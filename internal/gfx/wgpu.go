@@ -180,6 +180,13 @@ func toMipFilter(f FilterMode) wgpu.MipmapFilterMode {
 	return wgpu.MipmapFilterModeNearest
 }
 
+func toAddressMode(m AddressMode) wgpu.AddressMode {
+	if m == AddressRepeat {
+		return wgpu.AddressModeRepeat
+	}
+	return wgpu.AddressModeClampToEdge
+}
+
 func toVertexFormat(f VertexFormat) wgpu.VertexFormat {
 	switch f {
 	case VertexFormatUint32x2:
@@ -601,9 +608,9 @@ func (d *wgpuDevice) CreateTexture(desc TextureDesc) Texture {
 func (d *wgpuDevice) CreateSampler(desc SamplerDesc) Sampler {
 	sampler := must(d.device.TryCreateSampler(&wgpu.SamplerDescriptor{
 		Label:        desc.Label,
-		AddressModeU: wgpu.AddressModeClampToEdge,
-		AddressModeV: wgpu.AddressModeClampToEdge,
-		AddressModeW: wgpu.AddressModeClampToEdge,
+		AddressModeU: toAddressMode(desc.Address),
+		AddressModeV: toAddressMode(desc.Address),
+		AddressModeW: toAddressMode(desc.Address),
 		MagFilter:    toFilter(desc.MagFilter),
 		MinFilter:    toFilter(desc.MinFilter),
 		MipmapFilter: toMipFilter(desc.MipFilter),

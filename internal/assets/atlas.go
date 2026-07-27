@@ -33,6 +33,7 @@ func (r *Registry) UploadTo(dev gfx.Device) (gfx.Texture, gfx.Sampler) {
 		MagFilter: gfx.FilterNearest,
 		MinFilter: gfx.FilterLinear,
 		MipFilter: gfx.FilterLinear,
+		Address:   gfx.AddressRepeat,
 	})
 	return tex, smp
 }

@@ -334,12 +334,22 @@ const (
 	FilterLinear
 )
 
+// AddressMode 是纹理坐标超出 [0,1] 时的处理方式。
+type AddressMode uint8
+
+const (
+	// AddressRepeat 平铺重复。贪心合并后的四边形靠它重复材质。
+	AddressRepeat AddressMode = iota
+	AddressClampToEdge
+)
+
 // SamplerDesc 描述一个采样器。
 type SamplerDesc struct {
 	Label     string
 	MagFilter FilterMode
 	MinFilter FilterMode
 	MipFilter FilterMode
+	Address   AddressMode
 }
 
 // Sampler 是一个已创建的采样器。
