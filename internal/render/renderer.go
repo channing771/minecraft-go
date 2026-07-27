@@ -31,6 +31,14 @@ type Camera struct {
 	Pos      mgl32.Vec3
 }
 
+// FrameStats 是最近一次 Render 的 CPU 侧候选集统计。
+// CandidateFaces 是 GPU 背面/Hi-Z 剔除前的实例上限。
+type FrameStats struct {
+	CandidateSections int
+	CandidateBytes    int
+	CandidateFaces    int
+}
+
 type sectionSlot struct {
 	alloc     Alloc
 	origin    [4]int32
@@ -72,6 +80,11 @@ type Renderer struct {
 
 	haveLastCamera bool
 	lastCamera     Camera
+	lastFrameStats FrameStats
+
+	visibilityScratch mesh.VisibilityScratch
+	visibleSections   []core.SectionPos
+	sectionRecords    []byte
 }
 
 // New 创建使用默认 M1 容量与 4 MB/帧上传预算的渲染器。
@@ -316,6 +329,8 @@ func (r *Renderer) releaseOrigin(idx uint32) {
 
 func (r *Renderer) PendingUploads() int { return len(r.pending) }
 
+func (r *Renderer) LastFrameStats() FrameStats { return r.lastFrameStats }
+
 func (r *Renderer) DropSection(p core.SectionPos) {
 	delete(r.pending, p)
 	if slot, ok := r.sections[p]; ok {
@@ -358,28 +373,41 @@ func (r *Renderer) Render(
 ) {
 	origin := cameraSection(cam.Pos)
 	frustum := core.FrustumFrom(cam.ViewProj)
-	visibleSections := mesh.VisibleSections(origin, 32, frustum,
+	r.visibleSections = mesh.VisibleSectionsInto(
+		r.visibleSections, &r.visibilityScratch, origin, 32, frustum,
 		func(p core.SectionPos) (mesh.Connectivity, bool) {
 			c, ok := r.connectivity[p]
 			return c, ok
 		})
 
-	records := make([]byte, 0, len(visibleSections)*sectionRecordBytes)
+	records := r.sectionRecords[:0]
+	if available := cap(records); available < len(r.visibleSections)*sectionRecordBytes {
+		records = make([]byte, 0, len(r.visibleSections)*sectionRecordBytes)
+	}
 	candidates := 0
-	for _, p := range visibleSections {
+	candidateFaces := 0
+	for _, p := range r.visibleSections {
 		slot, ok := r.sections[p]
 		if !ok || len(slot.packed) == 0 {
 			continue
 		}
-		rec := make([]byte, sectionRecordBytes)
+		offset := len(records)
+		records = append(records, make([]byte, sectionRecordBytes)...)
+		rec := records[offset:]
 		for i, v := range slot.origin {
 			binary.LittleEndian.PutUint32(rec[i*4:], uint32(v))
 		}
 		binary.LittleEndian.PutUint32(rec[16:], slot.alloc.Offset)
 		binary.LittleEndian.PutUint32(rec[20:], uint32(len(slot.packed)))
 		binary.LittleEndian.PutUint32(rec[24:], slot.originIdx)
-		records = append(records, rec...)
 		candidates++
+		candidateFaces += len(slot.packed)
+	}
+	r.sectionRecords = records
+	r.lastFrameStats = FrameStats{
+		CandidateSections: candidates,
+		CandidateBytes:    len(records),
+		CandidateFaces:    candidateFaces,
 	}
 	if len(records) > 0 {
 		r.cull.sections.Write(0, records)

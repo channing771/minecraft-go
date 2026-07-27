@@ -1,0 +1,37 @@
+{
+  "scenario_version": 1,
+  "hardware": "Apple M5 / 24GiB",
+  "os": "macOS 26.5.1",
+  "go_version": "go1.26.0 darwin/arm64",
+  "git_commit": "6e6c2100d6a9ac5a90d762daf994d7d801269c90",
+  "framebuffer": "2560x1440",
+  "load_seconds": 3.231433459,
+  "phases": {
+    "flying": {
+      "frames": 14401,
+      "fps": 120.01080555592782,
+      "p50_ms": 8.321,
+      "p95_ms": 8.731,
+      "p99_ms": 8.947,
+      "max_ms": 13.47,
+      "peak_rss_bytes": 300711936,
+      "mean_candidate_sections": 1586.5562808138325,
+      "mean_candidate_bytes": 50769.80098604264,
+      "mean_candidate_faces": 201140.84869106312,
+      "max_pending_uploads": 0
+    },
+    "still": {
+      "frames": 7201,
+      "fps": 120.01082613979477,
+      "p50_ms": 8.332,
+      "p95_ms": 8.732,
+      "p99_ms": 8.854,
+      "max_ms": 9.532,
+      "peak_rss_bytes": 299450368,
+      "mean_candidate_sections": 1667,
+      "mean_candidate_bytes": 53344,
+      "mean_candidate_faces": 206800,
+      "max_pending_uploads": 0
+    }
+  }
+}

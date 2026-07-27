@@ -146,35 +146,118 @@ func VisibleSections(
 	frustum core.Frustum,
 	lookup func(core.SectionPos) (Connectivity, bool),
 ) []core.SectionPos {
-	type node struct {
-		pos      core.SectionPos
-		entry    Face // 上一个区段离开时使用的面；其对面是本区段的进入面。
-		isOrigin bool
+	return VisibleSectionsInto(nil, nil, origin, radius, frustum, lookup)
+}
+
+// VisibilityScratch 复用每帧 BFS 的密集状态，避免为数万区段创建 map bucket。
+type VisibilityScratch struct {
+	emitted  []uint8
+	seen     []uint8
+	pending  []uint8
+	expanded []uint8
+	queue    []uint32
+}
+
+// VisibleSectionsInto 是 VisibleSections 的零稳态分配版本。
+// dst 与 scratch 可跨帧复用；返回切片的内容会在下一次调用时被覆盖。
+func VisibleSectionsInto(
+	dst []core.SectionPos,
+	scratch *VisibilityScratch,
+	origin core.SectionPos,
+	radius int,
+	frustum core.Frustum,
+	lookup func(core.SectionPos) (Connectivity, bool),
+) []core.SectionPos {
+	if radius < 0 || origin.Y < 0 || origin.Y >= core.SectionsPerChunk {
+		return dst[:0]
+	}
+	if scratch == nil {
+		scratch = &VisibilityScratch{}
+	}
+	width := 2*radius + 1
+	total := width * width * core.SectionsPerChunk
+	if cap(scratch.emitted) < total {
+		scratch.emitted = make([]uint8, total)
+		scratch.seen = make([]uint8, total)
+		scratch.pending = make([]uint8, total)
+		scratch.expanded = make([]uint8, total)
+	} else {
+		scratch.emitted = scratch.emitted[:total]
+		scratch.seen = scratch.seen[:total]
+		scratch.pending = scratch.pending[:total]
+		scratch.expanded = scratch.expanded[:total]
+		clear(scratch.emitted)
+		clear(scratch.seen)
+		clear(scratch.pending)
+		clear(scratch.expanded)
+	}
+	scratch.queue = scratch.queue[:0]
+	dst = dst[:0]
+
+	baseX := origin.X - int32(radius)
+	baseZ := origin.Z - int32(radius)
+	indexOf := func(p core.SectionPos) int {
+		x := int(p.X - baseX)
+		z := int(p.Z - baseZ)
+		return (z*width+x)*core.SectionsPerChunk + int(p.Y)
+	}
+	positionOf := func(index int) core.SectionPos {
+		y := index % core.SectionsPerChunk
+		column := index / core.SectionsPerChunk
+		return core.SectionPos{
+			X: baseX + int32(column%width),
+			Y: int32(y),
+			Z: baseZ + int32(column/width),
+		}
 	}
 
-	out := make([]core.SectionPos, 0, 512)
-	emitted := make(map[core.SectionPos]bool, 1024)
-	enqueued := make(map[core.SectionPos]uint8, 1024)
+	const (
+		originBit    = uint8(1 << 6)
+		scheduledBit = uint8(1 << 7)
+	)
+	originIndex := indexOf(origin)
+	scratch.queue = append(scratch.queue, uint32(originIndex))
+	scratch.pending[originIndex] = originBit | scheduledBit
+	scratch.emitted[originIndex] = 1
+	dst = append(dst, origin)
 
-	queue := []node{{pos: origin, isOrigin: true}}
-	emitted[origin] = true
-	out = append(out, origin)
+	head := 0
+	for head < len(scratch.queue) {
+		curIndex := int(scratch.queue[head])
+		head++
+		entries := scratch.pending[curIndex] &^ scheduledBit
+		scratch.pending[curIndex] = 0
+		curPos := positionOf(curIndex)
 
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-
-		conn, loaded := lookup(cur.pos)
+		conn, loaded := lookup(curPos)
 		if !loaded {
 			continue
 		}
 
+		var allowedExits uint8
+		if entries&originBit != 0 {
+			allowedExits = 0x3f
+		} else {
+			for entry := Face(0); entry < 6; entry++ {
+				if entries&(1<<entry) == 0 {
+					continue
+				}
+				for exit := Face(0); exit < 6; exit++ {
+					if conn.Connected(opposite(entry), exit) {
+						allowedExits |= 1 << exit
+					}
+				}
+			}
+		}
+		allowedExits &^= scratch.expanded[curIndex]
+		scratch.expanded[curIndex] |= allowedExits
+
 		for exit := Face(0); exit < 6; exit++ {
-			if !cur.isOrigin && !conn.Connected(opposite(cur.entry), exit) {
+			if allowedExits&(1<<exit) == 0 {
 				continue
 			}
 			dx, dy, dz := stepOf(exit)
-			np := core.SectionPos{X: cur.pos.X + dx, Y: cur.pos.Y + dy, Z: cur.pos.Z + dz}
+			np := core.SectionPos{X: curPos.X + dx, Y: curPos.Y + dy, Z: curPos.Z + dz}
 
 			if np.Y < 0 || np.Y >= core.SectionsPerChunk {
 				continue
@@ -186,20 +269,25 @@ func VisibleSections(
 				continue
 			}
 
-			if !emitted[np] {
-				emitted[np] = true
-				out = append(out, np)
+			npIndex := indexOf(np)
+			if scratch.emitted[npIndex] == 0 {
+				scratch.emitted[npIndex] = 1
+				dst = append(dst, np)
 			}
 
 			bit := uint8(1) << exit
-			if enqueued[np]&bit != 0 {
+			if scratch.seen[npIndex]&bit != 0 {
 				continue
 			}
-			enqueued[np] |= bit
-			queue = append(queue, node{pos: np, entry: exit})
+			scratch.seen[npIndex] |= bit
+			scratch.pending[npIndex] |= bit
+			if scratch.pending[npIndex]&scheduledBit == 0 {
+				scratch.pending[npIndex] |= scheduledBit
+				scratch.queue = append(scratch.queue, uint32(npIndex))
+			}
 		}
 	}
-	return out
+	return dst
 }
 
 func abs32(v int32) int32 {

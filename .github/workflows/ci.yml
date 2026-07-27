@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: 依赖方向与绑定隔离门禁
+        run: go test ./internal/archcheck/ -v
+
+      - name: 单元测试
+        run: go test ./... -race
+
+      - name: 静态检查
+        run: |
+          go vet ./...
+          gofmt -l . | tee /tmp/fmt.txt
+          test ! -s /tmp/fmt.txt
+
+      - name: 微基准与 payload 阈值
+        run: go test ./... -bench=. -benchtime=1x -run='^$'

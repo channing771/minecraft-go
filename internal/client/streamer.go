@@ -22,8 +22,8 @@ type MeshedSection struct {
 
 // StreamStats 是流式加载器的只读诊断快照。
 type StreamStats struct {
-	CachedChunks, QueuedJobs, InFlightJobs int
-	Generation                             uint64
+	CachedChunks, QueuedJobs, InFlightJobs, ReadyResults int
+	Generation                                           uint64
 }
 
 type meshJob struct {
@@ -51,6 +51,7 @@ type Streamer struct {
 	center     core.ChunkPos
 	radius     int
 	generation uint64
+	activeMesh int
 
 	wg        sync.WaitGroup
 	closeOnce sync.Once
@@ -168,6 +169,7 @@ func (s *Streamer) claimReadyLocked(candidates []core.ChunkPos) []meshJob {
 			continue
 		}
 		s.meshed[center] = true
+		s.activeMesh++
 		out = append(out, meshJob{
 			center:     center,
 			chunks:     snapshot,
@@ -179,24 +181,31 @@ func (s *Streamer) claimReadyLocked(candidates []core.ChunkPos) []meshJob {
 
 func (s *Streamer) emitMeshJobs(jobs []meshJob) {
 	for _, job := range jobs {
-		get := func(pos core.ChunkPos) *world.Chunk { return job.chunks[pos] }
-		for si := 0; si < core.SectionsPerChunk; si++ {
-			n := world.NeighborhoodAt(get, job.center, si)
-			result := MeshedSection{
-				Pos: core.SectionPos{
-					X: job.center.X,
-					Y: int32(si),
-					Z: job.center.Z,
-				},
-				Quads:      mesh.MeshSection(n, s.reg),
-				Conn:       mesh.ComputeConnectivity(n.Center, s.reg),
-				Generation: job.generation,
-			}
-			select {
-			case s.results <- result:
-			case <-s.closed:
-				return
-			}
+		s.emitMeshJob(job)
+		s.mu.Lock()
+		s.activeMesh--
+		s.mu.Unlock()
+	}
+}
+
+func (s *Streamer) emitMeshJob(job meshJob) {
+	get := func(pos core.ChunkPos) *world.Chunk { return job.chunks[pos] }
+	for si := 0; si < core.SectionsPerChunk; si++ {
+		n := world.NeighborhoodAt(get, job.center, si)
+		result := MeshedSection{
+			Pos: core.SectionPos{
+				X: job.center.X,
+				Y: int32(si),
+				Z: job.center.Z,
+			},
+			Quads:      mesh.MeshSection(n, s.reg),
+			Conn:       mesh.ComputeConnectivity(n.Center, s.reg),
+			Generation: job.generation,
+		}
+		select {
+		case s.results <- result:
+		case <-s.closed:
+			return
 		}
 	}
 }
@@ -311,7 +320,8 @@ func (s *Streamer) Stats() StreamStats {
 	return StreamStats{
 		CachedChunks: len(s.chunks),
 		QueuedJobs:   len(s.queued),
-		InFlightJobs: len(s.inFlight),
+		InFlightJobs: len(s.inFlight) + s.activeMesh,
+		ReadyResults: len(s.results),
 		Generation:   s.generation,
 	}
 }

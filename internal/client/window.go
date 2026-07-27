@@ -60,7 +60,23 @@ func (w *Window) Poll() { glfw.PollEvents() }
 
 func (w *Window) ShouldClose() bool { return w.raw.ShouldClose() }
 
+func (w *Window) CancelClose() { w.raw.SetShouldClose(false) }
+
 func (w *Window) FramebufferSize() (int, int) { return w.raw.GetFramebufferSize() }
+
+func (w *Window) ContentSize() (int, int) { return w.raw.GetSize() }
+
+func (w *Window) SetContentSize(width, height int) { w.raw.SetSize(width, height) }
+
+func (w *Window) SetFloating(floating bool) {
+	value := glfw.False
+	if floating {
+		value = glfw.True
+	}
+	w.raw.SetAttrib(glfw.Floating, value)
+}
+
+func (w *Window) Focus() { w.raw.Focus() }
 
 func (w *Window) CursorPos() (float64, float64) { return w.raw.GetCursorPos() }
 
