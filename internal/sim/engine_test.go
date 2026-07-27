@@ -1,0 +1,202 @@
+package sim_test
+
+import (
+	"context"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/go-gl/mathgl/mgl32"
+
+	"minecraft-go/internal/core"
+	"minecraft-go/internal/sim"
+)
+
+func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
+	engine, session, chunkPos := readyFlatEngine(t)
+	origin := mgl32.Vec3{0.5, 2.5, 0.5}
+	direction := mgl32.Vec3{0, -1, 0}
+
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 4, Kind: sim.CommandPlaceRay,
+		Dimension: core.Overworld, Origin: origin, Direction: direction,
+		Block: core.DirtID,
+	})
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandPlaceRay,
+		Dimension: core.Overworld, Origin: origin, Direction: direction,
+		Block: core.StoneID,
+	})
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 3, Kind: sim.CommandBreakRay,
+		Dimension: core.Overworld, Origin: origin, Direction: direction,
+	})
+	result := engine.Step()
+	if len(result.Rejected) != 0 {
+		t.Fatalf("命令被拒绝: %+v", result.Rejected)
+	}
+	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 1 {
+		t.Fatalf("Changes = %+v", result.Changes)
+	}
+
+	chunk, revision, ok := engine.CloneReadyChunk(core.ChunkKey{
+		Dimension: core.Overworld,
+		Pos:       chunkPos,
+	})
+	if !ok || revision != 2 {
+		t.Fatalf("CloneReadyChunk revision = %d, ok=%v", revision, ok)
+	}
+	if got := chunk.BlockAt(0, 1, 0); got != core.DirtID {
+		t.Fatalf("最终 block = %d，想要 dirt", got)
+	}
+
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 4, Kind: sim.CommandBreakRay,
+		Dimension: core.Overworld, Origin: origin, Direction: direction,
+	})
+	duplicate := engine.Step()
+	if len(duplicate.Changes) != 0 || len(duplicate.Rejected) != 0 {
+		t.Fatalf("重复 sequence 产生了结果: %+v", duplicate)
+	}
+	_, revision, _ = engine.CloneReadyChunk(core.ChunkKey{
+		Dimension: core.Overworld,
+		Pos:       chunkPos,
+	})
+	if revision != 2 {
+		t.Fatalf("重复 sequence 把 revision 改为 %d", revision)
+	}
+}
+
+func TestEngineBatchesChunkRevisionOncePerTick(t *testing.T) {
+	engine, session, chunkPos := readyFlatEngine(t)
+	for x := 2; x >= 0; x-- {
+		engine.Enqueue(sim.Command{
+			Session: session, Sequence: uint64(4 - x), Kind: sim.CommandPlaceRay,
+			Dimension: core.Overworld,
+			Origin:    mgl32.Vec3{float32(x) + 0.5, 2.5, 0.5},
+			Direction: mgl32.Vec3{0, -1, 0},
+			Block:     core.StoneID,
+		})
+	}
+	result := engine.Step()
+	if len(result.Changes) != 1 {
+		t.Fatalf("change batches = %d，想要 1", len(result.Changes))
+	}
+	batch := result.Changes[0]
+	if batch.BaseRevision != 1 || batch.NewRevision != 2 {
+		t.Fatalf("revision = %d→%d，想要 1→2", batch.BaseRevision, batch.NewRevision)
+	}
+	if len(batch.Changes) != 3 {
+		t.Fatalf("changes = %+v", batch.Changes)
+	}
+	for index, change := range batch.Changes {
+		if change.Position.X != int32(index) || change.Position.Y != 1 {
+			t.Fatalf("changes 未按 block index 排序: %+v", batch.Changes)
+		}
+	}
+	_, revision, ok := engine.CloneReadyChunk(core.ChunkKey{
+		Dimension: core.Overworld,
+		Pos:       chunkPos,
+	})
+	if !ok || revision != 2 {
+		t.Fatalf("authoritative revision = %d, ok=%v", revision, ok)
+	}
+}
+
+func TestEngineReplayIsDeterministic(t *testing.T) {
+	type replayState struct {
+		hash     [32]byte
+		revision uint64
+		tick     uint64
+	}
+	run := func() replayState {
+		engine, session, chunkPos := readyFlatEngine(t)
+		engine.Enqueue(sim.Command{
+			Session: session, Sequence: 2, Kind: sim.CommandPlaceRay,
+			Dimension: core.Overworld,
+			Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
+			Direction: mgl32.Vec3{0, -1, 0},
+			Block:     core.GrassID,
+		})
+		engine.Step()
+		hash, revision, ok := engine.ChunkHash(core.ChunkKey{
+			Dimension: core.Overworld,
+			Pos:       chunkPos,
+		})
+		if !ok {
+			t.Fatal("权威区块 hash 不可用")
+		}
+		return replayState{
+			hash:     hash,
+			revision: revision,
+			tick:     engine.TickCount(),
+		}
+	}
+	if first, second := run(), run(); !reflect.DeepEqual(first, second) {
+		t.Fatalf("两次 replay 不同: %v != %v", first, second)
+	}
+}
+
+func TestEngineRunConsumesClockAndStopsIt(t *testing.T) {
+	engine := sim.NewEngine(flatBaseBlock, 0)
+	clock := &oneTickClock{
+		ticks:   make(chan time.Time, 1),
+		stopped: make(chan struct{}),
+	}
+	clock.ticks <- time.Now()
+	close(clock.ticks)
+
+	if err := engine.Run(context.Background(), clock); err != nil {
+		t.Fatal(err)
+	}
+	if got := engine.TickCount(); got != 1 {
+		t.Fatalf("TickCount = %d，想要 1", got)
+	}
+	select {
+	case <-clock.stopped:
+	default:
+		t.Fatal("Run 没有 Stop clock")
+	}
+}
+
+type oneTickClock struct {
+	ticks   chan time.Time
+	stopped chan struct{}
+}
+
+func (clock *oneTickClock) C() <-chan time.Time {
+	return clock.ticks
+}
+
+func (clock *oneTickClock) Stop() {
+	close(clock.stopped)
+}
+
+func readyFlatEngine(t *testing.T) (*sim.Engine, sim.SessionID, core.ChunkPos) {
+	t.Helper()
+	engine := sim.NewEngine(flatBaseBlock, 0)
+	session := sim.SessionID(1)
+	chunkPos := core.ChunkPos{}
+	engine.Enqueue(sim.Command{
+		Session:   session,
+		Sequence:  1,
+		Kind:      sim.CommandSetViewCenter,
+		Dimension: core.Overworld,
+		Center:    chunkPos,
+	})
+	requested := engine.Step()
+	wantKey := core.ChunkKey{Dimension: core.Overworld, Pos: chunkPos}
+	if !reflect.DeepEqual(requested.Generate, []core.ChunkKey{wantKey}) {
+		t.Fatalf("Generate = %+v，想要 %+v", requested.Generate, wantKey)
+	}
+	engine.SubmitGenerated(sim.GeneratedChunk{
+		Dimension: core.Overworld,
+		Pos:       chunkPos,
+		Chunk:     generateFlatChunk(chunkPos),
+	})
+	ready := engine.Step()
+	if !reflect.DeepEqual(ready.Ready, []core.ChunkKey{wantKey}) {
+		t.Fatalf("Ready = %+v，想要 %+v", ready.Ready, wantKey)
+	}
+	return engine, session, chunkPos
+}
