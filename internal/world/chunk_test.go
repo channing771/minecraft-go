@@ -44,6 +44,76 @@ func TestChunkIgnoresOutOfWorldWrites(t *testing.T) {
 	}
 }
 
+func TestChunkCloneIsDeep(t *testing.T) {
+	source := world.NewChunk(core.ChunkPos{X: -2, Z: 1})
+	source.SetBlock(15, core.MinY, 15, core.StoneID)
+
+	clone := source.Clone()
+	clone.SetBlock(15, core.MinY, 15, core.DirtID)
+
+	if got := source.BlockAt(15, core.MinY, 15); got != core.StoneID {
+		t.Fatalf("修改 clone 影响 source: got %d", got)
+	}
+	if got := clone.BlockAt(15, core.MinY, 15); got != core.DirtID {
+		t.Fatalf("clone block = %d，想要 dirt", got)
+	}
+}
+
+func TestChunkHashUsesLogicalBlocksNotPaletteLayout(t *testing.T) {
+	a := world.NewChunk(core.ChunkPos{})
+	b := world.NewChunk(core.ChunkPos{})
+
+	a.SetBlock(0, 0, 0, core.StoneID)
+	a.SetBlock(1, 0, 0, core.DirtID)
+	b.SetBlock(1, 0, 0, core.DirtID)
+	b.SetBlock(0, 0, 0, core.StoneID)
+
+	if a.Hash() != b.Hash() {
+		t.Fatal("相同逻辑方块、不同调色板顺序产生了不同哈希")
+	}
+	clone := a.Clone()
+	if clone.Hash() != a.Hash() {
+		t.Fatal("深克隆改变了逻辑哈希")
+	}
+	clone.SetBlock(0, 0, 0, core.GrassID)
+	if clone.Hash() == a.Hash() {
+		t.Fatal("方块修改后哈希没有改变")
+	}
+}
+
+func TestChunkBlockIndexRoundTripsNegativeChunksAndHeightBounds(t *testing.T) {
+	positions := []core.BlockPos{
+		{X: -17, Y: core.MinY, Z: 31},
+		{X: -32, Y: 0, Z: 16},
+		{X: -18, Y: core.MaxY - 1, Z: 17},
+	}
+	for _, position := range positions {
+		index, ok := world.ChunkBlockIndex(position)
+		if !ok {
+			t.Fatalf("ChunkBlockIndex(%+v) 被拒绝", position)
+		}
+		got, ok := world.BlockPosFromChunkIndex(position.Chunk(), index)
+		if !ok || got != position {
+			t.Fatalf("round trip %+v => %d => (%+v,%v)", position, index, got, ok)
+		}
+	}
+
+	for _, position := range []core.BlockPos{
+		{Y: core.MinY - 1},
+		{Y: core.MaxY},
+	} {
+		if _, ok := world.ChunkBlockIndex(position); ok {
+			t.Fatalf("越界位置 %+v 被接受", position)
+		}
+	}
+	if _, ok := world.BlockPosFromChunkIndex(
+		core.ChunkPos{},
+		uint32(core.SectionsPerChunk*core.BlocksPerSection),
+	); ok {
+		t.Fatal("越界 block index 被接受")
+	}
+}
+
 // TestNeighborhoodCrossesSectionBoundary 验证网格化邻域能读到
 // -1 与 16 这两个越界坐标，这是面剔除正确性的前提。
 func TestNeighborhoodCrossesSectionBoundary(t *testing.T) {
