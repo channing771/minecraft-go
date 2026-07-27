@@ -107,17 +107,19 @@ func queueMeshes(r *render.Renderer, reg *assets.Registry, chunks map[core.Chunk
 	for pos := range chunks {
 		for si := 0; si < core.SectionsPerChunk; si++ {
 			n := world.NeighborhoodAt(get, pos, si)
+			sectionPos := core.SectionPos{X: pos.X, Y: int32(si), Z: pos.Z}
+			r.SetConnectivity(sectionPos, mesh.ComputeConnectivity(n.Center, reg))
 			quads := mesh.MeshSection(n, reg)
 			if len(quads) == 0 {
 				continue
 			}
-			r.QueueSection(core.SectionPos{X: pos.X, Y: int32(si), Z: pos.Z}, quads)
+			r.QueueSection(sectionPos, quads)
 		}
 	}
 }
 
 func fixedCamera(aspect float32) render.Camera {
-	pos := mgl32.Vec3{175, 155, 175}
+	pos := mgl32.Vec3{96, 140, 96}
 	target := mgl32.Vec3{64, 48, 64}
 	view := mgl32.LookAtV(pos, target, mgl32.Vec3{0, 1, 0})
 	proj := core.Perspective(mgl32.DegToRad(55), aspect, 0.1, 1000)

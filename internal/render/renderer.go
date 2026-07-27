@@ -50,6 +50,8 @@ type Renderer struct {
 	camera    gfx.Buffer
 	indirect  gfx.Buffer
 	index     gfx.Buffer
+	zeroArgs  gfx.Buffer
+	cull      *culler
 
 	atlas     gfx.Texture
 	atlasView gfx.TextureView
@@ -59,6 +61,9 @@ type Renderer struct {
 
 	sections map[core.SectionPos]sectionSlot
 	pending  map[core.SectionPos][]mesh.Quad
+	// connectivity 包含无可绘制面（全空气/全实心）的区段；
+	// 可见性 BFS 需要它们作为通路或阻挡，不能只记录 sections。
+	connectivity map[core.SectionPos]mesh.Connectivity
 
 	maxOriginSlots uint32
 	nextOrigin     uint32
@@ -82,6 +87,7 @@ func newRenderer(
 		budget:         NewUploadBudget(uploadPerFrame),
 		sections:       make(map[core.SectionPos]sectionSlot),
 		pending:        make(map[core.SectionPos][]mesh.Quad),
+		connectivity:   make(map[core.SectionPos]mesh.Connectivity),
 		maxOriginSlots: originSlots,
 	}
 
@@ -116,6 +122,13 @@ func newRenderer(
 		Usage: gfx.BufferUsageIndex | gfx.BufferUsageCopyDst,
 	})
 	r.index.Write(0, uint32sToBytes([]uint32{0, 1, 2, 0, 2, 3}))
+	r.zeroArgs = dev.CreateBuffer(gfx.BufferDesc{
+		Label: "terrain zero indirect template",
+		Size:  5 * 4,
+		Usage: gfx.BufferUsageCopySrc | gfx.BufferUsageCopyDst,
+	})
+	r.zeroArgs.Write(0, uint32sToBytes([]uint32{6, 0, 0, 0, 0}))
+	r.cull = newCuller(dev, r.faces, r.instances, r.indirect, originSlots)
 
 	r.atlas, r.sampler = reg.UploadTo(dev)
 	r.atlasView = r.atlas.View(gfx.TextureViewDesc{
@@ -172,6 +185,12 @@ func (r *Renderer) QueueSection(p core.SectionPos, quads []mesh.Quad) {
 		return
 	}
 	r.pending[p] = append([]mesh.Quad(nil), quads...)
+}
+
+// SetConnectivity 登记区段的六面连通性。即使区段没有可绘制面也必须登记，
+// 因为全空气区段是 BFS 通路，全实心区段是阻挡。
+func (r *Renderer) SetConnectivity(p core.SectionPos, c mesh.Connectivity) {
+	r.connectivity[p] = c
 }
 
 // FlushUploads 按与中心区块的水平距离从近到远上传。
@@ -298,6 +317,11 @@ func (r *Renderer) DropOutside(center core.ChunkPos, radius int) {
 			r.DropSection(p)
 		}
 	}
+	for p := range r.connectivity {
+		if abs32Render(p.X-center.X) > int32(radius) || abs32Render(p.Z-center.Z) > int32(radius) {
+			delete(r.connectivity, p)
+		}
+	}
 }
 
 func abs32Render(v int32) int32 {
@@ -307,33 +331,43 @@ func abs32Render(v int32) int32 {
 	return v
 }
 
-// Render 用 CPU 展开所有已上传面，然后发出单次 indirect draw。
+// Render 在 CPU 上只遍历候选区段，GPU 完成逐面背面剔除、实例压缩与计数。
 func (r *Renderer) Render(
 	enc gfx.CommandEncoder,
 	target, depth gfx.TextureView,
 	cam Camera,
 ) {
-	total := 0
-	for _, slot := range r.sections {
-		total += len(slot.packed)
-	}
+	origin := cameraSection(cam.Pos)
+	frustum := core.FrustumFrom(cam.ViewProj)
+	visibleSections := mesh.VisibleSections(origin, 32, frustum,
+		func(p core.SectionPos) (mesh.Connectivity, bool) {
+			c, ok := r.connectivity[p]
+			return c, ok
+		})
 
-	if total > 0 {
-		instanceData := make([]byte, total*bytesPerVisibleFace)
-		i := 0
-		for _, slot := range r.sections {
-			for _, packed := range slot.packed {
-				off := i * bytesPerVisibleFace
-				binary.LittleEndian.PutUint32(instanceData[off:], uint32(packed))
-				binary.LittleEndian.PutUint32(instanceData[off+4:], uint32(packed>>32))
-				binary.LittleEndian.PutUint32(instanceData[off+8:], slot.originIdx)
-				i++
-			}
+	records := make([]byte, 0, len(visibleSections)*sectionRecordBytes)
+	candidates := 0
+	for _, p := range visibleSections {
+		slot, ok := r.sections[p]
+		if !ok || len(slot.packed) == 0 {
+			continue
 		}
-		r.instances.Write(0, instanceData)
+		rec := make([]byte, sectionRecordBytes)
+		for i, v := range slot.origin {
+			binary.LittleEndian.PutUint32(rec[i*4:], uint32(v))
+		}
+		binary.LittleEndian.PutUint32(rec[16:], slot.alloc.Offset)
+		binary.LittleEndian.PutUint32(rec[20:], uint32(len(slot.packed)))
+		binary.LittleEndian.PutUint32(rec[24:], slot.originIdx)
+		records = append(records, rec...)
+		candidates++
 	}
-	r.indirect.Write(0, uint32sToBytes([]uint32{6, uint32(total), 0, 0, 0}))
+	if len(records) > 0 {
+		r.cull.sections.Write(0, records)
+	}
 	r.camera.Write(0, cameraBytes(cam))
+	enc.CopyBufferToBuffer(r.zeroArgs, 0, r.indirect, 0, 20)
+	r.cull.dispatch(enc, candidates, cam.Pos)
 
 	pass := enc.BeginRenderPass(gfx.RenderPassDesc{
 		Label:      "terrain pass",
@@ -347,6 +381,21 @@ func (r *Renderer) Render(
 	pass.SetIndexBuffer(r.index, 0)
 	pass.DrawIndexedIndirect(r.indirect, 0)
 	pass.End()
+}
+
+func cameraSection(pos mgl32.Vec3) core.SectionPos {
+	block := core.BlockPos{
+		X: int32(math.Floor(float64(pos[0]))),
+		Y: int32(math.Floor(float64(pos[1]))),
+		Z: int32(math.Floor(float64(pos[2]))),
+	}
+	y := int32(block.SectionIndex())
+	if y < 0 {
+		y = 0
+	} else if y >= core.SectionsPerChunk {
+		y = core.SectionsPerChunk - 1
+	}
+	return core.SectionPos{X: block.Chunk().X, Y: y, Z: block.Chunk().Z}
 }
 
 func cameraBytes(cam Camera) []byte {
@@ -386,6 +435,9 @@ func uint64sToBytes(values []uint64) []byte {
 
 // Release 释放 Renderer 持有的全部 GPU 资源。
 func (r *Renderer) Release() {
+	if r.cull != nil {
+		r.cull.Release()
+	}
 	if r.bind != nil {
 		r.bind.Release()
 	}
@@ -402,7 +454,7 @@ func (r *Renderer) Release() {
 		r.atlas.Release()
 	}
 	for _, b := range []gfx.Buffer{
-		r.index, r.indirect, r.camera, r.origins, r.instances, r.faces,
+		r.zeroArgs, r.index, r.indirect, r.camera, r.origins, r.instances, r.faces,
 	} {
 		if b != nil {
 			b.Release()
