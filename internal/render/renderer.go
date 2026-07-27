@@ -52,6 +52,7 @@ type Renderer struct {
 	index     gfx.Buffer
 	zeroArgs  gfx.Buffer
 	cull      *culler
+	hiz       *hiZ
 
 	atlas     gfx.Texture
 	atlasView gfx.TextureView
@@ -68,6 +69,9 @@ type Renderer struct {
 	maxOriginSlots uint32
 	nextOrigin     uint32
 	freeOrigins    []uint32
+
+	haveLastCamera bool
+	lastCamera     Camera
 }
 
 // New 创建使用默认 M1 容量与 4 MB/帧上传预算的渲染器。
@@ -191,6 +195,21 @@ func (r *Renderer) QueueSection(p core.SectionPos, quads []mesh.Quad) {
 // 因为全空气区段是 BFS 通路，全实心区段是阻挡。
 func (r *Renderer) SetConnectivity(p core.SectionPos, c mesh.Connectivity) {
 	r.connectivity[p] = c
+}
+
+// Resize 重建与 viewport 尺寸相关的 Hi-Z 金字塔。
+func (r *Renderer) Resize(width, height uint32) {
+	if width == 0 || height == 0 {
+		return
+	}
+	if r.hiz != nil && r.hiz.viewportW == width && r.hiz.viewportH == height {
+		return
+	}
+	if r.hiz != nil {
+		r.hiz.Release()
+	}
+	r.hiz = newHiZ(r.dev, width, height)
+	r.haveLastCamera = false
 }
 
 // FlushUploads 按与中心区块的水平距离从近到远上传。
@@ -367,7 +386,9 @@ func (r *Renderer) Render(
 	}
 	r.camera.Write(0, cameraBytes(cam))
 	enc.CopyBufferToBuffer(r.zeroArgs, 0, r.indirect, 0, 20)
-	r.cull.dispatch(enc, candidates, cam.Pos)
+	useHiZ := r.hiz != nil && r.hiz.valid && r.haveLastCamera &&
+		cameraStable(r.lastCamera, cam)
+	r.cull.dispatchCamera(enc, candidates, cam, r.hiz, useHiZ)
 
 	pass := enc.BeginRenderPass(gfx.RenderPassDesc{
 		Label:      "terrain pass",
@@ -381,6 +402,21 @@ func (r *Renderer) Render(
 	pass.SetIndexBuffer(r.index, 0)
 	pass.DrawIndexedIndirect(r.indirect, 0)
 	pass.End()
+
+	if r.hiz != nil {
+		r.hiz.build(enc, depth)
+		r.lastCamera = cam
+		r.haveLastCamera = true
+	}
+}
+
+// cameraStable 采取保守策略：任何可辨认的矩阵变化都禁用一帧 Hi-Z。
+// 这比 1 方块/2° 阈值更严格，只会少剔除，不会因历史深度错位制造破洞。
+func cameraStable(a, b Camera) bool {
+	if b.Pos.Sub(a.Pos).Len() > 1 {
+		return false
+	}
+	return a.ViewProj.ApproxEqualThreshold(b.ViewProj, 1e-5)
 }
 
 func cameraSection(pos mgl32.Vec3) core.SectionPos {
@@ -437,6 +473,9 @@ func uint64sToBytes(values []uint64) []byte {
 func (r *Renderer) Release() {
 	if r.cull != nil {
 		r.cull.Release()
+	}
+	if r.hiz != nil {
+		r.hiz.Release()
 	}
 	if r.bind != nil {
 		r.bind.Release()

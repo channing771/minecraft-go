@@ -17,10 +17,17 @@ var cullShader string
 const sectionRecordBytes = 32
 
 type culler struct {
+	dev      gfx.Device
 	pipeline gfx.ComputePipeline
 	uniforms gfx.Buffer
 	sections gfx.Buffer
 	bind     gfx.BindGroup
+	layout   gfx.BindGroupLayout
+
+	faces, visible, args gfx.Buffer
+	hizView              gfx.TextureView
+	dummyHiZ             gfx.Texture
+	dummyHiZView         gfx.TextureView
 }
 
 func newCuller(
@@ -28,10 +35,10 @@ func newCuller(
 	faces, visible, args gfx.Buffer,
 	maxCandidates uint32,
 ) *culler {
-	c := &culler{}
+	c := &culler{dev: dev, faces: faces, visible: visible, args: args}
 	c.uniforms = dev.CreateBuffer(gfx.BufferDesc{
 		Label: "cull uniforms",
-		Size:  16,
+		Size:  128,
 		Usage: gfx.BufferUsageUniform | gfx.BufferUsageCopyDst,
 	})
 	c.sections = dev.CreateBuffer(gfx.BufferDesc{
@@ -40,7 +47,22 @@ func newCuller(
 		Usage: gfx.BufferUsageStorage | gfx.BufferUsageCopyDst,
 	})
 
-	layout := gfx.BindGroupLayout{
+	c.dummyHiZ = dev.CreateTexture(gfx.TextureDesc{
+		Label: "cull dummy hi-z",
+		Width: 1, Height: 1,
+		Format:    gfx.FormatR32Float,
+		Dimension: gfx.TextureDimension2D,
+		Usage:     gfx.TextureUsageBinding | gfx.TextureUsageCopyDst,
+	})
+	one := make([]byte, 4)
+	binary.LittleEndian.PutUint32(one, math.Float32bits(1))
+	c.dummyHiZ.WriteLayer(0, 0, one)
+	c.dummyHiZView = c.dummyHiZ.View(gfx.TextureViewDesc{
+		Dimension: gfx.TextureViewDimension2D,
+	})
+	c.hizView = c.dummyHiZView
+
+	c.layout = gfx.BindGroupLayout{
 		Label: "terrain cull layout",
 		Entries: []gfx.BindGroupLayoutEntry{
 			{Binding: 0, Type: gfx.BindingUniformBuffer, VisibleIn: gfx.StageCompute},
@@ -48,6 +70,10 @@ func newCuller(
 			{Binding: 2, Type: gfx.BindingStorageBufferRO, VisibleIn: gfx.StageCompute},
 			{Binding: 3, Type: gfx.BindingStorageBufferRW, VisibleIn: gfx.StageCompute},
 			{Binding: 4, Type: gfx.BindingStorageBufferRW, VisibleIn: gfx.StageCompute},
+			{
+				Binding: 5, Type: gfx.BindingSampledTextureUnfilterableFloat,
+				VisibleIn: gfx.StageCompute, ViewDimension: gfx.TextureViewDimension2D,
+			},
 		},
 	}
 	module := dev.CreateShaderModule(cullShader)
@@ -55,28 +81,53 @@ func newCuller(
 		Label:      "terrain cull",
 		Shader:     module,
 		Entry:      "cs_main",
-		BindGroups: []gfx.BindGroupLayout{layout},
+		BindGroups: []gfx.BindGroupLayout{c.layout},
 	})
 	module.Release()
-	c.bind = dev.CreateBindGroup(gfx.BindGroupDesc{
-		Label:  "terrain cull resources",
-		Layout: layout,
-		Entries: []gfx.BindGroupEntry{
-			{Binding: 0, Buffer: c.uniforms},
-			{Binding: 1, Buffer: c.sections},
-			{Binding: 2, Buffer: faces},
-			{Binding: 3, Buffer: visible},
-			{Binding: 4, Buffer: args},
-		},
-	})
+	c.rebuildBind()
 	return c
 }
 
+func (c *culler) rebuildBind() {
+	if c.bind != nil {
+		c.bind.Release()
+	}
+	c.bind = c.dev.CreateBindGroup(gfx.BindGroupDesc{
+		Label:  "terrain cull resources",
+		Layout: c.layout,
+		Entries: []gfx.BindGroupEntry{
+			{Binding: 0, Buffer: c.uniforms},
+			{Binding: 1, Buffer: c.sections},
+			{Binding: 2, Buffer: c.faces},
+			{Binding: 3, Buffer: c.visible},
+			{Binding: 4, Buffer: c.args},
+			{Binding: 5, Texture: c.hizView},
+		},
+	})
+}
+
 func (c *culler) dispatch(enc gfx.CommandEncoder, candidates int, camPos mgl32.Vec3) {
+	c.dispatchCamera(enc, candidates, Camera{
+		ViewProj: mgl32.Ident4(),
+		Pos:      camPos,
+	}, nil, false)
+}
+
+func (c *culler) dispatchCamera(
+	enc gfx.CommandEncoder,
+	candidates int,
+	cam Camera,
+	z *hiZ,
+	enableHiZ bool,
+) {
 	if candidates == 0 {
 		return
 	}
-	c.uniforms.Write(0, vec3UniformBytes(camPos))
+	if z != nil && c.hizView != z.fullView {
+		c.hizView = z.fullView
+		c.rebuildBind()
+	}
+	c.uniforms.Write(0, cullUniformBytes(cam, z, enableHiZ))
 	pass := enc.BeginComputePass("terrain cull pass")
 	pass.SetPipeline(c.pipeline)
 	pass.SetBindGroup(0, c.bind)
@@ -97,13 +148,35 @@ func (c *culler) Release() {
 	if c.uniforms != nil {
 		c.uniforms.Release()
 	}
+	if c.dummyHiZView != nil {
+		c.dummyHiZView.Release()
+	}
+	if c.dummyHiZ != nil {
+		c.dummyHiZ.Release()
+	}
 }
 
-func vec3UniformBytes(v mgl32.Vec3) []byte {
-	out := make([]byte, 16)
-	binary.LittleEndian.PutUint32(out[0:], math.Float32bits(v[0]))
-	binary.LittleEndian.PutUint32(out[4:], math.Float32bits(v[1]))
-	binary.LittleEndian.PutUint32(out[8:], math.Float32bits(v[2]))
+func cullUniformBytes(cam Camera, z *hiZ, enabled bool) []byte {
+	out := make([]byte, 128)
+	putFloat := func(offset int, value float32) {
+		binary.LittleEndian.PutUint32(out[offset:], math.Float32bits(value))
+	}
+	putFloat(0, cam.Pos[0])
+	putFloat(4, cam.Pos[1])
+	putFloat(8, cam.Pos[2])
+	for i, value := range cam.ViewProj {
+		putFloat(16+i*4, value)
+	}
+	if z != nil {
+		putFloat(80, float32(z.viewportW))
+		putFloat(84, float32(z.viewportH))
+		putFloat(88, float32(z.levels-1))
+		putFloat(96, float32(z.viewportW)/float32(z.paddedW))
+		putFloat(100, float32(z.viewportH)/float32(z.paddedH))
+	}
+	if enabled {
+		binary.LittleEndian.PutUint32(out[112:], 1)
+	}
 	return out
 }
 

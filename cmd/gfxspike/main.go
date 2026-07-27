@@ -51,6 +51,7 @@ func main() {
 	reg := assets.NewRegistry()
 	renderer := render.New(dev, reg, surface.Format())
 	defer renderer.Release()
+	renderer.Resize(uint32(fbWidth), uint32(fbHeight))
 
 	chunks := generateTerrain()
 	queueMeshes(renderer, reg, chunks)
@@ -70,6 +71,7 @@ func main() {
 		if depth.width != uint32(w) || depth.height != uint32(h) {
 			depth.Release()
 			depth = newDepthTarget(dev, uint32(w), uint32(h))
+			renderer.Resize(uint32(w), uint32(h))
 		}
 
 		renderer.BeginFrame()
@@ -139,7 +141,7 @@ func newDepthTarget(dev gfx.Device, width, height uint32) *depthTarget {
 		Height:    height,
 		Format:    gfx.FormatDepth32Float,
 		Dimension: gfx.TextureDimension2D,
-		Usage:     gfx.TextureUsageRenderTarget,
+		Usage:     gfx.TextureUsageRenderTarget | gfx.TextureUsageBinding,
 	})
 	view := texture.View(gfx.TextureViewDesc{
 		Dimension: gfx.TextureViewDimension2D,
