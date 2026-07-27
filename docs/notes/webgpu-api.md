@@ -443,3 +443,26 @@ RequestDevice → Configure → 每帧 `TryGetCurrentTexture` → clear render p
 - surface 格式：`[bgra8unorm-srgb bgra8unorm rgba16float rgb10a2unorm]`
 - present 模式：`[fifo immediate]`
 - 全程无 wgpu 验证层告警（已 `SetLogLevel(LogLevelWarn)`），关窗退出码 0
+
+## M0 结论（2026-07-27）
+
+- [x] macOS/Metal 上 surface 创建可用
+- [x] compute shader 可读写 storage buffer 并被 CPU 断言
+- [x] compute 内 `atomicAdd` 到 indirect 参数缓冲可用
+- [x] `DrawIndexedIndirect` 实例数由 GPU 决定
+
+结论：GPU-driven 管线成立，M1 可以按 spec §5 推进。
+
+实测证据：
+
+- `TestComputeDoublesInput` 在 Apple M5 / Metal 上将 256 个 `u32` 全部翻倍并读回断言。
+- `TestComputeFillsIndirectArgs` 从 128 个候选中筛出 64 个偶数编号实例，
+  GPU 写回的 `instanceCount == 64`，且 `indexCount == 6` 未被改写。
+- `cmd/gfxspike` 每帧先执行 compute pass，再由同一命令流中的
+  `DrawIndexedIndirect` 绘制；运行期间无 wgpu 验证层告警。
+
+遗留问题：
+
+- M0 只验证了 macOS/Metal；Windows/D3D12 与 Linux/Vulkan 的原生窗口句柄分支
+  留到需要跨平台运行时补齐。
+- Metal surface 首选格式是 `bgra8unorm-srgb`，颜色值必须继续按线性空间传入。
