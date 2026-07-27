@@ -1,0 +1,21 @@
+# 编译产物
+/bin/
+*.exe
+*.test
+*.out
+
+# 依赖缓存
+/vendor/
+
+# 编辑器
+.DS_Store
+.idea/
+.vscode/
+
+# 运行时产生的世界存档
+/saves/
+
+# 性能剖析产物
+*.pprof
+cpu.prof
+mem.prof
