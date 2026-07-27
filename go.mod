@@ -1,6 +1,6 @@
 module minecraft-go
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20260707082822-2a407d02d01a

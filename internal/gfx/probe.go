@@ -162,6 +162,9 @@ func (p *Probe) Frame() error {
 		texture.Release()
 		return fmt.Errorf("开启 render pass 失败: %w", err)
 	}
+	// pass 在 TryEnd 之后就没用了，但句柄仍需释放；放在这里能覆盖后面所有出错分支。
+	defer pass.Release()
+
 	if err := pass.TryEnd(); err != nil {
 		texture.Release()
 		return fmt.Errorf("结束 render pass 失败: %w", err)
