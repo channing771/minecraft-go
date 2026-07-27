@@ -51,6 +51,7 @@ Task 1 之前，**Go 的 WebGPU 绑定 API 签名未经实地验证**。Task 1 �
 - Create: `docs/notes/webgpu-api.md`
 - Create: `cmd/gfxspike/main.go`
 - Create: `internal/gfx/doc.go`
+- Create: `internal/gfx/probe.go`（本任务全部的绑定调用都在这里）
 
 **Interfaces:**
 - Consumes: 无（首个任务）
@@ -157,7 +158,40 @@ go list -m -f '{{.Dir}}' github.com/oliverbestmann/webgpu
 
 - [ ] **Step 4: 写空窗口 + clear color**
 
-`cmd/gfxspike/main.go`——本步骤直接使用绑定（尚未有 `gfx` 抽象层，Task 2 才建）。**以 Step 3 抄回的真实签名为准编写**，下面是结构骨架：
+**全部 WebGPU 绑定调用必须写在 `internal/gfx/probe.go` 里，`cmd/gfxspike/main.go` 不得 import 绑定。** 这条从第一行代码起就生效（见 Global Constraints），不是等 Task 2 再补救。Task 2 会把 `probe.go` 演化成完整的 `wgpu.go`，本任务先把边界立住。
+
+`gfx` 同样不 import GLFW——它只接收一个平台相关的窗口句柄，与窗口库解耦。
+
+**以 Step 3 抄回的真实签名为准编写。**
+
+`internal/gfx/probe.go`：
+
+```go
+package gfx
+
+// Probe 是 M0 的最小验证入口：用给定的原生窗口句柄建立设备与 surface，
+// 每次调用 Frame 清一次屏。Task 2 会把它演化成完整的设备抽象。
+type Probe struct {
+	// 字段按 Step 3 抄回的绑定类型填写：
+	// instance、adapter、device、queue、surface、surfaceFormat。
+}
+
+// NewProbe 依次创建 instance → surface(handle) → adapter → device
+// → 配置 surface，全部按 docs/notes/webgpu-api.md 记录的真实签名调用。
+//
+// handle 是平台相关的窗口句柄：macOS 上是 NSWindow 指针。
+func NewProbe(handle uintptr, width, height uint32) (*Probe, error)
+
+// Frame 取 surface 当前纹理，开一个 render pass，
+// LoadOp=Clear、ClearValue={0.1,0.2,0.3,1.0}、StoreOp=Store，
+// 不画任何东西直接结束 pass，然后提交并 Present。
+func (p *Probe) Frame() error
+
+// Close 释放 surface 与设备。
+func (p *Probe) Close()
+```
+
+`cmd/gfxspike/main.go`：
 
 ```go
 // Command gfxspike 是 M0 技术验证程序。
@@ -169,6 +203,7 @@ import (
 	"runtime"
 
 	"github.com/go-gl/glfw/v3.3/glfw"
+	"minecraft-go/internal/gfx"
 )
 
 func init() {
@@ -190,19 +225,26 @@ func main() {
 	}
 	defer win.Destroy()
 
-	// TODO(Task 1 Step 4): 按 docs/notes/webgpu-api.md 记录的签名，
-	// 依次创建 instance → surface(win) → adapter → device → 配置 surface。
-	// 每帧取 surface 当前纹理，开一个 render pass，
-	// LoadOp=Clear、ClearValue={0.1,0.2,0.3,1.0}，StoreOp=Store，直接结束 pass。
+	// GetCocoaWindow 返回 NSWindow 指针。跨平台分支留到需要时再加——
+	// M0 只验证 macOS/Metal 这一条最不确定的路径。
+	probe, err := gfx.NewProbe(cocoaHandle(win), 1280, 720)
+	if err != nil {
+		log.Fatalf("创建 WebGPU 设备失败: %v", err)
+	}
+	defer probe.Close()
 
 	for !win.ShouldClose() {
 		glfw.PollEvents()
-		// TODO(Task 1 Step 4): 提交 clear pass 并 Present。
+		if err := probe.Frame(); err != nil {
+			log.Fatalf("渲染帧失败: %v", err)
+		}
 	}
 }
 ```
 
-注意：上面两处 `TODO` 是**本步骤要写的内容**，不是留给后续任务的欠债。本步骤结束时文件里不得残留 `TODO`。
+`cocoaHandle` 是一个把 `win.GetCocoaWindow()` 转成 `uintptr` 的小助手——go-gl/glfw 不同版本的返回类型可能是 `unsafe.Pointer` 或 `uintptr`，以实际签名为准。
+
+本步骤结束时，`cmd/gfxspike/main.go` 里不得出现任何 WebGPU 绑定的类型或函数。
 
 - [ ] **Step 5: 运行验证**
 
@@ -217,7 +259,7 @@ go run ./cmd/gfxspike
 - [ ] **Step 6: 提交**
 
 ```bash
-git add go.mod go.sum .gitignore cmd/gfxspike/main.go internal/gfx/doc.go docs/notes/webgpu-api.md
+git add go.mod go.sum .gitignore cmd/gfxspike/main.go internal/gfx docs/notes/webgpu-api.md
 git commit -m "feat: 项目骨架与 WebGPU 绑定验证，跑通空窗口"
 ```
 
