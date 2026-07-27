@@ -3,11 +3,11 @@ package world
 
 import "minecraft-go/internal/core"
 
-// BlockID 是全局方块 ID。0 恒为空气。
-type BlockID uint16
+// BlockID 是核心域方块 ID 的兼容别名。
+type BlockID = core.BlockID
 
 // AirID 是空气的方块 ID。
-const AirID BlockID = 0
+const AirID = core.AirID
 
 // storageKind 是调色板容器的三种形态（spec §4.1）。
 type storageKind uint8

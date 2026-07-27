@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"minecraft-go/internal/assets"
+	"minecraft-go/internal/core"
 	"minecraft-go/internal/mesh"
 	"minecraft-go/internal/world"
-	"minecraft-go/internal/worldgen"
 )
 
 func TestRegistryAirIsTransparent(t *testing.T) {
@@ -14,23 +14,23 @@ func TestRegistryAirIsTransparent(t *testing.T) {
 	if r.Opaque(world.AirID) {
 		t.Fatal("空气不应是不透明的")
 	}
-	if !r.Opaque(worldgen.IDStone) {
+	if !r.Opaque(core.StoneID) {
 		t.Fatal("石头应是不透明的")
 	}
 }
 
 func TestGrassHasDistinctTopAndSide(t *testing.T) {
 	r := assets.NewRegistry()
-	top := r.Material(worldgen.IDGrass, mesh.FacePosY)
-	side := r.Material(worldgen.IDGrass, mesh.FaceNegX)
-	bottom := r.Material(worldgen.IDGrass, mesh.FaceNegY)
+	top := r.Material(core.GrassID, mesh.FacePosY)
+	side := r.Material(core.GrassID, mesh.FaceNegX)
+	bottom := r.Material(core.GrassID, mesh.FaceNegY)
 	if top == side {
 		t.Fatal("草方块的顶面与侧面材质相同")
 	}
 	if bottom == top {
 		t.Fatal("草方块的底面与顶面材质相同")
 	}
-	if bottom != r.Material(worldgen.IDDirt, mesh.FacePosY) {
+	if bottom != r.Material(core.DirtID, mesh.FacePosY) {
 		t.Fatal("草方块底面应复用泥土材质")
 	}
 }

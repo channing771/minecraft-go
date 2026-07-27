@@ -7,10 +7,10 @@ import (
 
 // M1 用到的方块 ID。完整的方块注册表在 M4 建立（spec §6.3）。
 const (
-	IDStone   world.BlockID = 2
-	IDDirt    world.BlockID = 3
-	IDGrass   world.BlockID = 4
-	IDBedrock world.BlockID = 5
+	IDStone   = core.StoneID
+	IDDirt    = core.DirtID
+	IDGrass   = core.GrassID
+	IDBedrock = core.BedrockID
 )
 
 // 地形参数。M1 只做高度图地形。

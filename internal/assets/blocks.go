@@ -1,9 +1,9 @@
 package assets
 
 import (
+	"minecraft-go/internal/core"
 	"minecraft-go/internal/mesh"
 	"minecraft-go/internal/world"
-	"minecraft-go/internal/worldgen"
 )
 
 const (
@@ -39,13 +39,13 @@ func (r *Registry) Opaque(id world.BlockID) bool {
 // Material 返回方块某个面的材质层号。实现 mesh.Registry。
 func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 	switch id {
-	case worldgen.IDStone:
+	case core.StoneID:
 		return LayerStone
-	case worldgen.IDDirt:
+	case core.DirtID:
 		return LayerDirt
-	case worldgen.IDBedrock:
+	case core.BedrockID:
 		return LayerBedrock
-	case worldgen.IDGrass:
+	case core.GrassID:
 		switch f {
 		case mesh.FacePosY:
 			return LayerGrassTop

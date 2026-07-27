@@ -1,9 +1,11 @@
 package world
 
+import "minecraft-go/internal/core"
+
 // BarrierID 是一个内部专用的实心方块 ID，玩家永远看不到它。
 //
 // 它用来表示“这里的数据还没加载，但请当作实心”——见 Neighborhood.At。
-const BarrierID BlockID = 1
+const BarrierID = core.BarrierID
 
 // Section 是一个 16³ 的方块区段。
 type Section struct {
