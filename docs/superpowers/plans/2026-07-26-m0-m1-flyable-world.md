@@ -26,7 +26,7 @@
 - **世界高度 Y ∈ [-64, 320)**，每区块 24 个区段，区段边长 16。
 - **仓库内不得提交任何二进制美术资源**（材质由代码生成）。原版 Minecraft 材质是 Mojang 版权资产。
 - **确定性要求**：`worldgen` 与 `sim` 对同一种子 + 同一输入序列必须产出完全相同的结果。禁止在这两个包内使用 `map` 遍历顺序、`time`、未播种的随机源。
-- **测试命令统一为** `go test ./...`；基准为 `go test -bench=. -benchmem ./...`。
+- **单元/集成测试命令统一为** `go test ./...`；纯 Go 微基准为 `go test -bench=. -benchmem ./...`。M1 的真实 1440p 帧时间与 RSS 门禁另用 Task 17 的 `cmd/mcgo --benchmark`。
 - 提交信息用中文，遵循 `type: 摘要` 格式（`feat:` / `test:` / `fix:` / `docs:` / `chore:` / `perf:`）。
 
 ### 关于 GPU 相关任务的一个前提
@@ -118,7 +118,7 @@ go list -m -f '{{.Dir}}' github.com/oliverbestmann/webgpu
 1. 如何创建 Instance（函数名、参数、是否返回 error）
 2. 如何请求 Adapter 与 Device（同步还是回调/Future 风格）
 3. 如何从 GLFW 窗口句柄创建 Surface（macOS 上需要 `CAMetalLayer`，绑定通常提供 `SurfaceDescriptorFromMetalLayer` 一类的结构；记录确切名称）
-4. `SurfaceConfiguration` 的字段名与必填项
+4. `SurfaceConfiguration` 的字段名与必填项；如何选择自动 VSync / 自动非 VSync present mode（Task 17 的 ≥100 fps 基准必须关闭 VSync）
 5. `CreateBuffer` / `CreateShaderModule` / `CreateRenderPipeline` / `CreateComputePipeline` / `CreateBindGroup` 的描述符结构体字段名
 6. `CommandEncoder` → `RenderPassEncoder` / `ComputePassEncoder` 的方法名
 7. `DrawIndexedIndirect` 的确切方法名与参数（buffer + offset）
@@ -288,7 +288,11 @@ type Buffer interface {
 	Size() uint64
 	// Write 把数据写入缓冲的 offset 处。要求 Usage 含 BufferUsageCopyDst。
 	Write(offset uint64, data []byte)
-	// ReadBack 同步读回缓冲内容，仅用于测试。要求 Usage 含 BufferUsageMapRead。
+	// ReadBack 同步读回缓冲内容，仅用于测试。要求 Usage 含 BufferUsageCopySrc。
+	//
+	// 实现必须在内部创建 Usage=MapRead|CopyDst 的 staging buffer，
+	// 先 CopyBufferToBuffer，再映射 staging。WebGPU 规定 MapRead 只能与
+	// CopyDst 组合，不能把 Storage/Indirect 等工作缓冲直接映射。
 	ReadBack() []byte
 	Release()
 }
@@ -355,15 +359,22 @@ const (
 	BindingUniformBuffer BindingType = iota
 	BindingStorageBufferRO
 	BindingStorageBufferRW
-	BindingTexture
+	BindingSampledTextureFloat
+	BindingSampledTextureUnfilterableFloat
+	BindingDepthTexture
+	BindingStorageTextureWrite
 	BindingSampler
 )
 
 // BindGroupLayoutEntry 是布局中的一个绑定槽。
 type BindGroupLayoutEntry struct {
-	Binding    uint32
-	Type       BindingType
-	VisibleIn  ShaderStage
+	Binding       uint32
+	Type          BindingType
+	VisibleIn     ShaderStage
+	// StorageFormat 仅 BindingStorageTextureWrite 使用。
+	StorageFormat TextureFormat
+	// ViewDimension 纹理绑定必须显式声明 2D 或 2D array，不得为 Auto。
+	ViewDimension TextureViewDimension
 }
 
 // ShaderStage 是着色器阶段位掩码。
@@ -469,6 +480,7 @@ const (
 	FormatBGRA8Unorm TextureFormat = iota
 	FormatRGBA8Unorm
 	FormatDepth32Float
+	FormatR32Float
 	FormatR32Uint
 )
 
@@ -478,6 +490,15 @@ type TextureDimension uint8
 const (
 	TextureDimension2D TextureDimension = iota
 	TextureDimension2DArray
+)
+
+// TextureViewDimension 是着色器看到的视图维度。
+type TextureViewDimension uint8
+
+const (
+	TextureViewDimensionAuto TextureViewDimension = iota
+	TextureViewDimension2D
+	TextureViewDimension2DArray
 )
 
 // TextureUsage 是纹理用途位掩码。
@@ -504,11 +525,31 @@ type TextureDesc struct {
 
 // Texture 是一张 GPU 纹理。
 type Texture interface {
-	// View 返回覆盖全部 mip 与全部层的默认视图。
-	View() TextureView
+	// View 创建指定 mip / array layer 范围的视图。
+	// 零值描述符表示覆盖全部 mip 与全部层。
+	View(TextureViewDesc) TextureView
 	// WriteLayer 把一层的像素数据写入指定 mip 级别。
 	WriteLayer(layer, mip uint32, rgba []byte)
 	Release()
+}
+
+// TextureAspect 指定视图覆盖纹理的哪个 aspect。
+type TextureAspect uint8
+
+const (
+	AspectAll TextureAspect = iota
+	AspectDepthOnly
+)
+
+// TextureViewDesc 描述纹理视图。
+// MipLevelCount/ArrayLayerCount 为 0 表示覆盖从 base 开始的全部剩余级别。
+type TextureViewDesc struct {
+	BaseMipLevel    uint32
+	MipLevelCount   uint32
+	BaseArrayLayer  uint32
+	ArrayLayerCount uint32
+	Aspect           TextureAspect
+	Dimension        TextureViewDimension
 }
 
 // TextureView 是纹理的一个视图。
@@ -557,12 +598,27 @@ type Surface interface {
 	// Acquire 取得当前帧的颜色附件视图。
 	Acquire() TextureView
 	Present()
+	// SetPresentMode 切换呈现模式；性能基准用 AutoNoVSync，
+	// 避免显示器刷新率把 ≥100 fps 的目标钳住。
+	SetPresentMode(PresentMode) error
 	// Resize 在窗口尺寸变化后重新配置 surface。
 	Resize(width, height uint32)
 	Format() TextureFormat
 	Release()
 }
+
+type PresentMode uint8
+
+const (
+	PresentModeAutoVSync PresentMode = iota
+	PresentModeAutoNoVSync
+)
 ```
+
+后端实现还必须满足两条 WebGPU 验证规则：
+
+1. `Buffer.ReadBack` 不直接映射工作缓冲，而是创建 `MapRead|CopyDst` staging buffer，从要求带 `CopySrc` 的工作缓冲拷贝后再映射。
+2. `Texture.View(TextureViewDesc)` 必须能创建单 mip 视图；纹理布局必须区分 filterable float、unfilterable float、depth 与 storage，并显式携带 2D/2D-array 维度。`BindingStorageTextureWrite` 映射到带明确 `StorageFormat` 的 write-only storage texture layout。Task 11 的 texture array 与 Task 15 的 R32Float Hi-Z 都依赖这些能力，Task 2 的三角形虽暂时用不到也必须在此固化接口。
 
 - [ ] **Step 3: 写三角形着色器**
 
@@ -679,7 +735,7 @@ func TestComputeDoublesInput(t *testing.T) {
 	outBuf := dev.CreateBuffer(gfx.BufferDesc{
 		Label: "test-out",
 		Size:  uint64(len(input)),
-		Usage: gfx.BufferUsageStorage | gfx.BufferUsageCopySrc | gfx.BufferUsageMapRead,
+		Usage: gfx.BufferUsageStorage | gfx.BufferUsageCopySrc,
 	})
 	defer outBuf.Release()
 
@@ -864,7 +920,7 @@ func TestComputeFillsIndirectArgs(t *testing.T) {
 		Label: "indirect-args",
 		Size:  uint64(len(args)),
 		Usage: gfx.BufferUsageIndirect | gfx.BufferUsageStorage |
-			gfx.BufferUsageCopyDst | gfx.BufferUsageCopySrc | gfx.BufferUsageMapRead,
+			gfx.BufferUsageCopyDst | gfx.BufferUsageCopySrc,
 	})
 	defer argsBuf.Release()
 	argsBuf.Write(0, args)
@@ -1445,7 +1501,7 @@ func (c *PalettedContainer) Get(x, y, z int) BlockID
 func (c *PalettedContainer) Set(x, y, z int, id BlockID)
 func (c *PalettedContainer) Compact()          // 惰性降级，tick 末调用
 func (c *PalettedContainer) IsUniform() (BlockID, bool)
-func (c *PalettedContainer) MemoryBytes() int  // 供内存基准断言
+func (c *PalettedContainer) PayloadBytes() int // 位数据、调色板与 lookup 条目的逻辑大小
 func (c *PalettedContainer) Clone() *PalettedContainer
 ```
 
@@ -1517,7 +1573,7 @@ func TestPalettedContainerUniformCostsNothing(t *testing.T) {
 	if _, ok := c.IsUniform(); !ok {
 		t.Fatal("新建容器应为单值态")
 	}
-	if n := c.MemoryBytes(); n > 64 {
+	if n := c.PayloadBytes(); n > 64 {
 		t.Fatalf("单值态占用 %d 字节，应接近 0", n)
 	}
 
@@ -1815,8 +1871,11 @@ func (c *PalettedContainer) IsUniform() (BlockID, bool) {
 	return 0, false
 }
 
-// MemoryBytes 估算本容器占用的堆内存，供内存预算测试断言。
-func (c *PalettedContainer) MemoryBytes() int {
+// PayloadBytes 返回压缩 payload 的逻辑大小。
+//
+// 它不包含 Go 对象头、map bucket、allocator size class 等运行时开销，
+// 只能比较压缩率，不能当作进程驻留内存。真实内存由 Task 17 采样 RSS。
+func (c *PalettedContainer) PayloadBytes() int {
 	n := len(c.data) * 8
 	n += len(c.palette) * 2
 	n += len(c.lookup) * 8 // map 开销的粗略估计
@@ -1886,7 +1945,10 @@ func (c *Chunk) SetBlock(lx int, wy int32, lz int, id BlockID)
 func (c *Chunk) Section(i int) *Section                      // i 为 0..23
 func (c *Chunk) Compact()
 
-type Neighborhood struct{ Center *Section; Neg, Pos [3]*Section }
+type Neighborhood struct {
+    Center *Section
+    Around [3][3][3]*Section // [dx+1][dy+1][dz+1]，含棱角邻居
+}
 func (n *Neighborhood) At(x, y, z int) BlockID               // 接受 -1..16
 func NeighborhoodAt(get func(core.ChunkPos) *Chunk, pos core.ChunkPos, si int) *Neighborhood
 ```
@@ -1941,8 +2003,8 @@ func TestNeighborhoodCrossesSectionBoundary(t *testing.T) {
 	above.Blocks.Set(7, 0, 7, world.BlockID(99))
 
 	n := &world.Neighborhood{Center: center}
-	n.Neg[1] = below // -Y
-	n.Pos[1] = above // +Y
+	n.Around[1][0][1] = below // -Y
+	n.Around[1][2][1] = above // +Y
 
 	if got := n.At(7, -1, 7); got != 42 {
 		t.Fatalf("At(7,-1,7) = %d，想要 42（应读到 -Y 邻居的顶层）", got)
@@ -2068,46 +2130,40 @@ func (c *Chunk) Compact() {
 ```go
 package world
 
-// Neighborhood 是网格化的输入：一个中心区段加它 6 个方向的邻居。
+// Neighborhood 是网格化的输入：一个中心区段加周围 3×3×3 邻域。
 //
-// Neg/Pos 的下标是轴编号：0=X, 1=Y, 2=Z。
+// Around 的下标是 [dx+1][dy+1][dz+1]。棱角邻居不仅用于面剔除，
+// 也用于 AO 在区段边缘的三格采样；缺失会形成永久暗缝。
 // 邻居为 nil 表示尚未加载，At 会返回 BarrierID（按实心处理）——
 // 这样不会在未加载边界上生成一批注定被遮住、且邻居到位后必须重做的面。
 type Neighborhood struct {
-	Center   *Section
-	Neg, Pos [3]*Section
+	Center *Section
+	Around [3][3][3]*Section
 }
 
 // At 读取局部坐标处的方块，三个分量各自允许 -1..16。
-// 恰好越界一格时转到对应邻居的对面一层；同时越界两个轴（棱、角）
-// 返回 BarrierID——网格化只需要面邻接，不需要棱角。
+// 越界分量会映射到 Around 中对应的面、棱或角邻居。
 func (n *Neighborhood) At(x, y, z int) BlockID {
 	c := [3]int{x, y, z}
-	axis := -1
+	cell := [3]int{1, 1, 1}
+	outside := false
 	for i, v := range c {
 		if v < -1 || v > 16 {
 			return BarrierID
 		}
-		if v == -1 || v == 16 {
-			if axis >= 0 {
-				return BarrierID // 越界两个轴，不支持
-			}
-			axis = i
+		switch v {
+		case -1:
+			cell[i], c[i], outside = 0, 15, true
+		case 16:
+			cell[i], c[i], outside = 2, 0, true
 		}
 	}
 
-	if axis < 0 {
+	if !outside {
 		return n.Center.Blocks.Get(x, y, z)
 	}
 
-	var nb *Section
-	if c[axis] == -1 {
-		nb = n.Neg[axis]
-		c[axis] = 15
-	} else {
-		nb = n.Pos[axis]
-		c[axis] = 0
-	}
+	nb := n.Around[cell[0]][cell[1]][cell[2]]
 	if nb == nil {
 		return BarrierID
 	}
@@ -2116,8 +2172,8 @@ func (n *Neighborhood) At(x, y, z int) BlockID {
 
 // NeighborhoodAt 组装一个区段的网格化邻域。
 //
-// get 返回给定区块，不存在时返回 nil。垂直方向的邻居来自同一区块，
-// 水平方向来自相邻区块；越出世界高度或邻居未加载时留 nil，
+// get 返回给定区块，不存在时返回 nil。Around 会填满所有已加载的
+// 面、棱、角邻居；越出世界高度或邻居未加载时留 nil，
 // At 会按 BarrierID（实心）处理。
 func NeighborhoodAt(get func(core.ChunkPos) *Chunk, pos core.ChunkPos, si int) *Neighborhood {
 	self := get(pos)
@@ -2125,25 +2181,20 @@ func NeighborhoodAt(get func(core.ChunkPos) *Chunk, pos core.ChunkPos, si int) *
 		return nil
 	}
 	n := &Neighborhood{Center: self.Section(si)}
-
-	if si > 0 {
-		n.Neg[1] = self.Section(si - 1)
-	}
-	if si < core.SectionsPerChunk-1 {
-		n.Pos[1] = self.Section(si + 1)
-	}
-
-	if c := get(core.ChunkPos{X: pos.X - 1, Z: pos.Z}); c != nil {
-		n.Neg[0] = c.Section(si)
-	}
-	if c := get(core.ChunkPos{X: pos.X + 1, Z: pos.Z}); c != nil {
-		n.Pos[0] = c.Section(si)
-	}
-	if c := get(core.ChunkPos{X: pos.X, Z: pos.Z - 1}); c != nil {
-		n.Neg[2] = c.Section(si)
-	}
-	if c := get(core.ChunkPos{X: pos.X, Z: pos.Z + 1}); c != nil {
-		n.Pos[2] = c.Section(si)
+	for dx := -1; dx <= 1; dx++ {
+		for dz := -1; dz <= 1; dz++ {
+			ch := get(core.ChunkPos{X: pos.X + int32(dx), Z: pos.Z + int32(dz)})
+			if ch == nil {
+				continue
+			}
+			for dy := -1; dy <= 1; dy++ {
+				nsi := si + dy
+				if nsi < 0 || nsi >= core.SectionsPerChunk {
+					continue
+				}
+				n.Around[dx+1][dy+1][dz+1] = ch.Section(nsi)
+			}
+		}
 	}
 	return n
 }
@@ -2182,6 +2233,8 @@ func TestNeighborhoodAtWiresHorizontalNeighbors(t *testing.T) {
 ```
 
 `y=0` 对应的区段索引是 `(0 - (-64)) / 16 = 4`，与测试中的 `si = 4` 一致。
+
+再补 `TestNeighborhoodReadsDiagonalForAO`：在 `(-X,+Y,+Z)` 邻居的对应角放置方块，断言 `n.At(-1,16,16)` 能读到该方块而不是 `BarrierID`。这条测试守住区段边缘 AO 不出现暗缝。
 
 - [ ] **Step 6: 运行测试，确认通过**
 
@@ -2505,7 +2558,7 @@ func TestGeneratedChunkCompresses(t *testing.T) {
 	uniform := 0
 	for i := 0; i < core.SectionsPerChunk; i++ {
 		s := c.Section(i)
-		total += s.Blocks.MemoryBytes()
+		total += s.Blocks.PayloadBytes()
 		if _, ok := s.Blocks.IsUniform(); ok {
 			uniform++
 		}
@@ -2516,7 +2569,7 @@ func TestGeneratedChunkCompresses(t *testing.T) {
 	}
 	// 朴素存储是 24*4096*2 = 196608 字节。
 	if total > 40000 {
-		t.Fatalf("单区块占用 %d 字节，朴素存储为 196608，压缩比不达标", total)
+		t.Fatalf("单区块 payload 估算 %d 字节，朴素 payload 为 196608，压缩比不达标", total)
 	}
 }
 ```
@@ -2843,7 +2896,7 @@ func (testRegistry) Material(id world.BlockID, f mesh.Face) uint16 {
 	return uint16(id)
 }
 
-// solidNeighbors 返回一个 6 个邻居都是实心的邻域，
+// solidNeighbors 返回一个周围 26 个邻居都是实心的邻域，
 // 这样中心区段与外界之间不会产生面，测试只观察内部结构。
 func solidNeighbors(center *world.Section) *world.Neighborhood {
 	solid := world.NewSection()
@@ -2855,9 +2908,15 @@ func solidNeighbors(center *world.Section) *world.Neighborhood {
 		}
 	}
 	n := &world.Neighborhood{Center: center}
-	for a := 0; a < 3; a++ {
-		n.Neg[a] = solid
-		n.Pos[a] = solid
+	for dx := 0; dx < 3; dx++ {
+		for dy := 0; dy < 3; dy++ {
+			for dz := 0; dz < 3; dz++ {
+				if dx == 1 && dy == 1 && dz == 1 {
+					continue
+				}
+				n.Around[dx][dy][dz] = solid
+			}
+		}
 	}
 	return n
 }
@@ -3614,6 +3673,7 @@ git commit -m "feat: 区段可见性图与 BFS 遍历，最廉价的一级剔除
 - Create: `internal/assets/procedural.go`
 - Create: `internal/assets/procedural_test.go`
 - Create: `internal/assets/atlas.go`
+- Create: `internal/assets/atlas_test.go`
 
 **Interfaces:**
 - Consumes: Task 2 的 `gfx.Device`、`gfx.Texture`
@@ -3972,17 +4032,44 @@ func downsample(src []byte, size int) []byte {
 }
 ```
 
+后续 terrain pipeline 的 atlas 布局必须写成 `Type: BindingSampledTextureFloat, ViewDimension: TextureViewDimension2DArray`；不能依赖后端从具体 TextureView 猜布局维度。
+
 - [ ] **Step 6: 补 downsample 测试并跑全部测试**
 
-`internal/assets/procedural_test.go` 追加：
+`internal/assets/atlas_test.go` 使用同包测试，直接覆盖未导出的纯函数：
 
 ```go
-func TestDownsampleHalvesSize(t *testing.T) {
-	r := assets.NewRegistry()
-	// 通过 LayerRGBA + 已知尺寸间接验证：16→8→4→2→1 共 5 级。
-	px := r.LayerRGBA(0)
-	if len(px) != 16*16*4 {
-		t.Fatalf("第 0 级大小 = %d", len(px))
+package assets
+
+import "testing"
+
+func TestDownsampleHalvesSizeAndAveragesRGBA(t *testing.T) {
+	// 2×2 RGBA，四个像素各通道平均应为 (40,50,60,70)。
+	src := []byte{
+		10, 20, 30, 40, 30, 40, 50, 60,
+		50, 60, 70, 80, 70, 80, 90, 100,
+	}
+	got := downsample(src, 2)
+	want := []byte{40, 50, 60, 70}
+	if len(got) != len(want) {
+		t.Fatalf("2×2 降采样长度 = %d，想要 %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("通道 %d = %d，想要 %d", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDownsampleMipChainEndsAtOnePixel(t *testing.T) {
+	px := make([]byte, 16*16*4)
+	size := 16
+	for size > 1 {
+		px = downsample(px, size)
+		size /= 2
+		if len(px) != size*size*4 {
+			t.Fatalf("mip %dx%d 长度 = %d", size, size, len(px))
+		}
 	}
 }
 ```
@@ -4378,8 +4465,12 @@ git commit -m "feat: 显存池分配器与每帧上传限流"
 ```go
 type Renderer struct{ /* 非导出 */ }
 func New(dev gfx.Device, reg *assets.Registry, colorFmt gfx.TextureFormat) *Renderer
-func (r *Renderer) UploadSection(p core.SectionPos, quads []mesh.Quad) bool  // 返回是否因限流被跳过
+func (r *Renderer) BeginFrame()
+func (r *Renderer) QueueSection(p core.SectionPos, quads []mesh.Quad) // 同位置新结果覆盖旧结果
+func (r *Renderer) FlushUploads(center core.ChunkPos)                 // 按近到远消耗本帧预算
+func (r *Renderer) PendingUploads() int                               // 测试与诊断
 func (r *Renderer) DropSection(p core.SectionPos)
+func (r *Renderer) DropOutside(center core.ChunkPos, radius int)
 func (r *Renderer) Render(enc gfx.CommandEncoder, target, depth gfx.TextureView, cam Camera)
 
 type Camera struct {
@@ -4565,12 +4656,15 @@ type Renderer struct {
 }
 ```
 
-`UploadSection` 的流程：
+`QueueSection` 把结果放入 renderer 持有的 pending map，同一位置的新网格覆盖旧网格但不得静默丢失。`FlushUploads` 每帧按到相机中心的距离排序，反复调用内部 `uploadOne`：
 
-1. `budget.TryConsume(len(quads) * bytesPerPoolFace)`，false 则直接返回 false（下一帧再试）
+1. `budget.TryConsume(len(quads) * bytesPerPoolFace)`，false 则保留在 pending 中，下一帧重试
 2. 若该区段已有分配且容量不足，先 `pool.Free` 再重新 `Alloc`
 3. 把 `quads` 逐个 `Pack()` 成 `[]uint64`，写入 `faces` 缓冲的对应偏移
 4. 登记/更新 `origins` 中的区段世界坐标
+5. 全部成功后才从 pending 删除；`DropSection` / `DropOutside` 必须同时删除 pending 与已上传分配
+
+补 `TestPendingUploadsEventuallyDrain`：用每帧只能容纳一个普通区段的预算排队 10 个区段，连续 `BeginFrame+Flush` 后断言全部最终上传；其中一个单项大于整帧预算，验证它只独占一帧但不会饿死。
 
 `Render` 的流程（本任务是 CPU 版，Task 14 换成 GPU）：
 
@@ -4602,12 +4696,12 @@ for pos := range chunks {
         if len(quads) == 0 {
             continue
         }
-        r.UploadSection(core.SectionPos{X: pos.X, Y: int32(si), Z: pos.Z}, quads)
+        r.QueueSection(core.SectionPos{X: pos.X, Y: int32(si), Z: pos.Z}, quads)
     }
 }
 ```
 
-上传限流会让首帧上传不完——主循环里每帧重试未成功的区段即可。
+上传限流会让首帧上传不完；结果留在 renderer 的 pending 队列中。主循环每帧先 `BeginFrame()`，再调用 `FlushUploads(core.ChunkPos{})`，直到 `PendingUploads()==0`。
 
 - [ ] **Step 5: 运行验证**
 
@@ -4646,9 +4740,9 @@ git commit -m "feat: 单次 indirect draw 渲染出第一帧真实地形"
 
 **Interfaces:**
 - Consumes: Task 13 的 `Renderer`、Task 10 的 `VisibleSections`、Task 3 的 `NewHeadlessDevice`
-- Produces: `Renderer.Render` 不再在 CPU 上展开实例；CPU 每帧只提交候选区段列表
+- Produces: `Renderer.Render` 不再在 CPU 上展开实例；CPU 每帧只遍历并提交候选区段列表
 
-**分工**：CPU 做可见性图 BFS + 区段级视锥（候选数量是几百，CPU 上几乎免费）；GPU 做面级背面剔除 + 压缩（数量是几百万，必须在 GPU 上）。
+**分工**：CPU 做可见性图 BFS + 区段级视锥；GPU 做面级背面剔除 + 压缩。CPU 成本与候选区段数相关、与总面数无关；候选数会随视距增长，不能写死为“几百”，必须由 Task 17 在固定 32 视距场景实测。
 
 - [ ] **Step 1: 写失败的测试**
 
@@ -4858,7 +4952,7 @@ func RunCullForTest(dev gfx.Device, quads []mesh.Quad, camPos mgl32.Vec3) []mesh
 
 `RunCullForTest` 的实现要点：把 `quads` 打包写入一个临时 faces 缓冲，造一条 `SectionRec{origin: {0,0,0,0}, face_offset: 0, face_count: len(quads), origin_idx: 0}`，跑一次 dispatch，然后 `ReadBack` 出 `visible` 与 `args`，按 `instance_count` 截断并 `mesh.UnpackQuad` 还原。
 
-**注意**：`visible` 与 `args` 缓冲的 Usage 必须含 `gfx.BufferUsageMapRead`，否则 `ReadBack` 拿不到数据。
+**注意**：`visible` 与 `args` 缓冲的 Usage 必须含 `gfx.BufferUsageCopySrc`。`ReadBack` 会在内部拷到 `MapRead|CopyDst` staging buffer；不得把 `MapRead` 与 `Storage` / `Indirect` 混在同一个缓冲上。
 
 - [ ] **Step 5: 运行测试，确认通过**
 
@@ -4880,7 +4974,7 @@ go test ./internal/render/ -run TestCull -v
 4. GPU：compute pass 跑剔除
 5. GPU：render pass 一条 `DrawIndexedIndirect`
 
-**CPU 每帧的工作量此时只与候选区段数（几百）有关，与总面数（几百万）无关**——这就是 spec §1.2「CPU 每帧工作量与视距无关」的兑现点。
+**CPU 每帧的工作量此时只与候选区段数有关，与总面数（几百万）无关。** 这兑现的是“CPU 不逐面工作”，并不意味着与视距严格无关：BFS 与候选列表上传仍随候选区段数增长。Task 17 必须分别记录 16/24/32 视距下的候选数、BFS 时间和上传字节数；若 32 视距下 CPU 超预算，再把区段记录持久化到 GPU 并改为增量更新，而不是用不准确的口号宣告达标。
 
 - [ ] **Step 7: 运行验证**
 
@@ -4894,7 +4988,7 @@ go run ./cmd/gfxspike
 
 ```bash
 git add internal/render
-git commit -m "feat: compute 剔除，CPU 每帧工作量与视距解耦"
+git commit -m "feat: compute 剔除，CPU 每帧不再逐面展开"
 ```
 
 ---
@@ -4902,6 +4996,7 @@ git commit -m "feat: compute 剔除，CPU 每帧工作量与视距解耦"
 ### Task 15: Hi-Z 遮挡剔除
 
 **Files:**
+- Create: `internal/render/shader/hiz_copy.wgsl`
 - Create: `internal/render/shader/hiz_build.wgsl`
 - Create: `internal/render/hiz.go`
 - Modify: `internal/render/shader/cull.wgsl`（加入遮挡测试）
@@ -4913,11 +5008,40 @@ git commit -m "feat: compute 剔除，CPU 每帧工作量与视距解耦"
 
 **这一级的收益排在可见性图之后。** 可见性图已经砍掉了地下和被墙隔开的区块；Hi-Z 补的是「在同一片开阔空间里，被前方山体挡住的远处区段」——这部分可见性图看不出来。
 
-**一个必须知道的取舍**：用**上一帧**的深度金字塔测**本帧**的可见性。相机快速转向时会有一帧的延迟，表现为边缘区段闪一下。代价是省掉一整个深度预通道。M1 接受这个取舍；若实测中闪烁明显，M5 再考虑两阶段剔除。
+**一个必须知道的取舍**：用**上一帧**的深度金字塔测**本帧**的可见性，代价是历史深度在相机运动后可能失效。为保证“绝不误剔除”，当相机平移超过 1 个方块、旋转超过 2°、投影矩阵变化或窗口 resize 时，本帧禁用 Hi-Z，只做可见性图与背面剔除，并用本帧深度重建下一帧金字塔。小幅运动继续复用上一帧；若实测收益不足，M5 再考虑深度预通道或重投影。
 
 - [ ] **Step 1: 写深度金字塔构建着色器**
 
-`internal/render/shader/hiz_build.wgsl`：
+深度附件是 `Depth32Float`，Hi-Z 是可写的 `R32Float`，两者格式不同，不能用纹理拷贝直接复制。先用 `hiz_copy.wgsl` 把深度采样到 mip 0，同时把窗口外的 padding 写成最远深度 1：
+
+```wgsl
+// internal/render/shader/hiz_copy.wgsl
+struct CopyUniforms {
+    viewport: vec2u,
+};
+
+@group(0) @binding(0) var src: texture_depth_2d;
+@group(0) @binding(1) var dst: texture_storage_2d<r32float, write>;
+@group(0) @binding(2) var<uniform> u: CopyUniforms;
+
+@compute @workgroup_size(8, 8)
+fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
+    let size = textureDimensions(dst);
+    if (gid.x >= size.x || gid.y >= size.y) {
+        return;
+    }
+    var d = 1.0;
+    if (gid.x < u.viewport.x && gid.y < u.viewport.y) {
+        d = textureLoad(src, vec2i(gid.xy), 0);
+    }
+    textureStore(dst, vec2i(gid.xy), vec4f(d, 0.0, 0.0, 1.0));
+}
+```
+
+该 pass 的布局分别使用 `BindGroupLayoutEntry{Type: BindingDepthTexture}` 与 `BindGroupLayoutEntry{Type: BindingStorageTextureWrite, StorageFormat: FormatR32Float}`。
+主程序创建深度纹理时 Usage 必须为 `TextureUsageRenderTarget|TextureUsageBinding`，并用 `AspectDepthOnly` 视图供复制 pass 采样；只带 RenderTarget usage 的深度附件不能在 compute 中读取。
+
+随后 `internal/render/shader/hiz_build.wgsl` 逐级下采样：
 
 ```wgsl
 // 从上一级 mip 取 2×2，保留最远的深度（保守：宁可少剔除，不可多剔除）。
@@ -4943,6 +5067,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
 }
 ```
 
+每一级都通过 `Texture.View(TextureViewDesc{BaseMipLevel: level, MipLevelCount: 1})` 单独绑定：R32Float 源是 `BindingSampledTextureUnfilterableFloat`，目标是 `BindingStorageTextureWrite`，两者 `ViewDimension` 都是 `TextureViewDimension2D`。不得把覆盖整条 mip 链的默认视图同时绑定为输入和输出，也不得为了 R32Float 请求非必要的 float32-filterable 特性。
+
 - [ ] **Step 2: 在剔除着色器中加入遮挡测试**
 
 `internal/render/shader/cull.wgsl` 修改：`SectionRec` 之外再传入 `view_proj` 与 Hi-Z 纹理，在**工作组的第一个线程**上做区段级遮挡测试，不通过则整个工作组直接返回。区段级足够——面级遮挡测试的收益远小于其成本。
@@ -4952,12 +5078,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
 struct CullUniforms {
     cam_pos:   vec4f,
     view_proj: mat4x4f,
-    // hiz_size 是 mip 0 的尺寸，x/y 为宽高，z 为最大 mip 级别。
+    // hiz_size.xy 是实际 viewport 像素尺寸，z 为最大 mip 级别。
     hiz_size:  vec4f,
+    // viewport 在补齐到 2 次幂后的 Hi-Z mip 0 中所占的 UV 比例。
+    hiz_uv_scale: vec4f,
 };
 
-@group(0) @binding(5) var hiz:     texture_2d<f32>;
-@group(0) @binding(6) var hiz_smp: sampler;
+@group(0) @binding(5) var hiz: texture_2d<f32>;
 
 // section_occluded 把区段 AABB 投影到屏幕，取其屏幕包围盒对应的
 // Hi-Z mip 级别采样，若 AABB 最近点仍比 Hi-Z 记录的深度更远，则被遮挡。
@@ -4985,12 +5112,26 @@ fn section_occluded(origin: vec3f) -> bool {
         min_z  = min(min_z, ndc.z);
     }
 
-    // 屏幕包围盒跨了多少像素，决定采样哪一级 mip：
-    // 选到「包围盒大致落在 2×2 个纹素内」的那一级，一次采样即可覆盖。
-    let size_px = (max_uv - min_uv) * u.hiz_size.xy;
-    let level = clamp(ceil(log2(max(size_px.x, size_px.y))), 0.0, u.hiz_size.z);
+    // 完全在 viewport 外由前面的视锥剔除处理；这里仍 clamp，避免边界浮点误差。
+    min_uv = clamp(min_uv, vec2f(0.0), vec2f(1.0));
+    max_uv = clamp(max_uv, vec2f(0.0), vec2f(1.0));
 
-    let d = textureSampleLevel(hiz, hiz_smp, (min_uv + max_uv) * 0.5, level).r;
+    // 选到包围盒宽高不超过一个 mip 纹素的级别。即使宽高都不超过 1，
+    // 包围盒也可能因未对齐跨越 2×2 个纹素，所以必须读四角，不能只采中心。
+    let size_px = (max_uv - min_uv) * u.hiz_size.xy;
+    let level = clamp(ceil(log2(max(max(size_px.x, size_px.y), 1.0))),
+                      0.0, u.hiz_size.z);
+
+    let dim = vec2i(textureDimensions(hiz, u32(level)));
+    let padded_min = min_uv * u.hiz_uv_scale.xy;
+    let padded_max = max_uv * u.hiz_uv_scale.xy;
+    let p0 = clamp(vec2i(floor(padded_min * vec2f(dim))), vec2i(0), dim - 1);
+    let p1 = clamp(vec2i(floor(padded_max * vec2f(dim))), vec2i(0), dim - 1);
+    let d00 = textureLoad(hiz, vec2i(p0.x, p0.y), i32(level)).r;
+    let d10 = textureLoad(hiz, vec2i(p1.x, p0.y), i32(level)).r;
+    let d01 = textureLoad(hiz, vec2i(p0.x, p1.y), i32(level)).r;
+    let d11 = textureLoad(hiz, vec2i(p1.x, p1.y), i32(level)).r;
+    let d = max(max(d00, d10), max(d01, d11));
     // min_z 是区段最近点；它比已记录的最远深度还远，说明整体被挡住。
     return min_z > d;
 }
@@ -5025,26 +5166,34 @@ package render
 // 用上一帧的深度测本帧的可见性（见 Task 15 说明），
 // 换来的是省掉一整个深度预通道。
 type hiZ struct {
-	tex      gfx.Texture
-	views    []gfx.TextureView // 每级一个视图
-	pipeline gfx.ComputePipeline
-	binds    []gfx.BindGroup
-	width    uint32
-	height   uint32
-	levels   uint32
+	tex          gfx.Texture
+	views        []gfx.TextureView // 每级一个单 mip 视图
+	copyPipeline gfx.ComputePipeline
+	buildPipeline gfx.ComputePipeline
+	copyBind     gfx.BindGroup
+	buildBinds   []gfx.BindGroup
+	viewportW    uint32
+	viewportH    uint32
+	paddedW      uint32
+	paddedH      uint32
+	levels       uint32
 }
 
-// newHiZ 创建金字塔。尺寸取不大于窗口尺寸的最大 2 的幂，
-// 让每一级下采样都是精确的 2:1，避免非整除带来的采样偏移。
+// newHiZ 创建金字塔。尺寸分别向上补齐到不小于窗口尺寸的 2 次幂，
+// 保证整个 viewport 都被覆盖；hiz_copy 把 padding 明确写成深度 1，
+// 因而 padding 只会让剔除更保守，不会制造错误遮挡。
 func newHiZ(dev gfx.Device, w, h uint32) *hiZ
 
-// build 录制金字塔构建：先把深度缓冲拷进 mip 0，
-// 然后逐级 dispatch 下采样。
+// build 在本帧 terrain render pass 结束后调用，结果供下一帧剔除使用：
+// 先以 compute 把 Depth32Float 转写进 R32Float mip 0 并填充 padding，
+// 再通过单 mip view 逐级 dispatch 下采样。
 func (z *hiZ) build(enc gfx.CommandEncoder, depth gfx.TextureView)
 
 // resize 在窗口尺寸变化后重建纹理与视图。
 func (z *hiZ) resize(dev gfx.Device, w, h uint32)
 ```
+
+`newHiZ` 创建 `FormatR32Float`、`TextureUsageBinding|TextureUsageStorage` 的完整 mip 链。culler 使用覆盖整条 mip 链的 sampled view；构建 pass 使用 `views[level-1]` 与 `views[level]`。第一帧尚无历史深度时必须禁用遮挡剔除，不能依赖未初始化纹理内容。
 
 - [ ] **Step 4: 写一个防回归的可见性测试**
 
@@ -5090,19 +5239,36 @@ func TestNothingIsCulledWhenDepthIsFar(t *testing.T) {
 		t.Fatal("min_z=0.9 比记录深度 0.5 更远，应判为被遮挡")
 	}
 }
+
+// TestHiZUsesAllCoveredTexels 防止实现退化为只采包围盒中心。
+// 四个角只要有一个记录到更远深度，就必须取最大值并保守地保留区段。
+func TestHiZUsesAllCoveredTexels(t *testing.T) {
+	if got := render.Max4ForTest(0.2, 0.3, 1.0, 0.4); got != 1.0 {
+		t.Fatalf("四纹素最大深度 = %g，想要 1.0", got)
+	}
+	if render.OccludedForTest(0.9, render.Max4ForTest(0.2, 0.3, 1.0, 0.4)) {
+		t.Fatal("覆盖范围内存在深度 1.0 时不得错误剔除")
+	}
+}
 ```
 
-对应导出两个测试专用函数（与 WGSL 中的公式保持一致，改一处必须改两处）：
+对应导出测试专用函数（与 WGSL 中的公式保持一致，改一处必须改两处）：
 
 ```go
 // HiZLevelForTest 与 cull.wgsl 中的 mip 级别选择公式等价，供测试验证。
 func HiZLevelForTest(sizePx float64) float64 {
-	return math.Ceil(math.Log2(sizePx))
+	return math.Ceil(math.Log2(math.Max(sizePx, 1)))
 }
 
 // OccludedForTest 与 cull.wgsl 中的遮挡判定等价，供测试验证。
 func OccludedForTest(minZ, hizDepth float32) bool { return minZ > hizDepth }
+
+func Max4ForTest(a, b, c, d float32) float32 {
+	return max(max(a, b), max(c, d))
+}
 ```
+
+再用一个 headless GPU 测试构建 `13×7` viewport 的金字塔：断言实际纹理补齐到 `16×8`，padding 在所有 mip 中保持深度 1，并把随机生成的深度图与 CPU max-reduction 逐级对拍。这个用例同时覆盖非 2 次幂窗口与单 mip view 绑定。
 
 - [ ] **Step 5: 运行测试与实机验证**
 
@@ -5154,7 +5320,13 @@ type Streamer struct{ /* 非导出 */ }
 func NewStreamer(gen *worldgen.Generator, reg *assets.Registry, workers int) *Streamer
 func (s *Streamer) SetCenter(p core.ChunkPos, radius int)
 func (s *Streamer) Drain(max int) []MeshedSection
+func (s *Streamer) Stats() StreamStats
 func (s *Streamer) Close()
+
+type StreamStats struct {
+    CachedChunks, QueuedJobs, InFlightJobs int
+    Generation uint64
+}
 ```
 
 - [ ] **Step 1: 写相机测试**
@@ -5375,9 +5547,10 @@ func TestStreamerSurvivesPanickingWork(t *testing.T) {
 ```go
 // MeshedSection 是一个已生成并网格化好的区段。
 type MeshedSection struct {
-	Pos   core.SectionPos
-	Quads []mesh.Quad
-	Conn  mesh.Connectivity
+	Pos        core.SectionPos
+	Quads      []mesh.Quad
+	Conn       mesh.Connectivity
+	Generation uint64 // 任务创建时的 SetCenter 代次，供过期诊断
 }
 
 // Streamer 在 worker pool 上并行生成与网格化区块（spec §4.3）。
@@ -5389,8 +5562,13 @@ type Streamer struct {
 	reg     *assets.Registry
 	jobs    chan core.ChunkPos
 	results chan MeshedSection
-	// chunks 缓存已生成的区块，网格化需要读邻居。
+	// chunks 只缓存当前 wanted 集合及一圈 halo；网格化 AO 需要 3×3 邻域。
 	chunks  map[core.ChunkPos]*world.Chunk
+	queued  map[core.ChunkPos]uint64
+	inFlight map[core.ChunkPos]uint64
+	center  core.ChunkPos
+	radius  int
+	generation uint64
 	mu      sync.Mutex
 	wg      sync.WaitGroup
 	closed  chan struct{}
@@ -5416,11 +5594,20 @@ func (s *Streamer) handleOne(pos core.ChunkPos) {
 			slog.Error("区块生成失败", "chunk", pos, "panic", r)
 		}
 	}()
-	// 生成、缓存、对 6 个邻居齐备的区段做网格化，结果送 results
-}
+		// 生成并缓存；检查本区块及周围 8 个区块，只有目标区块的
+		// 3×3 水平邻域齐备时才网格化。结果携带任务代次送 results。
+	}
 ```
 
-`SetCenter` 按到中心的距离排序派发任务——近处先出画面，比远处先出观感好得多。
+`SetCenter` 必须完成以下状态转换，不能只向 channel 追加任务：
+
+1. 代次加一，计算半径 `radius+1` 的 wanted chunk 集合；额外一圈是 AO/面邻域 halo，保证可见半径内区段都能完成网格化。
+2. 对 wanted 集合按到中心的距离排序，只派发不在 `chunks/queued/inFlight` 中的区块。
+3. 从 `chunks` 删除 wanted 之外的区块，同时清理对应 queued 标记；已在执行的旧任务不能强杀，完成时重新检查当前 wanted 集合：已离开 wanted 才丢弃，仍在 wanted 的旧代次结果仍然有效，不能仅因代次变化造成缺块。
+4. 新区块到达后，重新检查它周围 3×3 中哪些中心区块刚刚凑齐邻域；每个 `(section, generation)` 最多产出一次。
+5. `Drain` 按当前可见/wanted 集合过滤结果，而不是机械要求 generation 相等；`Close` 必须能在 jobs/results 背压下唤醒所有 worker，不能因发送结果而死锁。
+
+`Stats` 仅用于测试与诊断。加入 `TestStreamerCacheRemainsBoundedWhileTravelling`：把中心沿 X 连续移动 100 次，每次等待新代次有结果，最终断言 `CachedChunks <= (2*(radius+1)+1)^2`，且旧中心的结果不会在新代次被 Drain 出来。
 
 - [ ] **Step 5: 运行测试**
 
@@ -5437,10 +5624,12 @@ go test ./internal/client/ -v
 1. 处理输入：WASD 水平移动、空格/Shift 升降、鼠标控制视角（捕获光标）、`Esc` 释放光标
 2. 相机移动后若跨了区块，`streamer.SetCenter(newCenter, 32)`
 3. `renderer.BeginFrame()` 重置上传预算
-4. `streamer.Drain(64)` 取网格化结果并 `renderer.UploadSection`
-5. 卸载超出视距的区段：`renderer.DropSection`
-6. `renderer.Render(...)`
-7. Present
+4. `streamer.Drain(64)` 取当前仍在可见集合内的结果并 `renderer.QueueSection`
+5. `renderer.FlushUploads(newCenter)`；超预算结果保留到后续帧，不能丢弃
+6. `renderer.DropOutside(newCenter, 32)` 卸载超出视距的 GPU 分配并清理 pending；Streamer 在 `SetCenter` 内淘汰半径外 CPU chunks
+7. `renderer.Render(...)`
+8. terrain render pass 结束后 `hiZ.build(...)`，供下一帧使用
+9. Present
 
 窗口尺寸变化时 `surface.Resize` + 重建深度缓冲 + `hiZ.resize` + 更新 `camera.Aspect`。
 
@@ -5472,14 +5661,21 @@ git commit -m "feat: 自由飞行相机、输入与区块流式加载，M1 可�
 **Files:**
 - Create: `internal/render/bench_test.go`
 - Create: `internal/archcheck/deps_test.go`
+- Create: `internal/client/perf.go`
+- Create: `internal/client/perf_test.go`
+- Create: `internal/client/rss_darwin.go`
+- Create: `internal/client/rss_other.go`
+- Create: `cmd/perfcheck/main.go`
+- Modify: `cmd/mcgo/main.go`（增加固定场景 benchmark 模式）
 - Create: `.github/workflows/ci.yml`
 - Create: `docs/notes/perf-baseline.md`
+- Create: `docs/notes/perf-baseline.json`
 
 **Interfaces:**
 - Consumes: 前面所有任务
-- Produces: CI 门禁，防止性能与架构约束被无声侵蚀
+- Produces: 架构 CI 门禁 + 可复现的本机性能门禁，防止约束被无声侵蚀
 
-spec §7.1 明确要求：**性能是需求的一部分，所以要有性能门禁**。没有它，"优化"这个目标会在几个月里被一点点吃掉，而且没人说得清是哪一次提交开始变慢的。
+spec §7.1 明确要求：**性能是需求的一部分，所以要有性能门禁**。GitHub 托管 runner 的硬件不稳定，不能拿它比较绝对帧时间；因此 CI 负责架构、正确性与性能工具可运行，本计划另提供在基准开发机上执行的固定场景比较命令。两者不能混称为同一种门禁。
 
 - [ ] **Step 1: 写依赖方向门禁**
 
@@ -5498,6 +5694,7 @@ import (
 
 // allowed 列出每个内部包允许直接依赖的内部包（spec §3.1）。
 var allowed = map[string][]string{
+	"internal/archcheck": {},
 	"internal/core":     {},
 	"internal/gfx":      {},
 	"internal/world":    {"internal/core"},
@@ -5513,6 +5710,27 @@ var allowed = map[string][]string{
 // 靠自觉守不住这条：某次「就先临时 import 一下」之后，
 // 层次就永久地糊在一起了。
 func TestInternalDependenciesAreOneWay(t *testing.T) {
+	// 先枚举实际包，防止新增 internal 包却忘记登记而完全绕过门禁。
+	pkgsOut, err := exec.Command("go", "list", "-f", "{{.ImportPath}}", "./internal/...").Output()
+	if err != nil {
+		t.Fatalf("枚举 internal 包失败: %v", err)
+	}
+	actual := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(pkgsOut)), "\n") {
+		pkg := strings.TrimPrefix(strings.TrimSpace(line), "minecraft-go/")
+		if pkg != "" {
+			actual[pkg] = true
+			if _, ok := allowed[pkg]; !ok {
+				t.Errorf("新增内部包 %s 未登记依赖白名单", pkg)
+			}
+		}
+	}
+	for pkg := range allowed {
+		if !actual[pkg] {
+			t.Errorf("依赖白名单中的包 %s 不存在", pkg)
+		}
+	}
+
 	for pkg, allow := range allowed {
 		out, err := exec.Command("go", "list", "-deps", "./"+pkg).Output()
 		if err != nil {
@@ -5572,6 +5790,7 @@ go test ./internal/archcheck/ -v
 package render_test
 
 import (
+	"fmt"
 	"testing"
 
 	"minecraft-go/internal/assets"
@@ -5636,15 +5855,24 @@ func BenchmarkVisibleSections(b *testing.B) {
 		c, ok := conns[p]
 		return c, ok
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = mesh.VisibleSections(core.SectionPos{Y: 8}, 32, mesh.EverythingVisible(), lookup)
+	const sectionRecBytes = 32
+	for _, radius := range []int{16, 24, 32} {
+		b.Run(fmt.Sprintf("r%d", radius), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				got := mesh.VisibleSections(core.SectionPos{Y: 8}, radius,
+					mesh.EverythingVisible(), lookup)
+				b.ReportMetric(float64(len(got)), "candidate_sections")
+				b.ReportMetric(float64(len(got)*sectionRecBytes), "candidate_bytes/frame")
+			}
+		})
 	}
 }
 
-// BenchmarkWorldMemory 测量 32 视距下的世界数据驻留内存，
-// 直接对应 spec §1.2 的 <2 GB 目标。
-func BenchmarkWorldMemory(b *testing.B) {
+// BenchmarkPalettePayloadEstimate 只测调色板 payload 的逻辑大小。
+// 它用于防止压缩率回退，不代表进程 RSS：Chunk/Section 对象、map bucket、
+// 网格、队列、客户端状态与 GPU 资源均不在这里。<2 GB 的完成门禁由
+// cmd/mcgo --benchmark 对真实进程峰值 RSS 采样。
+func BenchmarkPalettePayloadEstimate(b *testing.B) {
 	g := worldgen.New(benchSeed)
 	var totalBytes int
 	const radius = 32
@@ -5652,22 +5880,45 @@ func BenchmarkWorldMemory(b *testing.B) {
 		for cz := int32(-radius); cz <= radius; cz++ {
 			ch := g.GenerateChunk(core.ChunkPos{X: cx, Z: cz})
 			for si := 0; si < core.SectionsPerChunk; si++ {
-				totalBytes += ch.Section(si).Blocks.MemoryBytes()
+				totalBytes += ch.Section(si).Blocks.PayloadBytes()
 			}
 		}
 	}
 	b.ReportMetric(float64(totalBytes)/(1<<20), "MB")
-	// 65×65 区块 × 24 区段的朴素存储是 820 MB（spec §4.1）。
+	// 65×65 区块 × 24 区段的朴素方块 payload 是 820 MB（spec §4.1）。
 	if mb := totalBytes / (1 << 20); mb > 300 {
-		b.Fatalf("32 视距世界数据占用 %d MB，超出预算", mb)
+		b.Fatalf("32 视距调色板 payload 估算 %d MB，超出预算", mb)
 	}
 }
 ```
 
 - [ ] **Step 4: 记录基线数字**
 
+先实现 `cmd/mcgo --benchmark`：
+
+1. 强制窗口内容区为 2560×1440，`surface.SetPresentMode(PresentModeAutoNoVSync)`；若平台无法关闭 VSync，直接报错，不能生成无意义的基线。
+2. 固定种子 `20260726`、视距 32。等 `Streamer.Stats()` 显示 queued/in-flight 均为 0、缓存达到 wanted 大小，且 renderer `PendingUploads()==0` 后再开始计时；设 5 分钟超时，加载未完成必须失败而不是永远等待。
+3. 预热 10 秒；随后跑两个代码内固定的相机阶段：静止 60 秒、以恒速穿越地形并周期转向 120 秒。路径、速度和时长是基准契约，修改必须显式提升 `scenario_version`。
+4. 每帧记录 wall-clock frame time、候选区段数、candidate buffer 上传字节、存活实例数和 pending uploads；每秒采样进程 RSS。首次加载时间另记，不混进稳态帧时间。
+5. 输出 JSON，至少包含硬件、OS、Go 版本、git commit、场景版本，以及两个阶段各自的 fps、p50/p95/p99/max、峰值 RSS。任何阶段 p99 ≥12 ms、fps <100 或峰值 RSS ≥2 GiB 时命令退出非零。
+
+`internal/client/perf.go` 负责无分配的环形采样与分位数汇总；`perf_test.go` 用已知序列验证 p50/p95/p99，避免排序下标写错。真实进程 RSS 使用带 build tag 的平台实现；darwin/arm64 是 M1 的基准平台，其他平台可以明确返回“不支持 RSS 门禁”，不得拿 `PalettedContainer.PayloadBytes` 冒充 RSS。
+
+`cmd/perfcheck` 比较两个相同 `scenario_version`、相同硬件标识的 JSON：帧时间或峰值 RSS 退化超过 20% 时失败；硬件或场景不同则拒绝比较，而非给出误导结论。
+
 ```bash
+# 纯 Go 微基准，保留人类可读记录
 go test ./... -bench=. -benchmem -run='^$' | tee docs/notes/perf-baseline.md
+
+# 开发机上的真实 1440p 固定场景；此命令本身执行绝对性能门禁
+go run ./cmd/mcgo --benchmark --perf-output /tmp/mcgo-perf.json
+cp /tmp/mcgo-perf.json docs/notes/perf-baseline.json
+
+# 后续提交在同一开发机上比较回归
+go run ./cmd/perfcheck \
+  -baseline docs/notes/perf-baseline.json \
+  -current /tmp/mcgo-perf.json \
+  -max-regression 0.20
 ```
 
 在 `docs/notes/perf-baseline.md` 顶部手写一段说明：
@@ -5679,8 +5930,10 @@ go test ./... -bench=. -benchmem -run='^$' | tee docs/notes/perf-baseline.md
 - 硬件：<填写具体型号，如 Apple M3 Pro / 18 GB>
 - Go 版本：go1.26.0 darwin/arm64
 
-下方数字是 M1 完成时的基线。CI 会对比这些数字，退化超过 20% 判红。
-换硬件后需要重新记录基线，跨硬件的数字没有可比性。
+下方是纯 Go 微基准的可读记录；真实 1440p 场景数据在 perf-baseline.json。
+GitHub CI 不比较跨机器绝对值。性能回归由同一台基准开发机运行
+cmd/mcgo --benchmark，再用 cmd/perfcheck 比较；退化超过 20% 判红。
+换硬件或 scenario_version 后必须显式重建基线。
 ```
 
 - [ ] **Step 5: 写 CI 配置**
@@ -5717,11 +5970,11 @@ jobs:
           gofmt -l . | tee /tmp/fmt.txt
           test ! -s /tmp/fmt.txt
 
-      - name: 基准（只跑不比对，防止基准本身编译坏掉）
+      - name: 微基准与 payload 阈值（不比较跨机器帧时间）
         run: go test ./... -bench=. -benchtime=1x -run='^$'
 ```
 
-**说明**：跨机器的绝对帧时间没有可比性，所以 CI 只保证基准能编译能跑；真正的性能回归比对在本机对着 `docs/notes/perf-baseline.md` 做。`BenchmarkWorldMemory` 是例外——内存占用与硬件无关，它的阈值断言在 CI 上有效。
+**说明**：跨机器的绝对帧时间没有可比性，所以托管 CI 只保证基准与性能工具能编译运行，并执行 `BenchmarkPalettePayloadEstimate` 的平台无关阈值。真实 fps、p99 与进程 RSS 的绝对门禁由同一台基准开发机执行 `cmd/mcgo --benchmark`；相对回归由 `cmd/perfcheck` 比较 JSON。文档与 CI 不再声称托管 runner 会做它实际没有做的 20% 比较。
 
 - [ ] **Step 6: 跑完整验证**
 
@@ -5730,14 +5983,17 @@ go test ./... -race
 go vet ./...
 gofmt -l .
 go test ./... -bench=. -benchtime=1x -run='^$'
+go run ./cmd/mcgo --benchmark --perf-output /tmp/mcgo-perf.json
+go run ./cmd/perfcheck -baseline docs/notes/perf-baseline.json \
+  -current /tmp/mcgo-perf.json -max-regression 0.20
 ```
 
-预期：全部通过，`gofmt -l` 无输出。
+预期：全部通过，`gofmt -l` 无输出；固定场景的静止与飞行阶段均达到 ≥100 fps、p99 <12 ms，峰值 RSS <2 GiB，且相对基线没有超过 20% 的退化。
 
 - [ ] **Step 7: 提交**
 
 ```bash
-git add internal/archcheck internal/render/bench_test.go .github docs/notes/perf-baseline.md
+git add internal/archcheck internal/render/bench_test.go internal/client cmd/mcgo cmd/perfcheck .github docs/notes/perf-baseline.md docs/notes/perf-baseline.json
 git commit -m "chore: 性能基准与 CI 门禁，锁住架构约束与性能目标"
 ```
 
@@ -5751,8 +6007,9 @@ M0 与 M1 全部任务完成后，应满足：
 |---|---|
 | M0：实例数由 GPU 决定 | `docs/notes/webgpu-api.md` 的 M0 结论四项全勾 |
 | 32 视距自由飞行 | `go run ./cmd/mcgo`，对照 Task 16 Step 7 清单 |
-| 帧时间达标 | 对照 spec §1.2，实测后回填并校准该节数字 |
-| 世界数据内存 | `BenchmarkWorldMemory` 报告 < 300 MB |
+| 帧时间达标 | 基准开发机运行 `cmd/mcgo --benchmark`：静止与飞行均 ≥100 fps、p99 <12 ms |
+| 驻留内存 | 同一固定场景报告峰值进程 RSS <2 GiB；`BenchmarkPalettePayloadEstimate` 仅作压缩率辅助指标 |
+| 性能未显著回退 | 同机运行 `cmd/perfcheck`，相对 `perf-baseline.json` 退化不超过 20% |
 | 依赖方向未被破坏 | `go test ./internal/archcheck/` |
 | GPU 绑定未泄漏到上层 | 同上，`TestOnlyGfxImportsWebGPU` |
 | 全部测试通过 | `go test ./... -race` |
