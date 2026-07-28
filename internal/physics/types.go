@@ -2,6 +2,7 @@
 package physics
 
 import (
+	"math"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -32,6 +33,20 @@ type State struct {
 	Position mgl32.Vec3
 	Velocity mgl32.Vec3
 	OnGround bool
+}
+
+// ValidState 报告状态的位置与速度是否都为有限值。
+func ValidState(state State) bool {
+	return validStateComponent(state.Position.X()) &&
+		validStateComponent(state.Position.Y()) &&
+		validStateComponent(state.Position.Z()) &&
+		validStateComponent(state.Velocity.X()) &&
+		validStateComponent(state.Velocity.Y()) &&
+		validStateComponent(state.Velocity.Z())
+}
+
+func validStateComponent(value float32) bool {
+	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
 }
 
 // Input 是单个固定步的玩家控制意图。

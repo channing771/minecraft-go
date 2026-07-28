@@ -35,12 +35,12 @@ func resolveMove(state State, displacement mgl32.Vec3, source CollisionSource) m
 	return result
 }
 
-func clipAxis(position mgl32.Vec3, axis int, requested float32, source CollisionSource) (float32, bool, bool) {
+func clipAxis(feetPosition mgl32.Vec3, axis int, requested float32, source CollisionSource) (float32, bool, bool) {
 	if requested == 0 {
 		return 0, false, false
 	}
 
-	player := PlayerBounds(position)
+	player := PlayerBounds(feetPosition)
 	min, max := player.Min, player.Max
 	if requested < 0 {
 		min[axis] += requested
@@ -48,20 +48,20 @@ func clipAxis(position mgl32.Vec3, axis int, requested float32, source Collision
 		max[axis] += requested
 	}
 
-	minX, maxX := blockRange(min.X(), max.X())
-	minY, maxY := blockRange(min.Y(), max.Y())
-	minZ, maxZ := blockRange(min.Z(), max.Z())
+	minX, maxX := blockRange(min.X()-CollisionEpsilon, max.X()+CollisionEpsilon)
+	minY, maxY := blockRange(min.Y()-CollisionEpsilon, max.Y()+CollisionEpsilon)
+	minZ, maxZ := blockRange(min.Z()-CollisionEpsilon, max.Z()+CollisionEpsilon)
 	clipped := requested
 	wasClipped := false
 	hitUnknown := false
 	for y := minY; y <= maxY; y++ {
 		for x := minX; x <= maxX; x++ {
 			for z := minZ; z <= maxZ; z++ {
-				position := core.BlockPos{X: x, Y: y, Z: z}
-				set := source.CollisionBoxes(position)
+				blockPosition := core.BlockPos{X: x, Y: y, Z: z}
+				set := source.CollisionBoxes(blockPosition)
 				if !set.Loaded {
 					hitUnknown = true
-					candidate, blocks := clipAgainst(player, axis, clipped, blockBounds(position, fullCubeBounds))
+					candidate, blocks := clipAgainst(feetPosition, player, axis, clipped, blockBounds(blockPosition, fullCubeBounds))
 					if blocks {
 						clipped = candidate
 						wasClipped = true
@@ -73,7 +73,7 @@ func clipAxis(position mgl32.Vec3, axis int, requested float32, source Collision
 					count = len(set.Boxes)
 				}
 				for i := 0; i < count; i++ {
-					candidate, blocks := clipAgainst(player, axis, clipped, blockBounds(position, set.Boxes[i]))
+					candidate, blocks := clipAgainst(feetPosition, player, axis, clipped, blockBounds(blockPosition, set.Boxes[i]))
 					if blocks {
 						clipped = candidate
 						wasClipped = true
@@ -92,24 +92,45 @@ func blockBounds(position core.BlockPos, local core.AABB) core.AABB {
 	return core.AABB{Min: local.Min.Add(offset), Max: local.Max.Add(offset)}
 }
 
-func clipAgainst(player core.AABB, axis int, requested float32, collider core.AABB) (float32, bool) {
+func clipAgainst(position mgl32.Vec3, player core.AABB, axis int, requested float32, collider core.AABB) (float32, bool) {
 	if !overlapsOtherAxes(player, collider, axis) {
 		return requested, false
 	}
 
 	if requested > 0 {
 		distance := collider.Min[axis] - player.Max[axis]
-		if distance >= -CollisionEpsilon && distance < requested-CollisionEpsilon {
-			return distance, true
+		if distance >= -CollisionEpsilon && distance <= requested+CollisionEpsilon {
+			candidate := min(distance, requested)
+			return safeCollisionDistance(position, collider, axis, requested, candidate), true
 		}
 		return requested, false
 	}
 
 	distance := collider.Max[axis] - player.Min[axis]
-	if distance <= CollisionEpsilon && distance > requested+CollisionEpsilon {
-		return distance, true
+	if distance <= CollisionEpsilon && distance >= requested-CollisionEpsilon {
+		candidate := max(distance, requested)
+		return safeCollisionDistance(position, collider, axis, requested, candidate), true
 	}
 	return requested, false
+}
+
+func safeCollisionDistance(position mgl32.Vec3, collider core.AABB, axis int, requested, distance float32) float32 {
+	for {
+		finalPosition := position
+		finalPosition[axis] += distance
+		finalBounds := PlayerBounds(finalPosition)
+		if requested > 0 {
+			if finalBounds.Max[axis] <= collider.Min[axis] {
+				return distance
+			}
+			distance = math.Nextafter32(distance, float32(math.Inf(-1)))
+			continue
+		}
+		if finalBounds.Min[axis] >= collider.Max[axis] {
+			return distance
+		}
+		distance = math.Nextafter32(distance, float32(math.Inf(1)))
+	}
 }
 
 func overlapsOtherAxes(a, b core.AABB, axis int) bool {
