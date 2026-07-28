@@ -12,6 +12,9 @@
 .idea/
 .vscode/
 
+# 本机 Claude Code 权限配置（可能包含宽泛的 shell 授权）
+/.claude/settings.local.json
+
 # 运行时产生的世界存档
 /saves/
 
