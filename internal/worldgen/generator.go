@@ -41,6 +41,18 @@ func (g *Generator) HeightAt(wx, wz int32) int32 {
 	return int32(seaLevel + n*terrainAmp)
 }
 
+// BaseBlockAt 返回不应用会话修改时指定世界位置的确定性方块。
+func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
+	if pos.Y < core.MinY || pos.Y >= core.MaxY {
+		return core.AirID
+	}
+	height := g.HeightAt(pos.X, pos.Z)
+	if height >= core.MaxY {
+		height = core.MaxY - 1
+	}
+	return terrainBlockAt(pos.Y, height)
+}
+
 // GenerateChunk 生成一个完整区块。
 func (g *Generator) GenerateChunk(pos core.ChunkPos) *world.Chunk {
 	c := world.NewChunk(pos)
@@ -54,21 +66,25 @@ func (g *Generator) GenerateChunk(pos core.ChunkPos) *world.Chunk {
 				h = core.MaxY - 1
 			}
 			for y := int32(core.MinY); y <= h; y++ {
-				var id world.BlockID
-				switch {
-				case y == core.MinY:
-					id = IDBedrock
-				case y == h:
-					id = IDGrass
-				case y > h-soilDepth:
-					id = IDDirt
-				default:
-					id = IDStone
-				}
-				c.SetBlock(lx, y, lz, id)
+				c.SetBlock(lx, y, lz, terrainBlockAt(y, h))
 			}
 		}
 	}
 	c.Compact()
 	return c
+}
+
+func terrainBlockAt(y, height int32) core.BlockID {
+	switch {
+	case y < core.MinY || y >= core.MaxY || y > height:
+		return core.AirID
+	case y == core.MinY:
+		return IDBedrock
+	case y == height:
+		return IDGrass
+	case y > height-soilDepth:
+		return IDDirt
+	default:
+		return IDStone
+	}
 }

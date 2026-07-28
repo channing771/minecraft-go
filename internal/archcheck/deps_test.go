@@ -24,6 +24,10 @@ var allowed = map[string][]string{
 	"internal/render": {
 		"internal/core", "internal/world", "internal/mesh", "internal/assets", "internal/gfx",
 	},
+	"internal/server": {
+		"internal/core", "internal/network", "internal/world",
+		"internal/worldgen", "internal/sim",
+	},
 	"internal/client": {
 		"internal/core", "internal/world", "internal/mesh", "internal/assets",
 		"internal/worldgen", "internal/render", "internal/gfx",

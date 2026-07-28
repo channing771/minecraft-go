@@ -73,6 +73,45 @@ func TestGenerateChunkIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestBaseBlockAtMatchesGeneratedChunk(t *testing.T) {
+	generator := worldgen.New(42)
+	for _, horizontal := range []core.BlockPos{
+		{X: 3, Z: 7},
+		{X: -19, Z: -33},
+	} {
+		height := generator.HeightAt(horizontal.X, horizontal.Z)
+		for _, y := range []int32{
+			height + 1,
+			height,
+			height - 1,
+			height - 4,
+			core.MinY,
+		} {
+			position := core.BlockPos{X: horizontal.X, Y: y, Z: horizontal.Z}
+			chunk := generator.GenerateChunk(position.Chunk())
+			x, _, z := position.Local()
+			got := generator.BaseBlockAt(position)
+			want := chunk.BlockAt(x, position.Y, z)
+			if got != want {
+				t.Fatalf(
+					"BaseBlockAt(%+v) = %d，GenerateChunk = %d",
+					position,
+					got,
+					want,
+				)
+			}
+		}
+	}
+	for _, position := range []core.BlockPos{
+		{Y: core.MinY - 1},
+		{Y: core.MaxY},
+	} {
+		if got := generator.BaseBlockAt(position); got != core.AirID {
+			t.Fatalf("世界高度外 BaseBlockAt(%+v) = %d", position, got)
+		}
+	}
+}
+
 func TestGenerateChunkIsSeamlessAcrossBorders(t *testing.T) {
 	g := worldgen.New(99)
 	for wz := int32(-40); wz < 40; wz++ {

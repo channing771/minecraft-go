@@ -209,6 +209,16 @@ func (engine *Engine) ChunkHash(
 	return chunk.Hash(), revision, true
 }
 
+func (engine *Engine) ChunkInfo(
+	key core.ChunkKey,
+) (ChunkInfo, bool) {
+	dimension := engine.dimensions[key.Dimension]
+	if dimension == nil {
+		return ChunkInfo{}, false
+	}
+	return dimension.Info(key.Pos)
+}
+
 func (engine *Engine) takeInbox() ([]Command, []GeneratedChunk) {
 	engine.inboxMu.Lock()
 	commands := append([]Command(nil), engine.commands...)
