@@ -37,6 +37,7 @@ type application struct {
 	serverCancel         context.CancelFunc
 	serverDone           chan error
 	mirror               *client.Mirror
+	predictor            *client.Predictor
 	mesher               *client.Mesher
 	depth                *depthTarget
 	camera               client.Camera
@@ -102,7 +103,7 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}
 	} else {
-		window, err = client.NewWindow(2560, 1440, "minecraft-go — M2A authoritative world")
+		window, err = client.NewWindow(2560, 1440, "minecraft-go — M2B authoritative player")
 		if err == nil {
 			fitFramebuffer(window, width, height)
 			width, height = window.FramebufferSize()
@@ -156,6 +157,7 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 		serverCancel:   serverCancel,
 		serverDone:     serverDone,
 		mirror:         client.NewMirror(),
+		predictor:      client.NewPredictor(),
 		mesher:         client.NewMesher(reg, max(1, runtime.NumCPU()-2)),
 		depth:          newDepthTarget(dev, uint32(width), uint32(height)),
 		camera:         camera,
@@ -164,9 +166,11 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 		loadedChunks:   make(map[core.ChunkPos]struct{}),
 		ticks:          ticks,
 	}
-	if err := app.sendViewCenter(app.center); err != nil {
-		app.Close()
-		return nil, fmt.Errorf("发送初始视距中心: %w", err)
+	if benchmark {
+		if err := app.sendViewCenter(app.center); err != nil {
+			app.Close()
+			return nil, fmt.Errorf("发送初始视距中心: %w", err)
+		}
 	}
 	return app, nil
 }
@@ -218,6 +222,11 @@ func (a *application) updateCenter() {
 	if err := a.sendViewCenter(center); err != nil {
 		log.Printf("更新视距中心失败: %v", err)
 	}
+}
+
+func (a *application) nextSequence() uint64 {
+	a.sequence++
+	return a.sequence
 }
 
 // frame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
@@ -283,6 +292,23 @@ func (a *application) drainServerMessages(maxMessages int) {
 			log.Printf("接收内置服务端消息失败: %v", err)
 			return
 		}
+		if state, ok := message.(network.PlayerState); ok {
+			result, err := a.predictor.ApplyPlayerState(state, client.MirrorCollisionSource{
+				Mirror:    a.mirror,
+				Dimension: core.Overworld,
+			})
+			if err != nil {
+				log.Printf("服务端协议数据非法，关闭会话: %v", err)
+				_ = a.clientEndpoint.Close()
+				a.serverCancel()
+				return
+			}
+			if result.ResetView {
+				a.camera.Yaw = result.Yaw
+				a.camera.Pitch = result.Pitch
+			}
+			continue
+		}
 		update, err := a.mirror.Apply(message)
 		if err != nil {
 			log.Printf("服务端协议数据非法，关闭会话: %v", err)
@@ -305,8 +331,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 			a.acceptedChanges += len(message.Changes)
 		}
 		if update.Resync != nil {
-			a.sequence++
-			update.Resync.Sequence = a.sequence
+			update.Resync.Sequence = a.nextSequence()
 			if err := a.send(update.Resync); err != nil {
 				log.Printf("发送区块 resync 失败: %v", err)
 			}
@@ -330,36 +355,37 @@ func (a *application) drainServerMessages(maxMessages int) {
 }
 
 func (a *application) sendViewCenter(center core.ChunkPos) error {
-	a.sequence++
 	return a.send(network.SetViewCenter{
-		Sequence:  a.sequence,
+		Sequence:  a.nextSequence(),
 		Dimension: core.Overworld,
 		Center:    center,
 	})
 }
 
 func (a *application) breakBlock() {
+	if _, ready := a.predictor.State(); !ready {
+		return
+	}
 	a.lastInteractionChunk = cameraChunk(a.camera.Pos)
-	a.sequence++
-	if err := a.send(network.BreakRay{
-		Sequence:  a.sequence,
-		Dimension: core.Overworld,
-		Origin:    a.camera.Pos,
-		Direction: a.camera.Forward(),
+	if err := a.send(network.BreakBlock{
+		Sequence: a.nextSequence(),
+		Yaw:      a.camera.Yaw,
+		Pitch:    a.camera.Pitch,
 	}); err != nil {
 		log.Printf("发送挖掘命令失败: %v", err)
 	}
 }
 
 func (a *application) placeBlock() {
+	if _, ready := a.predictor.State(); !ready {
+		return
+	}
 	a.lastInteractionChunk = cameraChunk(a.camera.Pos)
-	a.sequence++
-	if err := a.send(network.PlaceRay{
-		Sequence:  a.sequence,
-		Dimension: core.Overworld,
-		Origin:    a.camera.Pos,
-		Direction: a.camera.Forward(),
-		Block:     a.selectedBlock,
+	if err := a.send(network.PlaceBlock{
+		Sequence: a.nextSequence(),
+		Yaw:      a.camera.Yaw,
+		Pitch:    a.camera.Pitch,
+		Block:    a.selectedBlock,
 	}); err != nil {
 		log.Printf("发送放置命令失败: %v", err)
 	}

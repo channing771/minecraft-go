@@ -11,7 +11,7 @@ import (
 
 const pitchLimit = float32(math.Pi/2) - 0.01
 
-// Camera 是自由飞行相机。yaw=0、pitch=0 时朝向 -Z。
+// Camera 保存展示相机。yaw=0、pitch=0 时朝向 -Z。
 type Camera struct {
 	Pos        mgl32.Vec3
 	Yaw, Pitch float32
@@ -34,6 +34,7 @@ func (c *Camera) Rotate(dYaw, dPitch float32) {
 	c.Pitch = max(-pitchLimit, min(pitchLimit, c.Pitch+dPitch))
 }
 
+// Move 仅供尚未迁移到玩家预测的 benchmark 脚本使用。
 func (c *Camera) Move(fwd, right, up float32) {
 	sy := float32(math.Sin(float64(c.Yaw)))
 	cy := float32(math.Cos(float64(c.Yaw)))

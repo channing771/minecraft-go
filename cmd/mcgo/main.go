@@ -1,6 +1,6 @@
 //go:build darwin
 
-// Command mcgo 启动可自由飞行的 M1 地形客户端。
+// Command mcgo 启动 M2B 权威地面玩家客户端。
 package main
 
 import (
@@ -9,7 +9,12 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/go-gl/mathgl/mgl32"
+
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/core"
+	"minecraft-go/internal/network"
+	"minecraft-go/internal/physics"
 )
 
 const viewDistance = 32
@@ -57,7 +62,7 @@ func runInteractive(app *application) {
 		app.window.Poll()
 
 		now := time.Now()
-		dt := min(float32(now.Sub(lastFrame).Seconds()), 0.1)
+		dt := min(now.Sub(lastFrame), 100*time.Millisecond)
 		lastFrame = now
 
 		escapeDown := app.window.KeyDown(client.KeyEscape)
@@ -74,6 +79,16 @@ func runInteractive(app *application) {
 			justCaptured = true
 		}
 		clickWasDown = clickDown
+		captured := app.window.CursorCaptured()
+		if captured && !justCaptured {
+			mouseX, mouseY := app.window.CursorPos()
+			app.camera.Rotate(
+				float32(mouseX-lastMouseX)*0.002,
+				float32(lastMouseY-mouseY)*0.002,
+			)
+			lastMouseX, lastMouseY = mouseX, mouseY
+		}
+
 		number := 0
 		switch {
 		case app.window.KeyDown(client.Key1):
@@ -85,7 +100,7 @@ func runInteractive(app *application) {
 		}
 		actions := input.Update(clickDown, app.window.SecondaryButtonDown(), number)
 		app.selectedBlock = actions.SelectedBlock
-		if app.window.CursorCaptured() && !justCaptured {
+		if captured && !justCaptured {
 			if actions.Break {
 				app.breakBlock()
 			}
@@ -94,39 +109,37 @@ func runInteractive(app *application) {
 			}
 		}
 
-		if app.window.CursorCaptured() {
-			mouseX, mouseY := app.window.CursorPos()
-			app.camera.Rotate(
-				float32(mouseX-lastMouseX)*0.002,
-				float32(lastMouseY-mouseY)*0.002,
+		movement := client.Movement{}
+		if captured {
+			movement = client.MovementFromKeys(
+				app.window.KeyDown(client.KeyW),
+				app.window.KeyDown(client.KeyA),
+				app.window.KeyDown(client.KeyS),
+				app.window.KeyDown(client.KeyD),
+				app.window.KeyDown(client.KeySpace),
 			)
-			lastMouseX, lastMouseY = mouseX, mouseY
-
-			var fwd, right, up float32
-			if app.window.KeyDown(client.KeyW) {
-				fwd++
+		}
+		if _, ready := app.predictor.State(); ready {
+			control := client.Control{
+				MoveX: movement.MoveX,
+				MoveZ: movement.MoveZ,
+				Jump:  movement.Jump,
+				Yaw:   app.camera.Yaw,
+				Pitch: app.camera.Pitch,
 			}
-			if app.window.KeyDown(client.KeyS) {
-				fwd--
+			if err := app.predictor.Advance(
+				dt,
+				control,
+				client.MirrorCollisionSource{Mirror: app.mirror, Dimension: core.Overworld},
+				app.nextSequence,
+				func(input network.PlayerInput) error { return app.send(input) },
+			); err != nil {
+				log.Printf("推进玩家预测失败: %v", err)
 			}
-			if app.window.KeyDown(client.KeyD) {
-				right++
+			if feet, ok := app.predictor.PresentationPosition(dt); ok {
+				app.camera.Pos = feet.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+				app.center = cameraChunk(app.camera.Pos)
 			}
-			if app.window.KeyDown(client.KeyA) {
-				right--
-			}
-			if app.window.KeyDown(client.KeySpace) {
-				up++
-			}
-			if app.window.KeyDown(client.KeyLeftShift) {
-				up--
-			}
-			speed := float32(30)
-			if app.window.KeyDown(client.KeyLeftControl) {
-				speed = 120
-			}
-			app.camera.Move(fwd*speed*dt, right*speed*dt, up*speed*dt)
-			app.updateCenter()
 		}
 		app.frame(64)
 	}

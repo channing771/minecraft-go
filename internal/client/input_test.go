@@ -7,6 +7,23 @@ import (
 	"minecraft-go/internal/core"
 )
 
+func TestMovementFromKeysCancelsOpposites(t *testing.T) {
+	tests := []struct {
+		name             string
+		w, a, s, d, jump bool
+		want             client.Movement
+	}{
+		{"forward right jump", true, false, false, true, true, client.Movement{MoveX: 1, MoveZ: 1, Jump: true}},
+		{"opposites cancel", true, true, true, true, false, client.Movement{}},
+		{"back left", false, true, true, false, false, client.Movement{MoveX: -1, MoveZ: -1}},
+	}
+	for _, tc := range tests {
+		if got := client.MovementFromKeys(tc.w, tc.a, tc.s, tc.d, tc.jump); got != tc.want {
+			t.Fatalf("%s=%+v，想要 %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestInputStateUsesRisingEdgesAndNumberSelection(t *testing.T) {
 	var state client.InputState
 

@@ -2,6 +2,30 @@ package client
 
 import "minecraft-go/internal/core"
 
+type Movement struct {
+	MoveX int8
+	MoveZ int8
+	Jump  bool
+}
+
+func MovementFromKeys(w, a, s, d, jump bool) Movement {
+	var movement Movement
+	if d {
+		movement.MoveX++
+	}
+	if a {
+		movement.MoveX--
+	}
+	if w {
+		movement.MoveZ++
+	}
+	if s {
+		movement.MoveZ--
+	}
+	movement.Jump = jump
+	return movement
+}
+
 type Actions struct {
 	Break         bool
 	Place         bool
