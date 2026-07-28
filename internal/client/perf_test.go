@@ -3,6 +3,7 @@ package client_test
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"minecraft-go/internal/client"
@@ -44,7 +45,7 @@ func TestPerfSamplerRingKeepsNewestSamples(t *testing.T) {
 
 func TestPerfReportJSONRoundTripIncludesTicks(t *testing.T) {
 	want := client.PerfReport{
-		ScenarioVersion: 2,
+		ScenarioVersion: 3,
 		Hardware:        "test-machine",
 		SnapshotSeconds: 1.25,
 		LoadSeconds:     2.5,
@@ -66,5 +67,38 @@ func TestPerfReportJSONRoundTripIncludesTicks(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("JSON roundtrip = %+v，想要 %+v", got, want)
+	}
+}
+
+func TestPerfReportV3IncludesBenchmarkMetrics(t *testing.T) {
+	data := []byte(`{
+  "scenario_version": 3,
+  "hardware": "test-machine",
+  "framebuffer": "2560x1440",
+  "phases": {
+    "still": {"frames": 6000, "fps": 100, "p99_ms": 9, "peak_rss_bytes": 1024},
+    "flying": {"frames": 12000, "fps": 100, "p99_ms": 9, "peak_rss_bytes": 1024}
+  },
+  "ticks": {"frames": 3600, "p99_ms": 2, "max_ms": 4}
+}`)
+	var report client.PerfReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.ScenarioVersion != 3 {
+		t.Fatalf("scenario_version = %d，想要 3", report.ScenarioVersion)
+	}
+	if strings.TrimSpace(report.Hardware) == "" || strings.TrimSpace(report.Framebuffer) == "" {
+		t.Fatalf("benchmark 标识不完整: hardware=%q framebuffer=%q",
+			report.Hardware, report.Framebuffer)
+	}
+	for _, name := range []string{"still", "flying"} {
+		phase, ok := report.Phases[name]
+		if !ok || phase.Frames == 0 || phase.FPS == 0 || phase.P99MS == 0 || phase.PeakRSSBytes == 0 {
+			t.Fatalf("%s 阶段指标不完整: %+v, present=%v", name, phase, ok)
+		}
+	}
+	if report.Ticks.Frames == 0 || report.Ticks.P99MS == 0 || report.Ticks.MaxMS == 0 {
+		t.Fatalf("tick 指标不完整: %+v", report.Ticks)
 	}
 }

@@ -14,7 +14,7 @@ jobs:
           go-version: '1.26'
 
       - name: 架构与协议门禁
-        run: go test ./internal/archcheck ./internal/network -v
+        run: go test ./internal/archcheck ./internal/network ./internal/physics -v
 
       - name: 单元与端到端测试
         run: go test ./... -race
