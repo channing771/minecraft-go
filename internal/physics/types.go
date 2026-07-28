@@ -1,0 +1,89 @@
+// Package physics 提供客户端与服务端共享的确定性玩家物理。
+package physics
+
+import (
+	"time"
+
+	"github.com/go-gl/mathgl/mgl32"
+
+	"minecraft-go/internal/core"
+)
+
+const (
+	FixedDelta         = 50 * time.Millisecond
+	FixedDeltaSeconds  = float32(0.05)
+	PlayerWidth        = float32(0.6)
+	PlayerHeight       = float32(1.8)
+	EyeHeight          = float32(1.62)
+	StepHeight         = float32(0.6)
+	WalkSpeed          = float32(4.3)
+	GroundAcceleration = float32(40)
+	GroundDeceleration = float32(50)
+	AirAcceleration    = float32(8)
+	JumpSpeed          = float32(8.4)
+	Gravity            = float32(32)
+	TerminalFallSpeed  = float32(78.4)
+	CollisionEpsilon   = float32(1e-5)
+	GroundProbe        = float32(1e-4)
+)
+
+// State 是玩家在固定步开始时的物理状态；位置表示脚底中心。
+type State struct {
+	Position mgl32.Vec3
+	Velocity mgl32.Vec3
+	OnGround bool
+}
+
+// Input 是单个固定步的玩家控制意图。
+type Input struct {
+	MoveX int8
+	MoveZ int8
+	Jump  bool
+	Yaw   float32
+}
+
+// CollisionBoxSet 是一个方块局部坐标内的碰撞体集合。
+type CollisionBoxSet struct {
+	Loaded bool
+	Count  uint8
+	Boxes  [8]core.AABB
+}
+
+// CollisionSource 查询世界方块的局部碰撞体。
+type CollisionSource interface {
+	CollisionBoxes(core.BlockPos) CollisionBoxSet
+}
+
+// StepResult 是一个固定物理步的结果。
+type StepResult struct {
+	State      State
+	UsedStep   bool
+	HitUnknown bool
+}
+
+// PlayerBounds 返回以脚底中心为原点的完整玩家包围盒。
+func PlayerBounds(position mgl32.Vec3) core.AABB {
+	halfWidth := PlayerWidth / 2
+	return core.AABB{
+		Min: position.Sub(mgl32.Vec3{halfWidth, 0, halfWidth}),
+		Max: position.Add(mgl32.Vec3{halfWidth, PlayerHeight, halfWidth}),
+	}
+}
+
+// BlockCollisionBoxes 返回当前方块的局部碰撞体。
+func BlockCollisionBoxes(id core.BlockID, loaded bool) CollisionBoxSet {
+	if !loaded {
+		return CollisionBoxSet{}
+	}
+	if id == core.AirID {
+		return CollisionBoxSet{Loaded: true}
+	}
+	return CollisionBoxSet{
+		Loaded: true,
+		Count:  1,
+		Boxes: [8]core.AABB{{
+			Min: mgl32.Vec3{},
+			Max: mgl32.Vec3{1, 1, 1},
+		}},
+	}
+}

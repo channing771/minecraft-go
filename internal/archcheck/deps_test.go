@@ -11,10 +11,11 @@ import (
 var allowed = map[string][]string{
 	"internal/archcheck":  {},
 	"internal/core":       {},
+	"internal/physics":    {"internal/core"},
 	"internal/gfx":        {},
 	"internal/gfx/shader": {},
 	"internal/network":    {"internal/core"},
-	"internal/sim":        {"internal/core", "internal/world"},
+	"internal/sim":        {"internal/core", "internal/physics", "internal/world"},
 	"internal/world":      {"internal/core"},
 	"internal/worldgen":   {"internal/core", "internal/world"},
 	"internal/mesh":       {"internal/core", "internal/world"},
@@ -29,7 +30,7 @@ var allowed = map[string][]string{
 		"internal/worldgen", "internal/sim",
 	},
 	"internal/client": {
-		"internal/core", "internal/network", "internal/world", "internal/mesh", "internal/assets",
+		"internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets",
 		"internal/render", "internal/gfx",
 	},
 }

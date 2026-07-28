@@ -9,6 +9,13 @@ import (
 // AABB 是轴对齐包围盒。
 type AABB struct{ Min, Max mgl32.Vec3 }
 
+// Overlaps 判断两个包围盒是否存在严格的体积交叠。
+func (a AABB) Overlaps(b AABB) bool {
+	return a.Min.X() < b.Max.X() && a.Max.X() > b.Min.X() &&
+		a.Min.Y() < b.Max.Y() && a.Max.Y() > b.Min.Y() &&
+		a.Min.Z() < b.Max.Z() && a.Max.Z() > b.Min.Z()
+}
+
 // Ray 是一条射线，Dir 应为单位向量。
 type Ray struct{ Origin, Dir mgl32.Vec3 }
 

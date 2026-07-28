@@ -76,3 +76,13 @@ func TestPerspectiveUsesWebGPUDepthRange(t *testing.T) {
 		t.Fatal("完全位于近平面之前的盒子没有被剔除")
 	}
 }
+
+func TestAABBOverlapUsesStrictVolume(t *testing.T) {
+	a := core.AABB{Min: mgl32.Vec3{0, 0, 0}, Max: mgl32.Vec3{1, 1, 1}}
+	if !a.Overlaps(core.AABB{Min: mgl32.Vec3{0.5, 0, 0}, Max: mgl32.Vec3{1.5, 1, 1}}) {
+		t.Fatal("有体积交叠的 AABB 未命中")
+	}
+	if a.Overlaps(core.AABB{Min: mgl32.Vec3{1, 0, 0}, Max: mgl32.Vec3{2, 1, 1}}) {
+		t.Fatal("仅接触边界的 AABB 不应算交叠")
+	}
+}
