@@ -46,6 +46,7 @@ type application struct {
 	selectedBlock  core.BlockID
 	loadedChunks   map[core.ChunkPos]struct{}
 	ticks          *tickRecorder
+	observerFloor  uint64
 	closeOnce      sync.Once
 }
 
@@ -165,7 +166,7 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 		ticks:          ticks,
 	}
 	if benchmark {
-		if err := app.server.SetTrustedObserverCenter(core.Overworld, app.center); err != nil {
+		if err := app.requestTrustedObserverCenter(app.center); err != nil {
 			app.Close()
 			return nil, fmt.Errorf("设置初始 trusted observer 中心: %w", err)
 		}
@@ -217,9 +218,15 @@ func (a *application) updateCenter() {
 		return
 	}
 	a.center = center
-	if err := a.server.SetTrustedObserverCenter(core.Overworld, center); err != nil {
+	if err := a.requestTrustedObserverCenter(center); err != nil {
 		log.Printf("更新视距中心失败: %v", err)
 	}
+}
+
+func (a *application) requestTrustedObserverCenter(center core.ChunkPos) error {
+	_, _, sequence, _ := a.server.AppliedTrustedObserverCenter()
+	a.observerFloor = sequence
+	return a.server.SetTrustedObserverCenter(core.Overworld, center)
 }
 
 func (a *application) nextSequence() uint64 {

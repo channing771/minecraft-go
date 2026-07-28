@@ -100,6 +100,62 @@ func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
 	}
 }
 
+func TestTrustedObserverAppliedCenterWaitsForStepWithPreloadedTarget(t *testing.T) {
+	client, endpoint := network.NewMemoryPair(32)
+	generator := &gatedGenerator{release: make(chan struct{}), flat: true}
+	config := DefaultConfig(42)
+	config.ViewRadius = 1
+	config.Workers = 1
+	config.TrustedObserver = true
+	running := New(config, endpoint, generator)
+	t.Cleanup(func() {
+		close(generator.release)
+		_ = client.Close()
+		running.Close()
+	})
+
+	initial := core.ChunkPos{}
+	target := core.ChunkPos{X: 1}
+	if err := running.SetTrustedObserverCenter(core.Overworld, initial); err != nil {
+		t.Fatal(err)
+	}
+	requested := running.StepForTest()
+	if !containsChunk(requested.Generate, target) {
+		t.Fatalf("初始订阅未包含预加载目标: %+v", requested.Generate)
+	}
+	running.engine.SubmitGenerated(sim.GeneratedChunk{
+		Dimension: core.Overworld,
+		Pos:       target,
+		Chunk:     generator.chunk(target),
+	})
+	ready := running.StepForTest()
+	if !containsChunk(ready.Ready, target) {
+		t.Fatalf("目标 chunk 未预加载: %+v", ready.Ready)
+	}
+	if _, _, ok := running.ChunkHash(core.Overworld, target); !ok {
+		t.Fatal("预加载目标 hash 不可用")
+	}
+
+	dimension, center, sequence, ok := running.AppliedTrustedObserverCenter()
+	if !ok || dimension != core.Overworld || center != initial || sequence != 1 {
+		t.Fatalf("初始 applied center=(%d,%+v,%d,%v)", dimension, center, sequence, ok)
+	}
+	if err := running.SetTrustedObserverCenter(core.Overworld, target); err != nil {
+		t.Fatal(err)
+	}
+	dimension, center, queuedSequence, ok := running.AppliedTrustedObserverCenter()
+	if !ok || dimension != core.Overworld || center != initial || queuedSequence != sequence {
+		t.Fatalf("queue 尚未 drain 就报告 applied=(%d,%+v,%d,%v)", dimension, center, queuedSequence, ok)
+	}
+
+	running.StepForTest()
+	dimension, center, appliedSequence, ok := running.AppliedTrustedObserverCenter()
+	if !ok || dimension != core.Overworld || center != target || appliedSequence <= sequence {
+		t.Fatalf("Step 后 applied center=(%d,%+v,%d,%v)，先前 sequence=%d",
+			dimension, center, appliedSequence, ok, sequence)
+	}
+}
+
 func TestPlayerMessageTranslation(t *testing.T) {
 	tests := []struct {
 		name    string

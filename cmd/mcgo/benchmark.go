@@ -73,7 +73,12 @@ func runBenchmark(app *application, outputPath string) error {
 		return err
 	}
 	finalCenter := app.center
-	if err := waitForBenchmarkCenterConsistency(app, finalCenter, 10*time.Second); err != nil {
+	if err := waitForBenchmarkCenterConsistency(
+		app,
+		finalCenter,
+		app.observerFloor,
+		10*time.Second,
+	); err != nil {
 		return err
 	}
 	authoritativeHash, authoritativeRevision, authoritativeOK := app.server.ChunkHash(
@@ -189,11 +194,18 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 func waitForBenchmarkCenterConsistency(
 	app *application,
 	center core.ChunkPos,
+	afterSequence uint64,
 	timeout time.Duration,
 ) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		app.frame(4096)
+		appliedDimension, appliedCenter, appliedSequence, appliedOK :=
+			app.server.AppliedTrustedObserverCenter()
+		if !appliedOK || appliedDimension != core.Overworld ||
+			appliedCenter != center || appliedSequence <= afterSequence {
+			continue
+		}
 		authoritativeHash, authoritativeRevision, authoritativeOK := app.server.ChunkHash(
 			core.Overworld, center,
 		)
@@ -203,7 +215,18 @@ func waitForBenchmarkCenterConsistency(
 			return nil
 		}
 	}
-	return fmt.Errorf("最终 trusted observer 中心在 %s 内未收敛: center=%+v", timeout, center)
+	appliedDimension, appliedCenter, appliedSequence, appliedOK :=
+		app.server.AppliedTrustedObserverCenter()
+	return fmt.Errorf(
+		"最终 trusted observer 中心在 %s 内未收敛: center=%+v afterSequence=%d applied=(%d,%+v,%d,%v)",
+		timeout,
+		center,
+		afterSequence,
+		appliedDimension,
+		appliedCenter,
+		appliedSequence,
+		appliedOK,
+	)
 }
 
 func runWarmup(app *application, duration time.Duration) error {

@@ -24,6 +24,12 @@ type trustedObserverCenter struct {
 	center    core.ChunkPos
 }
 
+type appliedTrustedObserverCenter struct {
+	dimension core.DimensionID
+	center    core.ChunkPos
+	sequence  uint64
+}
+
 type Server struct {
 	config    Config
 	endpoint  network.ServerEndpoint
@@ -43,6 +49,7 @@ type Server struct {
 	trustedObserverMu       sync.Mutex
 	trustedObserverCenters  chan trustedObserverCenter
 	trustedObserverSequence uint64
+	appliedTrustedObserver  appliedTrustedObserverCenter
 
 	workers   sync.WaitGroup
 	stepMu    sync.Mutex
@@ -109,15 +116,39 @@ func (server *Server) Step() sim.TickResult {
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 
-	server.drainTrustedObserverCenter()
+	trustedCenter, trustedSequence, hasTrustedCenter := server.drainTrustedObserverCenter()
 	server.drainIncoming()
 	server.drainGenerated()
 	result := server.engine.Step()
+	if hasTrustedCenter {
+		server.appliedTrustedObserver = appliedTrustedObserverCenter{
+			dimension: trustedCenter.dimension,
+			center:    trustedCenter.center,
+			sequence:  trustedSequence,
+		}
+	}
 	server.publish(result)
 	server.cancelForgottenPending(result.Forget)
 	server.appendGenerationRequests(result.Generate)
 	server.scheduleGeneration()
 	return result
+}
+
+// AppliedTrustedObserverCenter 返回最近一次由 Step 应用的 trusted center。
+// 返回值均为副本；该状态只供 server-internal benchmark 同步使用。
+func (server *Server) AppliedTrustedObserverCenter() (
+	core.DimensionID,
+	core.ChunkPos,
+	uint64,
+	bool,
+) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	applied := server.appliedTrustedObserver
+	if !server.config.TrustedObserver || applied.sequence == 0 {
+		return 0, core.ChunkPos{}, 0, false
+	}
+	return applied.dimension, applied.center, applied.sequence, true
 }
 
 func (server *Server) SetTrustedObserverCenter(
@@ -274,9 +305,13 @@ func translateClientMessage(message network.ClientMessage) (sim.Command, bool) {
 	}
 }
 
-func (server *Server) drainTrustedObserverCenter() {
+func (server *Server) drainTrustedObserverCenter() (
+	trustedObserverCenter,
+	uint64,
+	bool,
+) {
 	if server.trustedObserverCenters == nil {
-		return
+		return trustedObserverCenter{}, 0, false
 	}
 	select {
 	case request := <-server.trustedObserverCenters:
@@ -291,7 +326,9 @@ func (server *Server) drainTrustedObserverCenter() {
 			Dimension: request.dimension,
 			Center:    request.center,
 		})
+		return request, server.trustedObserverSequence, true
 	default:
+		return trustedObserverCenter{}, 0, false
 	}
 }
 

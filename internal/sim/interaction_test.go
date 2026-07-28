@@ -114,6 +114,63 @@ func TestEnginePlaceValidationAndWhitelist(t *testing.T) {
 	})
 }
 
+func TestPlayerIntentRejectsTraversalIntoUnknownAdjacentChunk(t *testing.T) {
+	tests := []struct {
+		name    string
+		command sim.Command
+	}{
+		{name: "break", command: sim.Command{Kind: sim.CommandBreakBlock}},
+		{name: "place", command: sim.Command{Kind: sim.CommandPlaceBlock, Block: core.StoneID}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine := sim.NewEngine(flatBaseBlock, 0)
+			const session = sim.SessionID(1)
+			anchor := core.ChunkPos{X: 1}
+			engine.RegisterSession(session, core.Overworld, anchor)
+			requested := engine.Step()
+			if len(requested.Generate) != 1 || requested.Generate[0] != (core.ChunkKey{
+				Dimension: core.Overworld,
+				Pos:       anchor,
+			}) {
+				t.Fatalf("Generate=%+v", requested.Generate)
+			}
+			engine.SubmitGenerated(sim.GeneratedChunk{
+				Dimension: core.Overworld,
+				Pos:       anchor,
+				Chunk:     generateFlatChunk(anchor),
+			})
+			ready := engine.Step()
+			if player := onlyPlayer(t, ready); !player.Ready {
+				t.Fatalf("玩家未在边界 chunk 激活: %+v", player)
+			}
+			beforeHash, beforeRevision, ok := engine.ChunkHash(core.ChunkKey{
+				Dimension: core.Overworld,
+				Pos:       anchor,
+			})
+			if !ok {
+				t.Fatal("边界 chunk hash 不可用")
+			}
+
+			command := test.command
+			command.Session = session
+			command.Sequence = 2
+			command.Yaw = float32(math.Pi) / 2
+			engine.Enqueue(command)
+			assertRejected(t, engine.Step(), sim.RejectChunkNotReady)
+
+			afterHash, afterRevision, ok := engine.ChunkHash(core.ChunkKey{
+				Dimension: core.Overworld,
+				Pos:       anchor,
+			})
+			if !ok || afterHash != beforeHash || afterRevision != beforeRevision {
+				t.Fatalf("未知 chunk 交互修改已 Ready chunk: hash=%x→%x revision=%d→%d ok=%v",
+					beforeHash, afterHash, beforeRevision, afterRevision, ok)
+			}
+		})
+	}
+}
+
 func assertRejected(
 	t *testing.T,
 	result sim.TickResult,
