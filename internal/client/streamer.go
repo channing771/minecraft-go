@@ -12,14 +12,6 @@ import (
 	"minecraft-go/internal/worldgen"
 )
 
-// MeshedSection 是一个已生成并网格化好的区段。
-type MeshedSection struct {
-	Pos        core.SectionPos
-	Quads      []mesh.Quad
-	Conn       mesh.Connectivity
-	Generation uint64
-}
-
 // StreamStats 是流式加载器的只读诊断快照。
 type StreamStats struct {
 	CachedChunks, QueuedJobs, InFlightJobs, ReadyResults int
