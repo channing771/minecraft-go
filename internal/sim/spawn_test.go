@@ -63,6 +63,78 @@ func TestSpawnWaitsForEarlierUnknownCandidate(t *testing.T) {
 	}
 }
 
+func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
+	engine := NewEngine(spawnTestBase, 0)
+	const sessionID = SessionID(1)
+	anchor := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{}}
+	target := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1}}
+	engine.RegisterSession(sessionID, core.Overworld, anchor.Pos)
+
+	generatedAnchor := engine.Step()
+	if player := onlyInternalPlayer(t, generatedAnchor); player.Ready {
+		t.Fatalf("生成 anchor 前 player=%+v，想要 PendingSpawn", player)
+	}
+	if !reflect.DeepEqual(generatedAnchor.Generate, []core.ChunkKey{anchor}) {
+		t.Fatalf("首次 Generate=%+v，想要 [%+v]", generatedAnchor.Generate, anchor)
+	}
+
+	engine.SubmitGenerated(GeneratedChunk{
+		Dimension: core.Overworld,
+		Pos:       anchor.Pos,
+		Chunk:     world.NewChunk(anchor.Pos),
+	})
+	retained := engine.Step()
+	if player := onlyInternalPlayer(t, retained); player.Ready {
+		t.Fatalf("空 anchor 后 player=%+v，想要继续 PendingSpawn", player)
+	}
+	if !reflect.DeepEqual(retained.Ready, []core.ChunkKey{anchor}) ||
+		!reflect.DeepEqual(retained.Generate, []core.ChunkKey{target}) {
+		t.Fatalf("retain tick Ready=%+v Generate=%+v", retained.Ready, retained.Generate)
+	}
+	session := engine.sessions[sessionID]
+	if _, ok := session.wanted[anchor]; !ok {
+		t.Fatalf("PendingSpawn 未保留 anchor: wanted=%+v", session.wanted)
+	}
+	if _, ok := session.wanted[target]; !ok {
+		t.Fatalf("PendingSpawn 未保留 target: wanted=%+v", session.wanted)
+	}
+	if _, ok := session.player.spawnWanted[anchor.Pos]; !ok {
+		t.Fatalf("spawnWanted 未记录 anchor: %+v", session.player.spawnWanted)
+	}
+	if _, ok := session.player.spawnWanted[target.Pos]; !ok {
+		t.Fatalf("spawnWanted 未记录 target: %+v", session.player.spawnWanted)
+	}
+
+	engine.SubmitGenerated(GeneratedChunk{
+		Dimension: core.Overworld,
+		Pos:       target.Pos,
+		Chunk: spawnTestChunk(target.Pos, core.BlockPos{
+			X: -1,
+			Y: 0,
+			Z: 0,
+		}),
+	})
+	activated := engine.Step()
+	player := onlyInternalPlayer(t, activated)
+	if !player.Ready || !player.Reset ||
+		player.State.Position != (mgl32.Vec3{-0.5, 1, 0.5}) {
+		t.Fatalf("target Ready 后 player=%+v，想要 Active reset", player)
+	}
+	if !reflect.DeepEqual(activated.Ready, []core.ChunkKey{target}) ||
+		!reflect.DeepEqual(activated.Forget[sessionID], []core.ChunkKey{anchor}) {
+		t.Fatalf("activate tick Ready=%+v Forget=%+v", activated.Ready, activated.Forget)
+	}
+	if !reflect.DeepEqual(session.wanted, map[core.ChunkKey]struct{}{target: {}}) {
+		t.Fatalf("Active subscription wanted=%+v，想要仅 target", session.wanted)
+	}
+	if !reflect.DeepEqual(engine.wanted, map[core.ChunkKey]struct{}{target: {}}) {
+		t.Fatalf("Active union wanted=%+v，想要仅 target", engine.wanted)
+	}
+	if _, loaded := engine.dimensions[core.Overworld].Info(anchor.Pos); loaded {
+		t.Fatal("activate forget 后 anchor 仍加载")
+	}
+}
+
 func TestExhaustedSpawnRetriesOnlyAfterRevisionChange(t *testing.T) {
 	engine := NewEngine(spawnTestBase, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})

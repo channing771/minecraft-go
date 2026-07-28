@@ -101,19 +101,29 @@ func runInteractive(app *application) {
 		}
 		actions := input.Update(clickDown, app.window.SecondaryButtonDown(), number)
 
-		movement := client.Movement{}
-		if captured {
-			movement = client.MovementFromKeys(
-				app.window.KeyDown(client.KeyW),
-				app.window.KeyDown(client.KeyA),
-				app.window.KeyDown(client.KeyS),
-				app.window.KeyDown(client.KeyD),
-				app.window.KeyDown(client.KeySpace),
-			)
-		}
-		app.applyInteractiveInput(dt, movement, actions, captured && !justCaptured)
+		movement := client.MovementFromKeys(
+			app.window.KeyDown(client.KeyW),
+			app.window.KeyDown(client.KeyA),
+			app.window.KeyDown(client.KeyS),
+			app.window.KeyDown(client.KeyD),
+			app.window.KeyDown(client.KeySpace),
+		)
+		app.applyInteractiveCursorInput(dt, movement, actions, captured, justCaptured)
 		app.renderFrame(64)
 	}
+}
+
+func (a *application) applyInteractiveCursorInput(
+	elapsed time.Duration,
+	movement client.Movement,
+	actions client.Actions,
+	captured bool,
+	justCaptured bool,
+) {
+	if !captured {
+		movement = client.Movement{}
+	}
+	a.applyInteractiveInput(elapsed, movement, actions, captured && !justCaptured)
 }
 
 func (a *application) applyInteractiveInput(

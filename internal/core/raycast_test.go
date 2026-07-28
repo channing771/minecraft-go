@@ -26,6 +26,31 @@ func TestRaycastBlocksAxisAndNegativeCoordinates(t *testing.T) {
 	}
 }
 
+func TestRaycastBlocksIncludesExactReachEndpointAndRejectsNextFloatBeyond(t *testing.T) {
+	target := core.BlockPos{X: 6, Y: 0, Z: 0}
+	solid := func(position core.BlockPos) (bool, error) {
+		return position == target, nil
+	}
+
+	hit, ok, err := core.RaycastBlocks(
+		mgl32.Vec3{0, 0.5, 0.5},
+		mgl32.Vec3{1, 0, 0},
+		6,
+		solid,
+	)
+	if err != nil || !ok || hit.Block != target || hit.Distance != 6 ||
+		hit.Point != (mgl32.Vec3{6, 0.5, 0.5}) {
+		t.Fatalf("exact 6.0 endpoint hit=%+v ok=%v err=%v", hit, ok, err)
+	}
+
+	nextDistance := math.Nextafter32(6, float32(math.Inf(1)))
+	origin := mgl32.Vec3{6 - nextDistance, 0.5, 0.5}
+	if hit, ok, err := core.RaycastBlocks(origin, mgl32.Vec3{1, 0, 0}, 6, solid); err != nil || ok {
+		t.Fatalf("next-float outside endpoint hit=%+v ok=%v err=%v distance=%v",
+			hit, ok, err, nextDistance)
+	}
+}
+
 func TestRaycastBlocksOriginInsideSolid(t *testing.T) {
 	hit, ok, err := core.RaycastBlocks(
 		mgl32.Vec3{1.25, 2.5, 3.75}, mgl32.Vec3{0, 1, 0}, 6,

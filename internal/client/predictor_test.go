@@ -394,6 +394,113 @@ func TestPredictorRetriesFailedNeutralInputEveryFixedDelta(t *testing.T) {
 	}
 }
 
+func TestPredictorSuspensionFreezesFractionalPresentationAfterNeutralSend(t *testing.T) {
+	p, sequence := fullMovingHistoryPredictor(t)
+	if err := p.Advance(physics.FixedDelta/2, Control{MoveX: 1}, flatClientWorld{},
+		func() uint64 { (*sequence)++; return *sequence },
+		func(network.PlayerInput) error {
+			t.Fatal("半步余量不应发送输入")
+			return nil
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := p.PresentationPosition(0)
+
+	sent := 0
+	if err := p.Advance(physics.FixedDelta/2, Control{MoveX: 1}, flatClientWorld{},
+		func() uint64 { (*sequence)++; return *sequence },
+		func(input network.PlayerInput) error {
+			sent++
+			if input.MoveX != 0 || input.MoveZ != 0 || input.Jump {
+				t.Fatalf("suspension input=%+v，想要 neutral", input)
+			}
+			return nil
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := p.PresentationPosition(0)
+	state, _ := p.State()
+	if sent != 1 || after.X() < before.X() ||
+		!after.ApproxEqualThreshold(state.Position, 1e-6) {
+		t.Fatalf("进入 suspension 后 presentation=%v，之前=%v state=%v sent=%d",
+			after, before, state.Position, sent)
+	}
+
+	if err := p.Advance(5*physics.FixedDelta, Control{}, flatClientWorld{},
+		func() uint64 {
+			t.Fatal("成功 neutral 后等待期间又分配 sequence")
+			return 0
+		},
+		func(network.PlayerInput) error {
+			t.Fatal("成功 neutral 后等待期间又发送")
+			return nil
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	waiting, _ := p.PresentationPosition(0)
+	if !waiting.ApproxEqualThreshold(after, 1e-6) {
+		t.Fatalf("等待 authority ack 时 presentation=%v，想要冻结在 %v", waiting, after)
+	}
+}
+
+func TestPredictorSuspensionRetryKeepsFractionalPresentationFrozen(t *testing.T) {
+	p, sequence := fullMovingHistoryPredictor(t)
+	if err := p.Advance(physics.FixedDelta/2, Control{MoveX: 1}, flatClientWorld{},
+		func() uint64 { (*sequence)++; return *sequence },
+		func(network.PlayerInput) error { return nil },
+	); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := p.PresentationPosition(0)
+
+	sendErr := errors.New("send failed")
+	attempts := 0
+	send := func(network.PlayerInput) error {
+		attempts++
+		if attempts < 3 {
+			return sendErr
+		}
+		return nil
+	}
+	next := func() uint64 { (*sequence)++; return *sequence }
+	var frozen mgl32.Vec3
+	checkFrozen := func(stage string) {
+		t.Helper()
+		got, _ := p.PresentationPosition(0)
+		if frozen == (mgl32.Vec3{}) {
+			state, _ := p.State()
+			if got.X() < before.X() || !got.ApproxEqualThreshold(state.Position, 1e-6) {
+				t.Fatalf("%s presentation=%v，之前=%v state=%v", stage, got, before, state.Position)
+			}
+			frozen = got
+			return
+		}
+		if !got.ApproxEqualThreshold(frozen, 1e-6) {
+			t.Fatalf("%s presentation=%v，想要冻结在 %v", stage, got, frozen)
+		}
+	}
+
+	if err := p.Advance(physics.FixedDelta/2, Control{}, flatClientWorld{}, next, send); !errors.Is(err, sendErr) {
+		t.Fatalf("首次 neutral err=%v", err)
+	}
+	checkFrozen("首次发送失败后")
+	if err := p.Advance(physics.FixedDelta/2, Control{}, flatClientWorld{}, next, send); err != nil {
+		t.Fatalf("半个 retry interval: %v", err)
+	}
+	checkFrozen("半个 retry interval 后")
+	if err := p.Advance(physics.FixedDelta/2, Control{}, flatClientWorld{}, next, send); !errors.Is(err, sendErr) {
+		t.Fatalf("第二次 neutral err=%v", err)
+	}
+	checkFrozen("第二次发送失败后")
+	if err := p.Advance(physics.FixedDelta, Control{}, flatClientWorld{}, next, send); err != nil {
+		t.Fatalf("成功 neutral retry: %v", err)
+	}
+	checkFrozen("成功 retry 后")
+}
+
 func TestApplyPlayerStateReplaysOnlyUnacknowledgedInputs(t *testing.T) {
 	p := readyPredictor(t)
 	advanceSteps(t, p, 3, Control{MoveZ: 1})
@@ -983,6 +1090,26 @@ func fullHistoryPredictor(t *testing.T) (*Predictor, *uint64) {
 			return sequence
 		}, func(network.PlayerInput) error { return nil }); err != nil {
 			t.Fatalf("填充 history: %v", err)
+		}
+	}
+	return p, &sequence
+}
+
+func fullMovingHistoryPredictor(t *testing.T) (*Predictor, *uint64) {
+	t.Helper()
+	p := NewPredictor()
+	state := readyPlayerState()
+	state.Position = mgl32.Vec3{0.5, 1, 0.5}
+	if err := p.Begin(state); err != nil {
+		t.Fatalf("Begin moving predictor: %v", err)
+	}
+	sequence := uint64(0)
+	for p.HistoryLen() < predictionHistoryCapacity {
+		if err := p.Advance(physics.FixedDelta, Control{MoveX: 1}, flatClientWorld{}, func() uint64 {
+			sequence++
+			return sequence
+		}, func(network.PlayerInput) error { return nil }); err != nil {
+			t.Fatalf("填充 moving history: %v", err)
 		}
 	}
 	return p, &sequence

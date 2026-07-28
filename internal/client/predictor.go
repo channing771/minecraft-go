@@ -132,8 +132,12 @@ func (p *Predictor) Advance(
 
 	for range steps {
 		if len(p.history) == predictionHistoryCapacity {
+			frozenPosition := p.presentationPositionNoAdvance()
 			p.suspended = true
+			p.previous = p.current
 			p.accumulator = 0
+			p.displayOffset = frozenPosition.Sub(p.current.Position)
+			p.correctionRemaining = 0
 			return p.sendNeutral(control, nextSequence, send)
 		}
 

@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"crypto/sha256"
 	"math"
 	"reflect"
 	"testing"
@@ -303,6 +304,66 @@ func TestPlayerHashCoversEveryAuthoritativeField(t *testing.T) {
 	}
 	session.player = &originalPlayer
 	session.dimension = originalDimension
+}
+
+func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
+	fixture := []byte{
+		0x0f, 0x0e, 0x0d, 0x0c, // dimension: 0x0c0d0e0f
+		0x01,                   // lifecycle: PlayerActive
+		0x00, 0x00, 0xa0, 0x3f, // position X: 1.25
+		0x00, 0x00, 0x20, 0xc0, // position Y: -2.5
+		0x00, 0x00, 0x70, 0x40, // position Z: 3.75
+		0x00, 0x00, 0x90, 0xc0, // velocity X: -4.5
+		0x00, 0x00, 0xa8, 0x40, // velocity Y: 5.25
+		0x00, 0x00, 0xd8, 0xc0, // velocity Z: -6.75
+		0x00, 0x00, 0xf0, 0x40, // yaw: 7.5
+		0x00, 0x00, 0x04, 0xc1, // pitch: -8.25
+		0x01,                   // OnGround: true
+		0xf7,                   // input MoveX: -9
+		0x0a,                   // input MoveZ: 10
+		0x01,                   // input Jump: true
+		0x00, 0x00, 0x38, 0x41, // input Yaw: 11.5
+		0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // last input sequence
+	}
+	want := [32]byte{
+		0xc7, 0xfe, 0x85, 0x2a, 0x03, 0x28, 0x61, 0xc3,
+		0x5b, 0x42, 0xbb, 0x14, 0x6a, 0xf1, 0x38, 0x7d,
+		0xa9, 0xb0, 0x5c, 0xaa, 0xbb, 0xf9, 0x80, 0x35,
+		0x04, 0x0b, 0xc9, 0x89, 0x60, 0x7e, 0xd4, 0x6a,
+	}
+	if len(fixture) != 53 {
+		t.Fatalf("fixture 长度=%d，想要 53", len(fixture))
+	}
+	if digest := sha256.Sum256(fixture); digest != want {
+		t.Fatalf("独立 fixture digest=%x，想要 %x", digest, want)
+	}
+
+	const sessionID = SessionID(73)
+	engine := NewEngine(spawnTestBase, 0)
+	engine.sessions[sessionID] = &sessionState{
+		dimension: core.DimensionID(0x0c0d0e0f),
+		player: &playerState{
+			lifecycle: PlayerActive,
+			state: physics.State{
+				Position: mgl32.Vec3{1.25, -2.5, 3.75},
+				Velocity: mgl32.Vec3{-4.5, 5.25, -6.75},
+				OnGround: true,
+			},
+			yaw:   7.5,
+			pitch: -8.25,
+			input: physics.Input{
+				MoveX: -9,
+				MoveZ: 10,
+				Jump:  true,
+				Yaw:   11.5,
+			},
+			lastInputSequence: 0x1122334455667788,
+		},
+	}
+	got, ok := engine.PlayerHash(sessionID)
+	if !ok || got != want {
+		t.Fatalf("PlayerHash ok=%v digest=%x，想要 %x", ok, got, want)
+	}
 }
 
 func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {

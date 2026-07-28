@@ -112,6 +112,37 @@ func TestInteractiveInputUsesDrainedNotReadyForActionAndInputGate(t *testing.T) 
 	assertNoInteractiveClientMessage(t, serverEndpoint)
 }
 
+func TestCursorReleaseSendsNeutralFixedStepAfterHeldInput(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	if err := app.predictor.Begin(network.PlayerState{
+		ServerTick: 1,
+		Dimension:  core.Overworld,
+		Position:   mgl32.Vec3{0.5, 10, 0.5},
+		OnGround:   true,
+		Ready:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	held := client.Movement{MoveX: 1, MoveZ: -1, Jump: true}
+	app.applyInteractiveCursorInput(
+		physics.FixedDelta, held, client.Actions{}, true, false,
+	)
+	first, ok := receiveInteractiveClientMessage(t, serverEndpoint).(network.PlayerInput)
+	if !ok || first.Sequence != 1 || first.MoveX != held.MoveX ||
+		first.MoveZ != held.MoveZ || first.Jump != held.Jump {
+		t.Fatalf("captured held input=%+v", first)
+	}
+
+	app.applyInteractiveCursorInput(
+		physics.FixedDelta, held, client.Actions{}, false, false,
+	)
+	neutral, ok := receiveInteractiveClientMessage(t, serverEndpoint).(network.PlayerInput)
+	if !ok || neutral.Sequence != 2 || neutral.MoveX != 0 ||
+		neutral.MoveZ != 0 || neutral.Jump {
+		t.Fatalf("cursor release input=%+v，想要下一 fixed-step neutral", neutral)
+	}
+}
+
 func newInteractiveTestApplication(
 	t *testing.T,
 ) (*application, network.ServerEndpoint) {

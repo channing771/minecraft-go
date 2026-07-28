@@ -13,6 +13,13 @@ type MirrorCollisionSource struct {
 
 // CollisionBoxes 返回镜像方块的碰撞体；缺失区块保持为未加载状态。
 func (source MirrorCollisionSource) CollisionBoxes(position core.BlockPos) physics.CollisionBoxSet {
-	block, loaded := source.Mirror.BlockAt(source.Dimension, position)
-	return physics.BlockCollisionBoxes(block, loaded)
+	if position.Y < core.MinY || position.Y >= core.MaxY {
+		return physics.BlockCollisionBoxes(core.AirID, true)
+	}
+	chunk, loaded := source.Mirror.Chunk(source.Dimension, position.Chunk())
+	if !loaded || chunk.Desynced {
+		return physics.CollisionBoxSet{}
+	}
+	x, _, z := position.Local()
+	return physics.BlockCollisionBoxes(chunk.Chunk.BlockAt(x, position.Y, z), true)
 }
