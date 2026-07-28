@@ -16,6 +16,7 @@ const (
 	CommandBreakRay
 	CommandPlaceRay
 	CommandResync
+	CommandPlayerInput CommandKind = 4
 )
 
 type RejectReason uint8
@@ -27,6 +28,8 @@ const (
 	RejectProtectedBlock
 	RejectInvalidBlock
 	RejectOccupied
+	RejectInvalidInput   RejectReason = 6
+	RejectPlayerNotReady RejectReason = 7
 )
 
 type Command struct {
@@ -40,6 +43,11 @@ type Command struct {
 	Origin       mgl32.Vec3
 	Direction    mgl32.Vec3
 	Block        core.BlockID
+	MoveX        int8
+	MoveZ        int8
+	Jump         bool
+	Yaw          float32
+	Pitch        float32
 }
 
 type GeneratedChunk struct {

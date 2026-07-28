@@ -137,6 +137,71 @@ func TestEngineReplayIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestPlayerCommandsRejectRegisteredPendingPlayer(t *testing.T) {
+	tests := []struct {
+		name    string
+		command sim.Command
+	}{
+		{
+			name: "movement input",
+			command: sim.Command{
+				Kind: sim.CommandPlayerInput, MoveX: 1,
+			},
+		},
+		{
+			name: "interaction",
+			command: sim.Command{
+				Kind: sim.CommandBreakRay, Dimension: core.Overworld,
+				Origin: mgl32.Vec3{0.5, 2.5, 0.5}, Direction: mgl32.Vec3{0, -1, 0},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := sim.NewEngine(flatBaseBlock, 0)
+			const session = sim.SessionID(1)
+			engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
+			command := tc.command
+			command.Session = session
+			command.Sequence = 1
+			engine.Enqueue(command)
+
+			result := engine.Step()
+			if len(result.Rejected) != 1 || result.Rejected[0] != (sim.Rejection{
+				Session: session, Sequence: 1, Reason: sim.RejectPlayerNotReady,
+			}) {
+				t.Fatalf("Rejected=%+v", result.Rejected)
+			}
+			if player := onlyPlayer(t, result); player.LastInputSequence != 0 {
+				t.Fatalf("PendingSpawn input 被错误确认: %+v", player)
+			}
+		})
+	}
+}
+
+func TestPendingInteractionStaysRejectedWhenPlayerActivatesSameTick(t *testing.T) {
+	engine := sim.NewEngine(flatBaseBlock, 0)
+	const session = sim.SessionID(1)
+	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
+	engine.Step()
+	engine.SubmitGenerated(sim.GeneratedChunk{
+		Dimension: core.Overworld,
+		Chunk:     generateFlatChunk(core.ChunkPos{}),
+	})
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 1, Kind: sim.CommandBreakRay,
+		Dimension: core.Overworld,
+		Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
+		Direction: mgl32.Vec3{0, -1, 0},
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectPlayerNotReady ||
+		len(result.Changes) != 0 {
+		t.Fatalf("PendingSpawn 期间摄取的交互在激活后执行: %+v", result)
+	}
+}
+
 func TestEngineRunConsumesClockAndStopsIt(t *testing.T) {
 	engine := sim.NewEngine(flatBaseBlock, 0)
 	clock := &oneTickClock{

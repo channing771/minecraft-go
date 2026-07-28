@@ -14,6 +14,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/core"
+	"minecraft-go/internal/physics"
 	"minecraft-go/internal/world"
 )
 
@@ -118,7 +119,44 @@ func (engine *Engine) Step() TickResult {
 			session.center = command.Center
 			viewChanged = true
 		case CommandBreakRay, CommandPlaceRay:
+			if session.player != nil && session.player.lifecycle != PlayerActive {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectPlayerNotReady,
+				})
+				continue
+			}
 			interactions = append(interactions, command)
+		case CommandPlayerInput:
+			if session.player == nil || session.player.lifecycle != PlayerActive {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectPlayerNotReady,
+				})
+				continue
+			}
+			player := session.player
+			player.lastInputSequence = command.Sequence
+			if !validPlayerInput(command) {
+				player.input = physics.Input{Yaw: player.yaw}
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectInvalidInput,
+				})
+				continue
+			}
+			yaw := normalizeYaw(command.Yaw)
+			player.input = physics.Input{
+				MoveX: command.MoveX,
+				MoveZ: command.MoveZ,
+				Jump:  command.Jump,
+				Yaw:   yaw,
+			}
+			player.yaw = yaw
+			player.pitch = command.Pitch
 		case CommandResync:
 			result.Resync = append(result.Resync, ResyncRequest{
 				Session:      command.Session,
@@ -135,13 +173,15 @@ func (engine *Engine) Step() TickResult {
 			})
 		}
 	}
-	viewChanged = viewChanged || engine.subscriptionsDirty
+	engine.applyGenerated(generated, &result)
+	engine.advancePendingPlayersPreservingInputSequence()
+	engine.advanceActivePlayers()
+	playerViewChanged := engine.derivePlayerCenters()
+	viewChanged = viewChanged || playerViewChanged || engine.subscriptionsDirty
 	engine.subscriptionsDirty = false
 	if viewChanged {
 		engine.reconcileSubscriptions(&result)
 	}
-
-	engine.applyGenerated(generated, &result)
 
 	pending := make(map[core.ChunkKey]*pendingChunkChanges)
 	for _, command := range interactions {
@@ -154,7 +194,6 @@ func (engine *Engine) Step() TickResult {
 		}
 	}
 	engine.finishChanges(pending, &result)
-	engine.advancePendingPlayers()
 
 	result.Tick = engine.tick.Add(1)
 	engine.publishPlayers(&result)
@@ -382,6 +421,9 @@ func (engine *Engine) executeInteraction(
 	pending map[core.ChunkKey]*pendingChunkChanges,
 ) (RejectReason, bool) {
 	session := engine.sessions[command.Session]
+	if session != nil && session.player != nil && session.player.lifecycle != PlayerActive {
+		return RejectPlayerNotReady, true
+	}
 	dimension := engine.dimensions[command.Dimension]
 	originBlock, valid := rayOriginBlock(command.Origin)
 	if !valid || !validDirection(command.Direction) ||
@@ -476,6 +518,26 @@ func (engine *Engine) executeInteraction(
 		return 0, false
 	}
 	return RejectInvalidRay, true
+}
+
+func validPlayerInput(command Command) bool {
+	const maxPitch = float32(math.Pi/2 - 0.01)
+	return command.MoveX >= -1 && command.MoveX <= 1 &&
+		command.MoveZ >= -1 && command.MoveZ <= 1 &&
+		finiteInputComponent(command.Yaw) && finiteInputComponent(command.Pitch) &&
+		command.Pitch >= -maxPitch && command.Pitch <= maxPitch
+}
+
+func finiteInputComponent(value float32) bool {
+	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
+}
+
+func normalizeYaw(yaw float32) float32 {
+	normalized := math.Mod(float64(yaw)+math.Pi, 2*math.Pi)
+	if normalized < 0 {
+		normalized += 2 * math.Pi
+	}
+	return float32(normalized - math.Pi)
 }
 
 func (engine *Engine) recordChange(

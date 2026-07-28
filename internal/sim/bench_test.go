@@ -17,6 +17,26 @@ func BenchmarkEngineStepIdle(b *testing.B) {
 	}
 }
 
+func BenchmarkEngineStepPlayer(b *testing.B) {
+	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
+	engine.Step()
+	engine.SubmitGenerated(sim.GeneratedChunk{
+		Dimension: core.Overworld,
+		Chunk:     generateFlatChunk(core.ChunkPos{}),
+	})
+	result := engine.Step()
+	if len(result.Players) != 1 || !result.Players[0].Ready {
+		b.Fatalf("玩家未 Ready: %+v", result.Players)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		engine.Step()
+	}
+}
+
 func BenchmarkEngineStepBlockChanges(b *testing.B) {
 	engine := sim.NewEngine(flatBaseBlock, 0)
 	session := sim.SessionID(1)
