@@ -9,6 +9,7 @@ import (
 // Step 推进一个固定步，并解析方块碰撞。
 func Step(state State, input Input, source CollisionSource) StepResult {
 	validate(state, input)
+	beganGrounded := state.OnGround
 
 	target := movementTarget(input)
 	horizontal := mgl32.Vec3{state.Velocity.X(), 0, state.Velocity.Z()}
@@ -32,7 +33,20 @@ func Step(state State, input Input, source CollisionSource) StepResult {
 	} else {
 		state.Velocity[1] = max(state.Velocity.Y()-Gravity*FixedDeltaSeconds, -TerminalFallSpeed)
 	}
-	move := resolveMove(state, state.Velocity.Mul(FixedDeltaSeconds), source)
+	displacement := state.Velocity.Mul(FixedDeltaSeconds)
+	move := resolveMove(state, displacement, source)
+	usedStep := false
+	if (move.clipped[0] || move.clipped[2]) &&
+		(beganGrounded || move.onGround) &&
+		(displacement.X() != 0 || displacement.Z() != 0) {
+		if stepped, ok := resolveStepMove(state, displacement, source); ok &&
+			stepped.position.Y() > state.Position.Y()+CollisionEpsilon &&
+			horizontalDistanceSquared(state.Position, stepped.position) >
+				horizontalDistanceSquared(state.Position, move.position) {
+			move = stepped
+			usedStep = true
+		}
+	}
 	state.Position = move.position
 	state.OnGround = move.onGround
 	for axis, clipped := range move.clipped {
@@ -41,7 +55,7 @@ func Step(state State, input Input, source CollisionSource) StepResult {
 		}
 	}
 
-	return StepResult{State: state, HitUnknown: move.hitUnknown}
+	return StepResult{State: state, UsedStep: usedStep, HitUnknown: move.hitUnknown}
 }
 
 func movementTarget(input Input) mgl32.Vec3 {

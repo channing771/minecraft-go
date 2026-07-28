@@ -124,6 +124,39 @@ func overlapsOtherAxes(a, b core.AABB, axis int) bool {
 	return true
 }
 
+func boundsAreCollisionFree(position mgl32.Vec3, source CollisionSource) (bool, bool) {
+	player := PlayerBounds(position)
+	minX, maxX := blockRange(player.Min.X(), player.Max.X())
+	minY, maxY := blockRange(player.Min.Y(), player.Max.Y())
+	minZ, maxZ := blockRange(player.Min.Z(), player.Max.Z())
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			for z := minZ; z <= maxZ; z++ {
+				set := source.CollisionBoxes(core.BlockPos{X: x, Y: y, Z: z})
+				if !set.Loaded {
+					return false, true
+				}
+				count := int(set.Count)
+				if count > len(set.Boxes) {
+					count = len(set.Boxes)
+				}
+				for i := 0; i < count; i++ {
+					if boundsOverlap(player, blockBounds(core.BlockPos{X: x, Y: y, Z: z}, set.Boxes[i])) {
+						return false, false
+					}
+				}
+			}
+		}
+	}
+	return true, false
+}
+
+func boundsOverlap(a, b core.AABB) bool {
+	return a.Min.X() < b.Max.X() && a.Max.X() > b.Min.X() &&
+		a.Min.Y() < b.Max.Y() && a.Max.Y() > b.Min.Y() &&
+		a.Min.Z() < b.Max.Z() && a.Max.Z() > b.Min.Z()
+}
+
 func blockRange(min, max float32) (int32, int32) {
 	return int32(math.Floor(float64(min))), int32(math.Floor(float64(max)))
 }
