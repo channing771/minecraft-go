@@ -83,5 +83,6 @@ type TickResult struct {
 	Changes  []ChunkChangeBatch
 	Rejected []Rejection
 	Resync   []ResyncRequest
+	Players  []PlayerUpdate
 	Tick     uint64
 }

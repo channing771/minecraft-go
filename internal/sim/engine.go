@@ -34,6 +34,7 @@ type sessionState struct {
 	dimension    core.DimensionID
 	center       core.ChunkPos
 	wanted       map[core.ChunkKey]struct{}
+	player       *playerState
 }
 
 type pendingChunkChanges struct {
@@ -43,11 +44,12 @@ type pendingChunkChanges struct {
 }
 
 type Engine struct {
-	base       BaseBlockLookup
-	viewRadius int
-	dimensions map[core.DimensionID]*Dimension
-	sessions   map[SessionID]*sessionState
-	wanted     map[core.ChunkKey]struct{}
+	base               BaseBlockLookup
+	viewRadius         int
+	dimensions         map[core.DimensionID]*Dimension
+	sessions           map[SessionID]*sessionState
+	wanted             map[core.ChunkKey]struct{}
+	subscriptionsDirty bool
 
 	inboxMu   sync.Mutex
 	commands  []Command
@@ -108,6 +110,9 @@ func (engine *Engine) Step() TickResult {
 		session.lastSequence = command.Sequence
 		switch command.Kind {
 		case CommandSetViewCenter:
+			if session.player != nil {
+				continue
+			}
 			session.hasView = true
 			session.dimension = command.Dimension
 			session.center = command.Center
@@ -130,6 +135,8 @@ func (engine *Engine) Step() TickResult {
 			})
 		}
 	}
+	viewChanged = viewChanged || engine.subscriptionsDirty
+	engine.subscriptionsDirty = false
 	if viewChanged {
 		engine.reconcileSubscriptions(&result)
 	}
@@ -147,8 +154,10 @@ func (engine *Engine) Step() TickResult {
 		}
 	}
 	engine.finishChanges(pending, &result)
+	engine.advancePendingPlayers()
 
 	result.Tick = engine.tick.Add(1)
+	engine.publishPlayers(&result)
 	return result
 }
 
@@ -255,6 +264,13 @@ func (engine *Engine) reconcileSubscriptions(result *TickResult) {
 					next[key] = struct{}{}
 					union[key] = struct{}{}
 				}
+			}
+		}
+		if session.player != nil && session.player.lifecycle == PlayerPendingSpawn {
+			for chunk := range session.player.spawnWanted {
+				key := core.ChunkKey{Dimension: session.dimension, Pos: chunk}
+				next[key] = struct{}{}
+				union[key] = struct{}{}
 			}
 		}
 		for key := range session.wanted {
