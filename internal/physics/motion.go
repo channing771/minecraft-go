@@ -6,8 +6,8 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 )
 
-// Step 推进一个固定步。碰撞解析将在后续阶段接入；本阶段按自由空间积分。
-func Step(state State, input Input, _ CollisionSource) StepResult {
+// Step 推进一个固定步，并解析方块碰撞。
+func Step(state State, input Input, source CollisionSource) StepResult {
 	validate(state, input)
 
 	target := movementTarget(input)
@@ -32,9 +32,16 @@ func Step(state State, input Input, _ CollisionSource) StepResult {
 	} else {
 		state.Velocity[1] = max(state.Velocity.Y()-Gravity*FixedDeltaSeconds, -TerminalFallSpeed)
 	}
-	state.Position = state.Position.Add(state.Velocity.Mul(FixedDeltaSeconds))
+	move := resolveMove(state, state.Velocity.Mul(FixedDeltaSeconds), source)
+	state.Position = move.position
+	state.OnGround = move.onGround
+	for axis, clipped := range move.clipped {
+		if clipped {
+			state.Velocity[axis] = 0
+		}
+	}
 
-	return StepResult{State: state}
+	return StepResult{State: state, HitUnknown: move.hitUnknown}
 }
 
 func movementTarget(input Input) mgl32.Vec3 {
