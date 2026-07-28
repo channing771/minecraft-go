@@ -4,10 +4,25 @@ package storage
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/world"
 )
+
+type regionFile interface {
+	ReadAt([]byte, int64) (int, error)
+	WriteAt([]byte, int64) (int, error)
+	Stat() (os.FileInfo, error)
+	Sync() error
+	Truncate(int64) error
+	Close() error
+}
+
+type regionFileHooks struct {
+	Open func(string, int, fs.FileMode) (regionFile, error)
+}
 
 var (
 	ErrChunkNotFound    = errors.New("storage: chunk not found")

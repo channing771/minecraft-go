@@ -19,9 +19,11 @@ type region struct {
 	mu         sync.RWMutex
 	key        RegionKey
 	path       string
-	file       *os.File
+	file       regionFile
 	activeBank int
 	bank       regionBank
+	banks      [2]regionBank
+	bankValid  [2]bool
 }
 
 type preparedRegionSave struct {
@@ -30,6 +32,8 @@ type preparedRegionSave struct {
 	hash    [32]byte
 	payload []byte
 }
+
+var errRegionPayloadInvalid = errors.New("region payload integrity failure")
 
 func createRegion(ctx context.Context, path string, key RegionKey) (*region, error) {
 	if err := ctx.Err(); err != nil {
@@ -91,10 +95,26 @@ func createRegion(ctx context.Context, path string, key RegionKey) (*region, err
 }
 
 func openRegion(ctx context.Context, path string, key RegionKey) (*region, error) {
+	return openRegionWithHooks(ctx, path, key, regionFileHooks{Open: openRegionFile})
+}
+
+func openRegionFile(name string, flag int, mode os.FileMode) (regionFile, error) {
+	return os.OpenFile(name, flag, mode)
+}
+
+func openRegionWithHooks(
+	ctx context.Context,
+	path string,
+	key RegionKey,
+	hooks regionFileHooks,
+) (*region, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if hooks.Open == nil {
+		return nil, fmt.Errorf("open region %q: nil file hook", path)
+	}
+	file, err := hooks.Open(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open region %q: %w", path, err)
 	}
@@ -141,6 +161,8 @@ func openRegion(ctx context.Context, path string, key RegionKey) (*region, error
 		file:       file,
 		activeBank: activeBank,
 		bank:       bank,
+		banks:      [2]regionBank{bankA, bankB},
+		bankValid:  [2]bool{errA == nil, errB == nil},
 	}, nil
 }
 
@@ -153,8 +175,11 @@ func (r *region) load(ctx context.Context, key core.ChunkKey) (StoredChunk, erro
 	if err := ctx.Err(); err != nil {
 		return StoredChunk{}, err
 	}
+	if r.file == nil {
+		return StoredChunk{}, os.ErrClosed
+	}
 
-	stored, err := r.loadLocked(key)
+	stored, err := r.loadLocked(ctx, key)
 	if err != nil {
 		return StoredChunk{}, err
 	}
@@ -171,6 +196,9 @@ func (r *region) save(ctx context.Context, saves []ChunkSave) (SaveResult, error
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return result, err
+	}
+	if r.file == nil {
+		return result, os.ErrClosed
 	}
 
 	prepared := make([]preparedRegionSave, 0, len(saves))
@@ -201,18 +229,13 @@ func (r *region) save(ctx context.Context, saves []ChunkSave) (SaveResult, error
 	})
 
 	pending := make(map[core.ChunkKey]preparedRegionSave, len(prepared))
-	pendingComparisons := make(map[core.ChunkKey]uint64)
 	for _, candidate := range prepared {
 		if current, ok := pending[candidate.save.Key]; ok {
-			if err := compareSave(
-				candidate.save.Key,
-				candidate.save.Revision,
-				candidate.hash,
-				current.save.Revision,
-				current.hash,
-				pendingComparisons,
-			); err != nil {
-				return result, err
+			if candidate.save.Revision == current.save.Revision && candidate.hash != current.hash {
+				return result, fmt.Errorf(
+					"%w: %v revision %d",
+					ErrRevisionConflict, candidate.save.Key, candidate.save.Revision,
+				)
 			}
 			if candidate.save.Revision > current.save.Revision {
 				pending[candidate.save.Key] = candidate
@@ -227,7 +250,7 @@ func (r *region) save(ctx context.Context, saves []ChunkSave) (SaveResult, error
 				continue
 			}
 			if candidate.save.Revision == entry.Revision {
-				stored, err := r.loadLocked(candidate.save.Key)
+				stored, err := r.loadLocked(ctx, candidate.save.Key)
 				if err != nil {
 					return result, err
 				}
@@ -306,6 +329,8 @@ func (r *region) save(ctx context.Context, saves []ChunkSave) (SaveResult, error
 		return result, fmt.Errorf("sync index bank: %w", err)
 	}
 	r.bank, r.activeBank = next, inactiveBank
+	r.banks[inactiveBank] = next
+	r.bankValid[inactiveBank] = true
 	for _, candidate := range ordered {
 		result.Committed[candidate.save.Key] = candidate.save.Revision
 	}
@@ -341,7 +366,7 @@ func (r *region) close() error {
 	return err
 }
 
-func (r *region) loadLocked(key core.ChunkKey) (StoredChunk, error) {
+func (r *region) loadLocked(ctx context.Context, key core.ChunkKey) (StoredChunk, error) {
 	regionKey, slot := RegionFor(key)
 	if regionKey != r.key {
 		return StoredChunk{}, fmt.Errorf(
@@ -349,27 +374,105 @@ func (r *region) loadLocked(key core.ChunkKey) (StoredChunk, error) {
 			ErrCorrupt, key, regionKey, r.key,
 		)
 	}
-	entry := r.bank.Entries[slot]
-	if entry.OffsetSector == 0 {
+	activeEntry := r.bank.Entries[slot]
+	if activeEntry.OffsetSector == 0 {
 		return StoredChunk{}, fmt.Errorf("%w: %v", ErrChunkNotFound, key)
 	}
-	payload := make([]byte, int(entry.PayloadLength))
-	if err := readFullAt(r.file, payload, int64(entry.OffsetSector)*sectorSize); err != nil {
-		return StoredChunk{}, fmt.Errorf("%w: read chunk payload %v: %v", ErrCorrupt, key, err)
+	active, activeErr := r.loadEntry(ctx, key, slot, activeEntry)
+	if activeErr == nil {
+		return StoredChunk{
+			Key:               key,
+			Revision:          active.Revision,
+			PersistedRevision: activeEntry.Revision,
+			Chunk:             active.Chunk,
+		}, nil
 	}
-	if crc32.Checksum(payload, regionCRCTable) != entry.PayloadCRC32C {
-		return StoredChunk{}, fmt.Errorf("%w: chunk payload CRC32C for %v", ErrCorrupt, key)
+	if !errors.Is(activeErr, errRegionPayloadInvalid) {
+		return StoredChunk{}, activeErr
 	}
-	decoded, err := decodeChunkPayload(key, entry.Revision, payload)
-	if err != nil {
+
+	inactiveBank := 1 - r.activeBank
+	inactiveEntry := r.banks[inactiveBank].Entries[slot]
+	var old decodedPayload
+	oldErr := fmt.Errorf("%w: inactive bank entry is ineligible", ErrCorrupt)
+	if r.bankValid[inactiveBank] &&
+		inactiveEntry.OffsetSector != 0 &&
+		inactiveEntry.Revision < activeEntry.Revision &&
+		!regionExtentsOverlap(activeEntry, inactiveEntry) {
+		old, oldErr = r.loadEntry(ctx, key, slot, inactiveEntry)
+	}
+	if err := ctx.Err(); err != nil {
 		return StoredChunk{}, err
+	}
+	if oldErr != nil {
+		return StoredChunk{}, fmt.Errorf(
+			"%w: active=%w fallback=%w", ErrCorrupt, activeErr, oldErr,
+		)
+	}
+	if activeEntry.Revision == math.MaxUint64 {
+		return StoredChunk{}, fmt.Errorf(
+			"%w: active=%w fallback revision would overflow", ErrCorrupt, activeErr,
+		)
 	}
 	return StoredChunk{
 		Key:               key,
-		Revision:          decoded.Revision,
-		PersistedRevision: entry.Revision,
-		Chunk:             decoded.Chunk,
+		Revision:          activeEntry.Revision + 1,
+		PersistedRevision: old.Revision,
+		NeedsRewrite:      true,
+		Recovered:         true,
+		Chunk:             old.Chunk,
 	}, nil
+}
+
+func (r *region) loadEntry(
+	ctx context.Context,
+	key core.ChunkKey,
+	slot int,
+	entry regionEntry,
+) (decodedPayload, error) {
+	if err := ctx.Err(); err != nil {
+		return decodedPayload{}, err
+	}
+	if entry.OffsetSector == 0 {
+		return decodedPayload{}, fmt.Errorf("%w: absent region entry %d", ErrCorrupt, slot)
+	}
+	payload := make([]byte, int(entry.PayloadLength))
+	if err := readFullAt(r.file, payload, int64(entry.OffsetSector)*sectorSize); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return decodedPayload{}, fmt.Errorf(
+				"%w: read chunk payload %v: %w", ErrCorrupt, key, err,
+			)
+		}
+		return decodedPayload{}, fmt.Errorf("read chunk payload %v: %w", key, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return decodedPayload{}, err
+	}
+	if crc32.Checksum(payload, regionCRCTable) != entry.PayloadCRC32C {
+		return decodedPayload{}, fmt.Errorf(
+			"%w: %w: chunk payload CRC32C for %v",
+			ErrCorrupt, errRegionPayloadInvalid, key,
+		)
+	}
+	decoded, err := decodeChunkPayload(key, entry.Revision, payload)
+	if err != nil {
+		if errors.Is(err, ErrFutureVersion) {
+			return decodedPayload{}, err
+		}
+		return decodedPayload{}, fmt.Errorf("%w: %w", errRegionPayloadInvalid, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return decodedPayload{}, err
+	}
+	return decoded, nil
+}
+
+func regionExtentsOverlap(a, b regionEntry) bool {
+	aStart := uint64(a.OffsetSector)
+	aEnd := aStart + uint64(a.SectorCount)
+	bStart := uint64(b.OffsetSector)
+	bEnd := bStart + uint64(b.SectorCount)
+	return aStart < bEnd && bStart < aEnd
 }
 
 func bankOffset(index int) int64 {
@@ -383,7 +486,7 @@ func alignSector(offset int64) int64 {
 	return (offset + sectorSize - 1) / sectorSize * sectorSize
 }
 
-func writeFullAt(file *os.File, data []byte, offset int64) error {
+func writeFullAt(file regionFile, data []byte, offset int64) error {
 	for len(data) > 0 {
 		written, err := file.WriteAt(data, offset)
 		if err != nil {
@@ -398,7 +501,7 @@ func writeFullAt(file *os.File, data []byte, offset int64) error {
 	return nil
 }
 
-func readFullAt(file *os.File, data []byte, offset int64) error {
+func readFullAt(file regionFile, data []byte, offset int64) error {
 	for len(data) > 0 {
 		read, err := file.ReadAt(data, offset)
 		if read > 0 {

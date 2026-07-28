@@ -275,6 +275,44 @@ func TestRegionSyncHonorsCancellation(t *testing.T) {
 	}
 }
 
+func TestRegionLoadAfterCloseReturnsClosed(t *testing.T) {
+	key, chunkKey := crashRegionKeys()
+	r, err := createRegion(context.Background(), filepath.Join(t.TempDir(), "r.0.0.region"), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.load(context.Background(), chunkKey); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("load after close error = %v, want %v", err, os.ErrClosed)
+	}
+}
+
+func TestRegionSaveAfterCloseReturnsClosed(t *testing.T) {
+	key, chunkKey := crashRegionKeys()
+	r, err := createRegion(context.Background(), filepath.Join(t.TempDir(), "r.0.0.region"), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.close(); err != nil {
+		t.Fatal(err)
+	}
+	var saveErr error
+	panicked := true
+	func() {
+		defer func() { _ = recover() }()
+		_, saveErr = r.save(context.Background(), []ChunkSave{changedSave(chunkKey, 1)})
+		panicked = false
+	}()
+	if panicked {
+		t.Fatal("save after close panicked")
+	}
+	if !errors.Is(saveErr, os.ErrClosed) {
+		t.Fatalf("save after close error = %v, want %v", saveErr, os.ErrClosed)
+	}
+}
+
 func assertRegionEntryPaddingZero(t *testing.T, r *region) {
 	t.Helper()
 	for slot, entry := range r.bank.Entries {
