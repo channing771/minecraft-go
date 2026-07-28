@@ -3,6 +3,7 @@ package client
 import (
 	"errors"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -78,6 +79,7 @@ func TestPredictorBeginInitializesAndReusesHistory(t *testing.T) {
 	p.accumulator = 17 * time.Millisecond
 	p.suspended = true
 	p.suspendSequence = 98
+	p.suspendInputSent = true
 	p.displayOffset = mgl32.Vec3{1, 2, 3}
 	p.correctionRemaining = time.Second
 
@@ -99,7 +101,8 @@ func TestPredictorBeginInitializesAndReusesHistory(t *testing.T) {
 		t.Fatalf("Begin metadata dimension=%d tick=%d maxInput=%d", p.dimension, p.lastServerTick, p.maxSentInput)
 	}
 	if len(p.history) != 0 || cap(p.history) != 256 || p.accumulator != 0 ||
-		p.suspended || p.suspendSequence != 0 || p.displayOffset != (mgl32.Vec3{}) ||
+		p.suspended || p.suspendSequence != 0 || p.suspendInputSent ||
+		p.displayOffset != (mgl32.Vec3{}) ||
 		p.correctionRemaining != 0 {
 		t.Fatalf("Begin 未清理状态: history=%d/%d accumulator=%v suspended=%v sequence=%d offset=%v correction=%v",
 			len(p.history), cap(p.history), p.accumulator, p.suspended,
@@ -319,7 +322,7 @@ func TestPredictorSuspendsWithOneNeutralInputAtHistoryCapacity(t *testing.T) {
 	}
 	after, _ := p.State()
 	if !p.Suspended() || p.HistoryLen() != 256 || after != before ||
-		p.suspendSequence != 257 || p.maxSentInput != 257 {
+		p.suspendSequence != 257 || !p.suspendInputSent || p.maxSentInput != 257 {
 		t.Fatalf("suspension state suspended=%v history=%d sequence=%d max=%d before=%+v after=%+v",
 			p.Suspended(), p.HistoryLen(), p.suspendSequence, p.maxSentInput, before, after)
 	}
@@ -354,7 +357,8 @@ func TestPredictorRetriesFailedNeutralInputEveryFixedDelta(t *testing.T) {
 	if err := p.Advance(physics.FixedDelta, Control{MoveX: 1}, loadedAirSource{}, next, send); !errors.Is(err, sendErr) {
 		t.Fatalf("首次中立发送 err=%v", err)
 	}
-	if !p.Suspended() || p.suspendSequence != 0 || p.maxSentInput != 256 {
+	if !p.Suspended() || p.suspendSequence != 0 || p.suspendInputSent ||
+		p.maxSentInput != 256 {
 		t.Fatalf("首次失败 suspended=%v suspendSequence=%d maxSent=%d", p.Suspended(), p.suspendSequence, p.maxSentInput)
 	}
 	if err := p.Advance(physics.FixedDelta-time.Millisecond, Control{}, loadedAirSource{}, next, send); err != nil {
@@ -387,6 +391,466 @@ func TestPredictorRetriesFailedNeutralInputEveryFixedDelta(t *testing.T) {
 	}
 	if len(sent) != 3 {
 		t.Fatalf("成功后又重发，count=%d", len(sent))
+	}
+}
+
+func TestApplyPlayerStateReplaysOnlyUnacknowledgedInputs(t *testing.T) {
+	p := readyPredictor(t)
+	advanceSteps(t, p, 3, Control{MoveZ: 1})
+	authority := network.PlayerState{
+		ServerTick:        8,
+		LastInputSequence: 1,
+		Dimension:         core.Overworld,
+		Position:          mgl32.Vec3{0.5, 1, 0.4},
+		Yaw:               1.1,
+		Pitch:             -0.4,
+		OnGround:          true,
+		Ready:             true,
+	}
+
+	result, err := p.ApplyPlayerState(authority, flatClientWorld{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != (ReconcileResult{}) {
+		t.Fatalf("普通和解错误地请求重置视角: %+v", result)
+	}
+	if p.HistoryLen() != 2 || p.history[0].sequence != 2 || p.history[1].sequence != 3 {
+		t.Fatalf("history=%+v，想要只保留 sequence 2,3", p.history)
+	}
+
+	want := physics.State{
+		Position: authority.Position,
+		Velocity: authority.Velocity,
+		OnGround: authority.OnGround,
+	}
+	for range 2 {
+		want = physics.Step(want, physics.Input{MoveZ: 1}, flatClientWorld{}).State
+	}
+	got, _ := p.State()
+	assertStateNear(t, got, want, 1e-6)
+}
+
+func TestApplyPlayerStateIgnoresStaleAndEqualTicks(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		tick uint64
+	}{{name: "stale", tick: 6}, {name: "equal", tick: 7}} {
+		t.Run(test.name, func(t *testing.T) {
+			p := readyPredictor(t)
+			advanceSteps(t, p, 2, Control{MoveX: 1})
+			p.accumulator = physics.FixedDelta / 2
+			p.displayOffset = mgl32.Vec3{0.1, 0.2, 0.3}
+			p.correctionRemaining = 75 * time.Millisecond
+			before := clonePredictor(p)
+
+			result, err := p.ApplyPlayerState(network.PlayerState{
+				ServerTick:        test.tick,
+				LastInputSequence: p.maxSentInput,
+				Dimension:         core.Overworld,
+				Position:          mgl32.Vec3{100, 100, 100},
+				Yaw:               1,
+				Pitch:             0.5,
+				Ready:             false,
+			}, flatClientWorld{})
+			if err != nil || result != (ReconcileResult{}) {
+				t.Fatalf("stale tick=%d result=%+v err=%v", test.tick, result, err)
+			}
+			assertPredictorSame(t, p, before)
+		})
+	}
+}
+
+func TestInvalidPlayerStateIsRejectedAtomically(t *testing.T) {
+	invalid := []struct {
+		name   string
+		mutate func(*network.PlayerState, *Predictor)
+	}{
+		{name: "position NaN", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Position[0] = float32(math.NaN())
+		}},
+		{name: "velocity Inf", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Velocity[2] = float32(math.Inf(1))
+		}},
+		{name: "yaw NaN", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Yaw = float32(math.NaN())
+		}},
+		{name: "pitch Inf", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Pitch = float32(math.Inf(-1))
+		}},
+		{name: "pitch above limit", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Pitch = float32(math.Pi / 2)
+		}},
+		{name: "unknown dimension", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Dimension = core.DimensionID(99)
+		}},
+		{name: "ack beyond sent input", mutate: func(state *network.PlayerState, p *Predictor) {
+			state.LastInputSequence = p.maxSentInput + 1
+		}},
+		{name: "reset while not ready", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Reset = true
+			state.Ready = false
+		}},
+	}
+
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			p := readyPredictor(t)
+			advanceSteps(t, p, 2, Control{MoveZ: 1})
+			p.accumulator = physics.FixedDelta / 2
+			p.displayOffset = mgl32.Vec3{0.1, 0, 0}
+			p.correctionRemaining = 75 * time.Millisecond
+			state := nextAuthority(p)
+			test.mutate(&state, p)
+			before := clonePredictor(p)
+
+			result, err := p.ApplyPlayerState(state, flatClientWorld{})
+			if err == nil {
+				t.Fatal("ApplyPlayerState 接受了非法状态")
+			}
+			if result != (ReconcileResult{}) {
+				t.Fatalf("非法状态返回 result=%+v", result)
+			}
+			assertPredictorSame(t, p, before)
+		})
+	}
+}
+
+func TestApplyPlayerStateReadyFalseClearsPredictionAndRemembersTick(t *testing.T) {
+	p := readyPredictor(t)
+	advanceSteps(t, p, 2, Control{MoveX: 1})
+	p.accumulator = physics.FixedDelta / 2
+	p.suspended = true
+	p.suspendSequence = p.maxSentInput
+	p.suspendInputSent = true
+	p.displayOffset = mgl32.Vec3{0.2, 0, 0}
+	p.correctionRemaining = 50 * time.Millisecond
+	state := nextAuthority(p)
+	state.ServerTick = 11
+	state.LastInputSequence = 1
+	state.Ready = false
+
+	result, err := p.ApplyPlayerState(state, flatClientWorld{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != (ReconcileResult{}) {
+		t.Fatalf("Ready=false result=%+v", result)
+	}
+	got, ready := p.State()
+	if ready || got != (physics.State{}) || p.previous != (physics.State{}) ||
+		p.HistoryLen() != 0 || p.accumulator != 0 || p.suspended ||
+		p.suspendInputSent || p.suspendSequence != 0 ||
+		p.displayOffset != (mgl32.Vec3{}) || p.correctionRemaining != 0 ||
+		p.lastServerTick != 11 {
+		t.Fatalf("Ready=false 未清空预测: predictor=%+v", p)
+	}
+	if position, ok := p.PresentationPosition(time.Second); ok || position != (mgl32.Vec3{}) {
+		t.Fatalf("未就绪仍有展示位置: position=%v ok=%v", position, ok)
+	}
+}
+
+func TestApplyPlayerStateFirstReadySnapsAndResetsView(t *testing.T) {
+	p := NewPredictor()
+	state := readyPlayerState()
+	state.ServerTick = 1
+	state.Yaw = -1.25
+	state.Pitch = 0.35
+
+	result, err := p.ApplyPlayerState(state, flatClientWorld{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantResult := ReconcileResult{ResetView: true, Yaw: state.Yaw, Pitch: state.Pitch}
+	if result != wantResult {
+		t.Fatalf("first Ready result=%+v，想要 %+v", result, wantResult)
+	}
+	got, ready := p.State()
+	want := physics.State{Position: state.Position, Velocity: state.Velocity, OnGround: true}
+	if !ready {
+		t.Fatal("first Ready 后仍未就绪")
+	}
+	assertStateNear(t, got, want, 1e-6)
+	displayed, ok := p.PresentationPosition(0)
+	if !ok || !displayed.ApproxEqualThreshold(state.Position, 1e-6) {
+		t.Fatalf("first Ready 未 snap: displayed=%v ok=%v", displayed, ok)
+	}
+}
+
+func TestApplyPlayerStateResetAndDimensionChangeSnapAndResetView(t *testing.T) {
+	t.Run("Reset", func(t *testing.T) {
+		p := readyPredictor(t)
+		advanceSteps(t, p, 2, Control{MoveX: 1})
+		state := nextAuthority(p)
+		state.Reset = true
+		state.Position = mgl32.Vec3{8, 9, 10}
+		state.Yaw = -0.7
+		state.Pitch = 0.25
+		assertResetState(t, p, state)
+	})
+
+	t.Run("dimension change", func(t *testing.T) {
+		p := readyPredictor(t)
+		advanceSteps(t, p, 2, Control{MoveX: 1})
+		p.dimension = core.DimensionID(1)
+		state := nextAuthority(p)
+		state.Dimension = core.Overworld
+		state.Position = mgl32.Vec3{4, 5, 6}
+		state.Yaw = 0.8
+		state.Pitch = -0.2
+		assertResetState(t, p, state)
+	})
+}
+
+func TestSmallCorrectionDecaysInExactlyHundredMilliseconds(t *testing.T) {
+	p := readyPredictor(t)
+	before, _ := p.PresentationPosition(0)
+	state := authorityOffsetBy(p, mgl32.Vec3{0.25, 0, 0})
+	if _, err := p.ApplyPlayerState(state, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+
+	mid, _ := p.PresentationPosition(50 * time.Millisecond)
+	end, _ := p.PresentationPosition(50 * time.Millisecond)
+	if got := distance(mid, before); math.Abs(float64(got-0.125)) > 1e-6 {
+		t.Fatalf("50ms 中点=%v before=%v distance=%v，想要 0.125", mid, before, got)
+	}
+	predicted, _ := p.State()
+	if !end.ApproxEqualThreshold(predicted.Position, 1e-6) ||
+		p.displayOffset != (mgl32.Vec3{}) || p.correctionRemaining != 0 {
+		t.Fatalf("100ms 后=%v offset=%v remaining=%v，想要 %v",
+			end, p.displayOffset, p.correctionRemaining, predicted.Position)
+	}
+}
+
+func TestSmallCorrectionThresholdDoesNotSmoothSubthresholdError(t *testing.T) {
+	p := readyPredictor(t)
+	state := authorityOffsetBy(p, mgl32.Vec3{1.0/128 - 0.0001, 0, 0})
+	if _, err := p.ApplyPlayerState(state, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	displayed, _ := p.PresentationPosition(0)
+	predicted, _ := p.State()
+	if !displayed.ApproxEqualThreshold(predicted.Position, 1e-6) ||
+		p.displayOffset != (mgl32.Vec3{}) || p.correctionRemaining != 0 {
+		t.Fatalf("<1/128 仍创建平滑: displayed=%v predicted=%v offset=%v remaining=%v",
+			displayed, predicted.Position, p.displayOffset, p.correctionRemaining)
+	}
+
+	p = readyPredictor(t)
+	before, _ := p.PresentationPosition(0)
+	state = authorityOffsetBy(p, mgl32.Vec3{1.0 / 128, 0, 0})
+	if _, err := p.ApplyPlayerState(state, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	displayed, _ = p.PresentationPosition(0)
+	if !displayed.ApproxEqualThreshold(before, 1e-6) || p.correctionRemaining != 100*time.Millisecond {
+		t.Fatalf("=1/128 未创建平滑: displayed=%v before=%v remaining=%v",
+			displayed, before, p.correctionRemaining)
+	}
+}
+
+func TestLargeCorrectionSnapsAtHalfBlockThreshold(t *testing.T) {
+	p := readyPredictor(t)
+	state := authorityOffsetBy(p, mgl32.Vec3{0.5, 0, 0})
+	if _, err := p.ApplyPlayerState(state, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	displayed, _ := p.PresentationPosition(0)
+	predicted, _ := p.State()
+	if !displayed.ApproxEqualThreshold(predicted.Position, 1e-6) ||
+		p.displayOffset != (mgl32.Vec3{}) || p.correctionRemaining != 0 {
+		t.Fatalf(">=0.5 未 snap: displayed=%v predicted=%v offset=%v remaining=%v",
+			displayed, predicted.Position, p.displayOffset, p.correctionRemaining)
+	}
+}
+
+func TestSmallCorrectionDuringDecayStartsAtActualDisplayedPosition(t *testing.T) {
+	p := readyPredictor(t)
+	first := authorityOffsetBy(p, mgl32.Vec3{0.25, 0, 0})
+	if _, err := p.ApplyPlayerState(first, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	actual, _ := p.PresentationPosition(25 * time.Millisecond)
+
+	second := authorityOffsetBy(p, mgl32.Vec3{0.25, 0, 0})
+	if _, err := p.ApplyPlayerState(second, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	restarted, _ := p.PresentationPosition(0)
+	if !restarted.ApproxEqualThreshold(actual, 1e-6) {
+		t.Fatalf("再次纠正从错误位置开始: actual=%v restarted=%v", actual, restarted)
+	}
+	end, _ := p.PresentationPosition(100 * time.Millisecond)
+	predicted, _ := p.State()
+	if !end.ApproxEqualThreshold(predicted.Position, 1e-6) {
+		t.Fatalf("再次纠正 100ms 后=%v，想要 %v", end, predicted.Position)
+	}
+}
+
+func TestPresentationPositionInterpolatesPreviousAndCurrentState(t *testing.T) {
+	p := readyPredictor(t)
+	advanceSteps(t, p, 1, Control{MoveX: 1})
+	p.accumulator = physics.FixedDelta / 2
+	want := p.previous.Position.Add(p.current.Position).Mul(0.5)
+	got, ok := p.PresentationPosition(0)
+	if !ok || !got.ApproxEqualThreshold(want, 1e-6) {
+		t.Fatalf("interpolation=%v ok=%v，想要 %v", got, ok, want)
+	}
+}
+
+func TestSuspendedPredictorResumesOnlyAfterFixedNeutralSequenceIsAcknowledged(t *testing.T) {
+	p, sequence := fullHistoryPredictor(t)
+	if err := p.Advance(physics.FixedDelta, Control{}, loadedAirSource{}, func() uint64 {
+		(*sequence)++
+		return *sequence
+	}, func(network.PlayerInput) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := p.State()
+
+	early := nextAuthority(p)
+	early.LastInputSequence = p.suspendSequence - 1
+	early.Position = mgl32.Vec3{20, 20, 20}
+	if _, err := p.ApplyPlayerState(early, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := p.State()
+	if !p.Suspended() || p.HistoryLen() != predictionHistoryCapacity || got != before {
+		t.Fatalf("neutral ack 前恢复: suspended=%v history=%d before=%+v got=%+v",
+			p.Suspended(), p.HistoryLen(), before, got)
+	}
+
+	ack := early
+	ack.ServerTick++
+	ack.LastInputSequence = p.suspendSequence
+	ack.Position = mgl32.Vec3{2, 10, 3}
+	ack.Velocity = mgl32.Vec3{0.5, 0, 0}
+	if _, err := p.ApplyPlayerState(ack, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	want := physics.State{Position: ack.Position, Velocity: ack.Velocity, OnGround: ack.OnGround}
+	got, _ = p.State()
+	if p.Suspended() || p.suspendInputSent || p.suspendSequence != 0 ||
+		p.HistoryLen() != 0 || p.accumulator != 0 {
+		t.Fatalf("neutral ack 后未恢复: suspended=%v sent=%v sequence=%d history=%d accumulator=%v",
+			p.Suspended(), p.suspendInputSent, p.suspendSequence, p.HistoryLen(), p.accumulator)
+	}
+	assertStateNear(t, got, want, 1e-6)
+}
+
+func TestSuspendedPredictorDoesNotResumeBeforeNeutralSendSucceeds(t *testing.T) {
+	p, sequence := fullHistoryPredictor(t)
+	sendErr := errors.New("send failed")
+	if err := p.Advance(physics.FixedDelta, Control{}, loadedAirSource{}, func() uint64 {
+		(*sequence)++
+		return *sequence
+	}, func(network.PlayerInput) error { return sendErr }); !errors.Is(err, sendErr) {
+		t.Fatalf("neutral send err=%v", err)
+	}
+	before, _ := p.State()
+	state := nextAuthority(p)
+	state.LastInputSequence = p.maxSentInput
+	state.Position = mgl32.Vec3{30, 30, 30}
+
+	if _, err := p.ApplyPlayerState(state, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := p.State()
+	if !p.Suspended() || p.suspendInputSent || p.suspendSequence != 0 ||
+		p.HistoryLen() != predictionHistoryCapacity || got != before {
+		t.Fatalf("neutral 发送失败后错误恢复: suspended=%v sent=%v sequence=%d history=%d before=%+v got=%+v",
+			p.Suspended(), p.suspendInputSent, p.suspendSequence, p.HistoryLen(), before, got)
+	}
+}
+
+type flatClientWorld struct{}
+
+func (flatClientWorld) CollisionBoxes(position core.BlockPos) physics.CollisionBoxSet {
+	if position.Y == 0 {
+		return physics.BlockCollisionBoxes(core.StoneID, true)
+	}
+	return physics.BlockCollisionBoxes(core.AirID, true)
+}
+
+func advanceSteps(t *testing.T, p *Predictor, count int, control Control) {
+	t.Helper()
+	sequence := p.maxSentInput
+	for range count {
+		if err := p.Advance(physics.FixedDelta, control, flatClientWorld{}, func() uint64 {
+			sequence++
+			return sequence
+		}, func(network.PlayerInput) error { return nil }); err != nil {
+			t.Fatalf("Advance: %v", err)
+		}
+	}
+}
+
+func nextAuthority(p *Predictor) network.PlayerState {
+	return network.PlayerState{
+		ServerTick:        p.lastServerTick + 1,
+		LastInputSequence: p.maxSentInput,
+		Dimension:         core.Overworld,
+		Position:          p.current.Position,
+		Velocity:          p.current.Velocity,
+		Yaw:               0.4,
+		Pitch:             -0.2,
+		OnGround:          p.current.OnGround,
+		Ready:             true,
+	}
+}
+
+func authorityOffsetBy(p *Predictor, offset mgl32.Vec3) network.PlayerState {
+	state := nextAuthority(p)
+	state.Position = state.Position.Add(offset)
+	return state
+}
+
+func assertResetState(t *testing.T, p *Predictor, state network.PlayerState) {
+	t.Helper()
+	result, err := p.ApplyPlayerState(state, flatClientWorld{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantResult := ReconcileResult{ResetView: true, Yaw: state.Yaw, Pitch: state.Pitch}
+	if result != wantResult {
+		t.Fatalf("result=%+v，想要 %+v", result, wantResult)
+	}
+	want := physics.State{Position: state.Position, Velocity: state.Velocity, OnGround: state.OnGround}
+	got, _ := p.State()
+	assertStateNear(t, got, want, 1e-6)
+	displayed, ok := p.PresentationPosition(0)
+	if !ok || !displayed.ApproxEqualThreshold(want.Position, 1e-6) ||
+		p.HistoryLen() != 0 || p.displayOffset != (mgl32.Vec3{}) ||
+		p.correctionRemaining != 0 {
+		t.Fatalf("reset 未 snap/清空: displayed=%v ok=%v history=%d offset=%v remaining=%v",
+			displayed, ok, p.HistoryLen(), p.displayOffset, p.correctionRemaining)
+	}
+}
+
+func assertStateNear(t *testing.T, got, want physics.State, tolerance float32) {
+	t.Helper()
+	if !got.Position.ApproxEqualThreshold(want.Position, tolerance) ||
+		!got.Velocity.ApproxEqualThreshold(want.Velocity, tolerance) ||
+		got.OnGround != want.OnGround {
+		t.Fatalf("state=%+v，想要 %+v", got, want)
+	}
+}
+
+func distance(a, b mgl32.Vec3) float32 {
+	return a.Sub(b).Len()
+}
+
+func clonePredictor(p *Predictor) Predictor {
+	clone := *p
+	clone.history = append([]predictedInput(nil), p.history...)
+	return clone
+}
+
+func assertPredictorSame(t *testing.T, got *Predictor, want Predictor) {
+	t.Helper()
+	if !reflect.DeepEqual(*got, want) {
+		t.Fatalf("Predictor 被修改:\n got=%+v\nwant=%+v", *got, want)
 	}
 }
 

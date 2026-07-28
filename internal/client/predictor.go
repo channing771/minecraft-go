@@ -49,6 +49,7 @@ type Predictor struct {
 	maxSentInput        uint64
 	suspended           bool
 	suspendSequence     uint64
+	suspendInputSent    bool
 	displayOffset       mgl32.Vec3
 	correctionRemaining time.Duration
 }
@@ -85,6 +86,7 @@ func (p *Predictor) Begin(message network.PlayerState) error {
 	p.maxSentInput = message.LastInputSequence
 	p.suspended = false
 	p.suspendSequence = 0
+	p.suspendInputSent = false
 	p.displayOffset = mgl32.Vec3{}
 	p.correctionRemaining = 0
 	return nil
@@ -106,7 +108,7 @@ func (p *Predictor) Advance(
 	}
 
 	if p.suspended {
-		if p.suspendSequence != 0 {
+		if p.suspendInputSent {
 			return nil
 		}
 		p.accumulator += elapsed
@@ -184,8 +186,154 @@ func (p *Predictor) sendNeutral(
 		return err
 	}
 	p.suspendSequence = message.Sequence
+	p.suspendInputSent = true
 	p.maxSentInput = message.Sequence
 	return nil
+}
+
+// ApplyPlayerState 应用更新的权威玩家状态并重放尚未确认的输入。
+func (p *Predictor) ApplyPlayerState(
+	message network.PlayerState,
+	source physics.CollisionSource,
+) (ReconcileResult, error) {
+	if message.ServerTick <= p.lastServerTick {
+		return ReconcileResult{}, nil
+	}
+	authority, err := validatePlayerState(message, p.maxSentInput)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+
+	if !message.Ready {
+		p.clearForNotReady(message)
+		return ReconcileResult{}, nil
+	}
+	if !p.ready || message.Reset || message.Dimension != p.dimension {
+		if err := p.Begin(message); err != nil {
+			return ReconcileResult{}, err
+		}
+		return ReconcileResult{
+			ResetView: true,
+			Yaw:       message.Yaw,
+			Pitch:     message.Pitch,
+		}, nil
+	}
+	if p.suspended && (!p.suspendInputSent || message.LastInputSequence < p.suspendSequence) {
+		p.lastServerTick = message.ServerTick
+		return ReconcileResult{}, nil
+	}
+
+	oldDisplayed := p.presentationPositionNoAdvance()
+	oldPredicted := p.current.Position
+	p.current = authority
+	p.previous = authority
+	if p.suspended {
+		p.history = p.history[:0]
+		p.accumulator = 0
+		p.suspended = false
+		p.suspendSequence = 0
+		p.suspendInputSent = false
+	} else {
+		p.dropAcknowledged(message.LastInputSequence)
+		for _, entry := range p.history {
+			p.previous = p.current
+			p.current = physics.Step(p.current, entry.input, source).State
+		}
+	}
+	p.lastServerTick = message.ServerTick
+
+	errorDistance := p.current.Position.Sub(oldPredicted).Len()
+	if errorDistance >= 1.0/128 && errorDistance < 0.5 {
+		p.displayOffset = oldDisplayed.Sub(p.current.Position)
+		p.correctionRemaining = 100 * time.Millisecond
+	} else {
+		p.displayOffset = mgl32.Vec3{}
+		p.correctionRemaining = 0
+	}
+	return ReconcileResult{}, nil
+}
+
+// PresentationPosition 返回插值并应用纠正衰减后的显示脚底位置。
+func (p *Predictor) PresentationPosition(frameElapsed time.Duration) (mgl32.Vec3, bool) {
+	if !p.ready {
+		return mgl32.Vec3{}, false
+	}
+	if frameElapsed > 0 && p.correctionRemaining > 0 {
+		if frameElapsed >= p.correctionRemaining {
+			p.displayOffset = mgl32.Vec3{}
+			p.correctionRemaining = 0
+		} else {
+			remaining := p.correctionRemaining - frameElapsed
+			p.displayOffset = p.displayOffset.Mul(
+				float32(remaining) / float32(p.correctionRemaining),
+			)
+			p.correctionRemaining = remaining
+		}
+	}
+	return p.presentationPositionNoAdvance(), true
+}
+
+func (p *Predictor) presentationPositionNoAdvance() mgl32.Vec3 {
+	alpha := float32(p.accumulator) / float32(physics.FixedDelta)
+	if alpha < 0 {
+		alpha = 0
+	} else if alpha > 1 {
+		alpha = 1
+	}
+	position := p.previous.Position.Mul(1 - alpha).Add(p.current.Position.Mul(alpha))
+	return position.Add(p.displayOffset)
+}
+
+func (p *Predictor) dropAcknowledged(sequence uint64) {
+	firstUnacknowledged := 0
+	for firstUnacknowledged < len(p.history) &&
+		p.history[firstUnacknowledged].sequence <= sequence {
+		firstUnacknowledged++
+	}
+	copy(p.history, p.history[firstUnacknowledged:])
+	p.history = p.history[:len(p.history)-firstUnacknowledged]
+}
+
+func (p *Predictor) clearForNotReady(message network.PlayerState) {
+	p.ready = false
+	p.dimension = message.Dimension
+	p.current = physics.State{}
+	p.previous = physics.State{}
+	p.accumulator = 0
+	p.history = p.history[:0]
+	p.lastServerTick = message.ServerTick
+	p.maxSentInput = message.LastInputSequence
+	p.suspended = false
+	p.suspendSequence = 0
+	p.suspendInputSent = false
+	p.displayOffset = mgl32.Vec3{}
+	p.correctionRemaining = 0
+}
+
+func validatePlayerState(message network.PlayerState, maxSentInput uint64) (physics.State, error) {
+	state := physics.State{
+		Position: message.Position,
+		Velocity: message.Velocity,
+		OnGround: message.OnGround,
+	}
+	if message.Dimension != core.Overworld {
+		return physics.State{}, errors.New("client: player state has unknown dimension")
+	}
+	if !physics.ValidState(state) || !finiteFloat32(message.Yaw) ||
+		!finiteFloat32(message.Pitch) {
+		return physics.State{}, errors.New("client: player state contains non-finite value")
+	}
+	const maxPitch = float32(math.Pi/2 - 0.01)
+	if message.Pitch < -maxPitch || message.Pitch > maxPitch {
+		return physics.State{}, errors.New("client: player state has invalid pitch")
+	}
+	if message.LastInputSequence > maxSentInput {
+		return physics.State{}, errors.New("client: player state acknowledges unsent input")
+	}
+	if message.Reset && !message.Ready {
+		return physics.State{}, errors.New("client: reset player state is not ready")
+	}
+	return state, nil
 }
 
 // State 返回当前预测物理状态以及预测器是否已就绪。
