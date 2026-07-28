@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,6 +42,147 @@ func TestAuthoritativePlayerReplayIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestDelayedCloseCleanupDoesNotReenterStartedClose(t *testing.T) {
+	var gate delayedCloseGate
+	var calls atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	done, started := gate.start(func() {
+		calls.Add(1)
+		close(entered)
+		<-release
+	})
+	if !started {
+		t.Fatal("首次异步 close 未启动")
+	}
+	<-entered
+
+	gate.cleanup(func() {
+		calls.Add(1)
+	})
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("close 已启动后 cleanup 调用 closer %d 次，想要 1", got)
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("测试 closer 未退出")
+	}
+}
+
+func TestDelayedCloseLeakWaitUsesOneDeadline(t *testing.T) {
+	started := time.Unix(100, 0)
+	deadline := started.Add(time.Second)
+	closeDone := make(chan struct{})
+	close(closeDone)
+	nowCalls := 0
+	leakChecks := 0
+	result := waitForCloseAndLeakDeadline(
+		deadline,
+		closeDone,
+		func() bool {
+			leakChecks++
+			return false
+		},
+		func() time.Time {
+			nowCalls++
+			if nowCalls == 1 {
+				return started.Add(750 * time.Millisecond)
+			}
+			return deadline
+		},
+		func() {},
+	)
+	if result != delayedCloseLeakTimeout {
+		t.Fatalf("close 消耗 750ms 后结果=%v，想要原 deadline 的 leak timeout", result)
+	}
+	if leakChecks != 0 {
+		t.Fatalf("原 deadline 已到后仍执行 %d 次 leak probe，想要 0", leakChecks)
+	}
+}
+
+type delayedCloseWaitResult uint8
+
+const (
+	delayedCloseWaitOK delayedCloseWaitResult = iota
+	delayedCloseTimeout
+	delayedCloseLeakTimeout
+)
+
+type delayedCloseGate struct {
+	closeStarted bool
+}
+
+func (gate *delayedCloseGate) start(closeFunc func()) (<-chan struct{}, bool) {
+	if gate.closeStarted {
+		return nil, false
+	}
+	gate.closeStarted = true
+	done := make(chan struct{})
+	go func() {
+		closeFunc()
+		close(done)
+	}()
+	return done, true
+}
+
+func (gate *delayedCloseGate) cleanup(closeFunc func()) {
+	if gate.closeStarted {
+		return
+	}
+	gate.closeStarted = true
+	closeFunc()
+}
+
+func waitForCloseAndLeakDeadline(
+	deadline time.Time,
+	closeDone <-chan struct{},
+	leakFree func() bool,
+	now func() time.Time,
+	yield func(),
+) delayedCloseWaitResult {
+	remaining := deadline.Sub(now())
+	if remaining <= 0 {
+		select {
+		case <-closeDone:
+		default:
+			return delayedCloseTimeout
+		}
+	} else {
+		timer := time.NewTimer(remaining)
+		select {
+		case <-closeDone:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		case <-timer.C:
+			return delayedCloseTimeout
+		}
+	}
+
+	for {
+		if !now().Before(deadline) {
+			return delayedCloseLeakTimeout
+		}
+		if leakFree() {
+			return delayedCloseWaitOK
+		}
+		yield()
+	}
+}
+
 type delayedPlayerState struct {
 	deliverAtTick uint64
 	state         network.PlayerState
@@ -67,7 +209,7 @@ type delayedPlayerHarness struct {
 	placeSequence  uint64
 	breakSequence  uint64
 	goroutines     int
-	closed         bool
+	closeGate      delayedCloseGate
 }
 
 type delayedReplayResult struct {
@@ -98,10 +240,10 @@ func newDelayedPlayerHarness(t *testing.T, delayTicks uint64) *delayedPlayerHarn
 	}
 	h.running = New(config, serverEndpoint, flatTestGenerator{})
 	t.Cleanup(func() {
-		if !h.closed {
+		h.closeGate.cleanup(func() {
 			h.running.Close()
 			_ = h.clientEndpoint.Close()
-		}
+		})
 	})
 	return h
 }
@@ -502,41 +644,44 @@ func (h *delayedPlayerHarness) replayResult() delayedReplayResult {
 
 func (h *delayedPlayerHarness) closeAndAssertNoGoroutineLeak(timeout time.Duration) {
 	h.t.Helper()
-	if h.closed {
-		h.t.Fatal("delayed player harness 重复关闭")
-	}
-	done := make(chan struct{})
-	go func() {
+	deadline := time.Now().Add(timeout)
+	done, started := h.closeGate.start(func() {
 		h.running.Close()
 		_ = h.clientEndpoint.Close()
-		close(done)
-	}()
-	select {
-	case <-done:
-		h.closed = true
-	case <-time.After(timeout):
-		h.t.Fatalf("Server/MemoryTransport 关闭超过 %v\n%s", timeout, goroutineDump())
+	})
+	if !started {
+		h.t.Fatal("delayed player harness 重复关闭")
 	}
 
-	deadline := time.Now().Add(timeout)
-	for {
-		dump := goroutineDump()
-		serverLeak := strings.Contains(dump, "(*Server).endpointReader") ||
-			strings.Contains(dump, "(*Server).generationWorker") ||
-			strings.Contains(dump, "(*session).writeLoop")
-		if !serverLeak && runtime.NumGoroutine() <= h.goroutines {
-			return
-		}
-		if time.Now().After(deadline) {
-			h.t.Fatalf(
-				"关闭后 goroutine 未在 %v 内回到基线: before=%d after=%d\n%s",
-				timeout,
-				h.goroutines,
-				runtime.NumGoroutine(),
-				dump,
-			)
-		}
-		runtime.Gosched()
+	var dump string
+	result := waitForCloseAndLeakDeadline(
+		deadline,
+		done,
+		func() bool {
+			dump = goroutineDump()
+			serverLeak := strings.Contains(dump, "(*Server).endpointReader") ||
+				strings.Contains(dump, "(*Server).generationWorker") ||
+				strings.Contains(dump, "(*session).writeLoop")
+			return !serverLeak && runtime.NumGoroutine() <= h.goroutines
+		},
+		time.Now,
+		runtime.Gosched,
+	)
+	switch result {
+	case delayedCloseWaitOK:
+		return
+	case delayedCloseTimeout:
+		h.t.Fatalf("Server/MemoryTransport 关闭超过 %v\n%s", timeout, goroutineDump())
+	case delayedCloseLeakTimeout:
+		h.t.Fatalf(
+			"关闭后 goroutine 未在共享 %v deadline 内回到基线: before=%d after=%d\n%s",
+			timeout,
+			h.goroutines,
+			runtime.NumGoroutine(),
+			dump,
+		)
+	default:
+		h.t.Fatalf("未知 close/leak wait result: %d", result)
 	}
 }
 
