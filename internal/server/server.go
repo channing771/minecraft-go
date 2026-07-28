@@ -22,6 +22,7 @@ type Server struct {
 	endpoint  network.ServerEndpoint
 	generator Generator
 	engine    *sim.Engine
+	session   *session
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -64,6 +65,12 @@ func New(
 		queued:    make(map[core.ChunkKey]struct{}),
 	}
 
+	server.session = newSession(
+		ctx,
+		endpoint,
+		config.OutboxCapacity,
+		&server.workers,
+	)
 	server.workers.Add(1)
 	go server.endpointReader()
 	server.workers.Add(config.Workers)
@@ -81,6 +88,7 @@ func (server *Server) Step() sim.TickResult {
 	server.drainIncoming()
 	server.drainGenerated()
 	result := server.engine.Step()
+	server.publish(result)
 	server.cancelForgottenPending(result.Forget)
 	server.appendGenerationRequests(result.Generate)
 	server.scheduleGeneration()
@@ -106,6 +114,7 @@ func (server *Server) Run(ctx context.Context) error {
 func (server *Server) Close() {
 	server.closeOnce.Do(func() {
 		server.cancel()
+		server.session.close()
 		_ = server.endpoint.Close()
 		server.workers.Wait()
 	})
@@ -206,6 +215,9 @@ func (server *Server) drainIncoming() {
 			commands = append(commands, command)
 		default:
 			if hasView {
+				server.session.hasView = true
+				server.session.viewDimension = latestView.Dimension
+				server.session.viewCenter = latestView.Center
 				commands = append(commands, latestView)
 			}
 			for _, command := range commands {
