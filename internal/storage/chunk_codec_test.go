@@ -3,6 +3,11 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"flag"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -10,6 +15,58 @@ import (
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/world"
 )
+
+var updateStorageFixtures = flag.Bool(
+	"update-storage-fixtures", false, "rewrite committed storage fixtures",
+)
+
+func TestChunkV1Fixture(t *testing.T) {
+	want := codecFixtureChunk(core.ChunkPos{X: -3, Z: 7})
+	encoded, err := encodeChunkPayload(ChunkSave{
+		Key:      core.ChunkKey{Dimension: core.Overworld, Pos: want.Pos},
+		Revision: 19,
+		Chunk:    want,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("testdata", "chunk-v1.bin")
+	if *updateStorageFixtures {
+		if err := os.WriteFile(path, encoded, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, encoded) {
+		t.Fatal("v1 fixture drift; change schema version")
+	}
+}
+
+func TestFutureSchemaIsRejectedWithoutMutation(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	payload, err := encodeChunkPayload(ChunkSave{
+		Key: key, Revision: 19, Chunk: codecFixtureChunk(key.Pos),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.LittleEndian.PutUint32(payload[8:], currentChunkSchema+1)
+	before := bytes.Clone(payload)
+
+	got, err := decodeChunkPayload(key, 19, payload)
+	if !errors.Is(err, ErrFutureVersion) {
+		t.Fatalf("decode future schema error = %v, want ErrFutureVersion", err)
+	}
+	if !bytes.Equal(payload, before) {
+		t.Fatal("future-schema decode mutated payload")
+	}
+	if got.Key != (core.ChunkKey{}) || got.Revision != 0 || got.Schema != 0 || got.Chunk != nil {
+		t.Fatalf("decode future schema returned data: %+v", got)
+	}
+}
 
 func TestChunkPayloadRoundTripsDeterministically(t *testing.T) {
 	key := core.ChunkKey{
@@ -87,6 +144,7 @@ func TestChunkPayloadRejectsMalformedEnvelope(t *testing.T) {
 		payload  func() []byte
 		key      core.ChunkKey
 		revision uint64
+		wantErr  string
 	}{
 		{
 			name:    "wrong requested key",
@@ -141,6 +199,45 @@ func TestChunkPayloadRejectsMalformedEnvelope(t *testing.T) {
 			key: key, revision: 19,
 		},
 		{
+			name: "section count mismatch",
+			payload: func() []byte {
+				logical := testLogicalChunk(key, 19, func(int) world.ContainerSnapshot {
+					return world.ContainerSnapshot{Kind: world.StorageSingle, Single: core.AirID}
+				})
+				binary.LittleEndian.PutUint32(logical[28:], core.SectionsPerChunk-1)
+				return testEnvelope(key, 19, logical)
+			},
+			key: key, revision: 19, wantErr: "section count 23",
+		},
+		{
+			name: "section order mismatch",
+			payload: func() []byte {
+				logical := testLogicalChunk(key, 19, func(int) world.ContainerSnapshot {
+					return world.ContainerSnapshot{Kind: world.StorageSingle, Single: core.AirID}
+				})
+				binary.LittleEndian.PutUint32(logical[32:], 1)
+				return testEnvelope(key, 19, logical)
+			},
+			key: key, revision: 19, wantErr: "section index 1 at position 0",
+		},
+		{
+			name: "trailing logical bytes",
+			payload: func() []byte {
+				logical := testLogicalChunk(key, 19, func(int) world.ContainerSnapshot {
+					return world.ContainerSnapshot{Kind: world.StorageSingle, Single: core.AirID}
+				})
+				return testEnvelope(key, 19, append(logical, 0))
+			},
+			key: key, revision: 19,
+		},
+		{
+			name: "trailing envelope bytes",
+			payload: func() []byte {
+				return append(bytes.Clone(encoded), 0)
+			},
+			key: key, revision: 19,
+		},
+		{
 			name: "invalid palette length",
 			payload: func() []byte {
 				logical := testLogicalChunk(key, 19, func(index int) world.ContainerSnapshot {
@@ -177,8 +274,12 @@ func TestChunkPayloadRejectsMalformedEnvelope(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := decodeChunkPayload(tc.key, tc.revision, tc.payload()); err == nil {
+			_, err := decodeChunkPayload(tc.key, tc.revision, tc.payload())
+			if err == nil {
 				t.Fatal("malformed payload was accepted")
+			}
+			if tc.wantErr != "" && (!errors.Is(err, ErrCorrupt) || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("decode error = %v, want corrupt %q", err, tc.wantErr)
 			}
 		})
 	}

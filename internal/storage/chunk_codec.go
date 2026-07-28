@@ -151,7 +151,7 @@ func decodeChunkPayload(
 	if schema > currentChunkSchema {
 		return decodedPayload{}, fmt.Errorf("%w: chunk schema %d", ErrFutureVersion, schema)
 	}
-	if schema != currentChunkSchema {
+	if schema < oldestChunkSchema {
 		return decodedPayload{}, fmt.Errorf("%w: unsupported chunk schema %d", ErrCorrupt, schema)
 	}
 	key, err := decodeKey(&envelope)
@@ -213,11 +213,19 @@ func decodeChunkPayload(
 		return decodedPayload{}, fmt.Errorf("%w: decoded length does not match envelope", ErrCorrupt)
 	}
 
-	chunk, err := decodeLogicalChunk(key, revision, schema, decompressed)
+	dto, err := decodeLogicalChunk(key, revision, schema, decompressed)
 	if err != nil {
 		return decodedPayload{}, err
 	}
-	return decodedPayload{Key: key, Revision: revision, Schema: schema, Chunk: chunk}, nil
+	dto, _, err = migrateChunk(schema, dto)
+	if err != nil {
+		return decodedPayload{}, err
+	}
+	chunk, err := chunkFromDTO(dto)
+	if err != nil {
+		return decodedPayload{}, err
+	}
+	return decodedPayload{Key: key, Revision: revision, Schema: currentChunkSchema, Chunk: chunk}, nil
 }
 
 func decodeLogicalChunk(
@@ -225,61 +233,66 @@ func decodeLogicalChunk(
 	wantRevision uint64,
 	wantSchema uint32,
 	data []byte,
-) (*world.Chunk, error) {
+) (chunkDTO, error) {
 	logical := byteDecoder{data: data}
 	if err := logical.magic(chunkLogicalMagic); err != nil {
-		return nil, corrupt("logical magic", err)
+		return chunkDTO{}, corrupt("logical magic", err)
 	}
 	schema, err := logical.u32()
 	if err != nil {
-		return nil, corrupt("logical schema", err)
+		return chunkDTO{}, corrupt("logical schema", err)
 	}
 	if schema != wantSchema {
-		return nil, fmt.Errorf("%w: logical schema does not match envelope", ErrCorrupt)
-	}
-	if schema != currentChunkSchema {
-		return nil, fmt.Errorf("%w: unsupported logical schema %d", ErrCorrupt, schema)
+		return chunkDTO{}, fmt.Errorf("%w: logical schema does not match envelope", ErrCorrupt)
 	}
 	key, err := decodeKey(&logical)
 	if err != nil {
-		return nil, corrupt("logical key", err)
+		return chunkDTO{}, corrupt("logical key", err)
 	}
 	revision, err := logical.u64()
 	if err != nil {
-		return nil, corrupt("logical revision", err)
+		return chunkDTO{}, corrupt("logical revision", err)
 	}
 	if key != wantKey || revision != wantRevision {
-		return nil, fmt.Errorf("%w: logical key or revision does not match envelope", ErrCorrupt)
+		return chunkDTO{}, fmt.Errorf("%w: logical key or revision does not match envelope", ErrCorrupt)
 	}
 	count, err := logical.u32()
 	if err != nil {
-		return nil, corrupt("section count", err)
+		return chunkDTO{}, corrupt("section count", err)
 	}
 	if count != core.SectionsPerChunk {
-		return nil, fmt.Errorf("%w: section count %d", ErrCorrupt, count)
+		return chunkDTO{}, fmt.Errorf("%w: section count %d", ErrCorrupt, count)
 	}
 
-	chunk := world.NewChunk(key.Pos)
+	dto := chunkDTO{Key: key, Revision: revision}
 	for index := 0; index < core.SectionsPerChunk; index++ {
 		sectionIndex, err := logical.u32()
 		if err != nil {
-			return nil, corrupt("section index", err)
+			return chunkDTO{}, corrupt("section index", err)
 		}
 		if sectionIndex != uint32(index) {
-			return nil, fmt.Errorf("%w: section index %d at position %d", ErrCorrupt, sectionIndex, index)
+			return chunkDTO{}, fmt.Errorf("%w: section index %d at position %d", ErrCorrupt, sectionIndex, index)
 		}
 		snapshot, err := decodeContainerSnapshot(&logical)
 		if err != nil {
-			return nil, fmt.Errorf("%w: section %d: %v", ErrCorrupt, index, err)
+			return chunkDTO{}, fmt.Errorf("%w: section %d: %v", ErrCorrupt, index, err)
 		}
+		dto.Sections[index] = snapshot
+	}
+	if logical.remaining() != 0 {
+		return chunkDTO{}, fmt.Errorf("%w: trailing logical bytes", ErrCorrupt)
+	}
+	return dto, nil
+}
+
+func chunkFromDTO(dto chunkDTO) (*world.Chunk, error) {
+	chunk := world.NewChunk(dto.Key.Pos)
+	for index, snapshot := range dto.Sections {
 		container, err := world.NewPalettedContainerFromSnapshot(snapshot)
 		if err != nil {
 			return nil, fmt.Errorf("%w: section %d: %v", ErrCorrupt, index, err)
 		}
 		chunk.Section(index).Blocks = container
-	}
-	if logical.remaining() != 0 {
-		return nil, fmt.Errorf("%w: trailing logical bytes", ErrCorrupt)
 	}
 	return chunk, nil
 }
