@@ -1,6 +1,8 @@
 package sim
 
 import (
+	"math"
+
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/core"
@@ -17,7 +19,19 @@ const (
 	CommandPlaceRay
 	CommandResync
 	CommandPlayerInput CommandKind = 4
+	CommandBreakBlock  CommandKind = 5
+	CommandPlaceBlock  CommandKind = 6
 )
+
+// LookDirection 把玩家 look 角转换为单位方向；yaw=0、pitch=0 朝向 -Z。
+func LookDirection(yaw, pitch float32) mgl32.Vec3 {
+	cosPitch := float32(math.Cos(float64(pitch)))
+	return mgl32.Vec3{
+		-float32(math.Sin(float64(yaw))) * cosPitch,
+		float32(math.Sin(float64(pitch))),
+		-float32(math.Cos(float64(yaw))) * cosPitch,
+	}
+}
 
 type RejectReason uint8
 
