@@ -41,7 +41,7 @@ func TestSpawnCandidatesOrderByDistanceThenXZ(t *testing.T) {
 }
 
 func TestSpawnWaitsForEarlierUnknownCandidate(t *testing.T) {
-	engine := NewEngine(spawnTestBase, 0)
+	engine := NewEngine(0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	engine.Step()
 
@@ -64,7 +64,7 @@ func TestSpawnWaitsForEarlierUnknownCandidate(t *testing.T) {
 }
 
 func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
-	engine := NewEngine(spawnTestBase, 0)
+	engine := NewEngine(0)
 	const sessionID = SessionID(1)
 	anchor := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{}}
 	target := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1}}
@@ -130,13 +130,15 @@ func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
 	if !reflect.DeepEqual(engine.wanted, map[core.ChunkKey]struct{}{target: {}}) {
 		t.Fatalf("Active union wanted=%+v，想要仅 target", engine.wanted)
 	}
-	if _, loaded := engine.dimensions[core.Overworld].Info(anchor.Pos); loaded {
-		t.Fatal("activate forget 后 anchor 仍加载")
+	record := engine.dimensions[core.Overworld].records[anchor.Pos]
+	if record == nil || record.State != ChunkUnloading || record.Chunk == nil ||
+		!record.UnloadRequested || !record.Dirty() {
+		t.Fatalf("activate forget 后未保留待持久 anchor: %+v", record)
 	}
 }
 
 func TestExhaustedSpawnRetriesOnlyAfterRevisionChange(t *testing.T) {
-	engine := NewEngine(spawnTestBase, 0)
+	engine := NewEngine(0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	dimension := engine.dimensions[core.Overworld]
 	for x := int32(-1); x <= 1; x++ {
@@ -185,5 +187,3 @@ func spawnTestChunk(pos core.ChunkPos, support core.BlockPos) *world.Chunk {
 	chunk.SetBlock(x, support.Y, z, core.GrassID)
 	return chunk
 }
-
-func spawnTestBase(core.BlockPos) core.BlockID { return core.AirID }

@@ -12,7 +12,7 @@ import (
 )
 
 func TestRegisteredSessionRequestsAnchorBeforeClientInput(t *testing.T) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	result := engine.Step()
 	want := []core.ChunkKey{{Dimension: core.Overworld, Pos: core.ChunkPos{}}}
@@ -31,7 +31,7 @@ func TestRegisteredSessionRequestsAnchorBeforeClientInput(t *testing.T) {
 }
 
 func TestPendingSpawnActivatesAtDeterministicSurface(t *testing.T) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	engine.Step()
 	engine.SubmitGenerated(sim.GeneratedChunk{
@@ -52,7 +52,7 @@ func TestPendingSpawnActivatesAtDeterministicSurface(t *testing.T) {
 }
 
 func TestPlayerUpdatesSortBySession(t *testing.T) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	engine.RegisterSession(9, core.Overworld, core.ChunkPos{})
 	engine.RegisterSession(2, core.Overworld, core.ChunkPos{})
 
@@ -63,7 +63,7 @@ func TestPlayerUpdatesSortBySession(t *testing.T) {
 }
 
 func TestPlayerReturnsCopyOfAuthoritativeSnapshot(t *testing.T) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	if _, ok := engine.Player(1); ok {
 		t.Fatal("未注册 session 返回了 player")
 	}
@@ -91,7 +91,7 @@ func TestRegisteredPlayerIgnoresTrustedObserverCenterCommands(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			engine := sim.NewEngine(flatBaseBlock, 0)
+			engine := sim.NewEngine(0)
 			engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 			engine.Enqueue(sim.Command{
 				Session:   1,
@@ -116,7 +116,7 @@ func TestRegisteredPlayerIgnoresTrustedObserverCenterCommands(t *testing.T) {
 
 func TestRegisterSessionRejectsDuplicateOrUnknownDimension(t *testing.T) {
 	t.Run("duplicate", func(t *testing.T) {
-		engine := sim.NewEngine(flatBaseBlock, 0)
+		engine := sim.NewEngine(0)
 		engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 		assertPanics(t, "duplicate session", func() {
 			engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
@@ -124,7 +124,7 @@ func TestRegisterSessionRejectsDuplicateOrUnknownDimension(t *testing.T) {
 	})
 
 	t.Run("unknown dimension", func(t *testing.T) {
-		engine := sim.NewEngine(flatBaseBlock, 0)
+		engine := sim.NewEngine(0)
 		assertPanics(t, "unknown dimension", func() {
 			engine.RegisterSession(1, core.DimensionID(99), core.ChunkPos{})
 		})

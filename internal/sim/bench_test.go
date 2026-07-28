@@ -9,7 +9,7 @@ import (
 )
 
 func BenchmarkEngineStepIdle(b *testing.B) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	b.ReportAllocs()
 	for b.Loop() {
 		engine.Step()
@@ -17,7 +17,7 @@ func BenchmarkEngineStepIdle(b *testing.B) {
 }
 
 func BenchmarkEngineStepPlayer(b *testing.B) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	engine.Step()
 	engine.SubmitGenerated(sim.GeneratedChunk{
@@ -37,7 +37,7 @@ func BenchmarkEngineStepPlayer(b *testing.B) {
 }
 
 func BenchmarkEngineStepBlockChanges(b *testing.B) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	session := sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	engine.Step()

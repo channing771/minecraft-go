@@ -152,7 +152,7 @@ func TestPlayerCommandsRejectRegisteredPendingPlayer(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			engine := sim.NewEngine(flatBaseBlock, 0)
+			engine := sim.NewEngine(0)
 			const session = sim.SessionID(1)
 			engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 			command := tc.command
@@ -174,7 +174,7 @@ func TestPlayerCommandsRejectRegisteredPendingPlayer(t *testing.T) {
 }
 
 func TestPendingInteractionStaysRejectedWhenPlayerActivatesSameTick(t *testing.T) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	engine.Step()
@@ -194,7 +194,7 @@ func TestPendingInteractionStaysRejectedWhenPlayerActivatesSameTick(t *testing.T
 }
 
 func TestEngineRunConsumesClockAndStopsIt(t *testing.T) {
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	clock := &oneTickClock{
 		ticks:   make(chan time.Time, 1),
 		stopped: make(chan struct{}),
@@ -230,7 +230,7 @@ func (clock *oneTickClock) Stop() {
 
 func readyFlatEngine(t *testing.T) (*sim.Engine, sim.SessionID, core.ChunkPos) {
 	t.Helper()
-	engine := sim.NewEngine(flatBaseBlock, 0)
+	engine := sim.NewEngine(0)
 	session := sim.SessionID(1)
 	chunkPos := core.ChunkPos{}
 	engine.RegisterSession(session, core.Overworld, chunkPos)

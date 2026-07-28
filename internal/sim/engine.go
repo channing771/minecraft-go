@@ -46,7 +46,6 @@ type pendingChunkChanges struct {
 }
 
 type Engine struct {
-	base               BaseBlockLookup
 	viewRadius         int
 	dimensions         map[core.DimensionID]*Dimension
 	sessions           map[SessionID]*sessionState
@@ -59,18 +58,14 @@ type Engine struct {
 	tick      atomic.Uint64
 }
 
-func NewEngine(base BaseBlockLookup, viewRadius int) *Engine {
-	if base == nil {
-		panic("sim: nil base block lookup")
-	}
+func NewEngine(viewRadius int) *Engine {
 	if viewRadius < 0 {
 		panic("sim: negative view radius")
 	}
 	return &Engine{
-		base:       base,
 		viewRadius: viewRadius,
 		dimensions: map[core.DimensionID]*Dimension{
-			core.Overworld: NewDimension(core.Overworld, base),
+			core.Overworld: NewDimension(core.Overworld),
 		},
 		sessions: make(map[SessionID]*sessionState),
 		wanted:   make(map[core.ChunkKey]struct{}),
@@ -358,7 +353,12 @@ func (engine *Engine) reconcileSubscriptions(result *TickResult) {
 		return chunkKeyLess(candidates[i], candidates[j])
 	})
 	for _, key := range candidates {
-		if engine.dimensions[key.Dimension].BeginGeneration(key.Pos) {
+		dimension := engine.dimensions[key.Dimension]
+		if dimension.CancelUnload(key.Pos) {
+			result.Ready = append(result.Ready, key)
+			continue
+		}
+		if dimension.BeginGeneration(key.Pos) {
 			result.Generate = append(result.Generate, key)
 		}
 	}
@@ -369,7 +369,7 @@ func (engine *Engine) reconcileSubscriptions(result *TickResult) {
 		}
 		dimension := engine.dimensions[key.Dimension]
 		if info, ok := dimension.Info(key.Pos); ok && info.State == ChunkReady {
-			_ = dimension.Unload(key.Pos)
+			dimension.RequestUnload(key.Pos)
 		}
 	}
 	engine.wanted = union
@@ -428,7 +428,7 @@ func (engine *Engine) applyGenerated(
 			continue
 		}
 		if _, wanted := engine.wanted[key]; !wanted {
-			_ = dimension.Unload(key.Pos)
+			dimension.RequestUnload(key.Pos)
 			continue
 		}
 		result.Ready = append(result.Ready, key)

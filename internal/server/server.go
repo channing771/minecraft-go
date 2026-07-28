@@ -74,7 +74,7 @@ func New(
 		config:    config,
 		endpoint:  endpoint,
 		generator: generator,
-		engine:    sim.NewEngine(generator.BaseBlockAt, config.ViewRadius),
+		engine:    sim.NewEngine(config.ViewRadius),
 		ctx:       ctx,
 		cancel:    cancel,
 		incoming:  make(chan sim.Command, inputCapacity),

@@ -10,9 +10,7 @@ import (
 )
 
 func TestDimensionLifecycleReadyUnloadAndRetry(t *testing.T) {
-	dimension := sim.NewDimension(core.Overworld, func(core.BlockPos) core.BlockID {
-		return core.AirID
-	})
+	dimension := sim.NewDimension(core.Overworld)
 	pos := core.ChunkPos{X: -2, Z: 3}
 
 	if !dimension.BeginGeneration(pos) {
@@ -49,14 +47,36 @@ func TestDimensionLifecycleReadyUnloadAndRetry(t *testing.T) {
 		t.Fatal("修改读取副本影响了权威区块")
 	}
 
-	if err := dimension.Unload(pos); err != nil {
+	if dimension.RequestUnload(pos) {
+		t.Fatal("未持久的生成区块被立即卸载")
+	}
+	assertChunkInfo(t, dimension, pos, sim.ChunkUnloading, 1, nil)
+	if !dimension.CancelUnload(pos) {
+		t.Fatal("未取消生成区块的卸载请求")
+	}
+	if _, ready := dimension.BlockAt(blockPos); !ready {
+		t.Fatal("取消卸载后 BlockAt 未恢复 Ready")
+	}
+
+	cleanPos := core.ChunkPos{X: 4, Z: 4}
+	if !dimension.BeginLoading(cleanPos) {
+		t.Fatal("没有开始干净区块加载")
+	}
+	if err := dimension.ApplyLoaded(
+		cleanPos,
+		world.NewChunk(cleanPos),
+		1,
+		1,
+		false,
+		false,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := dimension.Info(pos); ok {
-		t.Fatal("Unload 后区块仍存在")
+	if !dimension.RequestUnload(cleanPos) {
+		t.Fatal("干净区块未立即卸载")
 	}
-	if _, ready := dimension.BlockAt(blockPos); ready {
-		t.Fatal("Unload 后 BlockAt 仍报告 Ready")
+	if _, ok := dimension.Info(cleanPos); ok {
+		t.Fatal("干净区块卸载后仍存在")
 	}
 
 	failedPos := core.ChunkPos{X: 8, Z: -5}
@@ -74,9 +94,7 @@ func TestDimensionLifecycleReadyUnloadAndRetry(t *testing.T) {
 
 func TestDimensionLifecycleRejectsInvalidTransitions(t *testing.T) {
 	newDimension := func() *sim.Dimension {
-		return sim.NewDimension(core.Overworld, func(core.BlockPos) core.BlockID {
-			return core.AirID
-		})
+		return sim.NewDimension(core.Overworld)
 	}
 	pos := core.ChunkPos{}
 
@@ -86,9 +104,9 @@ func TestDimensionLifecycleRejectsInvalidTransitions(t *testing.T) {
 	assertPanics(t, "MarkFailed from Absent", func() {
 		newDimension().MarkFailed(pos, errors.New("failed"))
 	})
-	assertPanics(t, "Unload from Absent", func() {
-		_ = newDimension().Unload(pos)
-	})
+	if newDimension().RequestUnload(pos) {
+		t.Fatal("Absent 区块报告已卸载")
+	}
 
 	dimension := newDimension()
 	dimension.BeginGeneration(pos)
@@ -103,6 +121,22 @@ func TestDimensionLifecycleRejectsInvalidTransitions(t *testing.T) {
 		t.Fatal("nil 生成结果被接受")
 	}
 	assertChunkInfo(t, dimension, pos, sim.ChunkGenerating, 0, nil)
+}
+
+func TestDimensionSetBlockRequiresReadyAndWorldHeight(t *testing.T) {
+	dimension := sim.NewDimension(core.Overworld)
+	if _, _, err := dimension.SetBlock(
+		core.BlockPos{Y: 0},
+		core.StoneID,
+	); !errors.Is(err, sim.ErrChunkNotReady) {
+		t.Fatalf("未加载 SetBlock = %v", err)
+	}
+	if _, _, err := dimension.SetBlock(
+		core.BlockPos{Y: core.MaxY},
+		core.StoneID,
+	); !errors.Is(err, sim.ErrBlockOutOfWorld) {
+		t.Fatalf("越界 SetBlock = %v", err)
+	}
 }
 
 func assertChunkInfo(
@@ -141,4 +175,37 @@ func assertPanics(t *testing.T, name string, run func()) {
 		}()
 		run()
 	})
+}
+
+func generateFlatChunk(pos core.ChunkPos) *world.Chunk {
+	chunk := world.NewChunk(pos)
+	for z := 0; z < core.SectionSize; z++ {
+		for x := 0; x < core.SectionSize; x++ {
+			for y := int32(core.MinY); y <= 0; y++ {
+				worldPos := core.BlockPos{
+					X: pos.X<<core.SectionShift + int32(x),
+					Y: y,
+					Z: pos.Z<<core.SectionShift + int32(z),
+				}
+				chunk.SetBlock(x, y, z, flatBaseBlock(worldPos))
+			}
+		}
+	}
+	chunk.Compact()
+	return chunk
+}
+
+func flatBaseBlock(position core.BlockPos) core.BlockID {
+	switch {
+	case position.Y < core.MinY || position.Y >= core.MaxY:
+		return core.AirID
+	case position.Y == core.MinY:
+		return core.BedrockID
+	case position.Y < 0:
+		return core.StoneID
+	case position.Y == 0:
+		return core.GrassID
+	default:
+		return core.AirID
+	}
 }

@@ -13,7 +13,6 @@ import (
 
 type Generator interface {
 	GenerateChunk(core.ChunkPos) *world.Chunk
-	BaseBlockAt(core.BlockPos) core.BlockID
 }
 
 type TerrainProbe struct {

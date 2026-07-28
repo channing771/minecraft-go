@@ -18,6 +18,7 @@ type ChunkState uint8
 
 const (
 	ChunkAbsent ChunkState = iota
+	ChunkLoading
 	ChunkGenerating
 	ChunkReady
 	ChunkFailed
@@ -25,10 +26,19 @@ const (
 )
 
 type ChunkRecord struct {
-	State    ChunkState
-	Chunk    *world.Chunk
-	Revision uint64
-	Err      error
+	State                ChunkState
+	Chunk                *world.Chunk
+	Revision             uint64
+	PersistedRevision    uint64
+	NeedsRewrite         bool
+	Recovered            bool
+	UnloadRequested      bool
+	SaveInFlightRevision uint64
+	Err                  error
+}
+
+func (record *ChunkRecord) Dirty() bool {
+	return record.Revision > record.PersistedRevision || record.NeedsRewrite
 }
 
 type ChunkInfo struct {
@@ -37,26 +47,55 @@ type ChunkInfo struct {
 	Err      error
 }
 
-type BaseBlockLookup func(core.BlockPos) core.BlockID
-
 // Dimension 由 Engine 的单写者 tick 独占，不提供内部锁。
 type Dimension struct {
-	id       core.DimensionID
-	base     BaseBlockLookup
-	records  map[core.ChunkPos]*ChunkRecord
-	overlays map[core.ChunkPos]map[uint32]core.BlockID
+	id      core.DimensionID
+	records map[core.ChunkPos]*ChunkRecord
 }
 
-func NewDimension(id core.DimensionID, base BaseBlockLookup) *Dimension {
-	if base == nil {
-		panic("sim: nil base block lookup")
-	}
+func NewDimension(id core.DimensionID) *Dimension {
 	return &Dimension{
-		id:       id,
-		base:     base,
-		records:  make(map[core.ChunkPos]*ChunkRecord),
-		overlays: make(map[core.ChunkPos]map[uint32]core.BlockID),
+		id:      id,
+		records: make(map[core.ChunkPos]*ChunkRecord),
 	}
+}
+
+// BeginLoading 把 Absent 或 Failed 区块转为 Loading。
+func (dimension *Dimension) BeginLoading(pos core.ChunkPos) bool {
+	record, exists := dimension.records[pos]
+	if !exists {
+		dimension.records[pos] = &ChunkRecord{State: ChunkLoading}
+		return true
+	}
+	switch record.State {
+	case ChunkLoading, ChunkGenerating, ChunkReady, ChunkUnloading:
+		return false
+	case ChunkFailed:
+		*record = ChunkRecord{State: ChunkLoading}
+		return true
+	case ChunkAbsent:
+		panic(fmt.Sprintf(
+			"sim: illegal chunk transition %d -> Loading at %+v",
+			record.State,
+			pos,
+		))
+	default:
+		panic(fmt.Sprintf("sim: unknown chunk state %d at %+v", record.State, pos))
+	}
+}
+
+func (dimension *Dimension) DropLoading(pos core.ChunkPos) {
+	dimension.recordForTransition(pos, ChunkLoading, "Absent")
+	delete(dimension.records, pos)
+}
+
+func (dimension *Dimension) MarkGenerating(pos core.ChunkPos) bool {
+	record, exists := dimension.records[pos]
+	if !exists || record.State != ChunkLoading {
+		return false
+	}
+	*record = ChunkRecord{State: ChunkGenerating}
+	return true
 }
 
 // BeginGeneration 把 Absent 或 Failed 区块转为 Generating。
@@ -67,12 +106,12 @@ func (dimension *Dimension) BeginGeneration(pos core.ChunkPos) bool {
 		return true
 	}
 	switch record.State {
-	case ChunkGenerating, ChunkReady:
+	case ChunkLoading, ChunkGenerating, ChunkReady, ChunkUnloading:
 		return false
 	case ChunkFailed:
 		*record = ChunkRecord{State: ChunkGenerating}
 		return true
-	case ChunkAbsent, ChunkUnloading:
+	case ChunkAbsent:
 		panic(fmt.Sprintf(
 			"sim: illegal chunk transition %d -> Generating at %+v",
 			record.State,
@@ -83,7 +122,7 @@ func (dimension *Dimension) BeginGeneration(pos core.ChunkPos) bool {
 	}
 }
 
-// ApplyGenerated 接管生成结果，应用持久 overlay 后进入 Ready。
+// ApplyGenerated 接管生成结果并以首个未持久修订进入 Ready。
 func (dimension *Dimension) ApplyGenerated(
 	pos core.ChunkPos,
 	chunk *world.Chunk,
@@ -99,13 +138,49 @@ func (dimension *Dimension) ApplyGenerated(
 			pos,
 		)
 	}
-	if err := dimension.applyOverlay(pos, chunk); err != nil {
-		return err
+	*record = ChunkRecord{
+		State:    ChunkReady,
+		Chunk:    chunk,
+		Revision: 1,
 	}
-	record.State = ChunkReady
-	record.Chunk = chunk
-	record.Revision = 1
-	record.Err = nil
+	return nil
+}
+
+func (dimension *Dimension) ApplyLoaded(
+	pos core.ChunkPos,
+	chunk *world.Chunk,
+	revision uint64,
+	persistedRevision uint64,
+	needsRewrite bool,
+	recovered bool,
+) error {
+	record := dimension.recordForTransition(pos, ChunkLoading, "Ready")
+	if chunk == nil {
+		return errors.New("sim: loaded chunk is nil")
+	}
+	if chunk.Pos != pos {
+		return fmt.Errorf(
+			"sim: loaded chunk position %+v, want %+v",
+			chunk.Pos,
+			pos,
+		)
+	}
+	if persistedRevision > revision {
+		return fmt.Errorf(
+			"sim: persisted revision %d exceeds current revision %d at %+v",
+			persistedRevision,
+			revision,
+			pos,
+		)
+	}
+	*record = ChunkRecord{
+		State:             ChunkReady,
+		Chunk:             chunk,
+		Revision:          revision,
+		PersistedRevision: persistedRevision,
+		NeedsRewrite:      needsRewrite,
+		Recovered:         recovered,
+	}
 	return nil
 }
 
@@ -121,13 +196,40 @@ func (dimension *Dimension) MarkFailed(pos core.ChunkPos, err error) {
 	}
 }
 
-// Unload 完成 Ready → Unloading → Absent，并保留 overlay。
-func (dimension *Dimension) Unload(pos core.ChunkPos) error {
-	record := dimension.recordForTransition(pos, ChunkReady, "Unloading")
+func (dimension *Dimension) MarkLoadFailed(pos core.ChunkPos, err error) {
+	if err == nil {
+		panic("sim: nil load failure")
+	}
+	record := dimension.recordForTransition(pos, ChunkLoading, "Failed")
+	*record = ChunkRecord{
+		State: ChunkFailed,
+		Err:   err,
+	}
+}
+
+// RequestUnload 立即删除已干净的 Ready 区块；必须保存的区块保留为 Unloading。
+func (dimension *Dimension) RequestUnload(pos core.ChunkPos) bool {
+	record, exists := dimension.records[pos]
+	if !exists || record.State != ChunkReady {
+		return false
+	}
+	if !record.Dirty() && record.SaveInFlightRevision == 0 {
+		delete(dimension.records, pos)
+		return true
+	}
 	record.State = ChunkUnloading
-	record.Chunk = nil
-	delete(dimension.records, pos)
-	return nil
+	record.UnloadRequested = true
+	return false
+}
+
+func (dimension *Dimension) CancelUnload(pos core.ChunkPos) bool {
+	record, exists := dimension.records[pos]
+	if !exists || record.State != ChunkUnloading {
+		return false
+	}
+	record.State = ChunkReady
+	record.UnloadRequested = false
+	return true
 }
 
 func (dimension *Dimension) Info(pos core.ChunkPos) (ChunkInfo, bool) {

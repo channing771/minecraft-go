@@ -124,7 +124,7 @@ func TestPlayerIntentRejectsTraversalIntoUnknownAdjacentChunk(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			engine := sim.NewEngine(flatBaseBlock, 0)
+			engine := sim.NewEngine(0)
 			const session = sim.SessionID(1)
 			anchor := core.ChunkPos{X: 1}
 			engine.RegisterSession(session, core.Overworld, anchor)
