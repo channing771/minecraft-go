@@ -95,6 +95,11 @@ func (server *Server) Step() sim.TickResult {
 	return result
 }
 
+// StepForTest 显式推进一个完整 tick，供无头确定性集成测试使用。
+func (server *Server) StepForTest() sim.TickResult {
+	return server.Step()
+}
+
 func (server *Server) Run(ctx context.Context) error {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -127,6 +132,19 @@ func (server *Server) ChunkInfo(
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 	return server.engine.ChunkInfo(core.ChunkKey{
+		Dimension: dimension,
+		Pos:       pos,
+	})
+}
+
+// ChunkHash 返回权威 Ready 区块的逻辑哈希与 revision，不暴露可变指针。
+func (server *Server) ChunkHash(
+	dimension core.DimensionID,
+	pos core.ChunkPos,
+) ([32]byte, uint64, bool) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.engine.ChunkHash(core.ChunkKey{
 		Dimension: dimension,
 		Pos:       pos,
 	})
