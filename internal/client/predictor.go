@@ -244,7 +244,7 @@ func (p *Predictor) ApplyPlayerState(
 
 	errorDistance := p.current.Position.Sub(oldPredicted).Len()
 	if errorDistance >= 1.0/128 && errorDistance < 0.5 {
-		p.displayOffset = oldDisplayed.Sub(p.current.Position)
+		p.displayOffset = oldDisplayed.Sub(p.interpolatedPosition())
 		p.correctionRemaining = 100 * time.Millisecond
 	} else {
 		p.displayOffset = mgl32.Vec3{}
@@ -274,14 +274,17 @@ func (p *Predictor) PresentationPosition(frameElapsed time.Duration) (mgl32.Vec3
 }
 
 func (p *Predictor) presentationPositionNoAdvance() mgl32.Vec3 {
+	return p.interpolatedPosition().Add(p.displayOffset)
+}
+
+func (p *Predictor) interpolatedPosition() mgl32.Vec3 {
 	alpha := float32(p.accumulator) / float32(physics.FixedDelta)
 	if alpha < 0 {
 		alpha = 0
 	} else if alpha > 1 {
 		alpha = 1
 	}
-	position := p.previous.Position.Mul(1 - alpha).Add(p.current.Position.Mul(alpha))
-	return position.Add(p.displayOffset)
+	return p.previous.Position.Mul(1 - alpha).Add(p.current.Position.Mul(alpha))
 }
 
 func (p *Predictor) dropAcknowledged(sequence uint64) {

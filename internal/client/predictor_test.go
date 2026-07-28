@@ -688,6 +688,63 @@ func TestSmallCorrectionDuringDecayStartsAtActualDisplayedPosition(t *testing.T)
 	}
 }
 
+func TestSmallCorrectionWithReplayKeepsInterpolatedPresentationContinuous(t *testing.T) {
+	p := readyPredictor(t)
+	control := Control{MoveX: 1}
+	advanceSteps(t, p, 3, control)
+	if err := p.Advance(physics.FixedDelta/2, control, flatClientWorld{}, func() uint64 {
+		t.Fatal("半个 fixed step 不应分配 sequence")
+		return 0
+	}, func(network.PlayerInput) error {
+		t.Fatal("半个 fixed step 不应发送输入")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := p.PresentationPosition(0)
+
+	initial := readyPlayerState()
+	authorityBase := physics.Step(physics.State{
+		Position: initial.Position,
+		Velocity: initial.Velocity,
+		OnGround: initial.OnGround,
+	}, physics.Input{MoveX: 1}, flatClientWorld{}).State
+	authority := network.PlayerState{
+		ServerTick:        p.lastServerTick + 1,
+		LastInputSequence: 1,
+		Dimension:         core.Overworld,
+		Position:          authorityBase.Position.Add(mgl32.Vec3{0.25, 0, 0}),
+		Velocity:          authorityBase.Velocity,
+		Yaw:               0.4,
+		Pitch:             -0.2,
+		OnGround:          authorityBase.OnGround,
+		Ready:             true,
+	}
+	if _, err := p.ApplyPlayerState(authority, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	if p.HistoryLen() != 2 || p.accumulator != physics.FixedDelta/2 ||
+		p.previous.Position.ApproxEqualThreshold(p.current.Position, 1e-6) {
+		t.Fatalf("测试未保留重放与非零插值状态: history=%d accumulator=%v previous=%v current=%v",
+			p.HistoryLen(), p.accumulator, p.previous.Position, p.current.Position)
+	}
+	continued, _ := p.PresentationPosition(0)
+	if !continued.ApproxEqualThreshold(before, 1e-6) {
+		t.Fatalf("重放后展示位置跳变: before=%v after=%v", before, continued)
+	}
+
+	actual, _ := p.PresentationPosition(25 * time.Millisecond)
+	authority.ServerTick++
+	authority.Position = authorityBase.Position.Add(mgl32.Vec3{0.5, 0, 0})
+	if _, err := p.ApplyPlayerState(authority, flatClientWorld{}); err != nil {
+		t.Fatal(err)
+	}
+	restarted, _ := p.PresentationPosition(0)
+	if !restarted.ApproxEqualThreshold(actual, 1e-6) {
+		t.Fatalf("衰减中重放纠正再次跳变: actual=%v restarted=%v", actual, restarted)
+	}
+}
+
 func TestPresentationPositionInterpolatesPreviousAndCurrentState(t *testing.T) {
 	p := readyPredictor(t)
 	advanceSteps(t, p, 1, Control{MoveX: 1})
