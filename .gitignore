@@ -12,6 +12,9 @@
 .idea/
 .vscode/
 
+# 仓库内隔离工作区
+/.worktrees/
+
 # 本机 Claude Code 权限配置（可能包含宽泛的 shell 授权）
 /.claude/settings.local.json
 
