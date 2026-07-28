@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-gl/mathgl/mgl32"
-
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
@@ -25,69 +23,61 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 	running := server.New(config, serverEndpoint, server.FlatTestGenerator{})
 	mirror := client.NewMirror()
 
-	sendClientMessage(t, clientEndpoint, network.SetViewCenter{
-		Sequence:  1,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{},
-	})
+	interactionChunk := (core.BlockPos{X: 0, Y: 1, Z: -6}).Chunk()
 	stepUntil(t, running, clientEndpoint, mirror, func() bool {
-		chunk, ok := mirror.Chunk(core.Overworld, core.ChunkPos{})
-		return ok && chunk.Revision == 1
+		chunk, chunkOK := mirror.Chunk(core.Overworld, interactionChunk)
+		player, playerOK := running.PlayerState()
+		return chunkOK && chunk.Revision == 1 && playerOK && player.Ready
 	})
 
-	breakPosition := core.BlockPos{X: 0, Y: 0, Z: 0}
-	sendClientMessage(t, clientEndpoint, network.BreakRay{
-		Sequence:  2,
-		Dimension: core.Overworld,
-		Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
-		Direction: mgl32.Vec3{0, -1, 0},
-	})
-	assertContiguousInteraction(
-		t, running, clientEndpoint, mirror, 1, 2, breakPosition, core.AirID,
-	)
-
+	pitch := float32(-0.2)
 	placements := []struct {
-		sequence uint64
 		position core.BlockPos
 		block    core.BlockID
 	}{
-		{sequence: 3, position: core.BlockPos{X: 1, Y: 1, Z: 0}, block: core.StoneID},
-		{sequence: 4, position: core.BlockPos{X: 2, Y: 1, Z: 0}, block: core.DirtID},
-		{sequence: 5, position: core.BlockPos{X: 3, Y: 1, Z: 0}, block: core.GrassID},
+		{position: core.BlockPos{X: 0, Y: 1, Z: -5}, block: core.StoneID},
+		{position: core.BlockPos{X: 0, Y: 1, Z: -4}, block: core.DirtID},
+		{position: core.BlockPos{X: 0, Y: 1, Z: -3}, block: core.GrassID},
 	}
-	for _, placement := range placements {
-		sendClientMessage(t, clientEndpoint, network.PlaceRay{
-			Sequence:  placement.sequence,
-			Dimension: core.Overworld,
-			Origin: mgl32.Vec3{
-				float32(placement.position.X) + 0.5,
-				2.5,
-				0.5,
-			},
-			Direction: mgl32.Vec3{0, -1, 0},
-			Block:     placement.block,
+	for index, placement := range placements {
+		sequence := uint64(index + 1)
+		sendClientMessage(t, clientEndpoint, network.PlaceBlock{
+			Sequence: sequence,
+			Yaw:      0,
+			Pitch:    pitch,
+			Block:    placement.block,
 		})
 		assertContiguousInteraction(
 			t,
 			running,
 			clientEndpoint,
 			mirror,
-			placement.sequence-1,
-			placement.sequence,
+			sequence,
+			sequence+1,
 			placement.position,
 			placement.block,
 		)
 	}
 
+	breakPosition := placements[len(placements)-1].position
+	sendClientMessage(t, clientEndpoint, network.BreakBlock{
+		Sequence: 4,
+		Yaw:      0,
+		Pitch:    pitch,
+	})
+	assertContiguousInteraction(
+		t, running, clientEndpoint, mirror, 4, 5, breakPosition, core.AirID,
+	)
+
 	assertMirrorBlock(t, mirror, breakPosition, core.AirID)
-	for _, placement := range placements {
+	for _, placement := range placements[:len(placements)-1] {
 		assertMirrorBlock(t, mirror, placement.position, placement.block)
 	}
 	authoritativeHash, authoritativeRevision, authoritativeOK := running.ChunkHash(
 		core.Overworld,
-		core.ChunkPos{},
+		interactionChunk,
 	)
-	mirrorHash, mirrorRevision, mirrorOK := mirror.Hash(core.Overworld, core.ChunkPos{})
+	mirrorHash, mirrorRevision, mirrorOK := mirror.Hash(core.Overworld, interactionChunk)
 	if !authoritativeOK || !mirrorOK ||
 		authoritativeRevision != mirrorRevision ||
 		authoritativeHash != mirrorHash {

@@ -17,6 +17,13 @@ const (
 	inputCapacity                = 256
 )
 
+var ErrTrustedObserverDisabled = errors.New("server: trusted observer disabled")
+
+type trustedObserverCenter struct {
+	dimension core.DimensionID
+	center    core.ChunkPos
+}
+
 type Server struct {
 	config    Config
 	endpoint  network.ServerEndpoint
@@ -32,6 +39,10 @@ type Server struct {
 	generated chan sim.GeneratedChunk
 	pending   []core.ChunkKey
 	queued    map[core.ChunkKey]struct{}
+
+	trustedObserverMu       sync.Mutex
+	trustedObserverCenters  chan trustedObserverCenter
+	trustedObserverSequence uint64
 
 	workers   sync.WaitGroup
 	stepMu    sync.Mutex
@@ -64,11 +75,15 @@ func New(
 		generated: make(chan sim.GeneratedChunk, queueCapacity),
 		queued:    make(map[core.ChunkKey]struct{}),
 	}
-	server.engine.RegisterSession(
-		localSessionID,
-		config.SpawnDimension,
-		config.SpawnAnchor,
-	)
+	if config.TrustedObserver {
+		server.trustedObserverCenters = make(chan trustedObserverCenter, 1)
+	} else {
+		server.engine.RegisterSession(
+			localSessionID,
+			config.SpawnDimension,
+			config.SpawnAnchor,
+		)
+	}
 
 	server.session = newSession(
 		ctx,
@@ -94,6 +109,7 @@ func (server *Server) Step() sim.TickResult {
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 
+	server.drainTrustedObserverCenter()
 	server.drainIncoming()
 	server.drainGenerated()
 	result := server.engine.Step()
@@ -102,6 +118,31 @@ func (server *Server) Step() sim.TickResult {
 	server.appendGenerationRequests(result.Generate)
 	server.scheduleGeneration()
 	return result
+}
+
+func (server *Server) SetTrustedObserverCenter(
+	dimension core.DimensionID,
+	center core.ChunkPos,
+) error {
+	if !server.config.TrustedObserver {
+		return ErrTrustedObserverDisabled
+	}
+	if dimension != core.Overworld {
+		return errors.New("server: trusted observer center must be overworld")
+	}
+	request := trustedObserverCenter{dimension: dimension, center: center}
+	server.trustedObserverMu.Lock()
+	defer server.trustedObserverMu.Unlock()
+	select {
+	case <-server.trustedObserverCenters:
+	default:
+	}
+	select {
+	case server.trustedObserverCenters <- request:
+	default:
+		panic("server: trusted observer queue invariant violated")
+	}
+	return nil
 }
 
 // StepForTest 显式推进一个完整 tick，供无头确定性集成测试使用。
@@ -191,33 +232,6 @@ func (server *Server) endpointReader() {
 
 func translateClientMessage(message network.ClientMessage) (sim.Command, bool) {
 	switch message := message.(type) {
-	case network.SetViewCenter:
-		return sim.Command{
-			Session:   localSessionID,
-			Sequence:  message.Sequence,
-			Kind:      sim.CommandSetViewCenter,
-			Dimension: message.Dimension,
-			Center:    message.Center,
-		}, true
-	case network.BreakRay:
-		return sim.Command{
-			Session:   localSessionID,
-			Sequence:  message.Sequence,
-			Kind:      sim.CommandBreakRay,
-			Dimension: message.Dimension,
-			Origin:    message.Origin,
-			Direction: message.Direction,
-		}, true
-	case network.PlaceRay:
-		return sim.Command{
-			Session:   localSessionID,
-			Sequence:  message.Sequence,
-			Kind:      sim.CommandPlaceRay,
-			Dimension: message.Dimension,
-			Origin:    message.Origin,
-			Direction: message.Direction,
-			Block:     message.Block,
-		}, true
 	case network.PlayerInput:
 		return sim.Command{
 			Session:  localSessionID,
@@ -260,28 +274,34 @@ func translateClientMessage(message network.ClientMessage) (sim.Command, bool) {
 	}
 }
 
+func (server *Server) drainTrustedObserverCenter() {
+	if server.trustedObserverCenters == nil {
+		return
+	}
+	select {
+	case request := <-server.trustedObserverCenters:
+		server.trustedObserverSequence++
+		server.session.hasView = true
+		server.session.viewDimension = request.dimension
+		server.session.viewCenter = request.center
+		server.engine.Enqueue(sim.Command{
+			Session:   localSessionID,
+			Sequence:  server.trustedObserverSequence,
+			Kind:      sim.CommandTrustedObserverCenter,
+			Dimension: request.dimension,
+			Center:    request.center,
+		})
+	default:
+	}
+}
+
 func (server *Server) drainIncoming() {
 	var commands []sim.Command
-	var latestView sim.Command
-	hasView := false
 	for {
 		select {
 		case command := <-server.incoming:
-			if command.Kind == sim.CommandSetViewCenter {
-				if !hasView || command.Sequence > latestView.Sequence {
-					latestView = command
-					hasView = true
-				}
-				continue
-			}
 			commands = append(commands, command)
 		default:
-			if hasView {
-				server.session.hasView = true
-				server.session.viewDimension = latestView.Dimension
-				server.session.viewCenter = latestView.Center
-				commands = append(commands, latestView)
-			}
 			for _, command := range commands {
 				server.engine.Enqueue(command)
 			}

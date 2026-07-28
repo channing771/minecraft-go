@@ -9,15 +9,16 @@ import (
 )
 
 type Config struct {
-	Seed           int64
-	ViewRadius     int
-	Workers        int
-	SnapshotChunks int
-	SnapshotBytes  int
-	OutboxCapacity int
-	TickObserver   func(time.Duration)
-	SpawnDimension core.DimensionID
-	SpawnAnchor    core.ChunkPos
+	Seed            int64
+	ViewRadius      int
+	Workers         int
+	SnapshotChunks  int
+	SnapshotBytes   int
+	OutboxCapacity  int
+	TickObserver    func(time.Duration)
+	SpawnDimension  core.DimensionID
+	SpawnAnchor     core.ChunkPos
+	TrustedObserver bool
 }
 
 func DefaultConfig(seed int64) Config {

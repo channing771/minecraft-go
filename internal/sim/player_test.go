@@ -80,7 +80,7 @@ func TestPlayerReturnsCopyOfAuthoritativeSnapshot(t *testing.T) {
 	}
 }
 
-func TestRegisteredSessionIgnoresLegacyViewCenterCommands(t *testing.T) {
+func TestRegisteredPlayerIgnoresTrustedObserverCenterCommands(t *testing.T) {
 	cases := []struct {
 		name      string
 		dimension core.DimensionID
@@ -96,7 +96,7 @@ func TestRegisteredSessionIgnoresLegacyViewCenterCommands(t *testing.T) {
 			engine.Enqueue(sim.Command{
 				Session:   1,
 				Sequence:  1,
-				Kind:      sim.CommandSetViewCenter,
+				Kind:      sim.CommandTrustedObserverCenter,
 				Dimension: tc.dimension,
 				Center:    tc.center,
 			})
@@ -108,7 +108,7 @@ func TestRegisteredSessionIgnoresLegacyViewCenterCommands(t *testing.T) {
 			}
 			player := onlyPlayer(t, result)
 			if player.Dimension != core.Overworld || player.ViewCenter != (core.ChunkPos{}) {
-				t.Fatalf("legacy view 命令覆盖了权威 anchor: %+v", player)
+				t.Fatalf("trusted observer 命令覆盖了玩家权威 anchor: %+v", player)
 			}
 		})
 	}

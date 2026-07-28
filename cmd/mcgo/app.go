@@ -24,32 +24,29 @@ import (
 )
 
 type application struct {
-	window               *client.Window
-	dev                  gfx.Device
-	surface              gfx.Surface
-	color                gfx.Texture
-	colorView            gfx.TextureView
-	frameWidth           int
-	frameHeight          int
-	renderer             *render.Renderer
-	clientEndpoint       network.ClientEndpoint
-	server               *server.Server
-	serverCancel         context.CancelFunc
-	serverDone           chan error
-	mirror               *client.Mirror
-	predictor            *client.Predictor
-	mesher               *client.Mesher
-	depth                *depthTarget
-	camera               client.Camera
-	center               core.ChunkPos
-	sequence             uint64
-	selectedBlock        core.BlockID
-	loadedChunks         map[core.ChunkPos]struct{}
-	ticks                *tickRecorder
-	acceptedChanges      int
-	rejectedCommands     int
-	lastInteractionChunk core.ChunkPos
-	closeOnce            sync.Once
+	window         *client.Window
+	dev            gfx.Device
+	surface        gfx.Surface
+	color          gfx.Texture
+	colorView      gfx.TextureView
+	frameWidth     int
+	frameHeight    int
+	renderer       *render.Renderer
+	clientEndpoint network.ClientEndpoint
+	server         *server.Server
+	serverCancel   context.CancelFunc
+	serverDone     chan error
+	mirror         *client.Mirror
+	predictor      *client.Predictor
+	mesher         *client.Mesher
+	depth          *depthTarget
+	camera         client.Camera
+	center         core.ChunkPos
+	sequence       uint64
+	selectedBlock  core.BlockID
+	loadedChunks   map[core.ChunkPos]struct{}
+	ticks          *tickRecorder
+	closeOnce      sync.Once
 }
 
 type tickRecorder struct {
@@ -136,6 +133,7 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
 	config := server.DefaultConfig(seed)
 	config.ViewRadius = viewDistance + 1
+	config.TrustedObserver = benchmark
 	ticks := newTickRecorder(100_000)
 	config.TickObserver = ticks.add
 	running := server.NewEmbedded(config, serverEndpoint)
@@ -167,9 +165,9 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 		ticks:          ticks,
 	}
 	if benchmark {
-		if err := app.sendViewCenter(app.center); err != nil {
+		if err := app.server.SetTrustedObserverCenter(core.Overworld, app.center); err != nil {
 			app.Close()
-			return nil, fmt.Errorf("发送初始视距中心: %w", err)
+			return nil, fmt.Errorf("设置初始 trusted observer 中心: %w", err)
 		}
 	}
 	return app, nil
@@ -219,7 +217,7 @@ func (a *application) updateCenter() {
 		return
 	}
 	a.center = center
-	if err := a.sendViewCenter(center); err != nil {
+	if err := a.server.SetTrustedObserverCenter(core.Overworld, center); err != nil {
 		log.Printf("更新视距中心失败: %v", err)
 	}
 }
@@ -332,8 +330,6 @@ func (a *application) drainServerMessages(maxMessages int) {
 					delete(a.loadedChunks, position)
 				}
 			}
-		case network.BlockChanges:
-			a.acceptedChanges += len(message.Changes)
 		}
 		if update.Resync != nil {
 			update.Resync.Sequence = a.nextSequence()
@@ -342,7 +338,6 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 		}
 		if update.Rejected != nil {
-			a.rejectedCommands++
 			log.Printf("权威命令被拒绝: sequence=%d reason=%s",
 				update.Rejected.Sequence, update.Rejected.Reason)
 		}
@@ -359,19 +354,10 @@ func (a *application) drainServerMessages(maxMessages int) {
 	}
 }
 
-func (a *application) sendViewCenter(center core.ChunkPos) error {
-	return a.send(network.SetViewCenter{
-		Sequence:  a.nextSequence(),
-		Dimension: core.Overworld,
-		Center:    center,
-	})
-}
-
 func (a *application) breakBlock() {
 	if _, ready := a.predictor.State(); !ready {
 		return
 	}
-	a.lastInteractionChunk = cameraChunk(a.camera.Pos)
 	if err := a.send(network.BreakBlock{
 		Sequence: a.nextSequence(),
 		Yaw:      a.camera.Yaw,
@@ -385,7 +371,6 @@ func (a *application) placeBlock() {
 	if _, ready := a.predictor.State(); !ready {
 		return
 	}
-	a.lastInteractionChunk = cameraChunk(a.camera.Pos)
 	if err := a.send(network.PlaceBlock{
 		Sequence: a.nextSequence(),
 		Yaw:      a.camera.Yaw,

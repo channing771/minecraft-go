@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -18,19 +17,9 @@ func TestGeneratorWorkerPanicIsolated(t *testing.T) {
 	config := server.DefaultConfig(7)
 	config.ViewRadius = 1
 	config.Workers = 2
-	client, endpoint := network.NewMemoryPair(64)
+	_, endpoint := network.NewMemoryPair(64)
 	running := server.New(config, endpoint, generator)
 	t.Cleanup(running.Close)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := client.Send(ctx, network.SetViewCenter{
-		Sequence:  1,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{},
-	}); err != nil {
-		t.Fatal(err)
-	}
 
 	ready := make(map[core.ChunkPos]struct{})
 	deadline := time.Now().Add(2 * time.Second)

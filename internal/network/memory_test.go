@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 )
 
@@ -18,7 +17,7 @@ func TestMemoryTransportPreservesOrderBothDirections(t *testing.T) {
 	defer cancel()
 
 	for sequence := uint64(1); sequence <= 100; sequence++ {
-		if err := client.Send(ctx, network.SetViewCenter{Sequence: sequence}); err != nil {
+		if err := client.Send(ctx, network.PlayerInput{Sequence: sequence}); err != nil {
 			t.Fatal(err)
 		}
 		if err := server.Send(ctx, network.CommandRejected{
@@ -33,7 +32,7 @@ func TestMemoryTransportPreservesOrderBothDirections(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := clientMessage.(network.SetViewCenter).Sequence; got != sequence {
+		if got := clientMessage.(network.PlayerInput).Sequence; got != sequence {
 			t.Fatalf("client→server sequence = %d，想要 %d", got, sequence)
 		}
 
@@ -53,14 +52,14 @@ func TestMemoryTransportAppliesCapacityBackpressure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := client.Send(ctx, network.SetViewCenter{Sequence: 1}); err != nil {
+	if err := client.Send(ctx, network.PlayerInput{Sequence: 1}); err != nil {
 		t.Fatal(err)
 	}
 	started := make(chan struct{})
 	result := make(chan error, 1)
 	go func() {
 		close(started)
-		result <- client.Send(ctx, network.SetViewCenter{Sequence: 2})
+		result <- client.Send(ctx, network.PlayerInput{Sequence: 2})
 	}()
 	<-started
 	select {
@@ -73,7 +72,7 @@ func TestMemoryTransportAppliesCapacityBackpressure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.(network.SetViewCenter).Sequence != 1 {
+	if first.(network.PlayerInput).Sequence != 1 {
 		t.Fatal("先收到的不是 sequence 1")
 	}
 	if err := <-result; err != nil {
@@ -83,7 +82,7 @@ func TestMemoryTransportAppliesCapacityBackpressure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.(network.SetViewCenter).Sequence != 2 {
+	if second.(network.PlayerInput).Sequence != 2 {
 		t.Fatal("后收到的不是 sequence 2")
 	}
 }
@@ -93,7 +92,7 @@ func TestMemoryTransportCancellationReleasesBlockedSend(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	if err := client.Send(
 		context.Background(),
-		network.SetViewCenter{Sequence: 1},
+		network.PlayerInput{Sequence: 1},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +102,7 @@ func TestMemoryTransportCancellationReleasesBlockedSend(t *testing.T) {
 	result := make(chan error, 1)
 	go func() {
 		close(started)
-		result <- client.Send(ctx, network.SetViewCenter{Sequence: 2})
+		result <- client.Send(ctx, network.PlayerInput{Sequence: 2})
 	}()
 	<-started
 	select {
@@ -172,7 +171,7 @@ func TestMemoryTransportCloseWakesBlockedSend(t *testing.T) {
 	client, server := network.NewMemoryPair(1)
 	if err := client.Send(
 		context.Background(),
-		network.SetViewCenter{Sequence: 1},
+		network.PlayerInput{Sequence: 1},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +182,7 @@ func TestMemoryTransportCloseWakesBlockedSend(t *testing.T) {
 		close(started)
 		result <- client.Send(
 			context.Background(),
-			network.SetViewCenter{Sequence: 2},
+			network.PlayerInput{Sequence: 2},
 		)
 	}()
 	<-started
@@ -210,7 +209,7 @@ func TestMemoryTransportDrainsQueuedMessagesBeforeClosed(t *testing.T) {
 	for sequence := uint64(1); sequence <= 2; sequence++ {
 		if err := client.Send(
 			context.Background(),
-			network.SetViewCenter{Sequence: sequence},
+			network.PlayerInput{Sequence: sequence},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -226,7 +225,7 @@ func TestMemoryTransportDrainsQueuedMessagesBeforeClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := message.(network.SetViewCenter).Sequence; got != sequence {
+		if got := message.(network.PlayerInput).Sequence; got != sequence {
 			t.Fatalf("sequence = %d，想要 %d", got, sequence)
 		}
 	}
@@ -254,9 +253,7 @@ func TestMemoryTransportConcurrentCloseIsSafe(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := client.Send(ctx, network.SetViewCenter{
-		Dimension: core.Overworld,
-	}); !errors.Is(err, network.ErrClosed) {
+	if err := client.Send(ctx, network.PlayerInput{}); !errors.Is(err, network.ErrClosed) {
 		t.Fatalf("并发 Close 后 Send = %v", err)
 	}
 }

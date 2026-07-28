@@ -11,41 +11,23 @@ import (
 
 func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 	clientMessages := []network.ClientMessage{
-		network.SetViewCenter{
-			Sequence:  1,
-			Dimension: core.Overworld,
-			Center:    core.ChunkPos{X: 2, Z: -3},
-		},
-		network.BreakRay{
-			Sequence:  2,
-			Dimension: core.Overworld,
-			Origin:    mgl32.Vec3{1, 2, 3},
-			Direction: mgl32.Vec3{0, -1, 0},
-		},
-		network.PlaceRay{
-			Sequence:  3,
-			Dimension: core.Overworld,
-			Origin:    mgl32.Vec3{1, 2, 3},
-			Direction: mgl32.Vec3{0, -1, 0},
-			Block:     core.StoneID,
-		},
 		network.PlayerInput{
-			Sequence: 4,
+			Sequence: 1,
 			MoveX:    -1,
 			MoveZ:    1,
 			Jump:     true,
 			Yaw:      90,
 			Pitch:    -15,
 		},
-		network.BreakBlock{Sequence: 5, Yaw: 90, Pitch: -15},
+		network.BreakBlock{Sequence: 2, Yaw: 90, Pitch: -15},
 		network.PlaceBlock{
-			Sequence: 6,
+			Sequence: 3,
 			Yaw:      90,
 			Pitch:    -15,
 			Block:    core.StoneID,
 		},
 		network.RequestChunkResync{
-			Sequence:     7,
+			Sequence:     4,
 			Dimension:    core.Overworld,
 			Chunk:        core.ChunkPos{X: 2, Z: -3},
 			HaveRevision: 7,
@@ -72,7 +54,7 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Reset:             true,
 		},
 	}
-	if len(clientMessages) != 7 || len(serverMessages) != 5 {
+	if len(clientMessages) != 4 || len(serverMessages) != 5 {
 		t.Fatal("消息集合不完整")
 	}
 }

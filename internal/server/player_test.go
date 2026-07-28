@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"runtime"
 	"testing"
@@ -14,6 +15,90 @@ import (
 	"minecraft-go/internal/sim"
 	"minecraft-go/internal/world"
 )
+
+func TestTrustedObserverIsDisabledByDefault(t *testing.T) {
+	running := newDefaultTestServer(t)
+	err := running.SetTrustedObserverCenter(core.Overworld, core.ChunkPos{X: 99})
+	if !errors.Is(err, ErrTrustedObserverDisabled) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTrustedObserverCoalescesCenterAndDrivesGeneration(t *testing.T) {
+	running := newTrustedObserverTestServer(t)
+	for x := int32(1); x <= 3; x++ {
+		if err := running.SetTrustedObserverCenter(
+			core.Overworld,
+			core.ChunkPos{X: x},
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := running.StepForTest()
+	if !containsChunk(result.Generate, core.ChunkPos{X: 3}) ||
+		containsChunk(result.Generate, core.ChunkPos{X: 1}) {
+		t.Fatalf("Generate=%+v", result.Generate)
+	}
+}
+
+func TestTrustedObserverDoesNotRegisterPlayer(t *testing.T) {
+	running := newTrustedObserverTestServer(t)
+	if player, ok := running.PlayerState(); ok {
+		t.Fatalf("trusted observer 注册了玩家: %+v", player)
+	}
+}
+
+func TestTrustedObserverRejectsNonOverworldCenter(t *testing.T) {
+	running := newTrustedObserverTestServer(t)
+	if err := running.SetTrustedObserverCenter(
+		core.DimensionID(99),
+		core.ChunkPos{X: 7},
+	); err == nil {
+		t.Fatal("非 Overworld trusted center 未被拒绝")
+	}
+	if result := running.StepForTest(); len(result.Generate) != 0 {
+		t.Fatalf("非法 center 驱动了生成: %+v", result.Generate)
+	}
+}
+
+func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
+	client, endpoint := network.NewMemoryPair(32)
+	config := DefaultConfig(42)
+	config.ViewRadius = 0
+	config.Workers = 1
+	config.TrustedObserver = true
+	running := New(config, endpoint, playerTestGenerator{})
+	t.Cleanup(func() {
+		_ = client.Close()
+		running.Close()
+	})
+
+	if err := running.SetTrustedObserverCenter(
+		core.Overworld,
+		core.ChunkPos{X: 1},
+	); err != nil {
+		t.Fatal(err)
+	}
+	sendPlayerClientMessage(t, client, network.RequestChunkResync{
+		Sequence:  1_000,
+		Dimension: core.Overworld,
+		Chunk:     core.ChunkPos{X: 1},
+	})
+	waitForQueuedPlayerCommand(t, running)
+	if first := running.StepForTest(); !containsChunk(first.Generate, core.ChunkPos{X: 1}) {
+		t.Fatalf("首个 trusted center 未驱动生成: %+v", first.Generate)
+	}
+
+	if err := running.SetTrustedObserverCenter(
+		core.Overworld,
+		core.ChunkPos{X: 2},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if second := running.StepForTest(); !containsChunk(second.Generate, core.ChunkPos{X: 2}) {
+		t.Fatalf("客户端 sequence 饿死后续 trusted center: %+v", second.Generate)
+	}
+}
 
 func TestPlayerMessageTranslation(t *testing.T) {
 	tests := []struct {
@@ -310,6 +395,38 @@ func sendPlayerClientMessage(
 }
 
 type playerTestGenerator struct{}
+
+func newDefaultTestServer(t *testing.T) *Server {
+	t.Helper()
+	_, endpoint := network.NewMemoryPair(32)
+	config := DefaultConfig(42)
+	config.ViewRadius = 0
+	config.Workers = 1
+	running := New(config, endpoint, playerTestGenerator{})
+	t.Cleanup(running.Close)
+	return running
+}
+
+func newTrustedObserverTestServer(t *testing.T) *Server {
+	t.Helper()
+	_, endpoint := network.NewMemoryPair(32)
+	config := DefaultConfig(42)
+	config.ViewRadius = 0
+	config.Workers = 1
+	config.TrustedObserver = true
+	running := New(config, endpoint, playerTestGenerator{})
+	t.Cleanup(running.Close)
+	return running
+}
+
+func containsChunk(keys []core.ChunkKey, pos core.ChunkPos) bool {
+	for _, key := range keys {
+		if key.Dimension == core.Overworld && key.Pos == pos {
+			return true
+		}
+	}
+	return false
+}
 
 func (playerTestGenerator) GenerateChunk(position core.ChunkPos) *world.Chunk {
 	chunk := world.NewChunk(position)

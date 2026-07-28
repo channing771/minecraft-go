@@ -1,9 +1,8 @@
 package sim_test
 
 import (
+	"math"
 	"testing"
-
-	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/sim"
@@ -40,37 +39,33 @@ func BenchmarkEngineStepPlayer(b *testing.B) {
 func BenchmarkEngineStepBlockChanges(b *testing.B) {
 	engine := sim.NewEngine(flatBaseBlock, 0)
 	session := sim.SessionID(1)
-	engine.Enqueue(sim.Command{
-		Session:   session,
-		Sequence:  1,
-		Kind:      sim.CommandSetViewCenter,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{},
-	})
+	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	engine.Step()
+	chunk := generateFlatChunk(core.ChunkPos{})
+	chunk.SetBlock(0, 2, 5, core.StoneID)
 	engine.SubmitGenerated(sim.GeneratedChunk{
 		Dimension: core.Overworld,
 		Pos:       core.ChunkPos{},
-		Chunk:     generateFlatChunk(core.ChunkPos{}),
+		Chunk:     chunk,
 	})
-	engine.Step()
+	result := engine.Step()
+	if len(result.Players) != 1 || !result.Players[0].Ready {
+		b.Fatalf("玩家未 Ready: %+v", result.Players)
+	}
 
-	sequence := uint64(2)
+	sequence := uint64(1)
 	placing := true
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
 		command := sim.Command{
-			Session: session, Sequence: sequence,
-			Dimension: core.Overworld,
-			Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
-			Direction: mgl32.Vec3{0, -1, 0},
+			Session: session, Sequence: sequence, Yaw: float32(math.Pi),
 		}
 		if placing {
-			command.Kind = sim.CommandPlaceRay
+			command.Kind = sim.CommandPlaceBlock
 			command.Block = core.StoneID
 		} else {
-			command.Kind = sim.CommandBreakRay
+			command.Kind = sim.CommandBreakBlock
 		}
 		engine.Enqueue(command)
 		engine.Step()

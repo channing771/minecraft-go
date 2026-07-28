@@ -30,12 +30,13 @@ type Clock interface {
 }
 
 type sessionState struct {
-	lastSequence uint64
-	hasView      bool
-	dimension    core.DimensionID
-	center       core.ChunkPos
-	wanted       map[core.ChunkKey]struct{}
-	player       *playerState
+	lastSequence                uint64
+	lastTrustedObserverSequence uint64
+	hasView                     bool
+	dimension                   core.DimensionID
+	center                      core.ChunkPos
+	wanted                      map[core.ChunkKey]struct{}
+	player                      *playerState
 }
 
 type pendingChunkChanges struct {
@@ -105,12 +106,11 @@ func (engine *Engine) Step() TickResult {
 	viewChanged := false
 	for _, command := range commands {
 		session := engine.session(command.Session)
-		if command.Sequence <= session.lastSequence {
-			continue
-		}
-		session.lastSequence = command.Sequence
-		switch command.Kind {
-		case CommandSetViewCenter:
+		if command.Kind == CommandTrustedObserverCenter {
+			if command.Sequence <= session.lastTrustedObserverSequence {
+				continue
+			}
+			session.lastTrustedObserverSequence = command.Sequence
 			if session.player != nil {
 				continue
 			}
@@ -118,16 +118,13 @@ func (engine *Engine) Step() TickResult {
 			session.dimension = command.Dimension
 			session.center = command.Center
 			viewChanged = true
-		case CommandBreakRay, CommandPlaceRay:
-			if session.player != nil && session.player.lifecycle != PlayerActive {
-				result.Rejected = append(result.Rejected, Rejection{
-					Session:  command.Session,
-					Sequence: command.Sequence,
-					Reason:   RejectPlayerNotReady,
-				})
-				continue
-			}
-			interactions = append(interactions, command)
+			continue
+		}
+		if command.Sequence <= session.lastSequence {
+			continue
+		}
+		session.lastSequence = command.Sequence
+		switch command.Kind {
 		case CommandBreakBlock, CommandPlaceBlock:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
 				result.Rejected = append(result.Rejected, Rejection{
@@ -443,32 +440,23 @@ func (engine *Engine) executeInteraction(
 	pending map[core.ChunkKey]*pendingChunkChanges,
 ) (RejectReason, bool) {
 	session := engine.sessions[command.Session]
-	var dimensionID core.DimensionID
-	var origin, direction mgl32.Vec3
-	switch command.Kind {
-	case CommandBreakBlock, CommandPlaceBlock:
-		if session == nil || session.player == nil ||
-			session.player.lifecycle != PlayerActive {
-			return RejectPlayerNotReady, true
-		}
-		dimensionID = session.dimension
-		origin = session.player.state.Position.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
-		direction = LookDirection(command.Yaw, command.Pitch)
-	case CommandBreakRay, CommandPlaceRay:
-		if session != nil && session.player != nil &&
-			session.player.lifecycle != PlayerActive {
-			return RejectPlayerNotReady, true
-		}
-		dimensionID = command.Dimension
-		origin = command.Origin
-		direction = command.Direction
-	default:
+	if command.Kind != CommandBreakBlock && command.Kind != CommandPlaceBlock {
 		return RejectInvalidRay, true
 	}
+	if session == nil || session.player == nil ||
+		session.player.lifecycle != PlayerActive {
+		return RejectPlayerNotReady, true
+	}
+	dimensionID := session.dimension
+	origin := session.player.state.Position.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+	direction := LookDirection(command.Yaw, command.Pitch)
 	dimension := engine.dimensions[dimensionID]
-	originBlock, valid := rayOriginBlock(origin)
-	if !valid || !validDirection(direction) || session == nil ||
-		!session.hasView || session.dimension != dimensionID || dimension == nil {
+	originBlock := core.BlockPos{
+		X: int32(math.Floor(float64(origin.X()))),
+		Y: int32(math.Floor(float64(origin.Y()))),
+		Z: int32(math.Floor(float64(origin.Z()))),
+	}
+	if !session.hasView || dimension == nil {
 		return RejectInvalidRay, true
 	}
 	originKey := core.ChunkKey{
@@ -478,8 +466,7 @@ func (engine *Engine) executeInteraction(
 	if _, subscribed := session.wanted[originKey]; !subscribed {
 		return RejectInvalidRay, true
 	}
-	if (command.Kind == CommandPlaceRay || command.Kind == CommandPlaceBlock) &&
-		!placeable(command.Block) {
+	if command.Kind == CommandPlaceBlock && !placeable(command.Block) {
 		return RejectInvalidBlock, true
 	}
 
@@ -506,7 +493,7 @@ func (engine *Engine) executeInteraction(
 	}
 
 	switch command.Kind {
-	case CommandBreakRay, CommandBreakBlock:
+	case CommandBreakBlock:
 		block, ready := dimension.BlockAt(hit.Block)
 		if !ready {
 			return RejectChunkNotReady, true
@@ -528,7 +515,7 @@ func (engine *Engine) executeInteraction(
 		}
 		return 0, false
 
-	case CommandPlaceRay, CommandPlaceBlock:
+	case CommandPlaceBlock:
 		if hit.Face == core.BlockFaceNone {
 			return RejectOccupied, true
 		}
@@ -540,16 +527,11 @@ func (engine *Engine) executeInteraction(
 		if !ready {
 			return RejectChunkNotReady, true
 		}
-		occupied := block != core.AirID
-		if command.Kind == CommandPlaceRay {
-			occupied = occupied || blockContains(target, origin)
-		} else {
-			occupied = occupied || placementOverlapsPlayer(
-				command.Block,
-				target,
-				session.player.state.Position,
-			)
-		}
+		occupied := block != core.AirID || placementOverlapsPlayer(
+			command.Block,
+			target,
+			session.player.state.Position,
+		)
 		if occupied {
 			return RejectOccupied, true
 		}
@@ -665,36 +647,6 @@ func (engine *Engine) finishChanges(
 	}
 }
 
-func rayOriginBlock(origin mgl32.Vec3) (core.BlockPos, bool) {
-	for _, component := range origin {
-		if math.IsNaN(float64(component)) || math.IsInf(float64(component), 0) {
-			return core.BlockPos{}, false
-		}
-	}
-	x := math.Floor(float64(origin[0]))
-	y := math.Floor(float64(origin[1]))
-	z := math.Floor(float64(origin[2]))
-	if x < math.MinInt32 || x > math.MaxInt32 ||
-		y < math.MinInt32 || y > math.MaxInt32 ||
-		z < math.MinInt32 || z > math.MaxInt32 {
-		return core.BlockPos{}, false
-	}
-	return core.BlockPos{X: int32(x), Y: int32(y), Z: int32(z)}, true
-}
-
-func validDirection(direction mgl32.Vec3) bool {
-	for _, component := range direction {
-		if math.IsNaN(float64(component)) || math.IsInf(float64(component), 0) {
-			return false
-		}
-	}
-	length := math.Hypot(
-		math.Hypot(float64(direction[0]), float64(direction[1])),
-		float64(direction[2]),
-	)
-	return length >= 1e-6
-}
-
 func placeable(block core.BlockID) bool {
 	return block == core.StoneID || block == core.DirtID || block == core.GrassID
 }
@@ -717,12 +669,6 @@ func adjacentBlock(block core.BlockPos, face core.BlockFace) core.BlockPos {
 		panic(fmt.Sprintf("sim: invalid hit face %d", face))
 	}
 	return block
-}
-
-func blockContains(block core.BlockPos, point mgl32.Vec3) bool {
-	return point[0] >= float32(block.X) && point[0] < float32(block.X+1) &&
-		point[1] >= float32(block.Y) && point[1] < float32(block.Y+1) &&
-		point[2] >= float32(block.Z) && point[2] < float32(block.Z+1)
 }
 
 func placementOverlapsPlayer(

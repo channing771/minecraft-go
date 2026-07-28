@@ -21,7 +21,7 @@ import (
 
 const (
 	benchmarkSeed   = 20260726
-	scenarioVersion = 2
+	scenarioVersion = 3
 )
 
 var (
@@ -59,10 +59,6 @@ func runBenchmark(app *application, outputPath string) error {
 	}
 	flyingStart := app.camera.Pos
 	probe := server.NewTerrainProbe(benchmarkSeed)
-	acceptedAtStart := app.acceptedChanges
-	rejectedAtStart := app.rejectedCommands
-	interactionCount := 0
-	nextInteraction := time.Second
 	flying, err := measurePhase(app, "flying", flyDuration, func(elapsed time.Duration) {
 		seconds := float32(elapsed.Seconds())
 		app.camera.Pos[0] = flyingStart[0] + seconds*48
@@ -72,35 +68,24 @@ func runBenchmark(app *application, outputPath string) error {
 		app.camera.Pos[1] = float32(probe.HeightAt(x, z)) + 3.5
 		app.camera.Pitch = -float32(math.Pi)/2 + 0.02
 		app.updateCenter()
-		for elapsed >= nextInteraction {
-			if interactionCount%2 == 0 {
-				app.breakBlock()
-			} else {
-				blocks := [...]core.BlockID{core.StoneID, core.DirtID, core.GrassID}
-				app.selectedBlock = blocks[(interactionCount/2)%len(blocks)]
-				app.placeBlock()
-			}
-			interactionCount++
-			nextInteraction += time.Second
-		}
 	})
 	if err != nil {
 		return err
 	}
-	if err := waitForBenchmarkInteractions(
-		app, acceptedAtStart+interactionCount, rejectedAtStart, 10*time.Second,
-	); err != nil {
+	finalCenter := app.center
+	if err := waitForBenchmarkCenterConsistency(app, finalCenter, 10*time.Second); err != nil {
 		return err
 	}
 	authoritativeHash, authoritativeRevision, authoritativeOK := app.server.ChunkHash(
-		core.Overworld, app.lastInteractionChunk,
+		core.Overworld, finalCenter,
 	)
 	mirrorHash, mirrorRevision, mirrorOK := app.mirror.Hash(
-		core.Overworld, app.lastInteractionChunk,
+		core.Overworld, finalCenter,
 	)
 	if !authoritativeOK || !mirrorOK || authoritativeRevision != mirrorRevision ||
 		authoritativeHash != mirrorHash {
-		return fmt.Errorf("交互后权威/镜像不一致: server=(%x,%d,%v) mirror=(%x,%d,%v)",
+		return fmt.Errorf("最终 trusted observer 中心权威/镜像不一致: center=%+v server=(%x,%d,%v) mirror=(%x,%d,%v)",
+			finalCenter,
 			authoritativeHash, authoritativeRevision, authoritativeOK,
 			mirrorHash, mirrorRevision, mirrorOK)
 	}
@@ -201,24 +186,24 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 	}
 }
 
-func waitForBenchmarkInteractions(
+func waitForBenchmarkCenterConsistency(
 	app *application,
-	wantAccepted int,
-	rejectedAtStart int,
+	center core.ChunkPos,
 	timeout time.Duration,
 ) error {
 	deadline := time.Now().Add(timeout)
-	for app.acceptedChanges < wantAccepted && time.Now().Before(deadline) {
+	for time.Now().Before(deadline) {
 		app.frame(4096)
+		authoritativeHash, authoritativeRevision, authoritativeOK := app.server.ChunkHash(
+			core.Overworld, center,
+		)
+		mirrorHash, mirrorRevision, mirrorOK := app.mirror.Hash(core.Overworld, center)
+		if authoritativeOK && mirrorOK && authoritativeRevision == mirrorRevision &&
+			authoritativeHash == mirrorHash {
+			return nil
+		}
 	}
-	if app.rejectedCommands != rejectedAtStart {
-		return fmt.Errorf("脚本交互被拒绝 %d 次", app.rejectedCommands-rejectedAtStart)
-	}
-	if app.acceptedChanges != wantAccepted {
-		return fmt.Errorf("脚本交互成功修改=%d，想要 %d",
-			app.acceptedChanges, wantAccepted)
-	}
-	return nil
+	return fmt.Errorf("最终 trusted observer 中心在 %s 内未收敛: center=%+v", timeout, center)
 }
 
 func runWarmup(app *application, duration time.Duration) error {

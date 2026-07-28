@@ -17,34 +17,6 @@ type ServerMessage interface {
 	serverMessage()
 }
 
-// 以下 M2A 过渡消息保留到 Task 14，在 app 和 benchmark 迁移后删除。
-type SetViewCenter struct {
-	Sequence  uint64
-	Dimension core.DimensionID
-	Center    core.ChunkPos
-}
-
-func (SetViewCenter) clientMessage() {}
-
-type BreakRay struct {
-	Sequence  uint64
-	Dimension core.DimensionID
-	Origin    mgl32.Vec3
-	Direction mgl32.Vec3
-}
-
-func (BreakRay) clientMessage() {}
-
-type PlaceRay struct {
-	Sequence  uint64
-	Dimension core.DimensionID
-	Origin    mgl32.Vec3
-	Direction mgl32.Vec3
-	Block     core.BlockID
-}
-
-func (PlaceRay) clientMessage() {}
-
 // PlayerInput 仅承载玩家输入值；语义验证由 sim 和 client 完成。
 type PlayerInput struct {
 	Sequence uint64

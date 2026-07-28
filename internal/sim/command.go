@@ -14,13 +14,11 @@ type SessionID uint64
 type CommandKind uint8
 
 const (
-	CommandSetViewCenter CommandKind = iota
-	CommandBreakRay
-	CommandPlaceRay
+	CommandTrustedObserverCenter CommandKind = iota
+	CommandPlayerInput
+	CommandBreakBlock
+	CommandPlaceBlock
 	CommandResync
-	CommandPlayerInput CommandKind = 4
-	CommandBreakBlock  CommandKind = 5
-	CommandPlaceBlock  CommandKind = 6
 )
 
 // LookDirection 把玩家 look 角转换为单位方向；yaw=0、pitch=0 朝向 -Z。
@@ -54,8 +52,6 @@ type Command struct {
 	Center       core.ChunkPos
 	Chunk        core.ChunkPos
 	HaveRevision uint64
-	Origin       mgl32.Vec3
-	Direction    mgl32.Vec3
 	Block        core.BlockID
 	MoveX        int8
 	MoveZ        int8

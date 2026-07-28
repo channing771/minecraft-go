@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-gl/mathgl/mgl32"
-
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/sim"
@@ -89,12 +87,10 @@ func TestPublishedDeltaIsContiguousAfterSnapshot(t *testing.T) {
 	}
 
 	running.incoming <- sim.Command{
-		Session:   localSessionID,
-		Sequence:  2,
-		Kind:      sim.CommandBreakRay,
-		Dimension: core.Overworld,
-		Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
-		Direction: mgl32.Vec3{0, -1, 0},
+		Session:  localSessionID,
+		Sequence: 2,
+		Kind:     sim.CommandBreakBlock,
+		Pitch:    -1.5,
 	}
 	running.Step()
 	delta := recvWorldServerMessage(t, client).(network.BlockChanges)
@@ -152,6 +148,14 @@ func TestForgetRemovesPendingSnapshotsAndSortsChunks(t *testing.T) {
 			ViewCenter: core.ChunkPos{},
 		}},
 	})
+	for _, key := range keys {
+		if _, pending := running.session.pendingSnapshots[key]; pending {
+			t.Fatalf("Forget 后 pendingSnapshots 仍包含 %+v", key)
+		}
+		if _, published := running.session.publications[key]; published {
+			t.Fatalf("Forget 后 publications 仍包含 %+v", key)
+		}
+	}
 	forgotten := recvWorldServerMessage(t, client).(network.ForgetChunks)
 	if !reflect.DeepEqual(forgotten.Chunks, want) {
 		t.Fatalf("ForgetChunks = %+v，想要 %+v", forgotten.Chunks, want)

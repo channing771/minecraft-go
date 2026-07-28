@@ -319,11 +319,8 @@ func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {
 		Session: sessionID, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1,
 	})
 	engine.Enqueue(Command{
-		Session: sessionID, Sequence: 3, Kind: CommandPlaceRay,
-		Dimension: core.Overworld,
-		Origin:    mgl32.Vec3{16.5, 2.5, 0.5},
-		Direction: mgl32.Vec3{0, -1, 0},
-		Block:     core.StoneID,
+		Session: sessionID, Sequence: 3, Kind: CommandBreakBlock,
+		Pitch: -float32(math.Pi)/2 + 0.01,
 	})
 
 	result := engine.Step()
@@ -335,12 +332,12 @@ func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {
 		t.Fatalf("移动后的新订阅没有在交互前生效: %+v", result)
 	}
 	chunk, _, ok := engine.CloneReadyChunk(core.ChunkKey{Dimension: core.Overworld, Pos: nextChunk})
-	if !ok || chunk.BlockAt(0, 1, 0) != core.StoneID {
+	if !ok || chunk.BlockAt(0, 0, 0) != core.AirID {
 		t.Fatalf("新订阅区块交互未执行: ok=%v chunk=%v", ok, chunk)
 	}
 }
 
-func TestPlayerCenterDerivationAlsoRunsWhenLegacyViewChanges(t *testing.T) {
+func TestPlayerCenterDerivationAlsoRunsWhenTrustedObserverChanges(t *testing.T) {
 	engine, sessionID := readyMovementPlayer(t)
 	loadMovementChunk(t, engine.dimensions[core.Overworld], movementFlatChunk(core.ChunkPos{X: 1}))
 	player := engine.sessions[sessionID].player
@@ -353,7 +350,7 @@ func TestPlayerCenterDerivationAlsoRunsWhenLegacyViewChanges(t *testing.T) {
 		Session: sessionID, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1,
 	})
 	engine.Enqueue(Command{
-		Session: 2, Sequence: 1, Kind: CommandSetViewCenter,
+		Session: 2, Sequence: 1, Kind: CommandTrustedObserverCenter,
 		Dimension: core.Overworld, Center: core.ChunkPos{X: 8},
 	})
 

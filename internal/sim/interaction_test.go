@@ -1,9 +1,8 @@
 package sim_test
 
 import (
+	"math"
 	"testing"
-
-	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/sim"
@@ -12,53 +11,32 @@ import (
 func TestEngineBreakValidation(t *testing.T) {
 	tests := []struct {
 		name      string
-		origin    mgl32.Vec3
-		direction mgl32.Vec3
+		yaw       float32
+		pitch     float32
 		rejected  bool
 		reason    sim.RejectReason
 		wantBlock core.BlockID
 		position  core.BlockPos
 	}{
 		{
-			name:      "stone breaks to air",
-			origin:    mgl32.Vec3{0.5, -0.5, 0.5},
-			direction: mgl32.Vec3{0, -1, 0},
+			name:      "grass breaks to air",
+			pitch:     -float32(math.Pi)/2 + 0.01,
 			wantBlock: core.AirID,
-			position:  core.BlockPos{X: 0, Y: -1, Z: 0},
+			position:  core.BlockPos{X: 0, Y: 0, Z: 0},
 		},
 		{
-			name:      "bedrock is protected",
-			origin:    mgl32.Vec3{0.5, -63.5, 0.5},
-			direction: mgl32.Vec3{0, -1, 0},
+			name:      "invalid look",
+			pitch:     float32(math.Pi) / 2,
 			rejected:  true,
-			reason:    sim.RejectProtectedBlock,
-			wantBlock: core.BedrockID,
-			position:  core.BlockPos{X: 0, Y: core.MinY, Z: 0},
-		},
-		{
-			name:      "invalid direction",
-			origin:    mgl32.Vec3{0.5, 2.5, 0.5},
-			direction: mgl32.Vec3{},
-			rejected:  true,
-			reason:    sim.RejectInvalidRay,
+			reason:    sim.RejectInvalidInput,
 			wantBlock: core.GrassID,
 			position:  core.BlockPos{X: 0, Y: 0, Z: 0},
 		},
 		{
 			name:      "no target",
-			origin:    mgl32.Vec3{0.5, 10.5, 0.5},
-			direction: mgl32.Vec3{0, 1, 0},
+			pitch:     float32(math.Pi)/2 - 0.01,
 			rejected:  true,
 			reason:    sim.RejectNoTarget,
-			wantBlock: core.GrassID,
-			position:  core.BlockPos{X: 0, Y: 0, Z: 0},
-		},
-		{
-			name:      "unloaded traversal",
-			origin:    mgl32.Vec3{15.5, 10.5, 0.5},
-			direction: mgl32.Vec3{1, 0, 0},
-			rejected:  true,
-			reason:    sim.RejectChunkNotReady,
 			wantBlock: core.GrassID,
 			position:  core.BlockPos{X: 0, Y: 0, Z: 0},
 		},
@@ -68,10 +46,8 @@ func TestEngineBreakValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine, session, chunkPos := readyFlatEngine(t)
 			engine.Enqueue(sim.Command{
-				Session: session, Sequence: 2, Kind: sim.CommandBreakRay,
-				Dimension: core.Overworld,
-				Origin:    tc.origin,
-				Direction: tc.direction,
+				Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
+				Yaw: tc.yaw, Pitch: tc.pitch,
 			})
 			result := engine.Step()
 			if tc.rejected {
@@ -100,11 +76,8 @@ func TestEnginePlaceValidationAndWhitelist(t *testing.T) {
 	t.Run("invalid block", func(t *testing.T) {
 		engine, session, _ := readyFlatEngine(t)
 		engine.Enqueue(sim.Command{
-			Session: session, Sequence: 2, Kind: sim.CommandPlaceRay,
-			Dimension: core.Overworld,
-			Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
-			Direction: mgl32.Vec3{0, -1, 0},
-			Block:     core.BarrierID,
+			Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+			Yaw: float32(math.Pi), Block: core.BarrierID,
 		})
 		assertRejected(t, engine.Step(), sim.RejectInvalidBlock)
 	})
@@ -112,38 +85,30 @@ func TestEnginePlaceValidationAndWhitelist(t *testing.T) {
 	t.Run("origin inside solid is occupied", func(t *testing.T) {
 		engine, session, _ := readyFlatEngine(t)
 		engine.Enqueue(sim.Command{
-			Session: session, Sequence: 2, Kind: sim.CommandPlaceRay,
-			Dimension: core.Overworld,
-			Origin:    mgl32.Vec3{0.5, 0.5, 0.5},
-			Direction: mgl32.Vec3{0, -1, 0},
-			Block:     core.StoneID,
+			Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+			Pitch: -float32(math.Pi)/2 + 0.01, Block: core.StoneID,
 		})
 		assertRejected(t, engine.Step(), sim.RejectOccupied)
 	})
 
 	t.Run("stone dirt grass succeed", func(t *testing.T) {
-		engine, session, chunkPos := readyFlatEngine(t)
 		blocks := []core.BlockID{core.StoneID, core.DirtID, core.GrassID}
 		for index, block := range blocks {
+			engine, session, chunkPos := readyFlatEngine(t)
 			engine.Enqueue(sim.Command{
-				Session: session, Sequence: uint64(index + 2), Kind: sim.CommandPlaceRay,
-				Dimension: core.Overworld,
-				Origin:    mgl32.Vec3{float32(index) + 0.5, 2.5, 0.5},
-				Direction: mgl32.Vec3{0, -1, 0},
-				Block:     block,
+				Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+				Yaw: float32(math.Pi), Block: block,
 			})
-		}
-		result := engine.Step()
-		if len(result.Rejected) != 0 {
-			t.Fatalf("合法放置被拒绝: %+v", result.Rejected)
-		}
-		chunk, _, _ := engine.CloneReadyChunk(core.ChunkKey{
-			Dimension: core.Overworld,
-			Pos:       chunkPos,
-		})
-		for index, want := range blocks {
-			if got := chunk.BlockAt(index, 1, 0); got != want {
-				t.Fatalf("x=%d block = %d，想要 %d", index, got, want)
+			result := engine.Step()
+			if len(result.Rejected) != 0 {
+				t.Fatalf("block[%d]=%d 合法放置被拒绝: %+v", index, block, result.Rejected)
+			}
+			chunk, _, _ := engine.CloneReadyChunk(core.ChunkKey{
+				Dimension: core.Overworld,
+				Pos:       chunkPos,
+			})
+			if got := chunk.BlockAt(0, 2, 4); got != block {
+				t.Fatalf("block[%d] 放置结果 = %d，想要 %d", index, got, block)
 			}
 		}
 	})

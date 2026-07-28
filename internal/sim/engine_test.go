@@ -2,11 +2,10 @@ package sim_test
 
 import (
 	"context"
+	"math"
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/sim"
@@ -14,22 +13,19 @@ import (
 
 func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
 	engine, session, chunkPos := readyFlatEngine(t)
-	origin := mgl32.Vec3{0.5, 2.5, 0.5}
-	direction := mgl32.Vec3{0, -1, 0}
+	yaw := float32(math.Pi)
 
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 4, Kind: sim.CommandPlaceRay,
-		Dimension: core.Overworld, Origin: origin, Direction: direction,
-		Block: core.DirtID,
+		Session: session, Sequence: 4, Kind: sim.CommandPlaceBlock,
+		Yaw: yaw, Block: core.DirtID,
 	})
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandPlaceRay,
-		Dimension: core.Overworld, Origin: origin, Direction: direction,
-		Block: core.StoneID,
+		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+		Yaw: yaw, Block: core.StoneID,
 	})
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 3, Kind: sim.CommandBreakRay,
-		Dimension: core.Overworld, Origin: origin, Direction: direction,
+		Session: session, Sequence: 3, Kind: sim.CommandBreakBlock,
+		Yaw: yaw,
 	})
 	result := engine.Step()
 	if len(result.Rejected) != 0 {
@@ -46,13 +42,13 @@ func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
 	if !ok || revision != 2 {
 		t.Fatalf("CloneReadyChunk revision = %d, ok=%v", revision, ok)
 	}
-	if got := chunk.BlockAt(0, 1, 0); got != core.DirtID {
+	if got := chunk.BlockAt(0, 2, 4); got != core.DirtID {
 		t.Fatalf("最终 block = %d，想要 dirt", got)
 	}
 
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 4, Kind: sim.CommandBreakRay,
-		Dimension: core.Overworld, Origin: origin, Direction: direction,
+		Session: session, Sequence: 4, Kind: sim.CommandBreakBlock,
+		Yaw: yaw,
 	})
 	duplicate := engine.Step()
 	if len(duplicate.Changes) != 0 || len(duplicate.Rejected) != 0 {
@@ -69,13 +65,10 @@ func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
 
 func TestEngineBatchesChunkRevisionOncePerTick(t *testing.T) {
 	engine, session, chunkPos := readyFlatEngine(t)
-	for x := 2; x >= 0; x-- {
+	for sequence := uint64(2); sequence <= 4; sequence++ {
 		engine.Enqueue(sim.Command{
-			Session: session, Sequence: uint64(4 - x), Kind: sim.CommandPlaceRay,
-			Dimension: core.Overworld,
-			Origin:    mgl32.Vec3{float32(x) + 0.5, 2.5, 0.5},
-			Direction: mgl32.Vec3{0, -1, 0},
-			Block:     core.StoneID,
+			Session: session, Sequence: sequence, Kind: sim.CommandPlaceBlock,
+			Yaw: float32(math.Pi), Block: core.StoneID,
 		})
 	}
 	result := engine.Step()
@@ -89,8 +82,13 @@ func TestEngineBatchesChunkRevisionOncePerTick(t *testing.T) {
 	if len(batch.Changes) != 3 {
 		t.Fatalf("changes = %+v", batch.Changes)
 	}
+	wantPositions := []core.BlockPos{
+		{X: 0, Y: 2, Z: 2},
+		{X: 0, Y: 2, Z: 3},
+		{X: 0, Y: 2, Z: 4},
+	}
 	for index, change := range batch.Changes {
-		if change.Position.X != int32(index) || change.Position.Y != 1 {
+		if change.Position != wantPositions[index] {
 			t.Fatalf("changes 未按 block index 排序: %+v", batch.Changes)
 		}
 	}
@@ -112,11 +110,8 @@ func TestEngineReplayIsDeterministic(t *testing.T) {
 	run := func() replayState {
 		engine, session, chunkPos := readyFlatEngine(t)
 		engine.Enqueue(sim.Command{
-			Session: session, Sequence: 2, Kind: sim.CommandPlaceRay,
-			Dimension: core.Overworld,
-			Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
-			Direction: mgl32.Vec3{0, -1, 0},
-			Block:     core.GrassID,
+			Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+			Yaw: float32(math.Pi), Block: core.GrassID,
 		})
 		engine.Step()
 		hash, revision, ok := engine.ChunkHash(core.ChunkKey{
@@ -151,8 +146,7 @@ func TestPlayerCommandsRejectRegisteredPendingPlayer(t *testing.T) {
 		{
 			name: "interaction",
 			command: sim.Command{
-				Kind: sim.CommandBreakRay, Dimension: core.Overworld,
-				Origin: mgl32.Vec3{0.5, 2.5, 0.5}, Direction: mgl32.Vec3{0, -1, 0},
+				Kind: sim.CommandBreakBlock,
 			},
 		},
 	}
@@ -189,10 +183,7 @@ func TestPendingInteractionStaysRejectedWhenPlayerActivatesSameTick(t *testing.T
 		Chunk:     generateFlatChunk(core.ChunkPos{}),
 	})
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 1, Kind: sim.CommandBreakRay,
-		Dimension: core.Overworld,
-		Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
-		Direction: mgl32.Vec3{0, -1, 0},
+		Session: session, Sequence: 1, Kind: sim.CommandBreakBlock,
 	})
 
 	result := engine.Step()
@@ -242,26 +233,23 @@ func readyFlatEngine(t *testing.T) (*sim.Engine, sim.SessionID, core.ChunkPos) {
 	engine := sim.NewEngine(flatBaseBlock, 0)
 	session := sim.SessionID(1)
 	chunkPos := core.ChunkPos{}
-	engine.Enqueue(sim.Command{
-		Session:   session,
-		Sequence:  1,
-		Kind:      sim.CommandSetViewCenter,
-		Dimension: core.Overworld,
-		Center:    chunkPos,
-	})
+	engine.RegisterSession(session, core.Overworld, chunkPos)
 	requested := engine.Step()
 	wantKey := core.ChunkKey{Dimension: core.Overworld, Pos: chunkPos}
 	if !reflect.DeepEqual(requested.Generate, []core.ChunkKey{wantKey}) {
 		t.Fatalf("Generate = %+v，想要 %+v", requested.Generate, wantKey)
 	}
+	chunk := generateFlatChunk(chunkPos)
+	chunk.SetBlock(0, 2, 5, core.StoneID)
 	engine.SubmitGenerated(sim.GeneratedChunk{
 		Dimension: core.Overworld,
 		Pos:       chunkPos,
-		Chunk:     generateFlatChunk(chunkPos),
+		Chunk:     chunk,
 	})
 	ready := engine.Step()
-	if !reflect.DeepEqual(ready.Ready, []core.ChunkKey{wantKey}) {
-		t.Fatalf("Ready = %+v，想要 %+v", ready.Ready, wantKey)
+	if !reflect.DeepEqual(ready.Ready, []core.ChunkKey{wantKey}) ||
+		len(ready.Players) != 1 || !ready.Players[0].Ready {
+		t.Fatalf("Ready = %+v Players=%+v，想要 %+v 与 active player", ready.Ready, ready.Players, wantKey)
 	}
 	return engine, session, chunkPos
 }

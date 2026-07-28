@@ -1,11 +1,62 @@
 package archcheck_test
 
 import (
+	"go/scanner"
+	"go/token"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
+	root := moduleRoot(t)
+	forbidden := map[string]struct{}{
+		"SetViewCenter":   {},
+		"BreakRay":        {},
+		"PlaceRay":        {},
+		"CommandBreakRay": {},
+		"CommandPlaceRay": {},
+	}
+	for _, sourceRoot := range []string{"cmd", "internal"} {
+		err := filepath.WalkDir(
+			filepath.Join(root, sourceRoot),
+			func(path string, entry fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if entry.IsDir() || filepath.Ext(path) != ".go" ||
+					path == filepath.Join(root, "internal", "archcheck", "deps_test.go") {
+					return nil
+				}
+				source, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				files := token.NewFileSet()
+				var sourceScanner scanner.Scanner
+				sourceScanner.Init(files.AddFile(path, -1, len(source)), source, nil, 0)
+				for {
+					position, kind, literal := sourceScanner.Scan()
+					if kind == token.EOF {
+						break
+					}
+					if kind == token.IDENT {
+						if _, retired := forbidden[literal]; retired {
+							t.Errorf("%s: legacy player authority identifier %s", files.Position(position), literal)
+						}
+					}
+				}
+				return nil
+			},
+		)
+		if err != nil {
+			t.Fatalf("扫描 %s Go 源码: %v", sourceRoot, err)
+		}
+	}
+}
 
 // allowed 列出每个内部包允许直接依赖的内部包。
 var allowed = map[string][]string{
