@@ -51,6 +51,7 @@ func runInteractive(app *application) {
 	lastFrame := time.Now()
 	escapeWasDown := false
 	clickWasDown := false
+	var input client.InputState
 
 	for !app.window.ShouldClose() {
 		app.window.Poll()
@@ -66,11 +67,32 @@ func runInteractive(app *application) {
 		escapeWasDown = escapeDown
 
 		clickDown := app.window.PrimaryButtonDown()
+		justCaptured := false
 		if clickDown && !clickWasDown && !app.window.CursorCaptured() {
 			app.window.SetCursorCaptured(true)
 			lastMouseX, lastMouseY = app.window.CursorPos()
+			justCaptured = true
 		}
 		clickWasDown = clickDown
+		number := 0
+		switch {
+		case app.window.KeyDown(client.Key1):
+			number = 1
+		case app.window.KeyDown(client.Key2):
+			number = 2
+		case app.window.KeyDown(client.Key3):
+			number = 3
+		}
+		actions := input.Update(clickDown, app.window.SecondaryButtonDown(), number)
+		app.selectedBlock = actions.SelectedBlock
+		if app.window.CursorCaptured() && !justCaptured {
+			if actions.Break {
+				app.breakBlock()
+			}
+			if actions.Place {
+				app.placeBlock()
+			}
+		}
 
 		if app.window.CursorCaptured() {
 			mouseX, mouseY := app.window.CursorPos()

@@ -5,13 +5,20 @@ import (
 	"log/slog"
 
 	"minecraft-go/internal/core"
+	"minecraft-go/internal/network"
 	"minecraft-go/internal/sim"
 	"minecraft-go/internal/world"
+	"minecraft-go/internal/worldgen"
 )
 
 type Generator interface {
 	GenerateChunk(core.ChunkPos) *world.Chunk
 	BaseBlockAt(core.BlockPos) core.BlockID
+}
+
+// NewEmbedded 创建使用内置确定性地形生成器的服务端。
+func NewEmbedded(config Config, endpoint network.ServerEndpoint) *Server {
+	return New(config, endpoint, worldgen.New(config.Seed))
 }
 
 func (server *Server) generationWorker() {

@@ -114,8 +114,9 @@ func waitUntilLoaded(app *application, timeout time.Duration) error {
 	lastLog := time.Time{}
 	for {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("固定场景在 %s 内未完成加载：stream=%+v pending=%d",
-				timeout, app.streamer.Stats(), app.renderer.PendingUploads())
+			return fmt.Errorf("固定场景在 %s 内未完成加载：chunks=%d/%d mesher=%+v pending=%d",
+				timeout, len(app.loadedChunks), wantedChunks, app.mesher.Stats(),
+				app.renderer.PendingUploads())
 		}
 		app.window.Poll()
 		if app.window.ShouldClose() {
@@ -124,17 +125,18 @@ func waitUntilLoaded(app *application, timeout time.Duration) error {
 		if !app.frame(4096) {
 			app.window.Focus()
 		}
-		stats := app.streamer.Stats()
-		if stats.CachedChunks == wantedChunks &&
+		stats := app.mesher.Stats()
+		if len(app.loadedChunks) == wantedChunks &&
 			stats.QueuedJobs == 0 &&
 			stats.InFlightJobs == 0 &&
 			stats.ReadyResults == 0 &&
+			stats.DirtySections == 0 &&
 			app.renderer.PendingUploads() == 0 {
 			return nil
 		}
 		if time.Since(lastLog) >= 5*time.Second {
 			fmt.Printf("加载中：chunks=%d/%d queued=%d active=%d ready=%d pending=%d\n",
-				stats.CachedChunks, wantedChunks, stats.QueuedJobs, stats.InFlightJobs,
+				len(app.loadedChunks), wantedChunks, stats.QueuedJobs, stats.InFlightJobs,
 				stats.ReadyResults, app.renderer.PendingUploads())
 			lastLog = time.Now()
 		}

@@ -23,6 +23,9 @@ const (
 	KeyLeftShift
 	KeyLeftControl
 	KeyEscape
+	Key1
+	Key2
+	Key3
 )
 
 var glfwKeys = [...]glfw.Key{
@@ -34,6 +37,9 @@ var glfwKeys = [...]glfw.Key{
 	KeyLeftShift:   glfw.KeyLeftShift,
 	KeyLeftControl: glfw.KeyLeftControl,
 	KeyEscape:      glfw.KeyEscape,
+	Key1:           glfw.Key1,
+	Key2:           glfw.Key2,
+	Key3:           glfw.Key3,
 }
 
 // Window 封装 GLFW 窗口、输入和原生句柄。
@@ -90,6 +96,11 @@ func (w *Window) KeyDown(key Key) bool {
 
 func (w *Window) PrimaryButtonDown() bool {
 	state := w.raw.GetMouseButton(glfw.MouseButtonLeft)
+	return state == glfw.Press
+}
+
+func (w *Window) SecondaryButtonDown() bool {
+	state := w.raw.GetMouseButton(glfw.MouseButtonRight)
 	return state == glfw.Press
 }
 

@@ -30,7 +30,7 @@ var allowed = map[string][]string{
 	},
 	"internal/client": {
 		"internal/core", "internal/network", "internal/world", "internal/mesh", "internal/assets",
-		"internal/worldgen", "internal/render", "internal/gfx",
+		"internal/render", "internal/gfx",
 	},
 }
 
