@@ -1,7 +1,7 @@
 # minecraft-go M2B 权威玩家移动设计
 
 - 日期：2026-07-27
-- 状态：待书面评审
+- 状态：已评审通过
 - 上位设计：`docs/superpowers/specs/2026-07-26-minecraft-go-design.md`
 - 前置阶段：`docs/superpowers/specs/2026-07-27-m2a-authoritative-interaction-design.md`
 - 范围：权威玩家姿态、固定步移动、重力与碰撞、自动跨步、客户端预测与服务端和解、权威交互射线
