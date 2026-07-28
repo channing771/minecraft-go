@@ -105,7 +105,10 @@ func TestCollisionStopsAtCeilingAndClearsUpwardVelocity(t *testing.T) {
 }
 
 func TestCollisionHandlesNegativeWorldCoordinates(t *testing.T) {
-	world := boxes(block(-1, 0, 0, fullCube))
+	world := boxes(
+		block(0, 0, 0, fullCube),
+		block(-1, 1, 0, fullCube),
+	)
 	got := physics.Step(physics.State{
 		Position: mgl32.Vec3{0.5, 1, 0.5},
 		Velocity: mgl32.Vec3{-30, 0, 0},

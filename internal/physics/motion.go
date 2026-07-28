@@ -40,7 +40,6 @@ func Step(state State, input Input, source CollisionSource) StepResult {
 		(beganGrounded || move.onGround) &&
 		(displacement.X() != 0 || displacement.Z() != 0) {
 		if stepped, ok := resolveStepMove(state, displacement, source); ok &&
-			stepped.position.Y() > state.Position.Y()+CollisionEpsilon &&
 			horizontalDistanceSquared(state.Position, stepped.position) >
 				horizontalDistanceSquared(state.Position, move.position) {
 			move = stepped

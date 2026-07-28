@@ -9,8 +9,6 @@ import (
 	"minecraft-go/internal/physics"
 )
 
-// These tests would fail if the alternate path were chosen without first
-// requiring a strictly greater horizontal distance than ordinary movement.
 func TestStepClimbsHalfBlock(t *testing.T) {
 	world := floorWithObstacle(0.5, true)
 	got := physics.Step(physics.State{
@@ -68,14 +66,20 @@ func TestStepKeepsOrdinaryPathOnEqualHorizontalDistance(t *testing.T) {
 	}
 }
 
-func TestStepDoesNotHopAcrossGroundLevelCollision(t *testing.T) {
+func TestStepSelectsLevelLandingWhenHorizontalProgressImproves(t *testing.T) {
+	world := boxes(
+		block(0, 0, 0, fullCube),
+		block(1, 0, 0, fullCube),
+		block(2, 0, 0, fullCube),
+		block(1, 1, 0, core.AABB{Max: mgl32.Vec3{1, 0.5, 1}}),
+	)
 	got := physics.Step(physics.State{
 		Position: mgl32.Vec3{0.5, 1, 0.5},
-		Velocity: mgl32.Vec3{-30, 0, 0},
+		Velocity: mgl32.Vec3{50, 0, 0},
 		OnGround: true,
-	}, physics.Input{MoveX: 1}, boxes(block(-1, 0, 0, fullCube)))
-	if got.UsedStep || got.State.Position.X() < 0.3-1e-5 || got.State.Position.X() > 0.3+1e-5 {
-		t.Fatalf("地面高度碰撞被错误当作跨步: %+v", got)
+	}, physics.Input{MoveX: 1}, world)
+	if !got.UsedStep || got.State.Position.X() < 2.89 || got.State.Position.Y() < 1-1e-5 || got.State.Position.Y() > 1+1e-5 {
+		t.Fatalf("同高落点的更远跨步未被选中: %+v", got)
 	}
 }
 
