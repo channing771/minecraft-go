@@ -3,6 +3,7 @@ package client_test
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"minecraft-go/internal/client"
@@ -185,6 +186,13 @@ func TestMirrorSurfacesCommandRejectionAndRejectsUnsupportedData(t *testing.T) {
 	}
 	if _, err := mirror.Apply(nil); err == nil {
 		t.Fatal("nil server message 未报错")
+	}
+}
+
+func TestMirrorDoesNotConsumePlayerState(t *testing.T) {
+	_, err := client.NewMirror().Apply(network.PlayerState{Ready: false})
+	if err == nil || !strings.Contains(err.Error(), "unsupported server message") {
+		t.Fatalf("Mirror.Apply PlayerState err=%v", err)
 	}
 }
 

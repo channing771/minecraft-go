@@ -29,8 +29,23 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Direction: mgl32.Vec3{0, -1, 0},
 			Block:     core.StoneID,
 		},
+		network.PlayerInput{
+			Sequence: 4,
+			MoveX:    -1,
+			MoveZ:    1,
+			Jump:     true,
+			Yaw:      90,
+			Pitch:    -15,
+		},
+		network.BreakBlock{Sequence: 5, Yaw: 90, Pitch: -15},
+		network.PlaceBlock{
+			Sequence: 6,
+			Yaw:      90,
+			Pitch:    -15,
+			Block:    core.StoneID,
+		},
 		network.RequestChunkResync{
-			Sequence:     4,
+			Sequence:     7,
 			Dimension:    core.Overworld,
 			Chunk:        core.ChunkPos{X: 2, Z: -3},
 			HaveRevision: 7,
@@ -44,8 +59,20 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Sequence: 4,
 			Reason:   network.RejectInvalidRay,
 		},
+		network.PlayerState{
+			ServerTick:        8,
+			LastInputSequence: 7,
+			Dimension:         core.Overworld,
+			Position:          mgl32.Vec3{1, 2, 3},
+			Velocity:          mgl32.Vec3{4, 5, 6},
+			Yaw:               90,
+			Pitch:             -15,
+			OnGround:          true,
+			Ready:             true,
+			Reset:             true,
+		},
 	}
-	if len(clientMessages) != 4 || len(serverMessages) != 4 {
+	if len(clientMessages) != 7 || len(serverMessages) != 5 {
 		t.Fatal("消息集合不完整")
 	}
 }
@@ -61,6 +88,8 @@ func TestRejectReasonsAreStableProtocolValues(t *testing.T) {
 		{network.RejectProtectedBlock, "protected_block"},
 		{network.RejectInvalidBlock, "invalid_block"},
 		{network.RejectOccupied, "occupied"},
+		{network.RejectInvalidInput, "invalid_input"},
+		{network.RejectPlayerNotReady, "player_not_ready"},
 	}
 	for _, tc := range tests {
 		if string(tc.got) != tc.want {

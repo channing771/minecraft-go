@@ -323,7 +323,9 @@ func rejectionUpdate(rejected network.CommandRejected) (MirrorUpdate, error) {
 		network.RejectChunkNotReady,
 		network.RejectProtectedBlock,
 		network.RejectInvalidBlock,
-		network.RejectOccupied:
+		network.RejectOccupied,
+		network.RejectInvalidInput,
+		network.RejectPlayerNotReady:
 		return MirrorUpdate{Rejected: &rejected}, nil
 	default:
 		return MirrorUpdate{}, fmt.Errorf(

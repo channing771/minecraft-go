@@ -17,6 +17,7 @@ type ServerMessage interface {
 	serverMessage()
 }
 
+// 以下 M2A 过渡消息保留到 Task 14，在 app 和 benchmark 迁移后删除。
 type SetViewCenter struct {
 	Sequence  uint64
 	Dimension core.DimensionID
@@ -44,6 +45,33 @@ type PlaceRay struct {
 
 func (PlaceRay) clientMessage() {}
 
+// PlayerInput 仅承载玩家输入值；语义验证由 sim 和 client 完成。
+type PlayerInput struct {
+	Sequence uint64
+	MoveX    int8
+	MoveZ    int8
+	Jump     bool
+	Yaw      float32
+	Pitch    float32
+}
+
+func (PlayerInput) clientMessage() {}
+
+type BreakBlock struct {
+	Sequence   uint64
+	Yaw, Pitch float32
+}
+
+func (BreakBlock) clientMessage() {}
+
+type PlaceBlock struct {
+	Sequence   uint64
+	Yaw, Pitch float32
+	Block      core.BlockID
+}
+
+func (PlaceBlock) clientMessage() {}
+
 type RequestChunkResync struct {
 	Sequence     uint64
 	Dimension    core.DimensionID
@@ -60,6 +88,20 @@ type ForgetChunks struct {
 
 func (ForgetChunks) serverMessage() {}
 
+type PlayerState struct {
+	ServerTick        uint64
+	LastInputSequence uint64
+	Dimension         core.DimensionID
+	Position          mgl32.Vec3
+	Velocity          mgl32.Vec3
+	Yaw, Pitch        float32
+	OnGround          bool
+	Ready             bool
+	Reset             bool
+}
+
+func (PlayerState) serverMessage() {}
+
 type RejectReason string
 
 const (
@@ -69,6 +111,8 @@ const (
 	RejectProtectedBlock RejectReason = "protected_block"
 	RejectInvalidBlock   RejectReason = "invalid_block"
 	RejectOccupied       RejectReason = "occupied"
+	RejectInvalidInput   RejectReason = "invalid_input"
+	RejectPlayerNotReady RejectReason = "player_not_ready"
 )
 
 type CommandRejected struct {
