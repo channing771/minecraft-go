@@ -89,3 +89,11 @@ func (files *worldFiles) close() error {
 	files.lock = nil
 	return nil
 }
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	return errors.Join(directory.Sync(), directory.Close())
+}

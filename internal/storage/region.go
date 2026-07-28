@@ -24,6 +24,9 @@ type region struct {
 	bank       regionBank
 	banks      [2]regionBank
 	bankValid  [2]bool
+	fileHooks  regionFileHooks
+
+	compactionHooks regionCompactionHooks
 }
 
 type preparedRegionSave struct {
@@ -87,7 +90,7 @@ func createRegion(ctx context.Context, path string, key RegionKey) (*region, err
 		return nil, fmt.Errorf("rename temporary region %q: %w", path, err)
 	}
 	removeTemporary = false
-	if err := syncRegionDirectory(parent); err != nil {
+	if err := syncDirectory(parent); err != nil {
 		return nil, fmt.Errorf("sync region directory %q: %w", parent, err)
 	}
 
@@ -163,6 +166,7 @@ func openRegionWithHooks(
 		bank:       bank,
 		banks:      [2]regionBank{bankA, bankB},
 		bankValid:  [2]bool{errA == nil, errB == nil},
+		fileHooks:  hooks,
 	}, nil
 }
 
@@ -284,17 +288,36 @@ func (r *region) save(ctx context.Context, saves []ChunkSave) (SaveResult, error
 		return result, fmt.Errorf("stat region %q: %w", r.path, err)
 	}
 	fileSize := info.Size()
+	free, err := freeSectorExtents(r.bank, fileSize)
+	if err != nil {
+		return result, err
+	}
+	appendSector := uint64(fileSize / sectorSize)
+	if fileSize%sectorSize != 0 {
+		appendSector++
+	}
+	if appendSector > math.MaxUint32 {
+		return result, fmt.Errorf("%w: region file exceeds uint32 sectors", ErrCorrupt)
+	}
 	next := r.bank
 	for _, candidate := range ordered {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		offset := alignSector(fileSize)
 		sectorCount := (len(candidate.payload) + sectorSize - 1) / sectorSize
-		endSector := uint64(offset/sectorSize) + uint64(sectorCount)
-		if offset < 0 || offset/sectorSize > math.MaxUint32 || endSector > math.MaxUint32 {
+		allocation, remaining := allocateExtent(free, uint32(sectorCount), uint32(appendSector))
+		if allocation.Count == 0 {
 			return result, fmt.Errorf("%w: region extent exceeds uint32 sectors", ErrCorrupt)
 		}
+		free = remaining
+		endSector := uint64(allocation.First) + uint64(allocation.Count)
+		if endSector > math.MaxUint32 {
+			return result, fmt.Errorf("%w: region extent exceeds uint32 sectors", ErrCorrupt)
+		}
+		if endSector > appendSector {
+			appendSector = endSector
+		}
+		offset := int64(allocation.First) * sectorSize
 		extent := make([]byte, sectorCount*sectorSize)
 		copy(extent, candidate.payload)
 		if err := writeFullAt(r.file, extent, offset); err != nil {
@@ -307,7 +330,6 @@ func (r *region) save(ctx context.Context, saves []ChunkSave) (SaveResult, error
 			Revision:      candidate.save.Revision,
 			PayloadCRC32C: crc32.Checksum(candidate.payload, regionCRCTable),
 		}
-		fileSize = offset + int64(len(extent))
 	}
 	if err := r.file.Sync(); err != nil {
 		return result, fmt.Errorf("sync payloads: %w", err)
@@ -516,14 +538,4 @@ func readFullAt(file regionFile, data []byte, offset int64) error {
 		}
 	}
 	return nil
-}
-
-func syncRegionDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	syncErr := directory.Sync()
-	closeErr := directory.Close()
-	return errors.Join(syncErr, closeErr)
 }
