@@ -29,6 +29,28 @@ func main() {
 	}
 
 	failed := false
+	for metric, values := range map[string][2]float64{
+		"load_seconds":     {baseline.LoadSeconds, current.LoadSeconds},
+		"snapshot_seconds": {baseline.SnapshotSeconds, current.SnapshotSeconds},
+	} {
+		if regressed(values[0], values[1], *maxRegression) {
+			fmt.Fprintf(os.Stderr, "%s 退化 %.1f%%：基线=%.3f 当前=%.3f\n",
+				metric, (values[1]/values[0]-1)*100, values[0], values[1])
+			failed = true
+		}
+	}
+	for metric, values := range map[string][2]float64{
+		"p50_ms": {baseline.Ticks.P50MS, current.Ticks.P50MS},
+		"p95_ms": {baseline.Ticks.P95MS, current.Ticks.P95MS},
+		"p99_ms": {baseline.Ticks.P99MS, current.Ticks.P99MS},
+		"max_ms": {baseline.Ticks.MaxMS, current.Ticks.MaxMS},
+	} {
+		if regressed(values[0], values[1], *maxRegression) {
+			fmt.Fprintf(os.Stderr, "ticks %s 退化 %.1f%%：基线=%.3f 当前=%.3f\n",
+				metric, (values[1]/values[0]-1)*100, values[0], values[1])
+			failed = true
+		}
+	}
 	for name, basePhase := range baseline.Phases {
 		currentPhase, ok := current.Phases[name]
 		if !ok {

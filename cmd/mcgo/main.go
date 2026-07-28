@@ -27,7 +27,7 @@ func main() {
 	if *benchmark {
 		seed = benchmarkSeed
 	}
-	app, err := newApplication(seed)
+	app, err := newApplication(seed, *benchmark)
 	if err != nil {
 		log.Fatalf("启动失败: %v", err)
 	}

@@ -16,6 +16,18 @@ type Generator interface {
 	BaseBlockAt(core.BlockPos) core.BlockID
 }
 
+type TerrainProbe struct {
+	generator *worldgen.Generator
+}
+
+func NewTerrainProbe(seed int64) *TerrainProbe {
+	return &TerrainProbe{generator: worldgen.New(seed)}
+}
+
+func (probe *TerrainProbe) HeightAt(x, z int32) int32 {
+	return probe.generator.HeightAt(x, z)
+}
+
 // NewEmbedded 创建使用内置确定性地形生成器的服务端。
 func NewEmbedded(config Config, endpoint network.ServerEndpoint) *Server {
 	return New(config, endpoint, worldgen.New(config.Seed))

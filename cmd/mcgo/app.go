@@ -24,40 +24,105 @@ import (
 )
 
 type application struct {
-	window         *client.Window
-	dev            gfx.Device
-	surface        gfx.Surface
-	renderer       *render.Renderer
-	clientEndpoint network.ClientEndpoint
-	server         *server.Server
-	serverCancel   context.CancelFunc
-	serverDone     chan error
-	mirror         *client.Mirror
-	mesher         *client.Mesher
-	depth          *depthTarget
-	camera         client.Camera
-	center         core.ChunkPos
-	sequence       uint64
-	selectedBlock  core.BlockID
-	loadedChunks   map[core.ChunkPos]struct{}
-	closeOnce      sync.Once
+	window               *client.Window
+	dev                  gfx.Device
+	surface              gfx.Surface
+	color                gfx.Texture
+	colorView            gfx.TextureView
+	frameWidth           int
+	frameHeight          int
+	renderer             *render.Renderer
+	clientEndpoint       network.ClientEndpoint
+	server               *server.Server
+	serverCancel         context.CancelFunc
+	serverDone           chan error
+	mirror               *client.Mirror
+	mesher               *client.Mesher
+	depth                *depthTarget
+	camera               client.Camera
+	center               core.ChunkPos
+	sequence             uint64
+	selectedBlock        core.BlockID
+	loadedChunks         map[core.ChunkPos]struct{}
+	ticks                *tickRecorder
+	acceptedChanges      int
+	rejectedCommands     int
+	lastInteractionChunk core.ChunkPos
+	closeOnce            sync.Once
 }
 
-func newApplication(seed int64) (*application, error) {
-	window, err := client.NewWindow(2560, 1440, "minecraft-go — M1 flyable world")
-	if err != nil {
-		return nil, err
+type tickRecorder struct {
+	mu      sync.Mutex
+	sampler *client.PerfSampler
+}
+
+func newTickRecorder(capacity int) *tickRecorder {
+	return &tickRecorder{sampler: client.NewPerfSampler(capacity)}
+}
+
+func (recorder *tickRecorder) add(duration time.Duration) {
+	recorder.mu.Lock()
+	recorder.sampler.Add(client.FrameSample{FrameMS: float64(duration.Microseconds()) / 1000})
+	recorder.mu.Unlock()
+}
+
+func (recorder *tickRecorder) reset() {
+	recorder.mu.Lock()
+	recorder.sampler.Reset()
+	recorder.mu.Unlock()
+}
+
+func (recorder *tickRecorder) summary() client.PhaseSummary {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	return recorder.sampler.Summary(0)
+}
+
+func newApplication(seed int64, benchmark bool) (*application, error) {
+	var window *client.Window
+	var dev gfx.Device
+	var surface gfx.Surface
+	var color gfx.Texture
+	var colorView gfx.TextureView
+	var colorFormat gfx.TextureFormat
+	width, height := 2560, 1440
+	var err error
+	if benchmark {
+		dev, err = gfx.NewHeadlessDevice()
+		colorFormat = gfx.FormatBGRA8UnormSrgb
+		if err == nil {
+			color = dev.CreateTexture(gfx.TextureDesc{
+				Label:     "benchmark offscreen color",
+				Width:     uint32(width),
+				Height:    uint32(height),
+				Format:    colorFormat,
+				Dimension: gfx.TextureDimension2D,
+				Usage:     gfx.TextureUsageRenderTarget,
+			})
+			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
+		}
+	} else {
+		window, err = client.NewWindow(2560, 1440, "minecraft-go — M2A authoritative world")
+		if err == nil {
+			fitFramebuffer(window, width, height)
+			width, height = window.FramebufferSize()
+			dev, surface, err = gfx.NewDevice(
+				window.NativeHandle(), uint32(width), uint32(height),
+			)
+			if err == nil {
+				colorFormat = surface.Format()
+			}
+		}
 	}
-	fitFramebuffer(window, 2560, 1440)
-	width, height := window.FramebufferSize()
-	dev, surface, err := gfx.NewDevice(window.NativeHandle(), uint32(width), uint32(height))
 	if err != nil {
-		window.Close()
+		if window != nil {
+			window.Close()
+		}
 		return nil, err
 	}
 
 	reg := assets.NewRegistry()
-	renderer := render.New(dev, reg, surface.Format())
+	renderer := render.New(dev, reg, colorFormat)
 	renderer.Resize(uint32(width), uint32(height))
 	camera := client.Camera{
 		Pos:    mgl32.Vec3{0, 110, 0},
@@ -70,6 +135,8 @@ func newApplication(seed int64) (*application, error) {
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
 	config := server.DefaultConfig(seed)
 	config.ViewRadius = viewDistance + 1
+	ticks := newTickRecorder(100_000)
+	config.TickObserver = ticks.add
 	running := server.NewEmbedded(config, serverEndpoint)
 	serverContext, serverCancel := context.WithCancel(context.Background())
 	serverDone := make(chan error, 1)
@@ -79,6 +146,10 @@ func newApplication(seed int64) (*application, error) {
 		window:         window,
 		dev:            dev,
 		surface:        surface,
+		color:          color,
+		colorView:      colorView,
+		frameWidth:     width,
+		frameHeight:    height,
 		renderer:       renderer,
 		clientEndpoint: clientEndpoint,
 		server:         running,
@@ -91,6 +162,7 @@ func newApplication(seed int64) (*application, error) {
 		center:         cameraChunk(camera.Pos),
 		selectedBlock:  core.StoneID,
 		loadedChunks:   make(map[core.ChunkPos]struct{}),
+		ticks:          ticks,
 	}
 	if err := app.sendViewCenter(app.center); err != nil {
 		app.Close()
@@ -121,9 +193,19 @@ func (a *application) Close() {
 		a.mesher.Close()
 		a.renderer.Release()
 		a.depth.Release()
-		a.surface.Release()
+		if a.colorView != nil {
+			a.colorView.Release()
+		}
+		if a.color != nil {
+			a.color.Release()
+		}
+		if a.surface != nil {
+			a.surface.Release()
+		}
 		a.dev.Release()
-		a.window.Close()
+		if a.window != nil {
+			a.window.Close()
+		}
 	})
 }
 
@@ -140,11 +222,11 @@ func (a *application) updateCenter() {
 
 // frame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
 func (a *application) frame(drainMax int) bool {
-	width, height := a.window.FramebufferSize()
+	width, height := a.framebufferSize()
 	if width == 0 || height == 0 {
 		return false
 	}
-	if uint32(width) != a.depth.width || uint32(height) != a.depth.height {
+	if a.surface != nil && (uint32(width) != a.depth.width || uint32(height) != a.depth.height) {
 		a.surface.Resize(uint32(width), uint32(height))
 		a.depth.Release()
 		a.depth = newDepthTarget(a.dev, uint32(width), uint32(height))
@@ -165,9 +247,12 @@ func (a *application) frame(drainMax int) bool {
 	a.renderer.FlushUploads(a.center)
 	a.renderer.DropOutside(a.center, viewDistance)
 
-	target := a.surface.Acquire()
-	if target == nil {
-		return false
+	target := a.colorView
+	if a.surface != nil {
+		target = a.surface.Acquire()
+		if target == nil {
+			return false
+		}
 	}
 	encoder := a.dev.CreateCommandEncoder()
 	a.renderer.Render(encoder, target, a.depth.view, render.Camera{
@@ -177,7 +262,9 @@ func (a *application) frame(drainMax int) bool {
 	command := encoder.Finish()
 	a.dev.Submit(command)
 	command.Release()
-	a.surface.Present()
+	if a.surface != nil {
+		a.surface.Present()
+	}
 	return true
 }
 
@@ -214,6 +301,8 @@ func (a *application) drainServerMessages(maxMessages int) {
 					delete(a.loadedChunks, position)
 				}
 			}
+		case network.BlockChanges:
+			a.acceptedChanges += len(message.Changes)
 		}
 		if update.Resync != nil {
 			a.sequence++
@@ -223,6 +312,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 		}
 		if update.Rejected != nil {
+			a.rejectedCommands++
 			log.Printf("权威命令被拒绝: sequence=%d reason=%s",
 				update.Rejected.Sequence, update.Rejected.Reason)
 		}
@@ -249,6 +339,7 @@ func (a *application) sendViewCenter(center core.ChunkPos) error {
 }
 
 func (a *application) breakBlock() {
+	a.lastInteractionChunk = cameraChunk(a.camera.Pos)
 	a.sequence++
 	if err := a.send(network.BreakRay{
 		Sequence:  a.sequence,
@@ -261,6 +352,7 @@ func (a *application) breakBlock() {
 }
 
 func (a *application) placeBlock() {
+	a.lastInteractionChunk = cameraChunk(a.camera.Pos)
 	a.sequence++
 	if err := a.send(network.PlaceRay{
 		Sequence:  a.sequence,
@@ -280,8 +372,15 @@ func (a *application) send(message network.ClientMessage) error {
 }
 
 func (a *application) framebufferLabel() string {
-	width, height := a.window.FramebufferSize()
+	width, height := a.framebufferSize()
 	return fmt.Sprintf("%dx%d", width, height)
+}
+
+func (a *application) framebufferSize() (int, int) {
+	if a.window != nil {
+		return a.window.FramebufferSize()
+	}
+	return a.frameWidth, a.frameHeight
 }
 
 func cameraChunk(pos mgl32.Vec3) core.ChunkPos {

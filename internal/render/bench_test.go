@@ -40,6 +40,37 @@ func BenchmarkMeshChunk(b *testing.B) {
 	}
 }
 
+func BenchmarkChunkSnapshotExport(b *testing.B) {
+	chunk := worldgen.New(benchSeed).GenerateChunk(core.ChunkPos{})
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		for section := 0; section < core.SectionsPerChunk; section++ {
+			_ = chunk.Section(section).Blocks.Snapshot()
+		}
+	}
+}
+
+func BenchmarkChunkSnapshotImport(b *testing.B) {
+	chunk := worldgen.New(benchSeed).GenerateChunk(core.ChunkPos{})
+	snapshots := make([]world.ContainerSnapshot, core.SectionsPerChunk)
+	for section := range snapshots {
+		snapshots[section] = chunk.Section(section).Blocks.Snapshot()
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		imported := world.NewChunk(core.ChunkPos{})
+		for section := 0; section < len(snapshots); section++ {
+			container, err := world.NewPalettedContainerFromSnapshot(snapshots[section])
+			if err != nil {
+				b.Fatal(err)
+			}
+			sectionData := imported.Section(section)
+			sectionData.Blocks = container
+		}
+	}
+}
+
 func BenchmarkVisibleSections(b *testing.B) {
 	g := worldgen.New(benchSeed)
 	reg := assets.NewRegistry()

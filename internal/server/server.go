@@ -82,6 +82,10 @@ func New(
 
 // Step 执行一次服务端编排与权威模拟 tick。
 func (server *Server) Step() sim.TickResult {
+	started := time.Now()
+	if server.config.TickObserver != nil {
+		defer func() { server.config.TickObserver(time.Since(started)) }()
+	}
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 

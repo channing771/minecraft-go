@@ -1,7 +1,10 @@
 // Package server 编排权威 Engine、生成 worker 和传输端点。
 package server
 
-import "runtime"
+import (
+	"runtime"
+	"time"
+)
 
 type Config struct {
 	Seed           int64
@@ -10,6 +13,7 @@ type Config struct {
 	SnapshotChunks int
 	SnapshotBytes  int
 	OutboxCapacity int
+	TickObserver   func(time.Duration)
 }
 
 func DefaultConfig(seed int64) Config {

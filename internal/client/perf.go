@@ -42,6 +42,12 @@ func (s *PerfSampler) Add(sample FrameSample) {
 	}
 }
 
+func (s *PerfSampler) Reset() {
+	s.next = 0
+	s.count = 0
+	s.dropped = 0
+}
+
 // PhaseSummary 是一个固定阶段的可比较摘要。
 type PhaseSummary struct {
 	Frames                   int     `json:"frames"`
@@ -118,5 +124,7 @@ type PerfReport struct {
 	GitCommit       string                  `json:"git_commit"`
 	Framebuffer     string                  `json:"framebuffer"`
 	LoadSeconds     float64                 `json:"load_seconds"`
+	SnapshotSeconds float64                 `json:"snapshot_seconds"`
 	Phases          map[string]PhaseSummary `json:"phases"`
+	Ticks           PhaseSummary            `json:"ticks"`
 }

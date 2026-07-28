@@ -14,12 +14,14 @@ import (
 	"time"
 
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
+	"minecraft-go/internal/server"
 )
 
 const (
 	benchmarkSeed   = 20260726
-	scenarioVersion = 1
+	scenarioVersion = 2
 )
 
 var (
@@ -29,18 +31,19 @@ var (
 )
 
 func runBenchmark(app *application, outputPath string) error {
-	app.window.SetFloating(true)
-	app.window.Focus()
-	width, height := app.window.FramebufferSize()
+	width, height := app.framebufferSize()
 	if width != 2560 || height != 1440 {
 		return fmt.Errorf("benchmark framebuffer=%dx%d，要求精确 2560x1440", width, height)
 	}
-	if err := app.surface.SetPresentMode(gfx.PresentModeAutoNoVSync); err != nil {
-		return fmt.Errorf("关闭 VSync: %w", err)
+	if app.surface != nil {
+		if err := app.surface.SetPresentMode(gfx.PresentModeAutoNoVSync); err != nil {
+			return fmt.Errorf("关闭 VSync: %w", err)
+		}
 	}
 
 	loadStarted := time.Now()
-	if err := waitUntilLoaded(app, 5*time.Minute); err != nil {
+	snapshotDuration, err := waitUntilLoaded(app, 5*time.Minute)
+	if err != nil {
 		return err
 	}
 	loadSeconds := time.Since(loadStarted).Seconds()
@@ -49,22 +52,59 @@ func runBenchmark(app *application, outputPath string) error {
 	if err := runWarmup(app, warmupDuration); err != nil {
 		return err
 	}
+	app.ticks.reset()
 	still, err := measurePhase(app, "still", stillDuration, nil)
 	if err != nil {
 		return err
 	}
 	flyingStart := app.camera.Pos
+	probe := server.NewTerrainProbe(benchmarkSeed)
+	acceptedAtStart := app.acceptedChanges
+	rejectedAtStart := app.rejectedCommands
+	interactionCount := 0
+	nextInteraction := time.Second
 	flying, err := measurePhase(app, "flying", flyDuration, func(elapsed time.Duration) {
 		seconds := float32(elapsed.Seconds())
 		app.camera.Pos[0] = flyingStart[0] + seconds*48
 		app.camera.Pos[2] = flyingStart[2] + float32(math.Sin(float64(seconds)*0.1))*96
-		app.camera.Yaw = -float32(math.Pi)/2 + float32(math.Sin(float64(seconds)*0.2))*0.9
-		app.camera.Pitch = -0.2 + float32(math.Sin(float64(seconds)*0.13))*0.15
+		x := int32(math.Floor(float64(app.camera.Pos[0])))
+		z := int32(math.Floor(float64(app.camera.Pos[2])))
+		app.camera.Pos[1] = float32(probe.HeightAt(x, z)) + 3.5
+		app.camera.Pitch = -float32(math.Pi)/2 + 0.02
 		app.updateCenter()
+		for elapsed >= nextInteraction {
+			if interactionCount%2 == 0 {
+				app.breakBlock()
+			} else {
+				blocks := [...]core.BlockID{core.StoneID, core.DirtID, core.GrassID}
+				app.selectedBlock = blocks[(interactionCount/2)%len(blocks)]
+				app.placeBlock()
+			}
+			interactionCount++
+			nextInteraction += time.Second
+		}
 	})
 	if err != nil {
 		return err
 	}
+	if err := waitForBenchmarkInteractions(
+		app, acceptedAtStart+interactionCount, rejectedAtStart, 10*time.Second,
+	); err != nil {
+		return err
+	}
+	authoritativeHash, authoritativeRevision, authoritativeOK := app.server.ChunkHash(
+		core.Overworld, app.lastInteractionChunk,
+	)
+	mirrorHash, mirrorRevision, mirrorOK := app.mirror.Hash(
+		core.Overworld, app.lastInteractionChunk,
+	)
+	if !authoritativeOK || !mirrorOK || authoritativeRevision != mirrorRevision ||
+		authoritativeHash != mirrorHash {
+		return fmt.Errorf("交互后权威/镜像不一致: server=(%x,%d,%v) mirror=(%x,%d,%v)",
+			authoritativeHash, authoritativeRevision, authoritativeOK,
+			mirrorHash, mirrorRevision, mirrorOK)
+	}
+	ticks := app.ticks.summary()
 
 	report := client.PerfReport{
 		ScenarioVersion: scenarioVersion,
@@ -74,10 +114,12 @@ func runBenchmark(app *application, outputPath string) error {
 		GitCommit:       commandOutput("git", "rev-parse", "HEAD"),
 		Framebuffer:     app.framebufferLabel(),
 		LoadSeconds:     loadSeconds,
+		SnapshotSeconds: snapshotDuration.Seconds(),
 		Phases: map[string]client.PhaseSummary{
 			"still":  still,
 			"flying": flying,
 		},
+		Ticks: ticks,
 	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -105,34 +147,50 @@ func runBenchmark(app *application, outputPath string) error {
 	if len(failures) > 0 {
 		return fmt.Errorf("%s", strings.Join(failures, "；"))
 	}
+	if ticks.P99MS >= 10 {
+		failures = append(failures, fmt.Sprintf("tick p99 %.3f ms >= 10 ms", ticks.P99MS))
+	}
+	if ticks.MaxMS >= 50 {
+		failures = append(failures, fmt.Sprintf("tick max %.3f ms >= 50 ms", ticks.MaxMS))
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%s", strings.Join(failures, "；"))
+	}
 	return nil
 }
 
-func waitUntilLoaded(app *application, timeout time.Duration) error {
+func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, error) {
 	deadline := time.Now().Add(timeout)
+	started := time.Now()
+	var snapshotDuration time.Duration
 	wantedChunks := (2*(viewDistance+1) + 1) * (2*(viewDistance+1) + 1)
 	lastLog := time.Time{}
 	for {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("固定场景在 %s 内未完成加载：chunks=%d/%d mesher=%+v pending=%d",
+			return 0, fmt.Errorf("固定场景在 %s 内未完成加载：chunks=%d/%d mesher=%+v pending=%d",
 				timeout, len(app.loadedChunks), wantedChunks, app.mesher.Stats(),
 				app.renderer.PendingUploads())
 		}
-		app.window.Poll()
-		if app.window.ShouldClose() {
-			app.window.CancelClose()
+		if app.window != nil {
+			app.window.Poll()
+			if app.window.ShouldClose() {
+				app.window.CancelClose()
+			}
 		}
 		if !app.frame(4096) {
-			app.window.Focus()
+			continue
 		}
 		stats := app.mesher.Stats()
+		if snapshotDuration == 0 && len(app.loadedChunks) == wantedChunks {
+			snapshotDuration = time.Since(started)
+		}
 		if len(app.loadedChunks) == wantedChunks &&
 			stats.QueuedJobs == 0 &&
 			stats.InFlightJobs == 0 &&
 			stats.ReadyResults == 0 &&
 			stats.DirtySections == 0 &&
 			app.renderer.PendingUploads() == 0 {
-			return nil
+			return snapshotDuration, nil
 		}
 		if time.Since(lastLog) >= 5*time.Second {
 			fmt.Printf("加载中：chunks=%d/%d queued=%d active=%d ready=%d pending=%d\n",
@@ -143,15 +201,37 @@ func waitUntilLoaded(app *application, timeout time.Duration) error {
 	}
 }
 
+func waitForBenchmarkInteractions(
+	app *application,
+	wantAccepted int,
+	rejectedAtStart int,
+	timeout time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+	for app.acceptedChanges < wantAccepted && time.Now().Before(deadline) {
+		app.frame(4096)
+	}
+	if app.rejectedCommands != rejectedAtStart {
+		return fmt.Errorf("脚本交互被拒绝 %d 次", app.rejectedCommands-rejectedAtStart)
+	}
+	if app.acceptedChanges != wantAccepted {
+		return fmt.Errorf("脚本交互成功修改=%d，想要 %d",
+			app.acceptedChanges, wantAccepted)
+	}
+	return nil
+}
+
 func runWarmup(app *application, duration time.Duration) error {
 	deadline := time.Now().Add(duration)
 	for time.Now().Before(deadline) {
-		app.window.Poll()
-		if app.window.ShouldClose() {
-			app.window.CancelClose()
+		if app.window != nil {
+			app.window.Poll()
+			if app.window.ShouldClose() {
+				app.window.CancelClose()
+			}
 		}
 		if !app.frame(4096) {
-			app.window.Focus()
+			continue
 		}
 	}
 	return nil
@@ -171,16 +251,17 @@ func measurePhase(
 	var peakRSS uint64
 	for time.Now().Before(deadline) {
 		frameStarted := time.Now()
-		app.window.Poll()
-		if app.window.ShouldClose() {
-			app.window.CancelClose()
+		if app.window != nil {
+			app.window.Poll()
+			if app.window.ShouldClose() {
+				app.window.CancelClose()
+			}
 		}
 		if update != nil {
 			update(frameStarted.Sub(started))
 		}
 		rendered := app.frame(4096)
 		if !rendered {
-			app.window.Focus()
 			if time.Since(lastRendered) > 5*time.Second {
 				return client.PhaseSummary{}, fmt.Errorf("%s 阶段连续 5 秒取不到 surface 帧", name)
 			}
