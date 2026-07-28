@@ -19,6 +19,19 @@ func (server *Server) publish(result sim.TickResult) {
 	if session.closed() {
 		return
 	}
+	var localPlayer sim.PlayerUpdate
+	hasLocalPlayer := false
+	for _, player := range result.Players {
+		if player.Session != localSessionID {
+			continue
+		}
+		localPlayer = player
+		hasLocalPlayer = true
+		session.hasView = true
+		session.viewDimension = player.Dimension
+		session.viewCenter = player.ViewCenter
+		break
+	}
 
 	for _, key := range result.Ready {
 		session.queueSnapshot(key, false)
@@ -67,6 +80,20 @@ func (server *Server) publish(result sim.TickResult) {
 		}) {
 			return
 		}
+	}
+	if hasLocalPlayer {
+		session.enqueue(network.PlayerState{
+			ServerTick:        result.Tick,
+			LastInputSequence: localPlayer.LastInputSequence,
+			Dimension:         localPlayer.Dimension,
+			Position:          localPlayer.State.Position,
+			Velocity:          localPlayer.State.Velocity,
+			Yaw:               localPlayer.Yaw,
+			Pitch:             localPlayer.Pitch,
+			OnGround:          localPlayer.State.OnGround,
+			Ready:             localPlayer.Ready,
+			Reset:             localPlayer.Reset,
+		})
 	}
 }
 
@@ -258,6 +285,10 @@ func networkRejectReason(reason sim.RejectReason) (network.RejectReason, bool) {
 		return network.RejectInvalidBlock, true
 	case sim.RejectOccupied:
 		return network.RejectOccupied, true
+	case sim.RejectInvalidInput:
+		return network.RejectInvalidInput, true
+	case sim.RejectPlayerNotReady:
+		return network.RejectPlayerNotReady, true
 	default:
 		return "", false
 	}

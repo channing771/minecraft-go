@@ -17,41 +17,34 @@ import (
 
 func TestSnapshotPublicationHonorsChunkBudgetAndDistanceOrder(t *testing.T) {
 	running, client, generator := newPublicationServer(t, 1, 2, 1<<20, false)
-	prepareReadySquare(t, running, generator, core.ChunkPos{})
+	prepareReadySquare(t, running, generator)
 
-	first := recvServerMessage(t, client).(network.ChunkSnapshot)
-	second := recvServerMessage(t, client).(network.ChunkSnapshot)
+	first := recvWorldServerMessage(t, client).(network.ChunkSnapshot)
+	second := recvWorldServerMessage(t, client).(network.ChunkSnapshot)
 	if first.Chunk != (core.ChunkPos{}) ||
 		second.Chunk != (core.ChunkPos{X: -1, Z: 0}) {
 		t.Fatalf("前两个快照 = %+v, %+v", first.Chunk, second.Chunk)
 	}
-	assertNoServerMessage(t, client)
+	assertNoWorldServerMessage(t, client)
 }
 
 func TestSnapshotPublicationAllowsOneOversizedFirstChunk(t *testing.T) {
 	running, client, generator := newPublicationServer(t, 1, 9, 1, false)
-	prepareReadySquare(t, running, generator, core.ChunkPos{})
+	prepareReadySquare(t, running, generator)
 
-	message := recvServerMessage(t, client).(network.ChunkSnapshot)
+	message := recvWorldServerMessage(t, client).(network.ChunkSnapshot)
 	if message.Chunk != (core.ChunkPos{}) {
 		t.Fatalf("首个 oversized 快照 = %+v", message.Chunk)
 	}
 	if message.PayloadBytes() <= 1 {
 		t.Fatalf("测试快照没有超过 byte budget: %d", message.PayloadBytes())
 	}
-	assertNoServerMessage(t, client)
+	assertNoWorldServerMessage(t, client)
 }
 
 func TestInitialSnapshotCapturesSameTickChangesBeforeDelta(t *testing.T) {
 	running, client, generator := newPublicationServer(t, 0, 4, 1<<20, true)
-	running.incoming <- sim.Command{
-		Session:   localSessionID,
-		Sequence:  1,
-		Kind:      sim.CommandSetViewCenter,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{},
-	}
-	requested := running.Step()
+	requested := running.engine.Step()
 	if len(requested.Generate) != 1 {
 		t.Fatalf("Generate = %+v", requested.Generate)
 	}
@@ -60,30 +53,37 @@ func TestInitialSnapshotCapturesSameTickChangesBeforeDelta(t *testing.T) {
 		Pos:       core.ChunkPos{},
 		Chunk:     generator.chunk(core.ChunkPos{}),
 	})
-	running.incoming <- sim.Command{
-		Session:   localSessionID,
-		Sequence:  2,
-		Kind:      sim.CommandBreakRay,
+	ready := running.engine.Step()
+	if len(ready.Ready) != 1 || !ready.Players[0].Ready {
+		t.Fatalf("spawn ready = %+v", ready)
+	}
+	running.session.queueSnapshot(core.ChunkKey{
 		Dimension: core.Overworld,
-		Origin:    mgl32.Vec3{0.5, 2.5, 0.5},
-		Direction: mgl32.Vec3{0, -1, 0},
+		Pos:       core.ChunkPos{},
+	}, false)
+	running.incoming <- sim.Command{
+		Session:  localSessionID,
+		Sequence: 2,
+		Kind:     sim.CommandBreakBlock,
+		Yaw:      0,
+		Pitch:    -1.5,
 	}
 	result := running.Step()
 	if len(result.Changes) != 1 {
 		t.Fatalf("同 tick Changes = %+v", result.Changes)
 	}
 
-	snapshot := recvServerMessage(t, client).(network.ChunkSnapshot)
+	snapshot := recvWorldServerMessage(t, client).(network.ChunkSnapshot)
 	if snapshot.Revision != 2 {
 		t.Fatalf("初始 snapshot revision = %d，想要 2", snapshot.Revision)
 	}
-	assertNoServerMessage(t, client)
+	assertNoWorldServerMessage(t, client)
 }
 
 func TestPublishedDeltaIsContiguousAfterSnapshot(t *testing.T) {
 	running, client, generator := newPublicationServer(t, 0, 4, 1<<20, true)
-	prepareReadySquare(t, running, generator, core.ChunkPos{})
-	snapshot := recvServerMessage(t, client).(network.ChunkSnapshot)
+	prepareReadySquare(t, running, generator)
+	snapshot := recvWorldServerMessage(t, client).(network.ChunkSnapshot)
 	if snapshot.Revision != 1 {
 		t.Fatalf("初始 revision = %d", snapshot.Revision)
 	}
@@ -97,7 +97,7 @@ func TestPublishedDeltaIsContiguousAfterSnapshot(t *testing.T) {
 		Direction: mgl32.Vec3{0, -1, 0},
 	}
 	running.Step()
-	delta := recvServerMessage(t, client).(network.BlockChanges)
+	delta := recvWorldServerMessage(t, client).(network.BlockChanges)
 	if delta.BaseRevision != 1 || delta.NewRevision != 2 {
 		t.Fatalf("delta revision = %d→%d", delta.BaseRevision, delta.NewRevision)
 	}
@@ -108,8 +108,8 @@ func TestPublishedDeltaIsContiguousAfterSnapshot(t *testing.T) {
 
 func TestResyncSnapshotPrecedesOrdinaryPendingSnapshots(t *testing.T) {
 	running, client, generator := newPublicationServer(t, 1, 1, 1<<20, false)
-	prepareReadySquare(t, running, generator, core.ChunkPos{})
-	first := recvServerMessage(t, client).(network.ChunkSnapshot)
+	prepareReadySquare(t, running, generator)
+	first := recvWorldServerMessage(t, client).(network.ChunkSnapshot)
 	if first.Chunk != (core.ChunkPos{}) {
 		t.Fatalf("首个快照 = %+v", first.Chunk)
 	}
@@ -123,35 +123,40 @@ func TestResyncSnapshotPrecedesOrdinaryPendingSnapshots(t *testing.T) {
 		HaveRevision: 0,
 	}
 	running.Step()
-	resync := recvServerMessage(t, client).(network.ChunkSnapshot)
+	resync := recvWorldServerMessage(t, client).(network.ChunkSnapshot)
 	if resync.Chunk != (core.ChunkPos{}) {
 		t.Fatalf("resync 前发送了普通快照 %+v", resync.Chunk)
 	}
 }
 
 func TestForgetRemovesPendingSnapshotsAndSortsChunks(t *testing.T) {
-	running, client, generator := newPublicationServer(t, 1, 1, 1<<20, false)
-	prepareReadySquare(t, running, generator, core.ChunkPos{})
-	_ = recvServerMessage(t, client).(network.ChunkSnapshot)
-
-	running.incoming <- sim.Command{
-		Session:   localSessionID,
-		Sequence:  2,
-		Kind:      sim.CommandSetViewCenter,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{X: 10, Z: 0},
-	}
-	running.Step()
-	forgotten := recvServerMessage(t, client).(network.ForgetChunks)
+	running, client, _ := newPublicationServer(t, 1, 1, 1<<20, false)
 	want := []core.ChunkPos{
 		{X: -1, Z: -1}, {X: -1, Z: 0}, {X: -1, Z: 1},
 		{X: 0, Z: -1}, {X: 0, Z: 0}, {X: 0, Z: 1},
 		{X: 1, Z: -1}, {X: 1, Z: 0}, {X: 1, Z: 1},
 	}
+	keys := make([]core.ChunkKey, len(want))
+	for index, chunk := range want {
+		key := core.ChunkKey{Dimension: core.Overworld, Pos: chunk}
+		keys[index] = key
+		running.session.pendingSnapshots[key] = snapshotRequest{}
+		running.session.publications[key] = &publication{}
+	}
+	running.publish(sim.TickResult{
+		Tick:   1,
+		Forget: map[sim.SessionID][]core.ChunkKey{localSessionID: keys},
+		Players: []sim.PlayerUpdate{{
+			Session:    localSessionID,
+			Dimension:  core.Overworld,
+			ViewCenter: core.ChunkPos{},
+		}},
+	})
+	forgotten := recvWorldServerMessage(t, client).(network.ForgetChunks)
 	if !reflect.DeepEqual(forgotten.Chunks, want) {
 		t.Fatalf("ForgetChunks = %+v，想要 %+v", forgotten.Chunks, want)
 	}
-	assertNoServerMessage(t, client)
+	assertNoWorldServerMessage(t, client)
 }
 
 func newPublicationServer(
@@ -183,16 +188,8 @@ func prepareReadySquare(
 	t *testing.T,
 	running *Server,
 	generator *gatedGenerator,
-	center core.ChunkPos,
 ) {
 	t.Helper()
-	running.incoming <- sim.Command{
-		Session:   localSessionID,
-		Sequence:  1,
-		Kind:      sim.CommandSetViewCenter,
-		Dimension: core.Overworld,
-		Center:    center,
-	}
 	requested := running.Step()
 	if len(requested.Generate) == 0 {
 		t.Fatal("没有 generation requests")
@@ -224,6 +221,19 @@ func recvServerMessage(
 	return message
 }
 
+func recvWorldServerMessage(
+	t *testing.T,
+	client network.ClientEndpoint,
+) network.ServerMessage {
+	t.Helper()
+	for {
+		message := recvServerMessage(t, client)
+		if _, playerState := message.(network.PlayerState); !playerState {
+			return message
+		}
+	}
+}
+
 func assertNoServerMessage(
 	t *testing.T,
 	client network.ClientEndpoint,
@@ -233,6 +243,28 @@ func assertNoServerMessage(
 	defer cancel()
 	if message, err := client.Recv(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("意外 server message = %#v, err=%v", message, err)
+	}
+}
+
+func assertNoWorldServerMessage(
+	t *testing.T,
+	client network.ClientEndpoint,
+) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Millisecond)
+	for {
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		message, err := client.Recv(ctx)
+		cancel()
+		if errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("接收 server message: %v", err)
+		}
+		if _, playerState := message.(network.PlayerState); !playerState {
+			t.Fatalf("意外 world server message = %#v", message)
+		}
 	}
 }
 

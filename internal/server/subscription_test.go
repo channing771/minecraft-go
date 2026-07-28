@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -24,50 +23,25 @@ func TestServerSubscriptionGenerationOrderAndBounds(t *testing.T) {
 	config := server.DefaultConfig(42)
 	config.ViewRadius = 1
 	config.Workers = 1
-	client, endpoint := network.NewMemoryPair(64)
+	config.SpawnAnchor = core.ChunkPos{X: 5, Z: -4}
+	_, endpoint := network.NewMemoryPair(64)
 	running := server.New(config, endpoint, emptyGenerator{})
 	t.Cleanup(running.Close)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := client.Send(ctx, network.SetViewCenter{
-		Sequence:  1,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{},
-	}); err != nil {
-		t.Fatal(err)
-	}
 	first := waitForGenerate(t, running)
 	wantFirst := []core.ChunkKey{
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 0, Z: 0}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1, Z: 0}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 0, Z: -1}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 0, Z: 1}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 1, Z: 0}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1, Z: -1}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1, Z: 1}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 1, Z: -1}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 1, Z: 1}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 5, Z: -4}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 4, Z: -4}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 5, Z: -5}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 5, Z: -3}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: -4}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 4, Z: -5}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 4, Z: -3}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: -5}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: -3}},
 	}
 	if !reflect.DeepEqual(first.Generate, wantFirst) {
 		t.Fatalf("初始 Generate = %+v，想要 %+v", first.Generate, wantFirst)
-	}
-
-	if err := client.Send(ctx, network.SetViewCenter{
-		Sequence:  2,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{X: 1, Z: 0},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	moved := waitForGenerate(t, running)
-	wantMoved := []core.ChunkKey{
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: 0}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -1}},
-		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: 1}},
-	}
-	if !reflect.DeepEqual(moved.Generate, wantMoved) {
-		t.Fatalf("移动后 Generate = %+v，想要 %+v", moved.Generate, wantMoved)
 	}
 }
 

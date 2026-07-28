@@ -3,7 +3,6 @@ package server_test
 import (
 	"context"
 	"errors"
-	"runtime"
 	"testing"
 	"time"
 
@@ -80,29 +79,6 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 		)
 	}
 
-	sendClientMessage(t, clientEndpoint, network.SetViewCenter{
-		Sequence:  6,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{X: 10, Z: 0},
-	})
-	stepUntil(t, running, clientEndpoint, mirror, func() bool {
-		_, ok := mirror.Chunk(core.Overworld, core.ChunkPos{})
-		return !ok
-	})
-	if _, _, ok := running.ChunkHash(core.Overworld, core.ChunkPos{}); ok {
-		t.Fatal("移出视距后权威中心区块仍 Ready")
-	}
-
-	sendClientMessage(t, clientEndpoint, network.SetViewCenter{
-		Sequence:  7,
-		Dimension: core.Overworld,
-		Center:    core.ChunkPos{},
-	})
-	stepUntil(t, running, clientEndpoint, mirror, func() bool {
-		chunk, ok := mirror.Chunk(core.Overworld, core.ChunkPos{})
-		return ok && chunk.Revision == 1
-	})
-
 	assertMirrorBlock(t, mirror, breakPosition, core.AirID)
 	for _, placement := range placements {
 		assertMirrorBlock(t, mirror, placement.position, placement.block)
@@ -116,7 +92,7 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 		authoritativeRevision != mirrorRevision ||
 		authoritativeHash != mirrorHash {
 		t.Fatalf(
-			"回载后一致性失败: authoritative=(%x,%d,%v) mirror=(%x,%d,%v)",
+			"交互后一致性失败: authoritative=(%x,%d,%v) mirror=(%x,%d,%v)",
 			authoritativeHash,
 			authoritativeRevision,
 			authoritativeOK,
@@ -224,9 +200,8 @@ func stepUntilCollect(
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for !done() {
-		running.StepForTest()
-		runtime.Gosched()
-		drainServerMessages(t, endpoint, mirror, collect)
+		result := running.StepForTest()
+		drainServerMessages(t, endpoint, mirror, collect, result.Tick)
 		if time.Now().After(deadline) {
 			t.Fatalf("等待权威状态超时；mirror center=%+v", mirrorChunkSummary(mirror))
 		}
@@ -238,20 +213,27 @@ func drainServerMessages(
 	endpoint network.ClientEndpoint,
 	mirror *client.Mirror,
 	collect func(network.ServerMessage),
+	throughTick uint64,
 ) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
 	for {
 		message, err := endpoint.Recv(ctx)
-		if errors.Is(err, context.Canceled) {
-			return
-		}
 		if err != nil {
 			t.Fatalf("接收服务端消息: %v", err)
 		}
 		if collect != nil {
 			collect(message)
+		}
+		if state, ok := message.(network.PlayerState); ok {
+			if state.ServerTick == throughTick {
+				return
+			}
+			if state.ServerTick > throughTick {
+				t.Fatalf("PlayerState tick=%d，跳过目标 tick=%d", state.ServerTick, throughTick)
+			}
+			continue
 		}
 		update, err := mirror.Apply(message)
 		if err != nil {

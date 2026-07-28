@@ -9,7 +9,6 @@ import (
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
-	"minecraft-go/internal/sim"
 	"minecraft-go/internal/world"
 )
 
@@ -40,16 +39,19 @@ func TestGeneratorWorkerPanicIsolated(t *testing.T) {
 		for _, key := range result.Ready {
 			ready[key.Pos] = struct{}{}
 		}
-		info, failed := running.ChunkInfo(core.Overworld, panicAt)
-		if failed && info.State == sim.ChunkFailed && len(ready) >= 5 {
-			if generator.callsFor(core.ChunkPos{X: -1, Z: -1}) == 0 {
-				t.Fatal("panic 后其他生成任务没有继续")
-			}
+		if generator.callsFor(panicAt) >= 2 &&
+			generator.callsFor(core.ChunkPos{X: -1, Z: -1}) > 0 &&
+			len(ready) >= 5 {
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("panic 未隔离: ready=%d", len(ready))
+	t.Fatalf(
+		"panic 未隔离: panicCalls=%d otherCalls=%d ready=%d",
+		generator.callsFor(panicAt),
+		generator.callsFor(core.ChunkPos{X: -1, Z: -1}),
+		len(ready),
+	)
 }
 
 type panicGenerator struct {

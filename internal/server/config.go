@@ -4,6 +4,8 @@ package server
 import (
 	"runtime"
 	"time"
+
+	"minecraft-go/internal/core"
 )
 
 type Config struct {
@@ -14,6 +16,8 @@ type Config struct {
 	SnapshotBytes  int
 	OutboxCapacity int
 	TickObserver   func(time.Duration)
+	SpawnDimension core.DimensionID
+	SpawnAnchor    core.ChunkPos
 }
 
 func DefaultConfig(seed int64) Config {
@@ -24,6 +28,8 @@ func DefaultConfig(seed int64) Config {
 		SnapshotChunks: 64,
 		SnapshotBytes:  1 << 20,
 		OutboxCapacity: 512,
+		SpawnDimension: core.Overworld,
+		SpawnAnchor:    core.ChunkPos{},
 	}
 }
 
@@ -39,5 +45,8 @@ func (config Config) validate() {
 	}
 	if config.OutboxCapacity < 1 {
 		panic("server: outbox capacity must be positive")
+	}
+	if config.SpawnDimension != core.Overworld {
+		panic("server: spawn dimension must be overworld")
 	}
 }

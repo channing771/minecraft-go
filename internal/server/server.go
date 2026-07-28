@@ -64,6 +64,11 @@ func New(
 		generated: make(chan sim.GeneratedChunk, queueCapacity),
 		queued:    make(map[core.ChunkKey]struct{}),
 	}
+	server.engine.RegisterSession(
+		localSessionID,
+		config.SpawnDimension,
+		config.SpawnAnchor,
+	)
 
 	server.session = newSession(
 		ctx,
@@ -141,6 +146,13 @@ func (server *Server) ChunkInfo(
 	})
 }
 
+// PlayerState 返回本地玩家权威状态的副本。
+func (server *Server) PlayerState() (sim.PlayerUpdate, bool) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.engine.Player(localSessionID)
+}
+
 // ChunkHash 返回权威 Ready 区块的逻辑哈希与 revision，不暴露可变指针。
 func (server *Server) ChunkHash(
 	dimension core.DimensionID,
@@ -205,6 +217,34 @@ func translateClientMessage(message network.ClientMessage) (sim.Command, bool) {
 			Origin:    message.Origin,
 			Direction: message.Direction,
 			Block:     message.Block,
+		}, true
+	case network.PlayerInput:
+		return sim.Command{
+			Session:  localSessionID,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandPlayerInput,
+			MoveX:    message.MoveX,
+			MoveZ:    message.MoveZ,
+			Jump:     message.Jump,
+			Yaw:      message.Yaw,
+			Pitch:    message.Pitch,
+		}, true
+	case network.BreakBlock:
+		return sim.Command{
+			Session:  localSessionID,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandBreakBlock,
+			Yaw:      message.Yaw,
+			Pitch:    message.Pitch,
+		}, true
+	case network.PlaceBlock:
+		return sim.Command{
+			Session:  localSessionID,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandPlaceBlock,
+			Yaw:      message.Yaw,
+			Pitch:    message.Pitch,
+			Block:    message.Block,
 		}, true
 	case network.RequestChunkResync:
 		return sim.Command{
