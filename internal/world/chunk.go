@@ -34,6 +34,15 @@ func (c *Chunk) Clone() *Chunk {
 	return clone
 }
 
+// PayloadBytes 返回 24 个区段的压缩 payload 与区块信封的估算大小。
+func (c *Chunk) PayloadBytes() int {
+	bytes := 512
+	for _, section := range c.sections {
+		bytes += section.Blocks.PayloadBytes()
+	}
+	return bytes
+}
+
 // Hash 返回只由逻辑方块值决定的稳定 SHA-256。
 func (c *Chunk) Hash() [sha256.Size]byte {
 	hash := sha256.New()

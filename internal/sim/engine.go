@@ -50,6 +50,7 @@ type Engine struct {
 	dimensions         map[core.DimensionID]*Dimension
 	sessions           map[SessionID]*sessionState
 	wanted             map[core.ChunkKey]struct{}
+	inFlightSaves      map[core.ChunkKey]persistenceInFlight
 	subscriptionsDirty bool
 
 	inboxMu   sync.Mutex
@@ -67,8 +68,9 @@ func NewEngine(viewRadius int) *Engine {
 		dimensions: map[core.DimensionID]*Dimension{
 			core.Overworld: NewDimension(core.Overworld),
 		},
-		sessions: make(map[SessionID]*sessionState),
-		wanted:   make(map[core.ChunkKey]struct{}),
+		sessions:      make(map[SessionID]*sessionState),
+		wanted:        make(map[core.ChunkKey]struct{}),
+		inFlightSaves: make(map[core.ChunkKey]persistenceInFlight),
 	}
 }
 

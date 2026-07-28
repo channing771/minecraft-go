@@ -232,6 +232,14 @@ func (dimension *Dimension) CancelUnload(pos core.ChunkPos) bool {
 	return true
 }
 
+func (dimension *Dimension) deleteCleanUnloading(pos core.ChunkPos) {
+	record := dimension.records[pos]
+	if record != nil && record.State == ChunkUnloading && !record.Dirty() &&
+		record.SaveInFlightRevision == 0 {
+		delete(dimension.records, pos)
+	}
+}
+
 func (dimension *Dimension) Info(pos core.ChunkPos) (ChunkInfo, bool) {
 	record, ok := dimension.records[pos]
 	if !ok {

@@ -81,6 +81,27 @@ func TestChunkHashUsesLogicalBlocksNotPaletteLayout(t *testing.T) {
 	}
 }
 
+func TestChunkPayloadBytesIsDeterministicAndAllocationFree(t *testing.T) {
+	chunk := world.NewChunk(core.ChunkPos{})
+	if got := chunk.PayloadBytes(); got != 512 {
+		t.Fatalf("all-air payload bytes=%d, want 512", got)
+	}
+	chunk.SetBlock(0, 0, 0, core.StoneID)
+	if got := chunk.PayloadBytes(); got != 2580 {
+		t.Fatalf("indexed payload bytes=%d, want 2580", got)
+	}
+
+	var got int
+	if allocations := testing.AllocsPerRun(100, func() {
+		got = chunk.PayloadBytes()
+	}); allocations != 0 {
+		t.Fatalf("PayloadBytes allocations=%v, want 0", allocations)
+	}
+	if got != 2580 {
+		t.Fatalf("repeated payload bytes=%d, want 2580", got)
+	}
+}
+
 func TestChunkBlockIndexRoundTripsNegativeChunksAndHeightBounds(t *testing.T) {
 	positions := []core.BlockPos{
 		{X: -17, Y: core.MinY, Z: 31},
