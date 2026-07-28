@@ -1,4 +1,4 @@
-package server_test
+package server
 
 import (
 	"minecraft-go/internal/core"
@@ -6,6 +6,12 @@ import (
 )
 
 type flatTestGenerator struct{}
+
+// FlatTestGenerator exposes the shared flat integration fixture to the
+// external-package server tests.
+type FlatTestGenerator = flatTestGenerator
+
+var playerIntegrationObstacle = core.BlockPos{X: 0, Y: 1, Z: -6}
 
 func (flatTestGenerator) GenerateChunk(position core.ChunkPos) *world.Chunk {
 	chunk := world.NewChunk(position)
@@ -21,12 +27,18 @@ func (flatTestGenerator) GenerateChunk(position core.ChunkPos) *world.Chunk {
 			}
 		}
 	}
+	if playerIntegrationObstacle.Chunk() == position {
+		x, _, z := playerIntegrationObstacle.Local()
+		chunk.SetBlock(x, playerIntegrationObstacle.Y, z, core.StoneID)
+	}
 	chunk.Compact()
 	return chunk
 }
 
 func (flatTestGenerator) BaseBlockAt(position core.BlockPos) core.BlockID {
 	switch {
+	case position == playerIntegrationObstacle:
+		return core.StoneID
 	case position.Y == core.MinY:
 		return core.BedrockID
 	case position.Y < -1:

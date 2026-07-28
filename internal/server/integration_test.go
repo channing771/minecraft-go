@@ -22,7 +22,7 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 	config.SnapshotChunks = 16
 	config.SnapshotBytes = 1 << 20
 	config.OutboxCapacity = 256
-	running := server.New(config, serverEndpoint, flatTestGenerator{})
+	running := server.New(config, serverEndpoint, server.FlatTestGenerator{})
 	mirror := client.NewMirror()
 
 	sendClientMessage(t, clientEndpoint, network.SetViewCenter{
