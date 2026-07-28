@@ -113,6 +113,62 @@ func TestStepKeepsClearAtExactBoundaryDistance(t *testing.T) {
 	}
 }
 
+func TestStepDoesNotStopBeforePositiveWallGap(t *testing.T) {
+	world := boxes(
+		block(0, 0, 0, fullCube),
+		block(1, 1, 0, fullCube),
+	)
+	got := physics.Step(physics.State{
+		Position: mgl32.Vec3{0.5, 1, 0.5},
+		Velocity: mgl32.Vec3{1.9998, 0, 0},
+		OnGround: true,
+	}, physics.Input{MoveX: 1}, world).State
+	if got.Position.X() < 0.69998 || got.Position.X() > 0.70000 {
+		t.Fatalf("positive gap movement stopped: position=%v", got.Position)
+	}
+	if got.Velocity.X() < 3.9997 || got.Velocity.X() > 3.9999 {
+		t.Fatalf("positive gap movement lost velocity: velocity=%v", got.Velocity)
+	}
+	if physics.PlayerBounds(got.Position).Max.X() >= 1 {
+		t.Fatalf("positive gap reached wall: bounds=%+v", physics.PlayerBounds(got.Position))
+	}
+}
+
+func TestStepDoesNotStopBeforeNegativeWallGap(t *testing.T) {
+	world := boxes(
+		block(1, 0, 0, fullCube),
+		block(0, 1, 0, fullCube),
+	)
+	got := physics.Step(physics.State{
+		Position: mgl32.Vec3{1.5, 1, 0.5},
+		Velocity: mgl32.Vec3{-1.9999, 0, 0},
+		OnGround: true,
+	}, physics.Input{MoveX: -1}, world).State
+	if got.Position.X() < 1.30000 || got.Position.X() > 1.30001 {
+		t.Fatalf("negative gap movement stopped: position=%v", got.Position)
+	}
+	if got.Velocity.X() < -4.0000 || got.Velocity.X() > -3.9998 {
+		t.Fatalf("negative gap movement lost velocity: velocity=%v", got.Velocity)
+	}
+	if physics.PlayerBounds(got.Position).Min.X() <= 1 {
+		t.Fatalf("negative gap reached wall: bounds=%+v", physics.PlayerBounds(got.Position))
+	}
+}
+
+func TestStepIgnoresUnknownCellTouchingParallelFace(t *testing.T) {
+	world := unknownAt(core.BlockPos{X: -1, Y: 1, Z: 0})
+	got := physics.Step(physics.State{
+		Position: mgl32.Vec3{0.3, 1, 0.5},
+		OnGround: true,
+	}, physics.Input{MoveZ: 1}, world)
+	if got.HitUnknown {
+		t.Fatalf("face-touching unknown cell reported as hit: %+v", got)
+	}
+	if got.State.Position.Z() >= 0.5 {
+		t.Fatalf("parallel movement did not progress: %+v", got)
+	}
+}
+
 func FuzzStepKeepsFiniteNonOverlappingState(f *testing.F) {
 	f.Add(int16(5), int16(10), int16(5), int16(0), int16(0), int16(0), int8(0), int8(1), false, int16(0))
 	f.Add(int16(-25), int16(10), int16(5), int16(43), int16(0), int16(0), int8(1), int8(0), false, int16(0))

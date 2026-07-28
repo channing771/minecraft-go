@@ -60,9 +60,9 @@ func clipAxis(feetPosition mgl32.Vec3, axis int, requested float32, source Colli
 				blockPosition := core.BlockPos{X: x, Y: y, Z: z}
 				set := source.CollisionBoxes(blockPosition)
 				if !set.Loaded {
-					hitUnknown = true
 					candidate, blocks := clipAgainst(feetPosition, player, axis, clipped, blockBounds(blockPosition, fullCubeBounds))
 					if blocks {
+						hitUnknown = true
 						clipped = candidate
 						wasClipped = true
 					}
@@ -96,6 +96,9 @@ func clipAgainst(position mgl32.Vec3, player core.AABB, axis int, requested floa
 	if !overlapsOtherAxes(player, collider, axis) {
 		return requested, false
 	}
+	if !endpointTouchesCollider(position, collider, axis, requested) {
+		return requested, false
+	}
 
 	if requested > 0 {
 		distance := collider.Min[axis] - player.Max[axis]
@@ -112,6 +115,15 @@ func clipAgainst(position mgl32.Vec3, player core.AABB, axis int, requested floa
 		return safeCollisionDistance(position, collider, axis, requested, candidate), true
 	}
 	return requested, false
+}
+
+func endpointTouchesCollider(position mgl32.Vec3, collider core.AABB, axis int, requested float32) bool {
+	position[axis] += requested
+	player := PlayerBounds(position)
+	if requested > 0 {
+		return player.Max[axis] >= collider.Min[axis]
+	}
+	return player.Min[axis] <= collider.Max[axis]
 }
 
 func safeCollisionDistance(position mgl32.Vec3, collider core.AABB, axis int, requested, distance float32) float32 {
