@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20260707082822-2a407d02d01a
 	github.com/go-gl/mathgl v1.2.0
+	github.com/klauspost/compress v1.19.1
 	github.com/oliverbestmann/webgpu v1.34.2
 )
 
