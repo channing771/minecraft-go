@@ -229,8 +229,14 @@ func (a *application) nextSequence() uint64 {
 	return a.sequence
 }
 
-// frame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
+// frame 应用服务端消息后绘制一帧。
 func (a *application) frame(drainMax int) bool {
+	a.drainServerMessages(drainMax)
+	return a.renderFrame(drainMax)
+}
+
+// renderFrame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
+func (a *application) renderFrame(workMax int) bool {
 	width, height := a.framebufferSize()
 	if width == 0 || height == 0 {
 		return false
@@ -244,9 +250,8 @@ func (a *application) frame(drainMax int) bool {
 	}
 
 	a.renderer.BeginFrame()
-	a.drainServerMessages(drainMax)
-	a.mesher.Schedule(a.mirror, drainMax)
-	for _, result := range a.mesher.Drain(a.mirror, drainMax) {
+	a.mesher.Schedule(a.mirror, workMax)
+	for _, result := range a.mesher.Drain(a.mirror, workMax) {
 		if result.Dimension != core.Overworld {
 			continue
 		}

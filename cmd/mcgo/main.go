@@ -64,6 +64,7 @@ func runInteractive(app *application) {
 		now := time.Now()
 		dt := min(now.Sub(lastFrame), 100*time.Millisecond)
 		lastFrame = now
+		app.drainServerMessages(64)
 
 		escapeDown := app.window.KeyDown(client.KeyEscape)
 		if escapeDown && !escapeWasDown {
@@ -99,15 +100,6 @@ func runInteractive(app *application) {
 			number = 3
 		}
 		actions := input.Update(clickDown, app.window.SecondaryButtonDown(), number)
-		app.selectedBlock = actions.SelectedBlock
-		if captured && !justCaptured {
-			if actions.Break {
-				app.breakBlock()
-			}
-			if actions.Place {
-				app.placeBlock()
-			}
-		}
 
 		movement := client.Movement{}
 		if captured {
@@ -119,28 +111,48 @@ func runInteractive(app *application) {
 				app.window.KeyDown(client.KeySpace),
 			)
 		}
-		if _, ready := app.predictor.State(); ready {
-			control := client.Control{
-				MoveX: movement.MoveX,
-				MoveZ: movement.MoveZ,
-				Jump:  movement.Jump,
-				Yaw:   app.camera.Yaw,
-				Pitch: app.camera.Pitch,
-			}
-			if err := app.predictor.Advance(
-				dt,
-				control,
-				client.MirrorCollisionSource{Mirror: app.mirror, Dimension: core.Overworld},
-				app.nextSequence,
-				func(input network.PlayerInput) error { return app.send(input) },
-			); err != nil {
-				log.Printf("推进玩家预测失败: %v", err)
-			}
-			if feet, ok := app.predictor.PresentationPosition(dt); ok {
-				app.camera.Pos = feet.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
-				app.center = cameraChunk(app.camera.Pos)
-			}
+		app.applyInteractiveInput(dt, movement, actions, captured && !justCaptured)
+		app.renderFrame(64)
+	}
+}
+
+func (a *application) applyInteractiveInput(
+	elapsed time.Duration,
+	movement client.Movement,
+	actions client.Actions,
+	allowActions bool,
+) {
+	a.selectedBlock = actions.SelectedBlock
+	if allowActions {
+		if actions.Break {
+			a.breakBlock()
 		}
-		app.frame(64)
+		if actions.Place {
+			a.placeBlock()
+		}
+	}
+
+	if _, ready := a.predictor.State(); !ready {
+		return
+	}
+	control := client.Control{
+		MoveX: movement.MoveX,
+		MoveZ: movement.MoveZ,
+		Jump:  movement.Jump,
+		Yaw:   a.camera.Yaw,
+		Pitch: a.camera.Pitch,
+	}
+	if err := a.predictor.Advance(
+		elapsed,
+		control,
+		client.MirrorCollisionSource{Mirror: a.mirror, Dimension: core.Overworld},
+		a.nextSequence,
+		func(input network.PlayerInput) error { return a.send(input) },
+	); err != nil {
+		log.Printf("推进玩家预测失败: %v", err)
+	}
+	if feet, ok := a.predictor.PresentationPosition(elapsed); ok {
+		a.camera.Pos = feet.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+		a.center = cameraChunk(a.camera.Pos)
 	}
 }
