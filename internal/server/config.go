@@ -19,18 +19,31 @@ type Config struct {
 	SpawnDimension  core.DimensionID
 	SpawnAnchor     core.ChunkPos
 	TrustedObserver bool
+	SaveWorkers     int
+	SaveChunks      int
+	SaveBytes       int
+	AutosaveTicks   uint64
+	UnsavedBytes    int64
+	ShutdownTimeout time.Duration
+	SaveObserver    func(time.Duration)
 }
 
 func DefaultConfig(seed int64) Config {
 	return Config{
-		Seed:           seed,
-		ViewRadius:     33,
-		Workers:        max(1, runtime.GOMAXPROCS(0)-1),
-		SnapshotChunks: 64,
-		SnapshotBytes:  1 << 20,
-		OutboxCapacity: 512,
-		SpawnDimension: core.Overworld,
-		SpawnAnchor:    core.ChunkPos{},
+		Seed:            seed,
+		ViewRadius:      33,
+		Workers:         max(1, runtime.GOMAXPROCS(0)-1),
+		SnapshotChunks:  64,
+		SnapshotBytes:   1 << 20,
+		OutboxCapacity:  512,
+		SpawnDimension:  core.Overworld,
+		SpawnAnchor:     core.ChunkPos{},
+		SaveWorkers:     2,
+		SaveChunks:      8,
+		SaveBytes:       4 << 20,
+		AutosaveTicks:   6000,
+		UnsavedBytes:    512 << 20,
+		ShutdownTimeout: 30 * time.Second,
 	}
 }
 
@@ -49,5 +62,20 @@ func (config Config) validate() {
 	}
 	if config.SpawnDimension != core.Overworld {
 		panic("server: spawn dimension must be overworld")
+	}
+	if config.SaveWorkers < 1 {
+		panic("server: save worker count must be positive")
+	}
+	if config.SaveChunks < 1 || config.SaveBytes < 1 {
+		panic("server: save budgets must be positive")
+	}
+	if config.AutosaveTicks == 0 {
+		panic("server: autosave ticks must be positive")
+	}
+	if config.UnsavedBytes < 1 {
+		panic("server: unsaved byte limit must be positive")
+	}
+	if config.ShutdownTimeout <= 0 {
+		panic("server: shutdown timeout must be positive")
 	}
 }

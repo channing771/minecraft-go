@@ -39,8 +39,10 @@ type Server struct {
 	engine    *sim.Engine
 	session   *session
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx         context.Context
+	cancel      context.CancelFunc
+	saveCtx     context.Context
+	cancelSaves context.CancelFunc
 
 	incoming  chan sim.Command
 	jobs      chan chunkJob
@@ -54,9 +56,13 @@ type Server struct {
 	trustedObserverSequence uint64
 	appliedTrustedObserver  appliedTrustedObserverCenter
 
-	workers   sync.WaitGroup
-	stepMu    sync.Mutex
-	closeOnce sync.Once
+	workers         sync.WaitGroup
+	saveWorkers     sync.WaitGroup
+	saveJobs        chan saveJob
+	saveCompletions chan saveCompletion
+	autosaveActive  bool
+	stepMu          sync.Mutex
+	closeOnce       sync.Once
 }
 
 func New(
@@ -76,20 +82,25 @@ func New(
 		panic("server: nil store")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	saveCtx, cancelSaves := context.WithCancel(ctx)
 	queueCapacity := max(1, config.Workers*2)
 	server := &Server{
-		config:    config,
-		endpoint:  endpoint,
-		generator: generator,
-		store:     store,
-		engine:    sim.NewEngine(config.ViewRadius),
-		ctx:       ctx,
-		cancel:    cancel,
-		incoming:  make(chan sim.Command, inputCapacity),
-		jobs:      make(chan chunkJob, queueCapacity),
-		acquired:  make(chan sim.AcquiredChunk, queueCapacity),
-		generated: make(chan sim.GeneratedChunk, queueCapacity),
-		queued:    make(map[core.ChunkKey]struct{}),
+		config:          config,
+		endpoint:        endpoint,
+		generator:       generator,
+		store:           store,
+		engine:          sim.NewEngine(config.ViewRadius),
+		ctx:             ctx,
+		cancel:          cancel,
+		saveCtx:         saveCtx,
+		cancelSaves:     cancelSaves,
+		incoming:        make(chan sim.Command, inputCapacity),
+		jobs:            make(chan chunkJob, queueCapacity),
+		acquired:        make(chan sim.AcquiredChunk, queueCapacity),
+		generated:       make(chan sim.GeneratedChunk, queueCapacity),
+		saveJobs:        make(chan saveJob, config.SaveWorkers*2),
+		saveCompletions: make(chan saveCompletion, config.SaveWorkers*2),
+		queued:          make(map[core.ChunkKey]struct{}),
 	}
 	if config.TrustedObserver {
 		server.trustedObserverCenters = make(chan trustedObserverCenter, 1)
@@ -113,6 +124,10 @@ func New(
 	for range config.Workers {
 		go server.chunkWorker()
 	}
+	server.saveWorkers.Add(config.SaveWorkers)
+	for range config.SaveWorkers {
+		go server.saveWorker()
+	}
 	return server
 }
 
@@ -125,6 +140,7 @@ func (server *Server) Step() sim.TickResult {
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 
+	server.drainSaveCompletions()
 	trustedCenter, trustedSequence, hasTrustedCenter := server.drainTrustedObserverCenter()
 	server.drainIncoming()
 	server.drainAcquired()
@@ -142,6 +158,7 @@ func (server *Server) Step() sim.TickResult {
 	server.appendChunkRequests(chunkJobLoad, result.Acquire)
 	server.appendChunkRequests(chunkJobGenerate, result.Generate)
 	server.scheduleChunkJobs()
+	server.schedulePersistence(result.Tick)
 	return result
 }
 
@@ -211,9 +228,11 @@ func (server *Server) Run(ctx context.Context) error {
 func (server *Server) Close() {
 	server.closeOnce.Do(func() {
 		server.cancel()
+		server.cancelSaves()
 		server.session.close()
 		_ = server.endpoint.Close()
 		server.workers.Wait()
+		server.saveWorkers.Wait()
 	})
 }
 
