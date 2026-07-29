@@ -229,6 +229,7 @@ func (p *Predictor) ApplyPlayerState(
 
 	oldDisplayed := p.presentationPositionNoAdvance()
 	oldPredicted := p.current.Position
+	oldCorrectionRemaining := p.correctionRemaining
 	p.current = authority
 	p.previous = authority
 	if p.suspended {
@@ -247,12 +248,24 @@ func (p *Predictor) ApplyPlayerState(
 	p.lastServerTick = message.ServerTick
 
 	errorDistance := p.current.Position.Sub(oldPredicted).Len()
-	if errorDistance >= 1.0/128 && errorDistance < 0.5 {
-		p.displayOffset = oldDisplayed.Sub(p.interpolatedPosition())
-		p.correctionRemaining = 100 * time.Millisecond
-	} else {
+	switch {
+	case errorDistance >= 0.5:
 		p.displayOffset = mgl32.Vec3{}
 		p.correctionRemaining = 0
+	case errorDistance >= 1.0/128:
+		p.displayOffset = oldDisplayed.Sub(p.interpolatedPosition())
+		p.correctionRemaining = 100 * time.Millisecond
+	default:
+		p.displayOffset = oldDisplayed.Sub(p.interpolatedPosition())
+		if p.displayOffset == (mgl32.Vec3{}) {
+			p.correctionRemaining = 0
+			break
+		}
+		remainingStep := max(time.Duration(0), physics.FixedDelta-p.accumulator)
+		p.correctionRemaining = max(oldCorrectionRemaining, remainingStep)
+		if p.correctionRemaining <= 0 {
+			p.displayOffset = mgl32.Vec3{}
+		}
 	}
 	return ReconcileResult{}, nil
 }
