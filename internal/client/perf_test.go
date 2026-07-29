@@ -43,7 +43,7 @@ func TestPerfSamplerRingKeepsNewestSamples(t *testing.T) {
 	}
 }
 
-func TestPerfReportJSONRoundTripIncludesTicks(t *testing.T) {
+func TestPerfReportJSONRoundTripIncludesTicksAndPersistence(t *testing.T) {
 	want := client.PerfReport{
 		ScenarioVersion: 3,
 		Hardware:        "test-machine",
@@ -68,25 +68,43 @@ func TestPerfReportJSONRoundTripIncludesTicks(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("JSON roundtrip = %+v，想要 %+v", got, want)
 	}
+	var shape map[string]json.RawMessage
+	if err := json.Unmarshal(data, &shape); err != nil {
+		t.Fatal(err)
+	}
+	persistence, ok := shape["persistence"]
+	if !ok {
+		t.Fatal("PerfReport JSON 缺少 persistence 摘要")
+	}
+	var summary map[string]json.RawMessage
+	if err := json.Unmarshal(persistence, &summary); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"snapshots", "p50_ms", "p95_ms", "p99_ms", "max_ms"} {
+		if _, ok := summary[field]; !ok {
+			t.Fatalf("persistence JSON 缺少字段 %q: %s", field, persistence)
+		}
+	}
 }
 
-func TestPerfReportV3IncludesBenchmarkMetrics(t *testing.T) {
+func TestPerfReportV4IncludesBenchmarkMetrics(t *testing.T) {
 	data := []byte(`{
-  "scenario_version": 3,
+  "scenario_version": 4,
   "hardware": "test-machine",
   "framebuffer": "2560x1440",
   "phases": {
     "still": {"frames": 6000, "fps": 100, "p99_ms": 9, "peak_rss_bytes": 1024},
     "flying": {"frames": 12000, "fps": 100, "p99_ms": 9, "peak_rss_bytes": 1024}
   },
-  "ticks": {"frames": 3600, "p99_ms": 2, "max_ms": 4}
+  "ticks": {"frames": 3600, "p99_ms": 2, "max_ms": 4},
+  "persistence": {"snapshots": 64, "p50_ms": 0.1, "p95_ms": 0.2, "p99_ms": 0.3, "max_ms": 0.4}
 }`)
 	var report client.PerfReport
 	if err := json.Unmarshal(data, &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.ScenarioVersion != 3 {
-		t.Fatalf("scenario_version = %d，想要 3", report.ScenarioVersion)
+	if report.ScenarioVersion != 4 {
+		t.Fatalf("scenario_version = %d，想要 4", report.ScenarioVersion)
 	}
 	if strings.TrimSpace(report.Hardware) == "" || strings.TrimSpace(report.Framebuffer) == "" {
 		t.Fatalf("benchmark 标识不完整: hardware=%q framebuffer=%q",
@@ -100,5 +118,10 @@ func TestPerfReportV3IncludesBenchmarkMetrics(t *testing.T) {
 	}
 	if report.Ticks.Frames == 0 || report.Ticks.P99MS == 0 || report.Ticks.MaxMS == 0 {
 		t.Fatalf("tick 指标不完整: %+v", report.Ticks)
+	}
+	if report.Persistence.Snapshots == 0 || report.Persistence.P50MS == 0 ||
+		report.Persistence.P95MS == 0 || report.Persistence.P99MS == 0 ||
+		report.Persistence.MaxMS == 0 {
+		t.Fatalf("persistence 指标不完整: %+v", report.Persistence)
 	}
 }

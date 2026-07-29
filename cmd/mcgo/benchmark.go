@@ -21,7 +21,7 @@ import (
 
 const (
 	benchmarkSeed   = 20260726
-	scenarioVersion = 3
+	scenarioVersion = 4
 )
 
 var (
@@ -53,6 +53,7 @@ func runBenchmark(app *application, outputPath string) error {
 		return err
 	}
 	app.ticks.reset()
+	app.saves.reset()
 	still, err := measurePhase(app, "still", stillDuration, nil)
 	if err != nil {
 		return err
@@ -95,6 +96,7 @@ func runBenchmark(app *application, outputPath string) error {
 			mirrorHash, mirrorRevision, mirrorOK)
 	}
 	ticks := app.ticks.summary()
+	persistence := app.saves.summary()
 
 	report := client.PerfReport{
 		ScenarioVersion: scenarioVersion,
@@ -109,7 +111,11 @@ func runBenchmark(app *application, outputPath string) error {
 			"still":  still,
 			"flying": flying,
 		},
-		Ticks: ticks,
+		Ticks:       ticks,
+		Persistence: persistence,
+	}
+	if report.Persistence.Snapshots == 0 {
+		return validateBenchmarkReport(report)
 	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -120,8 +126,14 @@ func runBenchmark(app *application, outputPath string) error {
 		return fmt.Errorf("写性能报告: %w", err)
 	}
 	fmt.Printf("性能报告已写入 %s\n", outputPath)
+	return validateBenchmarkReport(report)
+}
 
+func validateBenchmarkReport(report client.PerfReport) error {
 	var failures []string
+	if report.Persistence.Snapshots == 0 {
+		failures = append(failures, "persistence snapshots=0")
+	}
 	for name, phase := range report.Phases {
 		if phase.FPS < 100 {
 			failures = append(failures, fmt.Sprintf("%s fps %.1f < 100", name, phase.FPS))
@@ -134,14 +146,11 @@ func runBenchmark(app *application, outputPath string) error {
 				name, float64(phase.PeakRSSBytes)/(1<<20)))
 		}
 	}
-	if len(failures) > 0 {
-		return fmt.Errorf("%s", strings.Join(failures, "；"))
+	if report.Ticks.P99MS >= 10 {
+		failures = append(failures, fmt.Sprintf("tick p99 %.3f ms >= 10 ms", report.Ticks.P99MS))
 	}
-	if ticks.P99MS >= 10 {
-		failures = append(failures, fmt.Sprintf("tick p99 %.3f ms >= 10 ms", ticks.P99MS))
-	}
-	if ticks.MaxMS >= 50 {
-		failures = append(failures, fmt.Sprintf("tick max %.3f ms >= 50 ms", ticks.MaxMS))
+	if report.Ticks.MaxMS >= 50 {
+		failures = append(failures, fmt.Sprintf("tick max %.3f ms >= 50 ms", report.Ticks.MaxMS))
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf("%s", strings.Join(failures, "；"))

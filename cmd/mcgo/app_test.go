@@ -17,6 +17,20 @@ import (
 	"minecraft-go/internal/physics"
 )
 
+func TestPerformanceRecordersOnlyEnableSaveSamplingForBenchmark(t *testing.T) {
+	interactiveTicks, interactiveSaves := newPerformanceRecorders(false)
+	if interactiveTicks == nil || interactiveSaves != nil {
+		t.Fatalf("交互模式 recorders ticks=%v saves=%v，想要 tick recorder 且无 save recorder",
+			interactiveTicks, interactiveSaves)
+	}
+
+	benchmarkTicks, benchmarkSaves := newPerformanceRecorders(true)
+	if benchmarkTicks == nil || benchmarkSaves == nil {
+		t.Fatalf("benchmark recorders ticks=%v saves=%v，想要两者都有",
+			benchmarkTicks, benchmarkSaves)
+	}
+}
+
 func TestInteractiveInputUsesDrainedReadyResetInSameFrame(t *testing.T) {
 	app, serverEndpoint := newInteractiveTestApplication(t)
 	app.camera.Pos = mgl32.Vec3{99, 99, 99}

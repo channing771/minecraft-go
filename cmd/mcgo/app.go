@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -53,6 +54,7 @@ type application struct {
 	selectedBlock    core.BlockID
 	loadedChunks     map[core.ChunkPos]struct{}
 	ticks            *tickRecorder
+	saves            *saveRecorder
 	observerFloor    uint64
 	closeOnce        sync.Once
 	closeErr         error
@@ -62,6 +64,68 @@ type application struct {
 type tickRecorder struct {
 	mu      sync.Mutex
 	sampler *client.PerfSampler
+}
+
+type saveRecorder struct {
+	mu      sync.Mutex
+	samples []float64
+	next    int
+	count   int
+}
+
+func newSaveRecorder(capacity int) *saveRecorder {
+	return &saveRecorder{samples: make([]float64, max(1, capacity))}
+}
+
+func newPerformanceRecorders(benchmark bool) (*tickRecorder, *saveRecorder) {
+	ticks := newTickRecorder(100_000)
+	if !benchmark {
+		return ticks, nil
+	}
+	return ticks, newSaveRecorder(100_000)
+}
+
+func (recorder *saveRecorder) add(duration time.Duration) {
+	recorder.mu.Lock()
+	recorder.samples[recorder.next] = float64(duration.Nanoseconds()) / float64(time.Millisecond)
+	recorder.next = (recorder.next + 1) % len(recorder.samples)
+	recorder.count = min(recorder.count+1, len(recorder.samples))
+	recorder.mu.Unlock()
+}
+
+func (recorder *saveRecorder) reset() {
+	recorder.mu.Lock()
+	recorder.next = 0
+	recorder.count = 0
+	recorder.mu.Unlock()
+}
+
+func (recorder *saveRecorder) summary() client.PersistenceSummary {
+	recorder.mu.Lock()
+	ordered := make([]float64, recorder.count)
+	start := 0
+	if recorder.count == len(recorder.samples) {
+		start = recorder.next
+	}
+	for index := range recorder.count {
+		ordered[index] = recorder.samples[(start+index)%len(recorder.samples)]
+	}
+	recorder.mu.Unlock()
+	if len(ordered) == 0 {
+		return client.PersistenceSummary{}
+	}
+	slices.Sort(ordered)
+	percentile := func(p float64) float64 {
+		index := int(math.Ceil(p*float64(len(ordered)))) - 1
+		return ordered[max(0, min(index, len(ordered)-1))]
+	}
+	return client.PersistenceSummary{
+		Snapshots: uint64(len(ordered)),
+		P50MS:     percentile(0.50),
+		P95MS:     percentile(0.95),
+		P99MS:     percentile(0.99),
+		MaxMS:     ordered[len(ordered)-1],
+	}
 }
 
 func newTickRecorder(capacity int) *tickRecorder {
@@ -179,8 +243,11 @@ func newApplication(options applicationOptions) (*application, error) {
 	config := server.DefaultConfig(options.Seed)
 	config.ViewRadius = viewDistance + 1
 	config.TrustedObserver = options.Benchmark
-	ticks := newTickRecorder(100_000)
+	ticks, saves := newPerformanceRecorders(options.Benchmark)
 	config.TickObserver = ticks.add
+	if saves != nil {
+		config.SaveObserver = saves.add
+	}
 	running := server.NewEmbedded(config, serverEndpoint, store)
 	serverContext, serverCancel := context.WithCancel(context.Background())
 	serverDone := make(chan error, 1)
@@ -208,6 +275,7 @@ func newApplication(options applicationOptions) (*application, error) {
 		selectedBlock:  core.StoneID,
 		loadedChunks:   make(map[core.ChunkPos]struct{}),
 		ticks:          ticks,
+		saves:          saves,
 	}
 	app.releaseResources = app.releaseOwnedResources
 	if options.Benchmark {

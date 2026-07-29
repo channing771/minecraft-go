@@ -64,6 +64,15 @@ type PhaseSummary struct {
 	DroppedRingBufferSamples int     `json:"dropped_ring_buffer_samples,omitempty"`
 }
 
+// PersistenceSummary 汇总 benchmark 期间完成的存档批次耗时。
+type PersistenceSummary struct {
+	Snapshots uint64  `json:"snapshots"`
+	P50MS     float64 `json:"p50_ms"`
+	P95MS     float64 `json:"p95_ms"`
+	P99MS     float64 `json:"p99_ms"`
+	MaxMS     float64 `json:"max_ms"`
+}
+
 func (s *PerfSampler) Summary(peakRSS uint64) PhaseSummary {
 	if s.count == 0 {
 		return PhaseSummary{PeakRSSBytes: peakRSS}
@@ -127,4 +136,5 @@ type PerfReport struct {
 	SnapshotSeconds float64                 `json:"snapshot_seconds"`
 	Phases          map[string]PhaseSummary `json:"phases"`
 	Ticks           PhaseSummary            `json:"ticks"`
+	Persistence     PersistenceSummary      `json:"persistence"`
 }
