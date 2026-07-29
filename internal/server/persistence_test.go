@@ -931,7 +931,7 @@ func TestPersistenceBackpressureQueuesAcquireUntilMemoryRecovers(t *testing.T) {
 	config.TrustedObserver = true
 	config.UnsavedBytes = 512
 	running := New(config, endpoint, &countingGenerator{}, store)
-	t.Cleanup(running.Close)
+	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	heldKey := chunkKey(0, 0)
 	running.engine = dirtyReadyEngine(t, []core.ChunkKey{heldKey})
 	running.engine.Enqueue(sim.Command{
@@ -985,38 +985,6 @@ func TestPersistenceBackpressureQueuesAcquireUntilMemoryRecovers(t *testing.T) {
 	}
 }
 
-func TestCloseCancelsAndWaitsForSaveWorkersWithoutFinalStoreLifecycle(t *testing.T) {
-	store := newPersistenceTestStore()
-	store.gate = make(chan struct{})
-	running := newPersistenceServerWithoutCleanup(t, store)
-	running.engine = dirtyReadyEngine(t, []core.ChunkKey{chunkKey(0, 0)})
-	running.config.AutosaveTicks = running.engine.TickCount() + 1
-	running.StepForTest()
-	receiveSaveCall(t, store)
-
-	closed := make(chan struct{})
-	go func() {
-		running.Close()
-		close(closed)
-	}()
-	select {
-	case <-closed:
-	case <-time.After(time.Second):
-		t.Fatal("Close did not wait for canceled save worker to exit")
-	}
-	select {
-	case <-store.canceled:
-	default:
-		t.Fatal("save worker did not cancel gated SaveBatch")
-	}
-	store.mu.Lock()
-	syncCalls, closeCalls := store.syncCalls, store.closeCalls
-	store.mu.Unlock()
-	if syncCalls != 0 || closeCalls != 0 {
-		t.Fatalf("Task 13 Close touched store lifecycle: Sync=%d Close=%d", syncCalls, closeCalls)
-	}
-}
-
 type persistenceTestStore struct {
 	metadata storage.Metadata
 	started  chan []storage.ChunkSave
@@ -1060,9 +1028,12 @@ func (store *persistenceTestStore) SaveBatch(
 	case <-ctx.Done():
 		return storage.SaveResult{}, ctx.Err()
 	}
-	if store.gate != nil {
+	store.mu.Lock()
+	gate := store.gate
+	store.mu.Unlock()
+	if gate != nil {
 		select {
-		case <-store.gate:
+		case <-gate:
 		case <-ctx.Done():
 			select {
 			case store.canceled <- struct{}{}:
@@ -1107,8 +1078,24 @@ func (store *persistenceTestStore) Close() error {
 func newPersistenceServer(t *testing.T, store storage.Store) *Server {
 	t.Helper()
 	running := newPersistenceServerWithoutCleanup(t, store)
-	t.Cleanup(running.Close)
+	t.Cleanup(func() {
+		if testStore, ok := store.(*persistenceTestStore); ok {
+			testStore.recoverForShutdownCleanup()
+		}
+		shutdownServerForTest(t, running)
+	})
 	return running
+}
+
+func (store *persistenceTestStore) recoverForShutdownCleanup() {
+	store.mu.Lock()
+	gate := store.gate
+	store.gate = nil
+	store.respond = nil
+	store.mu.Unlock()
+	if gate != nil {
+		close(gate)
+	}
 }
 
 func newPersistenceServerWithoutCleanup(t *testing.T, store storage.Store) *Server {

@@ -31,6 +31,14 @@ type appliedTrustedObserverCenter struct {
 	sequence  uint64
 }
 
+type serverLifecycle uint8
+
+const (
+	serverRunning serverLifecycle = iota
+	serverClosing
+	serverClosed
+)
+
 type Server struct {
 	config    Config
 	endpoint  network.ServerEndpoint
@@ -69,7 +77,12 @@ type Server struct {
 	lastSaveError   string
 	lastSaveErrorAt time.Time
 	stepMu          sync.Mutex
-	closeOnce       sync.Once
+	shutdownGate    chan struct{}
+	lifecycle       serverLifecycle
+	runtimeDone     chan struct{}
+	saveDone        chan struct{}
+	closedDone      chan struct{}
+	storePhase      storeShutdownPhase
 }
 
 func New(
@@ -89,7 +102,9 @@ func New(
 		panic("server: nil store")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	saveCtx, cancelSaves := context.WithCancel(ctx)
+	saveCtx, cancelSaves := context.WithCancel(context.Background())
+	shutdownGate := make(chan struct{}, 1)
+	shutdownGate <- struct{}{}
 	queueCapacity := max(1, config.Workers*2)
 	server := &Server{
 		config:          config,
@@ -110,6 +125,10 @@ func New(
 		retry:           make(map[storage.RegionKey][]retrySave),
 		retryInFlight:   make(map[uint64]retrySave),
 		queued:          make(map[core.ChunkKey]struct{}),
+		runtimeDone:     make(chan struct{}),
+		saveDone:        make(chan struct{}),
+		closedDone:      make(chan struct{}),
+		shutdownGate:    shutdownGate,
 	}
 	if config.TrustedObserver {
 		server.trustedObserverCenters = make(chan trustedObserverCenter, 1)
@@ -137,17 +156,28 @@ func New(
 	for range config.SaveWorkers {
 		go server.saveWorker()
 	}
+	go func() {
+		server.workers.Wait()
+		close(server.runtimeDone)
+	}()
+	go func() {
+		server.saveWorkers.Wait()
+		close(server.saveDone)
+	}()
 	return server
 }
 
 // Step 执行一次服务端编排与权威模拟 tick。
 func (server *Server) Step() sim.TickResult {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	if server.lifecycle != serverRunning {
+		return sim.TickResult{}
+	}
 	started := time.Now()
 	if server.config.TickObserver != nil {
 		defer func() { server.config.TickObserver(time.Since(started)) }()
 	}
-	server.stepMu.Lock()
-	defer server.stepMu.Unlock()
 
 	server.drainSaveCompletions()
 	trustedCenter, trustedSequence, hasTrustedCenter := server.drainTrustedObserverCenter()
@@ -227,25 +257,30 @@ func (server *Server) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			server.Close()
-			return ctx.Err()
+			return server.shutdownAfterRunCancellation(ctx.Err())
 		case <-server.ctx.Done():
-			return nil
+			select {
+			case <-server.closedDone:
+				return nil
+			case <-ctx.Done():
+				return server.shutdownAfterRunCancellation(ctx.Err())
+			}
 		case <-ticker.C:
 			server.Step()
 		}
 	}
 }
 
-func (server *Server) Close() {
-	server.closeOnce.Do(func() {
-		server.cancel()
-		server.cancelSaves()
-		server.session.close()
-		_ = server.endpoint.Close()
-		server.workers.Wait()
-		server.saveWorkers.Wait()
-	})
+func (server *Server) shutdownAfterRunCancellation(runErr error) error {
+	shutdownCtx, cancel := context.WithTimeout(
+		context.Background(),
+		server.config.ShutdownTimeout,
+	)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	return runErr
 }
 
 func (server *Server) ChunkInfo(

@@ -241,7 +241,7 @@ func newDelayedPlayerHarness(t *testing.T, delayTicks uint64) *delayedPlayerHarn
 	h.running = NewMemory(config, serverEndpoint, flatTestGenerator{})
 	t.Cleanup(func() {
 		h.closeGate.cleanup(func() {
-			h.running.Close()
+			shutdownServerForTest(t, h.running)
 			_ = h.clientEndpoint.Close()
 		})
 	})
@@ -645,8 +645,11 @@ func (h *delayedPlayerHarness) replayResult() delayedReplayResult {
 func (h *delayedPlayerHarness) closeAndAssertNoGoroutineLeak(timeout time.Duration) {
 	h.t.Helper()
 	deadline := time.Now().Add(timeout)
+	var shutdownErr error
 	done, started := h.closeGate.start(func() {
-		h.running.Close()
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		shutdownErr = h.running.Shutdown(ctx)
+		cancel()
 		_ = h.clientEndpoint.Close()
 	})
 	if !started {
@@ -669,6 +672,9 @@ func (h *delayedPlayerHarness) closeAndAssertNoGoroutineLeak(timeout time.Durati
 	)
 	switch result {
 	case delayedCloseWaitOK:
+		if shutdownErr != nil {
+			h.t.Fatalf("Server Shutdown error=%v", shutdownErr)
+		}
 		return
 	case delayedCloseTimeout:
 		h.t.Fatalf("Server/MemoryTransport 关闭超过 %v\n%s", timeout, goroutineDump())

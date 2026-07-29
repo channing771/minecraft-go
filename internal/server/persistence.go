@@ -76,33 +76,43 @@ func (server *Server) saveWorker() {
 }
 
 func (server *Server) drainSaveCompletions() {
+	_ = server.drainSaveCompletionsWithError()
+}
+
+func (server *Server) drainSaveCompletionsWithError() error {
+	var result error
 	for {
 		select {
 		case completion := <-server.saveCompletions:
-			uncommitted := make([]sim.ChunkSaveSnapshot, 0, len(completion.Job.Snapshots))
-			for _, snapshot := range completion.Job.Snapshots {
-				if revision, ok := completion.Result.Committed[snapshot.Key]; ok {
-					server.applyCommittedSnapshot(snapshot, revision)
-				} else {
-					uncommitted = append(uncommitted, snapshot)
-				}
-			}
-			err := completion.Err
-			if err == nil && len(uncommitted) != 0 {
-				err = errors.New("save result omitted submitted chunks")
-			}
-			if err != nil {
-				server.retainFailedSave(completion.Job, uncommitted, err)
-			} else {
-				server.lastSaveSuccess = time.Now()
-				if completion.Job.Retry {
-					server.finishRetryDispatch(completion.Job)
-				}
-			}
+			result = errors.Join(result, server.applySaveCompletion(completion))
 		default:
-			return
+			return result
 		}
 	}
+}
+
+func (server *Server) applySaveCompletion(completion saveCompletion) error {
+	uncommitted := make([]sim.ChunkSaveSnapshot, 0, len(completion.Job.Snapshots))
+	for _, snapshot := range completion.Job.Snapshots {
+		if revision, ok := completion.Result.Committed[snapshot.Key]; ok {
+			server.applyCommittedSnapshot(snapshot, revision)
+		} else {
+			uncommitted = append(uncommitted, snapshot)
+		}
+	}
+	err := completion.Err
+	if err == nil && len(uncommitted) != 0 {
+		err = errors.New("save result omitted submitted chunks")
+	}
+	if err != nil {
+		server.retainFailedSave(completion.Job, uncommitted, err)
+		return fmt.Errorf("save region %+v: %w", completion.Job.Region, err)
+	}
+	server.lastSaveSuccess = time.Now()
+	if completion.Job.Retry {
+		server.finishRetryDispatch(completion.Job)
+	}
+	return nil
 }
 
 func (server *Server) applyCommittedSnapshot(

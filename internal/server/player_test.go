@@ -70,7 +70,7 @@ func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
 	running := NewMemory(config, endpoint, playerTestGenerator{})
 	t.Cleanup(func() {
 		_ = client.Close()
-		running.Close()
+		shutdownServerForTest(t, running)
 	})
 
 	if err := running.SetTrustedObserverCenter(
@@ -111,7 +111,7 @@ func TestTrustedObserverAppliedCenterWaitsForStepWithPreloadedTarget(t *testing.
 	t.Cleanup(func() {
 		close(generator.release)
 		_ = client.Close()
-		running.Close()
+		shutdownServerForTest(t, running)
 	})
 
 	initial := core.ChunkPos{}
@@ -250,7 +250,7 @@ func TestServerPublishesPlayerStateAndInputAck(t *testing.T) {
 	running := NewMemory(config, serverEndpoint, playerTestGenerator{})
 	t.Cleanup(func() {
 		_ = clientEndpoint.Close()
-		running.Close()
+		shutdownServerForTest(t, running)
 	})
 
 	registered, ok := running.PlayerState()
@@ -466,7 +466,7 @@ func newDefaultTestServer(t *testing.T) *Server {
 	config.ViewRadius = 0
 	config.Workers = 1
 	running := NewMemory(config, endpoint, playerTestGenerator{})
-	t.Cleanup(running.Close)
+	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	return running
 }
 
@@ -478,7 +478,7 @@ func newTrustedObserverTestServer(t *testing.T) *Server {
 	config.Workers = 1
 	config.TrustedObserver = true
 	running := NewMemory(config, endpoint, playerTestGenerator{})
-	t.Cleanup(running.Close)
+	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	return running
 }
 

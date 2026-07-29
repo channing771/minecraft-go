@@ -24,7 +24,7 @@ func TestServerSubscriptionAcquisitionOrderAndBounds(t *testing.T) {
 	config.SpawnAnchor = core.ChunkPos{X: 5, Z: -4}
 	_, endpoint := network.NewMemoryPair(64)
 	running := server.NewMemory(config, endpoint, emptyGenerator{})
-	t.Cleanup(running.Close)
+	t.Cleanup(func() { shutdownExternalServerForTest(t, running) })
 
 	first := running.Step()
 	wantFirst := []core.ChunkKey{

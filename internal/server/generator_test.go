@@ -19,7 +19,7 @@ func TestGeneratorWorkerPanicIsolated(t *testing.T) {
 	config.Workers = 2
 	_, endpoint := network.NewMemoryPair(64)
 	running := server.NewMemory(config, endpoint, generator)
-	t.Cleanup(running.Close)
+	t.Cleanup(func() { shutdownExternalServerForTest(t, running) })
 
 	ready := make(map[core.ChunkPos]struct{})
 	deadline := time.Now().Add(2 * time.Second)

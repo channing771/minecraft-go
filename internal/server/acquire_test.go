@@ -91,7 +91,7 @@ func TestEmbeddedConstructorUsesStoreMetadata(t *testing.T) {
 	config.SpawnAnchor = core.ChunkPos{X: 99, Z: 99}
 	_, endpoint := network.NewMemoryPair(32)
 	running := NewEmbedded(config, endpoint, store)
-	t.Cleanup(running.Close)
+	t.Cleanup(func() { shutdownServerForTest(t, running) })
 
 	result := running.StepForTest()
 	want := core.ChunkKey{Dimension: core.Overworld, Pos: metadata.SpawnAnchor}
@@ -114,7 +114,7 @@ func TestAcquireCancelsForgottenPendingLoads(t *testing.T) {
 	config.Workers = 1
 	config.TrustedObserver = true
 	running := New(config, endpoint, &countingGenerator{}, store)
-	t.Cleanup(running.Close)
+	t.Cleanup(func() { shutdownServerForTest(t, running) })
 
 	if err := running.SetTrustedObserverCenter(core.Overworld, core.ChunkPos{}); err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func newAcquireServer(t *testing.T, store storage.Store, generator Generator) *S
 	config.Workers = 1
 	config.TrustedObserver = true
 	running := New(config, endpoint, generator, store)
-	t.Cleanup(running.Close)
+	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	if err := running.SetTrustedObserverCenter(core.Overworld, core.ChunkPos{}); err != nil {
 		t.Fatal(err)
 	}
@@ -203,8 +203,11 @@ func (store *loadResultStore) LoadChunk(context.Context, core.ChunkKey) (storage
 	return store.stored, store.err
 }
 
-func (*loadResultStore) SaveBatch(context.Context, []storage.ChunkSave) (storage.SaveResult, error) {
-	return storage.SaveResult{}, errors.New("unexpected save")
+func (*loadResultStore) SaveBatch(
+	_ context.Context,
+	saves []storage.ChunkSave,
+) (storage.SaveResult, error) {
+	return committedResult(saves), nil
 }
 
 func (*loadResultStore) Sync(context.Context) error { return nil }

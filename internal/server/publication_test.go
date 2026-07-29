@@ -188,7 +188,7 @@ func newPublicationServer(
 	running := NewMemory(config, endpoint, generator)
 	t.Cleanup(func() {
 		close(generator.release)
-		running.Close()
+		shutdownServerForTest(t, running)
 	})
 	return running, client, generator
 }
