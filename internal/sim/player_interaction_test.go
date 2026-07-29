@@ -223,11 +223,13 @@ func readyFlatPlayerWithTarget(
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	requested := engine.Step()
-	if len(requested.Generate) != 1 || requested.Generate[0] != (core.ChunkKey{
+	if len(requested.Acquire) != 1 || requested.Acquire[0] != (core.ChunkKey{
 		Dimension: core.Overworld,
 	}) {
-		t.Fatalf("Generate=%+v", requested.Generate)
+		t.Fatalf("Acquire=%+v", requested.Acquire)
 	}
+	submitAcquiredMisses(engine, requested.Acquire)
+	engine.Step()
 	chunk := generateFlatChunk(core.ChunkPos{})
 	setTestBlocks(t, chunk, blocks)
 	engine.SubmitGenerated(sim.GeneratedChunk{

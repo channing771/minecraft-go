@@ -18,7 +18,7 @@ func TestServerStepReportsTickDuration(t *testing.T) {
 		samples++
 		duration = sample
 	}
-	running := server.New(config, serverEndpoint, emptyGenerator{})
+	running := server.NewMemory(config, serverEndpoint, emptyGenerator{})
 	t.Cleanup(func() {
 		_ = clientEndpoint.Close()
 		running.Close()

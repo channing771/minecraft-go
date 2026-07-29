@@ -129,12 +129,14 @@ func TestPlayerIntentRejectsTraversalIntoUnknownAdjacentChunk(t *testing.T) {
 			anchor := core.ChunkPos{X: 1}
 			engine.RegisterSession(session, core.Overworld, anchor)
 			requested := engine.Step()
-			if len(requested.Generate) != 1 || requested.Generate[0] != (core.ChunkKey{
+			if len(requested.Acquire) != 1 || requested.Acquire[0] != (core.ChunkKey{
 				Dimension: core.Overworld,
 				Pos:       anchor,
 			}) {
-				t.Fatalf("Generate=%+v", requested.Generate)
+				t.Fatalf("Acquire=%+v", requested.Acquire)
 			}
+			submitAcquiredMisses(engine, requested.Acquire)
+			engine.Step()
 			engine.SubmitGenerated(sim.GeneratedChunk{
 				Dimension: core.Overworld,
 				Pos:       anchor,

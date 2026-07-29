@@ -20,7 +20,7 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 	config.SnapshotChunks = 16
 	config.SnapshotBytes = 1 << 20
 	config.OutboxCapacity = 256
-	running := server.New(config, serverEndpoint, server.FlatTestGenerator{})
+	running := server.NewMemory(config, serverEndpoint, server.FlatTestGenerator{})
 	mirror := client.NewMirror()
 
 	interactionChunk := (core.BlockPos{X: 0, Y: 1, Z: -6}).Chunk()

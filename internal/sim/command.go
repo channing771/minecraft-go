@@ -67,6 +67,17 @@ type GeneratedChunk struct {
 	Err       error
 }
 
+type AcquiredChunk struct {
+	Key               core.ChunkKey
+	Chunk             *world.Chunk
+	Revision          uint64
+	PersistedRevision uint64
+	NeedsRewrite      bool
+	Recovered         bool
+	Missing           bool
+	Err               error
+}
+
 type BlockChange struct {
 	Position core.BlockPos
 	Block    core.BlockID
@@ -95,6 +106,7 @@ type ResyncRequest struct {
 }
 
 type TickResult struct {
+	Acquire  []core.ChunkKey
 	Generate []core.ChunkKey
 	Forget   map[SessionID][]core.ChunkKey
 	Ready    []core.ChunkKey

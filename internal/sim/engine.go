@@ -55,6 +55,7 @@ type Engine struct {
 
 	inboxMu   sync.Mutex
 	commands  []Command
+	acquired  []AcquiredChunk
 	generated []GeneratedChunk
 	tick      atomic.Uint64
 }
@@ -88,9 +89,16 @@ func (engine *Engine) SubmitGenerated(result GeneratedChunk) {
 	engine.inboxMu.Unlock()
 }
 
+// SubmitAcquired 可由区块读取 worker 并发调用，并转移 Chunk 所有权。
+func (engine *Engine) SubmitAcquired(result AcquiredChunk) {
+	engine.inboxMu.Lock()
+	engine.acquired = append(engine.acquired, result)
+	engine.inboxMu.Unlock()
+}
+
 // Step 严格串行执行一个权威 tick。
 func (engine *Engine) Step() TickResult {
-	commands, generated := engine.takeInbox()
+	commands, acquired, generated := engine.takeInbox()
 	sort.SliceStable(commands, func(i, j int) bool {
 		if commands[i].Session != commands[j].Session {
 			return commands[i].Session < commands[j].Session
@@ -189,7 +197,12 @@ func (engine *Engine) Step() TickResult {
 			})
 		}
 	}
-	engine.applyGenerated(generated, &result)
+	var currentWanted map[core.ChunkKey]struct{}
+	if len(acquired) != 0 || len(generated) != 0 {
+		currentWanted = engine.wantedSnapshot()
+	}
+	engine.applyAcquired(acquired, currentWanted, &result)
+	engine.applyGenerated(generated, currentWanted, &result)
 	engine.advancePendingPlayersPreservingInputSequence()
 	engine.advanceActivePlayers()
 	playerViewChanged := engine.derivePlayerCenters()
@@ -210,6 +223,7 @@ func (engine *Engine) Step() TickResult {
 		}
 	}
 	engine.finishChanges(pending, &result)
+	sortChunkKeys(result.Ready)
 
 	result.Tick = engine.tick.Add(1)
 	engine.publishPlayers(&result)
@@ -283,14 +297,16 @@ func (engine *Engine) ChunkInfo(
 	return dimension.Info(key.Pos)
 }
 
-func (engine *Engine) takeInbox() ([]Command, []GeneratedChunk) {
+func (engine *Engine) takeInbox() ([]Command, []AcquiredChunk, []GeneratedChunk) {
 	engine.inboxMu.Lock()
 	commands := append([]Command(nil), engine.commands...)
+	acquired := append([]AcquiredChunk(nil), engine.acquired...)
 	generated := append([]GeneratedChunk(nil), engine.generated...)
 	engine.commands = engine.commands[:0]
+	engine.acquired = engine.acquired[:0]
 	engine.generated = engine.generated[:0]
 	engine.inboxMu.Unlock()
-	return commands, generated
+	return commands, acquired, generated
 }
 
 func (engine *Engine) session(id SessionID) *sessionState {
@@ -305,28 +321,9 @@ func (engine *Engine) session(id SessionID) *sessionState {
 func (engine *Engine) reconcileSubscriptions(result *TickResult) {
 	union := make(map[core.ChunkKey]struct{})
 	for sessionID, session := range engine.sessions {
-		next := make(map[core.ChunkKey]struct{})
-		if session.hasView && engine.dimensions[session.dimension] != nil {
-			for dz := -engine.viewRadius; dz <= engine.viewRadius; dz++ {
-				for dx := -engine.viewRadius; dx <= engine.viewRadius; dx++ {
-					key := core.ChunkKey{
-						Dimension: session.dimension,
-						Pos: core.ChunkPos{
-							X: session.center.X + int32(dx),
-							Z: session.center.Z + int32(dz),
-						},
-					}
-					next[key] = struct{}{}
-					union[key] = struct{}{}
-				}
-			}
-		}
-		if session.player != nil && session.player.lifecycle == PlayerPendingSpawn {
-			for chunk := range session.player.spawnWanted {
-				key := core.ChunkKey{Dimension: session.dimension, Pos: chunk}
-				next[key] = struct{}{}
-				union[key] = struct{}{}
-			}
+		next := engine.sessionWantedSnapshot(session)
+		for key := range next {
+			union[key] = struct{}{}
 		}
 		for key := range session.wanted {
 			if _, retained := next[key]; !retained {
@@ -360,8 +357,8 @@ func (engine *Engine) reconcileSubscriptions(result *TickResult) {
 			result.Ready = append(result.Ready, key)
 			continue
 		}
-		if dimension.BeginGeneration(key.Pos) {
-			result.Generate = append(result.Generate, key)
+		if dimension.BeginLoading(key.Pos) {
+			result.Acquire = append(result.Acquire, key)
 		}
 	}
 
@@ -375,6 +372,91 @@ func (engine *Engine) reconcileSubscriptions(result *TickResult) {
 		}
 	}
 	engine.wanted = union
+}
+
+func (engine *Engine) wantedSnapshot() map[core.ChunkKey]struct{} {
+	wanted := make(map[core.ChunkKey]struct{})
+	for _, session := range engine.sessions {
+		for key := range engine.sessionWantedSnapshot(session) {
+			wanted[key] = struct{}{}
+		}
+	}
+	return wanted
+}
+
+func (engine *Engine) sessionWantedSnapshot(
+	session *sessionState,
+) map[core.ChunkKey]struct{} {
+	wanted := make(map[core.ChunkKey]struct{})
+	if session.hasView && engine.dimensions[session.dimension] != nil {
+		for dz := -engine.viewRadius; dz <= engine.viewRadius; dz++ {
+			for dx := -engine.viewRadius; dx <= engine.viewRadius; dx++ {
+				key := core.ChunkKey{
+					Dimension: session.dimension,
+					Pos: core.ChunkPos{
+						X: session.center.X + int32(dx),
+						Z: session.center.Z + int32(dz),
+					},
+				}
+				wanted[key] = struct{}{}
+			}
+		}
+	}
+	if session.player != nil && session.player.lifecycle == PlayerPendingSpawn {
+		for chunk := range session.player.spawnWanted {
+			wanted[core.ChunkKey{Dimension: session.dimension, Pos: chunk}] = struct{}{}
+		}
+	}
+	return wanted
+}
+
+func (engine *Engine) applyAcquired(
+	acquired []AcquiredChunk,
+	wanted map[core.ChunkKey]struct{},
+	result *TickResult,
+) {
+	sort.SliceStable(acquired, func(i, j int) bool {
+		return chunkKeyLess(acquired[i].Key, acquired[j].Key)
+	})
+	for _, acquiredChunk := range acquired {
+		key := acquiredChunk.Key
+		dimension := engine.dimensions[key.Dimension]
+		if dimension == nil {
+			continue
+		}
+		info, ok := dimension.Info(key.Pos)
+		if !ok || info.State != ChunkLoading {
+			continue
+		}
+		switch {
+		case acquiredChunk.Err != nil:
+			dimension.MarkLoadFailed(key.Pos, acquiredChunk.Err)
+		case acquiredChunk.Missing:
+			if _, retained := wanted[key]; !retained {
+				dimension.DropLoading(key.Pos)
+			} else if dimension.MarkGenerating(key.Pos) {
+				result.Generate = append(result.Generate, key)
+			}
+		default:
+			err := dimension.ApplyLoaded(
+				key.Pos,
+				acquiredChunk.Chunk,
+				acquiredChunk.Revision,
+				acquiredChunk.PersistedRevision,
+				acquiredChunk.NeedsRewrite,
+				acquiredChunk.Recovered,
+			)
+			if err != nil {
+				dimension.MarkLoadFailed(key.Pos, err)
+				continue
+			}
+			if _, retained := wanted[key]; !retained {
+				dimension.RequestUnload(key.Pos)
+				continue
+			}
+			result.Ready = append(result.Ready, key)
+		}
+	}
 }
 
 func (engine *Engine) subscriptionDistanceSquared(key core.ChunkKey) int64 {
@@ -395,6 +477,7 @@ func (engine *Engine) subscriptionDistanceSquared(key core.ChunkKey) int64 {
 
 func (engine *Engine) applyGenerated(
 	generated []GeneratedChunk,
+	wanted map[core.ChunkKey]struct{},
 	result *TickResult,
 ) {
 	sort.SliceStable(generated, func(i, j int) bool {
@@ -429,7 +512,7 @@ func (engine *Engine) applyGenerated(
 			dimension.MarkFailed(key.Pos, err)
 			continue
 		}
-		if _, wanted := engine.wanted[key]; !wanted {
+		if _, retained := wanted[key]; !retained {
 			dimension.RequestUnload(key.Pos)
 			continue
 		}

@@ -1,15 +1,292 @@
 package sim_test
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/sim"
+	"minecraft-go/internal/world"
 )
+
+func TestSubscriptionBeginsLoadingAndAcquiresInDistanceOrder(t *testing.T) {
+	engine := sim.NewEngine(1)
+	engine.Enqueue(sim.Command{
+		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: core.Overworld, Center: core.ChunkPos{X: 5, Z: -4},
+	})
+
+	result := engine.Step()
+	want := []core.ChunkKey{
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 5, Z: -4}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 4, Z: -4}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 5, Z: -5}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 5, Z: -3}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: -4}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 4, Z: -5}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 4, Z: -3}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: -5}},
+		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: -3}},
+	}
+	if !reflect.DeepEqual(result.Acquire, want) || len(result.Generate) != 0 {
+		t.Fatalf("Acquire=%+v Generate=%+v, want Acquire=%+v only", result.Acquire, result.Generate, want)
+	}
+	for _, key := range want {
+		info, ok := engine.ChunkInfo(key)
+		if !ok || info.State != sim.ChunkLoading {
+			t.Fatalf("chunk %+v info=%+v ok=%v, want Loading", key, info, ok)
+		}
+	}
+}
+
+func TestAcquiredMissGeneratesExactlyOnceAndLoadErrorFails(t *testing.T) {
+	engine := sim.NewEngine(0)
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -3}}
+	engine.Enqueue(sim.Command{
+		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: key.Dimension, Center: key.Pos,
+	})
+	engine.Step()
+	engine.SubmitAcquired(sim.AcquiredChunk{Key: key, Missing: true})
+	engine.SubmitAcquired(sim.AcquiredChunk{Key: key, Missing: true})
+
+	missing := engine.Step()
+	if !reflect.DeepEqual(missing.Generate, []core.ChunkKey{key}) {
+		t.Fatalf("Generate=%+v, want exactly [%+v]", missing.Generate, key)
+	}
+	if info, ok := engine.ChunkInfo(key); !ok || info.State != sim.ChunkGenerating {
+		t.Fatalf("miss info=%+v ok=%v, want Generating", info, ok)
+	}
+
+	failedKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 9, Z: 4}}
+	engine.Enqueue(sim.Command{
+		Session: 1, Sequence: 2, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: failedKey.Dimension, Center: failedKey.Pos,
+	})
+	engine.Step()
+	wantErr := errors.New("permission denied")
+	engine.SubmitAcquired(sim.AcquiredChunk{Key: failedKey, Err: wantErr})
+	failed := engine.Step()
+	info, ok := engine.ChunkInfo(failedKey)
+	if len(failed.Generate) != 0 || !ok || info.State != sim.ChunkFailed ||
+		!errors.Is(info.Err, wantErr) {
+		t.Fatalf("failed result=%+v info=%+v ok=%v", failed, info, ok)
+	}
+}
+
+func TestAcquiredResultsApplyInChunkKeyOrderWithExactLoadState(t *testing.T) {
+	engine := sim.NewEngine(1)
+	engine.Enqueue(sim.Command{
+		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: core.Overworld, Center: core.ChunkPos{},
+	})
+	requested := engine.Step()
+	for index := len(requested.Acquire) - 1; index >= 0; index-- {
+		key := requested.Acquire[index]
+		engine.SubmitAcquired(sim.AcquiredChunk{
+			Key:               key,
+			Chunk:             world.NewChunk(key.Pos),
+			Revision:          uint64(index + 10),
+			PersistedRevision: uint64(index + 10),
+		})
+	}
+
+	loaded := engine.Step()
+	wantReady := append([]core.ChunkKey(nil), requested.Acquire...)
+	sortChunkKeysForTest(wantReady)
+	if !reflect.DeepEqual(loaded.Ready, wantReady) {
+		t.Fatalf("Ready=%+v, want ChunkKey order %+v", loaded.Ready, wantReady)
+	}
+	for index := len(requested.Acquire) - 1; index >= 0; index-- {
+		key := requested.Acquire[index]
+		_, revision, ready := engine.ChunkHash(key)
+		if !ready || revision != uint64(index+10) {
+			t.Fatalf("chunk %+v revision=%d ready=%v", key, revision, ready)
+		}
+	}
+}
+
+func TestAcquiredResultsAfterForgetDoNotCreateCleanAuthority(t *testing.T) {
+	engine := sim.NewEngine(0)
+	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2}}
+	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 20}}
+	engine.Enqueue(sim.Command{
+		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: oldKey.Dimension, Center: oldKey.Pos,
+	})
+	engine.Step()
+	engine.Enqueue(sim.Command{
+		Session: 1, Sequence: 2, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: newKey.Dimension, Center: newKey.Pos,
+	})
+	engine.Step()
+
+	engine.SubmitAcquired(sim.AcquiredChunk{Key: oldKey, Missing: true})
+	if result := engine.Step(); len(result.Generate) != 0 {
+		t.Fatalf("forgotten miss generated: %+v", result.Generate)
+	}
+	if info, ok := engine.ChunkInfo(oldKey); ok {
+		t.Fatalf("forgotten miss retained info=%+v", info)
+	}
+
+	engine.SubmitAcquired(sim.AcquiredChunk{
+		Key: oldKey, Chunk: world.NewChunk(oldKey.Pos), Revision: 7, PersistedRevision: 7,
+	})
+	if result := engine.Step(); len(result.Ready) != 0 {
+		t.Fatalf("late hit published Ready: %+v", result.Ready)
+	}
+	if info, ok := engine.ChunkInfo(oldKey); ok {
+		t.Fatalf("late hit recreated authority: %+v", info)
+	}
+}
+
+func TestForgottenDirtyLoadedChunkRemainsUnloading(t *testing.T) {
+	engine := sim.NewEngine(0)
+	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -2}}
+	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 30}}
+	engine.Enqueue(sim.Command{
+		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: oldKey.Dimension, Center: oldKey.Pos,
+	})
+	engine.Step()
+	engine.Enqueue(sim.Command{
+		Session: 1, Sequence: 2, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: newKey.Dimension, Center: newKey.Pos,
+	})
+	engine.Step()
+	engine.SubmitAcquired(sim.AcquiredChunk{
+		Key: oldKey, Chunk: world.NewChunk(oldKey.Pos),
+		Revision: 7, PersistedRevision: 7, NeedsRewrite: true, Recovered: true,
+	})
+
+	result := engine.Step()
+	info, ok := engine.ChunkInfo(oldKey)
+	if len(result.Ready) != 0 || !ok || info.State != sim.ChunkUnloading || info.Revision != 7 {
+		t.Fatalf("result=%+v info=%+v ok=%v, want retained Unloading", result, info, ok)
+	}
+	snapshots := engine.PersistenceSnapshots(1, 1<<20, sim.SaveUrgent)
+	if len(snapshots) != 1 || snapshots[0].Key != oldKey || snapshots[0].Revision != 7 {
+		t.Fatalf("rewrite/recovered snapshot=%+v", snapshots)
+	}
+}
+
+func TestSameTickCenterMoveDropsOldAcquisitionMiss(t *testing.T) {
+	engine := sim.NewEngine(0)
+	const session = sim.SessionID(81)
+	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -3}}
+	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 20, Z: 30}}
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: oldKey.Dimension, Center: oldKey.Pos,
+	})
+	engine.Step()
+
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: newKey.Dimension, Center: newKey.Pos,
+	})
+	engine.SubmitAcquired(sim.AcquiredChunk{Key: oldKey, Missing: true})
+	result := engine.Step()
+
+	if len(result.Generate) != 0 {
+		t.Fatalf("same-tick forgotten miss generated=%+v", result.Generate)
+	}
+	if _, ok := engine.ChunkInfo(oldKey); ok {
+		t.Fatalf("same-tick forgotten miss retained old authority")
+	}
+	if !reflect.DeepEqual(result.Forget[session], []core.ChunkKey{oldKey}) ||
+		!reflect.DeepEqual(result.Acquire, []core.ChunkKey{newKey}) {
+		t.Fatalf("Forget=%+v Acquire=%+v", result.Forget[session], result.Acquire)
+	}
+}
+
+func TestSameTickCenterMoveDoesNotPublishOldCleanHit(t *testing.T) {
+	engine := sim.NewEngine(0)
+	const session = sim.SessionID(82)
+	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -4, Z: 7}}
+	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 40, Z: -70}}
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: oldKey.Dimension, Center: oldKey.Pos,
+	})
+	engine.Step()
+
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: newKey.Dimension, Center: newKey.Pos,
+	})
+	engine.SubmitAcquired(sim.AcquiredChunk{
+		Key: oldKey, Chunk: world.NewChunk(oldKey.Pos),
+		Revision: 5, PersistedRevision: 5,
+	})
+	result := engine.Step()
+
+	if len(result.Ready) != 0 {
+		t.Fatalf("same-tick forgotten clean hit published Ready=%+v", result.Ready)
+	}
+	if _, ok := engine.ChunkInfo(oldKey); ok {
+		t.Fatal("same-tick forgotten clean hit retained old authority")
+	}
+	if !reflect.DeepEqual(result.Forget[session], []core.ChunkKey{oldKey}) ||
+		!reflect.DeepEqual(result.Acquire, []core.ChunkKey{newKey}) {
+		t.Fatalf("Forget=%+v Acquire=%+v", result.Forget[session], result.Acquire)
+	}
+}
+
+func TestSameTickCenterMoveRetainsLateGeneratedWithoutReady(t *testing.T) {
+	engine := sim.NewEngine(0)
+	const session = sim.SessionID(83)
+	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: 9}}
+	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 60, Z: 90}}
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: oldKey.Dimension, Center: oldKey.Pos,
+	})
+	engine.Step()
+	engine.SubmitAcquired(sim.AcquiredChunk{Key: oldKey, Missing: true})
+	generated := engine.Step()
+	if !reflect.DeepEqual(generated.Generate, []core.ChunkKey{oldKey}) {
+		t.Fatalf("Generate=%+v", generated.Generate)
+	}
+
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: newKey.Dimension, Center: newKey.Pos,
+	})
+	engine.SubmitGenerated(sim.GeneratedChunk{
+		Dimension: oldKey.Dimension,
+		Pos:       oldKey.Pos,
+		Chunk:     world.NewChunk(oldKey.Pos),
+	})
+	result := engine.Step()
+
+	info, ok := engine.ChunkInfo(oldKey)
+	if len(result.Ready) != 0 || !ok || info.State != sim.ChunkUnloading || info.Revision != 1 {
+		t.Fatalf("Ready=%+v old info=%+v ok=%v", result.Ready, info, ok)
+	}
+	if !reflect.DeepEqual(result.Forget[session], []core.ChunkKey{oldKey}) ||
+		!reflect.DeepEqual(result.Acquire, []core.ChunkKey{newKey}) {
+		t.Fatalf("Forget=%+v Acquire=%+v", result.Forget[session], result.Acquire)
+	}
+}
+
+func sortChunkKeysForTest(keys []core.ChunkKey) {
+	slices.SortFunc(keys, func(left, right core.ChunkKey) int {
+		if left.Dimension != right.Dimension {
+			return cmp.Compare(left.Dimension, right.Dimension)
+		}
+		if left.Pos.X != right.Pos.X {
+			return cmp.Compare(left.Pos.X, right.Pos.X)
+		}
+		return cmp.Compare(left.Pos.Z, right.Pos.Z)
+	})
+}
 
 func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
 	engine, session, chunkPos := readyFlatEngine(t)
@@ -177,6 +454,8 @@ func TestPendingInteractionStaysRejectedWhenPlayerActivatesSameTick(t *testing.T
 	engine := sim.NewEngine(0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
+	requested := engine.Step()
+	submitAcquiredMisses(engine, requested.Acquire)
 	engine.Step()
 	engine.SubmitGenerated(sim.GeneratedChunk{
 		Dimension: core.Overworld,
@@ -236,8 +515,13 @@ func readyFlatEngine(t *testing.T) (*sim.Engine, sim.SessionID, core.ChunkPos) {
 	engine.RegisterSession(session, core.Overworld, chunkPos)
 	requested := engine.Step()
 	wantKey := core.ChunkKey{Dimension: core.Overworld, Pos: chunkPos}
-	if !reflect.DeepEqual(requested.Generate, []core.ChunkKey{wantKey}) {
-		t.Fatalf("Generate = %+v，想要 %+v", requested.Generate, wantKey)
+	if !reflect.DeepEqual(requested.Acquire, []core.ChunkKey{wantKey}) {
+		t.Fatalf("Acquire = %+v，想要 %+v", requested.Acquire, wantKey)
+	}
+	submitAcquiredMisses(engine, requested.Acquire)
+	generated := engine.Step()
+	if !reflect.DeepEqual(generated.Generate, []core.ChunkKey{wantKey}) {
+		t.Fatalf("Generate = %+v，想要 %+v", generated.Generate, wantKey)
 	}
 	chunk := generateFlatChunk(chunkPos)
 	chunk.SetBlock(0, 2, 5, core.StoneID)
@@ -252,4 +536,10 @@ func readyFlatEngine(t *testing.T) (*sim.Engine, sim.SessionID, core.ChunkPos) {
 		t.Fatalf("Ready = %+v Players=%+v，想要 %+v 与 active player", ready.Ready, ready.Players, wantKey)
 	}
 	return engine, session, chunkPos
+}
+
+func submitAcquiredMisses(engine *sim.Engine, keys []core.ChunkKey) {
+	for _, key := range keys {
+		engine.SubmitAcquired(sim.AcquiredChunk{Key: key, Missing: true})
+	}
 }

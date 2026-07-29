@@ -79,7 +79,7 @@ var allowed = map[string][]string{
 	},
 	"internal/server": {
 		"internal/core", "internal/network", "internal/world",
-		"internal/worldgen", "internal/sim",
+		"internal/worldgen", "internal/sim", "internal/storage",
 	},
 	"internal/client": {
 		"internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets",

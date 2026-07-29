@@ -137,7 +137,7 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 	config.TrustedObserver = benchmark
 	ticks := newTickRecorder(100_000)
 	config.TickObserver = ticks.add
-	running := server.NewEmbedded(config, serverEndpoint)
+	running := server.NewEmbeddedMemory(config, serverEndpoint)
 	serverContext, serverCancel := context.WithCancel(context.Background())
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- running.Run(serverContext) }()

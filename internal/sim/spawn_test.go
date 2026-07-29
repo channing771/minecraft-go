@@ -43,6 +43,10 @@ func TestSpawnCandidatesOrderByDistanceThenXZ(t *testing.T) {
 func TestSpawnWaitsForEarlierUnknownCandidate(t *testing.T) {
 	engine := NewEngine(0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
+	requested := engine.Step()
+	for _, key := range requested.Acquire {
+		engine.SubmitAcquired(AcquiredChunk{Key: key, Missing: true})
+	}
 	engine.Step()
 
 	laterChunk := world.NewChunk(core.ChunkPos{X: -1})
@@ -70,10 +74,15 @@ func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
 	target := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1}}
 	engine.RegisterSession(sessionID, core.Overworld, anchor.Pos)
 
-	generatedAnchor := engine.Step()
-	if player := onlyInternalPlayer(t, generatedAnchor); player.Ready {
+	acquiredAnchor := engine.Step()
+	if player := onlyInternalPlayer(t, acquiredAnchor); player.Ready {
 		t.Fatalf("生成 anchor 前 player=%+v，想要 PendingSpawn", player)
 	}
+	if !reflect.DeepEqual(acquiredAnchor.Acquire, []core.ChunkKey{anchor}) {
+		t.Fatalf("首次 Acquire=%+v，想要 [%+v]", acquiredAnchor.Acquire, anchor)
+	}
+	engine.SubmitAcquired(AcquiredChunk{Key: anchor, Missing: true})
+	generatedAnchor := engine.Step()
 	if !reflect.DeepEqual(generatedAnchor.Generate, []core.ChunkKey{anchor}) {
 		t.Fatalf("首次 Generate=%+v，想要 [%+v]", generatedAnchor.Generate, anchor)
 	}
@@ -88,8 +97,8 @@ func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
 		t.Fatalf("空 anchor 后 player=%+v，想要继续 PendingSpawn", player)
 	}
 	if !reflect.DeepEqual(retained.Ready, []core.ChunkKey{anchor}) ||
-		!reflect.DeepEqual(retained.Generate, []core.ChunkKey{target}) {
-		t.Fatalf("retain tick Ready=%+v Generate=%+v", retained.Ready, retained.Generate)
+		!reflect.DeepEqual(retained.Acquire, []core.ChunkKey{target}) {
+		t.Fatalf("retain tick Ready=%+v Acquire=%+v", retained.Ready, retained.Acquire)
 	}
 	session := engine.sessions[sessionID]
 	if _, ok := session.wanted[anchor]; !ok {
@@ -105,6 +114,11 @@ func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
 		t.Fatalf("spawnWanted 未记录 target: %+v", session.player.spawnWanted)
 	}
 
+	engine.SubmitAcquired(AcquiredChunk{Key: target, Missing: true})
+	generatedTarget := engine.Step()
+	if !reflect.DeepEqual(generatedTarget.Generate, []core.ChunkKey{target}) {
+		t.Fatalf("target Generate=%+v", generatedTarget.Generate)
+	}
 	engine.SubmitGenerated(GeneratedChunk{
 		Dimension: core.Overworld,
 		Pos:       target.Pos,

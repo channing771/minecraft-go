@@ -35,9 +35,9 @@ func TestTrustedObserverCoalescesCenterAndDrivesGeneration(t *testing.T) {
 		}
 	}
 	result := running.StepForTest()
-	if !containsChunk(result.Generate, core.ChunkPos{X: 3}) ||
-		containsChunk(result.Generate, core.ChunkPos{X: 1}) {
-		t.Fatalf("Generate=%+v", result.Generate)
+	if !containsChunk(result.Acquire, core.ChunkPos{X: 3}) ||
+		containsChunk(result.Acquire, core.ChunkPos{X: 1}) || len(result.Generate) != 0 {
+		t.Fatalf("Acquire=%+v Generate=%+v", result.Acquire, result.Generate)
 	}
 }
 
@@ -56,8 +56,8 @@ func TestTrustedObserverRejectsNonOverworldCenter(t *testing.T) {
 	); err == nil {
 		t.Fatal("非 Overworld trusted center 未被拒绝")
 	}
-	if result := running.StepForTest(); len(result.Generate) != 0 {
-		t.Fatalf("非法 center 驱动了生成: %+v", result.Generate)
+	if result := running.StepForTest(); len(result.Acquire) != 0 || len(result.Generate) != 0 {
+		t.Fatalf("非法 center 驱动了 acquisition/generation: %+v", result)
 	}
 }
 
@@ -67,7 +67,7 @@ func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
 	config.ViewRadius = 0
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := New(config, endpoint, playerTestGenerator{})
+	running := NewMemory(config, endpoint, playerTestGenerator{})
 	t.Cleanup(func() {
 		_ = client.Close()
 		running.Close()
@@ -85,8 +85,8 @@ func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
 		Chunk:     core.ChunkPos{X: 1},
 	})
 	waitForQueuedPlayerCommand(t, running)
-	if first := running.StepForTest(); !containsChunk(first.Generate, core.ChunkPos{X: 1}) {
-		t.Fatalf("首个 trusted center 未驱动生成: %+v", first.Generate)
+	if first := running.StepForTest(); !containsChunk(first.Acquire, core.ChunkPos{X: 1}) {
+		t.Fatalf("首个 trusted center 未驱动读取: %+v", first.Acquire)
 	}
 
 	if err := running.SetTrustedObserverCenter(
@@ -95,8 +95,8 @@ func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if second := running.StepForTest(); !containsChunk(second.Generate, core.ChunkPos{X: 2}) {
-		t.Fatalf("客户端 sequence 饿死后续 trusted center: %+v", second.Generate)
+	if second := running.StepForTest(); !containsChunk(second.Acquire, core.ChunkPos{X: 2}) {
+		t.Fatalf("客户端 sequence 饿死后续 trusted center: %+v", second.Acquire)
 	}
 }
 
@@ -107,7 +107,7 @@ func TestTrustedObserverAppliedCenterWaitsForStepWithPreloadedTarget(t *testing.
 	config.ViewRadius = 1
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := New(config, endpoint, generator)
+	running := NewMemory(config, endpoint, generator)
 	t.Cleanup(func() {
 		close(generator.release)
 		_ = client.Close()
@@ -120,9 +120,11 @@ func TestTrustedObserverAppliedCenterWaitsForStepWithPreloadedTarget(t *testing.
 		t.Fatal(err)
 	}
 	requested := running.StepForTest()
-	if !containsChunk(requested.Generate, target) {
-		t.Fatalf("初始订阅未包含预加载目标: %+v", requested.Generate)
+	if !containsChunk(requested.Acquire, target) {
+		t.Fatalf("初始订阅未包含预加载目标: %+v", requested.Acquire)
 	}
+	submitServerAcquiredMisses(running, requested.Acquire)
+	running.engine.Step()
 	running.engine.SubmitGenerated(sim.GeneratedChunk{
 		Dimension: core.Overworld,
 		Pos:       target,
@@ -245,7 +247,7 @@ func TestServerPublishesPlayerStateAndInputAck(t *testing.T) {
 	config := DefaultConfig(42)
 	config.ViewRadius, config.Workers = 0, 1
 	config.SpawnAnchor = core.ChunkPos{X: 4, Z: -3}
-	running := New(config, serverEndpoint, playerTestGenerator{})
+	running := NewMemory(config, serverEndpoint, playerTestGenerator{})
 	t.Cleanup(func() {
 		_ = clientEndpoint.Close()
 		running.Close()
@@ -257,9 +259,9 @@ func TestServerPublishesPlayerStateAndInputAck(t *testing.T) {
 		t.Fatalf("New 后 PlayerState = %+v,%v", registered, ok)
 	}
 	first := running.StepForTest()
-	wantGenerate := []core.ChunkKey{{Dimension: core.Overworld, Pos: config.SpawnAnchor}}
-	if !reflect.DeepEqual(first.Generate, wantGenerate) {
-		t.Fatalf("首 tick Generate = %+v，想要 %+v", first.Generate, wantGenerate)
+	wantAcquire := []core.ChunkKey{{Dimension: core.Overworld, Pos: config.SpawnAnchor}}
+	if !reflect.DeepEqual(first.Acquire, wantAcquire) || len(first.Generate) != 0 {
+		t.Fatalf("首 tick Acquire = %+v Generate=%+v，想要 %+v", first.Acquire, first.Generate, wantAcquire)
 	}
 	waitForReadyPlayer(t, running, clientEndpoint)
 
@@ -281,12 +283,17 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 	running, client, generator := newPublicationServer(t, 0, 8, 1<<20, true)
 
 	requested := running.StepForTest()
-	if len(requested.Generate) != 1 {
-		t.Fatalf("首 tick Generate = %+v", requested.Generate)
+	if len(requested.Acquire) != 1 {
+		t.Fatalf("首 tick Acquire = %+v", requested.Acquire)
 	}
 	firstState := recvServerMessage(t, client)
 	if state, ok := firstState.(network.PlayerState); !ok || state.ServerTick != requested.Tick {
 		t.Fatalf("首 tick message = %#v", firstState)
+	}
+	submitServerAcquiredMisses(running, requested.Acquire)
+	generated := running.engine.Step()
+	if len(generated.Generate) != 1 {
+		t.Fatalf("Generate=%+v", generated.Generate)
 	}
 
 	running.engine.SubmitGenerated(sim.GeneratedChunk{
@@ -458,7 +465,7 @@ func newDefaultTestServer(t *testing.T) *Server {
 	config := DefaultConfig(42)
 	config.ViewRadius = 0
 	config.Workers = 1
-	running := New(config, endpoint, playerTestGenerator{})
+	running := NewMemory(config, endpoint, playerTestGenerator{})
 	t.Cleanup(running.Close)
 	return running
 }
@@ -470,7 +477,7 @@ func newTrustedObserverTestServer(t *testing.T) *Server {
 	config.ViewRadius = 0
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := New(config, endpoint, playerTestGenerator{})
+	running := NewMemory(config, endpoint, playerTestGenerator{})
 	t.Cleanup(running.Close)
 	return running
 }

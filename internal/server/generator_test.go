@@ -18,7 +18,7 @@ func TestGeneratorWorkerPanicIsolated(t *testing.T) {
 	config.ViewRadius = 1
 	config.Workers = 2
 	_, endpoint := network.NewMemoryPair(64)
-	running := server.New(config, endpoint, generator)
+	running := server.NewMemory(config, endpoint, generator)
 	t.Cleanup(running.Close)
 
 	ready := make(map[core.ChunkPos]struct{})

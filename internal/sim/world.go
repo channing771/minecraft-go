@@ -178,7 +178,7 @@ func (dimension *Dimension) ApplyLoaded(
 		Chunk:             chunk,
 		Revision:          revision,
 		PersistedRevision: persistedRevision,
-		NeedsRewrite:      needsRewrite,
+		NeedsRewrite:      needsRewrite || recovered,
 		Recovered:         recovered,
 	}
 	return nil

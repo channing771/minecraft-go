@@ -43,8 +43,13 @@ func TestSnapshotPublicationAllowsOneOversizedFirstChunk(t *testing.T) {
 func TestInitialSnapshotCapturesSameTickChangesBeforeDelta(t *testing.T) {
 	running, client, generator := newPublicationServer(t, 0, 4, 1<<20, true)
 	requested := running.engine.Step()
-	if len(requested.Generate) != 1 {
-		t.Fatalf("Generate = %+v", requested.Generate)
+	if len(requested.Acquire) != 1 {
+		t.Fatalf("Acquire = %+v", requested.Acquire)
+	}
+	submitServerAcquiredMisses(running, requested.Acquire)
+	generated := running.engine.Step()
+	if len(generated.Generate) != 1 {
+		t.Fatalf("Generate = %+v", generated.Generate)
 	}
 	running.engine.SubmitGenerated(sim.GeneratedChunk{
 		Dimension: core.Overworld,
@@ -180,7 +185,7 @@ func newPublicationServer(
 	config.SnapshotChunks = snapshotChunks
 	config.SnapshotBytes = snapshotBytes
 	config.OutboxCapacity = 64
-	running := New(config, endpoint, generator)
+	running := NewMemory(config, endpoint, generator)
 	t.Cleanup(func() {
 		close(generator.release)
 		running.Close()
@@ -195,10 +200,15 @@ func prepareReadySquare(
 ) {
 	t.Helper()
 	requested := running.Step()
-	if len(requested.Generate) == 0 {
-		t.Fatal("没有 generation requests")
+	if len(requested.Acquire) == 0 {
+		t.Fatal("没有 acquisition requests")
 	}
-	for _, key := range requested.Generate {
+	submitServerAcquiredMisses(running, requested.Acquire)
+	generated := running.engine.Step()
+	if len(generated.Generate) != len(requested.Acquire) {
+		t.Fatalf("Generate = %d，想要 %d", len(generated.Generate), len(requested.Acquire))
+	}
+	for _, key := range generated.Generate {
 		running.engine.SubmitGenerated(sim.GeneratedChunk{
 			Dimension: key.Dimension,
 			Pos:       key.Pos,
@@ -206,8 +216,14 @@ func prepareReadySquare(
 		})
 	}
 	ready := running.Step()
-	if len(ready.Ready) != len(requested.Generate) {
-		t.Fatalf("Ready = %d，想要 %d", len(ready.Ready), len(requested.Generate))
+	if len(ready.Ready) != len(generated.Generate) {
+		t.Fatalf("Ready = %d，想要 %d", len(ready.Ready), len(generated.Generate))
+	}
+}
+
+func submitServerAcquiredMisses(running *Server, keys []core.ChunkKey) {
+	for _, key := range keys {
+		running.engine.SubmitAcquired(sim.AcquiredChunk{Key: key, Missing: true})
 	}
 }
 

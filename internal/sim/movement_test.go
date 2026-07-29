@@ -428,8 +428,15 @@ func readyMovementPlayer(t *testing.T) (*Engine, SessionID) {
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	requested := engine.Step()
 	wantKey := core.ChunkKey{Dimension: core.Overworld}
-	if !reflect.DeepEqual(requested.Generate, []core.ChunkKey{wantKey}) {
-		t.Fatalf("Generate=%+v，想要 %+v", requested.Generate, wantKey)
+	if !reflect.DeepEqual(requested.Acquire, []core.ChunkKey{wantKey}) {
+		t.Fatalf("Acquire=%+v，想要 %+v", requested.Acquire, wantKey)
+	}
+	for _, key := range requested.Acquire {
+		engine.SubmitAcquired(AcquiredChunk{Key: key, Missing: true})
+	}
+	generated := engine.Step()
+	if !reflect.DeepEqual(generated.Generate, []core.ChunkKey{wantKey}) {
+		t.Fatalf("Generate=%+v，想要 %+v", generated.Generate, wantKey)
 	}
 	engine.SubmitGenerated(GeneratedChunk{
 		Dimension: core.Overworld,

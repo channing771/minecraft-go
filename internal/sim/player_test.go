@@ -16,8 +16,8 @@ func TestRegisteredSessionRequestsAnchorBeforeClientInput(t *testing.T) {
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	result := engine.Step()
 	want := []core.ChunkKey{{Dimension: core.Overworld, Pos: core.ChunkPos{}}}
-	if !reflect.DeepEqual(result.Generate, want) {
-		t.Fatalf("Generate=%+v，想要 %+v", result.Generate, want)
+	if !reflect.DeepEqual(result.Acquire, want) || len(result.Generate) != 0 {
+		t.Fatalf("Acquire=%+v Generate=%+v，想要 acquire %+v", result.Acquire, result.Generate, want)
 	}
 	if len(result.Players) != 1 || result.Players[0].Ready {
 		t.Fatalf("初始 player update=%+v", result.Players)
@@ -33,6 +33,8 @@ func TestRegisteredSessionRequestsAnchorBeforeClientInput(t *testing.T) {
 func TestPendingSpawnActivatesAtDeterministicSurface(t *testing.T) {
 	engine := sim.NewEngine(0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
+	requested := engine.Step()
+	submitAcquiredMisses(engine, requested.Acquire)
 	engine.Step()
 	engine.SubmitGenerated(sim.GeneratedChunk{
 		Dimension: core.Overworld,
@@ -102,9 +104,9 @@ func TestRegisteredPlayerIgnoresTrustedObserverCenterCommands(t *testing.T) {
 			})
 
 			result := engine.Step()
-			wantGenerate := []core.ChunkKey{{Dimension: core.Overworld, Pos: core.ChunkPos{}}}
-			if !reflect.DeepEqual(result.Generate, wantGenerate) {
-				t.Fatalf("Generate=%+v，想要 anchor %+v", result.Generate, wantGenerate)
+			wantAcquire := []core.ChunkKey{{Dimension: core.Overworld, Pos: core.ChunkPos{}}}
+			if !reflect.DeepEqual(result.Acquire, wantAcquire) || len(result.Generate) != 0 {
+				t.Fatalf("Acquire=%+v Generate=%+v，想要 anchor %+v", result.Acquire, result.Generate, wantAcquire)
 			}
 			player := onlyPlayer(t, result)
 			if player.Dimension != core.Overworld || player.ViewCenter != (core.ChunkPos{}) {

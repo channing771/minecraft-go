@@ -238,7 +238,7 @@ func newDelayedPlayerHarness(t *testing.T, delayTicks uint64) *delayedPlayerHarn
 		delayTicks:     delayTicks,
 		goroutines:     runtime.NumGoroutine(),
 	}
-	h.running = New(config, serverEndpoint, flatTestGenerator{})
+	h.running = NewMemory(config, serverEndpoint, flatTestGenerator{})
 	t.Cleanup(func() {
 		h.closeGate.cleanup(func() {
 			h.running.Close()

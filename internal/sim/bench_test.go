@@ -19,6 +19,8 @@ func BenchmarkEngineStepIdle(b *testing.B) {
 func BenchmarkEngineStepPlayer(b *testing.B) {
 	engine := sim.NewEngine(0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
+	requested := engine.Step()
+	submitAcquiredMisses(engine, requested.Acquire)
 	engine.Step()
 	engine.SubmitGenerated(sim.GeneratedChunk{
 		Dimension: core.Overworld,
@@ -40,6 +42,8 @@ func BenchmarkEngineStepBlockChanges(b *testing.B) {
 	engine := sim.NewEngine(0)
 	session := sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
+	requested := engine.Step()
+	submitAcquiredMisses(engine, requested.Acquire)
 	engine.Step()
 	chunk := generateFlatChunk(core.ChunkPos{})
 	chunk.SetBlock(0, 2, 5, core.StoneID)

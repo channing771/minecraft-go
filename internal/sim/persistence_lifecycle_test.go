@@ -116,6 +116,84 @@ func TestPersistenceLifecyclePreservesRecoveryAndRewriteMetadata(t *testing.T) {
 	}
 }
 
+func TestRecoveredOnlyLoadedChunkRequiresRewriteOnUnload(t *testing.T) {
+	dimension := NewDimension(core.Overworld)
+	pos := core.ChunkPos{X: 7, Z: -11}
+	if !dimension.BeginLoading(pos) {
+		t.Fatal("load not started")
+	}
+	if err := dimension.ApplyLoaded(pos, world.NewChunk(pos), 6, 6, false, true); err != nil {
+		t.Fatal(err)
+	}
+	record := dimension.records[pos]
+	if !record.Recovered || !record.NeedsRewrite || !record.Dirty() {
+		t.Fatalf("recovered-only record=%+v", record)
+	}
+	if dimension.RequestUnload(pos) || record.State != ChunkUnloading ||
+		!record.UnloadRequested || record.Chunk == nil {
+		t.Fatalf("recovered-only unload=%+v", record)
+	}
+}
+
+func TestEngineAcquiredHitPropagatesExactPersistenceState(t *testing.T) {
+	engine := NewEngine(0)
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -6, Z: 3}}
+	engine.Enqueue(Command{
+		Session: 71, Sequence: 1, Kind: CommandTrustedObserverCenter,
+		Dimension: key.Dimension, Center: key.Pos,
+	})
+	requested := engine.Step()
+	if !reflect.DeepEqual(requested.Acquire, []core.ChunkKey{key}) {
+		t.Fatalf("Acquire=%+v", requested.Acquire)
+	}
+	chunk := world.NewChunk(key.Pos)
+	engine.SubmitAcquired(AcquiredChunk{
+		Key:               key,
+		Chunk:             chunk,
+		Revision:          12,
+		PersistedRevision: 9,
+		NeedsRewrite:      true,
+		Recovered:         true,
+	})
+
+	loaded := engine.Step()
+	record := engine.dimensions[key.Dimension].records[key.Pos]
+	if !reflect.DeepEqual(loaded.Ready, []core.ChunkKey{key}) || record == nil ||
+		record.State != ChunkReady || record.Chunk != chunk ||
+		record.Revision != 12 || record.PersistedRevision != 9 ||
+		!record.NeedsRewrite || !record.Recovered {
+		t.Fatalf("Ready=%+v record=%+v", loaded.Ready, record)
+	}
+}
+
+func TestEngineForgottenCleanAcquiredHitIsDeleted(t *testing.T) {
+	engine := NewEngine(0)
+	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 3}}
+	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 40}}
+	engine.Enqueue(Command{
+		Session: 72, Sequence: 1, Kind: CommandTrustedObserverCenter,
+		Dimension: oldKey.Dimension, Center: oldKey.Pos,
+	})
+	engine.Step()
+	engine.Enqueue(Command{
+		Session: 72, Sequence: 2, Kind: CommandTrustedObserverCenter,
+		Dimension: newKey.Dimension, Center: newKey.Pos,
+	})
+	engine.Step()
+	engine.SubmitAcquired(AcquiredChunk{
+		Key: oldKey, Chunk: world.NewChunk(oldKey.Pos),
+		Revision: 5, PersistedRevision: 5,
+	})
+
+	loaded := engine.Step()
+	if len(loaded.Ready) != 0 {
+		t.Fatalf("forgotten clean hit published Ready=%+v", loaded.Ready)
+	}
+	if _, exists := engine.dimensions[oldKey.Dimension].records[oldKey.Pos]; exists {
+		t.Fatal("forgotten clean hit retained authority")
+	}
+}
+
 func TestPersistenceLifecycleRejectsPersistedRevisionAboveCurrent(t *testing.T) {
 	dimension := NewDimension(core.Overworld)
 	pos := core.ChunkPos{X: 1, Z: 1}
@@ -209,7 +287,14 @@ func TestPersistenceLifecycleRetainsLateGeneratedChunkForSaving(t *testing.T) {
 		Session: session, Sequence: 1, Kind: CommandTrustedObserverCenter,
 		Dimension: core.Overworld, Center: first,
 	})
-	engine.Step()
+	acquired := engine.Step()
+	engine.SubmitAcquired(AcquiredChunk{
+		Key: core.ChunkKey{Dimension: core.Overworld, Pos: first}, Missing: true,
+	})
+	generated := engine.Step()
+	if len(acquired.Acquire) != 1 || len(generated.Generate) != 1 {
+		t.Fatalf("acquire=%+v generate=%+v", acquired.Acquire, generated.Generate)
+	}
 	engine.Enqueue(Command{
 		Session: session, Sequence: 2, Kind: CommandTrustedObserverCenter,
 		Dimension: core.Overworld, Center: second,

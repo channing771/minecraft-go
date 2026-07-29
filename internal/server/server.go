@@ -10,6 +10,7 @@ import (
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/sim"
+	"minecraft-go/internal/storage"
 )
 
 const (
@@ -34,6 +35,7 @@ type Server struct {
 	config    Config
 	endpoint  network.ServerEndpoint
 	generator Generator
+	store     storage.Store
 	engine    *sim.Engine
 	session   *session
 
@@ -41,9 +43,10 @@ type Server struct {
 	cancel context.CancelFunc
 
 	incoming  chan sim.Command
-	jobs      chan core.ChunkKey
+	jobs      chan chunkJob
+	acquired  chan sim.AcquiredChunk
 	generated chan sim.GeneratedChunk
-	pending   []core.ChunkKey
+	pending   []chunkJob
 	queued    map[core.ChunkKey]struct{}
 
 	trustedObserverMu       sync.Mutex
@@ -60,6 +63,7 @@ func New(
 	config Config,
 	endpoint network.ServerEndpoint,
 	generator Generator,
+	store storage.Store,
 ) *Server {
 	config.validate()
 	if endpoint == nil {
@@ -68,17 +72,22 @@ func New(
 	if generator == nil {
 		panic("server: nil generator")
 	}
+	if store == nil {
+		panic("server: nil store")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	queueCapacity := max(1, config.Workers*2)
 	server := &Server{
 		config:    config,
 		endpoint:  endpoint,
 		generator: generator,
+		store:     store,
 		engine:    sim.NewEngine(config.ViewRadius),
 		ctx:       ctx,
 		cancel:    cancel,
 		incoming:  make(chan sim.Command, inputCapacity),
-		jobs:      make(chan core.ChunkKey, queueCapacity),
+		jobs:      make(chan chunkJob, queueCapacity),
+		acquired:  make(chan sim.AcquiredChunk, queueCapacity),
 		generated: make(chan sim.GeneratedChunk, queueCapacity),
 		queued:    make(map[core.ChunkKey]struct{}),
 	}
@@ -102,7 +111,7 @@ func New(
 	go server.endpointReader()
 	server.workers.Add(config.Workers)
 	for range config.Workers {
-		go server.generationWorker()
+		go server.chunkWorker()
 	}
 	return server
 }
@@ -118,6 +127,7 @@ func (server *Server) Step() sim.TickResult {
 
 	trustedCenter, trustedSequence, hasTrustedCenter := server.drainTrustedObserverCenter()
 	server.drainIncoming()
+	server.drainAcquired()
 	server.drainGenerated()
 	result := server.engine.Step()
 	if hasTrustedCenter {
@@ -129,8 +139,9 @@ func (server *Server) Step() sim.TickResult {
 	}
 	server.publish(result)
 	server.cancelForgottenPending(result.Forget)
-	server.appendGenerationRequests(result.Generate)
-	server.scheduleGeneration()
+	server.appendChunkRequests(chunkJobLoad, result.Acquire)
+	server.appendChunkRequests(chunkJobGenerate, result.Generate)
+	server.scheduleChunkJobs()
 	return result
 }
 
@@ -358,13 +369,24 @@ func (server *Server) drainGenerated() {
 	}
 }
 
-func (server *Server) appendGenerationRequests(keys []core.ChunkKey) {
+func (server *Server) drainAcquired() {
+	for {
+		select {
+		case result := <-server.acquired:
+			server.engine.SubmitAcquired(result)
+		default:
+			return
+		}
+	}
+}
+
+func (server *Server) appendChunkRequests(kind chunkJobKind, keys []core.ChunkKey) {
 	for _, key := range keys {
 		if _, exists := server.queued[key]; exists {
 			continue
 		}
 		server.queued[key] = struct{}{}
-		server.pending = append(server.pending, key)
+		server.pending = append(server.pending, chunkJob{Kind: kind, Key: key})
 	}
 }
 
@@ -380,23 +402,23 @@ func (server *Server) cancelForgottenPending(
 		remove[key] = struct{}{}
 	}
 	kept := server.pending[:0]
-	for _, key := range server.pending {
-		if _, stale := remove[key]; stale {
-			delete(server.queued, key)
+	for _, job := range server.pending {
+		if _, stale := remove[job.Key]; stale {
+			delete(server.queued, job.Key)
 			continue
 		}
-		kept = append(kept, key)
+		kept = append(kept, job)
 	}
 	server.pending = kept
 }
 
-func (server *Server) scheduleGeneration() {
+func (server *Server) scheduleChunkJobs() {
 	for len(server.pending) != 0 {
-		key := server.pending[0]
+		job := server.pending[0]
 		select {
-		case server.jobs <- key:
+		case server.jobs <- job:
 			server.pending = server.pending[1:]
-			delete(server.queued, key)
+			delete(server.queued, job.Key)
 		default:
 			return
 		}
