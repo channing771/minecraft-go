@@ -61,6 +61,13 @@ type Server struct {
 	saveJobs        chan saveJob
 	saveCompletions chan saveCompletion
 	autosaveActive  bool
+	retry           map[storage.RegionKey][]retrySave
+	retryInFlight   map[uint64]retrySave
+	nextRetryID     uint64
+	backpressured   bool
+	lastSaveSuccess time.Time
+	lastSaveError   string
+	lastSaveErrorAt time.Time
 	stepMu          sync.Mutex
 	closeOnce       sync.Once
 }
@@ -100,6 +107,8 @@ func New(
 		generated:       make(chan sim.GeneratedChunk, queueCapacity),
 		saveJobs:        make(chan saveJob, config.SaveWorkers*2),
 		saveCompletions: make(chan saveCompletion, config.SaveWorkers*2),
+		retry:           make(map[storage.RegionKey][]retrySave),
+		retryInFlight:   make(map[uint64]retrySave),
 		queued:          make(map[core.ChunkKey]struct{}),
 	}
 	if config.TrustedObserver {
@@ -157,8 +166,11 @@ func (server *Server) Step() sim.TickResult {
 	server.cancelForgottenPending(result.Forget)
 	server.appendChunkRequests(chunkJobLoad, result.Acquire)
 	server.appendChunkRequests(chunkJobGenerate, result.Generate)
-	server.scheduleChunkJobs()
 	server.schedulePersistence(result.Tick)
+	server.updatePersistenceBackpressure()
+	if !server.backpressured {
+		server.scheduleChunkJobs()
+	}
 	return result
 }
 

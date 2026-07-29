@@ -23,6 +23,8 @@ type Config struct {
 	SaveChunks      int
 	SaveBytes       int
 	AutosaveTicks   uint64
+	RetryBaseTicks  uint64
+	RetryMaxTicks   uint64
 	UnsavedBytes    int64
 	ShutdownTimeout time.Duration
 	SaveObserver    func(time.Duration)
@@ -42,6 +44,8 @@ func DefaultConfig(seed int64) Config {
 		SaveChunks:      8,
 		SaveBytes:       4 << 20,
 		AutosaveTicks:   6000,
+		RetryBaseTicks:  20,
+		RetryMaxTicks:   1200,
 		UnsavedBytes:    512 << 20,
 		ShutdownTimeout: 30 * time.Second,
 	}
@@ -71,6 +75,12 @@ func (config Config) validate() {
 	}
 	if config.AutosaveTicks == 0 {
 		panic("server: autosave ticks must be positive")
+	}
+	if config.RetryBaseTicks == 0 || config.RetryMaxTicks == 0 {
+		panic("server: retry ticks must be positive")
+	}
+	if config.RetryMaxTicks < config.RetryBaseTicks {
+		panic("server: retry maximum must not be below base")
 	}
 	if config.UnsavedBytes < 1 {
 		panic("server: unsaved byte limit must be positive")
