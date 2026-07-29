@@ -1,11 +1,15 @@
 //go:build darwin
 
-// Command mcgo 启动 M2B 权威地面玩家客户端。
+// Command mcgo 启动 M3A 持久世界客户端。
 package main
 
 import (
+	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"log"
+	"os"
 	"runtime"
 	"time"
 
@@ -23,31 +27,80 @@ func init() {
 	runtime.LockOSThread()
 }
 
-func main() {
-	benchmark := flag.Bool("benchmark", false, "运行固定 1440p 性能场景")
-	perfOutput := flag.String("perf-output", "", "性能报告 JSON 输出路径")
-	flag.Parse()
+type mainOptions struct {
+	Application applicationOptions
+	PerfOutput  string
+}
 
+type runDependencies struct {
+	newApplication func(applicationOptions) (*application, error)
+	runInteractive func(*application)
+	runBenchmark   func(*application, string) error
+}
+
+func parseMainOptions(args []string) (mainOptions, error) {
+	flags := flag.NewFlagSet("mcgo", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	benchmark := flags.Bool("benchmark", false, "运行固定 1440p 性能场景")
+	perfOutput := flags.String("perf-output", "", "性能报告 JSON 输出路径")
+	worldPath := flags.String("world", "worlds/default", "世界存档目录")
+	if err := flags.Parse(args); err != nil {
+		return mainOptions{}, err
+	}
+	if flags.NArg() != 0 {
+		return mainOptions{}, fmt.Errorf("未知位置参数: %v", flags.Args())
+	}
+	if *benchmark && *perfOutput == "" {
+		return mainOptions{}, errors.New("--benchmark 必须同时提供 --perf-output")
+	}
 	seed := int64(42)
 	if *benchmark {
 		seed = benchmarkSeed
 	}
-	app, err := newApplication(seed, *benchmark)
-	if err != nil {
-		log.Fatalf("启动失败: %v", err)
-	}
-	defer app.Close()
+	return mainOptions{
+		Application: applicationOptions{
+			Seed:      seed,
+			Benchmark: *benchmark,
+			WorldPath: *worldPath,
+		},
+		PerfOutput: *perfOutput,
+	}, nil
+}
 
-	if *benchmark {
-		if *perfOutput == "" {
-			log.Fatal("--benchmark 必须同时提供 --perf-output")
-		}
-		if err := runBenchmark(app, *perfOutput); err != nil {
-			log.Fatalf("性能门禁失败: %v", err)
-		}
-		return
+func run(args []string) error {
+	return runWithDependencies(args, runDependencies{
+		newApplication: newApplication,
+		runInteractive: runInteractive,
+		runBenchmark:   runBenchmark,
+	})
+}
+
+func runWithDependencies(args []string, dependencies runDependencies) error {
+	options, err := parseMainOptions(args)
+	if err != nil {
+		return err
 	}
-	runInteractive(app)
+	app, err := dependencies.newApplication(options.Application)
+	if err != nil {
+		return fmt.Errorf("启动失败: %w", err)
+	}
+
+	var runErr error
+	if options.Application.Benchmark {
+		if err := dependencies.runBenchmark(app, options.PerfOutput); err != nil {
+			runErr = fmt.Errorf("性能门禁失败: %w", err)
+		}
+	} else {
+		dependencies.runInteractive(app)
+	}
+	return errors.Join(runErr, app.Close())
+}
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		log.Printf("mcgo: %v", err)
+		os.Exit(1)
+	}
 }
 
 func runInteractive(app *application) {

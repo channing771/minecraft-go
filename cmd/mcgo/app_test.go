@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -140,6 +141,99 @@ func TestCursorReleaseSendsNeutralFixedStepAfterHeldInput(t *testing.T) {
 	if !ok || neutral.Sequence != 2 || neutral.MoveX != 0 ||
 		neutral.MoveZ != 0 || neutral.Jump {
 		t.Fatalf("cursor release input=%+v，想要下一 fixed-step neutral", neutral)
+	}
+}
+
+func TestApplicationCloseReturnsPersistenceErrorAndReleasesOnce(t *testing.T) {
+	persistenceErr := errors.New("持久化刷盘失败")
+	serverDone := make(chan error, 1)
+	serverDone <- persistenceErr
+
+	cancelCalls := 0
+	releaseCalls := 0
+	app := &application{
+		serverCancel: func() { cancelCalls++ },
+		serverDone:   serverDone,
+		releaseResources: func() {
+			releaseCalls++
+		},
+	}
+
+	first := app.Close()
+	second := app.Close()
+	if !errors.Is(first, persistenceErr) {
+		t.Fatalf("Close error=%v，想要包含 %v", first, persistenceErr)
+	}
+	if first != second {
+		t.Fatalf("第二次 Close error=%v，不是缓存的第一次结果 %v", second, first)
+	}
+	if cancelCalls != 1 || releaseCalls != 1 {
+		t.Fatalf("Close 调用次数 cancel=%d release=%d，想要各 1 次", cancelCalls, releaseCalls)
+	}
+}
+
+func TestApplicationCloseCancelsBeforeWaitingAndSharesSuccessfulResult(t *testing.T) {
+	serverDone := make(chan error)
+	cancelObserved := make(chan struct{}, 1)
+	releaseObserved := make(chan struct{}, 1)
+	cancelCalls := 0
+	releaseCalls := 0
+	app := &application{
+		serverCancel: func() {
+			cancelCalls++
+			cancelObserved <- struct{}{}
+		},
+		serverDone: serverDone,
+		releaseResources: func() {
+			releaseCalls++
+			releaseObserved <- struct{}{}
+		},
+	}
+
+	const callers = 8
+	start := make(chan struct{})
+	results := make(chan error, callers)
+	var callersDone sync.WaitGroup
+	callersDone.Add(callers)
+	for range callers {
+		go func() {
+			defer callersDone.Done()
+			<-start
+			results <- app.Close()
+		}()
+	}
+	close(start)
+
+	select {
+	case <-cancelObserved:
+	case <-time.After(time.Second):
+		t.Fatal("Close 未在等待 serverDone 前调用 serverCancel")
+	}
+	select {
+	case err := <-results:
+		t.Fatalf("serverDone 前 Close 已返回: %v", err)
+	case <-releaseObserved:
+		t.Fatal("serverDone 前已释放资源")
+	default:
+	}
+	select {
+	case serverDone <- context.Canceled:
+	case <-time.After(time.Second):
+		t.Fatal("Close 未等待 serverDone")
+	}
+
+	callersDone.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Errorf("concurrent Close error=%v，plain context.Canceled 应为 nil", err)
+		}
+	}
+	if err := app.Close(); err != nil {
+		t.Fatalf("repeated Close error=%v", err)
+	}
+	if cancelCalls != 1 || releaseCalls != 1 {
+		t.Fatalf("Close 调用次数 cancel=%d release=%d，想要各 1 次", cancelCalls, releaseCalls)
 	}
 }
 

@@ -21,33 +21,42 @@ import (
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/render"
 	"minecraft-go/internal/server"
+	"minecraft-go/internal/storage"
 )
 
+type applicationOptions struct {
+	Seed      int64
+	Benchmark bool
+	WorldPath string
+}
+
 type application struct {
-	window         *client.Window
-	dev            gfx.Device
-	surface        gfx.Surface
-	color          gfx.Texture
-	colorView      gfx.TextureView
-	frameWidth     int
-	frameHeight    int
-	renderer       *render.Renderer
-	clientEndpoint network.ClientEndpoint
-	server         *server.Server
-	serverCancel   context.CancelFunc
-	serverDone     chan error
-	mirror         *client.Mirror
-	predictor      *client.Predictor
-	mesher         *client.Mesher
-	depth          *depthTarget
-	camera         client.Camera
-	center         core.ChunkPos
-	sequence       uint64
-	selectedBlock  core.BlockID
-	loadedChunks   map[core.ChunkPos]struct{}
-	ticks          *tickRecorder
-	observerFloor  uint64
-	closeOnce      sync.Once
+	window           *client.Window
+	dev              gfx.Device
+	surface          gfx.Surface
+	color            gfx.Texture
+	colorView        gfx.TextureView
+	frameWidth       int
+	frameHeight      int
+	renderer         *render.Renderer
+	clientEndpoint   network.ClientEndpoint
+	server           *server.Server
+	serverCancel     context.CancelFunc
+	serverDone       chan error
+	mirror           *client.Mirror
+	predictor        *client.Predictor
+	mesher           *client.Mesher
+	depth            *depthTarget
+	camera           client.Camera
+	center           core.ChunkPos
+	sequence         uint64
+	selectedBlock    core.BlockID
+	loadedChunks     map[core.ChunkPos]struct{}
+	ticks            *tickRecorder
+	observerFloor    uint64
+	closeOnce        sync.Once
+	closeErr         error
+	releaseResources func()
 }
 
 type tickRecorder struct {
@@ -77,7 +86,31 @@ func (recorder *tickRecorder) summary() client.PhaseSummary {
 	return recorder.sampler.Summary(0)
 }
 
-func newApplication(seed int64, benchmark bool) (*application, error) {
+func openApplicationStore(
+	ctx context.Context,
+	options applicationOptions,
+) (storage.Store, error) {
+	metadata := storage.Metadata{
+		FormatVersion:  1,
+		Seed:           options.Seed,
+		SpawnDimension: core.Overworld,
+		SpawnAnchor:    core.ChunkPos{},
+	}
+	if options.Benchmark {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return storage.NewMemory(metadata), nil
+	}
+	return storage.OpenDisk(ctx, options.WorldPath, storage.OpenOptions{Create: metadata})
+}
+
+func newApplication(options applicationOptions) (*application, error) {
+	store, err := openApplicationStore(context.Background(), options)
+	if err != nil {
+		return nil, fmt.Errorf("打开世界存储: %w", err)
+	}
+
 	var window *client.Window
 	var dev gfx.Device
 	var surface gfx.Surface
@@ -85,8 +118,7 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 	var colorView gfx.TextureView
 	var colorFormat gfx.TextureFormat
 	width, height := 2560, 1440
-	var err error
-	if benchmark {
+	if options.Benchmark {
 		dev, err = gfx.NewHeadlessDevice()
 		colorFormat = gfx.FormatBGRA8UnormSrgb
 		if err == nil {
@@ -101,7 +133,7 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}
 	} else {
-		window, err = client.NewWindow(2560, 1440, "minecraft-go — M2B authoritative player")
+		window, err = client.NewWindow(2560, 1440, "minecraft-go — M3A persistent world")
 		if err == nil {
 			fitFramebuffer(window, width, height)
 			width, height = window.FramebufferSize()
@@ -114,10 +146,22 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 		}
 	}
 	if err != nil {
+		if colorView != nil {
+			colorView.Release()
+		}
+		if color != nil {
+			color.Release()
+		}
+		if surface != nil {
+			surface.Release()
+		}
+		if dev != nil {
+			dev.Release()
+		}
 		if window != nil {
 			window.Close()
 		}
-		return nil, err
+		return nil, errors.Join(err, store.Close())
 	}
 
 	reg := assets.NewRegistry()
@@ -132,12 +176,12 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 		Far:    2000,
 	}
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
-	config := server.DefaultConfig(seed)
+	config := server.DefaultConfig(options.Seed)
 	config.ViewRadius = viewDistance + 1
-	config.TrustedObserver = benchmark
+	config.TrustedObserver = options.Benchmark
 	ticks := newTickRecorder(100_000)
 	config.TickObserver = ticks.add
-	running := server.NewEmbeddedMemory(config, serverEndpoint)
+	running := server.NewEmbedded(config, serverEndpoint, store)
 	serverContext, serverCancel := context.WithCancel(context.Background())
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- running.Run(serverContext) }()
@@ -165,10 +209,14 @@ func newApplication(seed int64, benchmark bool) (*application, error) {
 		loadedChunks:   make(map[core.ChunkPos]struct{}),
 		ticks:          ticks,
 	}
-	if benchmark {
+	app.releaseResources = app.releaseOwnedResources
+	if options.Benchmark {
 		if err := app.requestTrustedObserverCenter(app.center); err != nil {
-			app.Close()
-			return nil, fmt.Errorf("设置初始 trusted observer 中心: %w", err)
+			cleanupErr := app.Close()
+			return nil, errors.Join(
+				fmt.Errorf("设置初始 trusted observer 中心: %w", err),
+				cleanupErr,
+			)
 		}
 	}
 	return app, nil
@@ -186,30 +234,51 @@ func fitFramebuffer(window *client.Window, targetWidth, targetHeight int) {
 	window.Poll()
 }
 
-func (a *application) Close() {
+func (a *application) Close() error {
 	a.closeOnce.Do(func() {
-		_ = a.clientEndpoint.Close()
-		a.serverCancel()
-		if err := <-a.serverDone; err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("内置服务端退出: %v", err)
+		if a.clientEndpoint != nil {
+			a.closeErr = errors.Join(a.closeErr, a.clientEndpoint.Close())
 		}
-		a.mesher.Close()
-		a.renderer.Release()
-		a.depth.Release()
-		if a.colorView != nil {
-			a.colorView.Release()
+		if a.serverCancel != nil {
+			a.serverCancel()
 		}
-		if a.color != nil {
-			a.color.Release()
+		if a.serverDone != nil {
+			if err := <-a.serverDone; err != nil && err != context.Canceled {
+				a.closeErr = errors.Join(a.closeErr, err)
+			}
 		}
-		if a.surface != nil {
-			a.surface.Release()
-		}
-		a.dev.Release()
-		if a.window != nil {
-			a.window.Close()
+		if a.releaseResources != nil {
+			a.releaseResources()
 		}
 	})
+	return a.closeErr
+}
+
+func (a *application) releaseOwnedResources() {
+	if a.mesher != nil {
+		a.mesher.Close()
+	}
+	if a.renderer != nil {
+		a.renderer.Release()
+	}
+	if a.depth != nil {
+		a.depth.Release()
+	}
+	if a.colorView != nil {
+		a.colorView.Release()
+	}
+	if a.color != nil {
+		a.color.Release()
+	}
+	if a.surface != nil {
+		a.surface.Release()
+	}
+	if a.dev != nil {
+		a.dev.Release()
+	}
+	if a.window != nil {
+		a.window.Close()
+	}
 }
 
 func (a *application) updateCenter() {
