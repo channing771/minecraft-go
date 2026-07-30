@@ -7,7 +7,7 @@ import (
 	"minecraft-go/internal/core"
 )
 
-const maxSmallPacketPayload = 64 << 10
+const MaxSmallPayload = 64 << 10
 
 var (
 	errInvalidDimension = errors.New("network: dimension is not overworld")
@@ -537,7 +537,7 @@ func finishEncode(direction string, state State, packetID uint32, e byteEncoder)
 }
 
 func checkSmallPayload(payload []byte) error {
-	if len(payload) > maxSmallPacketPayload {
+	if len(payload) > MaxSmallPayload {
 		return errors.New("network: payload exceeds 64 KiB")
 	}
 	return nil
