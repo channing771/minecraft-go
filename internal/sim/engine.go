@@ -326,6 +326,24 @@ func (engine *Engine) RegisterObserverSession(id SessionID) {
 	}
 }
 
+// WantsChunk reports whether the current union subscription still needs key.
+// Callers serialize this query with Step and session lifecycle operations.
+func (engine *Engine) WantsChunk(key core.ChunkKey) bool {
+	_, wanted := engine.wanted[key]
+	return wanted
+}
+
+// SessionWantsChunk reports whether id currently subscribes to key.
+// Callers serialize this query with Step and session lifecycle operations.
+func (engine *Engine) SessionWantsChunk(id SessionID, key core.ChunkKey) bool {
+	session := engine.sessions[id]
+	if session == nil {
+		return false
+	}
+	_, wanted := session.wanted[key]
+	return wanted
+}
+
 func (engine *Engine) reconcileSubscriptions(result *TickResult) {
 	union := make(map[core.ChunkKey]struct{})
 	for sessionID, session := range engine.sessions {

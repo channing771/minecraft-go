@@ -620,7 +620,7 @@ func (h *delayedPlayerHarness) replayResult() delayedReplayResult {
 	if !ok {
 		h.t.Fatal("replay 最终 Server.PlayerState 不可用")
 	}
-	playerHash, ok := h.running.engine.PlayerHash(localSessionID)
+	playerHash, ok := h.running.engine.PlayerHash(testSessionID)
 	if !ok {
 		h.t.Fatal("replay 最终 PlayerHash 不可用")
 	}

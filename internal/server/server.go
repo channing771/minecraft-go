@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -12,24 +11,6 @@ import (
 	"minecraft-go/internal/sim"
 	"minecraft-go/internal/storage"
 )
-
-const (
-	localSessionID sim.SessionID = 1
-	inputCapacity                = 256
-)
-
-var ErrTrustedObserverDisabled = errors.New("server: trusted observer disabled")
-
-type trustedObserverCenter struct {
-	dimension core.DimensionID
-	center    core.ChunkPos
-}
-
-type appliedTrustedObserverCenter struct {
-	dimension core.DimensionID
-	center    core.ChunkPos
-	sequence  uint64
-}
 
 type serverLifecycle uint8
 
@@ -40,19 +21,20 @@ const (
 )
 
 type Server struct {
-	config    Config
-	endpoint  network.ServerEndpoint
-	generator Generator
-	store     storage.Store
-	engine    *sim.Engine
-	session   *session
+	config                    Config
+	generator                 Generator
+	store                     storage.Store
+	engine                    *sim.Engine
+	sessions                  map[sim.SessionID]*session
+	trustedObserver           *session
+	trustedObserverGeneration uint64
 
 	ctx         context.Context
 	cancel      context.CancelFunc
 	saveCtx     context.Context
 	cancelSaves context.CancelFunc
 
-	incoming  chan sim.Command
+	incoming  chan incomingCommand
 	jobs      chan chunkJob
 	acquired  chan sim.AcquiredChunk
 	generated chan sim.GeneratedChunk
@@ -85,16 +67,8 @@ type Server struct {
 	storePhase      storeShutdownPhase
 }
 
-func New(
-	config Config,
-	endpoint network.ServerEndpoint,
-	generator Generator,
-	store storage.Store,
-) *Server {
+func NewWorld(config Config, generator Generator, store storage.Store) *Server {
 	config.validate()
-	if endpoint == nil {
-		panic("server: nil endpoint")
-	}
 	if generator == nil {
 		panic("server: nil generator")
 	}
@@ -108,15 +82,15 @@ func New(
 	queueCapacity := max(1, config.Workers*2)
 	server := &Server{
 		config:          config,
-		endpoint:        endpoint,
 		generator:       generator,
 		store:           store,
 		engine:          sim.NewEngine(config.ViewRadius),
+		sessions:        make(map[sim.SessionID]*session),
 		ctx:             ctx,
 		cancel:          cancel,
 		saveCtx:         saveCtx,
 		cancelSaves:     cancelSaves,
-		incoming:        make(chan sim.Command, inputCapacity),
+		incoming:        make(chan incomingCommand, inputCapacity),
 		jobs:            make(chan chunkJob, queueCapacity),
 		acquired:        make(chan sim.AcquiredChunk, queueCapacity),
 		generated:       make(chan sim.GeneratedChunk, queueCapacity),
@@ -132,22 +106,8 @@ func New(
 	}
 	if config.TrustedObserver {
 		server.trustedObserverCenters = make(chan trustedObserverCenter, 1)
-	} else {
-		server.engine.RegisterSession(
-			localSessionID,
-			config.SpawnDimension,
-			config.SpawnAnchor,
-		)
 	}
 
-	server.session = newSession(
-		ctx,
-		endpoint,
-		config.OutboxCapacity,
-		&server.workers,
-	)
-	server.workers.Add(1)
-	go server.endpointReader()
 	server.workers.Add(config.Workers)
 	for range config.Workers {
 		go server.chunkWorker()
@@ -165,6 +125,90 @@ func New(
 		close(server.saveDone)
 	}()
 	return server
+}
+
+// New 暂时保留为单玩家测试与尚未迁移调用方的兼容包装。
+func New(
+	config Config,
+	endpoint network.ServerEndpoint,
+	generator Generator,
+	store storage.Store,
+) *Server {
+	if endpoint == nil {
+		panic("server: nil endpoint")
+	}
+	server := NewWorld(config, generator, store)
+	if config.TrustedObserver {
+		if err := server.AttachTrustedObserver(endpoint); err != nil {
+			panic(err)
+		}
+		return server
+	}
+	compatibilityID := sim.SessionID(1)
+	if _, err := server.AttachSession(SessionSpec{
+		ID:         compatibilityID,
+		Generation: 1,
+		Endpoint:   endpoint,
+		Restore: sim.PlayerRestore{
+			SpawnDimension: server.config.SpawnDimension,
+			SpawnAnchor:    server.config.SpawnAnchor,
+		},
+	}); err != nil {
+		panic(err)
+	}
+	return server
+}
+
+func (server *Server) AttachSession(spec SessionSpec) (<-chan SessionExit, error) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.attachSessionLocked(spec)
+}
+
+func (server *Server) DetachSession(
+	id sim.SessionID,
+	generation uint64,
+	cause error,
+) bool {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.detachSessionLocked(id, generation, cause)
+}
+
+func (server *Server) AttachTrustedObserver(endpoint network.ServerEndpoint) error {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.attachTrustedObserverLocked(endpoint)
+}
+
+func (server *Server) detachTrustedObserver(
+	id sim.SessionID,
+	generation uint64,
+	cause error,
+) bool {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.detachTrustedObserverLocked(id, generation, cause)
+}
+
+func (server *Server) SetTrustedObserverCenter(
+	dimension core.DimensionID,
+	center core.ChunkPos,
+) error {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.setTrustedObserverCenterLocked(dimension, center)
+}
+
+func (server *Server) AppliedTrustedObserverCenter() (
+	core.DimensionID,
+	core.ChunkPos,
+	uint64,
+	bool,
+) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.appliedTrustedObserverCenterLocked()
 }
 
 // Step 执行一次服务端编排与权威模拟 tick。
@@ -193,7 +237,7 @@ func (server *Server) Step() sim.TickResult {
 		}
 	}
 	server.publish(result)
-	server.cancelForgottenPending(result.Forget)
+	server.cancelUnwantedPending()
 	server.appendChunkRequests(chunkJobLoad, result.Acquire)
 	server.appendChunkRequests(chunkJobGenerate, result.Generate)
 	server.schedulePersistence(result.Tick)
@@ -204,71 +248,39 @@ func (server *Server) Step() sim.TickResult {
 	return result
 }
 
-// AppliedTrustedObserverCenter 返回最近一次由 Step 应用的 trusted center。
-// 返回值均为副本；该状态只供 server-internal benchmark 同步使用。
-func (server *Server) AppliedTrustedObserverCenter() (
-	core.DimensionID,
-	core.ChunkPos,
-	uint64,
-	bool,
-) {
-	server.stepMu.Lock()
-	defer server.stepMu.Unlock()
-	applied := server.appliedTrustedObserver
-	if !server.config.TrustedObserver || applied.sequence == 0 {
-		return 0, core.ChunkPos{}, 0, false
-	}
-	return applied.dimension, applied.center, applied.sequence, true
-}
-
-func (server *Server) SetTrustedObserverCenter(
-	dimension core.DimensionID,
-	center core.ChunkPos,
-) error {
-	if !server.config.TrustedObserver {
-		return ErrTrustedObserverDisabled
-	}
-	if dimension != core.Overworld {
-		return errors.New("server: trusted observer center must be overworld")
-	}
-	request := trustedObserverCenter{dimension: dimension, center: center}
-	server.trustedObserverMu.Lock()
-	defer server.trustedObserverMu.Unlock()
-	select {
-	case <-server.trustedObserverCenters:
-	default:
-	}
-	select {
-	case server.trustedObserverCenters <- request:
-	default:
-		panic("server: trusted observer queue invariant violated")
-	}
-	return nil
-}
-
 // StepForTest 显式推进一个完整 tick，供无头确定性集成测试使用。
 func (server *Server) StepForTest() sim.TickResult {
 	return server.Step()
 }
 
-func (server *Server) Run(ctx context.Context) error {
+func (server *Server) RunTicks(ctx context.Context) error {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return server.shutdownAfterRunCancellation(ctx.Err())
+			return ctx.Err()
 		case <-server.ctx.Done():
 			select {
 			case <-server.closedDone:
 				return nil
 			case <-ctx.Done():
-				return server.shutdownAfterRunCancellation(ctx.Err())
+				return ctx.Err()
 			}
 		case <-ticker.C:
 			server.Step()
 		}
 	}
+}
+
+// Run 暂时保留为测试兼容包装；RunTicks 返回后执行既有安全关服。
+func (server *Server) Run(ctx context.Context) error {
+	runErr := server.RunTicks(ctx)
+	if errors.Is(runErr, context.Canceled) ||
+		errors.Is(runErr, context.DeadlineExceeded) {
+		return server.shutdownAfterRunCancellation(runErr)
+	}
+	return runErr
 }
 
 func (server *Server) shutdownAfterRunCancellation(runErr error) error {
@@ -295,14 +307,29 @@ func (server *Server) ChunkInfo(
 	})
 }
 
-// PlayerState 返回本地玩家权威状态的副本。
+func (server *Server) PlayerStateFor(id sim.SessionID) (sim.PlayerUpdate, bool) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.engine.Player(id)
+}
+
+func (server *Server) PlayerSnapshotFor(id sim.SessionID) (sim.PlayerSnapshot, bool) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.engine.PlayerSnapshot(id)
+}
+
+// PlayerState 暂时保留为单玩家兼容包装。
 func (server *Server) PlayerState() (sim.PlayerUpdate, bool) {
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
-	return server.engine.Player(localSessionID)
+	ids := server.sortedSessionIDsLocked()
+	if len(ids) == 0 {
+		return sim.PlayerUpdate{}, false
+	}
+	return server.engine.Player(ids[0])
 }
 
-// ChunkHash 返回权威 Ready 区块的逻辑哈希与 revision，不暴露可变指针。
 func (server *Server) ChunkHash(
 	dimension core.DimensionID,
 	pos core.ChunkPos,
@@ -315,110 +342,12 @@ func (server *Server) ChunkHash(
 	})
 }
 
-func (server *Server) endpointReader() {
-	defer server.workers.Done()
-	for {
-		message, err := server.endpoint.Recv(server.ctx)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) &&
-				!errors.Is(err, network.ErrClosed) {
-				slog.Warn("服务端 endpoint reader 退出", "error", err)
-			}
-			return
-		}
-		command, ok := translateClientMessage(message)
-		if !ok {
-			continue
-		}
-		select {
-		case server.incoming <- command:
-		case <-server.ctx.Done():
-			return
-		}
-	}
-}
-
-func translateClientMessage(message network.ClientMessage) (sim.Command, bool) {
-	switch message := message.(type) {
-	case network.PlayerInput:
-		return sim.Command{
-			Session:  localSessionID,
-			Sequence: message.Sequence,
-			Kind:     sim.CommandPlayerInput,
-			MoveX:    message.MoveX,
-			MoveZ:    message.MoveZ,
-			Jump:     message.Jump,
-			Yaw:      message.Yaw,
-			Pitch:    message.Pitch,
-		}, true
-	case network.BreakBlock:
-		return sim.Command{
-			Session:  localSessionID,
-			Sequence: message.Sequence,
-			Kind:     sim.CommandBreakBlock,
-			Yaw:      message.Yaw,
-			Pitch:    message.Pitch,
-		}, true
-	case network.PlaceBlock:
-		return sim.Command{
-			Session:  localSessionID,
-			Sequence: message.Sequence,
-			Kind:     sim.CommandPlaceBlock,
-			Yaw:      message.Yaw,
-			Pitch:    message.Pitch,
-			Block:    message.Block,
-		}, true
-	case network.RequestChunkResync:
-		return sim.Command{
-			Session:      localSessionID,
-			Sequence:     message.Sequence,
-			Kind:         sim.CommandResync,
-			Dimension:    message.Dimension,
-			Chunk:        message.Chunk,
-			HaveRevision: message.HaveRevision,
-		}, true
-	default:
-		return sim.Command{}, false
-	}
-}
-
-func (server *Server) drainTrustedObserverCenter() (
-	trustedObserverCenter,
-	uint64,
-	bool,
-) {
-	if server.trustedObserverCenters == nil {
-		return trustedObserverCenter{}, 0, false
-	}
-	select {
-	case request := <-server.trustedObserverCenters:
-		server.trustedObserverSequence++
-		server.session.hasView = true
-		server.session.viewDimension = request.dimension
-		server.session.viewCenter = request.center
-		server.engine.Enqueue(sim.Command{
-			Session:   localSessionID,
-			Sequence:  server.trustedObserverSequence,
-			Kind:      sim.CommandTrustedObserverCenter,
-			Dimension: request.dimension,
-			Center:    request.center,
-		})
-		return request, server.trustedObserverSequence, true
-	default:
-		return trustedObserverCenter{}, 0, false
-	}
-}
-
-func (server *Server) drainIncoming() {
-	var commands []sim.Command
+func (server *Server) drainAcquired() {
 	for {
 		select {
-		case command := <-server.incoming:
-			commands = append(commands, command)
+		case result := <-server.acquired:
+			server.engine.SubmitAcquired(result)
 		default:
-			for _, command := range commands {
-				server.engine.Enqueue(command)
-			}
 			return
 		}
 	}
@@ -435,17 +364,6 @@ func (server *Server) drainGenerated() {
 	}
 }
 
-func (server *Server) drainAcquired() {
-	for {
-		select {
-		case result := <-server.acquired:
-			server.engine.SubmitAcquired(result)
-		default:
-			return
-		}
-	}
-}
-
 func (server *Server) appendChunkRequests(kind chunkJobKind, keys []core.ChunkKey) {
 	for _, key := range keys {
 		if _, exists := server.queued[key]; exists {
@@ -456,20 +374,13 @@ func (server *Server) appendChunkRequests(kind chunkJobKind, keys []core.ChunkKe
 	}
 }
 
-func (server *Server) cancelForgottenPending(
-	forgotten map[sim.SessionID][]core.ChunkKey,
-) {
-	keys := forgotten[localSessionID]
-	if len(keys) == 0 || len(server.pending) == 0 {
+func (server *Server) cancelUnwantedPending() {
+	if len(server.pending) == 0 {
 		return
-	}
-	remove := make(map[core.ChunkKey]struct{}, len(keys))
-	for _, key := range keys {
-		remove[key] = struct{}{}
 	}
 	kept := server.pending[:0]
 	for _, job := range server.pending {
-		if _, stale := remove[job.Key]; stale {
+		if !server.engine.WantsChunk(job.Key) {
 			delete(server.queued, job.Key)
 			continue
 		}

@@ -56,7 +56,17 @@ func (server *Server) Shutdown(ctx context.Context) error {
 				sequence:  trustedSequence,
 			}
 		}
-		server.session.close()
+		for _, id := range server.sortedSessionIDsLocked() {
+			current := server.sessions[id]
+			server.detachSessionLocked(id, current.generation, nil)
+		}
+		if server.trustedObserver != nil {
+			server.detachTrustedObserverLocked(
+				server.trustedObserver.id,
+				server.trustedObserver.generation,
+				nil,
+			)
+		}
 		server.cancel()
 	}
 	server.stepMu.Unlock()

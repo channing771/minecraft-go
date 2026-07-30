@@ -1,6 +1,7 @@
 package archcheck_test
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/scanner"
 	"go/token"
@@ -39,6 +40,7 @@ func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
 		"PlaceRay":        {},
 		"CommandBreakRay": {},
 		"CommandPlaceRay": {},
+		"localSessionID":  {},
 	}
 	for _, sourceRoot := range []string{"cmd", "internal"} {
 		err := filepath.WalkDir(
@@ -76,6 +78,74 @@ func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
 			t.Fatalf("扫描 %s Go 源码: %v", sourceRoot, err)
 		}
 	}
+}
+
+func TestSessionLifecycleResponsibilitiesLiveInSessionFile(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "internal", "server")
+	sessionDeclarations := topLevelDeclarationNames(
+		t,
+		filepath.Join(root, "session.go"),
+	)
+	serverDeclarations := topLevelDeclarationNames(
+		t,
+		filepath.Join(root, "server.go"),
+	)
+	wantSessionFile := []string{
+		"inputCapacity",
+		"trustedObserverSessionID",
+		"SessionSpec",
+		"SessionExit",
+		"incomingCommand",
+		"trustedObserverCenter",
+		"appliedTrustedObserverCenter",
+		"attachSessionLocked",
+		"detachSessionLocked",
+		"attachTrustedObserverLocked",
+		"detachTrustedObserverLocked",
+		"setTrustedObserverCenterLocked",
+		"appliedTrustedObserverCenterLocked",
+		"endpointReader",
+		"translateClientMessage",
+		"enqueueIncoming",
+		"drainIncoming",
+		"drainTrustedObserverCenter",
+		"sortedSessionIDsLocked",
+	}
+	for _, name := range wantSessionFile {
+		if !sessionDeclarations[name] {
+			t.Errorf("session.go must own session lifecycle declaration %s", name)
+		}
+		if serverDeclarations[name] {
+			t.Errorf("server.go must not own session lifecycle declaration %s", name)
+		}
+	}
+}
+
+func topLevelDeclarationNames(t *testing.T, path string) map[string]bool {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("解析 %s: %v", path, err)
+	}
+	names := make(map[string]bool)
+	for _, declaration := range parsed.Decls {
+		switch declaration := declaration.(type) {
+		case *ast.FuncDecl:
+			names[declaration.Name.Name] = true
+		case *ast.GenDecl:
+			for _, specification := range declaration.Specs {
+				switch specification := specification.(type) {
+				case *ast.TypeSpec:
+					names[specification.Name.Name] = true
+				case *ast.ValueSpec:
+					for _, name := range specification.Names {
+						names[name.Name] = true
+					}
+				}
+			}
+		}
+	}
+	return names
 }
 
 // allowed 列出每个内部包允许直接依赖的内部包。

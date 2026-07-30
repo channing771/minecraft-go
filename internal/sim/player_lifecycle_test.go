@@ -222,6 +222,34 @@ func TestOnlyRegisteredObserverAcceptsObserverCommands(t *testing.T) {
 	}
 }
 
+func TestUnregisterObserverRemovesSubscriptionAndAllowsReregister(t *testing.T) {
+	engine := NewEngine(0)
+	const observer = SessionID(71)
+	key := core.ChunkKey{
+		Dimension: core.Overworld,
+		Pos:       core.ChunkPos{X: 3, Z: -2},
+	}
+	engine.RegisterObserverSession(observer)
+	engine.Enqueue(Command{
+		Session: observer, Sequence: 1, Kind: CommandTrustedObserverCenter,
+		Dimension: key.Dimension, Center: key.Pos,
+	})
+	if result := engine.Step(); len(result.Acquire) != 1 ||
+		result.Acquire[0] != key || !engine.WantsChunk(key) {
+		t.Fatalf("observer subscription = %+v", result)
+	}
+
+	if snapshot, ok := engine.UnregisterSession(observer); ok ||
+		snapshot != (PlayerSnapshot{}) {
+		t.Fatalf("observer UnregisterSession = (%+v, %v)", snapshot, ok)
+	}
+	engine.Step()
+	if engine.WantsChunk(key) {
+		t.Fatal("observer unregister 后 union 仍需要旧区块")
+	}
+	engine.RegisterObserverSession(observer)
+}
+
 func TestPlayerRestoreAndSnapshotDeepCopySafeLocation(t *testing.T) {
 	engine := NewEngine(0)
 	id := SessionID(42)

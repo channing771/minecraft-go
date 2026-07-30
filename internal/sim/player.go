@@ -152,11 +152,12 @@ func (engine *Engine) PlayerSnapshot(id SessionID) (PlayerSnapshot, bool) {
 
 func (engine *Engine) UnregisterSession(id SessionID) (PlayerSnapshot, bool) {
 	session := engine.sessions[id]
-	if session == nil || session.player == nil {
+	if session == nil {
 		return PlayerSnapshot{}, false
 	}
 	var snapshot PlayerSnapshot
-	hasSnapshot := session.player.lifecycle == PlayerActive
+	hasSnapshot := session.player != nil &&
+		session.player.lifecycle == PlayerActive
 	if hasSnapshot {
 		snapshot = session.player.snapshot(session.dimension)
 	}

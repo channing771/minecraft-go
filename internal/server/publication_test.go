@@ -60,16 +60,19 @@ func TestInitialSnapshotCapturesSameTickChangesBeforeDelta(t *testing.T) {
 	if len(ready.Ready) != 1 || !ready.Players[0].Ready {
 		t.Fatalf("spawn ready = %+v", ready)
 	}
-	running.session.queueSnapshot(core.ChunkKey{
+	running.sessions[testSessionID].queueSnapshot(core.ChunkKey{
 		Dimension: core.Overworld,
 		Pos:       core.ChunkPos{},
 	}, false)
-	running.incoming <- sim.Command{
-		Session:  localSessionID,
-		Sequence: 2,
-		Kind:     sim.CommandBreakBlock,
-		Yaw:      0,
-		Pitch:    -1.5,
+	running.incoming <- incomingCommand{
+		Session: testSessionID, Generation: 1,
+		Command: sim.Command{
+			Session:  testSessionID,
+			Sequence: 2,
+			Kind:     sim.CommandBreakBlock,
+			Yaw:      0,
+			Pitch:    -1.5,
+		},
 	}
 	result := running.Step()
 	if len(result.Changes) != 1 {
@@ -91,11 +94,14 @@ func TestPublishedDeltaIsContiguousAfterSnapshot(t *testing.T) {
 		t.Fatalf("初始 revision = %d", snapshot.Revision)
 	}
 
-	running.incoming <- sim.Command{
-		Session:  localSessionID,
-		Sequence: 2,
-		Kind:     sim.CommandBreakBlock,
-		Pitch:    -1.5,
+	running.incoming <- incomingCommand{
+		Session: testSessionID, Generation: 1,
+		Command: sim.Command{
+			Session:  testSessionID,
+			Sequence: 2,
+			Kind:     sim.CommandBreakBlock,
+			Pitch:    -1.5,
+		},
 	}
 	running.Step()
 	delta := recvWorldServerMessage(t, client).(network.BlockChanges)
@@ -115,13 +121,16 @@ func TestResyncSnapshotPrecedesOrdinaryPendingSnapshots(t *testing.T) {
 		t.Fatalf("首个快照 = %+v", first.Chunk)
 	}
 
-	running.incoming <- sim.Command{
-		Session:      localSessionID,
-		Sequence:     2,
-		Kind:         sim.CommandResync,
-		Dimension:    core.Overworld,
-		Chunk:        core.ChunkPos{},
-		HaveRevision: 0,
+	running.incoming <- incomingCommand{
+		Session: testSessionID, Generation: 1,
+		Command: sim.Command{
+			Session:      testSessionID,
+			Sequence:     2,
+			Kind:         sim.CommandResync,
+			Dimension:    core.Overworld,
+			Chunk:        core.ChunkPos{},
+			HaveRevision: 0,
+		},
 	}
 	running.Step()
 	resync := recvWorldServerMessage(t, client).(network.ChunkSnapshot)
@@ -141,23 +150,23 @@ func TestForgetRemovesPendingSnapshotsAndSortsChunks(t *testing.T) {
 	for index, chunk := range want {
 		key := core.ChunkKey{Dimension: core.Overworld, Pos: chunk}
 		keys[index] = key
-		running.session.pendingSnapshots[key] = snapshotRequest{}
-		running.session.publications[key] = &publication{}
+		running.sessions[testSessionID].pendingSnapshots[key] = snapshotRequest{}
+		running.sessions[testSessionID].publications[key] = &publication{}
 	}
 	running.publish(sim.TickResult{
 		Tick:   1,
-		Forget: map[sim.SessionID][]core.ChunkKey{localSessionID: keys},
+		Forget: map[sim.SessionID][]core.ChunkKey{testSessionID: keys},
 		Players: []sim.PlayerUpdate{{
-			Session:    localSessionID,
+			Session:    testSessionID,
 			Dimension:  core.Overworld,
 			ViewCenter: core.ChunkPos{},
 		}},
 	})
 	for _, key := range keys {
-		if _, pending := running.session.pendingSnapshots[key]; pending {
+		if _, pending := running.sessions[testSessionID].pendingSnapshots[key]; pending {
 			t.Fatalf("Forget 后 pendingSnapshots 仍包含 %+v", key)
 		}
-		if _, published := running.session.publications[key]; published {
+		if _, published := running.sessions[testSessionID].publications[key]; published {
 			t.Fatalf("Forget 后 publications 仍包含 %+v", key)
 		}
 	}
