@@ -26,6 +26,7 @@ type regionFileHooks struct {
 
 var (
 	ErrChunkNotFound    = errors.New("storage: chunk not found")
+	ErrPlayerNotFound   = errors.New("storage: player not found")
 	ErrWorldLocked      = errors.New("storage: world locked")
 	ErrCorrupt          = errors.New("storage: corrupt data")
 	ErrFutureVersion    = errors.New("storage: future version")
@@ -64,6 +65,12 @@ type Store interface {
 	SaveBatch(context.Context, []ChunkSave) (SaveResult, error)
 	Sync(context.Context) error
 	Close() error
+}
+
+// WorldStore combines world chunk storage with persisted player state.
+type WorldStore interface {
+	Store
+	PlayerStore
 }
 
 type RegionKey struct {
