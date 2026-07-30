@@ -2,6 +2,9 @@
 package network
 
 import (
+	"errors"
+	"math"
+
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/core"
@@ -28,6 +31,14 @@ type PlayerInput struct {
 }
 
 func (PlayerInput) clientMessage() {}
+func (PlayerInput) clientPacket()  {}
+
+func (input PlayerInput) Validate() error {
+	if !finite32(input.Yaw) || !finite32(input.Pitch) {
+		return errors.New("network: player input has non-finite rotation")
+	}
+	return nil
+}
 
 type BreakBlock struct {
 	Sequence   uint64
@@ -35,6 +46,14 @@ type BreakBlock struct {
 }
 
 func (BreakBlock) clientMessage() {}
+func (BreakBlock) clientPacket()  {}
+
+func (command BreakBlock) Validate() error {
+	if !finite32(command.Yaw) || !finite32(command.Pitch) {
+		return errors.New("network: break block has non-finite rotation")
+	}
+	return nil
+}
 
 type PlaceBlock struct {
 	Sequence   uint64
@@ -43,6 +62,14 @@ type PlaceBlock struct {
 }
 
 func (PlaceBlock) clientMessage() {}
+func (PlaceBlock) clientPacket()  {}
+
+func (command PlaceBlock) Validate() error {
+	if !finite32(command.Yaw) || !finite32(command.Pitch) {
+		return errors.New("network: place block has non-finite rotation")
+	}
+	return nil
+}
 
 type RequestChunkResync struct {
 	Sequence     uint64
@@ -52,6 +79,7 @@ type RequestChunkResync struct {
 }
 
 func (RequestChunkResync) clientMessage() {}
+func (RequestChunkResync) clientPacket()  {}
 
 type ForgetChunks struct {
 	Dimension core.DimensionID
@@ -59,6 +87,21 @@ type ForgetChunks struct {
 }
 
 func (ForgetChunks) serverMessage() {}
+func (ForgetChunks) serverPacket()  {}
+
+func (forget ForgetChunks) Validate() error {
+	if len(forget.Chunks) < 1 || len(forget.Chunks) > 4096 {
+		return errors.New("network: forget chunks count is outside 1..4096")
+	}
+	seen := make(map[core.ChunkPos]struct{}, len(forget.Chunks))
+	for _, chunk := range forget.Chunks {
+		if _, duplicate := seen[chunk]; duplicate {
+			return errors.New("network: forget chunks contains a duplicate chunk")
+		}
+		seen[chunk] = struct{}{}
+	}
+	return nil
+}
 
 type PlayerState struct {
 	ServerTick        uint64
@@ -73,6 +116,24 @@ type PlayerState struct {
 }
 
 func (PlayerState) serverMessage() {}
+func (PlayerState) serverPacket()  {}
+
+func (state PlayerState) Validate() error {
+	for _, value := range state.Position {
+		if !finite32(value) {
+			return errors.New("network: player state has non-finite position")
+		}
+	}
+	for _, value := range state.Velocity {
+		if !finite32(value) {
+			return errors.New("network: player state has non-finite velocity")
+		}
+	}
+	if !finite32(state.Yaw) || !finite32(state.Pitch) {
+		return errors.New("network: player state has non-finite rotation")
+	}
+	return nil
+}
 
 type RejectReason string
 
@@ -93,3 +154,15 @@ type CommandRejected struct {
 }
 
 func (CommandRejected) serverMessage() {}
+func (CommandRejected) serverPacket()  {}
+
+func (rejection CommandRejected) Validate() error {
+	if _, ok := commandRejectReasonID(rejection.Reason); !ok {
+		return errors.New("network: unknown command rejection reason")
+	}
+	return nil
+}
+
+func finite32(value float32) bool {
+	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
+}
