@@ -1,6 +1,7 @@
 package archcheck_test
 
 import (
+	"go/parser"
 	"go/scanner"
 	"go/token"
 	"io/fs"
@@ -10,6 +11,25 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestOnlyTCPImplementationImportsNet(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "internal", "network")
+	files, err := filepath.Glob(filepath.Join(root, "*.go"))
+	if err != nil {
+		t.Fatalf("枚举 network Go 文件: %v", err)
+	}
+	for _, path := range files {
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("解析 %s: %v", path, err)
+		}
+		for _, imported := range parsed.Imports {
+			if imported.Path.Value == `"net"` && filepath.Base(path) != "tcp.go" {
+				t.Errorf("%s imports net; only tcp.go may import net", path)
+			}
+		}
+	}
+}
 
 func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
 	root := moduleRoot(t)
