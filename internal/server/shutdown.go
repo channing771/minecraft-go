@@ -5,10 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 
 	"minecraft-go/internal/sim"
 	"minecraft-go/internal/storage"
 )
+
+func waitForHostWorkers(ctx context.Context, workers *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 type storeShutdownPhase uint8
 

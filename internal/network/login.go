@@ -102,6 +102,11 @@ func (pending *PendingLogin) Identity() Identity {
 	return pending.identity
 }
 
+// Context owns the Login phase deadline and is canceled when that phase ends.
+func (pending *PendingLogin) Context() context.Context {
+	return pending.login
+}
+
 func (pending *PendingLogin) Accept(ctx context.Context, attach func(ServerEndpoint) error) error {
 	if attach == nil {
 		return errors.New("network: nil login attach callback")

@@ -319,6 +319,12 @@ func (server *Server) PlayerSnapshotFor(id sim.SessionID) (sim.PlayerSnapshot, b
 	return server.engine.PlayerSnapshot(id)
 }
 
+func (server *Server) TickCount() uint64 {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.engine.TickCount()
+}
+
 // PlayerState 暂时保留为单玩家兼容包装。
 func (server *Server) PlayerState() (sim.PlayerUpdate, bool) {
 	server.stepMu.Lock()
