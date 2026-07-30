@@ -32,6 +32,7 @@ type Clock interface {
 type sessionState struct {
 	lastSequence                uint64
 	lastTrustedObserverSequence uint64
+	trustedObserver             bool
 	hasView                     bool
 	dimension                   core.DimensionID
 	center                      core.ChunkPos
@@ -110,19 +111,25 @@ func (engine *Engine) Step() TickResult {
 	interactions := make([]Command, 0, len(commands))
 	viewChanged := false
 	for _, command := range commands {
-		session := engine.session(command.Session)
+		session := engine.sessions[command.Session]
+		if session == nil {
+			continue
+		}
 		if command.Kind == CommandTrustedObserverCenter {
+			if !session.trustedObserver {
+				continue
+			}
 			if command.Sequence <= session.lastTrustedObserverSequence {
 				continue
 			}
 			session.lastTrustedObserverSequence = command.Sequence
-			if session.player != nil {
-				continue
-			}
 			session.hasView = true
 			session.dimension = command.Dimension
 			session.center = command.Center
 			viewChanged = true
+			continue
+		}
+		if session.trustedObserver {
 			continue
 		}
 		if command.Sequence <= session.lastSequence {
@@ -309,13 +316,14 @@ func (engine *Engine) takeInbox() ([]Command, []AcquiredChunk, []GeneratedChunk)
 	return commands, acquired, generated
 }
 
-func (engine *Engine) session(id SessionID) *sessionState {
-	session := engine.sessions[id]
-	if session == nil {
-		session = &sessionState{wanted: make(map[core.ChunkKey]struct{})}
-		engine.sessions[id] = session
+func (engine *Engine) RegisterObserverSession(id SessionID) {
+	if engine.sessions[id] != nil {
+		panic("sim: duplicate registered session")
 	}
-	return session
+	engine.sessions[id] = &sessionState{
+		trustedObserver: true,
+		wanted:          make(map[core.ChunkKey]struct{}),
+	}
 }
 
 func (engine *Engine) reconcileSubscriptions(result *TickResult) {
@@ -403,6 +411,9 @@ func (engine *Engine) sessionWantedSnapshot(
 		}
 	}
 	if session.player != nil && session.player.lifecycle == PlayerPendingSpawn {
+		for key := range session.player.restoreWanted {
+			wanted[key] = struct{}{}
+		}
 		for chunk := range session.player.spawnWanted {
 			wanted[core.ChunkKey{Dimension: session.dimension, Pos: chunk}] = struct{}{}
 		}
