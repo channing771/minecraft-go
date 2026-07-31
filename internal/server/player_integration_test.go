@@ -238,7 +238,7 @@ func newDelayedPlayerHarness(t *testing.T, delayTicks uint64) *delayedPlayerHarn
 		delayTicks:     delayTicks,
 		goroutines:     runtime.NumGoroutine(),
 	}
-	h.running = NewMemory(config, serverEndpoint, flatTestGenerator{})
+	h.running = newMemoryAttachedWorldForTest(config, serverEndpoint, flatTestGenerator{})
 	t.Cleanup(func() {
 		h.closeGate.cleanup(func() {
 			shutdownServerForTest(t, h.running)
@@ -534,7 +534,7 @@ func (h *delayedPlayerHarness) advancePreparedInputTick() {
 
 func (h *delayedPlayerHarness) assertConverged(tolerance float32) {
 	h.t.Helper()
-	want, ok := h.running.PlayerState()
+	want, ok := h.running.PlayerStateFor(testSessionID)
 	if !ok || !want.Ready {
 		h.t.Fatalf("权威玩家最终状态不可用: %+v,%v", want, ok)
 	}
@@ -616,11 +616,11 @@ func (h *delayedPlayerHarness) assertWorldHashesEqual() {
 
 func (h *delayedPlayerHarness) replayResult() delayedReplayResult {
 	h.t.Helper()
-	player, ok := h.running.PlayerState()
+	player, ok := h.running.PlayerStateFor(testSessionID)
 	if !ok {
 		h.t.Fatal("replay 最终 Server.PlayerState 不可用")
 	}
-	playerHash, ok := h.running.engine.PlayerHash(localSessionID)
+	playerHash, ok := h.running.engine.PlayerHash(testSessionID)
 	if !ok {
 		h.t.Fatal("replay 最终 PlayerHash 不可用")
 	}

@@ -12,7 +12,9 @@ import (
 func TestSessionOutboxPreservesFIFO(t *testing.T) {
 	endpoint := &recordingServerEndpoint{}
 	var workers sync.WaitGroup
-	session := newSession(context.Background(), endpoint, 4, &workers)
+	session := newObserverSession(
+		context.Background(), testSessionID, 1, endpoint, 4, &workers, nil,
+	)
 
 	for sequence := uint64(1); sequence <= 3; sequence++ {
 		if !session.enqueue(network.CommandRejected{
@@ -40,7 +42,9 @@ func TestSessionOutboxPreservesFIFO(t *testing.T) {
 func TestSessionFullOutboxClosesWithoutBlocking(t *testing.T) {
 	endpoint := newBlockingServerEndpoint()
 	var workers sync.WaitGroup
-	session := newSession(context.Background(), endpoint, 1, &workers)
+	session := newObserverSession(
+		context.Background(), testSessionID, 1, endpoint, 1, &workers, nil,
+	)
 
 	if !session.enqueue(network.CommandRejected{Sequence: 1}) {
 		t.Fatal("第一次 enqueue 失败")

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"sort"
 
@@ -14,105 +15,163 @@ type queuedDelta struct {
 	message network.BlockChanges
 }
 
+const maxForgetChunksPerPacket = 4096
+
 func (server *Server) publish(result sim.TickResult) {
-	session := server.session
-	if session.closed() {
-		return
-	}
-	var localPlayer sim.PlayerUpdate
-	hasLocalPlayer := false
-	for _, player := range result.Players {
-		if player.Session != localSessionID {
+	for _, id := range server.sortedPublicationIDsLocked() {
+		current := server.publicationSessionLocked(id)
+		if current == nil || current.closed() {
 			continue
 		}
-		localPlayer = player
-		hasLocalPlayer = true
-		session.hasView = true
-		session.viewDimension = player.Dimension
-		session.viewCenter = player.ViewCenter
+		server.publishSession(current, result)
+	}
+}
+
+func (server *Server) publishSession(current *session, result sim.TickResult) {
+	var playerUpdate sim.PlayerUpdate
+	hasPlayerUpdate := false
+	for _, player := range result.Players {
+		if player.Session != current.id {
+			continue
+		}
+		playerUpdate = player
+		hasPlayerUpdate = true
+		current.hasView = true
+		current.viewDimension = player.Dimension
+		current.viewCenter = player.ViewCenter
 		break
 	}
 
 	for _, key := range result.Ready {
-		session.queueSnapshot(key, false)
+		if server.engine.SessionWantsChunk(current.id, key) {
+			current.queueSnapshot(key, false)
+		}
 	}
 	for _, request := range result.Resync {
-		if request.Session != localSessionID {
+		if request.Session != current.id {
 			continue
 		}
-		session.queueSnapshot(core.ChunkKey{
+		key := core.ChunkKey{
 			Dimension: request.Dimension,
 			Pos:       request.Chunk,
-		}, true)
+		}
+		if !server.engine.SessionWantsChunk(current.id, key) {
+			continue
+		}
+		current.queueSnapshot(key, true)
 	}
 
-	forgetMessages := session.applyForget(result.Forget[localSessionID])
-	deltas := server.classifyDeltas(result.Changes)
+	forgetMessages := current.applyForget(result.Forget[current.id])
+	deltas := server.classifyDeltas(current, result.Changes)
 
-	if !server.publishSnapshots() {
+	if !server.publishSnapshots(current) {
+		server.closePublicationSessionLocked(current, errSessionOutboxFull)
 		return
 	}
 	for _, delta := range deltas {
-		if !session.enqueue(delta.message) {
+		if !current.enqueue(delta.message) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 			return
 		}
-		publication := session.publications[delta.key]
+		publication := current.publications[delta.key]
 		publication.lastRevision = delta.message.NewRevision
 	}
 	for _, message := range forgetMessages {
-		if !session.enqueue(message) {
+		if !current.enqueue(message) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 			return
 		}
 	}
 	for _, rejection := range result.Rejected {
-		if rejection.Session != localSessionID {
+		if rejection.Session != current.id {
 			continue
 		}
 		reason, ok := networkRejectReason(rejection.Reason)
 		if !ok {
-			slog.Error("未知 sim rejection", "reason", rejection.Reason)
-			session.close()
+			slog.Error(
+				"未知 sim rejection",
+				"session", current.id,
+				"reason", rejection.Reason,
+			)
+			server.closePublicationSessionLocked(
+				current,
+				fmt.Errorf(
+					"server: unknown sim rejection: %d",
+					rejection.Reason,
+				),
+			)
 			return
 		}
-		if !session.enqueue(network.CommandRejected{
+		if !current.enqueue(network.CommandRejected{
 			Sequence: rejection.Sequence,
 			Reason:   reason,
 		}) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 			return
 		}
 	}
-	if hasLocalPlayer {
-		session.enqueue(network.PlayerState{
+	if hasPlayerUpdate {
+		if !current.enqueue(network.PlayerState{
 			ServerTick:        result.Tick,
-			LastInputSequence: localPlayer.LastInputSequence,
-			Dimension:         localPlayer.Dimension,
-			Position:          localPlayer.State.Position,
-			Velocity:          localPlayer.State.Velocity,
-			Yaw:               localPlayer.Yaw,
-			Pitch:             localPlayer.Pitch,
-			OnGround:          localPlayer.State.OnGround,
-			Ready:             localPlayer.Ready,
-			Reset:             localPlayer.Reset,
-		})
+			LastInputSequence: playerUpdate.LastInputSequence,
+			Dimension:         playerUpdate.Dimension,
+			Position:          playerUpdate.State.Position,
+			Velocity:          playerUpdate.State.Velocity,
+			Yaw:               playerUpdate.Yaw,
+			Pitch:             playerUpdate.Pitch,
+			OnGround:          playerUpdate.State.OnGround,
+			Ready:             playerUpdate.Ready,
+			Reset:             playerUpdate.Reset,
+		}) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
+		}
 	}
 }
 
-func (session *session) queueSnapshot(key core.ChunkKey, resync bool) {
-	state := session.publications[key]
+func (server *Server) closePublicationSessionLocked(current *session, cause error) {
+	if current == server.trustedObserver {
+		server.detachTrustedObserverLocked(
+			current.id,
+			current.generation,
+			cause,
+		)
+		return
+	}
+	server.detachSessionLocked(current.id, current.generation, cause)
+}
+
+func (server *Server) sortedPublicationIDsLocked() []sim.SessionID {
+	ids := server.sortedSessionIDsLocked()
+	if server.trustedObserver != nil {
+		ids = append(ids, server.trustedObserver.id)
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	}
+	return ids
+}
+
+func (server *Server) publicationSessionLocked(id sim.SessionID) *session {
+	if server.trustedObserver != nil && server.trustedObserver.id == id {
+		return server.trustedObserver
+	}
+	return server.sessions[id]
+}
+
+func (current *session) queueSnapshot(key core.ChunkKey, resync bool) {
+	state := current.publications[key]
 	if state == nil {
 		state = &publication{}
-		session.publications[key] = state
+		current.publications[key] = state
 	}
 	if state.snapshotSent && !resync {
 		return
 	}
-	request := session.pendingSnapshots[key]
+	request := current.pendingSnapshots[key]
 	request.resync = request.resync || resync
-	session.pendingSnapshots[key] = request
+	current.pendingSnapshots[key] = request
 	state.resyncQueued = state.resyncQueued || resync
 }
 
-func (session *session) applyForget(
+func (current *session) applyForget(
 	keys []core.ChunkKey,
 ) []network.ServerMessage {
 	if len(keys) == 0 {
@@ -120,8 +179,8 @@ func (session *session) applyForget(
 	}
 	byDimension := make(map[core.DimensionID][]core.ChunkPos)
 	for _, key := range keys {
-		delete(session.pendingSnapshots, key)
-		delete(session.publications, key)
+		delete(current.pendingSnapshots, key)
+		delete(current.publications, key)
 		byDimension[key.Dimension] = append(byDimension[key.Dimension], key.Pos)
 	}
 	dimensions := make([]core.DimensionID, 0, len(byDimension))
@@ -140,15 +199,19 @@ func (session *session) applyForget(
 			}
 			return chunks[i].Z < chunks[j].Z
 		})
-		messages = append(messages, network.ForgetChunks{
-			Dimension: dimension,
-			Chunks:    append([]core.ChunkPos(nil), chunks...),
-		})
+		for start := 0; start < len(chunks); start += maxForgetChunksPerPacket {
+			end := min(start+maxForgetChunksPerPacket, len(chunks))
+			messages = append(messages, network.ForgetChunks{
+				Dimension: dimension,
+				Chunks:    append([]core.ChunkPos(nil), chunks[start:end]...),
+			})
+		}
 	}
 	return messages
 }
 
 func (server *Server) classifyDeltas(
+	current *session,
 	batches []sim.ChunkChangeBatch,
 ) []queuedDelta {
 	deltas := make([]queuedDelta, 0, len(batches))
@@ -157,14 +220,17 @@ func (server *Server) classifyDeltas(
 			Dimension: batch.Dimension,
 			Pos:       batch.Chunk,
 		}
-		publication := server.session.publications[key]
+		if !server.engine.SessionWantsChunk(current.id, key) {
+			continue
+		}
+		publication := current.publications[key]
 		if publication == nil || !publication.snapshotSent {
-			server.session.queueSnapshot(key, false)
+			current.queueSnapshot(key, false)
 			continue
 		}
 		if publication.resyncQueued ||
 			publication.lastRevision != batch.BaseRevision {
-			server.session.queueSnapshot(key, true)
+			current.queueSnapshot(key, true)
 			continue
 		}
 		changes := make([]network.BlockChange, len(batch.Changes))
@@ -182,8 +248,12 @@ func (server *Server) classifyDeltas(
 			Changes:      changes,
 		}
 		if err := message.Validate(); err != nil {
-			slog.Error("sim 产生非法 block delta", "error", err)
-			server.session.close()
+			slog.Error(
+				"sim 产生非法 block delta",
+				"session", current.id,
+				"error", err,
+			)
+			server.closePublicationSessionLocked(current, err)
 			return nil
 		}
 		deltas = append(deltas, queuedDelta{
@@ -194,20 +264,19 @@ func (server *Server) classifyDeltas(
 	return deltas
 }
 
-func (server *Server) publishSnapshots() bool {
-	session := server.session
-	keys := make([]core.ChunkKey, 0, len(session.pendingSnapshots))
-	for key := range session.pendingSnapshots {
+func (server *Server) publishSnapshots(current *session) bool {
+	keys := make([]core.ChunkKey, 0, len(current.pendingSnapshots))
+	for key := range current.pendingSnapshots {
 		keys = append(keys, key)
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		leftRequest := session.pendingSnapshots[keys[i]]
-		rightRequest := session.pendingSnapshots[keys[j]]
+		leftRequest := current.pendingSnapshots[keys[i]]
+		rightRequest := current.pendingSnapshots[keys[j]]
 		if leftRequest.resync != rightRequest.resync {
 			return leftRequest.resync
 		}
-		leftDistance := session.snapshotDistanceSquared(keys[i])
-		rightDistance := session.snapshotDistanceSquared(keys[j])
+		leftDistance := current.snapshotDistanceSquared(keys[i])
+		rightDistance := current.snapshotDistanceSquared(keys[j])
 		if leftDistance != rightDistance {
 			return leftDistance < rightDistance
 		}
@@ -222,27 +291,32 @@ func (server *Server) publishSnapshots() bool {
 		}
 		chunk, revision, ready := server.engine.CloneReadyChunk(key)
 		if !ready {
-			delete(session.pendingSnapshots, key)
-			if publication := session.publications[key]; publication != nil {
+			delete(current.pendingSnapshots, key)
+			if publication := current.publications[key]; publication != nil {
 				publication.resyncQueued = false
 			}
 			continue
 		}
 		message, err := buildChunkSnapshot(key.Dimension, chunk, revision)
 		if err != nil {
-			slog.Error("构造区块快照失败", "key", key, "error", err)
-			session.close()
+			slog.Error(
+				"构造区块快照失败",
+				"session", current.id,
+				"key", key,
+				"error", err,
+			)
+			server.closePublicationSessionLocked(current, err)
 			return false
 		}
 		payload := message.PayloadBytes()
 		if sentChunks > 0 && sentBytes+payload > server.config.SnapshotBytes {
 			break
 		}
-		if !session.enqueue(message) {
+		if !current.enqueue(message) {
 			return false
 		}
-		delete(session.pendingSnapshots, key)
-		publication := session.publications[key]
+		delete(current.pendingSnapshots, key)
+		publication := current.publications[key]
 		publication.snapshotSent = true
 		publication.lastRevision = revision
 		publication.resyncQueued = false
@@ -252,12 +326,12 @@ func (server *Server) publishSnapshots() bool {
 	return true
 }
 
-func (session *session) snapshotDistanceSquared(key core.ChunkKey) int64 {
-	if !session.hasView || key.Dimension != session.viewDimension {
+func (current *session) snapshotDistanceSquared(key core.ChunkKey) int64 {
+	if !current.hasView || key.Dimension != current.viewDimension {
 		return int64(^uint64(0) >> 1)
 	}
-	dx := int64(key.Pos.X) - int64(session.viewCenter.X)
-	dz := int64(key.Pos.Z) - int64(session.viewCenter.Z)
+	dx := int64(key.Pos.X) - int64(current.viewCenter.X)
+	dz := int64(key.Pos.Z) - int64(current.viewCenter.Z)
 	return dx*dx + dz*dz
 }
 

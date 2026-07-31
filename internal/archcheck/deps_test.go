@@ -1,6 +1,8 @@
 package archcheck_test
 
 import (
+	"go/ast"
+	"go/parser"
 	"go/scanner"
 	"go/token"
 	"io/fs"
@@ -11,6 +13,25 @@ import (
 	"testing"
 )
 
+func TestOnlyTCPImplementationImportsNet(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "internal", "network")
+	files, err := filepath.Glob(filepath.Join(root, "*.go"))
+	if err != nil {
+		t.Fatalf("枚举 network Go 文件: %v", err)
+	}
+	for _, path := range files {
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("解析 %s: %v", path, err)
+		}
+		for _, imported := range parsed.Imports {
+			if imported.Path.Value == `"net"` && filepath.Base(path) != "tcp.go" {
+				t.Errorf("%s imports net; only tcp.go may import net", path)
+			}
+		}
+	}
+}
+
 func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
 	root := moduleRoot(t)
 	forbidden := map[string]struct{}{
@@ -19,6 +40,7 @@ func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
 		"PlaceRay":        {},
 		"CommandBreakRay": {},
 		"CommandPlaceRay": {},
+		"localSessionID":  {},
 	}
 	for _, sourceRoot := range []string{"cmd", "internal"} {
 		err := filepath.WalkDir(
@@ -58,6 +80,134 @@ func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
 	}
 }
 
+func TestMcgoUsesLoginStreamsInsteadOfAttachedServerEndpoints(t *testing.T) {
+	path := filepath.Join(moduleRoot(t), "cmd", "mcgo", "app.go")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, legacy := range []string{"server.NewEmbedded(", "server.NewEmbeddedMemory(", "server.New("} {
+		if strings.Contains(string(source), legacy) {
+			t.Errorf("%s retains legacy attached-server constructor %s", path, legacy)
+		}
+	}
+	if !strings.Contains(string(source), "network.NewMemoryStreamPair") ||
+		!strings.Contains(string(source), "network.LoginClient") {
+		t.Errorf("%s must assemble local connections through a stream login", path)
+	}
+}
+
+func TestMcgoBenchmarkTCPPathUsesTheSharedLoginStateMachine(t *testing.T) {
+	path := filepath.Join(moduleRoot(t), "cmd", "mcgo", "app.go")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"network.ListenTCP(",
+		"network.BeginServerLogin(",
+		"network.LoginClient(",
+		"running.AttachTrustedObserver",
+	} {
+		if !strings.Contains(string(source), required) {
+			t.Errorf("%s benchmark TCP path must contain %s", path, required)
+		}
+	}
+}
+
+func TestServerProductionDoesNotDeclareLegacyAttachedWorldWrappers(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "internal", "server")
+	for _, file := range []string{"generator.go", "server.go"} {
+		path := filepath.Join(root, file)
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			switch function.Name.Name {
+			case "New", "NewMemory", "NewEmbedded", "NewEmbeddedMemory":
+				t.Errorf("%s retains legacy server constructor %s", path, function.Name.Name)
+			case "PlayerState":
+				if function.Recv != nil && function.Type.Params.NumFields() == 0 {
+					t.Errorf("%s retains legacy no-argument PlayerState", path)
+				}
+			}
+		}
+	}
+}
+
+func TestSessionLifecycleResponsibilitiesLiveInSessionFile(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "internal", "server")
+	sessionDeclarations := topLevelDeclarationNames(
+		t,
+		filepath.Join(root, "session.go"),
+	)
+	serverDeclarations := topLevelDeclarationNames(
+		t,
+		filepath.Join(root, "server.go"),
+	)
+	wantSessionFile := []string{
+		"inputCapacity",
+		"trustedObserverSessionID",
+		"SessionSpec",
+		"SessionExit",
+		"incomingCommand",
+		"trustedObserverCenter",
+		"appliedTrustedObserverCenter",
+		"attachSessionLocked",
+		"detachSessionLocked",
+		"attachTrustedObserverLocked",
+		"detachTrustedObserverLocked",
+		"setTrustedObserverCenterLocked",
+		"appliedTrustedObserverCenterLocked",
+		"endpointReader",
+		"translateClientMessage",
+		"enqueueIncoming",
+		"drainIncoming",
+		"drainTrustedObserverCenter",
+		"sortedSessionIDsLocked",
+	}
+	for _, name := range wantSessionFile {
+		if !sessionDeclarations[name] {
+			t.Errorf("session.go must own session lifecycle declaration %s", name)
+		}
+		if serverDeclarations[name] {
+			t.Errorf("server.go must not own session lifecycle declaration %s", name)
+		}
+	}
+}
+
+func topLevelDeclarationNames(t *testing.T, path string) map[string]bool {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("解析 %s: %v", path, err)
+	}
+	names := make(map[string]bool)
+	for _, declaration := range parsed.Decls {
+		switch declaration := declaration.(type) {
+		case *ast.FuncDecl:
+			names[declaration.Name.Name] = true
+		case *ast.GenDecl:
+			for _, specification := range declaration.Specs {
+				switch specification := specification.(type) {
+				case *ast.TypeSpec:
+					names[specification.Name.Name] = true
+				case *ast.ValueSpec:
+					for _, name := range specification.Names {
+						names[name.Name] = true
+					}
+				}
+			}
+		}
+	}
+	return names
+}
+
 // allowed 列出每个内部包允许直接依赖的内部包。
 var allowed = map[string][]string{
 	"internal/archcheck":  {},
@@ -66,6 +216,7 @@ var allowed = map[string][]string{
 	"internal/gfx":        {},
 	"internal/gfx/shader": {},
 	"internal/network":    {"internal/core"},
+	"internal/profile":    {"internal/core"},
 	"internal/sim":        {"internal/core", "internal/physics", "internal/world"},
 	"internal/storage":    {"internal/core", "internal/world"},
 	"internal/world":      {"internal/core"},
@@ -149,6 +300,48 @@ func TestOnlyGfxImportsWebGPU(t *testing.T) {
 		for _, imported := range strings.Fields(parts[1]) {
 			if strings.Contains(imported, "webgpu") && parts[0] != "minecraft-go/internal/gfx" {
 				t.Errorf("%s 直接 import 了 WebGPU 绑定，只有 internal/gfx 可以", parts[0])
+			}
+		}
+	}
+}
+
+func TestMCGodHasNoGraphicsDependencies(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "cmd", "mcgod")
+	files, err := filepath.Glob(filepath.Join(root, "*.go"))
+	if err != nil {
+		t.Fatalf("枚举 mcgod Go 文件: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("mcgod must contain Go source files")
+	}
+	for _, path := range files {
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("解析 %s: %v", path, err)
+		}
+		for _, imported := range parsed.Imports {
+			path := strings.Trim(imported.Path.Value, "\"")
+			for _, forbidden := range []string{
+				"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx",
+				"github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu",
+			} {
+				if strings.HasPrefix(path, forbidden) {
+					t.Errorf("%s imports forbidden graphics dependency %s", path, imported.Path.Value)
+				}
+			}
+		}
+	}
+
+	command := exec.Command("go", "list", "-f", "{{.ImportPath}}", "-deps", "./cmd/mcgod")
+	command.Dir = moduleRoot(t)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("枚举 mcgod 传递依赖: %v", err)
+	}
+	for _, dependency := range strings.Fields(string(output)) {
+		for _, forbidden := range []string{"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu"} {
+			if dependency == forbidden || strings.HasPrefix(dependency, forbidden+"/") {
+				t.Errorf("mcgod transitively depends on forbidden graphics package %s", dependency)
 			}
 		}
 	}

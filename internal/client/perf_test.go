@@ -87,9 +87,10 @@ func TestPerfReportJSONRoundTripIncludesTicksAndPersistence(t *testing.T) {
 	}
 }
 
-func TestPerfReportV4IncludesBenchmarkMetrics(t *testing.T) {
+func TestPerfReportV5IncludesTransportProtocolAndPlayerPersistence(t *testing.T) {
 	data := []byte(`{
-  "scenario_version": 4,
+  "scenario_version": 5,
+  "transport": "tcp",
   "hardware": "test-machine",
   "framebuffer": "2560x1440",
   "phases": {
@@ -97,14 +98,16 @@ func TestPerfReportV4IncludesBenchmarkMetrics(t *testing.T) {
     "flying": {"frames": 12000, "fps": 100, "p99_ms": 9, "peak_rss_bytes": 1024}
   },
   "ticks": {"frames": 3600, "p99_ms": 2, "max_ms": 4},
-  "persistence": {"snapshots": 64, "p50_ms": 0.1, "p95_ms": 0.2, "p99_ms": 0.3, "max_ms": 0.4}
+  "persistence": {"snapshots": 64, "p50_ms": 0.1, "p95_ms": 0.2, "p99_ms": 0.3, "max_ms": 0.4},
+  "protocol": {"encode_p99_ms": 0.01, "decode_p99_ms": 0.02, "bytes": 19},
+  "player_persistence": {"snapshots": 32, "p50_ms": 0.01, "p95_ms": 0.02, "p99_ms": 0.03, "max_ms": 0.04}
 }`)
 	var report client.PerfReport
 	if err := json.Unmarshal(data, &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.ScenarioVersion != 4 {
-		t.Fatalf("scenario_version = %d，想要 4", report.ScenarioVersion)
+	if report.ScenarioVersion != 5 || report.Transport != "tcp" {
+		t.Fatalf("scenario/transport = %d/%q，想要 5/tcp", report.ScenarioVersion, report.Transport)
 	}
 	if strings.TrimSpace(report.Hardware) == "" || strings.TrimSpace(report.Framebuffer) == "" {
 		t.Fatalf("benchmark 标识不完整: hardware=%q framebuffer=%q",
@@ -123,5 +126,11 @@ func TestPerfReportV4IncludesBenchmarkMetrics(t *testing.T) {
 		report.Persistence.P95MS == 0 || report.Persistence.P99MS == 0 ||
 		report.Persistence.MaxMS == 0 {
 		t.Fatalf("persistence 指标不完整: %+v", report.Persistence)
+	}
+	if report.Protocol.EncodeP99MS == 0 || report.Protocol.DecodeP99MS == 0 || report.Protocol.Bytes == 0 {
+		t.Fatalf("protocol 指标不完整: %+v", report.Protocol)
+	}
+	if report.PlayerPersistence.Snapshots == 0 || report.PlayerPersistence.P99MS == 0 {
+		t.Fatalf("player persistence 指标不完整: %+v", report.PlayerPersistence)
 	}
 }

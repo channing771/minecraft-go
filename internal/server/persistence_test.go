@@ -221,12 +221,14 @@ func TestSaveCompletionAheadOfSnapshotAcceptsBoundedPersistedRevision(t *testing
 		t.Fatalf("save call=%+v, want revision 1", call)
 	}
 	for sequence, wantRevision := range []uint64{2, 3} {
-		running.incoming <- sim.Command{
-			Session:  localSessionID,
-			Sequence: uint64(sequence + 1),
-			Kind:     sim.CommandBreakBlock,
-			Pitch:    -1.5,
-		}
+		running.incoming <- incomingCommand{
+			Session: testSessionID, Generation: 1,
+			Command: sim.Command{
+				Session:  testSessionID,
+				Sequence: uint64(sequence + 1),
+				Kind:     sim.CommandBreakBlock,
+				Pitch:    -1.5,
+			}}
 		changed := running.StepForTest()
 		if len(changed.Changes) != 1 || changed.Changes[0].NewRevision != wantRevision {
 			t.Fatalf("change %d=%+v, want revision %d", sequence, changed.Changes, wantRevision)
@@ -282,9 +284,12 @@ func TestSaveCompletionEqualToNewerAuthorityDoesNotClaimForeignContent(t *testin
 	if len(call) != 1 || call[0].Revision != 1 {
 		t.Fatalf("save call=%+v, want revision 1", call)
 	}
-	running.incoming <- sim.Command{
-		Session: localSessionID, Sequence: 1,
-		Kind: sim.CommandBreakBlock, Pitch: -1.5,
+	running.incoming <- incomingCommand{
+		Session: testSessionID, Generation: 1,
+		Command: sim.Command{
+			Session: testSessionID, Sequence: 1,
+			Kind: sim.CommandBreakBlock, Pitch: -1.5,
+		},
 	}
 	changed := running.StepForTest()
 	if len(changed.Changes) != 1 || changed.Changes[0].NewRevision != 2 {
@@ -722,9 +727,12 @@ func TestMutationDuringRetrySelectsNewRevisionOnceAfterOldCommit(t *testing.T) {
 	}
 	waitSaveReturned(t, store)
 	waitCompletionQueued(t, running)
-	running.incoming <- sim.Command{
-		Session: localSessionID, Sequence: 1,
-		Kind: sim.CommandBreakBlock, Pitch: -1.5,
+	running.incoming <- incomingCommand{
+		Session: testSessionID, Generation: 1,
+		Command: sim.Command{
+			Session: testSessionID, Sequence: 1,
+			Kind: sim.CommandBreakBlock, Pitch: -1.5,
+		},
 	}
 	changed := running.StepForTest()
 	if len(changed.Changes) != 1 || changed.Changes[0].NewRevision != 2 {
@@ -930,12 +938,14 @@ func TestPersistenceBackpressureQueuesAcquireUntilMemoryRecovers(t *testing.T) {
 	config.SaveWorkers = 1
 	config.TrustedObserver = true
 	config.UnsavedBytes = 512
-	running := New(config, endpoint, &countingGenerator{}, store)
+	running := newAttachedWorldForTest(config, endpoint, &countingGenerator{}, store)
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	heldKey := chunkKey(0, 0)
 	running.engine = dirtyReadyEngine(t, []core.ChunkKey{heldKey})
+	running.engine.RegisterObserverSession(trustedObserverSessionID)
 	running.engine.Enqueue(sim.Command{
-		Session: 99, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Session: trustedObserverSessionID, Sequence: 1,
+		Kind:      sim.CommandTrustedObserverCenter,
 		Dimension: heldKey.Dimension, Center: heldKey.Pos,
 	})
 	running.engine.Step()
@@ -1108,8 +1118,7 @@ func newPersistenceServerWithoutCleanup(t *testing.T, store storage.Store) *Serv
 	config.SaveChunks = 8
 	config.SaveBytes = 1 << 20
 	config.AutosaveTicks = 6000
-	config.TrustedObserver = true
-	return New(config, endpoint, playerTestGenerator{}, store)
+	return newAttachedWorldForTest(config, endpoint, playerTestGenerator{}, store)
 }
 
 func dirtyReadyEngine(t *testing.T, keys []core.ChunkKey) *sim.Engine {
@@ -1117,6 +1126,7 @@ func dirtyReadyEngine(t *testing.T, keys []core.ChunkKey) *sim.Engine {
 	engine := sim.NewEngine(0)
 	for index, key := range keys {
 		session := sim.SessionID(index + 1)
+		engine.RegisterObserverSession(session)
 		engine.Enqueue(sim.Command{
 			Session: session, Sequence: 1,
 			Kind: sim.CommandTrustedObserverCenter, Dimension: key.Dimension, Center: key.Pos,
@@ -1162,7 +1172,7 @@ func dirtyUnloadingEngine(t *testing.T, key core.ChunkKey) *sim.Engine {
 func dirtyPlayerEngine(t *testing.T, key core.ChunkKey) *sim.Engine {
 	t.Helper()
 	engine := sim.NewEngine(0)
-	engine.RegisterSession(localSessionID, key.Dimension, key.Pos)
+	engine.RegisterSession(testSessionID, key.Dimension, key.Pos)
 	requested := engine.Step()
 	if !reflect.DeepEqual(requested.Acquire, []core.ChunkKey{key}) {
 		t.Fatalf("Acquire=%+v, want %+v", requested.Acquire, []core.ChunkKey{key})

@@ -1,9 +1,11 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +16,8 @@ import (
 	"minecraft-go/internal/core"
 )
 
+const maxPlayerFileLength = int64(playerEnvelopeLength) + int64(maxPlayerPayload)
+
 // DiskStore persists chunks in lazily opened region files under one locked world.
 type DiskStore struct {
 	mu      sync.Mutex
@@ -21,6 +25,8 @@ type DiskStore struct {
 	regions map[RegionKey]*region
 	closing atomic.Bool
 	closed  bool
+
+	playerReplaceHooks atomicReplaceHooks
 }
 
 func OpenDisk(ctx context.Context, root string, options OpenOptions) (*DiskStore, error) {
@@ -138,6 +144,103 @@ func (store *DiskStore) SaveBatch(
 	return result, nil
 }
 
+func (store *DiskStore) LoadPlayer(
+	ctx context.Context,
+	id core.PlayerID,
+) (StoredPlayer, error) {
+	if store.closing.Load() {
+		return StoredPlayer{}, os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return StoredPlayer{}, err
+	}
+	if !id.Valid() {
+		return StoredPlayer{}, fmt.Errorf("%w: invalid requested player ID", ErrCorrupt)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.closing.Load() || store.closed {
+		return StoredPlayer{}, os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return StoredPlayer{}, err
+	}
+	encoded, err := readPlayerFile(store.playerPath(id))
+	if errors.Is(err, os.ErrNotExist) {
+		return StoredPlayer{}, fmt.Errorf("%w: %s", ErrPlayerNotFound, id)
+	}
+	if err != nil {
+		return StoredPlayer{}, fmt.Errorf("read player %s: %w", id, err)
+	}
+	return decodePlayer(id, encoded)
+}
+
+func (store *DiskStore) SavePlayer(
+	ctx context.Context,
+	save PlayerSave,
+) (uint64, error) {
+	if store.closing.Load() {
+		return 0, os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	encoded, err := encodePlayer(save)
+	if err != nil {
+		return 0, err
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.closing.Load() || store.closed {
+		return 0, os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	path := store.playerPath(save.PlayerID)
+	previous, err := readPlayerFile(path)
+	switch {
+	case err == nil:
+		stored, decodeErr := decodePlayer(save.PlayerID, previous)
+		if decodeErr != nil {
+			return 0, fmt.Errorf("read existing player %s: %w", save.PlayerID, decodeErr)
+		}
+		switch {
+		case save.Revision < stored.Revision:
+			return stored.Revision, fmt.Errorf(
+				"%w: player %s revision %d is below %d",
+				ErrRevisionConflict, save.PlayerID, save.Revision, stored.Revision,
+			)
+		case save.Revision == stored.Revision:
+			if !bytes.Equal(encoded, previous) {
+				return stored.Revision, fmt.Errorf(
+					"%w: player %s revision %d",
+					ErrRevisionConflict, save.PlayerID, save.Revision,
+				)
+			}
+			return stored.Revision, nil
+		}
+	case errors.Is(err, os.ErrNotExist):
+	default:
+		return 0, fmt.Errorf("read existing player %s: %w", save.PlayerID, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	pattern := "." + save.PlayerID.String() + ".player.tmp-*"
+	hooks := store.playerReplaceHooks
+	hooks.beforeRename = ctx.Err
+	if err := replaceFileAtomicallyWithPatternAndHooks(
+		path, pattern, encoded, 0o600, hooks,
+	); err != nil {
+		return 0, fmt.Errorf("save player %s: %w", save.PlayerID, err)
+	}
+	return save.Revision, nil
+}
+
 func validateAndNormalizeSaves(saves []ChunkSave) ([]ChunkSave, error) {
 	maxRevisions := make(map[core.ChunkKey]uint64, len(saves))
 	for _, save := range saves {
@@ -241,6 +344,28 @@ func (store *DiskStore) regionPath(key RegionKey) string {
 	)
 }
 
+func (store *DiskStore) playerPath(id core.PlayerID) string {
+	return filepath.Join(store.files.root, "players", id.String()+".player")
+}
+
+func readPlayerFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	encoded, readErr := io.ReadAll(io.LimitReader(file, maxPlayerFileLength+1))
+	closeErr := file.Close()
+	if err := errors.Join(readErr, closeErr); err != nil {
+		return nil, err
+	}
+	if int64(len(encoded)) > maxPlayerFileLength {
+		return nil, fmt.Errorf(
+			"%w: player file exceeds %d bytes", ErrCorrupt, maxPlayerFileLength,
+		)
+	}
+	return encoded, nil
+}
+
 func (store *DiskStore) regionForSave(ctx context.Context, key RegionKey) (*region, error) {
 	if opened, ok := store.regions[key]; ok {
 		return opened, nil
@@ -281,4 +406,4 @@ func sortRegionKeys(keys []RegionKey) {
 	})
 }
 
-var _ Store = (*DiskStore)(nil)
+var _ WorldStore = (*DiskStore)(nil)

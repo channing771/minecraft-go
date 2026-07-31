@@ -400,6 +400,7 @@ func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {
 
 func TestPlayerCenterDerivationAlsoRunsWhenTrustedObserverChanges(t *testing.T) {
 	engine, sessionID := readyMovementPlayer(t)
+	engine.RegisterObserverSession(2)
 	loadMovementChunk(t, engine.dimensions[core.Overworld], movementFlatChunk(core.ChunkPos{X: 1}))
 	player := engine.sessions[sessionID].player
 	player.state = physics.State{

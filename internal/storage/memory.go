@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -14,6 +15,7 @@ type MemoryStore struct {
 	mu       sync.Mutex
 	metadata Metadata
 	chunks   map[core.ChunkKey]memoryChunk
+	players  map[core.PlayerID]memoryPlayer
 }
 
 type memoryChunk struct {
@@ -28,11 +30,17 @@ type pendingChunk struct {
 	chunk    *world.Chunk
 }
 
+type memoryPlayer struct {
+	revision uint64
+	encoded  []byte
+}
+
 // NewMemory 创建不执行磁盘 I/O 的内存 Store。
 func NewMemory(metadata Metadata) *MemoryStore {
 	return &MemoryStore{
 		metadata: metadata,
 		chunks:   make(map[core.ChunkKey]memoryChunk),
+		players:  make(map[core.PlayerID]memoryPlayer),
 	}
 }
 
@@ -133,6 +141,70 @@ func (store *MemoryStore) SaveBatch(
 	return SaveResult{Committed: committed}, nil
 }
 
+func (store *MemoryStore) LoadPlayer(
+	ctx context.Context,
+	id core.PlayerID,
+) (StoredPlayer, error) {
+	if err := ctx.Err(); err != nil {
+		return StoredPlayer{}, err
+	}
+	if !id.Valid() {
+		return StoredPlayer{}, fmt.Errorf("%w: invalid requested player ID", ErrCorrupt)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return StoredPlayer{}, err
+	}
+	stored, ok := store.players[id]
+	if !ok {
+		return StoredPlayer{}, fmt.Errorf("%w: %s", ErrPlayerNotFound, id)
+	}
+	return decodePlayer(id, bytes.Clone(stored.encoded))
+}
+
+func (store *MemoryStore) SavePlayer(
+	ctx context.Context,
+	save PlayerSave,
+) (uint64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	encoded, err := encodePlayer(save)
+	if err != nil {
+		return 0, err
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if stored, ok := store.players[save.PlayerID]; ok {
+		switch {
+		case save.Revision < stored.revision:
+			return stored.revision, fmt.Errorf(
+				"%w: player %s revision %d is below %d",
+				ErrRevisionConflict, save.PlayerID, save.Revision, stored.revision,
+			)
+		case save.Revision == stored.revision:
+			if !bytes.Equal(encoded, stored.encoded) {
+				return stored.revision, fmt.Errorf(
+					"%w: player %s revision %d",
+					ErrRevisionConflict, save.PlayerID, save.Revision,
+				)
+			}
+			return stored.revision, nil
+		}
+	}
+	store.players[save.PlayerID] = memoryPlayer{
+		revision: save.Revision,
+		encoded:  bytes.Clone(encoded),
+	}
+	return save.Revision, nil
+}
+
 func (store *MemoryStore) Sync(ctx context.Context) error {
 	return ctx.Err()
 }
@@ -175,4 +247,4 @@ func compareSave(
 	return nil
 }
 
-var _ Store = (*MemoryStore)(nil)
+var _ WorldStore = (*MemoryStore)(nil)
