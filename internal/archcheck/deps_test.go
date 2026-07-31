@@ -287,6 +287,48 @@ func TestOnlyGfxImportsWebGPU(t *testing.T) {
 	}
 }
 
+func TestMCGodHasNoGraphicsDependencies(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "cmd", "mcgod")
+	files, err := filepath.Glob(filepath.Join(root, "*.go"))
+	if err != nil {
+		t.Fatalf("枚举 mcgod Go 文件: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("mcgod must contain Go source files")
+	}
+	for _, path := range files {
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("解析 %s: %v", path, err)
+		}
+		for _, imported := range parsed.Imports {
+			path := strings.Trim(imported.Path.Value, "\"")
+			for _, forbidden := range []string{
+				"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx",
+				"github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu",
+			} {
+				if strings.HasPrefix(path, forbidden) {
+					t.Errorf("%s imports forbidden graphics dependency %s", path, imported.Path.Value)
+				}
+			}
+		}
+	}
+
+	command := exec.Command("go", "list", "-f", "{{.ImportPath}}", "-deps", "./cmd/mcgod")
+	command.Dir = moduleRoot(t)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("枚举 mcgod 传递依赖: %v", err)
+	}
+	for _, dependency := range strings.Fields(string(output)) {
+		for _, forbidden := range []string{"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu"} {
+			if dependency == forbidden || strings.HasPrefix(dependency, forbidden+"/") {
+				t.Errorf("mcgod transitively depends on forbidden graphics package %s", dependency)
+			}
+		}
+	}
+}
+
 func localName(importPath string) string {
 	return strings.TrimPrefix(strings.TrimSpace(importPath), "minecraft-go/")
 }
