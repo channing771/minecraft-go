@@ -45,6 +45,7 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	flags := flag.NewFlagSet("mcgo", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	benchmark := flags.Bool("benchmark", false, "运行固定 1440p 性能场景")
+	benchmarkTransport := flags.String("benchmark-transport", "memory", "benchmark 业务传输: memory 或 tcp")
 	perfOutput := flags.String("perf-output", "", "性能报告 JSON 输出路径")
 	worldPath := flags.String("world", "worlds/default", "世界存档目录")
 	connect := flags.String("connect", "", "远程 TCP 服务器地址")
@@ -58,10 +59,11 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	if *benchmark && *perfOutput == "" {
 		return mainOptions{}, errors.New("--benchmark 必须同时提供 --perf-output")
 	}
-	var worldExplicit, nameExplicit bool
+	var worldExplicit, nameExplicit, benchmarkTransportExplicit bool
 	flags.Visit(func(flag *flag.Flag) {
 		worldExplicit = worldExplicit || flag.Name == "world"
 		nameExplicit = nameExplicit || flag.Name == "name"
+		benchmarkTransportExplicit = benchmarkTransportExplicit || flag.Name == "benchmark-transport"
 	})
 	if *connect != "" && worldExplicit {
 		return mainOptions{}, errors.New("--connect 不能与显式 --world 同时使用")
@@ -72,16 +74,23 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	if *benchmark && nameExplicit {
 		return mainOptions{}, errors.New("--name 不能与 --benchmark 同时使用")
 	}
+	if benchmarkTransportExplicit && !*benchmark {
+		return mainOptions{}, errors.New("--benchmark-transport 只能与 --benchmark 同时使用")
+	}
+	if *benchmarkTransport != "memory" && *benchmarkTransport != "tcp" {
+		return mainOptions{}, fmt.Errorf("无效 --benchmark-transport %q：只支持 memory 或 tcp", *benchmarkTransport)
+	}
 	seed := int64(42)
 	if *benchmark {
 		seed = benchmarkSeed
 	}
 	return mainOptions{
 		Application: applicationOptions{
-			Seed:      seed,
-			Benchmark: *benchmark,
-			WorldPath: *worldPath,
-			Connect:   *connect,
+			Seed:               seed,
+			Benchmark:          *benchmark,
+			BenchmarkTransport: *benchmarkTransport,
+			WorldPath:          *worldPath,
+			Connect:            *connect,
 		},
 		PerfOutput: *perfOutput,
 		RequestedName: func() *string {

@@ -97,6 +97,24 @@ func TestMcgoUsesLoginStreamsInsteadOfAttachedServerEndpoints(t *testing.T) {
 	}
 }
 
+func TestMcgoBenchmarkTCPPathUsesTheSharedLoginStateMachine(t *testing.T) {
+	path := filepath.Join(moduleRoot(t), "cmd", "mcgo", "app.go")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"network.ListenTCP(",
+		"network.BeginServerLogin(",
+		"network.LoginClient(",
+		"running.AttachTrustedObserver",
+	} {
+		if !strings.Contains(string(source), required) {
+			t.Errorf("%s benchmark TCP path must contain %s", path, required)
+		}
+	}
+}
+
 func TestServerProductionDoesNotDeclareLegacyAttachedWorldWrappers(t *testing.T) {
 	root := filepath.Join(moduleRoot(t), "internal", "server")
 	for _, file := range []string{"generator.go", "server.go"} {

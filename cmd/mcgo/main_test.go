@@ -93,4 +93,31 @@ func TestRunWithDependenciesPassesExplicitNameToProfile(t *testing.T) {
 	}
 }
 
+func TestParseMainOptionsBenchmarkTransport(t *testing.T) {
+	defaults, err := parseMainOptions([]string{"--benchmark", "--perf-output", "x.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Application.BenchmarkTransport != "memory" {
+		t.Fatalf("default benchmark transport=%q, want memory", defaults.Application.BenchmarkTransport)
+	}
+	tcp, err := parseMainOptions([]string{
+		"--benchmark", "--benchmark-transport", "tcp", "--perf-output", "x.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tcp.Application.BenchmarkTransport != "tcp" {
+		t.Fatalf("TCP benchmark transport=%q", tcp.Application.BenchmarkTransport)
+	}
+	for _, args := range [][]string{
+		{"--benchmark-transport", "tcp"},
+		{"--benchmark", "--benchmark-transport", "udp", "--perf-output", "x.json"},
+	} {
+		if _, err := parseMainOptions(args); err == nil {
+			t.Fatalf("accepted invalid benchmark transport args %v", args)
+		}
+	}
+}
+
 var _ = profile.Options{}

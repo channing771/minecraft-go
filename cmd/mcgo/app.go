@@ -27,43 +27,45 @@ import (
 )
 
 type applicationOptions struct {
-	Seed      int64
-	Benchmark bool
-	WorldPath string
-	Connect   string
-	Identity  *network.Identity
+	Seed               int64
+	Benchmark          bool
+	BenchmarkTransport string
+	WorldPath          string
+	Connect            string
+	Identity           *network.Identity
 }
 
 type application struct {
-	window           applicationWindow
-	dev              gfx.Device
-	surface          gfx.Surface
-	color            gfx.Texture
-	colorView        gfx.TextureView
-	frameWidth       int
-	frameHeight      int
-	renderer         *render.Renderer
-	clientEndpoint   network.ClientEndpoint
-	receiver         *client.Receiver
-	server           *server.Server
-	host             applicationHost
-	serverCancel     context.CancelFunc
-	serverDone       chan error
-	mirror           *client.Mirror
-	predictor        *client.Predictor
-	mesher           *client.Mesher
-	depth            *depthTarget
-	camera           client.Camera
-	center           core.ChunkPos
-	sequence         uint64
-	selectedBlock    core.BlockID
-	loadedChunks     map[core.ChunkPos]struct{}
-	ticks            *tickRecorder
-	saves            *saveRecorder
-	observerFloor    uint64
-	closeOnce        sync.Once
-	closeErr         error
-	releaseResources func()
+	window             applicationWindow
+	dev                gfx.Device
+	surface            gfx.Surface
+	color              gfx.Texture
+	colorView          gfx.TextureView
+	frameWidth         int
+	frameHeight        int
+	renderer           *render.Renderer
+	clientEndpoint     network.ClientEndpoint
+	receiver           *client.Receiver
+	server             *server.Server
+	host               applicationHost
+	serverCancel       context.CancelFunc
+	serverDone         chan error
+	mirror             *client.Mirror
+	predictor          *client.Predictor
+	mesher             *client.Mesher
+	depth              *depthTarget
+	camera             client.Camera
+	center             core.ChunkPos
+	sequence           uint64
+	selectedBlock      core.BlockID
+	loadedChunks       map[core.ChunkPos]struct{}
+	ticks              *tickRecorder
+	saves              *saveRecorder
+	observerFloor      uint64
+	benchmarkTransport string
+	closeOnce          sync.Once
+	closeErr           error
+	releaseResources   func()
 }
 
 type applicationWindow interface {
@@ -187,7 +189,7 @@ func (recorder *saveRecorder) summary() client.PersistenceSummary {
 		return ordered[max(0, min(index, len(ordered)-1))]
 	}
 	return client.PersistenceSummary{
-		Snapshots: uint64(len(ordered)),
+		Snapshots: int64(len(ordered)),
 		P50MS:     percentile(0.50),
 		P95MS:     percentile(0.95),
 		P99MS:     percentile(0.99),
@@ -282,10 +284,11 @@ func newApplicationWithDependencies(
 		}
 	}
 	if options.Benchmark {
-		clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
 		running = server.NewWorld(config, worldgen.New(store.Metadata().Seed), store)
-		if err := running.AttachTrustedObserver(serverEndpoint); err != nil {
-			_ = clientEndpoint.Close()
+		clientEndpoint, err = assembleBenchmarkObserverConnection(
+			ctx, running, options.BenchmarkTransport,
+		)
+		if err != nil {
 			_ = store.Close()
 			return nil, err
 		}
@@ -408,6 +411,12 @@ func newApplicationWithDependencies(
 		loadedChunks:   make(map[core.ChunkPos]struct{}),
 		ticks:          ticks,
 		saves:          saves,
+		benchmarkTransport: func() string {
+			if options.BenchmarkTransport == "" {
+				return "memory"
+			}
+			return options.BenchmarkTransport
+		}(),
 	}
 	app.releaseResources = app.releaseOwnedResources
 	if options.Benchmark {
@@ -420,6 +429,57 @@ func newApplicationWithDependencies(
 		}
 	}
 	return app, nil
+}
+
+func assembleBenchmarkObserverConnection(
+	ctx context.Context,
+	running *server.Server,
+	transport string,
+) (network.ClientEndpoint, error) {
+	if transport == "" || transport == "memory" {
+		clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
+		if err := running.AttachTrustedObserver(serverEndpoint); err != nil {
+			_ = clientEndpoint.Close()
+			return nil, err
+		}
+		return clientEndpoint, nil
+	}
+	if transport != "tcp" {
+		return nil, fmt.Errorf("不支持 benchmark transport %q", transport)
+	}
+	listener, err := network.ListenTCP("127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	defer listener.Close()
+	serverDone := make(chan error, 1)
+	go func() {
+		stream, acceptErr := listener.Accept(ctx)
+		if acceptErr != nil {
+			serverDone <- acceptErr
+			return
+		}
+		pending, loginErr := network.BeginServerLogin(ctx, stream)
+		if loginErr == nil {
+			loginErr = pending.Accept(ctx, running.AttachTrustedObserver)
+		}
+		serverDone <- loginErr
+	}()
+	stream, err := network.DialTCP(ctx, listener.Addr())
+	if err != nil {
+		return nil, errors.Join(err, <-serverDone)
+	}
+	identity := network.Identity{
+		PlayerID:    core.PlayerID{0x2c, 0xad, 0xe1, 0x90, 0x9d, 0xb6, 0x43, 0x82, 0x8d, 0x31, 0xcb, 0x40, 0xe5, 0xbb, 0x52, 0x29},
+		DisplayName: "Benchmark",
+	}
+	endpoint, loginErr := network.LoginClient(ctx, stream, identity)
+	serverErr := <-serverDone
+	if err := errors.Join(loginErr, serverErr); err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	return endpoint, nil
 }
 
 type applicationLoginResult struct {

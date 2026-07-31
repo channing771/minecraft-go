@@ -177,12 +177,24 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 		err = d.done()
 	}
 	if err == nil {
-		err = validateClientWirePacket(state, packet)
+		err = validateDecodedClientWirePacket(state, packet)
 	}
 	if err != nil {
 		return nil, codecError("decode client", state, packetID, err)
 	}
 	return packet, nil
+}
+
+func validateDecodedClientWirePacket(state State, packet ClientPacket) error {
+	// The login state machine must observe an otherwise well-formed hello in
+	// order to return the frozen HandshakeVersionMismatch response. Outbound
+	// callers remain unable to encode an unsupported version.
+	if state == StateHandshake {
+		if _, ok := packet.(ClientHello); ok {
+			return nil
+		}
+	}
+	return validateClientWirePacket(state, packet)
 }
 
 func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint32, payload []byte, err error) {
