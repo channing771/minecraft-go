@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"math"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -64,6 +65,68 @@ func TestPlayerRestoreKeepsAirborneCurrentExact(t *testing.T) {
 	if !update.Ready || update.State.Position != (mgl32.Vec3{2.5, 5, 0.5}) ||
 		update.State.Velocity != (mgl32.Vec3{}) || update.State.OnGround {
 		t.Fatalf("airborne current restore update=%+v", update)
+	}
+}
+
+func TestPlayerRestoreRejectsCurrentOutsideWorldHeight(t *testing.T) {
+	tests := []struct {
+		name string
+		y    float32
+	}{
+		{name: "feet below minimum", y: float32(core.MinY) - 0.25},
+		{name: "head above maximum", y: float32(core.MaxY) - physics.PlayerHeight + 0.25},
+		{name: "extreme positive", y: math.MaxFloat32},
+		{name: "extreme negative", y: -math.MaxFloat32},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine := NewEngine(0)
+			id := SessionID(30 + index)
+			current := PlayerLocation{
+				Dimension: core.Overworld,
+				Position:  mgl32.Vec3{2.5, test.y, 0.5},
+			}
+			safe := PlayerLocation{
+				Dimension: core.Overworld,
+				Position:  mgl32.Vec3{16.5, 1, 0.5},
+			}
+			engine.RegisterPlayer(id, PlayerRestore{
+				Current:        &current,
+				Safe:           &safe,
+				SpawnDimension: core.Overworld,
+			})
+			makeRestoreWorldReady(t, engine, current, safe)
+
+			update := onlyPlayerUpdate(t, engine.Step(), id)
+			if !update.Ready || update.State.Position != safe.Position {
+				t.Fatalf("out-of-height current restored: update=%+v, want safe %+v", update, safe.Position)
+			}
+		})
+	}
+}
+
+func TestPlayerRestoreRejectsOutOfHeightSafeBeforeSpawnFallback(t *testing.T) {
+	engine := NewEngine(0)
+	id := SessionID(34)
+	current := PlayerLocation{
+		Dimension: core.Overworld,
+		Position:  mgl32.Vec3{2.5, 1, 0.5},
+	}
+	safe := PlayerLocation{
+		Dimension: core.Overworld,
+		Position:  mgl32.Vec3{16.5, -math.MaxFloat32, 0.5},
+	}
+	engine.RegisterPlayer(id, PlayerRestore{
+		Current:        &current,
+		Safe:           &safe,
+		SpawnDimension: core.Overworld,
+	})
+	makeRestoreWorldReady(t, engine, current, safe)
+	setRestoreBlock(t, engine, core.BlockPos{X: 2, Y: 1, Z: 0}, core.StoneID)
+
+	update := onlyPlayerUpdate(t, engine.Step(), id)
+	if !update.Ready || update.State.Position != (mgl32.Vec3{0.5, 1, 0.5}) {
+		t.Fatalf("out-of-height safe restored: update=%+v, want spawn fallback", update)
 	}
 }
 

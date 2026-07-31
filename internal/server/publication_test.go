@@ -177,6 +177,80 @@ func TestForgetRemovesPendingSnapshotsAndSortsChunks(t *testing.T) {
 	assertNoWorldServerMessage(t, client)
 }
 
+func TestForgetSplits4097ChunksIntoValidDeterministicPackets(t *testing.T) {
+	current := &session{
+		pendingSnapshots: make(map[core.ChunkKey]snapshotRequest),
+		publications:     make(map[core.ChunkKey]*publication),
+	}
+	keys := make([]core.ChunkKey, 4097)
+	for index := range keys {
+		chunk := core.ChunkPos{X: int32(4096 - index), Z: int32(index % 3)}
+		keys[index] = core.ChunkKey{Dimension: core.Overworld, Pos: chunk}
+		current.pendingSnapshots[keys[index]] = snapshotRequest{}
+		current.publications[keys[index]] = &publication{}
+	}
+
+	messages := current.applyForget(keys)
+	if len(messages) != 2 {
+		t.Fatalf("forget packet count = %d, want 2", len(messages))
+	}
+	first := messages[0].(network.ForgetChunks)
+	second := messages[1].(network.ForgetChunks)
+	if len(first.Chunks) != 4096 || len(second.Chunks) != 1 {
+		t.Fatalf("forget packet sizes = %d/%d, want 4096/1", len(first.Chunks), len(second.Chunks))
+	}
+	for index, message := range []network.ForgetChunks{first, second} {
+		if err := message.Validate(); err != nil {
+			t.Fatalf("forget packet %d invalid: %v", index, err)
+		}
+	}
+	if first.Chunks[0] != (core.ChunkPos{X: 0, Z: 1}) ||
+		second.Chunks[0] != (core.ChunkPos{X: 4096}) {
+		t.Fatalf("deterministic forget boundaries = first %+v last %+v", first.Chunks[0], second.Chunks[0])
+	}
+}
+
+func TestDefaultRadiusLargeCenterMovePublishesBoundedForgetPackets(t *testing.T) {
+	config := DefaultConfig(1)
+	engine := sim.NewEngine(config.ViewRadius)
+	const observer = sim.SessionID(77)
+	engine.RegisterObserverSession(observer)
+	engine.Enqueue(sim.Command{
+		Session: observer, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: core.Overworld, Center: core.ChunkPos{},
+	})
+	engine.Step()
+	engine.Enqueue(sim.Command{
+		Session: observer, Sequence: 2, Kind: sim.CommandTrustedObserverCenter,
+		Dimension: core.Overworld, Center: core.ChunkPos{X: 1000},
+	})
+	moved := engine.Step()
+	keys := moved.Forget[observer]
+	if len(keys) != 4489 {
+		t.Fatalf("default-radius center move forget count = %d, want 4489", len(keys))
+	}
+
+	current := &session{
+		pendingSnapshots: make(map[core.ChunkKey]snapshotRequest),
+		publications:     make(map[core.ChunkKey]*publication),
+	}
+	messages := current.applyForget(keys)
+	if len(messages) != 2 {
+		t.Fatalf("default-radius forget packet count = %d, want 2", len(messages))
+	}
+	total := 0
+	for index, raw := range messages {
+		message := raw.(network.ForgetChunks)
+		if err := message.Validate(); err != nil {
+			t.Fatalf("default-radius forget packet %d invalid: %v", index, err)
+		}
+		total += len(message.Chunks)
+	}
+	if total != 4489 {
+		t.Fatalf("default-radius packet total = %d, want 4489", total)
+	}
+}
+
 func newPublicationServer(
 	t *testing.T,
 	radius, snapshotChunks, snapshotBytes int,

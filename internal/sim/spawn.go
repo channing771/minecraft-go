@@ -189,6 +189,10 @@ func (engine *Engine) validateRestoreCandidate(
 	if !physics.ValidState(physics.State{Position: candidate.location.Position}) {
 		return false, true, false
 	}
+	bounds := physics.PlayerBounds(candidate.location.Position)
+	if bounds.Min.Y() < float32(core.MinY) || bounds.Max.Y() > float32(core.MaxY) {
+		return false, true, false
+	}
 	dimension := engine.dimensions[candidate.location.Dimension]
 	if dimension == nil {
 		return false, true, false

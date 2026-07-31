@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"minecraft-go/internal/core"
 )
 
 func TestProtocolTranscriptSuccessMatchesMemoryAndTCP(t *testing.T) {
@@ -110,6 +112,36 @@ func TestProtocolTranscriptRejectsEarlyPlayAcrossMemoryAndTCP(t *testing.T) {
 			}
 			if err := <-serverDone; err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestPlaySemanticValidationMatchesMemoryAndTCP(t *testing.T) {
+	packets := []struct {
+		name   string
+		packet ClientPacket
+	}{
+		{"place block exceeds 15 bits", PlaceBlock{Block: core.BlockID(1 << 15)}},
+		{"resync outside overworld", RequestChunkResync{Dimension: core.DimensionID(1)}},
+	}
+	transports := []struct {
+		name string
+		open func(*testing.T) (ClientPacketStream, ServerPacketStream)
+	}{
+		{"memory", func(t *testing.T) (ClientPacketStream, ServerPacketStream) { return NewMemoryStreamPair(8) }},
+		{"tcp", openTCPStreamPair},
+	}
+	for _, packet := range packets {
+		t.Run(packet.name, func(t *testing.T) {
+			for _, transport := range transports {
+				t.Run(transport.name, func(t *testing.T) {
+					client, server := transport.open(t)
+					t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+					if err := client.Send(context.Background(), StatePlay, packet.packet); err == nil {
+						t.Fatalf("%s accepted invalid %T", transport.name, packet.packet)
+					}
+				})
 			}
 		})
 	}

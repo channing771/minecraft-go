@@ -35,6 +35,84 @@ func TestPerformanceRecordersOnlyEnableSaveSamplingForBenchmark(t *testing.T) {
 	}
 }
 
+func TestBenchmarkTCPDialFailureClosesListenerBeforeWaitingForAccept(t *testing.T) {
+	dialErr := errors.New("injected benchmark dial failure")
+	listener := newBenchmarkDialFailureListener()
+	dial := func(context.Context, string) (network.ClientPacketStream, error) {
+		<-listener.accepted
+		return nil, dialErr
+	}
+	type result struct {
+		endpoint network.ClientEndpoint
+		err      error
+	}
+	returned := make(chan result, 1)
+	go func() {
+		endpoint, err := assembleBenchmarkObserverConnection(
+			context.Background(), nil, "tcp",
+			func(string) (network.Listener, error) { return listener, nil },
+			dial,
+		)
+		returned <- result{endpoint: endpoint, err: err}
+	}()
+
+	select {
+	case got := <-returned:
+		if got.endpoint != nil || !errors.Is(got.err, dialErr) {
+			t.Fatalf("dial failure result = (%T, %v), want (nil, dial error)", got.endpoint, got.err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		_ = listener.Close()
+		<-returned
+		t.Fatal("benchmark TCP dial failure waited on Accept before closing listener")
+	}
+	if got := listener.closeCalls.Load(); got != 1 {
+		t.Fatalf("listener Close calls = %d, want 1", got)
+	}
+	select {
+	case <-listener.acceptDone:
+	default:
+		t.Fatal("benchmark TCP dial failure returned before Accept goroutine exited")
+	}
+}
+
+type benchmarkDialFailureListener struct {
+	accepted   chan struct{}
+	closed     chan struct{}
+	acceptDone chan struct{}
+	closeOnce  sync.Once
+	closeCalls atomic.Int32
+}
+
+func newBenchmarkDialFailureListener() *benchmarkDialFailureListener {
+	return &benchmarkDialFailureListener{
+		accepted:   make(chan struct{}),
+		closed:     make(chan struct{}),
+		acceptDone: make(chan struct{}),
+	}
+}
+
+func (listener *benchmarkDialFailureListener) Accept(ctx context.Context) (network.ServerPacketStream, error) {
+	close(listener.accepted)
+	defer close(listener.acceptDone)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-listener.closed:
+		return nil, network.ErrClosed
+	}
+}
+
+func (*benchmarkDialFailureListener) Addr() string { return "benchmark.invalid:1" }
+
+func (listener *benchmarkDialFailureListener) Close() error {
+	listener.closeOnce.Do(func() {
+		listener.closeCalls.Add(1)
+		close(listener.closed)
+	})
+	return nil
+}
+
 func TestInteractiveInputUsesDrainedReadyResetInSameFrame(t *testing.T) {
 	app, serverEndpoint := newInteractiveTestApplication(t)
 	app.camera.Pos = mgl32.Vec3{99, 99, 99}
@@ -265,6 +343,7 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	surface := &connectionTestSurface{}
 	loginComplete := false
 	windowCalls := 0
+	windowTitle := ""
 	deviceCalls := 0
 	dependencies := connectionTestDependencies(t)
 	dependencies.dialTCP = func(context.Context, string) (network.ClientPacketStream, error) {
@@ -281,8 +360,9 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 		loginComplete = true
 		return endpoint, nil
 	}
-	dependencies.newWindow = func(int, int, string) (applicationWindow, error) {
+	dependencies.newWindow = func(_, _ int, title string) (applicationWindow, error) {
 		windowCalls++
+		windowTitle = title
 		if !loginComplete {
 			t.Fatal("window created before remote login completed")
 		}
@@ -316,6 +396,9 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	}
 	if windowCalls != 1 || deviceCalls != 1 {
 		t.Fatalf("remote success graphics calls window=%d device=%d, want 1/1", windowCalls, deviceCalls)
+	}
+	if windowTitle != "minecraft-go — M3B TCP world" {
+		t.Fatalf("interactive window title = %q, want M3B title", windowTitle)
 	}
 	if got := endpoint.closeCalls.Load(); got != 0 {
 		t.Fatalf("live remote application endpoint Close calls=%d, want 0", got)

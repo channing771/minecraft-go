@@ -11,7 +11,6 @@ const MaxSmallPayload = 64 << 10
 
 var (
 	errInvalidDimension = errors.New("network: dimension is not overworld")
-	errInvalidBlock     = errors.New("network: block ID exceeds 15 bits")
 	errInvalidCount     = errors.New("network: packet count is outside 1..4096")
 	errCountShortInput  = errors.New("network: packet count exceeds remaining payload")
 )
@@ -93,7 +92,7 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			err = readErr
 		} else {
 			copy(id[:], data)
-			name, err = d.string(128, 32)
+			name, err = d.string(MaxSmallPayload, MaxSmallPayload)
 		}
 		packet = LoginStart{PlayerID: id, DisplayName: name}
 	case StatePlay:
@@ -191,6 +190,13 @@ func validateDecodedClientWirePacket(state State, packet ClientPacket) error {
 	// callers remain unable to encode an unsupported version.
 	if state == StateHandshake {
 		if _, ok := packet.(ClientHello); ok {
+			return nil
+		}
+	}
+	// A structurally complete LoginStart must reach the login driver so it can
+	// return the frozen LoginInvalidIdentity code for semantic identity errors.
+	if state == StateLogin {
+		if _, ok := packet.(LoginStart); ok {
 			return nil
 		}
 	}
@@ -501,20 +507,7 @@ func decodeForgetChunks(d *byteDecoder) (ServerPacket, error) {
 }
 
 func validateClientWirePacket(state State, packet ClientPacket) error {
-	if err := ValidateClientPacket(state, packet); err != nil {
-		return err
-	}
-	switch message := packet.(type) {
-	case PlaceBlock:
-		if !validBlockID(message.Block) {
-			return errInvalidBlock
-		}
-	case RequestChunkResync:
-		if message.Dimension != core.Overworld {
-			return errInvalidDimension
-		}
-	}
-	return nil
+	return ValidateClientPacket(state, packet)
 }
 
 func validateServerWirePacket(state State, packet ServerPacket) error {

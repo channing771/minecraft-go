@@ -47,6 +47,21 @@ func TestMemoryLoginTransitionsToPlay(t *testing.T) {
 	}
 }
 
+func TestBeginServerLoginCanonicalizesDisplayName(t *testing.T) {
+	client, server := NewMemoryStreamPair(8)
+	t.Cleanup(func() { _ = client.Close() })
+	identity := testIdentity(21)
+	identity.DisplayName = "  Chen  "
+
+	pending := beginMemoryLogin(t, client, server, identity)
+	if got := pending.Identity().DisplayName; got != "Chen" {
+		t.Fatalf("pending display name = %q, want canonical %q", got, "Chen")
+	}
+	if err := pending.Reject(context.Background(), LoginServerFull, "done"); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+}
+
 func TestLoginClientReportsHandshakeVersionMismatch(t *testing.T) {
 	client, server := NewMemoryStreamPair(4)
 	t.Cleanup(func() { _ = client.Close() })

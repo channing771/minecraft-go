@@ -68,6 +68,9 @@ func (command PlaceBlock) Validate() error {
 	if !finite32(command.Yaw) || !finite32(command.Pitch) {
 		return errors.New("network: place block has non-finite rotation")
 	}
+	if !validBlockID(command.Block) {
+		return errors.New("network: place block ID exceeds 15 bits")
+	}
 	return nil
 }
 
@@ -80,6 +83,13 @@ type RequestChunkResync struct {
 
 func (RequestChunkResync) clientMessage() {}
 func (RequestChunkResync) clientPacket()  {}
+
+func (request RequestChunkResync) Validate() error {
+	if request.Dimension != core.Overworld {
+		return errors.New("network: chunk resync dimension is not overworld")
+	}
+	return nil
+}
 
 type ForgetChunks struct {
 	Dimension core.DimensionID

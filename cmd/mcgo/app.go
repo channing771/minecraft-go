@@ -287,6 +287,10 @@ func newApplicationWithDependencies(
 		running = server.NewWorld(config, worldgen.New(store.Metadata().Seed), store)
 		clientEndpoint, err = assembleBenchmarkObserverConnection(
 			ctx, running, options.BenchmarkTransport,
+			func(address string) (network.Listener, error) {
+				return network.ListenTCP(address)
+			},
+			dependencies.dialTCP,
 		)
 		if err != nil {
 			_ = store.Close()
@@ -337,7 +341,7 @@ func newApplicationWithDependencies(
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}
 	} else {
-		window, err = dependencies.newWindow(2560, 1440, "minecraft-go — M3A persistent world")
+		window, err = dependencies.newWindow(2560, 1440, "minecraft-go — M3B TCP world")
 		if err == nil {
 			fitFramebuffer(window, width, height)
 			width, height = window.FramebufferSize()
@@ -435,6 +439,8 @@ func assembleBenchmarkObserverConnection(
 	ctx context.Context,
 	running *server.Server,
 	transport string,
+	listenTCP func(string) (network.Listener, error),
+	dialTCP func(context.Context, string) (network.ClientPacketStream, error),
 ) (network.ClientEndpoint, error) {
 	if transport == "" || transport == "memory" {
 		clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
@@ -447,27 +453,31 @@ func assembleBenchmarkObserverConnection(
 	if transport != "tcp" {
 		return nil, fmt.Errorf("不支持 benchmark transport %q", transport)
 	}
-	listener, err := network.ListenTCP("127.0.0.1:0")
+	listener, err := listenTCP("127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 	defer listener.Close()
+	acceptContext, cancelAccept := context.WithCancel(ctx)
+	defer cancelAccept()
 	serverDone := make(chan error, 1)
 	go func() {
-		stream, acceptErr := listener.Accept(ctx)
+		stream, acceptErr := listener.Accept(acceptContext)
 		if acceptErr != nil {
 			serverDone <- acceptErr
 			return
 		}
-		pending, loginErr := network.BeginServerLogin(ctx, stream)
+		pending, loginErr := network.BeginServerLogin(acceptContext, stream)
 		if loginErr == nil {
-			loginErr = pending.Accept(ctx, running.AttachTrustedObserver)
+			loginErr = pending.Accept(acceptContext, running.AttachTrustedObserver)
 		}
 		serverDone <- loginErr
 	}()
-	stream, err := network.DialTCP(ctx, listener.Addr())
+	stream, err := dialTCP(ctx, listener.Addr())
 	if err != nil {
-		return nil, errors.Join(err, <-serverDone)
+		cancelAccept()
+		closeErr := listener.Close()
+		return nil, errors.Join(err, closeErr, <-serverDone)
 	}
 	identity := network.Identity{
 		PlayerID:    core.PlayerID{0x2c, 0xad, 0xe1, 0x90, 0x9d, 0xb6, 0x43, 0x82, 0x8d, 0x31, 0xcb, 0x40, 0xe5, 0xbb, 0x52, 0x29},

@@ -1,6 +1,6 @@
 //go:build darwin
 
-// Command mcgo 启动 M3A 持久世界客户端。
+// Command mcgo 启动 M3B TCP 直连与持久世界客户端。
 package main
 
 import (

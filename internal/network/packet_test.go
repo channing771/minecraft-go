@@ -45,6 +45,8 @@ func TestValidateClientPacket(t *testing.T) {
 		{"input NaN", StatePlay, PlayerInput{Yaw: float32(math.NaN())}},
 		{"break infinity", StatePlay, BreakBlock{Pitch: float32(math.Inf(1))}},
 		{"place NaN", StatePlay, PlaceBlock{Yaw: float32(math.NaN()), Block: core.StoneID}},
+		{"place block exceeds 15 bits", StatePlay, PlaceBlock{Block: core.BlockID(1 << 15)}},
+		{"resync outside overworld", StatePlay, RequestChunkResync{Dimension: core.DimensionID(1)}},
 		{"play packet during handshake", StateHandshake, PlayerInput{}},
 		{"play packet during login", StateLogin, PlayerInput{}},
 	}

@@ -151,7 +151,7 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 		case PlaceBlock:
 			return clientPacket.Validate()
 		case RequestChunkResync:
-			return nil
+			return clientPacket.Validate()
 		case KeepAliveReply:
 			if clientPacket.Token == 0 {
 				return errors.New("network: keep alive reply token is zero")

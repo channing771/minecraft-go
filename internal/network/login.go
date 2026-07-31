@@ -87,9 +87,17 @@ func BeginServerLogin(ctx context.Context, stream ServerPacketStream) (_ *Pendin
 	if !ok {
 		return nil, protocolViolation(errors.New("unexpected client login packet"))
 	}
+	canonicalName, identityErr := core.NormalizeDisplayName(start.DisplayName)
+	if !start.PlayerID.Valid() || identityErr != nil {
+		_ = stream.Send(login, StateLogin, LoginReject{
+			Code:    LoginInvalidIdentity,
+			Message: "玩家 ID 或昵称非法",
+		})
+		return nil, errors.New("network: invalid login identity")
+	}
 	pending := &PendingLogin{
 		stream:    stream,
-		identity:  Identity{PlayerID: start.PlayerID, DisplayName: start.DisplayName},
+		identity:  Identity{PlayerID: start.PlayerID, DisplayName: canonicalName},
 		login:     login,
 		cancel:    cancelLogin,
 		phaseDone: make(chan struct{}),

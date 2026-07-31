@@ -15,6 +15,8 @@ type queuedDelta struct {
 	message network.BlockChanges
 }
 
+const maxForgetChunksPerPacket = 4096
+
 func (server *Server) publish(result sim.TickResult) {
 	for _, id := range server.sortedPublicationIDsLocked() {
 		current := server.publicationSessionLocked(id)
@@ -197,10 +199,13 @@ func (current *session) applyForget(
 			}
 			return chunks[i].Z < chunks[j].Z
 		})
-		messages = append(messages, network.ForgetChunks{
-			Dimension: dimension,
-			Chunks:    append([]core.ChunkPos(nil), chunks...),
-		})
+		for start := 0; start < len(chunks); start += maxForgetChunksPerPacket {
+			end := min(start+maxForgetChunksPerPacket, len(chunks))
+			messages = append(messages, network.ForgetChunks{
+				Dimension: dimension,
+				Chunks:    append([]core.ChunkPos(nil), chunks[start:end]...),
+			})
+		}
 	}
 	return messages
 }
