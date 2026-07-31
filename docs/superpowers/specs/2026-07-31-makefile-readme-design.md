@@ -1,7 +1,7 @@
 # Makefile 与 README 设计
 
 - 日期：2026-07-31
-- 状态：待用户复核
+- 状态：已确认
 - 范围：新增根目录 Makefile 与 README，不修改业务代码和 CI
 
 ## 目标
@@ -46,4 +46,3 @@ README 不复制完整架构设计或性能基线，只链接仓库内已有文�
 - `make build` 生成 `bin/mcgo`；
 - `make clean` 仅删除生成的 `bin` 目录；
 - README 中的命令、参数、按键和路径与源码一致。
-
