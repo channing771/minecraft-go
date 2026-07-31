@@ -127,38 +127,6 @@ func NewWorld(config Config, generator Generator, store storage.Store) *Server {
 	return server
 }
 
-// New 暂时保留为单玩家测试与尚未迁移调用方的兼容包装。
-func New(
-	config Config,
-	endpoint network.ServerEndpoint,
-	generator Generator,
-	store storage.Store,
-) *Server {
-	if endpoint == nil {
-		panic("server: nil endpoint")
-	}
-	server := NewWorld(config, generator, store)
-	if config.TrustedObserver {
-		if err := server.AttachTrustedObserver(endpoint); err != nil {
-			panic(err)
-		}
-		return server
-	}
-	compatibilityID := sim.SessionID(1)
-	if _, err := server.AttachSession(SessionSpec{
-		ID:         compatibilityID,
-		Generation: 1,
-		Endpoint:   endpoint,
-		Restore: sim.PlayerRestore{
-			SpawnDimension: server.config.SpawnDimension,
-			SpawnAnchor:    server.config.SpawnAnchor,
-		},
-	}); err != nil {
-		panic(err)
-	}
-	return server
-}
-
 func (server *Server) AttachSession(spec SessionSpec) (<-chan SessionExit, error) {
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
@@ -323,17 +291,6 @@ func (server *Server) TickCount() uint64 {
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 	return server.engine.TickCount()
-}
-
-// PlayerState 暂时保留为单玩家兼容包装。
-func (server *Server) PlayerState() (sim.PlayerUpdate, bool) {
-	server.stepMu.Lock()
-	defer server.stepMu.Unlock()
-	ids := server.sortedSessionIDsLocked()
-	if len(ids) == 0 {
-		return sim.PlayerUpdate{}, false
-	}
-	return server.engine.Player(ids[0])
 }
 
 func (server *Server) ChunkHash(

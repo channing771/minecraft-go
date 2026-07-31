@@ -194,7 +194,7 @@ func newPublicationServer(
 	config.SnapshotChunks = snapshotChunks
 	config.SnapshotBytes = snapshotBytes
 	config.OutboxCapacity = 64
-	running := NewMemory(config, endpoint, generator)
+	running := newMemoryAttachedWorldForTest(config, endpoint, generator)
 	t.Cleanup(func() {
 		close(generator.release)
 		shutdownServerForTest(t, running)

@@ -5,9 +5,7 @@ import (
 	"log/slog"
 
 	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
 	"minecraft-go/internal/sim"
-	"minecraft-go/internal/storage"
 	"minecraft-go/internal/world"
 	"minecraft-go/internal/worldgen"
 )
@@ -26,46 +24,6 @@ func NewTerrainProbe(seed int64) *TerrainProbe {
 
 func (probe *TerrainProbe) HeightAt(x, z int32) int32 {
 	return probe.generator.HeightAt(x, z)
-}
-
-func NewMemory(
-	config Config,
-	endpoint network.ServerEndpoint,
-	generator Generator,
-) *Server {
-	store := storage.NewMemory(storage.Metadata{
-		FormatVersion:  1,
-		Seed:           config.Seed,
-		SpawnDimension: config.SpawnDimension,
-		SpawnAnchor:    config.SpawnAnchor,
-	})
-	return New(config, endpoint, generator, store)
-}
-
-// NewEmbedded 创建使用存档 metadata 与内置确定性地形生成器的服务端。
-func NewEmbedded(
-	config Config,
-	endpoint network.ServerEndpoint,
-	store storage.Store,
-) *Server {
-	if store == nil {
-		panic("server: nil store")
-	}
-	metadata := store.Metadata()
-	config.Seed = metadata.Seed
-	config.SpawnDimension = metadata.SpawnDimension
-	config.SpawnAnchor = metadata.SpawnAnchor
-	return New(config, endpoint, worldgen.New(metadata.Seed), store)
-}
-
-func NewEmbeddedMemory(config Config, endpoint network.ServerEndpoint) *Server {
-	store := storage.NewMemory(storage.Metadata{
-		FormatVersion:  1,
-		Seed:           config.Seed,
-		SpawnDimension: config.SpawnDimension,
-		SpawnAnchor:    config.SpawnAnchor,
-	})
-	return NewEmbedded(config, endpoint, store)
 }
 
 func runGeneration(

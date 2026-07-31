@@ -24,7 +24,7 @@ func TestNewWorldStartsWithoutAttachedPlayer(t *testing.T) {
 
 func TestCompatibilityNewAttachesLocalPlayer(t *testing.T) {
 	_, endpoint := network.NewMemoryPair(8)
-	running := New(registryTestConfig(), endpoint, playerTestGenerator{}, testStore())
+	running := newAttachedWorldForTest(registryTestConfig(), endpoint, playerTestGenerator{}, testStore())
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	if state, ok := running.PlayerStateFor(testSessionID); !ok ||
 		state.Session != testSessionID {

@@ -19,6 +19,7 @@ import (
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
+	"minecraft-go/internal/profile"
 )
 
 const viewDistance = 32
@@ -28,13 +29,15 @@ func init() {
 }
 
 type mainOptions struct {
-	Application applicationOptions
-	PerfOutput  string
+	Application   applicationOptions
+	PerfOutput    string
+	RequestedName *string
 }
 
 type runDependencies struct {
 	newApplication func(applicationOptions) (*application, error)
-	runInteractive func(*application)
+	loadIdentity   func(*string) (network.Identity, error)
+	runInteractive func(*application) error
 	runBenchmark   func(*application, string) error
 }
 
@@ -44,6 +47,8 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	benchmark := flags.Bool("benchmark", false, "运行固定 1440p 性能场景")
 	perfOutput := flags.String("perf-output", "", "性能报告 JSON 输出路径")
 	worldPath := flags.String("world", "worlds/default", "世界存档目录")
+	connect := flags.String("connect", "", "远程 TCP 服务器地址")
+	name := flags.String("name", "", "玩家显示名")
 	if err := flags.Parse(args); err != nil {
 		return mainOptions{}, err
 	}
@@ -52,6 +57,20 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	}
 	if *benchmark && *perfOutput == "" {
 		return mainOptions{}, errors.New("--benchmark 必须同时提供 --perf-output")
+	}
+	var worldExplicit, nameExplicit bool
+	flags.Visit(func(flag *flag.Flag) {
+		worldExplicit = worldExplicit || flag.Name == "world"
+		nameExplicit = nameExplicit || flag.Name == "name"
+	})
+	if *connect != "" && worldExplicit {
+		return mainOptions{}, errors.New("--connect 不能与显式 --world 同时使用")
+	}
+	if *connect != "" && *benchmark {
+		return mainOptions{}, errors.New("--connect 不能与 --benchmark 同时使用")
+	}
+	if *benchmark && nameExplicit {
+		return mainOptions{}, errors.New("--name 不能与 --benchmark 同时使用")
 	}
 	seed := int64(42)
 	if *benchmark {
@@ -62,14 +81,22 @@ func parseMainOptions(args []string) (mainOptions, error) {
 			Seed:      seed,
 			Benchmark: *benchmark,
 			WorldPath: *worldPath,
+			Connect:   *connect,
 		},
 		PerfOutput: *perfOutput,
+		RequestedName: func() *string {
+			if nameExplicit {
+				return name
+			}
+			return nil
+		}(),
 	}, nil
 }
 
 func run(args []string) error {
 	return runWithDependencies(args, runDependencies{
 		newApplication: newApplication,
+		loadIdentity:   loadApplicationIdentity,
 		runInteractive: runInteractive,
 		runBenchmark:   runBenchmark,
 	})
@@ -79,6 +106,13 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 	options, err := parseMainOptions(args)
 	if err != nil {
 		return err
+	}
+	if !options.Application.Benchmark {
+		identity, err := dependencies.loadIdentity(options.RequestedName)
+		if err != nil {
+			return fmt.Errorf("加载本机 profile: %w", err)
+		}
+		options.Application.Identity = &identity
 	}
 	app, err := dependencies.newApplication(options.Application)
 	if err != nil {
@@ -91,9 +125,21 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 			runErr = fmt.Errorf("性能门禁失败: %w", err)
 		}
 	} else {
-		dependencies.runInteractive(app)
+		runErr = dependencies.runInteractive(app)
 	}
 	return errors.Join(runErr, app.Close())
+}
+
+func loadApplicationIdentity(requestedName *string) (network.Identity, error) {
+	path, err := profile.DefaultPath()
+	if err != nil {
+		return network.Identity{}, err
+	}
+	loaded, err := profile.LoadOrCreate(profile.Options{Path: path, RequestedName: requestedName})
+	if err != nil {
+		return network.Identity{}, err
+	}
+	return network.Identity{PlayerID: loaded.PlayerID, DisplayName: loaded.DisplayName}, nil
 }
 
 func main() {
@@ -103,7 +149,7 @@ func main() {
 	}
 }
 
-func runInteractive(app *application) {
+func runInteractive(app *application) error {
 	app.window.SetCursorCaptured(true)
 	lastMouseX, lastMouseY := app.window.CursorPos()
 	lastFrame := time.Now()
@@ -118,6 +164,9 @@ func runInteractive(app *application) {
 		dt := min(now.Sub(lastFrame), 100*time.Millisecond)
 		lastFrame = now
 		app.drainServerMessages(64)
+		if err := app.receiver.Err(); err != nil {
+			return err
+		}
 
 		escapeDown := app.window.KeyDown(client.KeyEscape)
 		if escapeDown && !escapeWasDown {
@@ -164,6 +213,7 @@ func runInteractive(app *application) {
 		app.applyInteractiveCursorInput(dt, movement, actions, captured, justCaptured)
 		app.renderFrame(64)
 	}
+	return nil
 }
 
 func (a *application) applyInteractiveCursorInput(

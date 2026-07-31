@@ -23,16 +23,19 @@ import (
 	"minecraft-go/internal/render"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
+	"minecraft-go/internal/worldgen"
 )
 
 type applicationOptions struct {
 	Seed      int64
 	Benchmark bool
 	WorldPath string
+	Connect   string
+	Identity  *network.Identity
 }
 
 type application struct {
-	window           *client.Window
+	window           applicationWindow
 	dev              gfx.Device
 	surface          gfx.Surface
 	color            gfx.Texture
@@ -41,7 +44,9 @@ type application struct {
 	frameHeight      int
 	renderer         *render.Renderer
 	clientEndpoint   network.ClientEndpoint
+	receiver         *client.Receiver
 	server           *server.Server
+	host             applicationHost
 	serverCancel     context.CancelFunc
 	serverDone       chan error
 	mirror           *client.Mirror
@@ -59,6 +64,68 @@ type application struct {
 	closeOnce        sync.Once
 	closeErr         error
 	releaseResources func()
+}
+
+type applicationWindow interface {
+	SetCursorCaptured(bool)
+	CursorPos() (float64, float64)
+	ShouldClose() bool
+	Poll()
+	KeyDown(client.Key) bool
+	PrimaryButtonDown() bool
+	SecondaryButtonDown() bool
+	CursorCaptured() bool
+	FramebufferSize() (int, int)
+	ContentSize() (int, int)
+	SetContentSize(int, int)
+	CancelClose()
+	NativeHandle() gfx.NativeWindowHandle
+	Close()
+}
+
+type applicationHost interface {
+	Run(context.Context, network.Listener) error
+	AcceptStream(context.Context, network.ServerPacketStream) error
+	Shutdown(context.Context) error
+}
+
+type applicationDependencies struct {
+	openStore           func(context.Context, applicationOptions) (storage.WorldStore, error)
+	dialTCP             func(context.Context, string) (network.ClientPacketStream, error)
+	loginClient         func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
+	newHost             func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
+	newMemoryStreamPair func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
+	newWindow           func(int, int, string) (applicationWindow, error)
+	newDevice           func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
+	newHeadlessDevice   func() (gfx.Device, error)
+}
+
+func defaultApplicationDependencies() applicationDependencies {
+	return applicationDependencies{
+		openStore:   openApplicationStore,
+		dialTCP:     network.DialTCP,
+		loginClient: network.LoginClient,
+		newHost: func(
+			config server.Config,
+			generator server.Generator,
+			store storage.WorldStore,
+		) (applicationHost, error) {
+			return server.NewHost(config, generator, store), nil
+		},
+		newMemoryStreamPair: func(capacity int) (
+			network.ClientPacketStream,
+			network.ServerPacketStream,
+			error,
+		) {
+			clientStream, serverStream := network.NewMemoryStreamPair(capacity)
+			return clientStream, serverStream, nil
+		},
+		newWindow: func(width, height int, title string) (applicationWindow, error) {
+			return client.NewWindow(width, height, title)
+		},
+		newDevice:         gfx.NewDevice,
+		newHeadlessDevice: gfx.NewHeadlessDevice,
+	}
 }
 
 type tickRecorder struct {
@@ -153,7 +220,10 @@ func (recorder *tickRecorder) summary() client.PhaseSummary {
 func openApplicationStore(
 	ctx context.Context,
 	options applicationOptions,
-) (storage.Store, error) {
+) (storage.WorldStore, error) {
+	if options.Connect != "" {
+		return nil, nil
+	}
 	metadata := storage.Metadata{
 		FormatVersion:  1,
 		Seed:           options.Seed,
@@ -170,12 +240,79 @@ func openApplicationStore(
 }
 
 func newApplication(options applicationOptions) (*application, error) {
-	store, err := openApplicationStore(context.Background(), options)
-	if err != nil {
-		return nil, fmt.Errorf("打开世界存储: %w", err)
-	}
+	return newApplicationWithDependencies(options, defaultApplicationDependencies())
+}
 
-	var window *client.Window
+func newApplicationWithDependencies(
+	options applicationOptions,
+	dependencies applicationDependencies,
+) (*application, error) {
+	ctx := context.Background()
+	var store storage.WorldStore
+	var clientEndpoint network.ClientEndpoint
+	var running *server.Server
+	var host applicationHost
+	var serverCancel context.CancelFunc
+	var serverDone chan error
+	var err error
+	ticks, saves := newPerformanceRecorders(options.Benchmark)
+	config := server.DefaultConfig(options.Seed)
+	config.ViewRadius = viewDistance + 1
+	config.TrustedObserver = options.Benchmark
+	config.TickObserver = ticks.add
+	if saves != nil {
+		config.SaveObserver = saves.add
+	}
+	if options.Connect != "" {
+		if options.Identity == nil {
+			return nil, errors.New("远程连接缺少本机身份")
+		}
+		stream, err := dependencies.dialTCP(ctx, options.Connect)
+		if err != nil {
+			return nil, fmt.Errorf("连接远程服务器: %w", err)
+		}
+		clientEndpoint, err = dependencies.loginClient(ctx, stream, *options.Identity)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("远程登录: %w", err), stream.Close())
+		}
+	} else {
+		store, err = dependencies.openStore(ctx, options)
+		if err != nil {
+			return nil, fmt.Errorf("打开世界存储: %w", err)
+		}
+	}
+	if options.Benchmark {
+		clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
+		running = server.NewWorld(config, worldgen.New(store.Metadata().Seed), store)
+		if err := running.AttachTrustedObserver(serverEndpoint); err != nil {
+			_ = clientEndpoint.Close()
+			_ = store.Close()
+			return nil, err
+		}
+		serverContext, cancel := context.WithCancel(context.Background())
+		serverCancel = cancel
+		serverDone = make(chan error, 1)
+		go func() { serverDone <- running.Run(serverContext) }()
+	} else if options.Connect == "" {
+		if options.Identity == nil {
+			_ = store.Close()
+			return nil, errors.New("本地世界缺少本机身份")
+		}
+		clientEndpoint, host, serverCancel, serverDone, err = assembleLocalApplicationConnection(
+			ctx,
+			config,
+			worldgen.New(store.Metadata().Seed),
+			store,
+			*options.Identity,
+			dependencies,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("连接本地 Host: %w", err)
+		}
+	}
+	receiver := client.NewReceiver(clientEndpoint, 256)
+
+	var window applicationWindow
 	var dev gfx.Device
 	var surface gfx.Surface
 	var color gfx.Texture
@@ -183,7 +320,7 @@ func newApplication(options applicationOptions) (*application, error) {
 	var colorFormat gfx.TextureFormat
 	width, height := 2560, 1440
 	if options.Benchmark {
-		dev, err = gfx.NewHeadlessDevice()
+		dev, err = dependencies.newHeadlessDevice()
 		colorFormat = gfx.FormatBGRA8UnormSrgb
 		if err == nil {
 			color = dev.CreateTexture(gfx.TextureDesc{
@@ -197,11 +334,11 @@ func newApplication(options applicationOptions) (*application, error) {
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}
 	} else {
-		window, err = client.NewWindow(2560, 1440, "minecraft-go — M3A persistent world")
+		window, err = dependencies.newWindow(2560, 1440, "minecraft-go — M3A persistent world")
 		if err == nil {
 			fitFramebuffer(window, width, height)
 			width, height = window.FramebufferSize()
-			dev, surface, err = gfx.NewDevice(
+			dev, surface, err = dependencies.newDevice(
 				window.NativeHandle(), uint32(width), uint32(height),
 			)
 			if err == nil {
@@ -225,7 +362,14 @@ func newApplication(options applicationOptions) (*application, error) {
 		if window != nil {
 			window.Close()
 		}
-		return nil, errors.Join(err, store.Close())
+		connectionErr := receiver.Close()
+		if serverCancel != nil {
+			serverCancel()
+		}
+		if serverDone != nil {
+			connectionErr = errors.Join(connectionErr, <-serverDone)
+		}
+		return nil, errors.Join(err, connectionErr)
 	}
 
 	reg := assets.NewRegistry()
@@ -239,20 +383,6 @@ func newApplication(options applicationOptions) (*application, error) {
 		Near:   0.1,
 		Far:    2000,
 	}
-	clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
-	config := server.DefaultConfig(options.Seed)
-	config.ViewRadius = viewDistance + 1
-	config.TrustedObserver = options.Benchmark
-	ticks, saves := newPerformanceRecorders(options.Benchmark)
-	config.TickObserver = ticks.add
-	if saves != nil {
-		config.SaveObserver = saves.add
-	}
-	running := server.NewEmbedded(config, serverEndpoint, store)
-	serverContext, serverCancel := context.WithCancel(context.Background())
-	serverDone := make(chan error, 1)
-	go func() { serverDone <- running.Run(serverContext) }()
-
 	app := &application{
 		window:         window,
 		dev:            dev,
@@ -263,7 +393,9 @@ func newApplication(options applicationOptions) (*application, error) {
 		frameHeight:    height,
 		renderer:       renderer,
 		clientEndpoint: clientEndpoint,
+		receiver:       receiver,
 		server:         running,
+		host:           host,
 		serverCancel:   serverCancel,
 		serverDone:     serverDone,
 		mirror:         client.NewMirror(),
@@ -290,7 +422,137 @@ func newApplication(options applicationOptions) (*application, error) {
 	return app, nil
 }
 
-func fitFramebuffer(window *client.Window, targetWidth, targetHeight int) {
+type applicationLoginResult struct {
+	endpoint network.ClientEndpoint
+	err      error
+}
+
+func assembleLocalApplicationConnection(
+	ctx context.Context,
+	config server.Config,
+	generator server.Generator,
+	store storage.WorldStore,
+	identity network.Identity,
+	dependencies applicationDependencies,
+) (
+	network.ClientEndpoint,
+	applicationHost,
+	context.CancelFunc,
+	chan error,
+	error,
+) {
+	host, err := dependencies.newHost(config, generator, store)
+	if err != nil {
+		return nil, nil, nil, nil, errors.Join(err, store.Close())
+	}
+	hostContext, cancel := context.WithCancel(ctx)
+	hostDone := make(chan error, 1)
+	go func() { hostDone <- host.Run(hostContext, nil) }()
+
+	clientStream, serverStream, err := dependencies.newMemoryStreamPair(256)
+	if err != nil {
+		cleanupErr := cleanupLocalApplicationStartup(
+			host, cancel, hostDone, nil, nil, nil, config.ShutdownTimeout,
+		)
+		return nil, nil, nil, nil, errors.Join(err, cleanupErr)
+	}
+	acceptDone := make(chan error, 1)
+	go func() { acceptDone <- host.AcceptStream(hostContext, serverStream) }()
+	loginDone := make(chan applicationLoginResult, 1)
+	go func() {
+		endpoint, loginErr := dependencies.loginClient(hostContext, clientStream, identity)
+		loginDone <- applicationLoginResult{endpoint: endpoint, err: loginErr}
+	}()
+
+	select {
+	case result := <-loginDone:
+		if result.err == nil {
+			return result.endpoint, host, cancel, hostDone, nil
+		}
+		cleanupErr := cleanupLocalApplicationStartup(
+			host,
+			cancel,
+			hostDone,
+			acceptDone,
+			clientStream,
+			serverStream,
+			config.ShutdownTimeout,
+		)
+		return nil, nil, nil, nil, errors.Join(result.err, cleanupErr)
+	case hostErr := <-hostDone:
+		_ = clientStream.Close()
+		_ = serverStream.Close()
+		cancel()
+		result := <-loginDone
+		acceptErr := <-acceptDone
+		shutdownErr := shutdownApplicationHost(host, config.ShutdownTimeout)
+		return nil, nil, nil, nil, errors.Join(
+			hostErr,
+			result.err,
+			ignoreApplicationStartupCloseError(acceptErr),
+			shutdownErr,
+		)
+	case acceptErr := <-acceptDone:
+		_ = clientStream.Close()
+		_ = serverStream.Close()
+		cancel()
+		result := <-loginDone
+		hostErr := <-hostDone
+		shutdownErr := shutdownApplicationHost(host, config.ShutdownTimeout)
+		return nil, nil, nil, nil, errors.Join(
+			acceptErr,
+			result.err,
+			ignoreApplicationStartupCloseError(hostErr),
+			shutdownErr,
+		)
+	}
+}
+
+func cleanupLocalApplicationStartup(
+	host applicationHost,
+	cancel context.CancelFunc,
+	hostDone <-chan error,
+	acceptDone <-chan error,
+	clientStream network.ClientPacketStream,
+	serverStream network.ServerPacketStream,
+	shutdownTimeout time.Duration,
+) error {
+	var cleanupErr error
+	if clientStream != nil {
+		cleanupErr = errors.Join(cleanupErr, clientStream.Close())
+	}
+	if serverStream != nil {
+		cleanupErr = errors.Join(cleanupErr, serverStream.Close())
+	}
+	cancel()
+	if acceptDone != nil {
+		cleanupErr = errors.Join(
+			cleanupErr,
+			ignoreApplicationStartupCloseError(<-acceptDone),
+		)
+	}
+	cleanupErr = errors.Join(
+		cleanupErr,
+		ignoreApplicationStartupCloseError(<-hostDone),
+		shutdownApplicationHost(host, shutdownTimeout),
+	)
+	return cleanupErr
+}
+
+func shutdownApplicationHost(host applicationHost, timeout time.Duration) error {
+	shutdownContext, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return host.Shutdown(shutdownContext)
+}
+
+func ignoreApplicationStartupCloseError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, network.ErrClosed) {
+		return nil
+	}
+	return err
+}
+
+func fitFramebuffer(window applicationWindow, targetWidth, targetHeight int) {
 	contentWidth, contentHeight := window.ContentSize()
 	framebufferWidth, framebufferHeight := window.FramebufferSize()
 	if framebufferWidth <= 0 || framebufferHeight <= 0 {
@@ -304,7 +566,9 @@ func fitFramebuffer(window *client.Window, targetWidth, targetHeight int) {
 
 func (a *application) Close() error {
 	a.closeOnce.Do(func() {
-		if a.clientEndpoint != nil {
+		if a.receiver != nil {
+			a.closeErr = errors.Join(a.closeErr, a.receiver.Close())
+		} else if a.clientEndpoint != nil {
 			a.closeErr = errors.Join(a.closeErr, a.clientEndpoint.Close())
 		}
 		if a.serverCancel != nil {
@@ -428,16 +692,17 @@ func (a *application) drainServerMessages(maxMessages int) {
 	if maxMessages <= 0 {
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	for range maxMessages {
-		message, err := a.clientEndpoint.Recv(ctx)
-		if errors.Is(err, context.Canceled) || errors.Is(err, network.ErrClosed) {
+		if a.receiver == nil {
 			return
 		}
-		if err != nil {
-			log.Printf("接收内置服务端消息失败: %v", err)
-			return
+		message, ok := a.receiver.TryRecv()
+		if !ok {
+			runtime.Gosched()
+			message, ok = a.receiver.TryRecv()
+			if !ok {
+				return
+			}
 		}
 		if state, ok := message.(network.PlayerState); ok {
 			result, err := a.predictor.ApplyPlayerState(state, client.MirrorCollisionSource{
@@ -447,7 +712,9 @@ func (a *application) drainServerMessages(maxMessages int) {
 			if err != nil {
 				log.Printf("服务端协议数据非法，关闭会话: %v", err)
 				_ = a.clientEndpoint.Close()
-				a.serverCancel()
+				if a.serverCancel != nil {
+					a.serverCancel()
+				}
 				return
 			}
 			if result.ResetView {
@@ -460,7 +727,9 @@ func (a *application) drainServerMessages(maxMessages int) {
 		if err != nil {
 			log.Printf("服务端协议数据非法，关闭会话: %v", err)
 			_ = a.clientEndpoint.Close()
-			a.serverCancel()
+			if a.serverCancel != nil {
+				a.serverCancel()
+			}
 			return
 		}
 		switch message := message.(type) {

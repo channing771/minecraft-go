@@ -90,7 +90,7 @@ func TestEmbeddedConstructorUsesStoreMetadata(t *testing.T) {
 	config.Workers = 1
 	config.SpawnAnchor = core.ChunkPos{X: 99, Z: 99}
 	_, endpoint := network.NewMemoryPair(32)
-	running := NewEmbedded(config, endpoint, store)
+	running := newEmbeddedAttachedWorldForTest(config, endpoint, store)
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 
 	result := running.StepForTest()
@@ -113,7 +113,7 @@ func TestAcquireCancelsForgottenPendingLoads(t *testing.T) {
 	config.ViewRadius = 1
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := New(config, endpoint, &countingGenerator{}, store)
+	running := newAttachedWorldForTest(config, endpoint, &countingGenerator{}, store)
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 
 	if err := running.SetTrustedObserverCenter(core.Overworld, core.ChunkPos{}); err != nil {
@@ -153,7 +153,7 @@ func newAcquireServer(t *testing.T, store storage.Store, generator Generator) *S
 	config.ViewRadius = 0
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := New(config, endpoint, generator, store)
+	running := newAttachedWorldForTest(config, endpoint, generator, store)
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	if err := running.SetTrustedObserverCenter(core.Overworld, core.ChunkPos{}); err != nil {
 		t.Fatal(err)

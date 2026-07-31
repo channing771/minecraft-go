@@ -379,7 +379,7 @@ func TestServerRunUsesFreshShutdownTimeoutAndReturnsPersistenceError(t *testing.
 	config.SaveWorkers = 1
 	config.TrustedObserver = true
 	config.ShutdownTimeout = 200 * time.Millisecond
-	running := New(config, endpoint, playerTestGenerator{}, store)
+	running := newAttachedWorldForTest(config, endpoint, playerTestGenerator{}, store)
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	cancelRun()
 
@@ -598,7 +598,7 @@ func newShutdownTestServer(
 	config.SaveWorkers = 1
 	config.SaveChunks = 8
 	config.SaveBytes = 1 << 20
-	return New(config, endpoint, playerTestGenerator{}, store), client
+	return newAttachedWorldForTest(config, endpoint, playerTestGenerator{}, store), client
 }
 
 type shutdownTestStore struct {

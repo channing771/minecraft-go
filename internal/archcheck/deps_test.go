@@ -80,6 +80,48 @@ func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
 	}
 }
 
+func TestMcgoUsesLoginStreamsInsteadOfAttachedServerEndpoints(t *testing.T) {
+	path := filepath.Join(moduleRoot(t), "cmd", "mcgo", "app.go")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, legacy := range []string{"server.NewEmbedded(", "server.NewEmbeddedMemory(", "server.New("} {
+		if strings.Contains(string(source), legacy) {
+			t.Errorf("%s retains legacy attached-server constructor %s", path, legacy)
+		}
+	}
+	if !strings.Contains(string(source), "network.NewMemoryStreamPair") ||
+		!strings.Contains(string(source), "network.LoginClient") {
+		t.Errorf("%s must assemble local connections through a stream login", path)
+	}
+}
+
+func TestServerProductionDoesNotDeclareLegacyAttachedWorldWrappers(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "internal", "server")
+	for _, file := range []string{"generator.go", "server.go"} {
+		path := filepath.Join(root, file)
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			switch function.Name.Name {
+			case "New", "NewMemory", "NewEmbedded", "NewEmbeddedMemory":
+				t.Errorf("%s retains legacy server constructor %s", path, function.Name.Name)
+			case "PlayerState":
+				if function.Recv != nil && function.Type.Params.NumFields() == 0 {
+					t.Errorf("%s retains legacy no-argument PlayerState", path)
+				}
+			}
+		}
+	}
+}
+
 func TestSessionLifecycleResponsibilitiesLiveInSessionFile(t *testing.T) {
 	root := filepath.Join(moduleRoot(t), "internal", "server")
 	sessionDeclarations := topLevelDeclarationNames(

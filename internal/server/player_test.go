@@ -43,7 +43,7 @@ func TestTrustedObserverCoalescesCenterAndDrivesGeneration(t *testing.T) {
 
 func TestTrustedObserverDoesNotRegisterPlayer(t *testing.T) {
 	running := newTrustedObserverTestServer(t)
-	if player, ok := running.PlayerState(); ok {
+	if player, ok := running.PlayerStateFor(testSessionID); ok {
 		t.Fatalf("trusted observer 注册了玩家: %+v", player)
 	}
 }
@@ -117,7 +117,7 @@ func TestTrustedObserverAppliedCenterWaitsForStepWithPreloadedTarget(t *testing.
 	config.ViewRadius = 1
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := NewMemory(config, endpoint, generator)
+	running := newMemoryAttachedWorldForTest(config, endpoint, generator)
 	t.Cleanup(func() {
 		close(generator.release)
 		_ = client.Close()
@@ -257,13 +257,13 @@ func TestServerPublishesPlayerStateAndInputAck(t *testing.T) {
 	config := DefaultConfig(42)
 	config.ViewRadius, config.Workers = 0, 1
 	config.SpawnAnchor = core.ChunkPos{X: 4, Z: -3}
-	running := NewMemory(config, serverEndpoint, playerTestGenerator{})
+	running := newMemoryAttachedWorldForTest(config, serverEndpoint, playerTestGenerator{})
 	t.Cleanup(func() {
 		_ = clientEndpoint.Close()
 		shutdownServerForTest(t, running)
 	})
 
-	registered, ok := running.PlayerState()
+	registered, ok := running.PlayerStateFor(testSessionID)
 	if !ok || registered.Session != testSessionID || registered.Ready ||
 		registered.Dimension != core.Overworld || registered.ViewCenter != config.SpawnAnchor {
 		t.Fatalf("New 后 PlayerState = %+v,%v", registered, ok)
@@ -481,7 +481,7 @@ func newDefaultTestServer(t *testing.T) *Server {
 	config := DefaultConfig(42)
 	config.ViewRadius = 0
 	config.Workers = 1
-	running := NewMemory(config, endpoint, playerTestGenerator{})
+	running := newMemoryAttachedWorldForTest(config, endpoint, playerTestGenerator{})
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	return running
 }
@@ -493,7 +493,7 @@ func newTrustedObserverTestServer(t *testing.T) *Server {
 	config.ViewRadius = 0
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := NewMemory(config, endpoint, playerTestGenerator{})
+	running := newMemoryAttachedWorldForTest(config, endpoint, playerTestGenerator{})
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	return running
 }

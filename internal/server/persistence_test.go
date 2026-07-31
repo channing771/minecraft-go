@@ -938,7 +938,7 @@ func TestPersistenceBackpressureQueuesAcquireUntilMemoryRecovers(t *testing.T) {
 	config.SaveWorkers = 1
 	config.TrustedObserver = true
 	config.UnsavedBytes = 512
-	running := New(config, endpoint, &countingGenerator{}, store)
+	running := newAttachedWorldForTest(config, endpoint, &countingGenerator{}, store)
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	heldKey := chunkKey(0, 0)
 	running.engine = dirtyReadyEngine(t, []core.ChunkKey{heldKey})
@@ -1118,7 +1118,7 @@ func newPersistenceServerWithoutCleanup(t *testing.T, store storage.Store) *Serv
 	config.SaveChunks = 8
 	config.SaveBytes = 1 << 20
 	config.AutosaveTicks = 6000
-	return New(config, endpoint, playerTestGenerator{}, store)
+	return newAttachedWorldForTest(config, endpoint, playerTestGenerator{}, store)
 }
 
 func dirtyReadyEngine(t *testing.T, keys []core.ChunkKey) *sim.Engine {
