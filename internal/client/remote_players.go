@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -31,6 +32,8 @@ type remotePlayer struct {
 	yaw         float32
 	pitch       float32
 	lastTick    uint64
+	snapshots   remoteSnapshotRing
+	elapsed     time.Duration
 }
 
 type RemotePlayers struct {
@@ -101,14 +104,15 @@ func (players *RemotePlayers) applySpawn(spawn network.RemotePlayerSpawn) error 
 			spawn.PlayerID, spawn.ServerTick,
 		)
 	}
-	players.players[spawn.PlayerID] = &remotePlayer{
-		displayName: spawn.DisplayName,
-		dimension:   spawn.Dimension,
-		position:    spawn.Position,
-		yaw:         spawn.Yaw,
-		pitch:       spawn.Pitch,
-		lastTick:    spawn.ServerTick,
-	}
+	player := &remotePlayer{displayName: spawn.DisplayName}
+	player.pushSnapshot(remoteSnapshot{
+		tick:      spawn.ServerTick,
+		dimension: spawn.Dimension,
+		position:  spawn.Position,
+		yaw:       spawn.Yaw,
+		pitch:     spawn.Pitch,
+	}, true)
+	players.players[spawn.PlayerID] = player
 	return nil
 }
 
@@ -148,11 +152,13 @@ func (players *RemotePlayers) applyStates(states network.RemotePlayerStates) err
 	}
 	for _, state := range states.Players {
 		player := players.players[state.PlayerID]
-		player.dimension = state.Dimension
-		player.position = state.Position
-		player.yaw = state.Yaw
-		player.pitch = state.Pitch
-		player.lastTick = states.ServerTick
+		player.pushSnapshot(remoteSnapshot{
+			tick:      states.ServerTick,
+			dimension: state.Dimension,
+			position:  state.Position,
+			yaw:       state.Yaw,
+			pitch:     state.Pitch,
+		}, state.Reset)
 	}
 	return nil
 }
