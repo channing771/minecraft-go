@@ -42,6 +42,184 @@ func TestHostAllowsExactlyOneConcurrentLogin(t *testing.T) {
 	}
 }
 
+func TestHostAllowsEightPlayers(t *testing.T) {
+	host, stop := startMultiHost(t, newHostTestStore())
+	defer stop()
+	logins := make([]testLogin, 0, 8)
+	for number := byte(1); number <= 8; number++ {
+		login := startMemoryLogin(t, host, playerIdentity(number))
+		logins = append(logins, login)
+	}
+	for index, login := range logins {
+		waitReady(t, host, login)
+		entry := activeLoginForPlayer(t, host, login.Identity.PlayerID)
+		if want := sim.SessionID(index + 1); entry.Session != want {
+			t.Fatalf("player %d session = %d, want %d", index+1, entry.Session, want)
+		}
+	}
+	host.mu.Lock()
+	players, sessions := len(host.activeByPlayer), len(host.activeBySession)
+	host.mu.Unlock()
+	if players != 8 || sessions != 8 {
+		t.Fatalf("active indexes = players %d sessions %d, want 8/8", players, sessions)
+	}
+}
+
+func TestHostRejectsNinthPlayer(t *testing.T) {
+	store := newHostTestStore()
+	host, stop := startMultiHost(t, store)
+	defer stop()
+	logins := loginEightMemoryPlayers(t, host)
+	_, err := attemptMemoryLogin(host, playerIdentity(9))
+	assertLoginRejectCode(t, err, network.LoginServerFull)
+	if got := store.loadCount(); got != 8 {
+		t.Fatalf("LoadPlayer calls after full reject = %d, want 8", got)
+	}
+	assertLoginCanAdvance(t, logins[0], 101)
+}
+
+func TestHostRejectsDuplicatePlayerBeforeLoad(t *testing.T) {
+	store := newHostTestStore()
+	host, stop := startMultiHost(t, store)
+	defer stop()
+	logins := loginEightMemoryPlayers(t, host)
+	_, err := attemptMemoryLogin(host, logins[3].Identity)
+	assertLoginRejectCode(t, err, network.LoginAlreadyOnline)
+	if got := store.loadCount(); got != 8 {
+		t.Fatalf("duplicate called LoadPlayer: calls=%d, want 8", got)
+	}
+	assertLoginCanAdvance(t, logins[3], 102)
+}
+
+func TestHostAllowsDuplicateDisplayName(t *testing.T) {
+	host, stop := startMultiHost(t, newHostTestStore())
+	defer stop()
+	firstIdentity := playerIdentity(21)
+	secondIdentity := playerIdentity(22)
+	secondIdentity.DisplayName = firstIdentity.DisplayName
+	first := startMemoryLogin(t, host, firstIdentity)
+	second := startMemoryLogin(t, host, secondIdentity)
+	waitReady(t, host, first)
+	waitReady(t, host, second)
+	firstEntry := activeLoginForPlayer(t, host, firstIdentity.PlayerID)
+	secondEntry := activeLoginForPlayer(t, host, secondIdentity.PlayerID)
+	if firstEntry.Name != secondEntry.Name || firstEntry.Session == secondEntry.Session {
+		t.Fatalf("same-name entries = %+v and %+v", firstEntry, secondEntry)
+	}
+}
+
+func TestHostMiddleDisconnectFreesCapacityWithoutReusingSessionID(t *testing.T) {
+	host, stop := startMultiHost(t, newHostTestStore())
+	defer stop()
+	logins := loginEightMemoryPlayers(t, host)
+	middle := logins[3]
+	oldSession := activeLoginForPlayer(t, host, middle.Identity.PlayerID).Session
+	if err := middle.Client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitLoginDone(t, middle.Done)
+	waitForPlayerReleased(t, host, middle.Identity.PlayerID)
+	replacement := startMemoryLogin(t, host, playerIdentity(9))
+	waitReady(t, host, replacement)
+	newSession := activeLoginForPlayer(t, host, replacement.Identity.PlayerID).Session
+	if newSession != 9 || newSession <= oldSession {
+		t.Fatalf("replacement session = %d, want 9 and > %d", newSession, oldSession)
+	}
+}
+
+func TestHostCleanupUsesEntryIdentity(t *testing.T) {
+	config := hostTestConfig()
+	config.MaxPlayers = 8
+	host := NewHost(config, flatTestGenerator{}, newHostTestStore())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := host.Shutdown(ctx); err != nil {
+			t.Errorf("Host cleanup Shutdown: %v", err)
+		}
+	})
+	id := playerIdentity(31).PlayerID
+	old, err := host.reserveLogin(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.promoteLogin(old, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	host.releaseLogin(old)
+	successor, err := host.reserveLogin(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.promoteLogin(successor, 2, 2); err != nil {
+		t.Fatal(err)
+	}
+	host.releaseLogin(old)
+	host.mu.Lock()
+	byPlayer := host.activeByPlayer[id]
+	bySession := host.activeBySession[2]
+	host.mu.Unlock()
+	if byPlayer != successor || bySession != successor {
+		t.Fatalf("delayed cleanup removed successor: player=%p session=%p want=%p", byPlayer, bySession, successor)
+	}
+}
+
+func TestHostMalformedSessionCleanupIsIsolated(t *testing.T) {
+	config := hostTestConfig()
+	config.MaxPlayers = 8
+	host, stop := startHostWithConfig(t, config, newHostTestStore())
+	defer stop()
+	healthy := loginHealthyMemoryPlayers(t, host, 7, 200)
+
+	identity := playerIdentity(8)
+	clientStream, serverStream := network.NewMemoryStreamPair(32)
+	done := make(chan error, 1)
+	go func() {
+		done <- host.AcceptStream(context.Background(), &playErrorServerStream{
+			ServerPacketStream: serverStream,
+			err:                errors.New("malformed play packet"),
+		})
+	}()
+	client, err := network.LoginClient(context.Background(), clientStream, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
+	waitLoginDone(t, done)
+	waitForPlayerReleased(t, host, identity.PlayerID)
+	assertHealthyHostProgress(t, host, healthy)
+}
+
+func TestHostHeartbeatTimeoutCleanupIsIsolated(t *testing.T) {
+	config := hostTestConfig()
+	config.MaxPlayers = 8
+	config.HeartbeatInterval = 20 * time.Millisecond
+	config.HeartbeatTimeout = 150 * time.Millisecond
+	host, stop := startHostWithConfig(t, config, newHostTestStore())
+	defer stop()
+	healthy := loginHealthyMemoryPlayers(t, host, 7, 300)
+
+	timedOut := startMemoryLogin(t, host, playerIdentity(8))
+	waitForPlayerReleased(t, host, timedOut.Identity.PlayerID)
+	waitLoginDone(t, timedOut.Done)
+	assertHealthyHostProgress(t, host, healthy)
+}
+
+func TestHostSlowClientCleanupIsIsolated(t *testing.T) {
+	config := hostTestConfig()
+	config.MaxPlayers = 8
+	config.OutboxCapacity = 4
+	host, stop := startHostWithConfig(t, config, newHostTestStore())
+	defer stop()
+	healthy := loginHealthyMemoryPlayers(t, host, 7, 400)
+
+	slow := startMemoryLoginWithCapacity(t, host, playerIdentity(8), 1)
+	waitReady(t, host, slow)
+	waitForPlayerReleased(t, host, slow.Identity.PlayerID)
+	waitLoginDone(t, slow.Done)
+	assertHealthyHostProgress(t, host, healthy)
+}
+
 func TestHostClosesSeventeenthPreLoginImmediately(t *testing.T) {
 	host := newTestHost(t)
 	clients := make([]network.ClientPacketStream, 0, hostPreLoginCapacity)
@@ -277,9 +455,7 @@ func TestHostDisconnectPersistsReleasesSlotAndKeepsTicking(t *testing.T) {
 
 	first := startMemoryLogin(t, host, playerIdentity(5))
 	waitReady(t, host, first)
-	host.mu.Lock()
-	firstSession := host.active.Session
-	host.mu.Unlock()
+	firstSession := activeLoginForPlayer(t, host, first.Identity.PlayerID).Session
 	tickBefore := host.world.TickCount()
 	if err := first.Client.Close(); err != nil {
 		t.Fatal(err)
@@ -295,9 +471,7 @@ func TestHostDisconnectPersistsReleasesSlotAndKeepsTicking(t *testing.T) {
 
 	second := startMemoryLogin(t, host, playerIdentity(5))
 	waitReady(t, host, second)
-	host.mu.Lock()
-	secondSession := host.active.Session
-	host.mu.Unlock()
+	secondSession := activeLoginForPlayer(t, host, second.Identity.PlayerID).Session
 	if secondSession <= firstSession {
 		t.Fatalf("second session ID = %d, want > %d", secondSession, firstSession)
 	}
@@ -558,6 +732,7 @@ func newTestHostWithStore(t *testing.T, store storage.WorldStore) *Host {
 
 func hostTestConfig() Config {
 	config := DefaultConfig(42)
+	config.MaxPlayers = 1
 	config.ViewRadius = 0
 	config.Workers = 1
 	config.SaveWorkers = 1
@@ -591,9 +766,9 @@ func waitReady(t *testing.T, host *Host, login testLogin) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		host.mu.Lock()
-		active := host.active
+		active := host.activeByPlayer[login.Identity.PlayerID]
 		host.mu.Unlock()
-		if active != nil && active.PlayerID == login.Identity.PlayerID {
+		if active != nil {
 			if state, ok := host.world.PlayerStateFor(active.Session); ok && state.Ready {
 				return
 			}
@@ -620,14 +795,262 @@ func waitForNoActiveLogin(t *testing.T, host *Host) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		host.mu.Lock()
-		active := host.active
+		active := len(host.activeByPlayer)
 		host.mu.Unlock()
-		if active == nil {
+		if active == 0 {
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("active login was not released")
+}
+
+func startMultiHost(t *testing.T, store storage.WorldStore) (*Host, func()) {
+	t.Helper()
+	config := hostTestConfig()
+	config.MaxPlayers = 8
+	return startHostWithConfig(t, config, store)
+}
+
+func startHostWithConfig(t *testing.T, config Config, store storage.WorldStore) (*Host, func()) {
+	t.Helper()
+	host := NewHost(config, flatTestGenerator{}, store)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- host.Run(ctx, nil) }()
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("Host Run cleanup: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Error("Host Run cleanup timed out")
+			}
+		})
+	}
+	t.Cleanup(stop)
+	return host, stop
+}
+
+type endpointProgress struct {
+	login        testLogin
+	nextSequence uint64
+	nextMovement [2]int8
+	states       <-chan network.PlayerState
+	err          <-chan error
+	cancel       context.CancelFunc
+}
+
+func loginHealthyMemoryPlayers(t *testing.T, host *Host, count int, sequenceBase uint64) []endpointProgress {
+	t.Helper()
+	movements := [][2]int8{
+		{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1},
+	}
+	progress := make([]endpointProgress, 0, count)
+	for index := 0; index < count; index++ {
+		login := startMemoryLogin(t, host, playerIdentity(byte(index+1)))
+		waitReady(t, host, login)
+		current := monitorEndpointProgress(
+			login,
+			sequenceBase+uint64(index),
+			movements[index],
+		)
+		t.Cleanup(current.cancel)
+		progress = append(progress, current)
+	}
+	return progress
+}
+
+func monitorEndpointProgress(
+	login testLogin,
+	nextSequence uint64,
+	nextMovement [2]int8,
+) endpointProgress {
+	ctx, cancel := context.WithCancel(context.Background())
+	states := make(chan network.PlayerState, 1)
+	errResult := make(chan error, 1)
+	go func() {
+		for {
+			message, err := login.Client.Recv(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					errResult <- err
+				}
+				return
+			}
+			if state, ok := message.(network.PlayerState); ok {
+				select {
+				case states <- state:
+				default:
+					select {
+					case <-states:
+					default:
+					}
+					states <- state
+				}
+			}
+		}
+	}()
+	return endpointProgress{
+		login:        login,
+		nextSequence: nextSequence,
+		nextMovement: nextMovement,
+		states:       states,
+		err:          errResult,
+		cancel:       cancel,
+	}
+}
+
+func assertHealthyHostProgress(t *testing.T, host *Host, healthy []endpointProgress) {
+	t.Helper()
+	for index := range healthy {
+		progress := &healthy[index]
+		sequence := progress.nextSequence
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := progress.login.Client.Send(ctx, network.PlayerInput{
+			Sequence: sequence,
+			MoveX:    progress.nextMovement[0],
+			MoveZ:    progress.nextMovement[1],
+		}); err != nil {
+			cancel()
+			t.Fatalf("healthy endpoint post-cleanup send: %v", err)
+		}
+		acknowledged := false
+		for !acknowledged {
+			select {
+			case state := <-progress.states:
+				if state.LastInputSequence >= sequence {
+					acknowledged = true
+				}
+			case err := <-progress.err:
+				cancel()
+				t.Fatalf("healthy endpoint post-cleanup recv: %v", err)
+			case <-ctx.Done():
+				cancel()
+				t.Fatalf("healthy endpoint did not acknowledge post-cleanup sequence %d", sequence)
+			}
+		}
+		cancel()
+		progress.nextSequence++
+	}
+	host.mu.Lock()
+	players, sessions := len(host.activeByPlayer), len(host.activeBySession)
+	host.mu.Unlock()
+	if players != len(healthy) || sessions != len(healthy) {
+		t.Fatalf("healthy indexes = players %d sessions %d, want %d/%d", players, sessions, len(healthy), len(healthy))
+	}
+	tick := host.world.TickCount()
+	waitForTickAfter(t, host, tick)
+}
+
+func startMemoryLoginWithCapacity(t *testing.T, host *Host, identity network.Identity, capacity int) testLogin {
+	t.Helper()
+	clientStream, serverStream := network.NewMemoryStreamPair(capacity)
+	done := make(chan error, 1)
+	go func() { done <- host.AcceptStream(context.Background(), serverStream) }()
+	client, err := network.LoginClient(context.Background(), clientStream, identity)
+	if err != nil {
+		t.Fatalf("LoginClient: %v", err)
+	}
+	return testLogin{Client: client, Done: done, Identity: identity}
+}
+
+type playErrorServerStream struct {
+	network.ServerPacketStream
+	err error
+}
+
+func (stream *playErrorServerStream) Recv(ctx context.Context, state network.State) (network.ClientPacket, error) {
+	if state == network.StatePlay {
+		return nil, stream.err
+	}
+	return stream.ServerPacketStream.Recv(ctx, state)
+}
+
+func loginEightMemoryPlayers(t *testing.T, host *Host) []testLogin {
+	t.Helper()
+	logins := make([]testLogin, 0, 8)
+	for number := byte(1); number <= 8; number++ {
+		login := startMemoryLogin(t, host, playerIdentity(number))
+		waitReady(t, host, login)
+		logins = append(logins, login)
+	}
+	return logins
+}
+
+func activeLoginForPlayer(t *testing.T, host *Host, id core.PlayerID) activeLogin {
+	t.Helper()
+	host.mu.Lock()
+	entry := host.activeByPlayer[id]
+	if entry == nil {
+		host.mu.Unlock()
+		t.Fatalf("active login for %s not found", id)
+	}
+	got := *entry
+	host.mu.Unlock()
+	return got
+}
+
+func waitForPlayerReleased(t *testing.T, host *Host, id core.PlayerID) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		host.mu.Lock()
+		byPlayer := host.activeByPlayer[id]
+		bySession := false
+		for _, entry := range host.activeBySession {
+			if entry.PlayerID == id {
+				bySession = true
+				break
+			}
+		}
+		host.mu.Unlock()
+		if byPlayer == nil && !bySession {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("active login for %s was not released from both indexes", id)
+}
+
+func waitLoginDone(t *testing.T, done <-chan error) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("login worker did not exit")
+	}
+}
+
+func assertLoginRejectCode(t *testing.T, err error, want network.LoginRejectCode) {
+	t.Helper()
+	var remote *network.RemoteError
+	if !errors.As(err, &remote) || remote.State != network.StateLogin ||
+		network.LoginRejectCode(remote.Code) != want {
+		t.Fatalf("login error = %v, want code %d", err, want)
+	}
+}
+
+func assertLoginCanAdvance(t *testing.T, login testLogin, sequence uint64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := login.Client.Send(ctx, network.PlayerInput{Sequence: sequence}); err != nil {
+		t.Fatalf("send on existing login: %v", err)
+	}
+	for {
+		message, err := login.Client.Recv(ctx)
+		if err != nil {
+			t.Fatalf("recv on existing login: %v", err)
+		}
+		if state, ok := message.(network.PlayerState); ok && state.LastInputSequence >= sequence {
+			return
+		}
+	}
 }
 
 func waitForPlayerSave(t *testing.T, store *hostTestStore) {

@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	Seed              int64
+	MaxPlayers        int
 	ViewRadius        int
 	Workers           int
 	SnapshotChunks    int
@@ -37,6 +38,7 @@ type Config struct {
 func DefaultConfig(seed int64) Config {
 	return Config{
 		Seed:              seed,
+		MaxPlayers:        8,
 		ViewRadius:        33,
 		Workers:           max(1, runtime.GOMAXPROCS(0)-1),
 		SnapshotChunks:    64,
@@ -59,6 +61,12 @@ func DefaultConfig(seed int64) Config {
 }
 
 func (config *Config) validate() {
+	if config.MaxPlayers == 0 {
+		config.MaxPlayers = 8
+	}
+	if config.MaxPlayers < 1 || config.MaxPlayers > 8 {
+		panic("server: max players must be between 1 and 8")
+	}
 	if config.heartbeatClock == nil {
 		config.heartbeatClock = realHeartbeatClock{}
 	}

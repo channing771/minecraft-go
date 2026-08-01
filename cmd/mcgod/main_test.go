@@ -17,8 +17,38 @@ import (
 
 func TestDefaultOptions(t *testing.T) {
 	got, err := parseOptions(nil)
-	if err != nil || got.Listen != ":25565" || got.World != "worlds/default" || got.Seed != 42 {
+	if err != nil || got.Listen != ":25565" || got.World != "worlds/default" || got.Seed != 42 || got.MaxPlayers != 8 {
 		t.Fatalf("options=%+v err=%v", got, err)
+	}
+}
+
+func TestOptionsMaxPlayers(t *testing.T) {
+	got, err := parseOptions([]string{"--max-players=1"})
+	if err != nil || got.MaxPlayers != 1 {
+		t.Fatalf("explicit MaxPlayers options=%+v err=%v", got, err)
+	}
+	for _, value := range []string{"0", "9"} {
+		if _, err := parseOptions([]string{"--max-players=" + value}); err == nil {
+			t.Fatalf("parseOptions accepted explicit --max-players=%s", value)
+		}
+	}
+}
+
+func TestRunPassesMaxPlayersToHost(t *testing.T) {
+	want := errors.New("stop after config capture")
+	var got int
+	err := run(context.Background(), []string{"--max-players=3"}, dependencies{
+		openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
+			return storage.NewMemory(storage.Metadata{FormatVersion: 1, Seed: 42}), nil
+		},
+		listenTCP: func(string) (network.Listener, error) { return mcgodTestListener{}, nil },
+		newHost: func(config server.Config, _ server.Generator, _ storage.WorldStore) mcgodHost {
+			got = config.MaxPlayers
+			return &mcgodTestHost{runErr: want}
+		},
+	})
+	if !errors.Is(err, want) || got != 3 {
+		t.Fatalf("run error=%v MaxPlayers=%d, want %v and 3", err, got, want)
 	}
 }
 

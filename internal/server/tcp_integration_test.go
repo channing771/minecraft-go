@@ -196,8 +196,8 @@ func (h integrationHost) PlayerSnapshot(t *testing.T, id core.PlayerID) sim.Play
 func (h integrationHost) PlayerSnapshotFor(t *testing.T, id core.PlayerID) (sim.PlayerSnapshot, bool) {
 	t.Helper()
 	h.Host.mu.Lock()
-	active := h.Host.active
-	if active == nil || active.PlayerID != id || active.Session == 0 {
+	active := h.Host.activeByPlayer[id]
+	if active == nil || active.Session == 0 {
 		h.Host.mu.Unlock()
 		return sim.PlayerSnapshot{}, false
 	}
@@ -219,7 +219,7 @@ func (h integrationHost) WaitPlayerSaved(t *testing.T, id core.PlayerID) {
 	t.Helper()
 	waitIntegrationCondition(t, "player save completion", func() bool {
 		h.Host.mu.Lock()
-		active := h.Host.active
+		active := h.Host.activeByPlayer[id]
 		h.Host.mu.Unlock()
 		h.Host.players.mu.Lock()
 		cache := h.Host.players.cache[id]
@@ -395,6 +395,9 @@ func TestTCPPlayerAndWorldSurviveDisconnectAndRestart(t *testing.T) {
 func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 	t.Run("server full version mismatch and hostile peers leave listener healthy", func(t *testing.T) {
 		host := startDiskHost(t, t.TempDir(), "127.0.0.1:0", flatGenerator{})
+		host.Host.mu.Lock()
+		host.Host.config.MaxPlayers = 1
+		host.Host.mu.Unlock()
 		primaryIdentity := integrationIdentity(0x21, "Primary")
 		primary := dialIntegrationClient(t, host.Addr, primaryIdentity)
 		waitClientReadyFor(t, host, primary, primaryIdentity.PlayerID)
@@ -784,7 +787,7 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	}
 
 	host.mu.Lock()
-	active := *host.active
+	active := *host.activeByPlayer[identity.PlayerID]
 	host.mu.Unlock()
 	playerHash, ok := host.world.engine.PlayerHash(active.Session)
 	if !ok {

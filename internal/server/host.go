@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -15,7 +16,13 @@ import (
 
 const hostPreLoginCapacity = 16
 
-var errHostSessionIDExhausted = errors.New("server: host session IDs exhausted")
+var (
+	errHostSessionIDExhausted = errors.New("server: host session IDs exhausted")
+	errHostAlreadyOnline      = errors.New("server: player is already online")
+	errHostServerFull         = errors.New("server: host is full")
+	errHostLoginNotReserved   = errors.New("server: login reservation is no longer current")
+	errHostSessionRegistered  = errors.New("server: session is already registered")
+)
 
 type Host struct {
 	config  Config
@@ -24,7 +31,8 @@ type Host struct {
 
 	preLogin        chan struct{}
 	mu              sync.Mutex
-	active          *activeLogin
+	activeByPlayer  map[core.PlayerID]*activeLogin
+	activeBySession map[sim.SessionID]*activeLogin
 	preLoginStreams map[uint64]network.ServerPacketStream
 	nextPreLogin    uint64
 	nextSession     sim.SessionID
@@ -45,6 +53,7 @@ type activeLogin struct {
 }
 
 func NewHost(config Config, generator Generator, store storage.WorldStore) *Host {
+	config.validate()
 	if store == nil {
 		panic("server: nil host store")
 	}
@@ -55,6 +64,8 @@ func NewHost(config Config, generator Generator, store storage.WorldStore) *Host
 		world:           NewWorld(config, generator, store),
 		players:         newPlayerPersistence(store, config),
 		preLogin:        make(chan struct{}, hostPreLoginCapacity),
+		activeByPlayer:  make(map[core.PlayerID]*activeLogin),
+		activeBySession: make(map[sim.SessionID]*activeLogin),
 		preLoginStreams: make(map[uint64]network.ServerPacketStream),
 		runtimeDone:     make(chan error, 1),
 		shutdownGate:    gate,
@@ -136,14 +147,7 @@ func (h *Host) acceptLoop(ctx context.Context, listener network.Listener) {
 
 func (h *Host) pollPlayers() {
 	tick := h.world.TickCount()
-	h.mu.Lock()
-	var active activeLogin
-	hasActive := h.active != nil && h.active.Session != 0
-	if hasActive {
-		active = *h.active
-	}
-	h.mu.Unlock()
-	if hasActive {
+	for _, active := range h.activeLogins() {
 		if snapshot, ok := h.world.PlayerSnapshotFor(active.Session); ok {
 			if err := h.players.Observe(active.PlayerID, active.Name, snapshot, tick, false); err != nil {
 				slog.Warn("观察在线玩家快照失败", "error", err)
@@ -153,6 +157,62 @@ func (h *Host) pollPlayers() {
 	if err := h.players.Poll(tick); err != nil {
 		slog.Warn("玩家自动保存失败，保留重试", "error", err)
 	}
+}
+
+func (h *Host) activeLogins() []activeLogin {
+	h.mu.Lock()
+	active := make([]activeLogin, 0, len(h.activeBySession))
+	for _, entry := range h.activeBySession {
+		active = append(active, *entry)
+	}
+	h.mu.Unlock()
+	sort.Slice(active, func(left, right int) bool {
+		return active[left].Session < active[right].Session
+	})
+	return active
+}
+
+func (h *Host) reserveLogin(playerID core.PlayerID) (*activeLogin, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.activeByPlayer[playerID] != nil {
+		return nil, errHostAlreadyOnline
+	}
+	if h.closing || len(h.activeByPlayer) >= h.config.MaxPlayers {
+		return nil, errHostServerFull
+	}
+	entry := &activeLogin{PlayerID: playerID}
+	h.activeByPlayer[playerID] = entry
+	return entry, nil
+}
+
+func (h *Host) promoteLogin(entry *activeLogin, session sim.SessionID, generation uint64) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if entry == nil || h.activeByPlayer[entry.PlayerID] != entry {
+		return errHostLoginNotReserved
+	}
+	if h.activeBySession[session] != nil {
+		return errHostSessionRegistered
+	}
+	entry.Session = session
+	entry.Generation = generation
+	h.activeBySession[session] = entry
+	return nil
+}
+
+func (h *Host) releaseLogin(entry *activeLogin) {
+	if entry == nil {
+		return
+	}
+	h.mu.Lock()
+	if h.activeByPlayer[entry.PlayerID] == entry {
+		delete(h.activeByPlayer, entry.PlayerID)
+	}
+	if entry.Session != 0 && h.activeBySession[entry.Session] == entry {
+		delete(h.activeBySession, entry.Session)
+	}
+	h.mu.Unlock()
 }
 
 func (h *Host) AcceptStream(ctx context.Context, stream network.ServerPacketStream) error {
@@ -214,20 +274,17 @@ func (h *Host) acceptStream(
 	}
 	identity := pending.Identity()
 
-	h.mu.Lock()
-	if h.closing || h.active != nil {
-		h.mu.Unlock()
-		return pending.Reject(ctx, network.LoginServerFull, "服务器已有玩家在线")
+	active, err := h.reserveLogin(identity.PlayerID)
+	if errors.Is(err, errHostAlreadyOnline) {
+		return pending.Reject(ctx, network.LoginAlreadyOnline, "玩家已在线")
 	}
-	h.active = &activeLogin{PlayerID: identity.PlayerID, Name: identity.DisplayName}
+	if err != nil {
+		return pending.Reject(ctx, network.LoginServerFull, "服务器已满")
+	}
+	h.mu.Lock()
+	active.Name = identity.DisplayName
 	h.mu.Unlock()
-	defer func() {
-		h.mu.Lock()
-		if h.active != nil && h.active.PlayerID == identity.PlayerID {
-			h.active = nil
-		}
-		h.mu.Unlock()
-	}()
+	defer h.releaseLogin(active)
 
 	restore, err := h.players.Prepare(
 		pending.Context(),
@@ -253,9 +310,12 @@ func (h *Host) acceptStream(
 	h.nextGeneration++
 	sessionID := h.nextSession
 	generation := h.nextGeneration
-	h.active.Session = sessionID
-	h.active.Generation = generation
 	h.mu.Unlock()
+	if err := h.promoteLogin(active, sessionID, generation); err != nil {
+		h.players.Abort(identity.PlayerID)
+		_ = pending.Reject(ctx, network.LoginInternalError, "服务端会话注册失败")
+		return err
+	}
 
 	var exit <-chan SessionExit
 	err = pending.Accept(ctx, func(endpoint network.ServerEndpoint) error {
@@ -314,11 +374,6 @@ func (h *Host) Shutdown(ctx context.Context) error {
 	h.mu.Lock()
 	h.closing = true
 	listener := h.listener
-	var active activeLogin
-	hasActive := h.active != nil
-	if hasActive {
-		active = *h.active
-	}
 	streams := make([]network.ServerPacketStream, 0, len(h.preLoginStreams))
 	for _, stream := range h.preLoginStreams {
 		streams = append(streams, stream)
@@ -329,7 +384,7 @@ func (h *Host) Shutdown(ctx context.Context) error {
 	if listener != nil {
 		listenerErr = listener.Close()
 	}
-	if hasActive && active.Session != 0 {
+	for _, active := range h.activeLogins() {
 		h.world.DetachSession(active.Session, active.Generation, network.ErrClosed)
 	}
 	for _, stream := range streams {

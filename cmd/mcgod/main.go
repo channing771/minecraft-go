@@ -23,9 +23,10 @@ import (
 )
 
 type options struct {
-	Listen string
-	World  string
-	Seed   int64
+	Listen     string
+	World      string
+	Seed       int64
+	MaxPlayers int
 }
 
 type mcgodHost interface {
@@ -45,6 +46,7 @@ func parseOptions(args []string) (options, error) {
 	listen := flags.String("listen", ":25565", "TCP 监听地址")
 	world := flags.String("world", "worlds/default", "世界存档目录")
 	seed := flags.Int64("seed", 42, "新世界种子")
+	maxPlayers := flags.Int("max-players", 8, "最大玩家数（1..8，默认 8）")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -61,7 +63,12 @@ func parseOptions(args []string) (options, error) {
 	if _, err := net.ResolveTCPAddr("tcp", listenAddress); err != nil {
 		return options{}, fmt.Errorf("无效 --listen %q: %w", *listen, err)
 	}
-	return options{Listen: listenAddress, World: filepath.Clean(*world), Seed: *seed}, nil
+	if *maxPlayers < 1 || *maxPlayers > 8 {
+		return options{}, fmt.Errorf("--max-players 必须在 1..8 之间，实际为 %d", *maxPlayers)
+	}
+	return options{
+		Listen: listenAddress, World: filepath.Clean(*world), Seed: *seed, MaxPlayers: *maxPlayers,
+	}, nil
 }
 
 func defaultDependencies() dependencies {
@@ -101,7 +108,9 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 
 	metadata := store.Metadata()
 	dependencies.logger.Info("mcgod 已启动", "listen", listener.Addr(), "world", options.World, "protocol", network.ProtocolVersion)
-	host := dependencies.newHost(server.DefaultConfig(metadata.Seed), worldgen.New(metadata.Seed), store)
+	config := server.DefaultConfig(metadata.Seed)
+	config.MaxPlayers = options.MaxPlayers
+	host := dependencies.newHost(config, worldgen.New(metadata.Seed), store)
 	return host.Run(ctx, listener)
 }
 
