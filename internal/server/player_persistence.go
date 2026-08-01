@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -24,10 +25,10 @@ type playerPersistence struct {
 	mu           sync.Mutex
 	completionMu sync.Mutex
 	cache        map[core.PlayerID]*cachedPlayer
+	flushBarrier bool
+	scheduler    *playerSaveScheduler
 	jobs         chan playerSaveJob
 	completions  chan playerSaveCompletion
-	ctx          context.Context
-	cancel       context.CancelFunc
 	done         chan struct{}
 	closeOnce    sync.Once
 }
@@ -43,6 +44,7 @@ type cachedPlayer struct {
 	missingConfirmed    bool
 	dirty               bool
 	active, inFlight    bool
+	inFlightRevision    uint64
 	forcePending        bool
 	retry               *playerSaveJob
 	loadDone            chan struct{}
@@ -62,19 +64,22 @@ type playerSaveCompletion struct {
 	Err      error
 }
 
+type playerSaveIdentity struct {
+	playerID core.PlayerID
+	revision uint64
+}
+
 func newPlayerPersistence(store storage.PlayerStore, config Config) *playerPersistence {
-	ctx, cancel := context.WithCancel(context.Background())
+	scheduler := newPlayerSaveScheduler(store)
 	persistence := &playerPersistence{
 		store:       store,
 		config:      config,
 		cache:       make(map[core.PlayerID]*cachedPlayer),
-		jobs:        make(chan playerSaveJob, 1),
-		completions: make(chan playerSaveCompletion, 1),
-		ctx:         ctx,
-		cancel:      cancel,
+		scheduler:   scheduler,
+		jobs:        scheduler.jobs,
+		completions: scheduler.completions,
 		done:        make(chan struct{}),
 	}
-	go persistence.saveWorker()
 	return persistence
 }
 
@@ -287,20 +292,21 @@ func (p *playerPersistence) Poll(tick uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	err := p.drainCompletionsLocked(tick)
-	if p.hasInFlightLocked() {
-		return err
-	}
-	if player := p.nextRetryLocked(tick); player != nil {
+	for _, player := range p.sortedPlayersLocked(func(player *cachedPlayer) bool {
+		return !player.loading && !player.inFlight && player.retry != nil &&
+			player.retry.NextTick <= tick
+	}) {
 		job := *player.retry
 		if p.dispatchLocked(job) {
 			player.retry = nil
 		}
-		return err
 	}
 	if tick%p.config.AutosaveTicks != 0 {
 		return err
 	}
-	if player := p.nextDirtyLocked(false); player != nil {
+	for _, player := range p.sortedPlayersLocked(func(player *cachedPlayer) bool {
+		return !player.loading && !player.inFlight && player.dirty && player.retry == nil
+	}) {
 		p.dispatchLocked(playerSaveJob{
 			Save:    player.save(player.persisted + 1),
 			Attempt: 1,
@@ -315,6 +321,9 @@ func (p *playerPersistence) Flush(ctx context.Context) error {
 	}
 	p.completionMu.Lock()
 	defer p.completionMu.Unlock()
+	if err := p.drainInheritedCompletions(ctx); err != nil {
+		return err
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -330,7 +339,11 @@ func (p *playerPersistence) Flush(ctx context.Context) error {
 			return nil
 		}
 		if !p.hasInFlightLocked() {
-			if player := p.nextDirtyLocked(true); player != nil {
+			players := p.sortedPlayersLocked(func(player *cachedPlayer) bool {
+				return !player.loading && !player.inFlight && player.dirty
+			})
+			if len(players) != 0 {
+				player := players[0]
 				if player.retry != nil {
 					job := *player.retry
 					if p.dispatchLocked(job) {
@@ -350,8 +363,8 @@ func (p *playerPersistence) Flush(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-p.ctx.Done():
-				return p.ctx.Err()
+			case <-p.scheduler.ctx.Done():
+				return p.scheduler.ctx.Err()
 			default:
 			}
 			continue
@@ -367,16 +380,17 @@ func (p *playerPersistence) Flush(ctx context.Context) error {
 			}
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-p.ctx.Done():
-			return p.ctx.Err()
+		case <-p.scheduler.ctx.Done():
+			return p.scheduler.ctx.Err()
 		}
 	}
 }
 
 func (p *playerPersistence) CloseWorker() {
 	p.closeOnce.Do(func() {
-		p.cancel()
-		<-p.done
+		p.scheduler.CloseJobs()
+		p.scheduler.Wait()
+		close(p.done)
 	})
 }
 
@@ -448,51 +462,121 @@ func newMissingCachedPlayer(
 	}
 }
 
-func (p *playerPersistence) saveWorker() {
-	defer close(p.done)
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		case job := <-p.jobs:
-			revision, err := p.store.SavePlayer(p.ctx, clonePlayerSave(job.Save))
-			completion := playerSaveCompletion{
-				Job:      job,
-				Revision: revision,
-				Err:      err,
-			}
-			select {
-			case p.completions <- completion:
-			case <-p.ctx.Done():
-				return
-			}
-		}
-	}
-}
-
 func (p *playerPersistence) drainCompletionsLocked(tick uint64) error {
-	var result error
-	for {
+	completions := make([]playerSaveCompletion, 0, playerCacheCapacity)
+	draining := true
+	for draining {
 		select {
 		case completion := <-p.completions:
-			if err := p.applyCompletionLocked(completion, tick); err != nil {
-				result = errors.Join(result, err)
-			}
+			completions = append(completions, completion)
 		default:
-			return result
+			draining = false
 		}
 	}
+	return p.applyCompletionBatchLocked(completions, tick)
+}
+
+func (p *playerPersistence) drainInheritedCompletions(ctx context.Context) error {
+	p.mu.Lock()
+	p.flushBarrier = true
+	inherited := make(map[playerSaveIdentity]struct{}, playerCacheCapacity)
+	for id, player := range p.cache {
+		if player.inFlight {
+			inherited[playerSaveIdentity{
+				playerID: id,
+				revision: player.inFlightRevision,
+			}] = struct{}{}
+		}
+	}
+	if len(inherited) == 0 {
+		p.flushBarrier = false
+		p.mu.Unlock()
+		return nil
+	}
+	p.mu.Unlock()
+
+	completions := make([]playerSaveCompletion, 0, len(inherited))
+	var waitErr error
+	for len(inherited) != 0 && waitErr == nil {
+		select {
+		case completion := <-p.completions:
+			identity := playerSaveIdentity{
+				playerID: completion.Job.Save.PlayerID,
+				revision: completion.Job.Save.Revision,
+			}
+			if _, ok := inherited[identity]; ok {
+				completions = append(completions, completion)
+				delete(inherited, identity)
+			} else {
+				// The barrier prevents any new dispatch after its exact-key snapshot,
+				// so a foreign key is necessarily a stale/duplicate completion. Consume
+				// it without applying it to the current in-flight generation or errors.
+				continue
+			}
+		case <-ctx.Done():
+			waitErr = ctx.Err()
+		case <-p.scheduler.ctx.Done():
+			waitErr = p.scheduler.ctx.Err()
+		}
+	}
+	p.mu.Lock()
+	applyErr := p.applyCompletionBatchWithDispatchLocked(completions, 0, false)
+	p.flushBarrier = false
+	p.mu.Unlock()
+	return errors.Join(applyErr, waitErr)
+}
+
+func (p *playerPersistence) applyCompletionBatchLocked(
+	completions []playerSaveCompletion,
+	tick uint64,
+) error {
+	return p.applyCompletionBatchWithDispatchLocked(completions, tick, true)
+}
+
+func (p *playerPersistence) applyCompletionBatchWithDispatchLocked(
+	completions []playerSaveCompletion,
+	tick uint64,
+	dispatchFollowup bool,
+) error {
+	sort.Slice(completions, func(left, right int) bool {
+		leftJob, rightJob := completions[left].Job, completions[right].Job
+		if compared := bytes.Compare(leftJob.Save.PlayerID[:], rightJob.Save.PlayerID[:]); compared != 0 {
+			return compared < 0
+		}
+		return leftJob.Save.Revision < rightJob.Save.Revision
+	})
+	var result error
+	for _, completion := range completions {
+		if err := p.applyCompletionWithDispatchLocked(
+			completion,
+			tick,
+			dispatchFollowup,
+		); err != nil {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
 }
 
 func (p *playerPersistence) applyCompletionLocked(
 	completion playerSaveCompletion,
 	tick uint64,
 ) error {
+	return p.applyCompletionWithDispatchLocked(completion, tick, true)
+}
+
+func (p *playerPersistence) applyCompletionWithDispatchLocked(
+	completion playerSaveCompletion,
+	tick uint64,
+	dispatchFollowup bool,
+) error {
 	player := p.cache[completion.Job.Save.PlayerID]
-	if player == nil || player.loading || !player.inFlight {
+	if player == nil || player.loading || !player.inFlight ||
+		player.inFlightRevision != completion.Job.Save.Revision {
 		return nil
 	}
 	player.inFlight = false
+	player.inFlightRevision = 0
 	err := completion.Err
 	if err == nil && completion.Revision != completion.Job.Save.Revision {
 		err = fmt.Errorf(
@@ -523,7 +607,7 @@ func (p *playerPersistence) applyCompletionLocked(
 	player.missingConfirmed = false
 	player.retry = nil
 	player.dirty = !player.matchesSave(completion.Job.Save)
-	if player.dirty && player.forcePending {
+	if player.dirty && player.forcePending && dispatchFollowup {
 		p.dispatchLocked(playerSaveJob{
 			Save:    player.save(player.persisted + 1),
 			Attempt: 1,
@@ -534,19 +618,18 @@ func (p *playerPersistence) applyCompletionLocked(
 
 func (p *playerPersistence) dispatchLocked(job playerSaveJob) bool {
 	player := p.cache[job.Save.PlayerID]
-	if player == nil || player.loading || player.inFlight {
+	if player == nil || player.loading || player.inFlight || p.flushBarrier {
 		return false
 	}
-	select {
-	case p.jobs <- job:
+	if p.scheduler.TrySubmit(job) {
 		player.inFlight = true
+		player.inFlightRevision = job.Save.Revision
 		if player.matchesSave(job.Save) {
 			player.forcePending = false
 		}
 		return true
-	default:
-		return false
 	}
+	return false
 }
 
 func (p *playerPersistence) evictCleanLocked() {
@@ -575,30 +658,19 @@ func (p *playerPersistence) hasDirtyOrInFlightLocked() bool {
 	return false
 }
 
-func (p *playerPersistence) nextRetryLocked(tick uint64) *cachedPlayer {
-	var next *cachedPlayer
+func (p *playerPersistence) sortedPlayersLocked(
+	include func(*cachedPlayer) bool,
+) []*cachedPlayer {
+	players := make([]*cachedPlayer, 0, len(p.cache))
 	for _, player := range p.cache {
-		if player.loading || player.retry == nil || player.retry.NextTick > tick {
-			continue
-		}
-		if next == nil || bytes.Compare(player.id[:], next.id[:]) < 0 {
-			next = player
+		if include(player) {
+			players = append(players, player)
 		}
 	}
-	return next
-}
-
-func (p *playerPersistence) nextDirtyLocked(includeRetry bool) *cachedPlayer {
-	var next *cachedPlayer
-	for _, player := range p.cache {
-		if player.loading || !player.dirty || !includeRetry && player.retry != nil {
-			continue
-		}
-		if next == nil || bytes.Compare(player.id[:], next.id[:]) < 0 {
-			next = player
-		}
-	}
-	return next
+	sort.Slice(players, func(left, right int) bool {
+		return bytes.Compare(players[left].id[:], players[right].id[:]) < 0
+	})
+	return players
 }
 
 func (player *cachedPlayer) evictable() bool {
