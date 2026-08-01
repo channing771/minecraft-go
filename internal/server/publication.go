@@ -18,30 +18,52 @@ type queuedDelta struct {
 const maxForgetChunksPerPacket = 4096
 
 func (server *Server) publish(result sim.TickResult) {
+	players := make(map[sim.SessionID]sim.PlayerUpdate, len(result.Players))
+	for _, player := range result.Players {
+		players[player.Session] = player
+	}
 	for _, id := range server.sortedPublicationIDsLocked() {
 		current := server.publicationSessionLocked(id)
 		if current == nil || current.closed() {
 			continue
 		}
-		server.publishSession(current, result)
+		server.publishSession(current, result, players)
 	}
 }
 
-func (server *Server) publishSession(current *session, result sim.TickResult) {
-	var playerUpdate sim.PlayerUpdate
-	hasPlayerUpdate := false
-	for _, player := range result.Players {
-		if player.Session != current.id {
-			continue
-		}
-		playerUpdate = player
-		hasPlayerUpdate = true
-		current.hasView = true
-		current.viewDimension = player.Dimension
-		current.viewCenter = player.ViewCenter
-		break
+func (server *Server) publishSession(
+	current *session,
+	result sim.TickResult,
+	players map[sim.SessionID]sim.PlayerUpdate,
+) {
+	server.updateSessionView(current, players[current.id])
+	server.queueReadyAndResync(current, result)
+	if !server.publishRemoteDespawns(current, players) {
+		return
 	}
+	if !server.publishForget(current, result.Forget[current.id]) {
+		return
+	}
+	deltas := server.classifyDeltas(current, result.Changes)
+	if !server.publishSnapshots(current) || !server.publishDeltas(current, deltas) {
+		return
+	}
+	if !server.publishRemoteSpawnsAndStates(current, result.Tick, players) {
+		return
+	}
+	server.publishLocalResult(current, result, players[current.id])
+}
 
+func (server *Server) updateSessionView(current *session, player sim.PlayerUpdate) {
+	if player.Session != current.id {
+		return
+	}
+	current.hasView = true
+	current.viewDimension = player.Dimension
+	current.viewCenter = player.ViewCenter
+}
+
+func (server *Server) queueReadyAndResync(current *session, result sim.TickResult) {
 	for _, key := range result.Ready {
 		if server.engine.SessionWantsChunk(current.id, key) {
 			current.queueSnapshot(key, false)
@@ -60,28 +82,35 @@ func (server *Server) publishSession(current *session, result sim.TickResult) {
 		}
 		current.queueSnapshot(key, true)
 	}
+}
 
-	forgetMessages := current.applyForget(result.Forget[current.id])
-	deltas := server.classifyDeltas(current, result.Changes)
-
-	if !server.publishSnapshots(current) {
-		server.closePublicationSessionLocked(current, errSessionOutboxFull)
-		return
+func (server *Server) publishForget(current *session, keys []core.ChunkKey) bool {
+	for _, message := range current.applyForget(keys) {
+		if !current.enqueue(message) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
+			return false
+		}
 	}
+	return true
+}
+
+func (server *Server) publishDeltas(current *session, deltas []queuedDelta) bool {
 	for _, delta := range deltas {
 		if !current.enqueue(delta.message) {
 			server.closePublicationSessionLocked(current, errSessionOutboxFull)
-			return
+			return false
 		}
 		publication := current.publications[delta.key]
 		publication.lastRevision = delta.message.NewRevision
 	}
-	for _, message := range forgetMessages {
-		if !current.enqueue(message) {
-			server.closePublicationSessionLocked(current, errSessionOutboxFull)
-			return
-		}
-	}
+	return true
+}
+
+func (server *Server) publishLocalResult(
+	current *session,
+	result sim.TickResult,
+	playerUpdate sim.PlayerUpdate,
+) {
 	for _, rejection := range result.Rejected {
 		if rejection.Session != current.id {
 			continue
@@ -110,7 +139,7 @@ func (server *Server) publishSession(current *session, result sim.TickResult) {
 			return
 		}
 	}
-	if hasPlayerUpdate {
+	if playerUpdate.Session == current.id {
 		if !current.enqueue(network.PlayerState{
 			ServerTick:        result.Tick,
 			LastInputSequence: playerUpdate.LastInputSequence,
@@ -313,6 +342,7 @@ func (server *Server) publishSnapshots(current *session) bool {
 			break
 		}
 		if !current.enqueue(message) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 			return false
 		}
 		delete(current.pendingSnapshots, key)

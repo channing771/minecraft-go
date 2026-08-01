@@ -126,6 +126,7 @@ type session struct {
 	viewCenter       core.ChunkPos
 	publications     map[core.ChunkKey]*publication
 	pendingSnapshots map[core.ChunkKey]snapshotRequest
+	visiblePlayers   map[core.PlayerID]visiblePlayer
 }
 
 func newSession(
@@ -158,6 +159,7 @@ func newSession(
 		heartbeatReply:   make(chan uint64, 1),
 		publications:     make(map[core.ChunkKey]*publication),
 		pendingSnapshots: make(map[core.ChunkKey]snapshotRequest),
+		visiblePlayers:   make(map[core.PlayerID]visiblePlayer),
 	}
 	workers.Add(2)
 	go current.writeLoop()
@@ -190,6 +192,7 @@ func newObserverSession(
 		heartbeatReply:   make(chan uint64, 1),
 		publications:     make(map[core.ChunkKey]*publication),
 		pendingSnapshots: make(map[core.ChunkKey]snapshotRequest),
+		visiblePlayers:   make(map[core.PlayerID]visiblePlayer),
 	}
 	workers.Add(1)
 	go current.writeLoop()
