@@ -32,6 +32,7 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Chunk:        core.ChunkPos{X: 2, Z: -3},
 			HaveRevision: 7,
 		},
+		network.KeepAliveReply{Token: 1},
 	}
 	serverMessages := []network.ServerMessage{
 		network.ChunkSnapshot{},
@@ -53,8 +54,10 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Ready:             true,
 			Reset:             true,
 		},
+		network.KeepAlive{Token: 1},
+		network.Disconnect{Code: network.DisconnectTimeout},
 	}
-	if len(clientMessages) != 4 || len(serverMessages) != 5 {
+	if len(clientMessages) != 5 || len(serverMessages) != 7 {
 		t.Fatal("消息集合不完整")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"minecraft-go/internal/network"
 	"minecraft-go/internal/storage"
 )
 
@@ -50,6 +51,21 @@ func TestApplicationStoreBenchmarkUsesMemoryWithoutTouchingWorldPath(t *testing.
 	}
 	if _, err := os.Stat(worldPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("benchmark 触碰了 WorldPath，Stat error=%v", err)
+	}
+}
+
+func TestApplicationConnectionRemoteNeverOpensLocalStore(t *testing.T) {
+	worldPath := filepath.Join(t.TempDir(), "must-not-exist")
+	opened, err := openApplicationStore(context.Background(), applicationOptions{
+		Seed:      42,
+		Connect:   "127.0.0.1:25565",
+		WorldPath: worldPath,
+	})
+	if err != nil || opened != nil {
+		t.Fatalf("remote store = (%T, %v), want (nil, nil)", opened, err)
+	}
+	if _, err := os.Stat(worldPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remote touched WorldPath, Stat error=%v", err)
 	}
 }
 
@@ -115,6 +131,7 @@ func TestMainOptionsDefaultsAndWorldOverride(t *testing.T) {
 func TestMainOptionsRejectMissingBenchmarkOutputBeforeConstruction(t *testing.T) {
 	constructed := 0
 	err := runWithDependencies([]string{"--benchmark"}, runDependencies{
+		loadIdentity: testIdentityLoader,
 		newApplication: func(applicationOptions) (*application, error) {
 			constructed++
 			return nil, errors.New("不应构造应用")
@@ -186,6 +203,7 @@ func TestRunWithDependenciesPropagatesLifecycleErrorsAndAlwaysCloses(t *testing.
 			benchmarkCalls := 0
 			closeCalls := 0
 			gotErr := runWithDependencies(test.args, runDependencies{
+				loadIdentity: testIdentityLoader,
 				newApplication: func(applicationOptions) (*application, error) {
 					constructionCalls++
 					if test.constructionErr != nil {
@@ -205,8 +223,9 @@ func TestRunWithDependenciesPropagatesLifecycleErrorsAndAlwaysCloses(t *testing.
 						},
 					}, nil
 				},
-				runInteractive: func(*application) {
+				runInteractive: func(*application) error {
 					interactiveCalls++
+					return nil
 				},
 				runBenchmark: func(*application, string) error {
 					benchmarkCalls++
@@ -231,4 +250,8 @@ func TestRunWithDependenciesPropagatesLifecycleErrorsAndAlwaysCloses(t *testing.
 			}
 		})
 	}
+}
+
+func testIdentityLoader(*string) (network.Identity, error) {
+	return network.Identity{}, nil
 }

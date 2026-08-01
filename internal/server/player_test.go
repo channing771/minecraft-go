@@ -43,7 +43,7 @@ func TestTrustedObserverCoalescesCenterAndDrivesGeneration(t *testing.T) {
 
 func TestTrustedObserverDoesNotRegisterPlayer(t *testing.T) {
 	running := newTrustedObserverTestServer(t)
-	if player, ok := running.PlayerState(); ok {
+	if player, ok := running.PlayerStateFor(testSessionID); ok {
 		t.Fatalf("trusted observer 注册了玩家: %+v", player)
 	}
 }
@@ -62,14 +62,24 @@ func TestTrustedObserverRejectsNonOverworldCenter(t *testing.T) {
 }
 
 func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
-	client, endpoint := network.NewMemoryPair(32)
+	observerClient, observerEndpoint := network.NewMemoryPair(32)
+	playerClient, playerEndpoint := network.NewMemoryPair(32)
 	config := DefaultConfig(42)
 	config.ViewRadius = 0
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := NewMemory(config, endpoint, playerTestGenerator{})
+	running := NewWorld(config, playerTestGenerator{}, testStore())
+	if err := running.AttachTrustedObserver(observerEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := running.AttachSession(SessionSpec{
+		ID: 7, Generation: 1, Endpoint: playerEndpoint, Restore: testRestore(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
-		_ = client.Close()
+		_ = observerClient.Close()
+		_ = playerClient.Close()
 		shutdownServerForTest(t, running)
 	})
 
@@ -79,7 +89,7 @@ func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	sendPlayerClientMessage(t, client, network.RequestChunkResync{
+	sendPlayerClientMessage(t, playerClient, network.RequestChunkResync{
 		Sequence:  1_000,
 		Dimension: core.Overworld,
 		Chunk:     core.ChunkPos{X: 1},
@@ -107,7 +117,7 @@ func TestTrustedObserverAppliedCenterWaitsForStepWithPreloadedTarget(t *testing.
 	config.ViewRadius = 1
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := NewMemory(config, endpoint, generator)
+	running := newMemoryAttachedWorldForTest(config, endpoint, generator)
 	t.Cleanup(func() {
 		close(generator.release)
 		_ = client.Close()
@@ -175,7 +185,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Pitch:    -0.25,
 			},
 			want: sim.Command{
-				Session:  localSessionID,
+				Session:  testSessionID,
 				Sequence: 11,
 				Kind:     sim.CommandPlayerInput,
 				MoveX:    -1,
@@ -193,7 +203,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Pitch:    0.5,
 			},
 			want: sim.Command{
-				Session:  localSessionID,
+				Session:  testSessionID,
 				Sequence: 12,
 				Kind:     sim.CommandBreakBlock,
 				Yaw:      -1.25,
@@ -209,7 +219,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Block:    core.DirtID,
 			},
 			want: sim.Command{
-				Session:  localSessionID,
+				Session:  testSessionID,
 				Sequence: 13,
 				Kind:     sim.CommandPlaceBlock,
 				Yaw:      1.5,
@@ -220,7 +230,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, ok := translateClientMessage(test.message)
+			got, ok := translateClientMessage(testSessionID, test.message)
 			if !ok || !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("translateClientMessage(%#v) = %#v,%v，想要 %#v,true", test.message, got, ok, test.want)
 			}
@@ -247,14 +257,14 @@ func TestServerPublishesPlayerStateAndInputAck(t *testing.T) {
 	config := DefaultConfig(42)
 	config.ViewRadius, config.Workers = 0, 1
 	config.SpawnAnchor = core.ChunkPos{X: 4, Z: -3}
-	running := NewMemory(config, serverEndpoint, playerTestGenerator{})
+	running := newMemoryAttachedWorldForTest(config, serverEndpoint, playerTestGenerator{})
 	t.Cleanup(func() {
 		_ = clientEndpoint.Close()
 		shutdownServerForTest(t, running)
 	})
 
-	registered, ok := running.PlayerState()
-	if !ok || registered.Session != localSessionID || registered.Ready ||
+	registered, ok := running.PlayerStateFor(testSessionID)
+	if !ok || registered.Session != testSessionID || registered.Ready ||
 		registered.Dimension != core.Overworld || registered.ViewCenter != config.SpawnAnchor {
 		t.Fatalf("New 后 PlayerState = %+v,%v", registered, ok)
 	}
@@ -320,18 +330,24 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		t.Fatalf("Ready tick 尾消息 = %#v", readyMessages[1])
 	}
 
-	running.incoming <- sim.Command{
-		Session:  localSessionID,
-		Sequence: 1,
-		Kind:     sim.CommandBreakBlock,
-		Yaw:      0,
-		Pitch:    -1.5,
+	running.incoming <- incomingCommand{
+		Session: testSessionID, Generation: 1,
+		Command: sim.Command{
+			Session:  testSessionID,
+			Sequence: 1,
+			Kind:     sim.CommandBreakBlock,
+			Yaw:      0,
+			Pitch:    -1.5,
+		},
 	}
-	running.incoming <- sim.Command{
-		Session:  localSessionID,
-		Sequence: 2,
-		Kind:     sim.CommandPlayerInput,
-		MoveX:    2,
+	running.incoming <- incomingCommand{
+		Session: testSessionID, Generation: 1,
+		Command: sim.Command{
+			Session:  testSessionID,
+			Sequence: 2,
+			Kind:     sim.CommandPlayerInput,
+			MoveX:    2,
+		},
 	}
 	changed := running.StepForTest()
 	changedMessages := []network.ServerMessage{
@@ -355,8 +371,8 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		Dimension: core.Overworld,
 		Pos:       core.ChunkPos{},
 	}
-	running.session.publications[forgottenKey] = &publication{snapshotSent: true}
-	player, ok := running.engine.Player(localSessionID)
+	running.sessions[testSessionID].publications[forgottenKey] = &publication{snapshotSent: true}
+	player, ok := running.engine.Player(testSessionID)
 	if !ok {
 		t.Fatal("本地玩家不存在")
 	}
@@ -364,7 +380,7 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 	running.publish(sim.TickResult{
 		Tick: forgetTick,
 		Forget: map[sim.SessionID][]core.ChunkKey{
-			localSessionID: {forgottenKey},
+			testSessionID: {forgottenKey},
 		},
 		Players: []sim.PlayerUpdate{player},
 	})
@@ -465,7 +481,7 @@ func newDefaultTestServer(t *testing.T) *Server {
 	config := DefaultConfig(42)
 	config.ViewRadius = 0
 	config.Workers = 1
-	running := NewMemory(config, endpoint, playerTestGenerator{})
+	running := newMemoryAttachedWorldForTest(config, endpoint, playerTestGenerator{})
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	return running
 }
@@ -477,7 +493,7 @@ func newTrustedObserverTestServer(t *testing.T) *Server {
 	config.ViewRadius = 0
 	config.Workers = 1
 	config.TrustedObserver = true
-	running := NewMemory(config, endpoint, playerTestGenerator{})
+	running := newMemoryAttachedWorldForTest(config, endpoint, playerTestGenerator{})
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	return running
 }

@@ -66,11 +66,18 @@ type PhaseSummary struct {
 
 // PersistenceSummary 汇总 benchmark 期间完成的存档批次耗时。
 type PersistenceSummary struct {
-	Snapshots uint64  `json:"snapshots"`
+	Snapshots int64   `json:"snapshots"`
 	P50MS     float64 `json:"p50_ms"`
 	P95MS     float64 `json:"p95_ms"`
 	P99MS     float64 `json:"p99_ms"`
 	MaxMS     float64 `json:"max_ms"`
+}
+
+// ProtocolSummary 汇总固定协议探针的尾延迟与编码字节数。
+type ProtocolSummary struct {
+	EncodeP99MS float64 `json:"encode_p99_ms"`
+	DecodeP99MS float64 `json:"decode_p99_ms"`
+	Bytes       uint64  `json:"bytes"`
 }
 
 func (s *PerfSampler) Summary(peakRSS uint64) PhaseSummary {
@@ -126,15 +133,18 @@ func percentile(sorted []float64, p float64) float64 {
 
 // PerfReport 是 cmd/mcgo 与 cmd/perfcheck 共用的稳定 JSON 格式。
 type PerfReport struct {
-	ScenarioVersion int                     `json:"scenario_version"`
-	Hardware        string                  `json:"hardware"`
-	OS              string                  `json:"os"`
-	GoVersion       string                  `json:"go_version"`
-	GitCommit       string                  `json:"git_commit"`
-	Framebuffer     string                  `json:"framebuffer"`
-	LoadSeconds     float64                 `json:"load_seconds"`
-	SnapshotSeconds float64                 `json:"snapshot_seconds"`
-	Phases          map[string]PhaseSummary `json:"phases"`
-	Ticks           PhaseSummary            `json:"ticks"`
-	Persistence     PersistenceSummary      `json:"persistence"`
+	ScenarioVersion   int                     `json:"scenario_version"`
+	Transport         string                  `json:"transport,omitempty"`
+	Hardware          string                  `json:"hardware"`
+	OS                string                  `json:"os"`
+	GoVersion         string                  `json:"go_version"`
+	GitCommit         string                  `json:"git_commit"`
+	Framebuffer       string                  `json:"framebuffer"`
+	LoadSeconds       float64                 `json:"load_seconds"`
+	SnapshotSeconds   float64                 `json:"snapshot_seconds"`
+	Phases            map[string]PhaseSummary `json:"phases"`
+	Ticks             PhaseSummary            `json:"ticks"`
+	Persistence       PersistenceSummary      `json:"persistence"`
+	Protocol          ProtocolSummary         `json:"protocol,omitempty"`
+	PlayerPersistence PersistenceSummary      `json:"player_persistence,omitempty"`
 }

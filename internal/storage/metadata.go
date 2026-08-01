@@ -30,7 +30,17 @@ type metadataDirectory interface {
 	Close() error
 }
 
+type atomicReplaceFile interface {
+	Name() string
+	Chmod(fs.FileMode) error
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
 type atomicReplaceHooks struct {
+	createTemp    func(string, string) (atomicReplaceFile, error)
+	beforeRename  func() error
 	rename        func(string, string) error
 	openDirectory func(string) (metadataDirectory, error)
 }
@@ -103,11 +113,14 @@ func decodeMetadata(encoded []byte) (Metadata, error) {
 	}, nil
 }
 
-func replaceFileAtomically(path string, data []byte, mode fs.FileMode) error {
-	return replaceFileAtomicallyWithHooks(path, data, mode, atomicReplaceHooks{
-		rename:        os.Rename,
-		openDirectory: openMetadataDirectory,
-	})
+func replaceFileAtomically(
+	path, pattern string,
+	data []byte,
+	mode fs.FileMode,
+) error {
+	return replaceFileAtomicallyWithPatternAndHooks(
+		path, pattern, data, mode, atomicReplaceHooks{},
+	)
 }
 
 func replaceFileAtomicallyWithHooks(
@@ -116,10 +129,33 @@ func replaceFileAtomicallyWithHooks(
 	mode fs.FileMode,
 	hooks atomicReplaceHooks,
 ) error {
+	return replaceFileAtomicallyWithPatternAndHooks(
+		path, ".world.meta.tmp-*", data, mode, hooks,
+	)
+}
+
+func replaceFileAtomicallyWithPatternAndHooks(
+	path, pattern string,
+	data []byte,
+	mode fs.FileMode,
+	hooks atomicReplaceHooks,
+) error {
+	if hooks.createTemp == nil {
+		hooks.createTemp = func(directory, pattern string) (atomicReplaceFile, error) {
+			return os.CreateTemp(directory, pattern)
+		}
+	}
+	if hooks.rename == nil {
+		hooks.rename = os.Rename
+	}
+	if hooks.openDirectory == nil {
+		hooks.openDirectory = openMetadataDirectory
+	}
+
 	parent := filepath.Dir(path)
-	temporary, err := os.CreateTemp(parent, ".world.meta.tmp-*")
+	temporary, err := hooks.createTemp(parent, pattern)
 	if err != nil {
-		return fmt.Errorf("create temporary metadata: %w", err)
+		return fmt.Errorf("create temporary file: %w", err)
 	}
 	temporaryPath := temporary.Name()
 	removeTemporary := true
@@ -131,37 +167,42 @@ func replaceFileAtomicallyWithHooks(
 	}()
 
 	if err := temporary.Chmod(mode); err != nil {
-		return fmt.Errorf("chmod temporary metadata: %w", err)
+		return fmt.Errorf("chmod temporary file: %w", err)
 	}
 	for remaining := data; len(remaining) > 0; {
 		written, err := temporary.Write(remaining)
 		if err != nil {
-			return fmt.Errorf("write temporary metadata: %w", err)
+			return fmt.Errorf("write temporary file: %w", err)
 		}
 		if written == 0 {
-			return fmt.Errorf("write temporary metadata: %w", io.ErrShortWrite)
+			return fmt.Errorf("write temporary file: %w", io.ErrShortWrite)
 		}
 		remaining = remaining[written:]
 	}
 	if err := temporary.Sync(); err != nil {
-		return fmt.Errorf("sync temporary metadata: %w", err)
+		return fmt.Errorf("sync temporary file: %w", err)
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close temporary metadata: %w", err)
+		return fmt.Errorf("close temporary file: %w", err)
+	}
+	if hooks.beforeRename != nil {
+		if err := hooks.beforeRename(); err != nil {
+			return fmt.Errorf("before replacing file: %w", err)
+		}
 	}
 	if err := hooks.rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("replace metadata: %w", err)
+		return fmt.Errorf("replace file: %w", err)
 	}
 	removeTemporary = false
 
 	directory, err := hooks.openDirectory(parent)
 	if err != nil {
-		return fmt.Errorf("open metadata directory: %w", err)
+		return fmt.Errorf("open containing directory: %w", err)
 	}
 	syncErr := directory.Sync()
 	closeErr := directory.Close()
 	if err := errors.Join(syncErr, closeErr); err != nil {
-		return fmt.Errorf("sync metadata directory: %w", err)
+		return fmt.Errorf("sync containing directory: %w", err)
 	}
 
 	return nil

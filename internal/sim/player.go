@@ -30,6 +30,30 @@ type PlayerUpdate struct {
 	Reset             bool
 }
 
+type PlayerLocation struct {
+	Dimension core.DimensionID
+	Position  mgl32.Vec3
+}
+
+type PlayerRestore struct {
+	Current        *PlayerLocation
+	Safe           *PlayerLocation
+	Yaw, Pitch     float32
+	SpawnDimension core.DimensionID
+	SpawnAnchor    core.ChunkPos
+}
+
+type PlayerSnapshot struct {
+	Current    PlayerLocation
+	Yaw, Pitch float32
+	Safe       *PlayerLocation
+}
+
+type restoreCandidate struct {
+	location       PlayerLocation
+	requireSupport bool
+}
+
 type playerState struct {
 	lifecycle         PlayerLifecycle
 	anchor            core.ChunkPos
@@ -39,6 +63,10 @@ type playerState struct {
 	lastInputSequence uint64
 	reset             bool
 
+	restoreCandidates  []restoreCandidate
+	nextRestore        int
+	restoreWanted      map[core.ChunkKey]struct{}
+	safe               *PlayerLocation
 	candidates         []spawnColumn
 	candidateChunks    []core.ChunkPos
 	nextCandidate      int
@@ -47,39 +75,62 @@ type playerState struct {
 	exhaustedRevisions []uint64
 }
 
-func (engine *Engine) RegisterSession(
-	id SessionID,
-	dimensionID core.DimensionID,
-	anchor core.ChunkPos,
-) {
-	if engine.dimensions[dimensionID] == nil {
+func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
+	if engine.dimensions[restore.SpawnDimension] == nil {
 		panic("sim: register session in unknown dimension")
 	}
 	if engine.sessions[id] != nil {
 		panic("sim: duplicate registered session")
 	}
-	candidates := spawnCandidates(anchor)
+	candidates := spawnCandidates(restore.SpawnAnchor)
 	player := &playerState{
 		lifecycle: PlayerPendingSpawn,
-		anchor:    anchor,
+		anchor:    restore.SpawnAnchor,
 		state: physics.State{Position: mgl32.Vec3{
-			float32(anchor.X)*core.SectionSize + 0.5,
+			float32(restore.SpawnAnchor.X)*core.SectionSize + 0.5,
 			core.MaxY + 1,
-			float32(anchor.Z)*core.SectionSize + 0.5,
+			float32(restore.SpawnAnchor.Z)*core.SectionSize + 0.5,
 		}},
+		yaw:             restore.Yaw,
+		pitch:           restore.Pitch,
+		restoreWanted:   make(map[core.ChunkKey]struct{}),
 		candidates:      candidates,
 		candidateChunks: spawnCandidateChunks(candidates),
 		spawnWanted:     make(map[core.ChunkPos]struct{}),
 	}
-	player.spawnWanted[anchor] = struct{}{}
+	if restore.Current != nil {
+		player.restoreCandidates = append(player.restoreCandidates, restoreCandidate{
+			location: *restore.Current,
+		})
+	}
+	if restore.Safe != nil {
+		safe := *restore.Safe
+		player.safe = &safe
+		player.restoreCandidates = append(player.restoreCandidates, restoreCandidate{
+			location:       safe,
+			requireSupport: true,
+		})
+	}
+	player.spawnWanted[restore.SpawnAnchor] = struct{}{}
 	engine.sessions[id] = &sessionState{
 		hasView:   true,
-		dimension: dimensionID,
-		center:    anchor,
+		dimension: restore.SpawnDimension,
+		center:    restore.SpawnAnchor,
 		wanted:    make(map[core.ChunkKey]struct{}),
 		player:    player,
 	}
 	engine.subscriptionsDirty = true
+}
+
+func (engine *Engine) RegisterSession(
+	id SessionID,
+	dimensionID core.DimensionID,
+	anchor core.ChunkPos,
+) {
+	engine.RegisterPlayer(id, PlayerRestore{
+		SpawnDimension: dimensionID,
+		SpawnAnchor:    anchor,
+	})
 }
 
 func (engine *Engine) Player(id SessionID) (PlayerUpdate, bool) {
@@ -88,6 +139,49 @@ func (engine *Engine) Player(id SessionID) (PlayerUpdate, bool) {
 		return PlayerUpdate{}, false
 	}
 	return session.player.update(id, session), true
+}
+
+func (engine *Engine) PlayerSnapshot(id SessionID) (PlayerSnapshot, bool) {
+	session := engine.sessions[id]
+	if session == nil || session.player == nil ||
+		session.player.lifecycle != PlayerActive {
+		return PlayerSnapshot{}, false
+	}
+	return session.player.snapshot(session.dimension), true
+}
+
+func (engine *Engine) UnregisterSession(id SessionID) (PlayerSnapshot, bool) {
+	session := engine.sessions[id]
+	if session == nil {
+		return PlayerSnapshot{}, false
+	}
+	var snapshot PlayerSnapshot
+	hasSnapshot := session.player != nil &&
+		session.player.lifecycle == PlayerActive
+	if hasSnapshot {
+		snapshot = session.player.snapshot(session.dimension)
+	}
+	delete(engine.sessions, id)
+	engine.subscriptionsDirty = true
+	return snapshot, hasSnapshot
+}
+
+func (player *playerState) snapshot(
+	dimension core.DimensionID,
+) PlayerSnapshot {
+	snapshot := PlayerSnapshot{
+		Current: PlayerLocation{
+			Dimension: dimension,
+			Position:  player.state.Position,
+		},
+		Yaw:   player.yaw,
+		Pitch: player.pitch,
+	}
+	if player.safe != nil {
+		safe := *player.safe
+		snapshot.Safe = &safe
+	}
+	return snapshot
 }
 
 func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
@@ -177,6 +271,9 @@ func (engine *Engine) advanceActivePlayers() {
 	for _, id := range sessions {
 		session := engine.sessions[id]
 		player := session.player
+		if player.reset {
+			continue
+		}
 		if !physics.ValidState(player.state) || player.state.Position.Y() < core.MinY-16 {
 			player.beginReset()
 			engine.subscriptionsDirty = true
@@ -193,7 +290,56 @@ func (engine *Engine) advanceActivePlayers() {
 			dimensionCollisionSource{dimension: engine.dimensions[session.dimension]},
 		)
 		player.state = step.State
+		engine.updateSafeLocation(session)
 	}
+}
+
+func (engine *Engine) updateSafeLocation(session *sessionState) {
+	player := session.player
+	if !player.state.OnGround {
+		return
+	}
+	dimension := engine.dimensions[session.dimension]
+	if dimension == nil || !restoreLocationChunksReady(
+		dimension,
+		player.state.Position,
+	) {
+		return
+	}
+	source := dimensionCollisionSource{dimension: dimension}
+	free, ready := playerBoundsAreFree(player.state.Position, source)
+	completeSupport, _ := playerSupport(player.state.Position, source)
+	if !ready || !free || !completeSupport {
+		return
+	}
+	if player.safe == nil {
+		player.safe = &PlayerLocation{
+			Dimension: session.dimension,
+			Position:  player.state.Position,
+		}
+		return
+	}
+	player.safe.Dimension = session.dimension
+	player.safe.Position = player.state.Position
+}
+
+func restoreLocationChunksReady(
+	dimension *Dimension,
+	position mgl32.Vec3,
+) bool {
+	bounds := physics.PlayerBounds(position)
+	minX, maxX := blockSpan(bounds.Min.X(), bounds.Max.X())
+	minZ, maxZ := blockSpan(bounds.Min.Z(), bounds.Max.Z())
+	for x := minX; x <= maxX; x++ {
+		for z := minZ; z <= maxZ; z++ {
+			chunk := (core.BlockPos{X: x, Z: z}).Chunk()
+			info, exists := dimension.Info(chunk)
+			if !exists || info.State != ChunkReady {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (engine *Engine) advancePendingPlayersPreservingInputSequence() {

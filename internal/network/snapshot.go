@@ -126,6 +126,7 @@ type ChunkSnapshot struct {
 }
 
 func (ChunkSnapshot) serverMessage() {}
+func (ChunkSnapshot) serverPacket()  {}
 
 // Validate 检查快照的 revision 与全部 24 个有序区段。
 func (snapshot ChunkSnapshot) Validate() error {
@@ -176,6 +177,7 @@ type BlockChanges struct {
 }
 
 func (BlockChanges) serverMessage() {}
+func (BlockChanges) serverPacket()  {}
 
 // Validate 检查 revision 连续性、区块归属和严格递增的 block index。
 func (changes BlockChanges) Validate() error {
@@ -187,8 +189,8 @@ func (changes BlockChanges) Validate() error {
 			changes.NewRevision,
 		)
 	}
-	if len(changes.Changes) == 0 {
-		return errors.New("network: empty block changes")
+	if len(changes.Changes) < 1 || len(changes.Changes) > 4096 {
+		return errors.New("network: block changes count is outside 1..4096")
 	}
 	var previous uint32
 	for index, change := range changes.Changes {

@@ -6,8 +6,8 @@ import (
 )
 
 type memoryPair struct {
-	clientToServer chan ClientMessage
-	serverToClient chan ServerMessage
+	clientToServer chan ClientPacket
+	serverToClient chan ServerPacket
 	done           chan struct{}
 
 	closeOnce sync.Once
@@ -16,60 +16,83 @@ type memoryPair struct {
 	senders   sync.WaitGroup
 }
 
-type memoryClientEndpoint struct {
+type memoryClientStream struct {
 	pair *memoryPair
 }
 
-type memoryServerEndpoint struct {
+type memoryServerStream struct {
 	pair *memoryPair
+	peer string
 }
 
-// NewMemoryPair 创建一对共享关闭状态的有界内存端点。
-func NewMemoryPair(capacity int) (ClientEndpoint, ServerEndpoint) {
+// NewMemoryStreamPair 创建一对共享关闭状态的有界 packet stream。
+func NewMemoryStreamPair(capacity int) (ClientPacketStream, ServerPacketStream) {
 	if capacity < 1 {
 		panic("network: memory transport capacity must be positive")
 	}
 	pair := &memoryPair{
-		clientToServer: make(chan ClientMessage, capacity),
-		serverToClient: make(chan ServerMessage, capacity),
+		clientToServer: make(chan ClientPacket, capacity),
+		serverToClient: make(chan ServerPacket, capacity),
 		done:           make(chan struct{}),
 	}
-	return &memoryClientEndpoint{pair: pair}, &memoryServerEndpoint{pair: pair}
+	return &memoryClientStream{pair: pair}, &memoryServerStream{pair: pair, peer: "memory"}
 }
 
-func (endpoint *memoryClientEndpoint) Send(
-	ctx context.Context,
-	message ClientMessage,
-) error {
-	return memorySend(ctx, endpoint.pair, endpoint.pair.clientToServer, message)
+// NewMemoryPair 将内存 packet stream 包装成已附着的 Play endpoint。
+func NewMemoryPair(capacity int) (ClientEndpoint, ServerEndpoint) {
+	client, server := NewMemoryStreamPair(capacity)
+	return newClientPlayEndpoint(client), newServerPlayEndpoint(server)
 }
 
-func (endpoint *memoryClientEndpoint) Recv(
-	ctx context.Context,
-) (ServerMessage, error) {
-	return memoryReceive(ctx, endpoint.pair, endpoint.pair.serverToClient)
+func (stream *memoryClientStream) Send(ctx context.Context, state State, packet ClientPacket) error {
+	if err := ValidateClientPacket(state, packet); err != nil {
+		return err
+	}
+	return memorySend(ctx, stream.pair, stream.pair.clientToServer, packet)
 }
 
-func (endpoint *memoryClientEndpoint) Close() error {
-	endpoint.pair.close()
+func (stream *memoryClientStream) Recv(ctx context.Context, state State) (ServerPacket, error) {
+	packet, err := memoryReceive(ctx, stream.pair, stream.pair.serverToClient)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateServerPacket(state, packet); err != nil {
+		stream.pair.close()
+		return nil, protocolViolation(err)
+	}
+	return packet, nil
+}
+
+func (stream *memoryClientStream) Close() error {
+	stream.pair.close()
 	return nil
 }
 
-func (endpoint *memoryServerEndpoint) Send(
-	ctx context.Context,
-	message ServerMessage,
-) error {
-	return memorySend(ctx, endpoint.pair, endpoint.pair.serverToClient, message)
+func (stream *memoryServerStream) Send(ctx context.Context, state State, packet ServerPacket) error {
+	if err := ValidateServerPacket(state, packet); err != nil {
+		return err
+	}
+	return memorySend(ctx, stream.pair, stream.pair.serverToClient, packet)
 }
 
-func (endpoint *memoryServerEndpoint) Recv(
-	ctx context.Context,
-) (ClientMessage, error) {
-	return memoryReceive(ctx, endpoint.pair, endpoint.pair.clientToServer)
+func (stream *memoryServerStream) Recv(ctx context.Context, state State) (ClientPacket, error) {
+	packet, err := memoryReceive(ctx, stream.pair, stream.pair.clientToServer)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateClientPacket(state, packet); err != nil {
+		stream.pair.close()
+		return nil, protocolViolation(err)
+	}
+	return packet, nil
 }
 
-func (endpoint *memoryServerEndpoint) Close() error {
-	endpoint.pair.close()
+func (stream *memoryServerStream) Peer() string {
+	return stream.peer
+}
+
+func (stream *memoryServerStream) Close() error {
+	stream.pair.close()
 	return nil
 }
 
@@ -143,5 +166,5 @@ func memoryReceive[T any](
 	}
 }
 
-var _ ClientEndpoint = (*memoryClientEndpoint)(nil)
-var _ ServerEndpoint = (*memoryServerEndpoint)(nil)
+var _ ClientPacketStream = (*memoryClientStream)(nil)
+var _ ServerPacketStream = (*memoryServerStream)(nil)

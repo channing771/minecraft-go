@@ -70,9 +70,12 @@ func TestShutdownAppliesFinalBufferedCommandExactlyOnceWithoutPublishing(t *test
 	key := chunkKey(0, 0)
 	running.engine = dirtyPlayerEngine(t, key)
 	tickBefore := running.engine.TickCount()
-	running.incoming <- sim.Command{
-		Session: localSessionID, Sequence: 1,
-		Kind: sim.CommandBreakBlock, Pitch: -1.5,
+	running.incoming <- incomingCommand{
+		Session: testSessionID, Generation: 1,
+		Command: sim.Command{
+			Session: testSessionID, Sequence: 1,
+			Kind: sim.CommandBreakBlock, Pitch: -1.5,
+		},
 	}
 
 	if err := shutdownWithDeadline(running, time.Second); err != nil {
@@ -376,7 +379,7 @@ func TestServerRunUsesFreshShutdownTimeoutAndReturnsPersistenceError(t *testing.
 	config.SaveWorkers = 1
 	config.TrustedObserver = true
 	config.ShutdownTimeout = 200 * time.Millisecond
-	running := New(config, endpoint, playerTestGenerator{}, store)
+	running := newAttachedWorldForTest(config, endpoint, playerTestGenerator{}, store)
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	cancelRun()
 
@@ -433,6 +436,7 @@ func TestServerRunReturnsNilOnlyAfterExternalShutdownSucceeds(t *testing.T) {
 func TestConcurrentShutdownRunsFinalTickAndStoreLifecycleOnce(t *testing.T) {
 	store := newShutdownTestStore()
 	running, _ := newShutdownTestServer(t, store)
+	current := running.sessions[testSessionID]
 	tickBefore := running.engine.TickCount()
 	const callers = 8
 	results := make(chan error, callers)
@@ -467,7 +471,7 @@ func TestConcurrentShutdownRunsFinalTickAndStoreLifecycleOnce(t *testing.T) {
 	case <-deadline:
 		t.Fatal("save goroutines did not exit within shared deadline")
 	}
-	if !running.session.closed() {
+	if !current.closed() || running.sessions[testSessionID] != nil {
 		t.Fatal("successful Shutdown left session open")
 	}
 }
@@ -594,8 +598,7 @@ func newShutdownTestServer(
 	config.SaveWorkers = 1
 	config.SaveChunks = 8
 	config.SaveBytes = 1 << 20
-	config.TrustedObserver = true
-	return New(config, endpoint, playerTestGenerator{}, store), client
+	return newAttachedWorldForTest(config, endpoint, playerTestGenerator{}, store), client
 }
 
 type shutdownTestStore struct {

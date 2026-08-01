@@ -19,6 +19,12 @@ jobs:
       - name: 单元与端到端测试
         run: go test ./... -race
 
+      - name: TCP 重启与 Memory/TCP parity 重复门禁
+        run: go test ./internal/server -run 'TestTCPPlayerAndWorld|TestMemoryTCPParity' -race -count=10
+
+      - name: 构建无图形专用服务端
+        run: CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod
+
       - name: 静态检查
         run: |
           go vet ./...

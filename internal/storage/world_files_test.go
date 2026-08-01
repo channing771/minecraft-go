@@ -177,3 +177,74 @@ func TestMetadataCanceledCreateLeavesNoFile(t *testing.T) {
 		t.Fatalf("world.meta after canceled create: %v", err)
 	}
 }
+
+func TestWorldFilesCreatesAndValidatesRealPlayersDirectory(t *testing.T) {
+	t.Run("creates players directory", func(t *testing.T) {
+		root := t.TempDir()
+		files, err := openWorldFiles(context.Background(), root, OpenOptions{
+			Create: Metadata{FormatVersion: 1, Seed: 42},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer files.close()
+		info, err := os.Lstat(filepath.Join(root, "players"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("players mode = %v, want real directory", info.Mode())
+		}
+	})
+
+	t.Run("rejects regular file", func(t *testing.T) {
+		root := t.TempDir()
+		path := filepath.Join(root, "players")
+		if err := os.WriteFile(path, []byte("bystander"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files, err := openWorldFiles(context.Background(), root, OpenOptions{
+			Create: Metadata{FormatVersion: 1, Seed: 42},
+		})
+		if files != nil {
+			files.close()
+			t.Fatal("regular players file returned world files")
+		}
+		if err == nil {
+			t.Fatal("regular players file was accepted as directory")
+		}
+		got, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(got) != "bystander" {
+			t.Fatalf("regular players file changed to %q", got)
+		}
+	})
+
+	t.Run("rejects symlink", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		path := filepath.Join(root, "players")
+		if err := os.Symlink(outside, path); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		files, err := openWorldFiles(context.Background(), root, OpenOptions{
+			Create: Metadata{FormatVersion: 1, Seed: 42},
+		})
+		if files != nil {
+			files.close()
+			t.Fatal("players symlink returned world files")
+		}
+		if err == nil {
+			t.Fatal("players symlink was accepted as directory")
+		}
+		entries, readErr := os.ReadDir(outside)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("players symlink target was touched: %v", entries)
+		}
+	})
+}

@@ -10,6 +10,8 @@ import (
 	"minecraft-go/internal/client"
 )
 
+const m3bLatencyNoiseFloorMS = 0.01
+
 func main() {
 	baselinePath := flag.String("baseline", "", "基线 JSON")
 	currentPath := flag.String("current", "", "当前 JSON")
@@ -45,6 +47,14 @@ func compareReports(
 			baseline.ScenarioVersion,
 			current.ScenarioVersion,
 		)
+	}
+	if baseline.ScenarioVersion >= 5 {
+		if err := validateV5Report("baseline", baseline); err != nil {
+			return nil, err
+		}
+		if err := validateV5Report("current", current); err != nil {
+			return nil, err
+		}
 	}
 	if baseline.Hardware != current.Hardware {
 		return nil, fmt.Errorf(
@@ -92,6 +102,39 @@ func compareReports(
 			maxRegression,
 		)
 	}
+	if baseline.Protocol.EncodeP99MS >= m3bLatencyNoiseFloorMS && current.Protocol.EncodeP99MS > 0 {
+		failures = appendRegression(
+			failures, "protocol", "encode_p99_ms",
+			baseline.Protocol.EncodeP99MS, current.Protocol.EncodeP99MS, maxRegression,
+		)
+	}
+	if baseline.Protocol.DecodeP99MS >= m3bLatencyNoiseFloorMS && current.Protocol.DecodeP99MS > 0 {
+		failures = appendRegression(
+			failures, "protocol", "decode_p99_ms",
+			baseline.Protocol.DecodeP99MS, current.Protocol.DecodeP99MS, maxRegression,
+		)
+	}
+	if baseline.Protocol.Bytes > 0 && current.Protocol.Bytes > 0 {
+		failures = appendRegression(
+			failures, "protocol", "bytes",
+			float64(baseline.Protocol.Bytes), float64(current.Protocol.Bytes), maxRegression,
+		)
+	}
+	if baseline.PlayerPersistence.Snapshots > 0 && current.PlayerPersistence.Snapshots > 0 {
+		failures = appendM3BLatencyRegressions(
+			failures,
+			"player_persistence",
+			baseline.PlayerPersistence.P50MS,
+			baseline.PlayerPersistence.P95MS,
+			baseline.PlayerPersistence.P99MS,
+			baseline.PlayerPersistence.MaxMS,
+			current.PlayerPersistence.P50MS,
+			current.PlayerPersistence.P95MS,
+			current.PlayerPersistence.P99MS,
+			current.PlayerPersistence.MaxMS,
+			maxRegression,
+		)
+	}
 	phaseNames := make([]string, 0, len(baseline.Phases))
 	for name := range baseline.Phases {
 		phaseNames = append(phaseNames, name)
@@ -136,6 +179,50 @@ func compareReports(
 		}
 	}
 	return failures, nil
+}
+
+func validateV5Report(label string, report client.PerfReport) error {
+	if report.Transport != "memory" && report.Transport != "tcp" {
+		return fmt.Errorf("%s v5 transport 无效: %q", label, report.Transport)
+	}
+	if report.Protocol.EncodeP99MS <= 0 || report.Protocol.DecodeP99MS <= 0 || report.Protocol.Bytes == 0 {
+		return fmt.Errorf("%s v5 protocol 指标不完整: %+v", label, report.Protocol)
+	}
+	player := report.PlayerPersistence
+	if player.Snapshots <= 0 || player.P50MS <= 0 || player.P95MS <= 0 ||
+		player.P99MS <= 0 || player.MaxMS <= 0 {
+		return fmt.Errorf("%s v5 player_persistence 指标不完整: %+v", label, player)
+	}
+	if player.P50MS > player.P95MS || player.P95MS > player.P99MS || player.P99MS > player.MaxMS {
+		return fmt.Errorf("%s v5 player_persistence 分位数非单调: %+v", label, player)
+	}
+	return nil
+}
+
+func appendM3BLatencyRegressions(
+	failures []string,
+	prefix string,
+	baselineP50, baselineP95, baselineP99, baselineMax float64,
+	currentP50, currentP95, currentP99, currentMax float64,
+	threshold float64,
+) []string {
+	for _, metric := range []struct {
+		name              string
+		baseline, current float64
+	}{
+		{name: "p50_ms", baseline: baselineP50, current: currentP50},
+		{name: "p95_ms", baseline: baselineP95, current: currentP95},
+		{name: "p99_ms", baseline: baselineP99, current: currentP99},
+		{name: "max_ms", baseline: baselineMax, current: currentMax},
+	} {
+		if metric.baseline < m3bLatencyNoiseFloorMS {
+			continue
+		}
+		failures = appendRegression(
+			failures, prefix, metric.name, metric.baseline, metric.current, threshold,
+		)
+	}
+	return failures
 }
 
 func appendSummaryRegressions(

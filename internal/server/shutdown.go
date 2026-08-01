@@ -5,10 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 
 	"minecraft-go/internal/sim"
 	"minecraft-go/internal/storage"
 )
+
+func waitForHostWorkers(ctx context.Context, workers *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 type storeShutdownPhase uint8
 
@@ -56,7 +71,17 @@ func (server *Server) Shutdown(ctx context.Context) error {
 				sequence:  trustedSequence,
 			}
 		}
-		server.session.close()
+		for _, id := range server.sortedSessionIDsLocked() {
+			current := server.sessions[id]
+			server.detachSessionLocked(id, current.generation, nil)
+		}
+		if server.trustedObserver != nil {
+			server.detachTrustedObserverLocked(
+				server.trustedObserver.id,
+				server.trustedObserver.generation,
+				nil,
+			)
+		}
 		server.cancel()
 	}
 	server.stepMu.Unlock()

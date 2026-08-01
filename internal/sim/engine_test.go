@@ -17,6 +17,7 @@ import (
 
 func TestSubscriptionBeginsLoadingAndAcquiresInDistanceOrder(t *testing.T) {
 	engine := sim.NewEngine(1)
+	engine.RegisterObserverSession(1)
 	engine.Enqueue(sim.Command{
 		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
 		Dimension: core.Overworld, Center: core.ChunkPos{X: 5, Z: -4},
@@ -47,6 +48,7 @@ func TestSubscriptionBeginsLoadingAndAcquiresInDistanceOrder(t *testing.T) {
 
 func TestAcquiredMissGeneratesExactlyOnceAndLoadErrorFails(t *testing.T) {
 	engine := sim.NewEngine(0)
+	engine.RegisterObserverSession(1)
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -3}}
 	engine.Enqueue(sim.Command{
 		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
@@ -82,6 +84,7 @@ func TestAcquiredMissGeneratesExactlyOnceAndLoadErrorFails(t *testing.T) {
 
 func TestAcquiredResultsApplyInChunkKeyOrderWithExactLoadState(t *testing.T) {
 	engine := sim.NewEngine(1)
+	engine.RegisterObserverSession(1)
 	engine.Enqueue(sim.Command{
 		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
 		Dimension: core.Overworld, Center: core.ChunkPos{},
@@ -114,6 +117,7 @@ func TestAcquiredResultsApplyInChunkKeyOrderWithExactLoadState(t *testing.T) {
 
 func TestAcquiredResultsAfterForgetDoNotCreateCleanAuthority(t *testing.T) {
 	engine := sim.NewEngine(0)
+	engine.RegisterObserverSession(1)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2}}
 	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 20}}
 	engine.Enqueue(sim.Command{
@@ -148,6 +152,7 @@ func TestAcquiredResultsAfterForgetDoNotCreateCleanAuthority(t *testing.T) {
 
 func TestForgottenDirtyLoadedChunkRemainsUnloading(t *testing.T) {
 	engine := sim.NewEngine(0)
+	engine.RegisterObserverSession(1)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -2}}
 	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 30}}
 	engine.Enqueue(sim.Command{
@@ -179,6 +184,7 @@ func TestForgottenDirtyLoadedChunkRemainsUnloading(t *testing.T) {
 func TestSameTickCenterMoveDropsOldAcquisitionMiss(t *testing.T) {
 	engine := sim.NewEngine(0)
 	const session = sim.SessionID(81)
+	engine.RegisterObserverSession(session)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -3}}
 	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 20, Z: 30}}
 	engine.Enqueue(sim.Command{
@@ -209,6 +215,7 @@ func TestSameTickCenterMoveDropsOldAcquisitionMiss(t *testing.T) {
 func TestSameTickCenterMoveDoesNotPublishOldCleanHit(t *testing.T) {
 	engine := sim.NewEngine(0)
 	const session = sim.SessionID(82)
+	engine.RegisterObserverSession(session)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -4, Z: 7}}
 	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 40, Z: -70}}
 	engine.Enqueue(sim.Command{
@@ -242,6 +249,7 @@ func TestSameTickCenterMoveDoesNotPublishOldCleanHit(t *testing.T) {
 func TestSameTickCenterMoveRetainsLateGeneratedWithoutReady(t *testing.T) {
 	engine := sim.NewEngine(0)
 	const session = sim.SessionID(83)
+	engine.RegisterObserverSession(session)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: 9}}
 	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 60, Z: 90}}
 	engine.Enqueue(sim.Command{

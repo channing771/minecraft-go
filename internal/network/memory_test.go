@@ -266,3 +266,14 @@ func TestNewMemoryPairRejectsNonPositiveCapacity(t *testing.T) {
 	}()
 	network.NewMemoryPair(0)
 }
+
+func TestMemoryPacketStreamValidatesStateBeforeSend(t *testing.T) {
+	client, server := network.NewMemoryStreamPair(1)
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.Send(context.Background(), network.StateLogin, network.PlayerInput{}); err == nil {
+		t.Fatal("Play packet in Login state was sent")
+	}
+	if err := server.Send(context.Background(), network.StateHandshake, network.PlayerState{}); err == nil {
+		t.Fatal("Play packet in Handshake state was sent")
+	}
+}

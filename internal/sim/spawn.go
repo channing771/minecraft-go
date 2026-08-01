@@ -87,6 +87,21 @@ func (engine *Engine) advancePendingPlayers() {
 
 func (engine *Engine) advancePendingPlayer(id SessionID, session *sessionState) {
 	player := session.player
+	for player.nextRestore < len(player.restoreCandidates) {
+		candidate := player.restoreCandidates[player.nextRestore]
+		engine.retainRestoreChunks(session, candidate)
+		valid, ready, onGround := engine.validateRestoreCandidate(candidate)
+		if !ready {
+			return
+		}
+		if valid {
+			player.activate(session, candidate.location, onGround)
+			engine.subscriptionsDirty = true
+			return
+		}
+		player.nextRestore++
+	}
+
 	dimension := engine.dimensions[session.dimension]
 	if player.exhausted {
 		if !spawnRevisionsChanged(dimension, player) {
@@ -110,12 +125,10 @@ func (engine *Engine) advancePendingPlayer(id SessionID, session *sessionState) 
 			return
 		}
 		if valid {
-			player.lifecycle = PlayerActive
-			player.state = physics.State{Position: position, OnGround: true}
-			player.input = physics.Input{}
-			player.lastInputSequence = 0
-			player.reset = true
-			session.center = (core.BlockPos{X: candidate.X, Z: candidate.Z}).Chunk()
+			player.activate(session, PlayerLocation{
+				Dimension: session.dimension,
+				Position:  position,
+			}, true)
 			engine.subscriptionsDirty = true
 			return
 		}
@@ -131,6 +144,144 @@ func (engine *Engine) advancePendingPlayer(id SessionID, session *sessionState) 
 		}
 		player.exhaustedRevisions[index] = info.Revision
 	}
+}
+
+func (player *playerState) activate(
+	session *sessionState,
+	location PlayerLocation,
+	onGround bool,
+) {
+	player.lifecycle = PlayerActive
+	player.state = physics.State{
+		Position: location.Position,
+		OnGround: onGround,
+	}
+	player.input = physics.Input{Yaw: player.yaw}
+	player.lastInputSequence = 0
+	player.reset = true
+	session.dimension = location.Dimension
+	session.center = (core.BlockPos{
+		X: int32(math.Floor(float64(location.Position.X()))),
+		Z: int32(math.Floor(float64(location.Position.Z()))),
+	}).Chunk()
+	player.restoreCandidates = nil
+	player.nextRestore = 0
+	player.restoreWanted = nil
+}
+
+func (engine *Engine) retainRestoreChunks(
+	session *sessionState,
+	candidate restoreCandidate,
+) {
+	keys := restoreCandidateChunks(candidate.location)
+	for _, key := range keys {
+		if _, retained := session.player.restoreWanted[key]; retained {
+			continue
+		}
+		session.player.restoreWanted[key] = struct{}{}
+		engine.subscriptionsDirty = true
+	}
+}
+
+func (engine *Engine) validateRestoreCandidate(
+	candidate restoreCandidate,
+) (valid bool, ready bool, onGround bool) {
+	if !physics.ValidState(physics.State{Position: candidate.location.Position}) {
+		return false, true, false
+	}
+	bounds := physics.PlayerBounds(candidate.location.Position)
+	if bounds.Min.Y() < float32(core.MinY) || bounds.Max.Y() > float32(core.MaxY) {
+		return false, true, false
+	}
+	dimension := engine.dimensions[candidate.location.Dimension]
+	if dimension == nil {
+		return false, true, false
+	}
+	for _, key := range restoreCandidateChunks(candidate.location) {
+		info, exists := dimension.Info(key.Pos)
+		if !exists || info.State != ChunkReady {
+			return false, false, false
+		}
+	}
+	source := dimensionCollisionSource{dimension: dimension}
+	free, ready := playerBoundsAreFree(candidate.location.Position, source)
+	if !ready {
+		return false, false, false
+	}
+	completeSupport, anyGroundContact := playerSupport(candidate.location.Position, source)
+	if candidate.requireSupport && !completeSupport {
+		return false, true, anyGroundContact
+	}
+	return free, true, anyGroundContact
+}
+
+func restoreCandidateChunks(location PlayerLocation) []core.ChunkKey {
+	bounds := physics.PlayerBounds(location.Position)
+	minX, maxX := blockSpan(bounds.Min.X(), bounds.Max.X())
+	minZ, maxZ := blockSpan(bounds.Min.Z(), bounds.Max.Z())
+	unique := make(map[core.ChunkPos]struct{}, 4)
+	for x := minX; x <= maxX; x++ {
+		for z := minZ; z <= maxZ; z++ {
+			unique[(core.BlockPos{X: x, Z: z}).Chunk()] = struct{}{}
+		}
+	}
+	chunks := make([]core.ChunkPos, 0, len(unique))
+	for chunk := range unique {
+		chunks = append(chunks, chunk)
+	}
+	sort.Slice(chunks, func(i, j int) bool {
+		if chunks[i].X != chunks[j].X {
+			return chunks[i].X < chunks[j].X
+		}
+		return chunks[i].Z < chunks[j].Z
+	})
+	keys := make([]core.ChunkKey, 0, len(chunks))
+	for _, chunk := range chunks {
+		keys = append(keys, core.ChunkKey{
+			Dimension: location.Dimension,
+			Pos:       chunk,
+		})
+	}
+	return keys
+}
+
+func playerSupport(
+	position mgl32.Vec3,
+	source physics.CollisionSource,
+) (completeSupport bool, anyGroundContact bool) {
+	bounds := physics.PlayerBounds(position)
+	minX, maxX := blockSpan(bounds.Min.X(), bounds.Max.X())
+	minZ, maxZ := blockSpan(bounds.Min.Z(), bounds.Max.Z())
+	y := int32(math.Floor(float64(position.Y() - physics.GroundProbe)))
+	completeSupport = true
+	for x := minX; x <= maxX; x++ {
+		for z := minZ; z <= maxZ; z++ {
+			boxes := source.CollisionBoxes(core.BlockPos{X: x, Y: y, Z: z})
+			cellSupported := false
+			for index := 0; index < min(int(boxes.Count), len(boxes.Boxes)); index++ {
+				box := boxes.Boxes[index]
+				worldMin := box.Min.Add(mgl32.Vec3{float32(x), float32(y), float32(z)})
+				worldMax := box.Max.Add(mgl32.Vec3{float32(x), float32(y), float32(z)})
+				if worldMax.Y() < position.Y()-physics.GroundProbe-physics.CollisionEpsilon ||
+					worldMax.Y() > position.Y()+physics.CollisionEpsilon {
+					continue
+				}
+				if bounds.Min.X() < worldMax.X() && bounds.Max.X() > worldMin.X() &&
+					bounds.Min.Z() < worldMax.Z() && bounds.Max.Z() > worldMin.Z() {
+					anyGroundContact = true
+				}
+				if worldMin.X() <= max(bounds.Min.X(), float32(x)) &&
+					worldMax.X() >= min(bounds.Max.X(), float32(x+1)) &&
+					worldMin.Z() <= max(bounds.Min.Z(), float32(z)) &&
+					worldMax.Z() >= min(bounds.Max.Z(), float32(z+1)) {
+					cellSupported = true
+					break
+				}
+			}
+			completeSupport = completeSupport && cellSupported
+		}
+	}
+	return completeSupport, anyGroundContact
 }
 
 func (engine *Engine) retainSpawnChunk(

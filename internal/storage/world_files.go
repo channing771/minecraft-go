@@ -43,6 +43,12 @@ func openWorldFiles(ctx context.Context, root string, options OpenOptions) (*wor
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := ensurePlayersDirectory(filepath.Join(root, "players")); err != nil {
+		return nil, fmt.Errorf("prepare players directory: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	metadataPath := filepath.Join(root, "world.meta")
 	encoded, err := os.ReadFile(metadataPath)
@@ -71,12 +77,31 @@ func openWorldFiles(ctx context.Context, root string, options OpenOptions) (*wor
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := replaceFileAtomically(metadataPath, encoded, 0o600); err != nil {
+	if err := replaceFileAtomically(
+		metadataPath, ".world.meta.tmp-*", encoded, 0o600,
+	); err != nil {
 		return nil, fmt.Errorf("create world metadata %q: %w", metadataPath, err)
 	}
 
 	release = false
 	return &worldFiles{root: root, metadata: options.Create, lock: guard}, nil
+}
+
+func ensurePlayersDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			return fmt.Errorf("create %q: %w", path, err)
+		}
+		info, err = os.Lstat(path)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect %q: %w", path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%q is not a real directory", path)
+	}
+	return nil
 }
 
 func (files *worldFiles) close() error {

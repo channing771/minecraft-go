@@ -170,6 +170,22 @@ func TestBlockChangesValidateRevisionPositionAndOrder(t *testing.T) {
 				changes.Changes[0].Block = core.BlockID(1 << 15)
 			},
 		},
+		{
+			name: "too many changes",
+			mutate: func(changes *network.BlockChanges) {
+				changes.Changes = make([]network.BlockChange, 4097)
+				for index := range changes.Changes {
+					changes.Changes[index] = network.BlockChange{
+						Position: core.BlockPos{
+							X: int32(index % core.SectionSize),
+							Y: core.MinY + int32(index/(core.SectionSize*core.SectionSize)),
+							Z: int32((index / core.SectionSize) % core.SectionSize),
+						},
+						Block: core.StoneID,
+					}
+				}
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

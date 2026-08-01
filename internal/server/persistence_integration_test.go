@@ -353,7 +353,7 @@ func newPersistentHarness(
 		t:              t,
 		root:           root,
 		clientEndpoint: clientEndpoint,
-		running:        server.New(config, serverEndpoint, generator, store),
+		running:        newAttachedPersistentWorldForExternalTest(config, serverEndpoint, generator, store),
 		mirror:         client.NewMirror(),
 		generator:      generator,
 		trusted:        trusted,
@@ -373,7 +373,7 @@ func newPersistentHarness(
 func (h *persistentHarness) waitReady() {
 	h.t.Helper()
 	h.stepUntil(func() bool {
-		player, playerOK := h.running.PlayerState()
+		player, playerOK := playerStateForExternalTest(h.running)
 		if !playerOK || !player.Ready {
 			return false
 		}
@@ -490,7 +490,7 @@ func (h *persistentHarness) moveViewToUnvisitedChunk() {
 }
 
 func (h *persistentHarness) playerSummary() any {
-	state, ok := h.running.PlayerState()
+	state, ok := playerStateForExternalTest(h.running)
 	return struct {
 		State any
 		OK    bool
