@@ -182,6 +182,13 @@ func movePlayerAndPlaceBlock(
 		state, ok := message.(network.PlayerState)
 		return ok && state.LastInputSequence >= 2 && state.Position != before.Current.Position
 	})
+	sendIntegration(t, connected.Endpoint, network.PlayerInput{
+		Sequence: 3, Yaw: 0, Pitch: -0.2,
+	})
+	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
+		state, ok := message.(network.PlayerState)
+		return ok && state.LastInputSequence >= 3 && state.Velocity[0] == 0 && state.Velocity[2] == 0
+	})
 }
 
 func (h integrationHost) PlayerSnapshot(t *testing.T, id core.PlayerID) sim.PlayerSnapshot {
