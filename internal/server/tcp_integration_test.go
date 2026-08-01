@@ -229,6 +229,15 @@ func (h integrationHost) WaitPlayerSaved(t *testing.T) {
 	})
 }
 
+func (h integrationHost) WaitPlayerReleased(t *testing.T) {
+	t.Helper()
+	waitIntegrationCondition(t, "host player slot release", func() bool {
+		h.Host.mu.Lock()
+		defer h.Host.mu.Unlock()
+		return h.Host.active == nil
+	})
+}
+
 func (h integrationHost) Shutdown(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -434,19 +443,23 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = bad.Close()
+		waitForPreLoginCount(t, host.Host, 1)
 		slow, err := net.Dial("tcp", host.Addr)
 		if err != nil {
 			t.Fatal(err)
 		}
+		waitForPreLoginCount(t, host.Host, 2)
 
 		if err := primary.Close(); err != nil {
 			t.Fatal(err)
 		}
 		host.WaitPlayerSaved(t)
+		waitForPreLoginCount(t, host.Host, 1)
+		_ = slow.Close()
+		waitForPreLoginCount(t, host.Host, 0)
 		replacementIdentity := integrationIdentity(0x23, "Replacement")
 		replacement := dialIntegrationClient(t, host.Addr, replacementIdentity)
 		waitClientReadyFor(t, host, replacement, replacementIdentity.PlayerID)
-		_ = slow.Close()
 		_ = replacement.Close()
 		host.Shutdown(t)
 	})
@@ -468,6 +481,7 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 		host := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})
 		_, err = loginIntegrationClient(host.Addr, corrupt)
 		assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginPlayerDataCorrupt))
+		host.WaitPlayerReleased(t)
 
 		healthyIdentity := integrationIdentity(0x32, "Healthy")
 		healthy := dialIntegrationClient(t, host.Addr, healthyIdentity)
@@ -535,6 +549,7 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	})
 	want := host.PlayerSnapshot(t, firstIdentity.PlayerID)
 	_ = first.Close()
+	host.WaitPlayerReleased(t)
 	waitIntegrationCondition(t, "failed player save retained for retry", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()
@@ -551,6 +566,7 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	_, err := loginIntegrationClient(host.Addr, integrationIdentity(0x62, "Blocked"))
 	assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginServerFull))
 	_ = same.Close()
+	host.WaitPlayerReleased(t)
 	waitIntegrationCondition(t, "same-ID disconnect retry retained", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()

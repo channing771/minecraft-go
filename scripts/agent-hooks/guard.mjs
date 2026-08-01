@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -113,14 +114,65 @@ export function openSpecRequirementReasons(paths) {
   return reasons;
 }
 
-function run(command, argumentsList, timeout = 120_000) {
-  return spawnSync(command, argumentsList, {
+export function runCommand(
+  command,
+  argumentsList,
+  timeout = 120_000,
+  spawn = spawnSync,
+  environment = process.env,
+) {
+  const options = {
     cwd: repositoryRoot,
     encoding: "utf8",
     timeout,
-    env: process.env,
-  });
+    env: environment,
+  };
+  const direct = spawn(command, argumentsList, options);
+  if (direct.error?.code !== "ENOENT" || !/^[A-Za-z0-9._+-]+$/.test(command)) {
+    return direct;
+  }
+
+  if (["go", "gofmt"].includes(command)) {
+    const roots = [environment.GOROOT, "/usr/local/go"];
+    const gvmRoot = resolve(homedir(), ".gvm/gos");
+    if (existsSync(gvmRoot)) {
+      roots.push(
+        ...readdirSync(gvmRoot)
+          .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
+          .map((name) => resolve(gvmRoot, name)),
+      );
+    }
+    for (const root of roots.filter(Boolean)) {
+      const goTool = spawn(resolve(root, "bin", command), argumentsList, options);
+      if (goTool.error?.code !== "ENOENT") {
+        return goTool;
+      }
+    }
+  }
+
+  for (const directory of ["/opt/homebrew/bin", "/usr/local/bin"]) {
+    const installed = spawn(resolve(directory, command), argumentsList, options);
+    if (installed.error?.code !== "ENOENT") {
+      return installed;
+    }
+  }
+
+  const shell = environment.SHELL;
+  if (!shell) {
+    return direct;
+  }
+  const lookup = spawn(shell, ["-lc", `command -v ${command}`], options);
+  if (lookup.error || lookup.status !== 0) {
+    return direct;
+  }
+  const executable = (lookup.stdout ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("/"));
+  return executable ? spawn(executable, argumentsList, options) : direct;
 }
+
+const run = runCommand;
 
 function commandFailure(label, result) {
   if (result.error) {

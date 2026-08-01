@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { findBlockedCommand, openSpecRequirementReasons } from "./guard.mjs";
+import { findBlockedCommand, openSpecRequirementReasons, runCommand } from "./guard.mjs";
 
 test("blocks destructive git commands", () => {
   assert.match(findBlockedCommand("git reset --hard HEAD"), /reset --hard/);
@@ -45,4 +45,80 @@ test("does not require OpenSpec for one focused implementation component", () =>
     openSpecRequirementReasons(["internal/client/camera.go", "internal/client/camera_test.go"]),
     [],
   );
+});
+
+test("finds tools through the login shell when the hook PATH is incomplete", () => {
+  const calls = [];
+  const spawn = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    if (
+      command === "gofmt" ||
+      (command.endsWith("/gofmt") && command !== "/toolchain/bin/gofmt")
+    ) {
+      return { error: Object.assign(new Error("spawnSync gofmt ENOENT"), { code: "ENOENT" }) };
+    }
+    if (command === "/bin/zsh") {
+      return { status: 0, stdout: "/toolchain/bin/gofmt\n" };
+    }
+    return { status: 0, stdout: "" };
+  };
+
+  const result = runCommand(
+    "gofmt",
+    ["-l", "internal/server/example.go"],
+    30_000,
+    spawn,
+    { SHELL: "/bin/zsh", PATH: "/usr/bin:/bin" },
+  );
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(calls[0], ["gofmt", ["-l", "internal/server/example.go"]]);
+  assert.deepEqual(calls.at(-2), ["/bin/zsh", ["-lc", "command -v gofmt"]]);
+  assert.deepEqual(calls.at(-1), [
+    "/toolchain/bin/gofmt",
+    ["-l", "internal/server/example.go"],
+  ]);
+});
+
+test("finds Go tools through GOROOT when the hook PATH is incomplete", () => {
+  const calls = [];
+  const spawn = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    if (calls.length === 1) {
+      return { error: Object.assign(new Error("spawnSync go ENOENT"), { code: "ENOENT" }) };
+    }
+    return { status: 0, stdout: "" };
+  };
+
+  const result = runCommand("go", ["vet", "./..."], 30_000, spawn, {
+    GOROOT: "/toolchain",
+    PATH: "/usr/bin:/bin",
+  });
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(calls, [
+    ["go", ["vet", "./..."]],
+    ["/toolchain/bin/go", ["vet", "./..."]],
+  ]);
+});
+
+test("finds tools in common installation directories when the hook PATH is incomplete", () => {
+  const calls = [];
+  const spawn = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    if (calls.length === 1) {
+      return { error: Object.assign(new Error("spawnSync openspec ENOENT"), { code: "ENOENT" }) };
+    }
+    return { status: 0, stdout: "" };
+  };
+
+  const result = runCommand("openspec", ["validate", "--all"], 30_000, spawn, {
+    PATH: "/usr/bin:/bin",
+  });
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(calls, [
+    ["openspec", ["validate", "--all"]],
+    ["/opt/homebrew/bin/openspec", ["validate", "--all"]],
+  ]);
 });
