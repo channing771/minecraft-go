@@ -269,6 +269,12 @@ func TestPlayerPersistenceConfirmPersistsLatestMissingSnapshot(t *testing.T) {
 	}
 	p.Confirm(id)
 	p.Confirm(id)
+	p.mu.Lock()
+	activeAfterConfirm := p.cache[id] != nil && p.cache[id].active
+	p.mu.Unlock()
+	if !activeAfterConfirm {
+		t.Fatal("Confirm cleared active before the session exit lifecycle")
+	}
 	if err := p.Poll(6000); err != nil {
 		t.Fatal(err)
 	}
@@ -280,6 +286,7 @@ func TestPlayerPersistenceConfirmPersistsLatestMissingSnapshot(t *testing.T) {
 	}
 	store.complete(nil)
 	pollPlayerPersistenceUntilIdle(t, p, 6001)
+	p.Deactivate(id)
 }
 
 // 捕获：Abort 保留了 staged nickname，或 Observe 在 Confirm 前错误地提交传入 nickname。
@@ -404,7 +411,7 @@ func TestPlayerPersistenceCoalescesLatestSnapshotBehindSingleInFlightSave(t *tes
 	assertNoPlayerSaveStarted(t, store)
 }
 
-// 捕获：失败保存丢弃了最新离线快照，或 dirty/in-flight 状态错误允许另一身份占用唯一 cache。
+// 捕获：失败保存丢弃最新离线快照，或一个 retry 项错误阻塞另一身份使用剩余 cache 容量。
 func TestDirtyDisconnectedPlayerBlocksOnlyDifferentIdentity(t *testing.T) {
 	store := newControllablePlayerStore()
 	p := newPlayerPersistence(store, playerPersistenceTestConfig())
@@ -424,13 +431,16 @@ func TestDirtyDisconnectedPlayerBlocksOnlyDifferentIdentity(t *testing.T) {
 	if err := pollPlayerPersistenceUntilError(t, p, 21); err == nil {
 		t.Fatal("save failure not surfaced")
 	}
-	if _, err := p.Prepare(context.Background(), idB, "B", testMetadata()); !errors.Is(err, ErrPlayerPersistenceBackpressure) {
-		t.Fatalf("different ID err=%v", err)
+	restoredB, err := p.Prepare(context.Background(), idB, "B", testMetadata())
+	if err != nil || restoredB.Current != nil || restoredB.Safe != nil {
+		t.Fatalf("different ID restore=%+v err=%v, want independent cache slot", restoredB, err)
 	}
+	p.Abort(idB)
 	restored, err := p.Prepare(context.Background(), idA, "A", testMetadata())
 	if err != nil || restored.Current == nil || restored.Current.Position[0] != 10 {
 		t.Fatalf("restore=%+v err=%v", restored, err)
 	}
+	p.Abort(idA)
 }
 
 // 捕获：retry 未按首个 20-tick backoff 调度，或复用了较新快照/新 revision 而破坏幂等保存。
@@ -887,7 +897,7 @@ func TestPlayerPersistencePrepareDoesNotHoldCacheMutexDuringLoadPlayer(t *testin
 	}
 }
 
-// 捕获：并发 Prepare 的旧 Load 完成时覆盖较新的 cache，或同一身份触发两次 LoadPlayer。
+// 捕获：不同身份的 Prepare 被串行，或并发 Load 完成时互相覆盖 cache。
 func TestPlayerPersistencePrepareSerializesConcurrentLoadsAndKeepsLatestCache(t *testing.T) {
 	store := newControllablePlayerStore()
 	idA, idB := playerID(25), playerID(26)
@@ -907,41 +917,37 @@ func TestPlayerPersistencePrepareSerializesConcurrentLoadsAndKeepsLatestCache(t 
 		close(releaseA)
 		t.Fatalf("first blocked LoadPlayer id=%s, want %s", got, idA)
 	}
-	if p.prepareMu.TryLock() {
-		p.prepareMu.Unlock()
-		close(releaseA)
-		t.Fatal("Prepare released its load transaction gate before LoadPlayer completed")
-	}
-
 	preparedB := make(chan playerPrepareResult, 1)
 	go func() {
 		restore, err := p.Prepare(context.Background(), idB, "B", testMetadata())
 		preparedB <- playerPrepareResult{restore: restore, err: err}
 	}()
-	close(releaseA)
-	if result := receivePlayerPrepareResult(t, preparedA); result.err != nil {
+	if got := receivePlayerLoadStarted(t, store); got != idB {
+		close(releaseA)
 		close(releaseB)
+		t.Fatalf("concurrent blocked LoadPlayer id=%s, want %s", got, idB)
+	}
+	close(releaseA)
+	close(releaseB)
+	if result := receivePlayerPrepareResult(t, preparedA); result.err != nil {
 		t.Fatal(result.err)
 	}
-	if got := receivePlayerLoadStarted(t, store); got != idB {
-		close(releaseB)
-		t.Fatalf("second blocked LoadPlayer id=%s, want %s", got, idB)
-	}
-	close(releaseB)
 	if result := receivePlayerPrepareResult(t, preparedB); result.err != nil {
 		t.Fatal(result.err)
 	}
 
 	p.mu.Lock()
-	cache := p.cache
+	cacheA, cacheB := p.cache[idA], p.cache[idB]
 	p.mu.Unlock()
-	if cache == nil || cache.id != idB || cache.persisted != 9 {
-		t.Fatalf("final cache=%+v, want latest id=%s revision=9", cache, idB)
+	if cacheA == nil || cacheA.persisted != 7 || cacheB == nil || cacheB.persisted != 9 {
+		t.Fatalf("concurrent caches: A=%+v B=%+v, want revisions 7/9", cacheA, cacheB)
 	}
 	if store.loadCallCount(idA) != 1 || store.loadCallCount(idB) != 1 {
 		t.Fatalf("LoadPlayer calls: idA=%d idB=%d, want one each",
 			store.loadCallCount(idA), store.loadCallCount(idB))
 	}
+	p.Abort(idA)
+	p.Abort(idB)
 }
 
 // 捕获：Load 移出 cache mutex 后，Abort 在 load 期间过早返回并丢失取消 staged nickname 的原子性。
@@ -1229,7 +1235,13 @@ func pollPlayerPersistenceUntilIdle(t *testing.T, p *playerPersistence, tick uin
 			t.Fatal(err)
 		}
 		p.mu.Lock()
-		idle := p.cache == nil || !p.cache.inFlight
+		idle := true
+		for _, player := range p.cache {
+			if player.inFlight {
+				idle = false
+				break
+			}
+		}
 		p.mu.Unlock()
 		if idle {
 			return

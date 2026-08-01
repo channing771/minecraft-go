@@ -288,6 +288,7 @@ func (h *Host) acceptStream(
 	if result.HasSnapshot {
 		_ = h.players.Observe(identity.PlayerID, identity.DisplayName, result.Snapshot, h.world.TickCount(), true)
 	}
+	h.players.Deactivate(identity.PlayerID)
 	return result.Err
 }
 

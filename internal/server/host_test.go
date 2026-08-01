@@ -316,6 +316,42 @@ func TestHostDisconnectPersistsReleasesSlotAndKeepsTicking(t *testing.T) {
 	shutdownHostComponentsForTest(t, host)
 }
 
+// 捕获：Host 在已确认 session 退出并完成最后一次 Observe 后遗漏 Deactivate，使 cache 永久保留 active。
+func TestHostDisconnectDeactivatesCachedPlayer(t *testing.T) {
+	store := newHostTestStore()
+	host := newTestHostWithStore(t, store)
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- host.Run(runCtx, nil) }()
+
+	identity := playerIdentity(16)
+	login := startMemoryLogin(t, host, identity)
+	waitReady(t, host, login)
+	if err := login.Client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-login.Done:
+	case <-time.After(time.Second):
+		t.Fatal("AcceptStream did not return after disconnect")
+	}
+
+	host.players.mu.Lock()
+	cached := host.players.cache[identity.PlayerID]
+	active := cached != nil && cached.active
+	host.players.mu.Unlock()
+	if active {
+		t.Fatal("disconnected player remained active in persistence cache")
+	}
+
+	cancelRun()
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
 func TestHostFailedDisconnectSaveAllowsSameIdentityOnly(t *testing.T) {
 	store := newHostTestStore()
 	saveErr := errors.New("disk unavailable")
@@ -344,14 +380,15 @@ func TestHostFailedDisconnectSaveAllowsSameIdentityOnly(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("same-identity reconnect did not finish")
 	}
-	_, err := attemptMemoryLogin(host, playerIdentity(13))
-	var remote *network.RemoteError
-	if !errors.As(err, &remote) ||
-		network.LoginRejectCode(remote.Code) != network.LoginStoreUnavailable {
-		t.Fatalf("different-identity login error = %v, want store unavailable", err)
+	different := startMemoryLogin(t, host, playerIdentity(13))
+	waitReady(t, host, different)
+	_ = different.Client.Close()
+	select {
+	case <-different.Done:
+	case <-time.After(time.Second):
+		t.Fatal("different-identity login was blocked by another player's retry")
 	}
 
-	store.setSaveError(nil)
 	cancelRun()
 	select {
 	case err := <-runDone:
@@ -361,6 +398,7 @@ func TestHostFailedDisconnectSaveAllowsSameIdentityOnly(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run cleanup timed out")
 	}
+	store.setSaveError(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := host.Shutdown(ctx); err != nil {

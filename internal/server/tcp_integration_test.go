@@ -215,14 +215,14 @@ func (h integrationHost) ChunkHash(t *testing.T, position core.ChunkPos) ([32]by
 	return hash, revision
 }
 
-func (h integrationHost) WaitPlayerSaved(t *testing.T) {
+func (h integrationHost) WaitPlayerSaved(t *testing.T, id core.PlayerID) {
 	t.Helper()
 	waitIntegrationCondition(t, "player save completion", func() bool {
 		h.Host.mu.Lock()
 		active := h.Host.active
 		h.Host.mu.Unlock()
 		h.Host.players.mu.Lock()
-		cache := h.Host.players.cache
+		cache := h.Host.players.cache[id]
 		saved := cache != nil && cache.persisted > 0 && !cache.dirty && !cache.inFlight && cache.retry == nil
 		h.Host.players.mu.Unlock()
 		return active == nil && saved
@@ -375,7 +375,7 @@ func TestTCPPlayerAndWorldSurviveDisconnectAndRestart(t *testing.T) {
 	if err := client.Close(); err != nil {
 		t.Fatal(err)
 	}
-	first.WaitPlayerSaved(t)
+	first.WaitPlayerSaved(t, id)
 	first.Shutdown(t)
 
 	second := startDiskHost(t, root, "127.0.0.1:0", changedGenerator{})
@@ -442,7 +442,7 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 		if err := primary.Close(); err != nil {
 			t.Fatal(err)
 		}
-		host.WaitPlayerSaved(t)
+		host.WaitPlayerSaved(t, primaryIdentity.PlayerID)
 		replacementIdentity := integrationIdentity(0x23, "Replacement")
 		replacement := dialIntegrationClient(t, host.Addr, replacementIdentity)
 		waitClientReadyFor(t, host, replacement, replacementIdentity.PlayerID)
@@ -538,7 +538,7 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	waitIntegrationCondition(t, "failed player save retained for retry", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()
-		cache := host.Host.players.cache
+		cache := host.Host.players.cache[firstIdentity.PlayerID]
 		return cache != nil && cache.retry != nil && cache.dirty && !cache.inFlight
 	})
 
@@ -554,17 +554,19 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	waitIntegrationCondition(t, "same-ID disconnect retry retained", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()
-		cache := host.Host.players.cache
+		cache := host.Host.players.cache[firstIdentity.PlayerID]
 		return cache != nil && cache.retry != nil && cache.dirty
 	})
 
-	_, err = loginIntegrationClient(host.Addr, integrationIdentity(0x62, "Blocked"))
-	assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginStoreUnavailable))
+	differentIdentity := integrationIdentity(0x62, "IndependentRetry")
+	different := dialIntegrationClient(t, host.Addr, differentIdentity)
+	waitClientReadyFor(t, host, different, differentIdentity.PlayerID)
+	_ = different.Close()
 	store.setSaveError(nil)
 	waitIntegrationCondition(t, "player save retry success", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()
-		cache := host.Host.players.cache
+		cache := host.Host.players.cache[firstIdentity.PlayerID]
 		return cache != nil && cache.persisted > 0 && !cache.dirty && !cache.inFlight && cache.retry == nil
 	})
 
