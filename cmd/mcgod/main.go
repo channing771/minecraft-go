@@ -22,8 +22,6 @@ import (
 	"minecraft-go/internal/worldgen"
 )
 
-const protocolVersion = 1
-
 type options struct {
 	Listen string
 	World  string
@@ -102,7 +100,7 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 	}
 
 	metadata := store.Metadata()
-	dependencies.logger.Info("mcgod 已启动", "listen", listener.Addr(), "world", options.World, "protocol", protocolVersion)
+	dependencies.logger.Info("mcgod 已启动", "listen", listener.Addr(), "world", options.World, "protocol", network.ProtocolVersion)
 	host := dependencies.newHost(server.DefaultConfig(metadata.Seed), worldgen.New(metadata.Seed), store)
 	return host.Run(ctx, listener)
 }

@@ -7,8 +7,8 @@ import (
 	"minecraft-go/internal/core"
 )
 
-// ProtocolVersion 是 M3B 唯一支持的协议版本。
-const ProtocolVersion uint32 = 1
+// ProtocolVersion 是 M3C 唯一支持的协议版本。
+const ProtocolVersion uint32 = 2
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -77,6 +77,7 @@ const (
 	LoginStoreUnavailable
 	LoginProtocolViolation
 	LoginInternalError
+	LoginAlreadyOnline
 )
 
 type LoginReject struct {
@@ -220,6 +221,12 @@ func ValidateServerPacket(state State, packet ServerPacket) error {
 				return fmt.Errorf("network: invalid disconnect code %d", serverPacket.Code)
 			}
 			return nil
+		case RemotePlayerSpawn:
+			return serverPacket.Validate()
+		case RemotePlayerDespawn:
+			return serverPacket.Validate()
+		case RemotePlayerStates:
+			return serverPacket.Validate()
 		default:
 			return invalidServerPacket(state, packet)
 		}
@@ -235,7 +242,7 @@ func validHandshakeRejectCode(code HandshakeRejectCode) bool {
 func validLoginRejectCode(code LoginRejectCode) bool {
 	switch code {
 	case LoginServerFull, LoginInvalidIdentity, LoginPlayerDataCorrupt,
-		LoginStoreUnavailable, LoginProtocolViolation, LoginInternalError:
+		LoginStoreUnavailable, LoginProtocolViolation, LoginInternalError, LoginAlreadyOnline:
 		return true
 	default:
 		return false

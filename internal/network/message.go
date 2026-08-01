@@ -2,7 +2,9 @@
 package network
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"math"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -125,6 +127,79 @@ type PlayerState struct {
 	Reset             bool
 }
 
+type RemotePlayerSpawn struct {
+	PlayerID    core.PlayerID
+	DisplayName string
+	ServerTick  uint64
+	Dimension   core.DimensionID
+	Position    mgl32.Vec3
+	Yaw, Pitch  float32
+}
+
+func (RemotePlayerSpawn) serverMessage() {}
+func (RemotePlayerSpawn) serverPacket()  {}
+
+func (spawn RemotePlayerSpawn) Validate() error {
+	name, err := core.NormalizeDisplayName(spawn.DisplayName)
+	if err != nil || name != spawn.DisplayName || !spawn.PlayerID.Valid() ||
+		spawn.Dimension != core.Overworld || !finiteVec3(spawn.Position) ||
+		!finite32(spawn.Yaw) || !finite32(spawn.Pitch) {
+		return errors.New("network: invalid remote player spawn")
+	}
+	return nil
+}
+
+type RemotePlayerDespawn struct{ PlayerID core.PlayerID }
+
+func (RemotePlayerDespawn) serverMessage() {}
+func (RemotePlayerDespawn) serverPacket()  {}
+
+func (despawn RemotePlayerDespawn) Validate() error {
+	if !despawn.PlayerID.Valid() {
+		return errors.New("network: invalid remote player despawn")
+	}
+	return nil
+}
+
+type RemotePlayerStates struct {
+	ServerTick uint64
+	Players    []RemotePlayerState
+}
+
+type RemotePlayerState struct {
+	PlayerID   core.PlayerID
+	Dimension  core.DimensionID
+	Position   mgl32.Vec3
+	Yaw, Pitch float32
+	Reset      bool
+}
+
+func (RemotePlayerStates) serverMessage() {}
+func (RemotePlayerStates) serverPacket()  {}
+
+func (states RemotePlayerStates) Validate() error {
+	if len(states.Players) < 1 || len(states.Players) > 7 {
+		return errors.New("network: remote player state count is outside 1..7")
+	}
+	for index, state := range states.Players {
+		if err := state.validate(); err != nil {
+			return fmt.Errorf("network: remote player state %d: %w", index, err)
+		}
+		if index > 0 && bytes.Compare(states.Players[index-1].PlayerID[:], state.PlayerID[:]) >= 0 {
+			return errors.New("network: remote player states are not strictly sorted")
+		}
+	}
+	return nil
+}
+
+func (state RemotePlayerState) validate() error {
+	if !state.PlayerID.Valid() || state.Dimension != core.Overworld || !finiteVec3(state.Position) ||
+		!finite32(state.Yaw) || !finite32(state.Pitch) {
+		return errors.New("invalid remote player state")
+	}
+	return nil
+}
+
 func (PlayerState) serverMessage() {}
 func (PlayerState) serverPacket()  {}
 
@@ -175,4 +250,13 @@ func (rejection CommandRejected) Validate() error {
 
 func finite32(value float32) bool {
 	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
+}
+
+func finiteVec3(value mgl32.Vec3) bool {
+	for _, component := range value {
+		if !finite32(component) {
+			return false
+		}
+	}
+	return true
 }

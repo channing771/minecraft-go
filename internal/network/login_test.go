@@ -86,6 +86,44 @@ func TestLoginClientReportsHandshakeVersionMismatch(t *testing.T) {
 	}
 }
 
+func TestBeginServerLoginRejectsV1ClientHelloWithProtocolV2(t *testing.T) {
+	stream := &v1ClientHelloStream{}
+	if _, err := BeginServerLogin(context.Background(), stream); err == nil {
+		t.Fatal("v1 ClientHello accepted")
+	}
+	reject, ok := stream.sent.(HandshakeReject)
+	if !ok || stream.sentState != StateHandshake || reject.ServerProtocolVersion != 2 || reject.Code != HandshakeVersionMismatch {
+		t.Fatalf("v1 rejection = %#v in state %d, want v2 HandshakeReject", stream.sent, stream.sentState)
+	}
+}
+
+func TestBeginServerLoginFutureClientHelloReturnsV2MismatchOverTCP(t *testing.T) {
+	listener := listenLoopback(t)
+	t.Cleanup(func() { _ = listener.Close() })
+	client, server := dialAndAccept(t, listener)
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	serverDone := make(chan error, 1)
+	go func() {
+		_, err := BeginServerLogin(ctx, server)
+		serverDone <- err
+	}()
+
+	writeRawClientFrame(t, client, 0, []byte{byte(ProtocolVersion + 1)})
+	packet, err := client.Recv(ctx, StateHandshake)
+	if err != nil {
+		t.Fatalf("future ClientHello response: %v", err)
+	}
+	reject, ok := packet.(HandshakeReject)
+	if err != nil || !ok || reject.ServerProtocolVersion != ProtocolVersion || reject.Code != HandshakeVersionMismatch {
+		t.Fatalf("future ClientHello rejection=(%#v, %v), want protocol %d HandshakeVersionMismatch", packet, err, ProtocolVersion)
+	}
+	if err := <-serverDone; err == nil || !strings.Contains(err.Error(), "protocol violation") {
+		t.Fatalf("BeginServerLogin error=%v, want protocol violation after rejection", err)
+	}
+}
+
 func TestLoginClientReportsStableLoginRejectCodes(t *testing.T) {
 	for _, reject := range []LoginReject{
 		{Code: LoginServerFull, Message: "server full"},
@@ -539,3 +577,21 @@ func testIdentity(last byte) Identity {
 		DisplayName: "Chen",
 	}
 }
+
+type v1ClientHelloStream struct {
+	sent      ServerPacket
+	sentState State
+}
+
+func (stream *v1ClientHelloStream) Send(_ context.Context, state State, packet ServerPacket) error {
+	stream.sentState = state
+	stream.sent = packet
+	return nil
+}
+
+func (*v1ClientHelloStream) Recv(context.Context, State) (ClientPacket, error) {
+	return ClientHello{ProtocolVersion: 1}, nil
+}
+
+func (*v1ClientHelloStream) Peer() string { return "test" }
+func (*v1ClientHelloStream) Close() error { return nil }

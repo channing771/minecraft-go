@@ -87,6 +87,12 @@ func serverPacketID(state State, packet ServerPacket) (uint32, bool) {
 			return 5, true
 		case Disconnect:
 			return 6, true
+		case RemotePlayerSpawn:
+			return 7, true
+		case RemotePlayerDespawn:
+			return 8, true
+		case RemotePlayerStates:
+			return 9, true
 		}
 	}
 	return 0, false
@@ -125,6 +131,12 @@ func serverPacketForID(state State, id uint32) (ServerPacket, bool) {
 			return KeepAlive{}, true
 		case 6:
 			return Disconnect{}, true
+		case 7:
+			return RemotePlayerSpawn{}, true
+		case 8:
+			return RemotePlayerDespawn{}, true
+		case 9:
+			return RemotePlayerStates{}, true
 		}
 	}
 	return nil, false
