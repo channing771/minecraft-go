@@ -315,81 +315,15 @@ func (p *playerPersistence) Poll(tick uint64) error {
 	return err
 }
 
-func (p *playerPersistence) Flush(ctx context.Context) error {
-	if ctx == nil {
-		panic("server: nil player flush context")
-	}
-	p.completionMu.Lock()
-	defer p.completionMu.Unlock()
-	if err := p.drainInheritedCompletions(ctx); err != nil {
-		return err
-	}
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		p.mu.Lock()
-		if err := p.drainCompletionsLocked(0); err != nil {
-			p.mu.Unlock()
-			return err
-		}
-		if !p.hasDirtyOrInFlightLocked() {
-			p.mu.Unlock()
-			return nil
-		}
-		if !p.hasInFlightLocked() {
-			players := p.sortedPlayersLocked(func(player *cachedPlayer) bool {
-				return !player.loading && !player.inFlight && player.dirty
-			})
-			if len(players) != 0 {
-				player := players[0]
-				if player.retry != nil {
-					job := *player.retry
-					if p.dispatchLocked(job) {
-						player.retry = nil
-					}
-				} else {
-					p.dispatchLocked(playerSaveJob{
-						Save:    player.save(player.persisted + 1),
-						Attempt: 1,
-					})
-				}
-			}
-		}
-		inFlight := p.hasInFlightLocked()
-		p.mu.Unlock()
-		if !inFlight {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-p.scheduler.ctx.Done():
-				return p.scheduler.ctx.Err()
-			default:
-			}
-			continue
-		}
-
-		select {
-		case completion := <-p.completions:
-			p.mu.Lock()
-			err := p.applyCompletionLocked(completion, 0)
-			p.mu.Unlock()
-			if err != nil {
-				return err
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-p.scheduler.ctx.Done():
-			return p.scheduler.ctx.Err()
-		}
-	}
-}
-
 func (p *playerPersistence) CloseWorker() {
 	p.closeOnce.Do(func() {
 		p.scheduler.CloseJobs()
 		p.scheduler.Wait()
+		p.completionMu.Lock()
+		p.mu.Lock()
+		_ = p.drainCompletionsLocked(0)
+		p.mu.Unlock()
+		p.completionMu.Unlock()
 		close(p.done)
 	})
 }

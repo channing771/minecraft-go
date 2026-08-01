@@ -33,16 +33,23 @@ type Host struct {
 	mu              sync.Mutex
 	activeByPlayer  map[core.PlayerID]*activeLogin
 	activeBySession map[sim.SessionID]*activeLogin
-	preLoginStreams map[uint64]network.ServerPacketStream
+	preLoginStreams map[uint64]*pendingLoginStream
 	nextPreLogin    uint64
 	nextSession     sim.SessionID
 	nextGeneration  uint64
 	listener        network.Listener
 	runtimeCancel   context.CancelFunc
 	runtimeDone     chan error
-	workers         sync.WaitGroup
+	acceptWG        sync.WaitGroup
+	pendingWG       sync.WaitGroup
+	sessionWG       sync.WaitGroup
 	shutdownGate    chan struct{}
 	closing         bool
+}
+
+type pendingLoginStream struct {
+	stream network.ServerPacketStream
+	cancel context.CancelFunc
 }
 
 type activeLogin struct {
@@ -66,7 +73,7 @@ func NewHost(config Config, generator Generator, store storage.WorldStore) *Host
 		preLogin:        make(chan struct{}, hostPreLoginCapacity),
 		activeByPlayer:  make(map[core.PlayerID]*activeLogin),
 		activeBySession: make(map[sim.SessionID]*activeLogin),
-		preLoginStreams: make(map[uint64]network.ServerPacketStream),
+		preLoginStreams: make(map[uint64]*pendingLoginStream),
 		runtimeDone:     make(chan error, 1),
 		shutdownGate:    gate,
 	}
@@ -89,13 +96,13 @@ func (h *Host) Run(ctx context.Context, listener network.Listener) error {
 	h.listener = listener
 	h.runtimeCancel = cancel
 	if listener != nil {
-		h.workers.Add(1)
+		h.acceptWG.Add(1)
 	}
 	h.mu.Unlock()
 	go func() { h.runtimeDone <- h.world.RunTicks(runCtx) }()
 	if listener != nil {
 		go func() {
-			defer h.workers.Done()
+			defer h.acceptWG.Done()
 			h.acceptLoop(runCtx, listener)
 		}()
 	}
@@ -248,8 +255,8 @@ func (h *Host) acquirePreLogin(stream network.ServerPacketStream) (uint64, error
 	}
 	h.nextPreLogin++
 	streamID := h.nextPreLogin
-	h.preLoginStreams[streamID] = stream
-	h.workers.Add(1)
+	h.preLoginStreams[streamID] = &pendingLoginStream{stream: stream}
+	h.pendingWG.Add(1)
 	h.mu.Unlock()
 	return streamID, nil
 }
@@ -258,23 +265,33 @@ func (h *Host) acceptStream(
 	ctx context.Context,
 	stream network.ServerPacketStream,
 	streamID uint64,
-) error {
+) (resultErr error) {
+	pendingCtx, cancelPending := context.WithCancel(ctx)
+	h.bindPendingCancel(streamID, cancelPending)
+	var active *activeLogin
+	var activated, confirmed, promoted bool
 	defer func() {
+		cancelPending()
 		_ = stream.Close()
-		h.mu.Lock()
-		delete(h.preLoginStreams, streamID)
-		h.mu.Unlock()
-		h.workers.Done()
-		<-h.preLogin
+		if active != nil {
+			if !confirmed {
+				h.players.Abort(active.PlayerID)
+			}
+			if activated {
+				h.players.Deactivate(active.PlayerID)
+			}
+			h.releaseLogin(active)
+		}
+		h.finishStreamLifecycle(streamID, promoted)
 	}()
 
-	pending, err := network.BeginServerLogin(ctx, stream)
+	pending, err := network.BeginServerLogin(pendingCtx, stream)
 	if err != nil {
 		return err
 	}
 	identity := pending.Identity()
 
-	active, err := h.reserveLogin(identity.PlayerID)
+	active, err = h.reserveLogin(identity.PlayerID)
 	if errors.Is(err, errHostAlreadyOnline) {
 		return pending.Reject(ctx, network.LoginAlreadyOnline, "玩家已在线")
 	}
@@ -284,7 +301,6 @@ func (h *Host) acceptStream(
 	h.mu.Lock()
 	active.Name = identity.DisplayName
 	h.mu.Unlock()
-	defer h.releaseLogin(active)
 
 	restore, err := h.players.Prepare(
 		pending.Context(),
@@ -293,7 +309,6 @@ func (h *Host) acceptStream(
 		h.world.store.Metadata(),
 	)
 	if err != nil {
-		h.players.Abort(identity.PlayerID)
 		code, message := hostPlayerLoadReject(err)
 		_ = pending.Reject(ctx, code, message)
 		return err
@@ -302,7 +317,6 @@ func (h *Host) acceptStream(
 	h.mu.Lock()
 	if h.nextSession == ^sim.SessionID(0) || h.nextGeneration == ^uint64(0) {
 		h.mu.Unlock()
-		h.players.Abort(identity.PlayerID)
 		_ = pending.Reject(ctx, network.LoginInternalError, "服务端会话编号已耗尽")
 		return errHostSessionIDExhausted
 	}
@@ -311,11 +325,6 @@ func (h *Host) acceptStream(
 	sessionID := h.nextSession
 	generation := h.nextGeneration
 	h.mu.Unlock()
-	if err := h.promoteLogin(active, sessionID, generation); err != nil {
-		h.players.Abort(identity.PlayerID)
-		_ = pending.Reject(ctx, network.LoginInternalError, "服务端会话注册失败")
-		return err
-	}
 
 	var exit <-chan SessionExit
 	err = pending.Accept(ctx, func(endpoint network.ServerEndpoint) error {
@@ -332,24 +341,104 @@ func (h *Host) acceptStream(
 			h.world.DetachSession(sessionID, generation, activateErr)
 			return activateErr
 		}
+		activated = true
+		promoted = true
+		if promoteErr := h.promotePendingLogin(active, sessionID, generation, streamID); promoteErr != nil {
+			promoted = false
+			h.world.DetachSession(sessionID, generation, promoteErr)
+			return promoteErr
+		}
 		return nil
 	})
 	if err != nil {
 		if exit != nil {
-			h.world.DetachSession(sessionID, generation, err)
-			<-exit
+			return h.collectSessionExit(active, sessionID, generation, exit, err)
 		}
-		h.players.Abort(identity.PlayerID)
 		return err
 	}
 	h.players.Confirm(identity.PlayerID)
+	confirmed = true
 
-	result := <-exit
-	if result.HasSnapshot {
-		_ = h.players.Observe(identity.PlayerID, identity.DisplayName, result.Snapshot, h.world.TickCount(), true)
+	return h.collectSessionExit(active, sessionID, generation, exit, nil)
+}
+
+func (h *Host) bindPendingCancel(streamID uint64, cancel context.CancelFunc) {
+	h.mu.Lock()
+	pending := h.preLoginStreams[streamID]
+	closing := h.closing
+	if pending != nil {
+		pending.cancel = cancel
 	}
-	h.players.Deactivate(identity.PlayerID)
-	return result.Err
+	h.mu.Unlock()
+	if closing || pending == nil {
+		cancel()
+	}
+}
+
+func (h *Host) promotePendingLogin(
+	entry *activeLogin,
+	session sim.SessionID,
+	generation uint64,
+	streamID uint64,
+) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closing || entry == nil || h.activeByPlayer[entry.PlayerID] != entry ||
+		h.preLoginStreams[streamID] == nil {
+		return errHostLoginNotReserved
+	}
+	if h.activeBySession[session] != nil {
+		return errHostSessionRegistered
+	}
+	h.sessionWG.Add(1)
+	entry.Session = session
+	entry.Generation = generation
+	h.activeBySession[session] = entry
+	delete(h.preLoginStreams, streamID)
+	h.pendingWG.Done()
+	<-h.preLogin
+	return nil
+}
+
+func (h *Host) finishStreamLifecycle(streamID uint64, promoted bool) {
+	if promoted {
+		h.sessionWG.Done()
+		return
+	}
+	h.mu.Lock()
+	if h.preLoginStreams[streamID] != nil {
+		delete(h.preLoginStreams, streamID)
+		h.pendingWG.Done()
+		<-h.preLogin
+	}
+	h.mu.Unlock()
+}
+
+func (h *Host) collectSessionExit(
+	active *activeLogin,
+	session sim.SessionID,
+	generation uint64,
+	exit <-chan SessionExit,
+	cause error,
+) error {
+	if cause != nil {
+		h.world.DetachSession(session, generation, cause)
+	}
+	result := <-exit
+	var observeErr error
+	if result.HasSnapshot {
+		observeErr = h.players.Observe(
+			active.PlayerID,
+			active.Name,
+			result.Snapshot,
+			h.world.TickCount(),
+			true,
+		)
+	}
+	if cause != nil {
+		return errors.Join(cause, observeErr)
+	}
+	return errors.Join(result.Err, observeErr)
 }
 
 func (h *Host) Shutdown(ctx context.Context) error {
@@ -374,23 +463,23 @@ func (h *Host) Shutdown(ctx context.Context) error {
 	h.mu.Lock()
 	h.closing = true
 	listener := h.listener
-	streams := make([]network.ServerPacketStream, 0, len(h.preLoginStreams))
-	for _, stream := range h.preLoginStreams {
-		streams = append(streams, stream)
-	}
 	h.mu.Unlock()
 
 	var listenerErr error
 	if listener != nil {
 		listenerErr = listener.Close()
 	}
+	if err := h.waitAcceptLoop(ctx); err != nil {
+		return errors.Join(listenerErr, err)
+	}
+	h.closePendingLogins()
+	if err := waitForHostWorkers(ctx, &h.pendingWG); err != nil {
+		return errors.Join(listenerErr, err)
+	}
 	for _, active := range h.activeLogins() {
 		h.world.DetachSession(active.Session, active.Generation, network.ErrClosed)
 	}
-	for _, stream := range streams {
-		_ = stream.Close()
-	}
-	if err := waitForHostWorkers(ctx, &h.workers); err != nil {
+	if err := waitForHostWorkers(ctx, &h.sessionWG); err != nil {
 		return errors.Join(listenerErr, err)
 	}
 	if err := h.players.Flush(ctx); err != nil {
@@ -408,6 +497,41 @@ func (h *Host) Shutdown(ctx context.Context) error {
 	}
 	h.players.CloseWorker()
 	return listenerErr
+}
+
+func (h *Host) waitAcceptLoop(ctx context.Context) error {
+	return waitForHostWorkers(ctx, &h.acceptWG)
+}
+
+func (h *Host) closePendingLogins() {
+	h.mu.Lock()
+	ids := make([]uint64, 0, len(h.preLoginStreams))
+	for id := range h.preLoginStreams {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(left, right int) bool { return ids[left] < ids[right] })
+	pending := make([]*pendingLoginStream, 0, len(ids))
+	for _, id := range ids {
+		login := h.preLoginStreams[id]
+		pending = append(pending, &pendingLoginStream{
+			stream: login.stream,
+			cancel: login.cancel,
+		})
+	}
+	h.mu.Unlock()
+	for _, login := range pending {
+		if login == nil {
+			continue
+		}
+		if login.cancel != nil {
+			login.cancel()
+		}
+		_ = login.stream.Close()
+	}
+}
+
+func (h *Host) waitPendingLogins() {
+	h.pendingWG.Wait()
 }
 
 func hostPlayerLoadReject(err error) (network.LoginRejectCode, string) {

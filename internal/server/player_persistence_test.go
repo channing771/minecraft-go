@@ -989,7 +989,7 @@ func TestPlayerFlushCanceledContextLeavesRetryUndispatchedAndRetryable(t *testin
 	}
 }
 
-// 捕获：Flush 同时分派多个身份但在首错返回，给下次已修复的 Flush 留下旧失败 completion。
+// 捕获：Flush 在首错后没有继续处理其他身份，或把后续 completion 遗留给下一次 Flush。
 func TestPlayerFlushDoesNotLeaveConcurrentFailureForNextFlush(t *testing.T) {
 	store := newConcurrentPlayerSaveStore()
 	p := newPlayerPersistence(store, playerPersistenceTestConfig())
@@ -1015,9 +1015,15 @@ func TestPlayerFlushDoesNotLeaveConcurrentFailureForNextFlush(t *testing.T) {
 	store.assertNoStart(t)
 	wantErr := errors.New("disk unavailable")
 	store.complete(first.PlayerID, wantErr)
+	second := store.receiveStarted(t)
+	if second.PlayerID != playerID(2) {
+		t.Fatalf("first Flush second ID=%s, want %s", second.PlayerID, playerID(2))
+	}
+	store.complete(second.PlayerID, nil)
 	select {
 	case err := <-firstFlush:
-		if !errors.Is(err, wantErr) {
+		if !errors.Is(err, wantErr) || err.Error() !=
+			"save player 00000000-0000-4000-8000-000000000001 revision 8: disk unavailable" {
 			t.Fatalf("first Flush error=%v, want %v", err, wantErr)
 		}
 	case <-time.After(time.Second):
@@ -1031,11 +1037,6 @@ func TestPlayerFlushDoesNotLeaveConcurrentFailureForNextFlush(t *testing.T) {
 		t.Fatalf("healed Flush retry=%+v, want frozen=%+v", retry, first)
 	}
 	store.complete(retry.PlayerID, nil)
-	second := store.receiveStarted(t)
-	if second.PlayerID != playerID(2) {
-		t.Fatalf("healed Flush second ID=%s, want %s", second.PlayerID, playerID(2))
-	}
-	store.complete(second.PlayerID, nil)
 	select {
 	case err := <-secondFlush:
 		if err != nil {
@@ -1081,8 +1082,10 @@ func TestPlayerFlushDrainsInheritedInflightBatchBeforeReturning(t *testing.T) {
 	store.complete(playerID(2), twoErr)
 	select {
 	case err := <-firstFlush:
-		if !errors.Is(err, oneErr) || !errors.Is(err, twoErr) || err.Error() != "one\ntwo" {
-			t.Fatalf("inherited batch error=%q, want deterministic %q", err, "one\ntwo")
+		want := "save player 00000000-0000-4000-8000-000000000001 revision 8: one\n" +
+			"save player 00000000-0000-4000-8000-000000000002 revision 8: two"
+		if !errors.Is(err, oneErr) || !errors.Is(err, twoErr) || err.Error() != want {
+			t.Fatalf("inherited batch error=%q, want deterministic %q", err, want)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Flush did not return after inherited in-flight barrier completed")
@@ -1107,8 +1110,7 @@ func TestPlayerFlushDrainsInheritedInflightBatchBeforeReturning(t *testing.T) {
 	}
 }
 
-// 捕获：inherited batch 中较小 ID 成功时立刻分派 forced follow-up，随后较大 ID 失败返回，
-// 使 follow-up completion 跨越到下一次已修复的 Flush。
+// 捕获：inherited batch 有失败时漏掉成功 ID 的 latest follow-up，或把其 completion 留给下次 Flush。
 func TestPlayerFlushInheritedFailureDoesNotDispatchForcedFollowup(t *testing.T) {
 	p, store := newTwoInflightPlayerPersistence(t)
 	if err := p.Observe(playerID(1), "B", testPlayerSnapshot(20), 6000, true); err != nil {
@@ -1121,10 +1123,17 @@ func TestPlayerFlushInheritedFailureDoesNotDispatchForcedFollowup(t *testing.T) 
 	store.complete(playerID(1), nil)
 	wantErr := errors.New("two failed")
 	store.complete(playerID(2), wantErr)
+	followup := store.receiveStarted(t)
+	if followup.PlayerID != playerID(1) || followup.Revision != 9 ||
+		followup.Current.Position != [3]float32{20, 70, -20} {
+		t.Fatalf("same-Flush forced follow-up=%+v", followup)
+	}
+	store.complete(playerID(1), nil)
 	select {
 	case err := <-flushed:
-		if !errors.Is(err, wantErr) || err.Error() != "two failed" {
-			t.Fatalf("inherited Flush error=%q, want %q", err, "two failed")
+		want := "save player 00000000-0000-4000-8000-000000000002 revision 8: two failed"
+		if !errors.Is(err, wantErr) || err.Error() != want {
+			t.Fatalf("inherited Flush error=%q, want %q", err, want)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("inherited Flush did not return after complete batch")
@@ -1133,12 +1142,6 @@ func TestPlayerFlushInheritedFailureDoesNotDispatchForcedFollowup(t *testing.T) 
 
 	healed := make(chan error, 1)
 	go func() { healed <- p.Flush(context.Background()) }()
-	followup := store.receiveStarted(t)
-	if followup.PlayerID != playerID(1) || followup.Revision != 9 ||
-		followup.Current.Position != [3]float32{20, 70, -20} {
-		t.Fatalf("healed forced follow-up=%+v", followup)
-	}
-	store.complete(playerID(1), nil)
 	retry := store.receiveStarted(t)
 	if retry.PlayerID != playerID(2) || retry.Revision != 8 {
 		t.Fatalf("healed retry=%+v, want ID2 revision 8", retry)
@@ -1204,8 +1207,9 @@ func TestPlayerFlushInheritedBarrierRejectsForeignRevision(t *testing.T) {
 	store.complete(playerID(1), nil)
 	select {
 	case err := <-flushed:
-		if !errors.Is(err, wantErr) || errors.Is(err, context.Canceled) || err.Error() != "two failed" {
-			t.Fatalf("exact inherited batch error=%q, want %q", err, "two failed")
+		want := "save player 00000000-0000-4000-8000-000000000002 revision 8: two failed"
+		if !errors.Is(err, wantErr) || errors.Is(err, context.Canceled) || err.Error() != want {
+			t.Fatalf("exact inherited batch error=%q, want %q", err, want)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Flush did not return after exact inherited completion")
