@@ -26,6 +26,7 @@ type Server struct {
 	store                     storage.Store
 	engine                    *sim.Engine
 	sessions                  map[sim.SessionID]*session
+	playerSessions            map[core.PlayerID]sim.SessionID
 	trustedObserver           *session
 	trustedObserverGeneration uint64
 
@@ -86,6 +87,7 @@ func NewWorld(config Config, generator Generator, store storage.Store) *Server {
 		store:           store,
 		engine:          sim.NewEngine(config.ViewRadius),
 		sessions:        make(map[sim.SessionID]*session),
+		playerSessions:  make(map[core.PlayerID]sim.SessionID),
 		ctx:             ctx,
 		cancel:          cancel,
 		saveCtx:         saveCtx,

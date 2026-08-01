@@ -72,9 +72,7 @@ func TestTrustedObserverSequenceCannotBePoisonedByClientSequence(t *testing.T) {
 	if err := running.AttachTrustedObserver(observerEndpoint); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: playerEndpoint, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(7, 1, playerEndpoint)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

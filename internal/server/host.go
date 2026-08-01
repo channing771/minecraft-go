@@ -261,7 +261,9 @@ func (h *Host) acceptStream(
 	err = pending.Accept(ctx, func(endpoint network.ServerEndpoint) error {
 		var attachErr error
 		exit, attachErr = h.world.AttachSession(SessionSpec{
-			ID: sessionID, Generation: generation, Endpoint: endpoint, Restore: restore,
+			ID: sessionID, Generation: generation,
+			PlayerID: identity.PlayerID, DisplayName: identity.DisplayName,
+			Endpoint: endpoint, Restore: restore,
 		})
 		if attachErr != nil {
 			return attachErr

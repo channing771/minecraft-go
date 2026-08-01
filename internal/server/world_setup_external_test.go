@@ -1,6 +1,9 @@
 package server_test
 
 import (
+	"fmt"
+
+	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/sim"
@@ -15,7 +18,11 @@ func newMemoryAttachedWorldForExternalTest(config server.Config, endpoint networ
 		}
 		return running
 	}
-	if _, err := running.AttachSession(server.SessionSpec{ID: 1, Generation: 1, Endpoint: endpoint, Restore: sim.PlayerRestore{SpawnDimension: config.SpawnDimension, SpawnAnchor: config.SpawnAnchor}}); err != nil {
+	restore := sim.PlayerRestore{
+		SpawnDimension: config.SpawnDimension,
+		SpawnAnchor:    config.SpawnAnchor,
+	}
+	if _, err := running.AttachSession(externalSessionSpec(1, 1, endpoint, restore)); err != nil {
 		panic(err)
 	}
 	return running
@@ -33,8 +40,28 @@ func newAttachedPersistentWorldForExternalTest(config server.Config, endpoint ne
 		}
 		return running
 	}
-	if _, err := running.AttachSession(server.SessionSpec{ID: 1, Generation: 1, Endpoint: endpoint, Restore: sim.PlayerRestore{SpawnDimension: config.SpawnDimension, SpawnAnchor: config.SpawnAnchor}}); err != nil {
+	restore := sim.PlayerRestore{
+		SpawnDimension: config.SpawnDimension,
+		SpawnAnchor:    config.SpawnAnchor,
+	}
+	if _, err := running.AttachSession(externalSessionSpec(1, 1, endpoint, restore)); err != nil {
 		panic(err)
 	}
 	return running
+}
+
+func externalSessionSpec(
+	id sim.SessionID,
+	generation uint64,
+	endpoint network.ServerEndpoint,
+	restore sim.PlayerRestore,
+) server.SessionSpec {
+	return server.SessionSpec{
+		ID:          id,
+		Generation:  generation,
+		PlayerID:    core.PlayerID{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, byte(id)},
+		DisplayName: fmt.Sprintf("Player-%d", id),
+		Endpoint:    endpoint,
+		Restore:     restore,
+	}
 }

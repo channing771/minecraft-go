@@ -30,10 +30,12 @@ var (
 )
 
 type SessionSpec struct {
-	ID         sim.SessionID
-	Generation uint64
-	Endpoint   network.ServerEndpoint
-	Restore    sim.PlayerRestore
+	ID          sim.SessionID
+	Generation  uint64
+	PlayerID    core.PlayerID
+	DisplayName string
+	Endpoint    network.ServerEndpoint
+	Restore     sim.PlayerRestore
 }
 
 type SessionExit struct {
@@ -99,15 +101,17 @@ type snapshotRequest struct {
 }
 
 type session struct {
-	id         sim.SessionID
-	generation uint64
-	endpoint   network.ServerEndpoint
-	ctx        context.Context
-	cancel     context.CancelFunc
-	outbox     chan network.ServerMessage
-	workers    *sync.WaitGroup
-	exit       chan SessionExit
-	detach     func(sim.SessionID, uint64, error) bool
+	id          sim.SessionID
+	generation  uint64
+	playerID    core.PlayerID
+	displayName string
+	endpoint    network.ServerEndpoint
+	ctx         context.Context
+	cancel      context.CancelFunc
+	outbox      chan network.ServerMessage
+	workers     *sync.WaitGroup
+	exit        chan SessionExit
+	detach      func(sim.SessionID, uint64, error) bool
 
 	mu               sync.Mutex
 	isClosed         bool
@@ -142,6 +146,8 @@ func newSession(
 	current := &session{
 		id:               spec.ID,
 		generation:       spec.Generation,
+		playerID:         spec.PlayerID,
+		displayName:      spec.DisplayName,
 		endpoint:         spec.Endpoint,
 		ctx:              ctx,
 		cancel:           cancel,
@@ -349,14 +355,18 @@ func (current *session) heartbeatLoop(
 func (server *Server) attachSessionLocked(
 	spec SessionSpec,
 ) (<-chan SessionExit, error) {
+	canonical, err := core.NormalizeDisplayName(spec.DisplayName)
 	if server.lifecycle != serverRunning ||
 		spec.ID == 0 ||
 		spec.Generation == 0 ||
 		spec.Endpoint == nil ||
-		spec.ID == trustedObserverSessionID {
+		spec.ID == trustedObserverSessionID ||
+		!spec.PlayerID.Valid() ||
+		err != nil ||
+		canonical != spec.DisplayName {
 		return nil, ErrInvalidSession
 	}
-	if server.sessions[spec.ID] != nil {
+	if server.sessions[spec.ID] != nil || server.playerSessions[spec.PlayerID] != 0 {
 		return nil, ErrSessionExists
 	}
 	server.engine.RegisterPlayer(spec.ID, spec.Restore)
@@ -369,6 +379,7 @@ func (server *Server) attachSessionLocked(
 		server.DetachSession,
 	)
 	server.sessions[spec.ID] = current
+	server.playerSessions[spec.PlayerID] = spec.ID
 	server.workers.Add(1)
 	go server.endpointReader(current)
 	return current.exit, nil
@@ -386,6 +397,9 @@ func (server *Server) detachSessionLocked(
 		return false
 	}
 	delete(server.sessions, id)
+	if server.playerSessions[current.playerID] == id {
+		delete(server.playerSessions, current.playerID)
+	}
 	snapshot, hasSnapshot := server.engine.UnregisterSession(id)
 	current.shutdown()
 	current.exit <- SessionExit{

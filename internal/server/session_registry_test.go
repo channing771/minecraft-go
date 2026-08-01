@@ -19,9 +19,7 @@ func TestServerRejectsStaleSessionGeneration(t *testing.T) {
 	running := NewWorld(registryTestConfig(), playerTestGenerator{}, testStore())
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	client1, server1 := network.NewMemoryPair(32)
-	exit1, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: server1, Restore: testRestore(),
-	})
+	exit1, err := running.AttachSession(registrySessionSpec(7, 1, server1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,9 +30,7 @@ func TestServerRejectsStaleSessionGeneration(t *testing.T) {
 	client2, server2 := network.NewMemoryPair(32)
 	defer client1.Close()
 	defer client2.Close()
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 8, Generation: 2, Endpoint: server2, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(8, 2, server2)); err != nil {
 		t.Fatal(err)
 	}
 	running.enqueueIncoming(context.Background(), incomingCommand{
@@ -54,26 +50,30 @@ func TestSessionRegistryRejectsInvalidAndDuplicateSpecs(t *testing.T) {
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	_, endpoint := network.NewMemoryPair(8)
 
-	invalid := []SessionSpec{
-		{Generation: 1, Endpoint: endpoint, Restore: testRestore()},
-		{ID: 7, Endpoint: endpoint, Restore: testRestore()},
-		{ID: 7, Generation: 1, Restore: testRestore()},
-	}
+	valid := registrySessionSpec(7, 1, endpoint)
+	missingID := valid
+	missingID.ID = 0
+	missingGeneration := valid
+	missingGeneration.Generation = 0
+	missingEndpoint := valid
+	missingEndpoint.Endpoint = nil
+	invalid := []SessionSpec{missingID, missingGeneration, missingEndpoint}
 	for _, spec := range invalid {
 		if _, err := running.AttachSession(spec); !errors.Is(err, ErrInvalidSession) {
 			t.Fatalf("AttachSession(%+v) error = %v，想要 %v", spec, err, ErrInvalidSession)
 		}
 	}
 
-	exit, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-	})
+	exit, err := running.AttachSession(valid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 2, Endpoint: endpoint, Restore: testRestore(),
-	}); !errors.Is(err, ErrSessionExists) {
+	duplicateID := registrySessionSpec(8, 2, endpoint)
+	duplicateID.ID = 7
+	if duplicateID.PlayerID == valid.PlayerID {
+		t.Fatal("duplicate SessionID fixture reused PlayerID")
+	}
+	if _, err := running.AttachSession(duplicateID); !errors.Is(err, ErrSessionExists) {
 		t.Fatalf("重复 ID error = %v，想要 %v", err, ErrSessionExists)
 	}
 	if !running.DetachSession(7, 1, nil) {
@@ -88,9 +88,7 @@ func TestSessionRegistryAcceptsArbitraryPlayerID(t *testing.T) {
 	client, endpoint := network.NewMemoryPair(32)
 	defer client.Close()
 
-	exit, err := running.AttachSession(SessionSpec{
-		ID: 91, Generation: 4, Endpoint: endpoint, Restore: testRestore(),
-	})
+	exit, err := running.AttachSession(registrySessionSpec(91, 4, endpoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,8 +152,8 @@ func TestSessionRegistryPublishesOnlyToTargetSession(t *testing.T) {
 	defer client7.Close()
 	defer client8.Close()
 	for _, spec := range []SessionSpec{
-		{ID: 7, Generation: 1, Endpoint: endpoint7, Restore: testRestore()},
-		{ID: 8, Generation: 1, Endpoint: endpoint8, Restore: testRestore()},
+		registrySessionSpec(7, 1, endpoint7),
+		registrySessionSpec(8, 1, endpoint8),
 	} {
 		if _, err := running.AttachSession(spec); err != nil {
 			t.Fatal(err)
@@ -211,9 +209,7 @@ func TestSessionRegistryShutdownDetachesInIDOrderAndExitsOnce(t *testing.T) {
 				closeMu.Unlock()
 			},
 		}
-		exit, err := running.AttachSession(SessionSpec{
-			ID: id, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-		})
+		exit, err := running.AttachSession(registrySessionSpec(id, 1, endpoint))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -246,9 +242,7 @@ func TestSessionRegistryLateFailureCannotDetachNewGeneration(t *testing.T) {
 	running := NewWorld(registryTestConfig(), playerTestGenerator{}, testStore())
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	_, endpoint1 := network.NewMemoryPair(8)
-	exit1, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint1, Restore: testRestore(),
-	})
+	exit1, err := running.AttachSession(registrySessionSpec(7, 1, endpoint1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,9 +259,7 @@ func TestSessionRegistryLateFailureCannotDetachNewGeneration(t *testing.T) {
 	<-exit1
 
 	_, endpoint2 := network.NewMemoryPair(8)
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 2, Endpoint: endpoint2, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(7, 2, endpoint2)); err != nil {
 		t.Fatal(err)
 	}
 	old.fail(errors.New("late reader failure"))
@@ -295,9 +287,7 @@ func TestSessionRegistryDetachReleasesReaderBlockedOnFullIncoming(t *testing.T) 
 	endpoint := &countingRecvEndpoint{
 		calls: make(chan int, 2),
 	}
-	exit, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-	})
+	exit, err := running.AttachSession(registrySessionSpec(7, 1, endpoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,15 +315,11 @@ func TestSessionRegistrySlowSessionDoesNotCloseHealthySession(t *testing.T) {
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	slowEndpoint := newBlockingServerEndpoint()
 	healthyEndpoint := newHeartbeatEndpoint()
-	slowExit, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: slowEndpoint, Restore: testRestore(),
-	})
+	slowExit, err := running.AttachSession(registrySessionSpec(7, 1, slowEndpoint))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 8, Generation: 1, Endpoint: healthyEndpoint, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(8, 1, healthyEndpoint)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -375,15 +361,11 @@ func TestSessionRegistryUnknownMessageClosesOnlyTarget(t *testing.T) {
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	failingEndpoint := newHeartbeatEndpoint()
 	healthyEndpoint := newHeartbeatEndpoint()
-	exit, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: failingEndpoint, Restore: testRestore(),
-	})
+	exit, err := running.AttachSession(registrySessionSpec(7, 1, failingEndpoint))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 8, Generation: 1, Endpoint: healthyEndpoint, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(8, 1, healthyEndpoint)); err != nil {
 		t.Fatal(err)
 	}
 	failingEndpoint.recv <- nil
@@ -400,15 +382,11 @@ func TestSessionRegistryInvalidRejectionClosesOnlyTarget(t *testing.T) {
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	_, endpoint7 := network.NewMemoryPair(8)
 	_, endpoint8 := network.NewMemoryPair(8)
-	exit, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint7, Restore: testRestore(),
-	})
+	exit, err := running.AttachSession(registrySessionSpec(7, 1, endpoint7))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 8, Generation: 1, Endpoint: endpoint8, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(8, 1, endpoint8)); err != nil {
 		t.Fatal(err)
 	}
 	running.stepMu.Lock()
@@ -438,9 +416,7 @@ func TestSessionRegistryPublicationOrderIsStableByID(t *testing.T) {
 				closeMu.Unlock()
 			},
 		}
-		if _, err := running.AttachSession(SessionSpec{
-			ID: id, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-		}); err != nil {
+		if _, err := running.AttachSession(registrySessionSpec(id, 1, endpoint)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -477,8 +453,8 @@ func TestSessionRegistrySnapshotsDeltasAndForgetStayWithTarget(t *testing.T) {
 		},
 	}
 	for _, spec := range []SessionSpec{
-		{ID: 7, Generation: 1, Endpoint: endpoint7, Restore: restores[7]},
-		{ID: 8, Generation: 1, Endpoint: endpoint8, Restore: restores[8]},
+		registrySessionSpecWithRestore(7, 1, endpoint7, restores[7]),
+		registrySessionSpecWithRestore(8, 1, endpoint8, restores[8]),
 	} {
 		if _, err := running.AttachSession(spec); err != nil {
 			t.Fatal(err)
@@ -548,20 +524,20 @@ func TestSessionRegistryResyncCannotReadOtherSessionReadyChunk(t *testing.T) {
 	defer client7.Close()
 	defer client8.Close()
 	for _, spec := range []SessionSpec{
-		{
-			ID: 7, Generation: 1, Endpoint: endpoint7,
-			Restore: sim.PlayerRestore{
+		registrySessionSpecWithRestore(
+			7, 1, endpoint7,
+			sim.PlayerRestore{
 				SpawnDimension: core.Overworld,
 				SpawnAnchor:    core.ChunkPos{},
 			},
-		},
-		{
-			ID: 8, Generation: 1, Endpoint: endpoint8,
-			Restore: sim.PlayerRestore{
+		),
+		registrySessionSpecWithRestore(
+			8, 1, endpoint8,
+			sim.PlayerRestore{
 				SpawnDimension: core.Overworld,
 				SpawnAnchor:    core.ChunkPos{X: 10},
 			},
-		},
+		),
 	} {
 		if _, err := running.AttachSession(spec); err != nil {
 			t.Fatal(err)
@@ -603,9 +579,7 @@ func TestSessionRegistryForgetDoesNotCancelUnionPendingWork(t *testing.T) {
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	for _, id := range []sim.SessionID{7, 8} {
 		_, endpoint := network.NewMemoryPair(8)
-		if _, err := running.AttachSession(SessionSpec{
-			ID: id, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-		}); err != nil {
+		if _, err := running.AttachSession(registrySessionSpec(id, 1, endpoint)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -630,9 +604,7 @@ func TestSessionRegistryDetachCancelsPendingWorkWithNoSubscribers(t *testing.T) 
 	running := NewWorld(registryTestConfig(), playerTestGenerator{}, testStore())
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	_, endpoint := network.NewMemoryPair(8)
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(7, 1, endpoint)); err != nil {
 		t.Fatal(err)
 	}
 	result := running.engine.Step()
@@ -661,9 +633,7 @@ func TestSessionRegistryDetachKeepsPendingWorkForRemainingSubscriber(t *testing.
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	for _, id := range []sim.SessionID{7, 8} {
 		_, endpoint := network.NewMemoryPair(8)
-		if _, err := running.AttachSession(SessionSpec{
-			ID: id, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-		}); err != nil {
+		if _, err := running.AttachSession(registrySessionSpec(id, 1, endpoint)); err != nil {
 			t.Fatal(err)
 		}
 	}
