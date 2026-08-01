@@ -12,6 +12,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: OpenSpec 规格门禁
+        run: npx --yes @fission-ai/openspec@1.7.0 validate --all --strict --no-interactive
+
+      - name: Agent Hooks 策略测试
+        run: node --test scripts/agent-hooks/guard.test.mjs
 
       - name: 架构、存储与协议门禁
         run: go test ./internal/archcheck ./internal/storage ./internal/network ./internal/physics -v
