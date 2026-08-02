@@ -201,6 +201,52 @@ func TestMesherClearsInFlightBeforeBlockedResultPublication(t *testing.T) {
 	}
 }
 
+func TestMesherRedirtyQueuesLatestBeforeBlockedResultPublication(t *testing.T) {
+	mesher := NewMesher(assets.NewRegistry(), 1)
+	mirror := NewMirror()
+	applyAirChunkForBackpressureTest(t, mirror, core.ChunkPos{})
+	key := core.SectionKey{Dimension: core.Overworld, Pos: core.SectionPos{}}
+	release := mesher.BlockForTest(key)
+	for range cap(mesher.results) {
+		mesher.results <- mesherResult{}
+	}
+	defer func() {
+		release()
+		select {
+		case <-mesher.results:
+		default:
+		}
+		mesher.Close()
+	}()
+
+	mesher.MarkDirty(key)
+	mesher.Schedule(mirror, 1)
+	waitForMesherBackpressureTest(t, func() bool {
+		return mesher.Stats().InFlightJobs == 1
+	})
+	mesher.MarkDirty(key)
+	mesher.mu.Lock()
+	latest := mesher.dirty[key]
+	mesher.mu.Unlock()
+	release()
+	waitForMesherBackpressureTest(t, func() bool {
+		return mesher.Stats().InFlightJobs == 0
+	})
+
+	mesher.mu.Lock()
+	current, dirty := mesher.dirty[key]
+	readyCount := mesher.ready.Len()
+	readyKey, ready := mesher.ready.Take()
+	mesher.mu.Unlock()
+	resultsFull := len(mesher.results) == cap(mesher.results)
+	if !dirty || current != latest || readyCount != 1 || !ready || readyKey != key || !resultsFull {
+		t.Fatalf(
+			"阻塞发布时 dirty=(%v,%d/%d) ready=(%d,%+v,%v) resultsFull=%v",
+			dirty, current, latest, readyCount, readyKey, ready, resultsFull,
+		)
+	}
+}
+
 func applyAirChunkForBackpressureTest(t testing.TB, mirror *Mirror, pos core.ChunkPos) {
 	t.Helper()
 	sections := make([]network.SectionData, core.SectionsPerChunk)
