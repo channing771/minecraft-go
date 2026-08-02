@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -340,6 +341,36 @@ func TestPendingLoginSuccessfulAcceptStopsLoginWatcher(t *testing.T) {
 	}
 }
 
+func TestGatedServerPlayEndpointCommittedHandoffWinsLoginCancellation(t *testing.T) {
+	previous := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previous)
+
+	for iteration := 0; iteration < 128; iteration++ {
+		client, server := NewMemoryStreamPair(1)
+		login := &simultaneousHandoffContext{
+			done:     make(chan struct{}),
+			observed: make(chan struct{}),
+			release:  make(chan struct{}),
+		}
+		endpoint := newGatedServerPlayEndpoint(server, login)
+		result := make(chan error, 1)
+		go func() { result <- endpoint.wait(context.Background()) }()
+
+		<-login.observed
+		endpoint.commit()
+		close(login.done)
+		close(login.release)
+		runtime.Gosched()
+		if err := <-result; err != nil {
+			_ = client.Close()
+			t.Fatalf("committed handoff iteration %d selected canceled login: %v", iteration, err)
+		}
+		if err := client.Close(); err != nil {
+			t.Fatalf("close handoff stream iteration %d: %v", iteration, err)
+		}
+	}
+}
+
 func TestPendingLoginCancellationAtSuccessHandoffDoesNotReturnDeadEndpoint(t *testing.T) {
 	client, server := NewMemoryStreamPair(8)
 	t.Cleanup(func() { _ = client.Close() })
@@ -570,6 +601,31 @@ func assertRemoteError(t *testing.T, err error, state State, code uint8, message
 		t.Fatalf("remote error = %#v, want state=%d code=%d message=%q", err, state, code, message)
 	}
 }
+
+type simultaneousHandoffContext struct {
+	done     chan struct{}
+	observed chan struct{}
+	release  chan struct{}
+}
+
+func (*simultaneousHandoffContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (ctx *simultaneousHandoffContext) Done() <-chan struct{} {
+	close(ctx.observed)
+	<-ctx.release
+	return ctx.done
+}
+
+func (ctx *simultaneousHandoffContext) Err() error {
+	select {
+	case <-ctx.done:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+
+func (*simultaneousHandoffContext) Value(any) any { return nil }
 
 func testIdentity(last byte) Identity {
 	return Identity{
