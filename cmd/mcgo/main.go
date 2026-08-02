@@ -174,6 +174,7 @@ func runInteractive(app *application) error {
 		lastFrame = now
 		app.drainServerMessages(64)
 		if err := app.receiver.Err(); err != nil {
+			app.closeClientSession(err)
 			return err
 		}
 
@@ -220,7 +221,10 @@ func runInteractive(app *application) error {
 			app.window.KeyDown(client.KeySpace),
 		)
 		app.applyInteractiveCursorInput(dt, movement, actions, captured, justCaptured)
-		app.renderFrame(64)
+		app.remotePlayers.Advance(dt)
+		if _, err := app.renderFrame(64); err != nil {
+			return err
+		}
 	}
 	return nil
 }

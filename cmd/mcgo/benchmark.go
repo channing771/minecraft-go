@@ -22,6 +22,7 @@ import (
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
+	"minecraft-go/internal/physics"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
 )
@@ -415,7 +416,11 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 				app.window.CancelClose()
 			}
 		}
-		if !app.frame(4096) {
+		rendered, err := app.frame(4096, physics.FixedDelta)
+		if err != nil {
+			return 0, err
+		}
+		if !rendered {
 			continue
 		}
 		stats := app.mesher.Stats()
@@ -447,7 +452,9 @@ func waitForBenchmarkCenterConsistency(
 ) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		app.frame(4096)
+		if _, err := app.frame(4096, physics.FixedDelta); err != nil {
+			return err
+		}
 		appliedDimension, appliedCenter, appliedSequence, appliedOK :=
 			app.server.AppliedTrustedObserverCenter()
 		if !appliedOK || appliedDimension != core.Overworld ||
@@ -486,7 +493,11 @@ func runWarmup(app *application, duration time.Duration) error {
 				app.window.CancelClose()
 			}
 		}
-		if !app.frame(4096) {
+		rendered, err := app.frame(4096, physics.FixedDelta)
+		if err != nil {
+			return err
+		}
+		if !rendered {
 			continue
 		}
 	}
@@ -516,7 +527,10 @@ func measurePhase(
 		if update != nil {
 			update(frameStarted.Sub(started))
 		}
-		rendered := app.frame(4096)
+		rendered, err := app.frame(4096, physics.FixedDelta)
+		if err != nil {
+			return client.PhaseSummary{}, err
+		}
 		if !rendered {
 			if time.Since(lastRendered) > 5*time.Second {
 				return client.PhaseSummary{}, fmt.Errorf("%s 阶段连续 5 秒取不到 surface 帧", name)

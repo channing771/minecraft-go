@@ -5,7 +5,11 @@ package main
 import (
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/go-gl/mathgl/mgl32"
+
+	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/profile"
@@ -119,5 +123,50 @@ func TestParseMainOptionsBenchmarkTransport(t *testing.T) {
 		}
 	}
 }
+
+// Mutation killed: ignoring renderFrame's error makes the interactive loop
+// continue after a glyph worker failure instead of returning it immediately.
+func TestRunInteractivePropagatesRemoteGlyphError(t *testing.T) {
+	wantErr := errors.New("interactive glyph worker failure")
+	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{flushErr: wantErr})
+	app.window = &oneFrameInteractiveWindow{delay: 25 * time.Millisecond}
+	clientEndpoint, serverEndpoint := network.NewMemoryPair(4)
+	app.clientEndpoint = clientEndpoint
+	app.receiver = client.NewReceiver(clientEndpoint, 4)
+	t.Cleanup(func() { _ = serverEndpoint.Close() })
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{})); err != nil {
+		t.Fatal(err)
+	}
+	for index, x := range []float32{4, 8} {
+		if err := app.remotePlayers.Apply(network.RemotePlayerStates{
+			ServerTick: uint64(index + 2),
+			Players: []network.RemotePlayerState{{
+				PlayerID: integrationPlayerID(1), Dimension: core.Overworld,
+				Position: mgl32.Vec3{x, 0, 0},
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := runInteractive(app); !errors.Is(err, wantErr) {
+		t.Fatalf("runInteractive error=%v want wrapped glyph error", err)
+	}
+	if x := app.remotePlayers.Presentations()[0].Position[0]; x < 1.5 || x > 3 {
+		t.Fatalf("interactive interpolation x=%f want elapsed-driven midpoint range", x)
+	}
+}
+
+type oneFrameInteractiveWindow struct {
+	fakeInteractiveWindow
+	polled bool
+	delay  time.Duration
+}
+
+func (window *oneFrameInteractiveWindow) ShouldClose() bool { return window.polled }
+func (window *oneFrameInteractiveWindow) Poll() {
+	time.Sleep(window.delay)
+	window.polled = true
+}
+func (*oneFrameInteractiveWindow) FramebufferSize() (int, int) { return 16, 16 }
 
 var _ = profile.Options{}

@@ -4,7 +4,10 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"math"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,11 +15,13 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
+	"minecraft-go/internal/assets"
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
+	"minecraft-go/internal/render"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
 )
@@ -34,6 +39,501 @@ func TestPerformanceRecordersOnlyEnableSaveSamplingForBenchmark(t *testing.T) {
 			benchmarkTicks, benchmarkSaves)
 	}
 }
+
+// Mutation killed: routing any remote-player message through Mirror closes the
+// endpoint instead of completing the spawn/state/despawn roster lifecycle.
+func TestRemoteMessagesRouteOnlyToRoster(t *testing.T) {
+	app, serverEndpoint, endpoint, _ := newRemoteProtocolApplication(t)
+	spawn := remoteSpawn(2, "Remote-2", 1, mgl32.Vec3{1, 64, 3})
+	sendInteractiveServerMessage(t, serverEndpoint, spawn)
+	app.drainServerMessages(1)
+	got := app.remotePlayers.Presentations()
+	if len(got) != 1 || got[0].PlayerID != spawn.PlayerID || got[0].DisplayName != spawn.DisplayName {
+		t.Fatalf("spawn presentations=%+v", got)
+	}
+	states := network.RemotePlayerStates{ServerTick: 2, Players: []network.RemotePlayerState{{
+		PlayerID: spawn.PlayerID, Dimension: core.Overworld,
+		Position: mgl32.Vec3{9, 65, -4}, Yaw: 0.7, Pitch: -0.2,
+	}}}
+	sendInteractiveServerMessage(t, serverEndpoint, states)
+	app.drainServerMessages(1)
+	got = app.remotePlayers.Presentations()
+	if len(got) != 1 || got[0].Position != states.Players[0].Position || got[0].Yaw != 0.7 || got[0].Pitch != -0.2 {
+		t.Fatalf("state presentations=%+v", got)
+	}
+	sendInteractiveServerMessage(t, serverEndpoint, network.RemotePlayerDespawn{PlayerID: spawn.PlayerID})
+	app.drainServerMessages(1)
+	if got := len(app.remotePlayers.Presentations()); got != 0 {
+		t.Fatalf("despawn roster=%d", got)
+	}
+	if got := endpoint.closeCalls.Load(); got != 0 {
+		t.Fatalf("valid remote lifecycle closed endpoint %d times", got)
+	}
+}
+
+// Mutation killed: calling serverCancel, leaving the endpoint open, or failing
+// to reset the roster on a duplicate Spawn violates client-session isolation.
+func TestRemoteProtocolErrorClosesOnlyClientEndpoint(t *testing.T) {
+	app, serverEndpoint, endpoint, cancelCount := newRemoteProtocolApplication(t)
+	spawn := remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{0, 64, 0})
+	sendInteractiveServerMessage(t, serverEndpoint, spawn)
+	sendInteractiveServerMessage(t, serverEndpoint, spawn)
+	app.drainServerMessages(1)
+	if got := len(app.remotePlayers.Presentations()); got != 1 {
+		t.Fatalf("roster after valid spawn=%d", got)
+	}
+	if got := endpoint.closeCalls.Load(); got != 0 {
+		t.Fatalf("first valid spawn closed endpoint %d times", got)
+	}
+	app.drainServerMessages(1)
+	if got := endpoint.closeCalls.Load(); got != 1 {
+		t.Fatalf("protocol close count=%d", got)
+	}
+	if got := cancelCount(); got != 0 {
+		t.Fatalf("server cancel count=%d", got)
+	}
+	if got := len(app.remotePlayers.Presentations()); got != 0 {
+		t.Fatalf("roster after protocol close=%d", got)
+	}
+}
+
+// Mutation killed: observing a transport close without invoking the session
+// cleanup leaves stale remote players visible in the disconnected world.
+func TestRemoteConnectionCloseResetsRoster(t *testing.T) {
+	app, serverEndpoint, endpoint, cancelCount := newRemoteProtocolApplication(t)
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{})); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverEndpoint.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for app.receiver.Err() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := app.frame(0, 0); !errors.Is(err, network.ErrClosed) {
+		t.Fatalf("frame after disconnect error=%v want network.ErrClosed", err)
+	}
+	if got := len(app.remotePlayers.Presentations()); got != 0 {
+		t.Fatalf("roster after disconnect=%d", got)
+	}
+	if got := endpoint.closeCalls.Load(); got != 1 {
+		t.Fatalf("disconnect endpoint Close calls=%d", got)
+	}
+	if got := cancelCount(); got != 0 {
+		t.Fatalf("disconnect server cancel calls=%d", got)
+	}
+}
+
+// Mutation killed: Advance before drain, a missing Advance, or two Advances
+// produces position 8, 8, or 4 instead of the hand-derived midpoint 2.
+func TestFrameAdvancesRemotePlayersOnceAfterDrain(t *testing.T) {
+	app, serverEndpoint, _, _ := newRemoteProtocolApplication(t)
+	spawn := remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{0, 64, 0})
+	if err := app.remotePlayers.Apply(spawn); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.remotePlayers.Apply(network.RemotePlayerStates{ServerTick: 2, Players: []network.RemotePlayerState{{
+		PlayerID: spawn.PlayerID, Dimension: core.Overworld, Position: mgl32.Vec3{4, 64, 0},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	sendInteractiveServerMessage(t, serverEndpoint, network.RemotePlayerStates{ServerTick: 3, Players: []network.RemotePlayerState{{
+		PlayerID: spawn.PlayerID, Dimension: core.Overworld, Position: mgl32.Vec3{8, 64, 0},
+	}}})
+	rendered, err := app.frame(1, 25*time.Millisecond)
+	if err != nil || rendered {
+		t.Fatalf("frame=(%v,%v), want (false,nil) for zero framebuffer", rendered, err)
+	}
+	if got := app.remotePlayers.Presentations()[0].Position; got != (mgl32.Vec3{2, 64, 0}) {
+		t.Fatalf("advanced position=%v want [2 64 0]", got)
+	}
+}
+
+// Mutation killed: dropping identity/motion/name fields, sorting by input
+// order, or anchoring at the feet changes these literal render values.
+func TestRemotePresentationConversionPreservesSortedRenderData(t *testing.T) {
+	presentations := []client.RemotePresentation{
+		{PlayerID: integrationPlayerID(2), DisplayName: "乙", Position: mgl32.Vec3{8, 9, 10}, Yaw: 0.8, Pitch: -0.3},
+		{PlayerID: integrationPlayerID(1), DisplayName: "甲", Position: mgl32.Vec3{1, 2, 3}, Yaw: -0.4, Pitch: 0.2},
+	}
+	avatars, tags := remoteRenderPresentations(presentations)
+	wantAvatars := []render.Avatar{
+		{PlayerID: integrationPlayerID(1), Position: mgl32.Vec3{1, 2, 3}, Yaw: -0.4, Pitch: 0.2},
+		{PlayerID: integrationPlayerID(2), Position: mgl32.Vec3{8, 9, 10}, Yaw: 0.8, Pitch: -0.3},
+	}
+	wantTags := []render.NameTag{
+		{PlayerID: integrationPlayerID(1), Text: "甲", Anchor: mgl32.Vec3{1, 4.05, 3}},
+		{PlayerID: integrationPlayerID(2), Text: "乙", Anchor: mgl32.Vec3{8, 11.05, 10}},
+	}
+	if !reflect.DeepEqual(avatars, wantAvatars) || !reflect.DeepEqual(tags, wantTags) {
+		t.Fatalf("converted avatars/tags=%+v/%+v want=%+v/%+v", avatars, tags, wantAvatars, wantTags)
+	}
+}
+
+// Mutation killed: swapping, omitting, clearing, or creating empty remote
+// passes changes the real command encoder's captured pass descriptors.
+func TestApplicationRenderPassOrder(t *testing.T) {
+	glyphs := &integrationGlyphSource{}
+	app, dev := newRemoteRenderApplication(t, glyphs)
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{1, 2, 3})); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := app.renderFrame(1)
+	if err != nil || !rendered {
+		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{"terrain pass", "avatar pass", "name-tag pass"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("passes=%v want=%v", got, want)
+	}
+	if glyphs.lastBudget != app.renderer.UploadBudget() {
+		t.Fatal("name-tag Prepare did not receive terrain renderer's shared upload budget")
+	}
+	cameraBytes := dev.bufferByLabel(t, "name-tag camera").data
+	readFloat := func(offset int) float32 {
+		return math.Float32frombits(binary.LittleEndian.Uint32(cameraBytes[offset:]))
+	}
+	if got := [6]float32{
+		readFloat(64), readFloat(68), readFloat(72),
+		readFloat(80), readFloat(84), readFloat(88),
+	}; got != ([6]float32{1, 0, 0, 0, 1, 0}) {
+		t.Fatalf("billboard right/up=%v want [1 0 0]/[0 1 0]", got)
+	}
+	app.remotePlayers.Reset()
+	dev.resetPasses()
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("empty renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{"terrain pass"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("zero-remote passes=%v want=%v", got, want)
+	}
+}
+
+// Mutation killed: swallowing or replacing the atlas worker error prevents
+// errors.Is from observing it at the frame boundary.
+func TestRemoteGlyphErrorPropagatesFromFrame(t *testing.T) {
+	glyphErr := errors.New("injected glyph worker failure")
+	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{flushErr: glyphErr})
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{})); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := app.frame(0, 25*time.Millisecond)
+	if rendered || !errors.Is(err, glyphErr) {
+		t.Fatalf("frame=(%v,%v), want wrapped glyph error", rendered, err)
+	}
+}
+
+// Mutation killed: reordering or repeating any top-level release marker, or
+// resetting the roster after renderer release, changes the observed lifecycle.
+func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
+	dev := &integrationRenderDevice{}
+	reg := assets.NewRegistry()
+	terrain := render.New(dev, reg, gfx.FormatRGBA8Unorm)
+	atlas, err := render.NewGlyphAtlas(dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	avatar := render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
+	nameTag := render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
+	color := dev.CreateTexture(gfx.TextureDesc{Label: "main color", Width: 4, Height: 4, Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget})
+	app := &application{
+		dev: dev, color: color, colorView: color.View(gfx.TextureViewDesc{}),
+		depth: newDepthTarget(dev, 4, 4), renderer: terrain,
+		glyphAtlas: atlas, avatarRenderer: avatar, nameTagRenderer: nameTag,
+		remotePlayers: client.NewRemotePlayers(),
+	}
+	app.releaseResources = app.releaseOwnedResources
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{})); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(app.remotePlayers.Presentations()); got != 0 {
+		t.Fatalf("roster after Close=%d", got)
+	}
+	markers := dev.releaseMarkers([]string{
+		"name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
+		"main depth texture", "main color view", "main color texture", "device",
+	})
+	want := []string{"name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
+	if !reflect.DeepEqual(markers, want) {
+		t.Fatalf("release markers=%v want=%v; all=%v", markers, want, dev.releases)
+	}
+	for _, marker := range want {
+		if count := dev.releaseCount(marker); count != 1 {
+			t.Fatalf("release %q count=%d", marker, count)
+		}
+	}
+}
+
+// Mutation killed: constructing name tags before avatars, or cleaning a failed
+// name-tag construction in forward order, moves the avatar/atlas release markers.
+func TestApplicationConstructionFailureReleasesRemoteResourcesInReverse(t *testing.T) {
+	wantErr := errors.New("injected name-tag construction failure")
+	rawEndpoint, serverEndpoint := network.NewMemoryPair(4)
+	endpoint := &connectionTestEndpoint{ClientEndpoint: rawEndpoint}
+	t.Cleanup(func() { _ = serverEndpoint.Close() })
+	dev := &integrationRenderDevice{}
+	window := &connectionTestWindow{}
+	surface := &connectionTestSurface{}
+	var constructionOrder []string
+	dependencies := connectionTestDependencies(t)
+	dependencies.dialTCP = func(context.Context, string) (network.ClientPacketStream, error) {
+		return &connectionTestClientStream{}, nil
+	}
+	dependencies.loginClient = func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error) {
+		return endpoint, nil
+	}
+	dependencies.newWindow = func(int, int, string) (applicationWindow, error) { return window, nil }
+	dependencies.newDevice = func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error) {
+		return dev, surface, nil
+	}
+	dependencies.newGlyphAtlas = func(device gfx.Device) (*render.GlyphAtlas, error) {
+		constructionOrder = append(constructionOrder, "atlas")
+		return render.NewGlyphAtlas(device)
+	}
+	dependencies.newAvatarRenderer = func(device gfx.Device, color, depth gfx.TextureFormat) (*render.AvatarRenderer, error) {
+		constructionOrder = append(constructionOrder, "avatar")
+		return render.NewAvatarRenderer(device, color, depth), nil
+	}
+	dependencies.newNameTagRenderer = func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error) {
+		constructionOrder = append(constructionOrder, "name-tag")
+		return nil, wantErr
+	}
+	app, err := newApplicationWithDependencies(remoteConnectionOptions(), dependencies)
+	if app != nil || !errors.Is(err, wantErr) {
+		t.Fatalf("construction result=(%v,%v), want nil/wrapped failure", app, err)
+	}
+	if want := []string{"atlas", "avatar", "name-tag"}; !reflect.DeepEqual(constructionOrder, want) {
+		t.Fatalf("remote construction order=%v want=%v", constructionOrder, want)
+	}
+	markers := dev.releaseMarkers([]string{"avatar resources", "glyph-atlas texture", "terrain resources", "main depth texture", "device"})
+	wantMarkers := []string{"avatar resources", "glyph-atlas texture", "terrain resources", "main depth texture", "device"}
+	if !reflect.DeepEqual(markers, wantMarkers) {
+		t.Fatalf("failure release markers=%v want=%v; all=%v", markers, wantMarkers, dev.releases)
+	}
+	if endpoint.closeCalls.Load() != 1 || window.closeCalls.Load() != 1 || surface.releaseCalls.Load() != 1 {
+		t.Fatalf("failure ownership endpoint/window/surface=%d/%d/%d want 1/1/1",
+			endpoint.closeCalls.Load(), window.closeCalls.Load(), surface.releaseCalls.Load())
+	}
+}
+
+func newRemoteProtocolApplication(t *testing.T) (*application, network.ServerEndpoint, *connectionTestEndpoint, func() int) {
+	t.Helper()
+	rawClient, serverEndpoint := network.NewMemoryPair(16)
+	endpoint := &connectionTestEndpoint{ClientEndpoint: rawClient}
+	cancelCalls := 0
+	app := &application{
+		clientEndpoint: endpoint, receiver: client.NewReceiver(endpoint, 16),
+		mirror: client.NewMirror(), predictor: client.NewPredictor(),
+		remotePlayers: client.NewRemotePlayers(), serverCancel: func() { cancelCalls++ },
+	}
+	t.Cleanup(func() { app.closeClientSession(nil); _ = serverEndpoint.Close() })
+	return app, serverEndpoint, endpoint, func() int { return cancelCalls }
+}
+
+func remoteSpawn(id byte, name string, tick uint64, position mgl32.Vec3) network.RemotePlayerSpawn {
+	return network.RemotePlayerSpawn{PlayerID: integrationPlayerID(id), DisplayName: name, ServerTick: tick, Dimension: core.Overworld, Position: position}
+}
+
+func integrationPlayerID(last byte) core.PlayerID {
+	return core.PlayerID{0: 0x12, 6: 0x40, 8: 0x80, 15: last}
+}
+
+type integrationGlyphSource struct {
+	flushErr   error
+	lastBudget *render.UploadBudget
+}
+
+func (*integrationGlyphSource) Request(string) {}
+func (atlas *integrationGlyphSource) FlushUploads(budget *render.UploadBudget) error {
+	atlas.lastBudget = budget
+	return atlas.flushErr
+}
+func (*integrationGlyphSource) Glyph(rune) render.Glyph {
+	return render.Glyph{Advance: 10, BearingY: 8, Width: 8, Height: 10}
+}
+func (*integrationGlyphSource) Kern(rune, rune) float32      { return 0 }
+func (*integrationGlyphSource) TextureView() gfx.TextureView { return &integrationView{} }
+
+func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*application, *integrationRenderDevice) {
+	t.Helper()
+	dev := &integrationRenderDevice{}
+	reg := assets.NewRegistry()
+	color := dev.CreateTexture(gfx.TextureDesc{Label: "test color", Width: 16, Height: 16, Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget})
+	app := &application{
+		dev: dev, color: color, colorView: color.View(gfx.TextureViewDesc{}), frameWidth: 16, frameHeight: 16,
+		depth: newDepthTarget(dev, 16, 16), renderer: render.New(dev, reg, gfx.FormatRGBA8Unorm),
+		avatarRenderer:  render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float),
+		nameTagRenderer: render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, glyphs),
+		remotePlayers:   client.NewRemotePlayers(), mirror: client.NewMirror(), predictor: client.NewPredictor(),
+		mesher: client.NewMesher(reg, 1), camera: client.Camera{FovY: mgl32.DegToRad(70), Aspect: 1, Near: 0.1, Far: 100},
+		loadedChunks: make(map[core.ChunkPos]struct{}),
+	}
+	app.releaseResources = app.releaseOwnedResources
+	t.Cleanup(func() { _ = app.Close() })
+	return app, dev
+}
+
+type integrationRenderDevice struct {
+	releases, passes []string
+	buffers          map[string]*integrationBuffer
+}
+
+func (d *integrationRenderDevice) CreateBuffer(desc gfx.BufferDesc) gfx.Buffer {
+	if d.buffers == nil {
+		d.buffers = make(map[string]*integrationBuffer)
+	}
+	buffer := &integrationBuffer{desc: desc, release: func() { d.releases = append(d.releases, desc.Label) }}
+	d.buffers[desc.Label] = buffer
+	return buffer
+}
+func (d *integrationRenderDevice) CreateShaderModule(string) gfx.ShaderModule {
+	return &integrationResource{}
+}
+func (d *integrationRenderDevice) CreateRenderPipeline(desc gfx.RenderPipelineDesc) gfx.RenderPipeline {
+	return &integrationResource{release: func() { d.releases = append(d.releases, desc.Label+" pipeline") }}
+}
+func (d *integrationRenderDevice) CreateComputePipeline(desc gfx.ComputePipelineDesc) gfx.ComputePipeline {
+	return &integrationResource{release: func() { d.releases = append(d.releases, desc.Label+" pipeline") }}
+}
+func (d *integrationRenderDevice) CreateBindGroup(desc gfx.BindGroupDesc) gfx.BindGroup {
+	return &integrationResource{release: func() { d.releases = append(d.releases, desc.Label) }}
+}
+func (d *integrationRenderDevice) CreateTexture(desc gfx.TextureDesc) gfx.Texture {
+	return &integrationTexture{label: desc.Label, releases: &d.releases}
+}
+func (d *integrationRenderDevice) CreateSampler(desc gfx.SamplerDesc) gfx.Sampler {
+	return &integrationResource{release: func() { d.releases = append(d.releases, desc.Label) }}
+}
+func (d *integrationRenderDevice) CreateCommandEncoder() gfx.CommandEncoder {
+	return &integrationEncoder{device: d}
+}
+func (*integrationRenderDevice) Submit(...gfx.CommandBuffer) {}
+func (*integrationRenderDevice) Poll(bool)                   {}
+func (d *integrationRenderDevice) Release()                  { d.releases = append(d.releases, "device") }
+func (d *integrationRenderDevice) lastPasses() []string      { return append([]string(nil), d.passes...) }
+func (d *integrationRenderDevice) resetPasses()              { d.passes = nil }
+func (d *integrationRenderDevice) bufferByLabel(t *testing.T, label string) *integrationBuffer {
+	t.Helper()
+	buffer := d.buffers[label]
+	if buffer == nil {
+		t.Fatalf("missing buffer %q", label)
+	}
+	return buffer
+}
+func (d *integrationRenderDevice) releaseCount(label string) int {
+	count := 0
+	for _, got := range d.releases {
+		if got == label {
+			count++
+		}
+	}
+	return count
+}
+func (d *integrationRenderDevice) releaseMarkers(labels []string) []string {
+	set := map[string]bool{}
+	for _, label := range labels {
+		set[label] = true
+	}
+	var out []string
+	for _, label := range d.releases {
+		if set[label] {
+			out = append(out, label)
+		}
+	}
+	return out
+}
+
+type integrationBuffer struct {
+	desc    gfx.BufferDesc
+	data    []byte
+	release func()
+}
+
+func (b *integrationBuffer) Size() uint64 { return b.desc.Size }
+func (b *integrationBuffer) Write(offset uint64, data []byte) {
+	end := int(offset) + len(data)
+	if len(b.data) < end {
+		b.data = make([]byte, end)
+	}
+	copy(b.data[int(offset):], data)
+}
+func (b *integrationBuffer) ReadBack() []byte { return append([]byte(nil), b.data...) }
+func (b *integrationBuffer) Release() {
+	if b.release != nil {
+		b.release()
+		b.release = nil
+	}
+}
+
+type integrationResource struct{ release func() }
+
+func (r *integrationResource) Release() {
+	if r.release != nil {
+		r.release()
+		r.release = nil
+	}
+}
+
+type integrationTexture struct {
+	label    string
+	releases *[]string
+	released bool
+}
+
+func (t *integrationTexture) View(gfx.TextureViewDesc) gfx.TextureView {
+	return &integrationView{label: t.label + " view", releases: t.releases}
+}
+func (*integrationTexture) WriteLayer(uint32, uint32, []byte)                                  {}
+func (*integrationTexture) WriteRegion(uint32, uint32, uint32, uint32, uint32, uint32, []byte) {}
+func (t *integrationTexture) Release() {
+	if !t.released {
+		*t.releases = append(*t.releases, t.label+" texture")
+		t.released = true
+	}
+}
+
+type integrationView struct {
+	label    string
+	releases *[]string
+	released bool
+}
+
+func (v *integrationView) Release() {
+	if !v.released && v.releases != nil {
+		*v.releases = append(*v.releases, v.label)
+		v.released = true
+	}
+}
+
+type integrationEncoder struct{ device *integrationRenderDevice }
+
+func (e *integrationEncoder) BeginRenderPass(desc gfx.RenderPassDesc) gfx.RenderPass {
+	e.device.passes = append(e.device.passes, desc.Label)
+	return &integrationPass{}
+}
+func (*integrationEncoder) BeginComputePass(string) gfx.ComputePass                           { return &integrationComputePass{} }
+func (*integrationEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {}
+func (*integrationEncoder) Finish() gfx.CommandBuffer                                         { return &integrationResource{} }
+
+type integrationPass struct{}
+
+func (*integrationPass) SetPipeline(gfx.RenderPipeline)             {}
+func (*integrationPass) SetBindGroup(uint32, gfx.BindGroup)         {}
+func (*integrationPass) SetVertexBuffer(uint32, gfx.Buffer, uint64) {}
+func (*integrationPass) SetIndexBuffer(gfx.Buffer, uint64)          {}
+func (*integrationPass) DrawIndexedIndirect(gfx.Buffer, uint64)     {}
+func (*integrationPass) Draw(uint32, uint32)                        {}
+func (*integrationPass) End()                                       {}
+
+type integrationComputePass struct{}
+
+func (*integrationComputePass) SetPipeline(gfx.ComputePipeline)    {}
+func (*integrationComputePass) SetBindGroup(uint32, gfx.BindGroup) {}
+func (*integrationComputePass) Dispatch(uint32, uint32, uint32)    {}
+func (*integrationComputePass) End()                               {}
 
 func TestBenchmarkTCPDialFailureClosesListenerBeforeWaitingForAccept(t *testing.T) {
 	dialErr := errors.New("injected benchmark dial failure")
