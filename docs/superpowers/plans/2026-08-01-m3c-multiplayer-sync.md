@@ -1680,7 +1680,7 @@ Expected: benchmark 均可执行；固定容量热循环报告稳定 alloc 数�
 
 archcheck 明确检查 `cmd/mcgod` 依赖闭包没有 client/render/gfx/GLFW/WebGPU/x/image/font。README 把 M3 标成完成并链接 LAN 文档；`lan-server.md` 写 `--max-players 1..8`、同 ID/同名语义、可信局域网无认证/加密警告、两个客户端人工验收命令，以及断线/关服存档行为。窗口标题更新为 `minecraft-go — M3C multiplayer world`，但自动验证不启动窗口。
 
-- [ ] **Step 5：运行格式、单测、race、fuzz、vet、archcheck 和无窗口构建**
+- [x] **Step 5：运行格式、单测、race、fuzz、vet、archcheck 和无窗口构建**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && gofmt -w $(git ls-files -co --exclude-standard "*.go")'
@@ -1699,7 +1699,7 @@ git diff --check
 
 Expected: 全部 exit 0；fuzz 无 crash/超大分配；Linux mcgod 不拉入 Darwin 客户端；physics 输出 0 B/op、0 allocs/op；gofmt/diff-check 为空。
 
-- [ ] **Step 6：运行并接受同机 scenario v6 Memory/TCP 性能报告**
+- [x] **Step 6：运行并接受同机 scenario v6 Memory/TCP 性能报告**
 
 先保留旧 v5 baseline，运行新的 Memory 报告并立即执行显式迁移验证：
 
@@ -1717,7 +1717,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/m
 
 Expected: 两个报告都是 scenario 6、硬件相同、绝对门禁通过，TCP 相对 Memory 的 transport 相关稳定指标回退不超过 20%；raw max、queue high-water 与独立内存 server probe 不参与跨 transport 相对比较。迁移验证与 Memory→TCP 比较都通过后，才用 Memory 报告的精确 JSON（保留尾换行）更新 `docs/notes/perf-baseline.json`；`perf-baseline.md` 记录 commit/hardware、全部比较命令、两个报告 SHA-256、全部多人指标和三组微基准原始结果，不手工杜撰数值。
 
-- [ ] **Step 7：对 accepted v6 baseline 做第二次同机回归**
+- [x] **Step 7：对 accepted v6 baseline 做第二次同机回归**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --perf-output /tmp/mcgo-m3c-current.json'
@@ -1727,7 +1727,7 @@ shasum -a 256 docs/notes/perf-baseline.json /tmp/mcgo-m3c-memory.json /tmp/mcgo-
 
 Expected: perfcheck 输出通过，所有绝对门禁仍绿，accepted baseline 只来自 Step 6 的通过运行。若门禁失败，保留旧 baseline、修复原因并从 Step 5 重跑，不能放宽阈值。
 
-- [ ] **Step 8：执行规格/代码双评审与最终状态检查**
+- [x] **Step 8：执行规格/代码双评审与最终状态检查**
 
 逐条核对本计划规格覆盖矩阵和设计 §19 的全部退出条件；检查每个 Task 有 RED/GREEN 证据与单独 commit；运行：
 
@@ -1740,7 +1740,7 @@ test -z "$(zsh -ic 'gvm use go1.26.0 >/dev/null && go list -deps ./cmd/mcgod' | 
 
 Expected: 17 个任务各一个提交；状态只包含本任务待提交的 gate/docs 文件；关键标识存在；mcgod 禁止依赖查询无输出。
 
-- [ ] **Step 9：提交**
+- [x] **Step 9：提交**
 
 ```bash
 git add internal/client/perf.go internal/client/perf_test.go internal/network/benchmark_test.go internal/server/config.go internal/server/host.go internal/server/host_stats_test.go internal/server/multiplayer_bench_test.go internal/render/multiplayer_bench_test.go cmd/mcgo/benchmark.go cmd/mcgo/multiplayer_benchmark.go cmd/mcgo/benchmark_v6_test.go cmd/perfcheck/main.go cmd/perfcheck/main_test.go internal/archcheck/deps_test.go .github/workflows/ci.yml Makefile README.md docs/notes/lan-server.md docs/notes/perf-baseline.json docs/notes/perf-baseline.md
@@ -1758,6 +1758,6 @@ git commit -m "chore: 关闭 M3C 多人同步里程碑"
 - [ ] 16-entry cache、2 workers、16/2 queues 和单 ID 在途限制都有压力证明。
 - [ ] 两客户端 TCP、8-client 10 秒 soak、2000-tick Memory、Memory/TCP parity 和 8 人 Disk restart 全绿。
 - [ ] 错误 session 隔离，Flush/Shutdown 错误稳定且不跳过其他身份，队列和 goroutine 回落。
-- [ ] scenario v6 绝对门禁与同机 20% 回归通过，accepted baseline 来自通过运行。
-- [ ] test/race/fuzz/vet/gofmt/archcheck/Linux mcgod/physics alloc 全部通过，自动验证没有前台窗口。
-- [ ] README/LAN/性能文档与实现一致，M3 可以关闭并进入 M4。
+- [x] scenario v6 绝对门禁与同机 20% 回归通过，accepted baseline 来自通过运行。
+- [x] test/race/fuzz/vet/gofmt/archcheck/Linux mcgod/physics alloc 全部通过，自动验证没有前台窗口。
+- [x] README/LAN/性能文档与实现一致，M3 可以关闭并进入 M4。

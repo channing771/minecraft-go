@@ -131,6 +131,11 @@ func TestTCPSendDeadlineAndSubsequentSend(t *testing.T) {
 	if err := client.Close(); err != nil {
 		t.Fatalf("client Close: %v", err)
 	}
+	peerCloseCtx, cancelPeerClose := context.WithTimeout(context.Background(), time.Second)
+	defer cancelPeerClose()
+	if packet, err := server.Recv(peerCloseCtx, StateHandshake); packet != nil || !errors.Is(err, ErrClosed) {
+		t.Fatalf("Recv after peer close = (%v, %v), want (nil, ErrClosed)", packet, err)
+	}
 	if err := server.Send(context.Background(), StateHandshake, ServerHello{ProtocolVersion: ProtocolVersion}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Send after peer close = %v, want ErrClosed", err)
 	}

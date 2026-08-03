@@ -1,6 +1,6 @@
 # 性能基线
 
-> 审计状态（2026-08-03）：下列 Task 7A/8 产物与哈希均原样保留，但后续代码评审发现当时的 `perfcheck` 未覆盖全部 v6 生产者绝对门禁与核心报告完整性。下列“通过”只描述历史命令在对应旧提交上的输出，不能证明修复后的校验器已经执行，也不能关闭 Task 17。修复后尚未运行任何正式性能命令；新的正式链必须在非性能门禁与独立复审通过后重新取得用户明确授权。
+> 审计状态（2026-08-03）：下列 Task 7A/8 产物与哈希均原样保留，但后续代码评审发现当时的 `perfcheck` 未覆盖全部 v6 生产者绝对门禁与核心报告完整性。其“通过”只描述历史命令在对应旧提交上的输出，不能单独证明修复后的校验器或关闭 Task 17。修复 checkpoint 后已重新取得用户明确授权，并完成本文末尾的 repaired-checker formal validation；最终完成状态以该段及 closure gate 为准。
 
 ## 历史正式执行审计轨迹
 
@@ -205,3 +205,64 @@ Samples: `200/1600`. Same-transport stable metrics and every absolute gate passe
 ```text
 同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过
 ```
+
+## M3C repaired-checker formal validation
+
+Status: the repaired checker commit is `7951607237d0c5a8845c7e0ac08e08d558bef27f`. The user explicitly authorized this corrected one-shot chain after the repair checkpoint passed full non-performance gates and independent spec/code reviews.
+
+The first authorized preflight attempt exited `127` after all state assertions because the loop variable `path` is a special zsh array tied to `PATH`; it prevented only the trailing evidence-print commands from resolving. No `go run` command launched, all five new evidence paths remained absent, tracked state remained clean, and no benchmark process existed. The failure was disclosed. After the user explicitly authorized the correction, the loop variable was changed only to `evidence_path` and the complete preflight exited `0`.
+
+Corrected preflight assertions: exact HEAD `7951607237d0c5a8845c7e0ac08e08d558bef27f`; clean tracked state; `gvm use go1.26` reporting `go version go1.26.0 darwin/arm64`; accepted baseline SHA `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`; v5 backup SHA `428e9b61bd8a8bf782fdc4e8d54f488d544bee4b7da948873638fe40ba60a191`; TCP report SHA `ecf245513cbd69d4422af27797f19846d64015bda746270bfe741750e50d614c`; no `mcgo`, `mcgod`, or matching `go run`; all five repair evidence paths absent.
+
+| Evidence | Value |
+|---|---|
+| repaired checker commit | `7951607237d0c5a8845c7e0ac08e08d558bef27f` |
+| migration inputs | v5 `428e9b61bd8a8bf782fdc4e8d54f488d544bee4b7da948873638fe40ba60a191` → accepted Memory `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93` |
+| migration log | `/tmp/mcgo-m3c-repair-migration-7951607237d0.log` — `17acc77e4e35079370e47da52274aa1cbfbb8ec1e305fd3812dae6c68d739c3d` |
+| cross-transport inputs | accepted Memory `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93` → TCP `ecf245513cbd69d4422af27797f19846d64015bda746270bfe741750e50d614c` |
+| cross-transport log | `/tmp/mcgo-m3c-repair-cross-7951607237d0.log` — `c53a229765c46ff7d5555d6679a0701465effcc0513da010282b4f02fa2942cd` |
+| fresh current report | `/tmp/mcgo-m3c-repair-current-7951607237d0.json` — `68247fd10318ddd021e824b363f4bebc8efc1d4cf45b73fb4b79359d3cb20a70` |
+| fresh current log | `/tmp/mcgo-m3c-repair-current-7951607237d0.log` — `62672ff2f10e5305662851008d36c473040823d7cfb596519df1d149cbec65f2` |
+| same-transport inputs | accepted Memory `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93` → fresh current `68247fd10318ddd021e824b363f4bebc8efc1d4cf45b73fb4b79359d3cb20a70` |
+| same-transport log | `/tmp/mcgo-m3c-repair-current-compare-7951607237d0.log` — `c53a229765c46ff7d5555d6679a0701465effcc0513da010282b4f02fa2942cd` |
+| accepted baseline after chain | unchanged SHA `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93` |
+
+Every following pipeline enabled `set -o pipefail`. Each command was invoked exactly once and exited `0`; no formal command was retried and no new TCP benchmark ran:
+
+```text
+set -o pipefail
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline '/tmp/mcgo-m3c-task7a-baseline-v5-38c90a93cc1f.json' --current 'docs/notes/perf-baseline.json' --max-regression 0.20 --allow-scenario-upgrade 5:6" | tee /tmp/mcgo-m3c-repair-migration-7951607237d0.log
+
+set -o pipefail
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline 'docs/notes/perf-baseline.json' --current '/tmp/mcgo-m3c-task7a-tcp-38c90a93cc1f.json' --max-regression 0.20" | tee /tmp/mcgo-m3c-repair-cross-7951607237d0.log
+
+set -o pipefail
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/tmp/mcgo-m3c-repair-current-7951607237d0.json'" | tee /tmp/mcgo-m3c-repair-current-7951607237d0.log
+
+set -o pipefail
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline 'docs/notes/perf-baseline.json' --current '/tmp/mcgo-m3c-repair-current-7951607237d0.json' --max-regression 0.20" | tee /tmp/mcgo-m3c-repair-current-compare-7951607237d0.log
+```
+
+The fresh current report is scenario 6 / Memory with matching hardware and `git_commit=7951607237d0c5a8845c7e0ac08e08d558bef27f`. Its phase keys are exactly `flying/still`; ticks are exactly `200` frames with `fps=0`; interest samples are exactly `1600`; all latency summaries are positive and monotonic; every producer, phase, tick, queue, and RSS absolute gate passed.
+
+### Repaired-checker current summary
+
+```json
+{"load_seconds":26.606202709,"snapshot_seconds":21.620108333,"phases":{"flying":{"frames":50408,"fps":420.19958630080373,"p50_ms":1.712,"p95_ms":4.428,"p99_ms":9.466,"max_ms":24.177,"peak_rss_bytes":1413234688,"mean_candidate_sections":6.304773051896524,"mean_candidate_bytes":201.75273766068878,"mean_candidate_faces":874.0165053166164,"max_pending_uploads":0},"still":{"frames":11951,"fps":199.19847905769103,"p50_ms":5.003,"p95_ms":5.14,"p99_ms":5.459,"max_ms":8.713,"peak_rss_bytes":1132281856,"mean_candidate_sections":1667,"mean_candidate_bytes":53344,"mean_candidate_faces":206800,"max_pending_uploads":0}},"ticks":{"frames":200,"fps":0,"p50_ms":0.116,"p95_ms":0.139583,"p99_ms":0.147083,"max_ms":0.183375,"peak_rss_bytes":0,"mean_candidate_sections":0,"mean_candidate_bytes":0,"mean_candidate_faces":0,"max_pending_uploads":0},"persistence":{"snapshots":3583,"p50_ms":5.181416,"p95_ms":10.296,"p99_ms":11.276,"max_ms":25.375833},"protocol":{"encode_p99_ms":0.0005,"decode_p99_ms":0.000084,"bytes":38912},"player_persistence":{"snapshots":256,"p50_ms":0.0005,"p95_ms":0.000791,"p99_ms":0.001292,"max_ms":0.005083},"multiplayer":{"remote_state_encode":{"samples":62359,"p50_ms":0.001542,"p95_ms":0.004167,"p99_ms":0.006625,"max_ms":0.517917},"remote_state_decode":{"samples":62359,"p50_ms":0.000375,"p95_ms":0.001584,"p99_ms":0.002167,"max_ms":0.279417},"interest_diff":{"samples":1600,"p50_ms":0.006875,"p95_ms":0.013458,"p99_ms":0.016416,"max_ms":0.062542},"roster_apply":{"samples":62359,"p50_ms":0.003042,"p95_ms":0.009833,"p99_ms":0.016917,"max_ms":3.410334},"interpolation":{"samples":62359,"p50_ms":0.0005,"p95_ms":0.001708,"p99_ms":0.002,"max_ms":0.15775},"avatar_submit":{"samples":62360,"p50_ms":0.012792,"p95_ms":0.031625,"p99_ms":0.037375,"max_ms":0.625208},"name_tag_submit":{"samples":62360,"p50_ms":0.010416,"p95_ms":0.030249,"p99_ms":0.0395,"max_ms":3.426},"remote_gpu_complete":{"samples":256,"p50_ms":1.631916,"p95_ms":1.686583,"p99_ms":1.948792,"max_ms":2.074167},"server_outbound_bytes":569244,"outbox_high_water":1,"player_jobs_high_water":6,"player_done_high_water":2,"peak_rss_bytes":1443069952}}
+```
+
+### Repaired-checker outputs
+
+```text
+场景迁移验证通过：报告完整、硬件一致且当前 v6 绝对门禁通过
+同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过
+同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过
+```
+
+### Closure gate recovery
+
+The first post-ledger full suite, vet, and diff-check passed, but the required race set exited `1` only at `TestTCPSendDeadlineAndSubsequentSend`: after peer `Close`, its immediate small Send returned `nil` rather than `ErrClosed`. No formal performance command was rerun.
+
+GitNexus debugging traced `tcpServerStream.Send` to `tcpStream.send` and its socket `WriteFrame` path. The failure was an old test timing assumption: TCP does not guarantee that the first small local write after peer close has already observed FIN/RST. The test-only symbol impact was LOW with 0 callers and 0 affected flows. Production transport code was unchanged. The test now uses a one-second `Recv` context to observe peer EOF/`ErrClosed` first, then preserves the assertion that every subsequent Send returns `ErrClosed` immediately.
+
+The synchronized test passed ordinary `count=50` and race `count=20`. The complete `go test ./... -count=1`, the required network/server/client/render/mcgo/perfcheck race set, vet, gofmt, and diff-check then all exited `0`. Independent follow-up review reported No findings and confirmed that the write-deadline contract remains intact while only the impossible first-write timing assumption was removed.

@@ -1966,6 +1966,20 @@ This addendum is authoritative for interpreting the completed historical attempt
 - Later independent code review accepted four Important findings, including missing absolute/schema gates and insufficient execution binding. Therefore the historical Task 7A/8 artifacts are preserved but do not prove the repaired `perfcheck` executable, and Task 17 completion remains invalidated.
 - All future executable pipelines must enable `set -o pipefail`, select `gvm use go1.26`, derive new collision-safe paths from the then-current commit, run the full non-performance gate and review first, and obtain fresh explicit user authorization. The literal `go1.26.0` commands and already-used paths in Task 7/8 above are historical templates only and must not be rerun.
 
+### Repaired-checker formal validation checkpoint
+
+- [x] Repair commit `7951607237d0c5a8845c7e0ac08e08d558bef27f` passed full tests, required race packages, GitNexus change detection, and independent spec/code follow-up reviews with no findings.
+- [x] The first preflight stopped with exit 127 before any formal command because zsh special variable `path` overwrote `PATH`; absence of outputs/processes and clean tracked state were verified, the failure was disclosed, and the user explicitly authorized the variable-only correction to `evidence_path`.
+- [x] The corrected preflight passed with exact HEAD/toolchain/input hashes, clean tracked state, no process, and five absent collision-safe repair paths.
+- [x] Repaired-checker v5→accepted-v6 migration ran once and passed.
+- [x] Repaired-checker accepted-Memory→preserved-TCP comparison ran once and passed; no new TCP benchmark ran.
+- [x] Fresh Memory current at `7951607237d0` ran once, produced exact `200/1600`, and passed the complete jq schema/provenance/absolute-gate assertion.
+- [x] Repaired-checker accepted-Memory→fresh-current comparison ran once and passed.
+- [x] Final evidence review and non-performance closure gates. One pre-existing TCP peer-close timing assumption failed the first race run; a LOW-impact test-only FIN-observation synchronization passed count/race/full gates and independent follow-up review without production changes or formal performance reruns.
+- [x] Closure ledger commit and M3C completion checkboxes.
+
+Exact commands, authorization/preflight history, invocation counts, input/output hashes, raw current metrics, and the unchanged accepted-baseline hash are recorded in `docs/notes/perf-baseline.md` and the local SDD ledger.
+
 ---
 
 ## Stop Conditions
