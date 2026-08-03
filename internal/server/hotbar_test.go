@@ -11,6 +11,7 @@ import (
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/sim"
+	"minecraft-go/internal/storage"
 )
 
 func TestHotbarStateReachesOwningSessionBeforeReady(t *testing.T) {
@@ -74,8 +75,10 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 	firstMirror := &client.HotbarMirror{}
 	secondMirror := &client.HotbarMirror{}
 	firstReady, secondReady := false, false
+	wantCollected := core.ItemStack{Item: core.ItemGrass, Count: 1}
 	deadline := time.Now().Add(5 * time.Second)
-	broken := false
+	// 阶段 0 等待两人 Ready，阶段 1 验证玩家甲采集，阶段 2 验证玩家乙独立采集。
+	stage := 0
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待两名玩家快捷栏同步超时")
@@ -83,24 +86,42 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 		result := running.StepForTest()
 		firstStates := hotbarDrainTick(t, firstClient, result.Tick, firstMirror, &firstReady)
 		secondStates := hotbarDrainTick(t, secondClient, result.Tick, secondMirror, &secondReady)
-		if broken {
+		switch stage {
+		case 0:
+			if !firstReady || !secondReady {
+				continue
+			}
+			sendClientMessage(t, firstClient, network.BreakBlock{
+				Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
+			})
+			stage = 1
+		case 1:
 			if len(secondStates) != 0 {
 				t.Fatalf("玩家乙收到了不属于自己的快捷栏更新: %+v", secondStates)
 			}
 			if len(firstStates) == 0 {
 				continue
 			}
-			last := firstStates[len(firstStates)-1]
-			if last.Hotbar.Slots[0] != (core.ItemStack{Item: core.ItemGrass, Count: 1}) {
-				t.Fatalf("玩家甲快捷栏 = %+v，想要 1 个草", last.Hotbar)
+			if got := firstStates[len(firstStates)-1].Hotbar.Slots[0]; got != wantCollected {
+				t.Fatalf("玩家甲快捷栏栏位 0 = %+v，想要 %+v", got, wantCollected)
 			}
-			return
-		}
-		if firstReady && secondReady {
-			sendClientMessage(t, firstClient, network.BreakBlock{
+			sendClientMessage(t, secondClient, network.BreakBlock{
 				Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
 			})
-			broken = true
+			stage = 2
+		case 2:
+			if len(firstStates) != 0 {
+				t.Fatalf("玩家甲收到了玩家乙的快捷栏更新: %+v", firstStates)
+			}
+			if len(secondStates) == 0 {
+				continue
+			}
+			// 玩家乙独立采集：栏位 0 恰好一个自己挖到的物品，与玩家甲互不影响。
+			got := secondStates[len(secondStates)-1].Hotbar.Slots[0]
+			if got.Item == core.ItemNone || got.Count != 1 {
+				t.Fatalf("玩家乙快捷栏栏位 0 = %+v，想要恰好一个采集物", got)
+			}
+			return
 		}
 	}
 }
@@ -164,6 +185,106 @@ func hotbarDrainTick(
 			*ready = message.Ready
 			if message.ServerTick == throughTick {
 				return states
+			}
+			if message.ServerTick > throughTick {
+				t.Fatalf("PlayerState tick=%d，跳过目标 tick=%d", message.ServerTick, throughTick)
+			}
+		}
+	}
+}
+
+func TestHotbarFullRejectsBreakWithoutChangingWorld(t *testing.T) {
+	clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
+	config := hotbarTestConfig(1)
+	running := server.NewWorld(config, server.FlatTestGenerator{}, hotbarTestStore(config))
+	var full core.Hotbar
+	for slot := range full.Slots {
+		full.Slots[slot] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	}
+	if _, err := running.AttachSession(externalSessionSpec(1, 1, serverEndpoint, sim.PlayerRestore{
+		SpawnDimension: core.Overworld,
+		Hotbar:         full,
+	})); err != nil {
+		t.Fatalf("附加会话: %v", err)
+	}
+	shutdownHotbarServer(t, running, clientEndpoint)
+
+	mirror := &client.HotbarMirror{}
+	ready := false
+	deadline := time.Now().Add(5 * time.Second)
+	broken := false
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("等待满栏挖掘拒绝超时")
+		}
+		result := running.StepForTest()
+		states, rejections := hotbarDrainTickAllowingRejections(t, clientEndpoint, result.Tick, mirror, &ready)
+		if broken {
+			if len(rejections) == 0 {
+				continue
+			}
+			if rejections[0].Reason != network.RejectHotbarFull {
+				t.Fatalf("拒绝原因 = %+v，想要 hotbar_full", rejections[0])
+			}
+			if len(states) != 0 {
+				t.Fatalf("满栏被拒绝仍发布快捷栏: %+v", states)
+			}
+			if got, _ := mirror.State(); got != full {
+				t.Fatalf("满栏被拒绝后镜像 = %+v", got)
+			}
+			if len(result.Changes) != 0 {
+				t.Fatalf("满栏被拒绝仍修改世界: %+v", result.Changes)
+			}
+			return
+		}
+		if ready {
+			sendClientMessage(t, clientEndpoint, network.BreakBlock{
+				Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
+			})
+			broken = true
+		}
+	}
+}
+
+func hotbarTestStore(config server.Config) storage.WorldStore {
+	return storage.NewMemory(storage.Metadata{
+		FormatVersion:  1,
+		Seed:           config.Seed,
+		SpawnDimension: config.SpawnDimension,
+		SpawnAnchor:    config.SpawnAnchor,
+	})
+}
+
+// hotbarDrainTickAllowingRejections 与 hotbarDrainTick 相同，但把拒绝作为结果返回。
+func hotbarDrainTickAllowingRejections(
+	t *testing.T,
+	endpoint network.ClientEndpoint,
+	throughTick uint64,
+	mirror *client.HotbarMirror,
+	ready *bool,
+) ([]network.HotbarState, []network.CommandRejected) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var states []network.HotbarState
+	var rejections []network.CommandRejected
+	for {
+		message, err := endpoint.Recv(ctx)
+		if err != nil {
+			t.Fatalf("接收服务端消息: %v", err)
+		}
+		switch message := message.(type) {
+		case network.HotbarState:
+			if err := mirror.Apply(message); err != nil {
+				t.Fatalf("HotbarMirror.Apply: %v", err)
+			}
+			states = append(states, message)
+		case network.CommandRejected:
+			rejections = append(rejections, message)
+		case network.PlayerState:
+			*ready = message.Ready
+			if message.ServerTick == throughTick {
+				return states, rejections
 			}
 			if message.ServerTick > throughTick {
 				t.Fatalf("PlayerState tick=%d，跳过目标 tick=%d", message.ServerTick, throughTick)
