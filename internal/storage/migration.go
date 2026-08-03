@@ -13,11 +13,18 @@ type chunkDTO struct {
 	Key      core.ChunkKey
 	Revision uint64
 	Sections [core.SectionsPerChunk]world.ContainerSnapshot
+	Drops    [core.DropsPerChunk]world.DropSlot
 }
 
 type chunkMigration func(chunkDTO) (chunkDTO, error)
 
-var chunkMigrations = map[uint32]chunkMigration{}
+var chunkMigrations = map[uint32]chunkMigration{
+	// v1 没有掉落物负载，确定性迁移为全部空槽。
+	1: func(dto chunkDTO) (chunkDTO, error) {
+		dto.Drops = [core.DropsPerChunk]world.DropSlot{}
+		return dto, nil
+	},
+}
 
 func migrateChunk(from uint32, dto chunkDTO) (chunkDTO, bool, error) {
 	if from > currentChunkSchema {

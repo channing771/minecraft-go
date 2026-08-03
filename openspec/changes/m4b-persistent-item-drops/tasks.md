@@ -14,10 +14,10 @@
 
 ## 3. 区块存档 schema v2
 
-- [ ] 3.1 在 `internal/storage` 先写失败测试，覆盖带掉落物的 v2 roundtrip/golden、v1 迁移为空槽、未来版本与非法槽拒绝、故障写入保留旧记录，以及掉落物与方块同记录重启恢复。
-- [ ] 3.2 扩展 `chunkDTO`、逻辑 codec、migration 和容量估算，以固定 32 槽编码 generation 与活动状态；复用现有 envelope、region 原子提交和 `NeedsRewrite`，不新增文件或事务接口。
-- [ ] 3.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/world -race -count=1 && go test ./internal/archcheck -count=1'`，并确认 golden、迁移和故障测试通过，`git diff --check` 通过。
-- [ ] 3.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 持久化区块掉落物`。提交成功后自动进入第 4 组。
+- [x] 3.1 在 `internal/storage` 先写失败测试，覆盖带掉落物的 v2 roundtrip/golden、v1 迁移为空槽、未来版本与非法槽拒绝、故障写入保留旧记录，以及掉落物与方块同记录重启恢复。
+- [x] 3.2 扩展 `chunkDTO`、逻辑 codec、migration 和容量估算，以固定 32 槽编码 generation 与活动状态；复用现有 envelope、region 原子提交和 `NeedsRewrite`，不新增文件或事务接口。
+- [x] 3.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/world -race -count=1 && go test ./internal/archcheck -count=1'`，并确认 golden、迁移和故障测试通过，`git diff --check` 通过。
+- [x] 3.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 持久化区块掉落物`。提交成功后自动进入第 4 组。
 
 ## 4. 权威生成、拾取与过期
 

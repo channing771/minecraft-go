@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 
@@ -12,7 +13,7 @@ import (
 )
 
 const (
-	currentChunkSchema uint32 = 1
+	currentChunkSchema uint32 = 2
 	maxCompressedChunk        = 1 << 20
 	maxDecodedChunk           = 2 << 20
 
@@ -102,7 +103,85 @@ func encodeLogicalChunk(save ChunkSave) ([]byte, error) {
 		}
 		logical = appendLogicalSection(logical, uint32(index), snapshot)
 	}
+	for slot := range core.DropsPerChunk {
+		drop := save.Chunk.Drop(slot)
+		if err := validateDropSlot(drop); err != nil {
+			return nil, fmt.Errorf("%w: drop slot %d: %v", ErrCorrupt, slot, err)
+		}
+		logical = appendLogicalDropSlot(logical, drop)
+	}
 	return logical, nil
+}
+
+// validateDropSlot 检查活动槽的固定字段上限；非活动槽只保留 generation。
+func validateDropSlot(drop world.DropSlot) error {
+	if !drop.Active {
+		return nil
+	}
+	if drop.Generation == 0 {
+		return errors.New("active drop slot has zero generation")
+	}
+	if _, ok := core.ItemPlacement(drop.Stack.Item); !ok {
+		return fmt.Errorf("unknown drop item %d", drop.Stack.Item)
+	}
+	if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount {
+		return fmt.Errorf("drop count %d is outside 1..64", drop.Stack.Count)
+	}
+	if drop.BlockIndex >= core.SectionsPerChunk*core.BlocksPerSection {
+		return fmt.Errorf("drop block index %d is outside the chunk", drop.BlockIndex)
+	}
+	return nil
+}
+
+func appendLogicalDropSlot(dst []byte, drop world.DropSlot) []byte {
+	dst = appendU32(dst, drop.Generation)
+	active := byte(0)
+	if drop.Active {
+		active = 1
+	}
+	dst = append(dst, active)
+	dst = binary.LittleEndian.AppendUint16(dst, uint16(drop.Stack.Item))
+	dst = append(dst, drop.Stack.Count)
+	dst = appendU32(dst, drop.BlockIndex)
+	dst = appendU32(dst, drop.AgeTicks)
+	return append(dst, drop.PickupDelayTicks)
+}
+
+func decodeLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
+	var drop world.DropSlot
+	var err error
+	if drop.Generation, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	active, err := d.u8()
+	if err != nil {
+		return world.DropSlot{}, err
+	}
+	if active > 1 {
+		return world.DropSlot{}, fmt.Errorf("invalid drop active flag %d", active)
+	}
+	drop.Active = active == 1
+	item, err := d.u16()
+	if err != nil {
+		return world.DropSlot{}, err
+	}
+	drop.Stack.Item = core.ItemID(item)
+	if drop.Stack.Count, err = d.u8(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.BlockIndex, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.AgeTicks, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.PickupDelayTicks, err = d.u8(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if err := validateDropSlot(drop); err != nil {
+		return world.DropSlot{}, err
+	}
+	return drop, nil
 }
 
 func appendLogicalSection(dst []byte, index uint32, snapshot world.ContainerSnapshot) []byte {
@@ -279,6 +358,15 @@ func decodeLogicalChunk(
 		}
 		dto.Sections[index] = snapshot
 	}
+	if schema >= 2 {
+		for slot := range core.DropsPerChunk {
+			drop, err := decodeLogicalDropSlot(&logical)
+			if err != nil {
+				return chunkDTO{}, fmt.Errorf("%w: drop slot %d: %v", ErrCorrupt, slot, err)
+			}
+			dto.Drops[slot] = drop
+		}
+	}
 	if logical.remaining() != 0 {
 		return chunkDTO{}, fmt.Errorf("%w: trailing logical bytes", ErrCorrupt)
 	}
@@ -293,6 +381,9 @@ func chunkFromDTO(dto chunkDTO) (*world.Chunk, error) {
 			return nil, fmt.Errorf("%w: section %d: %v", ErrCorrupt, index, err)
 		}
 		chunk.Section(index).Blocks = container
+	}
+	for slot, drop := range dto.Drops {
+		chunk.SetDrop(slot, drop)
 	}
 	return chunk, nil
 }
