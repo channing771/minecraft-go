@@ -182,6 +182,13 @@ func movePlayerAndPlaceBlock(
 		state, ok := message.(network.PlayerState)
 		return ok && state.LastInputSequence >= 2 && state.Position != before.Current.Position
 	})
+	sendIntegration(t, connected.Endpoint, network.PlayerInput{
+		Sequence: 3, Yaw: 0, Pitch: -0.2,
+	})
+	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
+		state, ok := message.(network.PlayerState)
+		return ok && state.LastInputSequence >= 3 && state.Velocity[0] == 0 && state.Velocity[2] == 0
+	})
 }
 
 func (h integrationHost) PlayerSnapshot(t *testing.T, id core.PlayerID) sim.PlayerSnapshot {
@@ -226,6 +233,15 @@ func (h integrationHost) WaitPlayerSaved(t *testing.T, id core.PlayerID) {
 		saved := cache != nil && cache.persisted > 0 && !cache.dirty && !cache.inFlight && cache.retry == nil
 		h.Host.players.mu.Unlock()
 		return active == nil && saved
+	})
+}
+
+func (h integrationHost) WaitPlayerReleased(t *testing.T, id core.PlayerID) {
+	t.Helper()
+	waitIntegrationCondition(t, "host player slot release", func() bool {
+		h.Host.mu.Lock()
+		defer h.Host.mu.Unlock()
+		return h.Host.activeByPlayer[id] == nil
 	})
 }
 
@@ -433,23 +449,28 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		waitForPreLoginCount(t, host.Host, 1)
 		if _, err := bad.Write([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}); err != nil {
 			t.Fatal(err)
 		}
 		_ = bad.Close()
+		waitForPreLoginCount(t, host.Host, 0)
 		slow, err := net.Dial("tcp", host.Addr)
 		if err != nil {
 			t.Fatal(err)
 		}
+		waitForPreLoginCount(t, host.Host, 1)
 
 		if err := primary.Close(); err != nil {
 			t.Fatal(err)
 		}
 		host.WaitPlayerSaved(t, primaryIdentity.PlayerID)
+		waitForPreLoginCount(t, host.Host, 1)
+		_ = slow.Close()
+		waitForPreLoginCount(t, host.Host, 0)
 		replacementIdentity := integrationIdentity(0x23, "Replacement")
 		replacement := dialIntegrationClient(t, host.Addr, replacementIdentity)
 		waitClientReadyFor(t, host, replacement, replacementIdentity.PlayerID)
-		_ = slow.Close()
 		_ = replacement.Close()
 		host.Shutdown(t)
 	})
@@ -471,6 +492,7 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 		host := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})
 		_, err = loginIntegrationClient(host.Addr, corrupt)
 		assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginPlayerDataCorrupt))
+		host.WaitPlayerReleased(t, corrupt.PlayerID)
 
 		healthyIdentity := integrationIdentity(0x32, "Healthy")
 		healthy := dialIntegrationClient(t, host.Addr, healthyIdentity)
@@ -538,6 +560,7 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	})
 	want := host.PlayerSnapshot(t, firstIdentity.PlayerID)
 	_ = first.Close()
+	host.WaitPlayerReleased(t, firstIdentity.PlayerID)
 	waitIntegrationCondition(t, "failed player save retained for retry", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()
@@ -554,6 +577,7 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	_, err := loginIntegrationClient(host.Addr, integrationIdentity(0x62, "Blocked"))
 	assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginServerFull))
 	_ = same.Close()
+	host.WaitPlayerReleased(t, firstIdentity.PlayerID)
 	waitIntegrationCondition(t, "same-ID disconnect retry retained", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()

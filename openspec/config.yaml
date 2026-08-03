@@ -1,0 +1,43 @@
+schema: spec-driven
+
+context: |
+  项目：minecraft-go，一个用 Go 自研客户端与服务端的独立体素游戏，不兼容官方 Minecraft 协议或存档。
+  当前基线：Go 1.26；macOS/Apple Silicon 是图形与性能基准平台；WebGPU 经 internal/gfx 封装；客户端默认启动内置权威服务端，也可通过 TCP 连接专用服务端。
+  当前实现处于 M3B：已有持久世界、权威移动/交互、客户端预测、区块快照、GPU-driven 渲染、有界版本化二进制协议、TCP 直连、无图形专用服务端、稳定玩家身份与玩家状态存档。当前 Play 在线槽为 1，TCP 仅面向可信局域网，不提供认证或加密。docs/superpowers 中可能包含尚未实现的后续设计和计划，必须以代码与测试确认当前行为。
+  入口：cmd/mcgo 是 darwin 图形客户端；cmd/mcgod 是可构建为无 CGO Linux 程序的专用服务端；cmd/gfxspike 是图形技术验证；cmd/perfcheck 比较性能基线。
+  核心包：core 放端无关基础类型；profile 放本机稳定玩家档案；world 放世界数据模型；physics 放确定性物理；sim 放权威模拟；network 放端无关消息、登录协议和 Memory/TCP 传输；storage 放世界与玩家存档；server 负责 Host、会话和持久化装配；client 持有只读镜像、预测、输入和消息接收；mesh/render/gfx 组成渲染路径。
+  架构约束：内部包依赖必须符合 internal/archcheck/deps_test.go 的白名单；只有 internal/gfx 可直接 import WebGPU；sim 不得依赖渲染；world 不得依赖 network；单机和远程模式应共享游戏逻辑。
+  数据与性能约束：服务端是世界与玩家状态的唯一权威；客户端镜像只读；跨 goroutine 传递的消息在发送后视为不可变；热路径避免无界工作、意外分配和阻塞 I/O；现有性能阈值不得无理由放宽。
+  工程约定：文档、测试说明和面向开发者的叙述优先使用中文，Go 标识符和既有协议术语保留英文；修改保持最小且聚焦；新增行为必须有自动化测试；不要提交二进制美术资源或 Mojang 版权资产。
+  自动约束：Claude Code 与 Codex 共用 scripts/agent-hooks/guard.mjs；高风险命令、Go 格式、跨包/契约类 OpenSpec 要求和停止前验证由项目 Hook 机械执行。不得通过改 Hook、关闭 Hook 或设置豁免变量来绕过失败，除非用户明确批准该例外。
+  验证：至少运行受影响包测试；跨包或并发修改运行 go test ./... -race；提交前运行 gofmt、go vet ./...、架构测试和与改动相关的基准/性能门禁。
+  历史资料：docs/superpowers/specs 与 docs/superpowers/plans 是设计背景和决策记录，不是 OpenSpec 主规格；只读取与当前变更有关的部分，不批量复制。OpenSpec 主规格从真实变更归档后逐步增长。
+
+rules:
+  proposal:
+    - 使用中文撰写，明确背景、目标、非目标、用户可观察结果和受影响的包或文档
+    - 把变更限制为一个可独立评审、验证和回退的最小闭环
+    - 明确兼容性、存档、协议、并发或性能影响；不适用时直接说明
+  specs:
+    - 使用中文描述可观察行为，并保留 OpenSpec 要求的英文结构标题和 SHALL/MUST 关键字
+    - 每条 Requirement 至少包含一个可判定的 Given/When/Then Scenario，并覆盖重要失败路径或边界条件
+    - 只写行为契约；包结构、类型选择和实现步骤放入 design.md
+  design:
+    - 说明数据所有权、依赖方向、并发边界以及受影响文件；不得绕过现有架构门禁
+    - 涉及存档、线上协议或性能契约时，包含兼容/迁移方案、风险、回退方案和验证方法
+    - 对重要取舍记录被否决的替代方案及理由
+  tasks:
+    - 拆成按顺序执行、可单独验证、可勾选的小任务；测试与对应实现放在同一任务组
+    - 每项写明目标文件或包以及具体验证命令，避免“完成开发”一类不可判定描述
+    - 收尾任务必须包含 gofmt、go vet ./...、go test ./... -race 和 OpenSpec 严格校验；平台专属或性能变更补充相应门禁
+
+operations:
+  apply:
+    guidance:
+      - 实现前重新读取 proposal、delta specs、design 和 tasks，以这些产物约束范围
+      - 遵循 red-green-refactor，保留用户已有和无关的工作区改动，只在验证通过后勾选任务
+      - 实现发现规格或设计不成立时，先同步修改对应 OpenSpec 产物，再继续编码
+  archive:
+    guidance:
+      - 归档前确认任务状态、实现与 delta specs 一致，并运行 openspec validate --all --strict --no-interactive
+      - 把可复用的行为契约合入主规格；项目级工作习惯应更新 AGENTS.md 或 openspec/config.yaml
