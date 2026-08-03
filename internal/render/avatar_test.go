@@ -195,14 +195,14 @@ func TestAvatarRendererUsesFixedStorageAndDepthPass(t *testing.T) {
 	dev := &avatarTestDevice{}
 	renderer := NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 
-	instances := dev.bufferByLabel(t, "avatar instances")
-	if got, want := instances.desc.Size, uint64(maxAvatarParts*avatarInstanceBytes); got != want {
-		t.Fatalf("instance buffer size=%d want=%d", got, want)
+	upload := dev.bufferByLabel(t, "avatar dynamic upload")
+	if got, want := upload.desc.Size, uint64(3636); got != want {
+		t.Fatalf("dynamic upload size=%d want=%d", got, want)
 	}
-	if want := gfx.BufferUsageStorage | gfx.BufferUsageCopyDst; instances.desc.Usage != want {
-		t.Fatalf("instance buffer usage=%v want=%v", instances.desc.Usage, want)
+	if want := gfx.BufferUsageUniform | gfx.BufferUsageStorage | gfx.BufferUsageIndirect | gfx.BufferUsageCopyDst; upload.desc.Usage != want {
+		t.Fatalf("dynamic upload usage=%v want=%v", upload.desc.Usage, want)
 	}
-	if got, want := len(dev.buffers), 5; got != want {
+	if got, want := len(dev.buffers), 3; got != want {
 		t.Fatalf("constructor buffers=%d want=%d", got, want)
 	}
 	if dev.pipelineDesc.Blend != gfx.BlendReplace || !dev.pipelineDesc.DepthWrite ||
@@ -217,7 +217,7 @@ func TestAvatarRendererUsesFixedStorageAndDepthPass(t *testing.T) {
 	}
 
 	renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, makeTestAvatars(8))
-	if got, want := len(dev.buffers), 5; got != want {
+	if got, want := len(dev.buffers), 3; got != want {
 		t.Fatalf("render resized GPU buffers: got=%d want=%d", got, want)
 	}
 	if got, want := len(encoder.passes), 1; got != want {
@@ -230,7 +230,7 @@ func TestAvatarRendererUsesFixedStorageAndDepthPass(t *testing.T) {
 	if pass.draws != 1 || !pass.ended || !pass.setIndex {
 		t.Fatalf("encoded pass=%+v; want one indexed draw and End", pass)
 	}
-	args := dev.bufferByLabel(t, "avatar indirect args").lastWrite
+	args := upload.lastWrite[3616:3636]
 	if got := binary.LittleEndian.Uint32(args[0:4]); got != 36 {
 		t.Fatalf("index count=%d want=36", got)
 	}
@@ -278,24 +278,21 @@ func TestAvatarRendererHeadlessDraw(t *testing.T) {
 }
 
 func TestAvatarRendererReleaseIsIdempotent(t *testing.T) {
-	instances := &avatarReleaseBuffer{}
+	upload := &avatarReleaseBuffer{}
 	vertices := &avatarReleaseBuffer{}
 	indices := &avatarReleaseBuffer{}
-	camera := &avatarReleaseBuffer{}
-	indirect := &avatarReleaseBuffer{}
 	pipeline := &avatarReleasePipeline{}
 	bind := &avatarReleaseBindGroup{}
 	renderer := &AvatarRenderer{
-		instances: instances, vertices: vertices, indices: indices,
-		camera: camera, indirect: indirect, pipeline: pipeline, bind: bind,
+		dynamic: upload, vertices: vertices, indices: indices,
+		pipeline: pipeline, bind: bind,
 	}
 
 	renderer.Release()
 	renderer.Release()
 	for name, got := range map[string]int{
-		"instances": instances.releases, "vertices": vertices.releases,
-		"indices": indices.releases, "camera": camera.releases,
-		"indirect": indirect.releases, "pipeline": pipeline.releases,
+		"dynamic": upload.releases, "vertices": vertices.releases,
+		"indices": indices.releases, "pipeline": pipeline.releases,
 		"bind": bind.releases,
 	} {
 		if got != 1 {

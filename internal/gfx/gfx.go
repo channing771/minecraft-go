@@ -171,6 +171,10 @@ type BindGroupLayout struct {
 type BindGroupEntry struct {
 	Binding uint32
 	Buffer  Buffer
+	// Offset/Size 仅用于 Buffer。两者均为零时绑定整个 buffer；否则 Size
+	// 必须非零，且 [Offset, Offset+Size) 必须完全落在 buffer 内。
+	Offset  uint64
+	Size    uint64
 	Texture TextureView
 	Sampler Sampler
 }

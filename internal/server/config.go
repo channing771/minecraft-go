@@ -9,28 +9,30 @@ import (
 )
 
 type Config struct {
-	Seed              int64
-	MaxPlayers        int
-	ViewRadius        int
-	Workers           int
-	SnapshotChunks    int
-	SnapshotBytes     int
-	OutboxCapacity    int
-	TickObserver      func(time.Duration)
-	SpawnDimension    core.DimensionID
-	SpawnAnchor       core.ChunkPos
-	TrustedObserver   bool
-	SaveWorkers       int
-	SaveChunks        int
-	SaveBytes         int
-	AutosaveTicks     uint64
-	RetryBaseTicks    uint64
-	RetryMaxTicks     uint64
-	UnsavedBytes      int64
-	ShutdownTimeout   time.Duration
-	SaveObserver      func(time.Duration)
-	HeartbeatInterval time.Duration
-	HeartbeatTimeout  time.Duration
+	Seed                  int64
+	MaxPlayers            int
+	ViewRadius            int
+	Workers               int
+	SnapshotChunks        int
+	SnapshotBytes         int
+	OutboxCapacity        int
+	TickObserver          func(time.Duration)
+	ScheduledTickObserver func(time.Time, time.Duration)
+	InterestObserver      func(time.Duration)
+	SpawnDimension        core.DimensionID
+	SpawnAnchor           core.ChunkPos
+	TrustedObserver       bool
+	SaveWorkers           int
+	SaveChunks            int
+	SaveBytes             int
+	AutosaveTicks         uint64
+	RetryBaseTicks        uint64
+	RetryMaxTicks         uint64
+	UnsavedBytes          int64
+	ShutdownTimeout       time.Duration
+	SaveObserver          func(time.Duration)
+	HeartbeatInterval     time.Duration
+	HeartbeatTimeout      time.Duration
 
 	heartbeatClock heartbeatClock
 }

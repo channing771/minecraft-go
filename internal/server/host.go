@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"sync"
@@ -45,6 +46,87 @@ type Host struct {
 	sessionWG       sync.WaitGroup
 	shutdownGate    chan struct{}
 	closing         bool
+}
+
+// HostStats 是不暴露内部 map/channel 的瞬时有界队列快照。
+type HostStats struct {
+	ActivePlayers         int
+	MaxSessionOutboxDepth int
+	PlayerSaveJobDepth    int
+	PlayerSaveDoneDepth   int
+}
+
+// Stats 分别短暂取得 host、world 与 player persistence 锁；从不嵌套持锁。
+func (h *Host) Stats() HostStats {
+	h.mu.Lock()
+	stats := HostStats{ActivePlayers: len(h.activeBySession)}
+	h.mu.Unlock()
+
+	h.world.stepMu.Lock()
+	for _, current := range h.world.sessions {
+		if current != nil {
+			stats.MaxSessionOutboxDepth = max(stats.MaxSessionOutboxDepth, len(current.outbox))
+		}
+	}
+	h.world.stepMu.Unlock()
+
+	h.players.mu.Lock()
+	stats.PlayerSaveJobDepth = len(h.players.jobs)
+	stats.PlayerSaveDoneDepth = len(h.players.completions)
+	h.players.mu.Unlock()
+	return stats
+}
+
+// RunAtInputBoundary 在完整 world tick 之间执行 action，并等待 wantPlayers 个不同
+// session 的指定输入序号进入 world ingress。action 不得调用会再次取得 world step 锁的方法。
+func (h *Host) RunAtInputBoundary(
+	ctx context.Context,
+	sequence uint64,
+	wantPlayers int,
+	action func() error,
+) error {
+	if ctx == nil {
+		return errors.New("server: nil input boundary context")
+	}
+	if action == nil {
+		return errors.New("server: nil input boundary action")
+	}
+	if sequence == 0 || wantPlayers <= 0 {
+		return fmt.Errorf(
+			"server: invalid input boundary sequence=%d players=%d",
+			sequence, wantPlayers,
+		)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h.world.stepMu.Lock()
+	defer h.world.stepMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	boundary := newInputIngressBoundary(sequence, wantPlayers)
+	if !h.world.inputBoundary.CompareAndSwap(nil, boundary) {
+		return errors.New("server: input boundary already active")
+	}
+	defer h.world.inputBoundary.CompareAndSwap(boundary, nil)
+	if err := action(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-boundary.done:
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-h.world.ctx.Done():
+		return h.world.ctx.Err()
+	}
 }
 
 type pendingLoginStream struct {

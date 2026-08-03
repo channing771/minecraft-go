@@ -36,42 +36,47 @@ type applicationOptions struct {
 }
 
 type application struct {
-	window             applicationWindow
-	dev                gfx.Device
-	surface            gfx.Surface
-	color              gfx.Texture
-	colorView          gfx.TextureView
-	frameWidth         int
-	frameHeight        int
-	renderer           *render.Renderer
-	remotePlayers      *client.RemotePlayers
-	avatarRenderer     *render.AvatarRenderer
-	nameTagRenderer    *render.NameTagRenderer
-	glyphAtlas         *render.GlyphAtlas
-	clientEndpoint     network.ClientEndpoint
-	receiver           *client.Receiver
-	server             *server.Server
-	host               applicationHost
-	serverCancel       context.CancelFunc
-	serverDone         chan error
-	mirror             *client.Mirror
-	predictor          *client.Predictor
-	mesher             *client.Mesher
-	depth              *depthTarget
-	camera             client.Camera
-	center             core.ChunkPos
-	sequence           uint64
-	selectedBlock      core.BlockID
-	loadedChunks       map[core.ChunkPos]struct{}
-	ticks              *tickRecorder
-	saves              *saveRecorder
-	observerFloor      uint64
-	benchmarkTransport string
-	closeOnce          sync.Once
-	closeErr           error
-	clientCloseOnce    sync.Once
-	clientCloseErr     error
-	releaseResources   func()
+	window                  applicationWindow
+	dev                     gfx.Device
+	surface                 gfx.Surface
+	color                   gfx.Texture
+	colorView               gfx.TextureView
+	frameWidth              int
+	frameHeight             int
+	renderer                *render.Renderer
+	remotePlayers           *client.RemotePlayers
+	remotePresentations     []client.RemotePresentation
+	remoteAvatars           []render.Avatar
+	remoteNameTags          []render.NameTag
+	avatarRenderer          *render.AvatarRenderer
+	nameTagRenderer         *render.NameTagRenderer
+	glyphAtlas              *render.GlyphAtlas
+	clientEndpoint          network.ClientEndpoint
+	receiver                *client.Receiver
+	server                  *server.Server
+	host                    applicationHost
+	serverCancel            context.CancelFunc
+	serverDone              chan error
+	mirror                  *client.Mirror
+	predictor               *client.Predictor
+	mesher                  *client.Mesher
+	depth                   *depthTarget
+	camera                  client.Camera
+	center                  core.ChunkPos
+	sequence                uint64
+	selectedBlock           core.BlockID
+	loadedChunks            map[core.ChunkPos]struct{}
+	ticks                   *tickRecorder
+	saves                   *saveRecorder
+	observerFloor           uint64
+	benchmarkTransport      string
+	multiplayerRenderTiming *multiplayerRenderTiming
+	multiplayerRenderNow    func() time.Time
+	closeOnce               sync.Once
+	closeErr                error
+	clientCloseOnce         sync.Once
+	clientCloseErr          error
+	releaseResources        func()
 }
 
 type applicationWindow interface {
@@ -363,7 +368,7 @@ func newApplicationWithDependencies(
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}
 	} else {
-		window, err = dependencies.newWindow(2560, 1440, "minecraft-go — M3B TCP world")
+		window, err = dependencies.newWindow(2560, 1440, "minecraft-go — M3C multiplayer world")
 		if err == nil {
 			fitFramebuffer(window, width, height)
 			width, height = window.FramebufferSize()
@@ -823,9 +828,27 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		a.renderer.QueueSection(result.Pos, result.Quads)
 	}
 	a.renderer.FlushUploads(a.center)
-	presentations := a.remotePlayers.Presentations()
-	avatars, tags := remoteRenderPresentations(presentations)
-	if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
+	a.remotePresentations = a.remotePlayers.AppendPresentations(a.remotePresentations[:0])
+	a.remoteAvatars, a.remoteNameTags = remoteRenderPresentationsSortedInto(
+		a.remoteAvatars[:0],
+		a.remoteNameTags[:0],
+		a.remotePresentations,
+	)
+	avatars, tags := a.remoteAvatars, a.remoteNameTags
+	renderTiming := a.multiplayerRenderTiming
+	var renderNow func() time.Time
+	var nameTagDuration time.Duration
+	if renderTiming != nil {
+		renderNow = a.multiplayerRenderNow
+		if renderNow == nil {
+			renderNow = time.Now
+		}
+		started := renderNow()
+		if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
+			return false, fmt.Errorf("准备远端玩家昵称: %w", err)
+		}
+		nameTagDuration = renderNow().Sub(started)
+	} else if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
 		return false, fmt.Errorf("准备远端玩家昵称: %w", err)
 	}
 	a.renderer.DropOutside(a.center, viewDistance)
@@ -842,10 +865,18 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
 	})
+	var started time.Time
+	if renderTiming != nil {
+		started = renderNow()
+	}
 	a.avatarRenderer.Render(encoder, target, a.depth.view, render.Camera{
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
 	}, avatars)
+	if renderTiming != nil {
+		renderTiming.recordAvatar(renderNow().Sub(started))
+		started = renderNow()
+	}
 	right := mgl32.Vec3{
 		float32(math.Cos(float64(a.camera.Yaw))),
 		0,
@@ -856,6 +887,9 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		Right:    right,
 		Up:       right.Cross(a.camera.Forward()).Normalize(),
 	})
+	if renderTiming != nil {
+		renderTiming.recordNameTag(nameTagDuration + renderNow().Sub(started))
+	}
 	command := encoder.Finish()
 	a.dev.Submit(command)
 	command.Release()
@@ -870,8 +904,14 @@ func remoteRenderPresentations(presentations []client.RemotePresentation) ([]ren
 	slices.SortFunc(ordered, func(left, right client.RemotePresentation) int {
 		return slices.Compare(left.PlayerID[:], right.PlayerID[:])
 	})
-	avatars := make([]render.Avatar, 0, len(ordered))
-	tags := make([]render.NameTag, 0, len(ordered))
+	return remoteRenderPresentationsSortedInto(nil, nil, ordered)
+}
+
+func remoteRenderPresentationsSortedInto(
+	avatars []render.Avatar,
+	tags []render.NameTag,
+	ordered []client.RemotePresentation,
+) ([]render.Avatar, []render.NameTag) {
 	for _, presentation := range ordered {
 		avatars = append(avatars, render.Avatar{
 			PlayerID: presentation.PlayerID, Position: presentation.Position,

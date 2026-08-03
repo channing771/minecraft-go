@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"time"
 
@@ -88,6 +89,23 @@ func (players *RemotePlayers) Presentations() []RemotePresentation {
 		return bytes.Compare(presentations[i].PlayerID[:], presentations[j].PlayerID[:]) < 0
 	})
 	return presentations
+}
+
+func (players *RemotePlayers) AppendPresentations(dst []RemotePresentation) []RemotePresentation {
+	for playerID, player := range players.players {
+		dst = append(dst, RemotePresentation{
+			PlayerID:    playerID,
+			DisplayName: player.displayName,
+			Dimension:   player.dimension,
+			Position:    player.position,
+			Yaw:         player.yaw,
+			Pitch:       player.pitch,
+		})
+	}
+	slices.SortFunc(dst, func(left, right RemotePresentation) int {
+		return bytes.Compare(left.PlayerID[:], right.PlayerID[:])
+	})
+	return dst
 }
 
 func (players *RemotePlayers) Reset() {

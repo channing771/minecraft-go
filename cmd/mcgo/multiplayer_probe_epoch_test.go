@@ -8,22 +8,18 @@ import (
 	"time"
 )
 
+func runBenchmarkTestInputBoundary(_ context.Context, _ uint64, action func() error) error {
+	return action()
+}
+
 func observeMeasuredBenchmarkTick(
 	t *testing.T,
 	epoch *benchmarkServerEpoch,
 	duration time.Duration,
 ) benchmarkServerTickSignal {
 	t.Helper()
-	returned := make(chan struct{})
-	go func() {
-		epoch.observeTick(duration)
-		close(returned)
-	}()
+	epoch.observeTick(duration)
 	signal := <-epoch.signals
-	if err := epoch.advanceMeasurement(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	<-returned
 	return signal
 }
 
@@ -39,7 +35,7 @@ func TestBenchmarkServerEpochIgnoresWarmupAndStopsAtExactWindow(t *testing.T) {
 			t.Fatal("warm-up tick marked measured")
 		}
 	}
-	if err := epoch.beginMeasurement(func() error { return nil }); err != nil {
+	if err := epoch.beginMeasurement(context.Background(), runBenchmarkTestInputBoundary, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	for tick := 1; tick <= benchmarkServerMeasuredTicks; tick++ {
@@ -75,7 +71,7 @@ func TestBenchmarkServerEpochDropsStaleWarmupSignalsBeforeMeasurement(t *testing
 	epoch := newBenchmarkServerEpoch()
 	epoch.beginWarmup()
 	epoch.observeTick(time.Millisecond)
-	if err := epoch.beginMeasurement(func() error { return nil }); err != nil {
+	if err := epoch.beginMeasurement(context.Background(), runBenchmarkTestInputBoundary, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if signal := observeMeasuredBenchmarkTick(t, epoch, 2*time.Millisecond); !signal.measured {
@@ -101,17 +97,11 @@ func TestBenchmarkServerEpochArmsInputBeforeMeasurementGate(t *testing.T) {
 	epoch := newBenchmarkServerEpoch()
 	epoch.beginWarmup()
 	armed := false
-	err := epoch.beginMeasurement(func() error {
+	err := epoch.beginMeasurement(context.Background(), runBenchmarkTestInputBoundary, func() error {
 		if epoch.measuring() {
 			t.Fatal("measurement gate opened before input arm")
 		}
 		epoch.observeInterest(time.Second)
-		epoch.observeTick(time.Second)
-		select {
-		case signal := <-epoch.signals:
-			t.Fatalf("idle arm recorded a tick: %+v", signal)
-		default:
-		}
 		armed = true
 		return nil
 	})
@@ -126,9 +116,24 @@ func TestBenchmarkServerEpochArmsInputBeforeMeasurementGate(t *testing.T) {
 	}
 }
 
-func TestBenchmarkServerEpochHoldsHostUntilControllerArmsNextInput(t *testing.T) {
+func TestBenchmarkServerEpochRejectsTickCompletedWhileArmingFirstInput(t *testing.T) {
 	epoch := newBenchmarkServerEpoch()
-	if err := epoch.beginMeasurement(func() error { return nil }); err != nil {
+	epoch.beginWarmup()
+	err := epoch.beginMeasurement(context.Background(), runBenchmarkTestInputBoundary, func() error {
+		epoch.observeTick(time.Millisecond)
+		return nil
+	})
+	if err == nil {
+		t.Fatal("beginMeasurement accepted a tick completed while arming input 1")
+	}
+	if epoch.measuring() {
+		t.Fatal("failed input arm left measurement enabled")
+	}
+}
+
+func TestBenchmarkServerEpochObserverDoesNotWaitForController(t *testing.T) {
+	epoch := newBenchmarkServerEpoch()
+	if err := epoch.beginMeasurement(context.Background(), runBenchmarkTestInputBoundary, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	returned := make(chan struct{})
@@ -139,19 +144,19 @@ func TestBenchmarkServerEpochHoldsHostUntilControllerArmsNextInput(t *testing.T)
 	if signal := <-epoch.signals; !signal.measured {
 		t.Fatalf("first tick signal=%+v", signal)
 	}
-	advancedEarly := false
 	select {
 	case <-returned:
-		advancedEarly = true
 	case <-time.After(25 * time.Millisecond):
+		t.Fatal("tick observer waited for benchmark controller")
 	}
+}
+
+func TestBenchmarkServerEpochPreservesScheduledTickTime(t *testing.T) {
+	epoch := newBenchmarkServerEpoch()
 	epoch.beginWarmup()
-	select {
-	case <-returned:
-	case <-time.After(time.Second):
-		t.Fatal("aborting measurement did not release blocked Host tick")
-	}
-	if advancedEarly {
-		t.Fatal("Host tick advanced before the controller armed the next input")
+	scheduled := time.Now().Add(-25 * time.Millisecond)
+	epoch.observeScheduledTick(scheduled, time.Millisecond)
+	if signal := <-epoch.signals; !signal.scheduled.Equal(scheduled) {
+		t.Fatalf("scheduled tick=%s want=%s", signal.scheduled, scheduled)
 	}
 }

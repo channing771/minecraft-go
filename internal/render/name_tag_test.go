@@ -132,11 +132,14 @@ func TestNameTagPrepareRequestsAllThenFlushesOnceBeforeLayout(t *testing.T) {
 	if got, want := renderer.layout.glyphs[1].X, float32(19); got != want {
 		t.Fatalf("post-flush second glyph x=%f want=%f", got, want)
 	}
-	if got, want := len(dev.bufferByLabel(t, "name-tag glyph instances").lastWrite), 2*nameTagInstanceBytes; got != want {
-		t.Fatalf("glyph upload bytes=%d want=%d", got, want)
+	if got := len(dev.bufferByLabel(t, "name-tag dynamic upload").lastWrite); got != 0 {
+		t.Fatalf("Prepare GPU upload bytes=%d want=0", got)
 	}
-	if got, want := len(dev.bufferByLabel(t, "name-tag background instances").lastWrite), nameTagInstanceBytes; got != want {
-		t.Fatalf("background upload bytes=%d want=%d", got, want)
+	if got := float32At(renderer.upload, 768+nameTagInstanceBytes+16); got != 19 {
+		t.Fatalf("second encoded glyph x=%f want=19", got)
+	}
+	if got := float32At(renderer.upload, 256+60); got <= 0 || got >= 1 {
+		t.Fatalf("encoded background alpha=%f want strictly translucent", got)
 	}
 }
 
@@ -160,12 +163,14 @@ func TestNameTagPreparePropagatesFlushError(t *testing.T) {
 		glyphs:      append([]nameTagGlyph(nil), renderer.layout.glyphs...),
 		backgrounds: append([]nameTagBackground(nil), renderer.layout.backgrounds...),
 	}
-	glyphBuffer := dev.bufferByLabel(t, "name-tag glyph instances")
-	backgroundBuffer := dev.bufferByLabel(t, "name-tag background instances")
-	wantGlyphBytes := append([]byte(nil), glyphBuffer.lastWrite...)
-	wantBackgroundBytes := append([]byte(nil), backgroundBuffer.lastWrite...)
-	if len(wantGlyphBytes) != nameTagInstanceBytes || len(wantBackgroundBytes) != nameTagInstanceBytes {
-		t.Fatalf("initial instance bytes=%d/%d want=%d/%d", len(wantGlyphBytes), len(wantBackgroundBytes), nameTagInstanceBytes, nameTagInstanceBytes)
+	uploadBuffer := dev.bufferByLabel(t, "name-tag dynamic upload")
+	wantUpload := append([]byte(nil), renderer.upload...)
+	wantGPUWrite := append([]byte(nil), uploadBuffer.lastWrite...)
+	if got := float32At(wantUpload, 768); got != wantAnchor[0] {
+		t.Fatalf("initial encoded glyph anchor x=%f want=%f", got, wantAnchor[0])
+	}
+	if len(wantGPUWrite) != 0 {
+		t.Fatalf("initial Prepare GPU upload bytes=%d want=0", len(wantGPUWrite))
 	}
 
 	flushErr := errors.New("upload failed")
@@ -179,11 +184,11 @@ func TestNameTagPreparePropagatesFlushError(t *testing.T) {
 	if !reflect.DeepEqual(renderer.layout, wantLayout) {
 		t.Errorf("layout changed after flush error: got=%+v want=%+v", renderer.layout, wantLayout)
 	}
-	if !reflect.DeepEqual(glyphBuffer.lastWrite, wantGlyphBytes) {
-		t.Errorf("glyph buffer changed after flush error: bytes=%d want=%d", len(glyphBuffer.lastWrite), len(wantGlyphBytes))
+	if !reflect.DeepEqual(renderer.upload, wantUpload) {
+		t.Errorf("CPU upload changed after flush error")
 	}
-	if !reflect.DeepEqual(backgroundBuffer.lastWrite, wantBackgroundBytes) {
-		t.Errorf("background buffer changed after flush error")
+	if !reflect.DeepEqual(uploadBuffer.lastWrite, wantGPUWrite) {
+		t.Errorf("GPU upload changed after flush error")
 	}
 }
 
@@ -196,13 +201,14 @@ func TestNameTagRendererUsesFixedTransparentDepthPass(t *testing.T) {
 	renderer := NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
 	defer renderer.Release()
 
-	if got, want := dev.bufferByLabel(t, "name-tag glyph instances").desc.Size, uint64(maxNameTagGlyphs*nameTagInstanceBytes); got != want {
-		t.Fatalf("glyph buffer size=%d want=%d", got, want)
+	upload := dev.bufferByLabel(t, "name-tag dynamic upload")
+	if got, want := upload.desc.Size, uint64(15104); got != want {
+		t.Fatalf("dynamic upload size=%d want=%d", got, want)
 	}
-	if got, want := dev.bufferByLabel(t, "name-tag background instances").desc.Size, uint64(maxNameTags*nameTagInstanceBytes); got != want {
-		t.Fatalf("background buffer size=%d want=%d", got, want)
+	if got, want := upload.desc.Usage, gfx.BufferUsageUniform|gfx.BufferUsageStorage|gfx.BufferUsageCopyDst; got != want {
+		t.Fatalf("dynamic upload usage=%v want=%v", got, want)
 	}
-	if got, want := len(dev.buffers), 3; got != want {
+	if got, want := len(dev.buffers), 1; got != want {
 		t.Fatalf("constructor buffers=%d want=%d", got, want)
 	}
 	if got, want := len(dev.pipelineDescs), 2; got != want {
@@ -217,6 +223,9 @@ func TestNameTagRendererUsesFixedTransparentDepthPass(t *testing.T) {
 	if err := renderer.Prepare([]NameTag{{PlayerID: testNameTagID(1), Text: "A"}}, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
+	if len(upload.lastWrite) != 0 {
+		t.Fatalf("Prepare wrote %d GPU bytes want=0", len(upload.lastWrite))
+	}
 	encoder := &nameTagTestEncoder{}
 	camera := BillboardCamera{
 		ViewProj: mgl32.Ident4(),
@@ -224,7 +233,7 @@ func TestNameTagRendererUsesFixedTransparentDepthPass(t *testing.T) {
 		Up:       mgl32.Vec3{-0.5, 0.125, 1},
 	}
 	renderer.Render(encoder, &nameTagTestView{}, &nameTagTestView{}, camera)
-	if got, want := len(dev.buffers), 3; got != want {
+	if got, want := len(dev.buffers), 1; got != want {
 		t.Fatalf("Render created buffers: got=%d want=%d", got, want)
 	}
 	if got, want := len(encoder.passes), 1; got != want {
@@ -244,7 +253,7 @@ func TestNameTagRendererUsesFixedTransparentDepthPass(t *testing.T) {
 		t.Fatal("name-tag pass was not ended")
 	}
 
-	cameraBytes := dev.bufferByLabel(t, "name-tag camera").lastWrite
+	cameraBytes := upload.lastWrite[:96]
 	gotRight := [3]float32{float32At(cameraBytes, 64), float32At(cameraBytes, 68), float32At(cameraBytes, 72)}
 	gotUp := [3]float32{float32At(cameraBytes, 80), float32At(cameraBytes, 84), float32At(cameraBytes, 88)}
 	if gotRight != [3]float32{0.25, 0.5, 0.75} || gotUp != [3]float32{-0.5, 0.125, 1} {

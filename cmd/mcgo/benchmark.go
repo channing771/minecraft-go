@@ -29,7 +29,7 @@ import (
 
 const (
 	benchmarkSeed   = 20260726
-	scenarioVersion = 5
+	scenarioVersion = 6
 )
 
 var (
@@ -60,15 +60,20 @@ func runBenchmark(app *application, outputPath string) error {
 	if err := runWarmup(app, warmupDuration); err != nil {
 		return err
 	}
+	multiplayerProbe, err := newMultiplayerClientProbe(app)
+	if err != nil {
+		return fmt.Errorf("创建多人客户端性能探针: %w", err)
+	}
+	defer multiplayerProbe.Close()
 	app.ticks.reset()
 	app.saves.reset()
-	still, err := measurePhase(app, "still", stillDuration, nil)
+	still, err := measurePhase(app, multiplayerProbe, "still", stillDuration, nil)
 	if err != nil {
 		return err
 	}
 	flyingStart := app.camera.Pos
 	probe := server.NewTerrainProbe(benchmarkSeed)
-	flying, err := measurePhase(app, "flying", flyDuration, func(elapsed time.Duration) {
+	flying, err := measurePhase(app, multiplayerProbe, "flying", flyDuration, func(elapsed time.Duration) {
 		seconds := float32(elapsed.Seconds())
 		app.camera.Pos[0] = flyingStart[0] + seconds*48
 		app.camera.Pos[2] = flyingStart[2] + float32(math.Sin(float64(seconds)*0.1))*96
@@ -103,7 +108,21 @@ func runBenchmark(app *application, outputPath string) error {
 			authoritativeHash, authoritativeRevision, authoritativeOK,
 			mirrorHash, mirrorRevision, mirrorOK)
 	}
-	ticks := app.ticks.summary()
+	app.closeClientSession(nil)
+	if err := multiplayerProbe.measureGPUCompletion(app); err != nil {
+		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
+	}
+	serverMultiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)
+	if err != nil {
+		return fmt.Errorf("测量八会话服务端: %w", err)
+	}
+	multiplayer := multiplayerProbe.Summary()
+	multiplayer.InterestDiff = serverMultiplayer.InterestDiff
+	multiplayer.ServerOutboundBytes = serverMultiplayer.ServerOutboundBytes
+	multiplayer.OutboxHighWater = serverMultiplayer.OutboxHighWater
+	multiplayer.PlayerJobsHighWater = serverMultiplayer.PlayerJobsHighWater
+	multiplayer.PlayerDoneHighWater = serverMultiplayer.PlayerDoneHighWater
+	multiplayer.PeakRSSBytes = serverMultiplayer.PeakRSSBytes
 	persistence := app.saves.summary()
 	protocol, err := measureProtocolSummary()
 	if err != nil {
@@ -132,6 +151,7 @@ func runBenchmark(app *application, outputPath string) error {
 		Persistence:       persistence,
 		Protocol:          protocol,
 		PlayerPersistence: playerPersistence,
+		Multiplayer:       multiplayer,
 	}
 	if err := writeBenchmarkReport(outputPath, report); err != nil {
 		return err
@@ -305,6 +325,43 @@ func validateBenchmarkReport(report client.PerfReport) error {
 	if report.PlayerPersistence.P99MS >= 5 || report.PlayerPersistence.MaxMS >= 20 {
 		failures = append(failures, fmt.Sprintf("player_persistence 超过 p99/max 5/20ms: %+v", report.PlayerPersistence))
 	}
+	if report.ScenarioVersion >= 6 {
+		for name, summary := range map[string]client.LatencySummary{
+			"remote_state_encode": report.Multiplayer.RemoteStateEncode,
+			"remote_state_decode": report.Multiplayer.RemoteStateDecode,
+			"interest_diff":       report.Multiplayer.InterestDiff,
+			"roster_apply":        report.Multiplayer.RosterApply,
+			"interpolation":       report.Multiplayer.Interpolation,
+			"avatar_submit":       report.Multiplayer.AvatarSubmit,
+			"name_tag_submit":     report.Multiplayer.NameTagSubmit,
+			"remote_gpu_complete": report.Multiplayer.RemoteGPUComplete,
+		} {
+			minimum := 256
+			if name == "interest_diff" {
+				minimum = 1000
+			}
+			if summary.Samples < minimum || summary.P50MS <= 0 || summary.P95MS <= 0 ||
+				summary.P99MS <= 0 || summary.MaxMS <= 0 {
+				failures = append(failures, fmt.Sprintf("%s 指标不完整或 samples < %d: %+v", name, minimum, summary))
+			}
+		}
+		multiplayer := report.Multiplayer
+		if multiplayer.ServerOutboundBytes == 0 {
+			failures = append(failures, "server_outbound_bytes=0")
+		}
+		if multiplayer.OutboxHighWater > 512 {
+			failures = append(failures, fmt.Sprintf("outbox high-water %d > 512", multiplayer.OutboxHighWater))
+		}
+		if multiplayer.PlayerJobsHighWater > 16 {
+			failures = append(failures, fmt.Sprintf("player jobs high-water %d > 16", multiplayer.PlayerJobsHighWater))
+		}
+		if multiplayer.PlayerDoneHighWater > 2 {
+			failures = append(failures, fmt.Sprintf("player done high-water %d > 2", multiplayer.PlayerDoneHighWater))
+		}
+		if multiplayer.PeakRSSBytes == 0 || multiplayer.PeakRSSBytes >= 2<<30 {
+			failures = append(failures, fmt.Sprintf("multiplayer 峰值 RSS %.1f MiB 不在 (0, 2048) MiB", float64(multiplayer.PeakRSSBytes)/(1<<20)))
+		}
+	}
 	for name, phase := range report.Phases {
 		if phase.FPS < 100 {
 			failures = append(failures, fmt.Sprintf("%s fps %.1f < 100", name, phase.FPS))
@@ -317,8 +374,8 @@ func validateBenchmarkReport(report client.PerfReport) error {
 				name, float64(phase.PeakRSSBytes)/(1<<20)))
 		}
 	}
-	if report.Ticks.P99MS >= 15 {
-		failures = append(failures, fmt.Sprintf("tick p99 %.3f ms >= 15 ms", report.Ticks.P99MS))
+	if report.Ticks.P99MS >= 10 {
+		failures = append(failures, fmt.Sprintf("tick p99 %.3f ms >= 10 ms", report.Ticks.P99MS))
 	}
 	if report.Ticks.MaxMS >= 50 {
 		failures = append(failures, fmt.Sprintf("tick max %.3f ms >= 50 ms", report.Ticks.MaxMS))
@@ -506,6 +563,7 @@ func runWarmup(app *application, duration time.Duration) error {
 
 func measurePhase(
 	app *application,
+	multiplayer *multiplayerClientProbe,
 	name string,
 	duration time.Duration,
 	update func(time.Duration),
@@ -527,7 +585,11 @@ func measurePhase(
 		if update != nil {
 			update(frameStarted.Sub(started))
 		}
-		rendered, err := app.frame(4096, physics.FixedDelta)
+		multiplayer.tick++
+		if err := multiplayer.sampleFrame(app, multiplayer.tick); err != nil {
+			return client.PhaseSummary{}, fmt.Errorf("%s 多人 probe tick %d: %w", name, multiplayer.tick, err)
+		}
+		rendered, err := app.frame(4096, fixedBenchmarkFrameDuration)
 		if err != nil {
 			return client.PhaseSummary{}, err
 		}

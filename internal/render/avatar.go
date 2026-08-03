@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"math"
-	"sort"
+	"slices"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -18,6 +18,14 @@ const (
 	avatarPartsPerBody  = 6
 	maxAvatarParts      = maxRemoteAvatars * avatarPartsPerBody
 	avatarInstanceBytes = 80
+
+	avatarCameraOffset   = 0
+	avatarCameraBytes    = 64
+	avatarInstanceOffset = 256
+	avatarInstanceSize   = maxAvatarParts * avatarInstanceBytes
+	avatarIndirectOffset = avatarInstanceOffset + avatarInstanceSize
+	avatarIndirectBytes  = 20
+	avatarUploadBytes    = avatarIndirectOffset + avatarIndirectBytes
 )
 
 //go:embed shader/avatar.wgsl
@@ -38,23 +46,28 @@ type avatarPart struct {
 
 // AvatarRenderer 管理固定容量的远端玩家实例与独立渲染 pass。
 type AvatarRenderer struct {
-	instances gfx.Buffer
-	vertices  gfx.Buffer
-	indices   gfx.Buffer
-	camera    gfx.Buffer
-	indirect  gfx.Buffer
-	pipeline  gfx.RenderPipeline
-	bind      gfx.BindGroup
-	parts     []avatarPart
+	dynamic  gfx.Buffer
+	vertices gfx.Buffer
+	indices  gfx.Buffer
+	pipeline gfx.RenderPipeline
+	bind     gfx.BindGroup
+	parts    []avatarPart
+	ordered  []Avatar
+	upload   []byte
 }
 
 // NewAvatarRenderer 一次性创建最多七个远端玩家所需的固定 GPU 资源。
 func NewAvatarRenderer(dev gfx.Device, colorFormat, depthFormat gfx.TextureFormat) *AvatarRenderer {
-	renderer := &AvatarRenderer{}
-	renderer.instances = dev.CreateBuffer(gfx.BufferDesc{
-		Label: "avatar instances",
-		Size:  uint64(maxAvatarParts * avatarInstanceBytes),
-		Usage: gfx.BufferUsageStorage | gfx.BufferUsageCopyDst,
+	renderer := &AvatarRenderer{
+		parts:   make([]avatarPart, 0, maxAvatarParts),
+		ordered: make([]Avatar, 0, maxRemoteAvatars),
+		upload:  make([]byte, avatarUploadBytes),
+	}
+	renderer.dynamic = dev.CreateBuffer(gfx.BufferDesc{
+		Label: "avatar dynamic upload",
+		Size:  avatarUploadBytes,
+		Usage: gfx.BufferUsageUniform | gfx.BufferUsageStorage |
+			gfx.BufferUsageIndirect | gfx.BufferUsageCopyDst,
 	})
 	renderer.vertices = dev.CreateBuffer(gfx.BufferDesc{
 		Label: "avatar cube vertices",
@@ -68,17 +81,6 @@ func NewAvatarRenderer(dev gfx.Device, colorFormat, depthFormat gfx.TextureForma
 		Usage: gfx.BufferUsageIndex | gfx.BufferUsageCopyDst,
 	})
 	renderer.indices.Write(0, uint32sToBytes(avatarCubeIndices))
-	renderer.camera = dev.CreateBuffer(gfx.BufferDesc{
-		Label: "avatar camera",
-		Size:  64,
-		Usage: gfx.BufferUsageUniform | gfx.BufferUsageCopyDst,
-	})
-	renderer.indirect = dev.CreateBuffer(gfx.BufferDesc{
-		Label: "avatar indirect args",
-		Size:  20,
-		Usage: gfx.BufferUsageIndirect | gfx.BufferUsageCopyDst,
-	})
-
 	layout := gfx.BindGroupLayout{
 		Label: "avatar layout",
 		Entries: []gfx.BindGroupLayoutEntry{
@@ -110,8 +112,14 @@ func NewAvatarRenderer(dev gfx.Device, colorFormat, depthFormat gfx.TextureForma
 		Label:  "avatar resources",
 		Layout: layout,
 		Entries: []gfx.BindGroupEntry{
-			{Binding: 0, Buffer: renderer.camera},
-			{Binding: 1, Buffer: renderer.instances},
+			{
+				Binding: 0, Buffer: renderer.dynamic,
+				Offset: avatarCameraOffset, Size: avatarCameraBytes,
+			},
+			{
+				Binding: 1, Buffer: renderer.dynamic,
+				Offset: avatarInstanceOffset, Size: avatarInstanceSize,
+			},
 		},
 	})
 	return renderer
@@ -124,15 +132,17 @@ func (renderer *AvatarRenderer) Render(
 	camera Camera,
 	avatars []Avatar,
 ) {
-	renderer.parts = buildAvatarParts(renderer.parts[:0], avatars)
+	renderer.ordered = orderedAvatarsInto(renderer.ordered[:0], avatars)
+	renderer.parts = buildOrderedAvatarParts(renderer.parts[:0], renderer.ordered)
 	if len(renderer.parts) == 0 {
 		return
 	}
-	renderer.instances.Write(0, avatarPartBytes(renderer.parts))
-	renderer.camera.Write(0, avatarFloat32Bytes(camera.ViewProj[:]))
-	renderer.indirect.Write(0, uint32sToBytes([]uint32{
+	encodeAvatarPartsInto(renderer.upload[avatarInstanceOffset:avatarIndirectOffset], renderer.parts)
+	encodeAvatarFloat32sInto(renderer.upload[avatarCameraOffset:avatarCameraBytes], camera.ViewProj[:])
+	encodeAvatarUint32sInto(renderer.upload[avatarIndirectOffset:avatarUploadBytes], []uint32{
 		uint32(len(avatarCubeIndices)), uint32(len(renderer.parts)), 0, 0, 0,
-	}))
+	})
+	renderer.dynamic.Write(0, renderer.upload)
 
 	pass := encoder.BeginRenderPass(gfx.RenderPassDesc{
 		Label:     "avatar pass",
@@ -144,19 +154,50 @@ func (renderer *AvatarRenderer) Render(
 	pass.SetBindGroup(0, renderer.bind)
 	pass.SetVertexBuffer(0, renderer.vertices, 0)
 	pass.SetIndexBuffer(renderer.indices, 0)
-	pass.DrawIndexedIndirect(renderer.indirect, 0)
+	pass.DrawIndexedIndirect(renderer.dynamic, avatarIndirectOffset)
 	pass.End()
 }
 
+func encodeAvatarPartsInto(dst []byte, parts []avatarPart) {
+	for partIndex, part := range parts {
+		offset := partIndex * avatarInstanceBytes
+		for index, value := range part.transform {
+			binary.LittleEndian.PutUint32(dst[offset+index*4:], math.Float32bits(value))
+		}
+		for index, value := range part.color {
+			binary.LittleEndian.PutUint32(dst[offset+64+index*4:], math.Float32bits(value))
+		}
+	}
+}
+
+func encodeAvatarFloat32sInto(dst []byte, values []float32) {
+	for index, value := range values {
+		binary.LittleEndian.PutUint32(dst[index*4:], math.Float32bits(value))
+	}
+}
+
+func encodeAvatarUint32sInto(dst []byte, values []uint32) {
+	for index, value := range values {
+		binary.LittleEndian.PutUint32(dst[index*4:], value)
+	}
+}
+
 func buildAvatarParts(dst []avatarPart, avatars []Avatar) []avatarPart {
-	ordered := append([]Avatar(nil), avatars...)
-	sort.Slice(ordered, func(i, j int) bool {
-		return bytes.Compare(ordered[i].PlayerID[:], ordered[j].PlayerID[:]) < 0
+	return buildOrderedAvatarParts(dst, orderedAvatarsInto(nil, avatars))
+}
+
+func orderedAvatarsInto(dst []Avatar, avatars []Avatar) []Avatar {
+	ordered := append(dst, avatars...)
+	slices.SortFunc(ordered, func(left, right Avatar) int {
+		return bytes.Compare(left.PlayerID[:], right.PlayerID[:])
 	})
 	if len(ordered) > maxRemoteAvatars {
 		ordered = ordered[:maxRemoteAvatars]
 	}
+	return ordered
+}
 
+func buildOrderedAvatarParts(dst []avatarPart, ordered []Avatar) []avatarPart {
 	for _, avatar := range ordered {
 		root := mgl32.Translate3D(avatar.Position[0], avatar.Position[1], avatar.Position[2]).Mul4(
 			mgl32.HomogRotate3DY(avatar.Yaw),
@@ -259,7 +300,7 @@ func (renderer *AvatarRenderer) Release() {
 		renderer.pipeline = nil
 	}
 	for _, buffer := range []*gfx.Buffer{
-		&renderer.indirect, &renderer.camera, &renderer.indices, &renderer.vertices, &renderer.instances,
+		&renderer.indices, &renderer.vertices, &renderer.dynamic,
 	} {
 		if *buffer != nil {
 			(*buffer).Release()

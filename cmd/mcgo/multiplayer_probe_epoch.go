@@ -4,7 +4,7 @@ package main
 
 import (
 	"context"
-	"sync"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -28,36 +28,20 @@ const (
 )
 
 type benchmarkServerTickSignal struct {
-	measured bool
+	measured  bool
+	scheduled time.Time
 }
 
-type benchmarkServerMeasurementGate struct {
-	advance  chan struct{}
-	advanced chan struct{}
-	stop     chan struct{}
-	stopOnce sync.Once
-}
-
-func newBenchmarkServerMeasurementGate() *benchmarkServerMeasurementGate {
-	return &benchmarkServerMeasurementGate{
-		advance:  make(chan struct{}),
-		advanced: make(chan struct{}),
-		stop:     make(chan struct{}),
-	}
-}
-
-func (gate *benchmarkServerMeasurementGate) abort() {
-	gate.stopOnce.Do(func() { close(gate.stop) })
-}
+type benchmarkServerInputBoundary func(context.Context, uint64, func() error) error
 
 type benchmarkServerEpoch struct {
 	phase         atomic.Uint32
+	observedTicks atomic.Uint64
 	measuredTicks atomic.Int64
 	overflow      atomic.Bool
 	signals       chan benchmarkServerTickSignal
 	ticks         *client.LatencyRecorder
 	interest      *client.LatencyRecorder
-	measurement   atomic.Pointer[benchmarkServerMeasurementGate]
 }
 
 func newBenchmarkServerEpoch() *benchmarkServerEpoch {
@@ -75,7 +59,11 @@ func (epoch *benchmarkServerEpoch) beginWarmup() {
 	epoch.phase.Store(uint32(benchmarkServerEpochWarmup))
 }
 
-func (epoch *benchmarkServerEpoch) beginMeasurement(armInput func() error) error {
+func (epoch *benchmarkServerEpoch) beginMeasurement(
+	ctx context.Context,
+	inputBoundary benchmarkServerInputBoundary,
+	armInput func() error,
+) error {
 	epoch.abortMeasurement()
 	epoch.phase.Store(uint32(benchmarkServerEpochIdle))
 	epoch.drainSignals()
@@ -83,49 +71,46 @@ func (epoch *benchmarkServerEpoch) beginMeasurement(armInput func() error) error
 	epoch.interest.Reset()
 	epoch.measuredTicks.Store(0)
 	epoch.overflow.Store(false)
-	gate := newBenchmarkServerMeasurementGate()
-	epoch.measurement.Store(gate)
-	if armInput != nil {
-		if err := armInput(); err != nil {
-			gate.abort()
-			epoch.phase.Store(uint32(benchmarkServerEpochDone))
-			return err
-		}
+	if ctx == nil {
+		epoch.phase.Store(uint32(benchmarkServerEpochDone))
+		return errors.New("缺少 measurement context")
 	}
-	epoch.phase.Store(uint32(benchmarkServerEpochMeasuring))
+	armBoundary := epoch.observedTicks.Load()
+	if inputBoundary == nil {
+		epoch.phase.Store(uint32(benchmarkServerEpochDone))
+		return errors.New("缺少服务端 input boundary")
+	}
+	err := inputBoundary(ctx, 1, func() error {
+		if epoch.observedTicks.Load() != armBoundary {
+			return errors.New("服务端 tick 在首组输入 arm 前完成")
+		}
+		if armInput != nil {
+			if err := armInput(); err != nil {
+				return err
+			}
+		}
+		if epoch.observedTicks.Load() != armBoundary {
+			return errors.New("服务端 tick 在首组输入 arm 期间完成")
+		}
+		epoch.phase.Store(uint32(benchmarkServerEpochMeasuring))
+		return nil
+	})
+	if err != nil {
+		epoch.phase.Store(uint32(benchmarkServerEpochDone))
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		epoch.phase.Store(uint32(benchmarkServerEpochDone))
+		return err
+	}
 	return nil
 }
 
 func (epoch *benchmarkServerEpoch) abortMeasurement() {
-	if gate := epoch.measurement.Load(); gate != nil {
-		gate.abort()
-	}
 	epoch.phase.CompareAndSwap(
 		uint32(benchmarkServerEpochMeasuring),
 		uint32(benchmarkServerEpochDone),
 	)
-}
-
-func (epoch *benchmarkServerEpoch) advanceMeasurement(ctx context.Context) error {
-	gate := epoch.measurement.Load()
-	if gate == nil {
-		return context.Canceled
-	}
-	select {
-	case gate.advance <- struct{}{}:
-	case <-gate.stop:
-		return context.Canceled
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	select {
-	case <-gate.advanced:
-		return nil
-	case <-gate.stop:
-		return context.Canceled
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 func (epoch *benchmarkServerEpoch) measuring() bool {
@@ -139,6 +124,14 @@ func (epoch *benchmarkServerEpoch) observeInterest(duration time.Duration) {
 }
 
 func (epoch *benchmarkServerEpoch) observeTick(duration time.Duration) {
+	epoch.observeScheduledTick(time.Now(), duration)
+}
+
+func (epoch *benchmarkServerEpoch) observeScheduledTick(
+	scheduled time.Time,
+	duration time.Duration,
+) {
+	epoch.observedTicks.Add(1)
 	phase := benchmarkServerEpochPhase(epoch.phase.Load())
 	if phase != benchmarkServerEpochWarmup && phase != benchmarkServerEpochMeasuring {
 		return
@@ -149,28 +142,18 @@ func (epoch *benchmarkServerEpoch) observeTick(duration time.Duration) {
 		epoch.ticks.Add(duration)
 		final = epoch.measuredTicks.Add(1) == benchmarkServerMeasuredTicks
 	}
-	gate := epoch.measurement.Load()
 	select {
-	case epoch.signals <- benchmarkServerTickSignal{measured: measured}:
+	case epoch.signals <- benchmarkServerTickSignal{
+		measured: measured, scheduled: scheduled,
+	}:
 	default:
 		epoch.overflow.Store(true)
 	}
-	if !measured || gate == nil {
-		return
-	}
-	select {
-	case <-gate.advance:
-		if final {
-			epoch.phase.CompareAndSwap(
-				uint32(benchmarkServerEpochMeasuring),
-				uint32(benchmarkServerEpochDone),
-			)
-		}
-		select {
-		case gate.advanced <- struct{}{}:
-		case <-gate.stop:
-		}
-	case <-gate.stop:
+	if final {
+		epoch.phase.CompareAndSwap(
+			uint32(benchmarkServerEpochMeasuring),
+			uint32(benchmarkServerEpochDone),
+		)
 	}
 }
 

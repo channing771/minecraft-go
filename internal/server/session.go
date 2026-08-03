@@ -52,6 +52,42 @@ type incomingCommand struct {
 	Command    sim.Command
 }
 
+type inputIngressBoundary struct {
+	sequence uint64
+	want     int
+	done     chan struct{}
+
+	mu       sync.Mutex
+	sessions map[sim.SessionID]struct{}
+	closed   bool
+}
+
+func newInputIngressBoundary(sequence uint64, want int) *inputIngressBoundary {
+	return &inputIngressBoundary{
+		sequence: sequence,
+		want:     want,
+		done:     make(chan struct{}),
+		sessions: make(map[sim.SessionID]struct{}, want),
+	}
+}
+
+func (boundary *inputIngressBoundary) observe(command incomingCommand) {
+	if command.Command.Kind != sim.CommandPlayerInput ||
+		command.Command.Sequence != boundary.sequence {
+		return
+	}
+	boundary.mu.Lock()
+	defer boundary.mu.Unlock()
+	if boundary.closed {
+		return
+	}
+	boundary.sessions[command.Session] = struct{}{}
+	if len(boundary.sessions) == boundary.want {
+		boundary.closed = true
+		close(boundary.done)
+	}
+}
+
 type trustedObserverCenter struct {
 	dimension core.DimensionID
 	center    core.ChunkPos
@@ -622,6 +658,9 @@ func (server *Server) enqueueIncoming(
 ) {
 	select {
 	case server.incoming <- command:
+		if boundary := server.inputBoundary.Load(); boundary != nil {
+			boundary.observe(command)
+		}
 	case <-sessionCtx.Done():
 	case <-server.ctx.Done():
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"time"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
@@ -27,7 +28,13 @@ func (server *Server) publish(result sim.TickResult) {
 		if current == nil || current.closed() {
 			continue
 		}
-		server.publishSession(current, result, players)
+		if observer := server.config.InterestObserver; observer != nil {
+			started := time.Now()
+			server.publishSession(current, result, players)
+			observer(time.Since(started))
+		} else {
+			server.publishSession(current, result, players)
+		}
 	}
 }
 

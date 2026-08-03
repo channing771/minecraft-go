@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"math"
-	"sort"
+	"slices"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -22,6 +22,13 @@ const (
 	nameTagCameraBytes   = 96
 	nameTagPaddingX      = float32(4)
 	nameTagPaddingY      = float32(2)
+
+	nameTagCameraOffset     = 0
+	nameTagBackgroundOffset = 256
+	nameTagBackgroundSize   = maxNameTags * nameTagInstanceBytes
+	nameTagGlyphOffset      = 768
+	nameTagGlyphSize        = maxNameTagGlyphs * nameTagInstanceBytes
+	nameTagUploadBytes      = nameTagGlyphOffset + nameTagGlyphSize
 )
 
 //go:embed shader/name_tag.wgsl
@@ -70,18 +77,15 @@ type nameTagLayout struct {
 type NameTagRenderer struct {
 	atlas GlyphSource
 
-	glyphInstances      gfx.Buffer
-	backgroundInstances gfx.Buffer
-	camera              gfx.Buffer
-	backgroundPipeline  gfx.RenderPipeline
-	glyphPipeline       gfx.RenderPipeline
-	bind                gfx.BindGroup
-	sampler             gfx.Sampler
+	dynamic            gfx.Buffer
+	backgroundPipeline gfx.RenderPipeline
+	glyphPipeline      gfx.RenderPipeline
+	bind               gfx.BindGroup
+	sampler            gfx.Sampler
 
-	layout          nameTagLayout
-	glyphBytes      []byte
-	backgroundBytes []byte
-	cameraBytes     []byte
+	layout  nameTagLayout
+	ordered []NameTag
+	upload  []byte
 }
 
 func NewNameTagRenderer(
@@ -89,30 +93,20 @@ func NewNameTagRenderer(
 	colorFormat, depthFormat gfx.TextureFormat,
 	atlas GlyphSource,
 ) *NameTagRenderer {
-	renderer := &NameTagRenderer{atlas: atlas}
-	renderer.glyphInstances = dev.CreateBuffer(gfx.BufferDesc{
-		Label: "name-tag glyph instances",
-		Size:  uint64(maxNameTagGlyphs * nameTagInstanceBytes),
-		Usage: gfx.BufferUsageStorage | gfx.BufferUsageCopyDst,
-	})
-	renderer.backgroundInstances = dev.CreateBuffer(gfx.BufferDesc{
-		Label: "name-tag background instances",
-		Size:  uint64(maxNameTags * nameTagInstanceBytes),
-		Usage: gfx.BufferUsageStorage | gfx.BufferUsageCopyDst,
-	})
-	renderer.camera = dev.CreateBuffer(gfx.BufferDesc{
-		Label: "name-tag camera",
-		Size:  nameTagCameraBytes,
-		Usage: gfx.BufferUsageUniform | gfx.BufferUsageCopyDst,
+	renderer := &NameTagRenderer{
+		atlas:   atlas,
+		ordered: make([]NameTag, 0, maxNameTags),
+		upload:  make([]byte, nameTagUploadBytes),
+	}
+	renderer.dynamic = dev.CreateBuffer(gfx.BufferDesc{
+		Label: "name-tag dynamic upload",
+		Size:  nameTagUploadBytes,
+		Usage: gfx.BufferUsageUniform | gfx.BufferUsageStorage | gfx.BufferUsageCopyDst,
 	})
 	renderer.layout = nameTagLayout{
 		glyphs:      make([]nameTagGlyph, 0, maxNameTagGlyphs),
 		backgrounds: make([]nameTagBackground, 0, maxNameTags),
 	}
-	renderer.glyphBytes = make([]byte, maxNameTagGlyphs*nameTagInstanceBytes)
-	renderer.backgroundBytes = make([]byte, maxNameTags*nameTagInstanceBytes)
-	renderer.cameraBytes = make([]byte, nameTagCameraBytes)
-
 	layout := gfx.BindGroupLayout{
 		Label: "name-tag layout",
 		Entries: []gfx.BindGroupLayoutEntry{
@@ -139,9 +133,18 @@ func NewNameTagRenderer(
 		Label:  "name-tag resources",
 		Layout: layout,
 		Entries: []gfx.BindGroupEntry{
-			{Binding: 0, Buffer: renderer.camera},
-			{Binding: 1, Buffer: renderer.glyphInstances},
-			{Binding: 2, Buffer: renderer.backgroundInstances},
+			{
+				Binding: 0, Buffer: renderer.dynamic,
+				Offset: nameTagCameraOffset, Size: nameTagCameraBytes,
+			},
+			{
+				Binding: 1, Buffer: renderer.dynamic,
+				Offset: nameTagGlyphOffset, Size: nameTagGlyphSize,
+			},
+			{
+				Binding: 2, Buffer: renderer.dynamic,
+				Offset: nameTagBackgroundOffset, Size: nameTagBackgroundSize,
+			},
 			{Binding: 3, Texture: atlas.TextureView()},
 			{Binding: 4, Sampler: renderer.sampler},
 		},
@@ -166,24 +169,21 @@ func nameTagPipelineDesc(
 }
 
 func (renderer *NameTagRenderer) Prepare(tags []NameTag, budget *UploadBudget) error {
-	ordered := orderedNameTags(tags)
-	for index := range ordered {
-		ordered[index].Text = truncateNameTagText(ordered[index].Text)
-		renderer.atlas.Request(ordered[index].Text)
+	renderer.ordered = orderedNameTagsInto(renderer.ordered[:0], tags)
+	for index := range renderer.ordered {
+		renderer.ordered[index].Text = truncateNameTagText(renderer.ordered[index].Text)
+		renderer.atlas.Request(renderer.ordered[index].Text)
 	}
 	if err := renderer.atlas.FlushUploads(budget); err != nil {
 		return err
 	}
 
-	renderer.layout = layoutNameTags(&renderer.layout, renderer.atlas, ordered)
-	glyphBytes := encodeNameTagGlyphs(renderer.glyphBytes, renderer.layout.glyphs)
-	backgroundBytes := encodeNameTagBackgrounds(renderer.backgroundBytes, renderer.layout.backgrounds)
-	if len(glyphBytes) != 0 {
-		renderer.glyphInstances.Write(0, glyphBytes)
-	}
-	if len(backgroundBytes) != 0 {
-		renderer.backgroundInstances.Write(0, backgroundBytes)
-	}
+	renderer.layout = layoutOrderedNameTags(&renderer.layout, renderer.atlas, renderer.ordered)
+	encodeNameTagBackgrounds(
+		renderer.upload[nameTagBackgroundOffset:nameTagBackgroundOffset+nameTagBackgroundSize],
+		renderer.layout.backgrounds,
+	)
+	encodeNameTagGlyphs(renderer.upload[nameTagGlyphOffset:nameTagUploadBytes], renderer.layout.glyphs)
 	return nil
 }
 
@@ -195,7 +195,9 @@ func (renderer *NameTagRenderer) Render(
 	if len(renderer.layout.backgrounds) == 0 && len(renderer.layout.glyphs) == 0 {
 		return
 	}
-	renderer.camera.Write(0, encodeBillboardCamera(renderer.cameraBytes, camera))
+	encodeBillboardCamera(renderer.upload[nameTagCameraOffset:nameTagCameraBytes], camera)
+	uploadBytes := nameTagGlyphOffset + len(renderer.layout.glyphs)*nameTagInstanceBytes
+	renderer.dynamic.Write(0, renderer.upload[:uploadBytes])
 	pass := encoder.BeginRenderPass(nameTagPassDesc(target, depth))
 	pass.SetBindGroup(0, renderer.bind)
 	if len(renderer.layout.backgrounds) != 0 {
@@ -216,6 +218,10 @@ func nameTagPassDesc(target, depth gfx.TextureView) gfx.RenderPassDesc {
 }
 
 func layoutNameTags(dst *nameTagLayout, atlas GlyphSource, tags []NameTag) nameTagLayout {
+	return layoutOrderedNameTags(dst, atlas, orderedNameTags(tags))
+}
+
+func layoutOrderedNameTags(dst *nameTagLayout, atlas GlyphSource, ordered []NameTag) nameTagLayout {
 	if dst == nil {
 		dst = &nameTagLayout{
 			glyphs:      make([]nameTagGlyph, 0, maxNameTagGlyphs),
@@ -225,9 +231,9 @@ func layoutNameTags(dst *nameTagLayout, atlas GlyphSource, tags []NameTag) nameT
 	dst.glyphs = dst.glyphs[:0]
 	dst.backgrounds = dst.backgrounds[:0]
 
-	for _, tag := range orderedNameTags(tags) {
-		runes := []rune(truncateNameTagText(tag.Text))
-		if len(runes) == 0 {
+	for _, tag := range ordered {
+		text := truncateNameTagText(tag.Text)
+		if text == "" {
 			continue
 		}
 
@@ -235,9 +241,11 @@ func layoutNameTags(dst *nameTagLayout, atlas GlyphSource, tags []NameTag) nameT
 		penX := float32(0)
 		minX, minY := float32(math.Inf(1)), float32(math.Inf(1))
 		maxX, maxY := float32(math.Inf(-1)), float32(math.Inf(-1))
-		for index, char := range runes {
-			if index != 0 {
-				penX += atlas.Kern(runes[index-1], char)
+		var previous rune
+		havePrevious := false
+		for _, char := range text {
+			if havePrevious {
+				penX += atlas.Kern(previous, char)
 			}
 			glyph := atlas.Glyph(char)
 			x := penX + glyph.BearingX
@@ -251,6 +259,8 @@ func layoutNameTags(dst *nameTagLayout, atlas GlyphSource, tags []NameTag) nameT
 			minX, minY = min(minX, x), min(minY, y)
 			maxX, maxY = max(maxX, x+glyph.Width), max(maxY, y+glyph.Height)
 			penX += glyph.Advance
+			previous = char
+			havePrevious = true
 		}
 		minX = min(minX, 0)
 		maxX = max(maxX, penX)
@@ -269,9 +279,13 @@ func layoutNameTags(dst *nameTagLayout, atlas GlyphSource, tags []NameTag) nameT
 }
 
 func orderedNameTags(tags []NameTag) []NameTag {
-	ordered := append([]NameTag(nil), tags...)
-	sort.Slice(ordered, func(left, right int) bool {
-		return bytes.Compare(ordered[left].PlayerID[:], ordered[right].PlayerID[:]) < 0
+	return orderedNameTagsInto(nil, tags)
+}
+
+func orderedNameTagsInto(dst []NameTag, tags []NameTag) []NameTag {
+	ordered := append(dst, tags...)
+	slices.SortFunc(ordered, func(left, right NameTag) int {
+		return bytes.Compare(left.PlayerID[:], right.PlayerID[:])
 	})
 	if len(ordered) > maxNameTags {
 		ordered = ordered[:maxNameTags]
@@ -280,11 +294,14 @@ func orderedNameTags(tags []NameTag) []NameTag {
 }
 
 func truncateNameTagText(text string) string {
-	runes := []rune(text)
-	if len(runes) > maxNameTagRunes {
-		runes = runes[:maxNameTagRunes]
+	runes := 0
+	for index := range text {
+		if runes == maxNameTagRunes {
+			return text[:index]
+		}
+		runes++
 	}
-	return string(runes)
+	return text
 }
 
 func encodeNameTagGlyphs(dst []byte, glyphs []nameTagGlyph) []byte {
@@ -359,7 +376,7 @@ func (renderer *NameTagRenderer) Release() {
 		renderer.sampler = nil
 	}
 	for _, buffer := range []*gfx.Buffer{
-		&renderer.camera, &renderer.backgroundInstances, &renderer.glyphInstances,
+		&renderer.dynamic,
 	} {
 		if *buffer != nil {
 			(*buffer).Release()

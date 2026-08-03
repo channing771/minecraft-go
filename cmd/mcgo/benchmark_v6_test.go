@@ -171,7 +171,7 @@ func TestBenchmarkServerMeasuredWindowSendsOneSequencePerCompletedTick(t *testin
 		sent <- sequence
 		return nil
 	}
-	if err := epoch.beginMeasurement(func() error {
+	if err := epoch.beginMeasurement(testCtx, runBenchmarkTestInputBoundary, func() error {
 		return sendInputs(testCtx, 1)
 	}); err != nil {
 		t.Fatal(err)
@@ -202,6 +202,7 @@ func TestBenchmarkServerMeasuredWindowSendsOneSequencePerCompletedTick(t *testin
 		testCtx,
 		epoch,
 		8,
+		runBenchmarkTestInputBoundary,
 		sendInputs,
 		func() server.HostStats {
 			statsCalls++
@@ -247,7 +248,7 @@ func TestBenchmarkServerMeasuredWindowRejectsTickAdvanceBeforeStatsBoundary(t *t
 		sent <- sequence
 		return nil
 	}
-	if err := epoch.beginMeasurement(func() error {
+	if err := epoch.beginMeasurement(testCtx, runBenchmarkTestInputBoundary, func() error {
 		return sendInputs(testCtx, 1)
 	}); err != nil {
 		t.Fatal(err)
@@ -255,13 +256,11 @@ func TestBenchmarkServerMeasuredWindowRejectsTickAdvanceBeforeStatsBoundary(t *t
 	publisherDone := make(chan struct{})
 	go func() {
 		defer close(publisherDone)
-		for range benchmarkServerMeasuredTicks {
-			select {
-			case <-sent:
-				epoch.observeTick(time.Millisecond)
-			case <-testCtx.Done():
-				return
-			}
+		select {
+		case <-sent:
+			epoch.observeTick(time.Millisecond)
+			epoch.observeTick(time.Millisecond)
+		case <-testCtx.Done():
 		}
 	}()
 	releaseStats := make(chan struct{})
@@ -272,13 +271,11 @@ func TestBenchmarkServerMeasuredWindowRejectsTickAdvanceBeforeStatsBoundary(t *t
 			testCtx,
 			epoch,
 			8,
+			runBenchmarkTestInputBoundary,
 			sendInputs,
 			func() server.HostStats {
 				if statsCalls.Add(1) == 1 {
-					select {
-					case <-epoch.measurement.Load().stop:
-					case <-releaseStats:
-					}
+					<-releaseStats
 				}
 				return server.HostStats{ActivePlayers: 8}
 			},
@@ -299,6 +296,94 @@ func TestBenchmarkServerMeasuredWindowRejectsTickAdvanceBeforeStatsBoundary(t *t
 	}
 	if got := statsCalls.Load(); got != 1 {
 		t.Fatalf("stats calls=%d want=1 fail-fast sample", got)
+	}
+}
+
+func TestBenchmarkServerMeasuredWindowArmsInputsInsideStepBoundary(t *testing.T) {
+	epoch := newBenchmarkServerEpoch()
+	testCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	insideBoundary := false
+	inputBoundary := func(_ context.Context, _ uint64, action func() error) error {
+		insideBoundary = true
+		defer func() { insideBoundary = false }()
+		return action()
+	}
+	stopAfterAssertion := errors.New("stop after boundary assertion")
+	sendInputs := func(_ context.Context, sequence uint64) error {
+		if !insideBoundary {
+			return errors.New("input sent outside step boundary")
+		}
+		if sequence == 2 {
+			return stopAfterAssertion
+		}
+		return nil
+	}
+	if err := epoch.beginMeasurement(testCtx, inputBoundary, func() error {
+		return sendInputs(testCtx, 1)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	epoch.observeTick(time.Millisecond)
+	_, err := runBenchmarkServerMeasuredWindow(
+		testCtx,
+		epoch,
+		8,
+		inputBoundary,
+		sendInputs,
+		func() server.HostStats { return server.HostStats{ActivePlayers: 8} },
+		func() (uint64, error) { return 1, nil },
+	)
+	if !errors.Is(err, stopAfterAssertion) {
+		t.Fatalf("input boundary error=%v, want assertion stop", err)
+	}
+}
+
+func TestBenchmarkServerMeasuredWindowRejectsInputBoundaryPastTickDeadline(t *testing.T) {
+	epoch := newBenchmarkServerEpoch()
+	testCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := epoch.beginMeasurement(testCtx, runBenchmarkTestInputBoundary, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	epoch.observeTick(fixedBenchmarkFrameDuration - 20*time.Millisecond)
+	blockingBoundary := func(ctx context.Context, _ uint64, _ func() error) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	_, err := runBenchmarkServerMeasuredWindow(
+		testCtx,
+		epoch,
+		8,
+		blockingBoundary,
+		func(context.Context, uint64) error { return nil },
+		func() server.HostStats { return server.HostStats{ActivePlayers: 8} },
+		func() (uint64, error) { return 1, nil },
+	)
+	if err == nil || !strings.Contains(err.Error(), "50ms") {
+		t.Fatalf("input boundary deadline error=%v", err)
+	}
+}
+
+func TestBenchmarkServerInputDeadlineUsesScheduledTickTime(t *testing.T) {
+	scheduled := time.Now().Add(100 * time.Millisecond)
+	deadline, err := benchmarkServerInputDeadline(benchmarkServerTickSignal{
+		scheduled: scheduled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := scheduled.Add(fixedBenchmarkFrameDuration); !deadline.Equal(want) {
+		t.Fatalf("input deadline=%s want scheduled deadline=%s", deadline, want)
+	}
+}
+
+func TestBenchmarkServerInputDeadlineRejectsDelayedStepStart(t *testing.T) {
+	_, err := benchmarkServerInputDeadline(benchmarkServerTickSignal{
+		scheduled: time.Now().Add(-fixedBenchmarkFrameDuration),
+	})
+	if err == nil || !strings.Contains(err.Error(), "50ms") {
+		t.Fatalf("delayed step deadline error=%v", err)
 	}
 }
 

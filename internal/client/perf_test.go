@@ -5,9 +5,80 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"minecraft-go/internal/client"
 )
+
+func TestPerfReportV6RequiresCompleteMultiplayerJSON(t *testing.T) {
+	data := []byte(`{
+  "scenario_version": 6,
+  "multiplayer": {
+    "remote_state_encode": {"samples": 256, "p50_ms": 1, "p95_ms": 2, "p99_ms": 3, "max_ms": 4},
+    "remote_state_decode": {"samples": 256, "p50_ms": 5, "p95_ms": 6, "p99_ms": 7, "max_ms": 8},
+    "interest_diff": {"samples": 1000, "p50_ms": 9, "p95_ms": 10, "p99_ms": 11, "max_ms": 12},
+    "roster_apply": {"samples": 256, "p50_ms": 13, "p95_ms": 14, "p99_ms": 15, "max_ms": 16},
+    "interpolation": {"samples": 256, "p50_ms": 17, "p95_ms": 18, "p99_ms": 19, "max_ms": 20},
+    "avatar_submit": {"samples": 256, "p50_ms": 21, "p95_ms": 22, "p99_ms": 23, "max_ms": 24},
+    "name_tag_submit": {"samples": 256, "p50_ms": 25, "p95_ms": 26, "p99_ms": 27, "max_ms": 28},
+    "remote_gpu_complete": {"samples": 256, "p50_ms": 29, "p95_ms": 30, "p99_ms": 31, "max_ms": 32},
+    "server_outbound_bytes": 33,
+    "outbox_high_water": 34,
+    "player_jobs_high_water": 15,
+    "player_done_high_water": 2,
+    "peak_rss_bytes": 36
+  }
+}`)
+	var report client.PerfReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatal(err)
+	}
+	want := []client.LatencySummary{
+		{Samples: 256, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4},
+		{Samples: 256, P50MS: 5, P95MS: 6, P99MS: 7, MaxMS: 8},
+		{Samples: 1000, P50MS: 9, P95MS: 10, P99MS: 11, MaxMS: 12},
+		{Samples: 256, P50MS: 13, P95MS: 14, P99MS: 15, MaxMS: 16},
+		{Samples: 256, P50MS: 17, P95MS: 18, P99MS: 19, MaxMS: 20},
+		{Samples: 256, P50MS: 21, P95MS: 22, P99MS: 23, MaxMS: 24},
+		{Samples: 256, P50MS: 25, P95MS: 26, P99MS: 27, MaxMS: 28},
+		{Samples: 256, P50MS: 29, P95MS: 30, P99MS: 31, MaxMS: 32},
+	}
+	got := []client.LatencySummary{
+		report.Multiplayer.RemoteStateEncode, report.Multiplayer.RemoteStateDecode,
+		report.Multiplayer.InterestDiff, report.Multiplayer.RosterApply,
+		report.Multiplayer.Interpolation, report.Multiplayer.AvatarSubmit,
+		report.Multiplayer.NameTagSubmit, report.Multiplayer.RemoteGPUComplete,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("multiplayer latency JSON = %+v, want %+v", got, want)
+	}
+	if summary := report.Multiplayer; summary.ServerOutboundBytes != 33 ||
+		summary.OutboxHighWater != 34 || summary.PlayerJobsHighWater != 15 ||
+		summary.PlayerDoneHighWater != 2 || summary.PeakRSSBytes != 36 {
+		t.Fatalf("multiplayer scalar JSON incomplete: %+v", summary)
+	}
+}
+
+func TestLatencyRecorderIsBoundedAllocationFreeAndMutationSensitive(t *testing.T) {
+	recorder := client.NewLatencyRecorder(3)
+	allocs := testing.AllocsPerRun(1000, func() { recorder.Add(4 * time.Millisecond) })
+	if allocs != 0 {
+		t.Fatalf("LatencyRecorder.Add allocations/run = %v, want 0", allocs)
+	}
+	recorder.Reset()
+	for _, value := range []time.Duration{time.Millisecond, 2 * time.Millisecond, 3 * time.Millisecond, 4 * time.Millisecond} {
+		recorder.Add(value)
+	}
+	if got := recorder.Summary(); got != (client.LatencySummary{
+		Samples: 3, P50MS: 3, P95MS: 4, P99MS: 4, MaxMS: 4,
+	}) {
+		t.Fatalf("bounded latency summary = %+v", got)
+	}
+	recorder.Add(9 * time.Millisecond)
+	if got := recorder.Summary(); got.P50MS != 4 || got.P99MS != 9 || got.MaxMS != 9 {
+		t.Fatalf("mutation-sensitive latency summary = %+v", got)
+	}
+}
 
 func TestPerfSamplerPercentiles(t *testing.T) {
 	s := client.NewPerfSampler(100)

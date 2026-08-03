@@ -3,10 +3,11 @@
 package render
 
 import (
-	"embed"
+	_ "embed"
 	"fmt"
 	"image"
 	"image/draw"
+	"strings"
 	"sync"
 
 	"golang.org/x/image/font"
@@ -25,8 +26,14 @@ const (
 	glyphUploadBytes     = glyphCellSize * glyphCellSize
 )
 
-//go:embed assets/NotoSansCJKsc-Regular.otf assets/OFL.txt assets/NotoSansCJKsc-Regular.provenance.json
-var embeddedGlyphAssets embed.FS
+//go:embed assets/NotoSansCJKsc-Regular.otf
+var embeddedGlyphFont []byte
+
+//go:embed assets/OFL.txt
+var embeddedGlyphLicense string
+
+//go:embed assets/NotoSansCJKsc-Regular.provenance.json
+var embeddedGlyphProvenance string
 
 // Glyph describes one cell in the fixed-size glyph atlas.
 type Glyph struct {
@@ -118,11 +125,10 @@ func newGlyphAtlasWith(dev gfx.Device, factory glyphFaceFactory, rasterizer glyp
 }
 
 func embeddedGlyphFaceFactory() (font.Face, font.Face, error) {
-	data, err := embeddedGlyphAssets.ReadFile("assets/NotoSansCJKsc-Regular.otf")
-	if err != nil {
+	if err := validateEmbeddedGlyphMetadata(); err != nil {
 		return nil, nil, err
 	}
-	parsed, err := opentype.Parse(data)
+	parsed, err := opentype.Parse(embeddedGlyphFontData())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -136,6 +142,20 @@ func embeddedGlyphFaceFactory() (font.Face, font.Face, error) {
 		return nil, nil, err
 	}
 	return renderFace, workerFace, nil
+}
+
+func embeddedGlyphFontData() []byte {
+	return embeddedGlyphFont
+}
+
+func validateEmbeddedGlyphMetadata() error {
+	if !strings.Contains(embeddedGlyphLicense, "SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007") {
+		return fmt.Errorf("render: embedded glyph license metadata is missing or invalid")
+	}
+	if !strings.Contains(embeddedGlyphProvenance, "\"repository\": \"notofonts/noto-cjk\"") {
+		return fmt.Errorf("render: embedded glyph provenance metadata is missing or invalid")
+	}
+	return nil
 }
 
 func tofuGlyph() (Glyph, []byte) {

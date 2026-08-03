@@ -576,7 +576,7 @@ func (d *wgpuDevice) CreateBindGroup(desc BindGroupDesc) BindGroup {
 				panic("gfx: BindGroupEntry.Buffer 不是本后端创建的缓冲")
 			}
 			out.Buffer = b.buf
-			out.Size = b.buf.GetSize()
+			out.Offset, out.Size = resolveBindGroupBufferRange(desc.Label, e.Binding, e, b.buf.GetSize())
 		case e.Texture != nil:
 			v, ok := e.Texture.(*wgpuTextureView)
 			if !ok {
@@ -601,6 +601,30 @@ func (d *wgpuDevice) CreateBindGroup(desc BindGroupDesc) BindGroup {
 		Entries: entries,
 	}))
 	return &wgpuBindGroup{group: group}
+}
+
+func resolveBindGroupBufferRange(
+	groupLabel string,
+	binding uint32,
+	entry BindGroupEntry,
+	bufferSize uint64,
+) (uint64, uint64) {
+	if entry.Offset == 0 && entry.Size == 0 {
+		return 0, bufferSize
+	}
+	if entry.Size == 0 {
+		panic(fmt.Errorf(
+			"gfx: bind group %q binding %d 的 buffer range offset=%d size=0 要求显式 size > 0",
+			groupLabel, binding, entry.Offset,
+		))
+	}
+	if entry.Offset > bufferSize || entry.Size > bufferSize-entry.Offset {
+		panic(fmt.Errorf(
+			"gfx: bind group %q binding %d 的 buffer range offset=%d size=%d 超出 buffer size=%d",
+			groupLabel, binding, entry.Offset, entry.Size, bufferSize,
+		))
+	}
+	return entry.Offset, entry.Size
 }
 
 func (d *wgpuDevice) CreateTexture(desc TextureDesc) Texture {

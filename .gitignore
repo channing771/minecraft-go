@@ -26,3 +26,4 @@
 *.pprof
 cpu.prof
 mem.prof
+.gitnexus

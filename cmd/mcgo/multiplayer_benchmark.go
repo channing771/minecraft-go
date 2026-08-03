@@ -341,94 +341,58 @@ type benchmarkServerWindowSummary struct {
 	peakRSS    uint64
 }
 
+func benchmarkServerInputDeadline(signal benchmarkServerTickSignal) (time.Time, error) {
+	if signal.scheduled.IsZero() {
+		return time.Time{}, errors.New("server tick 缺少调度时间")
+	}
+	deadline := signal.scheduled.Add(fixedBenchmarkFrameDuration)
+	if !time.Now().Before(deadline) {
+		return time.Time{}, errors.New("server input boundary 已错过 50ms tick deadline")
+	}
+	return deadline, nil
+}
+
 func runBenchmarkServerMeasuredWindow(
 	ctx context.Context,
 	epoch *benchmarkServerEpoch,
 	wantPlayers int,
+	inputBoundary benchmarkServerInputBoundary,
 	sendInputs func(context.Context, uint64) error,
 	readStats func() server.HostStats,
 	readRSS func() (uint64, error),
 ) (benchmarkServerWindowSummary, error) {
 	var result benchmarkServerWindowSummary
-	type statsSample struct {
-		completed int
-		stats     server.HostStats
-	}
-	statsRequests := make(chan int, 1)
-	statsSamples := make(chan statsSample, 1)
-	statsWorkerDone := make(chan struct{})
-	go func() {
-		defer close(statsWorkerDone)
-		for completed := range statsRequests {
-			statsSamples <- statsSample{completed: completed, stats: readStats()}
-		}
-	}()
-	statsRequestsClosed := false
-	statsWorkerJoined := false
-	defer func() {
-		if !statsRequestsClosed {
-			close(statsRequests)
-		}
-		if !statsWorkerJoined {
-			<-statsWorkerDone
-		}
-	}()
 	completedWindow := false
 	defer func() {
 		if !completedWindow {
 			epoch.abortMeasurement()
 		}
 	}()
-	var pendingSignal *benchmarkServerTickSignal
 	for completed := 1; completed <= benchmarkServerMeasuredTicks; completed++ {
 		var signal benchmarkServerTickSignal
-		if pendingSignal != nil {
-			signal = *pendingSignal
-			pendingSignal = nil
-		} else {
-			select {
-			case signal = <-epoch.signals:
-			case <-ctx.Done():
-				return result, ctx.Err()
-			}
+		select {
+		case signal = <-epoch.signals:
+		case <-ctx.Done():
+			return result, ctx.Err()
 		}
 		if !signal.measured {
 			return result, fmt.Errorf(
 				"measured tick %d 收到 warm-up signal", completed,
 			)
 		}
+		var inputDeadline time.Time
 		if completed < benchmarkServerMeasuredTicks {
-			if err := sendInputs(ctx, uint64(completed+1)); err != nil {
-				return result, err
+			var err error
+			inputDeadline, err = benchmarkServerInputDeadline(signal)
+			if err != nil {
+				return result, fmt.Errorf("measured tick %d: %w", completed, err)
 			}
 		}
-		statsRequests <- completed
-		if err := epoch.advanceMeasurement(ctx); err != nil {
-			return result, fmt.Errorf(
-				"释放 measured tick %d: %w", completed, err,
-			)
-		}
-		var sample statsSample
-		select {
-		case sample = <-statsSamples:
-		case next := <-epoch.signals:
-			select {
-			case sample = <-statsSamples:
-				pendingSignal = &next
-			default:
-				return result, fmt.Errorf(
-					"Host.Stats 未在 measured tick %d 边界完成，下一 tick 已推进: measured=%v",
-					completed, next.measured,
-				)
-			}
-		case <-ctx.Done():
-			return result, ctx.Err()
-		}
-		stats := sample.stats
+		stats := readStats()
 		if stats.ActivePlayers != wantPlayers {
 			return result, fmt.Errorf(
 				"多人服务端 measured tick %d 玩家提前退出: active=%d want=%d",
-				sample.completed, stats.ActivePlayers, wantPlayers,
+				completed, stats.ActivePlayers, wantPlayers,
 			)
 		}
 		result.outboxHigh = max(result.outboxHigh, stats.MaxSessionOutboxDepth)
@@ -441,11 +405,50 @@ func runBenchmarkServerMeasuredWindow(
 			}
 			result.peakRSS = max(result.peakRSS, rss)
 		}
+		if completed < benchmarkServerMeasuredTicks {
+			if inputBoundary == nil {
+				return result, errors.New("缺少服务端 input boundary")
+			}
+			select {
+			case next := <-epoch.signals:
+				return result, fmt.Errorf(
+					"Host.Stats/采样未在 measured tick %d 边界完成，下一 tick 已推进: measured=%v",
+					completed, next.measured,
+				)
+			default:
+			}
+			if !time.Now().Before(inputDeadline) {
+				return result, fmt.Errorf(
+					"measured tick %d 的 input boundary 已错过 50ms deadline", completed,
+				)
+			}
+			nextSequence := uint64(completed + 1)
+			boundaryCtx, cancelBoundary := context.WithDeadline(ctx, inputDeadline)
+			err := inputBoundary(boundaryCtx, nextSequence, func() error {
+				select {
+				case next := <-epoch.signals:
+					return fmt.Errorf(
+						"Host.Stats/采样未在 measured tick %d 边界完成，下一 tick 已推进: measured=%v",
+						completed, next.measured,
+					)
+				default:
+				}
+				return sendInputs(boundaryCtx, nextSequence)
+			})
+			cancelBoundary()
+			if err != nil {
+				return result, fmt.Errorf(
+					"measured tick %d 的 input boundary 未在 50ms deadline 前完成: %w",
+					completed, err,
+				)
+			}
+			if !time.Now().Before(inputDeadline) {
+				return result, fmt.Errorf(
+					"measured tick %d 的 input boundary 超过 50ms deadline", completed,
+				)
+			}
+		}
 	}
-	close(statsRequests)
-	statsRequestsClosed = true
-	<-statsWorkerDone
-	statsWorkerJoined = true
 	completedWindow = true
 	return result, nil
 }
@@ -469,7 +472,7 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 	config.AutosaveTicks = 20
 	config.HeartbeatInterval = time.Hour
 	config.HeartbeatTimeout = time.Hour
-	config.TickObserver = epoch.observeTick
+	config.ScheduledTickObserver = epoch.observeScheduledTick
 	config.InterestObserver = epoch.observeInterest
 	store := storage.NewMemory(storage.Metadata{
 		FormatVersion: 1, Seed: benchmarkSeed,
@@ -596,9 +599,11 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 	loginPoll.Stop()
 	cancelLoginReady()
 	epoch.beginWarmup()
+	var lastWarmupSignal benchmarkServerTickSignal
 	for tick := 0; tick < benchmarkServerWarmupTicks; tick++ {
 		select {
 		case signal := <-epoch.signals:
+			lastWarmupSignal = signal
 			if signal.measured {
 				return client.MultiplayerSummary{}, client.PhaseSummary{},
 					fmt.Errorf("warm-up tick %d 被标记为 measured", tick+1)
@@ -622,15 +627,37 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 	sendInputs := func(ctx context.Context, sequence uint64) error {
 		return sendMultiplayerBenchmarkInputs(ctx, clients, sequence)
 	}
-	if err := epoch.beginMeasurement(func() error {
-		return sendInputs(runCtx, 1)
-	}); err != nil {
+	inputBoundary := func(
+		boundaryCtx context.Context,
+		sequence uint64,
+		action func() error,
+	) error {
+		return host.RunAtInputBoundary(boundaryCtx, sequence, len(clients), action)
+	}
+	firstInputDeadline, err := benchmarkServerInputDeadline(lastWarmupSignal)
+	if err != nil {
+		return client.MultiplayerSummary{}, client.PhaseSummary{}, fmt.Errorf(
+			"warm-up 后首组 input boundary: %w", err,
+		)
+	}
+	firstInputCtx, cancelFirstInput := context.WithDeadline(runCtx, firstInputDeadline)
+	err = epoch.beginMeasurement(firstInputCtx, inputBoundary, func() error {
+		return sendInputs(firstInputCtx, 1)
+	})
+	cancelFirstInput()
+	if err != nil {
 		return client.MultiplayerSummary{}, client.PhaseSummary{}, err
+	}
+	if !time.Now().Before(firstInputDeadline) {
+		return client.MultiplayerSummary{}, client.PhaseSummary{}, errors.New(
+			"warm-up 后首组 input boundary 超过 50ms deadline",
+		)
 	}
 	window, err := runBenchmarkServerMeasuredWindow(
 		runCtx,
 		epoch,
 		len(clients),
+		inputBoundary,
 		sendInputs,
 		host.Stats,
 		client.ProcessRSSBytes,

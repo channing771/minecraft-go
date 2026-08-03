@@ -189,7 +189,7 @@ func TestApplicationRenderPassOrder(t *testing.T) {
 	if glyphs.lastBudget != app.renderer.UploadBudget() {
 		t.Fatal("name-tag Prepare did not receive terrain renderer's shared upload budget")
 	}
-	cameraBytes := dev.bufferByLabel(t, "name-tag camera").data
+	cameraBytes := dev.bufferByLabel(t, "name-tag dynamic upload").data[:96]
 	readFloat := func(offset int) float32 {
 		return math.Float32frombits(binary.LittleEndian.Uint32(cameraBytes[offset:]))
 	}
@@ -897,8 +897,8 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	if windowCalls != 1 || deviceCalls != 1 {
 		t.Fatalf("remote success graphics calls window=%d device=%d, want 1/1", windowCalls, deviceCalls)
 	}
-	if windowTitle != "minecraft-go — M3B TCP world" {
-		t.Fatalf("interactive window title = %q, want M3B title", windowTitle)
+	if windowTitle != "minecraft-go — M3C multiplayer world" {
+		t.Fatalf("interactive window title = %q, want M3C title", windowTitle)
 	}
 	if got := endpoint.closeCalls.Load(); got != 0 {
 		t.Fatalf("live remote application endpoint Close calls=%d, want 0", got)
