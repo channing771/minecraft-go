@@ -1,99 +1,86 @@
 # 性能基线
 
-## Accepted scenario v5
+## M3C scenario v6 accepted baseline
 
-- 记录日期：2026-07-31
-- 硬件：Apple M2 / 16 GiB
-- 系统：macOS 26.5.1
-- Go：go1.26.0 darwin/arm64（GVM alias `go1.26`）
-- framebuffer：2560×1440 headless Metal，不创建或聚焦窗口
-- 报告记录的 pre-commit HEAD：`beaf66d742de860fb76d1d52d95c10e142cbccec`
-- accepted transport：Memory trusted observer
-- accepted JSON：`docs/notes/perf-baseline.json`
-- accepted/Memory SHA-256：`428e9b61bd8a8bf782fdc4e8d54f488d544bee4b7da948873638fe40ba60a191`
-- TCP SHA-256：`416a6c7e02ab8abf606cbc241eb85105caa0fb85e1a090e73c51ce3b6f46c972`
+| Evidence | Value |
+|---|---|
+| implementation commit | `38c90a93cc1f03f0a1adb00b4bf97b0131e7d0ef` |
+| toolchain | `go1.26.0 darwin/arm64` |
+| hardware | `Apple M2 / 16GiB` |
+| Memory report | `/tmp/mcgo-m3c-task7a-memory-38c90a93cc1f.json` — `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93` |
+| Memory log | `/tmp/mcgo-m3c-task7a-memory-38c90a93cc1f.log` — `dc04e13ead64cd9c936f188c934ccf6811797deb84d18607508ffec3209d1c47` |
+| TCP report | `/tmp/mcgo-m3c-task7a-tcp-38c90a93cc1f.json` — `ecf245513cbd69d4422af27797f19846d64015bda746270bfe741750e50d614c` |
+| TCP log | `/tmp/mcgo-m3c-task7a-tcp-38c90a93cc1f.log` — `274667a2cc1494b4b5280a9564c0732925df50574f3029833b031c0f610099b6` |
+| v5 backup | `/tmp/mcgo-m3c-task7a-baseline-v5-38c90a93cc1f.json` — `428e9b61bd8a8bf782fdc4e8d54f488d544bee4b7da948873638fe40ba60a191` |
+| migration | `/tmp/mcgo-m3c-task7a-migration-38c90a93cc1f.log` — `17acc77e4e35079370e47da52274aa1cbfbb8ec1e305fd3812dae6c68d739c3d` |
+| Memory→TCP | `/tmp/mcgo-m3c-task7a-compare-38c90a93cc1f.log` — `c53a229765c46ff7d5555d6679a0701465effcc0513da010282b4f02fa2942cd` |
+| microbench | `/tmp/mcgo-m3c-task7a-micro-38c90a93cc1f.txt` — `bde036a38fbc0f62ccc4e5167fb498f6e41f513117e8a4178459ebc435cfe485` |
+| stopped wrapper log | `/tmp/mcgo-m3c-memory-38c90a93cc1f.log` — `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` (0 bytes) |
 
-`perf-baseline.json` 与通过门禁的 `/tmp/mcgo-m3b-memory.json` 字节一致。换硬件、
-`scenario_version` 或固定场景后必须显式重建基线；跨机器数字不能当作 20% 相对门禁。
+Samples: Memory `200/1600`; TCP `200/1600`.
 
-正式命令：
+Policy: v6 cross-transport compares stable transport-related p50/p95/p99, FPS, RSS, load/snapshot, protocol, and persistence; raw max, queue high-water, and the independent Memory server probe are absolute-only. Same-transport additionally compares server tick/interest p50/p95/p99, outbound, and multiplayer RSS.
 
-```bash
-TERM=xterm-256color zsh -ic 'gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --perf-output /tmp/mcgo-m3b-memory.json'
-TERM=xterm-256color zsh -ic 'gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current /tmp/mcgo-m3b-memory.json'
-TERM=xterm-256color zsh -ic 'gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output /tmp/mcgo-m3b-tcp.json'
-TERM=xterm-256color zsh -ic 'gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/mcgo-m3b-memory.json --current /tmp/mcgo-m3b-tcp.json'
+Recovery note: the original wrapper stopped at the nonexistent GVM label `go1.26.0` before `go run`; it produced no JSON and the preserved log above is empty. Task 7A used the installed `go1.26` alias, which reports `go1.26.0 darwin/arm64`, with new collision-safe paths. No benchmark command was retried.
+
+### Memory multiplayer
+
+```json
+{"remote_state_encode":{"samples":62179,"p50_ms":0.001542,"p95_ms":0.004166,"p99_ms":0.006708,"max_ms":0.539625},"remote_state_decode":{"samples":62179,"p50_ms":0.000375,"p95_ms":0.001584,"p99_ms":0.002334,"max_ms":0.855667},"interest_diff":{"samples":1600,"p50_ms":0.007,"p95_ms":0.013083,"p99_ms":0.016209,"max_ms":0.027542},"roster_apply":{"samples":62179,"p50_ms":0.003041,"p95_ms":0.010167,"p99_ms":0.01825,"max_ms":0.717917},"interpolation":{"samples":62179,"p50_ms":0.000541,"p95_ms":0.001667,"p99_ms":0.002041,"max_ms":0.804666},"avatar_submit":{"samples":62180,"p50_ms":0.013042,"p95_ms":0.032,"p99_ms":0.037542,"max_ms":1.6365},"name_tag_submit":{"samples":62180,"p50_ms":0.010541,"p95_ms":0.030583,"p99_ms":0.040584,"max_ms":1.935209},"remote_gpu_complete":{"samples":256,"p50_ms":1.633625,"p95_ms":1.688916,"p99_ms":1.709083,"max_ms":3.157},"server_outbound_bytes":568532,"outbox_high_water":1,"player_jobs_high_water":6,"player_done_high_water":2,"peak_rss_bytes":1480851456}
 ```
 
-正式结果：
+### TCP multiplayer
 
-| 指标 | Memory accepted | TCP |
-|---|---:|---:|
-| load / snapshot | 47.868242 / 21.552631 s | 48.173385 / 21.663562 s |
-| still fps / p50 / p95 / p99 / max | 203.001 / 4.889 / 5.157 / 5.413 / 9.207 ms | 203.550 / 4.877 / 5.174 / 5.380 / 9.682 ms |
-| still peak RSS | 971456512 bytes | 987545600 bytes |
-| flying fps / p50 / p95 / p99 / max | 341.549 / 2.472 / 5.231 / 8.466 / 27.875 ms | 324.419 / 2.640 / 5.547 / 8.402 / 24.486 ms |
-| flying peak RSS | 1232076800 bytes | 1083129856 bytes |
-| tick p50 / p95 / p99 / max | 5.252 / 9.503 / 11.727 / 32.765 ms | 5.044 / 9.524 / 11.428 / 37.905 ms |
-| world persistence samples | 3282 | 3274 |
-| world persistence p50 / p95 / p99 / max | 5.170125 / 7.599333 / 10.416417 / 22.323875 ms | 5.228542 / 8.064667 / 10.433042 / 13.963625 ms |
-| protocol encode/decode p99 / bytes | 0.000375 / 0.000042 ms / 38912 | 0.000417 / 0.000083 ms / 38912 |
-| player persistence samples | 256 | 256 |
-| player persistence p50 / p95 / p99 / max | 0.000291 / 0.000458 / 0.000958 / 0.017750 ms | 0.000292 / 0.000625 / 0.001792 / 0.019042 ms |
-
-两份报告均通过绝对门禁，TCP 相对 Memory 的适用字段也通过 `cmd/perfcheck`。
-
-## 门禁与两项明确裁决
-
-绝对门禁保持为：still/flying fps `>= 100`、phase p99 `< 12 ms`、phase peak RSS
-`< 2 GiB`、tick max `< 50 ms`、protocol encode/decode p99 `< 1 ms`、player persistence
-p99 `< 5 ms` 且 max `< 20 ms`。world/player persistence 必须有样本。
-
-2026-07-31 用户明确授权只把 server tick p99 从 `< 10 ms` 调整为 `< 15 ms`；
-`15.000 ms` 本身仍失败。测试固定 `14.999 ms` 通过、`15.000 ms` 失败。没有改动 tick max、
-frame/fps/RSS 或 persistence 绝对门禁。
-
-同机相对退化比例仍为 20%。用户另明确授权：只对 M3B 新增的 `protocol` 与
-`player_persistence` **延迟字段**使用 `0.01 ms` baseline noise floor；baseline 值低于
-`0.01 ms` 时跳过该延迟字段的相对比较，因为 timer/调度噪声会把几十纳秒差异放大成失真的
-百分比。baseline 恰为或高于 `0.01 ms` 时仍执行 20% 规则。该 floor 不适用于 protocol
-bytes，也不适用于 load、frame、tick、world persistence 或任何既有指标。测试使用本次实际
-sub-microsecond 值证明跳过，并使用 `0.0100→0.0121 ms` 证明 floor 边界以上仍判红。
-
-## Protocol 与 player-store 微基准
-
-执行全部可移植 benchmark：
-
-```bash
-TERM=xterm-256color zsh -ic 'gvm use go1.26 >/dev/null && go test ./... -run "^$" -bench=. -benchtime=1x -count=1'
+```json
+{"remote_state_encode":{"samples":61016,"p50_ms":0.001542,"p95_ms":0.004167,"p99_ms":0.006792,"max_ms":0.754042},"remote_state_decode":{"samples":61016,"p50_ms":0.000416,"p95_ms":0.001625,"p99_ms":0.002209,"max_ms":0.211458},"interest_diff":{"samples":1600,"p50_ms":0.006958,"p95_ms":0.012917,"p99_ms":0.017458,"max_ms":0.065834},"roster_apply":{"samples":61016,"p50_ms":0.003041,"p95_ms":0.009958,"p99_ms":0.017542,"max_ms":0.757708},"interpolation":{"samples":61016,"p50_ms":0.000541,"p95_ms":0.001708,"p99_ms":0.002042,"max_ms":0.67825},"avatar_submit":{"samples":61017,"p50_ms":0.013042,"p95_ms":0.031916,"p99_ms":0.037375,"max_ms":0.592292},"name_tag_submit":{"samples":61017,"p50_ms":0.010542,"p95_ms":0.030125,"p99_ms":0.04025,"max_ms":1.176959},"remote_gpu_complete":{"samples":256,"p50_ms":1.639959,"p95_ms":1.691083,"p99_ms":1.809542,"max_ms":2.036708},"server_outbound_bytes":568888,"outbox_high_water":1,"player_jobs_high_water":6,"player_done_high_water":2,"peak_rss_bytes":1554104320}
 ```
 
-本次 Task 17 记录的代表值（`benchtime=1x` 只证明可执行性并提供量级，不作为跨机器阈值）：
+### Migration output
 
 ```text
-BenchmarkWorstLegalChunkSnapshot/Encode  349584 ns/op  1571632 B/op  31 allocs/op
-BenchmarkWorstLegalChunkSnapshot/Decode  175291 ns/op   403328 B/op  28 allocs/op
-logical=196749 bytes  wire=196776 bytes  compression-ratio=0.9999
-BenchmarkTCPLoopbackPlayerInput            14042 ns/op  (100 continuous packets)
-BenchmarkTCPLoopbackChunkSnapshot         222155 ns/op  885.76 MB/s (100 continuous packets)
-
-BenchmarkPlayerCodec/Encode                18000 ns/op
-BenchmarkPlayerCodec/Decode                 4333 ns/op
-BenchmarkMemoryPlayerStore/Save             3917 ns/op
-BenchmarkMemoryPlayerStore/Load             4042 ns/op
-BenchmarkDiskPlayerStore/Save            6812208 ns/op
-BenchmarkDiskPlayerStore/Load              40083 ns/op
+场景迁移验证通过：报告完整、硬件一致且当前 v6 绝对门禁通过
 ```
 
-网络 benchmark 还逐一覆盖全部小型 client/server packet 的 encode/decode、B/op 与 allocs/op。
+### Memory→TCP output
 
-## 结果限制与历史说明
+```text
+同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过
+```
 
-正式运行所在主机长期存在较高 swap/compressor 压力。三个连续 Memory 测量的 flying p99
-曾为 `8.612/20.554/8.466 ms`，说明渲染尾延迟对主机负载高度敏感；只有第三份在更低 load
-condition 下通过全部门禁并被接受。失败报告未覆盖 baseline，且所有固定阈值均按上述两项
-用户明确裁决执行。
+### Microbenchmarks
 
-此前 scenario v4 accepted baseline 来自 Apple M5 / 24 GiB，不能与当前 M2/16 GiB 做同机
-比较。`cmd/perfcheck` 会先拒绝 scenario/hardware provenance 不一致；本次是在 Memory/TCP
-均绝对通过、同机 v5 比较通过后才把 Memory v5 提升为 accepted baseline。
+```text
+goos: darwin
+goarch: arm64
+pkg: minecraft-go/internal/network
+cpu: Apple M2
+BenchmarkRemotePlayerStateCodec/Encode-8         	 3470312	       329.3 ns/op	    1048 B/op	       8 allocs/op
+BenchmarkRemotePlayerStateCodec/Encode-8         	 3721521	       327.8 ns/op	    1048 B/op	       8 allocs/op
+BenchmarkRemotePlayerStateCodec/Encode-8         	 3614332	       328.0 ns/op	    1048 B/op	       8 allocs/op
+BenchmarkRemotePlayerStateCodec/Decode-8         	 4971238	       241.5 ns/op	     352 B/op	       2 allocs/op
+BenchmarkRemotePlayerStateCodec/Decode-8         	 4979778	       241.4 ns/op	     352 B/op	       2 allocs/op
+BenchmarkRemotePlayerStateCodec/Decode-8         	 4972978	       242.1 ns/op	     352 B/op	       2 allocs/op
+PASS
+ok  	minecraft-go/internal/network	7.767s
+goos: darwin
+goarch: arm64
+pkg: minecraft-go/internal/server
+cpu: Apple M2
+BenchmarkEightPlayerInterest-8   	   30764	     39072 ns/op	   27555 B/op	     147 allocs/op
+BenchmarkEightPlayerInterest-8   	   31246	     38174 ns/op	   27564 B/op	     147 allocs/op
+BenchmarkEightPlayerInterest-8   	   36114	     35627 ns/op	   27578 B/op	     147 allocs/op
+PASS
+ok  	minecraft-go/internal/server	4.350s
+2026/08/03 17:01:32 gfx: 后端=metal 适配器="Apple M2" 类型=integrated-gpu
+goos: darwin
+goarch: arm64
+pkg: minecraft-go/internal/render
+cpu: Apple M2
+BenchmarkRemoteAvatarNameTag-8   	    7110	    172586 ns/op	     136 B/op	       9 allocs/op
+BenchmarkRemoteAvatarNameTag-8   	2026/08/03 17:01:33 gfx: 后端=metal 适配器="Apple M2" 类型=integrated-gpu
+    7215	    162635 ns/op	     136 B/op	       9 allocs/op
+BenchmarkRemoteAvatarNameTag-8   	2026/08/03 17:01:35 gfx: 后端=metal 适配器="Apple M2" 类型=integrated-gpu
+    6963	    166793 ns/op	     136 B/op	       9 allocs/op
+PASS
+ok  	minecraft-go/internal/render	5.647s
+```
