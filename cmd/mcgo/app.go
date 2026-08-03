@@ -50,6 +50,8 @@ type application struct {
 	remoteNameTags          []render.NameTag
 	avatarRenderer          *render.AvatarRenderer
 	nameTagRenderer         *render.NameTagRenderer
+	hotbarRenderer          *render.HotbarRenderer
+	hotbar                  client.HotbarMirror
 	glyphAtlas              *render.GlyphAtlas
 	clientEndpoint          network.ClientEndpoint
 	receiver                *client.Receiver
@@ -64,8 +66,6 @@ type application struct {
 	camera                  client.Camera
 	center                  core.ChunkPos
 	sequence                uint64
-	selectedBlock           core.BlockID
-	selectedSlot            uint8
 	loadedChunks            map[core.ChunkPos]struct{}
 	ticks                   *tickRecorder
 	saves                   *saveRecorder
@@ -115,6 +115,7 @@ type applicationDependencies struct {
 	newGlyphAtlas       func(gfx.Device) (*render.GlyphAtlas, error)
 	newAvatarRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
 	newNameTagRenderer  func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
+	newHotbarRenderer   func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.HotbarRenderer, error)
 }
 
 func defaultApplicationDependencies() applicationDependencies {
@@ -277,6 +278,11 @@ func newApplicationWithDependencies(
 			return render.NewNameTagRenderer(dev, color, depth, atlas), nil
 		}
 	}
+	if dependencies.newHotbarRenderer == nil {
+		dependencies.newHotbarRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource) (*render.HotbarRenderer, error) {
+			return render.NewHotbarRenderer(dev, color, atlas), nil
+		}
+	}
 	ctx := context.Background()
 	var store storage.WorldStore
 	var clientEndpoint network.ClientEndpoint
@@ -435,7 +441,6 @@ func newApplicationWithDependencies(
 		remotePlayers:  client.NewRemotePlayers(),
 		camera:         camera,
 		center:         cameraChunk(camera.Pos),
-		selectedBlock:  core.StoneID,
 		loadedChunks:   make(map[core.ChunkPos]struct{}),
 		ticks:          ticks,
 		saves:          saves,
@@ -468,6 +473,11 @@ func newApplicationWithDependencies(
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建昵称渲染器: %w", err), app.Close())
 	}
+	app.hotbarRenderer, err = dependencies.newHotbarRenderer(dev, colorFormat, app.glyphAtlas)
+	if err != nil {
+		app.releaseRemoteConstructionResources()
+		return nil, errors.Join(fmt.Errorf("创建快捷栏渲染器: %w", err), app.Close())
+	}
 	app.mesher = client.NewMesher(reg, max(1, runtime.NumCPU()-2))
 	if options.Benchmark {
 		if err := app.requestTrustedObserverCenter(app.center); err != nil {
@@ -482,6 +492,10 @@ func newApplicationWithDependencies(
 }
 
 func (a *application) releaseRemoteConstructionResources() {
+	if a.hotbarRenderer != nil {
+		a.hotbarRenderer.Release()
+		a.hotbarRenderer = nil
+	}
 	if a.nameTagRenderer != nil {
 		a.nameTagRenderer.Release()
 		a.nameTagRenderer = nil
@@ -715,6 +729,9 @@ func (a *application) Close() error {
 }
 
 func (a *application) releaseOwnedResources() {
+	if a.hotbarRenderer != nil {
+		a.hotbarRenderer.Release()
+	}
 	if a.nameTagRenderer != nil {
 		a.nameTagRenderer.Release()
 	}
@@ -765,6 +782,7 @@ func (a *application) closeClientSession(cause error) {
 		if a.remotePlayers != nil {
 			a.remotePlayers.Reset()
 		}
+		a.hotbar.Reset()
 	})
 }
 
@@ -852,6 +870,14 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	} else if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
 		return false, fmt.Errorf("准备远端玩家昵称: %w", err)
 	}
+	hotbar, hotbarConfirmed := a.hotbar.State()
+	if hotbarConfirmed {
+		if err := a.hotbarRenderer.Prepare(
+			hotbar, uint32(width), uint32(height), a.renderer.UploadBudget(),
+		); err != nil {
+			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
+		}
+	}
 	a.renderer.DropOutside(a.center, viewDistance)
 
 	target := a.colorView
@@ -890,6 +916,10 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	})
 	if renderTiming != nil {
 		renderTiming.recordNameTag(nameTagDuration + renderNow().Sub(started))
+	}
+	// HUD 在 terrain、avatar 与 name tag 之后绘制。
+	if hotbarConfirmed {
+		a.hotbarRenderer.Render(encoder, target)
 	}
 	command := encoder.Finish()
 	a.dev.Submit(command)
@@ -955,6 +985,13 @@ func (a *application) drainServerMessages(maxMessages int) {
 			if result.ResetView {
 				a.camera.Yaw = result.Yaw
 				a.camera.Pitch = result.Pitch
+			}
+			continue
+		}
+		if state, ok := message.(network.HotbarState); ok {
+			if err := a.hotbar.Apply(state); err != nil {
+				a.closeClientSession(err)
+				return
 			}
 			continue
 		}
@@ -1025,13 +1062,31 @@ func (a *application) placeBlock() {
 	if _, ready := a.predictor.State(); !ready {
 		return
 	}
+	// 放置引用最后一个已确认的选中栏位；尚未确认时不发送。
+	hotbar, confirmed := a.hotbar.State()
+	if !confirmed {
+		return
+	}
 	if err := a.send(network.PlaceBlock{
 		Sequence: a.nextSequence(),
 		Yaw:      a.camera.Yaw,
 		Pitch:    a.camera.Pitch,
-		Slot:     a.selectedSlot,
+		Slot:     hotbar.Selected,
 	}); err != nil {
 		log.Printf("发送放置命令失败: %v", err)
+	}
+}
+
+// selectHotbarSlot 只发送选择请求，不本地改写快捷栏镜像。
+func (a *application) selectHotbarSlot(slot uint8) {
+	if _, ready := a.predictor.State(); !ready {
+		return
+	}
+	if err := a.send(network.SelectHotbar{
+		Sequence: a.nextSequence(),
+		Slot:     slot,
+	}); err != nil {
+		log.Printf("发送快捷栏选择失败: %v", err)
 	}
 }
 

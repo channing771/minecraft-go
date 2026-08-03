@@ -26,36 +26,34 @@ func MovementFromKeys(w, a, s, d, jump bool) Movement {
 	return movement
 }
 
+// Actions 是一帧内需要上行的意图。选择只发送请求，
+// 客户端不据此改写任何已确认的权威快捷栏状态。
 type Actions struct {
-	Break         bool
-	Place         bool
-	SelectedBlock core.BlockID
+	Break      bool
+	Place      bool
+	Select     bool
+	SelectSlot uint8
 }
 
 type InputState struct {
 	primaryDown   bool
 	secondaryDown bool
-	selectedBlock core.BlockID
+	numberDown    int
 }
 
+// Update 把数字键 1..9 转换为一次快捷栏选择请求；
+// number 为 0 或超出 1..9 时不产生选择。
 func (state *InputState) Update(primary, secondary bool, number int) Actions {
-	if state.selectedBlock == core.AirID {
-		state.selectedBlock = core.StoneID
-	}
-	switch number {
-	case 1:
-		state.selectedBlock = core.StoneID
-	case 2:
-		state.selectedBlock = core.DirtID
-	case 3:
-		state.selectedBlock = core.GrassID
-	}
 	actions := Actions{
-		Break:         primary && !state.primaryDown,
-		Place:         secondary && !state.secondaryDown,
-		SelectedBlock: state.selectedBlock,
+		Break: primary && !state.primaryDown,
+		Place: secondary && !state.secondaryDown,
+	}
+	if number >= 1 && number <= core.HotbarSlots && number != state.numberDown {
+		actions.Select = true
+		actions.SelectSlot = uint8(number - 1)
 	}
 	state.primaryDown = primary
 	state.secondaryDown = secondary
+	state.numberDown = number
 	return actions
 }

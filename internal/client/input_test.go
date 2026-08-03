@@ -24,27 +24,36 @@ func TestMovementFromKeysCancelsOpposites(t *testing.T) {
 	}
 }
 
-func TestInputStateUsesRisingEdgesAndNumberSelection(t *testing.T) {
+func TestInputStateUsesRisingEdgesAndHotbarSelection(t *testing.T) {
 	var state client.InputState
 
 	first := state.Update(true, true, 0)
-	if !first.Break || !first.Place || first.SelectedBlock != core.StoneID {
+	if !first.Break || !first.Place || first.Select {
 		t.Fatalf("首次按下 = %+v", first)
 	}
 	held := state.Update(true, true, 2)
-	if held.Break || held.Place || held.SelectedBlock != core.DirtID {
-		t.Fatalf("持续按下/选择 2 = %+v", held)
+	if held.Break || held.Place || !held.Select || held.SelectSlot != 1 {
+		t.Fatalf("持续按下并按下数字 2 = %+v", held)
+	}
+	repeat := state.Update(true, true, 2)
+	if repeat.Select {
+		t.Fatalf("按住同一数字重复发送选择: %+v", repeat)
 	}
 	released := state.Update(false, false, 0)
-	if released.Break || released.Place || released.SelectedBlock != core.DirtID {
+	if released.Break || released.Place || released.Select {
 		t.Fatalf("释放 = %+v", released)
 	}
-	again := state.Update(true, false, 3)
-	if !again.Break || again.Place || again.SelectedBlock != core.GrassID {
-		t.Fatalf("再次按下/选择 3 = %+v", again)
+	again := state.Update(true, false, 9)
+	if !again.Break || again.Place || !again.Select || again.SelectSlot != core.HotbarSlots-1 {
+		t.Fatalf("再次按下并按下数字 9 = %+v", again)
 	}
-	invalid := state.Update(false, false, 9)
-	if invalid.SelectedBlock != core.GrassID {
-		t.Fatalf("无效数字改变选择: %+v", invalid)
+}
+
+func TestInputStateIgnoresNumbersOutsideHotbarRange(t *testing.T) {
+	var state client.InputState
+	for _, number := range []int{-1, 0, core.HotbarSlots + 1, 99} {
+		if got := state.Update(false, false, number); got.Select {
+			t.Fatalf("数字 %d 产生了选择请求: %+v", number, got)
+		}
 	}
 }

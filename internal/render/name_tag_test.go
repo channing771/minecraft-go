@@ -480,12 +480,14 @@ func (d *nameTagTestDevice) bufferByLabel(t *testing.T, label string) *nameTagTe
 type nameTagTestBuffer struct {
 	desc      gfx.BufferDesc
 	lastWrite []byte
+	writes    int
 	releases  int
 }
 
 func (b *nameTagTestBuffer) Size() uint64 { return b.desc.Size }
 func (b *nameTagTestBuffer) Write(_ uint64, data []byte) {
 	b.lastWrite = append(b.lastWrite[:0], data...)
+	b.writes++
 }
 func (*nameTagTestBuffer) ReadBack() []byte { panic("unexpected readback") }
 func (b *nameTagTestBuffer) Release()       { b.releases++ }

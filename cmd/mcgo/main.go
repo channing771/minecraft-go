@@ -202,15 +202,7 @@ func runInteractive(app *application) error {
 			lastMouseX, lastMouseY = mouseX, mouseY
 		}
 
-		number := 0
-		switch {
-		case app.window.KeyDown(client.Key1):
-			number = 1
-		case app.window.KeyDown(client.Key2):
-			number = 2
-		case app.window.KeyDown(client.Key3):
-			number = 3
-		}
+		number := pressedHotbarNumber(app.window)
 		actions := input.Update(clickDown, app.window.SecondaryButtonDown(), number)
 
 		movement := client.MovementFromKeys(
@@ -242,14 +234,26 @@ func (a *application) applyInteractiveCursorInput(
 	a.applyInteractiveInput(elapsed, movement, actions, captured && !justCaptured)
 }
 
+// pressedHotbarNumber 返回当前按下的快捷栏数字键 1..9，没有按下时返回 0。
+func pressedHotbarNumber(window applicationWindow) int {
+	for index := range core.HotbarSlots {
+		if window.KeyDown(client.Key1 + client.Key(index)) {
+			return index + 1
+		}
+	}
+	return 0
+}
+
 func (a *application) applyInteractiveInput(
 	elapsed time.Duration,
 	movement client.Movement,
 	actions client.Actions,
 	allowActions bool,
 ) {
-	a.selectedBlock = actions.SelectedBlock
 	if allowActions {
+		if actions.Select {
+			a.selectHotbarSlot(actions.SelectSlot)
+		}
 		if actions.Break {
 			a.breakBlock()
 		}

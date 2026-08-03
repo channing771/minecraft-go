@@ -235,12 +235,14 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	}
 	avatar := render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 	nameTag := render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
+	hotbar := render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas)
 	color := dev.CreateTexture(gfx.TextureDesc{Label: "main color", Width: 4, Height: 4, Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget})
 	app := &application{
 		dev: dev, color: color, colorView: color.View(gfx.TextureViewDesc{}),
 		depth: newDepthTarget(dev, 4, 4), renderer: terrain,
 		glyphAtlas: atlas, avatarRenderer: avatar, nameTagRenderer: nameTag,
-		remotePlayers: client.NewRemotePlayers(),
+		hotbarRenderer: hotbar,
+		remotePlayers:  client.NewRemotePlayers(),
 	}
 	app.releaseResources = app.releaseOwnedResources
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{})); err != nil {
@@ -253,10 +255,10 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 		t.Fatalf("roster after Close=%d", got)
 	}
 	markers := dev.releaseMarkers([]string{
-		"name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
+		"hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
 		"main depth texture", "main color view", "main color texture", "device",
 	})
-	want := []string{"name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
+	want := []string{"hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
 	if !reflect.DeepEqual(markers, want) {
 		t.Fatalf("release markers=%v want=%v; all=%v", markers, want, dev.releases)
 	}
@@ -367,6 +369,7 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 		depth: newDepthTarget(dev, 16, 16), renderer: render.New(dev, reg, gfx.FormatRGBA8Unorm),
 		avatarRenderer:  render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float),
 		nameTagRenderer: render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, glyphs),
+		hotbarRenderer:  render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, glyphs),
 		remotePlayers:   client.NewRemotePlayers(), mirror: client.NewMirror(), predictor: client.NewPredictor(),
 		mesher: client.NewMesher(reg, 1), camera: client.Camera{FovY: mgl32.DegToRad(70), Aspect: 1, Near: 0.1, Far: 100},
 		loadedChunks: make(map[core.ChunkPos]struct{}),
@@ -1401,5 +1404,120 @@ func assertNoInteractiveClientMessage(t *testing.T, endpoint network.ServerEndpo
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("检查无客户端消息: %v", err)
+	}
+}
+
+func TestHotbarSelectionOnlySendsRequestAndKeepsMirror(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld, Position: mgl32.Vec3{0.5, 10, 0.5},
+		OnGround: true, Ready: true, Reset: true,
+	})
+	var confirmed core.Hotbar
+	confirmed.Selected = 1
+	confirmed.Slots[1] = core.ItemStack{Item: core.ItemStone, Count: 3}
+	sendInteractiveServerMessage(t, serverEndpoint, network.HotbarState{Hotbar: confirmed})
+	app.drainServerMessages(2)
+
+	app.applyInteractiveInput(0, client.Movement{}, client.Actions{
+		Select: true, SelectSlot: 7,
+	}, true)
+
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	if got, ok := message.(network.SelectHotbar); !ok ||
+		got != (network.SelectHotbar{Sequence: 1, Slot: 7}) {
+		t.Fatalf("选择请求=%#v，想要 Sequence 1 Slot 7", message)
+	}
+	if got, ok := app.hotbar.State(); !ok || got != confirmed {
+		t.Fatalf("未确认的选择改写了镜像: %+v, %v", got, ok)
+	}
+}
+
+func TestHotbarPlaceUsesLastConfirmedSlot(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld, Position: mgl32.Vec3{0.5, 10, 0.5},
+		OnGround: true, Ready: true, Reset: true,
+	})
+	var confirmed core.Hotbar
+	confirmed.Selected = 5
+	confirmed.Slots[5] = core.ItemStack{Item: core.ItemDirt, Count: 2}
+	sendInteractiveServerMessage(t, serverEndpoint, network.HotbarState{Hotbar: confirmed})
+	app.drainServerMessages(2)
+
+	app.applyInteractiveInput(0, client.Movement{}, client.Actions{Place: true}, true)
+
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	place, ok := message.(network.PlaceBlock)
+	if !ok || place.Slot != 5 {
+		t.Fatalf("放置=%#v，想要引用已确认的栏位 5", message)
+	}
+	if got, ok := app.hotbar.State(); !ok || got != confirmed {
+		t.Fatalf("放置后镜像被本地预测修改: %+v, %v", got, ok)
+	}
+}
+
+func TestHotbarPlaceWaitsForFirstConfirmedState(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld, Position: mgl32.Vec3{0.5, 10, 0.5},
+		OnGround: true, Ready: true, Reset: true,
+	})
+	app.drainServerMessages(1)
+
+	app.applyInteractiveInput(0, client.Movement{}, client.Actions{Place: true}, true)
+
+	if app.sequence != 0 {
+		t.Fatalf("尚未确认快捷栏就分配 sequence=%d", app.sequence)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+}
+
+func TestHotbarMirrorResetsWithClientSession(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	var confirmed core.Hotbar
+	confirmed.Slots[0] = core.ItemStack{Item: core.ItemGrass, Count: 1}
+	sendInteractiveServerMessage(t, serverEndpoint, network.HotbarState{Hotbar: confirmed})
+	app.drainServerMessages(1)
+	if _, ok := app.hotbar.State(); !ok {
+		t.Fatal("权威快捷栏未进入镜像")
+	}
+
+	app.closeClientSession(nil)
+	if hotbar, ok := app.hotbar.State(); ok || hotbar != (core.Hotbar{}) {
+		t.Fatalf("关闭会话后镜像=%+v, %v，想要空且未确认", hotbar, ok)
+	}
+}
+
+// Mutation killed: drawing the HUD before terrain/avatar/name tags, or drawing
+// it without a confirmed authoritative state, changes the observed pass order.
+func TestApplicationDrawsHotbarHUDLast(t *testing.T) {
+	glyphs := &integrationGlyphSource{}
+	app, dev := newRemoteRenderApplication(t, glyphs)
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{1, 2, 3})); err != nil {
+		t.Fatal(err)
+	}
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("未确认快捷栏 renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{
+		"terrain pass", "avatar pass", "name-tag pass",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("未确认快捷栏 passes=%v want=%v", got, want)
+	}
+
+	var confirmed core.Hotbar
+	confirmed.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+	if err := app.hotbar.Apply(network.HotbarState{Hotbar: confirmed}); err != nil {
+		t.Fatal(err)
+	}
+	dev.resetPasses()
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("已确认快捷栏 renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{
+		"terrain pass", "avatar pass", "name-tag pass", "hotbar pass",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("已确认快捷栏 passes=%v want=%v", got, want)
 	}
 }

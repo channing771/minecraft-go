@@ -26,6 +26,12 @@ const (
 	Key1
 	Key2
 	Key3
+	Key4
+	Key5
+	Key6
+	Key7
+	Key8
+	Key9
 )
 
 var glfwKeys = [...]glfw.Key{
@@ -40,6 +46,12 @@ var glfwKeys = [...]glfw.Key{
 	Key1:           glfw.Key1,
 	Key2:           glfw.Key2,
 	Key3:           glfw.Key3,
+	Key4:           glfw.Key4,
+	Key5:           glfw.Key5,
+	Key6:           glfw.Key6,
+	Key7:           glfw.Key7,
+	Key8:           glfw.Key8,
+	Key9:           glfw.Key9,
 }
 
 // Window 封装 GLFW 窗口、输入和原生句柄。
