@@ -10,6 +10,7 @@ import (
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/sim"
+	"minecraft-go/internal/storage"
 	"minecraft-go/internal/world"
 )
 
@@ -267,5 +268,90 @@ func TestDropDiffStaysWithSessionOwner(t *testing.T) {
 	second := dropDrainTick(t, secondClient, result.Tick, &secondReady)
 	if len(first.upserts) != 0 || len(second.upserts) != 0 {
 		t.Fatalf("兴趣范围外的掉落物被发布: first=%+v second=%+v", first, second)
+	}
+}
+
+// TestDropSurvivesShutdownAndRestart 覆盖挖掘产生掉落物、正常刷新关服、
+// 从同一世界目录重启后掉落物 ID、物品、数量与方块位置一致。
+func TestDropSurvivesShutdownAndRestart(t *testing.T) {
+	root := t.TempDir()
+	first, firstStore, firstClient := newDropDiskWorld(t, root)
+	step := stepUntilDropReady(t, first, firstClient)
+
+	sendClientMessage(t, firstClient, network.BreakBlock{
+		Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
+	})
+	var created network.ItemDrop
+	deadline := time.Now().Add(5 * time.Second)
+	for created.Count == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("等待挖掘产生掉落物超时")
+		}
+		messages, _ := step()
+		for _, batch := range messages.upserts {
+			if len(batch.Drops) != 0 {
+				created = batch.Drops[0]
+			}
+		}
+	}
+	flushDropWorld(t, first, firstStore)
+
+	second, secondStore, _ := newDropDiskWorld(t, root)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := second.Shutdown(ctx); err != nil {
+			t.Errorf("second Shutdown: %v", err)
+		}
+		if err := secondStore.Close(); err != nil {
+			t.Errorf("second store Close: %v", err)
+		}
+	}()
+
+	key := core.ChunkKey{Dimension: created.ID.Dimension, Pos: created.ID.Chunk}
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("等待重启后区块 Ready 超时")
+		}
+		second.StepForTest()
+		chunk, _, ok := second.CloneReadyChunkForTest(key)
+		if !ok {
+			continue
+		}
+		got := chunk.Drop(int(created.ID.Slot))
+		if !got.Active || got.Generation != created.ID.Generation ||
+			got.Stack.Item != created.Item || got.Stack.Count != created.Count ||
+			got.BlockIndex != created.BlockIndex {
+			t.Fatalf("重启后掉落物 = %+v，想要与 %+v 一致", got, created)
+		}
+		return
+	}
+}
+
+func newDropDiskWorld(
+	t *testing.T,
+	root string,
+) (*server.Server, *storage.DiskStore, network.ClientEndpoint) {
+	t.Helper()
+	store := openPersistentDiskStore(t, root)
+	clientEndpoint, serverEndpoint := network.NewMemoryPair(4096)
+	t.Cleanup(func() { _ = clientEndpoint.Close() })
+	running := newAttachedPersistentWorldForExternalTest(
+		hotbarTestConfig(1), serverEndpoint, server.FlatTestGenerator{}, store,
+	)
+	return running, store, clientEndpoint
+}
+
+// flushDropWorld 正常关服并刷写全部待持久区块。
+func flushDropWorld(t *testing.T, running *server.Server, store *storage.DiskStore) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := running.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("store Close: %v", err)
 	}
 }

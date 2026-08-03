@@ -87,6 +87,15 @@ func sortDropIDs(ids []core.DropID) {
 	}
 }
 
+// CloneReadyChunkForTest 复制一个已 Ready 的权威区块，仅供纵向测试断言状态。
+func (server *Server) CloneReadyChunkForTest(
+	key core.ChunkKey,
+) (*world.Chunk, uint64, bool) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	return server.engine.CloneReadyChunk(key)
+}
+
 // SetChunkDropForTest 直接写入权威区块的掉落物槽，仅供纵向测试构造固定场景。
 func (server *Server) SetChunkDropForTest(
 	key core.ChunkKey,

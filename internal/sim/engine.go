@@ -54,6 +54,11 @@ type Engine struct {
 	inFlightSaves      map[core.ChunkKey]persistenceInFlight
 	subscriptionsDirty bool
 
+	// 掉落物 tick 的复用 scratch，避免每 tick 分配固定上限集合。
+	dropKeySeen        map[core.ChunkKey]struct{}
+	dropKeyScratch     []core.ChunkKey
+	dropSessionScratch []SessionID
+
 	inboxMu   sync.Mutex
 	commands  []Command
 	acquired  []AcquiredChunk

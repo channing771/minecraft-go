@@ -49,11 +49,11 @@
 
 ## 8. 纵向闭环、文档与最终门禁
 
-- [ ] 8.1 在 `internal/server` 增加 DiskStore 重启与 Memory/TCP 纵向测试：挖掘产生掉落物、部分/竞争拾取、离开再进入兴趣范围、正常刷新重启恢复必须得到相同最终方块、掉落物和快捷栏状态。
-- [ ] 8.2 在 `internal/sim`、`internal/network`、`internal/storage`、`internal/server`、`internal/client`、`internal/render` 增加最坏合法 6400 槽扫描、32 项 codec、32 槽存档、800 项差分/镜像/渲染微基准或 allocation 门禁；不得放宽现有阈值。
-- [ ] 8.3 更新 `README.md` 与 `docs/notes/lan-server.md`：说明 M4B 操作、协议 v4、区块 schema v2/v1 迁移、备份/回退、固定容量、可信 LAN 边界和未实现范围；文档使用中文。
-- [ ] 8.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s'`，确认无 panic、无无界分配和失败语料。
-- [ ] 8.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/network ./internal/storage ./internal/server ./internal/client ./internal/render -run "^$" -bench "ItemDrop|Chunk(Encode|Decode)|EightPlayerInterest" -benchmem -count=3'`，保存结果并只在实测回退时优化根因，不降低门禁。
-- [ ] 8.6 以不聚焦窗口的固定 benchmark 模式生成 `/tmp/mcgo-m4b-current.json`，再用 `cmd/perfcheck` 对 `docs/notes/perf-baseline.json` 做同场景 20% 比较；若运行环境不能保证不聚焦窗口，则跳过该运行并明确记录，绝不改用前台测试或覆盖已接受基线。
-- [ ] 8.7 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`；`gofmt -l .` 必须无输出，且 `midscene_run/` 保持未暂存。
-- [ ] 8.8 只暂存本组实现、测试、中文文档和本文件勾选；提交 `chore: 关闭 M4B 持久掉落物`。提交成功后停止实现，等待同步规格、归档和推送指令。
+- [x] 8.1 在 `internal/server` 增加 DiskStore 重启与 Memory/TCP 纵向测试：挖掘产生掉落物、部分/竞争拾取、离开再进入兴趣范围、正常刷新重启恢复必须得到相同最终方块、掉落物和快捷栏状态。
+- [x] 8.2 在 `internal/sim`、`internal/network`、`internal/storage`、`internal/server`、`internal/client`、`internal/render` 增加最坏合法 6400 槽扫描、32 项 codec、32 槽存档、800 项差分/镜像/渲染微基准或 allocation 门禁；不得放宽现有阈值。
+- [x] 8.3 更新 `README.md` 与 `docs/notes/lan-server.md`：说明 M4B 操作、协议 v4、区块 schema v2/v1 迁移、备份/回退、固定容量、可信 LAN 边界和未实现范围；文档使用中文。
+- [x] 8.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s'`，确认无 panic、无无界分配和失败语料。
+- [x] 8.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/network ./internal/storage ./internal/server ./internal/client ./internal/render -run "^$" -bench "ItemDrop|Chunk(Encode|Decode)|EightPlayerInterest" -benchmem -count=3'`，保存结果并只在实测回退时优化根因，不降低门禁。
+- [x] 8.6 以不聚焦窗口的固定 benchmark 模式生成 `/tmp/mcgo-m4b-current.json`，再用 `cmd/perfcheck` 对 `docs/notes/perf-baseline.json` 做同场景 20% 比较；若运行环境不能保证不聚焦窗口，则跳过该运行并明确记录，绝不改用前台测试或覆盖已接受基线。
+- [x] 8.7 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`；`gofmt -l .` 必须无输出，且 `midscene_run/` 保持未暂存。
+- [x] 8.8 只暂存本组实现、测试、中文文档和本文件勾选；提交 `chore: 关闭 M4B 持久掉落物`。提交成功后停止实现，等待同步规格、归档和推送指令。

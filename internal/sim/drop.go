@@ -170,29 +170,49 @@ func withinPickupRange(player, center mgl32.Vec3) bool {
 }
 
 // dropInterestKeys 返回本 tick 需要推进的区块，按稳定顺序排列且不重复。
+// 它复用引擎 scratch，因此稳定玩家数下不产生每 tick 分配。
 func (engine *Engine) dropInterestKeys() []core.ChunkKey {
-	union := make(map[core.ChunkKey]struct{})
+	if engine.dropKeySeen == nil {
+		engine.dropKeySeen = make(map[core.ChunkKey]struct{}, core.MaxSessionDrops)
+	}
+	clear(engine.dropKeySeen)
+	keys := engine.dropKeyScratch[:0]
 	for _, session := range engine.sessions {
-		for key := range engine.sessionDropWantedSnapshot(session) {
-			union[key] = struct{}{}
+		if session.player == nil || session.player.lifecycle != PlayerActive ||
+			engine.dimensions[session.dimension] == nil {
+			continue
+		}
+		for dx := -DropInterestRadius; dx <= DropInterestRadius; dx++ {
+			for dz := -DropInterestRadius; dz <= DropInterestRadius; dz++ {
+				key := core.ChunkKey{
+					Dimension: session.dimension,
+					Pos: core.ChunkPos{
+						X: session.center.X + int32(dx),
+						Z: session.center.Z + int32(dz),
+					},
+				}
+				if _, seen := engine.dropKeySeen[key]; seen {
+					continue
+				}
+				engine.dropKeySeen[key] = struct{}{}
+				keys = append(keys, key)
+			}
 		}
 	}
-	keys := make([]core.ChunkKey, 0, len(union))
-	for key := range union {
-		keys = append(keys, key)
-	}
 	sortChunkKeys(keys)
+	engine.dropKeyScratch = keys
 	return keys
 }
 
 func (engine *Engine) sortedActiveSessions() []SessionID {
-	sessions := make([]SessionID, 0, len(engine.sessions))
+	sessions := engine.dropSessionScratch[:0]
 	for id, session := range engine.sessions {
 		if session.player != nil && session.player.lifecycle == PlayerActive {
 			sessions = append(sessions, id)
 		}
 	}
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i] < sessions[j] })
+	engine.dropSessionScratch = sessions
 	return sessions
 }
 
@@ -251,40 +271,55 @@ const MaxSessionDrops = core.MaxSessionDrops
 // 调用方可复用 dst 底层数组；结果最多 MaxSessionDrops 项。
 func (engine *Engine) AppendSessionDrops(id SessionID, dst []DropSnapshot) []DropSnapshot {
 	session := engine.sessions[id]
-	if session == nil {
+	if session == nil || session.player == nil ||
+		session.player.lifecycle != PlayerActive {
 		return dst
 	}
-	keys := make([]core.ChunkKey, 0, MaxSessionDrops/core.DropsPerChunk)
-	for key := range engine.sessionDropWantedSnapshot(session) {
-		keys = append(keys, key)
+	dimension := engine.dimensions[session.dimension]
+	if dimension == nil {
+		return dst
 	}
-	sortChunkKeys(keys)
-	for _, key := range keys {
-		dimension := engine.dimensions[key.Dimension]
-		if dimension == nil {
-			continue
-		}
-		record, ok := dimension.records[key.Pos]
-		if !ok || record.State != ChunkReady || record.Chunk == nil {
-			continue
-		}
-		for slot := range core.DropsPerChunk {
-			drop := record.Chunk.Drop(slot)
-			if !drop.Active {
+	// 按 ChunkKey 的排序顺序直接遍历固定半径，避免每次调用分配集合。
+	for dx := -DropInterestRadius; dx <= DropInterestRadius; dx++ {
+		for dz := -DropInterestRadius; dz <= DropInterestRadius; dz++ {
+			key := core.ChunkKey{
+				Dimension: session.dimension,
+				Pos: core.ChunkPos{
+					X: session.center.X + int32(dx),
+					Z: session.center.Z + int32(dz),
+				},
+			}
+			record, ok := dimension.records[key.Pos]
+			if !ok || record.State != ChunkReady || record.Chunk == nil {
 				continue
 			}
-			dst = append(dst, DropSnapshot{
-				ID: core.DropID{
-					Dimension:  key.Dimension,
-					Chunk:      key.Pos,
-					Slot:       uint8(slot),
-					Generation: drop.Generation,
-				},
-				BlockIndex: drop.BlockIndex,
-				Item:       drop.Stack.Item,
-				Count:      drop.Stack.Count,
-			})
+			dst = appendChunkDrops(dst, key, record.Chunk)
 		}
+	}
+	return dst
+}
+
+func appendChunkDrops(
+	dst []DropSnapshot,
+	key core.ChunkKey,
+	chunk *world.Chunk,
+) []DropSnapshot {
+	for slot := range core.DropsPerChunk {
+		drop := chunk.Drop(slot)
+		if !drop.Active {
+			continue
+		}
+		dst = append(dst, DropSnapshot{
+			ID: core.DropID{
+				Dimension:  key.Dimension,
+				Chunk:      key.Pos,
+				Slot:       uint8(slot),
+				Generation: drop.Generation,
+			},
+			BlockIndex: drop.BlockIndex,
+			Item:       drop.Stack.Item,
+			Count:      drop.Stack.Count,
+		})
 	}
 	return dst
 }
