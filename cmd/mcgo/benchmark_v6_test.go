@@ -8,14 +8,45 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
 )
+
+type benchmarkBlockingServerStream struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (stream *benchmarkBlockingServerStream) Send(
+	ctx context.Context,
+	_ network.State,
+	_ network.ServerPacket,
+) error {
+	stream.entered <- struct{}{}
+	select {
+	case <-stream.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (*benchmarkBlockingServerStream) Recv(
+	context.Context,
+	network.State,
+) (network.ClientPacket, error) {
+	return nil, errors.New("unused benchmark Recv")
+}
+
+func (*benchmarkBlockingServerStream) Peer() string { return "benchmark-blocking" }
+func (*benchmarkBlockingServerStream) Close() error { return nil }
 
 func TestScenarioV6ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 	if scenarioVersion != 6 {
@@ -129,14 +160,13 @@ func TestScenarioV6NameTagFailurePublishesNoRenderTimingSample(t *testing.T) {
 
 func TestBenchmarkServerMeasuredWindowSendsOneSequencePerCompletedTick(t *testing.T) {
 	epoch := newBenchmarkServerEpoch()
-	testCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	testCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	sent := make(chan uint64, 1)
+	statsObserved := make(chan struct{}, 1)
 	var sequences []uint64
-	var events []string
 	var statsCalls, rssCalls int
 	sendInputs := func(_ context.Context, sequence uint64) error {
-		events = append(events, "send")
 		sequences = append(sequences, sequence)
 		sent <- sequence
 		return nil
@@ -152,7 +182,17 @@ func TestBenchmarkServerMeasuredWindowSendsOneSequencePerCompletedTick(t *testin
 		for range benchmarkServerMeasuredTicks {
 			select {
 			case <-sent:
-				epoch.signals <- benchmarkServerTickSignal{measured: true}
+				epoch.observeTick(time.Millisecond)
+				select {
+				case <-statsObserved:
+				case <-testCtx.Done():
+					return
+				}
+				select {
+				case <-time.After(2 * time.Millisecond):
+				case <-testCtx.Done():
+					return
+				}
 			case <-testCtx.Done():
 				return
 			}
@@ -164,8 +204,8 @@ func TestBenchmarkServerMeasuredWindowSendsOneSequencePerCompletedTick(t *testin
 		8,
 		sendInputs,
 		func() server.HostStats {
-			events = append(events, "tick")
 			statsCalls++
+			statsObserved <- struct{}{}
 			return server.HostStats{
 				ActivePlayers: 8, MaxSessionOutboxDepth: 5,
 				PlayerSaveJobDepth: 6, PlayerSaveDoneDepth: 1,
@@ -188,18 +228,6 @@ func TestBenchmarkServerMeasuredWindowSendsOneSequencePerCompletedTick(t *testin
 			t.Fatalf("sequence[%d]=%d want=%d", index, sequence, want)
 		}
 	}
-	if len(events) != 2*benchmarkServerMeasuredTicks {
-		t.Fatalf("events=%d want=%d", len(events), 2*benchmarkServerMeasuredTicks)
-	}
-	for index, event := range events {
-		want := "send"
-		if index%2 == 1 {
-			want = "tick"
-		}
-		if event != want {
-			t.Fatalf("event[%d]=%q want=%q; inputs are not tick-driven", index, event, want)
-		}
-	}
 	if statsCalls != benchmarkServerMeasuredTicks || rssCalls != 10 {
 		t.Fatalf("stats/rss calls=%d/%d want=%d/10", statsCalls, rssCalls, benchmarkServerMeasuredTicks)
 	}
@@ -207,6 +235,121 @@ func TestBenchmarkServerMeasuredWindowSendsOneSequencePerCompletedTick(t *testin
 		outboxHigh: 5, jobsHigh: 6, doneHigh: 1, peakRSS: 123,
 	}) {
 		t.Fatalf("summary=%+v", summary)
+	}
+}
+
+func TestBenchmarkServerMeasuredWindowRejectsTickAdvanceBeforeStatsBoundary(t *testing.T) {
+	epoch := newBenchmarkServerEpoch()
+	testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sent := make(chan uint64, 1)
+	sendInputs := func(_ context.Context, sequence uint64) error {
+		sent <- sequence
+		return nil
+	}
+	if err := epoch.beginMeasurement(func() error {
+		return sendInputs(testCtx, 1)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	publisherDone := make(chan struct{})
+	go func() {
+		defer close(publisherDone)
+		for range benchmarkServerMeasuredTicks {
+			select {
+			case <-sent:
+				epoch.observeTick(time.Millisecond)
+			case <-testCtx.Done():
+				return
+			}
+		}
+	}()
+	releaseStats := make(chan struct{})
+	var statsCalls atomic.Int64
+	controllerDone := make(chan error, 1)
+	go func() {
+		_, err := runBenchmarkServerMeasuredWindow(
+			testCtx,
+			epoch,
+			8,
+			sendInputs,
+			func() server.HostStats {
+				if statsCalls.Add(1) == 1 {
+					select {
+					case <-epoch.measurement.Load().stop:
+					case <-releaseStats:
+					}
+				}
+				return server.HostStats{ActivePlayers: 8}
+			},
+			func() (uint64, error) { return 1, nil },
+		)
+		controllerDone <- err
+	}()
+	var controllerErr error
+	select {
+	case controllerErr = <-controllerDone:
+	case <-time.After(100 * time.Millisecond):
+		close(releaseStats)
+		controllerErr = <-controllerDone
+	}
+	<-publisherDone
+	if controllerErr == nil || !strings.Contains(controllerErr.Error(), "Stats") {
+		t.Fatalf("tick advanced before Stats boundary error=%v", controllerErr)
+	}
+	if got := statsCalls.Load(); got != 1 {
+		t.Fatalf("stats calls=%d want=1 fail-fast sample", got)
+	}
+}
+
+func TestCanonicalCountingServerStreamFreezesMeasurementAtSendStart(t *testing.T) {
+	for _, test := range []struct {
+		name                       string
+		measuringAtStart, atFinish bool
+		wantCount                  bool
+	}{
+		{name: "measured send finishes after close", measuringAtStart: true, wantCount: true},
+		{name: "warm-up send finishes after open", atFinish: true, wantCount: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			epoch := newBenchmarkServerEpoch()
+			if test.measuringAtStart {
+				epoch.phase.Store(uint32(benchmarkServerEpochMeasuring))
+			}
+			inner := &benchmarkBlockingServerStream{
+				entered: make(chan struct{}, 1),
+				release: make(chan struct{}),
+			}
+			codec, err := network.NewCodec()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = codec.Close() })
+			var counted atomic.Uint64
+			stream := &canonicalCountingServerStream{
+				inner: inner, codec: codec, bytes: &counted, epoch: epoch,
+			}
+			done := make(chan error, 1)
+			go func() {
+				done <- stream.Send(
+					context.Background(), network.StatePlay,
+					network.PlayerState{ServerTick: 1},
+				)
+			}()
+			<-inner.entered
+			if test.atFinish {
+				epoch.phase.Store(uint32(benchmarkServerEpochMeasuring))
+			} else {
+				epoch.phase.Store(uint32(benchmarkServerEpochDone))
+			}
+			close(inner.release)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if got := counted.Load() > 0; got != test.wantCount {
+				t.Fatalf("counted=%v want=%v bytes=%d", got, test.wantCount, counted.Load())
+			}
+		})
 	}
 }
 

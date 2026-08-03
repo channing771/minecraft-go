@@ -245,6 +245,26 @@ func TestPerfcheckMultiplayerScenarioUpgradeAndProvenanceRules(t *testing.T) {
 		t.Fatalf("explicit 5:6 migration failures=%v error=%v", failures, err)
 	}
 	for _, test := range []struct {
+		name  string
+		clear func(*client.PerfReport)
+	}{
+		{name: "hardware", clear: func(report *client.PerfReport) { report.Hardware = "" }},
+		{name: "os", clear: func(report *client.PerfReport) { report.OS = "" }},
+		{name: "go_version", clear: func(report *client.PerfReport) { report.GoVersion = "" }},
+		{name: "git_commit", clear: func(report *client.PerfReport) { report.GitCommit = "" }},
+		{name: "framebuffer", clear: func(report *client.PerfReport) { report.Framebuffer = "" }},
+	} {
+		t.Run("empty "+test.name, func(t *testing.T) {
+			baseline, current := v5, v6
+			test.clear(&baseline)
+			test.clear(&current)
+			if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "5:6"); err == nil ||
+				!strings.Contains(err.Error(), test.name) {
+				t.Fatalf("empty %s provenance error=%v", test.name, err)
+			}
+		})
+	}
+	for _, test := range []struct {
 		name, allow       string
 		baseline, current client.PerfReport
 	}{
@@ -650,6 +670,10 @@ func comparableReport() client.PerfReport {
 	return client.PerfReport{
 		ScenarioVersion: 4,
 		Hardware:        "same-machine",
+		OS:              "test-os",
+		GoVersion:       "test-go",
+		GitCommit:       "test-commit",
+		Framebuffer:     "2560x1440",
 		LoadSeconds:     1,
 		SnapshotSeconds: 1,
 		Ticks: client.PhaseSummary{

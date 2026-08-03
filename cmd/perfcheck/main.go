@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"minecraft-go/internal/client"
 )
@@ -91,6 +92,12 @@ func compareReportsWithScenarioUpgrade(
 		if err := validateV6Report("current", current); err != nil {
 			return nil, err
 		}
+	}
+	if err := validateReportProvenance("baseline", baseline); err != nil {
+		return nil, err
+	}
+	if err := validateReportProvenance("current", current); err != nil {
+		return nil, err
 	}
 	if baseline.Hardware != current.Hardware {
 		return nil, fmt.Errorf(
@@ -290,6 +297,23 @@ func compareReportsWithScenarioUpgrade(
 		}
 	}
 	return failures, nil
+}
+
+func validateReportProvenance(label string, report client.PerfReport) error {
+	for _, field := range []struct {
+		name, value string
+	}{
+		{name: "hardware", value: report.Hardware},
+		{name: "os", value: report.OS},
+		{name: "go_version", value: report.GoVersion},
+		{name: "git_commit", value: report.GitCommit},
+		{name: "framebuffer", value: report.Framebuffer},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("%s provenance %s 为空", label, field.name)
+		}
+	}
+	return nil
 }
 
 func appendV6AbsoluteFailures(failures []string, report client.PerfReport) []string {

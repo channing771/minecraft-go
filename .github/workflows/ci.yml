@@ -22,6 +22,9 @@ jobs:
       - name: TCP 重启与 Memory/TCP parity 重复门禁
         run: go test ./internal/server -run 'TestTCPPlayerAndWorld|TestMemoryTCPParity' -race -count=10
 
+      - name: M3C v6 八玩家与性能报告门禁
+        run: go test ./internal/client ./internal/server ./cmd/mcgo ./cmd/perfcheck -run 'Test(PerfReportV6|ScenarioV6|PerfcheckV6|PerfcheckV5SameScenario|PerformanceThresholds|InterestObserver|HostStats|BenchmarkServerEpoch|BenchmarkServerMeasuredWindow)' -count=1
+
       - name: 构建无图形专用服务端
         run: CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod
 
@@ -33,3 +36,6 @@ jobs:
 
       - name: 微基准与平台无关阈值
         run: go test ./... -bench=. -benchtime=1x -run='^$'
+
+      - name: M3C 多人微基准可执行性
+        run: go test ./internal/network ./internal/server ./internal/render -run '^$' -bench '(RemotePlayerStateCodec|EightPlayerInterest|RemoteAvatarNameTag)' -benchmem -benchtime=100x -count=1

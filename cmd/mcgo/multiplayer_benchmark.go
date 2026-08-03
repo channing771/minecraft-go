@@ -272,10 +272,11 @@ func (stream *canonicalCountingServerStream) Send(
 	}
 	packetBytes := uvarintBytes(uint64(packetID)) + len(payload)
 	logicalBytes := uvarintBytes(uint64(packetBytes)) + packetBytes
+	measured := stream.epoch == nil || stream.epoch.measuring()
 	if err := stream.inner.Send(ctx, state, packet); err != nil {
 		return err
 	}
-	if stream.epoch == nil || stream.epoch.measuring() {
+	if measured {
 		stream.bytes.Add(uint64(logicalBytes))
 	}
 	return nil
@@ -349,22 +350,85 @@ func runBenchmarkServerMeasuredWindow(
 	readRSS func() (uint64, error),
 ) (benchmarkServerWindowSummary, error) {
 	var result benchmarkServerWindowSummary
+	type statsSample struct {
+		completed int
+		stats     server.HostStats
+	}
+	statsRequests := make(chan int, 1)
+	statsSamples := make(chan statsSample, 1)
+	statsWorkerDone := make(chan struct{})
+	go func() {
+		defer close(statsWorkerDone)
+		for completed := range statsRequests {
+			statsSamples <- statsSample{completed: completed, stats: readStats()}
+		}
+	}()
+	statsRequestsClosed := false
+	statsWorkerJoined := false
+	defer func() {
+		if !statsRequestsClosed {
+			close(statsRequests)
+		}
+		if !statsWorkerJoined {
+			<-statsWorkerDone
+		}
+	}()
+	completedWindow := false
+	defer func() {
+		if !completedWindow {
+			epoch.abortMeasurement()
+		}
+	}()
+	var pendingSignal *benchmarkServerTickSignal
 	for completed := 1; completed <= benchmarkServerMeasuredTicks; completed++ {
+		var signal benchmarkServerTickSignal
+		if pendingSignal != nil {
+			signal = *pendingSignal
+			pendingSignal = nil
+		} else {
+			select {
+			case signal = <-epoch.signals:
+			case <-ctx.Done():
+				return result, ctx.Err()
+			}
+		}
+		if !signal.measured {
+			return result, fmt.Errorf(
+				"measured tick %d 收到 warm-up signal", completed,
+			)
+		}
+		if completed < benchmarkServerMeasuredTicks {
+			if err := sendInputs(ctx, uint64(completed+1)); err != nil {
+				return result, err
+			}
+		}
+		statsRequests <- completed
+		if err := epoch.advanceMeasurement(ctx); err != nil {
+			return result, fmt.Errorf(
+				"释放 measured tick %d: %w", completed, err,
+			)
+		}
+		var sample statsSample
 		select {
-		case signal := <-epoch.signals:
-			if !signal.measured {
+		case sample = <-statsSamples:
+		case next := <-epoch.signals:
+			select {
+			case sample = <-statsSamples:
+				pendingSignal = &next
+			default:
 				return result, fmt.Errorf(
-					"measured tick %d 收到 warm-up signal", completed,
+					"Host.Stats 未在 measured tick %d 边界完成，下一 tick 已推进: measured=%v",
+					completed, next.measured,
 				)
 			}
 		case <-ctx.Done():
 			return result, ctx.Err()
 		}
-		stats := readStats()
+		stats := sample.stats
 		if stats.ActivePlayers != wantPlayers {
 			return result, fmt.Errorf(
 				"多人服务端 measured tick %d 玩家提前退出: active=%d want=%d",
-				completed, stats.ActivePlayers, wantPlayers,
+				sample.completed, stats.ActivePlayers, wantPlayers,
 			)
 		}
 		result.outboxHigh = max(result.outboxHigh, stats.MaxSessionOutboxDepth)
@@ -377,12 +441,12 @@ func runBenchmarkServerMeasuredWindow(
 			}
 			result.peakRSS = max(result.peakRSS, rss)
 		}
-		if completed < benchmarkServerMeasuredTicks {
-			if err := sendInputs(ctx, uint64(completed+1)); err != nil {
-				return result, err
-			}
-		}
 	}
+	close(statsRequests)
+	statsRequestsClosed = true
+	<-statsWorkerDone
+	statsWorkerJoined = true
+	completedWindow = true
 	return result, nil
 }
 

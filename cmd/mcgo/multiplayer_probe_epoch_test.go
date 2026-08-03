@@ -3,9 +3,29 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 )
+
+func observeMeasuredBenchmarkTick(
+	t *testing.T,
+	epoch *benchmarkServerEpoch,
+	duration time.Duration,
+) benchmarkServerTickSignal {
+	t.Helper()
+	returned := make(chan struct{})
+	go func() {
+		epoch.observeTick(duration)
+		close(returned)
+	}()
+	signal := <-epoch.signals
+	if err := epoch.advanceMeasurement(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-returned
+	return signal
+}
 
 func TestBenchmarkServerEpochIgnoresWarmupAndStopsAtExactWindow(t *testing.T) {
 	epoch := newBenchmarkServerEpoch()
@@ -26,8 +46,9 @@ func TestBenchmarkServerEpochIgnoresWarmupAndStopsAtExactWindow(t *testing.T) {
 		for range 8 {
 			epoch.observeInterest(time.Duration(tick) * time.Microsecond)
 		}
-		epoch.observeTick(time.Duration(tick) * time.Microsecond)
-		if signal := <-epoch.signals; !signal.measured {
+		if signal := observeMeasuredBenchmarkTick(
+			t, epoch, time.Duration(tick)*time.Microsecond,
+		); !signal.measured {
 			t.Fatalf("tick %d not marked measured", tick)
 		}
 	}
@@ -57,8 +78,7 @@ func TestBenchmarkServerEpochDropsStaleWarmupSignalsBeforeMeasurement(t *testing
 	if err := epoch.beginMeasurement(func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	epoch.observeTick(2 * time.Millisecond)
-	if signal := <-epoch.signals; !signal.measured {
+	if signal := observeMeasuredBenchmarkTick(t, epoch, 2*time.Millisecond); !signal.measured {
 		t.Fatalf("stale warm-up signal survived reset: %+v", signal)
 	}
 	if got := epoch.ticks.Summary().Samples; got != 1 {
@@ -98,11 +118,40 @@ func TestBenchmarkServerEpochArmsInputBeforeMeasurementGate(t *testing.T) {
 	if err != nil || !armed || !epoch.measuring() {
 		t.Fatalf("beginMeasurement err=%v armed=%v measuring=%v", err, armed, epoch.measuring())
 	}
-	epoch.observeTick(time.Millisecond)
-	if signal := <-epoch.signals; !signal.measured {
+	if signal := observeMeasuredBenchmarkTick(t, epoch, time.Millisecond); !signal.measured {
 		t.Fatalf("first post-arm tick not measured: %+v", signal)
 	}
 	if got := epoch.ticks.Summary().Samples; got != 1 {
 		t.Fatalf("post-arm samples=%d want=1", got)
+	}
+}
+
+func TestBenchmarkServerEpochHoldsHostUntilControllerArmsNextInput(t *testing.T) {
+	epoch := newBenchmarkServerEpoch()
+	if err := epoch.beginMeasurement(func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	returned := make(chan struct{})
+	go func() {
+		epoch.observeTick(time.Millisecond)
+		close(returned)
+	}()
+	if signal := <-epoch.signals; !signal.measured {
+		t.Fatalf("first tick signal=%+v", signal)
+	}
+	advancedEarly := false
+	select {
+	case <-returned:
+		advancedEarly = true
+	case <-time.After(25 * time.Millisecond):
+	}
+	epoch.beginWarmup()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("aborting measurement did not release blocked Host tick")
+	}
+	if advancedEarly {
+		t.Fatal("Host tick advanced before the controller armed the next input")
 	}
 }

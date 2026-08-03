@@ -1563,6 +1563,8 @@ git commit -m "test: 验证八玩家有界同步与恢复"
 
 ## Task 17：升级 scenario v6、性能指标、文档与全量出口门禁
 
+> **2026-08-03 归档声明：** 本 Task 17 中原有 Step 6/Step 7 的固定 `/tmp/mcgo-m3c-{memory,tcp,current}.json` 命令、失败后从 Step 5 重跑的描述及宽松 sample 检查均只保留为历史证据，不再可执行。唯一有效的执行合同是 `2026-08-03-m3c-performance-repeatability.md` 的 Task 6–8：使用 commit 派生的 collision-safe 路径、只执行一次正式链，并要求精确 `200 measured ticks/1600 interest samples`；发生失败必须停下，不得按本归档段落重跑。
+
 **Files:**
 - Modify: `internal/client/perf.go`
 - Modify: `internal/client/perf_test.go`
@@ -1626,12 +1628,30 @@ type HostStats struct {
 func (host *Host) Stats() HostStats
 ```
 
+**2026-08-03 已批准的可重复性策略（取代下文早期“所有共有指标”措辞）：**
+
+- v6 Memory→TCP：比较 transport 相关稳定 p50/p95/p99、FPS、RSS、load/snapshot、protocol 与 persistence；raw max、queue high-water 和独立内存 server probe 不做跨 transport 相对比较。
+- v6 同 transport：额外比较 server tick/interest p50/p95/p99、outbound 与 multiplayer RSS；raw max 和 queue high-water 仍只执行既有绝对门禁。
+- server probe：8 登录完成后 warm-up 20 ticks，再由 TickObserver 信号驱动 200 measured ticks/1600 interest samples，不再使用第二个 50 ms ticker。
+
+被拒绝的正式证据只保留用于诊断，不得提升为 baseline：
+
+```text
+a86285d45a00e85f2bb0eb0ae960b3d4efd04beeecb31c917a852f6537ffbe01  /tmp/mcgo-m3c-memory-b58d8bd.json
+12886882b273dd2e0712e78dc2d5f6fb0587c0aacca215c86162f581b0308771  /tmp/mcgo-m3c-tcp-b58d8bd.json
+875e4533728f3c4bbcaed153bb1af821f4970e066ea36b3ae7be0d8ba69aeef4  /tmp/mcgo-m3c-step6-compare-b58d8bd.log
+428e9b61bd8a8bf782fdc4e8d54f488d544bee4b7da948873638fe40ba60a191  docs/notes/perf-baseline.json
+ac4dfffd78fc3a31d56b3cf728651e805535b60d302d2c2f55273d23f79ecfdb  docs/notes/perf-baseline.md
+```
+
+最后两项仍是逐字冻结的 accepted v5 baseline；新 Step 6 完整通过前不得覆盖。
+
 - [ ] **Step 1：写 v6 JSON、阈值和跨版本拒绝的失败测试并确认 RED**
 
-`perf_test.go` 用手工 JSON 断言 scenario 6 的所有 latency samples/percentile、outbound/high-water/RSS 字段不可缺失。`benchmark_v6_test.go` 断言固定场景包含本地玩家、7 个 Spawn、每 tick 一个 count=7 States batch、7 个 Unicode 标签，且 `scenarioVersion==6`。`perfcheck` 测试固定：默认 scenario 不同拒绝比较；仅显式 `--allow-scenario-upgrade 5:6` 可比较 v5→v6 的共有字段，反向/跳版本/硬件不同仍拒绝；任一同名 latency p50/p95/p99、outbound bytes、queue high-water 或 RSS 回退严格大于 20% 失败；低样本/缺字段失败；server tick p99 `>=10ms` 失败而不是旧的 15 ms。
+`perf_test.go` 用手工 JSON 断言 scenario 6 的所有 latency samples/percentile、outbound/high-water/RSS 字段不可缺失。`benchmark_v6_test.go` 断言固定场景包含本地玩家、7 个 Spawn、每 tick 一个 count=7 States batch、7 个 Unicode 标签，且 `scenarioVersion==6`。`perfcheck` 测试固定：默认 scenario 不同拒绝比较；仅显式 `--allow-scenario-upgrade 5:6` 可执行 v5→v6 迁移验证，该模式只验证两份报告的版本字段完整性、硬件一致性和当前 v6 绝对门禁，不执行跨场景相对比较；反向/跳版本/硬件不同仍拒绝。v6 跨 transport 与同 transport 分别使用上方批准的稳定指标画像，严格大于 20% 失败、恰好 20% 通过；低样本/缺字段失败；server tick p99 `>=10ms` 失败而不是旧的 15 ms。
 
 ```bash
-zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./cmd/mcgo ./cmd/perfcheck -run "Test(PerfReportV6|ScenarioV6|PerfcheckMultiplayer|PerformanceThresholds)" -count=1'
+zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/server ./cmd/mcgo ./cmd/perfcheck -run "Test(PerfReportV6|ScenarioV6|PerfcheckV6|PerfcheckV5SameScenario|PerformanceThresholds|InterestObserver|HostStats|BenchmarkServerEpoch|BenchmarkServerMeasuredWindow)" -count=1'
 ```
 
 Expected: FAIL，报告仍是 v5 且 tick p99 门禁为 15 ms。
@@ -1646,7 +1666,7 @@ Expected: FAIL，报告仍是 v5 且 tick p99 门禁为 15 ms。
 
 `Config` 新增仅在非 nil 时调用的 `InterestObserver func(time.Duration)`，在每观察者兴趣差分外层计时，默认 nil 路径不读墙钟。`Host.Stats` 在短临界区内汇总 active 数、所有 session 中最大的单 outbox 当前深度和 player jobs/completions 当前深度，不暴露 map/channel，也不重编码消息。
 
-`cmd/mcgo/multiplayer_benchmark.go` 启动一个 nil-listener Host.Run，并通过 8 对 `network.NewMemoryStreamPair`/`Host.AcceptStream` 完成真实 Handshake/Login；server stream wrapper 在实际 Send 前用 `Codec.EncodeServer(state, packet)` 计算 canonical packet ID+payload+frame-prefix 逻辑字节数。8 个 headless client 持续 drain 10 秒固定脚本，采样 `Host.Stats` high-water 和 process RSS，并用该 Host 的 `TickObserver` 生成 tick PhaseSummary。`internal/server/multiplayer_bench_test.go` 另用 `StepForTest` 提供 `BenchmarkEightPlayerInterest`。探针返回 `ServerOutboundBytes>0`、interest latency 至少 1000 samples、tick 至少 100 samples、outbox不超过配置、jobs≤16、done≤2 和 peak RSS；cleanup 等队列归零并 Shutdown。最终 `PerfReport.Ticks` 使用这份 8-client tick summary，而不是主画面单连接 server 的 tick recorder。
+`cmd/mcgo/multiplayer_benchmark.go` 启动一个 nil-listener Host.Run，并通过 8 对 `network.NewMemoryStreamPair`/`Host.AcceptStream` 完成真实 Handshake/Login；server stream wrapper 在实际 Send 前用 `Codec.EncodeServer(state, packet)` 计算 canonical packet ID+payload+frame-prefix 逻辑字节数。8 个 headless client 全部登录后先 warm-up 20 个完整 tick，再由 `TickObserver` 完成信号驱动输入、`Host.Stats` high-water 与 process RSS 采样；不再使用第二个 50 ms ticker。measured window 必须精确得到 200 ticks/1600 interest samples。`internal/server/multiplayer_bench_test.go` 另用 `StepForTest` 提供 `BenchmarkEightPlayerInterest`。探针还要求 `ServerOutboundBytes>0`、outbox 不超过配置、jobs≤16、done≤2、peak RSS 非零且低于 2GiB；cleanup 等队列归零并 Shutdown。最终 `PerfReport.Ticks` 使用这份 8-client tick summary，而不是主画面单连接 server 的 tick recorder。
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/server ./internal/render -run "^$" -bench "(RemotePlayerStateCodec|EightPlayerInterest|RemoteAvatarNameTag)" -benchmem -count=3'
@@ -1656,7 +1676,7 @@ Expected: benchmark 均可执行；固定容量热循环报告稳定 alloc 数�
 
 - [ ] **Step 4：锁定绝对门禁、依赖闭包、CI 和用户文档**
 
-`validatePerformanceReport`/`perfcheck` 固定：still/flying FPS≥100、frame p99 `<12ms`、各 phase 与 multiplayer peak RSS `<2GiB`、8-client server tick p99 `<10ms`、max `<50ms`、所有 queue high-water 不超过硬上限。保留 physics `0 B/op, 0 allocs/op`。相同硬件/场景对所有共有指标执行 20% 回退比较；失败运行绝不覆盖 accepted baseline。
+`validatePerformanceReport`/`perfcheck` 固定：still/flying FPS≥100、frame p99 `<12ms`、各 phase 与 multiplayer peak RSS `<2GiB`、8-client server tick p99 `<10ms`、max `<50ms`、所有 queue high-water 不超过硬上限。保留 physics `0 B/op, 0 allocs/op`。v6 相同 scenario 按 transport 是否相同选择上方批准的稳定指标画像；raw max 与 queue high-water 只执行既有绝对门禁。显式 `5:6` 只执行版本字段完整性、硬件一致性和当前 v6 绝对门禁。失败运行绝不覆盖 accepted baseline。
 
 archcheck 明确检查 `cmd/mcgod` 依赖闭包没有 client/render/gfx/GLFW/WebGPU/x/image/font。README 把 M3 标成完成并链接 LAN 文档；`lan-server.md` 写 `--max-players 1..8`、同 ID/同名语义、可信局域网无认证/加密警告、两个客户端人工验收命令，以及断线/关服存档行为。窗口标题更新为 `minecraft-go — M3C multiplayer world`，但自动验证不启动窗口。
 
@@ -1681,21 +1701,21 @@ Expected: 全部 exit 0；fuzz 无 crash/超大分配；Linux mcgod 不拉入 Da
 
 - [ ] **Step 6：运行并接受同机 scenario v6 Memory/TCP 性能报告**
 
-先保留旧 v5 baseline，运行两个新的无窗口报告：
+先保留旧 v5 baseline，运行新的 Memory 报告并立即执行显式迁移验证：
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --perf-output /tmp/mcgo-m3c-memory.json'
+zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current /tmp/mcgo-m3c-memory.json --max-regression 0.20 --allow-scenario-upgrade 5:6'
+```
+
+Expected: Memory 报告为 scenario 6，v5/v6 报告字段完整、硬件相同，且当前 v6 全部绝对门禁通过；该显式迁移不执行跨场景相对比较。迁移验证通过后才运行新的 TCP 报告和同 scenario 比较：
+
+```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output /tmp/mcgo-m3c-tcp.json'
 zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/mcgo-m3c-memory.json --current /tmp/mcgo-m3c-tcp.json --max-regression 0.20'
 ```
 
-Expected: 两个报告 scenario 6、硬件相同、绝对门禁通过，TCP 相对 Memory 的共有指标回退不超过 20%。在覆盖旧文件前，还必须把当前 `docs/notes/perf-baseline.json` 的 v5 accepted baseline 与新 Memory v6 做一次显式迁移比较：
-
-```bash
-zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current /tmp/mcgo-m3c-memory.json --max-regression 0.20 --allow-scenario-upgrade 5:6'
-```
-
-Expected: 同硬件的 v5/v6 共有 frame/tick/RSS/persistence/protocol/player-persistence 指标回退不超过 20%，v6 新多人字段通过绝对门禁。三个比较都通过后，才用 Memory 报告的精确 JSON（保留尾换行）更新 `docs/notes/perf-baseline.json`；`perf-baseline.md` 记录 commit/hardware、三条比较命令、两个报告 SHA-256、全部多人指标和三组微基准原始结果，不手工杜撰数值。
+Expected: 两个报告都是 scenario 6、硬件相同、绝对门禁通过，TCP 相对 Memory 的 transport 相关稳定指标回退不超过 20%；raw max、queue high-water 与独立内存 server probe 不参与跨 transport 相对比较。迁移验证与 Memory→TCP 比较都通过后，才用 Memory 报告的精确 JSON（保留尾换行）更新 `docs/notes/perf-baseline.json`；`perf-baseline.md` 记录 commit/hardware、全部比较命令、两个报告 SHA-256、全部多人指标和三组微基准原始结果，不手工杜撰数值。
 
 - [ ] **Step 7：对 accepted v6 baseline 做第二次同机回归**
 
