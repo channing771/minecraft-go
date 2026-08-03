@@ -87,8 +87,8 @@ func TestLoginClientReportsHandshakeVersionMismatch(t *testing.T) {
 	}
 }
 
-func TestBeginServerLoginRejectsOutdatedClientHelloWithProtocolV3(t *testing.T) {
-	for _, version := range []uint32{1, 2} {
+func TestBeginServerLoginRejectsOutdatedClientHelloWithProtocolV4(t *testing.T) {
+	for _, version := range []uint32{1, 2, 3} {
 		stream := &staticClientHelloStream{version: version}
 		if _, err := BeginServerLogin(context.Background(), stream); err == nil {
 			t.Fatalf("v%d ClientHello accepted", version)
@@ -97,7 +97,7 @@ func TestBeginServerLoginRejectsOutdatedClientHelloWithProtocolV3(t *testing.T) 
 		if !ok || stream.sentState != StateHandshake ||
 			reject.ServerProtocolVersion != ProtocolVersion ||
 			reject.Code != HandshakeVersionMismatch {
-			t.Fatalf("v%d rejection = %#v in state %d, want v3 HandshakeReject",
+			t.Fatalf("v%d rejection = %#v in state %d, want v4 HandshakeReject",
 				version, stream.sent, stream.sentState)
 		}
 	}

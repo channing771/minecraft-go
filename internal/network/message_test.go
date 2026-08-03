@@ -61,8 +61,10 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 		network.KeepAlive{Token: 1},
 		network.Disconnect{Code: network.DisconnectTimeout},
 		network.HotbarState{},
+		network.ItemDropUpserts{},
+		network.ItemDropRemoves{},
 	}
-	if len(clientMessages) != 6 || len(serverMessages) != 11 {
+	if len(clientMessages) != 6 || len(serverMessages) != 13 {
 		t.Fatal("消息集合不完整")
 	}
 }
@@ -119,6 +121,7 @@ func TestRejectReasonsAreStableProtocolValues(t *testing.T) {
 		{network.RejectPlayerNotReady, "player_not_ready"},
 		{network.RejectInvalidSlot, "invalid_slot"},
 		{network.RejectHotbarFull, "hotbar_full"},
+		{network.RejectDropCapacity, "drop_capacity"},
 	}
 	for _, tc := range tests {
 		if string(tc.got) != tc.want {

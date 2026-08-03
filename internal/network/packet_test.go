@@ -76,8 +76,8 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 			t.Fatalf("%s state = %d, want %d", tc.name, tc.got, tc.want)
 		}
 	}
-	if ProtocolVersion != 3 {
-		t.Fatalf("protocol version = %d, want 3", ProtocolVersion)
+	if ProtocolVersion != 4 {
+		t.Fatalf("protocol version = %d, want 4", ProtocolVersion)
 	}
 
 	codes := []struct {
@@ -125,6 +125,13 @@ func TestValidateServerPacket(t *testing.T) {
 		{"keep alive", StatePlay, KeepAlive{Token: 1}},
 		{"disconnect", StatePlay, Disconnect{Code: DisconnectTimeout}},
 		{"hotbar state", StatePlay, HotbarState{}},
+		{"item drop upserts", StatePlay, ItemDropUpserts{Drops: []ItemDrop{{
+			ID:   core.DropID{Dimension: core.Overworld, Slot: 0, Generation: 1},
+			Item: core.ItemStone, Count: 1,
+		}}}},
+		{"item drop removes", StatePlay, ItemDropRemoves{IDs: []core.DropID{{
+			Dimension: core.Overworld, Slot: 0, Generation: 1,
+		}}}},
 	}
 	for _, tc := range valid {
 		t.Run(tc.name, func(t *testing.T) {
@@ -156,6 +163,8 @@ func TestValidateServerPacket(t *testing.T) {
 		{"player state infinity", StatePlay, PlayerState{Velocity: mgl32.Vec3{0, float32(math.Inf(1)), 0}}},
 		{"unknown command rejection", StatePlay, CommandRejected{Reason: RejectReason("other")}},
 		{"hotbar state out of range", StatePlay, HotbarState{Hotbar: core.Hotbar{Selected: core.HotbarSlots}}},
+		{"empty drop upserts", StatePlay, ItemDropUpserts{}},
+		{"empty drop removes", StatePlay, ItemDropRemoves{}},
 		{"play packet during handshake", StateHandshake, KeepAlive{Token: 1}},
 		{"play packet during login", StateLogin, KeepAlive{Token: 1}},
 	}

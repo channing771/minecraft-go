@@ -22,7 +22,7 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"hello", StateHandshake, ClientHello{ProtocolVersion: 3}, 0, "03"},
+		{"hello", StateHandshake, ClientHello{ProtocolVersion: 4}, 0, "04"},
 		{"login start", StateLogin, LoginStart{PlayerID: id, DisplayName: "Chen"}, 0, "00112233445546778899aabbccddeeff044368656e"},
 		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5}, 0, "0100000000000000ff01010000c03f000000bf"},
 		{"break", StatePlay, BreakBlock{Sequence: 2}, 1, "02000000000000000000000000000000"},
@@ -56,8 +56,8 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 3}, 0, "03"},
-		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 3, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0301026e6f"},
+		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 4}, 0, "04"},
+		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 4, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0401026e6f"},
 		{"login success", StateLogin, LoginSuccess{PlayerID: id}, 0, "00112233445546778899aabbccddeeff"},
 		{"login reject", StateLogin, LoginReject{Code: LoginInvalidIdentity, Message: "no"}, 1, "02026e6f"},
 		{"block changes", StatePlay, BlockChanges{Dimension: core.Overworld, Chunk: core.ChunkPos{X: 1, Z: -1}, BaseRevision: 1, NewRevision: 2, Changes: []BlockChange{{Position: core.BlockPos{X: 16, Y: -64, Z: -1}, Block: core.StoneID}}}, 1, "0000000001000000ffffffff010000000000000002000000000000000110000000c0ffffffffffffff0200"},
@@ -182,7 +182,7 @@ func TestSmallPacketErrorCodeWireValues(t *testing.T) {
 		packet ServerPacket
 		want   string
 	}{
-		{HandshakeReject{ServerProtocolVersion: 3, Code: HandshakeVersionMismatch}, "030100"},
+		{HandshakeReject{ServerProtocolVersion: 4, Code: HandshakeVersionMismatch}, "040100"},
 		{LoginReject{Code: LoginServerFull}, "0100"},
 		{LoginReject{Code: LoginInvalidIdentity}, "0200"},
 		{LoginReject{Code: LoginPlayerDataCorrupt}, "0300"},
@@ -346,7 +346,7 @@ func TestSmallPacketRejectsMalformedPayloads(t *testing.T) {
 			return err
 		}},
 		{"unknown rejection reason", func() error {
-			_, err := decodeServerControlPayload(StatePlay, 4, []byte{0, 0, 0, 0, 0, 0, 0, 0, 11})
+			_, err := decodeServerControlPayload(StatePlay, 4, []byte{0, 0, 0, 0, 0, 0, 0, 0, 12})
 			return err
 		}},
 	}

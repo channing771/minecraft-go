@@ -50,7 +50,7 @@ func TestProtocolV2RemotePlayerPacketIDsAreFrozen(t *testing.T) {
 			t.Fatalf("server packet ID %d decoded=%T ok=%v, want %T true", test.id, decoded, ok, test.packet)
 		}
 	}
-	if _, ok := serverPacketForID(StatePlay, 11); ok {
+	if _, ok := serverPacketForID(StatePlay, 13); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 }
@@ -75,7 +75,7 @@ func TestProtocolV1RegistryRejectsUnknownIDsAndStates(t *testing.T) {
 	if _, ok := clientPacketForID(StateHandshake, 1); ok {
 		t.Fatal("unknown handshake client packet ID accepted")
 	}
-	if _, ok := serverPacketForID(StatePlay, 11); ok {
+	if _, ok := serverPacketForID(StatePlay, 13); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 	if _, ok := clientPacketID(StateLogin, ClientHello{}); ok {
@@ -94,7 +94,7 @@ func TestCommandRejectReasonIDsAreFrozen(t *testing.T) {
 		{RejectInvalidRay, 1}, {RejectNoTarget, 2}, {RejectChunkNotReady, 3},
 		{RejectProtectedBlock, 4}, {RejectInvalidBlock, 5}, {RejectOccupied, 6},
 		{RejectInvalidInput, 7}, {RejectPlayerNotReady, 8},
-		{RejectInvalidSlot, 9}, {RejectHotbarFull, 10},
+		{RejectInvalidSlot, 9}, {RejectHotbarFull, 10}, {RejectDropCapacity, 11},
 	}
 	for _, tc := range reasons {
 		got, ok := commandRejectReasonID(tc.reason)
@@ -112,7 +112,7 @@ func TestCommandRejectReasonIDsAreFrozen(t *testing.T) {
 	if _, ok := commandRejectReasonForID(0); ok {
 		t.Fatal("zero rejection reason ID decoded")
 	}
-	if _, ok := commandRejectReasonForID(11); ok {
+	if _, ok := commandRejectReasonForID(12); ok {
 		t.Fatal("unknown rejection reason ID decoded")
 	}
 }
@@ -220,6 +220,12 @@ func sameServerPacketType(left, right ServerPacket) bool {
 		return ok
 	case HotbarState:
 		_, ok := right.(HotbarState)
+		return ok
+	case ItemDropUpserts:
+		_, ok := right.(ItemDropUpserts)
+		return ok
+	case ItemDropRemoves:
+		_, ok := right.(ItemDropRemoves)
 		return ok
 	}
 	return false

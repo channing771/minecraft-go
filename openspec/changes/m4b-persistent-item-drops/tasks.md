@@ -7,10 +7,10 @@
 
 ## 2. 有界协议 v4
 
-- [ ] 2.1 在 `internal/network` 先写失败的 packet/registry/codec/golden/fuzz seed 测试，覆盖两种最多 32 项的掉落物消息、严格 ID 顺序、非法字段、零方块 revision barrier、v3 握手拒绝和新的容量拒绝原因。
-- [ ] 2.2 把 `ProtocolVersion` 升为 4，在既有 packet 表尾追加 `ItemDropUpserts`/`ItemDropRemoves`，显式编码 `DropID` 字段，并在任何切片分配前校验计数和剩余字节；不增加协商或降级路径。
-- [ ] 2.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -race -count=1 && go test ./internal/archcheck -count=1'`，并确认所有 v4 golden 稳定、`git diff --check` 通过。
-- [ ] 2.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 升级掉落物协议 v4`。提交成功后自动进入第 3 组。
+- [x] 2.1 在 `internal/network` 先写失败的 packet/registry/codec/golden/fuzz seed 测试，覆盖两种最多 32 项的掉落物消息、严格 ID 顺序、非法字段、零方块 revision barrier、v3 握手拒绝和新的容量拒绝原因。
+- [x] 2.2 把 `ProtocolVersion` 升为 4，在既有 packet 表尾追加 `ItemDropUpserts`/`ItemDropRemoves`，显式编码 `DropID` 字段，并在任何切片分配前校验计数和剩余字节；不增加协商或降级路径。
+- [x] 2.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -race -count=1 && go test ./internal/archcheck -count=1'`，并确认所有 v4 golden 稳定、`git diff --check` 通过。
+- [x] 2.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 升级掉落物协议 v4`。提交成功后自动进入第 3 组。
 
 ## 3. 区块存档 schema v2
 

@@ -189,8 +189,9 @@ func (changes BlockChanges) Validate() error {
 			changes.NewRevision,
 		)
 	}
-	if len(changes.Changes) < 1 || len(changes.Changes) > 4096 {
-		return errors.New("network: block changes count is outside 1..4096")
+	// v4 允许零条方块变化作为纯掉落物变化的 revision barrier。
+	if len(changes.Changes) > 4096 {
+		return errors.New("network: block changes count exceeds 4096")
 	}
 	var previous uint32
 	for index, change := range changes.Changes {

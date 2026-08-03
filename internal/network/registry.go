@@ -99,6 +99,10 @@ func serverPacketID(state State, packet ServerPacket) (uint32, bool) {
 			return 9, true
 		case HotbarState:
 			return 10, true
+		case ItemDropUpserts:
+			return 11, true
+		case ItemDropRemoves:
+			return 12, true
 		}
 	}
 	return 0, false
@@ -145,6 +149,10 @@ func serverPacketForID(state State, id uint32) (ServerPacket, bool) {
 			return RemotePlayerStates{}, true
 		case 10:
 			return HotbarState{}, true
+		case 11:
+			return ItemDropUpserts{}, true
+		case 12:
+			return ItemDropRemoves{}, true
 		}
 	}
 	return nil, false
@@ -172,6 +180,8 @@ func commandRejectReasonID(reason RejectReason) (uint8, bool) {
 		return 9, true
 	case RejectHotbarFull:
 		return 10, true
+	case RejectDropCapacity:
+		return 11, true
 	default:
 		return 0, false
 	}
@@ -199,6 +209,8 @@ func commandRejectReasonForID(id uint8) (RejectReason, bool) {
 		return RejectInvalidSlot, true
 	case 10:
 		return RejectHotbarFull, true
+	case 11:
+		return RejectDropCapacity, true
 	default:
 		return "", false
 	}

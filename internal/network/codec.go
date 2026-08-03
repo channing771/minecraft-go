@@ -328,6 +328,21 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 				e.u16(uint16(stack.Item))
 				e.u8(stack.Count)
 			}
+		case ItemDropUpserts:
+			e.u64(message.ServerTick)
+			e.uvarint(uint32(len(message.Drops)))
+			for _, drop := range message.Drops {
+				encodeDropID(&e, drop.ID)
+				e.u32(drop.BlockIndex)
+				e.u16(uint16(drop.Item))
+				e.u8(drop.Count)
+			}
+		case ItemDropRemoves:
+			e.u64(message.ServerTick)
+			e.uvarint(uint32(len(message.IDs)))
+			for _, id := range message.IDs {
+				encodeDropID(&e, id)
+			}
 		default:
 			return 0, nil, codecError("encode server", state, packetID, invalidServerPacket(state, packet))
 		}
@@ -498,6 +513,10 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 			packet = despawn
 		case 9:
 			packet, err = decodeRemotePlayerStates(&d)
+		case 11:
+			packet, err = decodeItemDropUpserts(&d)
+		case 12:
+			packet, err = decodeItemDropRemoves(&d)
 		case 10:
 			var hotbar core.Hotbar
 			hotbar.Selected, err = d.u8()
@@ -528,6 +547,108 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 		return nil, codecError("decode server", state, packetID, err)
 	}
 	return packet, nil
+}
+
+const (
+	dropIDWireBytes   = 4 + 4 + 4 + 1 + 4
+	itemDropWireBytes = dropIDWireBytes + 4 + 2 + 1
+)
+
+func encodeDropID(e *byteEncoder, id core.DropID) {
+	e.i32(int32(id.Dimension))
+	e.i32(id.Chunk.X)
+	e.i32(id.Chunk.Z)
+	e.u8(id.Slot)
+	e.u32(id.Generation)
+}
+
+func decodeDropID(d *byteDecoder) (core.DropID, error) {
+	var id core.DropID
+	dimension, err := d.i32()
+	if err != nil {
+		return core.DropID{}, err
+	}
+	id.Dimension = core.DimensionID(dimension)
+	if id.Chunk.X, err = d.i32(); err != nil {
+		return core.DropID{}, err
+	}
+	if id.Chunk.Z, err = d.i32(); err != nil {
+		return core.DropID{}, err
+	}
+	if id.Slot, err = d.u8(); err != nil {
+		return core.DropID{}, err
+	}
+	if id.Generation, err = d.u32(); err != nil {
+		return core.DropID{}, err
+	}
+	return id, nil
+}
+
+// decodeItemDropBatchCount 在分配任何切片前校验计数与剩余字节。
+func decodeItemDropBatchCount(d *byteDecoder, itemBytes int) (uint32, error) {
+	count, err := d.uvarint()
+	if err != nil {
+		return 0, err
+	}
+	if count < 1 || count > MaxItemDropBatch {
+		return 0, errors.New("network: item drop batch count is outside 1..32")
+	}
+	if len(d.data)-d.offset < int(count)*itemBytes {
+		return 0, errCountShortInput
+	}
+	return count, nil
+}
+
+func decodeItemDropUpserts(d *byteDecoder) (ServerPacket, error) {
+	var result ItemDropUpserts
+	serverTick, err := d.u64()
+	if err != nil {
+		return nil, err
+	}
+	result.ServerTick = serverTick
+	count, err := decodeItemDropBatchCount(d, itemDropWireBytes)
+	if err != nil {
+		return nil, err
+	}
+	result.Drops = make([]ItemDrop, count)
+	for index := range result.Drops {
+		drop := &result.Drops[index]
+		if drop.ID, err = decodeDropID(d); err != nil {
+			return nil, err
+		}
+		if drop.BlockIndex, err = d.u32(); err != nil {
+			return nil, err
+		}
+		item, err := d.u16()
+		if err != nil {
+			return nil, err
+		}
+		drop.Item = core.ItemID(item)
+		if drop.Count, err = d.u8(); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func decodeItemDropRemoves(d *byteDecoder) (ServerPacket, error) {
+	var result ItemDropRemoves
+	serverTick, err := d.u64()
+	if err != nil {
+		return nil, err
+	}
+	result.ServerTick = serverTick
+	count, err := decodeItemDropBatchCount(d, dropIDWireBytes)
+	if err != nil {
+		return nil, err
+	}
+	result.IDs = make([]core.DropID, count)
+	for index := range result.IDs {
+		if result.IDs[index], err = decodeDropID(d); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 func decodeRemotePlayerStates(d *byteDecoder) (ServerPacket, error) {
@@ -602,7 +723,8 @@ func decodeBlockChanges(d *byteDecoder) (ServerPacket, error) {
 	if err == nil {
 		count, err = d.uvarint()
 	}
-	if err == nil && (count < 1 || count > 4096) {
+	// v4 允许零条方块变化作为纯掉落物变化的 revision barrier。
+	if err == nil && count > 4096 {
 		err = errInvalidCount
 	}
 	if err == nil && len(d.data)-d.offset < int(count)*14 {
