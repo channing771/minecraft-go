@@ -82,13 +82,16 @@ func TestChunkHashUsesLogicalBlocksNotPaletteLayout(t *testing.T) {
 }
 
 func TestChunkPayloadBytesIsDeterministicAndAllocationFree(t *testing.T) {
+	// 512 字节信封 + 32 个固定掉落物槽。
+	const airBytes = 512 + core.DropsPerChunk*world.DropSlotBytes
+	const indexedBytes = airBytes + 2068
 	chunk := world.NewChunk(core.ChunkPos{})
-	if got := chunk.PayloadBytes(); got != 512 {
-		t.Fatalf("all-air payload bytes=%d, want 512", got)
+	if got := chunk.PayloadBytes(); got != airBytes {
+		t.Fatalf("all-air payload bytes=%d, want %d", got, airBytes)
 	}
 	chunk.SetBlock(0, 0, 0, core.StoneID)
-	if got := chunk.PayloadBytes(); got != 2580 {
-		t.Fatalf("indexed payload bytes=%d, want 2580", got)
+	if got := chunk.PayloadBytes(); got != indexedBytes {
+		t.Fatalf("indexed payload bytes=%d, want %d", got, indexedBytes)
 	}
 
 	var got int
@@ -97,8 +100,8 @@ func TestChunkPayloadBytesIsDeterministicAndAllocationFree(t *testing.T) {
 	}); allocations != 0 {
 		t.Fatalf("PayloadBytes allocations=%v, want 0", allocations)
 	}
-	if got != 2580 {
-		t.Fatalf("repeated payload bytes=%d, want 2580", got)
+	if got != indexedBytes {
+		t.Fatalf("repeated payload bytes=%d, want %d", got, indexedBytes)
 	}
 }
 

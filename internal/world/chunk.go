@@ -11,6 +11,7 @@ import (
 type Chunk struct {
 	Pos      core.ChunkPos
 	sections [core.SectionsPerChunk]*Section
+	drops    [core.DropsPerChunk]DropSlot
 }
 
 // NewChunk 创建一个全空气的区块。
@@ -27,16 +28,16 @@ func (c *Chunk) Section(i int) *Section { return c.sections[i] }
 
 // Clone 返回区块及其全部区段的深拷贝。
 func (c *Chunk) Clone() *Chunk {
-	clone := &Chunk{Pos: c.Pos}
+	clone := &Chunk{Pos: c.Pos, drops: c.drops}
 	for index, section := range c.sections {
 		clone.sections[index] = section.Clone()
 	}
 	return clone
 }
 
-// PayloadBytes 返回 24 个区段的压缩 payload 与区块信封的估算大小。
+// PayloadBytes 返回 24 个区段的压缩 payload、固定掉落物槽与区块信封的估算大小。
 func (c *Chunk) PayloadBytes() int {
-	bytes := 512
+	bytes := 512 + core.DropsPerChunk*DropSlotBytes
 	for _, section := range c.sections {
 		bytes += section.Blocks.PayloadBytes()
 	}
