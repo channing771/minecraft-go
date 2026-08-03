@@ -42,10 +42,10 @@
 
 ## 7. 固定容量呈现与应用接线
 
-- [ ] 7.1 在 `internal/render`、`cmd/mcgo` 先写 headless 失败测试，覆盖最多 800 个 instance、物品颜色映射、由 server tick/ID 得到的稳定动画、消息分派、下一帧更新以及断线/维度 reset；测试不得启动或聚焦游戏窗口。
-- [ ] 7.2 复用现有立方体几何、`gfx` buffer 和 presentation conversion，增加固定 800 instance 的掉落物渲染器并接入 `application`；不新增贴图、二进制资源、每实体 GPU 对象或 `cmd/mcgod` 图形依赖。
-- [ ] 7.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/render ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，确认 800 项提交无持续资源增长且 `git diff --check` 通过。
-- [ ] 7.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 渲染可见掉落物`。提交成功后自动进入第 8 组。
+- [x] 7.1 在 `internal/render`、`cmd/mcgo` 先写 headless 失败测试，覆盖最多 800 个 instance、物品颜色映射、由 server tick/ID 得到的稳定动画、消息分派、下一帧更新以及断线/维度 reset；测试不得启动或聚焦游戏窗口。
+- [x] 7.2 复用现有立方体几何、`gfx` buffer 和 presentation conversion，增加固定 800 instance 的掉落物渲染器并接入 `application`；不新增贴图、二进制资源、每实体 GPU 对象或 `cmd/mcgod` 图形依赖。
+- [x] 7.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/render ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，确认 800 项提交无持续资源增长且 `git diff --check` 通过。
+- [x] 7.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 渲染可见掉落物`。提交成功后自动进入第 8 组。
 
 ## 8. 纵向闭环、文档与最终门禁
 

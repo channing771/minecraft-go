@@ -370,7 +370,11 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 		avatarRenderer:  render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float),
 		nameTagRenderer: render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, glyphs),
 		hotbarRenderer:  render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, glyphs),
-		remotePlayers:   client.NewRemotePlayers(), mirror: client.NewMirror(), predictor: client.NewPredictor(),
+		itemDropRenderer: render.NewItemDropRenderer(
+			dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float,
+		),
+		itemDrops:     client.NewItemDrops(),
+		remotePlayers: client.NewRemotePlayers(), mirror: client.NewMirror(), predictor: client.NewPredictor(),
 		mesher: client.NewMesher(reg, 1), camera: client.Camera{FovY: mgl32.DegToRad(70), Aspect: 1, Near: 0.1, Far: 100},
 		loadedChunks: make(map[core.ChunkPos]struct{}),
 	}
@@ -1361,6 +1365,7 @@ func newInteractiveTestApplication(
 		clientEndpoint: clientEndpoint,
 		receiver:       client.NewReceiver(clientEndpoint, 8),
 		mirror:         client.NewMirror(),
+		itemDrops:      client.NewItemDrops(),
 		predictor:      client.NewPredictor(),
 		serverCancel:   func() {},
 	}, serverEndpoint
@@ -1519,5 +1524,68 @@ func TestApplicationDrawsHotbarHUDLast(t *testing.T) {
 		"terrain pass", "avatar pass", "name-tag pass", "hotbar pass",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("已确认快捷栏 passes=%v want=%v", got, want)
+	}
+}
+
+// Mutation killed: drawing drops after name tags, skipping the mirror, or
+// leaking animation into the mirror changes the observed pass order or values.
+func TestApplicationDrawsItemDropsAfterAvatars(t *testing.T) {
+	glyphs := &integrationGlyphSource{}
+	app, dev := newRemoteRenderApplication(t, glyphs)
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{1, 2, 3})); err != nil {
+		t.Fatal(err)
+	}
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("空掉落物镜像 renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{
+		"terrain pass", "avatar pass", "name-tag pass",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("空掉落物镜像 passes=%v want=%v", got, want)
+	}
+
+	drop := network.ItemDrop{
+		ID:   core.DropID{Dimension: core.Overworld, Slot: 0, Generation: 1},
+		Item: core.ItemStone, Count: 1, BlockIndex: 9,
+	}
+	if err := app.itemDrops.Apply(network.ItemDropUpserts{
+		ServerTick: 3, Drops: []network.ItemDrop{drop},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dev.resetPasses()
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("有掉落物 renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{
+		"terrain pass", "avatar pass", "item drop pass", "name-tag pass",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("掉落物 passes=%v want=%v", got, want)
+	}
+
+	// 动画不得回写镜像。
+	got := app.itemDrops.Presentations()
+	if len(got) != 1 || got[0].BlockIndex != drop.BlockIndex || got[0].Count != drop.Count {
+		t.Fatalf("渲染修改了镜像: %+v", got)
+	}
+}
+
+func TestApplicationItemDropMirrorResetsWithSession(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	sendInteractiveServerMessage(t, serverEndpoint, network.ItemDropUpserts{
+		ServerTick: 1,
+		Drops: []network.ItemDrop{{
+			ID:   core.DropID{Dimension: core.Overworld, Slot: 0, Generation: 1},
+			Item: core.ItemGrass, Count: 1, BlockIndex: 4,
+		}},
+	})
+	app.drainServerMessages(1)
+	if len(app.itemDrops.Presentations()) != 1 {
+		t.Fatal("掉落物 upsert 未进入镜像")
+	}
+
+	app.closeClientSession(nil)
+	if got := app.itemDrops.Presentations(); len(got) != 0 {
+		t.Fatalf("关闭会话后镜像 = %+v，想要为空", got)
 	}
 }

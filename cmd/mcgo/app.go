@@ -52,6 +52,10 @@ type application struct {
 	nameTagRenderer         *render.NameTagRenderer
 	hotbarRenderer          *render.HotbarRenderer
 	hotbar                  client.HotbarMirror
+	itemDropRenderer        *render.ItemDropRenderer
+	itemDrops               *client.ItemDrops
+	itemDropInstances       []render.ItemDrop
+	serverTick              uint64
 	glyphAtlas              *render.GlyphAtlas
 	clientEndpoint          network.ClientEndpoint
 	receiver                *client.Receiver
@@ -116,6 +120,7 @@ type applicationDependencies struct {
 	newAvatarRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
 	newNameTagRenderer  func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
 	newHotbarRenderer   func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.HotbarRenderer, error)
+	newItemDropRenderer func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
 }
 
 func defaultApplicationDependencies() applicationDependencies {
@@ -283,6 +288,11 @@ func newApplicationWithDependencies(
 			return render.NewHotbarRenderer(dev, color, atlas), nil
 		}
 	}
+	if dependencies.newItemDropRenderer == nil {
+		dependencies.newItemDropRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.ItemDropRenderer, error) {
+			return render.NewItemDropRenderer(dev, color, depth), nil
+		}
+	}
 	ctx := context.Background()
 	var store storage.WorldStore
 	var clientEndpoint network.ClientEndpoint
@@ -437,6 +447,7 @@ func newApplicationWithDependencies(
 		serverCancel:   serverCancel,
 		serverDone:     serverDone,
 		mirror:         client.NewMirror(),
+		itemDrops:      client.NewItemDrops(),
 		predictor:      client.NewPredictor(),
 		remotePlayers:  client.NewRemotePlayers(),
 		camera:         camera,
@@ -478,6 +489,13 @@ func newApplicationWithDependencies(
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建快捷栏渲染器: %w", err), app.Close())
 	}
+	app.itemDropRenderer, err = dependencies.newItemDropRenderer(
+		dev, colorFormat, gfx.FormatDepth32Float,
+	)
+	if err != nil {
+		app.releaseRemoteConstructionResources()
+		return nil, errors.Join(fmt.Errorf("创建掉落物渲染器: %w", err), app.Close())
+	}
 	app.mesher = client.NewMesher(reg, max(1, runtime.NumCPU()-2))
 	if options.Benchmark {
 		if err := app.requestTrustedObserverCenter(app.center); err != nil {
@@ -492,6 +510,10 @@ func newApplicationWithDependencies(
 }
 
 func (a *application) releaseRemoteConstructionResources() {
+	if a.itemDropRenderer != nil {
+		a.itemDropRenderer.Release()
+		a.itemDropRenderer = nil
+	}
 	if a.hotbarRenderer != nil {
 		a.hotbarRenderer.Release()
 		a.hotbarRenderer = nil
@@ -729,6 +751,9 @@ func (a *application) Close() error {
 }
 
 func (a *application) releaseOwnedResources() {
+	if a.itemDropRenderer != nil {
+		a.itemDropRenderer.Release()
+	}
 	if a.hotbarRenderer != nil {
 		a.hotbarRenderer.Release()
 	}
@@ -783,6 +808,7 @@ func (a *application) closeClientSession(cause error) {
 			a.remotePlayers.Reset()
 		}
 		a.hotbar.Reset()
+		a.itemDrops.Reset()
 	})
 }
 
@@ -904,6 +930,13 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		renderTiming.recordAvatar(renderNow().Sub(started))
 		started = renderNow()
 	}
+	a.itemDropInstances = appendItemDropInstances(
+		a.itemDropInstances[:0], a.itemDrops.Presentations(),
+	)
+	a.itemDropRenderer.Render(encoder, target, a.depth.view, render.Camera{
+		ViewProj: a.camera.ViewProj(),
+		Pos:      a.camera.Pos,
+	}, a.serverTick, a.itemDropInstances)
 	right := mgl32.Vec3{
 		float32(math.Cos(float64(a.camera.Yaw))),
 		0,
@@ -974,6 +1007,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 		}
 		if state, ok := message.(network.PlayerState); ok {
+			a.serverTick = state.ServerTick
 			result, err := a.predictor.ApplyPlayerState(state, client.MirrorCollisionSource{
 				Mirror:    a.mirror,
 				Dimension: core.Overworld,
@@ -990,6 +1024,14 @@ func (a *application) drainServerMessages(maxMessages int) {
 		}
 		if state, ok := message.(network.HotbarState); ok {
 			if err := a.hotbar.Apply(state); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		}
+		switch message.(type) {
+		case network.ItemDropUpserts, network.ItemDropRemoves:
+			if err := a.itemDrops.Apply(message); err != nil {
 				a.closeClientSession(err)
 				return
 			}
@@ -1151,4 +1193,19 @@ func (d *depthTarget) Release() {
 		d.texture.Release()
 		d.texture = nil
 	}
+}
+
+// appendItemDropInstances 把只读镜像转换为渲染实例，复用调用方切片。
+func appendItemDropInstances(
+	dst []render.ItemDrop,
+	drops []client.ItemDropPresentation,
+) []render.ItemDrop {
+	for _, drop := range drops {
+		block, ok := render.ItemDropBlock(drop.ID.Chunk, drop.BlockIndex)
+		if !ok {
+			continue
+		}
+		dst = append(dst, render.ItemDrop{ID: drop.ID, Block: block, Item: drop.Item})
+	}
+	return dst
 }
