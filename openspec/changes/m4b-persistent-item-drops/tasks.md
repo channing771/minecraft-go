@@ -35,10 +35,10 @@
 
 ## 6. 客户端掉落物镜像
 
-- [ ] 6.1 在 `internal/client` 先写失败测试，覆盖未知 upsert 新增、同 ID 完整替换、未知 remove 拒绝、非法批次整体回滚、800 项容量预检、稳定 presentation 顺序与会话/维度 reset。
-- [ ] 6.2 参照现有 `RemotePlayers` 的严格协议错误和 reset 模式，实现独立 `ItemDrops`；预分配 map/scratch，批次先完整验证再应用，不引入插值、预测或网络依赖反向引用。
-- [ ] 6.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client -race -count=1 && go test ./internal/archcheck -count=1'`，包含 `testing.AllocsPerRun` 的稳定容量检查，并确认 `git diff --check` 通过。
-- [ ] 6.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 维护客户端掉落物镜像`。提交成功后自动进入第 7 组。
+- [x] 6.1 在 `internal/client` 先写失败测试，覆盖未知 upsert 新增、同 ID 完整替换、未知 remove 拒绝、非法批次整体回滚、800 项容量预检、稳定 presentation 顺序与会话/维度 reset。
+- [x] 6.2 参照现有 `RemotePlayers` 的严格协议错误和 reset 模式，实现独立 `ItemDrops`；预分配 map/scratch，批次先完整验证再应用，不引入插值、预测或网络依赖反向引用。
+- [x] 6.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client -race -count=1 && go test ./internal/archcheck -count=1'`，包含 `testing.AllocsPerRun` 的稳定容量检查，并确认 `git diff --check` 通过。
+- [x] 6.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 维护客户端掉落物镜像`。提交成功后自动进入第 7 组。
 
 ## 7. 固定容量呈现与应用接线
 

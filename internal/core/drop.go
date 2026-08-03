@@ -3,6 +3,12 @@ package core
 // DropsPerChunk 是单个区块可持有的固定权威掉落物槽数。
 const DropsPerChunk = 32
 
+// DropInterestRadius 是掉落物 tick 与同步的固定区块半径。
+const DropInterestRadius = 2
+
+// MaxSessionDrops 是单个会话镜像的固定上限：25 个兴趣区块 × 每区块 32 槽。
+const MaxSessionDrops = (2*DropInterestRadius + 1) * (2*DropInterestRadius + 1) * DropsPerChunk
+
 // DropID 在掉落物堆的生命周期内唯一且稳定地标识它。
 // 槽位复用时 Generation 递增，因此旧 ID 不会与新堆冲突。
 type DropID struct {

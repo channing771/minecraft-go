@@ -11,7 +11,7 @@ import (
 
 const (
 	// DropInterestRadius 是掉落物 tick 与同步的固定区块半径。
-	DropInterestRadius = 2
+	DropInterestRadius = core.DropInterestRadius
 	// DropPickupDelayTicks 是新掉落物可被拾取前的活动 tick 数。
 	DropPickupDelayTicks = 10
 	// DropLifetimeTicks 是掉落物累计活动 tick 的寿命上限。
@@ -245,7 +245,7 @@ type DropSnapshot struct {
 }
 
 // MaxSessionDrops 是单个会话镜像的固定上限：25 个兴趣区块 × 每区块 32 槽。
-const MaxSessionDrops = (2*DropInterestRadius + 1) * (2*DropInterestRadius + 1) * core.DropsPerChunk
+const MaxSessionDrops = core.MaxSessionDrops
 
 // AppendSessionDrops 按稳定 ID 顺序把该会话兴趣范围内的当前掉落物追加到 dst。
 // 调用方可复用 dst 底层数组；结果最多 MaxSessionDrops 项。
