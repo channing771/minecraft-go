@@ -27,11 +27,13 @@ func TestBreakBlockUsesAuthoritativeEye(t *testing.T) {
 }
 
 func TestPlaceBlockRejectsCompletePlayerAABBOverlap(t *testing.T) {
-	engine, session := readyFlatPlayerWithTarget(t, nil)
+	var stocked core.Hotbar
+	stocked.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+	engine, session := readyFlatPlayerRestored(t, nil, stocked)
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
 		Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
-		Block: core.StoneID,
+		Slot: 0,
 	})
 
 	result := engine.Step()
@@ -160,12 +162,14 @@ func TestPlayerInteractionProtectsBedrock(t *testing.T) {
 func TestPlayerInteractionPlacesAdjacentBlock(t *testing.T) {
 	target := core.BlockPos{X: 0, Y: 2, Z: 3}
 	want := core.BlockPos{X: 0, Y: 2, Z: 2}
-	engine, session := readyFlatPlayerWithTarget(t, map[core.BlockPos]core.BlockID{
+	var stocked core.Hotbar
+	stocked.Slots[0] = core.ItemStack{Item: core.ItemDirt, Count: 1}
+	engine, session := readyFlatPlayerRestored(t, map[core.BlockPos]core.BlockID{
 		target: core.StoneID,
-	})
+	}, stocked)
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
-		Yaw: float32(math.Pi), Block: core.DirtID,
+		Yaw: float32(math.Pi), Slot: 0,
 	})
 
 	result := engine.Step()
@@ -176,11 +180,13 @@ func TestPlayerInteractionPlacesAdjacentBlock(t *testing.T) {
 }
 
 func TestPlayerInteractionActionsObserveSequenceOrder(t *testing.T) {
-	engine, session := readyFlatPlayer(t)
+	var stocked core.Hotbar
+	stocked.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+	engine, session := readyFlatPlayerRestored(t, nil, stocked)
 	pitch := -float32(math.Pi)/2 + 0.01
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 3, Kind: sim.CommandPlaceBlock,
-		Pitch: pitch, Block: core.StoneID,
+		Pitch: pitch, Slot: 0,
 	})
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
@@ -195,20 +201,6 @@ func TestPlayerInteractionActionsObserveSequenceOrder(t *testing.T) {
 	}
 }
 
-func TestPlayerInteractionPlaceBlockWhitelist(t *testing.T) {
-	engine, session := readyFlatPlayer(t)
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
-		Pitch: -float32(math.Pi)/2 + 0.01, Block: core.BarrierID,
-	})
-
-	result := engine.Step()
-	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectInvalidBlock ||
-		len(result.Changes) != 0 {
-		t.Fatalf("invalid block result=%+v", result)
-	}
-}
-
 func readyFlatPlayer(t *testing.T) (*sim.Engine, sim.SessionID) {
 	t.Helper()
 	return readyFlatPlayerWithTarget(t, nil)
@@ -219,9 +211,22 @@ func readyFlatPlayerWithTarget(
 	blocks map[core.BlockPos]core.BlockID,
 ) (*sim.Engine, sim.SessionID) {
 	t.Helper()
+	return readyFlatPlayerRestored(t, blocks, core.Hotbar{})
+}
+
+func readyFlatPlayerRestored(
+	t *testing.T,
+	blocks map[core.BlockPos]core.BlockID,
+	hotbar core.Hotbar,
+) (*sim.Engine, sim.SessionID) {
+	t.Helper()
 	engine := sim.NewEngine(0)
 	const session = sim.SessionID(1)
-	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
+	engine.RegisterPlayer(session, sim.PlayerRestore{
+		SpawnDimension: core.Overworld,
+		SpawnAnchor:    core.ChunkPos{},
+		Hotbar:         hotbar,
+	})
 	requested := engine.Step()
 	if len(requested.Acquire) != 1 || requested.Acquire[0] != (core.ChunkKey{
 		Dimension: core.Overworld,

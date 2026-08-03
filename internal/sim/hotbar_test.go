@@ -1,0 +1,296 @@
+package sim_test
+
+import (
+	"math"
+	"testing"
+
+	"minecraft-go/internal/core"
+	"minecraft-go/internal/sim"
+)
+
+const lookDown = -float32(math.Pi)/2 + 0.01
+
+func TestHotbarPublishesInitialStateOnce(t *testing.T) {
+	var restored core.Hotbar
+	restored.Selected = 2
+	restored.Slots[1] = core.ItemStack{Item: core.ItemStone, Count: 5}
+	engine, session := readyFlatPlayerRestored(t, nil, restored)
+
+	// readyFlatPlayerRestored 已经消费了玩家进入 Active 的那个 tick。
+	if got := currentHotbar(t, engine, session); got != restored {
+		t.Fatalf("初始快捷栏 = %+v，想要 %+v", got, restored)
+	}
+	if result := engine.Step(); len(result.Hotbars) != 0 {
+		t.Fatalf("未变化时不应重复发布：%+v", result.Hotbars)
+	}
+}
+
+func TestHotbarSelectRequiresValidSlot(t *testing.T) {
+	engine, session := readyFlatPlayer(t)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandSelectHotbar, Slot: 4,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 0 || len(result.Hotbars) != 1 ||
+		result.Hotbars[0].Session != session || result.Hotbars[0].Hotbar.Selected != 4 {
+		t.Fatalf("合法选择 result=%+v", result)
+	}
+
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 3, Kind: sim.CommandSelectHotbar,
+		Slot: core.HotbarSlots,
+	})
+	rejected := engine.Step()
+	if len(rejected.Rejected) != 1 ||
+		rejected.Rejected[0].Reason != sim.RejectInvalidSlot ||
+		len(rejected.Hotbars) != 0 {
+		t.Fatalf("越界选择 result=%+v", rejected)
+	}
+	if got := currentHotbar(t, engine, session); got.Selected != 4 {
+		t.Fatalf("越界选择后 Selected = %d，想要 4", got.Selected)
+	}
+}
+
+func TestHotbarSelectSameSlotDoesNotRepublish(t *testing.T) {
+	engine, session := readyFlatPlayer(t)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandSelectHotbar, Slot: 0,
+	})
+
+	if result := engine.Step(); len(result.Hotbars) != 0 || len(result.Rejected) != 0 {
+		t.Fatalf("选中栏位未变化时不应发布：%+v", result)
+	}
+}
+
+func TestHotbarBreakAddsDropToLowestSlot(t *testing.T) {
+	engine, session := readyFlatPlayer(t)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
+		t.Fatalf("挖掘 result=%+v", result)
+	}
+	if len(result.Hotbars) != 1 || result.Hotbars[0].Session != session {
+		t.Fatalf("Hotbars=%+v，想要恰好一份属于本会话的更新", result.Hotbars)
+	}
+	want := core.ItemStack{Item: core.ItemGrass, Count: 1}
+	if result.Hotbars[0].Hotbar.Slots[0] != want {
+		t.Fatalf("栏位 0 = %+v，想要 %+v", result.Hotbars[0].Hotbar.Slots[0], want)
+	}
+}
+
+func TestHotbarBreakRejectsWhenFull(t *testing.T) {
+	var full core.Hotbar
+	for i := range full.Slots {
+		full.Slots[i] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	}
+	engine, session := readyFlatPlayerRestored(t, nil, full)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectHotbarFull ||
+		len(result.Changes) != 0 || len(result.Hotbars) != 0 {
+		t.Fatalf("满栏 result=%+v", result)
+	}
+	if got := currentHotbar(t, engine, session); got != full {
+		t.Fatalf("满栏被拒绝后快捷栏 = %+v，想要保持 %+v", got, full)
+	}
+}
+
+func TestHotbarBreakRejectsBlockWithoutDrop(t *testing.T) {
+	position := core.BlockPos{X: 0, Y: 0, Z: 0}
+	engine, session := readyFlatPlayerWithTarget(t, map[core.BlockPos]core.BlockID{
+		position: core.BarrierID,
+	})
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectProtectedBlock ||
+		len(result.Changes) != 0 || len(result.Hotbars) != 0 {
+		t.Fatalf("无掉落物方块 result=%+v", result)
+	}
+}
+
+func TestHotbarPlaceConsumesOneItem(t *testing.T) {
+	var stocked core.Hotbar
+	stocked.Slots[3] = core.ItemStack{Item: core.ItemDirt, Count: 2}
+	target := core.BlockPos{X: 0, Y: 2, Z: 3}
+	want := core.BlockPos{X: 0, Y: 2, Z: 2}
+	engine, session := readyFlatPlayerRestored(t, map[core.BlockPos]core.BlockID{
+		target: core.StoneID,
+	}, stocked)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+		Yaw: float32(math.Pi), Slot: 3,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 0 || len(result.Changes) != 1 ||
+		result.Changes[0].Changes[0] != (sim.BlockChange{Position: want, Block: core.DirtID}) {
+		t.Fatalf("放置 result=%+v", result)
+	}
+	if len(result.Hotbars) != 1 {
+		t.Fatalf("Hotbars=%+v，想要恰好一份", result.Hotbars)
+	}
+	got := result.Hotbars[0].Hotbar.Slots[3]
+	if got != (core.ItemStack{Item: core.ItemDirt, Count: 1}) {
+		t.Fatalf("栏位 3 = %+v，想要剩余 1 个泥土", got)
+	}
+}
+
+func TestHotbarPlaceLastItemClearsSlot(t *testing.T) {
+	var stocked core.Hotbar
+	stocked.Slots[0] = core.ItemStack{Item: core.ItemDirt, Count: 1}
+	target := core.BlockPos{X: 0, Y: 2, Z: 3}
+	engine, session := readyFlatPlayerRestored(t, map[core.BlockPos]core.BlockID{
+		target: core.StoneID,
+	}, stocked)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+		Yaw: float32(math.Pi), Slot: 0,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 0 || len(result.Hotbars) != 1 {
+		t.Fatalf("放置 result=%+v", result)
+	}
+	if result.Hotbars[0].Hotbar.Slots[0] != (core.ItemStack{}) {
+		t.Fatalf("栏位 0 = %+v，想要规范空栏位", result.Hotbars[0].Hotbar.Slots[0])
+	}
+}
+
+func TestHotbarPlaceRejectsEmptyOrInvalidSlot(t *testing.T) {
+	cases := []struct {
+		name string
+		slot uint8
+		want sim.RejectReason
+	}{
+		{name: "空栏位", slot: 1, want: sim.RejectInvalidBlock},
+		{name: "越界栏位", slot: core.HotbarSlots, want: sim.RejectInvalidSlot},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stocked core.Hotbar
+			stocked.Slots[0] = core.ItemStack{Item: core.ItemDirt, Count: 1}
+			target := core.BlockPos{X: 0, Y: 2, Z: 3}
+			engine, session := readyFlatPlayerRestored(t, map[core.BlockPos]core.BlockID{
+				target: core.StoneID,
+			}, stocked)
+			engine.Enqueue(sim.Command{
+				Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+				Yaw: float32(math.Pi), Slot: tc.slot,
+			})
+
+			result := engine.Step()
+			if len(result.Rejected) != 1 || result.Rejected[0].Reason != tc.want ||
+				len(result.Changes) != 0 || len(result.Hotbars) != 0 {
+				t.Fatalf("result=%+v", result)
+			}
+			if got := currentHotbar(t, engine, session); got != stocked {
+				t.Fatalf("失败放置改变了快捷栏：%+v", got)
+			}
+		})
+	}
+}
+
+func TestHotbarFailedPlaceKeepsItem(t *testing.T) {
+	var stocked core.Hotbar
+	stocked.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+	engine, session := readyFlatPlayerRestored(t, nil, stocked)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+		Pitch: lookDown, Slot: 0,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectOccupied ||
+		len(result.Changes) != 0 || len(result.Hotbars) != 0 {
+		t.Fatalf("碰撞放置 result=%+v", result)
+	}
+	if got := currentHotbar(t, engine, session); got != stocked {
+		t.Fatalf("失败放置扣除了物品：%+v", got)
+	}
+}
+
+func TestHotbarSameTickCommandsPublishFinalStateOnce(t *testing.T) {
+	engine, session := readyFlatPlayer(t)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 4, Kind: sim.CommandPlaceBlock,
+		Pitch: lookDown, Slot: 0,
+	})
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
+	})
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 3, Kind: sim.CommandSelectHotbar, Slot: 7,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 0 {
+		t.Fatalf("同 tick 序列 result=%+v", result)
+	}
+	if len(result.Hotbars) != 1 {
+		t.Fatalf("Hotbars=%+v，每 tick 最多一份最终状态", result.Hotbars)
+	}
+	hotbar := result.Hotbars[0].Hotbar
+	if hotbar.Selected != 7 || hotbar.Slots[0] != (core.ItemStack{}) {
+		t.Fatalf("最终快捷栏 = %+v，想要选中 7 且采集物已被放置消耗", hotbar)
+	}
+	want := sim.BlockChange{Position: core.BlockPos{X: 0, Y: 0, Z: 0}, Block: core.GrassID}
+	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 1 ||
+		result.Changes[0].Changes[0] != want {
+		t.Fatalf("同 tick 世界变更 =%+v", result.Changes)
+	}
+}
+
+func TestHotbarSurvivesSnapshotRestore(t *testing.T) {
+	var stocked core.Hotbar
+	stocked.Selected = 6
+	stocked.Slots[2] = core.ItemStack{Item: core.ItemGrass, Count: 9}
+	engine, session := readyFlatPlayerRestored(t, nil, stocked)
+
+	snapshot, ok := engine.PlayerSnapshot(session)
+	if !ok || snapshot.Hotbar != stocked {
+		t.Fatalf("PlayerSnapshot=%+v ok=%v，想要 %+v", snapshot, ok, stocked)
+	}
+	unregistered, ok := engine.UnregisterSession(session)
+	if !ok || unregistered.Hotbar != stocked {
+		t.Fatalf("UnregisterSession=%+v ok=%v", unregistered, ok)
+	}
+}
+
+func TestPlayerHashCoversHotbar(t *testing.T) {
+	var stocked core.Hotbar
+	stocked.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+	base, session := readyFlatPlayer(t)
+	stockedEngine, stockedSession := readyFlatPlayerRestored(t, nil, stocked)
+
+	baseHash, ok := base.PlayerHash(session)
+	if !ok {
+		t.Fatal("PlayerHash 应当可用")
+	}
+	stockedHash, ok := stockedEngine.PlayerHash(stockedSession)
+	if !ok {
+		t.Fatal("PlayerHash 应当可用")
+	}
+	if baseHash == stockedHash {
+		t.Fatal("玩家哈希必须覆盖快捷栏")
+	}
+}
+
+// currentHotbar 读取引擎当前的权威快捷栏值。
+func currentHotbar(t *testing.T, engine *sim.Engine, session sim.SessionID) core.Hotbar {
+	t.Helper()
+	snapshot, ok := engine.PlayerSnapshot(session)
+	if !ok {
+		t.Fatalf("会话 %d 没有权威快照", session)
+	}
+	return snapshot.Hotbar
+}

@@ -19,6 +19,7 @@ const (
 	CommandBreakBlock
 	CommandPlaceBlock
 	CommandResync
+	CommandSelectHotbar
 )
 
 // LookDirection 把玩家 look 角转换为单位方向；yaw=0、pitch=0 朝向 -Z。
@@ -42,6 +43,8 @@ const (
 	RejectOccupied
 	RejectInvalidInput   RejectReason = 6
 	RejectPlayerNotReady RejectReason = 7
+	RejectInvalidSlot    RejectReason = 8
+	RejectHotbarFull     RejectReason = 9
 )
 
 type Command struct {
@@ -52,7 +55,7 @@ type Command struct {
 	Center       core.ChunkPos
 	Chunk        core.ChunkPos
 	HaveRevision uint64
-	Block        core.BlockID
+	Slot         uint8
 	MoveX        int8
 	MoveZ        int8
 	Jump         bool
@@ -114,5 +117,6 @@ type TickResult struct {
 	Rejected []Rejection
 	Resync   []ResyncRequest
 	Players  []PlayerUpdate
+	Hotbars  []HotbarUpdate
 	Tick     uint64
 }

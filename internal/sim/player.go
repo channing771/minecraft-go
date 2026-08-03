@@ -41,12 +41,20 @@ type PlayerRestore struct {
 	Yaw, Pitch     float32
 	SpawnDimension core.DimensionID
 	SpawnAnchor    core.ChunkPos
+	Hotbar         core.Hotbar
 }
 
 type PlayerSnapshot struct {
 	Current    PlayerLocation
 	Yaw, Pitch float32
 	Safe       *PlayerLocation
+	Hotbar     core.Hotbar
+}
+
+// HotbarUpdate 是一名玩家在本 tick 的最终权威快捷栏，只发送给所属会话。
+type HotbarUpdate struct {
+	Session SessionID
+	Hotbar  core.Hotbar
 }
 
 type restoreCandidate struct {
@@ -62,6 +70,8 @@ type playerState struct {
 	yaw, pitch        float32
 	lastInputSequence uint64
 	reset             bool
+	hotbar            core.Hotbar
+	hotbarDirty       bool
 
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
@@ -82,6 +92,9 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 	if engine.sessions[id] != nil {
 		panic("sim: duplicate registered session")
 	}
+	if !restore.Hotbar.Valid() {
+		panic("sim: register session with invalid hotbar")
+	}
 	candidates := spawnCandidates(restore.SpawnAnchor)
 	player := &playerState{
 		lifecycle: PlayerPendingSpawn,
@@ -93,6 +106,8 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		}},
 		yaw:             restore.Yaw,
 		pitch:           restore.Pitch,
+		hotbar:          restore.Hotbar,
+		hotbarDirty:     true,
 		restoreWanted:   make(map[core.ChunkKey]struct{}),
 		candidates:      candidates,
 		candidateChunks: spawnCandidateChunks(candidates),
@@ -174,8 +189,9 @@ func (player *playerState) snapshot(
 			Dimension: dimension,
 			Position:  player.state.Position,
 		},
-		Yaw:   player.yaw,
-		Pitch: player.pitch,
+		Yaw:    player.yaw,
+		Pitch:  player.pitch,
+		Hotbar: player.hotbar,
 	}
 	if player.safe != nil {
 		safe := *player.safe
@@ -190,7 +206,8 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 		return [32]byte{}, false
 	}
 	player := session.player
-	var encoded [53]byte
+	// 53 字节玩家状态 + 1 字节选中栏位 + 每栏位 3 字节。
+	var encoded [53 + 1 + core.HotbarSlots*3]byte
 	offset := 0
 	putUint32 := func(value uint32) {
 		binary.LittleEndian.PutUint32(encoded[offset:], value)
@@ -225,6 +242,15 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 	putBool(player.input.Jump)
 	putFloat32(player.input.Yaw)
 	binary.LittleEndian.PutUint64(encoded[offset:], player.lastInputSequence)
+	offset += 8
+	encoded[offset] = player.hotbar.Selected
+	offset++
+	for _, stack := range player.hotbar.Slots {
+		binary.LittleEndian.PutUint16(encoded[offset:], uint16(stack.Item))
+		offset += 2
+		encoded[offset] = stack.Count
+		offset++
+	}
 	return sha256.Sum256(encoded[:]), true
 }
 
@@ -257,6 +283,26 @@ func (engine *Engine) publishPlayers(result *TickResult) {
 		session := engine.sessions[id]
 		result.Players = append(result.Players, session.player.update(id, session))
 		session.player.reset = false
+	}
+}
+
+// publishHotbars 为每名 Active 且 dirty 的玩家产出本 tick 唯一一份最终快捷栏。
+func (engine *Engine) publishHotbars(result *TickResult) {
+	sessions := make([]SessionID, 0, len(engine.sessions))
+	for id, session := range engine.sessions {
+		if session.player != nil && session.player.hotbarDirty &&
+			session.player.lifecycle == PlayerActive {
+			sessions = append(sessions, id)
+		}
+	}
+	sort.Slice(sessions, func(i, j int) bool { return sessions[i] < sessions[j] })
+	for _, id := range sessions {
+		player := engine.sessions[id].player
+		result.Hotbars = append(result.Hotbars, HotbarUpdate{
+			Session: id,
+			Hotbar:  player.hotbar,
+		})
+		player.hotbarDirty = false
 	}
 }
 
@@ -395,6 +441,7 @@ func (player *playerState) beginReset() {
 	}}
 	player.input = physics.Input{}
 	player.reset = false
+	player.hotbarDirty = true
 	player.nextCandidate = 0
 	player.exhausted = false
 	player.exhaustedRevisions = nil

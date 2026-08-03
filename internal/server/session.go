@@ -608,7 +608,6 @@ func translateClientMessage(
 			Kind:     sim.CommandPlaceBlock,
 			Yaw:      message.Yaw,
 			Pitch:    message.Pitch,
-			Block:    message.Block,
 		}, true
 	case network.RequestChunkResync:
 		return sim.Command{

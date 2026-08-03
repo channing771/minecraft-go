@@ -188,6 +188,28 @@ func (engine *Engine) Step() TickResult {
 			}
 			player.yaw = yaw
 			player.pitch = command.Pitch
+		case CommandSelectHotbar:
+			if session.player == nil || session.player.lifecycle != PlayerActive {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectPlayerNotReady,
+				})
+				continue
+			}
+			if command.Slot >= core.HotbarSlots {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectInvalidSlot,
+				})
+				continue
+			}
+			player := session.player
+			if player.hotbar.Selected != command.Slot {
+				player.hotbar.Selected = command.Slot
+				player.hotbarDirty = true
+			}
 		case CommandResync:
 			result.Resync = append(result.Resync, ResyncRequest{
 				Session:      command.Session,
@@ -233,6 +255,7 @@ func (engine *Engine) Step() TickResult {
 	sortChunkKeys(result.Ready)
 
 	result.Tick = engine.tick.Add(1)
+	engine.publishHotbars(&result)
 	engine.publishPlayers(&result)
 	return result
 }
@@ -580,8 +603,24 @@ func (engine *Engine) executeInteraction(
 	if _, subscribed := session.wanted[originKey]; !subscribed {
 		return RejectInvalidRay, true
 	}
-	if command.Kind == CommandPlaceBlock && !placeable(command.Block) {
-		return RejectInvalidBlock, true
+	player := session.player
+	// 放置先从请求栏位解析物品和方块，并在快捷栏副本上预演扣除。
+	var placement core.BlockID
+	var consumed core.Hotbar
+	if command.Kind == CommandPlaceBlock {
+		if command.Slot >= core.HotbarSlots {
+			return RejectInvalidSlot, true
+		}
+		block, ok := core.ItemPlacement(player.hotbar.Slots[command.Slot].Item)
+		if !ok {
+			return RejectInvalidBlock, true
+		}
+		next, ok := player.hotbar.Consume(command.Slot)
+		if !ok {
+			return RejectInvalidBlock, true
+		}
+		placement = block
+		consumed = next
 	}
 
 	hit, ok, err := core.RaycastBlocks(
@@ -615,6 +654,15 @@ func (engine *Engine) executeInteraction(
 		if block == core.BedrockID {
 			return RejectProtectedBlock, true
 		}
+		drop, ok := core.BlockDrop(block)
+		if !ok {
+			return RejectProtectedBlock, true
+		}
+		// 只有快捷栏副本能接收掉落物时才允许破坏方块。
+		collected, ok := player.hotbar.Add(drop)
+		if !ok {
+			return RejectHotbarFull, true
+		}
 		_, changed, setErr := dimension.SetBlock(hit.Block, core.AirID)
 		if setErr != nil {
 			return mapSetBlockError(setErr), true
@@ -626,6 +674,8 @@ func (engine *Engine) executeInteraction(
 				core.AirID,
 				pending,
 			)
+			player.hotbar = collected
+			player.hotbarDirty = true
 		}
 		return 0, false
 
@@ -642,14 +692,14 @@ func (engine *Engine) executeInteraction(
 			return RejectChunkNotReady, true
 		}
 		occupied := block != core.AirID || placementOverlapsPlayer(
-			command.Block,
+			placement,
 			target,
-			session.player.state.Position,
+			player.state.Position,
 		)
 		if occupied {
 			return RejectOccupied, true
 		}
-		_, changed, setErr := dimension.SetBlock(target, command.Block)
+		_, changed, setErr := dimension.SetBlock(target, placement)
 		if setErr != nil {
 			return mapSetBlockError(setErr), true
 		}
@@ -657,9 +707,11 @@ func (engine *Engine) executeInteraction(
 			engine.recordChange(
 				dimensionID,
 				target,
-				command.Block,
+				placement,
 				pending,
 			)
+			player.hotbar = consumed
+			player.hotbarDirty = true
 		}
 		return 0, false
 	}
@@ -759,10 +811,6 @@ func (engine *Engine) finishChanges(
 			Changes:      changes,
 		})
 	}
-}
-
-func placeable(block core.BlockID) bool {
-	return block == core.StoneID || block == core.DirtID || block == core.GrassID
 }
 
 func adjacentBlock(block core.BlockPos, face core.BlockFace) core.BlockPos {

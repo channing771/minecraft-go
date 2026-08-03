@@ -58,7 +58,8 @@ func BenchmarkEngineStepBlockChanges(b *testing.B) {
 	}
 
 	sequence := uint64(1)
-	placing := true
+	// 先挖掘再放置，使放置总能从栏位 0 取到刚采集的物品。
+	placing := false
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
@@ -67,7 +68,7 @@ func BenchmarkEngineStepBlockChanges(b *testing.B) {
 		}
 		if placing {
 			command.Kind = sim.CommandPlaceBlock
-			command.Block = core.StoneID
+			command.Slot = 0
 		} else {
 			command.Kind = sim.CommandBreakBlock
 		}

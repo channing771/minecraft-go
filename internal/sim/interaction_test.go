@@ -73,35 +73,36 @@ func TestEngineBreakValidation(t *testing.T) {
 }
 
 func TestEnginePlaceValidationAndWhitelist(t *testing.T) {
-	t.Run("invalid block", func(t *testing.T) {
+	t.Run("empty slot", func(t *testing.T) {
 		engine, session, _ := readyFlatEngine(t)
 		engine.Enqueue(sim.Command{
 			Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
-			Yaw: float32(math.Pi), Block: core.BarrierID,
+			Yaw: float32(math.Pi), Slot: 0,
 		})
 		assertRejected(t, engine.Step(), sim.RejectInvalidBlock)
 	})
 
 	t.Run("origin inside solid is occupied", func(t *testing.T) {
-		engine, session, _ := readyFlatEngine(t)
+		engine, session, _ := readyFlatEngineStocked(t, stockedHotbar(core.ItemStone))
 		engine.Enqueue(sim.Command{
 			Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
-			Pitch: -float32(math.Pi)/2 + 0.01, Block: core.StoneID,
+			Pitch: -float32(math.Pi)/2 + 0.01, Slot: 0,
 		})
 		assertRejected(t, engine.Step(), sim.RejectOccupied)
 	})
 
 	t.Run("stone dirt grass succeed", func(t *testing.T) {
-		blocks := []core.BlockID{core.StoneID, core.DirtID, core.GrassID}
-		for index, block := range blocks {
-			engine, session, chunkPos := readyFlatEngine(t)
+		items := []core.ItemID{core.ItemStone, core.ItemDirt, core.ItemGrass}
+		for index, item := range items {
+			block, _ := core.ItemPlacement(item)
+			engine, session, chunkPos := readyFlatEngineStocked(t, stockedHotbar(item))
 			engine.Enqueue(sim.Command{
 				Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
-				Yaw: float32(math.Pi), Block: block,
+				Yaw: float32(math.Pi), Slot: 0,
 			})
 			result := engine.Step()
 			if len(result.Rejected) != 0 {
-				t.Fatalf("block[%d]=%d 合法放置被拒绝: %+v", index, block, result.Rejected)
+				t.Fatalf("item[%d]=%d 合法放置被拒绝: %+v", index, item, result.Rejected)
 			}
 			chunk, _, _ := engine.CloneReadyChunk(core.ChunkKey{
 				Dimension: core.Overworld,
@@ -120,14 +121,18 @@ func TestPlayerIntentRejectsTraversalIntoUnknownAdjacentChunk(t *testing.T) {
 		command sim.Command
 	}{
 		{name: "break", command: sim.Command{Kind: sim.CommandBreakBlock}},
-		{name: "place", command: sim.Command{Kind: sim.CommandPlaceBlock, Block: core.StoneID}},
+		{name: "place", command: sim.Command{Kind: sim.CommandPlaceBlock, Slot: 0}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			engine := sim.NewEngine(0)
 			const session = sim.SessionID(1)
 			anchor := core.ChunkPos{X: 1}
-			engine.RegisterSession(session, core.Overworld, anchor)
+			engine.RegisterPlayer(session, sim.PlayerRestore{
+				SpawnDimension: core.Overworld,
+				SpawnAnchor:    anchor,
+				Hotbar:         stockedHotbar(core.ItemStone),
+			})
 			requested := engine.Step()
 			if len(requested.Acquire) != 1 || requested.Acquire[0] != (core.ChunkKey{
 				Dimension: core.Overworld,
@@ -171,6 +176,13 @@ func TestPlayerIntentRejectsTraversalIntoUnknownAdjacentChunk(t *testing.T) {
 			}
 		})
 	}
+}
+
+// stockedHotbar 返回栏位 0 装满该物品的快捷栏。
+func stockedHotbar(item core.ItemID) core.Hotbar {
+	var hotbar core.Hotbar
+	hotbar.Slots[0] = core.ItemStack{Item: item, Count: core.MaxStackCount}
+	return hotbar
 }
 
 func assertRejected(

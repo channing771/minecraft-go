@@ -297,16 +297,19 @@ func sortChunkKeysForTest(keys []core.ChunkKey) {
 }
 
 func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
-	engine, session, chunkPos := readyFlatEngine(t)
+	var stocked core.Hotbar
+	stocked.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	stocked.Slots[1] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+	engine, session, chunkPos := readyFlatEngineStocked(t, stocked)
 	yaw := float32(math.Pi)
 
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 4, Kind: sim.CommandPlaceBlock,
-		Yaw: yaw, Block: core.DirtID,
+		Yaw: yaw, Slot: 1,
 	})
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
-		Yaw: yaw, Block: core.StoneID,
+		Yaw: yaw, Slot: 0,
 	})
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 3, Kind: sim.CommandBreakBlock,
@@ -349,11 +352,11 @@ func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
 }
 
 func TestEngineBatchesChunkRevisionOncePerTick(t *testing.T) {
-	engine, session, chunkPos := readyFlatEngine(t)
+	engine, session, chunkPos := readyFlatEngineStocked(t, stockedHotbar(core.ItemStone))
 	for sequence := uint64(2); sequence <= 4; sequence++ {
 		engine.Enqueue(sim.Command{
 			Session: session, Sequence: sequence, Kind: sim.CommandPlaceBlock,
-			Yaw: float32(math.Pi), Block: core.StoneID,
+			Yaw: float32(math.Pi), Slot: 0,
 		})
 	}
 	result := engine.Step()
@@ -393,10 +396,10 @@ func TestEngineReplayIsDeterministic(t *testing.T) {
 		tick     uint64
 	}
 	run := func() replayState {
-		engine, session, chunkPos := readyFlatEngine(t)
+		engine, session, chunkPos := readyFlatEngineStocked(t, stockedHotbar(core.ItemGrass))
 		engine.Enqueue(sim.Command{
 			Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
-			Yaw: float32(math.Pi), Block: core.GrassID,
+			Yaw: float32(math.Pi), Slot: 0,
 		})
 		engine.Step()
 		hash, revision, ok := engine.ChunkHash(core.ChunkKey{
@@ -517,10 +520,22 @@ func (clock *oneTickClock) Stop() {
 
 func readyFlatEngine(t *testing.T) (*sim.Engine, sim.SessionID, core.ChunkPos) {
 	t.Helper()
+	return readyFlatEngineStocked(t, core.Hotbar{})
+}
+
+func readyFlatEngineStocked(
+	t *testing.T,
+	hotbar core.Hotbar,
+) (*sim.Engine, sim.SessionID, core.ChunkPos) {
+	t.Helper()
 	engine := sim.NewEngine(0)
 	session := sim.SessionID(1)
 	chunkPos := core.ChunkPos{}
-	engine.RegisterSession(session, core.Overworld, chunkPos)
+	engine.RegisterPlayer(session, sim.PlayerRestore{
+		SpawnDimension: core.Overworld,
+		SpawnAnchor:    chunkPos,
+		Hotbar:         hotbar,
+	})
 	requested := engine.Step()
 	wantKey := core.ChunkKey{Dimension: core.Overworld, Pos: chunkPos}
 	if !reflect.DeepEqual(requested.Acquire, []core.ChunkKey{wantKey}) {
