@@ -9,6 +9,11 @@ import (
 
 const MaxSmallPayload = 64 << 10
 
+const (
+	remotePlayerStateWireBytes   = 41
+	remotePlayerStatesMaxPayload = 8 + 1 + 7*remotePlayerStateWireBytes
+)
+
 var (
 	errInvalidDimension = errors.New("network: dimension is not overworld")
 	errInvalidCount     = errors.New("network: packet count is outside 1..4096")
@@ -185,9 +190,9 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 }
 
 func validateDecodedClientWirePacket(state State, packet ClientPacket) error {
-	// The login state machine must observe an otherwise well-formed hello in
+	// The login state machine must observe every structurally valid hello in
 	// order to return the frozen HandshakeVersionMismatch response. Outbound
-	// callers remain unable to encode an unsupported version.
+	// callers remain unable to encode unsupported versions.
 	if state == StateHandshake {
 		if _, ok := packet.(ClientHello); ok {
 			return nil
@@ -281,6 +286,31 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 		case Disconnect:
 			e.u8(uint8(message.Code))
 			e.string(message.Message, 256)
+		case RemotePlayerSpawn:
+			e.data = append(e.data, message.PlayerID[:]...)
+			e.string(message.DisplayName, 128)
+			e.u64(message.ServerTick)
+			e.i32(int32(message.Dimension))
+			for _, value := range message.Position {
+				e.f32(value)
+			}
+			e.f32(message.Yaw)
+			e.f32(message.Pitch)
+		case RemotePlayerDespawn:
+			e.data = append(e.data, message.PlayerID[:]...)
+		case RemotePlayerStates:
+			e.u64(message.ServerTick)
+			e.uvarint(uint32(len(message.Players)))
+			for _, player := range message.Players {
+				e.data = append(e.data, player.PlayerID[:]...)
+				e.i32(int32(player.Dimension))
+				for _, value := range player.Position {
+					e.f32(value)
+				}
+				e.f32(player.Yaw)
+				e.f32(player.Pitch)
+				e.bool(player.Reset)
+			}
 		default:
 			return 0, nil, codecError("encode server", state, packetID, invalidServerPacket(state, packet))
 		}
@@ -293,6 +323,9 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 func decodeServerControlPayload(state State, packetID uint32, payload []byte) (ServerPacket, error) {
 	if err := checkSmallPayload(payload); err != nil {
 		return nil, codecError("decode server", state, packetID, err)
+	}
+	if state == StatePlay && packetID == 9 && len(payload) > remotePlayerStatesMaxPayload {
+		return nil, codecError("decode server", state, packetID, errors.New("network: remote player states payload exceeds 296 bytes"))
 	}
 	if state == StatePlay && packetID == 0 {
 		return nil, codecError("decode server", state, packetID, errSnapshotDelegated)
@@ -410,6 +443,44 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 				message, err = d.string(256, 256)
 			}
 			packet = Disconnect{Code: DisconnectCode(code), Message: message}
+		case 7:
+			var spawn RemotePlayerSpawn
+			if data, readErr := d.take(len(spawn.PlayerID)); readErr != nil {
+				err = readErr
+			} else {
+				copy(spawn.PlayerID[:], data)
+				spawn.DisplayName, err = d.string(128, 32)
+			}
+			if err == nil {
+				spawn.ServerTick, err = d.u64()
+			}
+			var dimension int32
+			if err == nil {
+				dimension, err = d.i32()
+				spawn.Dimension = core.DimensionID(dimension)
+			}
+			for index := range spawn.Position {
+				if err == nil {
+					spawn.Position[index], err = d.f32()
+				}
+			}
+			if err == nil {
+				spawn.Yaw, err = d.f32()
+			}
+			if err == nil {
+				spawn.Pitch, err = d.f32()
+			}
+			packet = spawn
+		case 8:
+			var despawn RemotePlayerDespawn
+			if data, readErr := d.take(len(despawn.PlayerID)); readErr != nil {
+				err = readErr
+			} else {
+				copy(despawn.PlayerID[:], data)
+			}
+			packet = despawn
+		case 9:
+			packet, err = decodeRemotePlayerStates(&d)
 		default:
 			return nil, codecError("decode server", state, packetID, errUnknownPacketID)
 		}
@@ -426,6 +497,56 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 		return nil, codecError("decode server", state, packetID, err)
 	}
 	return packet, nil
+}
+
+func decodeRemotePlayerStates(d *byteDecoder) (ServerPacket, error) {
+	var result RemotePlayerStates
+	serverTick, err := d.u64()
+	result.ServerTick = serverTick
+	var count uint32
+	if err == nil {
+		count, err = d.uvarint()
+	}
+	if err == nil && (count < 1 || count > 7) {
+		err = errors.New("network: remote player state count is outside 1..7")
+	}
+	if err == nil && len(d.data)-d.offset < int(count)*remotePlayerStateWireBytes {
+		err = errors.New("network: remote player states exceed remaining payload")
+	}
+	if err == nil {
+		result.Players = make([]RemotePlayerState, int(count))
+		for index := range result.Players {
+			player := &result.Players[index]
+			var id []byte
+			id, err = d.take(len(player.PlayerID))
+			if err == nil {
+				copy(player.PlayerID[:], id)
+			}
+			var dimension int32
+			if err == nil {
+				dimension, err = d.i32()
+				player.Dimension = core.DimensionID(dimension)
+			}
+			for component := range player.Position {
+				if err == nil {
+					player.Position[component], err = d.f32()
+				}
+			}
+			if err == nil {
+				player.Yaw, err = d.f32()
+			}
+			if err == nil {
+				player.Pitch, err = d.f32()
+			}
+			if err == nil {
+				player.Reset, err = d.bool()
+			}
+			if err != nil {
+				break
+			}
+		}
+	}
+	return result, err
 }
 
 func decodeBlockChanges(d *byteDecoder) (ServerPacket, error) {

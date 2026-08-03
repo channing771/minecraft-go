@@ -49,6 +49,57 @@ func TestRunTicksCancellationDoesNotCloseWorldStore(t *testing.T) {
 	shutdownServerForTest(t, running)
 }
 
+func TestRunTicksReportsTickerScheduledTime(t *testing.T) {
+	type tickSample struct {
+		scheduled time.Time
+		completed time.Time
+		duration  time.Duration
+	}
+	config := registryTestConfig()
+	samples := make(chan tickSample, 1)
+	config.ScheduledTickObserver = func(scheduled time.Time, duration time.Duration) {
+		select {
+		case samples <- tickSample{
+			scheduled: scheduled,
+			completed: time.Now(),
+			duration:  duration,
+		}:
+		default:
+		}
+	}
+	running := NewWorld(config, playerTestGenerator{}, testStore())
+	t.Cleanup(func() { shutdownServerForTest(t, running) })
+
+	running.stepMu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- running.RunTicks(ctx) }()
+	time.Sleep(120 * time.Millisecond)
+	running.stepMu.Unlock()
+
+	var sample tickSample
+	select {
+	case sample = <-samples:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("RunTicks did not report a scheduled tick")
+	}
+	cancel()
+	if err := <-runDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunTicks error = %v", err)
+	}
+	if sample.scheduled.IsZero() {
+		t.Fatal("RunTicks reported a zero scheduled time")
+	}
+	stepStarted := sample.completed.Add(-sample.duration)
+	if blockedFor := stepStarted.Sub(sample.scheduled); blockedFor < 20*time.Millisecond {
+		t.Fatalf(
+			"scheduled tick drifted to lock acquisition: blocked=%s scheduled=%s started=%s",
+			blockedFor, sample.scheduled, stepStarted,
+		)
+	}
+}
+
 func TestTrustedObserverIsSeparateAndHasNoHeartbeat(t *testing.T) {
 	clock := newManualHeartbeatClock()
 	config := heartbeatTestConfig(clock)

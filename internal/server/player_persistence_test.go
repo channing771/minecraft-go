@@ -269,6 +269,12 @@ func TestPlayerPersistenceConfirmPersistsLatestMissingSnapshot(t *testing.T) {
 	}
 	p.Confirm(id)
 	p.Confirm(id)
+	p.mu.Lock()
+	activeAfterConfirm := p.cache[id] != nil && p.cache[id].active
+	p.mu.Unlock()
+	if !activeAfterConfirm {
+		t.Fatal("Confirm cleared active before the session exit lifecycle")
+	}
 	if err := p.Poll(6000); err != nil {
 		t.Fatal(err)
 	}
@@ -280,6 +286,7 @@ func TestPlayerPersistenceConfirmPersistsLatestMissingSnapshot(t *testing.T) {
 	}
 	store.complete(nil)
 	pollPlayerPersistenceUntilIdle(t, p, 6001)
+	p.Deactivate(id)
 }
 
 // 捕获：Abort 保留了 staged nickname，或 Observe 在 Confirm 前错误地提交传入 nickname。
@@ -404,7 +411,181 @@ func TestPlayerPersistenceCoalescesLatestSnapshotBehindSingleInFlightSave(t *tes
 	assertNoPlayerSaveStarted(t, store)
 }
 
-// 捕获：失败保存丢弃了最新离线快照，或 dirty/in-flight 状态错误允许另一身份占用唯一 cache。
+// 捕获：两个 worker 的 completion 以到达顺序直接应用，使同一 tick 的错误顺序不确定。
+func TestPlayerSaveCompletionBatchAppliesByPlayerID(t *testing.T) {
+	store := newConcurrentPlayerSaveStore()
+	idOne, idTwo := playerID(1), playerID(2)
+	store.put(storedPlayerForTest(idOne, 7, "One", testPlayerSnapshot(1)))
+	store.put(storedPlayerForTest(idTwo, 7, "Two", testPlayerSnapshot(2)))
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+	for _, prepared := range []struct {
+		id   core.PlayerID
+		name string
+	}{{idOne, "One"}, {idTwo, "Two"}} {
+		if _, err := p.Prepare(
+			context.Background(), prepared.id, prepared.name, testMetadata(),
+		); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Observe(
+			prepared.id, prepared.name, testPlayerSnapshot(10), 0, true,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := []storage.PlayerSave{store.receiveStarted(t), store.receiveStarted(t)}
+	assertPlayerSavesContainIDs(t, started, idOne, idTwo)
+
+	store.complete(idTwo, errors.New("two"))
+	waitForPlayerSaveCompletionDepth(t, p.completions, 1)
+	store.complete(idOne, errors.New("one"))
+	waitForPlayerSaveCompletionDepth(t, p.completions, 2)
+	if err := p.Poll(0); err == nil || err.Error() != "one\ntwo" {
+		t.Fatalf("reverse completion error=%q, want PlayerID order %q", err, "one\ntwo")
+	}
+}
+
+// 捕获：一个身份失败后全局阻塞另一个身份，或 retry 被较新的 Observe 改写 revision/value。
+func TestPlayerSaveRetryIsPerPlayer(t *testing.T) {
+	store := newConcurrentPlayerSaveStore()
+	idOne, idTwo := playerID(1), playerID(2)
+	store.put(storedPlayerForTest(idOne, 7, "One", testPlayerSnapshot(1)))
+	store.put(storedPlayerForTest(idTwo, 7, "Two", testPlayerSnapshot(2)))
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+	for _, prepared := range []struct {
+		id   core.PlayerID
+		name string
+	}{{idOne, "One"}, {idTwo, "Two"}} {
+		if _, err := p.Prepare(
+			context.Background(), prepared.id, prepared.name, testMetadata(),
+		); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Observe(
+			prepared.id, prepared.name, testPlayerSnapshot(10), 0, true,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := []storage.PlayerSave{store.receiveStarted(t), store.receiveStarted(t)}
+	assertPlayerSavesContainIDs(t, started, idOne, idTwo)
+	firstOne := playerSaveForID(t, started, idOne)
+	if err := p.Observe(idOne, "One", testPlayerSnapshot(20), 0, false); err != nil {
+		t.Fatal(err)
+	}
+
+	store.complete(idOne, errors.New("disk full"))
+	store.complete(idTwo, nil)
+	waitForPlayerSaveCompletionDepth(t, p.completions, 2)
+	if err := p.Poll(0); err == nil || err.Error() != "disk full" {
+		t.Fatalf("Poll error=%v, want ID one failure only", err)
+	}
+
+	p.mu.Lock()
+	one, two := p.cache[idOne], p.cache[idTwo]
+	if one == nil || one.retry == nil {
+		p.mu.Unlock()
+		t.Fatal("failed ID did not retain retry")
+	}
+	retry := *one.retry
+	twoPersisted, twoDirty, twoRetry := two.persisted, two.dirty, two.retry
+	p.mu.Unlock()
+	if retry.Attempt != 2 || retry.NextTick != 20 ||
+		!playerSavesEqual(retry.Save, firstOne) {
+		t.Fatalf("retry=%+v, want attempt 2 at tick 20 with frozen save %+v", retry, firstOne)
+	}
+	if twoPersisted != 8 || twoDirty || twoRetry != nil {
+		t.Fatalf("successful ID state persisted=%d dirty=%v retry=%+v", twoPersisted, twoDirty, twoRetry)
+	}
+
+	if err := p.Poll(19); err != nil {
+		t.Fatal(err)
+	}
+	store.assertNoStart(t)
+	if err := p.Poll(20); err != nil {
+		t.Fatal(err)
+	}
+	retried := store.receiveStarted(t)
+	if !playerSavesEqual(retried, firstOne) {
+		t.Fatalf("retry SavePlayer=%+v, want frozen=%+v", retried, firstOne)
+	}
+	store.assertNoStart(t)
+	store.complete(idOne, nil)
+	pollPlayerPersistenceUntilIdle(t, p, 20)
+
+	if err := p.Poll(6000); err != nil {
+		t.Fatal(err)
+	}
+	fresh := store.receiveStarted(t)
+	if fresh.PlayerID != idOne || fresh.Revision != 9 ||
+		fresh.Current.Position != [3]float32{20, 70, -20} {
+		t.Fatalf("post-retry latest SavePlayer=%+v", fresh)
+	}
+	store.assertNoStart(t)
+	store.complete(idOne, nil)
+	pollPlayerPersistenceUntilIdle(t, p, 6001)
+}
+
+// 捕获：同一 tick 只调度一个 eligible identity，或 map 迭代顺序泄漏到 jobs 队列。
+func TestPlayerSaveDispatchesEligiblePlayersInPlayerIDOrder(t *testing.T) {
+	t.Run("autosave", func(t *testing.T) {
+		store := newConcurrentPlayerSaveStore()
+		p := newPlayerPersistence(store, playerPersistenceTestConfig())
+		t.Cleanup(p.CloseWorker)
+		for _, value := range []byte{3, 1, 2} {
+			id := playerID(value)
+			name := string(rune('A' + value))
+			store.put(storedPlayerForTest(id, 7, name, testPlayerSnapshot(float32(value))))
+			if _, err := p.Prepare(context.Background(), id, name, testMetadata()); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.Observe(id, name, testPlayerSnapshot(10), 0, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+		blockPlayerSaveWorkers(t, p, store)
+
+		if err := p.Poll(6000); err != nil {
+			t.Fatal(err)
+		}
+		assertQueuedPlayerSaveJobIDs(t, p.jobs, playerID(1), playerID(2), playerID(3))
+	})
+
+	t.Run("retry", func(t *testing.T) {
+		store := newConcurrentPlayerSaveStore()
+		p := newPlayerPersistence(store, playerPersistenceTestConfig())
+		t.Cleanup(p.CloseWorker)
+		for _, value := range []byte{2, 1} {
+			id := playerID(value)
+			name := string(rune('A' + value))
+			store.put(storedPlayerForTest(id, 7, name, testPlayerSnapshot(float32(value))))
+			if _, err := p.Prepare(context.Background(), id, name, testMetadata()); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.Observe(id, name, testPlayerSnapshot(10), 0, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		started := []storage.PlayerSave{store.receiveStarted(t), store.receiveStarted(t)}
+		assertPlayerSavesContainIDs(t, started, playerID(1), playerID(2))
+		store.complete(playerID(2), errors.New("two"))
+		store.complete(playerID(1), errors.New("one"))
+		waitForPlayerSaveCompletionDepth(t, p.completions, 2)
+		if err := p.Poll(0); err == nil {
+			t.Fatal("failed saves were not surfaced")
+		}
+		blockPlayerSaveWorkers(t, p, store)
+
+		if err := p.Poll(20); err != nil {
+			t.Fatal(err)
+		}
+		assertQueuedPlayerSaveJobIDs(t, p.jobs, playerID(1), playerID(2))
+	})
+}
+
+// 捕获：失败保存丢弃最新离线快照，或一个 retry 项错误阻塞另一身份使用剩余 cache 容量。
 func TestDirtyDisconnectedPlayerBlocksOnlyDifferentIdentity(t *testing.T) {
 	store := newControllablePlayerStore()
 	p := newPlayerPersistence(store, playerPersistenceTestConfig())
@@ -424,13 +605,16 @@ func TestDirtyDisconnectedPlayerBlocksOnlyDifferentIdentity(t *testing.T) {
 	if err := pollPlayerPersistenceUntilError(t, p, 21); err == nil {
 		t.Fatal("save failure not surfaced")
 	}
-	if _, err := p.Prepare(context.Background(), idB, "B", testMetadata()); !errors.Is(err, ErrPlayerPersistenceBackpressure) {
-		t.Fatalf("different ID err=%v", err)
+	restoredB, err := p.Prepare(context.Background(), idB, "B", testMetadata())
+	if err != nil || restoredB.Current != nil || restoredB.Safe != nil {
+		t.Fatalf("different ID restore=%+v err=%v, want independent cache slot", restoredB, err)
 	}
+	p.Abort(idB)
 	restored, err := p.Prepare(context.Background(), idA, "A", testMetadata())
 	if err != nil || restored.Current == nil || restored.Current.Position[0] != 10 {
 		t.Fatalf("restore=%+v err=%v", restored, err)
 	}
+	p.Abort(idA)
 }
 
 // 捕获：retry 未按首个 20-tick backoff 调度，或复用了较新快照/新 revision 而破坏幂等保存。
@@ -805,6 +989,233 @@ func TestPlayerFlushCanceledContextLeavesRetryUndispatchedAndRetryable(t *testin
 	}
 }
 
+// 捕获：Flush 在首错后没有继续处理其他身份，或把后续 completion 遗留给下一次 Flush。
+func TestPlayerFlushDoesNotLeaveConcurrentFailureForNextFlush(t *testing.T) {
+	store := newConcurrentPlayerSaveStore()
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+	for _, value := range []byte{2, 1} {
+		id := playerID(value)
+		name := string(rune('A' + value))
+		store.put(storedPlayerForTest(id, 7, name, testPlayerSnapshot(float32(value))))
+		if _, err := p.Prepare(context.Background(), id, name, testMetadata()); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Observe(id, name, testPlayerSnapshot(10), 0, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	firstFlush := make(chan error, 1)
+	go func() { firstFlush <- p.Flush(context.Background()) }()
+	first := store.receiveStarted(t)
+	if first.PlayerID != playerID(1) {
+		t.Fatalf("first Flush SavePlayer ID=%s, want sorted ID %s", first.PlayerID, playerID(1))
+	}
+	store.assertNoStart(t)
+	wantErr := errors.New("disk unavailable")
+	store.complete(first.PlayerID, wantErr)
+	second := store.receiveStarted(t)
+	if second.PlayerID != playerID(2) {
+		t.Fatalf("first Flush second ID=%s, want %s", second.PlayerID, playerID(2))
+	}
+	store.complete(second.PlayerID, nil)
+	select {
+	case err := <-firstFlush:
+		if !errors.Is(err, wantErr) || err.Error() !=
+			"save player 00000000-0000-4000-8000-000000000001 revision 8: disk unavailable" {
+			t.Fatalf("first Flush error=%v, want %v", err, wantErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first failed Flush did not return")
+	}
+
+	secondFlush := make(chan error, 1)
+	go func() { secondFlush <- p.Flush(context.Background()) }()
+	retry := store.receiveStarted(t)
+	if retry.PlayerID != playerID(1) || !playerSavesEqual(retry, first) {
+		t.Fatalf("healed Flush retry=%+v, want frozen=%+v", retry, first)
+	}
+	store.complete(retry.PlayerID, nil)
+	select {
+	case err := <-secondFlush:
+		if err != nil {
+			t.Fatalf("healed second Flush error=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("healed second Flush did not return")
+	}
+}
+
+// 捕获：Flush 继承 Poll 已分派的多 ID in-flight 后在首错立即返回，遗留旧 completion 污染下次 Flush。
+func TestPlayerFlushDrainsInheritedInflightBatchBeforeReturning(t *testing.T) {
+	store := newConcurrentPlayerSaveStore()
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+	for _, value := range []byte{2, 1} {
+		id := playerID(value)
+		name := string(rune('A' + value))
+		store.put(storedPlayerForTest(id, 7, name, testPlayerSnapshot(float32(value))))
+		if _, err := p.Prepare(context.Background(), id, name, testMetadata()); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Observe(id, name, testPlayerSnapshot(10), 0, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := p.Poll(6000); err != nil {
+		t.Fatal(err)
+	}
+	started := []storage.PlayerSave{store.receiveStarted(t), store.receiveStarted(t)}
+	assertPlayerSavesContainIDs(t, started, playerID(1), playerID(2))
+
+	firstFlush := make(chan error, 1)
+	go func() { firstFlush <- p.Flush(context.Background()) }()
+	waitForPlayerFlushToWait(t, p)
+	oneErr, twoErr := errors.New("one"), errors.New("two")
+	store.complete(playerID(1), oneErr)
+	select {
+	case err := <-firstFlush:
+		t.Fatalf("Flush returned before inherited ID two completion: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	store.complete(playerID(2), twoErr)
+	select {
+	case err := <-firstFlush:
+		want := "save player 00000000-0000-4000-8000-000000000001 revision 8: one\n" +
+			"save player 00000000-0000-4000-8000-000000000002 revision 8: two"
+		if !errors.Is(err, oneErr) || !errors.Is(err, twoErr) || err.Error() != want {
+			t.Fatalf("inherited batch error=%q, want deterministic %q", err, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Flush did not return after inherited in-flight barrier completed")
+	}
+
+	secondFlush := make(chan error, 1)
+	go func() { secondFlush <- p.Flush(context.Background()) }()
+	for _, id := range []core.PlayerID{playerID(1), playerID(2)} {
+		retry := store.receiveStarted(t)
+		if retry.PlayerID != id {
+			t.Fatalf("healed retry PlayerID=%s, want %s", retry.PlayerID, id)
+		}
+		store.complete(id, nil)
+	}
+	select {
+	case err := <-secondFlush:
+		if err != nil {
+			t.Fatalf("healed Flush observed stale completion: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("healed Flush did not finish")
+	}
+}
+
+// 捕获：inherited batch 有失败时漏掉成功 ID 的 latest follow-up，或把其 completion 留给下次 Flush。
+func TestPlayerFlushInheritedFailureDoesNotDispatchForcedFollowup(t *testing.T) {
+	p, store := newTwoInflightPlayerPersistence(t)
+	if err := p.Observe(playerID(1), "B", testPlayerSnapshot(20), 6000, true); err != nil {
+		t.Fatal(err)
+	}
+
+	flushed := make(chan error, 1)
+	go func() { flushed <- p.Flush(context.Background()) }()
+	waitForPlayerFlushToWait(t, p)
+	store.complete(playerID(1), nil)
+	wantErr := errors.New("two failed")
+	store.complete(playerID(2), wantErr)
+	followup := store.receiveStarted(t)
+	if followup.PlayerID != playerID(1) || followup.Revision != 9 ||
+		followup.Current.Position != [3]float32{20, 70, -20} {
+		t.Fatalf("same-Flush forced follow-up=%+v", followup)
+	}
+	store.complete(playerID(1), nil)
+	select {
+	case err := <-flushed:
+		want := "save player 00000000-0000-4000-8000-000000000002 revision 8: two failed"
+		if !errors.Is(err, wantErr) || err.Error() != want {
+			t.Fatalf("inherited Flush error=%q, want %q", err, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("inherited Flush did not return after complete batch")
+	}
+	store.assertNoStart(t)
+
+	healed := make(chan error, 1)
+	go func() { healed <- p.Flush(context.Background()) }()
+	retry := store.receiveStarted(t)
+	if retry.PlayerID != playerID(2) || retry.Revision != 8 {
+		t.Fatalf("healed retry=%+v, want ID2 revision 8", retry)
+	}
+	store.complete(playerID(2), nil)
+	select {
+	case err := <-healed:
+		if err != nil {
+			t.Fatalf("healed Flush error=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("healed Flush did not finish")
+	}
+}
+
+// 捕获：等待 inherited peer 时 ctx cancel，已收集成功 completion 仍自动分派 forced follow-up。
+func TestPlayerFlushCanceledInheritedBatchDoesNotDispatchFollowup(t *testing.T) {
+	p, store := newTwoInflightPlayerPersistence(t)
+	if err := p.Observe(playerID(1), "B", testPlayerSnapshot(20), 6000, true); err != nil {
+		t.Fatal(err)
+	}
+	store.complete(playerID(1), nil)
+	waitForPlayerSaveCompletionDepth(t, p.completions, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	flushed := make(chan error, 1)
+	go func() { flushed <- p.Flush(ctx) }()
+	waitForPlayerFlushToWait(t, p)
+	waitForPlayerSaveCompletionDepth(t, p.completions, 0)
+	cancel()
+	select {
+	case err := <-flushed:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled inherited Flush error=%v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled inherited Flush did not return")
+	}
+	store.assertNoStart(t)
+	store.complete(playerID(2), nil)
+}
+
+// 捕获：相同 PlayerID 的旧 revision completion 被当作 inherited identity，提前释放 barrier
+// 并篡改当前 in-flight generation。
+func TestPlayerFlushInheritedBarrierRejectsForeignRevision(t *testing.T) {
+	p, store := newTwoInflightPlayerPersistence(t)
+	flushed := make(chan error, 1)
+	go func() { flushed <- p.Flush(context.Background()) }()
+	waitForPlayerFlushToWait(t, p)
+	p.completions <- playerSaveCompletion{
+		Job: playerSaveJob{Save: storage.PlayerSave{
+			PlayerID: playerID(1),
+			Revision: 7,
+		}},
+		Err: errors.New("foreign old revision"),
+	}
+	wantErr := errors.New("two failed")
+	store.complete(playerID(2), wantErr)
+	select {
+	case err := <-flushed:
+		t.Fatalf("Flush accepted foreign revision before exact ID1 completion: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	store.complete(playerID(1), nil)
+	select {
+	case err := <-flushed:
+		want := "save player 00000000-0000-4000-8000-000000000002 revision 8: two failed"
+		if !errors.Is(err, wantErr) || errors.Is(err, context.Canceled) || err.Error() != want {
+			t.Fatalf("exact inherited batch error=%q, want %q", err, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Flush did not return after exact inherited completion")
+	}
+}
+
 // 捕获：CloseWorker 只发 cancel 而未等待 worker 退出，留下后台 goroutine 或关闭时序竞态。
 func TestPlayerPersistenceCloseWorkerWaitsForWorkerExit(t *testing.T) {
 	previous := runtime.GOMAXPROCS(1)
@@ -887,7 +1298,7 @@ func TestPlayerPersistencePrepareDoesNotHoldCacheMutexDuringLoadPlayer(t *testin
 	}
 }
 
-// 捕获：并发 Prepare 的旧 Load 完成时覆盖较新的 cache，或同一身份触发两次 LoadPlayer。
+// 捕获：不同身份的 Prepare 被串行，或并发 Load 完成时互相覆盖 cache。
 func TestPlayerPersistencePrepareSerializesConcurrentLoadsAndKeepsLatestCache(t *testing.T) {
 	store := newControllablePlayerStore()
 	idA, idB := playerID(25), playerID(26)
@@ -907,41 +1318,37 @@ func TestPlayerPersistencePrepareSerializesConcurrentLoadsAndKeepsLatestCache(t 
 		close(releaseA)
 		t.Fatalf("first blocked LoadPlayer id=%s, want %s", got, idA)
 	}
-	if p.prepareMu.TryLock() {
-		p.prepareMu.Unlock()
-		close(releaseA)
-		t.Fatal("Prepare released its load transaction gate before LoadPlayer completed")
-	}
-
 	preparedB := make(chan playerPrepareResult, 1)
 	go func() {
 		restore, err := p.Prepare(context.Background(), idB, "B", testMetadata())
 		preparedB <- playerPrepareResult{restore: restore, err: err}
 	}()
-	close(releaseA)
-	if result := receivePlayerPrepareResult(t, preparedA); result.err != nil {
+	if got := receivePlayerLoadStarted(t, store); got != idB {
+		close(releaseA)
 		close(releaseB)
+		t.Fatalf("concurrent blocked LoadPlayer id=%s, want %s", got, idB)
+	}
+	close(releaseA)
+	close(releaseB)
+	if result := receivePlayerPrepareResult(t, preparedA); result.err != nil {
 		t.Fatal(result.err)
 	}
-	if got := receivePlayerLoadStarted(t, store); got != idB {
-		close(releaseB)
-		t.Fatalf("second blocked LoadPlayer id=%s, want %s", got, idB)
-	}
-	close(releaseB)
 	if result := receivePlayerPrepareResult(t, preparedB); result.err != nil {
 		t.Fatal(result.err)
 	}
 
 	p.mu.Lock()
-	cache := p.cache
+	cacheA, cacheB := p.cache[idA], p.cache[idB]
 	p.mu.Unlock()
-	if cache == nil || cache.id != idB || cache.persisted != 9 {
-		t.Fatalf("final cache=%+v, want latest id=%s revision=9", cache, idB)
+	if cacheA == nil || cacheA.persisted != 7 || cacheB == nil || cacheB.persisted != 9 {
+		t.Fatalf("concurrent caches: A=%+v B=%+v, want revisions 7/9", cacheA, cacheB)
 	}
 	if store.loadCallCount(idA) != 1 || store.loadCallCount(idB) != 1 {
 		t.Fatalf("LoadPlayer calls: idA=%d idB=%d, want one each",
 			store.loadCallCount(idA), store.loadCallCount(idB))
 	}
+	p.Abort(idA)
+	p.Abort(idB)
 }
 
 // 捕获：Load 移出 cache mutex 后，Abort 在 load 期间过早返回并丢失取消 staged nickname 的原子性。
@@ -1196,6 +1603,98 @@ func receivePlayerSave(t *testing.T, store *controllablePlayerStore) storage.Pla
 	}
 }
 
+func assertPlayerSavesContainIDs(
+	t *testing.T,
+	saves []storage.PlayerSave,
+	want ...core.PlayerID,
+) {
+	t.Helper()
+	if len(saves) != len(want) {
+		t.Fatalf("SavePlayer starts=%d, want %d", len(saves), len(want))
+	}
+	seen := make(map[core.PlayerID]bool, len(saves))
+	for _, save := range saves {
+		seen[save.PlayerID] = true
+	}
+	for _, id := range want {
+		if !seen[id] {
+			t.Fatalf("SavePlayer starts=%+v, missing PlayerID %s", saves, id)
+		}
+	}
+}
+
+func playerSaveForID(
+	t *testing.T,
+	saves []storage.PlayerSave,
+	id core.PlayerID,
+) storage.PlayerSave {
+	t.Helper()
+	for _, save := range saves {
+		if save.PlayerID == id {
+			return save
+		}
+	}
+	t.Fatalf("SavePlayer starts=%+v, missing PlayerID %s", saves, id)
+	return storage.PlayerSave{}
+}
+
+func blockPlayerSaveWorkers(
+	t *testing.T,
+	p *playerPersistence,
+	store *concurrentPlayerSaveStore,
+) {
+	t.Helper()
+	for _, value := range []byte{250, 251} {
+		p.jobs <- schedulerTestSaveJob(playerID(value), 1, float32(value))
+	}
+	started := []storage.PlayerSave{store.receiveStarted(t), store.receiveStarted(t)}
+	assertPlayerSavesContainIDs(t, started, playerID(250), playerID(251))
+}
+
+func newTwoInflightPlayerPersistence(
+	t *testing.T,
+) (*playerPersistence, *concurrentPlayerSaveStore) {
+	t.Helper()
+	store := newConcurrentPlayerSaveStore()
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+	for _, value := range []byte{2, 1} {
+		id := playerID(value)
+		name := string(rune('A' + value))
+		store.put(storedPlayerForTest(id, 7, name, testPlayerSnapshot(float32(value))))
+		if _, err := p.Prepare(context.Background(), id, name, testMetadata()); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Observe(id, name, testPlayerSnapshot(10), 0, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := p.Poll(6000); err != nil {
+		t.Fatal(err)
+	}
+	started := []storage.PlayerSave{store.receiveStarted(t), store.receiveStarted(t)}
+	assertPlayerSavesContainIDs(t, started, playerID(1), playerID(2))
+	return p, store
+}
+
+func assertQueuedPlayerSaveJobIDs(
+	t *testing.T,
+	jobs <-chan playerSaveJob,
+	want ...core.PlayerID,
+) {
+	t.Helper()
+	for index, id := range want {
+		select {
+		case job := <-jobs:
+			if job.Save.PlayerID != id {
+				t.Fatalf("queued job %d PlayerID=%s, want %s", index, job.Save.PlayerID, id)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("queued jobs ended at %d, want %d in PlayerID order", index, len(want))
+		}
+	}
+}
+
 func receivePlayerLoadStarted(t *testing.T, store *controllablePlayerStore) core.PlayerID {
 	t.Helper()
 	select {
@@ -1229,7 +1728,13 @@ func pollPlayerPersistenceUntilIdle(t *testing.T, p *playerPersistence, tick uin
 			t.Fatal(err)
 		}
 		p.mu.Lock()
-		idle := p.cache == nil || !p.cache.inFlight
+		idle := true
+		for _, player := range p.cache {
+			if player.inFlight {
+				idle = false
+				break
+			}
+		}
 		p.mu.Unlock()
 		if idle {
 			return

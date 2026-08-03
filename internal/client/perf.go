@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"slices"
+	"time"
 )
 
 var ErrRSSUnsupported = errors.New("当前平台不支持进程 RSS 采样")
@@ -80,6 +81,83 @@ type ProtocolSummary struct {
 	Bytes       uint64  `json:"bytes"`
 }
 
+// LatencySummary 是固定容量延迟探针的稳定 JSON 摘要。
+type LatencySummary struct {
+	Samples int     `json:"samples"`
+	P50MS   float64 `json:"p50_ms"`
+	P95MS   float64 `json:"p95_ms"`
+	P99MS   float64 `json:"p99_ms"`
+	MaxMS   float64 `json:"max_ms"`
+}
+
+// MultiplayerSummary 汇总固定八玩家场景的客户端、服务端和 GPU 提交指标。
+type MultiplayerSummary struct {
+	RemoteStateEncode   LatencySummary `json:"remote_state_encode"`
+	RemoteStateDecode   LatencySummary `json:"remote_state_decode"`
+	InterestDiff        LatencySummary `json:"interest_diff"`
+	RosterApply         LatencySummary `json:"roster_apply"`
+	Interpolation       LatencySummary `json:"interpolation"`
+	AvatarSubmit        LatencySummary `json:"avatar_submit"`
+	NameTagSubmit       LatencySummary `json:"name_tag_submit"`
+	RemoteGPUComplete   LatencySummary `json:"remote_gpu_complete"`
+	ServerOutboundBytes uint64         `json:"server_outbound_bytes"`
+	OutboxHighWater     int            `json:"outbox_high_water"`
+	PlayerJobsHighWater int            `json:"player_jobs_high_water"`
+	PlayerDoneHighWater int            `json:"player_done_high_water"`
+	PeakRSSBytes        uint64         `json:"peak_rss_bytes"`
+}
+
+// LatencyRecorder 在 Add 热路径中只覆写预分配的环形缓冲；Summary 才复制并排序。
+type LatencyRecorder struct {
+	samples []time.Duration
+	next    int
+	count   int
+}
+
+func NewLatencyRecorder(capacity int) *LatencyRecorder {
+	if capacity < 1 {
+		capacity = 1
+	}
+	return &LatencyRecorder{samples: make([]time.Duration, capacity)}
+}
+
+func (recorder *LatencyRecorder) Add(value time.Duration) {
+	recorder.samples[recorder.next] = value
+	recorder.next = (recorder.next + 1) % len(recorder.samples)
+	if recorder.count < len(recorder.samples) {
+		recorder.count++
+	}
+}
+
+func (recorder *LatencyRecorder) Reset() {
+	recorder.next = 0
+	recorder.count = 0
+}
+
+func (recorder *LatencyRecorder) Summary() LatencySummary {
+	if recorder.count == 0 {
+		return LatencySummary{}
+	}
+	values := make([]time.Duration, recorder.count)
+	copy(values, recorder.samples[:recorder.count])
+	slices.Sort(values)
+	milliseconds := func(value time.Duration) float64 {
+		return float64(value.Nanoseconds()) / float64(time.Millisecond)
+	}
+	return LatencySummary{
+		Samples: len(values),
+		P50MS:   milliseconds(values[percentileIndex(len(values), 0.50)]),
+		P95MS:   milliseconds(values[percentileIndex(len(values), 0.95)]),
+		P99MS:   milliseconds(values[percentileIndex(len(values), 0.99)]),
+		MaxMS:   milliseconds(values[len(values)-1]),
+	}
+}
+
+func percentileIndex(length int, percentile float64) int {
+	index := int(math.Ceil(percentile*float64(length))) - 1
+	return max(0, min(index, length-1))
+}
+
 func (s *PerfSampler) Summary(peakRSS uint64) PhaseSummary {
 	if s.count == 0 {
 		return PhaseSummary{PeakRSSBytes: peakRSS}
@@ -147,4 +225,5 @@ type PerfReport struct {
 	Persistence       PersistenceSummary      `json:"persistence"`
 	Protocol          ProtocolSummary         `json:"protocol,omitempty"`
 	PlayerPersistence PersistenceSummary      `json:"player_persistence,omitempty"`
+	Multiplayer       MultiplayerSummary      `json:"multiplayer"`
 }

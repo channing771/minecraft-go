@@ -112,6 +112,46 @@ func BenchmarkSmallPacketCodec(b *testing.B) {
 	}
 }
 
+func BenchmarkRemotePlayerStateCodec(b *testing.B) {
+	players := make([]RemotePlayerState, 7)
+	for index := range players {
+		players[index] = RemotePlayerState{
+			PlayerID:  core.PlayerID{0, 0, 0, byte(index + 1), 0, 0, 0x40, byte(index + 1), 0x80, 0, 0, 0, 0, 0, 0, byte(index + 1)},
+			Dimension: core.Overworld,
+			Position:  mgl32.Vec3{float32(index), 80, float32(-index)},
+			Yaw:       float32(index) * 0.1,
+			Pitch:     float32(index) * -0.01,
+		}
+	}
+	packet := RemotePlayerStates{ServerTick: 42, Players: players}
+	codec := benchmarkCodec(b)
+	defer codec.Close()
+	packetID, payload, err := codec.EncodeServer(StatePlay, packet)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Run("Encode", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_, encoded, err := codec.EncodeServer(StatePlay, packet)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkPayload = encoded
+		}
+	})
+	b.Run("Decode", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			decoded, err := codec.DecodeServer(StatePlay, packetID, payload)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkPacket = decoded
+		}
+	})
+}
+
 func BenchmarkWorstLegalChunkSnapshot(b *testing.B) {
 	snapshot := worstLegalBenchmarkSnapshot()
 	logical, err := encodeLogicalSnapshot(snapshot)

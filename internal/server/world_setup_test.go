@@ -15,7 +15,12 @@ func newAttachedWorldForTest(config Config, endpoint network.ServerEndpoint, gen
 		}
 		return running
 	}
-	if _, err := running.AttachSession(SessionSpec{ID: testSessionID, Generation: 1, Endpoint: endpoint, Restore: sim.PlayerRestore{SpawnDimension: config.SpawnDimension, SpawnAnchor: config.SpawnAnchor}}); err != nil {
+	spec := registrySessionSpec(testSessionID, 1, endpoint)
+	spec.Restore = sim.PlayerRestore{
+		SpawnDimension: config.SpawnDimension,
+		SpawnAnchor:    config.SpawnAnchor,
+	}
+	if _, err := running.AttachSession(spec); err != nil {
 		panic(err)
 	}
 	return running

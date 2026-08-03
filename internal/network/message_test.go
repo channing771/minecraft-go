@@ -54,10 +54,13 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Ready:             true,
 			Reset:             true,
 		},
+		network.RemotePlayerSpawn{PlayerID: core.PlayerID{0, 1, 2, 3, 4, 5, 0x46, 7, 0x88, 9, 10, 11, 12, 13, 14, 15}, DisplayName: "Chen"},
+		network.RemotePlayerDespawn{PlayerID: core.PlayerID{0, 1, 2, 3, 4, 5, 0x46, 7, 0x88, 9, 10, 11, 12, 13, 14, 15}},
+		network.RemotePlayerStates{Players: []network.RemotePlayerState{{PlayerID: core.PlayerID{0, 1, 2, 3, 4, 5, 0x46, 7, 0x88, 9, 10, 11, 12, 13, 14, 15}}}},
 		network.KeepAlive{Token: 1},
 		network.Disconnect{Code: network.DisconnectTimeout},
 	}
-	if len(clientMessages) != 5 || len(serverMessages) != 7 {
+	if len(clientMessages) != 5 || len(serverMessages) != 10 {
 		t.Fatal("消息集合不完整")
 	}
 }

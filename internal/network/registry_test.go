@@ -1,6 +1,9 @@
 package network
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestProtocolV1PacketIDsAreFrozen(t *testing.T) {
 	client := []struct {
@@ -29,11 +32,34 @@ func TestProtocolV1PacketIDsAreFrozen(t *testing.T) {
 	assertServerRegistry(t, server)
 }
 
+func TestProtocolV2RemotePlayerPacketIDsAreFrozen(t *testing.T) {
+	for _, test := range []struct {
+		packet ServerPacket
+		id     uint32
+	}{
+		{RemotePlayerSpawn{}, 7},
+		{RemotePlayerDespawn{}, 8},
+		{RemotePlayerStates{}, 9},
+	} {
+		gotID, ok := serverPacketID(StatePlay, test.packet)
+		if !ok || gotID != test.id {
+			t.Fatalf("server packet %T id=%d ok=%v, want %d true", test.packet, gotID, ok, test.id)
+		}
+		decoded, ok := serverPacketForID(StatePlay, test.id)
+		if !ok || fmt.Sprintf("%T", decoded) != fmt.Sprintf("%T", test.packet) {
+			t.Fatalf("server packet ID %d decoded=%T ok=%v, want %T true", test.id, decoded, ok, test.packet)
+		}
+	}
+	if _, ok := serverPacketForID(StatePlay, 10); ok {
+		t.Fatal("unknown play server packet ID accepted")
+	}
+}
+
 func TestProtocolV1RegistryRejectsUnknownIDsAndStates(t *testing.T) {
 	if _, ok := clientPacketForID(StateHandshake, 1); ok {
 		t.Fatal("unknown handshake client packet ID accepted")
 	}
-	if _, ok := serverPacketForID(StatePlay, 7); ok {
+	if _, ok := serverPacketForID(StatePlay, 10); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 	if _, ok := clientPacketID(StateLogin, ClientHello{}); ok {

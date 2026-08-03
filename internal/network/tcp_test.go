@@ -66,7 +66,7 @@ func TestTCPAcceptCanceledKeepsListenerReusable(t *testing.T) {
 	client, server := dialAndAccept(t, listener)
 	defer client.Close()
 	defer server.Close()
-	if err := client.Send(context.Background(), StateHandshake, ClientHello{ProtocolVersion: 1}); err != nil {
+	if err := client.Send(context.Background(), StateHandshake, ClientHello{ProtocolVersion: ProtocolVersion}); err != nil {
 		t.Fatalf("Send after canceled Accept: %v", err)
 	}
 	if _, err := server.Recv(context.Background(), StateHandshake); err != nil {
@@ -131,7 +131,12 @@ func TestTCPSendDeadlineAndSubsequentSend(t *testing.T) {
 	if err := client.Close(); err != nil {
 		t.Fatalf("client Close: %v", err)
 	}
-	if err := server.Send(context.Background(), StateHandshake, ServerHello{ProtocolVersion: 1}); !errors.Is(err, ErrClosed) {
+	peerCloseCtx, cancelPeerClose := context.WithTimeout(context.Background(), time.Second)
+	defer cancelPeerClose()
+	if packet, err := server.Recv(peerCloseCtx, StateHandshake); packet != nil || !errors.Is(err, ErrClosed) {
+		t.Fatalf("Recv after peer close = (%v, %v), want (nil, ErrClosed)", packet, err)
+	}
+	if err := server.Send(context.Background(), StateHandshake, ServerHello{ProtocolVersion: ProtocolVersion}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Send after peer close = %v, want ErrClosed", err)
 	}
 }
@@ -700,4 +705,15 @@ func dialAndAccept(t *testing.T, listener Listener) (ClientPacketStream, ServerP
 		t.Fatalf("Accept: %v", err)
 	}
 	return client, server
+}
+
+func writeRawClientFrame(t *testing.T, client ClientPacketStream, packetID uint32, payload []byte) {
+	t.Helper()
+	stream, ok := client.(*tcpClientStream)
+	if !ok {
+		t.Fatalf("client stream = %T, want *tcpClientStream", client)
+	}
+	if err := WriteFrame(stream.stream.conn, packetID, payload); err != nil {
+		t.Fatalf("write raw client frame: %v", err)
+	}
 }

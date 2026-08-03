@@ -96,7 +96,17 @@ type RenderPipelineDesc struct {
 	ColorFormat TextureFormat
 	// DepthFormat 为 FormatUndefined（零值）时不挂深度附件，此时 DepthWrite 无意义。
 	DepthFormat TextureFormat
+	// Blend 指定颜色附件的混合方式。零值 BlendReplace 保持现有行为。
+	Blend BlendMode
 }
+
+// BlendMode 指定颜色附件的混合方式。
+type BlendMode uint8
+
+const (
+	BlendReplace BlendMode = iota
+	BlendAlpha
+)
 
 // RenderPipeline 是一条已创建的渲染管线。
 type RenderPipeline interface{ Release() }
@@ -161,6 +171,10 @@ type BindGroupLayout struct {
 type BindGroupEntry struct {
 	Binding uint32
 	Buffer  Buffer
+	// Offset/Size 仅用于 Buffer。两者均为零时绑定整个 buffer；否则 Size
+	// 必须非零，且 [Offset, Offset+Size) 必须完全落在 buffer 内。
+	Offset  uint64
+	Size    uint64
 	Texture TextureView
 	Sampler Sampler
 }
@@ -252,6 +266,9 @@ const (
 	FormatDepth32Float
 	FormatR32Float
 	FormatR32Uint
+	// FormatR8Unorm 是单通道归一化格式，供字形 atlas 使用。
+	// 必须追加在已有枚举之后，以保持既有数值稳定。
+	FormatR8Unorm TextureFormat = 7
 )
 
 // TextureDimension 区分普通 2D 纹理与 2D 数组纹理。
@@ -300,7 +317,9 @@ type Texture interface {
 	// 零值描述符表示覆盖全部 mip 与全部层。
 	View(TextureViewDesc) TextureView
 	// WriteLayer 把一层的像素数据写入指定 mip 级别。
-	WriteLayer(layer, mip uint32, rgba []byte)
+	WriteLayer(layer, mip uint32, pixels []byte)
+	// WriteRegion 把像素数据写入指定 layer/mip 的矩形子区域。
+	WriteRegion(layer, mip, x, y, width, height uint32, pixels []byte)
 	Release()
 }
 

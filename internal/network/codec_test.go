@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -21,7 +22,7 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"hello", StateHandshake, ClientHello{ProtocolVersion: 1}, 0, "01"},
+		{"hello", StateHandshake, ClientHello{ProtocolVersion: 2}, 0, "02"},
 		{"login start", StateLogin, LoginStart{PlayerID: id, DisplayName: "Chen"}, 0, "00112233445546778899aabbccddeeff044368656e"},
 		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5}, 0, "0100000000000000ff01010000c03f000000bf"},
 		{"break", StatePlay, BreakBlock{Sequence: 2}, 1, "02000000000000000000000000000000"},
@@ -54,8 +55,8 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 1}, 0, "01"},
-		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 1, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0101026e6f"},
+		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 2}, 0, "02"},
+		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 2, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0201026e6f"},
 		{"login success", StateLogin, LoginSuccess{PlayerID: id}, 0, "00112233445546778899aabbccddeeff"},
 		{"login reject", StateLogin, LoginReject{Code: LoginInvalidIdentity, Message: "no"}, 1, "02026e6f"},
 		{"block changes", StatePlay, BlockChanges{Dimension: core.Overworld, Chunk: core.ChunkPos{X: 1, Z: -1}, BaseRevision: 1, NewRevision: 2, Changes: []BlockChange{{Position: core.BlockPos{X: 16, Y: -64, Z: -1}, Block: core.StoneID}}}, 1, "0000000001000000ffffffff010000000000000002000000000000000110000000c0ffffffffffffff0200"},
@@ -84,18 +85,109 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 	}
 }
 
+func TestProtocolV2RemotePlayerGolden(t *testing.T) {
+	id := mustCodecPlayerID(t)
+	tests := []struct {
+		packet  ServerPacket
+		wantID  uint32
+		wantHex string
+	}{
+		{RemotePlayerSpawn{PlayerID: id, DisplayName: "陈", ServerTick: 1, Dimension: core.Overworld, Position: mgl32.Vec3{1, 2, 3}, Yaw: 4, Pitch: -5}, 7, "00112233445546778899aabbccddeeff03e999880100000000000000000000000000803f0000004000004040000080400000a0c0"},
+		{RemotePlayerDespawn{PlayerID: id}, 8, "00112233445546778899aabbccddeeff"},
+		{RemotePlayerStates{ServerTick: 2, Players: []RemotePlayerState{{PlayerID: id, Dimension: core.Overworld, Position: mgl32.Vec3{1, 2, 3}, Yaw: 4, Pitch: -5, Reset: true}}}, 9, "02000000000000000100112233445546778899aabbccddeeff000000000000803f0000004000004040000080400000a0c001"},
+	}
+	for _, test := range tests {
+		packetID, payload, err := encodeServerControlPayload(StatePlay, test.packet)
+		if err != nil || packetID != test.wantID || hex.EncodeToString(payload) != test.wantHex {
+			t.Fatalf("%T id=%d payload=%x err=%v", test.packet, packetID, payload, err)
+		}
+		decoded, err := decodeServerControlPayload(StatePlay, packetID, payload)
+		if err != nil || !reflect.DeepEqual(decoded, test.packet) {
+			t.Fatalf("round=%#v err=%v", decoded, err)
+		}
+	}
+}
+
+func TestRemotePlayerWireRejectsInvalidValues(t *testing.T) {
+	id := mustCodecPlayerID(t)
+	invalidID := id
+	invalidID[6] = 0
+	states := make([]RemotePlayerState, 7)
+	for index := range states {
+		states[index] = RemotePlayerState{PlayerID: id, Dimension: core.Overworld}
+		states[index].PlayerID[15] = byte(index + 1)
+	}
+	_, maxPayload, err := encodeServerControlPayload(StatePlay, RemotePlayerStates{Players: states})
+	if err != nil || len(maxPayload) != 296 || len(maxPayload) >= 512 {
+		t.Fatalf("seven remote states payload=%d err=%v, want 296 and <512", len(maxPayload), err)
+	}
+
+	for _, packet := range []ServerPacket{
+		RemotePlayerSpawn{PlayerID: invalidID, DisplayName: "Chen"},
+		RemotePlayerSpawn{PlayerID: id, DisplayName: " Chen "},
+		RemotePlayerSpawn{PlayerID: id, DisplayName: "Chen", Dimension: core.DimensionID(1)},
+		RemotePlayerSpawn{PlayerID: id, DisplayName: "Chen", Position: mgl32.Vec3{float32(math.NaN()), 0, 0}},
+		RemotePlayerDespawn{PlayerID: invalidID},
+		RemotePlayerStates{},
+		RemotePlayerStates{Players: append(states, states[0])},
+		RemotePlayerStates{Players: []RemotePlayerState{{PlayerID: id, Dimension: core.Overworld}, {PlayerID: id, Dimension: core.Overworld}}},
+		RemotePlayerStates{Players: []RemotePlayerState{{PlayerID: id, Dimension: core.DimensionID(1)}}},
+		RemotePlayerStates{Players: []RemotePlayerState{{PlayerID: id, Position: mgl32.Vec3{float32(math.Inf(1)), 0, 0}}}},
+	} {
+		if _, _, err := encodeServerControlPayload(StatePlay, packet); err == nil {
+			t.Fatalf("invalid remote packet encoded: %#v", packet)
+		}
+	}
+
+	for _, test := range []struct {
+		name    string
+		payload []byte
+	}{
+		{"zero count", append(make([]byte, 8), 0)},
+		{"eight count", append(make([]byte, 8), 8)},
+		{"invalid UUIDv4", append(append(make([]byte, 8), 1), append(append([]byte{}, invalidID[:]...), make([]byte, 25)...)...)},
+		{"duplicate UUID", remotePlayerStatesWireFixture(id, id)},
+		{"out of order UUID", remotePlayerStatesWireFixture(states[1].PlayerID, states[0].PlayerID)},
+		{"noncanonical reset bool", mustDecodeHex(t, "02000000000000000100112233445546778899aabbccddeeff000000000000803f0000004000004040000080400000a0c002")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if packet, err := decodeServerControlPayload(StatePlay, 9, test.payload); err == nil {
+				t.Fatalf("invalid remote wire decoded as %#v", packet)
+			}
+		})
+	}
+}
+
+func TestRemotePlayerStatesRejectsNonCanonicalCountVarint(t *testing.T) {
+	payload := mustDecodeHex(t, "0200000000000000810000112233445546778899aabbccddeeff000000000000803f0000004000004040000080400000a0c001")
+	if packet, err := decodeServerControlPayload(StatePlay, 9, payload); !errors.Is(err, errInvalidUvarint) {
+		t.Fatalf("noncanonical state count decoded as %#v with %v, want errInvalidUvarint", packet, err)
+	}
+}
+
+func remotePlayerStatesWireFixture(ids ...core.PlayerID) []byte {
+	payload := make([]byte, 9)
+	payload[8] = byte(len(ids))
+	for _, id := range ids {
+		payload = append(payload, id[:]...)
+		payload = append(payload, make([]byte, 25)...)
+	}
+	return payload
+}
+
 func TestSmallPacketErrorCodeWireValues(t *testing.T) {
 	for _, tc := range []struct {
 		packet ServerPacket
 		want   string
 	}{
-		{HandshakeReject{ServerProtocolVersion: 1, Code: HandshakeVersionMismatch}, "010100"},
+		{HandshakeReject{ServerProtocolVersion: 2, Code: HandshakeVersionMismatch}, "020100"},
 		{LoginReject{Code: LoginServerFull}, "0100"},
 		{LoginReject{Code: LoginInvalidIdentity}, "0200"},
 		{LoginReject{Code: LoginPlayerDataCorrupt}, "0300"},
 		{LoginReject{Code: LoginStoreUnavailable}, "0400"},
 		{LoginReject{Code: LoginProtocolViolation}, "0500"},
 		{LoginReject{Code: LoginInternalError}, "0600"},
+		{LoginReject{Code: LoginAlreadyOnline}, "0700"},
 		{Disconnect{Code: DisconnectProtocolViolation}, "0100"},
 		{Disconnect{Code: DisconnectTimeout}, "0200"},
 		{Disconnect{Code: DisconnectServerShutdown}, "0300"},
@@ -327,6 +419,15 @@ func blockChangesCountFixture(count uint32) []byte {
 	encoder.u64(2)
 	encoder.uvarint(count)
 	return encoder.data
+}
+
+func mustDecodeHex(t *testing.T, value string) []byte {
+	t.Helper()
+	decoded, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decoded
 }
 
 func mustCodecPlayerID(t *testing.T) core.PlayerID {

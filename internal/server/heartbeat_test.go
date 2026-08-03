@@ -15,9 +15,7 @@ func TestHeartbeatDetachStopsEveryTimer(t *testing.T) {
 	config := heartbeatTestConfig(clock)
 	running := NewWorld(config, playerTestGenerator{}, testStore())
 	endpoint := newHeartbeatEndpoint()
-	exit, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-	})
+	exit, err := running.AttachSession(registrySessionSpec(7, 1, endpoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,9 +52,7 @@ func TestHeartbeatDefaultScheduleUsesFiveAndFifteenSeconds(t *testing.T) {
 	running := NewWorld(config, playerTestGenerator{}, testStore())
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	endpoint := newHeartbeatEndpoint()
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(7, 1, endpoint)); err != nil {
 		t.Fatal(err)
 	}
 	clock.nextTimer(t, 5*time.Second).fire()
@@ -73,9 +69,7 @@ func TestHeartbeatAllowsOnlyOneOutstandingAndUsesMonotonicTokens(t *testing.T) {
 	running := NewWorld(config, playerTestGenerator{}, testStore())
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	endpoint := newHeartbeatEndpoint()
-	_, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-	})
+	_, err := running.AttachSession(registrySessionSpec(7, 1, endpoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,9 +110,7 @@ func TestHeartbeatStaleReplyNotificationDoesNotStopNewTokenTimeout(t *testing.T)
 	running := NewWorld(config, playerTestGenerator{}, testStore())
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	endpoint := newHeartbeatEndpoint()
-	exit, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-	})
+	exit, err := running.AttachSession(registrySessionSpec(7, 1, endpoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,9 +162,7 @@ func TestHeartbeatRejectsMismatchedAndDuplicateTokens(t *testing.T) {
 			running := NewWorld(config, playerTestGenerator{}, testStore())
 			t.Cleanup(func() { shutdownServerForTest(t, running) })
 			endpoint := newHeartbeatEndpoint()
-			exit, err := running.AttachSession(SessionSpec{
-				ID: 7, Generation: 1, Endpoint: endpoint, Restore: testRestore(),
-			})
+			exit, err := running.AttachSession(registrySessionSpec(7, 1, endpoint))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,9 +195,7 @@ func TestHeartbeatTimeoutDetachesOnlyThatSession(t *testing.T) {
 	t.Cleanup(func() { shutdownServerForTest(t, running) })
 	failingEndpoint := newHeartbeatEndpoint()
 	healthyEndpoint := newHeartbeatEndpoint()
-	failingExit, err := running.AttachSession(SessionSpec{
-		ID: 7, Generation: 1, Endpoint: failingEndpoint, Restore: testRestore(),
-	})
+	failingExit, err := running.AttachSession(registrySessionSpec(7, 1, failingEndpoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,9 +204,7 @@ func TestHeartbeatTimeoutDetachesOnlyThatSession(t *testing.T) {
 	_ = clock.nextTimer(t, config.HeartbeatInterval)
 	_ = failingEndpoint.nextSent(t)
 	timeout := clock.nextTimer(t, config.HeartbeatTimeout)
-	if _, err := running.AttachSession(SessionSpec{
-		ID: 8, Generation: 1, Endpoint: healthyEndpoint, Restore: testRestore(),
-	}); err != nil {
+	if _, err := running.AttachSession(registrySessionSpec(8, 1, healthyEndpoint)); err != nil {
 		t.Fatal(err)
 	}
 	_ = clock.nextTimer(t, config.HeartbeatInterval)

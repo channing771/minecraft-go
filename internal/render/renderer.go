@@ -195,6 +195,9 @@ func newRenderer(
 // BeginFrame 重置本帧上传预算。
 func (r *Renderer) BeginFrame() { r.budget.BeginFrame() }
 
+// UploadBudget returns the frame-scoped budget shared by terrain and glyph uploads.
+func (r *Renderer) UploadBudget() *UploadBudget { return r.budget }
+
 // QueueSection 排队一个区段的最新网格；同位置的新结果覆盖旧 pending 结果。
 func (r *Renderer) QueueSection(p core.SectionPos, quads []mesh.Quad) {
 	if len(quads) == 0 {

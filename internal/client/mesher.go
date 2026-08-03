@@ -2,7 +2,6 @@ package client
 
 import (
 	"log/slog"
-	"sort"
 	"sync"
 
 	"minecraft-go/internal/assets"
@@ -64,6 +63,7 @@ type Mesher struct {
 
 	mu             sync.Mutex
 	dirty          map[core.SectionKey]uint64
+	ready          readySectionHeap
 	queued         map[core.SectionKey]uint64
 	inFlight       map[core.SectionKey]uint64
 	panicAt        map[core.SectionKey]bool
@@ -89,6 +89,7 @@ func NewMesher(registry *assets.Registry, workers int) *Mesher {
 		results:  make(chan mesherResult, mesherResultCapacity),
 		closed:   make(chan struct{}),
 		dirty:    make(map[core.SectionKey]uint64),
+		ready:    newReadySectionHeap(),
 		queued:   make(map[core.SectionKey]uint64),
 		inFlight: make(map[core.SectionKey]uint64),
 		panicAt:  make(map[core.SectionKey]bool),
@@ -133,6 +134,7 @@ func (mesher *Mesher) ForgetChunk(
 			},
 		}
 		delete(mesher.dirty, key)
+		mesher.ready.Remove(key)
 		delete(mesher.queued, key)
 		delete(mesher.panicAt, key)
 		delete(mesher.blockAt, key)
@@ -151,26 +153,21 @@ func (mesher *Mesher) Schedule(mirror *Mirror, maxJobs int) {
 		mesher.mu.Unlock()
 		return
 	}
-	candidates := make([]core.SectionKey, 0, len(mesher.dirty))
-	for key := range mesher.dirty {
-		if _, queued := mesher.queued[key]; queued {
-			continue
-		}
-		if _, inFlight := mesher.inFlight[key]; inFlight {
-			continue
-		}
-		candidates = append(candidates, key)
+	freeSlots := cap(mesher.jobs) - len(mesher.jobs)
+	if freeSlots <= 0 {
+		mesher.mu.Unlock()
+		return
 	}
+	maxJobs = min(maxJobs, freeSlots)
 	mesher.mu.Unlock()
-	sortSectionKeySlice(candidates)
 
-	scheduled := 0
-	for _, key := range candidates {
-		if scheduled >= maxJobs {
+	for range maxJobs {
+		mesher.mu.Lock()
+		key, ok := mesher.ready.Take()
+		if !ok {
+			mesher.mu.Unlock()
 			return
 		}
-
-		mesher.mu.Lock()
 		generation, dirty := mesher.dirty[key]
 		_, queued := mesher.queued[key]
 		_, inFlight := mesher.inFlight[key]
@@ -185,6 +182,14 @@ func (mesher *Mesher) Schedule(mirror *Mirror, maxJobs int) {
 
 		neighborhood, stamps, ok := cloneNeighborhood(mirror, key)
 		if !ok {
+			mesher.mu.Lock()
+			current, stillDirty := mesher.dirty[key]
+			if stillDirty && current == generation {
+				delete(mesher.dirty, key)
+			} else {
+				mesher.enqueueReadyLocked(key)
+			}
+			mesher.mu.Unlock()
 			continue
 		}
 		job := mesherJob{
@@ -199,6 +204,7 @@ func (mesher *Mesher) Schedule(mirror *Mirror, maxJobs int) {
 		_, queued = mesher.queued[key]
 		_, inFlight = mesher.inFlight[key]
 		if mesher.isClosed || !stillDirty || current != generation || queued || inFlight {
+			mesher.enqueueReadyLocked(key)
 			mesher.mu.Unlock()
 			continue
 		}
@@ -207,7 +213,6 @@ func (mesher *Mesher) Schedule(mirror *Mirror, maxJobs int) {
 
 		select {
 		case mesher.jobs <- job:
-			scheduled++
 		case <-mesher.closed:
 			mesher.removeQueued(key, generation)
 			return
@@ -317,16 +322,22 @@ func (mesher *Mesher) work() {
 func (mesher *Mesher) handle(job mesherJob) {
 	claimed := false
 	defer func() {
-		if recovered := recover(); recovered != nil {
+		recovered := recover()
+		if recovered != nil {
 			slog.Error("区段网格化失败", "section", job.key, "panic", recovered)
 		}
-		if claimed {
-			mesher.mu.Lock()
-			if mesher.inFlight[job.key] == job.generation {
-				delete(mesher.inFlight, job.key)
-			}
-			mesher.mu.Unlock()
+		if !claimed {
+			return
 		}
+		mesher.mu.Lock()
+		if mesher.inFlight[job.key] == job.generation {
+			delete(mesher.inFlight, job.key)
+		}
+		current, dirty := mesher.dirty[job.key]
+		if recovered != nil || (dirty && current != job.generation) {
+			mesher.enqueueReadyLocked(job.key)
+		}
+		mesher.mu.Unlock()
 	}()
 
 	mesher.mu.Lock()
@@ -365,6 +376,16 @@ func (mesher *Mesher) handle(job mesherJob) {
 		},
 		key: job.key,
 	}
+	mesher.mu.Lock()
+	if mesher.inFlight[job.key] == job.generation {
+		delete(mesher.inFlight, job.key)
+		current, dirty := mesher.dirty[job.key]
+		if dirty && current != job.generation {
+			mesher.enqueueReadyLocked(job.key)
+		}
+	}
+	mesher.mu.Unlock()
+	claimed = false
 	select {
 	case mesher.results <- result:
 	case <-mesher.closed:
@@ -377,12 +398,30 @@ func (mesher *Mesher) markDirtyLocked(key core.SectionKey) {
 		mesher.nextGeneration++
 	}
 	mesher.dirty[key] = mesher.nextGeneration
+	mesher.enqueueReadyLocked(key)
+}
+
+func (mesher *Mesher) enqueueReadyLocked(key core.SectionKey) {
+	if mesher.isClosed {
+		return
+	}
+	if _, dirty := mesher.dirty[key]; !dirty {
+		return
+	}
+	if _, queued := mesher.queued[key]; queued {
+		return
+	}
+	if _, inFlight := mesher.inFlight[key]; inFlight {
+		return
+	}
+	mesher.ready.Add(key)
 }
 
 func (mesher *Mesher) removeQueued(key core.SectionKey, generation uint64) {
 	mesher.mu.Lock()
 	if mesher.queued[key] == generation {
 		delete(mesher.queued, key)
+		mesher.enqueueReadyLocked(key)
 	}
 	mesher.mu.Unlock()
 }
@@ -445,19 +484,4 @@ func stampsMatch(mirror *Mirror, stamps []ChunkStamp) bool {
 		}
 	}
 	return true
-}
-
-func sortSectionKeySlice(keys []core.SectionKey) {
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].Dimension != keys[j].Dimension {
-			return keys[i].Dimension < keys[j].Dimension
-		}
-		if keys[i].Pos.X != keys[j].Pos.X {
-			return keys[i].Pos.X < keys[j].Pos.X
-		}
-		if keys[i].Pos.Z != keys[j].Pos.Z {
-			return keys[i].Pos.Z < keys[j].Pos.Z
-		}
-		return keys[i].Pos.Y < keys[j].Pos.Y
-	})
 }

@@ -28,15 +28,15 @@ func TestExternalCallerAttachesDynamicSession(t *testing.T) {
 	t.Cleanup(func() { shutdownExternalServerForTest(t, running) })
 	client, endpoint := network.NewMemoryPair(8)
 	defer client.Close()
-	exit, err := running.AttachSession(server.SessionSpec{
-		ID:         41,
-		Generation: 3,
-		Endpoint:   endpoint,
-		Restore: sim.PlayerRestore{
+	exit, err := running.AttachSession(externalSessionSpec(
+		41,
+		3,
+		endpoint,
+		sim.PlayerRestore{
 			SpawnDimension: core.Overworld,
 			SpawnAnchor:    core.ChunkPos{},
 		},
-	})
+	))
 	if err != nil {
 		t.Fatal(err)
 	}

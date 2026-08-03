@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"minecraft-go/internal/core"
@@ -26,6 +27,7 @@ type Server struct {
 	store                     storage.Store
 	engine                    *sim.Engine
 	sessions                  map[sim.SessionID]*session
+	playerSessions            map[core.PlayerID]sim.SessionID
 	trustedObserver           *session
 	trustedObserverGeneration uint64
 
@@ -34,12 +36,13 @@ type Server struct {
 	saveCtx     context.Context
 	cancelSaves context.CancelFunc
 
-	incoming  chan incomingCommand
-	jobs      chan chunkJob
-	acquired  chan sim.AcquiredChunk
-	generated chan sim.GeneratedChunk
-	pending   []chunkJob
-	queued    map[core.ChunkKey]struct{}
+	incoming      chan incomingCommand
+	inputBoundary atomic.Pointer[inputIngressBoundary]
+	jobs          chan chunkJob
+	acquired      chan sim.AcquiredChunk
+	generated     chan sim.GeneratedChunk
+	pending       []chunkJob
+	queued        map[core.ChunkKey]struct{}
 
 	trustedObserverMu       sync.Mutex
 	trustedObserverCenters  chan trustedObserverCenter
@@ -86,6 +89,7 @@ func NewWorld(config Config, generator Generator, store storage.Store) *Server {
 		store:           store,
 		engine:          sim.NewEngine(config.ViewRadius),
 		sessions:        make(map[sim.SessionID]*session),
+		playerSessions:  make(map[core.PlayerID]sim.SessionID),
 		ctx:             ctx,
 		cancel:          cancel,
 		saveCtx:         saveCtx,
@@ -181,14 +185,27 @@ func (server *Server) AppliedTrustedObserverCenter() (
 
 // Step 执行一次服务端编排与权威模拟 tick。
 func (server *Server) Step() sim.TickResult {
+	return server.step(time.Time{})
+}
+
+func (server *Server) step(scheduled time.Time) sim.TickResult {
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 	if server.lifecycle != serverRunning {
 		return sim.TickResult{}
 	}
 	started := time.Now()
-	if server.config.TickObserver != nil {
-		defer func() { server.config.TickObserver(time.Since(started)) }()
+	if server.config.TickObserver != nil ||
+		(server.config.ScheduledTickObserver != nil && !scheduled.IsZero()) {
+		defer func() {
+			duration := time.Since(started)
+			if server.config.TickObserver != nil {
+				server.config.TickObserver(duration)
+			}
+			if server.config.ScheduledTickObserver != nil && !scheduled.IsZero() {
+				server.config.ScheduledTickObserver(scheduled, duration)
+			}
+		}()
 	}
 
 	server.drainSaveCompletions()
@@ -235,8 +252,8 @@ func (server *Server) RunTicks(ctx context.Context) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-		case <-ticker.C:
-			server.Step()
+		case scheduled := <-ticker.C:
+			server.step(scheduled)
 		}
 	}
 }

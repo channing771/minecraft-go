@@ -203,8 +203,8 @@ func (h integrationHost) PlayerSnapshot(t *testing.T, id core.PlayerID) sim.Play
 func (h integrationHost) PlayerSnapshotFor(t *testing.T, id core.PlayerID) (sim.PlayerSnapshot, bool) {
 	t.Helper()
 	h.Host.mu.Lock()
-	active := h.Host.active
-	if active == nil || active.PlayerID != id || active.Session == 0 {
+	active := h.Host.activeByPlayer[id]
+	if active == nil || active.Session == 0 {
 		h.Host.mu.Unlock()
 		return sim.PlayerSnapshot{}, false
 	}
@@ -222,27 +222,37 @@ func (h integrationHost) ChunkHash(t *testing.T, position core.ChunkPos) ([32]by
 	return hash, revision
 }
 
-func (h integrationHost) WaitPlayerSaved(t *testing.T) {
+func (h integrationHost) WaitPlayerSaved(t *testing.T, id core.PlayerID) {
 	t.Helper()
 	waitIntegrationCondition(t, "player save completion", func() bool {
 		h.Host.mu.Lock()
-		active := h.Host.active
+		active := h.Host.activeByPlayer[id]
 		h.Host.mu.Unlock()
 		h.Host.players.mu.Lock()
-		cache := h.Host.players.cache
+		cache := h.Host.players.cache[id]
 		saved := cache != nil && cache.persisted > 0 && !cache.dirty && !cache.inFlight && cache.retry == nil
 		h.Host.players.mu.Unlock()
 		return active == nil && saved
 	})
 }
 
-func (h integrationHost) WaitPlayerReleased(t *testing.T) {
+func (h integrationHost) WaitPlayerReleased(t *testing.T, id core.PlayerID) {
 	t.Helper()
 	waitIntegrationCondition(t, "host player slot release", func() bool {
 		h.Host.mu.Lock()
 		defer h.Host.mu.Unlock()
-		return h.Host.active == nil
+		return h.Host.activeByPlayer[id] == nil
 	})
+	done := make(chan struct{})
+	go func() {
+		h.Host.sessionWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("host session lifecycle did not finish")
+	}
 }
 
 func (h integrationHost) Shutdown(t *testing.T) {
@@ -391,7 +401,7 @@ func TestTCPPlayerAndWorldSurviveDisconnectAndRestart(t *testing.T) {
 	if err := client.Close(); err != nil {
 		t.Fatal(err)
 	}
-	first.WaitPlayerSaved(t)
+	first.WaitPlayerSaved(t, id)
 	first.Shutdown(t)
 
 	second := startDiskHost(t, root, "127.0.0.1:0", changedGenerator{})
@@ -411,6 +421,9 @@ func TestTCPPlayerAndWorldSurviveDisconnectAndRestart(t *testing.T) {
 func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 	t.Run("server full version mismatch and hostile peers leave listener healthy", func(t *testing.T) {
 		host := startDiskHost(t, t.TempDir(), "127.0.0.1:0", flatGenerator{})
+		host.Host.mu.Lock()
+		host.Host.config.MaxPlayers = 1
+		host.Host.mu.Unlock()
 		primaryIdentity := integrationIdentity(0x21, "Primary")
 		primary := dialIntegrationClient(t, host.Addr, primaryIdentity)
 		waitClientReadyFor(t, host, primary, primaryIdentity.PlayerID)
@@ -446,21 +459,22 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		waitForPreLoginCount(t, host.Host, 1)
 		if _, err := bad.Write([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}); err != nil {
 			t.Fatal(err)
 		}
 		_ = bad.Close()
-		waitForPreLoginCount(t, host.Host, 1)
+		waitForPreLoginCount(t, host.Host, 0)
 		slow, err := net.Dial("tcp", host.Addr)
 		if err != nil {
 			t.Fatal(err)
 		}
-		waitForPreLoginCount(t, host.Host, 2)
+		waitForPreLoginCount(t, host.Host, 1)
 
 		if err := primary.Close(); err != nil {
 			t.Fatal(err)
 		}
-		host.WaitPlayerSaved(t)
+		host.WaitPlayerSaved(t, primaryIdentity.PlayerID)
 		waitForPreLoginCount(t, host.Host, 1)
 		_ = slow.Close()
 		waitForPreLoginCount(t, host.Host, 0)
@@ -488,7 +502,7 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 		host := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})
 		_, err = loginIntegrationClient(host.Addr, corrupt)
 		assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginPlayerDataCorrupt))
-		host.WaitPlayerReleased(t)
+		host.WaitPlayerReleased(t, corrupt.PlayerID)
 
 		healthyIdentity := integrationIdentity(0x32, "Healthy")
 		healthy := dialIntegrationClient(t, host.Addr, healthyIdentity)
@@ -556,11 +570,11 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	})
 	want := host.PlayerSnapshot(t, firstIdentity.PlayerID)
 	_ = first.Close()
-	host.WaitPlayerReleased(t)
+	host.WaitPlayerReleased(t, firstIdentity.PlayerID)
 	waitIntegrationCondition(t, "failed player save retained for retry", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()
-		cache := host.Host.players.cache
+		cache := host.Host.players.cache[firstIdentity.PlayerID]
 		return cache != nil && cache.retry != nil && cache.dirty && !cache.inFlight
 	})
 
@@ -573,21 +587,23 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	_, err := loginIntegrationClient(host.Addr, integrationIdentity(0x62, "Blocked"))
 	assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginServerFull))
 	_ = same.Close()
-	host.WaitPlayerReleased(t)
+	host.WaitPlayerReleased(t, firstIdentity.PlayerID)
 	waitIntegrationCondition(t, "same-ID disconnect retry retained", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()
-		cache := host.Host.players.cache
+		cache := host.Host.players.cache[firstIdentity.PlayerID]
 		return cache != nil && cache.retry != nil && cache.dirty
 	})
 
-	_, err = loginIntegrationClient(host.Addr, integrationIdentity(0x62, "Blocked"))
-	assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginStoreUnavailable))
+	differentIdentity := integrationIdentity(0x62, "IndependentRetry")
+	different := dialIntegrationClient(t, host.Addr, differentIdentity)
+	waitClientReadyFor(t, host, different, differentIdentity.PlayerID)
+	_ = different.Close()
 	store.setSaveError(nil)
 	waitIntegrationCondition(t, "player save retry success", func() bool {
 		host.Host.players.mu.Lock()
 		defer host.Host.players.mu.Unlock()
-		cache := host.Host.players.cache
+		cache := host.Host.players.cache[firstIdentity.PlayerID]
 		return cache != nil && cache.persisted > 0 && !cache.dirty && !cache.inFlight && cache.retry == nil
 	})
 
@@ -805,7 +821,7 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	}
 
 	host.mu.Lock()
-	active := *host.active
+	active := *host.activeByPlayer[identity.PlayerID]
 	host.mu.Unlock()
 	playerHash, ok := host.world.engine.PlayerHash(active.Session)
 	if !ok {

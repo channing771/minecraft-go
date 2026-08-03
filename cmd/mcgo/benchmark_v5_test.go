@@ -16,8 +16,8 @@ import (
 )
 
 func TestBenchmarkScenarioVersionIncludesPersistencePath(t *testing.T) {
-	if scenarioVersion != 5 {
-		t.Fatalf("scenarioVersion=%d，想要包含 TCP/protocol/player persistence 的 v5", scenarioVersion)
+	if scenarioVersion != 6 {
+		t.Fatalf("scenarioVersion=%d，想要包含八玩家同步指标的 v6", scenarioVersion)
 	}
 }
 
@@ -49,19 +49,19 @@ func TestValidateBenchmarkReportTickP99UserOverrideBoundary(t *testing.T) {
 			"still":  {FPS: 100, P99MS: 11, PeakRSSBytes: 1},
 			"flying": {FPS: 100, P99MS: 11, PeakRSSBytes: 1},
 		},
-		Ticks:             client.PhaseSummary{P99MS: 14.999, MaxMS: 49},
+		Ticks:             client.PhaseSummary{P99MS: 9.999, MaxMS: 49},
 		Persistence:       client.PersistenceSummary{Snapshots: 1},
 		Protocol:          client.ProtocolSummary{EncodeP99MS: 0.01, DecodeP99MS: 0.01, Bytes: 19},
 		PlayerPersistence: client.PersistenceSummary{Snapshots: 1, P99MS: 0.1, MaxMS: 0.1},
 	}
 	if err := validateBenchmarkReport(report); err != nil {
-		t.Fatalf("explicit 15ms tick p99 override rejected 14.999ms: %v", err)
+		t.Fatalf("v6 10ms tick p99 gate rejected 9.999ms: %v", err)
 	}
 
-	report.Ticks.P99MS = 15
+	report.Ticks.P99MS = 10
 	err := validateBenchmarkReport(report)
-	if err == nil || !strings.Contains(err.Error(), "tick p99 15.000 ms >= 15 ms") {
-		t.Fatalf("15ms tick p99 boundary error=%v", err)
+	if err == nil || !strings.Contains(err.Error(), "tick p99 10.000 ms >= 10 ms") {
+		t.Fatalf("10ms tick p99 boundary error=%v", err)
 	}
 }
 
@@ -98,7 +98,7 @@ func TestWriteBenchmarkReportDoesNotOverwriteAcceptedOutputOnFailure(t *testing.
 			"still":  {FPS: 100, P99MS: 11, PeakRSSBytes: 1},
 			"flying": {FPS: 100, P99MS: 12, PeakRSSBytes: 1},
 		},
-		Ticks:             client.PhaseSummary{P99MS: 14, MaxMS: 49},
+		Ticks:             client.PhaseSummary{P99MS: 9, MaxMS: 49},
 		Persistence:       client.PersistenceSummary{Snapshots: 1},
 		Protocol:          client.ProtocolSummary{EncodeP99MS: 0.01, DecodeP99MS: 0.01, Bytes: 19},
 		PlayerPersistence: client.PersistenceSummary{Snapshots: 1, P99MS: 0.1, MaxMS: 0.1},
@@ -245,7 +245,7 @@ func validBenchmarkReport() client.PerfReport {
 			"still":  {FPS: 100, P99MS: 11, PeakRSSBytes: 1},
 			"flying": {FPS: 100, P99MS: 11, PeakRSSBytes: 1},
 		},
-		Ticks:             client.PhaseSummary{P99MS: 14, MaxMS: 49},
+		Ticks:             client.PhaseSummary{P99MS: 9, MaxMS: 49},
 		Persistence:       client.PersistenceSummary{Snapshots: 1},
 		Protocol:          client.ProtocolSummary{EncodeP99MS: 0.01, DecodeP99MS: 0.01, Bytes: 19},
 		PlayerPersistence: client.PersistenceSummary{Snapshots: 1, P50MS: 0.01, P95MS: 0.01, P99MS: 0.1, MaxMS: 0.1},

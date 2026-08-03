@@ -362,6 +362,11 @@ func (endpoint *gatedServerPlayEndpoint) wait(ctx context.Context) error {
 	case <-endpoint.aborted:
 		return ErrClosed
 	case <-endpoint.login.Done():
+		select {
+		case <-endpoint.open:
+			return nil
+		default:
+		}
 		return endpoint.login.Err()
 	case <-ctx.Done():
 		return ctx.Err()

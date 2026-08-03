@@ -74,8 +74,8 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 			t.Fatalf("%s state = %d, want %d", tc.name, tc.got, tc.want)
 		}
 	}
-	if ProtocolVersion != 1 {
-		t.Fatalf("protocol version = %d, want 1", ProtocolVersion)
+	if ProtocolVersion != 2 {
+		t.Fatalf("protocol version = %d, want 2", ProtocolVersion)
 	}
 
 	codes := []struct {
@@ -90,6 +90,7 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 		{"login store unavailable", uint8(LoginStoreUnavailable), 4},
 		{"login protocol violation", uint8(LoginProtocolViolation), 5},
 		{"login internal error", uint8(LoginInternalError), 6},
+		{"login already online", uint8(LoginAlreadyOnline), 7},
 		{"disconnect protocol violation", uint8(DisconnectProtocolViolation), 1},
 		{"disconnect timeout", uint8(DisconnectTimeout), 2},
 		{"disconnect server shutdown", uint8(DisconnectServerShutdown), 3},
@@ -140,7 +141,7 @@ func TestValidateServerPacket(t *testing.T) {
 		{"unknown handshake code", StateHandshake, HandshakeReject{Code: HandshakeRejectCode(2)}},
 		{"invalid login success ID", StateLogin, LoginSuccess{}},
 		{"zero login code", StateLogin, LoginReject{}},
-		{"unknown login code", StateLogin, LoginReject{Code: LoginRejectCode(7)}},
+		{"unknown login code", StateLogin, LoginReject{Code: LoginRejectCode(8)}},
 		{"zero keep alive token", StatePlay, KeepAlive{}},
 		{"zero disconnect code", StatePlay, Disconnect{}},
 		{"unknown disconnect code", StatePlay, Disconnect{Code: DisconnectCode(6)}},

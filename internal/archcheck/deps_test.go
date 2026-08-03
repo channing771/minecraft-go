@@ -324,6 +324,7 @@ func TestMCGodHasNoGraphicsDependencies(t *testing.T) {
 			for _, forbidden := range []string{
 				"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx",
 				"github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu",
+				"golang.org/x/image", "golang.org/x/image/font",
 			} {
 				if strings.HasPrefix(path, forbidden) {
 					t.Errorf("%s imports forbidden graphics dependency %s", path, imported.Path.Value)
@@ -339,7 +340,11 @@ func TestMCGodHasNoGraphicsDependencies(t *testing.T) {
 		t.Fatalf("枚举 mcgod 传递依赖: %v", err)
 	}
 	for _, dependency := range strings.Fields(string(output)) {
-		for _, forbidden := range []string{"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu"} {
+		for _, forbidden := range []string{
+			"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx",
+			"github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu",
+			"golang.org/x/image", "golang.org/x/image/font",
+		} {
 			if dependency == forbidden || strings.HasPrefix(dependency, forbidden+"/") {
 				t.Errorf("mcgod transitively depends on forbidden graphics package %s", dependency)
 			}

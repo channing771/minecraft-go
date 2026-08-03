@@ -36,36 +36,47 @@ type applicationOptions struct {
 }
 
 type application struct {
-	window             applicationWindow
-	dev                gfx.Device
-	surface            gfx.Surface
-	color              gfx.Texture
-	colorView          gfx.TextureView
-	frameWidth         int
-	frameHeight        int
-	renderer           *render.Renderer
-	clientEndpoint     network.ClientEndpoint
-	receiver           *client.Receiver
-	server             *server.Server
-	host               applicationHost
-	serverCancel       context.CancelFunc
-	serverDone         chan error
-	mirror             *client.Mirror
-	predictor          *client.Predictor
-	mesher             *client.Mesher
-	depth              *depthTarget
-	camera             client.Camera
-	center             core.ChunkPos
-	sequence           uint64
-	selectedBlock      core.BlockID
-	loadedChunks       map[core.ChunkPos]struct{}
-	ticks              *tickRecorder
-	saves              *saveRecorder
-	observerFloor      uint64
-	benchmarkTransport string
-	closeOnce          sync.Once
-	closeErr           error
-	releaseResources   func()
+	window                  applicationWindow
+	dev                     gfx.Device
+	surface                 gfx.Surface
+	color                   gfx.Texture
+	colorView               gfx.TextureView
+	frameWidth              int
+	frameHeight             int
+	renderer                *render.Renderer
+	remotePlayers           *client.RemotePlayers
+	remotePresentations     []client.RemotePresentation
+	remoteAvatars           []render.Avatar
+	remoteNameTags          []render.NameTag
+	avatarRenderer          *render.AvatarRenderer
+	nameTagRenderer         *render.NameTagRenderer
+	glyphAtlas              *render.GlyphAtlas
+	clientEndpoint          network.ClientEndpoint
+	receiver                *client.Receiver
+	server                  *server.Server
+	host                    applicationHost
+	serverCancel            context.CancelFunc
+	serverDone              chan error
+	mirror                  *client.Mirror
+	predictor               *client.Predictor
+	mesher                  *client.Mesher
+	depth                   *depthTarget
+	camera                  client.Camera
+	center                  core.ChunkPos
+	sequence                uint64
+	selectedBlock           core.BlockID
+	loadedChunks            map[core.ChunkPos]struct{}
+	ticks                   *tickRecorder
+	saves                   *saveRecorder
+	observerFloor           uint64
+	benchmarkTransport      string
+	multiplayerRenderTiming *multiplayerRenderTiming
+	multiplayerRenderNow    func() time.Time
+	closeOnce               sync.Once
+	closeErr                error
+	clientCloseOnce         sync.Once
+	clientCloseErr          error
+	releaseResources        func()
 }
 
 type applicationWindow interface {
@@ -100,6 +111,9 @@ type applicationDependencies struct {
 	newWindow           func(int, int, string) (applicationWindow, error)
 	newDevice           func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
 	newHeadlessDevice   func() (gfx.Device, error)
+	newGlyphAtlas       func(gfx.Device) (*render.GlyphAtlas, error)
+	newAvatarRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
+	newNameTagRenderer  func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
 }
 
 func defaultApplicationDependencies() applicationDependencies {
@@ -249,6 +263,19 @@ func newApplicationWithDependencies(
 	options applicationOptions,
 	dependencies applicationDependencies,
 ) (*application, error) {
+	if dependencies.newGlyphAtlas == nil {
+		dependencies.newGlyphAtlas = render.NewGlyphAtlas
+	}
+	if dependencies.newAvatarRenderer == nil {
+		dependencies.newAvatarRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.AvatarRenderer, error) {
+			return render.NewAvatarRenderer(dev, color, depth), nil
+		}
+	}
+	if dependencies.newNameTagRenderer == nil {
+		dependencies.newNameTagRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat, atlas render.GlyphSource) (*render.NameTagRenderer, error) {
+			return render.NewNameTagRenderer(dev, color, depth, atlas), nil
+		}
+	}
 	ctx := context.Background()
 	var store storage.WorldStore
 	var clientEndpoint network.ClientEndpoint
@@ -341,7 +368,7 @@ func newApplicationWithDependencies(
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}
 	} else {
-		window, err = dependencies.newWindow(2560, 1440, "minecraft-go — M3B TCP world")
+		window, err = dependencies.newWindow(2560, 1440, "minecraft-go — M3C multiplayer world")
 		if err == nil {
 			fitFramebuffer(window, width, height)
 			width, height = window.FramebufferSize()
@@ -380,8 +407,6 @@ func newApplicationWithDependencies(
 	}
 
 	reg := assets.NewRegistry()
-	renderer := render.New(dev, reg, colorFormat)
-	renderer.Resize(uint32(width), uint32(height))
 	camera := client.Camera{
 		Pos:    mgl32.Vec3{0, 110, 0},
 		Pitch:  -0.25,
@@ -398,7 +423,6 @@ func newApplicationWithDependencies(
 		colorView:      colorView,
 		frameWidth:     width,
 		frameHeight:    height,
-		renderer:       renderer,
 		clientEndpoint: clientEndpoint,
 		receiver:       receiver,
 		server:         running,
@@ -407,8 +431,7 @@ func newApplicationWithDependencies(
 		serverDone:     serverDone,
 		mirror:         client.NewMirror(),
 		predictor:      client.NewPredictor(),
-		mesher:         client.NewMesher(reg, max(1, runtime.NumCPU()-2)),
-		depth:          newDepthTarget(dev, uint32(width), uint32(height)),
+		remotePlayers:  client.NewRemotePlayers(),
 		camera:         camera,
 		center:         cameraChunk(camera.Pos),
 		selectedBlock:  core.StoneID,
@@ -423,6 +446,28 @@ func newApplicationWithDependencies(
 		}(),
 	}
 	app.releaseResources = app.releaseOwnedResources
+	app.renderer = render.New(dev, reg, colorFormat)
+	app.renderer.Resize(uint32(width), uint32(height))
+	app.depth = newDepthTarget(dev, uint32(width), uint32(height))
+	app.glyphAtlas, err = dependencies.newGlyphAtlas(dev)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("创建字形图集: %w", err), app.Close())
+	}
+	app.avatarRenderer, err = dependencies.newAvatarRenderer(
+		dev, colorFormat, gfx.FormatDepth32Float,
+	)
+	if err != nil {
+		app.releaseRemoteConstructionResources()
+		return nil, errors.Join(fmt.Errorf("创建远端玩家渲染器: %w", err), app.Close())
+	}
+	app.nameTagRenderer, err = dependencies.newNameTagRenderer(
+		dev, colorFormat, gfx.FormatDepth32Float, app.glyphAtlas,
+	)
+	if err != nil {
+		app.releaseRemoteConstructionResources()
+		return nil, errors.Join(fmt.Errorf("创建昵称渲染器: %w", err), app.Close())
+	}
+	app.mesher = client.NewMesher(reg, max(1, runtime.NumCPU()-2))
 	if options.Benchmark {
 		if err := app.requestTrustedObserverCenter(app.center); err != nil {
 			cleanupErr := app.Close()
@@ -433,6 +478,21 @@ func newApplicationWithDependencies(
 		}
 	}
 	return app, nil
+}
+
+func (a *application) releaseRemoteConstructionResources() {
+	if a.nameTagRenderer != nil {
+		a.nameTagRenderer.Release()
+		a.nameTagRenderer = nil
+	}
+	if a.avatarRenderer != nil {
+		a.avatarRenderer.Release()
+		a.avatarRenderer = nil
+	}
+	if a.glyphAtlas != nil {
+		a.glyphAtlas.Release()
+		a.glyphAtlas = nil
+	}
 }
 
 func assembleBenchmarkObserverConnection(
@@ -636,11 +696,8 @@ func fitFramebuffer(window applicationWindow, targetWidth, targetHeight int) {
 
 func (a *application) Close() error {
 	a.closeOnce.Do(func() {
-		if a.receiver != nil {
-			a.closeErr = errors.Join(a.closeErr, a.receiver.Close())
-		} else if a.clientEndpoint != nil {
-			a.closeErr = errors.Join(a.closeErr, a.clientEndpoint.Close())
-		}
+		a.closeClientSession(nil)
+		a.closeErr = errors.Join(a.closeErr, a.clientCloseErr)
 		if a.serverCancel != nil {
 			a.serverCancel()
 		}
@@ -657,11 +714,20 @@ func (a *application) Close() error {
 }
 
 func (a *application) releaseOwnedResources() {
-	if a.mesher != nil {
-		a.mesher.Close()
+	if a.nameTagRenderer != nil {
+		a.nameTagRenderer.Release()
+	}
+	if a.glyphAtlas != nil {
+		a.glyphAtlas.Release()
+	}
+	if a.avatarRenderer != nil {
+		a.avatarRenderer.Release()
 	}
 	if a.renderer != nil {
 		a.renderer.Release()
+	}
+	if a.mesher != nil {
+		a.mesher.Close()
 	}
 	if a.depth != nil {
 		a.depth.Release()
@@ -681,6 +747,24 @@ func (a *application) releaseOwnedResources() {
 	if a.window != nil {
 		a.window.Close()
 	}
+}
+
+// closeClientSession closes only the current client endpoint. The embedded
+// server belongs to the whole application and is stopped exclusively by Close.
+func (a *application) closeClientSession(cause error) {
+	a.clientCloseOnce.Do(func() {
+		if cause != nil {
+			log.Printf("关闭客户端会话: %v", cause)
+		}
+		if a.receiver != nil {
+			a.clientCloseErr = a.receiver.Close()
+		} else if a.clientEndpoint != nil {
+			a.clientCloseErr = a.clientEndpoint.Close()
+		}
+		if a.remotePlayers != nil {
+			a.remotePlayers.Reset()
+		}
+	})
 }
 
 func (a *application) updateCenter() {
@@ -706,16 +790,25 @@ func (a *application) nextSequence() uint64 {
 }
 
 // frame 应用服务端消息后绘制一帧。
-func (a *application) frame(drainMax int) bool {
+func (a *application) frame(drainMax int, elapsed time.Duration) (bool, error) {
 	a.drainServerMessages(drainMax)
+	if a.receiver != nil {
+		if err := a.receiver.Err(); err != nil {
+			a.closeClientSession(err)
+			return false, err
+		}
+	}
+	if a.remotePlayers != nil {
+		a.remotePlayers.Advance(elapsed)
+	}
 	return a.renderFrame(drainMax)
 }
 
 // renderFrame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
-func (a *application) renderFrame(workMax int) bool {
+func (a *application) renderFrame(workMax int) (bool, error) {
 	width, height := a.framebufferSize()
 	if width == 0 || height == 0 {
-		return false
+		return false, nil
 	}
 	if a.surface != nil && (uint32(width) != a.depth.width || uint32(height) != a.depth.height) {
 		a.surface.Resize(uint32(width), uint32(height))
@@ -735,13 +828,36 @@ func (a *application) renderFrame(workMax int) bool {
 		a.renderer.QueueSection(result.Pos, result.Quads)
 	}
 	a.renderer.FlushUploads(a.center)
+	a.remotePresentations = a.remotePlayers.AppendPresentations(a.remotePresentations[:0])
+	a.remoteAvatars, a.remoteNameTags = remoteRenderPresentationsSortedInto(
+		a.remoteAvatars[:0],
+		a.remoteNameTags[:0],
+		a.remotePresentations,
+	)
+	avatars, tags := a.remoteAvatars, a.remoteNameTags
+	renderTiming := a.multiplayerRenderTiming
+	var renderNow func() time.Time
+	var nameTagDuration time.Duration
+	if renderTiming != nil {
+		renderNow = a.multiplayerRenderNow
+		if renderNow == nil {
+			renderNow = time.Now
+		}
+		started := renderNow()
+		if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
+			return false, fmt.Errorf("准备远端玩家昵称: %w", err)
+		}
+		nameTagDuration = renderNow().Sub(started)
+	} else if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
+		return false, fmt.Errorf("准备远端玩家昵称: %w", err)
+	}
 	a.renderer.DropOutside(a.center, viewDistance)
 
 	target := a.colorView
 	if a.surface != nil {
 		target = a.surface.Acquire()
 		if target == nil {
-			return false
+			return false, nil
 		}
 	}
 	encoder := a.dev.CreateCommandEncoder()
@@ -749,13 +865,65 @@ func (a *application) renderFrame(workMax int) bool {
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
 	})
+	var started time.Time
+	if renderTiming != nil {
+		started = renderNow()
+	}
+	a.avatarRenderer.Render(encoder, target, a.depth.view, render.Camera{
+		ViewProj: a.camera.ViewProj(),
+		Pos:      a.camera.Pos,
+	}, avatars)
+	if renderTiming != nil {
+		renderTiming.recordAvatar(renderNow().Sub(started))
+		started = renderNow()
+	}
+	right := mgl32.Vec3{
+		float32(math.Cos(float64(a.camera.Yaw))),
+		0,
+		-float32(math.Sin(float64(a.camera.Yaw))),
+	}
+	a.nameTagRenderer.Render(encoder, target, a.depth.view, render.BillboardCamera{
+		ViewProj: a.camera.ViewProj(),
+		Right:    right,
+		Up:       right.Cross(a.camera.Forward()).Normalize(),
+	})
+	if renderTiming != nil {
+		renderTiming.recordNameTag(nameTagDuration + renderNow().Sub(started))
+	}
 	command := encoder.Finish()
 	a.dev.Submit(command)
 	command.Release()
 	if a.surface != nil {
 		a.surface.Present()
 	}
-	return true
+	return true, nil
+}
+
+func remoteRenderPresentations(presentations []client.RemotePresentation) ([]render.Avatar, []render.NameTag) {
+	ordered := append([]client.RemotePresentation(nil), presentations...)
+	slices.SortFunc(ordered, func(left, right client.RemotePresentation) int {
+		return slices.Compare(left.PlayerID[:], right.PlayerID[:])
+	})
+	return remoteRenderPresentationsSortedInto(nil, nil, ordered)
+}
+
+func remoteRenderPresentationsSortedInto(
+	avatars []render.Avatar,
+	tags []render.NameTag,
+	ordered []client.RemotePresentation,
+) ([]render.Avatar, []render.NameTag) {
+	for _, presentation := range ordered {
+		avatars = append(avatars, render.Avatar{
+			PlayerID: presentation.PlayerID, Position: presentation.Position,
+			Yaw: presentation.Yaw, Pitch: presentation.Pitch,
+		})
+		tags = append(tags, render.NameTag{
+			PlayerID: presentation.PlayerID,
+			Text:     presentation.DisplayName,
+			Anchor:   presentation.Position.Add(mgl32.Vec3{0, 2.05, 0}),
+		})
+	}
+	return avatars, tags
 }
 
 func (a *application) drainServerMessages(maxMessages int) {
@@ -780,11 +948,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 				Dimension: core.Overworld,
 			})
 			if err != nil {
-				log.Printf("服务端协议数据非法，关闭会话: %v", err)
-				_ = a.clientEndpoint.Close()
-				if a.serverCancel != nil {
-					a.serverCancel()
-				}
+				a.closeClientSession(err)
 				return
 			}
 			if result.ResetView {
@@ -793,13 +957,19 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 			continue
 		}
+		switch message.(type) {
+		case network.RemotePlayerSpawn, *network.RemotePlayerSpawn,
+			network.RemotePlayerDespawn, *network.RemotePlayerDespawn,
+			network.RemotePlayerStates, *network.RemotePlayerStates:
+			if err := a.remotePlayers.Apply(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		}
 		update, err := a.mirror.Apply(message)
 		if err != nil {
-			log.Printf("服务端协议数据非法，关闭会话: %v", err)
-			_ = a.clientEndpoint.Close()
-			if a.serverCancel != nil {
-				a.serverCancel()
-			}
+			a.closeClientSession(err)
 			return
 		}
 		switch message := message.(type) {

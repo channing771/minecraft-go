@@ -123,6 +123,8 @@ func toFormat(f TextureFormat) wgpu.TextureFormat {
 		return wgpu.TextureFormatR32Float
 	case FormatR32Uint:
 		return wgpu.TextureFormatR32Uint
+	case FormatR8Unorm:
+		return wgpu.TextureFormatR8Unorm
 	}
 	panic(fmt.Errorf("gfx: 未知的纹理格式 %d", f))
 }
@@ -143,8 +145,32 @@ func fromFormat(f wgpu.TextureFormat) (TextureFormat, bool) {
 		return FormatR32Float, true
 	case wgpu.TextureFormatR32Uint:
 		return FormatR32Uint, true
+	case wgpu.TextureFormatR8Unorm:
+		return FormatR8Unorm, true
 	}
 	return FormatUndefined, false
+}
+
+// toBlendState 把 gfx 混合模式映射成 WebGPU 的颜色附件状态。
+func toBlendState(mode BlendMode) wgpu.BlendState {
+	switch mode {
+	case BlendReplace:
+		return wgpu.BlendStateReplace
+	case BlendAlpha:
+		return wgpu.BlendState{
+			Color: wgpu.BlendComponent{
+				Operation: wgpu.BlendOperationAdd,
+				SrcFactor: wgpu.BlendFactorSrcAlpha,
+				DstFactor: wgpu.BlendFactorOneMinusSrcAlpha,
+			},
+			Alpha: wgpu.BlendComponent{
+				Operation: wgpu.BlendOperationAdd,
+				SrcFactor: wgpu.BlendFactorOne,
+				DstFactor: wgpu.BlendFactorOneMinusSrcAlpha,
+			},
+		}
+	}
+	panic(fmt.Errorf("gfx: 未知的混合模式 %d", mode))
 }
 
 func toViewDimension(d TextureViewDimension) wgpu.TextureViewDimension {
@@ -483,6 +509,7 @@ func (d *wgpuDevice) CreateRenderPipeline(desc RenderPipelineDesc) RenderPipelin
 		}
 	}
 
+	blend := toBlendState(desc.Blend)
 	pipeline := must(d.device.TryCreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  desc.Label,
 		Layout: layout,
@@ -507,7 +534,7 @@ func (d *wgpuDevice) CreateRenderPipeline(desc RenderPipelineDesc) RenderPipelin
 			EntryPoint: desc.FragmentEntry,
 			Targets: []wgpu.ColorTargetState{{
 				Format:    toFormat(desc.ColorFormat),
-				Blend:     &wgpu.BlendStateReplace,
+				Blend:     &blend,
 				WriteMask: wgpu.ColorWriteMaskAll,
 			}},
 		},
@@ -549,7 +576,7 @@ func (d *wgpuDevice) CreateBindGroup(desc BindGroupDesc) BindGroup {
 				panic("gfx: BindGroupEntry.Buffer 不是本后端创建的缓冲")
 			}
 			out.Buffer = b.buf
-			out.Size = b.buf.GetSize()
+			out.Offset, out.Size = resolveBindGroupBufferRange(desc.Label, e.Binding, e, b.buf.GetSize())
 		case e.Texture != nil:
 			v, ok := e.Texture.(*wgpuTextureView)
 			if !ok {
@@ -576,6 +603,30 @@ func (d *wgpuDevice) CreateBindGroup(desc BindGroupDesc) BindGroup {
 	return &wgpuBindGroup{group: group}
 }
 
+func resolveBindGroupBufferRange(
+	groupLabel string,
+	binding uint32,
+	entry BindGroupEntry,
+	bufferSize uint64,
+) (uint64, uint64) {
+	if entry.Offset == 0 && entry.Size == 0 {
+		return 0, bufferSize
+	}
+	if entry.Size == 0 {
+		panic(fmt.Errorf(
+			"gfx: bind group %q binding %d 的 buffer range offset=%d size=0 要求显式 size > 0",
+			groupLabel, binding, entry.Offset,
+		))
+	}
+	if entry.Offset > bufferSize || entry.Size > bufferSize-entry.Offset {
+		panic(fmt.Errorf(
+			"gfx: bind group %q binding %d 的 buffer range offset=%d size=%d 超出 buffer size=%d",
+			groupLabel, binding, entry.Offset, entry.Size, bufferSize,
+		))
+	}
+	return entry.Offset, entry.Size
+}
+
 func (d *wgpuDevice) CreateTexture(desc TextureDesc) Texture {
 	layers := max(desc.Layers, 1)
 	mips := max(desc.MipLevels, 1)
@@ -597,11 +648,14 @@ func (d *wgpuDevice) CreateTexture(desc TextureDesc) Texture {
 		SampleCount:   1,
 	}))
 	return &wgpuTexture{
-		device:  d,
-		texture: tex,
-		width:   desc.Width,
-		height:  desc.Height,
-		format:  format,
+		device:       d,
+		texture:      tex,
+		width:        desc.Width,
+		height:       desc.Height,
+		layers:       layers,
+		mipLevels:    mips,
+		format:       format,
+		writeTexture: d.queue.TryWriteTexture,
 	}
 }
 
@@ -914,11 +968,14 @@ func (v *wgpuTextureView) Release() {
 // ---------------------------------------------------------------------------
 
 type wgpuTexture struct {
-	device  *wgpuDevice
-	texture *wgpu.Texture
-	width   uint32
-	height  uint32
-	format  wgpu.TextureFormat
+	device       *wgpuDevice
+	texture      *wgpu.Texture
+	writeTexture func(*wgpu.TexelCopyTextureInfo, []byte, *wgpu.TexelCopyBufferLayout, *wgpu.Extent3D) error
+	width        uint32
+	height       uint32
+	layers       uint32
+	mipLevels    uint32
+	format       wgpu.TextureFormat
 }
 
 func (t *wgpuTexture) View(desc TextureViewDesc) TextureView {
@@ -942,28 +999,58 @@ func (t *wgpuTexture) View(desc TextureViewDesc) TextureView {
 	return &wgpuTextureView{view: view}
 }
 
-func (t *wgpuTexture) WriteLayer(layer, mip uint32, rgba []byte) {
-	// mip N 的尺寸是基础尺寸右移 N 位，最小为 1。
-	w := max(t.width>>mip, 1)
-	h := max(t.height>>mip, 1)
+func (t *wgpuTexture) WriteLayer(layer, mip uint32, pixels []byte) {
+	t.WriteRegion(layer, mip, 0, 0, mipSize(t.width, mip), mipSize(t.height, mip), pixels)
+}
+
+func (t *wgpuTexture) WriteRegion(layer, mip, x, y, width, height uint32, pixels []byte) {
+	if layer >= t.layers {
+		panic(fmt.Errorf("gfx: layer %d 超出纹理层数 %d", layer, t.layers))
+	}
+	if mip >= t.mipLevels {
+		panic(fmt.Errorf("gfx: mip %d 超出纹理 mip 数 %d", mip, t.mipLevels))
+	}
+	if width == 0 || height == 0 {
+		panic("gfx: 写入 region 的宽和高必须大于零")
+	}
+	mipWidth := mipSize(t.width, mip)
+	mipHeight := mipSize(t.height, mip)
+	if width > mipWidth || x > mipWidth-width || height > mipHeight || y > mipHeight-height {
+		panic(fmt.Errorf("gfx: region (%d, %d, %d, %d) 超出 mip %d 尺寸 %dx%d", x, y, width, height, mip, mipWidth, mipHeight))
+	}
 	bytesPerPixel := t.format.ByteSize()
 	if bytesPerPixel == 0 {
 		panic(fmt.Errorf("gfx: 格式 %v 的每像素字节数未知，无法写入", t.format))
 	}
-	check(t.device.queue.TryWriteTexture(
+	want := uint64(width) * uint64(height) * uint64(bytesPerPixel)
+	if uint64(len(pixels)) != want {
+		panic(fmt.Errorf("gfx: region payload 大小 = %d，想要 %d", len(pixels), want))
+	}
+	writeTexture := t.writeTexture
+	if writeTexture == nil {
+		writeTexture = t.device.queue.TryWriteTexture
+	}
+	check(writeTexture(
 		&wgpu.TexelCopyTextureInfo{
 			Texture:  t.texture,
 			MipLevel: mip,
-			Origin:   wgpu.Origin3D{Z: layer},
+			Origin:   wgpu.Origin3D{X: x, Y: y, Z: layer},
 			Aspect:   wgpu.TextureAspectAll,
 		},
-		rgba,
+		pixels,
 		&wgpu.TexelCopyBufferLayout{
-			BytesPerRow:  w * bytesPerPixel,
-			RowsPerImage: h,
+			BytesPerRow:  width * bytesPerPixel,
+			RowsPerImage: height,
 		},
-		&wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+		&wgpu.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
 	))
+}
+
+func mipSize(size, mip uint32) uint32 {
+	if mip >= 32 {
+		return 1
+	}
+	return max(size>>mip, 1)
 }
 
 func (t *wgpuTexture) Release() {

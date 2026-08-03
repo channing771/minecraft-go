@@ -120,7 +120,8 @@ func TestMesherSurvivesPanickingJob(t *testing.T) {
 func TestMesherCloseReturnsWithFullResultQueue(t *testing.T) {
 	mirror := client.NewMirror()
 	loadMirrorSquare(t, mirror, core.Overworld, core.ChunkPos{}, 1, 1)
-	mesher := client.NewMesher(assets.NewRegistry(), 2)
+	workers := 2
+	mesher := client.NewMesher(assets.NewRegistry(), workers)
 
 	var keys []core.SectionKey
 	for z := int32(-1); z <= 1; z++ {
@@ -133,7 +134,9 @@ func TestMesherCloseReturnsWithFullResultQueue(t *testing.T) {
 	mesher.MarkDirty(keys...)
 	mesher.Schedule(mirror, len(keys))
 	waitForMesherStats(t, mesher, 10*time.Second, func(stats client.MesherStats) bool {
-		return stats.ReadyResults == stats.ResultCapacity && stats.InFlightJobs > 0
+		blockedPublishers := len(keys) - stats.ResultCapacity - workers
+		return stats.ReadyResults == stats.ResultCapacity &&
+			stats.QueuedJobs == blockedPublishers && stats.InFlightJobs == 0
 	})
 
 	done := make(chan struct{})

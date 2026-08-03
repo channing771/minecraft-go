@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +84,44 @@ func TestLoginClientReportsHandshakeVersionMismatch(t *testing.T) {
 	assertRemoteError(t, err, StateHandshake, uint8(HandshakeVersionMismatch), "upgrade required")
 	if err := <-serverDone; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBeginServerLoginRejectsV1ClientHelloWithProtocolV2(t *testing.T) {
+	stream := &v1ClientHelloStream{}
+	if _, err := BeginServerLogin(context.Background(), stream); err == nil {
+		t.Fatal("v1 ClientHello accepted")
+	}
+	reject, ok := stream.sent.(HandshakeReject)
+	if !ok || stream.sentState != StateHandshake || reject.ServerProtocolVersion != 2 || reject.Code != HandshakeVersionMismatch {
+		t.Fatalf("v1 rejection = %#v in state %d, want v2 HandshakeReject", stream.sent, stream.sentState)
+	}
+}
+
+func TestBeginServerLoginFutureClientHelloReturnsV2MismatchOverTCP(t *testing.T) {
+	listener := listenLoopback(t)
+	t.Cleanup(func() { _ = listener.Close() })
+	client, server := dialAndAccept(t, listener)
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	serverDone := make(chan error, 1)
+	go func() {
+		_, err := BeginServerLogin(ctx, server)
+		serverDone <- err
+	}()
+
+	writeRawClientFrame(t, client, 0, []byte{byte(ProtocolVersion + 1)})
+	packet, err := client.Recv(ctx, StateHandshake)
+	if err != nil {
+		t.Fatalf("future ClientHello response: %v", err)
+	}
+	reject, ok := packet.(HandshakeReject)
+	if err != nil || !ok || reject.ServerProtocolVersion != ProtocolVersion || reject.Code != HandshakeVersionMismatch {
+		t.Fatalf("future ClientHello rejection=(%#v, %v), want protocol %d HandshakeVersionMismatch", packet, err, ProtocolVersion)
+	}
+	if err := <-serverDone; err == nil || !strings.Contains(err.Error(), "protocol violation") {
+		t.Fatalf("BeginServerLogin error=%v, want protocol violation after rejection", err)
 	}
 }
 
@@ -299,6 +338,36 @@ func TestPendingLoginSuccessfulAcceptStopsLoginWatcher(t *testing.T) {
 	}
 	if packet, err := client.Recv(context.Background(), StatePlay); err != nil || packet != (PlayerState{Ready: true}) {
 		t.Fatalf("play packet after parent cancellation = (%+v, %v)", packet, err)
+	}
+}
+
+func TestGatedServerPlayEndpointCommittedHandoffWinsLoginCancellation(t *testing.T) {
+	previous := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previous)
+
+	for iteration := 0; iteration < 128; iteration++ {
+		client, server := NewMemoryStreamPair(1)
+		login := &simultaneousHandoffContext{
+			done:     make(chan struct{}),
+			observed: make(chan struct{}),
+			release:  make(chan struct{}),
+		}
+		endpoint := newGatedServerPlayEndpoint(server, login)
+		result := make(chan error, 1)
+		go func() { result <- endpoint.wait(context.Background()) }()
+
+		<-login.observed
+		endpoint.commit()
+		close(login.done)
+		close(login.release)
+		runtime.Gosched()
+		if err := <-result; err != nil {
+			_ = client.Close()
+			t.Fatalf("committed handoff iteration %d selected canceled login: %v", iteration, err)
+		}
+		if err := client.Close(); err != nil {
+			t.Fatalf("close handoff stream iteration %d: %v", iteration, err)
+		}
 	}
 }
 
@@ -533,9 +602,52 @@ func assertRemoteError(t *testing.T, err error, state State, code uint8, message
 	}
 }
 
+type simultaneousHandoffContext struct {
+	done     chan struct{}
+	observed chan struct{}
+	release  chan struct{}
+}
+
+func (*simultaneousHandoffContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (ctx *simultaneousHandoffContext) Done() <-chan struct{} {
+	close(ctx.observed)
+	<-ctx.release
+	return ctx.done
+}
+
+func (ctx *simultaneousHandoffContext) Err() error {
+	select {
+	case <-ctx.done:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+
+func (*simultaneousHandoffContext) Value(any) any { return nil }
+
 func testIdentity(last byte) Identity {
 	return Identity{
 		PlayerID:    core.PlayerID{0, 1, 2, 3, 4, 5, 0x46, 7, 0x88, 9, 10, 11, 12, 13, 14, last},
 		DisplayName: "Chen",
 	}
 }
+
+type v1ClientHelloStream struct {
+	sent      ServerPacket
+	sentState State
+}
+
+func (stream *v1ClientHelloStream) Send(_ context.Context, state State, packet ServerPacket) error {
+	stream.sentState = state
+	stream.sent = packet
+	return nil
+}
+
+func (*v1ClientHelloStream) Recv(context.Context, State) (ClientPacket, error) {
+	return ClientHello{ProtocolVersion: 1}, nil
+}
+
+func (*v1ClientHelloStream) Peer() string { return "test" }
+func (*v1ClientHelloStream) Close() error { return nil }
