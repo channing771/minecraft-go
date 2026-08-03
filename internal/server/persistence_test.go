@@ -17,6 +17,9 @@ import (
 	"minecraft-go/internal/world"
 )
 
+// emptyChunkEstimateBytes 是全空区块的存档估算：512 信封 + 32 个固定掉落物槽。
+const emptyChunkEstimateBytes = 512 + core.DropsPerChunk*world.DropSlotBytes
+
 func TestAutosaveBeginsAtConfiguredTickWithoutBlockingStep(t *testing.T) {
 	store := newPersistenceTestStore()
 	store.gate = make(chan struct{})
@@ -691,7 +694,7 @@ func TestPersistenceStatusReturnsCopiedCurrentState(t *testing.T) {
 	running.backpressured = true
 
 	status := running.PersistenceStatus()
-	if status.DirtyChunks != 1 || status.EstimatedBytes != 512 ||
+	if status.DirtyChunks != 1 || status.EstimatedBytes != emptyChunkEstimateBytes ||
 		status.InFlightChunks != 0 || !status.Backpressured ||
 		status.LastError != "original failure" ||
 		!status.LastErrorAt.Equal(time.Unix(123, 0)) || status.AutosaveDrained {
@@ -971,7 +974,7 @@ func TestPersistenceBackpressureQueuesAcquireUntilMemoryRecovers(t *testing.T) {
 		t.Fatalf("queued unknown chunk state=%+v exists=%v pending=%+v", info, exists, running.pending)
 	}
 	status := running.PersistenceStatus()
-	if !status.Backpressured || status.DirtyChunks != 1 || status.EstimatedBytes != 512 ||
+	if !status.Backpressured || status.DirtyChunks != 1 || status.EstimatedBytes != emptyChunkEstimateBytes ||
 		status.InFlightChunks != 0 || status.AutosaveDrained {
 		t.Fatalf("backpressure status=%+v", status)
 	}

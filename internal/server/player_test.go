@@ -368,7 +368,6 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		recvServerMessage(t, client),
 		recvServerMessage(t, client),
 		recvServerMessage(t, client),
-		recvServerMessage(t, client),
 	}
 	if _, ok := changedMessages[0].(network.BlockChanges); !ok {
 		t.Fatalf("change tick 首消息 = %T，想要 BlockChanges", changedMessages[0])
@@ -377,14 +376,10 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 	if !ok || rejection.Sequence != 2 || rejection.Reason != network.RejectInvalidInput {
 		t.Fatalf("change tick 次消息 = %#v", changedMessages[1])
 	}
-	// 挖掘成功后本 tick 发布一次采集结果。
-	hotbar, ok := changedMessages[2].(network.HotbarState)
-	if !ok || hotbar.Hotbar.Slots[0] != (core.ItemStack{Item: core.ItemGrass, Count: 1}) {
-		t.Fatalf("change tick 第三条消息 = %#v", changedMessages[2])
-	}
-	state, ok := changedMessages[3].(network.PlayerState)
+	// 挖掘只产生掉落物，本 tick 不再发布快捷栏更新。
+	state, ok := changedMessages[2].(network.PlayerState)
 	if !ok || state.ServerTick != changed.Tick || state.LastInputSequence != 2 {
-		t.Fatalf("change tick 尾消息 = %#v", changedMessages[3])
+		t.Fatalf("change tick 尾消息 = %#v", changedMessages[2])
 	}
 
 	forgottenKey := core.ChunkKey{

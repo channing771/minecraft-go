@@ -159,27 +159,12 @@ func movePlayerAndPlaceBlock(
 	position core.BlockPos,
 ) {
 	t.Helper()
-	// 先挖掉视线内的石头障碍以获得物品，再从栏位 0 放置该物品。
+	// M4B：挖掉视线内的石头障碍会在原地留下掉落物，世界修改由该挖掘产生。
 	sendIntegration(t, connected.Endpoint, network.BreakBlock{
 		Sequence: 1, Yaw: 0, Pitch: -0.2,
 	})
 	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
 		return integrationChangeSeen(message, position, core.AirID)
-	})
-	sendIntegration(t, connected.Endpoint, network.PlaceBlock{
-		Sequence: 2, Yaw: 0, Pitch: -0.6, Slot: 0,
-	})
-	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
-		changes, ok := message.(network.BlockChanges)
-		if !ok {
-			return false
-		}
-		for _, change := range changes.Changes {
-			if change.Block == core.StoneID {
-				return true
-			}
-		}
-		return false
 	})
 	before := host.PlayerSnapshot(t, integrationPlayerID())
 	sendIntegration(t, connected.Endpoint, network.PlayerInput{

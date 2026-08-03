@@ -63,45 +63,6 @@ func TestHotbarSelectSameSlotDoesNotRepublish(t *testing.T) {
 	}
 }
 
-func TestHotbarBreakAddsDropToLowestSlot(t *testing.T) {
-	engine, session := readyFlatPlayer(t)
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-
-	result := engine.Step()
-	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
-		t.Fatalf("挖掘 result=%+v", result)
-	}
-	if len(result.Hotbars) != 1 || result.Hotbars[0].Session != session {
-		t.Fatalf("Hotbars=%+v，想要恰好一份属于本会话的更新", result.Hotbars)
-	}
-	want := core.ItemStack{Item: core.ItemGrass, Count: 1}
-	if result.Hotbars[0].Hotbar.Slots[0] != want {
-		t.Fatalf("栏位 0 = %+v，想要 %+v", result.Hotbars[0].Hotbar.Slots[0], want)
-	}
-}
-
-func TestHotbarBreakRejectsWhenFull(t *testing.T) {
-	var full core.Hotbar
-	for i := range full.Slots {
-		full.Slots[i] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
-	}
-	engine, session := readyFlatPlayerRestored(t, nil, full)
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-
-	result := engine.Step()
-	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectHotbarFull ||
-		len(result.Changes) != 0 || len(result.Hotbars) != 0 {
-		t.Fatalf("满栏 result=%+v", result)
-	}
-	if got := currentHotbar(t, engine, session); got != full {
-		t.Fatalf("满栏被拒绝后快捷栏 = %+v，想要保持 %+v", got, full)
-	}
-}
-
 func TestHotbarBreakRejectsBlockWithoutDrop(t *testing.T) {
 	position := core.BlockPos{X: 0, Y: 0, Z: 0}
 	engine, session := readyFlatPlayerWithTarget(t, map[core.BlockPos]core.BlockID{
@@ -220,7 +181,9 @@ func TestHotbarFailedPlaceKeepsItem(t *testing.T) {
 }
 
 func TestHotbarSameTickCommandsPublishFinalStateOnce(t *testing.T) {
-	engine, session := readyFlatPlayer(t)
+	var stocked core.Hotbar
+	stocked.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+	engine, session := readyFlatPlayerRestored(t, nil, stocked)
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 4, Kind: sim.CommandPlaceBlock,
 		Pitch: lookDown, Slot: 0,
@@ -241,9 +204,9 @@ func TestHotbarSameTickCommandsPublishFinalStateOnce(t *testing.T) {
 	}
 	hotbar := result.Hotbars[0].Hotbar
 	if hotbar.Selected != 7 || hotbar.Slots[0] != (core.ItemStack{}) {
-		t.Fatalf("最终快捷栏 = %+v，想要选中 7 且采集物已被放置消耗", hotbar)
+		t.Fatalf("最终快捷栏 = %+v，想要选中 7 且放置已消耗物品", hotbar)
 	}
-	want := sim.BlockChange{Position: core.BlockPos{X: 0, Y: 0, Z: 0}, Block: core.GrassID}
+	want := sim.BlockChange{Position: core.BlockPos{X: 0, Y: 0, Z: 0}, Block: core.StoneID}
 	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 1 ||
 		result.Changes[0].Changes[0] != want {
 		t.Fatalf("同 tick 世界变更 =%+v", result.Changes)

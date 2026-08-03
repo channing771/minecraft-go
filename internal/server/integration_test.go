@@ -20,7 +20,9 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 	config.SnapshotChunks = 16
 	config.SnapshotBytes = 1 << 20
 	config.OutboxCapacity = 256
-	running := newMemoryAttachedWorldForExternalTest(config, serverEndpoint, server.FlatTestGenerator{})
+	running := newMemoryAttachedWorldWithHotbar(
+		config, serverEndpoint, server.FlatTestGenerator{}, stockedTestHotbar(core.ItemStone),
+	)
 	mirror := client.NewMirror()
 
 	interactionChunk := (core.BlockPos{X: 0, Y: 1, Z: -6}).Chunk()
@@ -31,7 +33,7 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 	})
 
 	pitch := float32(-0.2)
-	// 权威快捷栏下必须先挖掘获得物品，才能从对应栏位放回同一方块。
+	// M4B：挖掘只产生地面掉落物，放置改用登录时已确认的快捷栏物品。
 	sendClientMessage(t, clientEndpoint, network.BreakBlock{
 		Sequence: 1,
 		Yaw:      0,
@@ -55,7 +57,7 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 		t, running, clientEndpoint, mirror, interactionChunk, 2, 3,
 	)
 	if placed.Position == broken.Position || placed.Block != core.StoneID {
-		t.Fatalf("放置结果 = %+v，想要放下刚采集的石头", placed)
+		t.Fatalf("放置结果 = %+v，想要放下快捷栏中的石头", placed)
 	}
 	authoritativeHash, authoritativeRevision, authoritativeOK := running.ChunkHash(
 		core.Overworld,

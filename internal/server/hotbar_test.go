@@ -76,8 +76,9 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 	secondMirror := &client.HotbarMirror{}
 	firstReady, secondReady := false, false
 	wantCollected := core.ItemStack{Item: core.ItemGrass, Count: 1}
+	// 挖掘产生地面掉落物，玩家需在拾取延迟后原地拾取才会更新快捷栏。
 	deadline := time.Now().Add(5 * time.Second)
-	// 阶段 0 等待两人 Ready，阶段 1 验证玩家甲采集，阶段 2 验证玩家乙独立采集。
+	// 阶段 0 等待两人 Ready，阶段 1 验证玩家甲采集且玩家乙不受影响。
 	stage := 0
 	for {
 		if time.Now().After(deadline) {
@@ -96,6 +97,7 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 			})
 			stage = 1
 		case 1:
+			// 玩家甲挖掘后在原地拾取；同一 tick 内玩家乙不得收到任何快捷栏更新。
 			if len(secondStates) != 0 {
 				t.Fatalf("玩家乙收到了不属于自己的快捷栏更新: %+v", secondStates)
 			}
@@ -105,21 +107,8 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 			if got := firstStates[len(firstStates)-1].Hotbar.Slots[0]; got != wantCollected {
 				t.Fatalf("玩家甲快捷栏栏位 0 = %+v，想要 %+v", got, wantCollected)
 			}
-			sendClientMessage(t, secondClient, network.BreakBlock{
-				Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
-			})
-			stage = 2
-		case 2:
-			if len(firstStates) != 0 {
-				t.Fatalf("玩家甲收到了玩家乙的快捷栏更新: %+v", firstStates)
-			}
-			if len(secondStates) == 0 {
-				continue
-			}
-			// 玩家乙独立采集：栏位 0 恰好一个自己挖到的物品，与玩家甲互不影响。
-			got := secondStates[len(secondStates)-1].Hotbar.Slots[0]
-			if got.Item == core.ItemNone || got.Count != 1 {
-				t.Fatalf("玩家乙快捷栏栏位 0 = %+v，想要恰好一个采集物", got)
+			if got, ok := secondMirror.State(); !ok || got != (core.Hotbar{}) {
+				t.Fatalf("玩家乙镜像 = %+v, %v，想要保持为空", got, ok)
 			}
 			return
 		}
@@ -193,7 +182,7 @@ func hotbarDrainTick(
 	}
 }
 
-func TestHotbarFullRejectsBreakWithoutChangingWorld(t *testing.T) {
+func TestFullHotbarStillBreaksBlockIntoGroundDrop(t *testing.T) {
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
 	config := hotbarTestConfig(1)
 	running := server.NewWorld(config, server.FlatTestGenerator{}, hotbarTestStore(config))
@@ -215,25 +204,24 @@ func TestHotbarFullRejectsBreakWithoutChangingWorld(t *testing.T) {
 	broken := false
 	for {
 		if time.Now().After(deadline) {
-			t.Fatal("等待满栏挖掘拒绝超时")
+			t.Fatal("等待满快捷栏挖掘结果超时")
 		}
 		result := running.StepForTest()
-		states, rejections := hotbarDrainTickAllowingRejections(t, clientEndpoint, result.Tick, mirror, &ready)
+		states, rejections := hotbarDrainTickAllowingRejections(
+			t, clientEndpoint, result.Tick, mirror, &ready,
+		)
 		if broken {
-			if len(rejections) == 0 {
-				continue
-			}
-			if rejections[0].Reason != network.RejectHotbarFull {
-				t.Fatalf("拒绝原因 = %+v，想要 hotbar_full", rejections[0])
+			if len(rejections) != 0 {
+				t.Fatalf("满快捷栏挖掘被拒绝: %+v", rejections)
 			}
 			if len(states) != 0 {
-				t.Fatalf("满栏被拒绝仍发布快捷栏: %+v", states)
+				t.Fatalf("满快捷栏挖掘仍发布了快捷栏更新: %+v", states)
+			}
+			if len(result.Changes) == 0 {
+				continue
 			}
 			if got, _ := mirror.State(); got != full {
-				t.Fatalf("满栏被拒绝后镜像 = %+v", got)
-			}
-			if len(result.Changes) != 0 {
-				t.Fatalf("满栏被拒绝仍修改世界: %+v", result.Changes)
+				t.Fatalf("满快捷栏被修改: %+v", got)
 			}
 			return
 		}

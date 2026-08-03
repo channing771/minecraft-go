@@ -21,10 +21,10 @@
 
 ## 4. 权威生成、拾取与过期
 
-- [ ] 4.1 在 `internal/sim` 先写失败测试，覆盖挖掘创建/合并且不直接入栏、32 槽满时原子拒绝、满快捷栏仍可挖掘、10 tick 延迟、6000 活动 tick 过期、无人时暂停、部分拾取和多人稳定竞争。
-- [ ] 4.2 在现有单写者 tick 中增加固定半径 2 的 `dropWanted` 并与区块获取集合取并集；按 `ChunkKey`、`SessionID`、`DropID` 稳定扫描，复用 `Hotbar.Add`，并让纯掉落物变化通过零方块 batch 推进同一 `ChunkRecord.Revision`。
-- [ ] 4.3 在 `internal/server` 映射新的掉落物容量拒绝；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，并确认 `git diff --check` 通过。
-- [ ] 4.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 权威生成并拾取掉落物`。提交成功后自动进入第 5 组。
+- [x] 4.1 在 `internal/sim` 先写失败测试，覆盖挖掘创建/合并且不直接入栏、32 槽满时原子拒绝、满快捷栏仍可挖掘、10 tick 延迟、6000 活动 tick 过期、无人时暂停、部分拾取和多人稳定竞争。
+- [x] 4.2 在现有单写者 tick 中增加固定半径 2 的 `dropWanted` 并与区块获取集合取并集；按 `ChunkKey`、`SessionID`、`DropID` 稳定扫描，复用 `Hotbar.Add`，并让纯掉落物变化通过零方块 batch 推进同一 `ChunkRecord.Revision`。
+- [x] 4.3 在 `internal/server` 映射新的掉落物容量拒绝；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，并确认 `git diff --check` 通过。
+- [x] 4.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 权威生成并拾取掉落物`。提交成功后自动进入第 5 组。
 
 ## 5. 服务端兴趣差分发布
 

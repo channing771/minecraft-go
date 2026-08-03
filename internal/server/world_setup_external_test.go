@@ -11,6 +11,17 @@ import (
 )
 
 func newMemoryAttachedWorldForExternalTest(config server.Config, endpoint network.ServerEndpoint, generator server.Generator) *server.Server {
+	return newMemoryAttachedWorldWithHotbar(config, endpoint, generator, core.Hotbar{})
+}
+
+// newMemoryAttachedWorldWithHotbar 让放置类纵向测试可以从已确认的快捷栏起步；
+// M4B 的挖掘只产生地面掉落物，不再即时补充快捷栏。
+func newMemoryAttachedWorldWithHotbar(
+	config server.Config,
+	endpoint network.ServerEndpoint,
+	generator server.Generator,
+	hotbar core.Hotbar,
+) *server.Server {
 	running := server.NewWorld(config, generator, storage.NewMemory(storage.Metadata{FormatVersion: 1, Seed: config.Seed, SpawnDimension: config.SpawnDimension, SpawnAnchor: config.SpawnAnchor}))
 	if config.TrustedObserver {
 		if err := running.AttachTrustedObserver(endpoint); err != nil {
@@ -21,11 +32,19 @@ func newMemoryAttachedWorldForExternalTest(config server.Config, endpoint networ
 	restore := sim.PlayerRestore{
 		SpawnDimension: config.SpawnDimension,
 		SpawnAnchor:    config.SpawnAnchor,
+		Hotbar:         hotbar,
 	}
 	if _, err := running.AttachSession(externalSessionSpec(1, 1, endpoint, restore)); err != nil {
 		panic(err)
 	}
 	return running
+}
+
+// stockedTestHotbar 返回栏位 0 装满该物品的快捷栏。
+func stockedTestHotbar(item core.ItemID) core.Hotbar {
+	var hotbar core.Hotbar
+	hotbar.Slots[0] = core.ItemStack{Item: item, Count: core.MaxStackCount}
+	return hotbar
 }
 
 func playerStateForExternalTest(running *server.Server) (sim.PlayerUpdate, bool) {
@@ -43,12 +62,16 @@ func newAttachedPersistentWorldForExternalTest(config server.Config, endpoint ne
 	restore := sim.PlayerRestore{
 		SpawnDimension: config.SpawnDimension,
 		SpawnAnchor:    config.SpawnAnchor,
+		Hotbar:         persistentTestHotbar,
 	}
 	if _, err := running.AttachSession(externalSessionSpec(1, 1, endpoint, restore)); err != nil {
 		panic(err)
 	}
 	return running
 }
+
+// persistentTestHotbar 让持久化纵向脚本可以放置方块；挖掘只产生地面掉落物。
+var persistentTestHotbar = stockedTestHotbar(core.ItemStone)
 
 func externalSessionSpec(
 	id sim.SessionID,

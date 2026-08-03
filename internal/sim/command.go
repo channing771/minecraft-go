@@ -45,6 +45,7 @@ const (
 	RejectPlayerNotReady RejectReason = 7
 	RejectInvalidSlot    RejectReason = 8
 	RejectHotbarFull     RejectReason = 9
+	RejectDropCapacity   RejectReason = 10
 )
 
 type Command struct {

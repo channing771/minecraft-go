@@ -327,7 +327,8 @@ func rejectionUpdate(rejected network.CommandRejected) (MirrorUpdate, error) {
 		network.RejectInvalidInput,
 		network.RejectPlayerNotReady,
 		network.RejectInvalidSlot,
-		network.RejectHotbarFull:
+		network.RejectHotbarFull,
+		network.RejectDropCapacity:
 		return MirrorUpdate{Rejected: &rejected}, nil
 	default:
 		return MirrorUpdate{}, fmt.Errorf(

@@ -242,6 +242,7 @@ func (engine *Engine) Step() TickResult {
 	}
 
 	pending := make(map[core.ChunkKey]*pendingChunkChanges)
+	engine.advanceDrops(pending)
 	for _, command := range interactions {
 		if reason, rejected := engine.executeInteraction(command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{
@@ -654,14 +655,19 @@ func (engine *Engine) executeInteraction(
 		if block == core.BedrockID {
 			return RejectProtectedBlock, true
 		}
-		drop, ok := core.BlockDrop(block)
+		item, ok := core.BlockDrop(block)
 		if !ok {
 			return RejectProtectedBlock, true
 		}
-		// 只有快捷栏副本能接收掉落物时才允许破坏方块。
-		collected, ok := player.hotbar.Add(drop)
+		// 先预检所属区块的掉落物容量，容量不足时方块保持不变。
+		record, recordOK := dimension.records[hit.Block.Chunk()]
+		blockIndex, indexOK := world.ChunkBlockIndex(hit.Block)
+		if !recordOK || record.Chunk == nil || !indexOK {
+			return RejectChunkNotReady, true
+		}
+		dropSlot, ok := record.Chunk.PrepareDrop(item, blockIndex)
 		if !ok {
-			return RejectHotbarFull, true
+			return RejectDropCapacity, true
 		}
 		_, changed, setErr := dimension.SetBlock(hit.Block, core.AirID)
 		if setErr != nil {
@@ -674,8 +680,7 @@ func (engine *Engine) executeInteraction(
 				core.AirID,
 				pending,
 			)
-			player.hotbar = collected
-			player.hotbarDirty = true
+			record.Chunk.CommitDrop(dropSlot, item, blockIndex, DropPickupDelayTicks)
 		}
 		return 0, false
 

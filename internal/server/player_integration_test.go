@@ -588,8 +588,14 @@ func (h *delayedPlayerHarness) assertWorldHashesEqual() {
 	if !reflect.DeepEqual(h.rejections, wantRejections) {
 		h.t.Fatalf("rejections=%+v，想要 %+v", h.rejections, wantRejections)
 	}
-	if len(h.deltas) != 1 {
-		h.t.Fatalf("break deltas=%+v，想要恰好一个", h.deltas)
+	// M4B：挖掘产生地面掉落物，随后的拾取会追加零方块 revision barrier。
+	if len(h.deltas) == 0 {
+		h.t.Fatal("没有收到挖掘 delta")
+	}
+	for index, extra := range h.deltas[1:] {
+		if len(extra.Changes) != 0 {
+			h.t.Fatalf("挖掘后第 %d 个 delta 含方块变化: %+v", index+1, extra)
+		}
 	}
 	delta := h.deltas[0]
 	if delta.BaseRevision != 1 || delta.NewRevision != 2 || len(delta.Changes) != 1 ||
@@ -604,8 +610,10 @@ func (h *delayedPlayerHarness) assertWorldHashesEqual() {
 		delta.Chunk,
 	)
 	mirrorHash, mirrorRevision, mirrorOK := h.mirror.Hash(core.Overworld, delta.Chunk)
+	// 权威 revision 取最后一份 delta：拾取掉落物会在挖掘之后追加 barrier。
+	lastRevision := h.deltas[len(h.deltas)-1].NewRevision
 	if !authoritativeOK || !mirrorOK || authoritativeRevision != mirrorRevision ||
-		authoritativeRevision != delta.NewRevision || authoritativeHash != mirrorHash {
+		authoritativeRevision != lastRevision || authoritativeHash != mirrorHash {
 		h.t.Fatalf(
 			"交互区块不一致: authoritative=(%x,%d,%v) mirror=(%x,%d,%v) delta=%+v",
 			authoritativeHash,
@@ -629,8 +637,9 @@ func (h *delayedPlayerHarness) replayResult() delayedReplayResult {
 	if !ok {
 		h.t.Fatal("replay 最终 PlayerHash 不可用")
 	}
-	if len(h.deltas) != 1 {
-		h.t.Fatalf("replay break deltas=%+v，想要恰好一个", h.deltas)
+	// M4B：挖掘 delta 之后可能追加拾取掉落物产生的零方块 barrier。
+	if len(h.deltas) == 0 {
+		h.t.Fatalf("replay break deltas=%+v，想要至少一个", h.deltas)
 	}
 	chunk := h.deltas[0].Chunk
 	chunkHash, revision, ok := h.running.ChunkHash(core.Overworld, chunk)

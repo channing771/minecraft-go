@@ -35,7 +35,7 @@
 
 交互处理先在目标区块预检可合并槽或空槽，再在同一 tick 中把方块改为空气并提交掉落物；预检失败时两者都不写。满快捷栏不参与挖掘预检。掉落物拾取继续复用 `Hotbar.Add` 的最低栏位规则，循环添加到栏位满或堆为空，因此不复制快捷栏堆叠逻辑。
 
-每个会话保留现有地形 `wanted`，另计算固定半径 2 的 `dropWanted`；全局区块获取集合取二者并集，地形快照仍只按原 `wanted` 发布。每 tick 将所有 Ready 玩家 `dropWanted` 去重并按 `ChunkKey` 排序，只扫描其中 Ready 区块的 32 个槽。玩家按 `SessionID`、掉落物按 `DropID` 排序；先使用本 tick 完成移动后的权威位置处理已有掉落物，再处理挖掘，因此新堆从后续活动 tick 开始扣减 10 tick 延迟。区块离开全部 `dropWanted` 后其年龄和延迟暂停，值直接保存在槽中。
+每个会话保留现有地形 `wanted`，另计算固定半径 2 的 `dropWanted`。`dropWanted` 只用于掉落物 tick 与同步，不参与区块获取：生产视距（≥8）本就覆盖半径 2，让它驱动获取会在小视距下改变出生点摊开与区块保留语义，却不带来任何生产收益。未加载的兴趣区块本 tick 直接跳过。地形快照仍只按原 `wanted` 发布。每 tick 将所有 Ready 玩家 `dropWanted` 去重并按 `ChunkKey` 排序，只扫描其中 Ready 区块的 32 个槽。玩家按 `SessionID`、掉落物按 `DropID` 排序；先使用本 tick 完成移动后的权威位置处理已有掉落物，再处理挖掘，因此新堆从后续活动 tick 开始扣减 10 tick 延迟。区块离开全部 `dropWanted` 后其年龄和延迟暂停，值直接保存在槽中。
 
 拾取、过期、合并和创建都把所属区块标为变化。继续复用 `ChunkRecord.Revision`：含方块变化时发布正常 `BlockChanges`，仅掉落物变化时发布允许零条方块的 revision barrier。这样存储 revision 与现有客户端区块 revision 仍保持单调，无需第二套 revision 或事务。
 

@@ -8,6 +8,9 @@ import (
 	"minecraft-go/internal/world"
 )
 
+// emptyChunkEstimateBytes 是全空区块的存档估算：512 信封 + 32 个固定掉落物槽。
+const emptyChunkEstimateBytes = 512 + core.DropsPerChunk*world.DropSlotBytes
+
 func TestPersistenceSnapshotBudgetAndStaleAck(t *testing.T) {
 	engine := dirtyPersistenceEngine(t, []core.ChunkKey{
 		{Dimension: core.Overworld, Pos: core.ChunkPos{X: 0}},
@@ -22,8 +25,9 @@ func TestPersistenceSnapshotBudgetAndStaleAck(t *testing.T) {
 	if len(snapshots) != 1 || snapshots[0].Key.Pos.X != 1 {
 		t.Fatalf("priority snapshots=%+v", snapshots)
 	}
-	if snapshots[0].EstimatedBytes != 512 {
-		t.Fatalf("oversized snapshot bytes=%d, want 512", snapshots[0].EstimatedBytes)
+	if snapshots[0].EstimatedBytes != emptyChunkEstimateBytes {
+		t.Fatalf("oversized snapshot bytes=%d, want %d",
+			snapshots[0].EstimatedBytes, emptyChunkEstimateBytes)
 	}
 	snapshots[0].Chunk.SetBlock(0, 0, 0, core.DirtID)
 	record := dimension.records[snapshots[0].Key.Pos]
@@ -91,7 +95,7 @@ func TestPersistenceKeepsOneSnapshotPerKeyAndFailureMustMatch(t *testing.T) {
 		t.Fatalf("one key acquired more than once: %+v", selected)
 	}
 	wantInFlight := PersistenceStats{
-		DirtyChunks: 1, EstimatedBytes: 1024, InFlightChunks: 1,
+		DirtyChunks: 1, EstimatedBytes: 2 * emptyChunkEstimateBytes, InFlightChunks: 1,
 	}
 	engine.FailPersistence([]ChunkSaveSnapshot{{
 		Key: key, Revision: selected[0].Revision + 1, Chunk: selected[0].Chunk,
@@ -101,7 +105,7 @@ func TestPersistenceKeepsOneSnapshotPerKeyAndFailureMustMatch(t *testing.T) {
 	}
 	engine.FailPersistence(selected)
 	if got, want := engine.PersistenceStats(), (PersistenceStats{
-		DirtyChunks: 1, EstimatedBytes: 512,
+		DirtyChunks: 1, EstimatedBytes: emptyChunkEstimateBytes,
 	}); record.SaveInFlightRevision != 0 || record.PersistedRevision != 0 ||
 		!record.Dirty() || got != want {
 		t.Fatalf("matching failure advanced or retained in-flight state: record=%+v stats=%+v", record, got)
@@ -122,7 +126,7 @@ func TestPersistenceStaleAckCannotClearNewerInFlightSnapshot(t *testing.T) {
 	record.Revision++
 	current := engine.PersistenceSnapshots(1, 1<<20, SaveAll)[0]
 	wantInFlight := PersistenceStats{
-		DirtyChunks: 1, EstimatedBytes: 5160, InFlightChunks: 1,
+		DirtyChunks: 1, EstimatedBytes: 4136 + 2*emptyChunkEstimateBytes, InFlightChunks: 1,
 	}
 
 	engine.ApplyPersisted([]PersistedChunk{{Key: key, Revision: old.Revision}})
@@ -213,13 +217,13 @@ func TestPersistenceStatsKeepSelectionTimeInFlightBytesStable(t *testing.T) {
 	}
 
 	if got, want := engine.PersistenceStats(), (PersistenceStats{
-		DirtyChunks: 1, EstimatedBytes: 512, UnloadWaiting: 1,
+		DirtyChunks: 1, EstimatedBytes: emptyChunkEstimateBytes, UnloadWaiting: 1,
 	}); got != want {
 		t.Fatalf("stats before save=%+v, want %+v", got, want)
 	}
 	snapshot := engine.PersistenceSnapshots(1, 1<<20, SaveUrgent)
 	selectedStats := PersistenceStats{
-		DirtyChunks: 1, EstimatedBytes: 1024,
+		DirtyChunks: 1, EstimatedBytes: 2 * emptyChunkEstimateBytes,
 		InFlightChunks: 1, UnloadWaiting: 1,
 	}
 	if got := engine.PersistenceStats(); got != selectedStats {
@@ -234,7 +238,7 @@ func TestPersistenceStatsKeepSelectionTimeInFlightBytesStable(t *testing.T) {
 	}
 	engine.FailPersistence(snapshot)
 	if got, want := engine.PersistenceStats(), (PersistenceStats{
-		DirtyChunks: 1, EstimatedBytes: 512, UnloadWaiting: 1,
+		DirtyChunks: 1, EstimatedBytes: emptyChunkEstimateBytes, UnloadWaiting: 1,
 	}); got != want {
 		t.Fatalf("stats after failure=%+v, want %+v", got, want)
 	}
