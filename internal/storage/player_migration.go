@@ -15,11 +15,18 @@ type playerDTO struct {
 	Current     PlayerLocation
 	Yaw, Pitch  float32
 	Safe        *PlayerLocation
+	Hotbar      core.Hotbar
 }
 
 type playerMigration func(playerDTO) (playerDTO, error)
 
-var playerMigrations = map[uint32]playerMigration{}
+var playerMigrations = map[uint32]playerMigration{
+	// v1 没有快捷栏负载，确定性迁移为空快捷栏且选中栏位 0。
+	1: func(dto playerDTO) (playerDTO, error) {
+		dto.Hotbar = core.Hotbar{}
+		return dto, nil
+	},
+}
 
 func migratePlayer(from uint32, dto playerDTO) (playerDTO, bool, error) {
 	if from > currentPlayerSchema {

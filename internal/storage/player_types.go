@@ -18,6 +18,7 @@ type StoredPlayer struct {
 	Current      PlayerLocation
 	Yaw, Pitch   float32
 	Safe         *PlayerLocation
+	Hotbar       core.Hotbar
 	NeedsRewrite bool
 }
 
@@ -28,6 +29,7 @@ type PlayerSave struct {
 	Current     PlayerLocation
 	Yaw, Pitch  float32
 	Safe        *PlayerLocation
+	Hotbar      core.Hotbar
 }
 
 type PlayerStore interface {

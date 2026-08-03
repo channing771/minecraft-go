@@ -10,10 +10,12 @@ import (
 )
 
 const (
-	currentPlayerSchema   uint32 = 1
+	currentPlayerSchema   uint32 = 2
 	playerEnvelopeVersion uint32 = 1
 	playerEnvelopeLength         = 44
 	maxPlayerPayload      uint32 = 1 << 20
+	// playerHotbarBytes 是 schema v2 追加的固定快捷栏负载长度。
+	playerHotbarBytes = 1 + core.HotbarSlots*3
 )
 
 var (
@@ -26,7 +28,7 @@ func encodePlayer(save PlayerSave) ([]byte, error) {
 	if err := validatePlayerSave(save); err != nil {
 		return nil, err
 	}
-	payload, err := encodePlayerV1(save)
+	payload, err := encodePlayerV2(save)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +120,7 @@ func decodePlayer(wantID core.PlayerID, data []byte) (StoredPlayer, error) {
 	if hasher.Sum32() != wantCRC {
 		return StoredPlayer{}, fmt.Errorf("%w: player CRC32C", ErrCorrupt)
 	}
-	dto, err := decodePlayerV1(playerID, revision, payload)
+	dto, err := decodePlayerPayload(schema, playerID, revision, payload)
 	if err != nil {
 		return StoredPlayer{}, err
 	}
@@ -131,7 +133,8 @@ func decodePlayer(wantID core.PlayerID, data []byte) (StoredPlayer, error) {
 	}
 	stored := StoredPlayer{
 		PlayerID: dto.PlayerID, Revision: dto.Revision, DisplayName: dto.DisplayName,
-		Current: dto.Current, Yaw: dto.Yaw, Pitch: dto.Pitch, NeedsRewrite: migrated,
+		Current: dto.Current, Yaw: dto.Yaw, Pitch: dto.Pitch, Hotbar: dto.Hotbar,
+		NeedsRewrite: migrated,
 	}
 	if dto.Safe != nil {
 		safe := *dto.Safe
@@ -140,19 +143,77 @@ func decodePlayer(wantID core.PlayerID, data []byte) (StoredPlayer, error) {
 	return stored, nil
 }
 
-func encodePlayerV1(save PlayerSave) ([]byte, error) {
+// encodePlayerV2 在 v1 字段之后追加固定大小的快捷栏负载。
+func encodePlayerV2(save PlayerSave) ([]byte, error) {
 	name := []byte(save.DisplayName)
-	payload := make([]byte, 0, 4+len(name)+4+3*4+4+4+1+4+3*4)
+	payload := make([]byte, 0, 4+len(name)+4+3*4+4+4+1+4+3*4+playerHotbarBytes)
 	payload = appendU32(payload, uint32(len(name)))
 	payload = append(payload, name...)
 	payload = appendPlayerLocation(payload, save.Current)
 	payload = appendF32(payload, save.Yaw)
 	payload = appendF32(payload, save.Pitch)
 	if save.Safe == nil {
-		return append(payload, 0), nil
+		payload = append(payload, 0)
+	} else {
+		payload = append(payload, 1)
+		payload = appendPlayerLocation(payload, *save.Safe)
 	}
-	payload = append(payload, 1)
-	return appendPlayerLocation(payload, *save.Safe), nil
+	return appendPlayerHotbar(payload, save.Hotbar), nil
+}
+
+func appendPlayerHotbar(dst []byte, hotbar core.Hotbar) []byte {
+	dst = append(dst, hotbar.Selected)
+	for _, stack := range hotbar.Slots {
+		dst = binary.LittleEndian.AppendUint16(dst, uint16(stack.Item))
+		dst = append(dst, stack.Count)
+	}
+	return dst
+}
+
+// decodePlayerPayload 按 schema 解析 payload；v1 没有快捷栏字段。
+func decodePlayerPayload(
+	schema uint32,
+	playerID core.PlayerID,
+	revision uint64,
+	data []byte,
+) (playerDTO, error) {
+	switch schema {
+	case 1:
+		return decodePlayerV1(playerID, revision, data)
+	case 2:
+		return decodePlayerV2(playerID, revision, data)
+	default:
+		return playerDTO{}, fmt.Errorf("%w: unsupported player schema %d", ErrCorrupt, schema)
+	}
+}
+
+func decodePlayerV2(playerID core.PlayerID, revision uint64, data []byte) (playerDTO, error) {
+	if len(data) < playerHotbarBytes {
+		return playerDTO{}, fmt.Errorf("%w: player payload is shorter than the hotbar", ErrCorrupt)
+	}
+	split := len(data) - playerHotbarBytes
+	dto, err := decodePlayerV1(playerID, revision, data[:split])
+	if err != nil {
+		return playerDTO{}, err
+	}
+	decoder := byteDecoder{data: data[split:]}
+	selected, err := decoder.u8()
+	if err != nil {
+		return playerDTO{}, corrupt("player hotbar selection", err)
+	}
+	dto.Hotbar.Selected = selected
+	for index := range dto.Hotbar.Slots {
+		item, err := decoder.u16()
+		if err != nil {
+			return playerDTO{}, corrupt("player hotbar item", err)
+		}
+		count, err := decoder.u8()
+		if err != nil {
+			return playerDTO{}, corrupt("player hotbar count", err)
+		}
+		dto.Hotbar.Slots[index] = core.ItemStack{Item: core.ItemID(item), Count: count}
+	}
+	return dto, nil
 }
 
 func decodePlayerV1(playerID core.PlayerID, revision uint64, data []byte) (playerDTO, error) {
@@ -242,6 +303,7 @@ func validatePlayerSave(save PlayerSave) error {
 	return validatePlayerDTO(playerDTO{
 		PlayerID: save.PlayerID, Revision: save.Revision, DisplayName: save.DisplayName,
 		Current: save.Current, Yaw: save.Yaw, Pitch: save.Pitch, Safe: save.Safe,
+		Hotbar: save.Hotbar,
 	})
 }
 
@@ -269,6 +331,9 @@ func validatePlayerDTO(dto playerDTO) error {
 		if err := validatePlayerLocation(*dto.Safe); err != nil {
 			return err
 		}
+	}
+	if !dto.Hotbar.Valid() {
+		return fmt.Errorf("%w: invalid player hotbar", ErrCorrupt)
 	}
 	return nil
 }

@@ -9,8 +9,11 @@ import (
 )
 
 func FuzzDecodePlayer(f *testing.F) {
-	fixture, err := os.ReadFile(filepath.Join("testdata", "player-v1.bin"))
-	if err == nil {
+	for _, name := range []string{"player-v1.bin", "player-v2.bin"} {
+		fixture, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			continue
+		}
 		for length := range len(fixture) + 1 {
 			f.Add(bytes.Clone(fixture[:length]))
 		}

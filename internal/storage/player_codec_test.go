@@ -22,8 +22,16 @@ func fixturePlayerSave(id core.PlayerID, revision uint64) PlayerSave {
 	return PlayerSave{
 		PlayerID: id, Revision: revision, DisplayName: "Chen",
 		Current: PlayerLocation{Dimension: core.Overworld, Position: [3]float32{2.5, 70, -3.5}},
-		Yaw:     1.25, Pitch: -0.5, Safe: &safe,
+		Yaw:     1.25, Pitch: -0.5, Safe: &safe, Hotbar: fixturePlayerHotbar(),
 	}
+}
+
+func fixturePlayerHotbar() core.Hotbar {
+	var hotbar core.Hotbar
+	hotbar.Selected = 3
+	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	hotbar.Slots[6] = core.ItemStack{Item: core.ItemGrass, Count: 1}
+	return hotbar
 }
 
 func TestPlayerCodecRoundTrip(t *testing.T) {
@@ -36,11 +44,12 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	got, err := decodePlayer(id, encoded)
 	if err != nil || got.PlayerID != want.PlayerID || got.Revision != want.Revision ||
 		got.DisplayName != want.DisplayName || got.Current != want.Current ||
-		got.Yaw != want.Yaw || got.Pitch != want.Pitch || got.Safe == nil || *got.Safe != *want.Safe {
+		got.Yaw != want.Yaw || got.Pitch != want.Pitch || got.Safe == nil || *got.Safe != *want.Safe ||
+		got.Hotbar != want.Hotbar {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 	if got.NeedsRewrite {
-		t.Fatal("v1 player unexpectedly needs rewrite")
+		t.Fatal("v2 player unexpectedly needs rewrite")
 	}
 	got.Safe.Position[0] = 99
 	if want.Safe.Position[0] == 99 {
@@ -48,12 +57,12 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPlayerV1Fixture(t *testing.T) {
+func TestPlayerV2Fixture(t *testing.T) {
 	encoded, err := encodePlayer(fixturePlayerSave(fixturePlayerID(), 19))
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "player-v1.bin")
+	path := filepath.Join("testdata", "player-v2.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -64,8 +73,86 @@ func TestPlayerV1Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, encoded) {
-		t.Fatal("v1 fixture drift; change schema version")
+		t.Fatal("v2 fixture drift; change schema version")
 	}
+}
+
+func TestPlayerV1FixtureMigratesToEmptyHotbar(t *testing.T) {
+	encoded, err := os.ReadFile(filepath.Join("testdata", "player-v1.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodePlayer(fixturePlayerID(), encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fixturePlayerSave(fixturePlayerID(), 19)
+	if got.DisplayName != want.DisplayName || got.Current != want.Current ||
+		got.Yaw != want.Yaw || got.Pitch != want.Pitch ||
+		got.Safe == nil || *got.Safe != *want.Safe {
+		t.Fatalf("v1 迁移改变了既有字段: %+v", got)
+	}
+	if got.Hotbar != (core.Hotbar{}) {
+		t.Fatalf("v1 迁移快捷栏 = %+v，想要空快捷栏且选中 0", got.Hotbar)
+	}
+	if !got.NeedsRewrite {
+		t.Fatal("v1 存档必须标记为需要重写")
+	}
+}
+
+func TestPlayerCodecRejectsInvalidHotbarPayload(t *testing.T) {
+	id := fixturePlayerID()
+	invalid := []struct {
+		name   string
+		mutate func(*core.Hotbar)
+	}{
+		{"选中栏位越界", func(h *core.Hotbar) { h.Selected = core.HotbarSlots }},
+		{"数量超过上限", func(h *core.Hotbar) {
+			h.Slots[1] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount + 1}
+		}},
+		{"未知物品", func(h *core.Hotbar) {
+			h.Slots[2] = core.ItemStack{Item: core.ItemID(4242), Count: 1}
+		}},
+		{"空物品非零数量", func(h *core.Hotbar) {
+			h.Slots[3] = core.ItemStack{Item: core.ItemNone, Count: 5}
+		}},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			save := fixturePlayerSave(id, 3)
+			tc.mutate(&save.Hotbar)
+			if _, err := encodePlayer(save); !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("encode error = %v，想要 ErrCorrupt", err)
+			}
+			encoded := playerWireWithHotbar(t, id, save.Hotbar)
+			if _, err := decodePlayer(id, encoded); !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("decode error = %v，想要 ErrCorrupt", err)
+			}
+		})
+	}
+}
+
+// playerWireWithHotbar 用合法存档换掉快捷栏负载并修正 CRC，绕过编码器校验。
+func playerWireWithHotbar(t *testing.T, id core.PlayerID, hotbar core.Hotbar) []byte {
+	t.Helper()
+	encoded, err := encodePlayer(fixturePlayerSave(id, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := bytes.Clone(encoded)
+	offset := len(wire) - (1 + core.HotbarSlots*3)
+	wire[offset] = hotbar.Selected
+	offset++
+	for _, stack := range hotbar.Slots {
+		binary.LittleEndian.PutUint16(wire[offset:], uint16(stack.Item))
+		wire[offset+2] = stack.Count
+		offset += 3
+	}
+	hasher := crc32.New(playerCRCTable)
+	_, _ = hasher.Write(wire[8:40])
+	_, _ = hasher.Write(wire[playerEnvelopeLength:])
+	binary.LittleEndian.PutUint32(wire[40:], hasher.Sum32())
+	return wire
 }
 
 func TestPlayerCodecRejectsInvalidSave(t *testing.T) {

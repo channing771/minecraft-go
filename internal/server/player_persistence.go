@@ -344,6 +344,7 @@ func (player *cachedPlayer) restore(metadata storage.Metadata) sim.PlayerRestore
 	}
 	restore.Yaw = player.snapshot.Yaw
 	restore.Pitch = player.snapshot.Pitch
+	restore.Hotbar = player.snapshot.Hotbar
 	return restore
 }
 
@@ -353,8 +354,9 @@ func cachedPlayerFromStored(stored storage.StoredPlayer, pendingName string) *ca
 			Dimension: stored.Current.Dimension,
 			Position:  mgl32.Vec3(stored.Current.Position),
 		},
-		Yaw:   stored.Yaw,
-		Pitch: stored.Pitch,
+		Yaw:    stored.Yaw,
+		Pitch:  stored.Pitch,
+		Hotbar: stored.Hotbar,
 	}
 	if stored.Safe != nil {
 		snapshot.Safe = &sim.PlayerLocation{
@@ -621,8 +623,9 @@ func (player *cachedPlayer) save(revision uint64) storage.PlayerSave {
 			Dimension: player.snapshot.Current.Dimension,
 			Position:  [3]float32(player.snapshot.Current.Position),
 		},
-		Yaw:   player.snapshot.Yaw,
-		Pitch: player.snapshot.Pitch,
+		Yaw:    player.snapshot.Yaw,
+		Pitch:  player.snapshot.Pitch,
+		Hotbar: player.snapshot.Hotbar,
 	}
 	if player.snapshot.Safe != nil {
 		save.Safe = &storage.PlayerLocation{
@@ -637,7 +640,8 @@ func (player *cachedPlayer) matchesSave(save storage.PlayerSave) bool {
 	if !player.hasSnapshot || player.id != save.PlayerID || player.name != save.DisplayName ||
 		player.snapshot.Current.Dimension != save.Current.Dimension ||
 		[3]float32(player.snapshot.Current.Position) != save.Current.Position ||
-		player.snapshot.Yaw != save.Yaw || player.snapshot.Pitch != save.Pitch {
+		player.snapshot.Yaw != save.Yaw || player.snapshot.Pitch != save.Pitch ||
+		player.snapshot.Hotbar != save.Hotbar {
 		return false
 	}
 	if player.snapshot.Safe == nil || save.Safe == nil {
@@ -666,7 +670,8 @@ func clonePlayerSnapshot(snapshot sim.PlayerSnapshot) sim.PlayerSnapshot {
 }
 
 func playerSnapshotsEqual(left, right sim.PlayerSnapshot) bool {
-	if left.Current != right.Current || left.Yaw != right.Yaw || left.Pitch != right.Pitch {
+	if left.Current != right.Current || left.Yaw != right.Yaw ||
+		left.Pitch != right.Pitch || left.Hotbar != right.Hotbar {
 		return false
 	}
 	if left.Safe == nil || right.Safe == nil {
