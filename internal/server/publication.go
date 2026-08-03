@@ -58,6 +58,9 @@ func (server *Server) publishSession(
 	if !server.publishRemoteSpawnsAndStates(current, result.Tick, players) {
 		return
 	}
+	if !server.publishDrops(current, result.Tick) {
+		return
+	}
 	server.publishLocalResult(current, result, players[current.id])
 }
 

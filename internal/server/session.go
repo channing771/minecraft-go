@@ -163,6 +163,12 @@ type session struct {
 	publications     map[core.ChunkKey]*publication
 	pendingSnapshots map[core.ChunkKey]snapshotRequest
 	visiblePlayers   map[core.PlayerID]visiblePlayer
+
+	// 掉落物差分状态：已发布镜像与三块复用 scratch，容量固定为 MaxSessionDrops。
+	publishedDrops    map[core.DropID]sim.DropSnapshot
+	dropScratch       []sim.DropSnapshot
+	dropUpsertScratch []network.ItemDrop
+	dropRemoveScratch []core.DropID
 }
 
 func newSession(
@@ -181,21 +187,25 @@ func newSession(
 	}
 	ctx, cancel := context.WithCancel(parent)
 	current := &session{
-		id:               spec.ID,
-		generation:       spec.Generation,
-		playerID:         spec.PlayerID,
-		displayName:      spec.DisplayName,
-		endpoint:         spec.Endpoint,
-		ctx:              ctx,
-		cancel:           cancel,
-		outbox:           make(chan network.ServerMessage, config.OutboxCapacity),
-		workers:          workers,
-		exit:             make(chan SessionExit, 1),
-		detach:           detach,
-		heartbeatReply:   make(chan uint64, 1),
-		publications:     make(map[core.ChunkKey]*publication),
-		pendingSnapshots: make(map[core.ChunkKey]snapshotRequest),
-		visiblePlayers:   make(map[core.PlayerID]visiblePlayer),
+		id:                spec.ID,
+		generation:        spec.Generation,
+		playerID:          spec.PlayerID,
+		displayName:       spec.DisplayName,
+		endpoint:          spec.Endpoint,
+		ctx:               ctx,
+		cancel:            cancel,
+		outbox:            make(chan network.ServerMessage, config.OutboxCapacity),
+		workers:           workers,
+		exit:              make(chan SessionExit, 1),
+		detach:            detach,
+		heartbeatReply:    make(chan uint64, 1),
+		publications:      make(map[core.ChunkKey]*publication),
+		pendingSnapshots:  make(map[core.ChunkKey]snapshotRequest),
+		visiblePlayers:    make(map[core.PlayerID]visiblePlayer),
+		publishedDrops:    make(map[core.DropID]sim.DropSnapshot, sim.MaxSessionDrops),
+		dropScratch:       make([]sim.DropSnapshot, 0, sim.MaxSessionDrops),
+		dropUpsertScratch: make([]network.ItemDrop, 0, sim.MaxSessionDrops),
+		dropRemoveScratch: make([]core.DropID, 0, sim.MaxSessionDrops),
 	}
 	workers.Add(2)
 	go current.writeLoop()
@@ -229,6 +239,7 @@ func newObserverSession(
 		publications:     make(map[core.ChunkKey]*publication),
 		pendingSnapshots: make(map[core.ChunkKey]snapshotRequest),
 		visiblePlayers:   make(map[core.PlayerID]visiblePlayer),
+		publishedDrops:   make(map[core.DropID]sim.DropSnapshot),
 	}
 	workers.Add(1)
 	go current.writeLoop()

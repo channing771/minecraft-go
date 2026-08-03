@@ -218,6 +218,9 @@ func canonicalMultiplayerEvent(output interface{ Write([]byte) (int, error) }, v
 		write("ForgetChunks|dimension=%d|chunks=%v", message.Dimension, message.Chunks)
 	case network.CommandRejected:
 		write("CommandRejected|sequence=%d|reason=%s", message.Sequence, message.Reason)
+	case network.ItemDropUpserts, network.ItemDropRemoves:
+		// 掉落物差分按连接批次交付，边界批次会随传输而变；
+		// Memory/TCP 一致性由最终镜像状态覆盖，不进入逐消息 transcript。
 	case network.HotbarState:
 		write("HotbarState|selected=%d", message.Hotbar.Selected)
 		for index, stack := range message.Hotbar.Slots {

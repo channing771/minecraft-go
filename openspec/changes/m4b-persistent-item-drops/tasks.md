@@ -28,10 +28,10 @@
 
 ## 5. 服务端兴趣差分发布
 
-- [ ] 5.1 在 `internal/sim`、`internal/server` 先写失败测试，覆盖单会话最多 800 项的有序快照、进入/离开范围、合并/部分拾取更新、remove 先于同槽新 generation upsert、32 项分批、多人隔离和慢连接背压。
-- [ ] 5.2 实现可复用目标切片的 `Engine` 掉落物快照查询；在现有 session/publication 中保存已发布 map 与固定 scratch，每 tick 做最多 800 项差分，只有 enqueue 成功才更新镜像。
-- [ ] 5.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/server ./internal/network -race -count=1 && go test ./internal/archcheck -count=1'`，并确认 Memory/TCP 消息序列测试及 `git diff --check` 通过。
-- [ ] 5.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 按兴趣发布掉落物`。提交成功后自动进入第 6 组。
+- [x] 5.1 在 `internal/sim`、`internal/server` 先写失败测试，覆盖单会话最多 800 项的有序快照、进入/离开范围、合并/部分拾取更新、remove 先于同槽新 generation upsert、32 项分批、多人隔离和慢连接背压。
+- [x] 5.2 实现可复用目标切片的 `Engine` 掉落物快照查询；在现有 session/publication 中保存已发布 map 与固定 scratch，每 tick 做最多 800 项差分，只有 enqueue 成功才更新镜像。
+- [x] 5.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/server ./internal/network -race -count=1 && go test ./internal/archcheck -count=1'`，并确认 Memory/TCP 消息序列测试及 `git diff --check` 通过。
+- [x] 5.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 按兴趣发布掉落物`。提交成功后自动进入第 6 组。
 
 ## 6. 客户端掉落物镜像
 

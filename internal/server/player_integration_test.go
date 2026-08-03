@@ -443,6 +443,8 @@ func (h *delayedPlayerHarness) drainServerTick(throughTick uint64) {
 			if err := h.hotbar.Apply(message); err != nil {
 				h.t.Fatalf("HotbarMirror.Apply: %v", err)
 			}
+		case network.ItemDropUpserts, network.ItemDropRemoves:
+			// 掉落物由独立镜像消费，不进入世界镜像。
 		default:
 			if delta, ok := message.(network.BlockChanges); ok {
 				copied := delta

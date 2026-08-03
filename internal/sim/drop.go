@@ -235,3 +235,56 @@ func (engine *Engine) SetBlockForTest(position core.BlockPos, block core.BlockID
 	}
 	_, _, _ = dimension.SetBlock(position, block)
 }
+
+// DropSnapshot 是一个权威掉落物堆在本 tick 的完整可见值。
+type DropSnapshot struct {
+	ID         core.DropID
+	BlockIndex uint32
+	Item       core.ItemID
+	Count      uint8
+}
+
+// MaxSessionDrops 是单个会话镜像的固定上限：25 个兴趣区块 × 每区块 32 槽。
+const MaxSessionDrops = (2*DropInterestRadius + 1) * (2*DropInterestRadius + 1) * core.DropsPerChunk
+
+// AppendSessionDrops 按稳定 ID 顺序把该会话兴趣范围内的当前掉落物追加到 dst。
+// 调用方可复用 dst 底层数组；结果最多 MaxSessionDrops 项。
+func (engine *Engine) AppendSessionDrops(id SessionID, dst []DropSnapshot) []DropSnapshot {
+	session := engine.sessions[id]
+	if session == nil {
+		return dst
+	}
+	keys := make([]core.ChunkKey, 0, MaxSessionDrops/core.DropsPerChunk)
+	for key := range engine.sessionDropWantedSnapshot(session) {
+		keys = append(keys, key)
+	}
+	sortChunkKeys(keys)
+	for _, key := range keys {
+		dimension := engine.dimensions[key.Dimension]
+		if dimension == nil {
+			continue
+		}
+		record, ok := dimension.records[key.Pos]
+		if !ok || record.State != ChunkReady || record.Chunk == nil {
+			continue
+		}
+		for slot := range core.DropsPerChunk {
+			drop := record.Chunk.Drop(slot)
+			if !drop.Active {
+				continue
+			}
+			dst = append(dst, DropSnapshot{
+				ID: core.DropID{
+					Dimension:  key.Dimension,
+					Chunk:      key.Pos,
+					Slot:       uint8(slot),
+					Generation: drop.Generation,
+				},
+				BlockIndex: drop.BlockIndex,
+				Item:       drop.Stack.Item,
+				Count:      drop.Stack.Count,
+			})
+		}
+	}
+	return dst
+}

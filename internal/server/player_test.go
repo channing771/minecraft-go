@@ -368,18 +368,23 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		recvServerMessage(t, client),
 		recvServerMessage(t, client),
 		recvServerMessage(t, client),
+		recvServerMessage(t, client),
 	}
 	if _, ok := changedMessages[0].(network.BlockChanges); !ok {
 		t.Fatalf("change tick 首消息 = %T，想要 BlockChanges", changedMessages[0])
 	}
-	rejection, ok := changedMessages[1].(network.CommandRejected)
-	if !ok || rejection.Sequence != 2 || rejection.Reason != network.RejectInvalidInput {
+	// 挖掘只产生掉落物：本 tick 在拒绝之前发布一次掉落物 upsert。
+	upserts, ok := changedMessages[1].(network.ItemDropUpserts)
+	if !ok || len(upserts.Drops) != 1 || upserts.Drops[0].Item != core.ItemGrass {
 		t.Fatalf("change tick 次消息 = %#v", changedMessages[1])
 	}
-	// 挖掘只产生掉落物，本 tick 不再发布快捷栏更新。
-	state, ok := changedMessages[2].(network.PlayerState)
+	rejection, ok := changedMessages[2].(network.CommandRejected)
+	if !ok || rejection.Sequence != 2 || rejection.Reason != network.RejectInvalidInput {
+		t.Fatalf("change tick 第三条消息 = %#v", changedMessages[2])
+	}
+	state, ok := changedMessages[3].(network.PlayerState)
 	if !ok || state.ServerTick != changed.Tick || state.LastInputSequence != 2 {
-		t.Fatalf("change tick 尾消息 = %#v", changedMessages[2])
+		t.Fatalf("change tick 尾消息 = %#v", changedMessages[3])
 	}
 
 	forgottenKey := core.ChunkKey{
