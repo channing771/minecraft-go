@@ -243,6 +243,16 @@ func (h integrationHost) WaitPlayerReleased(t *testing.T, id core.PlayerID) {
 		defer h.Host.mu.Unlock()
 		return h.Host.activeByPlayer[id] == nil
 	})
+	done := make(chan struct{})
+	go func() {
+		h.Host.sessionWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("host session lifecycle did not finish")
+	}
 }
 
 func (h integrationHost) Shutdown(t *testing.T) {
