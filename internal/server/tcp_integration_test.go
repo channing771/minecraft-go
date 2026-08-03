@@ -912,7 +912,7 @@ func parityReadinessTranscript(
 		case network.PlayerState:
 			lastState = message
 			hasState = true
-		case network.ChunkSnapshot, network.KeepAlive:
+		case network.ChunkSnapshot, network.KeepAlive, network.HotbarState:
 		default:
 			t.Fatalf("unexpected parity readiness message %T", message)
 		}

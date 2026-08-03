@@ -146,6 +146,16 @@ func (server *Server) publishLocalResult(
 			return
 		}
 	}
+	// 快捷栏只发给所属会话，并排在使客户端开始交互的 Ready 状态之前。
+	for _, update := range result.Hotbars {
+		if update.Session != current.id {
+			continue
+		}
+		if !current.enqueue(network.HotbarState{Hotbar: update.Hotbar}) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
+			return
+		}
+	}
 	if playerUpdate.Session == current.id {
 		if !current.enqueue(network.PlayerState{
 			ServerTick:        result.Tick,

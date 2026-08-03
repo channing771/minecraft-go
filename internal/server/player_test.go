@@ -323,11 +323,17 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 	readyMessages := []network.ServerMessage{
 		recvServerMessage(t, client),
 		recvServerMessage(t, client),
+		recvServerMessage(t, client),
 	}
 	if _, ok := readyMessages[0].(network.ChunkSnapshot); !ok {
 		t.Fatalf("Ready tick 首消息 = %T，想要 ChunkSnapshot", readyMessages[0])
 	}
-	readyState, ok := readyMessages[1].(network.PlayerState)
+	// 初始快捷栏必须先于使客户端开始交互的 Ready 玩家状态。
+	if hotbar, ok := readyMessages[1].(network.HotbarState); !ok ||
+		hotbar.Hotbar != (core.Hotbar{}) {
+		t.Fatalf("Ready tick 次消息 = %#v，想要空快捷栏状态", readyMessages[1])
+	}
+	readyState, ok := readyMessages[2].(network.PlayerState)
 	if !ok || readyState.ServerTick != ready.Tick ||
 		readyState.LastInputSequence != 0 ||
 		readyState.Dimension != core.Overworld ||
@@ -335,7 +341,7 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		readyState.Velocity != (mgl32.Vec3{}) ||
 		readyState.Yaw != 0 || readyState.Pitch != 0 ||
 		!readyState.OnGround || !readyState.Ready || !readyState.Reset {
-		t.Fatalf("Ready tick 尾消息 = %#v", readyMessages[1])
+		t.Fatalf("Ready tick 尾消息 = %#v", readyMessages[2])
 	}
 
 	running.incoming <- incomingCommand{
@@ -362,6 +368,7 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		recvServerMessage(t, client),
 		recvServerMessage(t, client),
 		recvServerMessage(t, client),
+		recvServerMessage(t, client),
 	}
 	if _, ok := changedMessages[0].(network.BlockChanges); !ok {
 		t.Fatalf("change tick 首消息 = %T，想要 BlockChanges", changedMessages[0])
@@ -370,9 +377,14 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 	if !ok || rejection.Sequence != 2 || rejection.Reason != network.RejectInvalidInput {
 		t.Fatalf("change tick 次消息 = %#v", changedMessages[1])
 	}
-	state, ok := changedMessages[2].(network.PlayerState)
+	// 挖掘成功后本 tick 发布一次采集结果。
+	hotbar, ok := changedMessages[2].(network.HotbarState)
+	if !ok || hotbar.Hotbar.Slots[0] != (core.ItemStack{Item: core.ItemGrass, Count: 1}) {
+		t.Fatalf("change tick 第三条消息 = %#v", changedMessages[2])
+	}
+	state, ok := changedMessages[3].(network.PlayerState)
 	if !ok || state.ServerTick != changed.Tick || state.LastInputSequence != 2 {
-		t.Fatalf("change tick 尾消息 = %#v", changedMessages[2])
+		t.Fatalf("change tick 尾消息 = %#v", changedMessages[3])
 	}
 
 	forgottenKey := core.ChunkKey{

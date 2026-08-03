@@ -218,6 +218,11 @@ func canonicalMultiplayerEvent(output interface{ Write([]byte) (int, error) }, v
 		write("ForgetChunks|dimension=%d|chunks=%v", message.Dimension, message.Chunks)
 	case network.CommandRejected:
 		write("CommandRejected|sequence=%d|reason=%s", message.Sequence, message.Reason)
+	case network.HotbarState:
+		write("HotbarState|selected=%d", message.Hotbar.Selected)
+		for index, stack := range message.Hotbar.Slots {
+			write("HotbarSlot|index=%d|item=%d|count=%d", index, stack.Item, stack.Count)
+		}
 	case network.KeepAlive:
 		// Tokens come from runtime heartbeat timing and are intentionally excluded.
 	case network.Disconnect:

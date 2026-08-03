@@ -234,6 +234,10 @@ func drainServerMessages(
 		if collect != nil {
 			collect(message)
 		}
+		if _, ok := message.(network.HotbarState); ok {
+			// 快捷栏由独立的只读镜像消费，不进入世界镜像。
+			continue
+		}
 		if state, ok := message.(network.PlayerState); ok {
 			if state.ServerTick == throughTick {
 				return

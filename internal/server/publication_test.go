@@ -331,9 +331,12 @@ func recvWorldServerMessage(
 	t.Helper()
 	for {
 		message := recvServerMessage(t, client)
-		if _, playerState := message.(network.PlayerState); !playerState {
-			return message
+		switch message.(type) {
+		case network.PlayerState, network.HotbarState:
+			// 玩家状态和快捷栏是按会话定向的控制消息，不属于世界发布。
+			continue
 		}
+		return message
 	}
 }
 
@@ -365,7 +368,9 @@ func assertNoWorldServerMessage(
 		if err != nil {
 			t.Fatalf("接收 server message: %v", err)
 		}
-		if _, playerState := message.(network.PlayerState); !playerState {
+		switch message.(type) {
+		case network.PlayerState, network.HotbarState:
+		default:
 			t.Fatalf("意外 world server message = %#v", message)
 		}
 	}
