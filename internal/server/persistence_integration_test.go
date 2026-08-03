@@ -391,51 +391,40 @@ func (h *persistentHarness) waitReady() {
 func (h *persistentHarness) placeAndBreakScript() {
 	h.t.Helper()
 	pitch := float32(-0.2)
-	placements := []struct {
-		position core.BlockPos
-		block    core.BlockID
-	}{
-		{position: core.BlockPos{X: 0, Y: 1, Z: -5}, block: core.StoneID},
-		{position: core.BlockPos{X: 0, Y: 1, Z: -4}, block: core.DirtID},
-	}
-	for _, placement := range placements {
-		baseRevision := h.authoritativeRevision(placement.position.Chunk())
-		h.sequence++
-		sendClientMessage(h.t, h.clientEndpoint, network.PlaceBlock{
-			Sequence: h.sequence,
-			Yaw:      0,
-			Pitch:    pitch,
-			Block:    placement.block,
-		})
-		assertContiguousInteraction(
-			h.t,
-			h.running,
-			h.clientEndpoint,
-			h.mirror,
-			baseRevision,
-			baseRevision+1,
-			placement.position,
-			placement.block,
-		)
-	}
-	breakPosition := placements[len(placements)-1].position
-	baseRevision := h.authoritativeRevision(breakPosition.Chunk())
+	interactionChunk := (core.BlockPos{X: 0, Y: 1, Z: -6}).Chunk()
+
+	// 先挖掘获得物品，再从栏位 0 放回同一位置。
+	baseRevision := h.authoritativeRevision(interactionChunk)
 	h.sequence++
 	sendClientMessage(h.t, h.clientEndpoint, network.BreakBlock{
 		Sequence: h.sequence,
 		Yaw:      0,
 		Pitch:    pitch,
 	})
-	assertContiguousInteraction(
-		h.t,
-		h.running,
-		h.clientEndpoint,
-		h.mirror,
-		baseRevision,
-		baseRevision+1,
-		breakPosition,
-		core.AirID,
+	broken := awaitInteractionChange(
+		h.t, h.running, h.clientEndpoint, h.mirror,
+		interactionChunk, baseRevision, baseRevision+1,
 	)
+	if broken.Block != core.AirID {
+		h.t.Fatalf("挖掘结果 = %+v，想要空气", broken)
+	}
+
+	baseRevision = h.authoritativeRevision(interactionChunk)
+	h.sequence++
+	// 障碍消失后需要压低视角才能命中六格内的地面。
+	sendClientMessage(h.t, h.clientEndpoint, network.PlaceBlock{
+		Sequence: h.sequence,
+		Yaw:      0,
+		Pitch:    -0.6,
+		Slot:     0,
+	})
+	placed := awaitInteractionChange(
+		h.t, h.running, h.clientEndpoint, h.mirror,
+		interactionChunk, baseRevision, baseRevision+1,
+	)
+	if placed.Position == broken.Position || placed.Block != core.StoneID {
+		h.t.Fatalf("放置结果 = %+v，想要放下刚采集的石头", placed)
+	}
 }
 
 func (h *persistentHarness) authoritativeRevision(position core.ChunkPos) uint64 {

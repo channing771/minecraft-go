@@ -44,7 +44,7 @@
 
 - 客户端消息 `SelectHotbar{Sequence, Slot}`；
 - `PlaceBlock` 删除 `Block`，新增 `Slot`；
-- 服务端消息 `HotbarState{Selected, Slots[9]ItemStack}`。
+- 服务端消息 `HotbarState{Hotbar core.Hotbar}`，即固定的选中栏位加 9 个 `ItemStack` 栏位。
 
 所有栏位和物品值逐项验证，消息不携带长度可变的物品集合。TCP 编码固定；Memory 传输复制整个值。完整状态很小且只在登录或状态成功变化时发送，因此不设计 delta、确认号或单独 revision；可靠有序会话和现有玩家存档 revision 已覆盖各自边界。协议 golden、roundtrip、fuzz、截断/尾随数据和 v2 登录拒绝必须同步更新。
 

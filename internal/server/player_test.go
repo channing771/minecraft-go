@@ -214,7 +214,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Sequence: 13,
 				Yaw:      1.5,
 				Pitch:    -0.75,
-				Block:    core.DirtID,
+				Slot:     4,
 			},
 			want: sim.Command{
 				Session:  testSessionID,
@@ -222,7 +222,17 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Kind:     sim.CommandPlaceBlock,
 				Yaw:      1.5,
 				Pitch:    -0.75,
-				Block:    core.DirtID,
+				Slot:     4,
+			},
+		},
+		{
+			name:    "select hotbar carries only the slot",
+			message: network.SelectHotbar{Sequence: 14, Slot: 7},
+			want: sim.Command{
+				Session:  testSessionID,
+				Sequence: 14,
+				Kind:     sim.CommandSelectHotbar,
+				Slot:     7,
 			},
 		},
 	}

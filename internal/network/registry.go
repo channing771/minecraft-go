@@ -21,6 +21,8 @@ func clientPacketID(state State, packet ClientPacket) (uint32, bool) {
 			return 3, true
 		case KeepAliveReply:
 			return 4, true
+		case SelectHotbar:
+			return 5, true
 		}
 	}
 	return 0, false
@@ -49,6 +51,8 @@ func clientPacketForID(state State, id uint32) (ClientPacket, bool) {
 			return RequestChunkResync{}, true
 		case 4:
 			return KeepAliveReply{}, true
+		case 5:
+			return SelectHotbar{}, true
 		}
 	}
 	return nil, false
@@ -93,6 +97,8 @@ func serverPacketID(state State, packet ServerPacket) (uint32, bool) {
 			return 8, true
 		case RemotePlayerStates:
 			return 9, true
+		case HotbarState:
+			return 10, true
 		}
 	}
 	return 0, false
@@ -137,6 +143,8 @@ func serverPacketForID(state State, id uint32) (ServerPacket, bool) {
 			return RemotePlayerDespawn{}, true
 		case 9:
 			return RemotePlayerStates{}, true
+		case 10:
+			return HotbarState{}, true
 		}
 	}
 	return nil, false
@@ -160,6 +168,10 @@ func commandRejectReasonID(reason RejectReason) (uint8, bool) {
 		return 7, true
 	case RejectPlayerNotReady:
 		return 8, true
+	case RejectInvalidSlot:
+		return 9, true
+	case RejectHotbarFull:
+		return 10, true
 	default:
 		return 0, false
 	}
@@ -183,6 +195,10 @@ func commandRejectReasonForID(id uint8) (RejectReason, bool) {
 		return RejectInvalidInput, true
 	case 8:
 		return RejectPlayerNotReady, true
+	case 9:
+		return RejectInvalidSlot, true
+	case 10:
+		return RejectHotbarFull, true
 	default:
 		return "", false
 	}

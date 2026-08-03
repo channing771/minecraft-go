@@ -50,8 +50,24 @@ func TestProtocolV2RemotePlayerPacketIDsAreFrozen(t *testing.T) {
 			t.Fatalf("server packet ID %d decoded=%T ok=%v, want %T true", test.id, decoded, ok, test.packet)
 		}
 	}
-	if _, ok := serverPacketForID(StatePlay, 10); ok {
+	if _, ok := serverPacketForID(StatePlay, 11); ok {
 		t.Fatal("unknown play server packet ID accepted")
+	}
+}
+
+func TestProtocolV3HotbarPacketIDsAreFrozen(t *testing.T) {
+	assertClientRegistry(t, []struct {
+		state  State
+		packet ClientPacket
+		id     uint32
+	}{{StatePlay, SelectHotbar{}, 5}})
+	assertServerRegistry(t, []struct {
+		state  State
+		packet ServerPacket
+		id     uint32
+	}{{StatePlay, HotbarState{}, 10}})
+	if _, ok := clientPacketForID(StatePlay, 6); ok {
+		t.Fatal("unknown play client packet ID accepted")
 	}
 }
 
@@ -59,7 +75,7 @@ func TestProtocolV1RegistryRejectsUnknownIDsAndStates(t *testing.T) {
 	if _, ok := clientPacketForID(StateHandshake, 1); ok {
 		t.Fatal("unknown handshake client packet ID accepted")
 	}
-	if _, ok := serverPacketForID(StatePlay, 10); ok {
+	if _, ok := serverPacketForID(StatePlay, 11); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 	if _, ok := clientPacketID(StateLogin, ClientHello{}); ok {
@@ -78,6 +94,7 @@ func TestCommandRejectReasonIDsAreFrozen(t *testing.T) {
 		{RejectInvalidRay, 1}, {RejectNoTarget, 2}, {RejectChunkNotReady, 3},
 		{RejectProtectedBlock, 4}, {RejectInvalidBlock, 5}, {RejectOccupied, 6},
 		{RejectInvalidInput, 7}, {RejectPlayerNotReady, 8},
+		{RejectInvalidSlot, 9}, {RejectHotbarFull, 10},
 	}
 	for _, tc := range reasons {
 		got, ok := commandRejectReasonID(tc.reason)
@@ -95,7 +112,7 @@ func TestCommandRejectReasonIDsAreFrozen(t *testing.T) {
 	if _, ok := commandRejectReasonForID(0); ok {
 		t.Fatal("zero rejection reason ID decoded")
 	}
-	if _, ok := commandRejectReasonForID(9); ok {
+	if _, ok := commandRejectReasonForID(11); ok {
 		t.Fatal("unknown rejection reason ID decoded")
 	}
 }
@@ -159,6 +176,9 @@ func sameClientPacketType(left, right ClientPacket) bool {
 	case KeepAliveReply:
 		_, ok := right.(KeepAliveReply)
 		return ok
+	case SelectHotbar:
+		_, ok := right.(SelectHotbar)
+		return ok
 	}
 	return false
 }
@@ -197,6 +217,9 @@ func sameServerPacketType(left, right ServerPacket) bool {
 		return ok
 	case Disconnect:
 		_, ok := right.(Disconnect)
+		return ok
+	case HotbarState:
+		_, ok := right.(HotbarState)
 		return ok
 	}
 	return false

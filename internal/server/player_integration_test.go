@@ -25,7 +25,7 @@ func TestAuthoritativePlayerConvergesAfterThreeTickStateDelay(t *testing.T) {
 	h.hold(client.Movement{}, 10)         // friction stop
 	h.hold(client.Movement{MoveZ: 1, Jump: true}, 1)
 	h.hold(client.Movement{MoveZ: 1}, 20) // clear the one-block test obstacle without tunneling
-	h.clickPlaceDown(core.StoneID)        // target above intact support overlaps player: occupied
+	h.clickPlaceDown(0)                   // 空快捷栏栏位无法放置: invalid_block
 	h.clickBreakDown()                    // then break support through the authoritative eye ray
 	h.hold(client.Movement{}, 10)
 	h.flushAllStates()
@@ -314,7 +314,7 @@ func (h *delayedPlayerHarness) hold(movement client.Movement, ticks int) {
 	}
 }
 
-func (h *delayedPlayerHarness) clickPlaceDown(block core.BlockID) {
+func (h *delayedPlayerHarness) clickPlaceDown(slot uint8) {
 	h.t.Helper()
 	h.pitch = -float32(math.Pi)/2 + 0.01
 	h.advanceInputTick(func() network.ClientMessage {
@@ -323,7 +323,7 @@ func (h *delayedPlayerHarness) clickPlaceDown(block core.BlockID) {
 			Sequence: h.placeSequence,
 			Yaw:      h.yaw,
 			Pitch:    h.pitch,
-			Block:    block,
+			Slot:     slot,
 		}
 	})
 }
@@ -578,7 +578,7 @@ func (h *delayedPlayerHarness) assertWorldHashesEqual() {
 	h.t.Helper()
 	wantRejections := []network.CommandRejected{{
 		Sequence: h.placeSequence,
-		Reason:   network.RejectOccupied,
+		Reason:   network.RejectInvalidBlock,
 	}}
 	if !reflect.DeepEqual(h.rejections, wantRejections) {
 		h.t.Fatalf("rejections=%+v，想要 %+v", h.rejections, wantRejections)
@@ -700,7 +700,7 @@ func runDelayedPlayerScript(t *testing.T) delayedReplayResult {
 	h.hold(client.Movement{}, 10)
 	h.hold(client.Movement{MoveZ: 1, Jump: true}, 1)
 	h.hold(client.Movement{MoveZ: 1}, 20)
-	h.clickPlaceDown(core.StoneID)
+	h.clickPlaceDown(0)
 	h.clickBreakDown()
 	h.hold(client.Movement{}, 10)
 	h.flushAllStates()

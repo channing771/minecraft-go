@@ -122,7 +122,7 @@ func TestPlaySemanticValidationMatchesMemoryAndTCP(t *testing.T) {
 		name   string
 		packet ClientPacket
 	}{
-		{"place block exceeds 15 bits", PlaceBlock{Block: core.BlockID(1 << 15)}},
+		{"place block slot out of range", PlaceBlock{Slot: core.HotbarSlots}},
 		{"resync outside overworld", RequestChunkResync{Dimension: core.DimensionID(1)}},
 	}
 	transports := []struct {

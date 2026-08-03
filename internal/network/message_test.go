@@ -24,8 +24,9 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Sequence: 3,
 			Yaw:      90,
 			Pitch:    -15,
-			Block:    core.StoneID,
+			Slot:     4,
 		},
+		network.SelectHotbar{Sequence: 9, Slot: 8},
 		network.RequestChunkResync{
 			Sequence:     4,
 			Dimension:    core.Overworld,
@@ -59,9 +60,47 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 		network.RemotePlayerStates{Players: []network.RemotePlayerState{{PlayerID: core.PlayerID{0, 1, 2, 3, 4, 5, 0x46, 7, 0x88, 9, 10, 11, 12, 13, 14, 15}}}},
 		network.KeepAlive{Token: 1},
 		network.Disconnect{Code: network.DisconnectTimeout},
+		network.HotbarState{},
 	}
-	if len(clientMessages) != 5 || len(serverMessages) != 10 {
+	if len(clientMessages) != 6 || len(serverMessages) != 11 {
 		t.Fatal("消息集合不完整")
+	}
+}
+
+func TestHotbarMessagesValidateFixedBounds(t *testing.T) {
+	var hotbar core.Hotbar
+	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	valid := []interface{ Validate() error }{
+		network.PlaceBlock{Slot: core.HotbarSlots - 1},
+		network.SelectHotbar{Slot: 0},
+		network.HotbarState{Hotbar: hotbar},
+	}
+	for _, message := range valid {
+		if err := message.Validate(); err != nil {
+			t.Fatalf("%T 合法值被拒绝: %v", message, err)
+		}
+	}
+
+	overflow := hotbar
+	overflow.Slots[1] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount + 1}
+	unknown := hotbar
+	unknown.Slots[2] = core.ItemStack{Item: core.ItemID(4242), Count: 1}
+	ghost := hotbar
+	ghost.Slots[3] = core.ItemStack{Item: core.ItemNone, Count: 1}
+	selected := hotbar
+	selected.Selected = core.HotbarSlots
+	invalid := []interface{ Validate() error }{
+		network.PlaceBlock{Slot: core.HotbarSlots},
+		network.SelectHotbar{Slot: 255},
+		network.HotbarState{Hotbar: overflow},
+		network.HotbarState{Hotbar: unknown},
+		network.HotbarState{Hotbar: ghost},
+		network.HotbarState{Hotbar: selected},
+	}
+	for _, message := range invalid {
+		if err := message.Validate(); err == nil {
+			t.Fatalf("%T 非法值被接受: %+v", message, message)
+		}
 	}
 }
 
@@ -78,6 +117,8 @@ func TestRejectReasonsAreStableProtocolValues(t *testing.T) {
 		{network.RejectOccupied, "occupied"},
 		{network.RejectInvalidInput, "invalid_input"},
 		{network.RejectPlayerNotReady, "player_not_ready"},
+		{network.RejectInvalidSlot, "invalid_slot"},
+		{network.RejectHotbarFull, "hotbar_full"},
 	}
 	for _, tc := range tests {
 		if string(tc.got) != tc.want {

@@ -159,8 +159,15 @@ func movePlayerAndPlaceBlock(
 	position core.BlockPos,
 ) {
 	t.Helper()
+	// 先挖掉视线内的石头障碍以获得物品，再从栏位 0 放置该物品。
+	sendIntegration(t, connected.Endpoint, network.BreakBlock{
+		Sequence: 1, Yaw: 0, Pitch: -0.2,
+	})
+	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
+		return integrationChangeSeen(message, position, core.AirID)
+	})
 	sendIntegration(t, connected.Endpoint, network.PlaceBlock{
-		Sequence: 1, Yaw: 0, Pitch: -0.2, Block: core.DirtID,
+		Sequence: 2, Yaw: 0, Pitch: -0.6, Slot: 0,
 	})
 	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
 		changes, ok := message.(network.BlockChanges)
@@ -168,7 +175,7 @@ func movePlayerAndPlaceBlock(
 			return false
 		}
 		for _, change := range changes.Changes {
-			if change.Position == position && change.Block == core.DirtID {
+			if change.Block == core.StoneID {
 				return true
 			}
 		}
@@ -176,19 +183,37 @@ func movePlayerAndPlaceBlock(
 	})
 	before := host.PlayerSnapshot(t, integrationPlayerID())
 	sendIntegration(t, connected.Endpoint, network.PlayerInput{
-		Sequence: 2, MoveX: 1, Yaw: 0, Pitch: -0.2,
+		Sequence: 3, MoveX: 1, Yaw: 0, Pitch: -0.2,
 	})
 	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
 		state, ok := message.(network.PlayerState)
-		return ok && state.LastInputSequence >= 2 && state.Position != before.Current.Position
+		return ok && state.LastInputSequence >= 3 && state.Position != before.Current.Position
 	})
 	sendIntegration(t, connected.Endpoint, network.PlayerInput{
-		Sequence: 3, Yaw: 0, Pitch: -0.2,
+		Sequence: 4, Yaw: 0, Pitch: -0.2,
 	})
 	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
 		state, ok := message.(network.PlayerState)
-		return ok && state.LastInputSequence >= 3 && state.Velocity[0] == 0 && state.Velocity[2] == 0
+		return ok && state.LastInputSequence >= 4 && state.Velocity[0] == 0 && state.Velocity[2] == 0
 	})
+}
+
+// integrationChangeSeen 报告消息是否包含指定位置的目标方块变化。
+func integrationChangeSeen(
+	message network.ServerMessage,
+	position core.BlockPos,
+	block core.BlockID,
+) bool {
+	changes, ok := message.(network.BlockChanges)
+	if !ok {
+		return false
+	}
+	for _, change := range changes.Changes {
+		if change.Position == position && change.Block == block {
+			return true
+		}
+	}
+	return false
 }
 
 func (h integrationHost) PlayerSnapshot(t *testing.T, id core.PlayerID) sim.PlayerSnapshot {
@@ -395,7 +420,7 @@ func TestTCPPlayerAndWorldSurviveDisconnectAndRestart(t *testing.T) {
 		PlayerID: id, DisplayName: "Chen",
 	})
 	waitClientReady(t, first, client)
-	movePlayerAndPlaceBlock(t, first, client, core.BlockPos{X: 0, Y: 1, Z: -5})
+	movePlayerAndPlaceBlock(t, first, client, core.BlockPos{X: 0, Y: 1, Z: -6})
 	wantPlayer := first.PlayerSnapshot(t, id)
 	wantHash, wantRevision := first.ChunkHash(t, core.ChunkPos{})
 	if err := client.Close(); err != nil {
@@ -801,7 +826,7 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 
 	commands := []network.ClientMessage{
 		network.PlayerInput{Sequence: 1, MoveX: 1, Yaw: 0, Pitch: -0.2},
-		network.PlaceBlock{Sequence: 2, Yaw: 0, Pitch: -0.2, Block: core.DirtID},
+		network.PlaceBlock{Sequence: 2, Yaw: 0, Pitch: -0.2, Slot: 0},
 		network.BreakBlock{Sequence: 3, Yaw: 0, Pitch: -0.2},
 		network.RequestChunkResync{
 			Sequence: 4, Dimension: core.Overworld,

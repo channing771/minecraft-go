@@ -608,6 +608,14 @@ func translateClientMessage(
 			Kind:     sim.CommandPlaceBlock,
 			Yaw:      message.Yaw,
 			Pitch:    message.Pitch,
+			Slot:     message.Slot,
+		}, true
+	case network.SelectHotbar:
+		return sim.Command{
+			Session:  id,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandSelectHotbar,
+			Slot:     message.Slot,
 		}, true
 	case network.RequestChunkResync:
 		return sim.Command{

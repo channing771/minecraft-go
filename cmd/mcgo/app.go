@@ -65,6 +65,7 @@ type application struct {
 	center                  core.ChunkPos
 	sequence                uint64
 	selectedBlock           core.BlockID
+	selectedSlot            uint8
 	loadedChunks            map[core.ChunkPos]struct{}
 	ticks                   *tickRecorder
 	saves                   *saveRecorder
@@ -1028,7 +1029,7 @@ func (a *application) placeBlock() {
 		Sequence: a.nextSequence(),
 		Yaw:      a.camera.Yaw,
 		Pitch:    a.camera.Pitch,
-		Block:    a.selectedBlock,
+		Slot:     a.selectedSlot,
 	}); err != nil {
 		log.Printf("发送放置命令失败: %v", err)
 	}

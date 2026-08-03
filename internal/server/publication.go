@@ -400,6 +400,10 @@ func networkRejectReason(reason sim.RejectReason) (network.RejectReason, bool) {
 		return network.RejectInvalidInput, true
 	case sim.RejectPlayerNotReady:
 		return network.RejectPlayerNotReady, true
+	case sim.RejectInvalidSlot:
+		return network.RejectInvalidSlot, true
+	case sim.RejectHotbarFull:
+		return network.RejectHotbarFull, true
 	default:
 		return "", false
 	}

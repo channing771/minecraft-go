@@ -155,7 +155,7 @@ func fixedEightPlayerScript(ticks uint64) []multiplayerScriptStep {
 				command := network.BreakBlock{Sequence: tick * 2, Yaw: math.Pi, Pitch: -0.2}
 				steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Break: &command})
 			} else {
-				command := network.PlaceBlock{Sequence: tick * 2, Yaw: math.Pi, Pitch: -0.2, Block: core.DirtID}
+				command := network.PlaceBlock{Sequence: tick * 2, Yaw: math.Pi, Pitch: -0.2, Slot: 0}
 				steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Place: &command})
 			}
 		}

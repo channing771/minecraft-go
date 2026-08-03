@@ -60,7 +60,7 @@ func (command BreakBlock) Validate() error {
 type PlaceBlock struct {
 	Sequence   uint64
 	Yaw, Pitch float32
-	Block      core.BlockID
+	Slot       uint8
 }
 
 func (PlaceBlock) clientMessage() {}
@@ -70,8 +70,39 @@ func (command PlaceBlock) Validate() error {
 	if !finite32(command.Yaw) || !finite32(command.Pitch) {
 		return errors.New("network: place block has non-finite rotation")
 	}
-	if !validBlockID(command.Block) {
-		return errors.New("network: place block ID exceeds 15 bits")
+	if command.Slot >= core.HotbarSlots {
+		return errors.New("network: place block hotbar slot is outside 0..8")
+	}
+	return nil
+}
+
+// SelectHotbar 请求把权威选中栏位切换到 Slot。
+type SelectHotbar struct {
+	Sequence uint64
+	Slot     uint8
+}
+
+func (SelectHotbar) clientMessage() {}
+func (SelectHotbar) clientPacket()  {}
+
+func (command SelectHotbar) Validate() error {
+	if command.Slot >= core.HotbarSlots {
+		return errors.New("network: hotbar selection slot is outside 0..8")
+	}
+	return nil
+}
+
+// HotbarState 是服务端发给所属玩家的完整权威快捷栏。
+type HotbarState struct {
+	Hotbar core.Hotbar
+}
+
+func (HotbarState) serverMessage() {}
+func (HotbarState) serverPacket()  {}
+
+func (state HotbarState) Validate() error {
+	if !state.Hotbar.Valid() {
+		return errors.New("network: hotbar state is not a valid fixed hotbar")
 	}
 	return nil
 }
@@ -231,6 +262,8 @@ const (
 	RejectOccupied       RejectReason = "occupied"
 	RejectInvalidInput   RejectReason = "invalid_input"
 	RejectPlayerNotReady RejectReason = "player_not_ready"
+	RejectInvalidSlot    RejectReason = "invalid_slot"
+	RejectHotbarFull     RejectReason = "hotbar_full"
 )
 
 type CommandRejected struct {

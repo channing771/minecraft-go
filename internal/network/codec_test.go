@@ -22,13 +22,14 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"hello", StateHandshake, ClientHello{ProtocolVersion: 2}, 0, "02"},
+		{"hello", StateHandshake, ClientHello{ProtocolVersion: 3}, 0, "03"},
 		{"login start", StateLogin, LoginStart{PlayerID: id, DisplayName: "Chen"}, 0, "00112233445546778899aabbccddeeff044368656e"},
 		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5}, 0, "0100000000000000ff01010000c03f000000bf"},
 		{"break", StatePlay, BreakBlock{Sequence: 2}, 1, "02000000000000000000000000000000"},
-		{"place", StatePlay, PlaceBlock{Sequence: 3, Yaw: 2, Pitch: -1, Block: core.StoneID}, 2, "030000000000000000000040000080bf0200"},
+		{"place", StatePlay, PlaceBlock{Sequence: 3, Yaw: 2, Pitch: -1, Slot: 4}, 2, "030000000000000000000040000080bf04"},
 		{"resync", StatePlay, RequestChunkResync{Sequence: 4, Dimension: core.Overworld, Chunk: core.ChunkPos{X: -2, Z: 3}, HaveRevision: 5}, 3, "040000000000000000000000feffffff030000000500000000000000"},
 		{"keep alive reply", StatePlay, KeepAliveReply{Token: 6}, 4, "0600000000000000"},
+		{"select hotbar", StatePlay, SelectHotbar{Sequence: 9, Slot: 8}, 5, "090000000000000008"},
 	}
 	for _, tc := range clients {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,8 +56,8 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 2}, 0, "02"},
-		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 2, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0201026e6f"},
+		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 3}, 0, "03"},
+		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 3, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0301026e6f"},
 		{"login success", StateLogin, LoginSuccess{PlayerID: id}, 0, "00112233445546778899aabbccddeeff"},
 		{"login reject", StateLogin, LoginReject{Code: LoginInvalidIdentity, Message: "no"}, 1, "02026e6f"},
 		{"block changes", StatePlay, BlockChanges{Dimension: core.Overworld, Chunk: core.ChunkPos{X: 1, Z: -1}, BaseRevision: 1, NewRevision: 2, Changes: []BlockChange{{Position: core.BlockPos{X: 16, Y: -64, Z: -1}, Block: core.StoneID}}}, 1, "0000000001000000ffffffff010000000000000002000000000000000110000000c0ffffffffffffff0200"},
@@ -65,6 +66,7 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		{"command rejected", StatePlay, CommandRejected{Sequence: 7, Reason: RejectOccupied}, 4, "070000000000000006"},
 		{"keep alive", StatePlay, KeepAlive{Token: 8}, 5, "0800000000000000"},
 		{"disconnect", StatePlay, Disconnect{Code: DisconnectTimeout, Message: "bye"}, 6, "0203627965"},
+		{"hotbar state", StatePlay, goldenHotbarState(), 10, "02010005000000000000000000030040000000000000000000000000"},
 	}
 	for _, tc := range servers {
 		t.Run(tc.name, func(t *testing.T) {
@@ -180,7 +182,7 @@ func TestSmallPacketErrorCodeWireValues(t *testing.T) {
 		packet ServerPacket
 		want   string
 	}{
-		{HandshakeReject{ServerProtocolVersion: 2, Code: HandshakeVersionMismatch}, "020100"},
+		{HandshakeReject{ServerProtocolVersion: 3, Code: HandshakeVersionMismatch}, "030100"},
 		{LoginReject{Code: LoginServerFull}, "0100"},
 		{LoginReject{Code: LoginInvalidIdentity}, "0200"},
 		{LoginReject{Code: LoginPlayerDataCorrupt}, "0300"},
@@ -292,8 +294,43 @@ func TestSmallPacketRejectsMalformedPayloads(t *testing.T) {
 			_, err := decodeClientPacketPayload(StatePlay, 1, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xc0, 0x7f, 0, 0, 0, 0})
 			return err
 		}},
-		{"invalid block", func() error {
-			_, err := decodeClientPacketPayload(StatePlay, 2, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x80})
+		{"invalid place slot", func() error {
+			_, err := decodeClientPacketPayload(StatePlay, 2, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, core.HotbarSlots})
+			return err
+		}},
+		{"invalid select slot", func() error {
+			_, err := decodeClientPacketPayload(StatePlay, 5, []byte{0, 0, 0, 0, 0, 0, 0, 0, core.HotbarSlots})
+			return err
+		}},
+		{"hotbar state selected out of range", func() error {
+			_, err := decodeServerControlPayload(StatePlay, 10, hotbarStateWire(core.Hotbar{Selected: core.HotbarSlots}))
+			return err
+		}},
+		{"hotbar state unknown item", func() error {
+			hotbar := core.Hotbar{}
+			hotbar.Slots[0] = core.ItemStack{Item: core.ItemID(4242), Count: 1}
+			_, err := decodeServerControlPayload(StatePlay, 10, hotbarStateWire(hotbar))
+			return err
+		}},
+		{"hotbar state count overflow", func() error {
+			hotbar := core.Hotbar{}
+			hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount + 1}
+			_, err := decodeServerControlPayload(StatePlay, 10, hotbarStateWire(hotbar))
+			return err
+		}},
+		{"hotbar state empty item with count", func() error {
+			hotbar := core.Hotbar{}
+			hotbar.Slots[0] = core.ItemStack{Item: core.ItemNone, Count: 3}
+			_, err := decodeServerControlPayload(StatePlay, 10, hotbarStateWire(hotbar))
+			return err
+		}},
+		{"hotbar state trailing bytes", func() error {
+			_, err := decodeServerControlPayload(StatePlay, 10, append(hotbarStateWire(core.Hotbar{}), 0))
+			return err
+		}},
+		{"hotbar state truncated", func() error {
+			wire := hotbarStateWire(core.Hotbar{})
+			_, err := decodeServerControlPayload(StatePlay, 10, wire[:len(wire)-1])
 			return err
 		}},
 		{"invalid dimension", func() error {
@@ -309,7 +346,7 @@ func TestSmallPacketRejectsMalformedPayloads(t *testing.T) {
 			return err
 		}},
 		{"unknown rejection reason", func() error {
-			_, err := decodeServerControlPayload(StatePlay, 4, []byte{0, 0, 0, 0, 0, 0, 0, 0, 9})
+			_, err := decodeServerControlPayload(StatePlay, 4, []byte{0, 0, 0, 0, 0, 0, 0, 0, 11})
 			return err
 		}},
 	}
@@ -351,8 +388,17 @@ func TestSmallPacketRejectsInvalidSemanticPackets(t *testing.T) {
 			}
 		})
 	}
-	if _, _, err := encodeClientPacketPayload(StatePlay, PlaceBlock{Block: core.BlockID(1 << 15)}); err == nil {
-		t.Fatal("invalid client block encoded")
+	if _, _, err := encodeClientPacketPayload(StatePlay, PlaceBlock{Slot: core.HotbarSlots}); err == nil {
+		t.Fatal("invalid client slot encoded")
+	}
+	if _, _, err := encodeClientPacketPayload(StatePlay, SelectHotbar{Slot: core.HotbarSlots}); err == nil {
+		t.Fatal("invalid client hotbar selection encoded")
+	}
+	if _, _, err := encodeServerControlPayload(
+		StatePlay,
+		HotbarState{Hotbar: core.Hotbar{Selected: core.HotbarSlots}},
+	); err == nil {
+		t.Fatal("invalid server hotbar state encoded")
 	}
 	if _, _, err := encodeClientPacketPayload(StatePlay, PlayerInput{Yaw: float32(math.NaN())}); err == nil {
 		t.Fatal("non-finite client float encoded")
@@ -439,6 +485,24 @@ func mustCodecPlayerID(t *testing.T) core.PlayerID {
 	return id
 }
 
+func goldenHotbarState() HotbarState {
+	var hotbar core.Hotbar
+	hotbar.Selected = 2
+	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 5}
+	hotbar.Slots[4] = core.ItemStack{Item: core.ItemGrass, Count: core.MaxStackCount}
+	return HotbarState{Hotbar: hotbar}
+}
+
+// hotbarStateWire 手工构造固定负载，用于绕过编码器校验注入非法状态。
+func hotbarStateWire(hotbar core.Hotbar) []byte {
+	wire := make([]byte, 0, 1+core.HotbarSlots*3)
+	wire = append(wire, hotbar.Selected)
+	for _, stack := range hotbar.Slots {
+		wire = append(wire, byte(stack.Item), byte(stack.Item>>8), stack.Count)
+	}
+	return wire
+}
+
 func sameClientPacket(got, want ClientPacket) bool {
 	switch got := got.(type) {
 	case ClientHello:
@@ -461,6 +525,9 @@ func sameClientPacket(got, want ClientPacket) bool {
 		return ok && got == other
 	case KeepAliveReply:
 		other, ok := want.(KeepAliveReply)
+		return ok && got == other
+	case SelectHotbar:
+		other, ok := want.(SelectHotbar)
 		return ok && got == other
 	default:
 		return false
@@ -514,6 +581,9 @@ func sameServerPacket(got, want ServerPacket) bool {
 		return ok && got == other
 	case Disconnect:
 		other, ok := want.(Disconnect)
+		return ok && got == other
+	case HotbarState:
+		other, ok := want.(HotbarState)
 		return ok && got == other
 	default:
 		return false

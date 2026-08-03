@@ -87,14 +87,19 @@ func TestLoginClientReportsHandshakeVersionMismatch(t *testing.T) {
 	}
 }
 
-func TestBeginServerLoginRejectsV1ClientHelloWithProtocolV2(t *testing.T) {
-	stream := &v1ClientHelloStream{}
-	if _, err := BeginServerLogin(context.Background(), stream); err == nil {
-		t.Fatal("v1 ClientHello accepted")
-	}
-	reject, ok := stream.sent.(HandshakeReject)
-	if !ok || stream.sentState != StateHandshake || reject.ServerProtocolVersion != 2 || reject.Code != HandshakeVersionMismatch {
-		t.Fatalf("v1 rejection = %#v in state %d, want v2 HandshakeReject", stream.sent, stream.sentState)
+func TestBeginServerLoginRejectsOutdatedClientHelloWithProtocolV3(t *testing.T) {
+	for _, version := range []uint32{1, 2} {
+		stream := &staticClientHelloStream{version: version}
+		if _, err := BeginServerLogin(context.Background(), stream); err == nil {
+			t.Fatalf("v%d ClientHello accepted", version)
+		}
+		reject, ok := stream.sent.(HandshakeReject)
+		if !ok || stream.sentState != StateHandshake ||
+			reject.ServerProtocolVersion != ProtocolVersion ||
+			reject.Code != HandshakeVersionMismatch {
+			t.Fatalf("v%d rejection = %#v in state %d, want v3 HandshakeReject",
+				version, stream.sent, stream.sentState)
+		}
 	}
 }
 
@@ -634,20 +639,21 @@ func testIdentity(last byte) Identity {
 	}
 }
 
-type v1ClientHelloStream struct {
+type staticClientHelloStream struct {
+	version   uint32
 	sent      ServerPacket
 	sentState State
 }
 
-func (stream *v1ClientHelloStream) Send(_ context.Context, state State, packet ServerPacket) error {
+func (stream *staticClientHelloStream) Send(_ context.Context, state State, packet ServerPacket) error {
 	stream.sentState = state
 	stream.sent = packet
 	return nil
 }
 
-func (*v1ClientHelloStream) Recv(context.Context, State) (ClientPacket, error) {
-	return ClientHello{ProtocolVersion: 1}, nil
+func (stream *staticClientHelloStream) Recv(context.Context, State) (ClientPacket, error) {
+	return ClientHello{ProtocolVersion: stream.version}, nil
 }
 
-func (*v1ClientHelloStream) Peer() string { return "test" }
-func (*v1ClientHelloStream) Close() error { return nil }
+func (*staticClientHelloStream) Peer() string { return "test" }
+func (*staticClientHelloStream) Close() error { return nil }

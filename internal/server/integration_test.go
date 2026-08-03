@@ -31,47 +31,31 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 	})
 
 	pitch := float32(-0.2)
-	placements := []struct {
-		position core.BlockPos
-		block    core.BlockID
-	}{
-		{position: core.BlockPos{X: 0, Y: 1, Z: -5}, block: core.StoneID},
-		{position: core.BlockPos{X: 0, Y: 1, Z: -4}, block: core.DirtID},
-		{position: core.BlockPos{X: 0, Y: 1, Z: -3}, block: core.GrassID},
-	}
-	for index, placement := range placements {
-		sequence := uint64(index + 1)
-		sendClientMessage(t, clientEndpoint, network.PlaceBlock{
-			Sequence: sequence,
-			Yaw:      0,
-			Pitch:    pitch,
-			Block:    placement.block,
-		})
-		assertContiguousInteraction(
-			t,
-			running,
-			clientEndpoint,
-			mirror,
-			sequence,
-			sequence+1,
-			placement.position,
-			placement.block,
-		)
-	}
-
-	breakPosition := placements[len(placements)-1].position
+	// 权威快捷栏下必须先挖掘获得物品，才能从对应栏位放回同一方块。
 	sendClientMessage(t, clientEndpoint, network.BreakBlock{
-		Sequence: 4,
+		Sequence: 1,
 		Yaw:      0,
 		Pitch:    pitch,
 	})
-	assertContiguousInteraction(
-		t, running, clientEndpoint, mirror, 4, 5, breakPosition, core.AirID,
+	broken := awaitInteractionChange(
+		t, running, clientEndpoint, mirror, interactionChunk, 1, 2,
 	)
+	if broken.Block != core.AirID {
+		t.Fatalf("挖掘结果 = %+v，想要空气", broken)
+	}
 
-	assertMirrorBlock(t, mirror, breakPosition, core.AirID)
-	for _, placement := range placements[:len(placements)-1] {
-		assertMirrorBlock(t, mirror, placement.position, placement.block)
+	// 障碍消失后需要压低视角才能命中六格内的地面。
+	sendClientMessage(t, clientEndpoint, network.PlaceBlock{
+		Sequence: 2,
+		Yaw:      0,
+		Pitch:    -0.6,
+		Slot:     0,
+	})
+	placed := awaitInteractionChange(
+		t, running, clientEndpoint, mirror, interactionChunk, 2, 3,
+	)
+	if placed.Position == broken.Position || placed.Block != core.StoneID {
+		t.Fatalf("放置结果 = %+v，想要放下刚采集的石头", placed)
 	}
 	authoritativeHash, authoritativeRevision, authoritativeOK := running.ChunkHash(
 		core.Overworld,
@@ -107,6 +91,40 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 	if err := clientEndpoint.Close(); err != nil {
 		t.Fatalf("关闭客户端端点: %v", err)
 	}
+}
+
+// awaitInteractionChange 等待唯一一份 base→new 的 delta，并返回其中唯一的方块变化。
+func awaitInteractionChange(
+	t *testing.T,
+	running *server.Server,
+	endpoint network.ClientEndpoint,
+	mirror *client.Mirror,
+	chunk core.ChunkPos,
+	baseRevision uint64,
+	newRevision uint64,
+) network.BlockChange {
+	t.Helper()
+	var matching []network.BlockChanges
+	stepUntilCollect(t, running, endpoint, mirror, func(message network.ServerMessage) {
+		if delta, ok := message.(network.BlockChanges); ok && delta.Chunk == chunk {
+			matching = append(matching, delta)
+		}
+	}, func() bool {
+		_, revision, ok := mirror.Hash(core.Overworld, chunk)
+		return ok && revision == newRevision
+	})
+	if len(matching) != 1 || matching[0].BaseRevision != baseRevision ||
+		matching[0].NewRevision != newRevision || len(matching[0].Changes) != 1 {
+		t.Fatalf(
+			"交互 delta = %+v，想要唯一 %d→%d 的单方块变化",
+			matching,
+			baseRevision,
+			newRevision,
+		)
+	}
+	change := matching[0].Changes[0]
+	assertMirrorBlock(t, mirror, change.Position, change.Block)
+	return change
 }
 
 func assertContiguousInteraction(

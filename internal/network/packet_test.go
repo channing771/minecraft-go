@@ -20,7 +20,8 @@ func TestValidateClientPacket(t *testing.T) {
 		{"login start", StateLogin, LoginStart{PlayerID: validID, DisplayName: "Chen"}},
 		{"input", StatePlay, PlayerInput{Yaw: 90, Pitch: -15}},
 		{"break", StatePlay, BreakBlock{Yaw: 90, Pitch: -15}},
-		{"place", StatePlay, PlaceBlock{Yaw: 90, Pitch: -15, Block: core.StoneID}},
+		{"place", StatePlay, PlaceBlock{Yaw: 90, Pitch: -15, Slot: 8}},
+		{"select hotbar", StatePlay, SelectHotbar{Slot: 8}},
 		{"resync", StatePlay, RequestChunkResync{}},
 		{"keep alive reply", StatePlay, KeepAliveReply{Token: 1}},
 	}
@@ -44,8 +45,9 @@ func TestValidateClientPacket(t *testing.T) {
 		{"zero keep alive token", StatePlay, KeepAliveReply{}},
 		{"input NaN", StatePlay, PlayerInput{Yaw: float32(math.NaN())}},
 		{"break infinity", StatePlay, BreakBlock{Pitch: float32(math.Inf(1))}},
-		{"place NaN", StatePlay, PlaceBlock{Yaw: float32(math.NaN()), Block: core.StoneID}},
-		{"place block exceeds 15 bits", StatePlay, PlaceBlock{Block: core.BlockID(1 << 15)}},
+		{"place NaN", StatePlay, PlaceBlock{Yaw: float32(math.NaN())}},
+		{"place slot out of range", StatePlay, PlaceBlock{Slot: core.HotbarSlots}},
+		{"select hotbar slot out of range", StatePlay, SelectHotbar{Slot: core.HotbarSlots}},
 		{"resync outside overworld", StatePlay, RequestChunkResync{Dimension: core.DimensionID(1)}},
 		{"play packet during handshake", StateHandshake, PlayerInput{}},
 		{"play packet during login", StateLogin, PlayerInput{}},
@@ -74,8 +76,8 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 			t.Fatalf("%s state = %d, want %d", tc.name, tc.got, tc.want)
 		}
 	}
-	if ProtocolVersion != 2 {
-		t.Fatalf("protocol version = %d, want 2", ProtocolVersion)
+	if ProtocolVersion != 3 {
+		t.Fatalf("protocol version = %d, want 3", ProtocolVersion)
 	}
 
 	codes := []struct {
@@ -122,6 +124,7 @@ func TestValidateServerPacket(t *testing.T) {
 		{"command reject", StatePlay, CommandRejected{Reason: RejectInvalidRay}},
 		{"keep alive", StatePlay, KeepAlive{Token: 1}},
 		{"disconnect", StatePlay, Disconnect{Code: DisconnectTimeout}},
+		{"hotbar state", StatePlay, HotbarState{}},
 	}
 	for _, tc := range valid {
 		t.Run(tc.name, func(t *testing.T) {
@@ -152,6 +155,7 @@ func TestValidateServerPacket(t *testing.T) {
 		{"player state NaN", StatePlay, PlayerState{Position: mgl32.Vec3{float32(math.NaN()), 0, 0}}},
 		{"player state infinity", StatePlay, PlayerState{Velocity: mgl32.Vec3{0, float32(math.Inf(1)), 0}}},
 		{"unknown command rejection", StatePlay, CommandRejected{Reason: RejectReason("other")}},
+		{"hotbar state out of range", StatePlay, HotbarState{Hotbar: core.Hotbar{Selected: core.HotbarSlots}}},
 		{"play packet during handshake", StateHandshake, KeepAlive{Token: 1}},
 		{"play packet during login", StateLogin, KeepAlive{Token: 1}},
 	}

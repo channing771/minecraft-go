@@ -54,7 +54,10 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 			e.u64(message.Sequence)
 			e.f32(message.Yaw)
 			e.f32(message.Pitch)
-			e.u16(uint16(message.Block))
+			e.u8(message.Slot)
+		case SelectHotbar:
+			e.u64(message.Sequence)
+			e.u8(message.Slot)
 		case RequestChunkResync:
 			e.u64(message.Sequence)
 			e.i32(int32(message.Dimension))
@@ -138,7 +141,7 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 		case 2:
 			var sequence uint64
 			var yaw, pitch float32
-			var block uint16
+			var slot uint8
 			sequence, err = d.u64()
 			if err == nil {
 				yaw, err = d.f32()
@@ -147,9 +150,9 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 				pitch, err = d.f32()
 			}
 			if err == nil {
-				block, err = d.u16()
+				slot, err = d.u8()
 			}
-			packet = PlaceBlock{Sequence: sequence, Yaw: yaw, Pitch: pitch, Block: core.BlockID(block)}
+			packet = PlaceBlock{Sequence: sequence, Yaw: yaw, Pitch: pitch, Slot: slot}
 		case 3:
 			var sequence, revision uint64
 			var dimension, chunkX, chunkZ int32
@@ -171,6 +174,14 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			var token uint64
 			token, err = d.u64()
 			packet = KeepAliveReply{Token: token}
+		case 5:
+			var sequence uint64
+			var slot uint8
+			sequence, err = d.u64()
+			if err == nil {
+				slot, err = d.u8()
+			}
+			packet = SelectHotbar{Sequence: sequence, Slot: slot}
 		default:
 			return nil, codecError("decode client", state, packetID, errUnknownPacketID)
 		}
@@ -310,6 +321,12 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 				e.f32(player.Yaw)
 				e.f32(player.Pitch)
 				e.bool(player.Reset)
+			}
+		case HotbarState:
+			e.u8(message.Hotbar.Selected)
+			for _, stack := range message.Hotbar.Slots {
+				e.u16(uint16(stack.Item))
+				e.u8(stack.Count)
 			}
 		default:
 			return 0, nil, codecError("encode server", state, packetID, invalidServerPacket(state, packet))
@@ -481,6 +498,20 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 			packet = despawn
 		case 9:
 			packet, err = decodeRemotePlayerStates(&d)
+		case 10:
+			var hotbar core.Hotbar
+			hotbar.Selected, err = d.u8()
+			for index := range hotbar.Slots {
+				var item uint16
+				if err == nil {
+					item, err = d.u16()
+				}
+				if err == nil {
+					hotbar.Slots[index].Item = core.ItemID(item)
+					hotbar.Slots[index].Count, err = d.u8()
+				}
+			}
+			packet = HotbarState{Hotbar: hotbar}
 		default:
 			return nil, codecError("decode server", state, packetID, errUnknownPacketID)
 		}
