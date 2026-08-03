@@ -534,7 +534,7 @@ func readyFlatEngineStocked(
 	engine.RegisterPlayer(session, sim.PlayerRestore{
 		SpawnDimension: core.Overworld,
 		SpawnAnchor:    chunkPos,
-		Hotbar:         hotbar,
+		Inventory:      core.Inventory{Hotbar: hotbar},
 	})
 	requested := engine.Step()
 	wantKey := core.ChunkKey{Dimension: core.Overworld, Pos: chunkPos}

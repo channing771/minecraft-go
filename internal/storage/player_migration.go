@@ -15,15 +15,20 @@ type playerDTO struct {
 	Current     PlayerLocation
 	Yaw, Pitch  float32
 	Safe        *PlayerLocation
-	Hotbar      core.Hotbar
+	Inventory   core.Inventory
 }
 
 type playerMigration func(playerDTO) (playerDTO, error)
 
 var playerMigrations = map[uint32]playerMigration{
-	// v1 没有快捷栏负载，确定性迁移为空快捷栏且选中栏位 0。
+	// v1 没有物品负载，确定性迁移为空快捷栏且选中栏位 0。
 	1: func(dto playerDTO) (playerDTO, error) {
-		dto.Hotbar = core.Hotbar{}
+		dto.Inventory.Hotbar = core.Hotbar{}
+		return dto, nil
+	},
+	// v2 没有背包负载，确定性迁移为空背包并保留既有快捷栏。
+	2: func(dto playerDTO) (playerDTO, error) {
+		dto.Inventory.Backpack = [core.BackpackSlots]core.ItemStack{}
 		return dto, nil
 	},
 }

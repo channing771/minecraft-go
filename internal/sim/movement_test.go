@@ -335,14 +335,16 @@ func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
 		0x00, 0x00, 0x00, // slot 7: 空
 		0x00, 0x00, 0x00, // slot 8: 空
 	}
+	// schema v3：27 格空背包直接追加在快捷栏之后。
+	fixture = append(fixture, make([]byte, core.BackpackSlots*3)...)
 	want := [32]byte{
-		0x0d, 0x3f, 0x15, 0x56, 0x7a, 0xd5, 0xc2, 0xc5,
-		0x5f, 0xab, 0xde, 0xc9, 0xeb, 0x92, 0x0e, 0x35,
-		0xaf, 0x2b, 0xfc, 0x6a, 0x13, 0x48, 0xb9, 0x76,
-		0x80, 0x17, 0x4a, 0x86, 0xfc, 0x2e, 0x68, 0x1f,
+		0x52, 0x07, 0xe1, 0xf5, 0x9c, 0x93, 0x11, 0xca,
+		0x78, 0x92, 0xeb, 0xbe, 0x06, 0x18, 0xa0, 0xdd,
+		0xbb, 0x36, 0x4c, 0x69, 0x74, 0x2f, 0x8e, 0x2e,
+		0x69, 0xce, 0x32, 0x5f, 0x8e, 0xa3, 0x63, 0x08,
 	}
-	if len(fixture) != 81 {
-		t.Fatalf("fixture 长度=%d，想要 81", len(fixture))
+	if want := 81 + core.BackpackSlots*3; len(fixture) != want {
+		t.Fatalf("fixture 长度=%d，想要 %d", len(fixture), want)
 	}
 	if digest := sha256.Sum256(fixture); digest != want {
 		t.Fatalf("独立 fixture digest=%x，想要 %x", digest, want)
@@ -368,11 +370,13 @@ func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
 				Yaw:   11.5,
 			},
 			lastInputSequence: 0x1122334455667788,
-			hotbar: core.Hotbar{
-				Selected: 6,
-				Slots: [core.HotbarSlots]core.ItemStack{
-					0: {Item: core.ItemStone, Count: 5},
-					4: {Item: core.ItemGrass, Count: core.MaxStackCount},
+			inventory: core.Inventory{
+				Hotbar: core.Hotbar{
+					Selected: 6,
+					Slots: [core.HotbarSlots]core.ItemStack{
+						0: {Item: core.ItemStone, Count: 5},
+						4: {Item: core.ItemGrass, Count: core.MaxStackCount},
+					},
 				},
 			},
 		},

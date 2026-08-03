@@ -126,21 +126,14 @@ func (engine *Engine) pickUpDrop(
 			continue
 		}
 		player := session.player
-		hotbar := player.hotbar
-		taken := uint8(0)
-		for taken < drop.Stack.Count {
-			next, added := hotbar.Add(drop.Stack.Item)
-			if !added {
-				break
-			}
-			hotbar = next
-			taken++
-		}
+		// 一次整堆装入：先快捷栏后背包，余量留在地面。
+		next, remainder := player.inventory.AddStack(drop.Stack)
+		taken := drop.Stack.Count - remainder.Count
 		if taken == 0 {
 			continue
 		}
-		player.hotbar = hotbar
-		player.hotbarDirty = true
+		player.inventory = next
+		player.inventoryDirty = true
 		drop.Stack.Count -= taken
 		if drop.Stack.Count == 0 {
 			chunk.ClearDrop(slot)

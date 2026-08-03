@@ -211,9 +211,9 @@ func (engine *Engine) Step() TickResult {
 				continue
 			}
 			player := session.player
-			if player.hotbar.Selected != command.Slot {
-				player.hotbar.Selected = command.Slot
-				player.hotbarDirty = true
+			if player.inventory.Hotbar.Selected != command.Slot {
+				player.inventory.Hotbar.Selected = command.Slot
+				player.inventoryDirty = true
 			}
 		case CommandResync:
 			result.Resync = append(result.Resync, ResyncRequest{
@@ -261,7 +261,7 @@ func (engine *Engine) Step() TickResult {
 	sortChunkKeys(result.Ready)
 
 	result.Tick = engine.tick.Add(1)
-	engine.publishHotbars(&result)
+	engine.publishInventories(&result)
 	engine.publishPlayers(&result)
 	return result
 }
@@ -617,11 +617,11 @@ func (engine *Engine) executeInteraction(
 		if command.Slot >= core.HotbarSlots {
 			return RejectInvalidSlot, true
 		}
-		block, ok := core.ItemPlacement(player.hotbar.Slots[command.Slot].Item)
+		block, ok := core.ItemPlacement(player.inventory.Hotbar.Slots[command.Slot].Item)
 		if !ok {
 			return RejectInvalidBlock, true
 		}
-		next, ok := player.hotbar.Consume(command.Slot)
+		next, ok := player.inventory.Hotbar.Consume(command.Slot)
 		if !ok {
 			return RejectInvalidBlock, true
 		}
@@ -720,8 +720,8 @@ func (engine *Engine) executeInteraction(
 				placement,
 				pending,
 			)
-			player.hotbar = consumed
-			player.hotbarDirty = true
+			player.inventory.Hotbar = consumed
+			player.inventoryDirty = true
 		}
 		return 0, false
 	}

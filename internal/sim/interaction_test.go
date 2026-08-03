@@ -131,7 +131,7 @@ func TestPlayerIntentRejectsTraversalIntoUnknownAdjacentChunk(t *testing.T) {
 			engine.RegisterPlayer(session, sim.PlayerRestore{
 				SpawnDimension: core.Overworld,
 				SpawnAnchor:    anchor,
-				Hotbar:         stockedHotbar(core.ItemStone),
+				Inventory:      core.Inventory{Hotbar: stockedHotbar(core.ItemStone)},
 			})
 			requested := engine.Step()
 			if len(requested.Acquire) != 1 || requested.Acquire[0] != (core.ChunkKey{

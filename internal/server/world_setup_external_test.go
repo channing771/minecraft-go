@@ -32,7 +32,7 @@ func newMemoryAttachedWorldWithHotbar(
 	restore := sim.PlayerRestore{
 		SpawnDimension: config.SpawnDimension,
 		SpawnAnchor:    config.SpawnAnchor,
-		Hotbar:         hotbar,
+		Inventory:      core.Inventory{Hotbar: hotbar},
 	}
 	if _, err := running.AttachSession(externalSessionSpec(1, 1, endpoint, restore)); err != nil {
 		panic(err)
@@ -62,7 +62,7 @@ func newAttachedPersistentWorldForExternalTest(config server.Config, endpoint ne
 	restore := sim.PlayerRestore{
 		SpawnDimension: config.SpawnDimension,
 		SpawnAnchor:    config.SpawnAnchor,
-		Hotbar:         persistentTestHotbar,
+		Inventory:      core.Inventory{Hotbar: persistentTestHotbar},
 	}
 	if _, err := running.AttachSession(externalSessionSpec(1, 1, endpoint, restore)); err != nil {
 		panic(err)

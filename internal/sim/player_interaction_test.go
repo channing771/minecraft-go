@@ -220,12 +220,30 @@ func readyFlatPlayerRestored(
 	hotbar core.Hotbar,
 ) (*sim.Engine, sim.SessionID) {
 	t.Helper()
+	return readyFlatPlayerInventory(t, blocks, core.Inventory{Hotbar: hotbar})
+}
+
+// readyFlatPlayerWithInventory 用完整物品状态构造一个已 Ready 的平坦世界玩家。
+func readyFlatPlayerWithInventory(
+	t *testing.T,
+	inventory core.Inventory,
+) (*sim.Engine, sim.SessionID) {
+	t.Helper()
+	return readyFlatPlayerInventory(t, nil, inventory)
+}
+
+func readyFlatPlayerInventory(
+	t *testing.T,
+	blocks map[core.BlockPos]core.BlockID,
+	inventory core.Inventory,
+) (*sim.Engine, sim.SessionID) {
+	t.Helper()
 	engine := sim.NewEngine(0)
 	const session = sim.SessionID(1)
 	engine.RegisterPlayer(session, sim.PlayerRestore{
 		SpawnDimension: core.Overworld,
 		SpawnAnchor:    core.ChunkPos{},
-		Hotbar:         hotbar,
+		Inventory:      inventory,
 	})
 	requested := engine.Step()
 	if len(requested.Acquire) != 1 || requested.Acquire[0] != (core.ChunkKey{

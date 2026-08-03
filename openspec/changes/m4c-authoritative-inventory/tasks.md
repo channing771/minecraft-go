@@ -7,10 +7,10 @@
 
 ## 2. 玩家状态与存档 schema v3
 
-- [ ] 2.1 在 `internal/storage`、`internal/sim`、`internal/server` 先写失败测试，覆盖 v3 完整状态 roundtrip/golden、v2 保留快捷栏并迁移空背包、v1 链式迁移、非法背包/未来版本拒绝、故障写入保留旧记录和多身份隔离。
-- [ ] 2.2 将玩家 DTO、Save/StoredPlayer、sim player/snapshot 和持久化装配统一改为 `core.Inventory`；schema v3 在 v2 payload 后追加固定 81 字节背包，选择与放置继续只访问其中 Hotbar。
-- [ ] 2.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/sim ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，确认 migration/golden/故障测试与 `git diff --check` 通过。
-- [ ] 2.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 持久化玩家背包`。提交成功后自动进入第 3 组。
+- [x] 2.1 在 `internal/storage`、`internal/sim`、`internal/server` 先写失败测试，覆盖 v3 完整状态 roundtrip/golden、v2 保留快捷栏并迁移空背包、v1 链式迁移、非法背包/未来版本拒绝、故障写入保留旧记录和多身份隔离。
+- [x] 2.2 将玩家 DTO、Save/StoredPlayer、sim player/snapshot 和持久化装配统一改为 `core.Inventory`；schema v3 在 v2 payload 后追加固定 81 字节背包，选择与放置继续只访问其中 Hotbar。
+- [x] 2.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/sim ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，确认 migration/golden/故障测试与 `git diff --check` 通过。
+- [x] 2.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 持久化玩家背包`。提交成功后自动进入第 3 组。
 
 ## 3. 完整状态协议 v5
 

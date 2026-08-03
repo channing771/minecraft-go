@@ -10,12 +10,14 @@ import (
 )
 
 const (
-	currentPlayerSchema   uint32 = 2
+	currentPlayerSchema   uint32 = 3
 	playerEnvelopeVersion uint32 = 1
 	playerEnvelopeLength         = 44
 	maxPlayerPayload      uint32 = 1 << 20
 	// playerHotbarBytes 是 schema v2 追加的固定快捷栏负载长度。
 	playerHotbarBytes = 1 + core.HotbarSlots*3
+	// playerBackpackBytes 是 schema v3 追加的固定背包负载长度。
+	playerBackpackBytes = core.BackpackSlots * 3
 )
 
 var (
@@ -28,7 +30,7 @@ func encodePlayer(save PlayerSave) ([]byte, error) {
 	if err := validatePlayerSave(save); err != nil {
 		return nil, err
 	}
-	payload, err := encodePlayerV2(save)
+	payload, err := encodePlayerV3(save)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +135,7 @@ func decodePlayer(wantID core.PlayerID, data []byte) (StoredPlayer, error) {
 	}
 	stored := StoredPlayer{
 		PlayerID: dto.PlayerID, Revision: dto.Revision, DisplayName: dto.DisplayName,
-		Current: dto.Current, Yaw: dto.Yaw, Pitch: dto.Pitch, Hotbar: dto.Hotbar,
+		Current: dto.Current, Yaw: dto.Yaw, Pitch: dto.Pitch, Inventory: dto.Inventory,
 		NeedsRewrite: migrated,
 	}
 	if dto.Safe != nil {
@@ -143,8 +145,8 @@ func decodePlayer(wantID core.PlayerID, data []byte) (StoredPlayer, error) {
 	return stored, nil
 }
 
-// encodePlayerV2 在 v1 字段之后追加固定大小的快捷栏负载。
-func encodePlayerV2(save PlayerSave) ([]byte, error) {
+// encodePlayerV3 在 v2 负载之后追加固定大小的背包负载。
+func encodePlayerV3(save PlayerSave) ([]byte, error) {
 	name := []byte(save.DisplayName)
 	payload := make([]byte, 0, 4+len(name)+4+3*4+4+4+1+4+3*4+playerHotbarBytes)
 	payload = appendU32(payload, uint32(len(name)))
@@ -158,16 +160,36 @@ func encodePlayerV2(save PlayerSave) ([]byte, error) {
 		payload = append(payload, 1)
 		payload = appendPlayerLocation(payload, *save.Safe)
 	}
-	return appendPlayerHotbar(payload, save.Hotbar), nil
+	payload = appendPlayerHotbar(payload, save.Inventory.Hotbar)
+	for _, stack := range save.Inventory.Backpack {
+		payload = appendPlayerStack(payload, stack)
+	}
+	return payload, nil
 }
 
 func appendPlayerHotbar(dst []byte, hotbar core.Hotbar) []byte {
 	dst = append(dst, hotbar.Selected)
 	for _, stack := range hotbar.Slots {
-		dst = binary.LittleEndian.AppendUint16(dst, uint16(stack.Item))
-		dst = append(dst, stack.Count)
+		dst = appendPlayerStack(dst, stack)
 	}
 	return dst
+}
+
+func appendPlayerStack(dst []byte, stack core.ItemStack) []byte {
+	dst = binary.LittleEndian.AppendUint16(dst, uint16(stack.Item))
+	return append(dst, stack.Count)
+}
+
+func decodePlayerStack(decoder *byteDecoder) (core.ItemStack, error) {
+	item, err := decoder.u16()
+	if err != nil {
+		return core.ItemStack{}, err
+	}
+	count, err := decoder.u8()
+	if err != nil {
+		return core.ItemStack{}, err
+	}
+	return core.ItemStack{Item: core.ItemID(item), Count: count}, nil
 }
 
 // decodePlayerPayload 按 schema 解析 payload；v1 没有快捷栏字段。
@@ -182,9 +204,31 @@ func decodePlayerPayload(
 		return decodePlayerV1(playerID, revision, data)
 	case 2:
 		return decodePlayerV2(playerID, revision, data)
+	case 3:
+		return decodePlayerV3(playerID, revision, data)
 	default:
 		return playerDTO{}, fmt.Errorf("%w: unsupported player schema %d", ErrCorrupt, schema)
 	}
+}
+
+func decodePlayerV3(playerID core.PlayerID, revision uint64, data []byte) (playerDTO, error) {
+	if len(data) < playerBackpackBytes {
+		return playerDTO{}, fmt.Errorf("%w: player payload is shorter than the backpack", ErrCorrupt)
+	}
+	split := len(data) - playerBackpackBytes
+	dto, err := decodePlayerV2(playerID, revision, data[:split])
+	if err != nil {
+		return playerDTO{}, err
+	}
+	decoder := byteDecoder{data: data[split:]}
+	for index := range dto.Inventory.Backpack {
+		stack, err := decodePlayerStack(&decoder)
+		if err != nil {
+			return playerDTO{}, corrupt("player backpack slot", err)
+		}
+		dto.Inventory.Backpack[index] = stack
+	}
+	return dto, nil
 }
 
 func decodePlayerV2(playerID core.PlayerID, revision uint64, data []byte) (playerDTO, error) {
@@ -201,17 +245,13 @@ func decodePlayerV2(playerID core.PlayerID, revision uint64, data []byte) (playe
 	if err != nil {
 		return playerDTO{}, corrupt("player hotbar selection", err)
 	}
-	dto.Hotbar.Selected = selected
-	for index := range dto.Hotbar.Slots {
-		item, err := decoder.u16()
+	dto.Inventory.Hotbar.Selected = selected
+	for index := range dto.Inventory.Hotbar.Slots {
+		stack, err := decodePlayerStack(&decoder)
 		if err != nil {
-			return playerDTO{}, corrupt("player hotbar item", err)
+			return playerDTO{}, corrupt("player hotbar slot", err)
 		}
-		count, err := decoder.u8()
-		if err != nil {
-			return playerDTO{}, corrupt("player hotbar count", err)
-		}
-		dto.Hotbar.Slots[index] = core.ItemStack{Item: core.ItemID(item), Count: count}
+		dto.Inventory.Hotbar.Slots[index] = stack
 	}
 	return dto, nil
 }
@@ -303,7 +343,7 @@ func validatePlayerSave(save PlayerSave) error {
 	return validatePlayerDTO(playerDTO{
 		PlayerID: save.PlayerID, Revision: save.Revision, DisplayName: save.DisplayName,
 		Current: save.Current, Yaw: save.Yaw, Pitch: save.Pitch, Safe: save.Safe,
-		Hotbar: save.Hotbar,
+		Inventory: save.Inventory,
 	})
 }
 
@@ -332,8 +372,8 @@ func validatePlayerDTO(dto playerDTO) error {
 			return err
 		}
 	}
-	if !dto.Hotbar.Valid() {
-		return fmt.Errorf("%w: invalid player hotbar", ErrCorrupt)
+	if !dto.Inventory.Valid() {
+		return fmt.Errorf("%w: invalid player inventory", ErrCorrupt)
 	}
 	return nil
 }

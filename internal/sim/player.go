@@ -41,20 +41,20 @@ type PlayerRestore struct {
 	Yaw, Pitch     float32
 	SpawnDimension core.DimensionID
 	SpawnAnchor    core.ChunkPos
-	Hotbar         core.Hotbar
+	Inventory      core.Inventory
 }
 
 type PlayerSnapshot struct {
 	Current    PlayerLocation
 	Yaw, Pitch float32
 	Safe       *PlayerLocation
-	Hotbar     core.Hotbar
+	Inventory  core.Inventory
 }
 
-// HotbarUpdate 是一名玩家在本 tick 的最终权威快捷栏，只发送给所属会话。
-type HotbarUpdate struct {
-	Session SessionID
-	Hotbar  core.Hotbar
+// InventoryUpdate 是一名玩家在本 tick 的最终权威物品状态，只发送给所属会话。
+type InventoryUpdate struct {
+	Session   SessionID
+	Inventory core.Inventory
 }
 
 type restoreCandidate struct {
@@ -70,8 +70,8 @@ type playerState struct {
 	yaw, pitch        float32
 	lastInputSequence uint64
 	reset             bool
-	hotbar            core.Hotbar
-	hotbarDirty       bool
+	inventory         core.Inventory
+	inventoryDirty    bool
 
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
@@ -92,8 +92,8 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 	if engine.sessions[id] != nil {
 		panic("sim: duplicate registered session")
 	}
-	if !restore.Hotbar.Valid() {
-		panic("sim: register session with invalid hotbar")
+	if !restore.Inventory.Valid() {
+		panic("sim: register session with invalid inventory")
 	}
 	candidates := spawnCandidates(restore.SpawnAnchor)
 	player := &playerState{
@@ -106,8 +106,8 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		}},
 		yaw:             restore.Yaw,
 		pitch:           restore.Pitch,
-		hotbar:          restore.Hotbar,
-		hotbarDirty:     true,
+		inventory:       restore.Inventory,
+		inventoryDirty:  true,
 		restoreWanted:   make(map[core.ChunkKey]struct{}),
 		candidates:      candidates,
 		candidateChunks: spawnCandidateChunks(candidates),
@@ -189,9 +189,9 @@ func (player *playerState) snapshot(
 			Dimension: dimension,
 			Position:  player.state.Position,
 		},
-		Yaw:    player.yaw,
-		Pitch:  player.pitch,
-		Hotbar: player.hotbar,
+		Yaw:       player.yaw,
+		Pitch:     player.pitch,
+		Inventory: player.inventory,
 	}
 	if player.safe != nil {
 		safe := *player.safe
@@ -206,8 +206,8 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 		return [32]byte{}, false
 	}
 	player := session.player
-	// 53 字节玩家状态 + 1 字节选中栏位 + 每栏位 3 字节。
-	var encoded [53 + 1 + core.HotbarSlots*3]byte
+	// 53 字节玩家状态 + 1 字节选中栏位 + 每个物品栏位 3 字节。
+	var encoded [53 + 1 + core.InventorySlots*3]byte
 	offset := 0
 	putUint32 := func(value uint32) {
 		binary.LittleEndian.PutUint32(encoded[offset:], value)
@@ -243,9 +243,15 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 	putFloat32(player.input.Yaw)
 	binary.LittleEndian.PutUint64(encoded[offset:], player.lastInputSequence)
 	offset += 8
-	encoded[offset] = player.hotbar.Selected
+	encoded[offset] = player.inventory.Hotbar.Selected
 	offset++
-	for _, stack := range player.hotbar.Slots {
+	for _, stack := range player.inventory.Hotbar.Slots {
+		binary.LittleEndian.PutUint16(encoded[offset:], uint16(stack.Item))
+		offset += 2
+		encoded[offset] = stack.Count
+		offset++
+	}
+	for _, stack := range player.inventory.Backpack {
 		binary.LittleEndian.PutUint16(encoded[offset:], uint16(stack.Item))
 		offset += 2
 		encoded[offset] = stack.Count
@@ -286,11 +292,11 @@ func (engine *Engine) publishPlayers(result *TickResult) {
 	}
 }
 
-// publishHotbars 为每名 Active 且 dirty 的玩家产出本 tick 唯一一份最终快捷栏。
-func (engine *Engine) publishHotbars(result *TickResult) {
+// publishInventories 为每名 Active 且 dirty 的玩家产出本 tick 唯一一份完整物品状态。
+func (engine *Engine) publishInventories(result *TickResult) {
 	sessions := make([]SessionID, 0, len(engine.sessions))
 	for id, session := range engine.sessions {
-		if session.player != nil && session.player.hotbarDirty &&
+		if session.player != nil && session.player.inventoryDirty &&
 			session.player.lifecycle == PlayerActive {
 			sessions = append(sessions, id)
 		}
@@ -298,11 +304,11 @@ func (engine *Engine) publishHotbars(result *TickResult) {
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i] < sessions[j] })
 	for _, id := range sessions {
 		player := engine.sessions[id].player
-		result.Hotbars = append(result.Hotbars, HotbarUpdate{
-			Session: id,
-			Hotbar:  player.hotbar,
+		result.Inventories = append(result.Inventories, InventoryUpdate{
+			Session:   id,
+			Inventory: player.inventory,
 		})
-		player.hotbarDirty = false
+		player.inventoryDirty = false
 	}
 }
 
@@ -441,7 +447,7 @@ func (player *playerState) beginReset() {
 	}}
 	player.input = physics.Input{}
 	player.reset = false
-	player.hotbarDirty = true
+	player.inventoryDirty = true
 	player.nextCandidate = 0
 	player.exhausted = false
 	player.exhaustedRevisions = nil

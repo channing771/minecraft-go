@@ -18,7 +18,7 @@ type StoredPlayer struct {
 	Current      PlayerLocation
 	Yaw, Pitch   float32
 	Safe         *PlayerLocation
-	Hotbar       core.Hotbar
+	Inventory    core.Inventory
 	NeedsRewrite bool
 }
 
@@ -29,7 +29,7 @@ type PlayerSave struct {
 	Current     PlayerLocation
 	Yaw, Pitch  float32
 	Safe        *PlayerLocation
-	Hotbar      core.Hotbar
+	Inventory   core.Inventory
 }
 
 type PlayerStore interface {

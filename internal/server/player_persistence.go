@@ -344,7 +344,7 @@ func (player *cachedPlayer) restore(metadata storage.Metadata) sim.PlayerRestore
 	}
 	restore.Yaw = player.snapshot.Yaw
 	restore.Pitch = player.snapshot.Pitch
-	restore.Hotbar = player.snapshot.Hotbar
+	restore.Inventory = player.snapshot.Inventory
 	return restore
 }
 
@@ -354,9 +354,9 @@ func cachedPlayerFromStored(stored storage.StoredPlayer, pendingName string) *ca
 			Dimension: stored.Current.Dimension,
 			Position:  mgl32.Vec3(stored.Current.Position),
 		},
-		Yaw:    stored.Yaw,
-		Pitch:  stored.Pitch,
-		Hotbar: stored.Hotbar,
+		Yaw:       stored.Yaw,
+		Pitch:     stored.Pitch,
+		Inventory: stored.Inventory,
 	}
 	if stored.Safe != nil {
 		snapshot.Safe = &sim.PlayerLocation{
@@ -623,9 +623,9 @@ func (player *cachedPlayer) save(revision uint64) storage.PlayerSave {
 			Dimension: player.snapshot.Current.Dimension,
 			Position:  [3]float32(player.snapshot.Current.Position),
 		},
-		Yaw:    player.snapshot.Yaw,
-		Pitch:  player.snapshot.Pitch,
-		Hotbar: player.snapshot.Hotbar,
+		Yaw:       player.snapshot.Yaw,
+		Pitch:     player.snapshot.Pitch,
+		Inventory: player.snapshot.Inventory,
 	}
 	if player.snapshot.Safe != nil {
 		save.Safe = &storage.PlayerLocation{
@@ -641,7 +641,7 @@ func (player *cachedPlayer) matchesSave(save storage.PlayerSave) bool {
 		player.snapshot.Current.Dimension != save.Current.Dimension ||
 		[3]float32(player.snapshot.Current.Position) != save.Current.Position ||
 		player.snapshot.Yaw != save.Yaw || player.snapshot.Pitch != save.Pitch ||
-		player.snapshot.Hotbar != save.Hotbar {
+		player.snapshot.Inventory != save.Inventory {
 		return false
 	}
 	if player.snapshot.Safe == nil || save.Safe == nil {
@@ -671,7 +671,7 @@ func clonePlayerSnapshot(snapshot sim.PlayerSnapshot) sim.PlayerSnapshot {
 
 func playerSnapshotsEqual(left, right sim.PlayerSnapshot) bool {
 	if left.Current != right.Current || left.Yaw != right.Yaw ||
-		left.Pitch != right.Pitch || left.Hotbar != right.Hotbar {
+		left.Pitch != right.Pitch || left.Inventory != right.Inventory {
 		return false
 	}
 	if left.Safe == nil || right.Safe == nil {

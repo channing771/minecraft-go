@@ -192,7 +192,7 @@ func TestFullHotbarStillBreaksBlockIntoGroundDrop(t *testing.T) {
 	}
 	if _, err := running.AttachSession(externalSessionSpec(1, 1, serverEndpoint, sim.PlayerRestore{
 		SpawnDimension: core.Overworld,
-		Hotbar:         full,
+		Inventory:      core.Inventory{Hotbar: full},
 	})); err != nil {
 		t.Fatalf("附加会话: %v", err)
 	}

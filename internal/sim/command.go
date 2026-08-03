@@ -110,14 +110,14 @@ type ResyncRequest struct {
 }
 
 type TickResult struct {
-	Acquire  []core.ChunkKey
-	Generate []core.ChunkKey
-	Forget   map[SessionID][]core.ChunkKey
-	Ready    []core.ChunkKey
-	Changes  []ChunkChangeBatch
-	Rejected []Rejection
-	Resync   []ResyncRequest
-	Players  []PlayerUpdate
-	Hotbars  []HotbarUpdate
-	Tick     uint64
+	Acquire     []core.ChunkKey
+	Generate    []core.ChunkKey
+	Forget      map[SessionID][]core.ChunkKey
+	Ready       []core.ChunkKey
+	Changes     []ChunkChangeBatch
+	Rejected    []Rejection
+	Resync      []ResyncRequest
+	Players     []PlayerUpdate
+	Inventories []InventoryUpdate
+	Tick        uint64
 }

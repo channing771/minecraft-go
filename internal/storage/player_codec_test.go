@@ -22,16 +22,18 @@ func fixturePlayerSave(id core.PlayerID, revision uint64) PlayerSave {
 	return PlayerSave{
 		PlayerID: id, Revision: revision, DisplayName: "Chen",
 		Current: PlayerLocation{Dimension: core.Overworld, Position: [3]float32{2.5, 70, -3.5}},
-		Yaw:     1.25, Pitch: -0.5, Safe: &safe, Hotbar: fixturePlayerHotbar(),
+		Yaw:     1.25, Pitch: -0.5, Safe: &safe, Inventory: fixturePlayerInventory(),
 	}
 }
 
-func fixturePlayerHotbar() core.Hotbar {
-	var hotbar core.Hotbar
-	hotbar.Selected = 3
-	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
-	hotbar.Slots[6] = core.ItemStack{Item: core.ItemGrass, Count: 1}
-	return hotbar
+func fixturePlayerInventory() core.Inventory {
+	var inventory core.Inventory
+	inventory.Hotbar.Selected = 3
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	inventory.Hotbar.Slots[6] = core.ItemStack{Item: core.ItemGrass, Count: 1}
+	inventory.Backpack[0] = core.ItemStack{Item: core.ItemDirt, Count: 12}
+	inventory.Backpack[core.BackpackSlots-1] = core.ItemStack{Item: core.ItemStone, Count: 5}
+	return inventory
 }
 
 func TestPlayerCodecRoundTrip(t *testing.T) {
@@ -45,11 +47,11 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	if err != nil || got.PlayerID != want.PlayerID || got.Revision != want.Revision ||
 		got.DisplayName != want.DisplayName || got.Current != want.Current ||
 		got.Yaw != want.Yaw || got.Pitch != want.Pitch || got.Safe == nil || *got.Safe != *want.Safe ||
-		got.Hotbar != want.Hotbar {
+		got.Inventory != want.Inventory {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 	if got.NeedsRewrite {
-		t.Fatal("v2 player unexpectedly needs rewrite")
+		t.Fatal("v3 player unexpectedly needs rewrite")
 	}
 	got.Safe.Position[0] = 99
 	if want.Safe.Position[0] == 99 {
@@ -57,12 +59,12 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPlayerV2Fixture(t *testing.T) {
+func TestPlayerV3Fixture(t *testing.T) {
 	encoded, err := encodePlayer(fixturePlayerSave(fixturePlayerID(), 19))
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "player-v2.bin")
+	path := filepath.Join("testdata", "player-v3.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -73,7 +75,7 @@ func TestPlayerV2Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, encoded) {
-		t.Fatal("v2 fixture drift; change schema version")
+		t.Fatal("v3 fixture drift; change schema version")
 	}
 }
 
@@ -92,8 +94,8 @@ func TestPlayerV1FixtureMigratesToEmptyHotbar(t *testing.T) {
 		got.Safe == nil || *got.Safe != *want.Safe {
 		t.Fatalf("v1 迁移改变了既有字段: %+v", got)
 	}
-	if got.Hotbar != (core.Hotbar{}) {
-		t.Fatalf("v1 迁移快捷栏 = %+v，想要空快捷栏且选中 0", got.Hotbar)
+	if got.Inventory != (core.Inventory{}) {
+		t.Fatalf("v1 迁移物品状态 = %+v，想要空快捷栏与空背包", got.Inventory)
 	}
 	if !got.NeedsRewrite {
 		t.Fatal("v1 存档必须标记为需要重写")
@@ -120,11 +122,11 @@ func TestPlayerCodecRejectsInvalidHotbarPayload(t *testing.T) {
 	for _, tc := range invalid {
 		t.Run(tc.name, func(t *testing.T) {
 			save := fixturePlayerSave(id, 3)
-			tc.mutate(&save.Hotbar)
+			tc.mutate(&save.Inventory.Hotbar)
 			if _, err := encodePlayer(save); !errors.Is(err, ErrCorrupt) {
 				t.Fatalf("encode error = %v，想要 ErrCorrupt", err)
 			}
-			encoded := playerWireWithHotbar(t, id, save.Hotbar)
+			encoded := playerWireWithHotbar(t, id, save.Inventory.Hotbar)
 			if _, err := decodePlayer(id, encoded); !errors.Is(err, ErrCorrupt) {
 				t.Fatalf("decode error = %v，想要 ErrCorrupt", err)
 			}

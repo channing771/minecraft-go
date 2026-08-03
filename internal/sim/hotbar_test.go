@@ -17,11 +17,11 @@ func TestHotbarPublishesInitialStateOnce(t *testing.T) {
 	engine, session := readyFlatPlayerRestored(t, nil, restored)
 
 	// readyFlatPlayerRestored 已经消费了玩家进入 Active 的那个 tick。
-	if got := currentHotbar(t, engine, session); got != restored {
+	if got := currentInventory(t, engine, session).Hotbar; got != restored {
 		t.Fatalf("初始快捷栏 = %+v，想要 %+v", got, restored)
 	}
-	if result := engine.Step(); len(result.Hotbars) != 0 {
-		t.Fatalf("未变化时不应重复发布：%+v", result.Hotbars)
+	if result := engine.Step(); len(result.Inventories) != 0 {
+		t.Fatalf("未变化时不应重复发布：%+v", result.Inventories)
 	}
 }
 
@@ -32,8 +32,8 @@ func TestHotbarSelectRequiresValidSlot(t *testing.T) {
 	})
 
 	result := engine.Step()
-	if len(result.Rejected) != 0 || len(result.Hotbars) != 1 ||
-		result.Hotbars[0].Session != session || result.Hotbars[0].Hotbar.Selected != 4 {
+	if len(result.Rejected) != 0 || len(result.Inventories) != 1 ||
+		result.Inventories[0].Session != session || result.Inventories[0].Inventory.Hotbar.Selected != 4 {
 		t.Fatalf("合法选择 result=%+v", result)
 	}
 
@@ -44,10 +44,10 @@ func TestHotbarSelectRequiresValidSlot(t *testing.T) {
 	rejected := engine.Step()
 	if len(rejected.Rejected) != 1 ||
 		rejected.Rejected[0].Reason != sim.RejectInvalidSlot ||
-		len(rejected.Hotbars) != 0 {
+		len(rejected.Inventories) != 0 {
 		t.Fatalf("越界选择 result=%+v", rejected)
 	}
-	if got := currentHotbar(t, engine, session); got.Selected != 4 {
+	if got := currentInventory(t, engine, session).Hotbar; got.Selected != 4 {
 		t.Fatalf("越界选择后 Selected = %d，想要 4", got.Selected)
 	}
 }
@@ -58,7 +58,7 @@ func TestHotbarSelectSameSlotDoesNotRepublish(t *testing.T) {
 		Session: session, Sequence: 2, Kind: sim.CommandSelectHotbar, Slot: 0,
 	})
 
-	if result := engine.Step(); len(result.Hotbars) != 0 || len(result.Rejected) != 0 {
+	if result := engine.Step(); len(result.Inventories) != 0 || len(result.Rejected) != 0 {
 		t.Fatalf("选中栏位未变化时不应发布：%+v", result)
 	}
 }
@@ -74,7 +74,7 @@ func TestHotbarBreakRejectsBlockWithoutDrop(t *testing.T) {
 
 	result := engine.Step()
 	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectProtectedBlock ||
-		len(result.Changes) != 0 || len(result.Hotbars) != 0 {
+		len(result.Changes) != 0 || len(result.Inventories) != 0 {
 		t.Fatalf("无掉落物方块 result=%+v", result)
 	}
 }
@@ -97,10 +97,10 @@ func TestHotbarPlaceConsumesOneItem(t *testing.T) {
 		result.Changes[0].Changes[0] != (sim.BlockChange{Position: want, Block: core.DirtID}) {
 		t.Fatalf("放置 result=%+v", result)
 	}
-	if len(result.Hotbars) != 1 {
-		t.Fatalf("Hotbars=%+v，想要恰好一份", result.Hotbars)
+	if len(result.Inventories) != 1 {
+		t.Fatalf("Inventories=%+v，想要恰好一份", result.Inventories)
 	}
-	got := result.Hotbars[0].Hotbar.Slots[3]
+	got := result.Inventories[0].Inventory.Hotbar.Slots[3]
 	if got != (core.ItemStack{Item: core.ItemDirt, Count: 1}) {
 		t.Fatalf("栏位 3 = %+v，想要剩余 1 个泥土", got)
 	}
@@ -119,11 +119,11 @@ func TestHotbarPlaceLastItemClearsSlot(t *testing.T) {
 	})
 
 	result := engine.Step()
-	if len(result.Rejected) != 0 || len(result.Hotbars) != 1 {
+	if len(result.Rejected) != 0 || len(result.Inventories) != 1 {
 		t.Fatalf("放置 result=%+v", result)
 	}
-	if result.Hotbars[0].Hotbar.Slots[0] != (core.ItemStack{}) {
-		t.Fatalf("栏位 0 = %+v，想要规范空栏位", result.Hotbars[0].Hotbar.Slots[0])
+	if result.Inventories[0].Inventory.Hotbar.Slots[0] != (core.ItemStack{}) {
+		t.Fatalf("栏位 0 = %+v，想要规范空栏位", result.Inventories[0].Inventory.Hotbar.Slots[0])
 	}
 }
 
@@ -151,10 +151,10 @@ func TestHotbarPlaceRejectsEmptyOrInvalidSlot(t *testing.T) {
 
 			result := engine.Step()
 			if len(result.Rejected) != 1 || result.Rejected[0].Reason != tc.want ||
-				len(result.Changes) != 0 || len(result.Hotbars) != 0 {
+				len(result.Changes) != 0 || len(result.Inventories) != 0 {
 				t.Fatalf("result=%+v", result)
 			}
-			if got := currentHotbar(t, engine, session); got != stocked {
+			if got := currentInventory(t, engine, session).Hotbar; got != stocked {
 				t.Fatalf("失败放置改变了快捷栏：%+v", got)
 			}
 		})
@@ -172,10 +172,10 @@ func TestHotbarFailedPlaceKeepsItem(t *testing.T) {
 
 	result := engine.Step()
 	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectOccupied ||
-		len(result.Changes) != 0 || len(result.Hotbars) != 0 {
+		len(result.Changes) != 0 || len(result.Inventories) != 0 {
 		t.Fatalf("碰撞放置 result=%+v", result)
 	}
-	if got := currentHotbar(t, engine, session); got != stocked {
+	if got := currentInventory(t, engine, session).Hotbar; got != stocked {
 		t.Fatalf("失败放置扣除了物品：%+v", got)
 	}
 }
@@ -199,10 +199,10 @@ func TestHotbarSameTickCommandsPublishFinalStateOnce(t *testing.T) {
 	if len(result.Rejected) != 0 {
 		t.Fatalf("同 tick 序列 result=%+v", result)
 	}
-	if len(result.Hotbars) != 1 {
-		t.Fatalf("Hotbars=%+v，每 tick 最多一份最终状态", result.Hotbars)
+	if len(result.Inventories) != 1 {
+		t.Fatalf("Inventories=%+v，每 tick 最多一份最终状态", result.Inventories)
 	}
-	hotbar := result.Hotbars[0].Hotbar
+	hotbar := result.Inventories[0].Inventory.Hotbar
 	if hotbar.Selected != 7 || hotbar.Slots[0] != (core.ItemStack{}) {
 		t.Fatalf("最终快捷栏 = %+v，想要选中 7 且放置已消耗物品", hotbar)
 	}
@@ -220,11 +220,11 @@ func TestHotbarSurvivesSnapshotRestore(t *testing.T) {
 	engine, session := readyFlatPlayerRestored(t, nil, stocked)
 
 	snapshot, ok := engine.PlayerSnapshot(session)
-	if !ok || snapshot.Hotbar != stocked {
+	if !ok || snapshot.Inventory.Hotbar != stocked {
 		t.Fatalf("PlayerSnapshot=%+v ok=%v，想要 %+v", snapshot, ok, stocked)
 	}
 	unregistered, ok := engine.UnregisterSession(session)
-	if !ok || unregistered.Hotbar != stocked {
+	if !ok || unregistered.Inventory.Hotbar != stocked {
 		t.Fatalf("UnregisterSession=%+v ok=%v", unregistered, ok)
 	}
 }
@@ -248,12 +248,12 @@ func TestPlayerHashCoversHotbar(t *testing.T) {
 	}
 }
 
-// currentHotbar 读取引擎当前的权威快捷栏值。
-func currentHotbar(t *testing.T, engine *sim.Engine, session sim.SessionID) core.Hotbar {
+// currentInventory 读取引擎当前的完整权威物品状态。
+func currentInventory(t *testing.T, engine *sim.Engine, session sim.SessionID) core.Inventory {
 	t.Helper()
 	snapshot, ok := engine.PlayerSnapshot(session)
 	if !ok {
 		t.Fatalf("会话 %d 没有权威快照", session)
 	}
-	return snapshot.Hotbar
+	return snapshot.Inventory
 }

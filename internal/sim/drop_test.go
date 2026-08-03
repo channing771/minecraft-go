@@ -8,6 +8,22 @@ import (
 	"minecraft-go/internal/world"
 )
 
+// fullTestInventory 返回快捷栏与背包都装满的完整物品状态。
+func fullTestInventory() core.Inventory {
+	var inventory core.Inventory
+	for slot := range inventory.Hotbar.Slots {
+		inventory.Hotbar.Slots[slot] = core.ItemStack{
+			Item: core.ItemStone, Count: core.MaxStackCount,
+		}
+	}
+	for slot := range inventory.Backpack {
+		inventory.Backpack[slot] = core.ItemStack{
+			Item: core.ItemStone, Count: core.MaxStackCount,
+		}
+	}
+	return inventory
+}
+
 // dropTargetIndex 是俯视挖掘命中的方块 (0,0,0) 在区块内的索引。
 func dropTargetIndex(t *testing.T) uint32 {
 	t.Helper()
@@ -50,8 +66,8 @@ func TestBreakCreatesDropWithoutTouchingHotbar(t *testing.T) {
 	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
 		t.Fatalf("挖掘 result=%+v", result)
 	}
-	if len(result.Hotbars) != 0 {
-		t.Fatalf("挖掘直接修改了快捷栏: %+v", result.Hotbars)
+	if len(result.Inventories) != 0 {
+		t.Fatalf("挖掘直接修改了快捷栏: %+v", result.Inventories)
 	}
 	slot, drop := onlyDrop(t, engine)
 	if slot != 0 || drop.Stack != (core.ItemStack{Item: core.ItemGrass, Count: 1}) ||
@@ -61,7 +77,7 @@ func TestBreakCreatesDropWithoutTouchingHotbar(t *testing.T) {
 	if drop.PickupDelayTicks != sim.DropPickupDelayTicks {
 		t.Fatalf("拾取延迟 = %d，想要 %d", drop.PickupDelayTicks, sim.DropPickupDelayTicks)
 	}
-	if got := currentHotbar(t, engine, session); got != (core.Hotbar{}) {
+	if got := currentInventory(t, engine, session).Hotbar; got != (core.Hotbar{}) {
 		t.Fatalf("快捷栏 = %+v，想要保持为空", got)
 	}
 }
@@ -124,12 +140,9 @@ func TestBreakRejectsWhenChunkDropsAreFull(t *testing.T) {
 	}
 }
 
-func TestBreakSucceedsWithFullHotbar(t *testing.T) {
-	var full core.Hotbar
-	for slot := range full.Slots {
-		full.Slots[slot] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
-	}
-	engine, session := readyFlatPlayerRestored(t, nil, full)
+func TestBreakSucceedsWithFullInventory(t *testing.T) {
+	full := fullTestInventory()
+	engine, session := readyFlatPlayerWithInventory(t, full)
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
 	})
@@ -141,8 +154,8 @@ func TestBreakSucceedsWithFullHotbar(t *testing.T) {
 	if _, drop := onlyDrop(t, engine); drop.Stack.Item != core.ItemGrass {
 		t.Fatalf("满快捷栏挖掘没有产生掉落物: %+v", drop)
 	}
-	if got := currentHotbar(t, engine, session); got != full {
-		t.Fatalf("满快捷栏被修改: %+v", got)
+	if got := currentInventory(t, engine, session); got != full {
+		t.Fatalf("满物品状态被修改: %+v", got)
 	}
 }
 
@@ -158,7 +171,7 @@ func TestDropPickupWaitsForDelayThenFillsHotbar(t *testing.T) {
 		if _, drop := onlyDrop(t, engine); !drop.Active {
 			t.Fatalf("第 %d 个延迟 tick 掉落物被提前拾取", tick)
 		}
-		if got := currentHotbar(t, engine, session); got != (core.Hotbar{}) {
+		if got := currentInventory(t, engine, session).Hotbar; got != (core.Hotbar{}) {
 			t.Fatalf("第 %d 个延迟 tick 快捷栏被修改: %+v", tick, got)
 		}
 	}
@@ -171,21 +184,21 @@ func TestDropPickupWaitsForDelayThenFillsHotbar(t *testing.T) {
 		}
 	}
 	want := core.ItemStack{Item: core.ItemGrass, Count: 1}
-	if got := currentHotbar(t, engine, session); got.Slots[0] != want {
+	if got := currentInventory(t, engine, session).Hotbar; got.Slots[0] != want {
 		t.Fatalf("拾取后快捷栏 = %+v，想要栏位 0 得到 1 个草", got)
 	}
-	if len(result.Hotbars) != 1 {
-		t.Fatalf("拾取应当发布一次快捷栏更新: %+v", result.Hotbars)
+	if len(result.Inventories) != 1 {
+		t.Fatalf("拾取应当发布一次快捷栏更新: %+v", result.Inventories)
 	}
 }
 
 func TestDropPartialPickupKeepsRemainder(t *testing.T) {
-	var nearlyFull core.Hotbar
-	for slot := range nearlyFull.Slots {
-		nearlyFull.Slots[slot] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	// 快捷栏与背包都装满，只在一格留下 2 个空间。
+	nearlyFull := fullTestInventory()
+	nearlyFull.Hotbar.Slots[3] = core.ItemStack{
+		Item: core.ItemGrass, Count: core.MaxStackCount - 2,
 	}
-	nearlyFull.Slots[3] = core.ItemStack{Item: core.ItemGrass, Count: core.MaxStackCount - 2}
-	engine, session := readyFlatPlayerRestored(t, nil, nearlyFull)
+	engine, session := readyFlatPlayerWithInventory(t, nearlyFull)
 	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
 		Generation: 1, Active: true,
 		Stack:      core.ItemStack{Item: core.ItemGrass, Count: 5},
@@ -197,17 +210,14 @@ func TestDropPartialPickupKeepsRemainder(t *testing.T) {
 	if slot != 0 || drop.Stack.Count != 3 || drop.Generation != 1 {
 		t.Fatalf("部分拾取后槽 %d = %+v，想要保留 3 个草", slot, drop)
 	}
-	if got := currentHotbar(t, engine, session); got.Slots[3].Count != core.MaxStackCount {
+	if got := currentInventory(t, engine, session).Hotbar; got.Slots[3].Count != core.MaxStackCount {
 		t.Fatalf("部分拾取后快捷栏 = %+v，想要栏位 3 装满", got)
 	}
 }
 
-func TestDropDoesNotMoveWhenHotbarIsFull(t *testing.T) {
-	var full core.Hotbar
-	for slot := range full.Slots {
-		full.Slots[slot] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
-	}
-	engine, session := readyFlatPlayerRestored(t, nil, full)
+func TestDropDoesNotMoveWhenInventoryIsFull(t *testing.T) {
+	full := fullTestInventory()
+	engine, session := readyFlatPlayerWithInventory(t, full)
 	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
 		Generation: 1, Active: true,
 		Stack:      core.ItemStack{Item: core.ItemGrass, Count: 2},
@@ -218,8 +228,8 @@ func TestDropDoesNotMoveWhenHotbarIsFull(t *testing.T) {
 	if _, drop := onlyDrop(t, engine); drop.Stack.Count != 2 {
 		t.Fatalf("满快捷栏改变了掉落物数量: %+v", drop)
 	}
-	if got := currentHotbar(t, engine, session); got != full {
-		t.Fatalf("满快捷栏被修改: %+v", got)
+	if got := currentInventory(t, engine, session); got != full {
+		t.Fatalf("满物品状态被修改: %+v", got)
 	}
 }
 
@@ -245,7 +255,7 @@ func TestDropExpiresAfterLifetime(t *testing.T) {
 	if chunk.Drop(0).Active {
 		t.Fatalf("到达寿命后掉落物未移除: %+v", chunk.Drop(0))
 	}
-	if got := currentHotbar(t, engine, session); got != (core.Hotbar{}) {
+	if got := currentInventory(t, engine, session).Hotbar; got != (core.Hotbar{}) {
 		t.Fatalf("过期向快捷栏添加了物品: %+v", got)
 	}
 	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 0 {
