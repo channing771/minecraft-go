@@ -1955,6 +1955,19 @@ Expected: Task 17 closes with executable code, the v6 baseline, formal evidence,
 
 ---
 
+## Historical execution correction addendum (2026-08-03)
+
+This addendum is authoritative for interpreting the completed historical attempts; it does not mark Task 7 or Task 8 complete and does not authorize another formal run.
+
+- The original Task 7 wrapper enabled `set -o pipefail`, used the literal selector `gvm use go1.26.0`, exited 1 before `go run`, created no JSON, and left an empty log at `/tmp/mcgo-m3c-memory-38c90a93cc1f.log`. Its benchmark launch count was zero.
+- After that failure was disclosed, the user explicitly authorized Task 7A. The installed selector `go1.26` (actual `go version go1.26.0 darwin/arm64`) was used with fresh `/tmp/mcgo-m3c-task7a-*38c90a93cc1f*` paths. Memory, migration, TCP, cross-transport comparison, and microbenchmark commands each ran exactly once and exited 0. Their exact resolved commands, preflight results, input hashes, output hashes, and invocation counts are recorded in `docs/notes/perf-baseline.md` and the local SDD ledger.
+- After commit `886a141db5a7fc9a46eddc1ae5da5a31e803a7e6`, the user explicitly authorized Task 8. Its current Memory and baseline→current commands each ran exactly once and exited 0 using `/tmp/mcgo-m3c-current-*886a141db5a7*` paths. Exact command and hash binding is recorded in the same ledger.
+- The two generic successful comparison logs have identical content/SHA. They are never standalone proof; the ledger binds each to its resolved command and the SHA-256 of both JSON inputs.
+- Later independent code review accepted four Important findings, including missing absolute/schema gates and insufficient execution binding. Therefore the historical Task 7A/8 artifacts are preserved but do not prove the repaired `perfcheck` executable, and Task 17 completion remains invalidated.
+- All future executable pipelines must enable `set -o pipefail`, select `gvm use go1.26`, derive new collision-safe paths from the then-current commit, run the full non-performance gate and review first, and obtain fresh explicit user authorization. The literal `go1.26.0` commands and already-used paths in Task 7/8 above are historical templates only and must not be rerun.
+
+---
+
 ## Stop Conditions
 
 Stop immediately and preserve all evidence when any of these occurs:

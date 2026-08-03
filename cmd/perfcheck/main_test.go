@@ -293,7 +293,7 @@ func TestPerfcheckScenarioUpgradeSkipsRelativeRegressions(t *testing.T) {
 	current := completeV6ComparableReport("memory")
 	current.LoadSeconds = 2
 	current.SnapshotSeconds = 2
-	current.Ticks = client.PhaseSummary{P50MS: 2, P95MS: 3, P99MS: 4, MaxMS: 5}
+	current.Ticks = client.PhaseSummary{Frames: 200, P50MS: 2, P95MS: 3, P99MS: 4, MaxMS: 5}
 	current.Persistence = client.PersistenceSummary{
 		Snapshots: 10, P50MS: 2, P95MS: 3, P99MS: 4, MaxMS: 5,
 	}
@@ -303,7 +303,7 @@ func TestPerfcheckScenarioUpgradeSkipsRelativeRegressions(t *testing.T) {
 	}
 	for _, name := range []string{"still", "flying"} {
 		current.Phases[name] = client.PhaseSummary{
-			FPS: 100, P50MS: 2, P95MS: 3, P99MS: 4, MaxMS: 5, PeakRSSBytes: 2,
+			Frames: 1000, FPS: 100, P50MS: 2, P95MS: 3, P99MS: 4, MaxMS: 5, PeakRSSBytes: 2,
 		}
 	}
 
@@ -319,6 +319,7 @@ func TestPerfcheckScenarioUpgradeKeepsAbsoluteAndSchemaGates(t *testing.T) {
 		current := completeV6ComparableReport("memory")
 		phase := current.Phases["still"]
 		phase.P99MS = 12
+		phase.MaxMS = 12
 		current.Phases["still"] = phase
 		failures, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "5:6")
 		if err != nil || !strings.Contains(strings.Join(failures, "\n"), "still p99") {
@@ -333,6 +334,103 @@ func TestPerfcheckScenarioUpgradeKeepsAbsoluteAndSchemaGates(t *testing.T) {
 			t.Fatalf("schema migration error=%v", err)
 		}
 	})
+}
+
+func TestPerfcheckScenarioUpgradeKeepsProducerAbsoluteGates(t *testing.T) {
+	for _, test := range []struct {
+		name, want string
+		mutate     func(*client.PerfReport)
+	}{
+		{name: "protocol encode", want: "protocol encode p99", mutate: func(report *client.PerfReport) {
+			report.Protocol.EncodeP99MS = 1
+		}},
+		{name: "protocol decode", want: "protocol decode p99", mutate: func(report *client.PerfReport) {
+			report.Protocol.DecodeP99MS = 1
+		}},
+		{name: "player persistence p99", want: "player persistence p99", mutate: func(report *client.PerfReport) {
+			report.PlayerPersistence.P99MS = 5
+			report.PlayerPersistence.MaxMS = 5
+		}},
+		{name: "player persistence max", want: "player persistence max", mutate: func(report *client.PerfReport) {
+			report.PlayerPersistence.MaxMS = 20
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			baseline := completeV5ComparableReport("memory")
+			current := completeV6ComparableReport("memory")
+			test.mutate(&current)
+
+			failures, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "5:6")
+			if err != nil || !strings.Contains(strings.Join(failures, "\n"), test.want) {
+				t.Fatalf("absolute producer gate failures=%v err=%v want=%q", failures, err, test.want)
+			}
+		})
+	}
+}
+
+func TestPerfcheckScenarioUpgradeRejectsIncompleteV6CoreReport(t *testing.T) {
+	for _, test := range []struct {
+		name, want string
+		mutate     func(*client.PerfReport)
+	}{
+		{name: "load zero", want: "load_seconds", mutate: func(report *client.PerfReport) {
+			report.LoadSeconds = 0
+		}},
+		{name: "snapshot zero", want: "snapshot_seconds", mutate: func(report *client.PerfReport) {
+			report.SnapshotSeconds = 0
+		}},
+		{name: "missing still", want: "still", mutate: func(report *client.PerfReport) {
+			delete(report.Phases, "still")
+		}},
+		{name: "unexpected phase", want: "phases", mutate: func(report *client.PerfReport) {
+			report.Phases["unexpected"] = report.Phases["still"]
+		}},
+		{name: "still frames zero", want: "still", mutate: func(report *client.PerfReport) {
+			phase := report.Phases["still"]
+			phase.Frames = 0
+			report.Phases["still"] = phase
+		}},
+		{name: "still percentile non-monotonic", want: "still", mutate: func(report *client.PerfReport) {
+			phase := report.Phases["still"]
+			phase.P50MS = phase.P95MS + 1
+			report.Phases["still"] = phase
+		}},
+		{name: "ticks frame count", want: "ticks frames", mutate: func(report *client.PerfReport) {
+			report.Ticks.Frames = 199
+		}},
+		{name: "ticks fps nonzero", want: "ticks fps", mutate: func(report *client.PerfReport) {
+			report.Ticks.FPS = 1
+		}},
+		{name: "ticks percentile zero", want: "ticks", mutate: func(report *client.PerfReport) {
+			report.Ticks.P50MS = 0
+		}},
+		{name: "ticks percentile non-monotonic", want: "ticks", mutate: func(report *client.PerfReport) {
+			report.Ticks.P50MS = report.Ticks.P95MS + 1
+		}},
+		{name: "persistence samples zero", want: "persistence", mutate: func(report *client.PerfReport) {
+			report.Persistence.Snapshots = 0
+		}},
+		{name: "persistence percentile zero", want: "persistence", mutate: func(report *client.PerfReport) {
+			report.Persistence.P50MS = 0
+		}},
+		{name: "persistence percentile non-monotonic", want: "persistence", mutate: func(report *client.PerfReport) {
+			report.Persistence.P50MS = report.Persistence.P95MS + 1
+		}},
+		{name: "interest sample count", want: "interest_diff samples", mutate: func(report *client.PerfReport) {
+			report.Multiplayer.InterestDiff.Samples = 1599
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			baseline := completeV5ComparableReport("memory")
+			current := completeV6ComparableReport("memory")
+			test.mutate(&current)
+
+			if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "5:6"); err == nil ||
+				!strings.Contains(err.Error(), "current") || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("incomplete v6 error=%v want=%q", err, test.want)
+			}
+		})
+	}
 }
 
 func TestComparisonSuccessMessageDescribesComparisonMode(t *testing.T) {
@@ -353,7 +451,7 @@ func TestPerfcheckV6CrossTransportIgnoresRawTailAndIndependentServerProbe(t *tes
 		Snapshots: 10, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4,
 	}
 	current.Persistence = baseline.Persistence
-	current.Ticks = client.PhaseSummary{P50MS: 2, P95MS: 3, P99MS: 3.7, MaxMS: 4.9}
+	current.Ticks = client.PhaseSummary{Frames: 200, P50MS: 2, P95MS: 3, P99MS: 3.7, MaxMS: 4.9}
 	current.Persistence.MaxMS = 5
 	for name, phase := range current.Phases {
 		phase.MaxMS = 5
@@ -383,6 +481,7 @@ func TestPerfcheckV6CrossTransportChecksStableTransportMetrics(t *testing.T) {
 		{name: "phase p99", want: "still p99_ms", mutate: func(report *client.PerfReport) {
 			phase := report.Phases["still"]
 			phase.P99MS *= 1.201
+			phase.MaxMS = phase.P99MS
 			report.Phases["still"] = phase
 		}},
 		{name: "persistence p95", want: "persistence p95_ms", mutate: func(report *client.PerfReport) {
@@ -530,6 +629,7 @@ func TestPerfcheckV6SameTransportChecksStableServerProbeOnly(t *testing.T) {
 	}{
 		{name: "tick p99", want: "ticks p99_ms", mutate: func(report *client.PerfReport) {
 			report.Ticks.P99MS *= 1.201
+			report.Ticks.MaxMS = report.Ticks.P99MS
 		}},
 		{name: "interest p99", want: "interest_diff p99_ms", mutate: func(report *client.PerfReport) {
 			report.Multiplayer.InterestDiff.P99MS *= 1.201
@@ -628,12 +728,16 @@ func TestPerformanceThresholdsPerfcheckRejectsTickP99AtTenMilliseconds(t *testin
 	baseline := completeV6ComparableReport("memory")
 	current := completeV6ComparableReport("tcp")
 	baseline.Ticks.P99MS = 9.999
+	baseline.Ticks.MaxMS = 9.999
 	current.Ticks.P99MS = 9.999
+	current.Ticks.MaxMS = 9.999
 	if failures, err := compareReports(baseline, current, 0.20); err != nil || len(failures) != 0 {
 		t.Fatalf("9.999ms current rejected: failures=%v err=%v", failures, err)
 	}
 	baseline.Ticks.P99MS = 10
+	baseline.Ticks.MaxMS = 10
 	current.Ticks.P99MS = 10
+	current.Ticks.MaxMS = 10
 	failures, err := compareReports(baseline, current, 0.20)
 	if err != nil || !strings.Contains(strings.Join(failures, "\n"), "tick p99 10.000 ms >= 10 ms") {
 		t.Fatalf("10ms current boundary failures=%v err=%v", failures, err)
@@ -644,13 +748,22 @@ func completeV6ComparableReport(transport string) client.PerfReport {
 	report := completeV5ComparableReport(transport)
 	report.ScenarioVersion = 6
 	latency := client.LatencySummary{Samples: 1000, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4}
+	interestLatency := latency
+	interestLatency.Samples = 1600
 	report.Multiplayer = client.MultiplayerSummary{
-		RemoteStateEncode: latency, RemoteStateDecode: latency, InterestDiff: latency,
+		RemoteStateEncode: latency, RemoteStateDecode: latency, InterestDiff: interestLatency,
 		RosterApply: latency, Interpolation: latency, AvatarSubmit: latency,
 		NameTagSubmit: latency, RemoteGPUComplete: latency,
 		ServerOutboundBytes: 100, OutboxHighWater: 10, PlayerJobsHighWater: 10,
 		PlayerDoneHighWater: 1, PeakRSSBytes: 100,
 	}
+	report.Ticks.Frames = 200
+	report.Persistence = client.PersistenceSummary{
+		Snapshots: 10, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4,
+	}
+	still := report.Phases["still"]
+	still.Frames = 1000
+	report.Phases["still"] = still
 	report.Phases["flying"] = report.Phases["still"]
 	return report
 }

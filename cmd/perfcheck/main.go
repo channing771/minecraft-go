@@ -339,6 +339,26 @@ func appendV6AbsoluteFailures(failures []string, report client.PerfReport) []str
 	if report.Ticks.MaxMS >= 50 {
 		failures = append(failures, fmt.Sprintf("tick max %.3f ms >= 50 ms", report.Ticks.MaxMS))
 	}
+	if report.Protocol.EncodeP99MS >= 1 {
+		failures = append(failures, fmt.Sprintf(
+			"protocol encode p99 %.3f ms >= 1 ms", report.Protocol.EncodeP99MS,
+		))
+	}
+	if report.Protocol.DecodeP99MS >= 1 {
+		failures = append(failures, fmt.Sprintf(
+			"protocol decode p99 %.3f ms >= 1 ms", report.Protocol.DecodeP99MS,
+		))
+	}
+	if report.PlayerPersistence.P99MS >= 5 {
+		failures = append(failures, fmt.Sprintf(
+			"player persistence p99 %.3f ms >= 5 ms", report.PlayerPersistence.P99MS,
+		))
+	}
+	if report.PlayerPersistence.MaxMS >= 20 {
+		failures = append(failures, fmt.Sprintf(
+			"player persistence max %.3f ms >= 20 ms", report.PlayerPersistence.MaxMS,
+		))
+	}
 	multiplayer := report.Multiplayer
 	if multiplayer.PeakRSSBytes >= 2<<30 {
 		failures = append(failures, fmt.Sprintf("multiplayer peak RSS %d >= 2GiB", multiplayer.PeakRSSBytes))
@@ -356,6 +376,58 @@ func appendV6AbsoluteFailures(failures []string, report client.PerfReport) []str
 }
 
 func validateV6Report(label string, report client.PerfReport) error {
+	if report.LoadSeconds <= 0 {
+		return fmt.Errorf("%s v6 load_seconds 必须大于零: %f", label, report.LoadSeconds)
+	}
+	if report.SnapshotSeconds <= 0 {
+		return fmt.Errorf("%s v6 snapshot_seconds 必须大于零: %f", label, report.SnapshotSeconds)
+	}
+	for _, name := range []string{"still", "flying"} {
+		phase, ok := report.Phases[name]
+		if !ok {
+			return fmt.Errorf("%s v6 缺少 %s 阶段", label, name)
+		}
+		if phase.Frames <= 0 || phase.FPS <= 0 || phase.P50MS <= 0 || phase.P95MS <= 0 ||
+			phase.P99MS <= 0 || phase.MaxMS <= 0 || phase.PeakRSSBytes == 0 {
+			return fmt.Errorf("%s v6 %s 阶段指标不完整: %+v", label, name, phase)
+		}
+		if phase.P50MS > phase.P95MS || phase.P95MS > phase.P99MS || phase.P99MS > phase.MaxMS {
+			return fmt.Errorf("%s v6 %s 阶段分位数非单调: %+v", label, name, phase)
+		}
+	}
+	if len(report.Phases) != 2 {
+		return fmt.Errorf("%s v6 phases 必须精确包含 still/flying: %v", label, report.Phases)
+	}
+	if report.Ticks.Frames != 200 {
+		return fmt.Errorf("%s v6 ticks frames 必须为 200: %d", label, report.Ticks.Frames)
+	}
+	if report.Ticks.FPS != 0 {
+		return fmt.Errorf("%s v6 ticks fps 必须为零: %f", label, report.Ticks.FPS)
+	}
+	if report.Ticks.P50MS <= 0 || report.Ticks.P95MS <= 0 || report.Ticks.P99MS <= 0 ||
+		report.Ticks.MaxMS <= 0 {
+		return fmt.Errorf("%s v6 ticks 指标不完整: %+v", label, report.Ticks)
+	}
+	if report.Ticks.P50MS > report.Ticks.P95MS || report.Ticks.P95MS > report.Ticks.P99MS ||
+		report.Ticks.P99MS > report.Ticks.MaxMS {
+		return fmt.Errorf("%s v6 ticks 分位数非单调: %+v", label, report.Ticks)
+	}
+	persistence := report.Persistence
+	if persistence.Snapshots <= 0 || persistence.P50MS <= 0 || persistence.P95MS <= 0 ||
+		persistence.P99MS <= 0 || persistence.MaxMS <= 0 {
+		return fmt.Errorf("%s v6 persistence 指标不完整: %+v", label, persistence)
+	}
+	if persistence.P50MS > persistence.P95MS || persistence.P95MS > persistence.P99MS ||
+		persistence.P99MS > persistence.MaxMS {
+		return fmt.Errorf("%s v6 persistence 分位数非单调: %+v", label, persistence)
+	}
+	if report.Multiplayer.InterestDiff.Samples != 1600 {
+		return fmt.Errorf(
+			"%s v6 interest_diff samples 必须为 1600: %d",
+			label,
+			report.Multiplayer.InterestDiff.Samples,
+		)
+	}
 	latencies := []struct {
 		name       string
 		summary    client.LatencySummary
@@ -363,7 +435,7 @@ func validateV6Report(label string, report client.PerfReport) error {
 	}{
 		{name: "remote_state_encode", summary: report.Multiplayer.RemoteStateEncode, minSamples: 256},
 		{name: "remote_state_decode", summary: report.Multiplayer.RemoteStateDecode, minSamples: 256},
-		{name: "interest_diff", summary: report.Multiplayer.InterestDiff, minSamples: 1000},
+		{name: "interest_diff", summary: report.Multiplayer.InterestDiff, minSamples: 1600},
 		{name: "roster_apply", summary: report.Multiplayer.RosterApply, minSamples: 256},
 		{name: "interpolation", summary: report.Multiplayer.Interpolation, minSamples: 256},
 		{name: "avatar_submit", summary: report.Multiplayer.AvatarSubmit, minSamples: 256},
