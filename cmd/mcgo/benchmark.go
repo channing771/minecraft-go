@@ -109,8 +109,7 @@ func runBenchmark(app *application, outputPath string) error {
 			authoritativeHash, authoritativeRevision, authoritativeOK,
 			mirrorHash, mirrorRevision, mirrorOK)
 	}
-	app.closeClientSession(nil)
-	if err := multiplayerProbe.measureGPUCompletion(app); err != nil {
+	if err := multiplayerProbe.measureGPUCompletionAfterTransportClose(app); err != nil {
 		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
 	}
 	serverMultiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)
@@ -159,6 +158,14 @@ func runBenchmark(app *application, outputPath string) error {
 	}
 	fmt.Printf("性能报告已写入 %s\n", outputPath)
 	return nil
+}
+
+func (probe *multiplayerClientProbe) measureGPUCompletionAfterTransportClose(
+	app *application,
+) error {
+	app.server.CloseTrustedObserver()
+	app.closeClientSession(nil)
+	return probe.measureGPUCompletion(app)
 }
 
 func writeBenchmarkReport(outputPath string, report client.PerfReport) error {

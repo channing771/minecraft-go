@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -133,6 +134,45 @@ func TestTrustedObserverIsSeparateAndHasNoHeartbeat(t *testing.T) {
 	defer cancel()
 	if err := running.Shutdown(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCloseTrustedObserverSynchronouslyDetachesAndClosesEndpoint(t *testing.T) {
+	config := registryTestConfig()
+	config.TrustedObserver = true
+	running := NewWorld(config, playerTestGenerator{}, testStore())
+	t.Cleanup(func() { shutdownServerForTest(t, running) })
+
+	clientEndpoint, serverEndpoint := network.NewMemoryPair(8)
+	t.Cleanup(func() { _ = clientEndpoint.Close() })
+	endpoint := &countingCloseServerEndpoint{ServerEndpoint: serverEndpoint}
+	if err := running.AttachTrustedObserver(endpoint); err != nil {
+		t.Fatal(err)
+	}
+	center := core.ChunkPos{X: 4}
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: center}
+	if err := running.SetTrustedObserverCenter(core.Overworld, center); err != nil {
+		t.Fatal(err)
+	}
+	running.StepForTest()
+	if !running.engine.SessionWantsChunk(trustedObserverSessionID, key) {
+		t.Fatal("trusted observer 没有建立区块订阅")
+	}
+
+	running.CloseTrustedObserver()
+	if got := endpoint.closeCalls.Load(); got != 1 {
+		t.Fatalf("endpoint Close 调用=%d，想要 1", got)
+	}
+	if running.engine.SessionWantsChunk(trustedObserverSessionID, key) {
+		t.Fatal("显式关闭返回后 trusted observer 订阅仍存在")
+	}
+	if err := running.SetTrustedObserverCenter(core.Overworld, center); !errors.Is(err, ErrTrustedObserverDisabled) {
+		t.Fatalf("显式关闭返回后 SetTrustedObserverCenter error=%v", err)
+	}
+
+	running.CloseTrustedObserver()
+	if got := endpoint.closeCalls.Load(); got != 1 {
+		t.Fatalf("重复关闭后的 endpoint Close 调用=%d，想要 1", got)
 	}
 }
 
@@ -298,6 +338,16 @@ type failingSendServerEndpoint struct {
 	err     error
 	started chan struct{}
 	once    sync.Once
+}
+
+type countingCloseServerEndpoint struct {
+	network.ServerEndpoint
+	closeCalls atomic.Int32
+}
+
+func (endpoint *countingCloseServerEndpoint) Close() error {
+	endpoint.closeCalls.Add(1)
+	return endpoint.ServerEndpoint.Close()
 }
 
 func (endpoint *failingSendServerEndpoint) Send(

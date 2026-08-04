@@ -5,9 +5,9 @@
 - [x] 1.3 在 `internal/client/perf.go` 定义唯一的 scenario v8 2048 样本常量，并在 `cmd/mcgo/benchmark.go` 与 `cmd/mcgo/multiplayer_benchmark.go` 最小实现 scenario v8 和探针内部测试时钟；标签准备、命令编码与资源释放保持计时区间外，不修改 still/flying workload、分辨率或交互路径。
 - [x] 1.4 在 `cmd/perfcheck` 先写失败测试，覆盖 v8 少于 2048 个 GPU 样本时拒绝、完整 v8 同场景比较、v7 仍接受 256 个历史样本，以及 v7/v8 不静默混比；最小实现按 scenario 选择样本下限，不修改 20% 或任何绝对阈值。
 - [x] 1.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/client -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l cmd/mcgo cmd/perfcheck internal/client`、`git diff --check` 和 `openspec validate --all --strict --no-interactive` 通过；运行 `detect_changes` 或记录同等只读 fallback，只暂存本 change、代码、测试与本组勾选，提交 `fix: 稳定 GPU 完成性能门禁`。
-- [ ] 1.6 对 `runBenchmark`、`closeClientSession`、`detachTrustedObserverLocked` 和新 `CloseTrustedObserver` 的相邻调用链执行 upstream impact 或等价 fallback；先在 `internal/server` 写失败测试，证明显式关闭同步移除 observer、关闭 endpoint 且重复调用安全，再在 `cmd/mcgo` 写 headless 失败测试，证明首个 GPU 时钟读取前已完成 observer 收尾。
-- [ ] 1.7 在 `internal/server` 最小实现幂等 `CloseTrustedObserver`，复用 `stepMu` 与 `detachTrustedObserverLocked`；在 `cmd/mcgo/benchmark.go` 中先服务端关闭 observer、再关闭客户端 receiver、最后进入 `measureGPUCompletion`，不增加 sleep、轮询、重试、依赖或场景版本。
-- [ ] 1.8 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./cmd/mcgo ./cmd/perfcheck ./internal/client -race -count=1 && go test ./internal/archcheck -count=1'`、相关关闭竞态压力测试、`gofmt -l`、OpenSpec strict 和 `git diff --check`；完成 `detect_changes` 或 fallback，只暂存屏障代码、测试、本 change 与本组勾选，提交 `fix: 隔离 GPU 探针传输收尾`。
+- [x] 1.6 对 `runBenchmark`、`closeClientSession`、`detachTrustedObserverLocked` 和新 `CloseTrustedObserver` 的相邻调用链执行 upstream impact 或等价 fallback；先在 `internal/server` 写失败测试，证明显式关闭同步移除 observer、关闭 endpoint 且重复调用安全，再在 `cmd/mcgo` 写 headless 失败测试，证明首个 GPU 时钟读取前已完成 observer 收尾。
+- [x] 1.7 在 `internal/server` 最小实现幂等 `CloseTrustedObserver`，复用 `stepMu` 与 `detachTrustedObserverLocked`；在 `cmd/mcgo/benchmark.go` 中先服务端关闭 observer、再关闭客户端 receiver、最后进入 `measureGPUCompletion`，不增加 sleep、轮询、重试、依赖或场景版本。
+- [x] 1.8 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./cmd/mcgo ./cmd/perfcheck ./internal/client -race -count=1 && go test ./internal/archcheck -count=1'`、相关关闭竞态压力测试、`gofmt -l`、OpenSpec strict 和 `git diff --check`；完成 `detect_changes` 或 fallback，只暂存屏障代码、测试、本 change 与本组勾选，提交 `fix: 隔离 GPU 探针传输收尾`。
 
 ## 2. M5 v8 正式链预检与执行
 

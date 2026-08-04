@@ -15,8 +15,11 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
+	"minecraft-go/internal/storage"
+	"minecraft-go/internal/worldgen"
 )
 
 type benchmarkBlockingServerStream struct {
@@ -118,6 +121,64 @@ func TestScenarioV8GPUCompletionTimesOnlySubmitAndPoll(t *testing.T) {
 		if got := dev.events[start : start+len(want)]; !reflect.DeepEqual(got, want) {
 			t.Fatalf("sample %d events=%v, want=%v", sample, got, want)
 		}
+	}
+}
+
+func TestScenarioV8GPUCompletionStartsAfterTransportTeardown(t *testing.T) {
+	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	config := server.DefaultConfig(benchmarkSeed)
+	config.TrustedObserver = true
+	config.ViewRadius = 0
+	config.Workers = 1
+	config.SaveWorkers = 1
+	running := server.NewWorld(
+		config,
+		worldgen.New(benchmarkSeed),
+		storage.NewMemory(storage.Metadata{
+			FormatVersion:  1,
+			Seed:           benchmarkSeed,
+			SpawnDimension: core.Overworld,
+		}),
+	)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := running.Shutdown(ctx); err != nil {
+			t.Errorf("关闭测试服务端: %v", err)
+		}
+	})
+	rawClient, serverEndpoint := network.NewMemoryPair(8)
+	clientEndpoint := &connectionTestEndpoint{ClientEndpoint: rawClient}
+	if err := running.AttachTrustedObserver(serverEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	app.server = running
+	app.clientEndpoint = clientEndpoint
+
+	probe, err := newMultiplayerClientProbe(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(probe.Close)
+	clockReads := 0
+	probe.now = func() time.Time {
+		if clockReads == 0 {
+			if err := running.SetTrustedObserverCenter(core.Overworld, core.ChunkPos{}); !errors.Is(err, server.ErrTrustedObserverDisabled) {
+				t.Fatalf("首个 GPU 时钟读取时 trusted observer 仍挂载: %v", err)
+			}
+			if got := clientEndpoint.closeCalls.Load(); got != 1 {
+				t.Fatalf("首个 GPU 时钟读取时客户端 Close 调用=%d，想要 1", got)
+			}
+		}
+		clockReads++
+		return time.Unix(0, int64(clockReads)*int64(time.Millisecond))
+	}
+
+	if err := probe.measureGPUCompletionAfterTransportClose(app); err != nil {
+		t.Fatal(err)
+	}
+	if clockReads == 0 {
+		t.Fatal("GPU 探针未读取时钟")
 	}
 }
 

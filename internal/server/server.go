@@ -153,6 +153,15 @@ func (server *Server) AttachTrustedObserver(endpoint network.ServerEndpoint) err
 	return server.attachTrustedObserverLocked(endpoint)
 }
 
+func (server *Server) CloseTrustedObserver() {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	current := server.trustedObserver
+	if current != nil {
+		server.detachTrustedObserverLocked(current.id, current.generation, nil)
+	}
+}
+
 func (server *Server) detachTrustedObserver(
 	id sim.SessionID,
 	generation uint64,
