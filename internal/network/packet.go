@@ -147,8 +147,6 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 		switch clientPacket := packet.(type) {
 		case PlayerInput:
 			return clientPacket.Validate()
-		case BreakBlock:
-			return clientPacket.Validate()
 		case PlaceBlock:
 			return clientPacket.Validate()
 		case SelectHotbar:

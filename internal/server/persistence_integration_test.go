@@ -396,10 +396,11 @@ func (h *persistentHarness) placeAndBreakScript() {
 	// 先挖掘获得物品，再从栏位 0 放回同一位置。
 	baseRevision := h.authoritativeRevision(interactionChunk)
 	h.sequence++
-	sendClientMessage(h.t, h.clientEndpoint, network.BreakBlock{
+	sendClientMessage(h.t, h.clientEndpoint, network.PlayerInput{
 		Sequence: h.sequence,
 		Yaw:      0,
 		Pitch:    pitch,
+		Mining:   true,
 	})
 	broken := awaitInteractionChange(
 		h.t, h.running, h.clientEndpoint, h.mirror,

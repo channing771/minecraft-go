@@ -86,10 +86,11 @@ func TestMultiplayerTCPClientsSeeMoveEditAndDespawn(t *testing.T) {
 	})
 
 	target := core.BlockPos{X: 0, Y: 1, Z: -6}
-	mustSendMultiplayer(t, deadline, a, network.BreakBlock{
+	mustSendMultiplayer(t, deadline, a, network.PlayerInput{
 		Sequence: 9,
 		Yaw:      0,
 		Pitch:    -0.2,
+		Mining:   true,
 	})
 	// Kills one-sided block fanout, incorrect block IDs, revision-only equality,
 	// hash-only equality, and a driver that compares a mirror with itself.
@@ -338,8 +339,6 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 				switch {
 				case step.Input != nil:
 					message = *step.Input
-				case step.Break != nil:
-					message = *step.Break
 				case step.Place != nil:
 					message = *step.Place
 				}

@@ -1138,19 +1138,6 @@ func (a *application) drainServerMessages(maxMessages int) {
 	}
 }
 
-func (a *application) breakBlock() {
-	if _, ready := a.predictor.State(); !ready {
-		return
-	}
-	if err := a.send(network.BreakBlock{
-		Sequence: a.nextSequence(),
-		Yaw:      a.camera.Yaw,
-		Pitch:    a.camera.Pitch,
-	}); err != nil {
-		log.Printf("发送挖掘命令失败: %v", err)
-	}
-}
-
 func (a *application) placeBlock() {
 	if _, ready := a.predictor.State(); !ready {
 		return

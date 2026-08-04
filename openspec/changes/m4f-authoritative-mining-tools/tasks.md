@@ -6,15 +6,15 @@
 
 ## 2. 协议 v8 固定采掘字段
 
-- [ ] 2.1 在 `internal/network` 先写失败的 registry、codec golden、验证与登录测试：`PlayerInput` 携带持续采掘布尔值，`PlayerState` 携带规范权威进度，协议为 v8，v7 登录拒绝，Play client packet ID `1` 未分配且其他 ID 不变。
-- [ ] 2.2 扩展 `internal/network/message.go`、`codec.go`、`packet.go` 和 `registry.go`，并在 `internal/sim`、`internal/server`、`internal/client` 只加入编译所需的固定字段与零状态映射；删除即时 `BreakBlock` codec/registry 入口，不新增独立采掘消息。
-- [ ] 2.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/client ./internal/server -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 定义权威采掘协议 v8`。
+- [x] 2.1 在 `internal/network` 先写失败的 registry、codec golden、验证与登录测试：`PlayerInput` 携带持续采掘布尔值，`PlayerState` 携带规范权威进度，协议为 v8，v7 登录拒绝，Play client packet ID `1` 未分配且其他 ID 不变。
+- [x] 2.2 扩展 `internal/network/message.go`、`codec.go`、`packet.go` 和 `registry.go`，并在 `internal/sim`、`internal/server`、`internal/client` 只加入编译所需的固定字段与零状态映射；删除即时 `BreakBlock` codec/registry 入口，不新增独立采掘消息。
+- [x] 2.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/client ./internal/server -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 定义权威采掘协议 v8`。
 
 ## 3. 持续输入与即时破坏退役
 
-- [ ] 3.1 在 `internal/client`、`cmd/mcgo` 和 `internal/server` 先写失败测试，覆盖主键按住而非上升沿、容器打开和 predictor neutral 发送 `Mining=false`、固定步输入携带视角与采掘状态、服务端 ingress 保存最后有效意图，以及旧 packet ID `1` 触发协议违规。
-- [ ] 3.2 修改 `internal/client/input.go`、`predictor.go`、`cmd/mcgo/main.go`、`app.go` 与 `internal/server/session.go`，让持续输入端到端到达 simulation owner；删除客户端 `breakBlock` 发送路径和服务端 `BreakBlock` 翻译，不改变右键放置/打开熔炉语义。
-- [ ] 3.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/server ./cmd/mcgo -race -count=1'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 接通持续采掘输入`。
+- [x] 3.1 在 `internal/client`、`cmd/mcgo` 和 `internal/server` 先写失败测试，覆盖主键按住而非上升沿、容器打开和 predictor neutral 发送 `Mining=false`、固定步输入携带视角与采掘状态、服务端 ingress 保存最后有效意图，以及旧 packet ID `1` 触发协议违规。
+- [x] 3.2 修改 `internal/client/input.go`、`predictor.go`、`cmd/mcgo/main.go`、`app.go` 与 `internal/server/session.go`，让持续输入端到端到达 simulation owner；删除客户端 `breakBlock` 发送路径和服务端 `BreakBlock` 翻译，不改变右键放置/打开熔炉语义。
+- [x] 3.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/server ./cmd/mcgo -race -count=1'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 接通持续采掘输入`。
 
 ## 4. 权威采掘进度与固定等级
 
@@ -25,10 +25,10 @@
 
 ## 5. 原子破坏、掉落与熔炉内容保全
 
-- [ ] 5.1 迁移 `internal/sim` 现有交互/掉落/熔炉测试为采掘完成语义，并先增加失败场景：错误工具无方块掉落、裸手石头启动、容量不足不破坏、错误工具熔炉只掉内容、空熔炉无掉落、同 tick 两人只提交一次。
-- [ ] 5.2 从 `internal/sim/engine.go` 的即时破坏分支抽出唯一按已验证目标完成的原子 helper；harvestable 普通方块预演一个掉落，错误工具普通方块不预演，熔炉按工具等级预演本体与内容或仅内容。
-- [ ] 5.3 删除 `CommandBreakBlock` 及只服务即时破坏的代码和测试夹具，保留放置射线与拒绝映射；完成成功或容量失败后清零，容量失败只用最后输入 sequence 拒绝一次。
-- [ ] 5.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world ./internal/server -race -count=1'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 原子完成工具采掘`。
+- [x] 5.1 迁移 `internal/sim` 现有交互/掉落/熔炉测试为采掘完成语义，并先增加失败场景：错误工具无方块掉落、裸手石头启动、容量不足不破坏、错误工具熔炉只掉内容、空熔炉无掉落、同 tick 两人只提交一次。
+- [x] 5.2 从 `internal/sim/engine.go` 的即时破坏分支抽出唯一按已验证目标完成的原子 helper；harvestable 普通方块预演一个掉落，错误工具普通方块不预演，熔炉按工具等级预演本体与内容或仅内容。
+- [x] 5.3 删除 `CommandBreakBlock` 及只服务即时破坏的代码和测试夹具，保留放置射线与拒绝映射；完成成功或容量失败后清零，容量失败只用最后输入 sequence 拒绝一次。
+- [x] 5.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world ./internal/server -race -count=1'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 原子完成工具采掘`。
 
 ## 6. Memory/TCP 发布与生命周期闭环
 

@@ -20,7 +20,6 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Pitch:    -15,
 			Mining:   true,
 		},
-		network.BreakBlock{Sequence: 2, Yaw: 90, Pitch: -15},
 		network.PlaceBlock{
 			Sequence: 3,
 			Yaw:      90,
@@ -72,7 +71,7 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 		network.ItemDropUpserts{},
 		network.ItemDropRemoves{},
 	}
-	if len(clientMessages) != 8 || len(serverMessages) != 13 {
+	if len(clientMessages) != 7 || len(serverMessages) != 13 {
 		t.Fatal("消息集合不完整")
 	}
 }

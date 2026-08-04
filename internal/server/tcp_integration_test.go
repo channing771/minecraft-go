@@ -164,8 +164,8 @@ func movePlayerAndPlaceBlock(
 ) {
 	t.Helper()
 	// M4B：挖掉视线内的石头障碍会在原地留下掉落物，世界修改由该挖掘产生。
-	sendIntegration(t, connected.Endpoint, network.BreakBlock{
-		Sequence: 1, Yaw: 0, Pitch: -0.2,
+	sendIntegration(t, connected.Endpoint, network.PlayerInput{
+		Sequence: 1, Yaw: 0, Pitch: -0.2, Mining: true,
 	})
 	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
 		return integrationChangeSeen(message, position, core.AirID)
@@ -439,8 +439,9 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	firstIdentity := integrationIdentity(0x81, "Crafter")
 	secondIdentity := integrationIdentity(0x82, "Observer")
 	spawn := integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil)
+	spawn.Inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
 	seedIntegrationPlayer(t, root, firstIdentity, spawn)
-	seedIntegrationPlayer(t, root, secondIdentity, spawn)
+	seedIntegrationPlayer(t, root, secondIdentity, integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil))
 
 	firstHost := startDiskHost(t, root, "127.0.0.1:0", changedGenerator{})
 	firstClient := dialIntegrationClient(t, firstHost.Addr, firstIdentity)
@@ -481,22 +482,28 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 		t.Fatalf("石砖放置位置 = %+v，想要两个不同位置", placed)
 	}
 
-	sendIntegration(t, firstClient.Endpoint, network.BreakBlock{
-		Sequence: 4, Yaw: 0, Pitch: -0.2,
+	sendIntegration(t, firstClient.Endpoint, network.SelectHotbar{
+		Sequence: 4, Slot: 1,
+	})
+	waitIntegrationInventory(t, firstClient, func(inventory core.Inventory) bool {
+		return inventory.Hotbar.Selected == 1
+	})
+	sendIntegration(t, firstClient.Endpoint, network.PlayerInput{
+		Sequence: 5, Yaw: 0, Pitch: -0.2, Mining: true,
 	})
 	waitIntegrationState(t, firstClient, func(message network.ServerMessage) bool {
 		return integrationChangeSeen(message, placed[1], core.AirID)
 	})
 	sendIntegration(t, firstClient.Endpoint, network.PlayerInput{
-		Sequence: 5, MoveZ: 1, Yaw: 0, Pitch: -0.2,
+		Sequence: 6, MoveZ: 1, Yaw: 0, Pitch: -0.2,
 	})
 	wantInventory := waitIntegrationInventory(t, firstClient, func(inventory core.Inventory) bool {
 		return integrationItemCount(inventory, core.ItemStoneBrick) == 3
 	})
-	sendIntegration(t, firstClient.Endpoint, network.PlayerInput{Sequence: 6, Yaw: 0, Pitch: -0.2})
+	sendIntegration(t, firstClient.Endpoint, network.PlayerInput{Sequence: 7, Yaw: 0, Pitch: -0.2})
 	waitIntegrationState(t, firstClient, func(message network.ServerMessage) bool {
 		state, ok := message.(network.PlayerState)
-		return ok && state.LastInputSequence >= 6
+		return ok && state.LastInputSequence >= 7
 	})
 
 	wantPlayer := firstHost.PlayerSnapshot(t, firstIdentity.PlayerID)
@@ -930,13 +937,19 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 		network.CraftRecipe{Sequence: 2, Recipe: core.RecipeStoneBricks},
 		network.CraftRecipe{Sequence: 3, Recipe: core.RecipeStoneBricks},
 		network.PlaceBlock{Sequence: 4, Yaw: 0, Pitch: -0.2, Slot: 0},
-		network.BreakBlock{Sequence: 5, Yaw: 0, Pitch: -0.2},
+	}
+	for sequence := uint64(5); sequence < 35; sequence++ {
+		commands = append(commands, network.PlayerInput{
+			Sequence: sequence, Yaw: 0, Pitch: -0.2, Mining: true,
+		})
+	}
+	commands = append(commands,
 		network.RequestChunkResync{
-			Sequence: 6, Dimension: core.Overworld,
+			Sequence: 35, Dimension: core.Overworld,
 			Chunk: (core.BlockPos{X: 0, Y: 1, Z: -5}).Chunk(), HaveRevision: 0,
 		},
-		network.PlayerInput{Sequence: 7, Yaw: 0, Pitch: -0.2},
-	}
+		network.PlayerInput{Sequence: 36, Yaw: 0, Pitch: -0.2},
+	)
 	for _, command := range commands {
 		sendIntegration(t, endpoint, command)
 		waitIntegrationCondition(t, fmt.Sprintf("%s %T queued", transport, command), func() bool {

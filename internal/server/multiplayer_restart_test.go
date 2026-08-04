@@ -98,7 +98,7 @@ func runEightPlayersSurviveDiskRestart(t *testing.T) {
 	clients = connectRestartClients(t, first.addr, identities, nil)
 	waitRestartClientsReady(t, clients)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	if err := clients[0].endpoint.Send(ctx, network.BreakBlock{Sequence: 1, Yaw: 0, Pitch: -0.2}); err != nil {
+	if err := clients[0].endpoint.Send(ctx, network.PlayerInput{Sequence: 1, Yaw: 0, Pitch: -0.2, Mining: true}); err != nil {
 		cancel()
 		t.Fatalf("break edited chunk: %v", err)
 	}

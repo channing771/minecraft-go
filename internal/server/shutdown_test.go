@@ -69,12 +69,21 @@ func TestShutdownAppliesFinalBufferedCommandExactlyOnceWithoutPublishing(t *test
 	running, client := newShutdownTestServer(t, store)
 	key := chunkKey(0, 0)
 	running.engine = dirtyPlayerEngine(t, key)
+	running.engine.Enqueue(sim.Command{
+		Session: testSessionID, Sequence: 1, Kind: sim.CommandPlayerInput,
+		Pitch: -1.5, Mining: true,
+	})
+	for range 4 {
+		if primed := running.engine.Step(); len(primed.Changes) != 0 {
+			t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+		}
+	}
 	tickBefore := running.engine.TickCount()
 	running.incoming <- incomingCommand{
 		Session: testSessionID, Generation: 1,
 		Command: sim.Command{
-			Session: testSessionID, Sequence: 1,
-			Kind: sim.CommandBreakBlock, Pitch: -1.5,
+			Session: testSessionID, Sequence: 2,
+			Kind: sim.CommandPlayerInput, Pitch: -1.5, Mining: true,
 		},
 	}
 

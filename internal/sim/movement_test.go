@@ -420,8 +420,8 @@ func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {
 		Session: sessionID, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1,
 	})
 	engine.Enqueue(Command{
-		Session: sessionID, Sequence: 3, Kind: CommandBreakBlock,
-		Pitch: -float32(math.Pi)/2 + 0.01,
+		Session: sessionID, Sequence: 3, Kind: CommandPlayerInput,
+		MoveX: 1, Pitch: -float32(math.Pi)/2 + 0.01, Mining: true,
 	})
 
 	result := engine.Step()
@@ -429,12 +429,12 @@ func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {
 	if after.ViewCenter != nextChunk || after.State.Position.X() < 16 {
 		t.Fatalf("订阅中心没有使用本 tick 权威移动结果: %+v", after)
 	}
-	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
+	if len(result.Rejected) != 0 || !after.Mining.Active || after.Mining.Target.Chunk() != nextChunk {
 		t.Fatalf("移动后的新订阅没有在交互前生效: %+v", result)
 	}
 	chunk, _, ok := engine.CloneReadyChunk(core.ChunkKey{Dimension: core.Overworld, Pos: nextChunk})
-	if !ok || chunk.BlockAt(0, 0, 0) != core.AirID {
-		t.Fatalf("新订阅区块交互未执行: ok=%v chunk=%v", ok, chunk)
+	if !ok || chunk.BlockAt(0, 0, 0) != core.GrassID {
+		t.Fatalf("权威采掘完成前修改了新订阅区块: ok=%v chunk=%v", ok, chunk)
 	}
 }
 

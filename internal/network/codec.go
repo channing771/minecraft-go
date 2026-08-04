@@ -47,10 +47,6 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 			e.f32(message.Yaw)
 			e.f32(message.Pitch)
 			e.bool(message.Mining)
-		case BreakBlock:
-			e.u64(message.Sequence)
-			e.f32(message.Yaw)
-			e.f32(message.Pitch)
 		case PlaceBlock:
 			e.u64(message.Sequence)
 			e.f32(message.Yaw)
@@ -150,17 +146,6 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 				mining, err = d.bool()
 			}
 			packet = PlayerInput{Sequence: sequence, MoveX: moveX, MoveZ: moveZ, Jump: jump, Yaw: yaw, Pitch: pitch, Mining: mining}
-		case 1:
-			var sequence uint64
-			var yaw, pitch float32
-			sequence, err = d.u64()
-			if err == nil {
-				yaw, err = d.f32()
-			}
-			if err == nil {
-				pitch, err = d.f32()
-			}
-			packet = BreakBlock{Sequence: sequence, Yaw: yaw, Pitch: pitch}
 		case 2:
 			var sequence uint64
 			var yaw, pitch float32

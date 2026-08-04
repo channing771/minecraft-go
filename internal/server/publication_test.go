@@ -60,20 +60,19 @@ func TestInitialSnapshotCapturesSameTickChangesBeforeDelta(t *testing.T) {
 	if len(ready.Ready) != 1 || !ready.Players[0].Ready {
 		t.Fatalf("spawn ready = %+v", ready)
 	}
+	running.engine.Enqueue(sim.Command{
+		Session: testSessionID, Sequence: 2, Kind: sim.CommandPlayerInput,
+		Yaw: 0, Pitch: -1.5, Mining: true,
+	})
+	for range 4 {
+		if primed := running.engine.Step(); len(primed.Changes) != 0 {
+			t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+		}
+	}
 	running.sessions[testSessionID].queueSnapshot(core.ChunkKey{
 		Dimension: core.Overworld,
 		Pos:       core.ChunkPos{},
 	}, false)
-	running.incoming <- incomingCommand{
-		Session: testSessionID, Generation: 1,
-		Command: sim.Command{
-			Session:  testSessionID,
-			Sequence: 2,
-			Kind:     sim.CommandBreakBlock,
-			Yaw:      0,
-			Pitch:    -1.5,
-		},
-	}
 	result := running.Step()
 	if len(result.Changes) != 1 {
 		t.Fatalf("同 tick Changes = %+v", result.Changes)
@@ -94,14 +93,14 @@ func TestPublishedDeltaIsContiguousAfterSnapshot(t *testing.T) {
 		t.Fatalf("初始 revision = %d", snapshot.Revision)
 	}
 
-	running.incoming <- incomingCommand{
-		Session: testSessionID, Generation: 1,
-		Command: sim.Command{
-			Session:  testSessionID,
-			Sequence: 2,
-			Kind:     sim.CommandBreakBlock,
-			Pitch:    -1.5,
-		},
+	running.engine.Enqueue(sim.Command{
+		Session: testSessionID, Sequence: 2, Kind: sim.CommandPlayerInput,
+		Pitch: -1.5, Mining: true,
+	})
+	for range 4 {
+		if primed := running.engine.Step(); len(primed.Changes) != 0 {
+			t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+		}
 	}
 	running.Step()
 	delta := recvWorldServerMessage(t, client).(network.BlockChanges)

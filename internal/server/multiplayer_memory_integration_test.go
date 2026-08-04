@@ -51,7 +51,6 @@ type multiplayerScriptStep struct {
 	Tick   uint64
 	Player int
 	Input  *network.PlayerInput
-	Break  *network.BreakBlock
 	Place  *network.PlaceBlock
 }
 
@@ -130,31 +129,38 @@ func TestCanceledMultiplayerPacketAcceptClosesLateStreamAndJoinsWorker(t *testin
 
 func fixedEightPlayerScript(ticks uint64) []multiplayerScriptStep {
 	steps := make([]multiplayerScriptStep, 0, int(ticks)*multiplayerClientCount+int(ticks/20))
+	var miningUntil [multiplayerClientCount]uint64
 	for tick := uint64(1); tick <= ticks; tick++ {
+		if tick%20 == 0 && (tick/20)%2 == 1 {
+			player := int((tick/20 - 1) % multiplayerClientCount)
+			miningUntil[player] = tick + 29
+		}
 		sign := int8(1)
 		if ((tick - 1) / 10 % 2) != 0 {
 			sign = -1
 		}
 		for player := 0; player < multiplayerClientCount; player++ {
 			input := network.PlayerInput{Sequence: tick*2 - 1, Yaw: 0, Pitch: -0.2}
-			switch player % 4 {
-			case 0:
-				input.MoveX = sign
-			case 1:
-				input.MoveX = -sign
-			case 2:
-				input.MoveZ = sign
-			case 3:
-				input.MoveZ = -sign
+			if tick <= miningUntil[player] {
+				input.Yaw = math.Pi
+				input.Mining = true
+			} else {
+				switch player % 4 {
+				case 0:
+					input.MoveX = sign
+				case 1:
+					input.MoveX = -sign
+				case 2:
+					input.MoveZ = sign
+				case 3:
+					input.MoveZ = -sign
+				}
 			}
 			steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Input: &input})
 		}
 		if tick%20 == 0 {
 			player := int((tick/20 - 1) % multiplayerClientCount)
-			if (tick/20)%2 == 1 {
-				command := network.BreakBlock{Sequence: tick * 2, Yaw: math.Pi, Pitch: -0.2}
-				steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Break: &command})
-			} else {
+			if (tick/20)%2 == 0 {
 				command := network.PlaceBlock{Sequence: tick * 2, Yaw: math.Pi, Pitch: -0.2, Slot: 0}
 				steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Place: &command})
 			}
@@ -392,14 +398,11 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 			var message network.ClientMessage
 			switch {
 			case step.Input != nil:
+				if step.Input.Mining && multiplayerManualTarget.Chunk() != initialChunk {
+					t.Fatalf("mining target escaped initial chunk: %+v", multiplayerManualTarget)
+				}
 				message = *step.Input
 				pendingSequences = append(pendingSequences, fmt.Sprintf("p%d/input/%d", step.Player, step.Input.Sequence))
-			case step.Break != nil:
-				if multiplayerManualTarget.Chunk() != initialChunk {
-					t.Fatalf("break target escaped initial chunk: %+v", multiplayerManualTarget)
-				}
-				message = *step.Break
-				pendingSequences = append(pendingSequences, fmt.Sprintf("p%d/break/%d", step.Player, step.Break.Sequence))
 			case step.Place != nil:
 				if multiplayerManualTarget.Chunk() != initialChunk {
 					t.Fatalf("place target escaped initial chunk: %+v", multiplayerManualTarget)

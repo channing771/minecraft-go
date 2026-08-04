@@ -25,7 +25,6 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		{"hello", StateHandshake, ClientHello{ProtocolVersion: 8}, 0, "08"},
 		{"login start", StateLogin, LoginStart{PlayerID: id, DisplayName: "Chen"}, 0, "00112233445546778899aabbccddeeff044368656e"},
 		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5, Mining: true}, 0, "0100000000000000ff01010000c03f000000bf01"},
-		{"break", StatePlay, BreakBlock{Sequence: 2}, 1, "02000000000000000000000000000000"},
 		{"place", StatePlay, PlaceBlock{Sequence: 3, Yaw: 2, Pitch: -1, Slot: 4}, 2, "030000000000000000000040000080bf04"},
 		{"resync", StatePlay, RequestChunkResync{Sequence: 4, Dimension: core.Overworld, Chunk: core.ChunkPos{X: -2, Z: 3}, HaveRevision: 5}, 3, "040000000000000000000000feffffff030000000500000000000000"},
 		{"keep alive reply", StatePlay, KeepAliveReply{Token: 6}, 4, "0600000000000000"},
@@ -87,6 +86,12 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPlayClientPacketIDOneIsUnknown(t *testing.T) {
+	if _, err := decodeClientPacketPayload(StatePlay, 1, nil); !errors.Is(err, errUnknownPacketID) {
+		t.Fatalf("Play client packet ID 1 解码错误 = %v，想要 %v", err, errUnknownPacketID)
 	}
 }
 
@@ -574,9 +579,6 @@ func sameClientPacket(got, want ClientPacket) bool {
 		return ok && got == other
 	case PlayerInput:
 		other, ok := want.(PlayerInput)
-		return ok && got == other
-	case BreakBlock:
-		other, ok := want.(BreakBlock)
 		return ok && got == other
 	case PlaceBlock:
 		other, ok := want.(PlaceBlock)

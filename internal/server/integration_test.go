@@ -34,10 +34,11 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 
 	pitch := float32(-0.2)
 	// M4B：挖掘只产生地面掉落物，放置改用登录时已确认的快捷栏物品。
-	sendClientMessage(t, clientEndpoint, network.BreakBlock{
+	sendClientMessage(t, clientEndpoint, network.PlayerInput{
 		Sequence: 1,
 		Yaw:      0,
 		Pitch:    pitch,
+		Mining:   true,
 	})
 	broken := awaitInteractionChange(
 		t, running, clientEndpoint, mirror, interactionChunk, 1, 2,

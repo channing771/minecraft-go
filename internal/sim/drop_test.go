@@ -56,13 +56,10 @@ func onlyDrop(t *testing.T, engine *sim.Engine) (int, world.DropSlot) {
 	return found, drop
 }
 
-func TestBreakCreatesDropWithoutTouchingHotbar(t *testing.T) {
+func TestMiningCreatesDropWithoutTouchingHotbar(t *testing.T) {
 	engine, session := readyFlatPlayer(t)
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-
-	result := engine.Step()
+	sequence := uint64(1)
+	result := mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 5)
 	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
 		t.Fatalf("挖掘 result=%+v", result)
 	}
@@ -82,24 +79,19 @@ func TestBreakCreatesDropWithoutTouchingHotbar(t *testing.T) {
 	}
 }
 
-func TestBreakMergesIntoExistingDropAtSamePosition(t *testing.T) {
+func TestMiningMergesIntoExistingDropAtSamePosition(t *testing.T) {
 	engine, session := readyFlatPlayer(t)
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-	engine.Step()
+	sequence := uint64(1)
+	mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 5)
 	// 第二次挖掘同一列的下一格方块会落在不同位置，因此改为直接注入同位置堆。
 	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
 		Generation: 1, Active: true,
 		Stack:      core.ItemStack{Item: core.ItemDirt, Count: 63},
-		BlockIndex: dropTargetIndex(t), PickupDelayTicks: 5,
+		BlockIndex: dropTargetIndex(t), PickupDelayTicks: sim.DropPickupDelayTicks,
 	})
 	engine.SetBlockForTest(core.BlockPos{}, core.DirtID)
 
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 3, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-	result := engine.Step()
+	result := mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 5)
 	if len(result.Rejected) != 0 {
 		t.Fatalf("合并挖掘被拒绝: %+v", result.Rejected)
 	}
@@ -109,7 +101,7 @@ func TestBreakMergesIntoExistingDropAtSamePosition(t *testing.T) {
 	}
 }
 
-func TestBreakRejectsWhenChunkDropsAreFull(t *testing.T) {
+func TestMiningRejectsWhenChunkDropsAreFull(t *testing.T) {
 	engine, session := readyFlatPlayer(t)
 	key := core.ChunkKey{Dimension: core.Overworld}
 	elsewhere, ok := world.ChunkBlockIndex(core.BlockPos{X: 5, Y: 0, Z: 5})
@@ -124,10 +116,8 @@ func TestBreakRejectsWhenChunkDropsAreFull(t *testing.T) {
 		})
 	}
 
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-	result := engine.Step()
+	sequence := uint64(1)
+	result := mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 5)
 	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectDropCapacity {
 		t.Fatalf("满掉落物槽 result=%+v", result)
 	}
@@ -140,14 +130,11 @@ func TestBreakRejectsWhenChunkDropsAreFull(t *testing.T) {
 	}
 }
 
-func TestBreakSucceedsWithFullInventory(t *testing.T) {
+func TestMiningSucceedsWithFullInventory(t *testing.T) {
 	full := fullTestInventory()
 	engine, session := readyFlatPlayerWithInventory(t, full)
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-
-	result := engine.Step()
+	sequence := uint64(1)
+	result := mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 5)
 	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
 		t.Fatalf("满快捷栏挖掘 result=%+v", result)
 	}
@@ -161,10 +148,13 @@ func TestBreakSucceedsWithFullInventory(t *testing.T) {
 
 func TestDropPickupWaitsForDelayThenFillsHotbar(t *testing.T) {
 	engine, session := readyFlatPlayer(t)
+	sequence := uint64(1)
+	mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 5)
+	sequence++
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
+		Session: session, Sequence: sequence, Kind: sim.CommandPlayerInput,
+		Pitch: lookDown, Mining: false,
 	})
-	engine.Step()
 
 	for tick := range sim.DropPickupDelayTicks - 1 {
 		engine.Step()

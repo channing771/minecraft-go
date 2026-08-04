@@ -16,7 +16,6 @@ type CommandKind uint8
 const (
 	CommandTrustedObserverCenter CommandKind = iota
 	CommandPlayerInput
-	CommandBreakBlock
 	CommandPlaceBlock
 	CommandResync
 	CommandSelectHotbar

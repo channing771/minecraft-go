@@ -43,21 +43,6 @@ func (input PlayerInput) Validate() error {
 	return nil
 }
 
-type BreakBlock struct {
-	Sequence   uint64
-	Yaw, Pitch float32
-}
-
-func (BreakBlock) clientMessage() {}
-func (BreakBlock) clientPacket()  {}
-
-func (command BreakBlock) Validate() error {
-	if !finite32(command.Yaw) || !finite32(command.Pitch) {
-		return errors.New("network: break block has non-finite rotation")
-	}
-	return nil
-}
-
 type PlaceBlock struct {
 	Sequence   uint64
 	Yaw, Pitch float32
