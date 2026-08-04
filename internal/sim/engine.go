@@ -215,6 +215,35 @@ func (engine *Engine) Step() TickResult {
 				player.inventory.Hotbar.Selected = command.Slot
 				player.inventoryDirty = true
 			}
+		case CommandMoveInventoryStack:
+			if session.player == nil || session.player.lifecycle != PlayerActive {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectPlayerNotReady,
+				})
+				continue
+			}
+			if command.Slot >= core.InventorySlots || command.ToSlot >= core.InventorySlots {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectInvalidSlot,
+				})
+				continue
+			}
+			player := session.player
+			next, ok := player.inventory.MoveStack(command.Slot, command.ToSlot)
+			if !ok {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectInvalidInput,
+				})
+				continue
+			}
+			player.inventory = next
+			player.inventoryDirty = true
 		case CommandResync:
 			result.Resync = append(result.Resync, ResyncRequest{
 				Session:      command.Session,

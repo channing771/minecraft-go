@@ -226,6 +226,17 @@ func TestPlayerMessageTranslation(t *testing.T) {
 			},
 		},
 		{
+			name:    "move inventory stack carries only the slots",
+			message: network.MoveInventoryStack{Sequence: 15, From: 2, To: 30},
+			want: sim.Command{
+				Session:  testSessionID,
+				Sequence: 15,
+				Kind:     sim.CommandMoveInventoryStack,
+				Slot:     2,
+				ToSlot:   30,
+			},
+		},
+		{
 			name:    "select hotbar carries only the slot",
 			message: network.SelectHotbar{Sequence: 14, Slot: 7},
 			want: sim.Command{

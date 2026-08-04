@@ -21,10 +21,10 @@
 
 ## 4. 权威移动与背包拾取
 
-- [ ] 4.1 在 `internal/sim`、`internal/server` 先写失败测试，覆盖移动命令 sequence、空目标/部分合并/交换、同格/越界/空来源拒绝、一次 dirty 发布，以及掉落物先快捷栏后背包、部分拾取、全满保留和多人稳定竞争。
-- [ ] 4.2 接入 `CommandMoveInventoryStack` 和 endpoint 翻译；在单写者 tick 原子替换完整 Inventory，掉落物一次调用 `AddStack` 并同步提交余量，复用现有 `RejectInvalidInput`/`RejectInvalidSlot`。
-- [ ] 4.3 增加 Memory/TCP 纵向测试，证明相同移动与拾取序列得到相同物品状态、掉落物和拒绝结果；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/server ./internal/network -race -count=1 && go test ./internal/archcheck -count=1'`，并确认 `git diff --check` 通过。
-- [ ] 4.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 权威移动并拾取背包物品`。提交成功后自动进入第 5 组。
+- [x] 4.1 在 `internal/sim`、`internal/server` 先写失败测试，覆盖移动命令 sequence、空目标/部分合并/交换、同格/越界/空来源拒绝、一次 dirty 发布，以及掉落物先快捷栏后背包、部分拾取、全满保留和多人稳定竞争。
+- [x] 4.2 接入 `CommandMoveInventoryStack` 和 endpoint 翻译；在单写者 tick 原子替换完整 Inventory，掉落物一次调用 `AddStack` 并同步提交余量，复用现有 `RejectInvalidInput`/`RejectInvalidSlot`。
+- [x] 4.3 增加 Memory/TCP 纵向测试，证明相同移动与拾取序列得到相同物品状态、掉落物和拒绝结果；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/server ./internal/network -race -count=1 && go test ./internal/archcheck -count=1'`，并确认 `git diff --check` 通过。
+- [x] 4.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 权威移动并拾取背包物品`。提交成功后自动进入第 5 组。
 
 ## 5. 固定容量背包布局与渲染
 
