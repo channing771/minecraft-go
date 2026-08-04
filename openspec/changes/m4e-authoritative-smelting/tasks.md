@@ -9,11 +9,11 @@
 
 ## 2. 区块固定熔炉槽与原子批量掉落
 
-- [ ] 2.1 在 `internal/world` 先写失败测试，覆盖 32 槽最低索引分配、第 33 个失败、generation 初次为 1/复用递增/耗尽不复用、活动槽方块索引唯一且对应熔炉方块、停用槽只保留 generation、`Clone` 与 `PayloadBytes` 包含熔炉状态、旧引用在复用后失效；`Chunk.Hash` 继续只表示方块。
-- [ ] 2.2 在 `internal/world` 先写失败测试覆盖批量掉落：四堆可完整放入时成功、任一堆放不下时全部掉落物字节不变、同物品同位置先合并、空 stack 忽略、不可放置但已注册的煤炭/粗铁/铁锭可掉落。
-- [ ] 2.3 在 `internal/core` 增加 `FurnaceRef`、`FurnacesPerChunk=32` 与统一 UI 槽常量；在 `internal/world` 实现 `FurnaceSlot`、`Chunk.Furnace`/`SetFurnace`/`FurnaceAt`/`PrepareFurnace`/`DeactivateFurnace`，只用固定数组两次扫描，不建立 map 或索引缓存。
-- [ ] 2.4 实现在掉落物数组副本上预演的 `PrepareDropBatch`/`CommitDropBatch`（固定 `[4]core.ItemStack`），任何余量都返回失败且不修改区块；保留现有单物品 `PrepareDrop`/`CommitDrop`，其合法性改用 `RegisteredItem`。
-- [ ] 2.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/world` 与 `git diff --check` 无输出；提交 `feat: 增加区块固定熔炉状态`，然后自动进入第 3 组。
+- [x] 2.1 在 `internal/world` 先写失败测试，覆盖 32 槽最低索引分配、第 33 个失败、generation 初次为 1/复用递增/耗尽不复用、活动槽方块索引唯一且对应熔炉方块、停用槽只保留 generation、`Clone` 与 `PayloadBytes` 包含熔炉状态、旧引用在复用后失效；`Chunk.Hash` 继续只表示方块。
+- [x] 2.2 在 `internal/world` 先写失败测试覆盖批量掉落：四堆可完整放入时成功、任一堆放不下时全部掉落物字节不变、同物品同位置先合并、空 stack 忽略、不可放置但已注册的煤炭/粗铁/铁锭可掉落。
+- [x] 2.3 在 `internal/core` 增加 `FurnaceRef`、`FurnacesPerChunk=32` 与统一 UI 槽常量；在 `internal/world` 实现 `FurnaceSlot`、`Chunk.Furnace`/`SetFurnace`/`FurnaceAt`/`PrepareFurnace`/`DeactivateFurnace`，只用固定数组两次扫描，不建立 map 或索引缓存。
+- [x] 2.4 实现在掉落物数组副本上预演的 `PrepareDropBatch`/`CommitDropBatch`（固定 `[4]core.ItemStack`），任何余量都返回失败且不修改区块；保留现有单物品 `PrepareDrop`/`CommitDrop`，其合法性改用 `RegisteredItem`。
+- [x] 2.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/world` 与 `git diff --check` 无输出；提交 `feat: 增加区块固定熔炉状态`，然后自动进入第 3 组。
 
 ## 3. 区块存档 schema v4
 
