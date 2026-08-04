@@ -40,11 +40,11 @@
 
 ## 6. 跨容器移动、放置与原子破坏
 
-- [ ] 6.1 在 `internal/sim` 先写失败测试覆盖跨容器事务：物品栏→输入只接受粗铁、→燃料只接受煤炭、输出只能作为来源、空目标整堆、同类合并留余量、合法异类交换、非法交换双方不变、物品栏满时取出失败、过期 generation 或 sequence 不变、多玩家同 tick 按 session/sequence 稳定串行且所有查看者看到同一最终值。
-- [ ] 6.2 先写放置与破坏失败测试：熔炉物品放置同时启用最低槽并扣 1；第 33 炉原子拒绝且不扣物品、不改方块与 revision；铁块放置不分配熔炉槽；破坏空炉掉本体；满内容炉按本体→输入→燃料→输出稳定预演；掉落容量不足时方块、熔炉、掉落物与 revision 全不变；成功后停用槽保留 generation。
-- [ ] 6.3 实现纯 helper `moveFurnaceStack(inventory, furnace, from, to)`，在值副本上按现有 `Inventory.MoveStack` 语义计算并验证最终三格约束，成功才同时写回玩家物品与区块熔炉；只追加一个拒绝理由 `RejectFurnaceCapacity`（sim 稳定值 11、wire ID 12），其余复用 `RejectInvalidInput`/`RejectInvalidSlot`，不创建通用 `Container` 接口。
-- [ ] 6.4 把熔炉特例接在共享交互原子点：放置时先 `PrepareFurnace` 再写方块、启用槽并扣物品；破坏时先 `PrepareDropBatch` 再清方块、停用槽并提交批量掉落；全部变化仍走既有 pending chunk change，炉内部变化用 `touchChunk` 不重复提升 revision。
-- [ ] 6.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world ./internal/network -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 原子操作共享熔炉物品`，然后自动进入第 7 组。
+- [x] 6.1 在 `internal/sim` 先写失败测试覆盖跨容器事务：物品栏→输入只接受粗铁、→燃料只接受煤炭、输出只能作为来源、空目标整堆、同类合并留余量、合法异类交换、非法交换双方不变、物品栏满时取出失败、过期 generation 或 sequence 不变、多玩家同 tick 按 session/sequence 稳定串行且所有查看者看到同一最终值。
+- [x] 6.2 先写放置与破坏失败测试：熔炉物品放置同时启用最低槽并扣 1；第 33 炉原子拒绝且不扣物品、不改方块与 revision；铁块放置不分配熔炉槽；破坏空炉掉本体；满内容炉按本体→输入→燃料→输出稳定预演；掉落容量不足时方块、熔炉、掉落物与 revision 全不变；成功后停用槽保留 generation。
+- [x] 6.3 实现纯 helper `moveFurnaceStack(inventory, furnace, from, to)`，在值副本上按现有 `Inventory.MoveStack` 语义计算并验证最终三格约束，成功才同时写回玩家物品与区块熔炉；只追加一个拒绝理由 `RejectFurnaceCapacity`（sim 稳定值 11、wire ID 12），其余复用 `RejectInvalidInput`/`RejectInvalidSlot`，不创建通用 `Container` 接口。
+- [x] 6.4 把熔炉特例接在共享交互原子点：放置时先 `PrepareFurnace` 再写方块、启用槽并扣物品；破坏时先 `PrepareDropBatch` 再清方块、停用槽并提交批量掉落；全部变化仍走既有 pending chunk change，炉内部变化用 `touchChunk` 不重复提升 revision。
+- [x] 6.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world ./internal/network -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 原子操作共享熔炉物品`，然后自动进入第 7 组。
 
 ## 7. 服务端翻译、私有发布与 Memory/TCP 闭环
 

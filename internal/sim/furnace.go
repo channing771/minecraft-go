@@ -265,3 +265,163 @@ func withinFurnaceReach(eye mgl32.Vec3, chunk core.ChunkPos, blockIndex uint32) 
 	}
 	return center.Sub(eye).Len() <= interactionReach
 }
+
+// moveFurnaceStack 在玩家物品与熔炉的值副本上计算一次整堆移动，
+// 只有两侧最终槽位都满足约束时才返回新值；任何一步失败都返回原值和 false。
+func moveFurnaceStack(
+	inventory core.Inventory,
+	furnace world.FurnaceSlot,
+	from, to uint8,
+) (core.Inventory, world.FurnaceSlot, bool) {
+	if from >= core.FurnaceViewSlots || to >= core.FurnaceViewSlots || from == to {
+		return inventory, furnace, false
+	}
+	if to == core.FurnaceOutputSlot {
+		return inventory, furnace, false
+	}
+	if !inventory.Valid() || !furnace.Valid() || !furnace.Active {
+		return inventory, furnace, false
+	}
+	// 两侧都在玩家物品栏内时复用既有整堆移动语义。
+	if from < core.InventorySlots && to < core.InventorySlots {
+		next, ok := inventory.MoveStack(from, to)
+		return next, furnace, ok
+	}
+
+	source, ok := furnaceViewSlot(inventory, furnace, from)
+	if !ok || source.Item == core.ItemNone {
+		return inventory, furnace, false
+	}
+	target, ok := furnaceViewSlot(inventory, furnace, to)
+	if !ok {
+		return inventory, furnace, false
+	}
+
+	var nextSource, nextTarget core.ItemStack
+	switch {
+	case target.Item == core.ItemNone:
+		nextTarget = source
+	case target.Item == source.Item:
+		space := core.MaxStackCount - target.Count
+		if space == 0 {
+			return inventory, furnace, false
+		}
+		moved := min(space, source.Count)
+		nextTarget = core.ItemStack{Item: target.Item, Count: target.Count + moved}
+		if source.Count > moved {
+			nextSource = core.ItemStack{Item: source.Item, Count: source.Count - moved}
+		}
+	default:
+		// 不同物品交换，交换后两侧约束都必须成立。
+		nextTarget = source
+		nextSource = target
+	}
+
+	nextInventory, nextFurnace := inventory, furnace
+	if nextInventory, nextFurnace, ok = setFurnaceViewSlot(
+		nextInventory, nextFurnace, from, nextSource,
+	); !ok {
+		return inventory, furnace, false
+	}
+	if nextInventory, nextFurnace, ok = setFurnaceViewSlot(
+		nextInventory, nextFurnace, to, nextTarget,
+	); !ok {
+		return inventory, furnace, false
+	}
+	if !nextFurnace.Valid() || !nextInventory.Valid() {
+		return inventory, furnace, false
+	}
+	return nextInventory, nextFurnace, true
+}
+
+// furnaceViewSlot 读取统一栏位 0..38 中的一格。
+func furnaceViewSlot(
+	inventory core.Inventory,
+	furnace world.FurnaceSlot,
+	slot uint8,
+) (core.ItemStack, bool) {
+	switch slot {
+	case core.FurnaceInputSlot:
+		return furnace.Input, true
+	case core.FurnaceFuelSlot:
+		return furnace.Fuel, true
+	case core.FurnaceOutputSlot:
+		return furnace.Output, true
+	default:
+		return inventory.Slot(slot)
+	}
+}
+
+// setFurnaceViewSlot 写入统一栏位 0..38 中的一格，并保持熔炉格的物品约束。
+func setFurnaceViewSlot(
+	inventory core.Inventory,
+	furnace world.FurnaceSlot,
+	slot uint8,
+	stack core.ItemStack,
+) (core.Inventory, world.FurnaceSlot, bool) {
+	switch slot {
+	case core.FurnaceInputSlot:
+		if !allowedFurnaceStack(stack, core.ItemRawIron) {
+			return inventory, furnace, false
+		}
+		furnace.Input = stack
+	case core.FurnaceFuelSlot:
+		if !allowedFurnaceStack(stack, core.ItemCoal) {
+			return inventory, furnace, false
+		}
+		furnace.Fuel = stack
+	case core.FurnaceOutputSlot:
+		if !allowedFurnaceStack(stack, core.ItemIronIngot) {
+			return inventory, furnace, false
+		}
+		furnace.Output = stack
+	default:
+		next, ok := inventory.SetSlot(slot, stack)
+		if !ok {
+			return inventory, furnace, false
+		}
+		inventory = next
+	}
+	return inventory, furnace, true
+}
+
+// allowedFurnaceStack 报告某个堆是否可以放进只接受特定物品的熔炉格。
+func allowedFurnaceStack(stack core.ItemStack, allowed core.ItemID) bool {
+	if stack.Item == core.ItemNone {
+		return stack.Count == 0
+	}
+	return stack.Item == allowed && stack.Count >= 1 && stack.Count <= core.MaxStackCount
+}
+
+// applyFurnaceMove 处理跨容器移动命令，成功时同时提交玩家物品与区块熔炉。
+func (engine *Engine) applyFurnaceMove(
+	id SessionID,
+	command Command,
+	pending map[core.ChunkKey]*pendingChunkChanges,
+) (RejectReason, bool) {
+	session := engine.sessions[id]
+	if session == nil || session.player == nil || session.player.lifecycle != PlayerActive {
+		return RejectPlayerNotReady, true
+	}
+	if !session.viewFurnace || session.furnace != command.Furnace {
+		return RejectInvalidInput, true
+	}
+	chunk, furnace, ok := engine.furnaceView(command.Furnace)
+	if !ok {
+		return RejectInvalidInput, true
+	}
+	nextInventory, nextFurnace, ok := moveFurnaceStack(
+		session.player.inventory, furnace, command.Slot, command.ToSlot,
+	)
+	if !ok {
+		return RejectInvalidInput, true
+	}
+	chunk.SetFurnace(int(command.Furnace.Slot), nextFurnace)
+	engine.touchChunk(core.ChunkKey{
+		Dimension: command.Furnace.Dimension,
+		Pos:       command.Furnace.Chunk,
+	}, pending)
+	session.player.inventory = nextInventory
+	session.player.inventoryDirty = true
+	return 0, false
+}

@@ -403,17 +403,18 @@ func (state PlayerState) Validate() error {
 type RejectReason string
 
 const (
-	RejectInvalidRay     RejectReason = "invalid_ray"
-	RejectNoTarget       RejectReason = "no_target"
-	RejectChunkNotReady  RejectReason = "chunk_not_ready"
-	RejectProtectedBlock RejectReason = "protected_block"
-	RejectInvalidBlock   RejectReason = "invalid_block"
-	RejectOccupied       RejectReason = "occupied"
-	RejectInvalidInput   RejectReason = "invalid_input"
-	RejectPlayerNotReady RejectReason = "player_not_ready"
-	RejectInvalidSlot    RejectReason = "invalid_slot"
-	RejectHotbarFull     RejectReason = "hotbar_full"
-	RejectDropCapacity   RejectReason = "drop_capacity"
+	RejectInvalidRay      RejectReason = "invalid_ray"
+	RejectNoTarget        RejectReason = "no_target"
+	RejectChunkNotReady   RejectReason = "chunk_not_ready"
+	RejectProtectedBlock  RejectReason = "protected_block"
+	RejectInvalidBlock    RejectReason = "invalid_block"
+	RejectOccupied        RejectReason = "occupied"
+	RejectInvalidInput    RejectReason = "invalid_input"
+	RejectPlayerNotReady  RejectReason = "player_not_ready"
+	RejectInvalidSlot     RejectReason = "invalid_slot"
+	RejectHotbarFull      RejectReason = "hotbar_full"
+	RejectDropCapacity    RejectReason = "drop_capacity"
+	RejectFurnaceCapacity RejectReason = "furnace_capacity"
 )
 
 type CommandRejected struct {

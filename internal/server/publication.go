@@ -419,6 +419,8 @@ func networkRejectReason(reason sim.RejectReason) (network.RejectReason, bool) {
 		return network.RejectHotbarFull, true
 	case sim.RejectDropCapacity:
 		return network.RejectDropCapacity, true
+	case sim.RejectFurnaceCapacity:
+		return network.RejectFurnaceCapacity, true
 	default:
 		return "", false
 	}

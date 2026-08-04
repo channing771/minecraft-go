@@ -372,7 +372,7 @@ func TestSmallPacketRejectsMalformedPayloads(t *testing.T) {
 			return err
 		}},
 		{"unknown rejection reason", func() error {
-			_, err := decodeServerControlPayload(StatePlay, 4, []byte{0, 0, 0, 0, 0, 0, 0, 0, 12})
+			_, err := decodeServerControlPayload(StatePlay, 4, []byte{0, 0, 0, 0, 0, 0, 0, 0, 13})
 			return err
 		}},
 	}

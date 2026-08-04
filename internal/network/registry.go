@@ -210,6 +210,8 @@ func commandRejectReasonID(reason RejectReason) (uint8, bool) {
 		return 10, true
 	case RejectDropCapacity:
 		return 11, true
+	case RejectFurnaceCapacity:
+		return 12, true
 	default:
 		return 0, false
 	}
@@ -239,6 +241,8 @@ func commandRejectReasonForID(id uint8) (RejectReason, bool) {
 		return RejectHotbarFull, true
 	case 11:
 		return RejectDropCapacity, true
+	case 12:
+		return RejectFurnaceCapacity, true
 	default:
 		return "", false
 	}

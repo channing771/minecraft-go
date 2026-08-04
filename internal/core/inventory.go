@@ -139,3 +139,14 @@ func (inventory Inventory) MoveStack(from, to uint8) (Inventory, bool) {
 	}
 	return inventory, true
 }
+
+// SetSlot 返回把统一索引 slot 写为 stack 后的新值；
+// 索引越界或物品未注册时返回原值和 false。
+func (inventory Inventory) SetSlot(slot uint8, stack ItemStack) (Inventory, bool) {
+	if slot >= InventorySlots || !stack.Valid() {
+		return inventory, false
+	}
+	next := inventory
+	next.setSlot(slot, stack)
+	return next, true
+}

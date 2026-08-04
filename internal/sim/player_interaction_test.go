@@ -223,6 +223,16 @@ func readyFlatPlayerRestored(
 	return readyFlatPlayerInventory(t, blocks, core.Inventory{Hotbar: hotbar})
 }
 
+// readyFlatPlayerInventoryWithBlocks 用完整物品状态和额外方块构造已 Ready 的玩家。
+func readyFlatPlayerInventoryWithBlocks(
+	t *testing.T,
+	blocks map[core.BlockPos]core.BlockID,
+	inventory core.Inventory,
+) (*sim.Engine, sim.SessionID) {
+	t.Helper()
+	return readyFlatPlayerInventory(t, blocks, inventory)
+}
+
 // readyFlatPlayerWithInventory 用完整物品状态构造一个已 Ready 的平坦世界玩家。
 func readyFlatPlayerWithInventory(
 	t *testing.T,

@@ -95,6 +95,7 @@ func TestCommandRejectReasonIDsAreFrozen(t *testing.T) {
 		{RejectProtectedBlock, 4}, {RejectInvalidBlock, 5}, {RejectOccupied, 6},
 		{RejectInvalidInput, 7}, {RejectPlayerNotReady, 8},
 		{RejectInvalidSlot, 9}, {RejectHotbarFull, 10}, {RejectDropCapacity, 11},
+		{RejectFurnaceCapacity, 12},
 	}
 	for _, tc := range reasons {
 		got, ok := commandRejectReasonID(tc.reason)
@@ -112,7 +113,7 @@ func TestCommandRejectReasonIDsAreFrozen(t *testing.T) {
 	if _, ok := commandRejectReasonForID(0); ok {
 		t.Fatal("zero rejection reason ID decoded")
 	}
-	if _, ok := commandRejectReasonForID(12); ok {
+	if _, ok := commandRejectReasonForID(13); ok {
 		t.Fatal("unknown rejection reason ID decoded")
 	}
 }
