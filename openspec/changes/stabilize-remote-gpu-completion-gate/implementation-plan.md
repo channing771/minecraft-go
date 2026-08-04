@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在不提高任何阈值的前提下，把 `remote_gpu_complete` 纠正为 `Submit + Poll(true)` 的 2048 样本 scenario v8 指标，并建立不含 M4D 实现的 M5 v8 基线。
+**Goal:** 在不提高任何阈值的前提下，把 `remote_gpu_complete` 纠正为传输收尾完成后的 `Submit + Poll(true)` 2048 样本 scenario v8 指标，并建立不含 M4D 实现的 M5 v8 基线。
 
-**Architecture:** 在 M4D 实现前基点 `0eace21` 的隔离 worktree 中修改共用性能报告契约、benchmark producer 和 perfcheck validator。正式 Memory/TCP 基线链通过后，只把后续代码与基线提交线性带回当前 `main`，再恢复 M4D 验收。
+**Architecture:** 在 M4D 实现前基点 `0eace21` 的隔离 worktree 中修改共用性能报告契约、benchmark producer、服务端可信观察者阶段屏障和 perfcheck validator。正式 Memory/TCP 基线链通过后，只把后续代码与基线提交线性带回当前 `main`，再恢复 M4D 验收。
 
 **Tech Stack:** Go 1.26.0（GVM）、`internal/gfx` WebGPU 抽象、Metal headless device、OpenSpec、Go 标准测试工具。
 
@@ -13,7 +13,7 @@
 - 所有 Go 命令 MUST 先执行 `gvm use go1.26.0`，不得下载或安装另一套 Go。
 - 自动测试与 benchmark MUST 使用 headless device 和离屏纹理，不得创建、启动或聚焦游戏窗口。
 - `remote_gpu_complete` MUST 恰好采集 2048 个样本；still/flying workload、2560x1440 framebuffer、20% 相对阈值和全部绝对门禁保持不变。
-- Memory/TCP 正式报告各执行恰好一次；任一步失败立即停止，不得重跑、筛选输出或覆盖基线。
+- 每个经授权的精确 HEAD 正式链中，Memory/TCP 报告各执行恰好一次；旧 HEAD 失败后不得重跑、筛选输出或覆盖基线，只有阶段屏障代码提交后才能按新 HEAD、新路径和新授权开启新链。
 - 不新增依赖、GPU timestamp query、重试、窗口中位数、原始样本文件或交互运行时分支。
 - 当前 `main` 的 `README.md`、`docs/notes/lan-server.md`、`internal/server/tcp_integration_test.go`、M4D `tasks.md` 和 `midscene_run/` MUST 保持原样，直到性能分支集成完成。
 - 修改任何 Go symbol 前执行 GitNexus upstream impact；服务不可用时记录证据，并用 `rg` 列出全部调用者。提交前执行 `detect_changes`；工具不可用时使用精确 staged diff 和调用链清单替代。
@@ -357,18 +357,43 @@ git commit -m "fix: 稳定 GPU 完成性能门禁"
 
 ---
 
-### Task 4: 全量验证并执行一次性 M5 v8 正式链
+### Task 4: 修复探针阶段屏障并执行新的 M5 v8 正式链
 
 **Files:**
+- Modify: `internal/server/server.go`
+- Modify: `internal/server/attached_test.go`
+- Modify: `cmd/mcgo/benchmark.go`
+- Modify: `cmd/mcgo/benchmark_v6_test.go`
 - Modify after successful formal chain: `docs/notes/perf-baseline-m5.json`
 - Modify after successful formal chain: `docs/notes/perf-baseline-m5.md`
 - Modify: `openspec/changes/stabilize-remote-gpu-completion-gate/tasks.md`
 
 **Interfaces:**
-- Consumes: 已提交的 scenario v8 producer/validator。
-- Produces: 不含 M4D 的 M5 v8 Memory 基线及一次 TCP parity 证据。
+- Consumes: 已提交的 scenario v8 producer/validator，以及首轮失败报告。
+- Produces: 同步 `Server.CloseTrustedObserver` 屏障、不含 M4D 的 M5 v8 Memory 基线及一次 TCP parity 证据。
 
-- [ ] **Step 1: 全量验证代码提交**
+- [x] **Step 1: 冻结首轮正式链失败证据**
+
+提交 `4bda1bf309b4dfe3dbbc4d64c58772a5bbf6d48c` 上的 Memory/TCP 各执行一次。Memory 自检通过，TCP 报告生成成功，但跨 transport 门禁因 GPU p99 `1.338333ms → 2.549958ms`（`90.5%`）失败。Memory/TCP SHA-256 分别为 `a2156dde788e35f26d47fd3b1ed5e0b81ac047761114e8d4b9b1598a50ffd005` 与 `e427a24d493a90d762ae15cea329aa6325093248d1e9ae3afa05ad66d361500f`。不得重跑、复用或提升这两份报告。
+
+- [ ] **Step 2: 先写同步 observer 收尾失败测试**
+
+对 `runBenchmark`、`closeClientSession` 和 `detachTrustedObserverLocked` 完成 impact/fallback。新增 server 测试，要求显式关闭在返回前移除 observer、关闭 endpoint 且重复调用安全；新增 headless benchmark 测试，要求 observer 收尾发生在首个 GPU 时钟读取前。先运行定向测试并确认红灯。
+
+- [ ] **Step 3: 最小实现并提交阶段屏障**
+
+在 `Server` 增加幂等 `CloseTrustedObserver`，只复用 `stepMu` 与 `detachTrustedObserverLocked`。benchmark 在 `measureGPUCompletion` 前先调用它，再调用 `closeClientSession`；不增加 sleep、轮询、重试、依赖或 scenario 版本。执行：
+
+```bash
+zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./cmd/mcgo ./cmd/perfcheck ./internal/client -race -count=1 && go test ./internal/archcheck -count=1'
+gofmt -l internal/server cmd/mcgo cmd/perfcheck internal/client
+openspec validate --all --strict --no-interactive
+git diff --check
+```
+
+完成 `detect_changes` 或 fallback，勾选 1.6–1.8，只暂存屏障代码、测试与本 change，提交 `fix: 隔离 GPU 探针传输收尾`。
+
+- [ ] **Step 4: 全量验证并生成新的精确正式路径**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'
@@ -376,79 +401,23 @@ openspec validate --all --strict --no-interactive
 git diff --check
 ```
 
-预期：全部通过、`gofmt -l .` 无输出、无窗口出现。
+从屏障修复后的新 HEAD 派生 `/tmp/mcgo-m5-v8-<head12>-{memory,tcp}.json`，确认路径不存在、无遗留进程，并重新记录硬件/OS/Go/电源/负载与 M2 哈希。向用户报告新 HEAD、展开后的路径及一次性边界，取得明确确认后才能继续。
 
-- [ ] **Step 2: 生成精确正式路径并预检**
+- [ ] **Step 5: 使用新路径恰好运行一次 Memory 并自检**
 
-```bash
-perf_v8_head="$(git rev-parse HEAD)"
-perf_v8_head12="$(git rev-parse --short=12 HEAD)"
-perf_v8_memory="/tmp/mcgo-m5-v8-${perf_v8_head12}-memory.json"
-perf_v8_tcp="/tmp/mcgo-m5-v8-${perf_v8_head12}-tcp.json"
-git status --short
-pgrep -fl 'mcgo|mcgod|benchmark'
-test ! -e "$perf_v8_memory"
-test ! -e "$perf_v8_tcp"
-shasum -a 256 docs/notes/perf-baseline.json docs/notes/perf-baseline.md
-```
+使用 GVM 和 headless benchmark 生成新 Memory 报告，以自身作为 baseline/current 运行 `cmd/perfcheck --max-regression 0.20`。确认 scenario=8、transport=memory、hardware=`Apple M5 / 24GiB`、framebuffer=`2560x1440`、GPU samples=2048；任一失败立即停止，不执行 TCP。
 
-同时记录 `system_profiler SPHardwareDataType SPSoftwareDataType`、`pmset -g batt`、`pmset -g custom` 和 `uptime`。向用户报告完整 `$perf_v8_head`、两个展开后的绝对路径及一次性边界；取得明确确认后才能继续。
+- [ ] **Step 6: 使用新路径恰好运行一次 TCP 并比较**
 
-- [ ] **Step 3: 恰好运行一次 Memory 并自检**
+只在 Step 5 通过后生成一次 TCP 报告，以新 Memory 为 baseline 执行相同 20% 门禁。确认同硬件、同场景、同 framebuffer 和 GPU samples=2048；任一失败立即停止且不重跑。
 
-```bash
-perf_v8_head12="$(git rev-parse --short=12 HEAD)"
-perf_v8_memory="/tmp/mcgo-m5-v8-${perf_v8_head12}-memory.json"
-zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '$perf_v8_memory'"
-zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline '$perf_v8_memory' --current '$perf_v8_memory' --max-regression 0.20"
-jq '{scenario_version,transport,hardware,framebuffer,gpu:.multiplayer.remote_gpu_complete}' "$perf_v8_memory"
-```
+- [ ] **Step 7: 仅在新正式链全部通过后提升基线**
 
-预期：scenario=8、transport=memory、hardware=`Apple M5 / 24GiB`、framebuffer=`2560x1440`、GPU samples=2048；任一失败立即停止，不执行 TCP。
+使用 `apply_patch` 把新 Memory JSON 的精确内容写入 `docs/notes/perf-baseline-m5.json`，不得手工修改数值。中文 provenance 同时记录 v7 波动、首轮 v8 失败证据、屏障修复提交、新正式链 HEAD/命令、Memory/TCP SHA-256、门禁输出，以及“每条正式链各执行一次、失败链未重跑、无窗口、M2 基线未改”。
 
-- [ ] **Step 4: 恰好运行一次 TCP 并比较**
+- [ ] **Step 8: 验证精确字节并提交基线**
 
-只在 Step 3 全部通过后执行：
-
-```bash
-perf_v8_head12="$(git rev-parse --short=12 HEAD)"
-perf_v8_memory="/tmp/mcgo-m5-v8-${perf_v8_head12}-memory.json"
-perf_v8_tcp="/tmp/mcgo-m5-v8-${perf_v8_head12}-tcp.json"
-zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '$perf_v8_tcp'"
-zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline '$perf_v8_memory' --current '$perf_v8_tcp' --max-regression 0.20"
-jq '{scenario_version,transport,hardware,framebuffer,gpu:.multiplayer.remote_gpu_complete}' "$perf_v8_tcp"
-```
-
-预期：scenario=8、transport=tcp、同硬件/同 framebuffer、GPU samples=2048，跨 transport 比较通过；任一失败立即停止。
-
-- [ ] **Step 5: 仅在全部通过后提升基线**
-
-使用 `apply_patch` 把 Memory JSON 的精确内容写入 `docs/notes/perf-baseline-m5.json`，不得手工修改任何数值。更新 `docs/notes/perf-baseline-m5.md`，记录：
-
-- 被替代的 v7 基线提交 `d1c383102a28082753eec7657116101c8ae6a28b`；
-- M4D v7 失败值 `2.618ms → 4.909ms` 及相同代码历史波动证据；
-- v8 精确 HEAD、硬件、OS、Go、电源、负载、命令；
-- Memory/TCP SHA-256 与门禁输出；
-- “各执行一次、未重跑、无窗口、M2 基线未改”。
-
-- [ ] **Step 6: 验证精确字节并提交基线**
-
-```bash
-perf_v8_head12="$(git rev-parse --short=12 HEAD)"
-perf_v8_memory="/tmp/mcgo-m5-v8-${perf_v8_head12}-memory.json"
-perf_v8_tcp="/tmp/mcgo-m5-v8-${perf_v8_head12}-tcp.json"
-cmp -s docs/notes/perf-baseline-m5.json "$perf_v8_memory"
-shasum -a 256 "$perf_v8_memory" "$perf_v8_tcp"
-zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current docs/notes/perf-baseline-m5.json --max-regression 0.20'
-openspec validate --all --strict --no-interactive
-git diff --check
-```
-
-确认 M2 哈希与 Step 2 完全一致。勾选 2.1–3.2，完成 `detect_changes` 或 fallback，只暂存两个 M5 文件和本 change，提交：
-
-```bash
-git commit -m "chore: 建立 M5 scenario v8 基线"
-```
+确认 M5 JSON 与新 Memory 临时报告逐字一致并通过自比较，M2 哈希未变；执行受影响测试、OpenSpec strict、`gofmt -l .` 与 `git diff --check`。勾选 2.5–3.2，完成 `detect_changes` 或 fallback，只暂存两个 M5 文件和本 change，提交 `chore: 建立 M5 scenario v8 基线`。
 
 ---
 
@@ -459,7 +428,7 @@ git commit -m "chore: 建立 M5 scenario v8 基线"
 - Resume afterward: `openspec/changes/m4d-authoritative-crafting/tasks.md`
 
 **Interfaces:**
-- Consumes: 隔离分支的 `fix: 稳定 GPU 完成性能门禁` 与 `chore: 建立 M5 scenario v8 基线` 两个提交。
+- Consumes: 隔离分支的 `fix: 稳定 GPU 完成性能门禁`、`fix: 隔离 GPU 探针传输收尾` 与 `chore: 建立 M5 scenario v8 基线` 三个提交。
 - Produces: 当前 `main` 上的 v8 代码/基线，以及可恢复执行的 M4D 5.5。
 
 - [ ] **Step 1: 列出并确认待带入提交**
@@ -471,11 +440,11 @@ git log --reverse --format='%H %s' 0eace21..codex/stabilize-remote-gpu-completio
 git status --short
 ```
 
-跳过隔离分支上的规划 cherry-pick；只选择消息为 `fix: 稳定 GPU 完成性能门禁` 和 `chore: 建立 M5 scenario v8 基线` 的两个精确哈希。
+跳过隔离分支上的规划 cherry-pick；只选择消息为 `fix: 稳定 GPU 完成性能门禁`、`fix: 隔离 GPU 探针传输收尾` 和 `chore: 建立 M5 scenario v8 基线` 的三个精确哈希。
 
 - [ ] **Step 2: 一次一个线性带入**
 
-依次对 Step 1 得到的两个精确哈希执行 `git cherry-pick`，并把该哈希作为唯一参数。每次后运行 `git status --short`，确认 M4D 四个未提交文件和 `midscene_run/` 仍存在且未暂存；冲突时停止并报告，不猜测覆盖方向。
+依次对 Step 1 得到的三个精确哈希执行 `git cherry-pick`，并把该哈希作为唯一参数。每次后运行 `git status --short`，确认 M4D 四个未提交文件和 `midscene_run/` 仍存在且未暂存；冲突时停止并报告，不猜测覆盖方向。
 
 - [ ] **Step 3: 在 main 全量验证**
 

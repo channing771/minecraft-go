@@ -4,6 +4,8 @@
 
 M4D 已在 `main` 上完成前四组并保留第五组未提交改动。新的 v8 基线如果直接在当前 `main` 上生成，就包含 M4D 实现，无法作为 M4D 前后比较起点。因此性能修复必须从 M4D 实现前的已提交基点 `0eace21` 隔离建立，再合入当前分支。
 
+首轮 v8 正式链在提交 `4bda1bf309b4dfe3dbbc4d64c58772a5bbf6d48c` 上按约束各执行一次：Memory 自检通过，TCP 报告也生成成功，但跨 transport 门禁因 `remote_gpu_complete` p99 从 `1.338333ms` 升至 `2.549958ms` 而失败。两份报告的 GPU p50 几乎相同，TCP 的 FPS、tick、存档与多数多人指标相同或更好；历史 v7 还显示相同代码的 Memory p99 曾从 `2.618ms` 波动至 `4.909ms`。因此证据排除了 TCP 业务路径和 M4D 回退，指向 GPU 探针前的生命周期边界与相关尾部噪声。
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -58,19 +60,31 @@ M4D 已在 `main` 上完成前四组并保留第五组未提交改动。新的 v
 
 单元验证覆盖计时事件顺序、2048 样本、v6/v7 兼容、v8 下限、场景不匹配和阈值不变；最终运行 `go test ./... -race -count=1`、`go vet ./...`、架构检查、`gofmt -l .`、OpenSpec strict 和 `git diff --check`。所有 benchmark 保持 headless。
 
+### 6. GPU 探针使用显式 trusted observer 收尾屏障
+
+首轮实现调用 `app.closeClientSession(nil)` 后立即进入 GPU 探针。该调用只关闭客户端 receiver；内置服务端继续运行，trusted observer 的 server endpoint 没有 reader，只能在 writer 的后续发送失败后通过新 goroutine 异步卸载，并且卸载还要取得 `stepMu`。Memory 共享关闭状态会更快暴露失败，TCP 对端关闭传播则依赖内核 I/O 时序；两者都不能作为稳定的测量屏障。
+
+在 `internal/server.Server` 增加幂等的 `CloseTrustedObserver`。它取得 `stepMu`，若 observer 存在则直接调用既有 `detachTrustedObserverLocked`；该路径同步从 registry/engine 移除 observer、取消 session 并关闭 server endpoint，observer 已不存在时直接返回。benchmark 在 GPU 探针前先调用该方法，再关闭客户端 receiver；因此 Memory/TCP 都由同一个服务端所有权边界完成收尾，不依赖 writer 失败、休眠或超时轮询。
+
+单元测试锁定同步卸载、endpoint 关闭和重复调用安全；headless benchmark 测试锁定 observer 收尾发生在首个 GPU 时钟读取前。保留 2048 样本、`Submit + Poll(true)` 计时范围、20% 阈值和所有绝对门禁，不保存原始样本。
+
+v8 尚未合入 `main`，也没有可接受的 v8 基线，因此该修复仍属于 scenario v8 的建立过程，无需再升 v9。首轮 v8 报告及 SHA-256 只作为失败证据；修复提交后必须记录新的精确 HEAD、全新 Memory/TCP 路径并重新取得一次性执行授权。
+
 ## Risks / Trade-offs
 
 - [2048 样本仍包含 OS、Go runtime 和 Metal 驱动调度] → 指标本来就是 CPU 发起到 queue 完成，不声称纯 GPU timestamp；扩大样本只减少少数孤立事件对 p99 的支配，不隐藏持续退化。
 - [额外样本增加正式链时间] → 只增加数秒离线测量，不进入交互热路径；不再增加窗口或重复运行。
 - [从旧基点分支会产生一次非线性合入] → 基线必须排除 M4D；分支只修改性能代码、基线和本 change，合入前严格检查与 M4D 工作区的重叠文件。
 - [正式 v8 链仍可能失败] → 保留输出和证据后停止，不修改阈值、样本数或基线；形成新假设后另行更新本 change。
+- [显式卸载与异步 writer 失败竞态] → `CloseTrustedObserver` 在 `stepMu` 下幂等操作当前 generation；延迟到达的旧 detach 通过既有 generation 检查成为 no-op。
 - [当前 M5 文件内容从 v7 更新为 v8] → 中文 provenance 明确记录被替代场景和提交；Git 历史保留 v7 精确字节，M2 文件完全不动。
 
 ## Migration Plan
 
 1. 提交并严格校验本 change 的规划；保留 M4D 未提交第五组改动和 `midscene_run/`。
 2. 从 `0eace21` 创建隔离分支，带入规划，按 TDD 实现 v8 并提交；确认没有 M4D 生产代码。
-3. 完成全量自动验证，记录精确正式 HEAD 和全新临时路径，取得执行确认后运行一次 Memory、自检、一次 TCP 和跨 transport 比较。
-4. 仅在全部通过后更新 M5 当前基线与中文 provenance，验证 M2 哈希未变并提交。
-5. 把性能分支合入当前 `main`，用 M5 v8 基线执行一次 M4D Memory/TCP 当前报告；通过后恢复 M4D 第五组提交与最终收尾。
-6. 回退时恢复 v7 M5 基线提交并撤销 v8 生产代码；不同 scenario 报告始终拒绝相对比较，不需要数据迁移。
+3. 保留首轮 v8 Memory/TCP 报告、哈希和失败输出，不重跑、不提升；提交同步 observer 收尾屏障及测试。
+4. 重新完成全量自动验证，记录新的精确 HEAD 和全新临时路径，取得执行确认后运行一条新的 Memory/TCP 各一次正式链。
+5. 仅在全部通过后更新 M5 当前基线与中文 provenance，验证 M2 哈希未变并提交。
+6. 把性能分支合入当前 `main`，用 M5 v8 基线执行一次 M4D Memory/TCP 当前报告；通过后恢复 M4D 第五组提交与最终收尾。
+7. 回退时恢复 v7 M5 基线提交并撤销 v8 生产代码；不同 scenario 报告始终拒绝相对比较，不需要数据迁移。

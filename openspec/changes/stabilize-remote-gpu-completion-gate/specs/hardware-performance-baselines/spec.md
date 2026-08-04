@@ -12,6 +12,11 @@
 - **WHEN** 无窗口报告生成、完整性门禁或跨 transport 比较任一步失败
 - **THEN** 项目 MUST 停止正式链，不得重跑失败步骤、放宽阈值、提升诊断报告或创建和覆盖正式基线
 
+#### Scenario: 阶段屏障修复后使用新的正式链
+- **GIVEN** 一条 v8 正式链已因 GPU 完成尾部退化停止，且报告揭示测量阶段缺少同步收尾屏障
+- **WHEN** 项目提交阶段屏障修复并准备再次建立基线
+- **THEN** 失败报告 MUST 只保留为诊断证据，系统 MUST 使用新的精确 HEAD、两个全新路径和新的明确授权执行 Memory/TCP 各一次，不得把新执行视为对旧 HEAD 失败步骤的重跑
+
 #### Scenario: v7 失败报告不得提升
 - **GIVEN** M4D 的 scenario v7 报告因 `remote_gpu_complete` 尾部波动失败
 - **WHEN** scenario v8 修复完成并准备重建 M5 基线

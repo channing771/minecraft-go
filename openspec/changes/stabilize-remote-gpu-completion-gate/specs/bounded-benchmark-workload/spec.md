@@ -8,6 +8,15 @@ scenario v8 的 `remote_gpu_complete` SHALL 在固定 2560x1440 离屏目标上�
 - **WHEN** benchmark 记录一次 `remote_gpu_complete` 样本
 - **THEN** 计时 MUST 紧邻命令提交开始并在阻塞轮询返回时结束，准备、编码和释放事件均位于计时区间之外
 
+#### Scenario: 首个样本等待传输收尾完成
+- **GIVEN** benchmark 的 still/flying 阶段已经结束
+- **WHEN** 系统关闭客户端会话并准备采集 `remote_gpu_complete`
+- **THEN** 服务端 MUST 显式卸载 trusted observer 并同步关闭其 endpoint，且首个计时样本 MUST 在该操作返回后才开始
+
+#### Scenario: 不依赖异步 writer 失败形成屏障
+- **WHEN** Memory 或 TCP 对端关闭尚未触发 trusted observer writer 失败
+- **THEN** benchmark MUST 仍能主动完成 observer 卸载，不得通过休眠、轮询超时或等待下一次发送来开始 GPU 采样
+
 #### Scenario: v8 报告样本完整
 - **WHEN** benchmark 成功生成一份 scenario v8 报告
 - **THEN** `remote_gpu_complete.samples` MUST 等于 `2048`，且 p50、p95、p99 和 max MUST 完整、为正并保持单调
