@@ -38,6 +38,10 @@ scenario v8 的 `remote_gpu_complete` SHALL 在固定 2560x1440 离屏目标上�
 - **WHEN** baseline 与 current 都是完整的 scenario v8 报告
 - **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
 
+#### Scenario: v7 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v7 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
 #### Scenario: v7 与 v8 不静默混比
 - **WHEN** baseline 为 scenario v7、current 为 scenario v8
 - **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致
@@ -46,7 +50,7 @@ scenario v8 的 `remote_gpu_complete` SHALL 在固定 2560x1440 离屏目标上�
 - **WHEN** baseline 为 scenario v6、current 为 scenario v7 且没有显式迁移授权
 - **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
 
-#### Scenario: 既有 v6 到 v7 显式迁移保持有效
+#### Scenario: 显式授权同硬件迁移
 - **WHEN** 调用方显式授权 `6:7` 迁移且两份报告的硬件身份一致
 - **THEN** 比较器 MUST 执行既有完整性与绝对门禁，并跳过不同 workload 之间无意义的相对回归判定
 
@@ -54,7 +58,7 @@ scenario v8 的 `remote_gpu_complete` SHALL 在固定 2560x1440 离屏目标上�
 - **WHEN** 调用方单独读取一份完整 scenario v6 或 v7 报告
 - **THEN** 比较器 MUST 按该历史场景原有的完整性规则校验，不得要求 2048 个 GPU 样本
 
-#### Scenario: 跨硬件场景迁移仍被拒绝
+#### Scenario: 跨硬件迁移
 - **WHEN** 两份不同 scenario 报告的硬件身份不同
 - **THEN** 比较器 MUST 拒绝比较，且不得以场景升级为由执行跨硬件归一化
 
