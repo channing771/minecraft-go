@@ -803,6 +803,49 @@ func TestApplicationMiningOverlayUsesOnlyConfirmedPlayerState(t *testing.T) {
 	}
 }
 
+// 杀死变异：旧或重复 PlayerState 不得回滚 app 的已确认 tick、采掘条或 reset 生命周期。
+func TestApplicationMiningOverlayIgnoresStaleAndEqualPlayerState(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	active := network.PlayerState{
+		ServerTick: 2, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 0.5}, OnGround: true, Ready: true,
+		MiningActive: true, MiningTarget: core.BlockPos{X: 1, Y: 10, Z: 2},
+		MiningProgressTicks: 6, MiningRequiredTicks: 15, MiningHarvestable: true,
+	}
+	sendInteractiveServerMessage(t, serverEndpoint, active)
+	app.drainServerMessages(1)
+	want := render.MiningOverlay{
+		Active: true, ProgressTicks: 6, RequiredTicks: 15, Harvestable: true,
+	}
+	app.inventoryOpen = true
+	app.inventorySource = 8
+
+	for _, tick := range []uint64{1, 2} {
+		sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+			ServerTick: tick, Dimension: core.Overworld,
+			Position: mgl32.Vec3{0.5, 10, 0.5}, OnGround: true, Ready: true, Reset: true,
+		})
+		app.drainServerMessages(1)
+		if app.serverTick != 2 || app.miningOverlay != want {
+			t.Fatalf("tick=%d 后 app tick/overlay=%d/%+v，想要 2/%+v",
+				tick, app.serverTick, app.miningOverlay, want)
+		}
+		if !app.inventoryOpen || app.inventorySource != 8 {
+			t.Fatalf("tick=%d 的旧 reset 改写界面: open=%v source=%d",
+				tick, app.inventoryOpen, app.inventorySource)
+		}
+	}
+
+	newer := active
+	newer.ServerTick = 3
+	newer.MiningProgressTicks = 7
+	sendInteractiveServerMessage(t, serverEndpoint, newer)
+	app.drainServerMessages(1)
+	if app.serverTick != 3 || app.miningOverlay.ProgressTicks != 7 {
+		t.Fatalf("更新状态未生效: tick/overlay=%d/%+v", app.serverTick, app.miningOverlay)
+	}
+}
+
 // 杀死变异：reset 或连接关闭遗漏清理会把上一会话进度留在下一帧。
 func TestApplicationMiningOverlayClearsOnResetAndSessionClose(t *testing.T) {
 	for _, test := range []struct {

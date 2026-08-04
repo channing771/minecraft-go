@@ -1028,7 +1028,9 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 		}
 		if state, ok := message.(network.PlayerState); ok {
-			a.serverTick = state.ServerTick
+			if state.ServerTick <= a.serverTick {
+				continue
+			}
 			result, err := a.predictor.ApplyPlayerState(state, client.MirrorCollisionSource{
 				Mirror:    a.mirror,
 				Dimension: core.Overworld,
@@ -1037,6 +1039,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 				a.closeClientSession(err)
 				return
 			}
+			a.serverTick = state.ServerTick
 			if state.Reset || !state.MiningActive {
 				a.miningOverlay = render.MiningOverlay{}
 			} else {
