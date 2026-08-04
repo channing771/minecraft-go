@@ -20,10 +20,10 @@
 
 ## 4. 固定合成入口与应用接线
 
-- [ ] 4.1 在 `internal/render` 与 `cmd/mcgo` 先写 headless 失败测试，覆盖背包打开时固定配方行、enabled/disabled 状态、配方命中边界、有效点击只发一次、不可用不发送、发送后不改镜像、清除来源选择，以及关闭/断线/reset 行为不回退。
-- [ ] 4.2 扩展现有 `HotbarRenderer` 的固定 CPU/GPU 容量和共用几何，绘制 `4 石头 → 4 石砖` 与一次合成按钮；增加一个纯配方命中函数，不新增列表、第二套 pipeline 或每帧对象。
-- [ ] 4.3 在 `cmd/mcgo` 的背包点击路径用最后确认 Inventory 调用同一 `Craft` 函数判断可用性，成功命中时发送一次 recipe ID `1` 并清除来源选择；保持输入抑制、中性移动、鼠标捕获和服务端 tick 行为不变。
-- [ ] 4.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./internal/client ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`；测试不得启动或聚焦游戏窗口，确认满容量 allocation、buffer 边界、`gofmt` 和 `git diff --check` 通过；提交 `feat: 接入石砖合成界面`，然后自动进入第 5 组。
+- [x] 4.1 在 `internal/render` 与 `cmd/mcgo` 先写 headless 失败测试，覆盖背包打开时固定配方行、enabled/disabled 状态、配方命中边界、有效点击只发一次、不可用不发送、发送后不改镜像、清除来源选择，以及关闭/断线/reset 行为不回退。
+- [x] 4.2 扩展现有 `HotbarRenderer` 的固定 CPU/GPU 容量和共用几何，绘制 `4 石头 → 4 石砖` 与一次合成按钮；增加一个纯配方命中函数，不新增列表、第二套 pipeline 或每帧对象。
+- [x] 4.3 在 `cmd/mcgo` 的背包点击路径用最后确认 Inventory 调用同一 `Craft` 函数判断可用性，成功命中时发送一次 recipe ID `1` 并清除来源选择；保持输入抑制、中性移动、鼠标捕获和服务端 tick 行为不变。
+- [x] 4.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./internal/client ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`；测试不得启动或聚焦游戏窗口，确认满容量 allocation、buffer 边界、`gofmt` 和 `git diff --check` 通过；提交 `feat: 接入石砖合成界面`，然后自动进入第 5 组。
 
 ## 5. 重启闭环、兼容文档与专项门禁
 

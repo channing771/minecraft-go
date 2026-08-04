@@ -10,10 +10,15 @@ import (
 )
 
 const (
-	// 固定容量按背包界面的最坏情况：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块。
-	maxHotbarQuads = 2 + core.InventorySlots*2
-	// 数量最多两位数（1..64），每格最多两个数字。
-	maxHotbarGlyphs = core.InventorySlots * 2
+	// 固定容量按背包界面的最坏情况：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块，
+	// 再加固定合成行的输入色块、输出色块与按钮。
+	maxHotbarQuads = 2 + core.InventorySlots*2 + recipeQuads
+	// 数量最多两位数（1..64），每格最多两个数字；固定配方的两个数量各一位。
+	maxHotbarGlyphs = core.InventorySlots*2 + recipeGlyphs
+
+	// 一条固定配方：输入格、输出格和一个合成按钮。
+	recipeQuads  = 3
+	recipeGlyphs = 2
 
 	hotbarInstanceBytes  = 48
 	hotbarViewportOffset = 0
@@ -32,6 +37,9 @@ const (
 	hotbarDigitMargin  = float32(3)
 	// 背包界面在快捷栏之上再放 3 行，并与快捷栏留出一段间隔。
 	inventoryRowGap = float32(12)
+	// 合成行位于背包最上一行之上。
+	recipeRowGap      = float32(16)
+	recipeButtonWidth = float32(96)
 )
 
 //go:embed shader/hotbar.wgsl
@@ -276,7 +284,78 @@ func layoutInventory(
 		x, y := inventorySlotOrigin(slot, open, width, height)
 		appendHotbarCount(dst, atlas, stack.Count, x, y)
 	}
+	if open {
+		appendRecipeRow(dst, atlas, inventory, width, height)
+	}
 	return *dst
+}
+
+// appendRecipeRow 绘制固定的 4 石头 → 4 石砖 配方行与一次合成按钮。
+func appendRecipeRow(
+	dst *hotbarLayout,
+	atlas GlyphSource,
+	inventory core.Inventory,
+	width, height float32,
+) {
+	recipe, ok := core.Recipe(core.RecipeStoneBricks)
+	if !ok {
+		return
+	}
+	inputX, inputY := recipeSlotOrigin(0, width, height)
+	outputX, outputY := recipeSlotOrigin(1, width, height)
+	for _, entry := range [2]struct {
+		stack core.ItemStack
+		x, y  float32
+	}{
+		{recipe.Input, inputX, inputY},
+		{recipe.Output, outputX, outputY},
+	} {
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: entry.x, Y: entry.y,
+			Width: hotbarSlotSize, Height: hotbarSlotSize,
+			Color: hotbarItemColor(entry.stack.Item),
+		})
+		appendHotbarCount(dst, atlas, entry.stack.Count, entry.x, entry.y)
+	}
+
+	// 按钮颜色只表示是否可合成；服务端每次仍重新验证。
+	color := [4]float32{0.28, 0.28, 0.30, 0.85}
+	if _, craftable := inventory.Craft(core.RecipeStoneBricks); craftable {
+		color = [4]float32{0.30, 0.68, 0.36, 0.95}
+	}
+	buttonX, buttonY := recipeButtonOrigin(width, height)
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: buttonX, Y: buttonY,
+		Width: recipeButtonWidth, Height: hotbarSlotSize,
+		Color: color,
+	})
+}
+
+// recipeSlotOrigin 返回配方行第 index 个格子的左上角像素坐标。
+func recipeSlotOrigin(index int, width, height float32) (float32, float32) {
+	x, _ := inventorySlotOrigin(index, true, width, height)
+	_, topRowY := inventorySlotOrigin(core.HotbarSlots, true, width, height)
+	return x, topRowY - recipeRowGap - hotbarSlotSize
+}
+
+// recipeButtonOrigin 返回合成按钮的左上角像素坐标。
+func recipeButtonOrigin(width, height float32) (float32, float32) {
+	x, y := recipeSlotOrigin(2, width, height)
+	return x, y
+}
+
+// RecipeButtonAt 报告光标是否命中固定合成按钮，命中时返回配方 ID。
+// 它与绘制共用同一套几何常量。
+func RecipeButtonAt(cursorX, cursorY float64, width, height uint32) (core.RecipeID, bool) {
+	if width == 0 || height == 0 {
+		return 0, false
+	}
+	left, top := recipeButtonOrigin(float32(width), float32(height))
+	x, y := float32(cursorX), float32(cursorY)
+	if x < left || x >= left+recipeButtonWidth || y < top || y >= top+hotbarSlotSize {
+		return 0, false
+	}
+	return core.RecipeStoneBricks, true
 }
 
 // inventorySlotOrigin 返回统一索引对应格子的左上角像素坐标。

@@ -1665,6 +1665,78 @@ func TestInventoryClickOutsideSlotsDoesNothing(t *testing.T) {
 	assertNoInteractiveClientMessage(t, serverEndpoint)
 }
 
+// Mutation killed: skipping the confirmed Craft check, predicting the result,
+// or sending more than one request changes the message or local mirror.
+func TestCraftRecipeClickUsesConfirmedInventory(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+	app.inventorySource = 5
+	width, height := uint32(1280), uint32(720)
+	x, y := recipeButtonCenter(t, width, height)
+
+	app.clickInventorySlot(x, y, width, height)
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	craft, ok := message.(network.CraftRecipe)
+	if !ok || craft.Recipe != core.RecipeStoneBricks {
+		t.Fatalf("合成请求 = %#v，想要石砖配方", message)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+	if app.inventorySource != -1 {
+		t.Fatalf("合成后来源未清除: %d", app.inventorySource)
+	}
+	got, confirmed := app.inventory.State()
+	if !confirmed || got != inventory {
+		t.Fatalf("合成请求本地改写镜像: %+v, %v", got, confirmed)
+	}
+}
+
+func TestUnavailableCraftRecipeClickDoesNothing(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 3}
+	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+	x, y := recipeButtonCenter(t, 1280, 720)
+
+	app.clickInventorySlot(x, y, 1280, 720)
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+	got, confirmed := app.inventory.State()
+	if !confirmed || got != inventory {
+		t.Fatalf("不可用配方改写镜像: %+v, %v", got, confirmed)
+	}
+}
+
+func TestPlayerResetClearsInventorySource(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	app.inventoryOpen = true
+	app.inventorySource = 8
+	sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 0.5}, OnGround: true, Ready: true, Reset: true,
+	})
+
+	app.drainServerMessages(1)
+	if !app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("reset 后 open=%v source=%d，想要界面保持且来源清除", app.inventoryOpen, app.inventorySource)
+	}
+}
+
+func TestClientSessionCloseClearsInventoryUIState(t *testing.T) {
+	app, _ := newInteractiveTestApplication(t)
+	app.inventoryOpen = true
+	app.inventorySource = 8
+
+	app.closeClientSession(nil)
+	if app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("断线后 open=%v source=%d，想要界面关闭且来源清除", app.inventoryOpen, app.inventorySource)
+	}
+}
+
 func TestInventoryCloseClearsSourceAndRecapturesCursor(t *testing.T) {
 	app, _ := newInteractiveTestApplication(t)
 	app.setInventoryOpen(true)
@@ -1689,5 +1761,19 @@ func inventorySlotCenter(t *testing.T, slot int, width, height uint32) (float64,
 		}
 	}
 	t.Fatalf("找不到栏位 %d 的像素", slot)
+	return 0, 0
+}
+
+func recipeButtonCenter(t *testing.T, width, height uint32) (float64, float64) {
+	t.Helper()
+	for y := range int(height) {
+		for x := range int(width) {
+			if recipe, ok := render.RecipeButtonAt(float64(x), float64(y), width, height); ok &&
+				recipe == core.RecipeStoneBricks {
+				return float64(x), float64(y)
+			}
+		}
+	}
+	t.Fatal("找不到石砖配方按钮像素")
 	return 0, 0
 }
