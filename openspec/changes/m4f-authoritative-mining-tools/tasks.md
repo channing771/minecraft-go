@@ -18,10 +18,10 @@
 
 ## 4. 权威采掘进度与固定等级
 
-- [ ] 4.1 在新的 `internal/sim/mining_test.go` 先写表驱动失败测试，覆盖全部方块/手持组合、首 tick、持续递增、松键、目标/方块/工具变化、超距、未就绪、基岩、reset、八名玩家独立状态与权威发布字段。
-- [ ] 4.2 新增 `internal/sim/mining.go` 的固定规则与 `playerMiningState`，在移动、掉落物、熔炉、跨容器移动和放置之后按排序 session 推进每人一次六格射线；无效目标正常清零且不逐 tick 拒绝。
-- [ ] 4.3 增加 `AllocsPerRun` 或等价微基准，锁定八名持续采掘的零堆分配与每 tick 最多八次射线；不得加入 map、slice 增长、goroutine 或配置层。
-- [ ] 4.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/sim -run "^$" -bench "Mining" -benchmem -count=3'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 推进权威计时采掘`。
+- [x] 4.1 在新的 `internal/sim/mining_test.go` 先写表驱动失败测试，覆盖全部方块/手持组合、首 tick、持续递增、松键、目标/方块/工具变化、超距、未就绪、基岩、reset、八名玩家独立状态与权威发布字段。
+- [x] 4.2 新增 `internal/sim/mining.go` 的固定规则与 `playerMiningState`，在移动、掉落物、熔炉、跨容器移动和放置之后按排序 session 推进每人一次六格射线；无效目标正常清零且不逐 tick 拒绝。
+- [x] 4.3 增加 `AllocsPerRun` 或等价微基准，锁定八名持续采掘的零堆分配与每 tick 最多八次射线；不得加入 map、slice 增长、goroutine 或配置层。
+- [x] 4.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/sim -run "^$" -bench "Mining" -benchmem -count=3'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 推进权威计时采掘`。
 
 ## 5. 原子破坏、掉落与熔炉内容保全
 

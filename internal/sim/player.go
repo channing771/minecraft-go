@@ -28,6 +28,7 @@ type PlayerUpdate struct {
 	LastInputSequence uint64
 	Ready             bool
 	Reset             bool
+	Mining            MiningUpdate
 }
 
 type PlayerLocation struct {
@@ -70,6 +71,7 @@ type playerState struct {
 	yaw, pitch        float32
 	lastInputSequence uint64
 	miningHeld        bool
+	mining            playerMiningState
 	reset             bool
 	inventory         core.Inventory
 	inventoryDirty    bool
@@ -275,6 +277,7 @@ func (player *playerState) update(
 		LastInputSequence: player.lastInputSequence,
 		Ready:             player.lifecycle == PlayerActive,
 		Reset:             player.reset,
+		Mining:            player.mining.update(),
 	}
 }
 
@@ -447,6 +450,8 @@ func (player *playerState) beginReset() {
 		float32(player.anchor.Z)*core.SectionSize + 0.5,
 	}}
 	player.input = physics.Input{}
+	player.miningHeld = false
+	player.mining = playerMiningState{}
 	player.reset = false
 	player.inventoryDirty = true
 	player.nextCandidate = 0

@@ -172,6 +172,10 @@ func (engine *Engine) Step() TickResult {
 			interactions = append(interactions, command)
 		case CommandPlayerInput:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
+				if session.player != nil {
+					session.player.miningHeld = false
+					session.player.mining = playerMiningState{}
+				}
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
 					Sequence: command.Sequence,
@@ -184,6 +188,7 @@ func (engine *Engine) Step() TickResult {
 			if !validPlayerInput(command) {
 				player.input = physics.Input{Yaw: player.yaw}
 				player.miningHeld = false
+				player.mining = playerMiningState{}
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
 					Sequence: command.Sequence,
@@ -340,6 +345,7 @@ func (engine *Engine) Step() TickResult {
 			})
 		}
 	}
+	engine.advanceMining(pending, &result)
 	engine.finishChanges(pending, &result)
 	sortChunkKeys(result.Ready)
 
