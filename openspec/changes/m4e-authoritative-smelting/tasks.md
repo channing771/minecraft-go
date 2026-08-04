@@ -24,10 +24,10 @@
 
 ## 4. 协议 v7 熔炉消息与客户端只读镜像
 
-- [ ] 4.1 在 `internal/network` 先写失败的 packet/registry/codec/golden/fuzz 测试，锁定客户端 ID `OpenFurnace=8`、`MoveFurnaceStack=9`、`CloseFurnace=10` 与服务端 ID `FurnaceState=13`、`FurnaceClosed=14` 及各自固定 payload 长度，覆盖熔炉引用字段、有限视角、统一索引 `0..38`、合法 stack、进度与燃烧范围、截断、尾随、未知值和 v6 登录拒绝。
-- [ ] 4.2 在 `internal/client` 先写失败测试：`FurnaceMirror` 只接受熔炉状态与关闭消息，新 generation 替换旧值，过期状态或过期关闭不影响当前界面，非法状态返回 error，`Reset` 清空，`State` 返回值副本且客户端点击不改镜像。
-- [ ] 4.3 把 `ProtocolVersion` 升为 7，在既有 switch 末尾追加消息与 packet case，增加私有 `encodeFurnaceRef`/`decodeFurnaceRef` helper，禁止可变长度集合；`FurnaceMirror` 只持有一个状态值与 bool，不建立 map。
-- [ ] 4.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/client -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 定义权威熔炉协议 v7`，然后自动进入第 5 组。
+- [x] 4.1 在 `internal/network` 先写失败的 packet/registry/codec/golden/fuzz 测试，锁定客户端 ID `OpenFurnace=8`、`MoveFurnaceStack=9`、`CloseFurnace=10` 与服务端 ID `FurnaceState=13`、`FurnaceClosed=14` 及各自固定 payload 长度，覆盖熔炉引用字段、有限视角、统一索引 `0..38`、合法 stack、进度与燃烧范围、截断、尾随、未知值和 v6 登录拒绝。
+- [x] 4.2 在 `internal/client` 先写失败测试：`FurnaceMirror` 只接受熔炉状态与关闭消息，新 generation 替换旧值，过期状态或过期关闭不影响当前界面，非法状态返回 error，`Reset` 清空，`State` 返回值副本且客户端点击不改镜像。
+- [x] 4.3 把 `ProtocolVersion` 升为 7，在既有 switch 末尾追加消息与 packet case，增加私有 `encodeFurnaceRef`/`decodeFurnaceRef` helper，禁止可变长度集合；`FurnaceMirror` 只持有一个状态值与 bool，不建立 map。
+- [x] 4.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/client -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 定义权威熔炉协议 v7`，然后自动进入第 5 组。
 
 ## 5. 有界熔炼 tick 与查看生命周期
 

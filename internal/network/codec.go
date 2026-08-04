@@ -65,6 +65,17 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 		case CraftRecipe:
 			e.u64(message.Sequence)
 			e.u8(uint8(message.Recipe))
+		case OpenFurnace:
+			e.u64(message.Sequence)
+			e.f32(message.Yaw)
+			e.f32(message.Pitch)
+		case MoveFurnaceStack:
+			e.u64(message.Sequence)
+			encodeFurnaceRef(&e, message.Furnace)
+			e.u8(message.From)
+			e.u8(message.To)
+		case CloseFurnace:
+			e.u64(message.Sequence)
 		case RequestChunkResync:
 			e.u64(message.Sequence)
 			e.i32(int32(message.Dimension))
@@ -208,6 +219,33 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 				recipe, err = d.u8()
 			}
 			packet = CraftRecipe{Sequence: sequence, Recipe: core.RecipeID(recipe)}
+		case 8:
+			var open OpenFurnace
+			open.Sequence, err = d.u64()
+			if err == nil {
+				open.Yaw, err = d.f32()
+			}
+			if err == nil {
+				open.Pitch, err = d.f32()
+			}
+			packet = open
+		case 9:
+			var move MoveFurnaceStack
+			move.Sequence, err = d.u64()
+			if err == nil {
+				move.Furnace, err = decodeFurnaceRef(&d)
+			}
+			if err == nil {
+				move.From, err = d.u8()
+			}
+			if err == nil {
+				move.To, err = d.u8()
+			}
+			packet = move
+		case 10:
+			var closeFurnace CloseFurnace
+			closeFurnace.Sequence, err = d.u64()
+			packet = closeFurnace
 		default:
 			return nil, codecError("decode client", state, packetID, errUnknownPacketID)
 		}
@@ -358,6 +396,16 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 				e.u16(uint16(stack.Item))
 				e.u8(stack.Count)
 			}
+		case FurnaceState:
+			encodeFurnaceRef(&e, message.Furnace)
+			for _, stack := range [3]core.ItemStack{message.Input, message.Fuel, message.Output} {
+				e.u16(uint16(stack.Item))
+				e.u8(stack.Count)
+			}
+			e.u8(message.ProgressTicks)
+			e.u16(message.BurnTicks)
+		case FurnaceClosed:
+			encodeFurnaceRef(&e, message.Furnace)
 		case ItemDropUpserts:
 			e.u64(message.ServerTick)
 			e.uvarint(uint32(len(message.Drops)))
@@ -557,6 +605,23 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 				inventory.Backpack[index], err = decodeItemStack(&d, err)
 			}
 			packet = InventoryState{Inventory: inventory}
+		case 13:
+			var state FurnaceState
+			state.Furnace, err = decodeFurnaceRef(&d)
+			state.Input, err = decodeItemStack(&d, err)
+			state.Fuel, err = decodeItemStack(&d, err)
+			state.Output, err = decodeItemStack(&d, err)
+			if err == nil {
+				state.ProgressTicks, err = d.u8()
+			}
+			if err == nil {
+				state.BurnTicks, err = d.u16()
+			}
+			packet = state
+		case 14:
+			var closed FurnaceClosed
+			closed.Furnace, err = decodeFurnaceRef(&d)
+			packet = closed
 		default:
 			return nil, codecError("decode server", state, packetID, errUnknownPacketID)
 		}
@@ -594,6 +659,39 @@ func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
 		return core.ItemStack{}, err
 	}
 	return core.ItemStack{Item: core.ItemID(item), Count: count}, nil
+}
+
+// furnaceRefWireBytes 是熔炉引用的固定编码长度。
+const furnaceRefWireBytes = 4 + 4 + 4 + 1 + 4
+
+func encodeFurnaceRef(e *byteEncoder, ref core.FurnaceRef) {
+	e.i32(int32(ref.Dimension))
+	e.i32(ref.Chunk.X)
+	e.i32(ref.Chunk.Z)
+	e.u8(ref.Slot)
+	e.u32(ref.Generation)
+}
+
+func decodeFurnaceRef(d *byteDecoder) (core.FurnaceRef, error) {
+	var ref core.FurnaceRef
+	dimension, err := d.i32()
+	if err != nil {
+		return core.FurnaceRef{}, err
+	}
+	ref.Dimension = core.DimensionID(dimension)
+	if ref.Chunk.X, err = d.i32(); err != nil {
+		return core.FurnaceRef{}, err
+	}
+	if ref.Chunk.Z, err = d.i32(); err != nil {
+		return core.FurnaceRef{}, err
+	}
+	if ref.Slot, err = d.u8(); err != nil {
+		return core.FurnaceRef{}, err
+	}
+	if ref.Generation, err = d.u32(); err != nil {
+		return core.FurnaceRef{}, err
+	}
+	return ref, nil
 }
 
 func encodeDropID(e *byteEncoder, id core.DropID) {

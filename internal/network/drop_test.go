@@ -33,7 +33,7 @@ func TestProtocolV4DropPacketIDsAreFrozen(t *testing.T) {
 		{StatePlay, ItemDropUpserts{}, 11},
 		{StatePlay, ItemDropRemoves{}, 12},
 	})
-	if _, ok := serverPacketForID(StatePlay, 13); ok {
+	if _, ok := serverPacketForID(StatePlay, 15); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 }

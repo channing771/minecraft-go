@@ -50,7 +50,7 @@ func TestProtocolV2RemotePlayerPacketIDsAreFrozen(t *testing.T) {
 			t.Fatalf("server packet ID %d decoded=%T ok=%v, want %T true", test.id, decoded, ok, test.packet)
 		}
 	}
-	if _, ok := serverPacketForID(StatePlay, 13); ok {
+	if _, ok := serverPacketForID(StatePlay, 15); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 }
@@ -66,7 +66,7 @@ func TestProtocolV3HotbarPacketIDsAreFrozen(t *testing.T) {
 		packet ServerPacket
 		id     uint32
 	}{{StatePlay, InventoryState{}, 10}})
-	if _, ok := clientPacketForID(StatePlay, 8); ok {
+	if _, ok := clientPacketForID(StatePlay, 11); ok {
 		t.Fatal("unknown play client packet ID accepted")
 	}
 }
@@ -75,7 +75,7 @@ func TestProtocolV1RegistryRejectsUnknownIDsAndStates(t *testing.T) {
 	if _, ok := clientPacketForID(StateHandshake, 1); ok {
 		t.Fatal("unknown handshake client packet ID accepted")
 	}
-	if _, ok := serverPacketForID(StatePlay, 13); ok {
+	if _, ok := serverPacketForID(StatePlay, 15); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 	if _, ok := clientPacketID(StateLogin, ClientHello{}); ok {
@@ -185,6 +185,15 @@ func sameClientPacketType(left, right ClientPacket) bool {
 	case CraftRecipe:
 		_, ok := right.(CraftRecipe)
 		return ok
+	case OpenFurnace:
+		_, ok := right.(OpenFurnace)
+		return ok
+	case MoveFurnaceStack:
+		_, ok := right.(MoveFurnaceStack)
+		return ok
+	case CloseFurnace:
+		_, ok := right.(CloseFurnace)
+		return ok
 	}
 	return false
 }
@@ -232,6 +241,12 @@ func sameServerPacketType(left, right ServerPacket) bool {
 		return ok
 	case ItemDropRemoves:
 		_, ok := right.(ItemDropRemoves)
+		return ok
+	case FurnaceState:
+		_, ok := right.(FurnaceState)
+		return ok
+	case FurnaceClosed:
+		_, ok := right.(FurnaceClosed)
 		return ok
 	}
 	return false

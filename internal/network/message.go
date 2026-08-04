@@ -108,6 +108,120 @@ func (command CraftRecipe) Validate() error {
 	return nil
 }
 
+// OpenFurnace 请求打开视线内的熔炉；服务端用权威射线验证距离与目标方块。
+type OpenFurnace struct {
+	Sequence   uint64
+	Yaw, Pitch float32
+}
+
+func (OpenFurnace) clientMessage() {}
+func (OpenFurnace) clientPacket()  {}
+
+func (command OpenFurnace) Validate() error {
+	if !finite32(command.Yaw) || !finite32(command.Pitch) {
+		return errors.New("network: open furnace has non-finite rotation")
+	}
+	return nil
+}
+
+// MoveFurnaceStack 请求在统一栏位 0..38 之间整堆移动；输出格只能作为来源。
+type MoveFurnaceStack struct {
+	Sequence uint64
+	Furnace  core.FurnaceRef
+	From, To uint8
+}
+
+func (MoveFurnaceStack) clientMessage() {}
+func (MoveFurnaceStack) clientPacket()  {}
+
+func (command MoveFurnaceStack) Validate() error {
+	if err := validFurnaceRef(command.Furnace); err != nil {
+		return err
+	}
+	if command.From >= core.FurnaceViewSlots || command.To >= core.FurnaceViewSlots {
+		return errors.New("network: furnace move slot is outside 0..38")
+	}
+	if command.From == command.To {
+		return errors.New("network: furnace move source equals target")
+	}
+	if command.To == core.FurnaceOutputSlot {
+		return errors.New("network: furnace output slot cannot be a move target")
+	}
+	return nil
+}
+
+// CloseFurnace 结束当前会话的查看关系。
+type CloseFurnace struct {
+	Sequence uint64
+}
+
+func (CloseFurnace) clientMessage() {}
+func (CloseFurnace) clientPacket()  {}
+
+func (CloseFurnace) Validate() error { return nil }
+
+// FurnaceState 是服务端发给当前查看者的完整熔炉状态。
+type FurnaceState struct {
+	Furnace       core.FurnaceRef
+	Input         core.ItemStack
+	Fuel          core.ItemStack
+	Output        core.ItemStack
+	ProgressTicks uint8
+	BurnTicks     uint16
+}
+
+func (FurnaceState) serverMessage() {}
+func (FurnaceState) serverPacket()  {}
+
+func (state FurnaceState) Validate() error {
+	if err := validFurnaceRef(state.Furnace); err != nil {
+		return err
+	}
+	if state.ProgressTicks >= core.FurnaceSmeltTicks || state.BurnTicks > core.FurnaceBurnTicks {
+		return errors.New("network: furnace timers are outside their fixed ranges")
+	}
+	if !validFurnaceStack(state.Input, core.ItemRawIron) ||
+		!validFurnaceStack(state.Fuel, core.ItemCoal) ||
+		!validFurnaceStack(state.Output, core.ItemIronIngot) {
+		return errors.New("network: furnace slot holds an item it cannot contain")
+	}
+	return nil
+}
+
+// FurnaceClosed 通知客户端当前查看的熔炉已经失效。
+type FurnaceClosed struct {
+	Furnace core.FurnaceRef
+}
+
+func (FurnaceClosed) serverMessage() {}
+func (FurnaceClosed) serverPacket()  {}
+
+func (closed FurnaceClosed) Validate() error {
+	return validFurnaceRef(closed.Furnace)
+}
+
+// validFurnaceRef 检查熔炉引用的固定字段范围。
+func validFurnaceRef(ref core.FurnaceRef) error {
+	if ref.Dimension != core.Overworld {
+		return errors.New("network: furnace dimension is not overworld")
+	}
+	if ref.Slot >= core.FurnacesPerChunk {
+		return errors.New("network: furnace slot is outside 0..31")
+	}
+	if ref.Generation == 0 {
+		return errors.New("network: furnace generation is zero")
+	}
+	return nil
+}
+
+// validFurnaceStack 报告某个熔炉格是否为空或恰好装着允许的物品。
+func validFurnaceStack(stack core.ItemStack, allowed core.ItemID) bool {
+	if stack.Item == core.ItemNone {
+		return stack.Count == 0
+	}
+	return stack.Item == allowed && stack.Count >= 1 && stack.Count <= core.MaxStackCount
+}
+
 // InventoryState 是服务端发给所属玩家的完整权威物品状态。
 type InventoryState struct {
 	Inventory core.Inventory

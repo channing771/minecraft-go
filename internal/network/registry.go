@@ -27,6 +27,12 @@ func clientPacketID(state State, packet ClientPacket) (uint32, bool) {
 			return 6, true
 		case CraftRecipe:
 			return 7, true
+		case OpenFurnace:
+			return 8, true
+		case MoveFurnaceStack:
+			return 9, true
+		case CloseFurnace:
+			return 10, true
 		}
 	}
 	return 0, false
@@ -61,6 +67,12 @@ func clientPacketForID(state State, id uint32) (ClientPacket, bool) {
 			return MoveInventoryStack{}, true
 		case 7:
 			return CraftRecipe{}, true
+		case 8:
+			return OpenFurnace{}, true
+		case 9:
+			return MoveFurnaceStack{}, true
+		case 10:
+			return CloseFurnace{}, true
 		}
 	}
 	return nil, false
@@ -111,6 +123,10 @@ func serverPacketID(state State, packet ServerPacket) (uint32, bool) {
 			return 11, true
 		case ItemDropRemoves:
 			return 12, true
+		case FurnaceState:
+			return 13, true
+		case FurnaceClosed:
+			return 14, true
 		}
 	}
 	return 0, false
@@ -161,6 +177,10 @@ func serverPacketForID(state State, id uint32) (ServerPacket, bool) {
 			return ItemDropUpserts{}, true
 		case 12:
 			return ItemDropRemoves{}, true
+		case 13:
+			return FurnaceState{}, true
+		case 14:
+			return FurnaceClosed{}, true
 		}
 	}
 	return nil, false

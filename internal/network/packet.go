@@ -7,8 +7,8 @@ import (
 	"minecraft-go/internal/core"
 )
 
-// ProtocolVersion 是 M4D 唯一支持的协议版本。
-const ProtocolVersion uint32 = 6
+// ProtocolVersion 是 M4E 唯一支持的协议版本。
+const ProtocolVersion uint32 = 7
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -157,6 +157,12 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 			return clientPacket.Validate()
 		case CraftRecipe:
 			return clientPacket.Validate()
+		case OpenFurnace:
+			return clientPacket.Validate()
+		case MoveFurnaceStack:
+			return clientPacket.Validate()
+		case CloseFurnace:
+			return clientPacket.Validate()
 		case RequestChunkResync:
 			return clientPacket.Validate()
 		case KeepAliveReply:
@@ -238,6 +244,10 @@ func ValidateServerPacket(state State, packet ServerPacket) error {
 		case ItemDropUpserts:
 			return serverPacket.Validate()
 		case ItemDropRemoves:
+			return serverPacket.Validate()
+		case FurnaceState:
+			return serverPacket.Validate()
+		case FurnaceClosed:
 			return serverPacket.Validate()
 		default:
 			return invalidServerPacket(state, packet)
