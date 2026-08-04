@@ -1,6 +1,20 @@
-# Apple M5 scenario v8 性能基线
+# Apple M5 性能基线
 
-## 基线身份
+## 当前 scenario v9 基线
+
+- 正式提交：`96deb04ed9f9c396b4df8dbeed145be872ac9af7`
+- scenario：`9`
+- transport：`memory`
+- framebuffer：`2560x1440`
+- hardware：`Apple M5 / 24GiB`
+- OS：`macOS 26.5.1`
+- Go：`go1.26.0 darwin/arm64`，由 GVM 已安装工具链提供
+- Memory JSON SHA-256：`70488080e09eb9fa52ce16f162a15768fd8d2bef85511c5e629a663e76140283`
+- TCP JSON SHA-256：`0ad12f022882159090115873678e4d7b7b3b7a489f40e870e8de0f4197b34b9e`
+
+Memory 与 TCP 报告各采集一次，分别通过 v8→v9 绝对门禁和同场景跨 transport 门禁。采集从电池 79% 放电开始，结束时为 73%；完整命令、报告路径和结果见 `perf-baseline.md`。`perf-baseline-m5.json` 是 Memory 报告的精确字节副本。
+
+## 历史 scenario v8 基线身份
 
 - 正式提交：`b912c9f06a085dda9c8a3d7f14a9836152246f2c`
 - 阶段屏障修复提交：`b912c9f06a085dda9c8a3d7f14a9836152246f2c`
@@ -77,7 +91,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/m
 
 ## 后续使用
 
-在同一 M5 硬件上生成 scenario v8 当前报告后，显式选择本基线：
+在同一 M5 硬件上生成 scenario v9 当前报告后，显式选择本基线：
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/<current-report>.json --max-regression 0.20'
