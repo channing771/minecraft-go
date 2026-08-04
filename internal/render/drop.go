@@ -196,7 +196,7 @@ func dropAnimationPhase(serverTick uint64, id core.DropID) dropPhase {
 
 // itemDropColor 复用与程序化方块一致的稳定基色。
 func itemDropColor(item core.ItemID) ([4]float32, bool) {
-	if _, ok := core.ItemPlacement(item); !ok {
+	if !core.RegisteredItem(item) {
 		return [4]float32{}, false
 	}
 	return hotbarItemColor(item), true

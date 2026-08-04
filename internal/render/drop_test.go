@@ -205,3 +205,24 @@ func TestItemDropRendererHeadlessDraw(t *testing.T) {
 	commands.Release()
 	dev.Poll(true)
 }
+
+func TestItemDropColorCoversRegisteredNonPlaceableItems(t *testing.T) {
+	for _, item := range []core.ItemID{
+		core.ItemCoal, core.ItemRawIron, core.ItemIronIngot,
+		core.ItemFurnace, core.ItemIronBlock,
+	} {
+		color, ok := itemDropColor(item)
+		if !ok {
+			t.Fatalf("已注册物品 %d 无法绘制掉落物", item)
+		}
+		if color == ([4]float32{}) {
+			t.Fatalf("物品 %d 的掉落物颜色为零值", item)
+		}
+	}
+	if _, ok := itemDropColor(core.ItemNone); ok {
+		t.Fatal("空物品被绘制")
+	}
+	if _, ok := itemDropColor(core.ItemID(4242)); ok {
+		t.Fatal("未知物品被绘制")
+	}
+}

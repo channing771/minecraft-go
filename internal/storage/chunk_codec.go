@@ -123,7 +123,7 @@ func validateDropSlot(drop world.DropSlot) error {
 	if drop.Generation == 0 {
 		return errors.New("active drop slot has zero generation")
 	}
-	if _, ok := core.ItemPlacement(drop.Stack.Item); !ok {
+	if !core.RegisteredItem(drop.Stack.Item) {
 		return fmt.Errorf("unknown drop item %d", drop.Stack.Item)
 	}
 	if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount {

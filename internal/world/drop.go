@@ -49,7 +49,7 @@ func (c *Chunk) ClearDrop(slot int) {
 // PrepareDrop 预检可接收一个 item 的槽：先找同物品、同方块位置的最低未满堆，
 // 否则用最低的可复用空槽。它不修改区块，因此调用方可以先预检再原子提交。
 func (c *Chunk) PrepareDrop(item core.ItemID, blockIndex uint32) (int, bool) {
-	if _, ok := core.ItemPlacement(item); !ok {
+	if !core.RegisteredItem(item) {
 		return 0, false
 	}
 	for slot := range c.drops {

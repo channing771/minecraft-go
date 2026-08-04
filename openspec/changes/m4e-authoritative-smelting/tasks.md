@@ -1,11 +1,11 @@
 ## 1. 稳定资源、固定配方与矿石生成
 
-- [ ] 1.1 在 `internal/core` 先写失败测试，覆盖稳定方块 ID `CoalOreID=7`、`IronOreID=8`、`FurnaceID=9`、`IronBlockID=10` 与物品 ID `ItemCoal=5`、`ItemRawIron=6`、`ItemIronIngot=7`、`ItemFurnace=8`、`ItemIronBlock=9` 不漂移，`RegisteredItem` 接受全部新物品，煤炭/粗铁/铁锭不可放置，矿石与熔炉/铁块的掉落映射，以及 8 石头→1 熔炉、9 铁锭→1 铁块的最低索引扣料与产物无容量原子失败。
-- [ ] 1.2 在 `internal/core` 最小实现：现有 enum 末尾追加 ID，新增单个 `RegisteredItem` 判断并让 `ItemStack.Valid` 与 `Hotbar.Add` 改用它，`BlockDrop`、`ItemPlacement`、`Recipe` 只追加确切 case；不新增注册表、接口或配置。
-- [ ] 1.3 在 `internal/worldgen` 先写失败测试，覆盖同种子同坐标确定性、不同种子样本差异、煤仅 `Y<96`、铁仅 `Y<48`、只替换石头、铁优先、负坐标、`BaseBlockAt` 与整区块逐点一致以及 golden 漂移。
-- [ ] 1.4 在 `generator.go` 只增加三维整数哈希与一处 `generatedBlockAt` 包装，`BaseBlockAt` 与 `GenerateChunk` 都调用它；先跑非 golden 测试，再用现有 `-update` 机制重写 golden 并复跑，不手工猜哈希。
-- [ ] 1.5 在 `internal/assets` 为四个新方块追加程序化材质层，在 `internal/render` 让 `hotbarItemColor` 与 `itemDropColor` 覆盖全部注册物品（含不可放置物品）；补材质索引、颜色非零与 drop 渲染测试，不新增 shader、pipeline 或二进制资源。
-- [ ] 1.6 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/worldgen ./internal/assets ./internal/render -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/worldgen internal/assets internal/render` 与 `git diff --check` 无输出；只暂存本组与任务勾选，提交 `feat: 定义 M4E 资源与矿石生成`，然后自动进入第 2 组。
+- [x] 1.1 在 `internal/core` 先写失败测试，覆盖稳定方块 ID `CoalOreID=7`、`IronOreID=8`、`FurnaceID=9`、`IronBlockID=10` 与物品 ID `ItemCoal=5`、`ItemRawIron=6`、`ItemIronIngot=7`、`ItemFurnace=8`、`ItemIronBlock=9` 不漂移，`RegisteredItem` 接受全部新物品，煤炭/粗铁/铁锭不可放置，矿石与熔炉/铁块的掉落映射，以及 8 石头→1 熔炉、9 铁锭→1 铁块的最低索引扣料与产物无容量原子失败。
+- [x] 1.2 在 `internal/core` 最小实现：现有 enum 末尾追加 ID，新增单个 `RegisteredItem` 判断并让 `ItemStack.Valid` 与 `Hotbar.Add` 改用它，`BlockDrop`、`ItemPlacement`、`Recipe` 只追加确切 case；不新增注册表、接口或配置。
+- [x] 1.3 在 `internal/worldgen` 先写失败测试，覆盖同种子同坐标确定性、不同种子样本差异、煤仅 `Y<96`、铁仅 `Y<48`、只替换石头、铁优先、负坐标、`BaseBlockAt` 与整区块逐点一致以及 golden 漂移。
+- [x] 1.4 在 `generator.go` 只增加三维整数哈希与一处 `generatedBlockAt` 包装，`BaseBlockAt` 与 `GenerateChunk` 都调用它；先跑非 golden 测试，再用现有 `-update` 机制重写 golden 并复跑，不手工猜哈希。
+- [x] 1.5 在 `internal/assets` 为四个新方块追加程序化材质层，在 `internal/render` 让 `hotbarItemColor` 与 `itemDropColor` 覆盖全部注册物品（含不可放置物品）；补材质索引、颜色非零与 drop 渲染测试，不新增 shader、pipeline 或二进制资源。
+- [x] 1.6 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/worldgen ./internal/assets ./internal/render -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/worldgen internal/assets internal/render` 与 `git diff --check` 无输出；只暂存本组与任务勾选，提交 `feat: 定义 M4E 资源与矿石生成`，然后自动进入第 2 组。
 
 ## 2. 区块固定熔炉槽与原子批量掉落
 

@@ -10,6 +10,11 @@ const (
 	ItemDirt
 	ItemGrass
 	ItemStoneBrick
+	ItemCoal
+	ItemRawIron
+	ItemIronIngot
+	ItemFurnace
+	ItemIronBlock
 )
 
 const (
@@ -36,7 +41,7 @@ func (s ItemStack) Valid() bool {
 	if s.Item == ItemNone {
 		return s.Count == 0
 	}
-	if _, ok := ItemPlacement(s.Item); !ok {
+	if !RegisteredItem(s.Item) {
 		return false
 	}
 	return s.Count >= 1 && s.Count <= MaxStackCount
@@ -58,7 +63,7 @@ func (h Hotbar) Valid() bool {
 // Add 把一个物品放入快捷栏副本：先补最低索引的同类未满栏位，否则用最低索引的空栏位。
 // 没有空间或物品未注册时返回原值和 false。
 func (h Hotbar) Add(item ItemID) (Hotbar, bool) {
-	if _, ok := ItemPlacement(item); !ok {
+	if !RegisteredItem(item) {
 		return h, false
 	}
 	for i := range h.Slots {
@@ -105,9 +110,23 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 		return ItemGrass, true
 	case StoneBrickID:
 		return ItemStoneBrick, true
+	case CoalOreID:
+		return ItemCoal, true
+	case IronOreID:
+		return ItemRawIron, true
+	case FurnaceID:
+		return ItemFurnace, true
+	case IronBlockID:
+		return ItemIronBlock, true
 	default:
 		return ItemNone, false
 	}
+}
+
+// RegisteredItem 报告该物品是否是已注册的合法物品。
+// 合法性与放置映射分离：煤炭、粗铁和铁锭合法但不可直接放置。
+func RegisteredItem(item ItemID) bool {
+	return item >= ItemStone && item <= ItemIronBlock
 }
 
 // ItemPlacement 返回该物品放置后写入世界的方块；不可放置的物品返回 false。
@@ -121,6 +140,10 @@ func ItemPlacement(item ItemID) (BlockID, bool) {
 		return GrassID, true
 	case ItemStoneBrick:
 		return StoneBrickID, true
+	case ItemFurnace:
+		return FurnaceID, true
+	case ItemIronBlock:
+		return IronBlockID, true
 	default:
 		return AirID, false
 	}
