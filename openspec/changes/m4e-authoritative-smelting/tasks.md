@@ -76,6 +76,6 @@
 
 ## 11. 最终门禁与阶段收尾
 
-- [ ] 11.1 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`；`gofmt -l .` 必须无输出，且不得启动或聚焦游戏窗口。
-- [ ] 11.2 执行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，核对 proposal、四份 delta specs、design 与实现一致，确认协议 v7、区块 schema v4、玩家 schema v3 与 scenario v9 均未被放宽或静默覆盖。
-- [ ] 11.3 只暂存 M4E 实现、测试、中文文档和本文件勾选，排除 `midscene_run/`；提交 `chore: 关闭 M4E 权威熔炼`，停止实现并等待主规格同步、归档与推送指令。
+- [x] 11.1 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`；`gofmt -l .` 必须无输出，且不得启动或聚焦游戏窗口。
+- [x] 11.2 执行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，核对 proposal、四份 delta specs、design 与实现一致，确认协议 v7、区块 schema v4、玩家 schema v3 与 scenario v9 均未被放宽或静默覆盖。
+- [x] 11.3 只暂存 M4E 实现、测试、中文文档和本文件勾选，排除 `midscene_run/`；提交 `chore: 关闭 M4E 权威熔炼`，停止实现并等待主规格同步、归档与推送指令。
