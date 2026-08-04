@@ -1,8 +1,8 @@
 ## 1. 工具物品、单格上限与固定配方
 
-- [ ] 1.1 在 `internal/core` 和 `internal/storage` 先写失败测试，覆盖石镐/铁镐稳定 ID、单格上限 1、普通物品上限 64、添加/移动/合成容量、两条固定配方、玩家 schema v3 往返与未知工具 ID 的旧读取拒绝。
-- [ ] 1.2 在 `internal/core/item.go`、`inventory.go`、`recipe.go` 追加工具和配方并让全部栏位算法复用统一上限查询；保持单输入配方、玩家 schema v3 和区块 schema v4 不变。
-- [ ] 1.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/storage -race -count=1'`、`go test ./internal/archcheck -count=1`、`gofmt -l .` 与 `git diff --check`，通过后提交 `feat: 定义采掘工具与固定配方`。
+- [x] 1.1 在 `internal/core` 和 `internal/storage` 先写失败测试，覆盖石镐/铁镐稳定 ID、单格上限 1、普通物品上限 64、添加/移动/合成容量、两条固定配方、玩家 schema v3 往返与未知工具 ID 的旧读取拒绝。
+- [x] 1.2 在 `internal/core/item.go`、`inventory.go`、`recipe.go` 追加工具和配方并让全部栏位算法复用统一上限查询；保持单输入配方、玩家 schema v3 和区块 schema v4 不变。
+- [x] 1.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/storage -race -count=1'`、`go test ./internal/archcheck -count=1`、`gofmt -l .` 与 `git diff --check`，通过后提交 `feat: 定义采掘工具与固定配方`。
 
 ## 2. 协议 v8 固定采掘字段
 

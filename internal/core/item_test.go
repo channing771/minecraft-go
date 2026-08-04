@@ -20,6 +20,39 @@ func TestCanonicalItemIDsStayStable(t *testing.T) {
 	}
 }
 
+func TestToolIDsAndStackLimitsAreStable(t *testing.T) {
+	if core.ItemStonePickaxe != 10 || core.ItemIronPickaxe != 11 {
+		t.Fatalf("工具 ID 发生变化: stone=%d iron=%d", core.ItemStonePickaxe, core.ItemIronPickaxe)
+	}
+	tests := []struct {
+		item core.ItemID
+		want uint8
+		ok   bool
+	}{
+		{core.ItemStone, 64, true},
+		{core.ItemIronBlock, 64, true},
+		{core.ItemStonePickaxe, 1, true},
+		{core.ItemIronPickaxe, 1, true},
+		{core.ItemNone, 0, false},
+		{core.ItemID(4242), 0, false},
+	}
+	for _, test := range tests {
+		got, ok := core.ItemStackLimit(test.item)
+		if got != test.want || ok != test.ok {
+			t.Errorf("ItemStackLimit(%d)=(%d,%v)，想要 (%d,%v)",
+				test.item, got, ok, test.want, test.ok)
+		}
+	}
+	for _, tool := range []core.ItemID{core.ItemStonePickaxe, core.ItemIronPickaxe} {
+		if !(core.ItemStack{Item: tool, Count: 1}).Valid() {
+			t.Errorf("单个工具 %d 应当有效", tool)
+		}
+		if (core.ItemStack{Item: tool, Count: 2}).Valid() {
+			t.Errorf("两个工具 %d 必须无效", tool)
+		}
+	}
+}
+
 func TestHotbarShapeIsFixed(t *testing.T) {
 	var h core.Hotbar
 	if core.HotbarSlots != 9 {
