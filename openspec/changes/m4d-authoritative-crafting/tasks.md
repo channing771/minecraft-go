@@ -27,12 +27,18 @@
 
 ## 5. 重启闭环、兼容文档与专项门禁
 
-- [ ] 5.1 在 `internal/server` 增加 DiskStore 重启纵向测试：从 v2 区块迁移、采集 4 石头、合成石砖、放置、挖掘、拾取、正常刷新和多身份乱序重连后，完整物品状态、石砖区块与掉落物必须一致；保存失败保持可重试且不部分提交。
-- [ ] 5.2 更新 `README.md` 与 `docs/notes/lan-server.md`，说明固定石砖配方、背包操作、协议 v6、玩家 schema v3、区块 schema v3/v1-v2 迁移、备份/回退和未实现范围；文档使用中文并删除“尚无背包界面”的过时描述。
-- [ ] 5.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s'`，确认无 panic、无无界分配和失败语料。
-- [ ] 5.4 增加并执行固定工作量微基准：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/network ./internal/storage ./internal/sim -run "^$" -bench "Craft|ChunkCodec|SmallPacketCodec" -benchmem -count=3'`；只优化实测根因，不降低既有门禁。
-- [ ] 5.5 只在现有 `--benchmark` 路径确认无窗口时生成全新 M5 scenario v7 Memory/TCP 临时报告，并显式使用 `docs/notes/perf-baseline-m5.json` 运行 `cmd/perfcheck --max-regression 0.20`；任一步失败停止，不重跑、不打开前台窗口、不覆盖基线。
-- [ ] 5.6 只暂存本组测试、中文文档和任务勾选，确认 `midscene_run/` 仍未暂存；提交 `test: 验证石砖合成重启闭环`，然后自动进入第 6 组。
+- [x] 5.1 在 `internal/server` 增加 DiskStore 重启纵向测试：从 v2 区块迁移、采集 4 石头、合成石砖、放置、挖掘、拾取、正常刷新和多身份乱序重连后，完整物品状态、石砖区块与掉落物必须一致；保存失败保持可重试且不部分提交。
+- [x] 5.2 更新 `README.md` 与 `docs/notes/lan-server.md`，说明固定石砖配方、背包操作、协议 v6、玩家 schema v3、区块 schema v3/v1-v2 迁移、备份/回退和未实现范围；文档使用中文并删除“尚无背包界面”的过时描述。
+- [x] 5.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s'`，确认无 panic、无无界分配和失败语料。
+- [x] 5.4 确认并执行固定工作量微基准：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/network ./internal/storage ./internal/sim -run "^$" -bench "Craft|Chunk(Encode|Decode)|SmallPacketCodec" -benchmem -count=3'`；只优化实测根因，不降低既有门禁。
+- [x] 5.5 只在现有 `--benchmark` 路径确认无窗口时，以当前精确 HEAD 派生两个全新 M5 scenario v8 Memory/TCP 临时报告路径；Memory 先显式使用 `docs/notes/perf-baseline-m5.json` 运行 `cmd/perfcheck --max-regression 0.20`，通过后 TCP 再对同一基线运行相同门禁。Memory/TCP 各执行一次，任一步失败停止，不重跑、不打开前台窗口、不复用旧报告或覆盖基线。
+  - 2026-08-04 在精确 HEAD `6d275a81688e8b53263ae17ecc7754b02c9ba601` 上只执行一次 Memory 报告 `/tmp/mcgo-m4d-v8-6d275a81688e-memory.json`，SHA-256 为 `a878195ac2e37bf5d1fe19cc67b833fcd7371073586d768f7cdf6834b2e84d95`；报告满足 scenario v8、M5、2560x1440 与 GPU 2048 样本，但 `interest_diff.p99_ms` 从基线 `0.034334` 升至 `0.042917`，门禁以退化 `25.0%` 失败。已立即停止，未执行 TCP、未重跑 Memory、未覆盖基线；本任务保持未完成。
+  - 比较契约修复提交：`30b283ea49ba0b73e9077d2844019ec47d5012f4`（`fix: 移除不稳定 interest 相对门禁`）；producer、scenario v8、20% 阈值、报告 schema 与 M5 baseline 均未改变。
+  - Memory 复判：复用 `/tmp/mcgo-m4d-v8-6d275a81688e-memory.json` 原始字节，执行前后 SHA-256 均为 `a878195ac2e37bf5d1fe19cc67b833fcd7371073586d768f7cdf6834b2e84d95`；在修复提交上执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/mcgo-m4d-v8-6d275a81688e-memory.json --max-regression 0.20'`，成功文本：`同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过`。
+  - TCP 正式报告：从原始生产提交 `6d275a81688e8b53263ae17ecc7754b02c9ba601` 的 detached 干净 worktree 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output /tmp/mcgo-m4d-v8-6d275a81688e-tcp.json'`；报告路径 `/tmp/mcgo-m4d-v8-6d275a81688e-tcp.json`，SHA-256 `7ecac884c4a4a5c8853ff5223b862e32c7059e67ff580c18b332d75181c5e14e`，scenario v8、TCP、M5/24GiB、2560x1440、GPU 2048、interest 1600 与 tick 200 字段均通过完整性核验。
+  - TCP 门禁：在修复提交上执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/mcgo-m4d-v8-6d275a81688e-tcp.json --max-regression 0.20'`，成功文本：`同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过`。Memory 未重跑，TCP benchmark 实际且仅执行一次，报告与 `docs/notes/perf-baseline-m5.json` 均未覆盖或改写。
+- [x] 5.6 只暂存本组测试、中文文档和任务勾选，确认 `midscene_run/` 仍未暂存；提交 `test: 验证石砖合成重启闭环`，然后自动进入第 6 组。
+  - 2026-08-04 fresh GVM Go 1.26.0 验证通过：`go test ./internal/server -run 'TestCraftingSurvivesV2DiskRestartAndReconnectOrder|TestMemoryTCPParityBusinessTranscriptAndHashes' -race -count=1`、`go test ./internal/server -race -count=1` 与 `go test ./internal/archcheck -count=1`；`gofmt -l internal/server/tcp_integration_test.go`、`openspec validate --all --strict --no-interactive` 和 `git diff --check` 无失败。暂存范围精确为 `README.md`、`docs/notes/lan-server.md`、`internal/server/tcp_integration_test.go` 与本文件；`midscene_run/` 保持未暂存。
 
 ## 6. 最终门禁与阶段收尾
 
