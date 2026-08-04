@@ -48,10 +48,10 @@
 
 ## 7. 服务端翻译、私有发布与 Memory/TCP 闭环
 
-- [ ] 7.1 在 `internal/server` 先写失败测试：三个客户端消息字段无损翻译为 sim 命令；熔炉状态只发给当前查看者；两名查看者收到相同完整状态；未打开界面者不收；关闭通知精确一次；完整物品状态仍只发本人；outbox 满时继续关闭慢 session 且不阻塞其他玩家。
-- [ ] 7.2 先写 Memory/TCP 纵向失败测试，使用同一脚本：两玩家登录 → 获取资源 → 放炉 → 同时打开 → 交错移动煤炭与粗铁 → 推进 200 tick → 两端同见 1 铁锭 → 一人取出 → 另一人见输出为空 → 旧引用命令被拒绝；两种 transport 的最终区块、物品状态与拒绝序列必须相同。
-- [ ] 7.3 先写 DiskStore 重启失败测试：在进度 137、燃烧 1463 时正常刷新、关闭并重开，确认三格与计时原值恢复且停服墙钟不补算，重新进入活动范围后下一 tick 变 138/1462；注入保存失败时旧完整记录可恢复，重试后才整体更新。
-- [ ] 7.4 在现有 switch 与发布顺序中最小接线，`server.session` 不保存熔炉状态或查看者 map；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -race -count=1 && go test ./internal/network ./internal/sim ./internal/storage -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 接通多人权威熔炉服务端`，然后自动进入第 8 组。
+- [x] 7.1 在 `internal/server` 先写失败测试：三个客户端消息字段无损翻译为 sim 命令；熔炉状态只发给当前查看者；两名查看者收到相同完整状态；未打开界面者不收；关闭通知精确一次；完整物品状态仍只发本人；outbox 满时继续关闭慢 session 且不阻塞其他玩家。
+- [x] 7.2 先写 Memory/TCP 纵向失败测试，使用同一脚本：两玩家登录 → 获取资源 → 放炉 → 同时打开 → 交错移动煤炭与粗铁 → 推进 200 tick → 两端同见 1 铁锭 → 一人取出 → 另一人见输出为空 → 旧引用命令被拒绝；两种 transport 的最终区块、物品状态与拒绝序列必须相同。
+- [x] 7.3 先写 DiskStore 重启失败测试：在进度 137、燃烧 1463 时正常刷新、关闭并重开，确认三格与计时原值恢复且停服墙钟不补算，重新进入活动范围后下一 tick 变 138/1462；注入保存失败时旧完整记录可恢复，重试后才整体更新。
+- [x] 7.4 在现有 switch 与发布顺序中最小接线，`server.session` 不保存熔炉状态或查看者 map；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -race -count=1 && go test ./internal/network ./internal/sim ./internal/storage -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 接通多人权威熔炉服务端`，然后自动进入第 8 组。
 
 ## 8. 熔炉界面接线
 

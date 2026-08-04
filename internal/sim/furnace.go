@@ -425,3 +425,16 @@ func (engine *Engine) applyFurnaceMove(
 	session.player.inventoryDirty = true
 	return 0, false
 }
+
+// SetPlayerInventoryForTest 改写某个会话的权威物品状态，仅供纵向测试构造固定场景。
+func (engine *Engine) SetPlayerInventoryForTest(
+	id SessionID,
+	mutate func(core.Inventory) core.Inventory,
+) {
+	session := engine.sessions[id]
+	if session == nil || session.player == nil {
+		return
+	}
+	session.player.inventory = mutate(session.player.inventory)
+	session.player.inventoryDirty = true
+}

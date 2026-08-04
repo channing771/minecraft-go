@@ -159,6 +159,32 @@ func (server *Server) publishLocalResult(
 			return
 		}
 	}
+	// 熔炉状态只发给当前查看者；仅订阅区块但未打开界面的玩家不会收到。
+	for _, update := range result.Furnaces {
+		if update.Session != current.id {
+			continue
+		}
+		if !current.enqueue(network.FurnaceState{
+			Furnace:       update.Furnace,
+			Input:         update.Input,
+			Fuel:          update.Fuel,
+			Output:        update.Output,
+			ProgressTicks: update.ProgressTicks,
+			BurnTicks:     update.BurnTicks,
+		}) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
+			return
+		}
+	}
+	for _, ended := range result.FurnaceEnds {
+		if ended.Session != current.id {
+			continue
+		}
+		if !current.enqueue(network.FurnaceClosed{Furnace: ended.Furnace}) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
+			return
+		}
+	}
 	if playerUpdate.Session == current.id {
 		if !current.enqueue(network.PlayerState{
 			ServerTick:        result.Tick,
