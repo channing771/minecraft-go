@@ -10,15 +10,22 @@ import (
 )
 
 const (
-	// 固定容量按背包界面的最坏情况：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块，
-	// 再加固定合成行的输入色块、输出色块与按钮。
-	maxHotbarQuads = 2 + core.InventorySlots*2 + recipeQuads
-	// 数量最多两位数（1..64），每格最多两个数字；固定配方的两个数量各一位。
-	maxHotbarGlyphs = core.InventorySlots*2 + recipeGlyphs
+	// 固定容量按最坏布局：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块，
+	// 再加固定合成行与熔炉视图中较大的一个。
+	maxHotbarQuads = 2 + core.InventorySlots*2 + maxOverlayQuads
+	// 数量最多两位数（1..64），每格最多两个数字。
+	maxHotbarGlyphs = core.InventorySlots*2 + maxOverlayGlyphs
 
 	// 一条固定配方：输入格、输出格和一个合成按钮。
 	recipeQuads  = 3
 	recipeGlyphs = 2
+	// 熔炉视图：三个栏位背景、三个物品色块、两条进度条底与两条进度条填充。
+	furnaceQuads = 3 + 3 + 4
+	// 三个熔炉格各最多两位数量。
+	furnaceGlyphs = 6
+
+	maxOverlayQuads  = max(recipeQuads, furnaceQuads)
+	maxOverlayGlyphs = max(recipeGlyphs, furnaceGlyphs)
 
 	hotbarInstanceBytes  = 48
 	hotbarViewportOffset = 0
@@ -40,6 +47,9 @@ const (
 	// 合成行位于背包最上一行之上。
 	recipeRowGap      = float32(16)
 	recipeButtonWidth = float32(96)
+	// 熔炉三格与两条进度条排在背包最上一行之上。
+	furnaceBarHeight = float32(10)
+	furnaceBarGap    = float32(6)
 )
 
 //go:embed shader/hotbar.wgsl
@@ -163,6 +173,7 @@ func (renderer *HotbarRenderer) Prepare(
 	inventory core.Inventory,
 	open bool,
 	source int,
+	overlay *FurnaceOverlay,
 	width, height uint32,
 	budget *UploadBudget,
 ) error {
@@ -171,7 +182,7 @@ func (renderer *HotbarRenderer) Prepare(
 		return err
 	}
 	layoutInventory(
-		&renderer.layout, renderer.atlas, inventory, open, source,
+		&renderer.layout, renderer.atlas, inventory, open, source, overlay,
 		float32(width), float32(height),
 	)
 	encodeHotbarViewport(
@@ -209,14 +220,15 @@ func (renderer *HotbarRenderer) Render(encoder gfx.CommandEncoder, target gfx.Te
 	pass.End()
 }
 
-// layoutInventory 只依赖 framebuffer 尺寸、完整物品状态和界面开关，
-// 产出固定上限的实例；关闭时只有底部 9 格 HUD。
+// layoutInventory 只依赖 framebuffer 尺寸、完整物品状态、界面开关与熔炉叠加值，
+// 产出固定上限的实例；关闭时只有底部 9 格 HUD，overlay 非 nil 时画熔炉视图而不是合成行。
 func layoutInventory(
 	dst *hotbarLayout,
 	atlas GlyphSource,
 	inventory core.Inventory,
 	open bool,
 	source int,
+	overlay *FurnaceOverlay,
 	width, height float32,
 ) hotbarLayout {
 	if dst == nil {
@@ -244,8 +256,12 @@ func layoutInventory(
 		Height: hotbarSlotSize + 2*hotbarSelectBorder,
 		Color:  [4]float32{1, 1, 1, 0.92},
 	})
-	if open && source >= 0 && source < core.InventorySlots {
+	if open && source >= 0 &&
+		(source < core.InventorySlots || overlay != nil && source < core.FurnaceViewSlots) {
 		sourceX, sourceY := inventorySlotOrigin(source, open, width, height)
+		if source >= core.InventorySlots {
+			sourceX, sourceY = recipeSlotOrigin(source-core.InventorySlots, width, height)
+		}
 		dst.quads = append(dst.quads, hotbarInstance{
 			X:      sourceX - hotbarSelectBorder,
 			Y:      sourceY - hotbarSelectBorder,
@@ -285,9 +301,105 @@ func layoutInventory(
 		appendHotbarCount(dst, atlas, stack.Count, x, y)
 	}
 	if open {
-		appendRecipeRow(dst, atlas, inventory, width, height)
+		if overlay != nil {
+			appendFurnaceRow(dst, atlas, *overlay, width, height)
+		} else {
+			appendRecipeRow(dst, atlas, inventory, width, height)
+		}
 	}
 	return *dst
+}
+
+// FurnaceOverlay 是熔炉界面需要显示的全部权威值。
+// 它是 render 本地值，由 app 从已确认镜像转换，渲染层不依赖协议类型。
+type FurnaceOverlay struct {
+	Input         core.ItemStack
+	Fuel          core.ItemStack
+	Output        core.ItemStack
+	ProgressTicks uint8
+	BurnTicks     uint16
+}
+
+// appendFurnaceRow 绘制熔炉的输入、燃料、输出三格与燃烧、熔炼两条进度条。
+func appendFurnaceRow(
+	dst *hotbarLayout,
+	atlas GlyphSource,
+	overlay FurnaceOverlay,
+	width, height float32,
+) {
+	stacks := [3]core.ItemStack{overlay.Input, overlay.Fuel, overlay.Output}
+	for index, stack := range stacks {
+		x, y := recipeSlotOrigin(index, width, height)
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: x, Y: y,
+			Width: hotbarSlotSize, Height: hotbarSlotSize,
+			Color: [4]float32{0.05, 0.05, 0.06, 0.62},
+		})
+		if stack.Item == core.ItemNone {
+			continue
+		}
+		dst.quads = append(dst.quads, hotbarInstance{
+			X:      x + hotbarSwatchInset,
+			Y:      y + hotbarSwatchInset,
+			Width:  hotbarSlotSize - 2*hotbarSwatchInset,
+			Height: hotbarSlotSize - 2*hotbarSwatchInset,
+			Color:  hotbarItemColor(stack.Item),
+		})
+		appendHotbarCount(dst, atlas, stack.Count, x, y)
+	}
+
+	// 两条进度条分别显示剩余燃烧量与当前熔炼进度。
+	bars := [2]struct {
+		fraction float32
+		color    [4]float32
+	}{
+		{float32(overlay.BurnTicks) / float32(core.FurnaceBurnTicks),
+			[4]float32{0.95, 0.55, 0.15, 0.95}},
+		{float32(overlay.ProgressTicks) / float32(core.FurnaceSmeltTicks),
+			[4]float32{0.35, 0.75, 1, 0.95}},
+	}
+	barX, barTop := furnaceBarOrigin(width, height)
+	barWidth := 3*hotbarSlotSize + 2*hotbarSlotGap
+	for index, bar := range bars {
+		y := barTop + float32(index)*(furnaceBarHeight+furnaceBarGap)
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: barX, Y: y, Width: barWidth, Height: furnaceBarHeight,
+			Color: [4]float32{0.05, 0.05, 0.06, 0.62},
+		})
+		if bar.fraction <= 0 {
+			continue
+		}
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: barX, Y: y,
+			Width: barWidth * min(bar.fraction, 1), Height: furnaceBarHeight,
+			Color: bar.color,
+		})
+	}
+}
+
+// furnaceBarOrigin 返回两条进度条的左上角像素坐标。
+func furnaceBarOrigin(width, height float32) (float32, float32) {
+	x, y := recipeSlotOrigin(0, width, height)
+	return x, y - furnaceBarGap - 2*furnaceBarHeight - furnaceBarGap
+}
+
+// FurnaceSlotAt 把光标像素坐标映射为熔炉界面的统一索引 0..38。
+// 它与绘制共用同一套几何常量；界外返回 false。
+func FurnaceSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool) {
+	if slot, ok := InventorySlotAt(cursorX, cursorY, width, height); ok {
+		return slot, true
+	}
+	if width == 0 || height == 0 {
+		return 0, false
+	}
+	x, y := float32(cursorX), float32(cursorY)
+	for index := range 3 {
+		left, top := recipeSlotOrigin(index, float32(width), float32(height))
+		if x >= left && x < left+hotbarSlotSize && y >= top && y < top+hotbarSlotSize {
+			return core.InventorySlots + uint8(index), true
+		}
+	}
+	return 0, false
 }
 
 // appendRecipeRow 绘制固定的 4 石头 → 4 石砖 配方行与一次合成按钮。

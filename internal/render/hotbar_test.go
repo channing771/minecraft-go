@@ -8,6 +8,17 @@ import (
 	"minecraft-go/internal/gfx"
 )
 
+// fullFurnaceOverlay 是熔炉视图的最坏布局：三格都有物品且两条进度条都非空。
+func fullFurnaceOverlay() *FurnaceOverlay {
+	return &FurnaceOverlay{
+		Input:         core.ItemStack{Item: core.ItemRawIron, Count: core.MaxStackCount},
+		Fuel:          core.ItemStack{Item: core.ItemCoal, Count: core.MaxStackCount},
+		Output:        core.ItemStack{Item: core.ItemIronIngot, Count: core.MaxStackCount},
+		ProgressTicks: core.FurnaceSmeltTicks - 1,
+		BurnTicks:     core.FurnaceBurnTicks,
+	}
+}
+
 func fullTestInventory() core.Inventory {
 	var inventory core.Inventory
 	inventory.Hotbar.Selected = 4
@@ -35,7 +46,7 @@ func TestHotbarLayoutIsFixedNineSlotsWithSelection(t *testing.T) {
 	var inventory core.Inventory
 	inventory.Hotbar.Selected = 2
 	var layout hotbarLayout
-	got := layoutInventory(&layout, atlas, inventory, false, -1, 800, 600)
+	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, 800, 600)
 
 	if len(got.quads) != 1+core.HotbarSlots {
 		t.Fatalf("空物品状态 quads=%d，想要选中框加 9 个栏位", len(got.quads))
@@ -77,7 +88,7 @@ func TestHotbarLayoutDrawsItemSwatchesAndCounts(t *testing.T) {
 	inventory.Hotbar.Slots[8] = core.ItemStack{Item: core.ItemGrass, Count: 1}
 
 	var layout hotbarLayout
-	got := layoutInventory(&layout, atlas, inventory, false, -1, 1280, 720)
+	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, 1280, 720)
 	if len(got.quads) != 1+core.HotbarSlots+3 {
 		t.Fatalf("quads=%d，想要选中框、9 个栏位和 3 个色块", len(got.quads))
 	}
@@ -108,7 +119,7 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
-	got := layoutInventory(&layout, atlas, fullTestInventory(), true, 5, 1280, 720)
+	got := layoutInventory(&layout, atlas, fullTestInventory(), true, 5, fullFurnaceOverlay(), 1280, 720)
 	if len(got.quads) != maxHotbarQuads {
 		t.Fatalf("满界面 quads=%d，想要 %d", len(got.quads), maxHotbarQuads)
 	}
@@ -123,10 +134,10 @@ func TestHotbarLayoutRejectsInvalidStateAndEmptyFramebuffer(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
 	invalid := core.Inventory{Hotbar: core.Hotbar{Selected: core.HotbarSlots}}
 	var layout hotbarLayout
-	if got := layoutInventory(&layout, atlas, invalid, false, -1, 800, 600); len(got.quads) != 0 {
+	if got := layoutInventory(&layout, atlas, invalid, false, -1, nil, 800, 600); len(got.quads) != 0 {
 		t.Fatalf("非法物品状态 quads=%d，想要 0", len(got.quads))
 	}
-	if got := layoutInventory(&layout, atlas, core.Inventory{}, false, -1, 0, 600); len(got.quads) != 0 {
+	if got := layoutInventory(&layout, atlas, core.Inventory{}, false, -1, nil, 0, 600); len(got.quads) != 0 {
 		t.Fatalf("零宽 framebuffer quads=%d，想要 0", len(got.quads))
 	}
 }
@@ -158,7 +169,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 		}
 	}
 
-	if err := renderer.Prepare(fullTestInventory(), true, 5, 1280, 720, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare(fullTestInventory(), true, 5, fullFurnaceOverlay(), 1280, 720, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	if len(upload.lastWrite) != 0 {
@@ -199,7 +210,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 func TestHotbarRendererSkipsEmptyPreparedLayout(t *testing.T) {
 	renderer := NewHotbarRenderer(&nameTagTestDevice{}, gfx.FormatRGBA8Unorm, newFakeNameTagAtlas())
 	defer renderer.Release()
-	if err := renderer.Prepare(core.Inventory{}, false, -1, 0, 0, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare(core.Inventory{}, false, -1, nil, 0, 0, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	encoder := &nameTagTestEncoder{}
@@ -249,13 +260,14 @@ func TestHotbarPrepareReusesLayoutAndUploadStorage(t *testing.T) {
 		upload: make([]byte, hotbarUploadBytes),
 	}
 	inventory := fullTestInventory()
+	overlay := fullFurnaceOverlay()
 	budget := NewUploadBudget(1024)
-	if err := renderer.Prepare(inventory, true, 3, 1280, 720, budget); err != nil {
+	if err := renderer.Prepare(inventory, true, 3, overlay, 1280, 720, budget); err != nil {
 		t.Fatalf("warm Prepare: %v", err)
 	}
 	allocations := testing.AllocsPerRun(1000, func() {
 		source.requestCount = 0
-		if err := renderer.Prepare(inventory, true, 3, 1280, 720, budget); err != nil {
+		if err := renderer.Prepare(inventory, true, 3, overlay, 1280, 720, budget); err != nil {
 			panic(err)
 		}
 	})
@@ -288,7 +300,7 @@ func TestHotbarRendererHeadlessBlendOverExistingColor(t *testing.T) {
 	defer atlas.Release()
 	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas)
 	defer renderer.Release()
-	if err := renderer.Prepare(fullTestInventory(), true, 0, 128, 128, NewUploadBudget(1<<20)); err != nil {
+	if err := renderer.Prepare(fullTestInventory(), true, 0, nil, 128, 128, NewUploadBudget(1<<20)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 
@@ -313,7 +325,7 @@ func TestInventoryLayoutOpensThreeBackpackRows(t *testing.T) {
 	}
 	var layout hotbarLayout
 	var inventory core.Inventory
-	got := layoutInventory(&layout, atlas, inventory, true, 12, 1280, 720)
+	got := layoutInventory(&layout, atlas, inventory, true, 12, nil, 1280, 720)
 
 	// 选中框 + 来源高亮 + 36 个栏位背景 + 固定配方行。
 	if len(got.quads) != 2+core.InventorySlots+recipeQuads {
@@ -358,10 +370,10 @@ func TestInventoryLayoutDrawsFixedRecipeRow(t *testing.T) {
 	}
 	var layout hotbarLayout
 
-	closed := layoutInventory(&layout, atlas, core.Inventory{}, false, -1, 1280, 720)
+	closed := layoutInventory(&layout, atlas, core.Inventory{}, false, -1, nil, 1280, 720)
 	closedQuads := len(closed.quads)
 
-	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, 1280, 720)
+	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, 1280, 720)
 	if len(open.quads) <= closedQuads {
 		t.Fatalf("打开时 quads=%d，想要多于关闭时的 %d", len(open.quads), closedQuads)
 	}
@@ -373,7 +385,7 @@ func TestInventoryLayoutDrawsFixedRecipeRow(t *testing.T) {
 	disabled := open.quads[len(open.quads)-1]
 	var stocked core.Inventory
 	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
-	enabledLayout := layoutInventory(&layout, atlas, stocked, true, -1, 1280, 720)
+	enabledLayout := layoutInventory(&layout, atlas, stocked, true, -1, nil, 1280, 720)
 	enabled := enabledLayout.quads[len(enabledLayout.quads)-1]
 	if disabled.Color == enabled.Color {
 		t.Fatal("可合成与不可合成的按钮颜色相同")
@@ -398,5 +410,111 @@ func TestRecipeButtonHitTestMatchesDrawnGeometry(t *testing.T) {
 	// 配方行不得与背包格重叠。
 	if _, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 1280, 720); ok {
 		t.Fatal("合成按钮与背包格重叠")
+	}
+}
+
+// 杀死变异：丢失熔炉格、放错进度条或忽略权威计时都会改变实例布局。
+func TestFurnaceOverlayDrawsThreeSlotsAndTwoBars(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	for _, char := range hotbarDigits {
+		atlas.glyphs[char] = fakeNameTagGlyph(7)
+	}
+	var layout hotbarLayout
+
+	empty := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, &FurnaceOverlay{}, 1280, 720)
+	// 空熔炉：3 个栏位背景 + 2 条进度条底，没有色块也没有填充。
+	emptyQuads := len(empty.quads)
+	if len(empty.glyphs) != 0 {
+		t.Fatalf("空熔炉数字 = %d，想要 0", len(empty.glyphs))
+	}
+
+	full := layoutInventory(
+		&layout, atlas, core.Inventory{}, true, -1, fullFurnaceOverlay(), 1280, 720,
+	)
+	if len(full.quads) != emptyQuads+3+2 {
+		t.Fatalf("满熔炉 quads = %d，想要比空熔炉多 3 个色块和 2 条填充", len(full.quads))
+	}
+	if len(full.glyphs) != furnaceGlyphs {
+		t.Fatalf("满熔炉数字 = %d，想要 %d", len(full.glyphs), furnaceGlyphs)
+	}
+
+	// 进度条宽度必须随权威计时按比例变化。
+	half := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, &FurnaceOverlay{
+		BurnTicks: core.FurnaceBurnTicks / 2,
+	}, 1280, 720)
+	// 满布局末尾是 [燃烧底, 燃烧填充, 熔炼底, 熔炼填充]；
+	// 半满布局的熔炼进度为 0 所以没有填充，末尾是 [燃烧底, 燃烧填充, 熔炼底]。
+	fullBar := full.quads[len(full.quads)-3]
+	halfBar := half.quads[len(half.quads)-2]
+	if halfBar.Width >= fullBar.Width || halfBar.Width <= 0 {
+		t.Fatalf("半满燃烧条宽度 = %f，满条 = %f", halfBar.Width, fullBar.Width)
+	}
+}
+
+func TestFurnaceOverlayReplacesRecipeRow(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	for _, char := range hotbarDigits {
+		atlas.glyphs[char] = fakeNameTagGlyph(7)
+	}
+	var layout hotbarLayout
+	var stocked core.Inventory
+	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+
+	recipe := layoutInventory(&layout, atlas, stocked, true, -1, nil, 1280, 720)
+	furnace := layoutInventory(&layout, atlas, stocked, true, -1, &FurnaceOverlay{}, 1280, 720)
+	if len(recipe.quads) == len(furnace.quads) {
+		t.Fatal("熔炉视图与合成行产生了相同布局")
+	}
+}
+
+func TestFurnaceSlotAtCoversUnifiedIndices(t *testing.T) {
+	width, height := uint32(1280), uint32(720)
+	// 0..35 与背包命中一致。
+	for _, slot := range []int{0, 8, 9, 35} {
+		x, y := inventorySlotOrigin(slot, true, float32(width), float32(height))
+		got, ok := FurnaceSlotAt(float64(x)+1, float64(y)+1, width, height)
+		if !ok || int(got) != slot {
+			t.Fatalf("统一索引 %d 命中 = %d, %v", slot, got, ok)
+		}
+	}
+	// 36、37、38 落在熔炉三格上。
+	for index := range 3 {
+		x, y := recipeSlotOrigin(index, float32(width), float32(height))
+		got, ok := FurnaceSlotAt(float64(x), float64(y), width, height)
+		if !ok || got != core.InventorySlots+uint8(index) {
+			t.Fatalf("熔炉格 %d 命中 = %d, %v", index, got, ok)
+		}
+		if _, ok := FurnaceSlotAt(
+			float64(x+hotbarSlotSize), float64(y+hotbarSlotSize/2), width, height,
+		); ok {
+			t.Fatalf("熔炉格 %d 右边界外仍被命中", index)
+		}
+	}
+	if _, ok := FurnaceSlotAt(0, 0, width, height); ok {
+		t.Fatal("界外命中被接受")
+	}
+	if _, ok := FurnaceSlotAt(100, 100, 0, 0); ok {
+		t.Fatal("零尺寸 framebuffer 被判为命中")
+	}
+}
+
+func TestFurnaceSourceHighlightCoversFurnaceSlots(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	var layout hotbarLayout
+	for source := range core.FurnaceViewSlots {
+		got := layoutInventory(
+			&layout, atlas, core.Inventory{}, true, source,
+			&FurnaceOverlay{}, 1280, 720,
+		)
+		// 第二个 quad 是来源高亮。
+		highlight := got.quads[1]
+		wantX, wantY := inventorySlotOrigin(source, true, 1280, 720)
+		if source >= core.InventorySlots {
+			wantX, wantY = recipeSlotOrigin(source-core.InventorySlots, 1280, 720)
+		}
+		if highlight.X != wantX-hotbarSelectBorder || highlight.Y != wantY-hotbarSelectBorder {
+			t.Fatalf("来源 %d 高亮 = %+v，想要包住 (%f,%f)",
+				source, highlight, wantX, wantY)
+		}
 	}
 }

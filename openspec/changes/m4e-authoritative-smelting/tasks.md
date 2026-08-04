@@ -55,11 +55,11 @@
 
 ## 8. 熔炉界面接线
 
-- [ ] 8.1 在 `internal/render` 先写 headless 失败测试，覆盖 36 格物品加 3 格熔炉布局、来源 `0..38` 高亮、三种 stack 与数量、进度与燃烧条在 0 与边界值、固定 quad/glyph 容量、命中边界、满布局 allocation 与 buffer 边界，且原有背包合成行保持不变。
-- [ ] 8.2 在 `internal/client` 与 `cmd/mcgo` 先写失败测试：本地镜像射线命中熔炉时只发一次打开请求、非熔炉仍发放置请求；收到权威状态后才显示；两次点击只发一次跨容器移动且不改镜像；`E`/`Escape` 立即清界面并发关闭；收到关闭通知、断线或玩家状态 reset 时清界面与来源；打开时抑制移动、视角、挖掘、放置与快捷栏选择；测试只用 fake window/gfx，不调用交互式 `run()`。
-- [ ] 8.3 按最坏布局重新计算 `maxHotbarQuads`/`maxHotbarGlyphs`，`layoutInventory` 在 overlay 非 nil 时画三格与两条进度并省略合成行；新增与绘制共用几何的纯命中函数 `render.FurnaceSlotAt`；`FurnaceOverlay` 是 render-local 值，由 app 从已确认镜像转换，renderer 不导入 `network`。
-- [ ] 8.4 在现有右键与点击路径分流：用 `core.RaycastBlocks` 加 `client.Mirror.BlockAt` 做本地命中只决定发送打开还是放置，服务端仍重新射线；统一来源索引 `0..38`；显式关闭可本地关界面，但任何物品变化仍等待服务端确认。
-- [ ] 8.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./internal/client ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，确认无窗口出现、`gofmt` 与 `git diff --check` 通过；提交 `feat: 接入权威熔炉界面`，然后自动进入第 9 组。
+- [x] 8.1 在 `internal/render` 先写 headless 失败测试，覆盖 36 格物品加 3 格熔炉布局、来源 `0..38` 高亮、三种 stack 与数量、进度与燃烧条在 0 与边界值、固定 quad/glyph 容量、命中边界、满布局 allocation 与 buffer 边界，且原有背包合成行保持不变。
+- [x] 8.2 在 `internal/client` 与 `cmd/mcgo` 先写失败测试：本地镜像射线命中熔炉时只发一次打开请求、非熔炉仍发放置请求；收到权威状态后才显示；两次点击只发一次跨容器移动且不改镜像；`E`/`Escape` 立即清界面并发关闭；收到关闭通知、断线或玩家状态 reset 时清界面与来源；打开时抑制移动、视角、挖掘、放置与快捷栏选择；测试只用 fake window/gfx，不调用交互式 `run()`。
+- [x] 8.3 按最坏布局重新计算 `maxHotbarQuads`/`maxHotbarGlyphs`，`layoutInventory` 在 overlay 非 nil 时画三格与两条进度并省略合成行；新增与绘制共用几何的纯命中函数 `render.FurnaceSlotAt`；`FurnaceOverlay` 是 render-local 值，由 app 从已确认镜像转换，renderer 不导入 `network`。
+- [x] 8.4 在现有右键与点击路径分流：用 `core.RaycastBlocks` 加 `client.Mirror.BlockAt` 做本地命中只决定发送打开还是放置，服务端仍重新射线；统一来源索引 `0..38`；显式关闭可本地关界面，但任何物品变化仍等待服务端确认。
+- [x] 8.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./internal/client ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，确认无窗口出现、`gofmt` 与 `git diff --check` 通过；提交 `feat: 接入权威熔炉界面`，然后自动进入第 9 组。
 
 ## 9. scenario v9 与兼容文档
 

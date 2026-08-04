@@ -52,6 +52,7 @@ type application struct {
 	nameTagRenderer         *render.NameTagRenderer
 	hotbarRenderer          *render.HotbarRenderer
 	inventory               client.InventoryMirror
+	furnace                 client.FurnaceMirror
 	itemDropRenderer        *render.ItemDropRenderer
 	itemDrops               *client.ItemDrops
 	itemDropInstances       []render.ItemDrop
@@ -811,6 +812,7 @@ func (a *application) closeClientSession(cause error) {
 			a.remotePlayers.Reset()
 		}
 		a.inventory.Reset()
+		a.furnace.Reset()
 		a.inventoryOpen = false
 		a.inventorySource = -1
 		a.itemDrops.Reset()
@@ -903,8 +905,18 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	}
 	inventory, inventoryConfirmed := a.inventory.State()
 	if inventoryConfirmed {
+		var overlay *render.FurnaceOverlay
+		if furnace, opened := a.furnace.State(); opened {
+			overlay = &render.FurnaceOverlay{
+				Input:         furnace.Input,
+				Fuel:          furnace.Fuel,
+				Output:        furnace.Output,
+				ProgressTicks: furnace.ProgressTicks,
+				BurnTicks:     furnace.BurnTicks,
+			}
+		}
 		if err := a.hotbarRenderer.Prepare(
-			inventory, a.inventoryOpen, a.inventorySource,
+			inventory, a.inventoryOpen, a.inventorySource, overlay,
 			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
@@ -1023,7 +1035,11 @@ func (a *application) drainServerMessages(maxMessages int) {
 				return
 			}
 			if state.Reset {
-				a.inventorySource = -1
+				if _, opened := a.furnace.State(); opened {
+					a.clearFurnaceUI()
+				} else {
+					a.inventorySource = -1
+				}
 			}
 			if result.ResetView {
 				a.camera.Yaw = result.Yaw
@@ -1035,6 +1051,32 @@ func (a *application) drainServerMessages(maxMessages int) {
 			if err := a.inventory.Apply(state); err != nil {
 				a.closeClientSession(err)
 				return
+			}
+			continue
+		}
+		if state, ok := message.(network.FurnaceState); ok {
+			previous, opened := a.furnace.Ref()
+			if err := a.furnace.Apply(state); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			if !opened || previous != state.Furnace {
+				a.inventorySource = -1
+			}
+			a.inventoryOpen = true
+			if a.window != nil {
+				a.window.SetCursorCaptured(false)
+			}
+			continue
+		}
+		if closed, ok := message.(network.FurnaceClosed); ok {
+			current, opened := a.furnace.Ref()
+			if err := a.furnace.Close(closed); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			if opened && current == closed.Furnace {
+				a.clearFurnaceUI()
 			}
 			continue
 		}
@@ -1113,6 +1155,28 @@ func (a *application) placeBlock() {
 	if _, ready := a.predictor.State(); !ready {
 		return
 	}
+	hit, found, err := core.RaycastBlocks(
+		a.camera.Pos,
+		a.camera.Forward(),
+		6,
+		func(position core.BlockPos) (bool, error) {
+			block, loaded := a.mirror.BlockAt(core.Overworld, position)
+			return loaded && block != core.AirID, nil
+		},
+	)
+	if err != nil {
+		log.Printf("本地熔炉射线失败: %v", err)
+	} else if found {
+		block, loaded := a.mirror.BlockAt(core.Overworld, hit.Block)
+		if loaded && block == core.FurnaceID {
+			if err := a.send(network.OpenFurnace{
+				Sequence: a.nextSequence(), Yaw: a.camera.Yaw, Pitch: a.camera.Pitch,
+			}); err != nil {
+				log.Printf("发送打开熔炉请求失败: %v", err)
+			}
+			return
+		}
+	}
 	// 放置引用最后一个已确认的选中栏位；尚未确认时不发送。
 	hotbar, confirmed := a.inventory.Hotbar()
 	if !confirmed {
@@ -1128,8 +1192,17 @@ func (a *application) placeBlock() {
 	}
 }
 
-// setInventoryOpen 切换背包界面：打开释放鼠标并清除来源，关闭恢复捕获。
+// setInventoryOpen 切换容器界面：显式关闭熔炉时立即清理并通知服务端。
 func (a *application) setInventoryOpen(open bool) {
+	if !open {
+		if _, opened := a.furnace.State(); opened {
+			a.clearFurnaceUI()
+			if err := a.send(network.CloseFurnace{Sequence: a.nextSequence()}); err != nil {
+				log.Printf("发送关闭熔炉请求失败: %v", err)
+			}
+			return
+		}
+	}
 	a.inventoryOpen = open
 	a.inventorySource = -1
 	if a.window != nil {
@@ -1141,25 +1214,45 @@ func (a *application) setInventoryOpen(open bool) {
 	}
 }
 
+// clearFurnaceUI 丢弃当前熔炉镜像并关闭容器界面，不发送协议消息。
+func (a *application) clearFurnaceUI() {
+	a.furnace.Reset()
+	a.inventoryOpen = false
+	a.inventorySource = -1
+	if a.window != nil {
+		a.window.SetCursorCaptured(true)
+	}
+}
+
 // clickInventorySlot 处理固定配方按钮，或用两次有效栏位点击组成一次整堆移动请求。
 func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height uint32) {
-	if recipe, ok := render.RecipeButtonAt(cursorX, cursorY, width, height); ok {
-		inventory, confirmed := a.inventory.State()
-		if !confirmed {
+	furnace, furnaceOpen := a.furnace.State()
+	if !furnaceOpen {
+		if recipe, ok := render.RecipeButtonAt(cursorX, cursorY, width, height); ok {
+			inventory, confirmed := a.inventory.State()
+			if !confirmed {
+				return
+			}
+			if _, craftable := inventory.Craft(recipe); !craftable {
+				return
+			}
+			a.inventorySource = -1
+			if err := a.send(network.CraftRecipe{
+				Sequence: a.nextSequence(), Recipe: recipe,
+			}); err != nil {
+				log.Printf("发送合成请求失败: %v", err)
+			}
 			return
 		}
-		if _, craftable := inventory.Craft(recipe); !craftable {
-			return
-		}
-		a.inventorySource = -1
-		if err := a.send(network.CraftRecipe{
-			Sequence: a.nextSequence(), Recipe: recipe,
-		}); err != nil {
-			log.Printf("发送合成请求失败: %v", err)
-		}
-		return
 	}
-	slot, ok := render.InventorySlotAt(cursorX, cursorY, width, height)
+
+	var slot uint8
+	var ok bool
+	if furnaceOpen {
+		slot, ok = render.FurnaceSlotAt(cursorX, cursorY, width, height)
+	} else {
+		slot, ok = render.InventorySlotAt(cursorX, cursorY, width, height)
+	}
 	if !ok {
 		return
 	}
@@ -1170,6 +1263,17 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 	from := uint8(a.inventorySource)
 	a.inventorySource = -1
 	if from == slot {
+		return
+	}
+	if furnaceOpen {
+		if slot == core.FurnaceOutputSlot {
+			return
+		}
+		if err := a.send(network.MoveFurnaceStack{
+			Sequence: a.nextSequence(), Furnace: furnace.Furnace, From: from, To: slot,
+		}); err != nil {
+			log.Printf("发送熔炉移动失败: %v", err)
+		}
 		return
 	}
 	if err := a.send(network.MoveInventoryStack{
