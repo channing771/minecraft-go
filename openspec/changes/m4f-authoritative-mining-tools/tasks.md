@@ -44,10 +44,10 @@
 
 ## 8. scenario v10、兼容文档与比较器
 
-- [ ] 8.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：报告标记 v10、v9/v10 默认拒绝、仅 `9:10` 可显式迁移、迁移只执行完整性/绝对门禁、v10 同场景与跨 transport 仍执行既有稳定门禁、历史 v6-v9 保持可读。
-- [ ] 8.2 把 benchmark producer 和比较器升级到 scenario v10，不改变 2560x1440、still/flying、2048 GPU 样本、RSS、tick、20% 相对阈值和其他绝对门禁；M2 基线文件内容与路径保持不变。
-- [ ] 8.3 更新 `README.md`、`docs/notes/lan-server.md` 与 `docs/notes/perf-baseline.md`，使用中文说明按住采掘、两级工具、五条配方、协议 v8、玩家 schema v3、区块 schema v4、备份/回退、scenario v10 与未实现范围。
-- [ ] 8.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/network -race -count=1'`，再运行 OpenSpec strict、gofmt 与 diff check，通过后提交 `feat: 升级 benchmark scenario v10`。
+- [x] 8.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：报告标记 v10、v9/v10 默认拒绝、仅 `9:10` 可显式迁移、迁移只执行完整性/绝对门禁、v10 同场景与跨 transport 仍执行既有稳定门禁、历史 v6-v9 保持可读。
+- [x] 8.2 把 benchmark producer 和比较器升级到 scenario v10，不改变 2560x1440、still/flying、2048 GPU 样本、RSS、tick、20% 相对阈值和其他绝对门禁；M2 基线文件内容与路径保持不变。
+- [x] 8.3 更新 `README.md`、`docs/notes/lan-server.md` 与 `docs/notes/perf-baseline.md`，使用中文说明按住采掘、两级工具、五条配方、协议 v8、玩家 schema v3、区块 schema v4、备份/回退、scenario v10 与未实现范围。
+- [x] 8.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/network -race -count=1'`，再运行 OpenSpec strict、gofmt 与 diff check，通过后提交 `feat: 升级 benchmark scenario v10`。
 
 ## 9. 候选版本完整门禁
 

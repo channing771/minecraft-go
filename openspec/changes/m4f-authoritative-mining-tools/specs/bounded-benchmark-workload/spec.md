@@ -31,9 +31,9 @@
 - **WHEN** baseline 为 scenario v8、current 为 scenario v9 且没有显式迁移授权
 - **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致
 
-#### Scenario: 显式授权 v8 到 v9 迁移
-- **WHEN** 调用方显式授权 `8:9` 迁移且两份报告的硬件身份一致
-- **THEN** 比较器 MUST 执行既有完整性与绝对门禁，并跳过不同 workload 之间无意义的相对回归判定
+#### Scenario: 退役的 v8 到 v9 迁移参数被拒绝
+- **WHEN** 调用方使用已经退役的 `8:9` 迁移参数比较 scenario v8 与 v9
+- **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
 
 #### Scenario: v7 与 v8 不静默混比
 - **WHEN** baseline 为 scenario v7、current 为 scenario v8
@@ -43,9 +43,9 @@
 - **WHEN** baseline 为 scenario v6、current 为 scenario v7 且没有显式迁移授权
 - **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
 
-#### Scenario: 显式授权 v6 到 v7 迁移
-- **WHEN** 调用方显式授权 `6:7` 迁移且两份报告的硬件身份一致
-- **THEN** 比较器 MUST 执行既有完整性与绝对门禁，并跳过不同 workload 之间无意义的相对回归判定
+#### Scenario: 退役的 v6 到 v7 迁移参数被拒绝
+- **WHEN** 调用方使用已经退役的 `6:7` 迁移参数比较 scenario v6 与 v7
+- **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
 
 #### Scenario: 历史报告保持可校验
 - **WHEN** 调用方单独读取一份完整 scenario v6、v7、v8 或 v9 报告
