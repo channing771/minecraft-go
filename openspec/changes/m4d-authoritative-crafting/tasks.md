@@ -1,9 +1,9 @@
 ## 1. 固定石砖枚举与纯合成
 
-- [ ] 1.1 在 `internal/core` 先写失败测试，覆盖稳定 `StoneBrickID`、`ItemStoneBrick`、recipe ID `1`、4 石头到 4 石砖、未知配方、跨栏位最低索引扣料、扣料后释放输出格、原料不足、产物无容量、非法 Inventory 不改原值和零分配最坏路径。
-- [ ] 1.2 在 `internal/core` 最小实现一个固定 recipe switch 与 `Inventory.Craft` 值操作；复用 `Slot`、`setSlot` 和 `AddStack`，不新增注册器、接口、配置或第二套可合成判断。
-- [ ] 1.3 在 `internal/assets`、`internal/render` 增加程序化石砖材质和现有物品色块映射，补充方块/物品放置、挖掘掉落和材质测试；不新增二进制资源或第二个 renderer。
-- [ ] 1.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/assets ./internal/render -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/assets internal/render` 与 `git diff --check` 无输出；只暂存本组与任务勾选，提交 `feat: 定义固定石砖配方`，然后自动进入第 2 组。
+- [x] 1.1 在 `internal/core` 先写失败测试，覆盖稳定 `StoneBrickID`、`ItemStoneBrick`、recipe ID `1`、4 石头到 4 石砖、未知配方、跨栏位最低索引扣料、扣料后释放输出格、原料不足、产物无容量、非法 Inventory 不改原值和零分配最坏路径。
+- [x] 1.2 在 `internal/core` 最小实现一个固定 recipe switch 与 `Inventory.Craft` 值操作；复用 `Slot`、`setSlot` 和 `AddStack`，不新增注册器、接口、配置或第二套可合成判断。
+- [x] 1.3 在 `internal/assets`、`internal/render` 增加程序化石砖材质和现有物品色块映射，补充方块/物品放置、挖掘掉落和材质测试；不新增二进制资源或第二个 renderer。
+- [x] 1.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/assets ./internal/render -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/assets internal/render` 与 `git diff --check` 无输出；只暂存本组与任务勾选，提交 `feat: 定义固定石砖配方`，然后自动进入第 2 组。
 
 ## 2. 区块存档 schema v3
 

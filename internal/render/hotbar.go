@@ -357,6 +357,8 @@ func hotbarItemColor(item core.ItemID) [4]float32 {
 		return [4]float32{134.0 / 255, 96.0 / 255, 67.0 / 255, 1}
 	case core.ItemGrass:
 		return [4]float32{88.0 / 255, 140.0 / 255, 60.0 / 255, 1}
+	case core.ItemStoneBrick:
+		return [4]float32{122.0 / 255, 118.0 / 255, 112.0 / 255, 1}
 	default:
 		return [4]float32{}
 	}

@@ -12,6 +12,7 @@ const (
 	LayerGrassTop
 	LayerGrassSide
 	LayerBedrock
+	LayerStoneBrick
 	layerCount
 )
 
@@ -28,6 +29,7 @@ func NewRegistry() *Registry {
 	r.layers[LayerGrassTop] = grassTopTexture()
 	r.layers[LayerGrassSide] = grassSideTexture()
 	r.layers[LayerBedrock] = noisyTexture(rgb{R: 60, G: 60, B: 64}, 28, 0x3F19)
+	r.layers[LayerStoneBrick] = noisyTexture(rgb{R: 122, G: 118, B: 112}, 10, 0x77B1)
 	return r
 }
 
@@ -45,6 +47,8 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 		return LayerDirt
 	case core.BedrockID:
 		return LayerBedrock
+	case core.StoneBrickID:
+		return LayerStoneBrick
 	case core.GrassID:
 		switch f {
 		case mesh.FacePosY:

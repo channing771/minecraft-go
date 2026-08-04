@@ -32,6 +32,7 @@ const (
 	DirtID
 	GrassID
 	BedrockID
+	StoneBrickID
 )
 
 const (
