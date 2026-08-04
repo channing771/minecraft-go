@@ -258,7 +258,7 @@ func (a *application) applyInteractiveCursorInput(
 	if !captured {
 		movement = client.Movement{}
 	}
-	a.applyInteractiveInput(elapsed, movement, actions, captured && !justCaptured)
+	a.applyInteractiveInput(elapsed, movement, actions, captured && !justCaptured && !a.inventoryOpen)
 }
 
 // pressedHotbarNumber 返回当前按下的快捷栏数字键 1..9，没有按下时返回 0。
@@ -281,9 +281,6 @@ func (a *application) applyInteractiveInput(
 		if actions.Select {
 			a.selectHotbarSlot(actions.SelectSlot)
 		}
-		if actions.Break {
-			a.breakBlock()
-		}
 		if actions.Place {
 			a.placeBlock()
 		}
@@ -293,11 +290,12 @@ func (a *application) applyInteractiveInput(
 		return
 	}
 	control := client.Control{
-		MoveX: movement.MoveX,
-		MoveZ: movement.MoveZ,
-		Jump:  movement.Jump,
-		Yaw:   a.camera.Yaw,
-		Pitch: a.camera.Pitch,
+		MoveX:  movement.MoveX,
+		MoveZ:  movement.MoveZ,
+		Jump:   movement.Jump,
+		Yaw:    a.camera.Yaw,
+		Pitch:  a.camera.Pitch,
+		Mining: allowActions && actions.Mining,
 	}
 	if err := a.predictor.Advance(
 		elapsed,

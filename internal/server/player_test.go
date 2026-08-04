@@ -166,7 +166,7 @@ func TestTrustedObserverAppliedCenterWaitsForStepWithPreloadedTarget(t *testing.
 	}
 }
 
-func TestPlayerMessageTranslation(t *testing.T) {
+func TestTranslatePlayerMessage(t *testing.T) {
 	tests := []struct {
 		name    string
 		message network.ClientMessage
@@ -181,6 +181,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Jump:     true,
 				Yaw:      0.75,
 				Pitch:    -0.25,
+				Mining:   true,
 			},
 			want: sim.Command{
 				Session:  testSessionID,
@@ -191,6 +192,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Jump:     true,
 				Yaw:      0.75,
 				Pitch:    -0.25,
+				Mining:   true,
 			},
 		},
 		{

@@ -33,23 +33,42 @@ func TestEngineAppliesOnlyLatestPlayerInputOncePerTick(t *testing.T) {
 
 func TestInvalidLatestInputIsAckedAndNeutral(t *testing.T) {
 	engine, session := readyMovementPlayer(t)
-	engine.Enqueue(Command{Session: session, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1})
+	engine.Enqueue(Command{
+		Session: session, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1, Mining: true,
+	})
 	moving := onlyMovementPlayer(t, engine.Step())
+	if !engine.sessions[session].player.miningHeld {
+		t.Fatal("有效输入未保存持续采掘意图")
+	}
+	engine.Enqueue(Command{Session: session, Sequence: 3, Kind: CommandPlayerInput})
+	onlyMovementPlayer(t, engine.Step())
+	if engine.sessions[session].player.miningHeld {
+		t.Fatal("中性输入未清空持续采掘意图")
+	}
+	engine.Enqueue(Command{
+		Session: session, Sequence: 4, Kind: CommandPlayerInput, Mining: true,
+	})
+	moving = onlyMovementPlayer(t, engine.Step())
 
-	engine.Enqueue(Command{Session: session, Sequence: 3, Kind: CommandPlayerInput, MoveZ: 1})
-	engine.Enqueue(Command{Session: session, Sequence: 4, Kind: CommandPlayerInput, MoveZ: 2})
+	engine.Enqueue(Command{
+		Session: session, Sequence: 5, Kind: CommandPlayerInput,
+		MoveZ: 2, Yaw: float32(math.NaN()), Mining: true,
+	})
 	result := engine.Step()
 	after := onlyMovementPlayer(t, result)
-	if after.LastInputSequence != 4 || len(result.Rejected) != 1 ||
-		result.Rejected[0] != (Rejection{Session: session, Sequence: 4, Reason: RejectInvalidInput}) {
+	if after.LastInputSequence != 5 || len(result.Rejected) != 1 ||
+		result.Rejected[0] != (Rejection{Session: session, Sequence: 5, Reason: RejectInvalidInput}) {
 		t.Fatalf("result=%+v", result)
 	}
 	if after.State.Position != moving.State.Position || after.State.Velocity != (mgl32.Vec3{}) {
 		t.Fatalf("非法最新输入没有改用中立状态: moving=%+v after=%+v", moving.State, after.State)
 	}
+	if engine.sessions[session].player.miningHeld {
+		t.Fatal("非法最新输入未清空持续采掘意图")
+	}
 
 	held := onlyMovementPlayer(t, engine.Step())
-	if held.State != after.State || held.LastInputSequence != 4 {
+	if held.State != after.State || held.LastInputSequence != 5 {
 		t.Fatalf("非法输入后的 held 状态不是中立: after=%+v held=%+v", after, held)
 	}
 }

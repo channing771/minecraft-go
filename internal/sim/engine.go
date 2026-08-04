@@ -183,6 +183,7 @@ func (engine *Engine) Step() TickResult {
 			player.lastInputSequence = command.Sequence
 			if !validPlayerInput(command) {
 				player.input = physics.Input{Yaw: player.yaw}
+				player.miningHeld = false
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
 					Sequence: command.Sequence,
@@ -197,6 +198,7 @@ func (engine *Engine) Step() TickResult {
 				Jump:  command.Jump,
 				Yaw:   yaw,
 			}
+			player.miningHeld = command.Mining
 			player.yaw = yaw
 			player.pitch = command.Pitch
 		case CommandSelectHotbar:

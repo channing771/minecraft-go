@@ -679,7 +679,7 @@ func TestInteractiveInputUsesDrainedReadyResetInSameFrame(t *testing.T) {
 	sendInteractiveServerMessage(t, serverEndpoint, state)
 
 	app.drainServerMessages(1)
-	app.applyInteractiveInput(0, client.Movement{}, client.Actions{Break: true}, true)
+	app.applyInteractiveInput(physics.FixedDelta, client.Movement{}, client.Actions{Mining: true}, true)
 
 	wantPosition := mgl32.Vec3{4.5, 20 + physics.EyeHeight, -2.5}
 	if app.camera.Pos != wantPosition || app.camera.Yaw != 0.75 || app.camera.Pitch != -0.2 {
@@ -687,8 +687,8 @@ func TestInteractiveInputUsesDrainedReadyResetInSameFrame(t *testing.T) {
 			app.camera.Pos, app.camera.Yaw, app.camera.Pitch, wantPosition)
 	}
 	message := receiveInteractiveClientMessage(t, serverEndpoint)
-	breakBlock, ok := message.(network.BreakBlock)
-	if !ok || breakBlock != (network.BreakBlock{Sequence: 1, Yaw: 0.75, Pitch: -0.2}) {
+	input, ok := message.(network.PlayerInput)
+	if !ok || input != (network.PlayerInput{Sequence: 1, Yaw: 0.75, Pitch: -0.2, Mining: true}) {
 		t.Fatalf("Ready Reset 同帧动作=%#v", message)
 	}
 }
@@ -746,7 +746,7 @@ func TestInteractiveInputUsesDrainedNotReadyForActionAndInputGate(t *testing.T) 
 	app.applyInteractiveInput(
 		physics.FixedDelta,
 		client.Movement{MoveZ: 1},
-		client.Actions{Break: true},
+		client.Actions{Mining: true},
 		true,
 	)
 

@@ -29,7 +29,7 @@ func MovementFromKeys(w, a, s, d, jump bool) Movement {
 // Actions 是一帧内需要上行的意图。选择只发送请求，
 // 客户端不据此改写任何已确认的权威快捷栏状态。
 type Actions struct {
-	Break      bool
+	Mining     bool
 	Place      bool
 	Select     bool
 	SelectSlot uint8
@@ -60,7 +60,7 @@ func (state *InputState) Update(
 	if inventoryOpen {
 		actions.Click = rising
 	} else {
-		actions.Break = rising
+		actions.Mining = primary
 		actions.Place = secondary && !state.secondaryDown
 		if number >= 1 && number <= core.HotbarSlots && number != state.numberDown {
 			actions.Select = true

@@ -69,6 +69,7 @@ type playerState struct {
 	input             physics.Input
 	yaw, pitch        float32
 	lastInputSequence uint64
+	miningHeld        bool
 	reset             bool
 	inventory         core.Inventory
 	inventoryDirty    bool

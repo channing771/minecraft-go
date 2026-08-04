@@ -72,6 +72,7 @@ type Command struct {
 	Jump         bool
 	Yaw          float32
 	Pitch        float32
+	Mining       bool
 }
 
 type GeneratedChunk struct {
