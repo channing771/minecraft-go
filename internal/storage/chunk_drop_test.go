@@ -63,7 +63,7 @@ func TestChunkCodecRoundTripsDrops(t *testing.T) {
 	}
 }
 
-func TestChunkV2Fixture(t *testing.T) {
+func TestChunkV3Fixture(t *testing.T) {
 	want := dropFixtureChunk(t, core.ChunkPos{X: -3, Z: 7})
 	encoded, err := encodeChunkPayload(ChunkSave{
 		Key:      core.ChunkKey{Dimension: core.Overworld, Pos: want.Pos},
@@ -73,7 +73,7 @@ func TestChunkV2Fixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "chunk-v2.bin")
+	path := filepath.Join("testdata", "chunk-v3.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -84,7 +84,7 @@ func TestChunkV2Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, encoded) {
-		t.Fatal("v2 fixture drift; change schema version")
+		t.Fatal("v3 fixture drift; change schema version")
 	}
 }
 
@@ -189,5 +189,79 @@ func TestChunkCodecKeepsExhaustedDropGeneration(t *testing.T) {
 	}
 	if got.Chunk.Drop(2).Generation != math.MaxUint32 {
 		t.Fatalf("耗尽的 generation 未被保存: %+v", got.Chunk.Drop(2))
+	}
+}
+
+func TestChunkV2FixtureMigratesLosslesslyAndNeedsRewrite(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	encoded, err := os.ReadFile(filepath.Join("testdata", "chunk-v2.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeChunkPayload(key, 19, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := dropFixtureChunk(t, key.Pos)
+	if got.Chunk.Hash() != want.Hash() {
+		t.Fatal("v2 迁移改变了方块状态")
+	}
+	if got.Chunk.DropsHash() != want.DropsHash() {
+		t.Fatal("v2 迁移改变了掉落物状态")
+	}
+	if got.Schema != currentChunkSchema {
+		t.Fatalf("迁移后 schema = %d，想要 %d", got.Schema, currentChunkSchema)
+	}
+	if !got.Migrated {
+		t.Fatal("v2 区块必须标记为已迁移，才能在下次保存时改写为 v3")
+	}
+}
+
+func TestChunkV3FixtureDoesNotNeedRewrite(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	encoded, err := encodeChunkPayload(ChunkSave{
+		Key: key, Revision: 19, Chunk: dropFixtureChunk(t, key.Pos),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeChunkPayload(key, 19, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Migrated {
+		t.Fatal("当前 schema 不应标记为已迁移")
+	}
+}
+
+func TestChunkCodecRoundTripsStoneBrick(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	chunk := codecFixtureChunk(key.Pos)
+	chunk.SetBlock(1, 2, 3, core.StoneBrickID)
+	index, ok := world.ChunkBlockIndex(core.BlockPos{
+		X: key.Pos.X<<core.SectionShift + 1, Y: 2, Z: key.Pos.Z<<core.SectionShift + 3,
+	})
+	if !ok {
+		t.Fatal("石砖方块没有区块索引")
+	}
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 1, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStoneBrick, Count: 4},
+		BlockIndex: index,
+	})
+
+	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 19, Chunk: chunk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeChunkPayload(key, 19, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Chunk.BlockAt(1, 2, 3) != core.StoneBrickID {
+		t.Fatalf("石砖方块未往返: %d", got.Chunk.BlockAt(1, 2, 3))
+	}
+	if got.Chunk.Drop(0).Stack.Item != core.ItemStoneBrick {
+		t.Fatalf("石砖掉落物未往返: %+v", got.Chunk.Drop(0))
 	}
 }

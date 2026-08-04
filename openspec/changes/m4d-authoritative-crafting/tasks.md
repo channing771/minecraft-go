@@ -7,9 +7,9 @@
 
 ## 2. 区块存档 schema v3
 
-- [ ] 2.1 在 `internal/storage` 与 `internal/server` 先写失败测试，覆盖 v2 方块/掉落物无损迁移、v1 链式迁移、石砖方块与掉落物 v3 roundtrip/golden、未来版本拒绝、故障写入保留旧记录，以及正常 active bank 迁移结果传播为 `NeedsRewrite` 并由服务端保存确认。
-- [ ] 2.2 将区块当前 schema 升为 3，新增无数据变化的 `2→3` migration；把 `migrateChunk` 的 migrated 结果经 `decodedPayload` 和正常 `region.Load` 传播到 `StoredChunk.NeedsRewrite`，复用现有 acquire/dirty/原子保存路径，不扫描未加载区域。
-- [ ] 2.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，确认 migration/golden/故障测试、`gofmt -l internal/storage internal/server` 和 `git diff --check` 通过；提交 `feat: 升级区块存档 schema v3`，然后自动进入第 3 组。
+- [x] 2.1 在 `internal/storage` 与 `internal/server` 先写失败测试，覆盖 v2 方块/掉落物无损迁移、v1 链式迁移、石砖方块与掉落物 v3 roundtrip/golden、未来版本拒绝、故障写入保留旧记录，以及正常 active bank 迁移结果传播为 `NeedsRewrite` 并由服务端保存确认。
+- [x] 2.2 将区块当前 schema 升为 3，新增无数据变化的 `2→3` migration；把 `migrateChunk` 的 migrated 结果经 `decodedPayload` 和正常 `region.Load` 传播到 `StoredChunk.NeedsRewrite`，复用现有 acquire/dirty/原子保存路径，不扫描未加载区域。
+- [x] 2.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，确认 migration/golden/故障测试、`gofmt -l internal/storage internal/server` 和 `git diff --check` 通过；提交 `feat: 升级区块存档 schema v3`，然后自动进入第 3 组。
 
 ## 3. 权威合成协议 v6 纵向闭环
 

@@ -19,9 +19,13 @@ func FuzzDecodeChunkPayload(f *testing.F) {
 	for length := range len(fixture) + 1 {
 		f.Add(bytes.Clone(fixture[:length]))
 	}
-	if v2, err := os.ReadFile(filepath.Join("testdata", "chunk-v2.bin")); err == nil {
-		for length := range len(v2) + 1 {
-			f.Add(bytes.Clone(v2[:length]))
+	for _, name := range []string{"chunk-v2.bin", "chunk-v3.bin"} {
+		older, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			continue
+		}
+		for length := range len(older) + 1 {
+			f.Add(bytes.Clone(older[:length]))
 		}
 	}
 	for _, offset := range []int{36, 40} {
