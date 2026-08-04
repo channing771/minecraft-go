@@ -62,6 +62,9 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 			e.u64(message.Sequence)
 			e.u8(message.From)
 			e.u8(message.To)
+		case CraftRecipe:
+			e.u64(message.Sequence)
+			e.u8(uint8(message.Recipe))
 		case RequestChunkResync:
 			e.u64(message.Sequence)
 			e.i32(int32(message.Dimension))
@@ -197,6 +200,14 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 				to, err = d.u8()
 			}
 			packet = MoveInventoryStack{Sequence: sequence, From: from, To: to}
+		case 7:
+			var sequence uint64
+			var recipe uint8
+			sequence, err = d.u64()
+			if err == nil {
+				recipe, err = d.u8()
+			}
+			packet = CraftRecipe{Sequence: sequence, Recipe: core.RecipeID(recipe)}
 		default:
 			return nil, codecError("decode client", state, packetID, errUnknownPacketID)
 		}

@@ -30,7 +30,7 @@ import (
 const (
 	benchmarkSeed            = 20260726
 	benchmarkMessageDrainMax = 4096
-	scenarioVersion          = 7
+	scenarioVersion          = 8
 )
 
 var (
@@ -109,8 +109,7 @@ func runBenchmark(app *application, outputPath string) error {
 			authoritativeHash, authoritativeRevision, authoritativeOK,
 			mirrorHash, mirrorRevision, mirrorOK)
 	}
-	app.closeClientSession(nil)
-	if err := multiplayerProbe.measureGPUCompletion(app); err != nil {
+	if err := multiplayerProbe.measureGPUCompletionAfterTransportClose(app); err != nil {
 		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
 	}
 	serverMultiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)
@@ -159,6 +158,17 @@ func runBenchmark(app *application, outputPath string) error {
 	}
 	fmt.Printf("性能报告已写入 %s\n", outputPath)
 	return nil
+}
+
+func (probe *multiplayerClientProbe) measureGPUCompletionAfterTransportClose(
+	app *application,
+) error {
+	serverCloseErr := app.server.CloseTrustedObserver()
+	app.closeClientSession(nil)
+	if err := errors.Join(serverCloseErr, app.clientCloseErr); err != nil {
+		return fmt.Errorf("关闭 GPU 探针传输: %w", err)
+	}
+	return probe.measureGPUCompletion(app)
 }
 
 func writeBenchmarkReport(outputPath string, report client.PerfReport) error {
@@ -340,6 +350,9 @@ func validateBenchmarkReport(report client.PerfReport) error {
 			minimum := 256
 			if name == "interest_diff" {
 				minimum = 1000
+			}
+			if name == "remote_gpu_complete" && report.ScenarioVersion >= 8 {
+				minimum = client.ScenarioV8GPUCompletionSamples
 			}
 			if summary.Samples < minimum || summary.P50MS <= 0 || summary.P95MS <= 0 ||
 				summary.P99MS <= 0 || summary.MaxMS <= 0 {

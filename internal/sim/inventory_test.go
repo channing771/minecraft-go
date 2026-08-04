@@ -125,3 +125,91 @@ func TestDropPickupFallsBackToBackpack(t *testing.T) {
 		t.Fatalf("快捷栏被修改: %+v", got.Hotbar)
 	}
 }
+
+func craftCommand(session sim.SessionID, sequence uint64, recipe core.RecipeID) sim.Command {
+	return sim.Command{
+		Session:  session,
+		Sequence: sequence,
+		Kind:     sim.CommandCraftRecipe,
+		Recipe:   recipe,
+	}
+}
+
+func TestCraftPublishesOnceAndConsumesInputs(t *testing.T) {
+	var stocked core.Inventory
+	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 5}
+	engine, session := readyFlatPlayerWithInventory(t, stocked)
+	engine.Enqueue(craftCommand(session, 2, core.RecipeStoneBricks))
+
+	result := engine.Step()
+	if len(result.Rejected) != 0 || len(result.Inventories) != 1 {
+		t.Fatalf("合成 result=%+v", result)
+	}
+	got := result.Inventories[0].Inventory
+	if got.Hotbar.Slots[0] != (core.ItemStack{Item: core.ItemStone, Count: 1}) {
+		t.Fatalf("原料格 = %+v，想要剩余 1 个石头", got.Hotbar.Slots[0])
+	}
+	if got.Hotbar.Slots[1] != (core.ItemStack{Item: core.ItemStoneBrick, Count: 4}) {
+		t.Fatalf("产物格 = %+v，想要 4 个石砖", got.Hotbar.Slots[1])
+	}
+}
+
+func TestCraftRejectsWithoutChangingInventory(t *testing.T) {
+	var stocked core.Inventory
+	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 3}
+	cases := []struct {
+		name   string
+		recipe core.RecipeID
+	}{
+		{"原料不足", core.RecipeStoneBricks},
+		{"未知配方", core.RecipeID(200)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, session := readyFlatPlayerWithInventory(t, stocked)
+			engine.Enqueue(craftCommand(session, 2, tc.recipe))
+
+			result := engine.Step()
+			if len(result.Rejected) != 1 ||
+				result.Rejected[0].Reason != sim.RejectInvalidInput {
+				t.Fatalf("result=%+v，想要 invalid_input", result)
+			}
+			if len(result.Inventories) != 0 {
+				t.Fatalf("失败的合成仍发布状态: %+v", result.Inventories)
+			}
+			if got := currentInventory(t, engine, session); got != stocked {
+				t.Fatalf("失败的合成修改了物品状态: %+v", got)
+			}
+		})
+	}
+}
+
+func TestCraftIgnoresStaleSequence(t *testing.T) {
+	var stocked core.Inventory
+	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 8}
+	engine, session := readyFlatPlayerWithInventory(t, stocked)
+	engine.Enqueue(craftCommand(session, 2, core.RecipeStoneBricks))
+	engine.Step()
+
+	// 重复使用同一 sequence，必须被既有去重规则丢弃。
+	engine.Enqueue(craftCommand(session, 2, core.RecipeStoneBricks))
+	result := engine.Step()
+	if len(result.Inventories) != 0 || len(result.Rejected) != 0 {
+		t.Fatalf("过期 sequence 被再次执行: %+v", result)
+	}
+	if got := currentInventory(t, engine, session).Hotbar.Slots[0].Count; got != 4 {
+		t.Fatalf("原料被扣除两次: 剩余 %d，想要 4", got)
+	}
+}
+
+func TestCraftRejectsPendingSpawn(t *testing.T) {
+	engine := sim.NewEngine(0)
+	const session = sim.SessionID(1)
+	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
+	engine.Enqueue(craftCommand(session, 1, core.RecipeStoneBricks))
+
+	result := engine.Step()
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectPlayerNotReady {
+		t.Fatalf("PendingSpawn result=%+v", result)
+	}
+}

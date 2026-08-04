@@ -244,6 +244,27 @@ func (engine *Engine) Step() TickResult {
 			}
 			player.inventory = next
 			player.inventoryDirty = true
+		case CommandCraftRecipe:
+			if session.player == nil || session.player.lifecycle != PlayerActive {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectPlayerNotReady,
+				})
+				continue
+			}
+			player := session.player
+			next, ok := player.inventory.Craft(command.Recipe)
+			if !ok {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectInvalidInput,
+				})
+				continue
+			}
+			player.inventory = next
+			player.inventoryDirty = true
 		case CommandResync:
 			result.Resync = append(result.Resync, ResyncRequest{
 				Session:      command.Session,

@@ -21,6 +21,7 @@ const (
 	CommandResync
 	CommandSelectHotbar
 	CommandMoveInventoryStack
+	CommandCraftRecipe
 )
 
 // LookDirection 把玩家 look 角转换为单位方向；yaw=0、pitch=0 朝向 -Z。
@@ -59,6 +60,7 @@ type Command struct {
 	HaveRevision uint64
 	Slot         uint8
 	ToSlot       uint8
+	Recipe       core.RecipeID
 	MoveX        int8
 	MoveZ        int8
 	Jump         bool

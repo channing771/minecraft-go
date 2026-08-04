@@ -15,8 +15,11 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
+	"minecraft-go/internal/storage"
+	"minecraft-go/internal/worldgen"
 )
 
 type benchmarkBlockingServerStream struct {
@@ -48,9 +51,9 @@ func (*benchmarkBlockingServerStream) Recv(
 func (*benchmarkBlockingServerStream) Peer() string { return "benchmark-blocking" }
 func (*benchmarkBlockingServerStream) Close() error { return nil }
 
-func TestScenarioV7ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 7 {
-		t.Fatalf("scenarioVersion=%d, want 7", scenarioVersion)
+func TestScenarioV8ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 8 {
+		t.Fatalf("scenarioVersion=%d, want 8", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {
@@ -85,6 +88,185 @@ func TestScenarioV7ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 		if !strings.ContainsAny(tag.Text, "界月星河山海云") {
 			t.Fatalf("tag is not the fixed Unicode fixture: %q", tag.Text)
 		}
+	}
+}
+
+func TestScenarioV8GPUCompletionTimesOnlySubmitAndPoll(t *testing.T) {
+	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	probe, err := newMultiplayerClientProbe(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(probe.Close)
+
+	clockReads := 0
+	probe.now = func() time.Time {
+		dev.events = append(dev.events, "now")
+		clockReads++
+		return time.Unix(0, int64(clockReads)*int64(time.Millisecond))
+	}
+	dev.events = nil
+	if err := probe.measureGPUCompletion(app); err != nil {
+		t.Fatal(err)
+	}
+	if got := probe.gpuComplete.Summary().Samples; got != 2048 {
+		t.Fatalf("GPU samples=%d, want 2048", got)
+	}
+	want := []string{"finish", "now", "submit", "poll", "now", "release"}
+	if got, expected := len(dev.events), 2048*len(want); got != expected {
+		t.Fatalf("GPU events=%d, want %d", got, expected)
+	}
+	for sample := range 2048 {
+		start := sample * len(want)
+		if got := dev.events[start : start+len(want)]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("sample %d events=%v, want=%v", sample, got, want)
+		}
+	}
+}
+
+func TestScenarioV8GPUCompletionStopsWhenTransportCloseFails(t *testing.T) {
+	serverCloseErr := errors.New("注入服务端关闭失败")
+	clientCloseErr := errors.New("注入客户端关闭失败")
+	for _, test := range []struct {
+		name      string
+		serverErr error
+		clientErr error
+		want      error
+	}{
+		{name: "服务端", serverErr: serverCloseErr, want: serverCloseErr},
+		{name: "客户端", clientErr: clientCloseErr, want: clientCloseErr},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+			config := server.DefaultConfig(benchmarkSeed)
+			config.TrustedObserver = true
+			running := server.NewWorld(
+				config,
+				worldgen.New(benchmarkSeed),
+				storage.NewMemory(storage.Metadata{FormatVersion: 1, Seed: benchmarkSeed, SpawnDimension: core.Overworld}),
+			)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := running.Shutdown(ctx); err != nil {
+					t.Errorf("关闭测试服务端: %v", err)
+				}
+			})
+
+			rawClient, rawServer := network.NewMemoryPair(8)
+			clientEndpoint := &benchmarkCloseErrorClientEndpoint{ClientEndpoint: rawClient, err: test.clientErr}
+			serverEndpoint := &benchmarkCloseErrorServerEndpoint{ServerEndpoint: rawServer, err: test.serverErr}
+			if err := running.AttachTrustedObserver(serverEndpoint); err != nil {
+				t.Fatal(err)
+			}
+			app.server = running
+			app.clientEndpoint = clientEndpoint
+
+			probe, err := newMultiplayerClientProbe(app)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(probe.Close)
+			clockReads := 0
+			probe.now = func() time.Time {
+				clockReads++
+				return time.Unix(0, int64(clockReads)*int64(time.Millisecond))
+			}
+
+			err = probe.measureGPUCompletionAfterTransportClose(app)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("measureGPUCompletionAfterTransportClose error=%v，想要 %v", err, test.want)
+			}
+			if clockReads != 0 {
+				t.Fatalf("关闭失败后 GPU 时钟读取=%d，想要 0", clockReads)
+			}
+			if got := serverEndpoint.closeCalls.Load(); got != 1 {
+				t.Fatalf("服务端 Close 调用=%d，想要 1", got)
+			}
+			if got := clientEndpoint.closeCalls.Load(); got != 1 {
+				t.Fatalf("客户端 Close 调用=%d，想要 1", got)
+			}
+		})
+	}
+}
+
+type benchmarkCloseErrorClientEndpoint struct {
+	network.ClientEndpoint
+	err        error
+	closeCalls atomic.Int32
+}
+
+func (endpoint *benchmarkCloseErrorClientEndpoint) Close() error {
+	endpoint.closeCalls.Add(1)
+	return errors.Join(endpoint.ClientEndpoint.Close(), endpoint.err)
+}
+
+type benchmarkCloseErrorServerEndpoint struct {
+	network.ServerEndpoint
+	err        error
+	closeCalls atomic.Int32
+}
+
+func (endpoint *benchmarkCloseErrorServerEndpoint) Close() error {
+	endpoint.closeCalls.Add(1)
+	return errors.Join(endpoint.ServerEndpoint.Close(), endpoint.err)
+}
+
+func TestScenarioV8GPUCompletionStartsAfterTransportTeardown(t *testing.T) {
+	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	config := server.DefaultConfig(benchmarkSeed)
+	config.TrustedObserver = true
+	config.ViewRadius = 0
+	config.Workers = 1
+	config.SaveWorkers = 1
+	running := server.NewWorld(
+		config,
+		worldgen.New(benchmarkSeed),
+		storage.NewMemory(storage.Metadata{
+			FormatVersion:  1,
+			Seed:           benchmarkSeed,
+			SpawnDimension: core.Overworld,
+		}),
+	)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := running.Shutdown(ctx); err != nil {
+			t.Errorf("关闭测试服务端: %v", err)
+		}
+	})
+	rawClient, serverEndpoint := network.NewMemoryPair(8)
+	clientEndpoint := &connectionTestEndpoint{ClientEndpoint: rawClient}
+	if err := running.AttachTrustedObserver(serverEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	app.server = running
+	app.clientEndpoint = clientEndpoint
+
+	probe, err := newMultiplayerClientProbe(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(probe.Close)
+	clockReads := 0
+	probe.now = func() time.Time {
+		if clockReads == 0 {
+			if err := running.SetTrustedObserverCenter(core.Overworld, core.ChunkPos{}); !errors.Is(err, server.ErrTrustedObserverDisabled) {
+				t.Fatalf("首个 GPU 时钟读取时 trusted observer 仍挂载: %v", err)
+			}
+			if got := clientEndpoint.closeCalls.Load(); got != 1 {
+				t.Fatalf("首个 GPU 时钟读取时客户端 Close 调用=%d，想要 1", got)
+			}
+		}
+		clockReads++
+		return time.Unix(0, int64(clockReads)*int64(time.Millisecond))
+	}
+
+	if err := probe.measureGPUCompletionAfterTransportClose(app); err != nil {
+		t.Fatal(err)
+	}
+	if clockReads == 0 {
+		t.Fatal("GPU 探针未读取时钟")
 	}
 }
 
@@ -464,6 +646,26 @@ func TestPerformanceThresholdsRejectTickP99AtTenMilliseconds(t *testing.T) {
 	report.Ticks.P99MS = 10
 	if err := validateBenchmarkReport(report); err == nil || !strings.Contains(err.Error(), ">= 10 ms") {
 		t.Fatalf("10ms tick p99 boundary error=%v", err)
+	}
+}
+
+func TestScenarioV8BenchmarkReportRequires2048GPUCompletionSamples(t *testing.T) {
+	report := validBenchmarkReport()
+	report.ScenarioVersion = 8
+	report.Multiplayer = validMultiplayerSummary()
+	report.Multiplayer.RemoteGPUComplete.Samples = 2047
+	if err := validateBenchmarkReport(report); err == nil ||
+		!strings.Contains(err.Error(), "remote_gpu_complete") {
+		t.Fatalf("2047 GPU samples error=%v", err)
+	}
+	report.Multiplayer.RemoteGPUComplete.Samples = 2048
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("2048 GPU samples rejected: %v", err)
+	}
+	report.ScenarioVersion = 7
+	report.Multiplayer.RemoteGPUComplete.Samples = 256
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("v7 256 GPU samples rejected: %v", err)
 	}
 }
 

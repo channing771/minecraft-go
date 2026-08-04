@@ -1022,6 +1022,9 @@ func (a *application) drainServerMessages(maxMessages int) {
 				a.closeClientSession(err)
 				return
 			}
+			if state.Reset {
+				a.inventorySource = -1
+			}
 			if result.ResetView {
 				a.camera.Yaw = result.Yaw
 				a.camera.Pitch = result.Pitch
@@ -1138,8 +1141,24 @@ func (a *application) setInventoryOpen(open bool) {
 	}
 }
 
-// clickInventorySlot 用两次有效点击组成一次整堆移动请求；界外点击无效。
+// clickInventorySlot 处理固定配方按钮，或用两次有效栏位点击组成一次整堆移动请求。
 func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height uint32) {
+	if recipe, ok := render.RecipeButtonAt(cursorX, cursorY, width, height); ok {
+		inventory, confirmed := a.inventory.State()
+		if !confirmed {
+			return
+		}
+		if _, craftable := inventory.Craft(recipe); !craftable {
+			return
+		}
+		a.inventorySource = -1
+		if err := a.send(network.CraftRecipe{
+			Sequence: a.nextSequence(), Recipe: recipe,
+		}); err != nil {
+			log.Printf("发送合成请求失败: %v", err)
+		}
+		return
+	}
 	slot, ok := render.InventorySlotAt(cursorX, cursorY, width, height)
 	if !ok {
 		return

@@ -24,6 +24,8 @@ var chunkMigrations = map[uint32]chunkMigration{
 		dto.Drops = [core.DropsPerChunk]world.DropSlot{}
 		return dto, nil
 	},
+	// v3 与 v2 的 payload 布局相同，只是让旧程序拒绝含新方块的记录。
+	2: func(dto chunkDTO) (chunkDTO, error) { return dto, nil },
 }
 
 func migrateChunk(from uint32, dto chunkDTO) (chunkDTO, bool, error) {

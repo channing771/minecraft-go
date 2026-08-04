@@ -406,6 +406,7 @@ func (r *region) loadLocked(ctx context.Context, key core.ChunkKey) (StoredChunk
 			Key:               key,
 			Revision:          active.Revision,
 			PersistedRevision: activeEntry.Revision,
+			NeedsRewrite:      active.Migrated,
 			Chunk:             active.Chunk,
 		}, nil
 	}

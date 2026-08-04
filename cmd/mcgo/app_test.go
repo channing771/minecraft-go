@@ -421,6 +421,7 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 
 type integrationRenderDevice struct {
 	releases, passes []string
+	events           []string
 	buffers          map[string]*integrationBuffer
 }
 
@@ -453,11 +454,13 @@ func (d *integrationRenderDevice) CreateSampler(desc gfx.SamplerDesc) gfx.Sample
 func (d *integrationRenderDevice) CreateCommandEncoder() gfx.CommandEncoder {
 	return &integrationEncoder{device: d}
 }
-func (*integrationRenderDevice) Submit(...gfx.CommandBuffer) {}
-func (*integrationRenderDevice) Poll(bool)                   {}
-func (d *integrationRenderDevice) Release()                  { d.releases = append(d.releases, "device") }
-func (d *integrationRenderDevice) lastPasses() []string      { return append([]string(nil), d.passes...) }
-func (d *integrationRenderDevice) resetPasses()              { d.passes = nil }
+func (d *integrationRenderDevice) Submit(...gfx.CommandBuffer) {
+	d.events = append(d.events, "submit")
+}
+func (d *integrationRenderDevice) Poll(bool)            { d.events = append(d.events, "poll") }
+func (d *integrationRenderDevice) Release()             { d.releases = append(d.releases, "device") }
+func (d *integrationRenderDevice) lastPasses() []string { return append([]string(nil), d.passes...) }
+func (d *integrationRenderDevice) resetPasses()         { d.passes = nil }
 func (d *integrationRenderDevice) bufferByLabel(t *testing.T, label string) *integrationBuffer {
 	t.Helper()
 	buffer := d.buffers[label]
@@ -559,7 +562,10 @@ func (e *integrationEncoder) BeginRenderPass(desc gfx.RenderPassDesc) gfx.Render
 }
 func (*integrationEncoder) BeginComputePass(string) gfx.ComputePass                           { return &integrationComputePass{} }
 func (*integrationEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {}
-func (*integrationEncoder) Finish() gfx.CommandBuffer                                         { return &integrationResource{} }
+func (e *integrationEncoder) Finish() gfx.CommandBuffer {
+	e.device.events = append(e.device.events, "finish")
+	return &integrationResource{release: func() { e.device.events = append(e.device.events, "release") }}
+}
 
 type integrationPass struct{}
 
@@ -1665,6 +1671,78 @@ func TestInventoryClickOutsideSlotsDoesNothing(t *testing.T) {
 	assertNoInteractiveClientMessage(t, serverEndpoint)
 }
 
+// Mutation killed: skipping the confirmed Craft check, predicting the result,
+// or sending more than one request changes the message or local mirror.
+func TestCraftRecipeClickUsesConfirmedInventory(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+	app.inventorySource = 5
+	width, height := uint32(1280), uint32(720)
+	x, y := recipeButtonCenter(t, width, height)
+
+	app.clickInventorySlot(x, y, width, height)
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	craft, ok := message.(network.CraftRecipe)
+	if !ok || craft.Recipe != core.RecipeStoneBricks {
+		t.Fatalf("合成请求 = %#v，想要石砖配方", message)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+	if app.inventorySource != -1 {
+		t.Fatalf("合成后来源未清除: %d", app.inventorySource)
+	}
+	got, confirmed := app.inventory.State()
+	if !confirmed || got != inventory {
+		t.Fatalf("合成请求本地改写镜像: %+v, %v", got, confirmed)
+	}
+}
+
+func TestUnavailableCraftRecipeClickDoesNothing(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 3}
+	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+	x, y := recipeButtonCenter(t, 1280, 720)
+
+	app.clickInventorySlot(x, y, 1280, 720)
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+	got, confirmed := app.inventory.State()
+	if !confirmed || got != inventory {
+		t.Fatalf("不可用配方改写镜像: %+v, %v", got, confirmed)
+	}
+}
+
+func TestPlayerResetClearsInventorySource(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	app.inventoryOpen = true
+	app.inventorySource = 8
+	sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 0.5}, OnGround: true, Ready: true, Reset: true,
+	})
+
+	app.drainServerMessages(1)
+	if !app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("reset 后 open=%v source=%d，想要界面保持且来源清除", app.inventoryOpen, app.inventorySource)
+	}
+}
+
+func TestClientSessionCloseClearsInventoryUIState(t *testing.T) {
+	app, _ := newInteractiveTestApplication(t)
+	app.inventoryOpen = true
+	app.inventorySource = 8
+
+	app.closeClientSession(nil)
+	if app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("断线后 open=%v source=%d，想要界面关闭且来源清除", app.inventoryOpen, app.inventorySource)
+	}
+}
+
 func TestInventoryCloseClearsSourceAndRecapturesCursor(t *testing.T) {
 	app, _ := newInteractiveTestApplication(t)
 	app.setInventoryOpen(true)
@@ -1689,5 +1767,19 @@ func inventorySlotCenter(t *testing.T, slot int, width, height uint32) (float64,
 		}
 	}
 	t.Fatalf("找不到栏位 %d 的像素", slot)
+	return 0, 0
+}
+
+func recipeButtonCenter(t *testing.T, width, height uint32) (float64, float64) {
+	t.Helper()
+	for y := range int(height) {
+		for x := range int(width) {
+			if recipe, ok := render.RecipeButtonAt(float64(x), float64(y), width, height); ok &&
+				recipe == core.RecipeStoneBricks {
+				return float64(x), float64(y)
+			}
+		}
+	}
+	t.Fatal("找不到石砖配方按钮像素")
 	return 0, 0
 }

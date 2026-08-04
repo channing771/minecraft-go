@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -100,7 +101,7 @@ func TestRunOpensWorldBeforeListeningAndUsesStoredSeed(t *testing.T) {
 	if got, want := strings.Join(events, ","), "open:worlds/demo,listen:127.0.0.1:25565"; got != want {
 		t.Fatalf("assembly order=%q, want %q", got, want)
 	}
-	for _, field := range []string{"listen=127.0.0.1:25565", "world=worlds/demo", "protocol=5"} {
+	for _, field := range []string{"listen=127.0.0.1:25565", "world=worlds/demo", fmt.Sprintf("protocol=%d", network.ProtocolVersion)} {
 		if !strings.Contains(logs.String(), field) {
 			t.Fatalf("startup log %q lacks %q", logs.String(), field)
 		}

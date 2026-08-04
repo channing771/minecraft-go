@@ -9,6 +9,7 @@ const (
 	ItemStone
 	ItemDirt
 	ItemGrass
+	ItemStoneBrick
 )
 
 const (
@@ -102,6 +103,8 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 		return ItemDirt, true
 	case GrassID:
 		return ItemGrass, true
+	case StoneBrickID:
+		return ItemStoneBrick, true
 	default:
 		return ItemNone, false
 	}
@@ -116,6 +119,8 @@ func ItemPlacement(item ItemID) (BlockID, bool) {
 		return DirtID, true
 	case ItemGrass:
 		return GrassID, true
+	case ItemStoneBrick:
+		return StoneBrickID, true
 	default:
 		return AirID, false
 	}

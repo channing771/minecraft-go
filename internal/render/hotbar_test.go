@@ -315,9 +315,9 @@ func TestInventoryLayoutOpensThreeBackpackRows(t *testing.T) {
 	var inventory core.Inventory
 	got := layoutInventory(&layout, atlas, inventory, true, 12, 1280, 720)
 
-	// 选中框 + 来源高亮 + 36 个栏位背景。
-	if len(got.quads) != 2+core.InventorySlots {
-		t.Fatalf("打开时 quads=%d，想要 %d", len(got.quads), 2+core.InventorySlots)
+	// 选中框 + 来源高亮 + 36 个栏位背景 + 固定配方行。
+	if len(got.quads) != 2+core.InventorySlots+recipeQuads {
+		t.Fatalf("打开时 quads=%d，想要 %d", len(got.quads), 2+core.InventorySlots+recipeQuads)
 	}
 	hotbarY := float32(720) - hotbarBottomMargin - hotbarSlotSize
 	for slot := range core.InventorySlots {
@@ -346,5 +346,57 @@ func TestInventorySlotAtRejectsOutsideHits(t *testing.T) {
 	}
 	if _, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 0, 0); ok {
 		t.Fatal("零尺寸 framebuffer 被判为命中")
+	}
+}
+
+// Mutation killed: dropping the recipe row, mislaying the button, or letting
+// enabled state ignore the confirmed inventory changes the observed instances.
+func TestInventoryLayoutDrawsFixedRecipeRow(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	for _, char := range hotbarDigits {
+		atlas.glyphs[char] = fakeNameTagGlyph(7)
+	}
+	var layout hotbarLayout
+
+	closed := layoutInventory(&layout, atlas, core.Inventory{}, false, -1, 1280, 720)
+	closedQuads := len(closed.quads)
+
+	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, 1280, 720)
+	if len(open.quads) <= closedQuads {
+		t.Fatalf("打开时 quads=%d，想要多于关闭时的 %d", len(open.quads), closedQuads)
+	}
+	// 输入色块、输出色块与按钮，加上输入/输出各一位数量。
+	if len(open.glyphs) != 2 {
+		t.Fatalf("配方行数字 = %d，想要 2", len(open.glyphs))
+	}
+
+	disabled := open.quads[len(open.quads)-1]
+	var stocked core.Inventory
+	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+	enabledLayout := layoutInventory(&layout, atlas, stocked, true, -1, 1280, 720)
+	enabled := enabledLayout.quads[len(enabledLayout.quads)-1]
+	if disabled.Color == enabled.Color {
+		t.Fatal("可合成与不可合成的按钮颜色相同")
+	}
+	if disabled.X != enabled.X || disabled.Y != enabled.Y {
+		t.Fatalf("按钮位置随状态漂移: %+v vs %+v", disabled, enabled)
+	}
+}
+
+func TestRecipeButtonHitTestMatchesDrawnGeometry(t *testing.T) {
+	x, y := recipeButtonOrigin(1280, 720)
+	if got, ok := RecipeButtonAt(float64(x)+1, float64(y)+1, 1280, 720); !ok ||
+		got != core.RecipeStoneBricks {
+		t.Fatalf("按钮命中 = %d, %v，想要石砖配方", got, ok)
+	}
+	if _, ok := RecipeButtonAt(float64(x)-1, float64(y)+1, 1280, 720); ok {
+		t.Fatal("按钮左侧 1 像素被判为命中")
+	}
+	if _, ok := RecipeButtonAt(float64(x)+1, float64(y)+1, 0, 0); ok {
+		t.Fatal("零尺寸 framebuffer 被判为命中")
+	}
+	// 配方行不得与背包格重叠。
+	if _, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 1280, 720); ok {
+		t.Fatal("合成按钮与背包格重叠")
 	}
 }

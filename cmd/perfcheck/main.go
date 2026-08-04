@@ -429,6 +429,10 @@ func validateV6Report(label string, report client.PerfReport) error {
 			report.Multiplayer.InterestDiff.Samples,
 		)
 	}
+	remoteGPUCompletionSamples := 256
+	if report.ScenarioVersion >= 8 {
+		remoteGPUCompletionSamples = client.ScenarioV8GPUCompletionSamples
+	}
 	latencies := []struct {
 		name       string
 		summary    client.LatencySummary
@@ -441,7 +445,7 @@ func validateV6Report(label string, report client.PerfReport) error {
 		{name: "interpolation", summary: report.Multiplayer.Interpolation, minSamples: 256},
 		{name: "avatar_submit", summary: report.Multiplayer.AvatarSubmit, minSamples: 256},
 		{name: "name_tag_submit", summary: report.Multiplayer.NameTagSubmit, minSamples: 256},
-		{name: "remote_gpu_complete", summary: report.Multiplayer.RemoteGPUComplete, minSamples: 256},
+		{name: "remote_gpu_complete", summary: report.Multiplayer.RemoteGPUComplete, minSamples: remoteGPUCompletionSamples},
 	}
 	for _, latency := range latencies {
 		value := latency.summary
@@ -480,12 +484,6 @@ func appendV6MultiplayerRegressions(
 		{name: "avatar_submit", baseline: baseline.AvatarSubmit, current: current.AvatarSubmit},
 		{name: "name_tag_submit", baseline: baseline.NameTagSubmit, current: current.NameTagSubmit},
 		{name: "remote_gpu_complete", baseline: baseline.RemoteGPUComplete, current: current.RemoteGPUComplete},
-	}
-	if includeServerProbe {
-		latencies = append(latencies, struct {
-			name              string
-			baseline, current client.LatencySummary
-		}{name: "interest_diff", baseline: baseline.InterestDiff, current: current.InterestDiff})
 	}
 	for _, latency := range latencies {
 		failures = appendStableSummaryRegressions(

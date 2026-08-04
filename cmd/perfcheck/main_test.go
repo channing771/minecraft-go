@@ -313,6 +313,33 @@ func TestPerfcheckV7ScenarioRules(t *testing.T) {
 	}
 }
 
+func TestPerfcheckV8Requires2048GPUCompletionSamples(t *testing.T) {
+	baseline := completeV8ComparableReport("memory")
+	current := completeV8ComparableReport("tcp")
+	current.Multiplayer.RemoteGPUComplete.Samples = 2047
+	if _, err := compareReports(baseline, current, 0.20); err == nil ||
+		!strings.Contains(err.Error(), "remote_gpu_complete") {
+		t.Fatalf("v8 low GPU samples error=%v", err)
+	}
+
+	current.Multiplayer.RemoteGPUComplete.Samples = 2048
+	if failures, err := compareReports(baseline, current, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v8 comparison failures=%v err=%v", failures, err)
+	}
+
+	v7 := completeV7ComparableReport("memory")
+	v7.Multiplayer.RemoteGPUComplete.Samples = 256
+	v7Current := completeV7ComparableReport("memory")
+	v7Current.Multiplayer.RemoteGPUComplete.Samples = 256
+	if failures, err := compareReports(v7, v7Current, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v7 compatibility failures=%v err=%v", failures, err)
+	}
+	if _, err := compareReports(v7, current, 0.20); err == nil ||
+		!strings.Contains(err.Error(), "scenario_version") {
+		t.Fatalf("v7/v8 mismatch error=%v", err)
+	}
+}
+
 func TestPerfcheckScenarioUpgradeSkipsRelativeRegressions(t *testing.T) {
 	baseline := completeV5ComparableReport("memory")
 	baseline.Persistence = client.PersistenceSummary{
@@ -446,6 +473,12 @@ func TestPerfcheckScenarioUpgradeRejectsIncompleteV6CoreReport(t *testing.T) {
 		}},
 		{name: "interest sample count", want: "interest_diff samples", mutate: func(report *client.PerfReport) {
 			report.Multiplayer.InterestDiff.Samples = 1599
+		}},
+		{name: "interest percentile zero", want: "interest_diff", mutate: func(report *client.PerfReport) {
+			report.Multiplayer.InterestDiff.P50MS = 0
+		}},
+		{name: "interest percentile non-monotonic", want: "interest_diff", mutate: func(report *client.PerfReport) {
+			report.Multiplayer.InterestDiff.P50MS = report.Multiplayer.InterestDiff.P95MS + 1
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -659,9 +692,6 @@ func TestPerfcheckV6SameTransportChecksStableServerProbeOnly(t *testing.T) {
 			report.Ticks.P99MS *= 1.201
 			report.Ticks.MaxMS = report.Ticks.P99MS
 		}},
-		{name: "interest p99", want: "interest_diff p99_ms", mutate: func(report *client.PerfReport) {
-			report.Multiplayer.InterestDiff.P99MS *= 1.201
-		}},
 		{name: "outbound", want: "server_outbound_bytes", mutate: func(report *client.PerfReport) {
 			report.Multiplayer.ServerOutboundBytes = 121
 		}},
@@ -689,6 +719,36 @@ func TestPerfcheckV6SameTransportChecksStableServerProbeOnly(t *testing.T) {
 	current.Multiplayer.PlayerDoneHighWater = 2
 	if failures, err := compareReports(baseline, current, 0.20); err != nil || len(failures) != 0 {
 		t.Fatalf("same-transport raw tail/high-water failures=%v err=%v", failures, err)
+	}
+}
+
+func TestPerfcheckV8SameTransportIgnoresInterestPublicationLatency(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*client.LatencySummary)
+	}{
+		{name: "p50", mutate: func(summary *client.LatencySummary) {
+			summary.P50MS *= 1.201
+		}},
+		{name: "p95", mutate: func(summary *client.LatencySummary) {
+			summary.P95MS *= 1.201
+		}},
+		{name: "p99", mutate: func(summary *client.LatencySummary) {
+			summary.P99MS *= 1.201
+		}},
+		{name: "max", mutate: func(summary *client.LatencySummary) {
+			summary.MaxMS *= 1.201
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			baseline := completeV8ComparableReport("memory")
+			current := completeV8ComparableReport("memory")
+			test.mutate(&current.Multiplayer.InterestDiff)
+			failures, err := compareReports(baseline, current, 0.20)
+			if err != nil || len(failures) != 0 {
+				t.Fatalf("interest publication latency failures=%v err=%v", failures, err)
+			}
+		})
 	}
 }
 
@@ -799,6 +859,13 @@ func completeV6ComparableReport(transport string) client.PerfReport {
 func completeV7ComparableReport(transport string) client.PerfReport {
 	report := completeV6ComparableReport(transport)
 	report.ScenarioVersion = 7
+	return report
+}
+
+func completeV8ComparableReport(transport string) client.PerfReport {
+	report := completeV7ComparableReport(transport)
+	report.ScenarioVersion = 8
+	report.Multiplayer.RemoteGPUComplete.Samples = 2048
 	return report
 }
 

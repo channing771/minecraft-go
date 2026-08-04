@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	currentChunkSchema uint32 = 2
+	currentChunkSchema uint32 = 3
 	maxCompressedChunk        = 1 << 20
 	maxDecodedChunk           = 2 << 20
 
@@ -31,6 +31,8 @@ type decodedPayload struct {
 	Revision uint64
 	Schema   uint32
 	Chunk    *world.Chunk
+	// Migrated 表示记录读自旧 schema，需要在下次正常保存时改写。
+	Migrated bool
 }
 
 // encodeChunkPayload serializes one full chunk as a bounded, versioned zstd envelope.
@@ -296,7 +298,7 @@ func decodeChunkPayload(
 	if err != nil {
 		return decodedPayload{}, err
 	}
-	dto, _, err = migrateChunk(schema, dto)
+	dto, migrated, err := migrateChunk(schema, dto)
 	if err != nil {
 		return decodedPayload{}, err
 	}
@@ -304,7 +306,10 @@ func decodeChunkPayload(
 	if err != nil {
 		return decodedPayload{}, err
 	}
-	return decodedPayload{Key: key, Revision: revision, Schema: currentChunkSchema, Chunk: chunk}, nil
+	return decodedPayload{
+		Key: key, Revision: revision, Schema: currentChunkSchema,
+		Chunk: chunk, Migrated: migrated,
+	}, nil
 }
 
 func decodeLogicalChunk(
