@@ -112,7 +112,7 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 				continue
 			}
 			if got := firstStates[len(firstStates)-1].Inventory.Hotbar.Slots[0]; got != wantCollected {
-				continue
+				t.Fatalf("玩家甲快捷栏栏位 0 = %+v，想要 %+v", got, wantCollected)
 			}
 			if got, ok := secondMirror.State(); !ok || got != (core.Inventory{}) {
 				t.Fatalf("玩家乙镜像 = %+v, %v，想要保持为空", got, ok)
