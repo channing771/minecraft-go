@@ -26,6 +26,8 @@
 
 ## 4. 线性集成与收尾
 
-- [ ] 4.1 回到当前 `main`，按顺序带入隔离分支中规划提交之后的 v8 代码提交和基线提交；保留 M4D 第五组未提交文件及 `midscene_run/`，确认没有覆盖、暂存或混入无关改动。
-- [ ] 4.2 在 `main` 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`；确认 scenario v8、2048 样本、计时边界、M5 v8 基线、M2 哈希与实现一致。
-- [ ] 4.3 运行 `detect_changes` 或记录 fallback，只暂存本文件的最终勾选，提交 `chore: 关闭 scenario v8 GPU 门禁修复`；停止本 change 实现，随后返回 M4D，将其 5.5 更新为使用 M5 v8 基线继续一次性 Memory/TCP 当前报告验收。
+- [x] 4.1 回到当前 `main`，按顺序带入隔离分支中规划提交之后的 v8 代码提交和基线提交；保留 M4D 第五组未提交文件及 `midscene_run/`，确认没有覆盖、暂存或混入无关改动。
+- [x] 4.2 确认 M4D 已把唯一 `ProtocolVersion` 升为 6，修复 `cmd/mcgod` 启动日志测试复制的 v5 字面量；定向 race 通过且完成 `detect_changes` 或 fallback 后，只暂存该测试并提交 `test: 同步 mcgod 协议日志版本`。
+- [x] 4.3 对 `CloseTrustedObserver`、`session.shutdown`、`measureGPUCompletionAfterTransportClose` 和 `integrationEncoder.Finish` 完成 impact/fallback；按 TDD 证明服务端显式关闭返回 endpoint 错误，任一侧关闭失败都在首个 GPU 时钟读取前停止，并锁定 `Finish → now → Submit → Poll(true) → now → Release` 顺序。最小实现只保留并传播既有关闭错误，不增加重试、轮询、sleep、依赖或新接口层；受影响 race、OpenSpec strict 与 diff 检查通过后，提交 `fix: 阻止传输关闭失败报告`。
+- [x] 4.4 在 `main` 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`；确认 scenario v8、2048 样本、计时边界、关闭失败即停、M5 v8 基线、M2 哈希与实现一致。
+- [x] 4.5 运行 `detect_changes` 或记录 fallback，只暂存本计划与任务文件的最终修订，提交 `chore: 关闭 scenario v8 GPU 门禁修复`；停止本 change 实现，随后返回 M4D，将其 5.5 更新为使用 M5 v8 基线继续一次性 Memory/TCP 当前报告验收。

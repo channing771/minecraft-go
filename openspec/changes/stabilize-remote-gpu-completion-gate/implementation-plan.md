@@ -424,12 +424,22 @@ git diff --check
 ### Task 5: 线性带回 main 并交还 M4D
 
 **Files:**
+- Modify: `cmd/mcgod/main_test.go`
+- Modify: `internal/server/session.go`
+- Modify: `internal/server/server.go`
+- Modify: `internal/server/attached_test.go`
+- Modify: `cmd/mcgo/benchmark.go`
+- Modify: `cmd/mcgo/benchmark_v6_test.go`
+- Modify: `cmd/mcgo/app_test.go`
+- Modify: `openspec/changes/stabilize-remote-gpu-completion-gate/specs/bounded-benchmark-workload/spec.md`
+- Modify: `openspec/changes/stabilize-remote-gpu-completion-gate/design.md`
+- Modify: `openspec/changes/stabilize-remote-gpu-completion-gate/implementation-plan.md`
 - Modify: `openspec/changes/stabilize-remote-gpu-completion-gate/tasks.md`
 - Resume afterward: `openspec/changes/m4d-authoritative-crafting/tasks.md`
 
 **Interfaces:**
-- Consumes: 隔离分支的 `fix: 稳定 GPU 完成性能门禁`、`fix: 隔离 GPU 探针传输收尾` 与 `chore: 建立 M5 scenario v8 基线` 三个提交。
-- Produces: 当前 `main` 上的 v8 代码/基线，以及可恢复执行的 M4D 5.5。
+- Consumes: 隔离分支的 `fix: 稳定 GPU 完成性能门禁`、`docs: 修订 scenario v8 探针阶段屏障`、`fix: 隔离 GPU 探针传输收尾` 与 `chore: 建立 M5 scenario v8 基线` 四个提交。
+- Produces: 当前 `main` 上的 v8 代码/基线、关闭失败即停的报告边界，以及可恢复执行的 M4D 5.5。
 
 - [ ] **Step 1: 列出并确认待带入提交**
 
@@ -440,13 +450,40 @@ git log --reverse --format='%H %s' 0eace21..codex/stabilize-remote-gpu-completio
 git status --short
 ```
 
-跳过隔离分支上的规划 cherry-pick；只选择消息为 `fix: 稳定 GPU 完成性能门禁`、`fix: 隔离 GPU 探针传输收尾` 和 `chore: 建立 M5 scenario v8 基线` 的三个精确哈希。
+跳过隔离分支上早于首轮正式链失败的规划 cherry-pick；只选择消息为 `fix: 稳定 GPU 完成性能门禁`、`docs: 修订 scenario v8 探针阶段屏障`、`fix: 隔离 GPU 探针传输收尾` 和 `chore: 建立 M5 scenario v8 基线` 的四个精确哈希。
 
 - [ ] **Step 2: 一次一个线性带入**
 
-依次对 Step 1 得到的三个精确哈希执行 `git cherry-pick`，并把该哈希作为唯一参数。每次后运行 `git status --short`，确认 M4D 四个未提交文件和 `midscene_run/` 仍存在且未暂存；冲突时停止并报告，不猜测覆盖方向。
+依次对 Step 1 得到的四个精确哈希执行 `git cherry-pick`，并把该哈希作为唯一参数。每次后运行 `git status --short`，确认 M4D 四个未提交文件和 `midscene_run/` 仍存在且未暂存；冲突时停止并报告，不猜测覆盖方向。
 
-- [ ] **Step 3: 在 main 全量验证**
+- [ ] **Step 3: 单独修复 mcgod 协议日志测试漂移**
+
+全仓首次验证若只因 `cmd/mcgod` 启动日志测试仍写死 `protocol=5` 而失败，确认生产日志读取 `network.ProtocolVersion` 且 M4D 已将唯一协议升为 6。让测试期望复用该唯一版本源，先运行定向 race 测试，再完成 `detect_changes` 或 fallback，只暂存 `cmd/mcgod/main_test.go` 并提交：
+
+```bash
+git commit -m "test: 同步 mcgod 协议日志版本"
+```
+
+- [ ] **Step 4: 按评审用 TDD 阻止关闭失败报告**
+
+对 `CloseTrustedObserver`、`session.shutdown`、`measureGPUCompletionAfterTransportClose` 和测试 fake `integrationEncoder.Finish` 完成 impact/fallback。先写失败测试，要求服务端显式关闭返回 endpoint `Close` 错误，且服务端或客户端任一关闭失败时都不读取首个 GPU 时钟；同时记录 `Finish` 并断言它位于首次 `now` 之前。
+
+最小实现只让 session 保留首次 endpoint 关闭错误、让 `CloseTrustedObserver` 返回该错误，并让 benchmark 在关闭两侧后用 `errors.Join` 检查既有 `clientCloseErr`；任一错误直接返回，不增加重试、轮询、sleep、依赖或新接口层。执行：
+
+```bash
+zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./cmd/mcgo -race -count=1'
+gofmt -l internal/server cmd/mcgo
+openspec validate --all --strict --no-interactive
+git diff --check
+```
+
+完成 `detect_changes` 或 fallback，只暂存上述生产代码、测试、delta spec 与 design，提交：
+
+```bash
+git commit -m "fix: 阻止传输关闭失败报告"
+```
+
+- [ ] **Step 5: 在 main 全量验证**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'
@@ -456,14 +493,14 @@ git diff --check
 
 预期：全部通过，M5 baseline scenario=8、M2 哈希不变、无窗口出现。
 
-- [ ] **Step 4: 关闭性能修复 change**
+- [ ] **Step 6: 关闭性能修复 change**
 
-勾选 4.1–4.3，完成 `detect_changes` 或 fallback，只暂存该任务文件，提交：
+勾选 4.1–4.5，完成 `detect_changes` 或 fallback，只暂存本计划与任务文件，提交：
 
 ```bash
 git commit -m "chore: 关闭 scenario v8 GPU 门禁修复"
 ```
 
-- [ ] **Step 5: 返回 M4D**
+- [ ] **Step 7: 返回 M4D**
 
 把 M4D 5.5 从 scenario v7 更新为 v8，并明确使用新 M5 v8 基线。随后重新读取 M4D proposal/specs/design/tasks，按其“一次 Memory、通过后一次 TCP、任一步失败停止”的规则继续，不能复用或提升之前失败的 `/tmp/mcgo-m4d-perf.pwI2ub/memory.json`。
