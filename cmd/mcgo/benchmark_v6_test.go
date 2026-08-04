@@ -112,7 +112,7 @@ func TestScenarioV8GPUCompletionTimesOnlySubmitAndPoll(t *testing.T) {
 	if got := probe.gpuComplete.Summary().Samples; got != 2048 {
 		t.Fatalf("GPU samples=%d, want 2048", got)
 	}
-	want := []string{"now", "submit", "poll", "now", "release"}
+	want := []string{"finish", "now", "submit", "poll", "now", "release"}
 	if got, expected := len(dev.events), 2048*len(want); got != expected {
 		t.Fatalf("GPU events=%d, want %d", got, expected)
 	}
@@ -122,6 +122,94 @@ func TestScenarioV8GPUCompletionTimesOnlySubmitAndPoll(t *testing.T) {
 			t.Fatalf("sample %d events=%v, want=%v", sample, got, want)
 		}
 	}
+}
+
+func TestScenarioV8GPUCompletionStopsWhenTransportCloseFails(t *testing.T) {
+	serverCloseErr := errors.New("注入服务端关闭失败")
+	clientCloseErr := errors.New("注入客户端关闭失败")
+	for _, test := range []struct {
+		name      string
+		serverErr error
+		clientErr error
+		want      error
+	}{
+		{name: "服务端", serverErr: serverCloseErr, want: serverCloseErr},
+		{name: "客户端", clientErr: clientCloseErr, want: clientCloseErr},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+			config := server.DefaultConfig(benchmarkSeed)
+			config.TrustedObserver = true
+			running := server.NewWorld(
+				config,
+				worldgen.New(benchmarkSeed),
+				storage.NewMemory(storage.Metadata{FormatVersion: 1, Seed: benchmarkSeed, SpawnDimension: core.Overworld}),
+			)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := running.Shutdown(ctx); err != nil {
+					t.Errorf("关闭测试服务端: %v", err)
+				}
+			})
+
+			rawClient, rawServer := network.NewMemoryPair(8)
+			clientEndpoint := &benchmarkCloseErrorClientEndpoint{ClientEndpoint: rawClient, err: test.clientErr}
+			serverEndpoint := &benchmarkCloseErrorServerEndpoint{ServerEndpoint: rawServer, err: test.serverErr}
+			if err := running.AttachTrustedObserver(serverEndpoint); err != nil {
+				t.Fatal(err)
+			}
+			app.server = running
+			app.clientEndpoint = clientEndpoint
+
+			probe, err := newMultiplayerClientProbe(app)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(probe.Close)
+			clockReads := 0
+			probe.now = func() time.Time {
+				clockReads++
+				return time.Unix(0, int64(clockReads)*int64(time.Millisecond))
+			}
+
+			err = probe.measureGPUCompletionAfterTransportClose(app)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("measureGPUCompletionAfterTransportClose error=%v，想要 %v", err, test.want)
+			}
+			if clockReads != 0 {
+				t.Fatalf("关闭失败后 GPU 时钟读取=%d，想要 0", clockReads)
+			}
+			if got := serverEndpoint.closeCalls.Load(); got != 1 {
+				t.Fatalf("服务端 Close 调用=%d，想要 1", got)
+			}
+			if got := clientEndpoint.closeCalls.Load(); got != 1 {
+				t.Fatalf("客户端 Close 调用=%d，想要 1", got)
+			}
+		})
+	}
+}
+
+type benchmarkCloseErrorClientEndpoint struct {
+	network.ClientEndpoint
+	err        error
+	closeCalls atomic.Int32
+}
+
+func (endpoint *benchmarkCloseErrorClientEndpoint) Close() error {
+	endpoint.closeCalls.Add(1)
+	return errors.Join(endpoint.ClientEndpoint.Close(), endpoint.err)
+}
+
+type benchmarkCloseErrorServerEndpoint struct {
+	network.ServerEndpoint
+	err        error
+	closeCalls atomic.Int32
+}
+
+func (endpoint *benchmarkCloseErrorServerEndpoint) Close() error {
+	endpoint.closeCalls.Add(1)
+	return errors.Join(endpoint.ServerEndpoint.Close(), endpoint.err)
 }
 
 func TestScenarioV8GPUCompletionStartsAfterTransportTeardown(t *testing.T) {

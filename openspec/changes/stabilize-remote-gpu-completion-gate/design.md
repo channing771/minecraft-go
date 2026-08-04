@@ -28,7 +28,7 @@ M4D 已在 `main` 上完成前四组并保留第五组未提交改动。新的 v
 
 每次循环仍先完成昵称准备、command encoder 创建、角色/昵称 Render 和 `Finish`。命令准备完成后读取开始时间，依次调用 `Submit(command)` 与 `Poll(true)`，立即读取结束时间并记录差值，最后在计时区间外 `Release` command。
 
-`multiplayerClientProbe` 增加一个默认指向 `time.Now` 的内部时钟函数。headless 测试使用现有 fake device 记录 `now → submit → poll → now → release` 顺序，同时验证 2048 次样本；生产循环不增加闭包、接口或额外分配。
+`multiplayerClientProbe` 增加一个默认指向 `time.Now` 的内部时钟函数。headless 测试使用现有 fake device 记录 `finish → now → submit → poll → now → release` 顺序，同时验证 2048 次样本；生产循环不增加闭包、接口或额外分配。
 
 否决 GPU timestamp query：它需要能力探测、query set、resolve/readback 和跨后端约定，远超本次修正 CPU 发起到 queue 完成指标的范围。否决只移动报告名称：不能修复错误计时边界。
 
@@ -64,9 +64,9 @@ M4D 已在 `main` 上完成前四组并保留第五组未提交改动。新的 v
 
 首轮实现调用 `app.closeClientSession(nil)` 后立即进入 GPU 探针。该调用只关闭客户端 receiver；内置服务端继续运行，trusted observer 的 server endpoint 没有 reader，只能在 writer 的后续发送失败后通过新 goroutine 异步卸载，并且卸载还要取得 `stepMu`。Memory 共享关闭状态会更快暴露失败，TCP 对端关闭传播则依赖内核 I/O 时序；两者都不能作为稳定的测量屏障。
 
-在 `internal/server.Server` 增加幂等的 `CloseTrustedObserver`。它取得 `stepMu`，若 observer 存在则直接调用既有 `detachTrustedObserverLocked`；该路径同步从 registry/engine 移除 observer、取消 session 并关闭 server endpoint，observer 已不存在时直接返回。benchmark 在 GPU 探针前先调用该方法，再关闭客户端 receiver；因此 Memory/TCP 都由同一个服务端所有权边界完成收尾，不依赖 writer 失败、休眠或超时轮询。
+在 `internal/server.Server` 增加幂等的 `CloseTrustedObserver`。它取得 `stepMu`，若 observer 存在则直接调用既有 `detachTrustedObserverLocked`；该路径同步从 registry/engine 移除 observer、取消 session 并关闭 server endpoint，observer 已不存在时直接返回。session 保留首次 endpoint `Close` 的结果，`CloseTrustedObserver` 将该错误返回给 benchmark；benchmark 随后关闭客户端 receiver，并在进入 GPU 探针前合并检查服务端与客户端关闭错误。因此 Memory/TCP 都由同一个服务端所有权边界完成收尾，任一关闭失败都会停止报告生成，不依赖 writer 失败、休眠或超时轮询。
 
-单元测试锁定同步卸载、endpoint 关闭和重复调用安全；headless benchmark 测试锁定 observer 收尾发生在首个 GPU 时钟读取前。保留 2048 样本、`Submit + Poll(true)` 计时范围、20% 阈值和所有绝对门禁，不保存原始样本。
+单元测试锁定同步卸载、endpoint 关闭、关闭错误传播和重复调用安全；headless benchmark 测试锁定 observer 收尾发生在首个 GPU 时钟读取前，并证明任一关闭错误都阻止首次 GPU 时钟读取。事件测试同时记录 command `Finish`，防止命令编码回退到计时区间内。保留 2048 样本、`Submit + Poll(true)` 计时范围、20% 阈值和所有绝对门禁，不保存原始样本。
 
 v8 尚未合入 `main`，也没有可接受的 v8 基线，因此该修复仍属于 scenario v8 的建立过程，无需再升 v9。首轮 v8 报告及 SHA-256 只作为失败证据；修复提交后必须记录新的精确 HEAD、全新 Memory/TCP 路径并重新取得一次性执行授权。
 
@@ -77,6 +77,7 @@ v8 尚未合入 `main`，也没有可接受的 v8 基线，因此该修复仍属
 - [从旧基点分支会产生一次非线性合入] → 基线必须排除 M4D；分支只修改性能代码、基线和本 change，合入前严格检查与 M4D 工作区的重叠文件。
 - [正式 v8 链仍可能失败] → 保留输出和证据后停止，不修改阈值、样本数或基线；形成新假设后另行更新本 change。
 - [显式卸载与异步 writer 失败竞态] → `CloseTrustedObserver` 在 `stepMu` 下幂等操作当前 generation；延迟到达的旧 detach 通过既有 generation 检查成为 no-op。
+- [endpoint 已关闭但 `Close` 返回错误] → 仍完成 registry/engine 卸载并保留首次错误；benchmark 选择失败即停，不把无法证明传输已干净收尾的运行提升为报告。
 - [当前 M5 文件内容从 v7 更新为 v8] → 中文 provenance 明确记录被替代场景和提交；Git 历史保留 v7 精确字节，M2 文件完全不动。
 
 ## Migration Plan

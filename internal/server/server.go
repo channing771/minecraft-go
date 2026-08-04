@@ -153,13 +153,15 @@ func (server *Server) AttachTrustedObserver(endpoint network.ServerEndpoint) err
 	return server.attachTrustedObserverLocked(endpoint)
 }
 
-func (server *Server) CloseTrustedObserver() {
+func (server *Server) CloseTrustedObserver() error {
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 	current := server.trustedObserver
-	if current != nil {
-		server.detachTrustedObserverLocked(current.id, current.generation, nil)
+	if current == nil {
+		return nil
 	}
+	server.detachTrustedObserverLocked(current.id, current.generation, nil)
+	return current.closeErr
 }
 
 func (server *Server) detachTrustedObserver(

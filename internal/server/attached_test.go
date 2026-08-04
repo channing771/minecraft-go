@@ -145,7 +145,8 @@ func TestCloseTrustedObserverSynchronouslyDetachesAndClosesEndpoint(t *testing.T
 
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(8)
 	t.Cleanup(func() { _ = clientEndpoint.Close() })
-	endpoint := &countingCloseServerEndpoint{ServerEndpoint: serverEndpoint}
+	wantCloseErr := errors.New("注入 observer 关闭失败")
+	endpoint := &countingCloseServerEndpoint{ServerEndpoint: serverEndpoint, closeErr: wantCloseErr}
 	if err := running.AttachTrustedObserver(endpoint); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +160,9 @@ func TestCloseTrustedObserverSynchronouslyDetachesAndClosesEndpoint(t *testing.T
 		t.Fatal("trusted observer 没有建立区块订阅")
 	}
 
-	running.CloseTrustedObserver()
+	if err := running.CloseTrustedObserver(); !errors.Is(err, wantCloseErr) {
+		t.Fatalf("CloseTrustedObserver error=%v，想要 %v", err, wantCloseErr)
+	}
 	if got := endpoint.closeCalls.Load(); got != 1 {
 		t.Fatalf("endpoint Close 调用=%d，想要 1", got)
 	}
@@ -343,11 +346,12 @@ type failingSendServerEndpoint struct {
 type countingCloseServerEndpoint struct {
 	network.ServerEndpoint
 	closeCalls atomic.Int32
+	closeErr   error
 }
 
 func (endpoint *countingCloseServerEndpoint) Close() error {
 	endpoint.closeCalls.Add(1)
-	return endpoint.ServerEndpoint.Close()
+	return errors.Join(endpoint.ServerEndpoint.Close(), endpoint.closeErr)
 }
 
 func (endpoint *failingSendServerEndpoint) Send(

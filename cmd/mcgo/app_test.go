@@ -563,6 +563,7 @@ func (e *integrationEncoder) BeginRenderPass(desc gfx.RenderPassDesc) gfx.Render
 func (*integrationEncoder) BeginComputePass(string) gfx.ComputePass                           { return &integrationComputePass{} }
 func (*integrationEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {}
 func (e *integrationEncoder) Finish() gfx.CommandBuffer {
+	e.device.events = append(e.device.events, "finish")
 	return &integrationResource{release: func() { e.device.events = append(e.device.events, "release") }}
 }
 

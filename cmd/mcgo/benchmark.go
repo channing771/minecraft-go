@@ -163,8 +163,11 @@ func runBenchmark(app *application, outputPath string) error {
 func (probe *multiplayerClientProbe) measureGPUCompletionAfterTransportClose(
 	app *application,
 ) error {
-	app.server.CloseTrustedObserver()
+	serverCloseErr := app.server.CloseTrustedObserver()
 	app.closeClientSession(nil)
+	if err := errors.Join(serverCloseErr, app.clientCloseErr); err != nil {
+		return fmt.Errorf("关闭 GPU 探针传输: %w", err)
+	}
 	return probe.measureGPUCompletion(app)
 }
 

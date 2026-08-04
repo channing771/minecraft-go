@@ -152,6 +152,7 @@ type session struct {
 	mu               sync.Mutex
 	isClosed         bool
 	closeOnce        sync.Once
+	closeErr         error
 	failOnce         sync.Once
 	nextToken        uint64
 	outstandingToken uint64
@@ -275,7 +276,7 @@ func (current *session) shutdown() {
 		current.isClosed = true
 		current.mu.Unlock()
 		current.cancel()
-		_ = current.endpoint.Close()
+		current.closeErr = current.endpoint.Close()
 	})
 }
 
