@@ -46,6 +46,7 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 			e.bool(message.Jump)
 			e.f32(message.Yaw)
 			e.f32(message.Pitch)
+			e.bool(message.Mining)
 		case BreakBlock:
 			e.u64(message.Sequence)
 			e.f32(message.Yaw)
@@ -128,6 +129,7 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			var moveX, moveZ int8
 			var jump bool
 			var yaw, pitch float32
+			var mining bool
 			sequence, err = d.u64()
 			if err == nil {
 				moveX, err = d.i8()
@@ -144,7 +146,10 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			if err == nil {
 				pitch, err = d.f32()
 			}
-			packet = PlayerInput{Sequence: sequence, MoveX: moveX, MoveZ: moveZ, Jump: jump, Yaw: yaw, Pitch: pitch}
+			if err == nil {
+				mining, err = d.bool()
+			}
+			packet = PlayerInput{Sequence: sequence, MoveX: moveX, MoveZ: moveZ, Jump: jump, Yaw: yaw, Pitch: pitch, Mining: mining}
 		case 1:
 			var sequence uint64
 			var yaw, pitch float32
@@ -352,6 +357,13 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 			e.bool(message.OnGround)
 			e.bool(message.Ready)
 			e.bool(message.Reset)
+			e.bool(message.MiningActive)
+			e.i32(message.MiningTarget.X)
+			e.i32(message.MiningTarget.Y)
+			e.i32(message.MiningTarget.Z)
+			e.u16(message.MiningProgressTicks)
+			e.u16(message.MiningRequiredTicks)
+			e.bool(message.MiningHarvestable)
 		case CommandRejected:
 			reason, _ := commandRejectReasonID(message.Reason)
 			e.u64(message.Sequence)
@@ -527,6 +539,27 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 			}
 			if err == nil {
 				statePacket.Reset, err = d.bool()
+			}
+			if err == nil {
+				statePacket.MiningActive, err = d.bool()
+			}
+			if err == nil {
+				statePacket.MiningTarget.X, err = d.i32()
+			}
+			if err == nil {
+				statePacket.MiningTarget.Y, err = d.i32()
+			}
+			if err == nil {
+				statePacket.MiningTarget.Z, err = d.i32()
+			}
+			if err == nil {
+				statePacket.MiningProgressTicks, err = d.u16()
+			}
+			if err == nil {
+				statePacket.MiningRequiredTicks, err = d.u16()
+			}
+			if err == nil {
+				statePacket.MiningHarvestable, err = d.bool()
 			}
 			packet = statePacket
 		case 4:

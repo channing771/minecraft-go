@@ -24,7 +24,7 @@ func BenchmarkSmallPacketCodec(b *testing.B) {
 	}{
 		{"ClientHello", StateHandshake, ClientHello{ProtocolVersion: ProtocolVersion}},
 		{"LoginStart", StateLogin, LoginStart{PlayerID: id, DisplayName: "Benchmark"}},
-		{"PlayerInput", StatePlay, PlayerInput{Sequence: 1, MoveX: 1, MoveZ: -1, Jump: true, Yaw: 0.5, Pitch: -0.25}},
+		{"PlayerInput", StatePlay, PlayerInput{Sequence: 1, MoveX: 1, MoveZ: -1, Jump: true, Yaw: 0.5, Pitch: -0.25, Mining: true}},
 		{"BreakBlock", StatePlay, BreakBlock{Sequence: 2, Yaw: 0.5, Pitch: -0.25}},
 		{"PlaceBlock", StatePlay, PlaceBlock{Sequence: 3, Yaw: 0.5, Pitch: -0.25, Slot: 2}},
 		{"RequestChunkResync", StatePlay, RequestChunkResync{Sequence: 4, Dimension: core.Overworld, Chunk: core.ChunkPos{X: -2, Z: 3}, HaveRevision: 7}},
@@ -41,7 +41,7 @@ func BenchmarkSmallPacketCodec(b *testing.B) {
 		{"LoginReject", StateLogin, LoginReject{Code: LoginServerFull, Message: "full"}},
 		{"BlockChanges", StatePlay, BlockChanges{Dimension: core.Overworld, Chunk: core.ChunkPos{}, BaseRevision: 1, NewRevision: 2, Changes: []BlockChange{{Position: core.BlockPos{X: 1, Y: 2, Z: 3}, Block: core.DirtID}}}},
 		{"ForgetChunks", StatePlay, ForgetChunks{Dimension: core.Overworld, Chunks: []core.ChunkPos{{X: -1, Z: 2}}}},
-		{"PlayerState", StatePlay, PlayerState{ServerTick: 5, LastInputSequence: 4, Dimension: core.Overworld, Position: mgl32.Vec3{1, 2, 3}, Velocity: mgl32.Vec3{0.1, 0.2, 0.3}, Ready: true}},
+		{"PlayerState", StatePlay, PlayerState{ServerTick: 5, LastInputSequence: 4, Dimension: core.Overworld, Position: mgl32.Vec3{1, 2, 3}, Velocity: mgl32.Vec3{0.1, 0.2, 0.3}, Ready: true, MiningActive: true, MiningTarget: core.BlockPos{X: 1, Y: 2, Z: 3}, MiningProgressTicks: 6, MiningRequiredTicks: 15, MiningHarvestable: true}},
 		{"CommandRejected", StatePlay, CommandRejected{Sequence: 6, Reason: RejectNoTarget}},
 		{"KeepAlive", StatePlay, KeepAlive{Token: 7}},
 		{"Disconnect", StatePlay, Disconnect{Code: DisconnectServerShutdown, Message: "shutdown"}},
@@ -198,7 +198,7 @@ func BenchmarkTCPLoopbackPlayerInput(b *testing.B) {
 	client, server, closePair := benchmarkTCPPair(b)
 	defer closePair()
 	ctx := context.Background()
-	packet := PlayerInput{Sequence: 1, MoveX: 1, MoveZ: -1, Yaw: 0.5, Pitch: -0.25}
+	packet := PlayerInput{Sequence: 1, MoveX: 1, MoveZ: -1, Yaw: 0.5, Pitch: -0.25, Mining: true}
 	received := make(chan error, 1)
 	go func() {
 		for range b.N {
