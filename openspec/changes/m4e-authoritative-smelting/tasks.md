@@ -31,12 +31,12 @@
 
 ## 5. 有界熔炼 tick 与查看生命周期
 
-- [ ] 5.1 在 `internal/sim` 先写失败测试覆盖状态机：有效输入加煤时设 1600 后同 tick 变 1599 且进度为 1；第 200 tick 产出 1 铁锭；一个煤恰好 8 锭；空输入、错误输入、输出满或异类时进度与燃烧都暂停；恢复后从原值继续；多人重叠半径只推进一次；半径 2 边界；区块卸载或无 Ready 玩家时暂停；同区块多炉只升一次 revision。
-- [ ] 5.2 先写打开与失效失败测试：Ready、sequence、有限视角、服务端六格射线、目标必须是活动且 generation 匹配的熔炉；一人最多一个、多人可同看；超距、方块改变、generation 变化、区块卸载、维度 reset 时精确一次关闭；断线直接移除查看者。
-- [ ] 5.3 把 `dropInterestKeys` 最小重命名为 `activeInterestKeys` 并让 `advanceDrops` 与 `advanceFurnaces` 复用同一结果与既有 seen/scratch 和稳定排序；熔炉只在值变化时 `SetFurnace` 加 `touchChunk`，不新增每 tick map。
-- [ ] 5.4 实现查看生命周期：打开命令复用 `LookDirection`、`core.RaycastBlocks` 与 `interactionReach`，session 只保存一个 `core.FurnaceRef` 加 bool；每 tick 在全部命令与推进之后验证查看者，再按 session 顺序输出完整熔炉状态，不在 `server.session` 建第二份真相。
-- [ ] 5.5 增加 `BenchmarkAdvanceFurnaces6400`（8 名 Ready 玩家、25 个重叠区块、每区块 32 槽）并用 `testing.AllocsPerRun` 锁定稳定态推进 0 分配；若 `TickResult` 输出导致必要分配，只测不含查看者的推进 helper，不得用无界缓存规避。
-- [ ] 5.6 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/sim -run "^$" -bench AdvanceFurnaces6400 -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 实现有界权威熔炼`，然后自动进入第 6 组。
+- [x] 5.1 在 `internal/sim` 先写失败测试覆盖状态机：有效输入加煤时设 1600 后同 tick 变 1599 且进度为 1；第 200 tick 产出 1 铁锭；一个煤恰好 8 锭；空输入、错误输入、输出满或异类时进度与燃烧都暂停；恢复后从原值继续；多人重叠半径只推进一次；半径 2 边界；区块卸载或无 Ready 玩家时暂停；同区块多炉只升一次 revision。
+- [x] 5.2 先写打开与失效失败测试：Ready、sequence、有限视角、服务端六格射线、目标必须是活动且 generation 匹配的熔炉；一人最多一个、多人可同看；超距、方块改变、generation 变化、区块卸载、维度 reset 时精确一次关闭；断线直接移除查看者。
+- [x] 5.3 把 `dropInterestKeys` 最小重命名为 `activeInterestKeys` 并让 `advanceDrops` 与 `advanceFurnaces` 复用同一结果与既有 seen/scratch 和稳定排序；熔炉只在值变化时 `SetFurnace` 加 `touchChunk`，不新增每 tick map。
+- [x] 5.4 实现查看生命周期：打开命令复用 `LookDirection`、`core.RaycastBlocks` 与 `interactionReach`，session 只保存一个 `core.FurnaceRef` 加 bool；每 tick 在全部命令与推进之后验证查看者，再按 session 顺序输出完整熔炉状态，不在 `server.session` 建第二份真相。
+- [x] 5.5 增加 `BenchmarkAdvanceFurnaces6400`（8 名 Ready 玩家、25 个重叠区块、每区块 32 槽）并用 `testing.AllocsPerRun` 锁定稳定态推进 0 分配；若 `TickResult` 输出导致必要分配，只测不含查看者的推进 helper，不得用无界缓存规避。
+- [x] 5.6 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/sim -run "^$" -bench AdvanceFurnaces6400 -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 实现有界权威熔炼`，然后自动进入第 6 组。
 
 ## 6. 跨容器移动、放置与原子破坏
 

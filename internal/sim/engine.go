@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,9 @@ type sessionState struct {
 	center                      core.ChunkPos
 	wanted                      map[core.ChunkKey]struct{}
 	player                      *playerState
+	// 每名玩家最多查看一个熔炉；引用失效时由权威 tick 统一清除。
+	furnace     core.FurnaceRef
+	viewFurnace bool
 }
 
 type pendingChunkChanges struct {
@@ -55,9 +59,10 @@ type Engine struct {
 	subscriptionsDirty bool
 
 	// 掉落物 tick 的复用 scratch，避免每 tick 分配固定上限集合。
-	dropKeySeen        map[core.ChunkKey]struct{}
-	dropKeyScratch     []core.ChunkKey
-	dropSessionScratch []SessionID
+	dropKeySeen          map[core.ChunkKey]struct{}
+	dropKeyScratch       []core.ChunkKey
+	furnaceViewerScratch []SessionID
+	dropSessionScratch   []SessionID
 
 	inboxMu   sync.Mutex
 	commands  []Command
@@ -244,6 +249,18 @@ func (engine *Engine) Step() TickResult {
 			}
 			player.inventory = next
 			player.inventoryDirty = true
+		case CommandOpenFurnace:
+			if reason, rejected := engine.openFurnace(command.Session, command); rejected {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   reason,
+				})
+			}
+		case CommandCloseFurnace:
+			// 关闭永远成功：客户端可以随时结束查看关系。
+			session.viewFurnace = false
+			session.furnace = core.FurnaceRef{}
 		case CommandCraftRecipe:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
 				result.Rejected = append(result.Rejected, Rejection{
@@ -298,6 +315,7 @@ func (engine *Engine) Step() TickResult {
 
 	pending := make(map[core.ChunkKey]*pendingChunkChanges)
 	engine.advanceDrops(pending)
+	engine.advanceFurnaces(pending)
 	for _, command := range interactions {
 		if reason, rejected := engine.executeInteraction(command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{
@@ -312,6 +330,7 @@ func (engine *Engine) Step() TickResult {
 
 	result.Tick = engine.tick.Add(1)
 	engine.publishInventories(&result)
+	engine.publishFurnaces(&result)
 	engine.publishPlayers(&result)
 	return result
 }
@@ -920,9 +939,18 @@ func mapSetBlockError(err error) RejectReason {
 	return RejectInvalidRay
 }
 
+// sortChunkKeys 用泛型排序避免 sort.Slice 的反射 swapper 分配，
+// 使权威 tick 的热路径保持零分配。
 func sortChunkKeys(keys []core.ChunkKey) {
-	sort.Slice(keys, func(i, j int) bool {
-		return chunkKeyLess(keys[i], keys[j])
+	slices.SortFunc(keys, func(left, right core.ChunkKey) int {
+		switch {
+		case chunkKeyLess(left, right):
+			return -1
+		case chunkKeyLess(right, left):
+			return 1
+		default:
+			return 0
+		}
 	})
 }
 
