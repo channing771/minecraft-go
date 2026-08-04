@@ -51,7 +51,7 @@ type application struct {
 	avatarRenderer          *render.AvatarRenderer
 	nameTagRenderer         *render.NameTagRenderer
 	hotbarRenderer          *render.HotbarRenderer
-	hotbar                  client.HotbarMirror
+	inventory               client.InventoryMirror
 	itemDropRenderer        *render.ItemDropRenderer
 	itemDrops               *client.ItemDrops
 	itemDropInstances       []render.ItemDrop
@@ -807,7 +807,7 @@ func (a *application) closeClientSession(cause error) {
 		if a.remotePlayers != nil {
 			a.remotePlayers.Reset()
 		}
-		a.hotbar.Reset()
+		a.inventory.Reset()
 		a.itemDrops.Reset()
 	})
 }
@@ -896,7 +896,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	} else if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
 		return false, fmt.Errorf("准备远端玩家昵称: %w", err)
 	}
-	hotbar, hotbarConfirmed := a.hotbar.State()
+	hotbar, hotbarConfirmed := a.inventory.Hotbar()
 	if hotbarConfirmed {
 		if err := a.hotbarRenderer.Prepare(
 			hotbar, uint32(width), uint32(height), a.renderer.UploadBudget(),
@@ -1022,8 +1022,8 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 			continue
 		}
-		if state, ok := message.(network.HotbarState); ok {
-			if err := a.hotbar.Apply(state); err != nil {
+		if state, ok := message.(network.InventoryState); ok {
+			if err := a.inventory.Apply(state); err != nil {
 				a.closeClientSession(err)
 				return
 			}
@@ -1105,7 +1105,7 @@ func (a *application) placeBlock() {
 		return
 	}
 	// 放置引用最后一个已确认的选中栏位；尚未确认时不发送。
-	hotbar, confirmed := a.hotbar.State()
+	hotbar, confirmed := a.inventory.Hotbar()
 	if !confirmed {
 		return
 	}

@@ -154,7 +154,7 @@ func (server *Server) publishLocalResult(
 		if update.Session != current.id {
 			continue
 		}
-		if !current.enqueue(network.HotbarState{Hotbar: update.Inventory.Hotbar}) {
+		if !current.enqueue(network.InventoryState{Inventory: update.Inventory}) {
 			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 			return
 		}

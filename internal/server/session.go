@@ -628,6 +628,14 @@ func translateClientMessage(
 			Kind:     sim.CommandSelectHotbar,
 			Slot:     message.Slot,
 		}, true
+	case network.MoveInventoryStack:
+		return sim.Command{
+			Session:  id,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandMoveInventoryStack,
+			Slot:     message.From,
+			ToSlot:   message.To,
+		}, true
 	case network.RequestChunkResync:
 		return sim.Command{
 			Session:      id,

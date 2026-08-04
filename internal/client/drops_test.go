@@ -154,7 +154,7 @@ func TestItemDropsResetClearsMirror(t *testing.T) {
 
 func TestItemDropsRejectsUnsupportedMessage(t *testing.T) {
 	mirror := client.NewItemDrops()
-	if err := mirror.Apply(network.HotbarState{}); err == nil {
+	if err := mirror.Apply(network.InventoryState{}); err == nil {
 		t.Fatal("非掉落物消息被接受")
 	}
 }

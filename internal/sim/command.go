@@ -20,6 +20,7 @@ const (
 	CommandPlaceBlock
 	CommandResync
 	CommandSelectHotbar
+	CommandMoveInventoryStack
 )
 
 // LookDirection 把玩家 look 角转换为单位方向；yaw=0、pitch=0 朝向 -Z。
@@ -57,6 +58,7 @@ type Command struct {
 	Chunk        core.ChunkPos
 	HaveRevision uint64
 	Slot         uint8
+	ToSlot       uint8
 	MoveX        int8
 	MoveZ        int8
 	Jump         bool

@@ -221,10 +221,13 @@ func canonicalMultiplayerEvent(output interface{ Write([]byte) (int, error) }, v
 	case network.ItemDropUpserts, network.ItemDropRemoves:
 		// 掉落物差分按连接批次交付，边界批次会随传输而变；
 		// Memory/TCP 一致性由最终镜像状态覆盖，不进入逐消息 transcript。
-	case network.HotbarState:
-		write("HotbarState|selected=%d", message.Hotbar.Selected)
-		for index, stack := range message.Hotbar.Slots {
-			write("HotbarSlot|index=%d|item=%d|count=%d", index, stack.Item, stack.Count)
+	case network.InventoryState:
+		write("InventoryState|selected=%d", message.Inventory.Hotbar.Selected)
+		for index, stack := range message.Inventory.Hotbar.Slots {
+			write("InventorySlot|index=%d|item=%d|count=%d", index, stack.Item, stack.Count)
+		}
+		for index, stack := range message.Inventory.Backpack {
+			write("BackpackSlot|index=%d|item=%d|count=%d", index, stack.Item, stack.Count)
 		}
 	case network.KeepAlive:
 		// Tokens come from runtime heartbeat timing and are intentionally excluded.

@@ -193,7 +193,7 @@ type delayedPlayerHarness struct {
 	clientEndpoint network.ClientEndpoint
 	running        *Server
 	mirror         *client.Mirror
-	hotbar         client.HotbarMirror
+	inventory      client.InventoryMirror
 	predictor      *client.Predictor
 	delayTicks     uint64
 	serverTick     uint64
@@ -439,9 +439,9 @@ func (h *delayedPlayerHarness) drainServerTick(throughTick uint64) {
 				state:         message,
 			})
 			return
-		case network.HotbarState:
-			if err := h.hotbar.Apply(message); err != nil {
-				h.t.Fatalf("HotbarMirror.Apply: %v", err)
+		case network.InventoryState:
+			if err := h.inventory.Apply(message); err != nil {
+				h.t.Fatalf("InventoryMirror.Apply: %v", err)
 			}
 		case network.ItemDropUpserts, network.ItemDropRemoves:
 			// 掉落物由独立镜像消费，不进入世界镜像。

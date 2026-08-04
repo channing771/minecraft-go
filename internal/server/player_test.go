@@ -329,9 +329,9 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		t.Fatalf("Ready tick 首消息 = %T，想要 ChunkSnapshot", readyMessages[0])
 	}
 	// 初始快捷栏必须先于使客户端开始交互的 Ready 玩家状态。
-	if hotbar, ok := readyMessages[1].(network.HotbarState); !ok ||
-		hotbar.Hotbar != (core.Hotbar{}) {
-		t.Fatalf("Ready tick 次消息 = %#v，想要空快捷栏状态", readyMessages[1])
+	if state, ok := readyMessages[1].(network.InventoryState); !ok ||
+		state.Inventory != (core.Inventory{}) {
+		t.Fatalf("Ready tick 次消息 = %#v，想要空物品状态", readyMessages[1])
 	}
 	readyState, ok := readyMessages[2].(network.PlayerState)
 	if !ok || readyState.ServerTick != ready.Tick ||

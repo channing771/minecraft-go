@@ -65,8 +65,8 @@ func TestProtocolV3HotbarPacketIDsAreFrozen(t *testing.T) {
 		state  State
 		packet ServerPacket
 		id     uint32
-	}{{StatePlay, HotbarState{}, 10}})
-	if _, ok := clientPacketForID(StatePlay, 6); ok {
+	}{{StatePlay, InventoryState{}, 10}})
+	if _, ok := clientPacketForID(StatePlay, 7); ok {
 		t.Fatal("unknown play client packet ID accepted")
 	}
 }
@@ -179,6 +179,9 @@ func sameClientPacketType(left, right ClientPacket) bool {
 	case SelectHotbar:
 		_, ok := right.(SelectHotbar)
 		return ok
+	case MoveInventoryStack:
+		_, ok := right.(MoveInventoryStack)
+		return ok
 	}
 	return false
 }
@@ -218,8 +221,8 @@ func sameServerPacketType(left, right ServerPacket) bool {
 	case Disconnect:
 		_, ok := right.(Disconnect)
 		return ok
-	case HotbarState:
-		_, ok := right.(HotbarState)
+	case InventoryState:
+		_, ok := right.(InventoryState)
 		return ok
 	case ItemDropUpserts:
 		_, ok := right.(ItemDropUpserts)

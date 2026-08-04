@@ -27,6 +27,7 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			Slot:     4,
 		},
 		network.SelectHotbar{Sequence: 9, Slot: 8},
+		network.MoveInventoryStack{Sequence: 10, From: 0, To: 35},
 		network.RequestChunkResync{
 			Sequence:     4,
 			Dimension:    core.Overworld,
@@ -60,11 +61,11 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 		network.RemotePlayerStates{Players: []network.RemotePlayerState{{PlayerID: core.PlayerID{0, 1, 2, 3, 4, 5, 0x46, 7, 0x88, 9, 10, 11, 12, 13, 14, 15}}}},
 		network.KeepAlive{Token: 1},
 		network.Disconnect{Code: network.DisconnectTimeout},
-		network.HotbarState{},
+		network.InventoryState{},
 		network.ItemDropUpserts{},
 		network.ItemDropRemoves{},
 	}
-	if len(clientMessages) != 6 || len(serverMessages) != 13 {
+	if len(clientMessages) != 7 || len(serverMessages) != 13 {
 		t.Fatal("消息集合不完整")
 	}
 }
@@ -75,7 +76,7 @@ func TestHotbarMessagesValidateFixedBounds(t *testing.T) {
 	valid := []interface{ Validate() error }{
 		network.PlaceBlock{Slot: core.HotbarSlots - 1},
 		network.SelectHotbar{Slot: 0},
-		network.HotbarState{Hotbar: hotbar},
+		network.InventoryState{Inventory: core.Inventory{Hotbar: hotbar}},
 	}
 	for _, message := range valid {
 		if err := message.Validate(); err != nil {
@@ -94,10 +95,10 @@ func TestHotbarMessagesValidateFixedBounds(t *testing.T) {
 	invalid := []interface{ Validate() error }{
 		network.PlaceBlock{Slot: core.HotbarSlots},
 		network.SelectHotbar{Slot: 255},
-		network.HotbarState{Hotbar: overflow},
-		network.HotbarState{Hotbar: unknown},
-		network.HotbarState{Hotbar: ghost},
-		network.HotbarState{Hotbar: selected},
+		network.InventoryState{Inventory: core.Inventory{Hotbar: overflow}},
+		network.InventoryState{Inventory: core.Inventory{Hotbar: unknown}},
+		network.InventoryState{Inventory: core.Inventory{Hotbar: ghost}},
+		network.InventoryState{Inventory: core.Inventory{Hotbar: selected}},
 	}
 	for _, message := range invalid {
 		if err := message.Validate(); err == nil {

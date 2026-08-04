@@ -237,7 +237,7 @@ func drainServerMessages(
 			collect(message)
 		}
 		switch message.(type) {
-		case network.HotbarState, network.ItemDropUpserts, network.ItemDropRemoves:
+		case network.InventoryState, network.ItemDropUpserts, network.ItemDropRemoves:
 			// 快捷栏与掉落物由独立的只读镜像消费，不进入世界镜像。
 			continue
 		}

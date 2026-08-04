@@ -58,6 +58,10 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 		case SelectHotbar:
 			e.u64(message.Sequence)
 			e.u8(message.Slot)
+		case MoveInventoryStack:
+			e.u64(message.Sequence)
+			e.u8(message.From)
+			e.u8(message.To)
 		case RequestChunkResync:
 			e.u64(message.Sequence)
 			e.i32(int32(message.Dimension))
@@ -182,6 +186,17 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 				slot, err = d.u8()
 			}
 			packet = SelectHotbar{Sequence: sequence, Slot: slot}
+		case 6:
+			var sequence uint64
+			var from, to uint8
+			sequence, err = d.u64()
+			if err == nil {
+				from, err = d.u8()
+			}
+			if err == nil {
+				to, err = d.u8()
+			}
+			packet = MoveInventoryStack{Sequence: sequence, From: from, To: to}
 		default:
 			return nil, codecError("decode client", state, packetID, errUnknownPacketID)
 		}
@@ -322,9 +337,13 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 				e.f32(player.Pitch)
 				e.bool(player.Reset)
 			}
-		case HotbarState:
-			e.u8(message.Hotbar.Selected)
-			for _, stack := range message.Hotbar.Slots {
+		case InventoryState:
+			e.u8(message.Inventory.Hotbar.Selected)
+			for _, stack := range message.Inventory.Hotbar.Slots {
+				e.u16(uint16(stack.Item))
+				e.u8(stack.Count)
+			}
+			for _, stack := range message.Inventory.Backpack {
 				e.u16(uint16(stack.Item))
 				e.u8(stack.Count)
 			}
@@ -518,19 +537,15 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 		case 12:
 			packet, err = decodeItemDropRemoves(&d)
 		case 10:
-			var hotbar core.Hotbar
-			hotbar.Selected, err = d.u8()
-			for index := range hotbar.Slots {
-				var item uint16
-				if err == nil {
-					item, err = d.u16()
-				}
-				if err == nil {
-					hotbar.Slots[index].Item = core.ItemID(item)
-					hotbar.Slots[index].Count, err = d.u8()
-				}
+			var inventory core.Inventory
+			inventory.Hotbar.Selected, err = d.u8()
+			for index := range inventory.Hotbar.Slots {
+				inventory.Hotbar.Slots[index], err = decodeItemStack(&d, err)
 			}
-			packet = HotbarState{Hotbar: hotbar}
+			for index := range inventory.Backpack {
+				inventory.Backpack[index], err = decodeItemStack(&d, err)
+			}
+			packet = InventoryState{Inventory: inventory}
 		default:
 			return nil, codecError("decode server", state, packetID, errUnknownPacketID)
 		}
@@ -553,6 +568,22 @@ const (
 	dropIDWireBytes   = 4 + 4 + 4 + 1 + 4
 	itemDropWireBytes = dropIDWireBytes + 4 + 2 + 1
 )
+
+// decodeItemStack 读取一格固定编码；沿用已有错误则原样返回。
+func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
+	if err != nil {
+		return core.ItemStack{}, err
+	}
+	item, err := d.u16()
+	if err != nil {
+		return core.ItemStack{}, err
+	}
+	count, err := d.u8()
+	if err != nil {
+		return core.ItemStack{}, err
+	}
+	return core.ItemStack{Item: core.ItemID(item), Count: count}, nil
+}
 
 func encodeDropID(e *byteEncoder, id core.DropID) {
 	e.i32(int32(id.Dimension))

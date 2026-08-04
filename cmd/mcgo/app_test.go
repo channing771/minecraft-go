@@ -1421,7 +1421,7 @@ func TestHotbarSelectionOnlySendsRequestAndKeepsMirror(t *testing.T) {
 	var confirmed core.Hotbar
 	confirmed.Selected = 1
 	confirmed.Slots[1] = core.ItemStack{Item: core.ItemStone, Count: 3}
-	sendInteractiveServerMessage(t, serverEndpoint, network.HotbarState{Hotbar: confirmed})
+	sendInteractiveServerMessage(t, serverEndpoint, network.InventoryState{Inventory: core.Inventory{Hotbar: confirmed}})
 	app.drainServerMessages(2)
 
 	app.applyInteractiveInput(0, client.Movement{}, client.Actions{
@@ -1433,7 +1433,7 @@ func TestHotbarSelectionOnlySendsRequestAndKeepsMirror(t *testing.T) {
 		got != (network.SelectHotbar{Sequence: 1, Slot: 7}) {
 		t.Fatalf("选择请求=%#v，想要 Sequence 1 Slot 7", message)
 	}
-	if got, ok := app.hotbar.State(); !ok || got != confirmed {
+	if got, ok := app.inventory.Hotbar(); !ok || got != confirmed {
 		t.Fatalf("未确认的选择改写了镜像: %+v, %v", got, ok)
 	}
 }
@@ -1447,7 +1447,7 @@ func TestHotbarPlaceUsesLastConfirmedSlot(t *testing.T) {
 	var confirmed core.Hotbar
 	confirmed.Selected = 5
 	confirmed.Slots[5] = core.ItemStack{Item: core.ItemDirt, Count: 2}
-	sendInteractiveServerMessage(t, serverEndpoint, network.HotbarState{Hotbar: confirmed})
+	sendInteractiveServerMessage(t, serverEndpoint, network.InventoryState{Inventory: core.Inventory{Hotbar: confirmed}})
 	app.drainServerMessages(2)
 
 	app.applyInteractiveInput(0, client.Movement{}, client.Actions{Place: true}, true)
@@ -1457,7 +1457,7 @@ func TestHotbarPlaceUsesLastConfirmedSlot(t *testing.T) {
 	if !ok || place.Slot != 5 {
 		t.Fatalf("放置=%#v，想要引用已确认的栏位 5", message)
 	}
-	if got, ok := app.hotbar.State(); !ok || got != confirmed {
+	if got, ok := app.inventory.Hotbar(); !ok || got != confirmed {
 		t.Fatalf("放置后镜像被本地预测修改: %+v, %v", got, ok)
 	}
 }
@@ -1482,14 +1482,14 @@ func TestHotbarMirrorResetsWithClientSession(t *testing.T) {
 	app, serverEndpoint := newInteractiveTestApplication(t)
 	var confirmed core.Hotbar
 	confirmed.Slots[0] = core.ItemStack{Item: core.ItemGrass, Count: 1}
-	sendInteractiveServerMessage(t, serverEndpoint, network.HotbarState{Hotbar: confirmed})
+	sendInteractiveServerMessage(t, serverEndpoint, network.InventoryState{Inventory: core.Inventory{Hotbar: confirmed}})
 	app.drainServerMessages(1)
-	if _, ok := app.hotbar.State(); !ok {
+	if _, ok := app.inventory.Hotbar(); !ok {
 		t.Fatal("权威快捷栏未进入镜像")
 	}
 
 	app.closeClientSession(nil)
-	if hotbar, ok := app.hotbar.State(); ok || hotbar != (core.Hotbar{}) {
+	if hotbar, ok := app.inventory.Hotbar(); ok || hotbar != (core.Hotbar{}) {
 		t.Fatalf("关闭会话后镜像=%+v, %v，想要空且未确认", hotbar, ok)
 	}
 }
@@ -1513,7 +1513,7 @@ func TestApplicationDrawsHotbarHUDLast(t *testing.T) {
 
 	var confirmed core.Hotbar
 	confirmed.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
-	if err := app.hotbar.Apply(network.HotbarState{Hotbar: confirmed}); err != nil {
+	if err := app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{Hotbar: confirmed}}); err != nil {
 		t.Fatal(err)
 	}
 	dev.resetPasses()

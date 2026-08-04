@@ -14,10 +14,10 @@
 
 ## 3. 完整状态协议 v5
 
-- [ ] 3.1 在 `internal/network`、`internal/client`、`internal/server` 先写失败的 packet/registry/codec/golden/fuzz seed 测试，覆盖固定 109 字节 `InventoryState`、10 字节 `MoveInventoryStack`、精确长度与索引校验、v4 登录拒绝、首次状态顺序和只向所属玩家发布。
-- [ ] 3.2 将 `ProtocolVersion` 升为 5，以 packet ID 10 的 `InventoryState` 替换 `HotbarState`，追加移动请求；把客户端镜像替换为 `InventoryMirror`，服务端 dirty 发布完整状态，不保留双状态或降级 codec。
-- [ ] 3.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/client ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，确认 Memory/TCP 共用校验、v5 golden 和 `git diff --check` 通过。
-- [ ] 3.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 升级背包协议 v5`。提交成功后自动进入第 4 组。
+- [x] 3.1 在 `internal/network`、`internal/client`、`internal/server` 先写失败的 packet/registry/codec/golden/fuzz seed 测试，覆盖固定 109 字节 `InventoryState`、10 字节 `MoveInventoryStack`、精确长度与索引校验、v4 登录拒绝、首次状态顺序和只向所属玩家发布。
+- [x] 3.2 将 `ProtocolVersion` 升为 5，以 packet ID 10 的 `InventoryState` 替换 `HotbarState`，追加移动请求；把客户端镜像替换为 `InventoryMirror`，服务端 dirty 发布完整状态，不保留双状态或降级 codec。
+- [x] 3.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/client ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，确认 Memory/TCP 共用校验、v5 golden 和 `git diff --check` 通过。
+- [x] 3.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 升级背包协议 v5`。提交成功后自动进入第 4 组。
 
 ## 4. 权威移动与背包拾取
 

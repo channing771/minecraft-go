@@ -25,7 +25,7 @@ func TestHotbarStateReachesOwningSessionBeforeReady(t *testing.T) {
 	var kinds []string
 	stepUntilCollect(t, running, clientEndpoint, mirror, func(message network.ServerMessage) {
 		switch message := message.(type) {
-		case network.HotbarState:
+		case network.InventoryState:
 			kinds = append(kinds, "hotbar")
 		case network.PlayerState:
 			if message.Ready {
@@ -72,8 +72,8 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 	}
 
 	shutdownHotbarServer(t, running, firstClient, secondClient)
-	firstMirror := &client.HotbarMirror{}
-	secondMirror := &client.HotbarMirror{}
+	firstMirror := &client.InventoryMirror{}
+	secondMirror := &client.InventoryMirror{}
 	firstReady, secondReady := false, false
 	wantCollected := core.ItemStack{Item: core.ItemGrass, Count: 1}
 	// 挖掘产生地面掉落物，玩家需在拾取延迟后原地拾取才会更新快捷栏。
@@ -104,10 +104,10 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 			if len(firstStates) == 0 {
 				continue
 			}
-			if got := firstStates[len(firstStates)-1].Hotbar.Slots[0]; got != wantCollected {
+			if got := firstStates[len(firstStates)-1].Inventory.Hotbar.Slots[0]; got != wantCollected {
 				t.Fatalf("玩家甲快捷栏栏位 0 = %+v，想要 %+v", got, wantCollected)
 			}
-			if got, ok := secondMirror.State(); !ok || got != (core.Hotbar{}) {
+			if got, ok := secondMirror.State(); !ok || got != (core.Inventory{}) {
 				t.Fatalf("玩家乙镜像 = %+v, %v，想要保持为空", got, ok)
 			}
 			return
@@ -150,22 +150,22 @@ func hotbarDrainTick(
 	t *testing.T,
 	endpoint network.ClientEndpoint,
 	throughTick uint64,
-	mirror *client.HotbarMirror,
+	mirror *client.InventoryMirror,
 	ready *bool,
-) []network.HotbarState {
+) []network.InventoryState {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	var states []network.HotbarState
+	var states []network.InventoryState
 	for {
 		message, err := endpoint.Recv(ctx)
 		if err != nil {
 			t.Fatalf("接收服务端消息: %v", err)
 		}
 		switch message := message.(type) {
-		case network.HotbarState:
+		case network.InventoryState:
 			if err := mirror.Apply(message); err != nil {
-				t.Fatalf("HotbarMirror.Apply: %v", err)
+				t.Fatalf("InventoryMirror.Apply: %v", err)
 			}
 			states = append(states, message)
 		case network.CommandRejected:
@@ -198,7 +198,7 @@ func TestFullHotbarStillBreaksBlockIntoGroundDrop(t *testing.T) {
 	}
 	shutdownHotbarServer(t, running, clientEndpoint)
 
-	mirror := &client.HotbarMirror{}
+	mirror := &client.InventoryMirror{}
 	ready := false
 	deadline := time.Now().Add(5 * time.Second)
 	broken := false
@@ -220,7 +220,7 @@ func TestFullHotbarStillBreaksBlockIntoGroundDrop(t *testing.T) {
 			if len(result.Changes) == 0 {
 				continue
 			}
-			if got, _ := mirror.State(); got != full {
+			if got, _ := mirror.State(); got.Hotbar != full {
 				t.Fatalf("满快捷栏被修改: %+v", got)
 			}
 			return
@@ -248,13 +248,13 @@ func hotbarDrainTickAllowingRejections(
 	t *testing.T,
 	endpoint network.ClientEndpoint,
 	throughTick uint64,
-	mirror *client.HotbarMirror,
+	mirror *client.InventoryMirror,
 	ready *bool,
-) ([]network.HotbarState, []network.CommandRejected) {
+) ([]network.InventoryState, []network.CommandRejected) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	var states []network.HotbarState
+	var states []network.InventoryState
 	var rejections []network.CommandRejected
 	for {
 		message, err := endpoint.Recv(ctx)
@@ -262,9 +262,9 @@ func hotbarDrainTickAllowingRejections(
 			t.Fatalf("接收服务端消息: %v", err)
 		}
 		switch message := message.(type) {
-		case network.HotbarState:
+		case network.InventoryState:
 			if err := mirror.Apply(message); err != nil {
-				t.Fatalf("HotbarMirror.Apply: %v", err)
+				t.Fatalf("InventoryMirror.Apply: %v", err)
 			}
 			states = append(states, message)
 		case network.CommandRejected:

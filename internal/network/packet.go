@@ -7,8 +7,8 @@ import (
 	"minecraft-go/internal/core"
 )
 
-// ProtocolVersion 是 M4B 唯一支持的协议版本。
-const ProtocolVersion uint32 = 4
+// ProtocolVersion 是 M4C 唯一支持的协议版本。
+const ProtocolVersion uint32 = 5
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -153,6 +153,8 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 			return clientPacket.Validate()
 		case SelectHotbar:
 			return clientPacket.Validate()
+		case MoveInventoryStack:
+			return clientPacket.Validate()
 		case RequestChunkResync:
 			return clientPacket.Validate()
 		case KeepAliveReply:
@@ -229,7 +231,7 @@ func ValidateServerPacket(state State, packet ServerPacket) error {
 			return serverPacket.Validate()
 		case RemotePlayerStates:
 			return serverPacket.Validate()
-		case HotbarState:
+		case InventoryState:
 			return serverPacket.Validate()
 		case ItemDropUpserts:
 			return serverPacket.Validate()

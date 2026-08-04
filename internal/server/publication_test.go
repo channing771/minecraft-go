@@ -332,7 +332,7 @@ func recvWorldServerMessage(
 	for {
 		message := recvServerMessage(t, client)
 		switch message.(type) {
-		case network.PlayerState, network.HotbarState,
+		case network.PlayerState, network.InventoryState,
 			network.ItemDropUpserts, network.ItemDropRemoves:
 			// 玩家状态、快捷栏与掉落物差分是按会话定向的控制消息，不属于世界发布。
 			continue
@@ -370,7 +370,7 @@ func assertNoWorldServerMessage(
 			t.Fatalf("接收 server message: %v", err)
 		}
 		switch message.(type) {
-		case network.PlayerState, network.HotbarState,
+		case network.PlayerState, network.InventoryState,
 			network.ItemDropUpserts, network.ItemDropRemoves:
 		default:
 			t.Fatalf("意外 world server message = %#v", message)

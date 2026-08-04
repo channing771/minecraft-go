@@ -22,6 +22,7 @@ func TestValidateClientPacket(t *testing.T) {
 		{"break", StatePlay, BreakBlock{Yaw: 90, Pitch: -15}},
 		{"place", StatePlay, PlaceBlock{Yaw: 90, Pitch: -15, Slot: 8}},
 		{"select hotbar", StatePlay, SelectHotbar{Slot: 8}},
+		{"move inventory stack", StatePlay, MoveInventoryStack{From: 0, To: core.InventorySlots - 1}},
 		{"resync", StatePlay, RequestChunkResync{}},
 		{"keep alive reply", StatePlay, KeepAliveReply{Token: 1}},
 	}
@@ -48,6 +49,8 @@ func TestValidateClientPacket(t *testing.T) {
 		{"place NaN", StatePlay, PlaceBlock{Yaw: float32(math.NaN())}},
 		{"place slot out of range", StatePlay, PlaceBlock{Slot: core.HotbarSlots}},
 		{"select hotbar slot out of range", StatePlay, SelectHotbar{Slot: core.HotbarSlots}},
+		{"inventory move out of range", StatePlay, MoveInventoryStack{To: core.InventorySlots}},
+		{"inventory move same slot", StatePlay, MoveInventoryStack{From: 2, To: 2}},
 		{"resync outside overworld", StatePlay, RequestChunkResync{Dimension: core.DimensionID(1)}},
 		{"play packet during handshake", StateHandshake, PlayerInput{}},
 		{"play packet during login", StateLogin, PlayerInput{}},
@@ -76,8 +79,8 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 			t.Fatalf("%s state = %d, want %d", tc.name, tc.got, tc.want)
 		}
 	}
-	if ProtocolVersion != 4 {
-		t.Fatalf("protocol version = %d, want 4", ProtocolVersion)
+	if ProtocolVersion != 5 {
+		t.Fatalf("protocol version = %d, want 5", ProtocolVersion)
 	}
 
 	codes := []struct {
@@ -124,7 +127,7 @@ func TestValidateServerPacket(t *testing.T) {
 		{"command reject", StatePlay, CommandRejected{Reason: RejectInvalidRay}},
 		{"keep alive", StatePlay, KeepAlive{Token: 1}},
 		{"disconnect", StatePlay, Disconnect{Code: DisconnectTimeout}},
-		{"hotbar state", StatePlay, HotbarState{}},
+		{"inventory state", StatePlay, InventoryState{}},
 		{"item drop upserts", StatePlay, ItemDropUpserts{Drops: []ItemDrop{{
 			ID:   core.DropID{Dimension: core.Overworld, Slot: 0, Generation: 1},
 			Item: core.ItemStone, Count: 1,
@@ -162,7 +165,7 @@ func TestValidateServerPacket(t *testing.T) {
 		{"player state NaN", StatePlay, PlayerState{Position: mgl32.Vec3{float32(math.NaN()), 0, 0}}},
 		{"player state infinity", StatePlay, PlayerState{Velocity: mgl32.Vec3{0, float32(math.Inf(1)), 0}}},
 		{"unknown command rejection", StatePlay, CommandRejected{Reason: RejectReason("other")}},
-		{"hotbar state out of range", StatePlay, HotbarState{Hotbar: core.Hotbar{Selected: core.HotbarSlots}}},
+		{"inventory state out of range", StatePlay, InventoryState{Inventory: core.Inventory{Hotbar: core.Hotbar{Selected: core.HotbarSlots}}}},
 		{"empty drop upserts", StatePlay, ItemDropUpserts{}},
 		{"empty drop removes", StatePlay, ItemDropRemoves{}},
 		{"play packet during handshake", StateHandshake, KeepAlive{Token: 1}},
