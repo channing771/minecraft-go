@@ -12,6 +12,6 @@
 
 ## 3. 无窗口性能验收与收尾
 
-- [ ] 3.1 在新的临时路径运行一次无窗口 Memory 性能诊断，确认 flying p99 低于 `12ms`；失败则保留证据并停止，不降低阈值、不自动重跑。
-- [ ] 3.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race && go vet ./... && test -z "$(gofmt -l .)"'`、`go test ./internal/archcheck -count=1` 和 `openspec validate --all --strict --no-interactive`。
-- [ ] 3.3 记录诊断结果和正式 M5 基线恢复条件，提交本组；不在本变更中生成正式基线文件。
+- [x] 3.1 在新的临时路径运行一次无窗口 Memory 性能诊断，确认 flying p99 低于 `12ms`；失败则保留证据并停止，不降低阈值、不自动重跑。
+- [x] 3.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race && go vet ./... && test -z "$(gofmt -l .)"'`、`go test ./internal/archcheck -count=1` 和 `openspec validate --all --strict --no-interactive`。
+- [x] 3.3 记录诊断结果和正式 M5 基线恢复条件，提交本组；不在本变更中生成正式基线文件。
