@@ -16,7 +16,11 @@
 - **THEN** 系统 MAY 使用更高的网格工作上限完成初始载入，且这些帧不得进入延迟样本
 
 ### Requirement: 工作负载变化使用新场景版本
-采用有界计时帧并使用纠正后 GPU 完成探针的报告 MUST 标记为 scenario v8；既有 scenario v6/v7 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。
+含确定性矿石分布的 benchmark 世界报告 MUST 标记为 scenario v9；既有 scenario v6/v7/v8 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。矿石改变了固定种子世界的材料分布，因此 v8 与 v9 之间 MUST 只通过显式授权迁移，且迁移只执行完整性与绝对门禁。
+
+#### Scenario: v9 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v9 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
 
 #### Scenario: v8 同场景比较
 - **WHEN** baseline 与 current 都是完整的 scenario v8 报告
@@ -25,6 +29,14 @@
 #### Scenario: v7 同场景比较
 - **WHEN** baseline 与 current 都是完整的 scenario v7 报告
 - **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v8 与 v9 不静默混比
+- **WHEN** baseline 为 scenario v8、current 为 scenario v9 且没有显式迁移授权
+- **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致
+
+#### Scenario: 显式授权 v8 到 v9 迁移
+- **WHEN** 调用方显式授权 `8:9` 迁移且两份报告的硬件身份一致
+- **THEN** 比较器 MUST 执行既有完整性与绝对门禁，并跳过不同 workload 之间无意义的相对回归判定
 
 #### Scenario: v7 与 v8 不静默混比
 - **WHEN** baseline 为 scenario v7、current 为 scenario v8
