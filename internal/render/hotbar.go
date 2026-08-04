@@ -16,9 +16,9 @@ const (
 	// 数量最多两位数（1..64），每格最多两个数字。
 	maxHotbarGlyphs = core.InventorySlots*2 + maxOverlayGlyphs
 
-	// 三条固定配方，每条包含输入格、输出格、合成按钮和两个数量。
-	recipeQuads  = 3 * 3
-	recipeGlyphs = 3 * 2
+	// 五条固定配方，每条包含输入格、输出格、合成按钮和两个数量。
+	recipeQuads  = 5 * 3
+	recipeGlyphs = 5 * 2
 	// 熔炉视图：三个栏位背景、三个物品色块、两条进度条底与两条进度条填充。
 	furnaceQuads = 3 + 3 + 4
 	// 三个熔炉格各最多两位数量。
@@ -42,6 +42,9 @@ const (
 	hotbarSelectBorder = float32(3)
 	hotbarSwatchInset  = float32(10)
 	hotbarDigitMargin  = float32(3)
+	miningBarWidth     = float32(240)
+	miningBarHeight    = float32(12)
+	miningBarGap       = float32(16)
 	// 背包界面在快捷栏之上再放 3 行，并与快捷栏留出一段间隔。
 	inventoryRowGap = float32(12)
 	// 合成行位于背包最上一行之上。
@@ -52,11 +55,13 @@ const (
 	furnaceBarGap    = float32(6)
 )
 
-// ponytail: 当前只有三条固定配方；需要分页或分类时再引入共享目录。
+// ponytail: 当前只有五条固定配方；需要分页或分类时再引入共享目录。
 var inventoryRecipeIDs = [...]core.RecipeID{
 	core.RecipeStoneBricks,
 	core.RecipeFurnace,
 	core.RecipeIronBlock,
+	core.RecipeStonePickaxe,
+	core.RecipeIronPickaxe,
 }
 
 //go:embed shader/hotbar.wgsl
@@ -181,6 +186,7 @@ func (renderer *HotbarRenderer) Prepare(
 	open bool,
 	source int,
 	overlay *FurnaceOverlay,
+	mining MiningOverlay,
 	width, height uint32,
 	budget *UploadBudget,
 ) error {
@@ -189,7 +195,7 @@ func (renderer *HotbarRenderer) Prepare(
 		return err
 	}
 	layoutInventory(
-		&renderer.layout, renderer.atlas, inventory, open, source, overlay,
+		&renderer.layout, renderer.atlas, inventory, open, source, overlay, mining,
 		float32(width), float32(height),
 	)
 	encodeHotbarViewport(
@@ -236,6 +242,7 @@ func layoutInventory(
 	open bool,
 	source int,
 	overlay *FurnaceOverlay,
+	mining MiningOverlay,
 	width, height float32,
 ) hotbarLayout {
 	if dst == nil {
@@ -313,8 +320,44 @@ func layoutInventory(
 		} else {
 			appendRecipeRows(dst, atlas, inventory, width, height)
 		}
+	} else {
+		appendMiningBar(dst, mining, width, height)
 	}
 	return *dst
+}
+
+// MiningOverlay 是最后确认的权威采掘状态；渲染器不会自行推进它。
+type MiningOverlay struct {
+	Active        bool
+	ProgressTicks uint16
+	RequiredTicks uint16
+	Harvestable   bool
+}
+
+// appendMiningBar 在快捷栏上方绘制固定背景和权威比例填充。
+func appendMiningBar(dst *hotbarLayout, overlay MiningOverlay, width, height float32) {
+	if !overlay.Active || overlay.RequiredTicks == 0 {
+		return
+	}
+	x := (width - miningBarWidth) * 0.5
+	_, hotbarY := inventorySlotOrigin(0, false, width, height)
+	y := hotbarY - miningBarGap - miningBarHeight
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: x, Y: y, Width: miningBarWidth, Height: miningBarHeight,
+		Color: [4]float32{0.05, 0.05, 0.06, 0.78},
+	})
+	fraction := float32(overlay.ProgressTicks) / float32(overlay.RequiredTicks)
+	if fraction <= 0 {
+		return
+	}
+	color := [4]float32{0.95, 0.55, 0.15, 0.95}
+	if overlay.Harvestable {
+		color = [4]float32{0.30, 0.78, 0.36, 0.95}
+	}
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: x, Y: y, Width: miningBarWidth * min(fraction, 1), Height: miningBarHeight,
+		Color: color,
+	})
 }
 
 // FurnaceOverlay 是熔炉界面需要显示的全部权威值。
@@ -409,7 +452,7 @@ func FurnaceSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool)
 	return 0, false
 }
 
-// appendRecipeRows 绘制三条固定配方及各自的一次合成按钮。
+// appendRecipeRows 绘制五条固定配方及各自的一次合成按钮。
 func appendRecipeRows(
 	dst *hotbarLayout,
 	atlas GlyphSource,
@@ -576,6 +619,10 @@ func hotbarItemColor(item core.ItemID) [4]float32 {
 		return [4]float32{88.0 / 255, 86.0 / 255, 88.0 / 255, 1}
 	case core.ItemIronBlock:
 		return [4]float32{214.0 / 255, 214.0 / 255, 216.0 / 255, 1}
+	case core.ItemStonePickaxe:
+		return [4]float32{104.0 / 255, 112.0 / 255, 120.0 / 255, 1}
+	case core.ItemIronPickaxe:
+		return [4]float32{190.0 / 255, 198.0 / 255, 210.0 / 255, 1}
 	default:
 		return [4]float32{}
 	}

@@ -38,9 +38,9 @@
 
 ## 7. 五行配方与权威 HUD
 
-- [ ] 7.1 在 `internal/render` 与 `cmd/mcgo` 先写失败测试，覆盖五条固定配方的绘制/命中/可合成状态、两把工具色块、固定最坏缓冲大小、绿色可掉落条、橙色无掉落条、非活动不绘制和 reset 清零。
-- [ ] 7.2 修改 `internal/render/hotbar.go` 与 `cmd/mcgo/app.go`，只在现有 HUD pipeline 增加背景/填充两个 quad，并把固定配方数组扩为五项；不新增 shader、纹理、glyph、pipeline 或动态容量。
-- [ ] 7.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./cmd/mcgo ./internal/client -race -count=1'`，确认自动测试未创建或聚焦窗口，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 显示采掘进度与工具配方`。
+- [x] 7.1 在 `internal/render` 与 `cmd/mcgo` 先写失败测试，覆盖五条固定配方的绘制/命中/可合成状态、两把工具色块、固定最坏缓冲大小、绿色可掉落条、橙色无掉落条、非活动不绘制和 reset 清零。
+- [x] 7.2 修改 `internal/render/hotbar.go` 与 `cmd/mcgo/app.go`，只在现有 HUD pipeline 增加背景/填充两个 quad，并把固定配方数组扩为五项；不新增 shader、纹理、glyph、pipeline 或动态容量。
+- [x] 7.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./cmd/mcgo ./internal/client -race -count=1'`，确认自动测试未创建或聚焦窗口，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 显示采掘进度与工具配方`。
 
 ## 8. scenario v10、兼容文档与比较器
 
