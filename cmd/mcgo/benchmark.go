@@ -28,8 +28,9 @@ import (
 )
 
 const (
-	benchmarkSeed   = 20260726
-	scenarioVersion = 6
+	benchmarkSeed            = 20260726
+	benchmarkMessageDrainMax = 4096
+	scenarioVersion          = 7
 )
 
 var (
@@ -473,7 +474,7 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 				app.window.CancelClose()
 			}
 		}
-		rendered, err := app.frame(4096, physics.FixedDelta)
+		rendered, err := app.frame(benchmarkMessageDrainMax, benchmarkMessageDrainMax, physics.FixedDelta)
 		if err != nil {
 			return 0, err
 		}
@@ -509,7 +510,7 @@ func waitForBenchmarkCenterConsistency(
 ) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, err := app.frame(4096, physics.FixedDelta); err != nil {
+		if _, err := app.frame(benchmarkMessageDrainMax, benchmarkMessageDrainMax, physics.FixedDelta); err != nil {
 			return err
 		}
 		appliedDimension, appliedCenter, appliedSequence, appliedOK :=
@@ -550,7 +551,7 @@ func runWarmup(app *application, duration time.Duration) error {
 				app.window.CancelClose()
 			}
 		}
-		rendered, err := app.frame(4096, physics.FixedDelta)
+		rendered, err := app.frame(benchmarkMessageDrainMax, steadyFrameMeshWorkMax, physics.FixedDelta)
 		if err != nil {
 			return err
 		}
@@ -589,7 +590,7 @@ func measurePhase(
 		if err := multiplayer.sampleFrame(app, multiplayer.tick); err != nil {
 			return client.PhaseSummary{}, fmt.Errorf("%s 多人 probe tick %d: %w", name, multiplayer.tick, err)
 		}
-		rendered, err := app.frame(4096, fixedBenchmarkFrameDuration)
+		rendered, err := app.frame(benchmarkMessageDrainMax, steadyFrameMeshWorkMax, fixedBenchmarkFrameDuration)
 		if err != nil {
 			return client.PhaseSummary{}, err
 		}

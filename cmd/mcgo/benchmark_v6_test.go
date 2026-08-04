@@ -48,9 +48,9 @@ func (*benchmarkBlockingServerStream) Recv(
 func (*benchmarkBlockingServerStream) Peer() string { return "benchmark-blocking" }
 func (*benchmarkBlockingServerStream) Close() error { return nil }
 
-func TestScenarioV6ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 6 {
-		t.Fatalf("scenarioVersion=%d, want 6", scenarioVersion)
+func TestScenarioV7ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 7 {
+		t.Fatalf("scenarioVersion=%d, want 7", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {
@@ -88,7 +88,7 @@ func TestScenarioV6ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 	}
 }
 
-func TestScenarioV6RenderFrameSamplesExistingRemotePassesExactlyOnce(t *testing.T) {
+func TestScenarioV7RenderFrameSamplesExistingRemotePassesExactlyOnce(t *testing.T) {
 	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "星河", 1, mgl32.Vec3{0, 0, -4})); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestScenarioV6RenderFrameSamplesExistingRemotePassesExactlyOnce(t *testing.
 	}
 }
 
-func TestScenarioV6NilRenderTimingNeverReadsBenchmarkClock(t *testing.T) {
+func TestScenarioV7NilRenderTimingNeverReadsBenchmarkClock(t *testing.T) {
 	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "月海", 1, mgl32.Vec3{0, 0, -4})); err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestScenarioV6NilRenderTimingNeverReadsBenchmarkClock(t *testing.T) {
 	}
 }
 
-func TestScenarioV6NameTagFailurePublishesNoRenderTimingSample(t *testing.T) {
+func TestScenarioV7NameTagFailurePublishesNoRenderTimingSample(t *testing.T) {
 	wantErr := errors.New("injected glyph flush failure")
 	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{flushErr: wantErr})
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "云野", 1, mgl32.Vec3{0, 0, -4})); err != nil {
@@ -438,7 +438,7 @@ func TestCanonicalCountingServerStreamFreezesMeasurementAtSendStart(t *testing.T
 	}
 }
 
-func TestScenarioV6EightSessionServerProbeIsRealAndBounded(t *testing.T) {
+func TestScenarioV7EightSessionServerProbeIsRealAndBounded(t *testing.T) {
 	multiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)
 	if err != nil {
 		t.Fatal(err)

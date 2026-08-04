@@ -111,7 +111,7 @@ func TestRemoteConnectionCloseResetsRoster(t *testing.T) {
 	for app.receiver.Err() == nil && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if _, err := app.frame(0, 0); !errors.Is(err, network.ErrClosed) {
+	if _, err := app.frame(0, 0, 0); !errors.Is(err, network.ErrClosed) {
 		t.Fatalf("frame after disconnect error=%v want network.ErrClosed", err)
 	}
 	if got := len(app.remotePlayers.Presentations()); got != 0 {
@@ -141,12 +141,48 @@ func TestFrameAdvancesRemotePlayersOnceAfterDrain(t *testing.T) {
 	sendInteractiveServerMessage(t, serverEndpoint, network.RemotePlayerStates{ServerTick: 3, Players: []network.RemotePlayerState{{
 		PlayerID: spawn.PlayerID, Dimension: core.Overworld, Position: mgl32.Vec3{8, 64, 0},
 	}}})
-	rendered, err := app.frame(1, 25*time.Millisecond)
+	rendered, err := app.frame(1, 1, 25*time.Millisecond)
 	if err != nil || rendered {
 		t.Fatalf("frame=(%v,%v), want (false,nil) for zero framebuffer", rendered, err)
 	}
 	if got := app.remotePlayers.Presentations()[0].Position; got != (mgl32.Vec3{2, 64, 0}) {
 		t.Fatalf("advanced position=%v want [2 64 0]", got)
+	}
+}
+
+func TestFrameKeepsMesherWorkBoundIndependentFromMessageDrain(t *testing.T) {
+	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	sections := make([]network.SectionData, core.SectionsPerChunk)
+	for index := range sections {
+		sections[index] = network.SectionData{
+			Y: int32(index), Storage: network.SectionSingle, Single: core.AirID,
+		}
+	}
+	for z := int32(-1); z <= 1; z++ {
+		for x := int32(-1); x <= 1; x++ {
+			if _, err := app.mirror.Apply(network.ChunkSnapshot{
+				Dimension: core.Overworld,
+				Chunk:     core.ChunkPos{X: x, Z: z},
+				Revision:  1,
+				Sections:  sections,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	first := core.SectionKey{Dimension: core.Overworld, Pos: core.SectionPos{Y: 0}}
+	second := core.SectionKey{Dimension: core.Overworld, Pos: core.SectionPos{Y: 1}}
+	release := app.mesher.BlockForTest(first)
+	t.Cleanup(release)
+	app.mesher.MarkDirty(first, second)
+
+	rendered, err := app.frame(4096, 1, 0)
+	if err != nil || !rendered {
+		t.Fatalf("frame=(%v,%v)", rendered, err)
+	}
+	stats := app.mesher.Stats()
+	if scheduled := stats.QueuedJobs + stats.InFlightJobs; scheduled != 1 {
+		t.Fatalf("drain=4096 mesh=1 scheduled=%d stats=%+v", scheduled, stats)
 	}
 }
 
@@ -217,7 +253,7 @@ func TestRemoteGlyphErrorPropagatesFromFrame(t *testing.T) {
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{})); err != nil {
 		t.Fatal(err)
 	}
-	rendered, err := app.frame(0, 25*time.Millisecond)
+	rendered, err := app.frame(0, 0, 25*time.Millisecond)
 	if rendered || !errors.Is(err, glyphErr) {
 		t.Fatalf("frame=(%v,%v), want wrapped glyph error", rendered, err)
 	}

@@ -840,7 +840,7 @@ func (a *application) nextSequence() uint64 {
 }
 
 // frame 应用服务端消息后绘制一帧。
-func (a *application) frame(drainMax int, elapsed time.Duration) (bool, error) {
+func (a *application) frame(drainMax, meshWorkMax int, elapsed time.Duration) (bool, error) {
 	a.drainServerMessages(drainMax)
 	if a.receiver != nil {
 		if err := a.receiver.Err(); err != nil {
@@ -851,7 +851,7 @@ func (a *application) frame(drainMax int, elapsed time.Duration) (bool, error) {
 	if a.remotePlayers != nil {
 		a.remotePlayers.Advance(elapsed)
 	}
-	return a.renderFrame(drainMax)
+	return a.renderFrame(meshWorkMax)
 }
 
 // renderFrame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。

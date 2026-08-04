@@ -22,7 +22,10 @@ import (
 	"minecraft-go/internal/profile"
 )
 
-const viewDistance = 32
+const (
+	viewDistance           = 32
+	steadyFrameMeshWorkMax = 64
+)
 
 func init() {
 	runtime.LockOSThread()
@@ -238,7 +241,7 @@ func runInteractive(app *application) error {
 		}
 		app.applyInteractiveCursorInput(dt, movement, actions, captured, justCaptured)
 		app.remotePlayers.Advance(dt)
-		if _, err := app.renderFrame(64); err != nil {
+		if _, err := app.renderFrame(steadyFrameMeshWorkMax); err != nil {
 			return err
 		}
 	}

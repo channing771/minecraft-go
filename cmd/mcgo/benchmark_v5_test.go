@@ -16,8 +16,8 @@ import (
 )
 
 func TestBenchmarkScenarioVersionIncludesPersistencePath(t *testing.T) {
-	if scenarioVersion != 6 {
-		t.Fatalf("scenarioVersion=%d，想要包含八玩家同步指标的 v6", scenarioVersion)
+	if scenarioVersion != 7 {
+		t.Fatalf("scenarioVersion=%d，想要有界计时帧的 v7", scenarioVersion)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestValidateBenchmarkReportTickP99UserOverrideBoundary(t *testing.T) {
 		PlayerPersistence: client.PersistenceSummary{Snapshots: 1, P99MS: 0.1, MaxMS: 0.1},
 	}
 	if err := validateBenchmarkReport(report); err != nil {
-		t.Fatalf("v6 10ms tick p99 gate rejected 9.999ms: %v", err)
+		t.Fatalf("v7 10ms tick p99 gate rejected 9.999ms: %v", err)
 	}
 
 	report.Ticks.P99MS = 10
