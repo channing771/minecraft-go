@@ -712,6 +712,7 @@ func TestTCPPlayerAndWorldSaveFailureRecovery(t *testing.T) {
 	different := dialIntegrationClient(t, host.Addr, differentIdentity)
 	waitClientReadyFor(t, host, different, differentIdentity.PlayerID)
 	_ = different.Close()
+	host.WaitPlayerReleased(t, differentIdentity.PlayerID)
 	store.setSaveError(nil)
 	waitIntegrationCondition(t, "player save retry success", func() bool {
 		host.Host.players.mu.Lock()

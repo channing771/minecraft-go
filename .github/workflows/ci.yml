@@ -26,7 +26,7 @@ jobs:
         run: go test ./internal/archcheck ./internal/storage ./internal/network ./internal/physics -v
 
       - name: 单元与端到端测试
-        run: go test ./... -race
+        run: go test ./... -race -p=1
 
       - name: TCP 重启与 Memory/TCP parity 重复门禁
         run: go test ./internal/server -run 'TestTCPPlayerAndWorld|TestMemoryTCPParity' -race -count=10
