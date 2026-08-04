@@ -1,6 +1,6 @@
 ## 1. 建立 M5 正式报告链
 
-- [ ] 1.1 在提交本变更规划后记录精确 HEAD 和现有 M2 JSON/Markdown SHA-256；确认 tracked state 干净、`mcgo`/`mcgod`/benchmark 均未运行、两个全新 `/tmp/mcgo-m5-baseline-<HEAD12>-{memory,tcp}.json` 路径不存在，并核对 `cmd/mcgo/app.go` 的 benchmark 分支只创建 headless device。
+- [x] 1.1 在提交本变更规划后记录精确 HEAD 和现有 M2 JSON/Markdown SHA-256；确认 tracked state 干净、`mcgo`/`mcgod`/benchmark 均未运行、两个全新 `/tmp/mcgo-m5-baseline-<HEAD12>-{memory,tcp}.json` 路径不存在，并核对 `cmd/mcgo/app.go` 的 benchmark 分支只创建 headless device。
 - [ ] 1.2 使用 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m5-baseline-<HEAD12>-memory.json'` 恰好执行一次正式 Memory 报告；随后以该报告同时作为 baseline/current 运行 `cmd/perfcheck --max-regression 0.20`，验证 scenario v6 完整性和全部绝对门禁。任一步失败立即停止且不得重跑。
 - [ ] 1.3 使用相同 Go selector 和全新 TCP 路径恰好执行一次 `--benchmark-transport tcp`；随后以 Memory 为 baseline、TCP 为 current 运行 `cmd/perfcheck --max-regression 0.20`。任一步失败立即停止且不得重跑。
 
