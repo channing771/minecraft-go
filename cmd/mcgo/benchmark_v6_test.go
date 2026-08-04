@@ -48,9 +48,9 @@ func (*benchmarkBlockingServerStream) Recv(
 func (*benchmarkBlockingServerStream) Peer() string { return "benchmark-blocking" }
 func (*benchmarkBlockingServerStream) Close() error { return nil }
 
-func TestScenarioV7ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 7 {
-		t.Fatalf("scenarioVersion=%d, want 7", scenarioVersion)
+func TestScenarioV8ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 8 {
+		t.Fatalf("scenarioVersion=%d, want 8", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {
@@ -84,6 +84,39 @@ func TestScenarioV7ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 	for _, tag := range scenario.Tags {
 		if !strings.ContainsAny(tag.Text, "界月星河山海云") {
 			t.Fatalf("tag is not the fixed Unicode fixture: %q", tag.Text)
+		}
+	}
+}
+
+func TestScenarioV8GPUCompletionTimesOnlySubmitAndPoll(t *testing.T) {
+	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	probe, err := newMultiplayerClientProbe(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(probe.Close)
+
+	clockReads := 0
+	probe.now = func() time.Time {
+		dev.events = append(dev.events, "now")
+		clockReads++
+		return time.Unix(0, int64(clockReads)*int64(time.Millisecond))
+	}
+	dev.events = nil
+	if err := probe.measureGPUCompletion(app); err != nil {
+		t.Fatal(err)
+	}
+	if got := probe.gpuComplete.Summary().Samples; got != 2048 {
+		t.Fatalf("GPU samples=%d, want 2048", got)
+	}
+	want := []string{"now", "submit", "poll", "now", "release"}
+	if got, expected := len(dev.events), 2048*len(want); got != expected {
+		t.Fatalf("GPU events=%d, want %d", got, expected)
+	}
+	for sample := range 2048 {
+		start := sample * len(want)
+		if got := dev.events[start : start+len(want)]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("sample %d events=%v, want=%v", sample, got, want)
 		}
 	}
 }
@@ -464,6 +497,26 @@ func TestPerformanceThresholdsRejectTickP99AtTenMilliseconds(t *testing.T) {
 	report.Ticks.P99MS = 10
 	if err := validateBenchmarkReport(report); err == nil || !strings.Contains(err.Error(), ">= 10 ms") {
 		t.Fatalf("10ms tick p99 boundary error=%v", err)
+	}
+}
+
+func TestScenarioV8BenchmarkReportRequires2048GPUCompletionSamples(t *testing.T) {
+	report := validBenchmarkReport()
+	report.ScenarioVersion = 8
+	report.Multiplayer = validMultiplayerSummary()
+	report.Multiplayer.RemoteGPUComplete.Samples = 2047
+	if err := validateBenchmarkReport(report); err == nil ||
+		!strings.Contains(err.Error(), "remote_gpu_complete") {
+		t.Fatalf("2047 GPU samples error=%v", err)
+	}
+	report.Multiplayer.RemoteGPUComplete.Samples = 2048
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("2048 GPU samples rejected: %v", err)
+	}
+	report.ScenarioVersion = 7
+	report.Multiplayer.RemoteGPUComplete.Samples = 256
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("v7 256 GPU samples rejected: %v", err)
 	}
 }
 

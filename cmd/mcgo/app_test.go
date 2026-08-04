@@ -421,6 +421,7 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 
 type integrationRenderDevice struct {
 	releases, passes []string
+	events           []string
 	buffers          map[string]*integrationBuffer
 }
 
@@ -453,11 +454,13 @@ func (d *integrationRenderDevice) CreateSampler(desc gfx.SamplerDesc) gfx.Sample
 func (d *integrationRenderDevice) CreateCommandEncoder() gfx.CommandEncoder {
 	return &integrationEncoder{device: d}
 }
-func (*integrationRenderDevice) Submit(...gfx.CommandBuffer) {}
-func (*integrationRenderDevice) Poll(bool)                   {}
-func (d *integrationRenderDevice) Release()                  { d.releases = append(d.releases, "device") }
-func (d *integrationRenderDevice) lastPasses() []string      { return append([]string(nil), d.passes...) }
-func (d *integrationRenderDevice) resetPasses()              { d.passes = nil }
+func (d *integrationRenderDevice) Submit(...gfx.CommandBuffer) {
+	d.events = append(d.events, "submit")
+}
+func (d *integrationRenderDevice) Poll(bool)            { d.events = append(d.events, "poll") }
+func (d *integrationRenderDevice) Release()             { d.releases = append(d.releases, "device") }
+func (d *integrationRenderDevice) lastPasses() []string { return append([]string(nil), d.passes...) }
+func (d *integrationRenderDevice) resetPasses()         { d.passes = nil }
 func (d *integrationRenderDevice) bufferByLabel(t *testing.T, label string) *integrationBuffer {
 	t.Helper()
 	buffer := d.buffers[label]
@@ -559,7 +562,9 @@ func (e *integrationEncoder) BeginRenderPass(desc gfx.RenderPassDesc) gfx.Render
 }
 func (*integrationEncoder) BeginComputePass(string) gfx.ComputePass                           { return &integrationComputePass{} }
 func (*integrationEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {}
-func (*integrationEncoder) Finish() gfx.CommandBuffer                                         { return &integrationResource{} }
+func (e *integrationEncoder) Finish() gfx.CommandBuffer {
+	return &integrationResource{release: func() { e.device.events = append(e.device.events, "release") }}
+}
 
 type integrationPass struct{}
 

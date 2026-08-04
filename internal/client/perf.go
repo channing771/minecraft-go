@@ -9,6 +9,8 @@ import (
 
 var ErrRSSUnsupported = errors.New("当前平台不支持进程 RSS 采样")
 
+const ScenarioV8GPUCompletionSamples = 2048
+
 // FrameSample 是固定场景的一帧性能样本。
 type FrameSample struct {
 	FrameMS           float64

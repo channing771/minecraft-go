@@ -30,7 +30,7 @@ import (
 const (
 	benchmarkSeed            = 20260726
 	benchmarkMessageDrainMax = 4096
-	scenarioVersion          = 7
+	scenarioVersion          = 8
 )
 
 var (
@@ -340,6 +340,9 @@ func validateBenchmarkReport(report client.PerfReport) error {
 			minimum := 256
 			if name == "interest_diff" {
 				minimum = 1000
+			}
+			if name == "remote_gpu_complete" && report.ScenarioVersion >= 8 {
+				minimum = client.ScenarioV8GPUCompletionSamples
 			}
 			if summary.Samples < minimum || summary.P50MS <= 0 || summary.P95MS <= 0 ||
 				summary.P99MS <= 0 || summary.MaxMS <= 0 {

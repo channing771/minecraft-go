@@ -1,10 +1,10 @@
 ## 1. 隔离基点与 TDD 修复
 
-- [ ] 1.1 在用户确认本规划后，从 M4D 实现前基点 `0eace21` 创建独立 worktree 和 `codex/stabilize-remote-gpu-completion-gate` 分支，带入本 change 的规划提交；确认 `git diff --name-only 0eace21..HEAD` 此时只包含本 change，当前 `main` 的 M4D 第五组改动与 `midscene_run/` 保持原样。
-- [ ] 1.2 修改任何 Go symbol 前按仓库规则对 `measureGPUCompletion`、`runBenchmark` 和 `validateV6Report` 执行 upstream impact；GitNexus 不可用时记录不可用证据，并用 `rg`/调用者清单报告 blast radius。先在 `cmd/mcgo` 写 headless 失败测试，锁定 2048 次 `now → Submit → Poll(true) → now → Release` 事件顺序和 scenario v8 报告样本数。
-- [ ] 1.3 在 `internal/client/perf.go` 定义唯一的 scenario v8 2048 样本常量，并在 `cmd/mcgo/benchmark.go` 与 `cmd/mcgo/multiplayer_benchmark.go` 最小实现 scenario v8 和探针内部测试时钟；标签准备、命令编码与资源释放保持计时区间外，不修改 still/flying workload、分辨率或交互路径。
-- [ ] 1.4 在 `cmd/perfcheck` 先写失败测试，覆盖 v8 少于 2048 个 GPU 样本时拒绝、完整 v8 同场景比较、v7 仍接受 256 个历史样本，以及 v7/v8 不静默混比；最小实现按 scenario 选择样本下限，不修改 20% 或任何绝对阈值。
-- [ ] 1.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/client -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l cmd/mcgo cmd/perfcheck internal/client`、`git diff --check` 和 `openspec validate --all --strict --no-interactive` 通过；运行 `detect_changes` 或记录同等只读 fallback，只暂存本 change、代码、测试与本组勾选，提交 `fix: 稳定 GPU 完成性能门禁`。
+- [x] 1.1 在用户确认本规划后，从 M4D 实现前基点 `0eace21` 创建独立 worktree 和 `codex/stabilize-remote-gpu-completion-gate` 分支，带入本 change 的规划提交；确认 `git diff --name-only 0eace21..HEAD` 此时只包含本 change，当前 `main` 的 M4D 第五组改动与 `midscene_run/` 保持原样。
+- [x] 1.2 修改任何 Go symbol 前按仓库规则对 `measureGPUCompletion`、`runBenchmark` 和 `validateV6Report` 执行 upstream impact；GitNexus 不可用时记录不可用证据，并用 `rg`/调用者清单报告 blast radius。先在 `cmd/mcgo` 写 headless 失败测试，锁定 2048 次 `now → Submit → Poll(true) → now → Release` 事件顺序和 scenario v8 报告样本数。
+- [x] 1.3 在 `internal/client/perf.go` 定义唯一的 scenario v8 2048 样本常量，并在 `cmd/mcgo/benchmark.go` 与 `cmd/mcgo/multiplayer_benchmark.go` 最小实现 scenario v8 和探针内部测试时钟；标签准备、命令编码与资源释放保持计时区间外，不修改 still/flying workload、分辨率或交互路径。
+- [x] 1.4 在 `cmd/perfcheck` 先写失败测试，覆盖 v8 少于 2048 个 GPU 样本时拒绝、完整 v8 同场景比较、v7 仍接受 256 个历史样本，以及 v7/v8 不静默混比；最小实现按 scenario 选择样本下限，不修改 20% 或任何绝对阈值。
+- [x] 1.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/client -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l cmd/mcgo cmd/perfcheck internal/client`、`git diff --check` 和 `openspec validate --all --strict --no-interactive` 通过；运行 `detect_changes` 或记录同等只读 fallback，只暂存本 change、代码、测试与本组勾选，提交 `fix: 稳定 GPU 完成性能门禁`。
 
 ## 2. M5 v8 正式链预检与执行
 

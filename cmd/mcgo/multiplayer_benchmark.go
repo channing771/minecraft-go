@@ -117,6 +117,7 @@ type multiplayerClientProbe struct {
 	interpolate  *client.LatencyRecorder
 	renderTiming *multiplayerRenderTiming
 	gpuComplete  *client.LatencyRecorder
+	now          func() time.Time
 	tick         uint64
 }
 
@@ -135,7 +136,8 @@ func newMultiplayerClientProbe(app *application) (*multiplayerClientProbe, error
 		rosterApply:  client.NewLatencyRecorder(benchmarkLatencyCapacity),
 		interpolate:  client.NewLatencyRecorder(benchmarkLatencyCapacity),
 		renderTiming: newMultiplayerRenderTiming(),
-		gpuComplete:  client.NewLatencyRecorder(256),
+		gpuComplete:  client.NewLatencyRecorder(client.ScenarioV8GPUCompletionSamples),
+		now:          time.Now,
 		tick:         1,
 	}
 	for _, spawn := range probe.scenario.Spawns {
@@ -221,8 +223,7 @@ func benchmarkBillboardCamera(app *application) render.BillboardCamera {
 
 func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) error {
 	avatars, tags := remoteRenderPresentations(probe.roster.Presentations())
-	for range 256 {
-		started := time.Now()
+	for range client.ScenarioV8GPUCompletionSamples {
 		if err := app.nameTagRenderer.Prepare(tags, app.renderer.UploadBudget()); err != nil {
 			return err
 		}
@@ -232,10 +233,11 @@ func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) erro
 		}, avatars)
 		app.nameTagRenderer.Render(encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app))
 		command := encoder.Finish()
+		started := probe.now()
 		app.dev.Submit(command)
 		app.dev.Poll(true)
+		probe.gpuComplete.Add(probe.now().Sub(started))
 		command.Release()
-		probe.gpuComplete.Add(time.Since(started))
 	}
 	return nil
 }

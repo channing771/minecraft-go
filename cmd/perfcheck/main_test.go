@@ -313,6 +313,33 @@ func TestPerfcheckV7ScenarioRules(t *testing.T) {
 	}
 }
 
+func TestPerfcheckV8Requires2048GPUCompletionSamples(t *testing.T) {
+	baseline := completeV8ComparableReport("memory")
+	current := completeV8ComparableReport("tcp")
+	current.Multiplayer.RemoteGPUComplete.Samples = 2047
+	if _, err := compareReports(baseline, current, 0.20); err == nil ||
+		!strings.Contains(err.Error(), "remote_gpu_complete") {
+		t.Fatalf("v8 low GPU samples error=%v", err)
+	}
+
+	current.Multiplayer.RemoteGPUComplete.Samples = 2048
+	if failures, err := compareReports(baseline, current, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v8 comparison failures=%v err=%v", failures, err)
+	}
+
+	v7 := completeV7ComparableReport("memory")
+	v7.Multiplayer.RemoteGPUComplete.Samples = 256
+	v7Current := completeV7ComparableReport("memory")
+	v7Current.Multiplayer.RemoteGPUComplete.Samples = 256
+	if failures, err := compareReports(v7, v7Current, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v7 compatibility failures=%v err=%v", failures, err)
+	}
+	if _, err := compareReports(v7, current, 0.20); err == nil ||
+		!strings.Contains(err.Error(), "scenario_version") {
+		t.Fatalf("v7/v8 mismatch error=%v", err)
+	}
+}
+
 func TestPerfcheckScenarioUpgradeSkipsRelativeRegressions(t *testing.T) {
 	baseline := completeV5ComparableReport("memory")
 	baseline.Persistence = client.PersistenceSummary{
@@ -799,6 +826,13 @@ func completeV6ComparableReport(transport string) client.PerfReport {
 func completeV7ComparableReport(transport string) client.PerfReport {
 	report := completeV6ComparableReport(transport)
 	report.ScenarioVersion = 7
+	return report
+}
+
+func completeV8ComparableReport(transport string) client.PerfReport {
+	report := completeV7ComparableReport(transport)
+	report.ScenarioVersion = 8
+	report.Multiplayer.RemoteGPUComplete.Samples = 2048
 	return report
 }
 
