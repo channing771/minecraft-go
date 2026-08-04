@@ -13,10 +13,10 @@
 
 ## 3. 权威合成协议 v6 纵向闭环
 
-- [ ] 3.1 在 `internal/network` 先写失败的 packet/registry/codec/golden/fuzz seed 测试，覆盖固定 9 字节 `CraftRecipe`、recipe ID 校验、截断/尾随拒绝、稳定 packet ID、协议 v6 登录和 v5 登录拒绝。
-- [ ] 3.2 在 `internal/sim`、`internal/server` 先写失败测试，覆盖 Ready/sequence、成功一次 dirty、未知配方/原料不足/无容量原子拒绝、过期命令不重复执行、只向所属玩家确认，以及 8 玩家稳定隔离。
-- [ ] 3.3 将 `ProtocolVersion` 升为 6，追加 `CraftRecipe` 请求、`CommandCraftRecipe` 和 endpoint 翻译；在权威 tick 调用 `Inventory.Craft`，失败复用 `RejectInvalidInput`，成功只走一次现有完整 `InventoryState` 私有发布，不新增结果包或 dirty 位。
-- [ ] 3.4 增加 Memory/TCP 纵向测试，证明相同初始 Inventory 和合成序列得到相同最终状态、拒绝和持久化结果；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/sim ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 接入权威合成协议 v6`，然后自动进入第 4 组。
+- [x] 3.1 在 `internal/network` 先写失败的 packet/registry/codec/golden/fuzz seed 测试，覆盖固定 9 字节 `CraftRecipe`、recipe ID 校验、截断/尾随拒绝、稳定 packet ID、协议 v6 登录和 v5 登录拒绝。
+- [x] 3.2 在 `internal/sim`、`internal/server` 先写失败测试，覆盖 Ready/sequence、成功一次 dirty、未知配方/原料不足/无容量原子拒绝、过期命令不重复执行、只向所属玩家确认，以及 8 玩家稳定隔离。
+- [x] 3.3 将 `ProtocolVersion` 升为 6，追加 `CraftRecipe` 请求、`CommandCraftRecipe` 和 endpoint 翻译；在权威 tick 调用 `Inventory.Craft`，失败复用 `RejectInvalidInput`，成功只走一次现有完整 `InventoryState` 私有发布，不新增结果包或 dirty 位。
+- [x] 3.4 增加 Memory/TCP 纵向测试，证明相同初始 Inventory 和合成序列得到相同最终状态、拒绝和持久化结果；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/sim ./internal/server -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 接入权威合成协议 v6`，然后自动进入第 4 组。
 
 ## 4. 固定合成入口与应用接线
 

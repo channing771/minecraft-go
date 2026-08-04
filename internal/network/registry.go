@@ -25,6 +25,8 @@ func clientPacketID(state State, packet ClientPacket) (uint32, bool) {
 			return 5, true
 		case MoveInventoryStack:
 			return 6, true
+		case CraftRecipe:
+			return 7, true
 		}
 	}
 	return 0, false
@@ -57,6 +59,8 @@ func clientPacketForID(state State, id uint32) (ClientPacket, bool) {
 			return SelectHotbar{}, true
 		case 6:
 			return MoveInventoryStack{}, true
+		case 7:
+			return CraftRecipe{}, true
 		}
 	}
 	return nil, false

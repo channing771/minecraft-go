@@ -22,7 +22,7 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"hello", StateHandshake, ClientHello{ProtocolVersion: 5}, 0, "05"},
+		{"hello", StateHandshake, ClientHello{ProtocolVersion: 6}, 0, "06"},
 		{"login start", StateLogin, LoginStart{PlayerID: id, DisplayName: "Chen"}, 0, "00112233445546778899aabbccddeeff044368656e"},
 		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5}, 0, "0100000000000000ff01010000c03f000000bf"},
 		{"break", StatePlay, BreakBlock{Sequence: 2}, 1, "02000000000000000000000000000000"},
@@ -31,6 +31,7 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		{"keep alive reply", StatePlay, KeepAliveReply{Token: 6}, 4, "0600000000000000"},
 		{"select hotbar", StatePlay, SelectHotbar{Sequence: 9, Slot: 8}, 5, "090000000000000008"},
 		{"move inventory stack", StatePlay, MoveInventoryStack{Sequence: 10, From: 3, To: 35}, 6, "0a00000000000000" + "03" + "23"},
+		{"craft recipe", StatePlay, CraftRecipe{Sequence: 11, Recipe: core.RecipeStoneBricks}, 7, "0b00000000000000" + "01"},
 	}
 	for _, tc := range clients {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,8 +58,8 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 5}, 0, "05"},
-		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 5, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0501026e6f"},
+		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 6}, 0, "06"},
+		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 6, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0601026e6f"},
 		{"login success", StateLogin, LoginSuccess{PlayerID: id}, 0, "00112233445546778899aabbccddeeff"},
 		{"login reject", StateLogin, LoginReject{Code: LoginInvalidIdentity, Message: "no"}, 1, "02026e6f"},
 		{"block changes", StatePlay, BlockChanges{Dimension: core.Overworld, Chunk: core.ChunkPos{X: 1, Z: -1}, BaseRevision: 1, NewRevision: 2, Changes: []BlockChange{{Position: core.BlockPos{X: 16, Y: -64, Z: -1}, Block: core.StoneID}}}, 1, "0000000001000000ffffffff010000000000000002000000000000000110000000c0ffffffffffffff0200"},
@@ -183,7 +184,7 @@ func TestSmallPacketErrorCodeWireValues(t *testing.T) {
 		packet ServerPacket
 		want   string
 	}{
-		{HandshakeReject{ServerProtocolVersion: 5, Code: HandshakeVersionMismatch}, "050100"},
+		{HandshakeReject{ServerProtocolVersion: 6, Code: HandshakeVersionMismatch}, "060100"},
 		{LoginReject{Code: LoginServerFull}, "0100"},
 		{LoginReject{Code: LoginInvalidIdentity}, "0200"},
 		{LoginReject{Code: LoginPlayerDataCorrupt}, "0300"},
@@ -335,6 +336,14 @@ func TestSmallPacketRejectsMalformedPayloads(t *testing.T) {
 			)
 			return err
 		}},
+		{"unknown craft recipe", func() error {
+			_, err := decodeClientPacketPayload(StatePlay, 7, []byte{0, 0, 0, 0, 0, 0, 0, 0, 200})
+			return err
+		}},
+		{"craft recipe trailing byte", func() error {
+			_, err := decodeClientPacketPayload(StatePlay, 7, []byte{0, 0, 0, 0, 0, 0, 0, 0, 1, 0})
+			return err
+		}},
 		{"inventory move slot out of range", func() error {
 			_, err := decodeClientPacketPayload(
 				StatePlay, 6, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, core.InventorySlots},
@@ -421,6 +430,9 @@ func TestSmallPacketRejectsInvalidSemanticPackets(t *testing.T) {
 		StatePlay, MoveInventoryStack{From: core.InventorySlots},
 	); err == nil {
 		t.Fatal("invalid inventory move encoded")
+	}
+	if _, _, err := encodeClientPacketPayload(StatePlay, CraftRecipe{}); err == nil {
+		t.Fatal("unknown recipe encoded")
 	}
 	if _, _, err := encodeClientPacketPayload(StatePlay, PlayerInput{Yaw: float32(math.NaN())}); err == nil {
 		t.Fatal("non-finite client float encoded")
@@ -575,6 +587,9 @@ func sameClientPacket(got, want ClientPacket) bool {
 		return ok && got == other
 	case MoveInventoryStack:
 		other, ok := want.(MoveInventoryStack)
+		return ok && got == other
+	case CraftRecipe:
+		other, ok := want.(CraftRecipe)
 		return ok && got == other
 	default:
 		return false

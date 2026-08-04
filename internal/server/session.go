@@ -628,6 +628,13 @@ func translateClientMessage(
 			Kind:     sim.CommandSelectHotbar,
 			Slot:     message.Slot,
 		}, true
+	case network.CraftRecipe:
+		return sim.Command{
+			Session:  id,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandCraftRecipe,
+			Recipe:   message.Recipe,
+		}, true
 	case network.MoveInventoryStack:
 		return sim.Command{
 			Session:  id,

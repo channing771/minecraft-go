@@ -28,6 +28,7 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 		},
 		network.SelectHotbar{Sequence: 9, Slot: 8},
 		network.MoveInventoryStack{Sequence: 10, From: 0, To: 35},
+		network.CraftRecipe{Sequence: 11, Recipe: core.RecipeStoneBricks},
 		network.RequestChunkResync{
 			Sequence:     4,
 			Dimension:    core.Overworld,
@@ -65,7 +66,7 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 		network.ItemDropUpserts{},
 		network.ItemDropRemoves{},
 	}
-	if len(clientMessages) != 7 || len(serverMessages) != 13 {
+	if len(clientMessages) != 8 || len(serverMessages) != 13 {
 		t.Fatal("消息集合不完整")
 	}
 }
