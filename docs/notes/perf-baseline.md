@@ -1,5 +1,37 @@
 # 性能基线
 
+## 当前 M5 scenario v9 基线
+
+2026-08-04 在冻结提交 `96deb04ed9f9c396b4df8dbeed145be872ac9af7` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。采集从电池 79% 放电开始，结束时为 73%，启动前负载为 `5.76/4.87/4.14`；这组现实条件属于基线证据，不通过重跑筛选结果。
+
+- 当前 Memory 基线：`docs/notes/perf-baseline-m5.json`，SHA-256 `70488080e09eb9fa52ce16f162a15768fd8d2bef85511c5e629a663e76140283`
+- 正式 Memory 报告：`/tmp/mcgo-m5-v9-96deb04ed9f9-memory.json`，SHA-256 同上
+- 正式 TCP 报告：`/tmp/mcgo-m5-v9-96deb04ed9f9-tcp.json`，SHA-256 `0ad12f022882159090115873678e4d7b7b3b7a489f40e870e8de0f4197b34b9e`
+- 被替代的 scenario v8 Memory JSON：SHA-256 `f5d7420535f41d88497cd91178eef9baf138bfa7f73efb487efc06bc02322c8e`；历史说明保留在 `perf-baseline-m5.md` 和 Git 历史中
+
+以下四条正式命令各执行一次且均为 exit 0，没有重跑，也没有启动或聚焦前台窗口：
+
+```sh
+zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m5-v9-96deb04ed9f9-memory.json'
+zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/mcgo-m5-v9-96deb04ed9f9-memory.json --max-regression 0.20 --allow-scenario-upgrade 8:9'
+zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output /tmp/mcgo-m5-v9-96deb04ed9f9-tcp.json'
+zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/mcgo-m5-v9-96deb04ed9f9-memory.json --current /tmp/mcgo-m5-v9-96deb04ed9f9-tcp.json --max-regression 0.20'
+```
+
+Memory 报告先通过 v8→v9 完整性、同硬件与绝对门禁；TCP 随后通过相对该 Memory 报告的同场景跨 transport 门禁。Memory/TCP 飞行阶段分别为 `621.8/638.5 FPS`、p95 `3.114/2.968ms`，`remote_gpu_complete` 都包含 2048 个样本。
+
+## M4E scenario v9 升级规则
+
+M4E 在固定种子世界中加入煤矿与铁矿，因此 benchmark 报告的 `scenario_version` 从 8 升为 9。帧率、tick、RSS、队列、2048 个 GPU 完成样本及 20% 退化阈值都保持不变。无后缀的 M2 scenario v6 基线保持冻结；M5 scenario v8 证据保留在 `perf-baseline-m5.md` 与 Git 历史中，`perf-baseline-m5.json` 当前保存 scenario v9，版本之间不得静默混比。
+
+当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 8:9`。迁移比较仍验证完整性、来源信息、同硬件与当前报告的全部绝对门禁，但会跳过跨场景的相对退化判定；反向、跳级、其他参数或默认 v8→v9 比较都被拒绝。上面的正式链在覆盖 M5 文件前执行了一次迁移验证；建立 v9 基线后，同硬件的后续报告直接执行同场景比较：
+
+```sh
+go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/mcgo-m5-v9-current.json --max-regression 0.20
+```
+
+本文后续的 `5:6` 历史命令只记录它们在当时提交上的审计轨迹，不代表当前工具仍接受该参数。
+
 > 审计状态（2026-08-03）：下列 Task 7A/8 产物与哈希均原样保留，但后续代码评审发现当时的 `perfcheck` 未覆盖全部 v6 生产者绝对门禁与核心报告完整性。其“通过”只描述历史命令在对应旧提交上的输出，不能单独证明修复后的校验器或关闭 Task 17。修复 checkpoint 后已重新取得用户明确授权，并完成本文末尾的 repaired-checker formal validation；最终完成状态以该段及 closure gate 为准。
 
 ## 历史正式执行审计轨迹

@@ -27,11 +27,12 @@ const (
 // Generator 按种子生成地形。无内部可变状态，可并发调用。
 type Generator struct {
 	noise *perlin
+	seed  int64
 }
 
 // New 创建一个地形生成器。
 func New(seed int64) *Generator {
-	return &Generator{noise: newPerlin(seed)}
+	return &Generator{noise: newPerlin(seed), seed: seed}
 }
 
 // HeightAt 返回世界坐标 (wx,wz) 处最高实心方块的 Y。
@@ -50,7 +51,23 @@ func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
 	if height >= core.MaxY {
 		height = core.MaxY - 1
 	}
-	return terrainBlockAt(pos.Y, height)
+	return g.generatedBlockAt(pos, height)
+}
+
+// generatedBlockAt 是单点查询与整区块生成共用的纯判断，
+// 矿石只替换本应为石头的方块，铁矿判断优先于煤矿。
+func (g *Generator) generatedBlockAt(pos core.BlockPos, height int32) core.BlockID {
+	base := terrainBlockAt(pos.Y, height)
+	if base != IDStone {
+		return base
+	}
+	if pos.Y < ironMaxY && oreHash(g.seed, pos, ironSalt)%ironOdds == 0 {
+		return core.IronOreID
+	}
+	if pos.Y < coalMaxY && oreHash(g.seed, pos, coalSalt)%coalOdds == 0 {
+		return core.CoalOreID
+	}
+	return base
 }
 
 // GenerateChunk 生成一个完整区块。
@@ -66,7 +83,9 @@ func (g *Generator) GenerateChunk(pos core.ChunkPos) *world.Chunk {
 				h = core.MaxY - 1
 			}
 			for y := int32(core.MinY); y <= h; y++ {
-				c.SetBlock(lx, y, lz, terrainBlockAt(y, h))
+				c.SetBlock(lx, y, lz, g.generatedBlockAt(core.BlockPos{
+					X: baseX + int32(lx), Y: y, Z: baseZ + int32(lz),
+				}, h))
 			}
 		}
 	}

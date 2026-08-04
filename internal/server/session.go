@@ -629,6 +629,29 @@ func translateClientMessage(
 			Kind:     sim.CommandSelectHotbar,
 			Slot:     message.Slot,
 		}, true
+	case network.OpenFurnace:
+		return sim.Command{
+			Session:  id,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandOpenFurnace,
+			Yaw:      message.Yaw,
+			Pitch:    message.Pitch,
+		}, true
+	case network.MoveFurnaceStack:
+		return sim.Command{
+			Session:  id,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandMoveFurnaceStack,
+			Furnace:  message.Furnace,
+			Slot:     message.From,
+			ToSlot:   message.To,
+		}, true
+	case network.CloseFurnace:
+		return sim.Command{
+			Session:  id,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandCloseFurnace,
+		}, true
 	case network.CraftRecipe:
 		return sim.Command{
 			Session:  id,

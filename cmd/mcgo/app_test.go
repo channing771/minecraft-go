@@ -1378,16 +1378,20 @@ func TestRunInteractiveReturnsReceiverDisconnectWithoutRendering(t *testing.T) {
 	}
 }
 
-type fakeInteractiveWindow struct{}
+type fakeInteractiveWindow struct {
+	captured bool
+}
 
-func (*fakeInteractiveWindow) SetCursorCaptured(bool)        {}
+func (window *fakeInteractiveWindow) SetCursorCaptured(captured bool) {
+	window.captured = captured
+}
 func (*fakeInteractiveWindow) CursorPos() (float64, float64) { return 0, 0 }
 func (*fakeInteractiveWindow) ShouldClose() bool             { return false }
 func (*fakeInteractiveWindow) Poll()                         {}
 func (*fakeInteractiveWindow) KeyDown(client.Key) bool       { return false }
 func (*fakeInteractiveWindow) PrimaryButtonDown() bool       { return false }
 func (*fakeInteractiveWindow) SecondaryButtonDown() bool     { return false }
-func (*fakeInteractiveWindow) CursorCaptured() bool          { return false }
+func (window *fakeInteractiveWindow) CursorCaptured() bool   { return window.captured }
 func (*fakeInteractiveWindow) FramebufferSize() (int, int)   { return 1, 1 }
 func (*fakeInteractiveWindow) ContentSize() (int, int)       { return 1, 1 }
 func (*fakeInteractiveWindow) SetContentSize(int, int)       {}
@@ -1404,12 +1408,13 @@ func newInteractiveTestApplication(
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(8)
 	t.Cleanup(func() { _ = clientEndpoint.Close() })
 	return &application{
-		clientEndpoint: clientEndpoint,
-		receiver:       client.NewReceiver(clientEndpoint, 8),
-		mirror:         client.NewMirror(),
-		itemDrops:      client.NewItemDrops(),
-		predictor:      client.NewPredictor(),
-		serverCancel:   func() {},
+		clientEndpoint:  clientEndpoint,
+		receiver:        client.NewReceiver(clientEndpoint, 8),
+		mirror:          client.NewMirror(),
+		itemDrops:       client.NewItemDrops(),
+		inventorySource: -1,
+		predictor:       client.NewPredictor(),
+		serverCancel:    func() {},
 	}, serverEndpoint
 }
 
@@ -1518,6 +1523,84 @@ func TestHotbarPlaceWaitsForFirstConfirmedState(t *testing.T) {
 		t.Fatalf("尚未确认快捷栏就分配 sequence=%d", app.sequence)
 	}
 	assertNoInteractiveClientMessage(t, serverEndpoint)
+}
+
+func TestPlaceOpensLocalMirrorFurnaceWithoutPredictingUI(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	if err := app.predictor.Begin(network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 3.5}, OnGround: true, Ready: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app.camera = client.Camera{Pos: mgl32.Vec3{0.5, 10.5, 3.5}}
+	loadInteractiveBlock(t, app, core.BlockPos{X: 0, Y: 10, Z: 0}, core.FurnaceID)
+
+	app.placeBlock()
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	open, ok := message.(network.OpenFurnace)
+	if !ok || open != (network.OpenFurnace{Sequence: 1}) {
+		t.Fatalf("打开熔炉请求 = %#v，想要 sequence 1 与当前视角", message)
+	}
+	if app.inventoryOpen {
+		t.Fatal("服务端确认前本地打开了熔炉界面")
+	}
+	if _, opened := app.furnace.State(); opened {
+		t.Fatal("打开请求本地改写了熔炉镜像")
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+}
+
+func TestPlaceKeepsBlockRequestForNonFurnaceHit(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	if err := app.predictor.Begin(network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 3.5}, OnGround: true, Ready: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app.camera = client.Camera{Pos: mgl32.Vec3{0.5, 10.5, 3.5}}
+	loadInteractiveBlock(t, app, core.BlockPos{X: 0, Y: 10, Z: 0}, core.StoneID)
+	var inventory core.Inventory
+	inventory.Hotbar.Selected = 4
+	inventory.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemDirt, Count: 1}
+	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+
+	app.placeBlock()
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	place, ok := message.(network.PlaceBlock)
+	if !ok || place != (network.PlaceBlock{Sequence: 1, Slot: 4}) {
+		t.Fatalf("非熔炉右键请求 = %#v，想要放置已确认栏位 4", message)
+	}
+}
+
+func loadInteractiveBlock(
+	t *testing.T,
+	app *application,
+	position core.BlockPos,
+	block core.BlockID,
+) {
+	t.Helper()
+	sections := make([]network.SectionData, core.SectionsPerChunk)
+	for index := range sections {
+		sections[index] = network.SectionData{
+			Y: int32(index), Storage: network.SectionSingle, Single: core.AirID,
+		}
+	}
+	chunk := position.Chunk()
+	if _, err := app.mirror.Apply(network.ChunkSnapshot{
+		Dimension: core.Overworld, Chunk: chunk, Revision: 1, Sections: sections,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.mirror.Apply(network.BlockChanges{
+		Dimension: core.Overworld, Chunk: chunk, BaseRevision: 1, NewRevision: 2,
+		Changes: []network.BlockChange{{Position: position, Block: block}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestHotbarMirrorResetsWithClientSession(t *testing.T) {
@@ -1671,6 +1754,121 @@ func TestInventoryClickOutsideSlotsDoesNothing(t *testing.T) {
 	assertNoInteractiveClientMessage(t, serverEndpoint)
 }
 
+func TestAuthoritativeFurnaceStateOpensUI(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	state := network.FurnaceState{
+		Furnace:       core.FurnaceRef{Dimension: core.Overworld, Generation: 1},
+		Input:         core.ItemStack{Item: core.ItemRawIron, Count: 2},
+		Fuel:          core.ItemStack{Item: core.ItemCoal, Count: 3},
+		ProgressTicks: 17, BurnTicks: 1599,
+	}
+
+	sendInteractiveServerMessage(t, serverEndpoint, state)
+	app.drainServerMessages(1)
+	got, opened := app.furnace.State()
+	if !opened || got != state || !app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("权威熔炉界面 state=%+v opened=%v ui=%v source=%d",
+			got, opened, app.inventoryOpen, app.inventorySource)
+	}
+	app.inventorySource = 1
+	state.ProgressTicks++
+	sendInteractiveServerMessage(t, serverEndpoint, state)
+	app.drainServerMessages(1)
+	if app.inventorySource != 1 {
+		t.Fatalf("连续权威更新清除了已选来源: %d", app.inventorySource)
+	}
+}
+
+func TestFurnaceTwoClicksSendOneMoveWithoutPrediction(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemRawIron, Count: 2}
+	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+	state := network.FurnaceState{
+		Furnace: core.FurnaceRef{Dimension: core.Overworld, Slot: 2, Generation: 3},
+		Fuel:    core.ItemStack{Item: core.ItemCoal, Count: 1},
+	}
+	if err := app.furnace.Apply(state); err != nil {
+		t.Fatal(err)
+	}
+	app.inventoryOpen = true
+
+	width, height := uint32(1280), uint32(720)
+	sourceX, sourceY := furnaceSlotCenter(t, 1, width, height)
+	targetX, targetY := furnaceSlotCenter(t, core.FurnaceInputSlot, width, height)
+	app.clickInventorySlot(sourceX, sourceY, width, height)
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+	app.clickInventorySlot(targetX, targetY, width, height)
+
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	want := network.MoveFurnaceStack{
+		Sequence: 1, Furnace: state.Furnace, From: 1, To: core.FurnaceInputSlot,
+	}
+	if got, ok := message.(network.MoveFurnaceStack); !ok || got != want {
+		t.Fatalf("跨容器移动 = %#v，想要 %+v", message, want)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+	if got, _ := app.inventory.State(); got != inventory {
+		t.Fatalf("移动请求改写了物品镜像: %+v", got)
+	}
+	if got, _ := app.furnace.State(); got != state {
+		t.Fatalf("移动请求改写了熔炉镜像: %+v", got)
+	}
+}
+
+func TestExplicitFurnaceCloseClearsUIAndSendsOnce(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	window := &fakeInteractiveWindow{}
+	app.window = window
+	state := network.FurnaceState{
+		Furnace: core.FurnaceRef{Dimension: core.Overworld, Generation: 1},
+	}
+	if err := app.furnace.Apply(state); err != nil {
+		t.Fatal(err)
+	}
+	app.inventoryOpen = true
+	app.inventorySource = core.FurnaceFuelSlot
+
+	app.setInventoryOpen(false)
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	if got, ok := message.(network.CloseFurnace); !ok || got != (network.CloseFurnace{Sequence: 1}) {
+		t.Fatalf("关闭熔炉请求 = %#v", message)
+	}
+	app.setInventoryOpen(false)
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+	if app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("关闭后 ui=%v source=%d", app.inventoryOpen, app.inventorySource)
+	}
+	if !window.CursorCaptured() {
+		t.Fatal("关闭熔炉后未恢复鼠标捕获")
+	}
+	if _, opened := app.furnace.State(); opened {
+		t.Fatal("显式关闭后仍保留熔炉镜像")
+	}
+}
+
+func TestFurnaceClosedMessageClearsUIWithoutEcho(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	state := network.FurnaceState{
+		Furnace: core.FurnaceRef{Dimension: core.Overworld, Slot: 1, Generation: 2},
+	}
+	sendInteractiveServerMessage(t, serverEndpoint, state)
+	app.drainServerMessages(1)
+	app.inventorySource = core.FurnaceOutputSlot
+
+	sendInteractiveServerMessage(t, serverEndpoint, network.FurnaceClosed{Furnace: state.Furnace})
+	app.drainServerMessages(1)
+	if app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("服务端关闭后 ui=%v source=%d", app.inventoryOpen, app.inventorySource)
+	}
+	if _, opened := app.furnace.State(); opened {
+		t.Fatal("服务端关闭后仍保留熔炉镜像")
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+}
+
 // Mutation killed: skipping the confirmed Craft check, predicting the result,
 // or sending more than one request changes the message or local mirror.
 func TestCraftRecipeClickUsesConfirmedInventory(t *testing.T) {
@@ -1732,8 +1930,37 @@ func TestPlayerResetClearsInventorySource(t *testing.T) {
 	}
 }
 
+func TestPlayerResetClosesFurnaceUI(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	if err := app.furnace.Apply(network.FurnaceState{
+		Furnace: core.FurnaceRef{Dimension: core.Overworld, Generation: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app.inventoryOpen = true
+	app.inventorySource = core.FurnaceInputSlot
+	sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 0.5}, OnGround: true, Ready: true, Reset: true,
+	})
+
+	app.drainServerMessages(1)
+	if app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("reset 后 ui=%v source=%d", app.inventoryOpen, app.inventorySource)
+	}
+	if _, opened := app.furnace.State(); opened {
+		t.Fatal("reset 后仍保留熔炉镜像")
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+}
+
 func TestClientSessionCloseClearsInventoryUIState(t *testing.T) {
 	app, _ := newInteractiveTestApplication(t)
+	if err := app.furnace.Apply(network.FurnaceState{
+		Furnace: core.FurnaceRef{Dimension: core.Overworld, Generation: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	app.inventoryOpen = true
 	app.inventorySource = 8
 
@@ -1741,11 +1968,19 @@ func TestClientSessionCloseClearsInventoryUIState(t *testing.T) {
 	if app.inventoryOpen || app.inventorySource != -1 {
 		t.Fatalf("断线后 open=%v source=%d，想要界面关闭且来源清除", app.inventoryOpen, app.inventorySource)
 	}
+	if _, opened := app.furnace.State(); opened {
+		t.Fatal("断线后仍保留熔炉镜像")
+	}
 }
 
 func TestInventoryCloseClearsSourceAndRecapturesCursor(t *testing.T) {
 	app, _ := newInteractiveTestApplication(t)
+	window := &fakeInteractiveWindow{}
+	app.window = window
 	app.setInventoryOpen(true)
+	if window.CursorCaptured() {
+		t.Fatal("打开背包后仍捕获鼠标")
+	}
 	width, height := uint32(1280), uint32(720)
 	x, y := inventorySlotCenter(t, 5, width, height)
 	app.clickInventorySlot(x, y, width, height)
@@ -1753,6 +1988,9 @@ func TestInventoryCloseClearsSourceAndRecapturesCursor(t *testing.T) {
 	app.setInventoryOpen(false)
 	if app.inventoryOpen || app.inventorySource != -1 {
 		t.Fatalf("关闭后 open=%v source=%d", app.inventoryOpen, app.inventorySource)
+	}
+	if !window.CursorCaptured() {
+		t.Fatal("关闭背包后未恢复鼠标捕获")
 	}
 }
 
@@ -1767,6 +2005,20 @@ func inventorySlotCenter(t *testing.T, slot int, width, height uint32) (float64,
 		}
 	}
 	t.Fatalf("找不到栏位 %d 的像素", slot)
+	return 0, 0
+}
+
+func furnaceSlotCenter(t *testing.T, slot int, width, height uint32) (float64, float64) {
+	t.Helper()
+	for x := range int(width) {
+		for y := range int(height) {
+			got, ok := render.FurnaceSlotAt(float64(x), float64(y), width, height)
+			if ok && int(got) == slot {
+				return float64(x), float64(y)
+			}
+		}
+	}
+	t.Fatalf("找不到熔炉统一栏位 %d 的像素", slot)
 	return 0, 0
 }
 

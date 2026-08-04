@@ -82,8 +82,9 @@ func TestChunkHashUsesLogicalBlocksNotPaletteLayout(t *testing.T) {
 }
 
 func TestChunkPayloadBytesIsDeterministicAndAllocationFree(t *testing.T) {
-	// 512 字节信封 + 32 个固定掉落物槽。
-	const airBytes = 512 + core.DropsPerChunk*world.DropSlotBytes
+	// 512 字节信封 + 32 个固定掉落物槽 + 32 个固定熔炉槽。
+	const airBytes = 512 + core.DropsPerChunk*world.DropSlotBytes +
+		core.FurnacesPerChunk*world.FurnaceSlotBytes
 	const indexedBytes = airBytes + 2068
 	chunk := world.NewChunk(core.ChunkPos{})
 	if got := chunk.PayloadBytes(); got != airBytes {

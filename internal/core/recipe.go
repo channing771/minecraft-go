@@ -3,8 +3,14 @@ package core
 // RecipeID 是稳定的配方编号；0 保留为无效值。
 type RecipeID uint8
 
-// RecipeStoneBricks 用 4 个石头合成 4 个石砖。
-const RecipeStoneBricks RecipeID = 1
+const (
+	// RecipeStoneBricks 用 4 个石头合成 4 个石砖。
+	RecipeStoneBricks RecipeID = iota + 1
+	// RecipeFurnace 用 8 个石头合成 1 个熔炉。
+	RecipeFurnace
+	// RecipeIronBlock 用 9 个铁锭合成 1 个铁块。
+	RecipeIronBlock
+)
 
 // CraftingRecipe 是一条固定的单输入、单输出配方。
 type CraftingRecipe struct {
@@ -19,6 +25,16 @@ func Recipe(id RecipeID) (CraftingRecipe, bool) {
 		return CraftingRecipe{
 			Input:  ItemStack{Item: ItemStone, Count: 4},
 			Output: ItemStack{Item: ItemStoneBrick, Count: 4},
+		}, true
+	case RecipeFurnace:
+		return CraftingRecipe{
+			Input:  ItemStack{Item: ItemStone, Count: 8},
+			Output: ItemStack{Item: ItemFurnace, Count: 1},
+		}, true
+	case RecipeIronBlock:
+		return CraftingRecipe{
+			Input:  ItemStack{Item: ItemIronIngot, Count: 9},
+			Output: ItemStack{Item: ItemIronBlock, Count: 1},
 		}, true
 	default:
 		return CraftingRecipe{}, false

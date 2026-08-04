@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	currentChunkSchema uint32 = 3
+	currentChunkSchema uint32 = 4
 	maxCompressedChunk        = 1 << 20
 	maxDecodedChunk           = 2 << 20
 
@@ -112,7 +112,112 @@ func encodeLogicalChunk(save ChunkSave) ([]byte, error) {
 		}
 		logical = appendLogicalDropSlot(logical, drop)
 	}
+	if err := validateFurnaceSlots(save.Chunk); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
+	}
+	for slot := range core.FurnacesPerChunk {
+		logical = appendLogicalFurnaceSlot(logical, save.Chunk.Furnace(slot))
+	}
 	return logical, nil
+}
+
+// validateFurnaceSlots 检查全部熔炉槽的固定约束：
+// 活动槽的方块索引唯一、位于区块内且对应位置必须是熔炉方块。
+func validateFurnaceSlots(chunk *world.Chunk) error {
+	seen := make(map[uint32]int, core.FurnacesPerChunk)
+	for slot := range core.FurnacesPerChunk {
+		furnace := chunk.Furnace(slot)
+		if !furnace.Valid() {
+			return fmt.Errorf("furnace slot %d is not a valid fixed slot", slot)
+		}
+		if !furnace.Active {
+			continue
+		}
+		if furnace.BlockIndex >= core.SectionsPerChunk*core.BlocksPerSection {
+			return fmt.Errorf("furnace slot %d block index %d is outside the chunk",
+				slot, furnace.BlockIndex)
+		}
+		if other, duplicate := seen[furnace.BlockIndex]; duplicate {
+			return fmt.Errorf("furnace slots %d and %d share block index %d",
+				other, slot, furnace.BlockIndex)
+		}
+		seen[furnace.BlockIndex] = slot
+		pos, ok := world.BlockPosFromChunkIndex(chunk.Pos, furnace.BlockIndex)
+		if !ok {
+			return fmt.Errorf("furnace slot %d block index %d has no position",
+				slot, furnace.BlockIndex)
+		}
+		lx, y, lz := pos.Local()
+		if chunk.BlockAt(lx, int32(y), lz) != core.FurnaceID {
+			return fmt.Errorf("furnace slot %d does not point at a furnace block", slot)
+		}
+	}
+	return nil
+}
+
+func appendLogicalFurnaceSlot(dst []byte, furnace world.FurnaceSlot) []byte {
+	dst = appendU32(dst, furnace.Generation)
+	active := byte(0)
+	if furnace.Active {
+		active = 1
+	}
+	dst = append(dst, active)
+	dst = appendU32(dst, furnace.BlockIndex)
+	for _, stack := range [3]core.ItemStack{furnace.Input, furnace.Fuel, furnace.Output} {
+		dst = binary.LittleEndian.AppendUint16(dst, uint16(stack.Item))
+		dst = append(dst, stack.Count)
+	}
+	dst = append(dst, furnace.ProgressTicks)
+	return binary.LittleEndian.AppendUint16(dst, furnace.BurnTicks)
+}
+
+func decodeLogicalFurnaceSlot(d *byteDecoder) (world.FurnaceSlot, error) {
+	var furnace world.FurnaceSlot
+	generation, err := d.u32()
+	if err != nil {
+		return world.FurnaceSlot{}, err
+	}
+	furnace.Generation = generation
+	active, err := d.u8()
+	if err != nil {
+		return world.FurnaceSlot{}, err
+	}
+	if active > 1 {
+		return world.FurnaceSlot{}, fmt.Errorf("furnace active flag %d is not 0 or 1", active)
+	}
+	furnace.Active = active == 1
+	blockIndex, err := d.u32()
+	if err != nil {
+		return world.FurnaceSlot{}, err
+	}
+	furnace.BlockIndex = blockIndex
+	stacks := [3]*core.ItemStack{&furnace.Input, &furnace.Fuel, &furnace.Output}
+	for _, stack := range stacks {
+		item, err := d.u16()
+		if err != nil {
+			return world.FurnaceSlot{}, err
+		}
+		count, err := d.u8()
+		if err != nil {
+			return world.FurnaceSlot{}, err
+		}
+		stack.Item = core.ItemID(item)
+		stack.Count = count
+	}
+	progress, err := d.u8()
+	if err != nil {
+		return world.FurnaceSlot{}, err
+	}
+	furnace.ProgressTicks = progress
+	burn, err := d.u16()
+	if err != nil {
+		return world.FurnaceSlot{}, err
+	}
+	furnace.BurnTicks = burn
+	if !furnace.Valid() {
+		return world.FurnaceSlot{}, errors.New("furnace slot is not a valid fixed slot")
+	}
+	return furnace, nil
 }
 
 // validateDropSlot 检查活动槽的固定字段上限；非活动槽只保留 generation。
@@ -123,7 +228,7 @@ func validateDropSlot(drop world.DropSlot) error {
 	if drop.Generation == 0 {
 		return errors.New("active drop slot has zero generation")
 	}
-	if _, ok := core.ItemPlacement(drop.Stack.Item); !ok {
+	if !core.RegisteredItem(drop.Stack.Item) {
 		return fmt.Errorf("unknown drop item %d", drop.Stack.Item)
 	}
 	if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount {
@@ -372,6 +477,15 @@ func decodeLogicalChunk(
 			dto.Drops[slot] = drop
 		}
 	}
+	if schema >= 4 {
+		for slot := range core.FurnacesPerChunk {
+			furnace, err := decodeLogicalFurnaceSlot(&logical)
+			if err != nil {
+				return chunkDTO{}, fmt.Errorf("%w: furnace slot %d: %v", ErrCorrupt, slot, err)
+			}
+			dto.Furnaces[slot] = furnace
+		}
+	}
 	if logical.remaining() != 0 {
 		return chunkDTO{}, fmt.Errorf("%w: trailing logical bytes", ErrCorrupt)
 	}
@@ -389,6 +503,12 @@ func chunkFromDTO(dto chunkDTO) (*world.Chunk, error) {
 	}
 	for slot, drop := range dto.Drops {
 		chunk.SetDrop(slot, drop)
+	}
+	for slot, furnace := range dto.Furnaces {
+		chunk.SetFurnace(slot, furnace)
+	}
+	if err := validateFurnaceSlots(chunk); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
 	}
 	return chunk, nil
 }

@@ -162,3 +162,130 @@ func BenchmarkInventoryCraftWorstCase(b *testing.B) {
 		inventory.Craft(core.RecipeStoneBricks)
 	}
 }
+
+func TestM4EResourceIDsAreStable(t *testing.T) {
+	if core.CoalOreID != 7 || core.IronOreID != 8 ||
+		core.FurnaceID != 9 || core.IronBlockID != 10 {
+		t.Fatal("M4E 方块 ID 漂移")
+	}
+	if core.ItemCoal != 5 || core.ItemRawIron != 6 || core.ItemIronIngot != 7 ||
+		core.ItemFurnace != 8 || core.ItemIronBlock != 9 {
+		t.Fatal("M4E 物品 ID 漂移")
+	}
+}
+
+func TestRegisteredItemSeparatesValidityFromPlacement(t *testing.T) {
+	registered := []core.ItemID{
+		core.ItemStone, core.ItemDirt, core.ItemGrass, core.ItemStoneBrick,
+		core.ItemCoal, core.ItemRawIron, core.ItemIronIngot,
+		core.ItemFurnace, core.ItemIronBlock,
+	}
+	for _, item := range registered {
+		if !core.RegisteredItem(item) {
+			t.Fatalf("物品 %d 未被登记为合法", item)
+		}
+	}
+	if core.RegisteredItem(core.ItemNone) || core.RegisteredItem(core.ItemID(4242)) {
+		t.Fatal("空物品或未知物品被登记为合法")
+	}
+	// 煤炭、粗铁、铁锭合法但没有放置映射。
+	for _, item := range []core.ItemID{core.ItemCoal, core.ItemRawIron, core.ItemIronIngot} {
+		if _, ok := core.ItemPlacement(item); ok {
+			t.Fatalf("物品 %d 不应可放置", item)
+		}
+	}
+	for _, tc := range []struct {
+		item  core.ItemID
+		block core.BlockID
+	}{
+		{core.ItemFurnace, core.FurnaceID},
+		{core.ItemIronBlock, core.IronBlockID},
+	} {
+		if block, ok := core.ItemPlacement(tc.item); !ok || block != tc.block {
+			t.Fatalf("物品 %d 放置映射 = (%d, %v)", tc.item, block, ok)
+		}
+	}
+}
+
+func TestM4EBlockDrops(t *testing.T) {
+	for _, tc := range []struct {
+		block core.BlockID
+		item  core.ItemID
+	}{
+		{core.CoalOreID, core.ItemCoal},
+		{core.IronOreID, core.ItemRawIron},
+		{core.FurnaceID, core.ItemFurnace},
+		{core.IronBlockID, core.ItemIronBlock},
+	} {
+		item, ok := core.BlockDrop(tc.block)
+		if !ok || item != tc.item {
+			t.Fatalf("方块 %d 掉落 = (%d, %v)，想要 %d", tc.block, item, ok, tc.item)
+		}
+	}
+}
+
+func TestFurnaceAndIronBlockRecipes(t *testing.T) {
+	for _, tc := range []struct {
+		id     core.RecipeID
+		input  core.ItemStack
+		output core.ItemStack
+	}{
+		{core.RecipeFurnace, core.ItemStack{Item: core.ItemStone, Count: 8},
+			core.ItemStack{Item: core.ItemFurnace, Count: 1}},
+		{core.RecipeIronBlock, core.ItemStack{Item: core.ItemIronIngot, Count: 9},
+			core.ItemStack{Item: core.ItemIronBlock, Count: 1}},
+	} {
+		recipe, ok := core.Recipe(tc.id)
+		if !ok || recipe.Input != tc.input || recipe.Output != tc.output {
+			t.Fatalf("配方 %d = %+v, %v", tc.id, recipe, ok)
+		}
+	}
+	if core.RecipeFurnace != 2 || core.RecipeIronBlock != 3 {
+		t.Fatal("M4E 配方 ID 漂移")
+	}
+}
+
+func TestCraftFurnaceConsumesLowestSlots(t *testing.T) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStone, Count: 5}
+	inventory.Backpack[2] = core.ItemStack{Item: core.ItemStone, Count: 5}
+
+	next, ok := inventory.Craft(core.RecipeFurnace)
+	if !ok {
+		t.Fatal("石头充足时熔炉合成失败")
+	}
+	if next.Hotbar.Slots[1] != (core.ItemStack{}) {
+		t.Fatalf("最低索引原料格未清空: %+v", next.Hotbar.Slots[1])
+	}
+	if next.Backpack[2].Count != 2 {
+		t.Fatalf("次低索引扣料 = %+v，想要剩 2", next.Backpack[2])
+	}
+	if next.Hotbar.Slots[0] != (core.ItemStack{Item: core.ItemFurnace, Count: 1}) {
+		t.Fatalf("产物落点 = %+v", next.Hotbar.Slots[0])
+	}
+}
+
+func TestCraftIronBlockRejectsWithoutMutating(t *testing.T) {
+	var short core.Inventory
+	short.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemIronIngot, Count: 8}
+	if next, ok := short.Craft(core.RecipeIronBlock); ok || next != short {
+		t.Fatalf("铁锭不足仍合成: ok=%v", ok)
+	}
+
+	// 铁锭刚好 9 个但其余格全满，扣空的格必须能接收产物。
+	full := core.Inventory{}
+	for slot := range full.Hotbar.Slots {
+		full.Hotbar.Slots[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+	}
+	for slot := range full.Backpack {
+		full.Backpack[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+	}
+	full.Backpack[7] = core.ItemStack{Item: core.ItemIronIngot, Count: 9}
+	next, ok := full.Craft(core.RecipeIronBlock)
+	if !ok {
+		t.Fatal("扣空的格应当能接收铁块")
+	}
+	if next.Backpack[7] != (core.ItemStack{Item: core.ItemIronBlock, Count: 1}) {
+		t.Fatalf("产物未放回释放出的格: %+v", next.Backpack[7])
+	}
+}

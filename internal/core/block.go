@@ -33,6 +33,10 @@ const (
 	GrassID
 	BedrockID
 	StoneBrickID
+	CoalOreID
+	IronOreID
+	FurnaceID
+	IronBlockID
 )
 
 const (

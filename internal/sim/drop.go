@@ -47,7 +47,7 @@ func (engine *Engine) sessionDropWantedSnapshot(
 // advanceDrops 在单写者 tick 中推进兴趣范围内的掉落物寿命并处理拾取。
 // 它按 ChunkKey、SessionID、槽位稳定扫描，最坏为玩家数 × 25 区块 × 32 槽。
 func (engine *Engine) advanceDrops(pending map[core.ChunkKey]*pendingChunkChanges) {
-	keys := engine.dropInterestKeys()
+	keys := engine.activeInterestKeys()
 	if len(keys) == 0 {
 		return
 	}
@@ -162,9 +162,9 @@ func withinPickupRange(player, center mgl32.Vec3) bool {
 	return center.Sub(player).Len() <= dropPickupRange
 }
 
-// dropInterestKeys 返回本 tick 需要推进的区块，按稳定顺序排列且不重复。
-// 它复用引擎 scratch，因此稳定玩家数下不产生每 tick 分配。
-func (engine *Engine) dropInterestKeys() []core.ChunkKey {
+// activeInterestKeys 返回本 tick 需要推进的区块，按稳定顺序排列且不重复。
+// 掉落物与熔炉共用同一集合，并复用引擎 scratch，因此稳定玩家数下不产生每 tick 分配。
+func (engine *Engine) activeInterestKeys() []core.ChunkKey {
 	if engine.dropKeySeen == nil {
 		engine.dropKeySeen = make(map[core.ChunkKey]struct{}, core.MaxSessionDrops)
 	}

@@ -22,6 +22,9 @@ const (
 	CommandSelectHotbar
 	CommandMoveInventoryStack
 	CommandCraftRecipe
+	CommandOpenFurnace
+	CommandCloseFurnace
+	CommandMoveFurnaceStack
 )
 
 // LookDirection 把玩家 look 角转换为单位方向；yaw=0、pitch=0 朝向 -Z。
@@ -48,6 +51,8 @@ const (
 	RejectInvalidSlot    RejectReason = 8
 	RejectHotbarFull     RejectReason = 9
 	RejectDropCapacity   RejectReason = 10
+	// RejectFurnaceCapacity 表示区块的 32 个熔炉槽已经用尽。
+	RejectFurnaceCapacity RejectReason = 11
 )
 
 type Command struct {
@@ -61,6 +66,7 @@ type Command struct {
 	Slot         uint8
 	ToSlot       uint8
 	Recipe       core.RecipeID
+	Furnace      core.FurnaceRef
 	MoveX        int8
 	MoveZ        int8
 	Jump         bool
@@ -123,5 +129,24 @@ type TickResult struct {
 	Resync      []ResyncRequest
 	Players     []PlayerUpdate
 	Inventories []InventoryUpdate
+	Furnaces    []FurnaceUpdate
+	FurnaceEnds []FurnaceEnd
 	Tick        uint64
+}
+
+// FurnaceUpdate 是本 tick 发给某个查看者的完整权威熔炉状态。
+type FurnaceUpdate struct {
+	Session       SessionID
+	Furnace       core.FurnaceRef
+	Input         core.ItemStack
+	Fuel          core.ItemStack
+	Output        core.ItemStack
+	ProgressTicks uint8
+	BurnTicks     uint16
+}
+
+// FurnaceEnd 通知某个查看者其熔炉引用已经失效。
+type FurnaceEnd struct {
+	Session SessionID
+	Furnace core.FurnaceRef
 }

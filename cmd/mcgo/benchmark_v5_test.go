@@ -16,8 +16,8 @@ import (
 )
 
 func TestBenchmarkScenarioVersionIncludesPersistencePath(t *testing.T) {
-	if scenarioVersion != 8 {
-		t.Fatalf("scenarioVersion=%d，想要 GPU 完成边界修复后的 v8", scenarioVersion)
+	if scenarioVersion != 9 {
+		t.Fatalf("scenarioVersion=%d，想要权威熔炼资源链后的 v9", scenarioVersion)
 	}
 }
 

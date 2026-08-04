@@ -13,6 +13,10 @@ const (
 	LayerGrassSide
 	LayerBedrock
 	LayerStoneBrick
+	LayerCoalOre
+	LayerIronOre
+	LayerFurnace
+	LayerIronBlock
 	layerCount
 )
 
@@ -30,6 +34,10 @@ func NewRegistry() *Registry {
 	r.layers[LayerGrassSide] = grassSideTexture()
 	r.layers[LayerBedrock] = noisyTexture(rgb{R: 60, G: 60, B: 64}, 28, 0x3F19)
 	r.layers[LayerStoneBrick] = noisyTexture(rgb{R: 122, G: 118, B: 112}, 10, 0x77B1)
+	r.layers[LayerCoalOre] = noisyTexture(rgb{R: 96, G: 94, B: 94}, 34, 0x5C3D)
+	r.layers[LayerIronOre] = noisyTexture(rgb{R: 156, G: 132, B: 110}, 30, 0x6A21)
+	r.layers[LayerFurnace] = noisyTexture(rgb{R: 88, G: 86, B: 88}, 16, 0x41D7)
+	r.layers[LayerIronBlock] = noisyTexture(rgb{R: 214, G: 214, B: 216}, 8, 0x2E95)
 	return r
 }
 
@@ -49,6 +57,14 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 		return LayerBedrock
 	case core.StoneBrickID:
 		return LayerStoneBrick
+	case core.CoalOreID:
+		return LayerCoalOre
+	case core.IronOreID:
+		return LayerIronOre
+	case core.FurnaceID:
+		return LayerFurnace
+	case core.IronBlockID:
+		return LayerIronBlock
 	case core.GrassID:
 		switch f {
 		case mesh.FacePosY:
