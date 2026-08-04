@@ -96,6 +96,177 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
+	clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
+	config := server.DefaultConfig(42)
+	config.ViewRadius = 1
+	config.Workers = 1
+	config.SnapshotChunks = 16
+	config.SnapshotBytes = 1 << 20
+	config.OutboxCapacity = 256
+	var hotbar core.Hotbar
+	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
+	hotbar.Slots[2] = core.ItemStack{Item: core.ItemDirt, Count: 1}
+	running := newMemoryAttachedWorldWithHotbar(config, serverEndpoint, server.FlatTestGenerator{}, hotbar)
+	t.Cleanup(func() { shutdownExternalServerForTest(t, running) })
+	mirror := client.NewMirror()
+	target := core.BlockPos{X: 0, Y: 1, Z: -6}
+	ready, inventoryConfirmed := false, false
+	stepUntilCollect(t, running, clientEndpoint, mirror, func(message network.ServerMessage) {
+		switch message := message.(type) {
+		case network.PlayerState:
+			assertValidMiningPlayerState(t, message)
+			ready = ready || message.Ready
+		case network.InventoryState:
+			inventoryConfirmed = message.Inventory.Hotbar == hotbar
+		}
+	}, func() bool {
+		_, loaded := mirror.Chunk(core.Overworld, target.Chunk())
+		return ready && inventoryConfirmed && loaded
+	})
+
+	sendClientMessage(t, clientEndpoint, network.PlayerInput{Sequence: 1, Pitch: -0.2, Mining: true})
+	stoneProgress := waitMemoryMiningState(t, running, clientEndpoint, mirror, func(state network.PlayerState) bool {
+		return state.MiningActive && state.MiningProgressTicks == 1
+	})
+	if stoneProgress.MiningTarget != target || stoneProgress.MiningRequiredTicks != 15 || !stoneProgress.MiningHarvestable {
+		t.Fatalf("石镐首 tick = %+v", stoneProgress)
+	}
+	for want := uint16(2); want <= 4; want++ {
+		state := nextMemoryMiningState(t, running, clientEndpoint, mirror, nil)
+		if state.MiningProgressTicks != want || state.MiningRequiredTicks != 15 {
+			t.Fatalf("石镐进度 = %d/%d，想要 %d/15", state.MiningProgressTicks, state.MiningRequiredTicks, want)
+		}
+	}
+
+	sendClientMessage(t, clientEndpoint, network.SelectHotbar{Sequence: 2, Slot: 1})
+	reset := waitMemoryMiningState(t, running, clientEndpoint, mirror, func(state network.PlayerState) bool {
+		return state.MiningActive && state.MiningRequiredTicks == 8
+	})
+	if reset.MiningProgressTicks != 1 || !reset.MiningHarvestable {
+		t.Fatalf("切换铁镐后未从 1 重置: %+v", reset)
+	}
+
+	sendClientMessage(t, clientEndpoint, network.PlayerInput{Sequence: 3, Pitch: -0.2})
+	released := waitMemoryMiningState(t, running, clientEndpoint, mirror, func(state network.PlayerState) bool {
+		return state.LastInputSequence == 3
+	})
+	if released.MiningActive {
+		t.Fatalf("松键后采掘仍活动: %+v", released)
+	}
+
+	sendClientMessage(t, clientEndpoint, network.SelectHotbar{Sequence: 4, Slot: 2})
+	selectedWrongTool := false
+	stepUntilCollect(t, running, clientEndpoint, mirror, func(message network.ServerMessage) {
+		switch message := message.(type) {
+		case network.PlayerState:
+			assertValidMiningPlayerState(t, message)
+		case network.InventoryState:
+			selectedWrongTool = message.Inventory.Hotbar.Selected == 2
+		}
+	}, func() bool { return selectedWrongTool })
+	sendClientMessage(t, clientEndpoint, network.PlayerInput{Sequence: 5, Pitch: -0.2, Mining: true})
+	wrongTool := make([]network.PlayerState, 0, 30)
+	sawBreak, sawDrop := false, false
+	for len(wrongTool) < 30 {
+		state := nextMemoryMiningState(t, running, clientEndpoint, mirror, func(message network.ServerMessage) {
+			switch message.(type) {
+			case network.BlockChanges:
+				sawBreak = true
+			case network.ItemDropUpserts:
+				sawDrop = true
+			}
+		})
+		if state.LastInputSequence < 5 {
+			continue
+		}
+		wrongTool = append(wrongTool, state)
+	}
+	for index, state := range wrongTool[:29] {
+		want := uint16(index + 1)
+		if !state.MiningActive || state.MiningProgressTicks != want || state.MiningRequiredTicks != 30 || state.MiningHarvestable {
+			t.Fatalf("错误工具进度[%d] = %+v", index, state)
+		}
+	}
+	if wrongTool[29].MiningActive || !sawBreak || sawDrop {
+		t.Fatalf("错误工具完成 = state=%+v break=%t drop=%t", wrongTool[29], sawBreak, sawDrop)
+	}
+	if block, loaded := mirror.BlockAt(core.Overworld, target); !loaded || block != core.AirID {
+		t.Fatalf("错误工具完成后方块 = %d,%t", block, loaded)
+	}
+
+	running.SetBlockForTest(target, core.StoneID)
+	sendClientMessage(t, clientEndpoint, network.PlayerInput{Sequence: 6, Pitch: -0.2, Mining: true})
+	waitMemoryMiningState(t, running, clientEndpoint, mirror, func(state network.PlayerState) bool {
+		return state.LastInputSequence == 6 && state.MiningActive
+	})
+	if err := clientEndpoint.Close(); err != nil {
+		t.Fatalf("关闭 Memory 客户端: %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		running.StepForTest()
+		if _, ok := playerStateForExternalTest(running); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Memory 断线后采掘会话未清除")
+		}
+	}
+}
+
+func waitMemoryMiningState(
+	t *testing.T,
+	running *server.Server,
+	endpoint network.ClientEndpoint,
+	mirror *client.Mirror,
+	done func(network.PlayerState) bool,
+) network.PlayerState {
+	t.Helper()
+	var matched network.PlayerState
+	stepUntilCollect(t, running, endpoint, mirror, func(message network.ServerMessage) {
+		state, ok := message.(network.PlayerState)
+		if !ok {
+			return
+		}
+		assertValidMiningPlayerState(t, state)
+		if done(state) {
+			matched = state
+		}
+	}, func() bool { return matched.ServerTick != 0 })
+	return matched
+}
+
+func nextMemoryMiningState(
+	t *testing.T,
+	running *server.Server,
+	endpoint network.ClientEndpoint,
+	mirror *client.Mirror,
+	collect func(network.ServerMessage),
+) network.PlayerState {
+	t.Helper()
+	result := running.StepForTest()
+	var state network.PlayerState
+	drainServerMessages(t, endpoint, mirror, func(message network.ServerMessage) {
+		if collect != nil {
+			collect(message)
+		}
+		if current, ok := message.(network.PlayerState); ok {
+			assertValidMiningPlayerState(t, current)
+			state = current
+		}
+	}, result.Tick)
+	return state
+}
+
+func assertValidMiningPlayerState(t *testing.T, state network.PlayerState) {
+	t.Helper()
+	if err := state.Validate(); err != nil {
+		t.Fatalf("PlayerState tick=%d 非法: %v", state.ServerTick, err)
+	}
+}
+
 // awaitInteractionChange 等待唯一一份 base→new 的 delta，并返回其中唯一的方块变化。
 func awaitInteractionChange(
 	t *testing.T,

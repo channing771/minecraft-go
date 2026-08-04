@@ -652,6 +652,9 @@ func drainOneTask16(connected *multiplayerTCPClient) (bool, error) {
 	connected.transcript = append(connected.transcript, multiplayerEvent{message: message})
 	switch message := message.(type) {
 	case network.PlayerState:
+		if err := message.Validate(); err != nil {
+			return true, fmt.Errorf("PlayerState.Validate: %w", err)
+		}
 		connected.local = message
 	case network.ChunkSnapshot, network.BlockChanges, network.ForgetChunks, network.CommandRejected:
 		update, err := connected.mirror.Apply(message)
@@ -831,6 +834,9 @@ func (connected *multiplayerTCPClient) drainOne() (bool, error) {
 	connected.transcript = append(connected.transcript, multiplayerEvent{message: message})
 	switch message := message.(type) {
 	case network.PlayerState:
+		if err := message.Validate(); err != nil {
+			return true, fmt.Errorf("PlayerState.Validate: %w", err)
+		}
 		connected.local = message
 	case network.ChunkSnapshot, network.BlockChanges, network.ForgetChunks, network.CommandRejected:
 		update, err := connected.mirror.Apply(message)
@@ -1090,7 +1096,10 @@ func multiplayerDiagnostics(first, second *multiplayerTCPClient) string {
 func multiplayerEventSummary(message network.ServerMessage) string {
 	switch message := message.(type) {
 	case network.PlayerState:
-		return fmt.Sprintf("PlayerState tick=%d input=%d pos=%v ready=%v reset=%v", message.ServerTick, message.LastInputSequence, message.Position, message.Ready, message.Reset)
+		return fmt.Sprintf("PlayerState tick=%d input=%d pos=%v ready=%v reset=%v mining=%t target=%+v progress=%d/%d harvestable=%t",
+			message.ServerTick, message.LastInputSequence, message.Position, message.Ready, message.Reset,
+			message.MiningActive, message.MiningTarget, message.MiningProgressTicks,
+			message.MiningRequiredTicks, message.MiningHarvestable)
 	case network.ChunkSnapshot:
 		return fmt.Sprintf("ChunkSnapshot chunk=%+v revision=%d", message.Chunk, message.Revision)
 	case network.BlockChanges:

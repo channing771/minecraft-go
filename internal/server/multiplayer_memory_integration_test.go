@@ -98,7 +98,7 @@ func TestEightMemorySessionsAreDeterministicFor2000Ticks(t *testing.T) {
 	runEightMemorySessionsDeterminism(t, 2000)
 }
 
-func TestEightPlayerMemoryTCPParity(t *testing.T) {
+func TestMultiplayerMemoryTCPMiningCompetition(t *testing.T) {
 	runEightPlayerMemoryTCPParity(t, 200)
 }
 
@@ -134,6 +134,9 @@ func fixedEightPlayerScript(ticks uint64) []multiplayerScriptStep {
 		if tick%20 == 0 && (tick/20)%2 == 1 {
 			player := int((tick/20 - 1) % multiplayerClientCount)
 			miningUntil[player] = tick + 29
+			if tick == 20 {
+				miningUntil[1] = tick + 29
+			}
 		}
 		sign := int8(1)
 		if ((tick - 1) / 10 % 2) != 0 {
@@ -144,6 +147,8 @@ func fixedEightPlayerScript(ticks uint64) []multiplayerScriptStep {
 			if tick <= miningUntil[player] {
 				input.Yaw = math.Pi
 				input.Mining = true
+			} else if player < 2 && tick < 20 {
+				// 前两名玩家保持同一出生位置，以便 tick 20 竞争同一方块。
 			} else {
 				switch player % 4 {
 				case 0:
@@ -160,7 +165,7 @@ func fixedEightPlayerScript(ticks uint64) []multiplayerScriptStep {
 		}
 		if tick%20 == 0 {
 			player := int((tick/20 - 1) % multiplayerClientCount)
-			if (tick/20)%2 == 0 {
+			if (tick/20)%2 == 0 && miningUntil[player] < tick {
 				command := network.PlaceBlock{Sequence: tick * 2, Yaw: math.Pi, Pitch: -0.2, Slot: 0}
 				steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Place: &command})
 			}
@@ -190,11 +195,13 @@ func canonicalMultiplayerEvent(output interface{ Write([]byte) (int, error) }, v
 	write := func(format string, args ...any) { _, _ = fmt.Fprintf(output, format+"\n", args...) }
 	switch message := value.(type) {
 	case network.PlayerState:
-		write("PlayerState|tick=%d|sequence=%d|dimension=%d|position=%08x,%08x,%08x|velocity=%08x,%08x,%08x|yaw=%08x|pitch=%08x|ground=%t|ready=%t|reset=%t",
+		write("PlayerState|tick=%d|sequence=%d|dimension=%d|position=%08x,%08x,%08x|velocity=%08x,%08x,%08x|yaw=%08x|pitch=%08x|ground=%t|ready=%t|reset=%t|mining=%t|target=%d,%d,%d|progress=%d/%d|harvestable=%t",
 			message.ServerTick-baseTick, message.LastInputSequence, message.Dimension,
 			math.Float32bits(message.Position[0]), math.Float32bits(message.Position[1]), math.Float32bits(message.Position[2]),
 			math.Float32bits(message.Velocity[0]), math.Float32bits(message.Velocity[1]), math.Float32bits(message.Velocity[2]),
-			math.Float32bits(message.Yaw), math.Float32bits(message.Pitch), message.OnGround, message.Ready, message.Reset)
+			math.Float32bits(message.Yaw), math.Float32bits(message.Pitch), message.OnGround, message.Ready, message.Reset,
+			message.MiningActive, message.MiningTarget.X, message.MiningTarget.Y, message.MiningTarget.Z,
+			message.MiningProgressTicks, message.MiningRequiredTicks, message.MiningHarvestable)
 	case network.RemotePlayerSpawn:
 		write("RemotePlayerSpawn|tick=%d|player=%s|name=%q|dimension=%d|position=%08x,%08x,%08x|yaw=%08x|pitch=%08x",
 			message.ServerTick-baseTick, message.PlayerID, message.DisplayName, message.Dimension,
@@ -465,6 +472,9 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		}
 		outcome.MirrorHashes[index], outcome.MirrorRevision[index] = mirrorHash, revision
 	}
+	if ticks >= 49 {
+		assertMultiplayerMiningCompetition(t, transport, clients[:2])
+	}
 	copy(outcome.Transcript[:], combined.Sum(nil))
 	var ok bool
 	outcome.ChunkHash, outcome.ChunkRevision, ok = running.ChunkHash(key.Dimension, key.Pos)
@@ -484,6 +494,39 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		t.Fatalf("cleanup %s multiplayer: %v", transport, err)
 	}
 	return outcome
+}
+
+func assertMultiplayerMiningCompetition(t *testing.T, transport string, clients []*multiplayerTCPClient) {
+	t.Helper()
+	for index, connected := range clients {
+		progress := make([]uint16, 0, 29)
+		changes := 0
+		for _, event := range connected.transcript {
+			switch message := event.message.(type) {
+			case network.PlayerState:
+				if message.MiningActive && message.MiningTarget == multiplayerManualTarget {
+					progress = append(progress, message.MiningProgressTicks)
+				}
+			case network.BlockChanges:
+				for _, change := range message.Changes {
+					if change.Position == multiplayerManualTarget && change.Block == core.AirID {
+						changes++
+					}
+				}
+			}
+		}
+		if len(progress) != 29 {
+			t.Fatalf("%s 竞争玩家 %d 进度长度=%d，想要 29: %v", transport, index, len(progress), progress)
+		}
+		for offset, got := range progress {
+			if want := uint16(offset + 1); got != want {
+				t.Fatalf("%s 竞争玩家 %d 进度[%d]=%d，想要 %d", transport, index, offset, got, want)
+			}
+		}
+		if changes != 1 {
+			t.Fatalf("%s 竞争玩家 %d 收到完成变更=%d，想要 1", transport, index, changes)
+		}
+	}
 }
 
 func cleanupEightManualMultiplayer(

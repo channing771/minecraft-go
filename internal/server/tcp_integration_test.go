@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -42,12 +44,27 @@ type flatGenerator struct{}
 
 type changedGenerator struct{}
 
+type miningParityGenerator struct{}
+
 func (flatGenerator) GenerateChunk(position core.ChunkPos) *world.Chunk {
 	return integrationChunk(position, core.StoneID)
 }
 
 func (changedGenerator) GenerateChunk(position core.ChunkPos) *world.Chunk {
 	return integrationChunk(position, core.DirtID)
+}
+
+func (miningParityGenerator) GenerateChunk(position core.ChunkPos) *world.Chunk {
+	chunk := integrationChunk(position, core.StoneID)
+	for _, target := range []core.BlockPos{{X: -1, Y: 1, Z: -6}, {X: 1, Y: 1, Z: -6}} {
+		if target.Chunk() != position {
+			continue
+		}
+		x, _, z := target.Local()
+		chunk.SetBlock(x, target.Y, z, core.StoneID)
+	}
+	chunk.Compact()
+	return chunk
 }
 
 func integrationChunk(position core.ChunkPos, fill core.BlockID) *world.Chunk {
@@ -539,7 +556,7 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	secondHost.Shutdown(t)
 }
 
-func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
+func TestTCPPlayerAndWorldFailureMatrixProtocolVersionAndUnknownPacket(t *testing.T) {
 	t.Run("server full version mismatch and hostile peers leave listener healthy", func(t *testing.T) {
 		host := startDiskHost(t, t.TempDir(), "127.0.0.1:0", flatGenerator{})
 		host.Host.mu.Lock()
@@ -552,28 +569,32 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 		_, err := loginIntegrationClient(host.Addr, integrationIdentity(0x22, "Second"))
 		assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginServerFull))
 
-		raw, err := net.Dial("tcp", host.Addr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := network.WriteFrame(raw, 0, []byte{byte(network.ProtocolVersion + 1)}); err != nil {
+		for _, version := range []byte{7, byte(network.ProtocolVersion + 1)} {
+			raw, err := net.Dial("tcp", host.Addr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := network.WriteFrame(raw, 0, []byte{version}); err != nil {
+				_ = raw.Close()
+				t.Fatal(err)
+			}
+			packetID, payload, err := network.ReadFrame(raw)
 			_ = raw.Close()
-			t.Fatal(err)
-		}
-		packetID, payload, err := network.ReadFrame(raw)
-		_ = raw.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		codec, err := network.NewCodec()
-		if err != nil {
-			t.Fatal(err)
-		}
-		packet, err := codec.DecodeServer(network.StateHandshake, packetID, payload)
-		_ = codec.Close()
-		reject, ok := packet.(network.HandshakeReject)
-		if err != nil || !ok || reject.Code != network.HandshakeVersionMismatch {
-			t.Fatalf("version reject=(%#v,%v), want HandshakeVersionMismatch", packet, err)
+			if err != nil {
+				t.Fatal(err)
+			}
+			codec, err := network.NewCodec()
+			if err != nil {
+				t.Fatal(err)
+			}
+			packet, err := codec.DecodeServer(network.StateHandshake, packetID, payload)
+			_ = codec.Close()
+			reject, ok := packet.(network.HandshakeReject)
+			if err != nil || !ok || reject.Code != network.HandshakeVersionMismatch ||
+				reject.ServerProtocolVersion != network.ProtocolVersion {
+				t.Fatalf("v%d reject=(%#v,%v), want v%d HandshakeVersionMismatch",
+					version, packet, err, network.ProtocolVersion)
+			}
 		}
 
 		bad, err := net.Dial("tcp", host.Addr)
@@ -596,6 +617,57 @@ func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 			t.Fatal(err)
 		}
 		host.WaitPlayerSaved(t, primaryIdentity.PlayerID)
+
+		violator := integrationIdentity(0x24, "OldBreakPacket")
+		rawPlay, err := net.Dial("tcp", host.Addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		codec, err := network.NewCodec()
+		if err != nil {
+			_ = rawPlay.Close()
+			t.Fatal(err)
+		}
+		packetID, payload, err := codec.EncodeClient(network.StateHandshake, network.ClientHello{ProtocolVersion: network.ProtocolVersion})
+		if err == nil {
+			err = network.WriteFrame(rawPlay, packetID, payload)
+		}
+		if err == nil {
+			packetID, payload, err = network.ReadFrame(rawPlay)
+		}
+		if err == nil {
+			_, err = codec.DecodeServer(network.StateHandshake, packetID, payload)
+		}
+		if err == nil {
+			packetID, payload, err = codec.EncodeClient(network.StateLogin, network.LoginStart{
+				PlayerID: violator.PlayerID, DisplayName: violator.DisplayName,
+			})
+		}
+		if err == nil {
+			err = network.WriteFrame(rawPlay, packetID, payload)
+		}
+		if err == nil {
+			packetID, payload, err = network.ReadFrame(rawPlay)
+		}
+		if err == nil {
+			var packet network.ServerPacket
+			packet, err = codec.DecodeServer(network.StateLogin, packetID, payload)
+			if success, ok := packet.(network.LoginSuccess); !ok || success.PlayerID != violator.PlayerID {
+				err = fmt.Errorf("LoginSuccess=%#v", packet)
+			}
+		}
+		_ = codec.Close()
+		if err != nil {
+			_ = rawPlay.Close()
+			t.Fatalf("raw Play 登录: %v", err)
+		}
+		if err := network.WriteFrame(rawPlay, 1, nil); err != nil {
+			_ = rawPlay.Close()
+			t.Fatalf("发送废止 Play packet ID 1: %v", err)
+		}
+		host.WaitPlayerReleased(t, violator.PlayerID)
+		_ = rawPlay.Close()
+
 		waitForPreLoginCount(t, host.Host, 1)
 		_ = slow.Close()
 		waitForPreLoginCount(t, host.Host, 0)
@@ -882,6 +954,262 @@ func TestMemoryTCPParityBusinessTranscriptAndHashes(t *testing.T) {
 	if last := memory.Transcript[len(memory.Transcript)-1]; !strings.HasPrefix(last, "DisconnectTick:") {
 		t.Fatalf("parity transcript ends with %q, want disconnect tick", last)
 	}
+}
+
+func TestMemoryTCPMiningConvergence(t *testing.T) {
+	memory := runMiningParityScript(t, "memory")
+	tcp := runMiningParityScript(t, "tcp")
+	if !reflect.DeepEqual(tcp, memory) {
+		t.Fatalf("采掘 Memory/TCP 未收敛\nmemory=%+v\ntcp=%+v", memory, tcp)
+	}
+}
+
+type miningTranscriptEntry struct {
+	Active        bool
+	Target        core.BlockPos
+	ProgressTicks uint16
+	RequiredTicks uint16
+	Harvestable   bool
+}
+
+type miningParityResult struct {
+	ChunkHash     [32]byte
+	ChunkRevision uint64
+	InventoryHash [32]byte
+	DropHash      [32]byte
+	Progress      []miningTranscriptEntry
+	FinalInactive miningTranscriptEntry
+	Disconnected  bool
+}
+
+func runMiningParityScript(t *testing.T, transport string) miningParityResult {
+	t.Helper()
+	identity := integrationIdentity(0x72, "MiningParity")
+	store := storage.NewMemory(storage.Metadata{
+		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+	})
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
+	inventory.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemDirt, Count: 1}
+	location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{0.5, 1.001, 0.5}}
+	if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{
+		PlayerID: identity.PlayerID, Revision: 1, DisplayName: identity.DisplayName,
+		Current: location, Safe: &location, Inventory: inventory,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	config := hostTestConfig()
+	config.ViewRadius = 1
+	config.AutosaveTicks = 1000
+	host := NewHost(config, miningParityGenerator{}, store)
+	endpoint, acceptDone, closeTransport := openParityTransport(t, host, transport, identity)
+	defer closeTransport()
+	mirror := client.NewMirror()
+	drops := client.NewItemDrops()
+	inventoryConfirmed := false
+	ready := false
+	for !ready || !inventoryConfirmed || !parityViewLoaded(mirror) {
+		_, messages := parityStep(t, host, endpoint, mirror)
+		for _, message := range messages {
+			applyMiningParityMessage(t, drops, message)
+			switch message := message.(type) {
+			case network.PlayerState:
+				assertValidIntegrationPlayerState(t, message)
+				ready = ready || message.Ready
+			case network.InventoryState:
+				inventoryConfirmed = message.Inventory == inventory
+			}
+		}
+	}
+
+	step := func(command network.ClientMessage) (network.PlayerState, []network.ServerMessage) {
+		if command != nil {
+			sendIntegration(t, endpoint, command)
+			waitIntegrationCondition(t, fmt.Sprintf("%s mining %T queued", transport, command), func() bool {
+				return len(host.world.incoming) > 0
+			})
+		}
+		_, messages := parityStep(t, host, endpoint, mirror)
+		var state network.PlayerState
+		for _, message := range messages {
+			applyMiningParityMessage(t, drops, message)
+			if current, ok := message.(network.PlayerState); ok {
+				assertValidIntegrationPlayerState(t, current)
+				state = current
+			}
+		}
+		return state, messages
+	}
+
+	result := miningParityResult{Progress: make([]miningTranscriptEntry, 0, 45)}
+	record := func(state network.PlayerState) {
+		result.Progress = append(result.Progress, canonicalMiningState(state))
+	}
+	state, _ := step(network.PlayerInput{Sequence: 1, Pitch: -0.2, Mining: true})
+	record(state)
+	for range 3 {
+		state, _ = step(nil)
+		record(state)
+	}
+	state, _ = step(network.SelectHotbar{Sequence: 2, Slot: 1})
+	record(state)
+	if state.MiningProgressTicks != 1 || state.MiningRequiredTicks != 8 {
+		t.Fatalf("%s 切换铁镐状态 = %+v", transport, state)
+	}
+	state, _ = step(network.PlayerInput{Sequence: 3, Pitch: -0.2})
+	record(state)
+	if state.MiningActive {
+		t.Fatalf("%s 松键后仍活动: %+v", transport, state)
+	}
+	state, _ = step(network.SelectHotbar{Sequence: 4, Slot: 2})
+	record(state)
+	for tick := 1; tick <= 30; tick++ {
+		var command network.ClientMessage
+		if tick == 1 {
+			command = network.PlayerInput{Sequence: 5, Pitch: -0.2, Mining: true}
+		}
+		var messages []network.ServerMessage
+		state, messages = step(command)
+		record(state)
+		if tick < 30 && (!state.MiningActive || state.MiningProgressTicks != uint16(tick) ||
+			state.MiningRequiredTicks != 30 || state.MiningHarvestable) {
+			t.Fatalf("%s 错误工具 tick %d = %+v", transport, tick, state)
+		}
+		if tick == 30 {
+			if state.MiningActive || miningParityHasDrop(messages) {
+				t.Fatalf("%s 错误工具完成 = state=%+v messages=%+v", transport, state, messages)
+			}
+		}
+	}
+	state, _ = step(network.SelectHotbar{Sequence: 6, Slot: 1})
+	record(state)
+	const sideYaw = -0.16514868
+	for tick := 1; tick <= 8; tick++ {
+		var command network.ClientMessage
+		if tick == 1 {
+			command = network.PlayerInput{Sequence: 7, Yaw: sideYaw, Pitch: -0.2, Mining: true}
+		}
+		state, _ = step(command)
+		record(state)
+		if tick < 8 && (!state.MiningActive || state.MiningProgressTicks != uint16(tick) ||
+			state.MiningRequiredTicks != 8 || !state.MiningHarvestable) {
+			t.Fatalf("%s 铁镐 tick %d = %+v", transport, tick, state)
+		}
+	}
+	if state.MiningActive || len(drops.Presentations()) != 1 {
+		t.Fatalf("%s 铁镐完成 = state=%+v drops=%+v", transport, state, drops.Presentations())
+	}
+	state, _ = step(network.PlayerInput{Sequence: 8, Yaw: sideYaw, Pitch: -0.2})
+	result.FinalInactive = canonicalMiningState(state)
+
+	host.mu.Lock()
+	active := *host.activeByPlayer[identity.PlayerID]
+	host.mu.Unlock()
+	snapshot, ok := host.world.PlayerSnapshotFor(active.Session)
+	if !ok {
+		t.Fatalf("%s 采掘 player snapshot 不可用", transport)
+	}
+	result.InventoryHash = inventoryDigest(snapshot.Inventory)
+	result.DropHash = itemDropDigest(drops.Presentations())
+	result.ChunkHash, result.ChunkRevision, ok = host.world.ChunkHash(core.Overworld, core.ChunkPos{})
+	if !ok {
+		t.Fatalf("%s 采掘 chunk hash 不可用", transport)
+	}
+	state, _ = step(network.PlayerInput{Sequence: 9, Yaw: -sideYaw, Pitch: -0.2, Mining: true})
+	if !state.MiningActive {
+		t.Fatalf("%s 断线前采掘未活动: %+v", transport, state)
+	}
+	if err := endpoint.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	select {
+	case err := <-acceptDone:
+		if err != nil && !errors.Is(err, network.ErrClosed) {
+			t.Fatalf("%s mining accept worker: %v", transport, err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("%s mining accept worker did not exit: %v", transport, ctx.Err())
+	}
+	host.world.StepForTest()
+	_, present := host.world.PlayerSnapshotFor(active.Session)
+	result.Disconnected = !present
+	if present {
+		t.Fatalf("%s 活动采掘玩家断线后仍存在", transport)
+	}
+	if err := host.Shutdown(ctx); err != nil {
+		t.Fatalf("%s mining Host.Shutdown: %v", transport, err)
+	}
+	stored, err := store.LoadPlayer(ctx, identity.PlayerID)
+	if err != nil {
+		t.Fatalf("%s mining LoadPlayer: %v", transport, err)
+	}
+	if inventoryDigest(stored.Inventory) != result.InventoryHash {
+		t.Fatalf("%s 断线持久化背包与最终快照不一致", transport)
+	}
+	return result
+}
+
+func applyMiningParityMessage(t *testing.T, drops *client.ItemDrops, message network.ServerMessage) {
+	t.Helper()
+	switch message.(type) {
+	case network.ItemDropUpserts, network.ItemDropRemoves:
+		if err := drops.Apply(message); err != nil {
+			t.Fatalf("采掘掉落镜像 Apply(%T): %v", message, err)
+		}
+	}
+}
+
+func assertValidIntegrationPlayerState(t *testing.T, state network.PlayerState) {
+	t.Helper()
+	if err := state.Validate(); err != nil {
+		t.Fatalf("PlayerState tick=%d 非法: %v", state.ServerTick, err)
+	}
+}
+
+func canonicalMiningState(state network.PlayerState) miningTranscriptEntry {
+	return miningTranscriptEntry{
+		Active: state.MiningActive, Target: state.MiningTarget,
+		ProgressTicks: state.MiningProgressTicks, RequiredTicks: state.MiningRequiredTicks,
+		Harvestable: state.MiningHarvestable,
+	}
+}
+
+func miningParityHasDrop(messages []network.ServerMessage) bool {
+	for _, message := range messages {
+		if _, ok := message.(network.ItemDropUpserts); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func inventoryDigest(inventory core.Inventory) [32]byte {
+	var encoded bytes.Buffer
+	encoded.WriteByte(inventory.Hotbar.Selected)
+	for slot := range core.InventorySlots {
+		stack, _ := inventory.Slot(uint8(slot))
+		_ = binary.Write(&encoded, binary.LittleEndian, uint16(stack.Item))
+		encoded.WriteByte(stack.Count)
+	}
+	return sha256.Sum256(encoded.Bytes())
+}
+
+func itemDropDigest(drops []client.ItemDropPresentation) [32]byte {
+	var encoded bytes.Buffer
+	for _, drop := range drops {
+		_ = binary.Write(&encoded, binary.LittleEndian, int32(drop.ID.Dimension))
+		_ = binary.Write(&encoded, binary.LittleEndian, drop.ID.Chunk.X)
+		_ = binary.Write(&encoded, binary.LittleEndian, drop.ID.Chunk.Z)
+		_ = binary.Write(&encoded, binary.LittleEndian, drop.ID.Slot)
+		_ = binary.Write(&encoded, binary.LittleEndian, drop.ID.Generation)
+		_ = binary.Write(&encoded, binary.LittleEndian, drop.BlockIndex)
+		_ = binary.Write(&encoded, binary.LittleEndian, uint16(drop.Item))
+		encoded.WriteByte(drop.Count)
+	}
+	return sha256.Sum256(encoded.Bytes())
 }
 
 type parityResult struct {

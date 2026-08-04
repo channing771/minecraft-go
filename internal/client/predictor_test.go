@@ -573,6 +573,36 @@ func TestApplyPlayerStateIgnoresStaleAndEqualTicks(t *testing.T) {
 	}
 }
 
+func TestApplyPlayerStateAcceptsCanonicalMiningWithoutPredictingIt(t *testing.T) {
+	p := readyPredictor(t)
+	state := nextAuthority(p)
+	state.MiningActive = true
+	state.MiningTarget = core.BlockPos{X: 1, Y: 2, Z: 3}
+	state.MiningProgressTicks = 6
+	state.MiningRequiredTicks = 15
+	state.MiningHarvestable = true
+	if err := state.Validate(); err != nil {
+		t.Fatalf("测试 PlayerState 非法: %v", err)
+	}
+	if _, err := p.ApplyPlayerState(state, flatClientWorld{}); err != nil {
+		t.Fatalf("ApplyPlayerState(active mining): %v", err)
+	}
+	got, ready := p.State()
+	want := physics.State{Position: state.Position, Velocity: state.Velocity, OnGround: state.OnGround}
+	if !ready {
+		t.Fatal("规范采掘状态使 Predictor 退出 Ready")
+	}
+	assertStateNear(t, got, want, 1e-6)
+
+	inactive := nextAuthority(p)
+	if err := inactive.Validate(); err != nil {
+		t.Fatalf("测试 inactive PlayerState 非法: %v", err)
+	}
+	if _, err := p.ApplyPlayerState(inactive, flatClientWorld{}); err != nil {
+		t.Fatalf("ApplyPlayerState(inactive mining): %v", err)
+	}
+}
+
 func TestInvalidPlayerStateIsRejectedAtomically(t *testing.T) {
 	invalid := []struct {
 		name   string

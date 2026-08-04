@@ -32,9 +32,9 @@
 
 ## 6. Memory/TCP 发布与生命周期闭环
 
-- [ ] 6.1 在 `internal/server` 先写失败的 Memory/TCP 纵向测试，覆盖按住到完成、权威进度逐 tick 发布、工具切换重置、错误工具无掉落、两玩家竞争、断线/reset 清零、v7 登录拒绝和 Memory/TCP 最终哈希一致。
-- [ ] 6.2 让 `internal/server/publication.go` 与相关 session 代码把 sim 固定采掘更新映射到所属玩家的 `PlayerState`，不广播给其他玩家、不增加独立 outbox 消息，并保持慢客户端只关闭自身。
-- [ ] 6.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/network ./internal/client -race -count=1'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 发布多人权威采掘状态`。
+- [x] 6.1 在 `internal/server` 先写失败的 Memory/TCP 纵向测试，覆盖按住到完成、权威进度逐 tick 发布、工具切换重置、错误工具无掉落、两玩家竞争、断线/reset 清零、v7 登录拒绝和 Memory/TCP 最终哈希一致。
+- [x] 6.2 让 `internal/server/publication.go` 与相关 session 代码把 sim 固定采掘更新映射到所属玩家的 `PlayerState`，不广播给其他玩家、不增加独立 outbox 消息，并保持慢客户端只关闭自身。
+- [x] 6.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/network ./internal/client -race -count=1'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 发布多人权威采掘状态`。
 
 ## 7. 五行配方与权威 HUD
 
