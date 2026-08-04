@@ -37,7 +37,8 @@
   - Memory 复判：复用 `/tmp/mcgo-m4d-v8-6d275a81688e-memory.json` 原始字节，执行前后 SHA-256 均为 `a878195ac2e37bf5d1fe19cc67b833fcd7371073586d768f7cdf6834b2e84d95`；在修复提交上执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/mcgo-m4d-v8-6d275a81688e-memory.json --max-regression 0.20'`，成功文本：`同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过`。
   - TCP 正式报告：从原始生产提交 `6d275a81688e8b53263ae17ecc7754b02c9ba601` 的 detached 干净 worktree 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output /tmp/mcgo-m4d-v8-6d275a81688e-tcp.json'`；报告路径 `/tmp/mcgo-m4d-v8-6d275a81688e-tcp.json`，SHA-256 `7ecac884c4a4a5c8853ff5223b862e32c7059e67ff580c18b332d75181c5e14e`，scenario v8、TCP、M5/24GiB、2560x1440、GPU 2048、interest 1600 与 tick 200 字段均通过完整性核验。
   - TCP 门禁：在修复提交上执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/mcgo-m4d-v8-6d275a81688e-tcp.json --max-regression 0.20'`，成功文本：`同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过`。Memory 未重跑，TCP benchmark 实际且仅执行一次，报告与 `docs/notes/perf-baseline-m5.json` 均未覆盖或改写。
-- [ ] 5.6 只暂存本组测试、中文文档和任务勾选，确认 `midscene_run/` 仍未暂存；提交 `test: 验证石砖合成重启闭环`，然后自动进入第 6 组。
+- [x] 5.6 只暂存本组测试、中文文档和任务勾选，确认 `midscene_run/` 仍未暂存；提交 `test: 验证石砖合成重启闭环`，然后自动进入第 6 组。
+  - 2026-08-04 fresh GVM Go 1.26.0 验证通过：`go test ./internal/server -run 'TestCraftingSurvivesV2DiskRestartAndReconnectOrder|TestMemoryTCPParityBusinessTranscriptAndHashes' -race -count=1`、`go test ./internal/server -race -count=1` 与 `go test ./internal/archcheck -count=1`；`gofmt -l internal/server/tcp_integration_test.go`、`openspec validate --all --strict --no-interactive` 和 `git diff --check` 无失败。暂存范围精确为 `README.md`、`docs/notes/lan-server.md`、`internal/server/tcp_integration_test.go` 与本文件；`midscene_run/` 保持未暂存。
 
 ## 6. 最终门禁与阶段收尾
 

@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/klauspost/compress/zstd"
 
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
@@ -428,6 +431,106 @@ func TestTCPPlayerAndWorldSurviveDisconnectAndRestart(t *testing.T) {
 	second.Shutdown(t)
 }
 
+func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
+	root := t.TempDir()
+	key := core.ChunkKey{Dimension: core.Overworld}
+	seedV2CraftingChunk(t, root, key)
+	firstIdentity := integrationIdentity(0x81, "Crafter")
+	secondIdentity := integrationIdentity(0x82, "Observer")
+	spawn := integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil)
+	seedIntegrationPlayer(t, root, firstIdentity, spawn)
+	seedIntegrationPlayer(t, root, secondIdentity, spawn)
+
+	firstHost := startDiskHost(t, root, "127.0.0.1:0", changedGenerator{})
+	firstClient := dialIntegrationClient(t, firstHost.Addr, firstIdentity)
+	witness := dialIntegrationClient(t, firstHost.Addr, secondIdentity)
+	waitClientReadyFor(t, firstHost, firstClient, firstIdentity.PlayerID)
+	waitClientReadyFor(t, firstHost, witness, secondIdentity.PlayerID)
+	waitIntegrationCondition(t, "从 v2 区块拾取 4 石头", func() bool {
+		return integrationItemCount(firstHost.PlayerSnapshot(t, firstIdentity.PlayerID).Inventory, core.ItemStone) == 4
+	})
+
+	sendIntegration(t, firstClient.Endpoint, network.CraftRecipe{
+		Sequence: 1, Recipe: core.RecipeStoneBricks,
+	})
+	waitIntegrationInventory(t, firstClient, func(inventory core.Inventory) bool {
+		return integrationItemCount(inventory, core.ItemStoneBrick) == 4
+	})
+
+	placed := make([]core.BlockPos, 0, 2)
+	for sequence := uint64(2); sequence <= 3; sequence++ {
+		sendIntegration(t, firstClient.Endpoint, network.PlaceBlock{
+			Sequence: sequence, Yaw: 0, Pitch: -0.2, Slot: 0,
+		})
+		waitIntegrationState(t, firstClient, func(message network.ServerMessage) bool {
+			changes, ok := message.(network.BlockChanges)
+			if !ok {
+				return false
+			}
+			for _, change := range changes.Changes {
+				if change.Block == core.StoneBrickID {
+					placed = append(placed, change.Position)
+					return true
+				}
+			}
+			return false
+		})
+	}
+	if len(placed) != 2 || placed[0] == placed[1] {
+		t.Fatalf("石砖放置位置 = %+v，想要两个不同位置", placed)
+	}
+
+	sendIntegration(t, firstClient.Endpoint, network.BreakBlock{
+		Sequence: 4, Yaw: 0, Pitch: -0.2,
+	})
+	waitIntegrationState(t, firstClient, func(message network.ServerMessage) bool {
+		return integrationChangeSeen(message, placed[1], core.AirID)
+	})
+	sendIntegration(t, firstClient.Endpoint, network.PlayerInput{
+		Sequence: 5, MoveZ: 1, Yaw: 0, Pitch: -0.2,
+	})
+	wantInventory := waitIntegrationInventory(t, firstClient, func(inventory core.Inventory) bool {
+		return integrationItemCount(inventory, core.ItemStoneBrick) == 3
+	})
+	sendIntegration(t, firstClient.Endpoint, network.PlayerInput{Sequence: 6, Yaw: 0, Pitch: -0.2})
+	waitIntegrationState(t, firstClient, func(message network.ServerMessage) bool {
+		state, ok := message.(network.PlayerState)
+		return ok && state.LastInputSequence >= 6
+	})
+
+	wantPlayer := firstHost.PlayerSnapshot(t, firstIdentity.PlayerID)
+	if wantPlayer.Inventory != wantInventory {
+		t.Fatalf("权威背包 = %+v，想要客户端确认 %+v", wantPlayer.Inventory, wantInventory)
+	}
+	assertCraftingChunkState(t, firstHost, placed[0], placed[1])
+	if err := firstClient.Close(); err != nil {
+		t.Fatal(err)
+	}
+	firstHost.WaitPlayerSaved(t, firstIdentity.PlayerID)
+	if err := witness.Close(); err != nil {
+		t.Fatal(err)
+	}
+	firstHost.WaitPlayerReleased(t, secondIdentity.PlayerID)
+	firstHost.Shutdown(t)
+	if schema := integrationStoredChunkSchema(t, root, key); schema != 3 {
+		t.Fatalf("正常刷新后的区块 schema=%d，想要 3", schema)
+	}
+
+	secondHost := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})
+	reconnectedWitness := dialIntegrationClient(t, secondHost.Addr, secondIdentity)
+	waitClientReadyFor(t, secondHost, reconnectedWitness, secondIdentity.PlayerID)
+	reconnected := dialIntegrationClient(t, secondHost.Addr, firstIdentity)
+	waitClientReadyFor(t, secondHost, reconnected, firstIdentity.PlayerID)
+	assertPlayerRestored(t, secondHost, firstIdentity.PlayerID, wantPlayer)
+	if got := secondHost.PlayerSnapshot(t, secondIdentity.PlayerID).Inventory; got != (core.Inventory{}) {
+		t.Fatalf("乱序重连污染第二身份背包: %+v", got)
+	}
+	assertCraftingChunkState(t, secondHost, placed[0], placed[1])
+	_ = reconnected.Close()
+	_ = reconnectedWitness.Close()
+	secondHost.Shutdown(t)
+}
+
 func TestTCPPlayerAndWorldFailureMatrix(t *testing.T) {
 	t.Run("server full version mismatch and hostile peers leave listener healthy", func(t *testing.T) {
 		host := startDiskHost(t, t.TempDir(), "127.0.0.1:0", flatGenerator{})
@@ -728,7 +831,7 @@ func seedIntegrationPlayer(
 			Dimension: snapshot.Current.Dimension,
 			Position:  [3]float32(snapshot.Current.Position),
 		},
-		Yaw: snapshot.Yaw, Pitch: snapshot.Pitch,
+		Yaw: snapshot.Yaw, Pitch: snapshot.Pitch, Inventory: snapshot.Inventory,
 	}
 	if snapshot.Safe != nil {
 		save.Safe = &storage.PlayerLocation{
@@ -773,13 +876,15 @@ func TestMemoryTCPParityBusinessTranscriptAndHashes(t *testing.T) {
 }
 
 type parityResult struct {
-	Transcript     []string
-	PlayerHash     [32]byte
-	ChunkHash      [32]byte
-	ChunkRevision  uint64
-	MirrorHash     [32]byte
-	MirrorRevision uint64
-	DisconnectTick bool
+	Transcript      []string
+	PlayerHash      [32]byte
+	ChunkHash       [32]byte
+	ChunkRevision   uint64
+	MirrorHash      [32]byte
+	MirrorRevision  uint64
+	Inventory       core.Inventory
+	StoredInventory core.Inventory
+	DisconnectTick  bool
 }
 
 func runParityTranscript(t *testing.T, transport string) parityResult {
@@ -788,6 +893,15 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	store := storage.NewMemory(storage.Metadata{
 		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
 	})
+	var initialInventory core.Inventory
+	initialInventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+	location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{0.5, 1.001, 0.5}}
+	if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{
+		PlayerID: identity.PlayerID, Revision: 1, DisplayName: identity.DisplayName,
+		Current: location, Safe: &location, Inventory: initialInventory,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	config := hostTestConfig()
 	config.ViewRadius = 1
 	config.AutosaveTicks = 1000
@@ -811,13 +925,15 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 
 	commands := []network.ClientMessage{
 		network.PlayerInput{Sequence: 1, MoveX: 1, Yaw: 0, Pitch: -0.2},
-		network.PlaceBlock{Sequence: 2, Yaw: 0, Pitch: -0.2, Slot: 0},
-		network.BreakBlock{Sequence: 3, Yaw: 0, Pitch: -0.2},
+		network.CraftRecipe{Sequence: 2, Recipe: core.RecipeStoneBricks},
+		network.CraftRecipe{Sequence: 3, Recipe: core.RecipeStoneBricks},
+		network.PlaceBlock{Sequence: 4, Yaw: 0, Pitch: -0.2, Slot: 0},
+		network.BreakBlock{Sequence: 5, Yaw: 0, Pitch: -0.2},
 		network.RequestChunkResync{
-			Sequence: 4, Dimension: core.Overworld,
+			Sequence: 6, Dimension: core.Overworld,
 			Chunk: (core.BlockPos{X: 0, Y: 1, Z: -5}).Chunk(), HaveRevision: 0,
 		},
-		network.PlayerInput{Sequence: 5, Yaw: 0, Pitch: -0.2},
+		network.PlayerInput{Sequence: 7, Yaw: 0, Pitch: -0.2},
 	}
 	for _, command := range commands {
 		sendIntegration(t, endpoint, command)
@@ -836,6 +952,10 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	playerHash, ok := host.world.engine.PlayerHash(active.Session)
 	if !ok {
 		t.Fatal("parity player hash unavailable")
+	}
+	snapshot, ok := host.world.PlayerSnapshotFor(active.Session)
+	if !ok {
+		t.Fatal("parity player snapshot unavailable")
 	}
 	position := (core.BlockPos{X: 0, Y: 1, Z: -5}).Chunk()
 	chunkHash, chunkRevision, ok := host.world.ChunkHash(core.Overworld, position)
@@ -875,11 +995,17 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 		Transcript: transcript, PlayerHash: playerHash,
 		ChunkHash: chunkHash, ChunkRevision: chunkRevision,
 		MirrorHash: mirrorHash, MirrorRevision: mirrorRevision,
+		Inventory:      snapshot.Inventory,
 		DisconnectTick: disconnect.Tick > 0,
 	}
 	if err := host.Shutdown(ctx); err != nil {
 		t.Fatalf("parity Host.Shutdown: %v", err)
 	}
+	stored, err := store.LoadPlayer(ctx, identity.PlayerID)
+	if err != nil {
+		t.Fatalf("parity LoadPlayer: %v", err)
+	}
+	result.StoredInventory = stored.Inventory
 	closeTransport()
 	return result
 }
@@ -1042,10 +1168,188 @@ func parityBusinessMessage(
 		return []string{fmt.Sprintf("PlayerState:%+v", message)}
 	case network.CommandRejected:
 		return []string{fmt.Sprintf("CommandRejected:%+v", message)}
+	case network.InventoryState:
+		return []string{fmt.Sprintf("InventoryState:%+v", message.Inventory)}
 	case network.KeepAlive, network.Disconnect:
 		return nil
 	default:
 		t.Fatalf("unexpected parity business message %T", message)
 		return nil
 	}
+}
+
+func waitIntegrationInventory(
+	t *testing.T,
+	connected integrationClient,
+	done func(core.Inventory) bool,
+) core.Inventory {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		message, err := connected.Endpoint.Recv(ctx)
+		if err != nil {
+			t.Fatalf("等待物品状态: %v", err)
+		}
+		applyIntegrationMessage(t, connected.Mirror, message)
+		switch message := message.(type) {
+		case network.InventoryState:
+			if done(message.Inventory) {
+				return message.Inventory
+			}
+		case network.CommandRejected:
+			t.Fatalf("物品状态等待期间命令被拒绝: %+v", message)
+		}
+	}
+}
+
+func integrationItemCount(inventory core.Inventory, item core.ItemID) int {
+	total := 0
+	for slot := range core.InventorySlots {
+		stack, _ := inventory.Slot(uint8(slot))
+		if stack.Item == item {
+			total += int(stack.Count)
+		}
+	}
+	return total
+}
+
+func assertCraftingChunkState(
+	t *testing.T,
+	host integrationHost,
+	placed, mined core.BlockPos,
+) {
+	t.Helper()
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: placed.Chunk()}
+	chunk, _, ok := host.Host.world.CloneReadyChunkForTest(key)
+	if !ok {
+		t.Fatalf("石砖区块 %+v 未 Ready", key)
+	}
+	placedX, _, placedZ := placed.Local()
+	minedX, _, minedZ := mined.Local()
+	if got := chunk.BlockAt(placedX, placed.Y, placedZ); got != core.StoneBrickID {
+		t.Fatalf("保留位置 %+v 方块=%d，想要石砖；回收位置=%+v", placed, got, mined)
+	}
+	if got := chunk.BlockAt(minedX, mined.Y, minedZ); got != core.AirID {
+		t.Fatalf("回收位置方块=%d，想要空气", got)
+	}
+	for slot := range core.DropsPerChunk {
+		if drop := chunk.Drop(slot); drop.Active {
+			t.Fatalf("拾取后仍有活动掉落物: slot=%d drop=%+v", slot, drop)
+		}
+	}
+}
+
+func seedV2CraftingChunk(t *testing.T, root string, key core.ChunkKey) {
+	t.Helper()
+	chunk := integrationChunk(key.Pos, core.StoneID)
+	index, ok := world.ChunkBlockIndex(core.BlockPos{X: 0, Y: 1, Z: 0})
+	if !ok {
+		t.Fatal("测试掉落物位置无区块索引")
+	}
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 1, Active: true,
+		Stack: core.ItemStack{Item: core.ItemStone, Count: 4}, BlockIndex: index,
+	})
+	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
+		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveBatch(context.Background(), []storage.ChunkSave{{
+		Key: key, Revision: 1, Chunk: chunk,
+	}}); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rewriteIntegrationChunkSchema(t, root, key, 2)
+}
+
+func rewriteIntegrationChunkSchema(t *testing.T, root string, key core.ChunkKey, schema uint32) {
+	t.Helper()
+	data, path, bankOffset, entryOffset, payloadOffset, sectorCount, payloadLength := integrationRegionEntry(t, root, key)
+	payload := data[payloadOffset : payloadOffset+payloadLength]
+	decodedLength := binary.LittleEndian.Uint32(payload[36:])
+	compressedLength := binary.LittleEndian.Uint32(payload[40:])
+	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logical, err := decoder.DecodeAll(payload[44:44+compressedLength], make([]byte, 0, decodedLength))
+	decoder.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.LittleEndian.PutUint32(logical[4:], schema)
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderCRC(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed := encoder.EncodeAll(logical, nil)
+	encoder.Close()
+	next := append([]byte(nil), payload[:44]...)
+	binary.LittleEndian.PutUint32(next[8:], schema)
+	binary.LittleEndian.PutUint32(next[36:], uint32(len(logical)))
+	binary.LittleEndian.PutUint32(next[40:], uint32(len(compressed)))
+	next = append(next, compressed...)
+	if len(next) > sectorCount*4096 {
+		t.Fatalf("v%d 测试 payload=%d，超过 extent=%d", schema, len(next), sectorCount*4096)
+	}
+	clear(data[payloadOffset : payloadOffset+sectorCount*4096])
+	copy(data[payloadOffset:], next)
+	binary.LittleEndian.PutUint32(data[entryOffset+8:], uint32(len(next)))
+	binary.LittleEndian.PutUint32(data[entryOffset+20:], crc32.Checksum(next, crc32.MakeTable(crc32.Castagnoli)))
+	bank := data[bankOffset : bankOffset+7*4096]
+	binary.LittleEndian.PutUint32(bank[60:], 0)
+	binary.LittleEndian.PutUint32(bank[60:], crc32.Checksum(bank, crc32.MakeTable(crc32.Castagnoli)))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func integrationStoredChunkSchema(t *testing.T, root string, key core.ChunkKey) uint32 {
+	t.Helper()
+	data, _, _, _, payloadOffset, _, payloadLength := integrationRegionEntry(t, root, key)
+	if payloadLength < 12 {
+		t.Fatalf("区块 payload 过短: %d", payloadLength)
+	}
+	return binary.LittleEndian.Uint32(data[payloadOffset+8:])
+}
+
+func integrationRegionEntry(
+	t *testing.T,
+	root string,
+	key core.ChunkKey,
+) (data []byte, path string, bankOffset, entryOffset, payloadOffset, sectorCount, payloadLength int) {
+	t.Helper()
+	region, slot := storage.RegionFor(key)
+	path = filepath.Join(root, "dimensions", fmt.Sprint(region.Dimension), "regions", fmt.Sprintf("r.%d.%d.region", region.X, region.Z))
+	var err error
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bestGeneration := uint64(0)
+	for _, start := range []int{1 * 4096, 8 * 4096} {
+		entry := start + 64 + slot*24
+		offset := int(binary.LittleEndian.Uint32(data[entry:])) * 4096
+		generation := binary.LittleEndian.Uint64(data[start+24:])
+		if offset == 0 || generation < bestGeneration {
+			continue
+		}
+		bestGeneration = generation
+		bankOffset = start
+		entryOffset = entry
+		payloadOffset = offset
+		sectorCount = int(binary.LittleEndian.Uint32(data[entry+4:]))
+		payloadLength = int(binary.LittleEndian.Uint32(data[entry+8:]))
+	}
+	if payloadOffset == 0 || payloadLength == 0 {
+		t.Fatalf("区块 %+v 没有活动 region entry", key)
+	}
+	return
 }
