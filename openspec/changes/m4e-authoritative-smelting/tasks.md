@@ -63,10 +63,10 @@
 
 ## 9. scenario v9 与兼容文档
 
-- [ ] 9.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：benchmark 报告标记 v9；默认 v8→v9 比较被拒绝；错误的迁移参数被拒绝；显式 `8:9` 执行完整性与绝对门禁并跳过相对回归；v9 缺字段被拒绝；v9 同场景 Memory/TCP 仍执行跨 transport 比较。
-- [ ] 9.2 把 benchmark 场景版本升为 9 并让 `cmd/perfcheck` 只接受显式 `8:9` 升级，阈值、稳定指标与 M2 基线路径保持不变。
-- [ ] 9.3 更新 `README.md`、`docs/notes/lan-server.md` 与 `docs/notes/perf-baseline.md`，说明矿石分布、熔炉操作与统一 `0..38` 界面、协议 v7、玩家 schema v3、区块 schema v4 与 v1-v3 迁移、备份与回退要求、scenario v9 升级以及未实现范围；文档使用中文。
-- [ ] 9.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/client -race -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 升级 benchmark scenario v9`，然后自动进入第 10 组。
+- [x] 9.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：benchmark 报告标记 v9；默认 v8→v9 比较被拒绝；错误的迁移参数被拒绝；显式 `8:9` 执行完整性与绝对门禁并跳过相对回归；v9 缺字段被拒绝；v9 同场景 Memory/TCP 仍执行跨 transport 比较。
+- [x] 9.2 把 benchmark 场景版本升为 9 并让 `cmd/perfcheck` 只接受显式 `8:9` 升级，阈值、稳定指标与 M2 基线路径保持不变。
+- [x] 9.3 更新 `README.md`、`docs/notes/lan-server.md` 与 `docs/notes/perf-baseline.md`，说明矿石分布、熔炉操作与统一 `0..38` 界面、协议 v7、玩家 schema v3、区块 schema v4 与 v1-v3 迁移、备份与回退要求、scenario v9 升级以及未实现范围；文档使用中文。
+- [x] 9.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/client -race -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 升级 benchmark scenario v9`，然后自动进入第 10 组。
 
 ## 10. 一次性 M5 scenario v9 性能基线
 

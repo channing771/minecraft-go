@@ -1,5 +1,17 @@
 # 性能基线
 
+## M4E scenario v9 升级规则
+
+M4E 在固定种子世界中加入煤矿与铁矿，因此 benchmark 报告的 `scenario_version` 从 8 升为 9。帧率、tick、RSS、队列、2048 个 GPU 完成样本及 20% 退化阈值都保持不变。无后缀的 M2 scenario v6 基线与 `perf-baseline-m5.json` 中的 M5 scenario v8 基线都保持冻结，不得与 v9 静默混比。
+
+当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 8:9`。迁移比较仍验证完整性、来源信息、同硬件与当前报告的全部绝对门禁，但会跳过跨场景的相对退化判定；反向、跳级、其他参数或默认 v8→v9 比较都被拒绝。生成 v9 Memory 报告后先执行：
+
+```sh
+go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/mcgo-m5-v9-memory.json --max-regression 0.20 --allow-scenario-upgrade 8:9
+```
+
+只有该步通过时，才用同硬件、同 v9 的 Memory 报告比较 TCP 报告，恢复跨 transport 相对门禁。本文后续的 `5:6` 历史命令只记录它们在当时提交上的审计轨迹，不代表当前工具仍接受该参数。
+
 > 审计状态（2026-08-03）：下列 Task 7A/8 产物与哈希均原样保留，但后续代码评审发现当时的 `perfcheck` 未覆盖全部 v6 生产者绝对门禁与核心报告完整性。其“通过”只描述历史命令在对应旧提交上的输出，不能单独证明修复后的校验器或关闭 Task 17。修复 checkpoint 后已重新取得用户明确授权，并完成本文末尾的 repaired-checker formal validation；最终完成状态以该段及 closure gate 为准。
 
 ## 历史正式执行审计轨迹
