@@ -42,6 +42,9 @@
 
 ## 6. 最终门禁与阶段收尾
 
-- [ ] 6.1 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`；`gofmt -l .` 必须无输出，且不得启动或聚焦游戏窗口。
-- [ ] 6.2 执行 `openspec validate --all --strict --no-interactive`、`git diff --check`，核对 proposal、4 份 delta specs、design 与实现一致，确认协议 v6、区块 schema v3 和性能基线均未被放宽或静默覆盖。
-- [ ] 6.3 只暂存 M4D 实现、测试、中文文档和本文件勾选，排除 `midscene_run/`；提交 `chore: 关闭 M4D 权威合成`，停止实现并等待主规格同步、归档与推送指令。
+- [x] 6.1 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`；`gofmt -l .` 必须无输出，且不得启动或聚焦游戏窗口。
+  - 2026-08-04T03:11:20-0700 PDT fresh GVM Go 1.26.0：`go test ./... -race -count=1` exit 0；随后 `go vet ./...` exit 0、`go test ./internal/archcheck -count=1` 输出 `ok   minecraft-go/internal/archcheck` 且 exit 0、`gofmt -l .` 无输出且 exit 0。未启动或聚焦游戏窗口。
+- [x] 6.2 执行 `openspec validate --all --strict --no-interactive`、`git diff --check`，核对 proposal、4 份 delta specs、design 与实现一致，确认协议 v6、区块 schema v3 和性能基线均未被放宽或静默覆盖。
+  - 2026-08-04T03:12:13-0700 PDT fresh：`openspec validate --all --strict --no-interactive` 输出 `Totals: 8 passed, 0 failed`；`git diff --check` exit 0、无输出。`rg` 确认 `network.ProtocolVersion = 6`、`currentChunkSchema = 3`、scenario v8 与 20% 阈值仍在；`git diff --quiet main...HEAD -- docs/notes/perf-baseline-m5.json` exit 0。两份不可变 M4D 报告 SHA-256 仍为 Memory `a878195ac2e37bf5d1fe19cc67b833fcd7371073586d768f7cdf6834b2e84d95`、TCP `7ecac884c4a4a5c8853ff5223b862e32c7059e67ff580c18b332d75181c5e14e`。
+- [x] 6.3 只暂存 M4D 实现、测试、中文文档和本文件勾选，排除 `midscene_run/`；提交 `chore: 关闭 M4D 权威合成`，停止实现并等待主规格同步、归档与推送指令。
+  - 2026-08-04T03:12:13-0700 PDT GitNexus 与 `detect_changes` 不可用（`command -v detect_changes` 无输出）；fallback `git diff --stat main...HEAD`、`git diff --name-status main...HEAD`、`git diff --check`、`rg` 与 `git status --short` 确认该收尾提交仅包含本文件，且未暂存或纳入 `midscene_run/`。
