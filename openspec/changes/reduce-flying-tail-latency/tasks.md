@@ -1,8 +1,8 @@
 ## 1. 性能场景 v7 兼容
 
-- [ ] 1.1 在 `cmd/perfcheck` 先补充失败测试，覆盖 v7 同版本比较、未授权 v6/v7 拒绝、显式 `6:7` 同硬件迁移与跨硬件拒绝。
-- [ ] 1.2 最小扩展场景完整性校验和迁移参数，不修改现有阈值、v5/v6 行为或报告 schema。
-- [ ] 1.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/perfcheck -race -count=1'`，提交本组。
+- [x] 1.1 在 `cmd/perfcheck` 先补充失败测试，覆盖 v7 同版本比较、未授权 v6/v7 拒绝、显式 `6:7` 同硬件迁移与跨硬件拒绝。
+- [x] 1.2 最小扩展场景完整性校验和迁移参数，不修改现有阈值、v5/v6 行为或报告 schema。
+- [x] 1.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/perfcheck -race -count=1'`，提交本组。
 
 ## 2. 有界 benchmark 帧工作
 

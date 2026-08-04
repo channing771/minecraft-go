@@ -17,7 +17,7 @@ func main() {
 	baselinePath := flag.String("baseline", "", "基线 JSON")
 	currentPath := flag.String("current", "", "当前 JSON")
 	maxRegression := flag.Float64("max-regression", 0.20, "允许的最大相对退化")
-	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 5:6 场景迁移")
+	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 5:6 或 6:7 场景迁移")
 	flag.Parse()
 
 	if *baselinePath == "" || *currentPath == "" {
@@ -42,7 +42,7 @@ func main() {
 
 func comparisonSuccessMessage(baselineVersion, currentVersion int) string {
 	if baselineVersion != currentVersion {
-		return "场景迁移验证通过：报告完整、硬件一致且当前 v6 绝对门禁通过"
+		return fmt.Sprintf("场景迁移验证通过：报告完整、硬件一致且当前 v%d 绝对门禁通过", currentVersion)
 	}
 	return "同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过"
 }
@@ -62,8 +62,9 @@ func compareReportsWithScenarioUpgrade(
 	allowScenarioUpgrade string,
 ) ([]string, error) {
 	scenarioUpgrade := baseline.ScenarioVersion != current.ScenarioVersion
-	if scenarioUpgrade &&
-		!(baseline.ScenarioVersion == 5 && current.ScenarioVersion == 6 && allowScenarioUpgrade == "5:6") {
+	allowedScenarioUpgrade := baseline.ScenarioVersion == 5 && current.ScenarioVersion == 6 && allowScenarioUpgrade == "5:6" ||
+		baseline.ScenarioVersion == 6 && current.ScenarioVersion == 7 && allowScenarioUpgrade == "6:7"
+	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(
 			"scenario_version 不同：基线=%d 当前=%d",
 			baseline.ScenarioVersion,
@@ -114,8 +115,8 @@ func compareReportsWithScenarioUpgrade(
 	if scenarioUpgrade {
 		return failures, nil
 	}
-	v6Pair := baseline.ScenarioVersion == 6 && current.ScenarioVersion == 6
-	crossTransportV6 := v6Pair && baseline.Transport != current.Transport
+	stablePair := baseline.ScenarioVersion >= 6 && baseline.ScenarioVersion == current.ScenarioVersion
+	crossTransportStable := stablePair && baseline.Transport != current.Transport
 	for _, metric := range []struct {
 		name              string
 		baseline, current float64
@@ -125,8 +126,8 @@ func compareReportsWithScenarioUpgrade(
 	} {
 		failures = appendRegression(failures, "", metric.name, metric.baseline, metric.current, maxRegression)
 	}
-	if v6Pair {
-		if !crossTransportV6 {
+	if stablePair {
+		if !crossTransportStable {
 			failures = appendStableSummaryRegressions(
 				failures,
 				"ticks",
@@ -155,7 +156,7 @@ func compareReportsWithScenarioUpgrade(
 		)
 	}
 	if baseline.Persistence.Snapshots > 0 && current.Persistence.Snapshots > 0 {
-		if v6Pair {
+		if stablePair {
 			failures = appendStableSummaryRegressions(
 				failures,
 				"persistence",
@@ -202,7 +203,7 @@ func compareReportsWithScenarioUpgrade(
 		)
 	}
 	if baseline.PlayerPersistence.Snapshots > 0 && current.PlayerPersistence.Snapshots > 0 {
-		if v6Pair {
+		if stablePair {
 			failures = appendM3BStableLatencyRegressions(
 				failures,
 				"player_persistence",
@@ -230,13 +231,13 @@ func compareReportsWithScenarioUpgrade(
 			)
 		}
 	}
-	if v6Pair {
+	if stablePair {
 		failures = appendV6MultiplayerRegressions(
 			failures,
 			baseline.Multiplayer,
 			current.Multiplayer,
 			maxRegression,
-			!crossTransportV6,
+			!crossTransportStable,
 		)
 	}
 	phaseNames := make([]string, 0, len(baseline.Phases))
@@ -251,7 +252,7 @@ func compareReportsWithScenarioUpgrade(
 			failures = append(failures, fmt.Sprintf("当前报告缺少阶段 %q", name))
 			continue
 		}
-		if v6Pair {
+		if stablePair {
 			failures = appendStableSummaryRegressions(
 				failures,
 				name,

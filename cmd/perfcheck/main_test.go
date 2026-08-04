@@ -285,6 +285,34 @@ func TestPerfcheckMultiplayerScenarioUpgradeAndProvenanceRules(t *testing.T) {
 	}
 }
 
+func TestPerfcheckV7ScenarioRules(t *testing.T) {
+	v6 := completeV6ComparableReport("memory")
+	v7 := completeV7ComparableReport("memory")
+
+	if _, err := compareReports(v6, v7, 0.20); err == nil || !strings.Contains(err.Error(), "scenario_version") {
+		t.Fatalf("default 6:7 comparison error=%v", err)
+	}
+	migrationCurrent := completeV7ComparableReport("memory")
+	migrationCurrent.LoadSeconds *= 2
+	if failures, err := compareReportsWithScenarioUpgrade(v6, migrationCurrent, 0.20, "6:7"); err != nil || len(failures) != 0 {
+		t.Fatalf("explicit 6:7 migration failures=%v error=%v", failures, err)
+	}
+	sameScenarioCurrent := completeV7ComparableReport("memory")
+	still := sameScenarioCurrent.Phases["still"]
+	still.MaxMS *= 2
+	sameScenarioCurrent.Phases["still"] = still
+	if failures, err := compareReports(v7, sameScenarioCurrent, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v7 same-scenario failures=%v error=%v", failures, err)
+	}
+
+	crossHardware := v7
+	crossHardware.Hardware = "different"
+	if _, err := compareReportsWithScenarioUpgrade(v6, crossHardware, 0.20, "6:7"); err == nil ||
+		!strings.Contains(err.Error(), "硬件标识不同") {
+		t.Fatalf("cross-hardware 6:7 migration error=%v", err)
+	}
+}
+
 func TestPerfcheckScenarioUpgradeSkipsRelativeRegressions(t *testing.T) {
 	baseline := completeV5ComparableReport("memory")
 	baseline.Persistence = client.PersistenceSummary{
@@ -765,6 +793,12 @@ func completeV6ComparableReport(transport string) client.PerfReport {
 	still.Frames = 1000
 	report.Phases["still"] = still
 	report.Phases["flying"] = report.Phases["still"]
+	return report
+}
+
+func completeV7ComparableReport(transport string) client.PerfReport {
+	report := completeV6ComparableReport(transport)
+	report.ScenarioVersion = 7
 	return report
 }
 
