@@ -1589,3 +1589,69 @@ func TestApplicationItemDropMirrorResetsWithSession(t *testing.T) {
 		t.Fatalf("关闭会话后镜像 = %+v，想要为空", got)
 	}
 }
+
+func TestInventoryTwoClicksSendOneMoveRequest(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld, Position: mgl32.Vec3{0.5, 10, 0.5},
+		OnGround: true, Ready: true, Reset: true,
+	})
+	app.drainServerMessages(1)
+	app.setInventoryOpen(true)
+
+	width, height := uint32(1280), uint32(720)
+	sourceX, sourceY := inventorySlotCenter(t, 1, width, height)
+	targetX, targetY := inventorySlotCenter(t, 30, width, height)
+
+	app.clickInventorySlot(sourceX, sourceY, width, height)
+	if app.inventorySource != 1 {
+		t.Fatalf("首次点击来源 = %d，想要 1", app.inventorySource)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+
+	app.clickInventorySlot(targetX, targetY, width, height)
+	if app.inventorySource != -1 {
+		t.Fatalf("第二次点击后来源未清除: %d", app.inventorySource)
+	}
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	if got, ok := message.(network.MoveInventoryStack); !ok || got.From != 1 || got.To != 30 {
+		t.Fatalf("移动请求 = %#v，想要 1 → 30", message)
+	}
+}
+
+func TestInventoryClickOutsideSlotsDoesNothing(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	app.setInventoryOpen(true)
+	app.clickInventorySlot(0, 0, 1280, 720)
+	if app.inventorySource != -1 {
+		t.Fatalf("界外点击记录了来源: %d", app.inventorySource)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+}
+
+func TestInventoryCloseClearsSourceAndRecapturesCursor(t *testing.T) {
+	app, _ := newInteractiveTestApplication(t)
+	app.setInventoryOpen(true)
+	width, height := uint32(1280), uint32(720)
+	x, y := inventorySlotCenter(t, 5, width, height)
+	app.clickInventorySlot(x, y, width, height)
+
+	app.setInventoryOpen(false)
+	if app.inventoryOpen || app.inventorySource != -1 {
+		t.Fatalf("关闭后 open=%v source=%d", app.inventoryOpen, app.inventorySource)
+	}
+}
+
+func inventorySlotCenter(t *testing.T, slot int, width, height uint32) (float64, float64) {
+	t.Helper()
+	for x := range int(width) {
+		for y := range int(height) {
+			got, ok := render.InventorySlotAt(float64(x), float64(y), width, height)
+			if ok && int(got) == slot {
+				return float64(x), float64(y)
+			}
+		}
+	}
+	t.Fatalf("找不到栏位 %d 的像素", slot)
+	return 0, 0
+}

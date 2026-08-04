@@ -35,10 +35,10 @@
 
 ## 6. E 键输入与应用接线
 
-- [ ] 6.1 在 `internal/client`、`cmd/mcgo` 先写 headless 失败测试，覆盖 `E` 上升沿、打开释放鼠标、两次有效点击只发一次请求、界外点击无效、未确认不预测、`E`/`Escape` 关闭清选并重新捕获、断线/维度 reset，以及打开期间抑制所有游戏操作。
-- [ ] 6.2 增加 `KeyE` 映射和应用的 open/source 两个字段；用 `render.InventorySlotAt` 路由点击，打开时立即并持续发送中性移动输入，不发送视角、挖掘、放置或数字键选择，关闭后恢复原交互。
-- [ ] 6.3 把 InventoryMirror 同时接入快捷栏 HUD 和背包 overlay；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/render ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，测试不得启动或聚焦游戏窗口，并确认 `git diff --check` 通过。
-- [ ] 6.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 接入背包输入交互`。提交成功后自动进入第 7 组。
+- [x] 6.1 在 `internal/client`、`cmd/mcgo` 先写 headless 失败测试，覆盖 `E` 上升沿、打开释放鼠标、两次有效点击只发一次请求、界外点击无效、未确认不预测、`E`/`Escape` 关闭清选并重新捕获、断线/维度 reset，以及打开期间抑制所有游戏操作。
+- [x] 6.2 增加 `KeyE` 映射和应用的 open/source 两个字段；用 `render.InventorySlotAt` 路由点击，打开时立即并持续发送中性移动输入，不发送视角、挖掘、放置或数字键选择，关闭后恢复原交互。
+- [x] 6.3 把 InventoryMirror 同时接入快捷栏 HUD 和背包 overlay；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/render ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，测试不得启动或聚焦游戏窗口，并确认 `git diff --check` 通过。
+- [x] 6.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 接入背包输入交互`。提交成功后自动进入第 7 组。
 
 ## 7. 重启闭环、文档与最终门禁
 

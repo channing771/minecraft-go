@@ -180,20 +180,26 @@ func runInteractive(app *application) error {
 
 		escapeDown := app.window.KeyDown(client.KeyEscape)
 		if escapeDown && !escapeWasDown {
-			app.window.SetCursorCaptured(false)
+			// 背包打开时 Escape 只关闭背包并重新捕获鼠标。
+			if app.inventoryOpen {
+				app.setInventoryOpen(false)
+				lastMouseX, lastMouseY = app.window.CursorPos()
+			} else {
+				app.window.SetCursorCaptured(false)
+			}
 		}
 		escapeWasDown = escapeDown
 
 		clickDown := app.window.PrimaryButtonDown()
 		justCaptured := false
-		if clickDown && !clickWasDown && !app.window.CursorCaptured() {
+		if clickDown && !clickWasDown && !app.window.CursorCaptured() && !app.inventoryOpen {
 			app.window.SetCursorCaptured(true)
 			lastMouseX, lastMouseY = app.window.CursorPos()
 			justCaptured = true
 		}
 		clickWasDown = clickDown
 		captured := app.window.CursorCaptured()
-		if captured && !justCaptured {
+		if captured && !justCaptured && !app.inventoryOpen {
 			mouseX, mouseY := app.window.CursorPos()
 			app.camera.Rotate(
 				float32(mouseX-lastMouseX)*0.002,
@@ -203,7 +209,21 @@ func runInteractive(app *application) error {
 		}
 
 		number := pressedHotbarNumber(app.window)
-		actions := input.Update(clickDown, app.window.SecondaryButtonDown(), number)
+		actions := input.Update(
+			clickDown, app.window.SecondaryButtonDown(), number,
+			app.window.KeyDown(client.KeyE), app.inventoryOpen,
+		)
+		if actions.ToggleInventory {
+			app.setInventoryOpen(!app.inventoryOpen)
+			if !app.inventoryOpen {
+				lastMouseX, lastMouseY = app.window.CursorPos()
+			}
+		}
+		if app.inventoryOpen && actions.Click {
+			width, height := app.framebufferSize()
+			cursorX, cursorY := app.window.CursorPos()
+			app.clickInventorySlot(cursorX, cursorY, uint32(width), uint32(height))
+		}
 
 		movement := client.MovementFromKeys(
 			app.window.KeyDown(client.KeyW),
@@ -212,6 +232,10 @@ func runInteractive(app *application) error {
 			app.window.KeyDown(client.KeyD),
 			app.window.KeyDown(client.KeySpace),
 		)
+		if app.inventoryOpen {
+			// 界面打开时持续发送中性输入，避免服务端沿用上一帧移动。
+			movement = client.Movement{}
+		}
 		app.applyInteractiveCursorInput(dt, movement, actions, captured, justCaptured)
 		app.remotePlayers.Advance(dt)
 		if _, err := app.renderFrame(64); err != nil {

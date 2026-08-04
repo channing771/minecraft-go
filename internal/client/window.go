@@ -32,6 +32,7 @@ const (
 	Key7
 	Key8
 	Key9
+	KeyE
 )
 
 var glfwKeys = [...]glfw.Key{
@@ -52,6 +53,7 @@ var glfwKeys = [...]glfw.Key{
 	Key7:           glfw.Key7,
 	Key8:           glfw.Key8,
 	Key9:           glfw.Key9,
+	KeyE:           glfw.KeyE,
 }
 
 // Window 封装 GLFW 窗口、输入和原生句柄。

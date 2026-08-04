@@ -811,6 +811,8 @@ func (a *application) closeClientSession(cause error) {
 			a.remotePlayers.Reset()
 		}
 		a.inventory.Reset()
+		a.inventoryOpen = false
+		a.inventorySource = -1
 		a.itemDrops.Reset()
 	})
 }
@@ -1120,6 +1122,41 @@ func (a *application) placeBlock() {
 		Slot:     hotbar.Selected,
 	}); err != nil {
 		log.Printf("发送放置命令失败: %v", err)
+	}
+}
+
+// setInventoryOpen 切换背包界面：打开释放鼠标并清除来源，关闭恢复捕获。
+func (a *application) setInventoryOpen(open bool) {
+	a.inventoryOpen = open
+	a.inventorySource = -1
+	if a.window != nil {
+		a.window.SetCursorCaptured(!open)
+	}
+	if open {
+		// 立即发送一次中性输入，清除服务端保留的上一帧移动。
+		a.applyInteractiveInput(0, client.Movement{}, client.Actions{}, false)
+	}
+}
+
+// clickInventorySlot 用两次有效点击组成一次整堆移动请求；界外点击无效。
+func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height uint32) {
+	slot, ok := render.InventorySlotAt(cursorX, cursorY, width, height)
+	if !ok {
+		return
+	}
+	if a.inventorySource < 0 {
+		a.inventorySource = int(slot)
+		return
+	}
+	from := uint8(a.inventorySource)
+	a.inventorySource = -1
+	if from == slot {
+		return
+	}
+	if err := a.send(network.MoveInventoryStack{
+		Sequence: a.nextSequence(), From: from, To: slot,
+	}); err != nil {
+		log.Printf("发送背包移动失败: %v", err)
 	}
 }
 
