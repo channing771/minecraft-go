@@ -23,7 +23,7 @@ scenario v7 的 `remote_gpu_complete` 文档声称测量 `Submit + Device.Poll(t
 
 ## Impact
 
-- 受影响代码：`cmd/mcgo/benchmark.go`、`cmd/mcgo/multiplayer_benchmark.go`、`cmd/perfcheck` 及对应测试；不改变游戏协议、存档、权威 tick、交互渲染或第三方依赖。
+- 受影响代码：`internal/client/perf.go`、`cmd/mcgo/benchmark.go`、`cmd/mcgo/multiplayer_benchmark.go`、`cmd/perfcheck` 及对应测试；不改变游戏协议、存档、权威 tick、交互渲染或第三方依赖。
 - 受影响文档：`docs/notes/perf-baseline-m5.json`、`docs/notes/perf-baseline-m5.md`、相关 OpenSpec 主规格，以及 M4D 的性能验收任务。
 - 性能影响：正式 benchmark 增加约 1792 次离屏远端角色/昵称提交，预计只增加数秒离线验证时间；交互客户端和服务端运行时不受影响。
 - 兼容性：v6/v7 JSON 仍可读取和校验，但不能与 v8 进行未授权的相对比较；M2 scenario v6 基线内容和路径不变。
