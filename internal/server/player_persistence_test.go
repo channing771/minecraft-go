@@ -1238,7 +1238,9 @@ func TestPlayerPersistenceWorkerDoesNotHoldCacheMutexDuringStoreSave(t *testing.
 	p := newPlayerPersistence(store, playerPersistenceTestConfig())
 	t.Cleanup(p.CloseWorker)
 	mutexFree := make(chan bool, 1)
+	observeReturned := make(chan struct{})
 	store.setOnSave(func() {
+		<-observeReturned
 		if p.mu.TryLock() {
 			p.mu.Unlock()
 			mutexFree <- true
@@ -1252,6 +1254,7 @@ func TestPlayerPersistenceWorkerDoesNotHoldCacheMutexDuringStoreSave(t *testing.
 	if err := p.Observe(id, "A", testPlayerSnapshot(10), 0, true); err != nil {
 		t.Fatal(err)
 	}
+	close(observeReturned)
 	_ = receivePlayerSave(t, store)
 	select {
 	case free := <-mutexFree:
