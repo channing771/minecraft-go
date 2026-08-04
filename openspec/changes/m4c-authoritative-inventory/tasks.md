@@ -42,11 +42,11 @@
 
 ## 7. 重启闭环、文档与最终门禁
 
-- [ ] 7.1 在 `internal/server` 增加 DiskStore 重启纵向测试：v2 玩家迁移、掉落物跨快捷栏/背包拾取、跨区移动/交换、正常刷新和多身份乱序重连必须恢复相同完整物品状态，保存失败保持可重试。
-- [ ] 7.2 在 `internal/core`、`internal/network`、`internal/storage`、`internal/sim`、`internal/client`、`internal/render` 增加 36 格 Add/Move、完整状态 codec、玩家 v3 codec、8 玩家拾取/发布、满界面微基准或 allocation 门禁；不得放宽既有阈值。
-- [ ] 7.3 更新 `README.md` 与 `docs/notes/lan-server.md`：说明 `E` 背包操作、整堆规则、拾取优先级、协议 v5、玩家 schema v3/v2 迁移、备份/回退、可信 LAN 边界和未实现范围；文档使用中文。
-- [ ] 7.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/storage -run "^$" -fuzz FuzzDecodePlayer -fuzztime=10s'`，确认无 panic、无无界分配和失败语料。
-- [ ] 7.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/network ./internal/storage ./internal/sim ./internal/server ./internal/client ./internal/render -run "^$" -bench "Inventory|PlayerCodec|SmallPacketCodec|Hotbar" -benchmem -count=3'`，保存结果并只优化实测根因，不降低门禁。
-- [ ] 7.6 仅在能保证不聚焦窗口时运行固定 offscreen benchmark 并用 `cmd/perfcheck` 对已接受基线做同场景 20% 比较；否则明确记录跳过，不得改用前台测试或覆盖基线。
-- [ ] 7.7 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`；`gofmt -l .` 必须无输出，且 `midscene_run/` 保持未暂存。
-- [ ] 7.8 只暂存本组实现、测试、中文文档和本文件勾选；提交 `chore: 关闭 M4C 权威背包`。提交成功后停止实现，等待同步规格、归档和推送指令。
+- [x] 7.1 在 `internal/server` 增加 DiskStore 重启纵向测试：v2 玩家迁移、掉落物跨快捷栏/背包拾取、跨区移动/交换、正常刷新和多身份乱序重连必须恢复相同完整物品状态，保存失败保持可重试。
+- [x] 7.2 在 `internal/core`、`internal/network`、`internal/storage`、`internal/sim`、`internal/client`、`internal/render` 增加 36 格 Add/Move、完整状态 codec、玩家 v3 codec、8 玩家拾取/发布、满界面微基准或 allocation 门禁；不得放宽既有阈值。
+- [x] 7.3 更新 `README.md` 与 `docs/notes/lan-server.md`：说明 `E` 背包操作、整堆规则、拾取优先级、协议 v5、玩家 schema v3/v2 迁移、备份/回退、可信 LAN 边界和未实现范围；文档使用中文。
+- [x] 7.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/storage -run "^$" -fuzz FuzzDecodePlayer -fuzztime=10s'`，确认无 panic、无无界分配和失败语料。
+- [x] 7.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/network ./internal/storage ./internal/sim ./internal/server ./internal/client ./internal/render -run "^$" -bench "Inventory|PlayerCodec|SmallPacketCodec|Hotbar" -benchmem -count=3'`，保存结果并只优化实测根因，不降低门禁。
+- [x] 7.6 仅在能保证不聚焦窗口时运行固定 offscreen benchmark 并用 `cmd/perfcheck` 对已接受基线做同场景 20% 比较；否则明确记录跳过，不得改用前台测试或覆盖基线。
+- [x] 7.7 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race && go vet ./... && go test ./internal/archcheck -count=1 && gofmt -l .'`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`；`gofmt -l .` 必须无输出，且 `midscene_run/` 保持未暂存。
+- [x] 7.8 只暂存本组实现、测试、中文文档和本文件勾选；提交 `chore: 关闭 M4C 权威背包`。提交成功后停止实现，等待同步规格、归档和推送指令。

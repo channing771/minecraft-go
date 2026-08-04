@@ -286,7 +286,7 @@ func assertPlayerRestored(t *testing.T, host integrationHost, id core.PlayerID, 
 	t.Helper()
 	got := host.PlayerSnapshot(t, id)
 	if got.Current != want.Current || got.Yaw != want.Yaw || got.Pitch != want.Pitch ||
-		!equalIntegrationSafe(got.Safe, want.Safe) {
+		got.Inventory != want.Inventory || !equalIntegrationSafe(got.Safe, want.Safe) {
 		t.Fatalf("restored player=%+v, want %+v", got, want)
 	}
 }

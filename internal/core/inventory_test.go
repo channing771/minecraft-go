@@ -254,3 +254,27 @@ func TestInventoryMoveStackRejectsInvalidRequests(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkInventoryAddStack(b *testing.B) {
+	var inventory core.Inventory
+	for slot := range inventory.Hotbar.Slots {
+		inventory.Hotbar.Slots[slot] = core.ItemStack{
+			Item: core.ItemDirt, Count: core.MaxStackCount,
+		}
+	}
+	stack := core.ItemStack{Item: core.ItemStone, Count: 64}
+	b.ReportAllocs()
+	for b.Loop() {
+		inventory.AddStack(stack)
+	}
+}
+
+func BenchmarkInventoryMoveStack(b *testing.B) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 32}
+	inventory.Backpack[26] = core.ItemStack{Item: core.ItemGrass, Count: 32}
+	b.ReportAllocs()
+	for b.Loop() {
+		inventory.MoveStack(0, core.InventorySlots-1)
+	}
+}
