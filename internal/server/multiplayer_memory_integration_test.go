@@ -358,7 +358,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		}
 		clients[index] = &multiplayerTCPClient{
 			identity: identity, endpoint: endpoint, receiver: client.NewReceiver(endpoint, 4096),
-			mirror: client.NewMirror(), remotes: client.NewRemotePlayers(),
+			mirror: client.NewMirror(), drops: client.NewItemDrops(), remotes: client.NewRemotePlayers(),
 		}
 		connected := clients[index]
 		t.Cleanup(func() {
@@ -443,6 +443,9 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		drainMultiplayerClientsToTick(t, drainCtx, transport, clients, result.Tick)
 		drainCancel()
+		if tick == 49 {
+			assertMultiplayerMiningCompetition(t, transport, clients[:2])
+		}
 		if got := len(running.incoming); got != 0 {
 			t.Fatalf("%s tick %d ends with incoming=%d\n%s", transport, tick, got, multiplayerDiagnosticsMany(clients))
 		}
@@ -472,9 +475,6 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		}
 		outcome.MirrorHashes[index], outcome.MirrorRevision[index] = mirrorHash, revision
 	}
-	if ticks >= 49 {
-		assertMultiplayerMiningCompetition(t, transport, clients[:2])
-	}
 	copy(outcome.Transcript[:], combined.Sum(nil))
 	var ok bool
 	outcome.ChunkHash, outcome.ChunkRevision, ok = running.ChunkHash(key.Dimension, key.Pos)
@@ -498,10 +498,16 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 
 func assertMultiplayerMiningCompetition(t *testing.T, transport string, clients []*multiplayerTCPClient) {
 	t.Helper()
+	blockIndex, ok := world.ChunkBlockIndex(multiplayerManualTarget)
+	if !ok {
+		t.Fatal("多人采掘目标无区块索引")
+	}
+	var sharedDrop client.ItemDropPresentation
 	for index, connected := range clients {
 		progress := make([]uint16, 0, 29)
 		changes := 0
-		for _, event := range connected.transcript {
+		completionIndex := -1
+		for eventIndex, event := range connected.transcript {
 			switch message := event.message.(type) {
 			case network.PlayerState:
 				if message.MiningActive && message.MiningTarget == multiplayerManualTarget {
@@ -511,6 +517,7 @@ func assertMultiplayerMiningCompetition(t *testing.T, transport string, clients 
 				for _, change := range message.Changes {
 					if change.Position == multiplayerManualTarget && change.Block == core.AirID {
 						changes++
+						completionIndex = eventIndex
 					}
 				}
 			}
@@ -525,6 +532,64 @@ func assertMultiplayerMiningCompetition(t *testing.T, transport string, clients 
 		}
 		if changes != 1 {
 			t.Fatalf("%s 竞争玩家 %d 收到完成变更=%d，想要 1", transport, index, changes)
+		}
+		if completionIndex < 0 {
+			t.Fatalf("%s 竞争玩家 %d 缺少完成帧", transport, index)
+		}
+		upsertCount := 0
+		var completedDrop network.ItemDrop
+		foundInactive := false
+		for _, event := range connected.transcript[completionIndex+1:] {
+			switch message := event.message.(type) {
+			case network.ItemDropUpserts:
+				upsertCount++
+				if err := message.Validate(); err != nil {
+					t.Fatalf("%s 竞争玩家 %d ItemDropUpserts 非法: %v", transport, index, err)
+				}
+				if len(message.Drops) != 1 {
+					t.Fatalf("%s 竞争玩家 %d 完成帧掉落数=%d，想要 1", transport, index, len(message.Drops))
+				}
+				completedDrop = message.Drops[0]
+			case network.PlayerState:
+				if err := message.Validate(); err != nil {
+					t.Fatalf("%s 竞争玩家 %d 完成 PlayerState 非法: %v", transport, index, err)
+				}
+				if canonicalMiningState(message) != (miningTranscriptEntry{}) {
+					t.Fatalf("%s 竞争玩家 %d 完成状态不规范: %+v", transport, index, message)
+				}
+				foundInactive = true
+			}
+			if foundInactive {
+				break
+			}
+		}
+		if !foundInactive || upsertCount != 1 {
+			t.Fatalf("%s 竞争玩家 %d 完成帧 inactive=%t upserts=%d，想要 true/1",
+				transport, index, foundInactive, upsertCount)
+		}
+		if completedDrop.BlockIndex != blockIndex || completedDrop.Item != core.ItemStone || completedDrop.Count != 1 {
+			t.Fatalf("%s 竞争玩家 %d 掉落内容不匹配: %+v", transport, index, completedDrop)
+		}
+		presentations := connected.drops.Presentations()
+		if len(presentations) != 1 {
+			t.Fatalf("%s 竞争玩家 %d 掉落镜像数=%d，想要 1: %+v", transport, index, len(presentations), presentations)
+		}
+		presentation := presentations[0]
+		if presentation.ID != completedDrop.ID || presentation.BlockIndex != completedDrop.BlockIndex ||
+			presentation.Item != completedDrop.Item || presentation.Count != completedDrop.Count {
+			t.Fatalf("%s 竞争玩家 %d 掉落镜像未收敛: mirror=%+v upsert=%+v",
+				transport, index, presentation, completedDrop)
+		}
+		if canonicalMiningState(connected.local) != (miningTranscriptEntry{}) {
+			t.Fatalf("%s 竞争玩家 %d 本地状态不规范: %+v", transport, index, connected.local)
+		}
+		if err := connected.local.Validate(); err != nil {
+			t.Fatalf("%s 竞争玩家 %d 本地状态非法: %v", transport, index, err)
+		}
+		if index == 0 {
+			sharedDrop = presentation
+		} else if presentation != sharedDrop {
+			t.Fatalf("%s 竞争客户端掉落物不一致: first=%+v player%d=%+v", transport, sharedDrop, index, presentation)
 		}
 	}
 }

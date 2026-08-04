@@ -33,6 +33,7 @@ type multiplayerTCPClient struct {
 	endpoint        network.ClientEndpoint
 	receiver        *client.Receiver
 	mirror          *client.Mirror
+	drops           *client.ItemDrops
 	remotes         *client.RemotePlayers
 	local           network.PlayerState
 	transcript      []multiplayerEvent
@@ -435,7 +436,8 @@ func task16CleanupProbeClient(name string) *multiplayerTCPClient {
 	clientEndpoint, _ := network.NewMemoryPair(1)
 	return &multiplayerTCPClient{
 		identity: network.Identity{DisplayName: name}, endpoint: clientEndpoint,
-		receiver: client.NewReceiver(clientEndpoint, 1), mirror: client.NewMirror(), remotes: client.NewRemotePlayers(),
+		receiver: client.NewReceiver(clientEndpoint, 1), mirror: client.NewMirror(), drops: client.NewItemDrops(),
+		remotes: client.NewRemotePlayers(),
 	}
 }
 
@@ -664,6 +666,10 @@ func drainOneTask16(connected *multiplayerTCPClient) (bool, error) {
 		if update.Resync != nil {
 			return true, fmt.Errorf("Mirror.Apply(%T) requested resync %+v", message, *update.Resync)
 		}
+	case network.ItemDropUpserts, network.ItemDropRemoves:
+		if err := connected.drops.Apply(message); err != nil {
+			return true, fmt.Errorf("ItemDrops.Apply(%T): %w", message, err)
+		}
 	case network.RemotePlayerSpawn, network.RemotePlayerStates, network.RemotePlayerDespawn:
 		if err := connected.remotes.Apply(message); err != nil {
 			return true, fmt.Errorf("RemotePlayers.Apply(%T): %w", message, err)
@@ -786,6 +792,7 @@ func connectMultiplayerTCPClient(
 		endpoint: endpoint,
 		receiver: client.NewReceiver(endpoint, 1024),
 		mirror:   client.NewMirror(),
+		drops:    client.NewItemDrops(),
 		remotes:  client.NewRemotePlayers(),
 	}, nil
 }
@@ -848,6 +855,10 @@ func (connected *multiplayerTCPClient) drainOne() (bool, error) {
 		}
 		if update.Rejected != nil {
 			return true, fmt.Errorf("command rejected: %+v", *update.Rejected)
+		}
+	case network.ItemDropUpserts, network.ItemDropRemoves:
+		if err := connected.drops.Apply(message); err != nil {
+			return true, fmt.Errorf("ItemDrops.Apply(%T): %w", message, err)
 		}
 	case network.RemotePlayerSpawn, network.RemotePlayerStates, network.RemotePlayerDespawn:
 		if err := connected.remotes.Apply(message); err != nil {

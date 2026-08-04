@@ -964,6 +964,99 @@ func TestMemoryTCPMiningConvergence(t *testing.T) {
 	}
 }
 
+func TestMiningCompletionOraclesRejectOrderDuplicatesAndMirrorDivergence(t *testing.T) {
+	target := core.BlockPos{X: 1, Y: 1, Z: -6}
+	blockIndex, ok := world.ChunkBlockIndex(target)
+	if !ok {
+		t.Fatal("测试目标没有区块索引")
+	}
+	delta := network.BlockChanges{
+		Dimension: core.Overworld, Chunk: target.Chunk(), BaseRevision: 1, NewRevision: 2,
+		Changes: []network.BlockChange{{Position: target, Block: core.AirID}},
+	}
+	upsert := network.ItemDropUpserts{ServerTick: 2, Drops: []network.ItemDrop{{
+		ID:         core.DropID{Dimension: core.Overworld, Chunk: target.Chunk(), Generation: 1},
+		BlockIndex: blockIndex, Item: core.ItemStone, Count: 1,
+	}}}
+	inactive := network.PlayerState{ServerTick: 2}
+	valid := []network.ServerMessage{delta, upsert, inactive}
+	tests := []struct {
+		name     string
+		messages []network.ServerMessage
+		wantErr  bool
+	}{
+		{name: "规范完成帧", messages: valid},
+		{name: "交换 BlockChanges 和 drop", messages: []network.ServerMessage{upsert, delta, inactive}, wantErr: true},
+		{name: "重复 drop upsert", messages: []network.ServerMessage{delta, upsert, upsert, inactive}, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateMiningCompletionFrame(test.messages, target)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("validateMiningCompletionFrame error=%v wantErr=%t", err, test.wantErr)
+			}
+		})
+	}
+	var hash [32]byte
+	hash[0] = 1
+	other := hash
+	other[0] = 2
+	if err := validateMiningMirrorConvergence(hash, 2, other, 2, true); err == nil {
+		t.Fatal("authority/mirror hash 偏离未被拒绝")
+	}
+}
+
+func validateMiningCompletionFrame(messages []network.ServerMessage, target core.BlockPos) error {
+	if len(messages) != 3 {
+		return fmt.Errorf("采掘完成帧消息数=%d，想要 3: %+v", len(messages), messages)
+	}
+	delta, ok := messages[0].(network.BlockChanges)
+	if !ok {
+		return fmt.Errorf("采掘完成帧第一条=%T，想要 BlockChanges", messages[0])
+	}
+	if err := delta.Validate(); err != nil {
+		return fmt.Errorf("采掘 BlockChanges 非法: %w", err)
+	}
+	if delta.Dimension != core.Overworld || delta.Chunk != target.Chunk() ||
+		len(delta.Changes) != 1 || delta.Changes[0] != (network.BlockChange{Position: target, Block: core.AirID}) {
+		return fmt.Errorf("采掘 BlockChanges 未精确破坏目标: %+v", delta)
+	}
+	upserts, ok := messages[1].(network.ItemDropUpserts)
+	if !ok {
+		return fmt.Errorf("采掘完成帧第二条=%T，想要 ItemDropUpserts", messages[1])
+	}
+	if err := upserts.Validate(); err != nil {
+		return fmt.Errorf("采掘 ItemDropUpserts 非法: %w", err)
+	}
+	blockIndex, indexed := world.ChunkBlockIndex(target)
+	if !indexed || len(upserts.Drops) != 1 || upserts.Drops[0].BlockIndex != blockIndex ||
+		upserts.Drops[0].Item != core.ItemStone || upserts.Drops[0].Count != 1 {
+		return fmt.Errorf("采掘掉落物不唯一或内容不匹配: %+v", upserts)
+	}
+	state, ok := messages[2].(network.PlayerState)
+	if !ok {
+		return fmt.Errorf("采掘完成帧第三条=%T，想要 PlayerState", messages[2])
+	}
+	if err := state.Validate(); err != nil {
+		return fmt.Errorf("采掘 PlayerState 非法: %w", err)
+	}
+	if state.ServerTick != upserts.ServerTick || canonicalMiningState(state) != (miningTranscriptEntry{}) {
+		return fmt.Errorf("采掘完成帧未以同 tick 规范非活动状态收尾: state=%+v upserts=%+v", state, upserts)
+	}
+	return nil
+}
+
+func validateMiningMirrorConvergence(authorityHash [32]byte, authorityRevision uint64, mirrorHash [32]byte, mirrorRevision uint64, loaded bool) error {
+	if !loaded {
+		return errors.New("采掘 mirror 未加载")
+	}
+	if mirrorHash != authorityHash || mirrorRevision != authorityRevision {
+		return fmt.Errorf("mirror/authority 未收敛: mirror=%x/%d authority=%x/%d",
+			mirrorHash, mirrorRevision, authorityHash, authorityRevision)
+	}
+	return nil
+}
+
 type miningTranscriptEntry struct {
 	Active        bool
 	Target        core.BlockPos
@@ -1085,23 +1178,31 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	state, _ = step(network.SelectHotbar{Sequence: 6, Slot: 1})
 	record(state)
 	const sideYaw = -0.16514868
+	sideTarget := core.BlockPos{X: 1, Y: 1, Z: -6}
+	var completionMessages []network.ServerMessage
 	for tick := 1; tick <= 8; tick++ {
 		var command network.ClientMessage
 		if tick == 1 {
 			command = network.PlayerInput{Sequence: 7, Yaw: sideYaw, Pitch: -0.2, Mining: true}
 		}
-		state, _ = step(command)
+		state, completionMessages = step(command)
 		record(state)
 		if tick < 8 && (!state.MiningActive || state.MiningProgressTicks != uint16(tick) ||
 			state.MiningRequiredTicks != 8 || !state.MiningHarvestable) {
 			t.Fatalf("%s 铁镐 tick %d = %+v", transport, tick, state)
 		}
 	}
+	if err := validateMiningCompletionFrame(completionMessages, sideTarget); err != nil {
+		t.Fatalf("%s 铁镐完成帧: %v", transport, err)
+	}
 	if state.MiningActive || len(drops.Presentations()) != 1 {
 		t.Fatalf("%s 铁镐完成 = state=%+v drops=%+v", transport, state, drops.Presentations())
 	}
 	state, _ = step(network.PlayerInput{Sequence: 8, Yaw: sideYaw, Pitch: -0.2})
 	result.FinalInactive = canonicalMiningState(state)
+	if result.FinalInactive != (miningTranscriptEntry{}) {
+		t.Fatalf("%s 最终非活动状态不规范: %+v", transport, result.FinalInactive)
+	}
 
 	host.mu.Lock()
 	active := *host.activeByPlayer[identity.PlayerID]
@@ -1112,9 +1213,15 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	}
 	result.InventoryHash = inventoryDigest(snapshot.Inventory)
 	result.DropHash = itemDropDigest(drops.Presentations())
-	result.ChunkHash, result.ChunkRevision, ok = host.world.ChunkHash(core.Overworld, core.ChunkPos{})
+	authorityHash, authorityRevision, ok := host.world.ChunkHash(core.Overworld, core.ChunkPos{})
 	if !ok {
 		t.Fatalf("%s 采掘 chunk hash 不可用", transport)
+	}
+	result.ChunkHash, result.ChunkRevision, ok = mirror.Hash(core.Overworld, core.ChunkPos{})
+	if err := validateMiningMirrorConvergence(
+		authorityHash, authorityRevision, result.ChunkHash, result.ChunkRevision, ok,
+	); err != nil {
+		t.Fatalf("%s 采掘镜像收敛: %v", transport, err)
 	}
 	state, _ = step(network.PlayerInput{Sequence: 9, Yaw: -sideYaw, Pitch: -0.2, Mining: true})
 	if !state.MiningActive {

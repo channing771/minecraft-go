@@ -168,20 +168,19 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 	}, func() bool { return selectedWrongTool })
 	sendClientMessage(t, clientEndpoint, network.PlayerInput{Sequence: 5, Pitch: -0.2, Mining: true})
 	wrongTool := make([]network.PlayerState, 0, 30)
-	sawBreak, sawDrop := false, false
+	var completionMessages []network.ServerMessage
 	for len(wrongTool) < 30 {
+		tickMessages := make([]network.ServerMessage, 0, 2)
 		state := nextMemoryMiningState(t, running, clientEndpoint, mirror, func(message network.ServerMessage) {
-			switch message.(type) {
-			case network.BlockChanges:
-				sawBreak = true
-			case network.ItemDropUpserts:
-				sawDrop = true
-			}
+			tickMessages = append(tickMessages, message)
 		})
 		if state.LastInputSequence < 5 {
 			continue
 		}
 		wrongTool = append(wrongTool, state)
+		if len(wrongTool) == 30 {
+			completionMessages = tickMessages
+		}
 	}
 	for index, state := range wrongTool[:29] {
 		want := uint16(index + 1)
@@ -189,9 +188,7 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 			t.Fatalf("错误工具进度[%d] = %+v", index, state)
 		}
 	}
-	if wrongTool[29].MiningActive || !sawBreak || sawDrop {
-		t.Fatalf("错误工具完成 = state=%+v break=%t drop=%t", wrongTool[29], sawBreak, sawDrop)
-	}
+	assertWrongToolMiningCompletionFrame(t, completionMessages, target)
 	if block, loaded := mirror.BlockAt(core.Overworld, target); !loaded || block != core.AirID {
 		t.Fatalf("错误工具完成后方块 = %d,%t", block, loaded)
 	}
@@ -213,6 +210,33 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("Memory 断线后采掘会话未清除")
 		}
+	}
+}
+
+func assertWrongToolMiningCompletionFrame(t *testing.T, messages []network.ServerMessage, target core.BlockPos) {
+	t.Helper()
+	if len(messages) != 2 {
+		t.Fatalf("错误工具完成帧消息数=%d，想要 2: %+v", len(messages), messages)
+	}
+	delta, ok := messages[0].(network.BlockChanges)
+	if !ok {
+		t.Fatalf("错误工具完成帧第一条=%T，想要 BlockChanges", messages[0])
+	}
+	if err := delta.Validate(); err != nil {
+		t.Fatalf("错误工具 BlockChanges 非法: %v", err)
+	}
+	if delta.Dimension != core.Overworld || delta.Chunk != target.Chunk() ||
+		len(delta.Changes) != 1 || delta.Changes[0] != (network.BlockChange{Position: target, Block: core.AirID}) {
+		t.Fatalf("错误工具未精确破坏目标: %+v", delta)
+	}
+	state, ok := messages[1].(network.PlayerState)
+	if !ok {
+		t.Fatalf("错误工具完成帧第二条=%T，想要 PlayerState", messages[1])
+	}
+	assertValidMiningPlayerState(t, state)
+	if state.MiningActive || state.MiningTarget != (core.BlockPos{}) || state.MiningProgressTicks != 0 ||
+		state.MiningRequiredTicks != 0 || state.MiningHarvestable {
+		t.Fatalf("错误工具完成帧未以规范非活动状态收尾: %+v", state)
 	}
 }
 
