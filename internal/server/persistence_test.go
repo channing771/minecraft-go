@@ -18,7 +18,8 @@ import (
 )
 
 // emptyChunkEstimateBytes 是全空区块的存档估算：512 信封 + 32 个固定掉落物槽。
-const emptyChunkEstimateBytes = 512 + core.DropsPerChunk*world.DropSlotBytes
+const emptyChunkEstimateBytes = 512 + core.DropsPerChunk*world.DropSlotBytes +
+	core.FurnacesPerChunk*world.FurnaceSlotBytes
 
 func TestAutosaveBeginsAtConfiguredTickWithoutBlockingStep(t *testing.T) {
 	store := newPersistenceTestStore()
