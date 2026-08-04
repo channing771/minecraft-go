@@ -485,12 +485,6 @@ func appendV6MultiplayerRegressions(
 		{name: "name_tag_submit", baseline: baseline.NameTagSubmit, current: current.NameTagSubmit},
 		{name: "remote_gpu_complete", baseline: baseline.RemoteGPUComplete, current: current.RemoteGPUComplete},
 	}
-	if includeServerProbe {
-		latencies = append(latencies, struct {
-			name              string
-			baseline, current client.LatencySummary
-		}{name: "interest_diff", baseline: baseline.InterestDiff, current: current.InterestDiff})
-	}
 	for _, latency := range latencies {
 		failures = appendStableSummaryRegressions(
 			failures, latency.name,

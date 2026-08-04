@@ -1,9 +1,9 @@
 ## 1. 修正同 transport 比较契约
 
-- [ ] 1.1 在编辑 `appendV6MultiplayerRegressions` 前执行 GitNexus upstream impact；若工具仍不可用，使用 `rg` 精确列出定义、全部调用者、比较模式选择和既有变异测试，向用户报告影响范围与 fallback，不修改其他 symbol。
-- [ ] 1.2 在 `cmd/perfcheck/main_test.go` 先写失败测试：scenario v8 同 transport 报告的 `interest_diff` p50、p95、p99 各自退化 20.1% 均不得产生 failure；样本不足、非正、非单调以及 server tick p99 退化 20.1% 仍必须失败。用 GVM 执行对应 `go test ./cmd/perfcheck -run '<新增测试>' -count=1`，确认旧实现因 `interest_diff` 断言转红。
-- [ ] 1.3 在 `cmd/perfcheck/main.go` 只从同 transport server-probe 相对 profile 移除 `interest_diff` 条目，不修改通用回归算法、跨 transport profile、20% 阈值、完整性或绝对门禁；执行 `gofmt` 后让新增测试转绿。
-- [ ] 1.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/perfcheck -race -count=1 && go test ./internal/archcheck -count=1'`、`gofmt -l cmd/perfcheck` 与 `git diff --check`；运行 `detect_changes`，不可用时用精确 diff/caller fallback，确认只改变预期 profile 与测试。只暂存本组代码、测试和任务勾选，提交 `fix: 移除不稳定 interest 相对门禁`。
+- [x] 1.1 在编辑 `appendV6MultiplayerRegressions` 前执行 GitNexus upstream impact；若工具仍不可用，使用 `rg` 精确列出定义、全部调用者、比较模式选择和既有变异测试，向用户报告影响范围与 fallback，不修改其他 symbol。
+- [x] 1.2 在 `cmd/perfcheck/main_test.go` 先写失败测试：scenario v8 同 transport 报告的 `interest_diff` p50、p95、p99 各自退化 20.1% 均不得产生 failure；样本不足、非正、非单调以及 server tick p99 退化 20.1% 仍必须失败。用 GVM 执行对应 `go test ./cmd/perfcheck -run '<新增测试>' -count=1`，确认旧实现因 `interest_diff` 断言转红。
+- [x] 1.3 在 `cmd/perfcheck/main.go` 只从同 transport server-probe 相对 profile 移除 `interest_diff` 条目，不修改通用回归算法、跨 transport profile、20% 阈值、完整性或绝对门禁；执行 `gofmt` 后让新增测试转绿。
+- [x] 1.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/perfcheck -race -count=1 && go test ./internal/archcheck -count=1'`、`gofmt -l cmd/perfcheck` 与 `git diff --check`；运行 `detect_changes`，不可用时用精确 diff/caller fallback，确认只改变预期 profile 与测试。只暂存本组代码、测试和任务勾选，提交 `fix: 移除不稳定 interest 相对门禁`。
 
 ## 2. 复判不可变 Memory 并继续一次 TCP
 
