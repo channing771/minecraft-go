@@ -15,14 +15,14 @@
 - [x] 2.2 记录精确 HEAD、`Apple M5 / 24GiB`、OS、GVM Go 1.26.0、电源/低功耗状态、可见系统负载、M2 JSON/Markdown 哈希，并用当时 HEAD 的 12 位短哈希派生两个不存在的全新 Memory/TCP 临时 JSON 路径；向用户报告展开后的绝对路径和“Memory/TCP 各一次、任一步失败停止且不得重跑”的边界，并取得针对该 HEAD 与路径的明确确认。
 - [x] 2.3 使用 GVM 在无窗口模式恰好执行一次 Memory v8 报告，随后以该报告同时作为 baseline/current 运行 `cmd/perfcheck --max-regression 0.20`；确认 scenario=8、transport=memory、framebuffer=2560x1440、GPU samples=2048，任一步失败立即停止且不得重跑。
 - [x] 2.4 在 `4bda1bf309b4dfe3dbbc4d64c58772a5bbf6d48c` 上恰好执行一次 TCP v8 报告；Memory/TCP SHA-256 分别为 `a2156dde788e35f26d47fd3b1ed5e0b81ac047761114e8d4b9b1598a50ffd005` 与 `e427a24d493a90d762ae15cea329aa6325093248d1e9ae3afa05ad66d361500f`。跨 transport 门禁因 GPU p99 `1.338333ms → 2.549958ms`（`90.5%`）失败后立即停止，未重跑、未修改基线；两份报告只保留为诊断证据。
-- [ ] 2.5 屏障修复提交后重新执行全仓 race、vet、archcheck、gofmt、OpenSpec strict 和 `git diff --check`；记录新的精确 HEAD、环境、M2 哈希与两个全新不存在的 Memory/TCP 路径，确认无遗留进程，并针对新 HEAD/路径重新取得“一次 Memory、通过后一次 TCP、任一步失败停止”的明确授权。
-- [ ] 2.6 使用新的已授权路径恰好执行一次 Memory v8 报告并自比较；确认 scenario=8、transport=memory、framebuffer=2560x1440、GPU samples=2048，失败立即停止且不得执行 TCP。
-- [ ] 2.7 仅在 2.6 通过后恰好执行一次 TCP v8 报告并以新 Memory 报告执行 20% 跨 transport 门禁；确认硬件、场景和 framebuffer 相同，失败立即停止且不得重跑。
+- [x] 2.5 屏障修复提交后重新执行全仓 race、vet、archcheck、gofmt、OpenSpec strict 和 `git diff --check`；记录新的精确 HEAD、环境、M2 哈希与两个全新不存在的 Memory/TCP 路径，确认无遗留进程，并针对新 HEAD/路径重新取得“一次 Memory、通过后一次 TCP、任一步失败停止”的明确授权。
+- [x] 2.6 使用新的已授权路径恰好执行一次 Memory v8 报告并自比较；确认 scenario=8、transport=memory、framebuffer=2560x1440、GPU samples=2048，失败立即停止且不得执行 TCP。
+- [x] 2.7 仅在 2.6 通过后恰好执行一次 TCP v8 报告并以新 Memory 报告执行 20% 跨 transport 门禁；确认硬件、场景和 framebuffer 相同，失败立即停止且不得重跑。
 
 ## 3. 提升 v8 基线
 
-- [ ] 3.1 仅在 2.6–2.7 全部通过后，把新 Memory 报告的精确字节更新为 `docs/notes/perf-baseline-m5.json`，更新中文 `docs/notes/perf-baseline-m5.md`，记录 v7 被替代原因、首轮 v8 失败证据、屏障修复提交、新正式链命令、Memory/TCP SHA-256、门禁输出和现实环境限制；不得修改 M2 基线。
-- [ ] 3.2 验证 M5 JSON 与临时 Memory 报告逐字一致并通过自比较，M2 JSON/Markdown 哈希与 2.2 一致；执行受影响测试、OpenSpec strict、`gofmt -l .` 和 `git diff --check`，运行 `detect_changes` 或记录 fallback，只暂存 M5 基线文档与本组勾选，提交 `chore: 建立 M5 scenario v8 基线`。
+- [x] 3.1 仅在 2.6–2.7 全部通过后，把新 Memory 报告的精确字节更新为 `docs/notes/perf-baseline-m5.json`，更新中文 `docs/notes/perf-baseline-m5.md`，记录 v7 被替代原因、首轮 v8 失败证据、屏障修复提交、新正式链命令、Memory/TCP SHA-256、门禁输出和现实环境限制；不得修改 M2 基线。
+- [x] 3.2 验证 M5 JSON 与临时 Memory 报告逐字一致并通过自比较，M2 JSON/Markdown 哈希与 2.2 一致；执行受影响测试、OpenSpec strict、`gofmt -l .` 和 `git diff --check`，运行 `detect_changes` 或记录 fallback，只暂存 M5 基线文档与本组勾选，提交 `chore: 建立 M5 scenario v8 基线`。
 
 ## 4. 线性集成与收尾
 
