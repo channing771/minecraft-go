@@ -1,6 +1,6 @@
 ## 1. 重建 v7 正式链边界
 
-- [ ] 1.1 提交并严格校验本次规划更新后，记录精确 HEAD 与现有 M2 JSON/Markdown SHA-256；确认 tracked state 干净、`cmd/mcgo/benchmark.go` 生产 scenario v7、benchmark 分支只创建 headless device、`mcgo`/`mcgod`/benchmark 均未运行，且两个全新 `/tmp/mcgo-m5-v7-<HEAD12>-{memory,tcp}.json` 路径不存在。
+- [x] 1.1 提交并严格校验本次规划更新后，记录精确 HEAD 与现有 M2 JSON/Markdown SHA-256；确认 tracked state 干净、`cmd/mcgo/benchmark.go` 生产 scenario v7、benchmark 分支只创建 headless device、`mcgo`/`mcgod`/benchmark 均未运行，且两个全新 `/tmp/mcgo-m5-v7-<HEAD12>-{memory,tcp}.json` 路径不存在。
 - [ ] 1.2 记录 M5 硬件、OS、Go、电源状态和可见系统负载；不要求无法实现的人工清空。向用户报告精确 HEAD、路径和“Memory/TCP 各一次、任一步失败停止”的边界，并取得针对该正式链的一次性明确授权。
 
 ## 2. 执行单次无窗口报告链
