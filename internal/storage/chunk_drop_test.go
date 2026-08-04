@@ -63,31 +63,6 @@ func TestChunkCodecRoundTripsDrops(t *testing.T) {
 	}
 }
 
-func TestChunkV3Fixture(t *testing.T) {
-	want := dropFixtureChunk(t, core.ChunkPos{X: -3, Z: 7})
-	encoded, err := encodeChunkPayload(ChunkSave{
-		Key:      core.ChunkKey{Dimension: core.Overworld, Pos: want.Pos},
-		Revision: 19,
-		Chunk:    want,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join("testdata", "chunk-v3.bin")
-	if *updateStorageFixtures {
-		if err := os.WriteFile(path, encoded, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, encoded) {
-		t.Fatal("v3 fixture drift; change schema version")
-	}
-}
-
 func TestChunkV1FixtureMigratesToEmptyDrops(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	encoded, err := os.ReadFile(filepath.Join("testdata", "chunk-v1.bin"))

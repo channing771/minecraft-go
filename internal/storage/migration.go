@@ -14,6 +14,7 @@ type chunkDTO struct {
 	Revision uint64
 	Sections [core.SectionsPerChunk]world.ContainerSnapshot
 	Drops    [core.DropsPerChunk]world.DropSlot
+	Furnaces [core.FurnacesPerChunk]world.FurnaceSlot
 }
 
 type chunkMigration func(chunkDTO) (chunkDTO, error)
@@ -26,6 +27,11 @@ var chunkMigrations = map[uint32]chunkMigration{
 	},
 	// v3 与 v2 的 payload 布局相同，只是让旧程序拒绝含新方块的记录。
 	2: func(dto chunkDTO) (chunkDTO, error) { return dto, nil },
+	// v3 没有熔炉负载，确定性迁移为全部空槽。
+	3: func(dto chunkDTO) (chunkDTO, error) {
+		dto.Furnaces = [core.FurnacesPerChunk]world.FurnaceSlot{}
+		return dto, nil
+	},
 }
 
 func migrateChunk(from uint32, dto chunkDTO) (chunkDTO, bool, error) {

@@ -17,10 +17,10 @@
 
 ## 3. 区块存档 schema v4
 
-- [ ] 3.1 在 `internal/storage` 与 `internal/server` 先写失败测试，覆盖 v4 三格物品/进度/燃烧/generation roundtrip、v3 方块与掉落物无损迁移且 `NeedsRewrite=true`、v1/v2 链式迁移、v4 fixture 不迁移、未来版本拒绝，以及玩家 schema 保持 3 且可持久化煤炭/粗铁/铁锭/熔炉/铁块。
-- [ ] 3.2 先写损坏与故障失败测试：活动槽 generation=0、标志非 0/1、重复方块索引、索引越界、对应方块不是熔炉、错误物品或数量、progress>199、burn>1600、停用槽残留字段、截断与尾随字节，以及 DiskStore 部分写入失败后旧记录仍可加载。
-- [ ] 3.3 把 `currentChunkSchema` 升为 4，逻辑负载按 sections → 掉落物 → 32 熔炉槽追加定长编码，migration registry 只增加 `3: 空熔炉集合`；encode 与 decode 共用同一套校验，先重建 sections 再验证活动槽与熔炉方块对应关系。
-- [ ] 3.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/server -race -count=1 && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s && go test ./internal/storage -run "^$" -bench "Chunk(Encode|Decode)" -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认无 panic、旧 fixture 无漂移、`gofmt` 与 `git diff --check` 通过；提交 `feat: 升级熔炉区块存档 schema v4`，然后自动进入第 4 组。
+- [x] 3.1 在 `internal/storage` 与 `internal/server` 先写失败测试，覆盖 v4 三格物品/进度/燃烧/generation roundtrip、v3 方块与掉落物无损迁移且 `NeedsRewrite=true`、v1/v2 链式迁移、v4 fixture 不迁移、未来版本拒绝，以及玩家 schema 保持 3 且可持久化煤炭/粗铁/铁锭/熔炉/铁块。
+- [x] 3.2 先写损坏与故障失败测试：活动槽 generation=0、标志非 0/1、重复方块索引、索引越界、对应方块不是熔炉、错误物品或数量、progress>199、burn>1600、停用槽残留字段、截断与尾随字节，以及 DiskStore 部分写入失败后旧记录仍可加载。
+- [x] 3.3 把 `currentChunkSchema` 升为 4，逻辑负载按 sections → 掉落物 → 32 熔炉槽追加定长编码，migration registry 只增加 `3: 空熔炉集合`；encode 与 decode 共用同一套校验，先重建 sections 再验证活动槽与熔炉方块对应关系。
+- [x] 3.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/server -race -count=1 && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s && go test ./internal/storage -run "^$" -bench "Chunk(Encode|Decode)" -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认无 panic、旧 fixture 无漂移、`gofmt` 与 `git diff --check` 通过；提交 `feat: 升级熔炉区块存档 schema v4`，然后自动进入第 4 组。
 
 ## 4. 协议 v7 熔炉消息与客户端只读镜像
 

@@ -512,8 +512,8 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	}
 	firstHost.WaitPlayerReleased(t, secondIdentity.PlayerID)
 	firstHost.Shutdown(t)
-	if schema := integrationStoredChunkSchema(t, root, key); schema != 3 {
-		t.Fatalf("正常刷新后的区块 schema=%d，想要 3", schema)
+	if schema := integrationStoredChunkSchema(t, root, key); schema != 4 {
+		t.Fatalf("正常刷新后的区块 schema=%d，想要 4", schema)
 	}
 
 	secondHost := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})
@@ -1286,6 +1286,11 @@ func rewriteIntegrationChunkSchema(t *testing.T, root string, key core.ChunkKey,
 		t.Fatal(err)
 	}
 	binary.LittleEndian.PutUint32(logical[4:], schema)
+	// 逻辑负载末尾是固定长度的熔炉槽；标注为 v4 之前的 schema 时必须一并截掉，
+	// 否则旧版本解码会把它们当作尾随字节而拒绝整个区块。
+	if schema < 4 {
+		logical = logical[:len(logical)-core.FurnacesPerChunk*world.FurnaceSlotBytes]
+	}
 	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderCRC(true))
 	if err != nil {
 		t.Fatal(err)
