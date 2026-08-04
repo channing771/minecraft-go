@@ -128,6 +128,16 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 	}
 }
 
+func TestHotbarBufferRegionsDoNotOverlap(t *testing.T) {
+	if hotbarQuadOffset%256 != 0 || hotbarGlyphOffset%256 != 0 {
+		t.Fatalf("buffer offset 未按 256 字节对齐: quad=%d glyph=%d", hotbarQuadOffset, hotbarGlyphOffset)
+	}
+	quadEnd := hotbarQuadOffset + hotbarQuadSize
+	if hotbarGlyphOffset < quadEnd {
+		t.Fatalf("glyph offset=%d 落入 quad 区间 [%d,%d)", hotbarGlyphOffset, hotbarQuadOffset, quadEnd)
+	}
+}
+
 // Mutation killed: accepting an invalid authoritative value or a degenerate
 // framebuffer would emit instances for a state the server never confirmed.
 func TestHotbarLayoutRejectsInvalidStateAndEmptyFramebuffer(t *testing.T) {
@@ -361,56 +371,103 @@ func TestInventorySlotAtRejectsOutsideHits(t *testing.T) {
 	}
 }
 
-// Mutation killed: dropping the recipe row, mislaying the button, or letting
-// enabled state ignore the confirmed inventory changes the observed instances.
-func TestInventoryLayoutDrawsFixedRecipeRow(t *testing.T) {
+// 杀死变异：遗漏任一配方行、错放按钮或忽略已确认背包都会改变实例布局。
+func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
 	for _, char := range hotbarDigits {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
 
-	closed := layoutInventory(&layout, atlas, core.Inventory{}, false, -1, nil, 1280, 720)
-	closedQuads := len(closed.quads)
-
 	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, 1280, 720)
-	if len(open.quads) <= closedQuads {
-		t.Fatalf("打开时 quads=%d，想要多于关闭时的 %d", len(open.quads), closedQuads)
+	if len(open.quads) != 46 {
+		t.Fatalf("空背包 quads=%d，想要选中框、36 格和 9 个配方实例共 46", len(open.quads))
 	}
-	// 输入色块、输出色块与按钮，加上输入/输出各一位数量。
-	if len(open.glyphs) != 2 {
-		t.Fatalf("配方行数字 = %d，想要 2", len(open.glyphs))
+	if len(open.glyphs) != 6 {
+		t.Fatalf("三条配方数字=%d，想要每条输入输出各一位共 6", len(open.glyphs))
+	}
+	overlay := open.quads[len(open.quads)-9:]
+	wantItems := [][4]float32{
+		{128.0 / 255, 128.0 / 255, 128.0 / 255, 1},
+		{122.0 / 255, 118.0 / 255, 112.0 / 255, 1},
+		{128.0 / 255, 128.0 / 255, 128.0 / 255, 1},
+		{88.0 / 255, 86.0 / 255, 88.0 / 255, 1},
+		{220.0 / 255, 220.0 / 255, 224.0 / 255, 1},
+		{214.0 / 255, 214.0 / 255, 216.0 / 255, 1},
+	}
+	for row, y := range []float32{420, 368, 316} {
+		input, output := overlay[row*3], overlay[row*3+1]
+		if input.X != 408 || output.X != 460 || input.Y != y || output.Y != y {
+			t.Fatalf("配方行 %d 位置错误: input=%+v output=%+v", row, input, output)
+		}
+		if input.Color != wantItems[row*2] || output.Color != wantItems[row*2+1] {
+			t.Fatalf("配方行 %d 物品错误: input=%v output=%v", row, input.Color, output.Color)
+		}
+	}
+	disabled := hotbarRecipeButtonQuads(open)
+	if len(disabled) != 3 {
+		t.Fatalf("配方按钮=%d，想要 3", len(disabled))
 	}
 
-	disabled := open.quads[len(open.quads)-1]
-	var stocked core.Inventory
-	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
-	enabledLayout := layoutInventory(&layout, atlas, stocked, true, -1, nil, 1280, 720)
-	enabled := enabledLayout.quads[len(enabledLayout.quads)-1]
-	if disabled.Color == enabled.Color {
-		t.Fatal("可合成与不可合成的按钮颜色相同")
+	var stone core.Inventory
+	stone.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+	stoneButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, stone, true, -1, nil, 1280, 720))
+	if disabled[0].Color == stoneButtons[0].Color {
+		t.Fatal("石砖可合成时按钮颜色未改变")
 	}
-	if disabled.X != enabled.X || disabled.Y != enabled.Y {
-		t.Fatalf("按钮位置随状态漂移: %+v vs %+v", disabled, enabled)
+	if disabled[1].Color != stoneButtons[1].Color || disabled[2].Color != stoneButtons[2].Color {
+		t.Fatal("石砖原料错误启用了其他配方")
+	}
+
+	stone.Hotbar.Slots[0].Count = 8
+	furnaceButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, stone, true, -1, nil, 1280, 720))
+	if disabled[1].Color == furnaceButtons[1].Color || disabled[2].Color != furnaceButtons[2].Color {
+		t.Fatal("熔炉配方可用颜色不独立")
+	}
+
+	var iron core.Inventory
+	iron.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemIronIngot, Count: 9}
+	ironButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, iron, true, -1, nil, 1280, 720))
+	if disabled[2].Color == ironButtons[2].Color || disabled[0].Color != ironButtons[0].Color ||
+		disabled[1].Color != ironButtons[1].Color {
+		t.Fatal("铁块配方可用颜色不独立")
 	}
 }
 
 func TestRecipeButtonHitTestMatchesDrawnGeometry(t *testing.T) {
-	x, y := recipeButtonOrigin(1280, 720)
-	if got, ok := RecipeButtonAt(float64(x)+1, float64(y)+1, 1280, 720); !ok ||
-		got != core.RecipeStoneBricks {
-		t.Fatalf("按钮命中 = %d, %v，想要石砖配方", got, ok)
+	for _, test := range []struct {
+		name   string
+		y      float64
+		recipe core.RecipeID
+	}{
+		{"石砖", 421, core.RecipeStoneBricks},
+		{"熔炉", 369, core.RecipeFurnace},
+		{"铁块", 317, core.RecipeIronBlock},
+	} {
+		got, ok := RecipeButtonAt(513, test.y, 1280, 720)
+		if !ok || got != test.recipe {
+			t.Fatalf("%s按钮命中 = %d, %v，想要 %d", test.name, got, ok, test.recipe)
+		}
+		if _, ok := InventorySlotAt(513, test.y, 1280, 720); ok {
+			t.Fatalf("%s按钮与背包格重叠", test.name)
+		}
 	}
-	if _, ok := RecipeButtonAt(float64(x)-1, float64(y)+1, 1280, 720); ok {
+	if _, ok := RecipeButtonAt(511, 421, 1280, 720); ok {
 		t.Fatal("按钮左侧 1 像素被判为命中")
 	}
-	if _, ok := RecipeButtonAt(float64(x)+1, float64(y)+1, 0, 0); ok {
+	if _, ok := RecipeButtonAt(513, 421, 0, 0); ok {
 		t.Fatal("零尺寸 framebuffer 被判为命中")
 	}
-	// 配方行不得与背包格重叠。
-	if _, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 1280, 720); ok {
-		t.Fatal("合成按钮与背包格重叠")
+}
+
+func hotbarRecipeButtonQuads(layout hotbarLayout) []hotbarInstance {
+	buttons := make([]hotbarInstance, 0, 3)
+	for _, quad := range layout.quads {
+		if quad.Width == recipeButtonWidth && quad.Height == hotbarSlotSize {
+			buttons = append(buttons, quad)
+		}
 	}
+	return buttons
 }
 
 // 杀死变异：丢失熔炉格、放错进度条或忽略权威计时都会改变实例布局。
@@ -461,9 +518,11 @@ func TestFurnaceOverlayReplacesRecipeRow(t *testing.T) {
 	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
 
 	recipe := layoutInventory(&layout, atlas, stocked, true, -1, nil, 1280, 720)
+	recipeButtons := len(hotbarRecipeButtonQuads(recipe))
 	furnace := layoutInventory(&layout, atlas, stocked, true, -1, &FurnaceOverlay{}, 1280, 720)
-	if len(recipe.quads) == len(furnace.quads) {
-		t.Fatal("熔炉视图与合成行产生了相同布局")
+	if recipeButtons != 3 || len(hotbarRecipeButtonQuads(furnace)) != 0 {
+		t.Fatalf("配方视图按钮=%d，熔炉视图按钮=%d，想要 3 和 0",
+			recipeButtons, len(hotbarRecipeButtonQuads(furnace)))
 	}
 }
 

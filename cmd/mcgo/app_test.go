@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"sync"
@@ -1869,49 +1870,102 @@ func TestFurnaceClosedMessageClearsUIWithoutEcho(t *testing.T) {
 	assertNoInteractiveClientMessage(t, serverEndpoint)
 }
 
-// Mutation killed: skipping the confirmed Craft check, predicting the result,
-// or sending more than one request changes the message or local mirror.
+// 杀死变异：跳过已确认背包检查、发送错误配方、预测结果或重复发送都会失败。
 func TestCraftRecipeClickUsesConfirmedInventory(t *testing.T) {
-	app, serverEndpoint := newInteractiveTestApplication(t)
-	var inventory core.Inventory
-	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
-	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
-		t.Fatal(err)
-	}
-	app.inventorySource = 5
-	width, height := uint32(1280), uint32(720)
-	x, y := recipeButtonCenter(t, width, height)
+	for _, test := range []struct {
+		name   string
+		recipe core.RecipeID
+		input  core.ItemStack
+	}{
+		{"石砖", core.RecipeStoneBricks, core.ItemStack{Item: core.ItemStone, Count: 4}},
+		{"熔炉", core.RecipeFurnace, core.ItemStack{Item: core.ItemStone, Count: 8}},
+		{"铁块", core.RecipeIronBlock, core.ItemStack{Item: core.ItemIronIngot, Count: 9}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app, serverEndpoint := newInteractiveTestApplication(t)
+			var inventory core.Inventory
+			inventory.Hotbar.Slots[0] = test.input
+			if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+				t.Fatal(err)
+			}
+			app.inventorySource = 5
+			width, height := uint32(1280), uint32(720)
+			x, y := recipeButtonCenter(t, test.recipe, width, height)
 
-	app.clickInventorySlot(x, y, width, height)
-	message := receiveInteractiveClientMessage(t, serverEndpoint)
-	craft, ok := message.(network.CraftRecipe)
-	if !ok || craft.Recipe != core.RecipeStoneBricks {
-		t.Fatalf("合成请求 = %#v，想要石砖配方", message)
-	}
-	assertNoInteractiveClientMessage(t, serverEndpoint)
-	if app.inventorySource != -1 {
-		t.Fatalf("合成后来源未清除: %d", app.inventorySource)
-	}
-	got, confirmed := app.inventory.State()
-	if !confirmed || got != inventory {
-		t.Fatalf("合成请求本地改写镜像: %+v, %v", got, confirmed)
+			app.clickInventorySlot(x, y, width, height)
+			message := receiveInteractiveClientMessage(t, serverEndpoint)
+			craft, ok := message.(network.CraftRecipe)
+			if !ok || craft.Recipe != test.recipe {
+				t.Fatalf("合成请求 = %#v，想要 recipe %d", message, test.recipe)
+			}
+			assertNoInteractiveClientMessage(t, serverEndpoint)
+			if app.inventorySource != -1 {
+				t.Fatalf("合成后来源未清除: %d", app.inventorySource)
+			}
+			got, confirmed := app.inventory.State()
+			if !confirmed || got != inventory {
+				t.Fatalf("合成请求本地改写镜像: %+v, %v", got, confirmed)
+			}
+		})
 	}
 }
 
 func TestUnavailableCraftRecipeClickDoesNothing(t *testing.T) {
-	app, serverEndpoint := newInteractiveTestApplication(t)
-	var inventory core.Inventory
-	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 3}
-	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
-		t.Fatal(err)
+	for _, recipe := range []core.RecipeID{
+		core.RecipeStoneBricks, core.RecipeFurnace, core.RecipeIronBlock,
+	} {
+		t.Run(fmt.Sprintf("recipe_%d", recipe), func(t *testing.T) {
+			app, serverEndpoint := newInteractiveTestApplication(t)
+			inventory := core.Inventory{}
+			if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+				t.Fatal(err)
+			}
+			x, y := recipeButtonCenter(t, recipe, 1280, 720)
+
+			app.clickInventorySlot(x, y, 1280, 720)
+			assertNoInteractiveClientMessage(t, serverEndpoint)
+			got, confirmed := app.inventory.State()
+			if !confirmed || got != inventory {
+				t.Fatalf("不可用配方改写镜像: %+v, %v", got, confirmed)
+			}
+		})
 	}
-	x, y := recipeButtonCenter(t, 1280, 720)
+
+	t.Run("产物无容量", func(t *testing.T) {
+		app, serverEndpoint := newInteractiveTestApplication(t)
+		inventory := core.Inventory{}
+		for slot := range inventory.Hotbar.Slots {
+			inventory.Hotbar.Slots[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+		}
+		for slot := range inventory.Backpack {
+			inventory.Backpack[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+		}
+		inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 5}
+		if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+			t.Fatal(err)
+		}
+		x, y := recipeButtonCenter(t, core.RecipeStoneBricks, 1280, 720)
+
+		app.clickInventorySlot(x, y, 1280, 720)
+		assertNoInteractiveClientMessage(t, serverEndpoint)
+		got, confirmed := app.inventory.State()
+		if !confirmed || got != inventory {
+			t.Fatalf("产物无容量时改写镜像: %+v, %v", got, confirmed)
+		}
+	})
+}
+
+func TestCraftRecipeClickWaitsForConfirmedInventory(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	x, y := recipeButtonCenter(t, core.RecipeStoneBricks, 1280, 720)
 
 	app.clickInventorySlot(x, y, 1280, 720)
 	assertNoInteractiveClientMessage(t, serverEndpoint)
-	got, confirmed := app.inventory.State()
-	if !confirmed || got != inventory {
-		t.Fatalf("不可用配方改写镜像: %+v, %v", got, confirmed)
+	if app.sequence != 0 {
+		t.Fatalf("未确认背包消耗了 sequence: %d", app.sequence)
+	}
+	if _, confirmed := app.inventory.State(); confirmed {
+		t.Fatal("点击后空镜像被标记为已确认")
 	}
 }
 
@@ -2022,16 +2076,16 @@ func furnaceSlotCenter(t *testing.T, slot int, width, height uint32) (float64, f
 	return 0, 0
 }
 
-func recipeButtonCenter(t *testing.T, width, height uint32) (float64, float64) {
+func recipeButtonCenter(t *testing.T, recipe core.RecipeID, width, height uint32) (float64, float64) {
 	t.Helper()
 	for y := range int(height) {
 		for x := range int(width) {
-			if recipe, ok := render.RecipeButtonAt(float64(x), float64(y), width, height); ok &&
-				recipe == core.RecipeStoneBricks {
+			if got, ok := render.RecipeButtonAt(float64(x), float64(y), width, height); ok &&
+				got == recipe {
 				return float64(x), float64(y)
 			}
 		}
 	}
-	t.Fatal("找不到石砖配方按钮像素")
+	t.Fatalf("找不到 recipe %d 的按钮像素", recipe)
 	return 0, 0
 }
