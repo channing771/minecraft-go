@@ -10,17 +10,17 @@ import (
 )
 
 const (
-	// HUD 固定容量：1 个选中框 + 9 个栏位背景 + 最多 9 个物品色块。
-	maxHotbarQuads = 1 + core.HotbarSlots*2
+	// 固定容量按背包界面的最坏情况：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块。
+	maxHotbarQuads = 2 + core.InventorySlots*2
 	// 数量最多两位数（1..64），每格最多两个数字。
-	maxHotbarGlyphs = core.HotbarSlots * 2
+	maxHotbarGlyphs = core.InventorySlots * 2
 
 	hotbarInstanceBytes  = 48
 	hotbarViewportOffset = 0
 	hotbarViewportBytes  = 16
 	hotbarQuadOffset     = 256
 	hotbarQuadSize       = maxHotbarQuads * hotbarInstanceBytes
-	hotbarGlyphOffset    = 1280
+	hotbarGlyphOffset    = 4096
 	hotbarGlyphSize      = maxHotbarGlyphs * hotbarInstanceBytes
 	hotbarUploadBytes    = hotbarGlyphOffset + hotbarGlyphSize
 
@@ -30,6 +30,8 @@ const (
 	hotbarSelectBorder = float32(3)
 	hotbarSwatchInset  = float32(10)
 	hotbarDigitMargin  = float32(3)
+	// 背包界面在快捷栏之上再放 3 行，并与快捷栏留出一段间隔。
+	inventoryRowGap = float32(12)
 )
 
 //go:embed shader/hotbar.wgsl
@@ -146,9 +148,13 @@ func hotbarPipelineDesc(
 	}
 }
 
-// Prepare 按 framebuffer 尺寸与完整快捷栏值重建固定布局。
+// Prepare 按 framebuffer 尺寸与完整物品状态重建固定布局。
+// open 为 false 时只布局底部 9 格 HUD；为 true 时布局 3×9 背包加 1×9 快捷栏。
+// source 是已选中的来源格 0..35，-1 表示没有来源高亮。
 func (renderer *HotbarRenderer) Prepare(
-	hotbar core.Hotbar,
+	inventory core.Inventory,
+	open bool,
+	source int,
 	width, height uint32,
 	budget *UploadBudget,
 ) error {
@@ -156,7 +162,10 @@ func (renderer *HotbarRenderer) Prepare(
 	if err := renderer.atlas.FlushUploads(budget); err != nil {
 		return err
 	}
-	layoutHotbar(&renderer.layout, renderer.atlas, hotbar, float32(width), float32(height))
+	layoutInventory(
+		&renderer.layout, renderer.atlas, inventory, open, source,
+		float32(width), float32(height),
+	)
 	encodeHotbarViewport(
 		renderer.upload[hotbarViewportOffset:hotbarViewportOffset+hotbarViewportBytes],
 		float32(width), float32(height),
@@ -192,11 +201,14 @@ func (renderer *HotbarRenderer) Render(encoder gfx.CommandEncoder, target gfx.Te
 	pass.End()
 }
 
-// layoutHotbar 只依赖 framebuffer 尺寸与快捷栏值，产出固定上限的实例。
-func layoutHotbar(
+// layoutInventory 只依赖 framebuffer 尺寸、完整物品状态和界面开关，
+// 产出固定上限的实例；关闭时只有底部 9 格 HUD。
+func layoutInventory(
 	dst *hotbarLayout,
 	atlas GlyphSource,
-	hotbar core.Hotbar,
+	inventory core.Inventory,
+	open bool,
+	source int,
 	width, height float32,
 ) hotbarLayout {
 	if dst == nil {
@@ -207,52 +219,97 @@ func layoutHotbar(
 	}
 	dst.quads = dst.quads[:0]
 	dst.glyphs = dst.glyphs[:0]
-	if width <= 0 || height <= 0 || !hotbar.Valid() {
+	if width <= 0 || height <= 0 || !inventory.Valid() {
 		return *dst
 	}
 
-	total := core.HotbarSlots*hotbarSlotSize + (core.HotbarSlots-1)*hotbarSlotGap
-	originX := (width - total) * 0.5
-	originY := height - hotbarBottomMargin - hotbarSlotSize
-	slotX := func(slot int) float32 {
-		return originX + float32(slot)*(hotbarSlotSize+hotbarSlotGap)
+	slots := core.HotbarSlots
+	if open {
+		slots = core.InventorySlots
 	}
-
 	// 选中框先绘制，随后的栏位背景只覆盖内部，留下可见边框。
-	selected := slotX(int(hotbar.Selected))
+	selectedX, selectedY := inventorySlotOrigin(int(inventory.Hotbar.Selected), open, width, height)
 	dst.quads = append(dst.quads, hotbarInstance{
-		X:      selected - hotbarSelectBorder,
-		Y:      originY - hotbarSelectBorder,
+		X:      selectedX - hotbarSelectBorder,
+		Y:      selectedY - hotbarSelectBorder,
 		Width:  hotbarSlotSize + 2*hotbarSelectBorder,
 		Height: hotbarSlotSize + 2*hotbarSelectBorder,
 		Color:  [4]float32{1, 1, 1, 0.92},
 	})
-	for slot := range core.HotbarSlots {
+	if open && source >= 0 && source < core.InventorySlots {
+		sourceX, sourceY := inventorySlotOrigin(source, open, width, height)
 		dst.quads = append(dst.quads, hotbarInstance{
-			X: slotX(slot), Y: originY,
+			X:      sourceX - hotbarSelectBorder,
+			Y:      sourceY - hotbarSelectBorder,
+			Width:  hotbarSlotSize + 2*hotbarSelectBorder,
+			Height: hotbarSlotSize + 2*hotbarSelectBorder,
+			Color:  [4]float32{0.35, 0.75, 1, 0.95},
+		})
+	}
+	for slot := range slots {
+		x, y := inventorySlotOrigin(slot, open, width, height)
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: x, Y: y,
 			Width: hotbarSlotSize, Height: hotbarSlotSize,
 			Color: [4]float32{0.05, 0.05, 0.06, 0.62},
 		})
 	}
-	for slot, stack := range hotbar.Slots {
+	for slot := range slots {
+		stack, _ := inventory.Slot(uint8(slot))
 		if stack.Item == core.ItemNone {
 			continue
 		}
+		x, y := inventorySlotOrigin(slot, open, width, height)
 		dst.quads = append(dst.quads, hotbarInstance{
-			X:      slotX(slot) + hotbarSwatchInset,
-			Y:      originY + hotbarSwatchInset,
+			X:      x + hotbarSwatchInset,
+			Y:      y + hotbarSwatchInset,
 			Width:  hotbarSlotSize - 2*hotbarSwatchInset,
 			Height: hotbarSlotSize - 2*hotbarSwatchInset,
 			Color:  hotbarItemColor(stack.Item),
 		})
 	}
-	for slot, stack := range hotbar.Slots {
+	for slot := range slots {
+		stack, _ := inventory.Slot(uint8(slot))
 		if stack.Item == core.ItemNone {
 			continue
 		}
-		appendHotbarCount(dst, atlas, stack.Count, slotX(slot), originY)
+		x, y := inventorySlotOrigin(slot, open, width, height)
+		appendHotbarCount(dst, atlas, stack.Count, x, y)
 	}
 	return *dst
+}
+
+// inventorySlotOrigin 返回统一索引对应格子的左上角像素坐标。
+// 索引 0..8 是底部快捷栏行，9..35 是其上方自上而下的三行背包。
+func inventorySlotOrigin(slot int, open bool, width, height float32) (float32, float32) {
+	column := slot % core.HotbarSlots
+	total := core.HotbarSlots*hotbarSlotSize + (core.HotbarSlots-1)*hotbarSlotGap
+	x := (width-total)*0.5 + float32(column)*(hotbarSlotSize+hotbarSlotGap)
+	hotbarY := height - hotbarBottomMargin - hotbarSlotSize
+	if !open || slot < core.HotbarSlots {
+		return x, hotbarY
+	}
+	// 背包第 0 行在最上方，第 2 行紧邻快捷栏。
+	row := (slot - core.HotbarSlots) / core.HotbarSlots
+	rowsAbove := float32(2 - row)
+	y := hotbarY - inventoryRowGap - (rowsAbove+1)*hotbarSlotSize - rowsAbove*hotbarSlotGap
+	return x, y
+}
+
+// InventorySlotAt 把光标像素坐标映射为背包界面中的统一索引 0..35。
+// 命中格子之外返回 false，与绘制共用同一套几何常量。
+func InventorySlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool) {
+	if width == 0 || height == 0 {
+		return 0, false
+	}
+	x, y := float32(cursorX), float32(cursorY)
+	for slot := range core.InventorySlots {
+		left, top := inventorySlotOrigin(slot, true, float32(width), float32(height))
+		if x >= left && x < left+hotbarSlotSize && y >= top && y < top+hotbarSlotSize {
+			return uint8(slot), true
+		}
+	}
+	return 0, false
 }
 
 // appendHotbarCount 在栏位右下角排布最多两位数量数字。

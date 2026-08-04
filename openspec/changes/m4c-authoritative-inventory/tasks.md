@@ -28,10 +28,10 @@
 
 ## 5. 固定容量背包布局与渲染
 
-- [ ] 5.1 在 `internal/render` 先写 headless 失败测试，覆盖关闭时 9 格 HUD、打开时 3×9 背包加 1×9 快捷栏、统一索引、来源高亮、边界/界外命中、最多两位数量和满 36 格固定 allocation/GPU 容量。
-- [ ] 5.2 扩展现有 `HotbarRenderer` 与同一 pipeline/buffer，增加完整 Inventory 布局和共用几何的 `InventorySlotAt`；不新增第二个 renderer、贴图、每栏对象或二进制资源。
-- [ ] 5.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render -race -count=1 && go test ./internal/archcheck -count=1'`，确认布局/命中一致、稳定分配和 `git diff --check` 通过。
-- [ ] 5.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 绘制固定背包界面`。提交成功后自动进入第 6 组。
+- [x] 5.1 在 `internal/render` 先写 headless 失败测试，覆盖关闭时 9 格 HUD、打开时 3×9 背包加 1×9 快捷栏、统一索引、来源高亮、边界/界外命中、最多两位数量和满 36 格固定 allocation/GPU 容量。
+- [x] 5.2 扩展现有 `HotbarRenderer` 与同一 pipeline/buffer，增加完整 Inventory 布局和共用几何的 `InventorySlotAt`；不新增第二个 renderer、贴图、每栏对象或二进制资源。
+- [x] 5.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render -race -count=1 && go test ./internal/archcheck -count=1'`，确认布局/命中一致、稳定分配和 `git diff --check` 通过。
+- [x] 5.4 只暂存本组代码、测试和本文件勾选；提交 `feat: 绘制固定背包界面`。提交成功后自动进入第 6 组。
 
 ## 6. E 键输入与应用接线
 

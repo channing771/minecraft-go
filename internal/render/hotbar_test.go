@@ -8,18 +8,23 @@ import (
 	"minecraft-go/internal/gfx"
 )
 
-func fullTestHotbar() core.Hotbar {
-	var hotbar core.Hotbar
-	hotbar.Selected = 4
+func fullTestInventory() core.Inventory {
+	var inventory core.Inventory
+	inventory.Hotbar.Selected = 4
 	items := [core.HotbarSlots]core.ItemID{
 		core.ItemStone, core.ItemDirt, core.ItemGrass,
 		core.ItemStone, core.ItemDirt, core.ItemGrass,
 		core.ItemStone, core.ItemDirt, core.ItemGrass,
 	}
 	for slot, item := range items {
-		hotbar.Slots[slot] = core.ItemStack{Item: item, Count: core.MaxStackCount}
+		inventory.Hotbar.Slots[slot] = core.ItemStack{Item: item, Count: core.MaxStackCount}
 	}
-	return hotbar
+	for slot := range inventory.Backpack {
+		inventory.Backpack[slot] = core.ItemStack{
+			Item: items[slot%len(items)], Count: core.MaxStackCount,
+		}
+	}
+	return inventory
 }
 
 // Mutation killed: dropping the selection frame, mislaying slots, or letting the
@@ -27,13 +32,13 @@ func fullTestHotbar() core.Hotbar {
 // exact instance rectangles below.
 func TestHotbarLayoutIsFixedNineSlotsWithSelection(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
-	var hotbar core.Hotbar
-	hotbar.Selected = 2
+	var inventory core.Inventory
+	inventory.Hotbar.Selected = 2
 	var layout hotbarLayout
-	got := layoutHotbar(&layout, atlas, hotbar, 800, 600)
+	got := layoutInventory(&layout, atlas, inventory, false, -1, 800, 600)
 
 	if len(got.quads) != 1+core.HotbarSlots {
-		t.Fatalf("空快捷栏 quads=%d，想要选中框加 9 个栏位", len(got.quads))
+		t.Fatalf("空物品状态 quads=%d，想要选中框加 9 个栏位", len(got.quads))
 	}
 	if len(got.glyphs) != 0 {
 		t.Fatalf("空快捷栏数字=%d，想要 0", len(got.glyphs))
@@ -66,13 +71,13 @@ func TestHotbarLayoutDrawsItemSwatchesAndCounts(t *testing.T) {
 	for _, char := range hotbarDigits {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
-	var hotbar core.Hotbar
-	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 64}
-	hotbar.Slots[3] = core.ItemStack{Item: core.ItemDirt, Count: 9}
-	hotbar.Slots[8] = core.ItemStack{Item: core.ItemGrass, Count: 1}
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 64}
+	inventory.Hotbar.Slots[3] = core.ItemStack{Item: core.ItemDirt, Count: 9}
+	inventory.Hotbar.Slots[8] = core.ItemStack{Item: core.ItemGrass, Count: 1}
 
 	var layout hotbarLayout
-	got := layoutHotbar(&layout, atlas, hotbar, 1280, 720)
+	got := layoutInventory(&layout, atlas, inventory, false, -1, 1280, 720)
 	if len(got.quads) != 1+core.HotbarSlots+3 {
 		t.Fatalf("quads=%d，想要选中框、9 个栏位和 3 个色块", len(got.quads))
 	}
@@ -103,12 +108,12 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
-	got := layoutHotbar(&layout, atlas, fullTestHotbar(), 1280, 720)
+	got := layoutInventory(&layout, atlas, fullTestInventory(), true, 5, 1280, 720)
 	if len(got.quads) != maxHotbarQuads {
-		t.Fatalf("满快捷栏 quads=%d，想要 %d", len(got.quads), maxHotbarQuads)
+		t.Fatalf("满界面 quads=%d，想要 %d", len(got.quads), maxHotbarQuads)
 	}
 	if len(got.glyphs) != maxHotbarGlyphs {
-		t.Fatalf("满快捷栏数字=%d，想要 %d", len(got.glyphs), maxHotbarGlyphs)
+		t.Fatalf("满界面数字=%d，想要 %d", len(got.glyphs), maxHotbarGlyphs)
 	}
 }
 
@@ -116,12 +121,12 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 // framebuffer would emit instances for a state the server never confirmed.
 func TestHotbarLayoutRejectsInvalidStateAndEmptyFramebuffer(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
-	invalid := core.Hotbar{Selected: core.HotbarSlots}
+	invalid := core.Inventory{Hotbar: core.Hotbar{Selected: core.HotbarSlots}}
 	var layout hotbarLayout
-	if got := layoutHotbar(&layout, atlas, invalid, 800, 600); len(got.quads) != 0 {
-		t.Fatalf("非法快捷栏 quads=%d，想要 0", len(got.quads))
+	if got := layoutInventory(&layout, atlas, invalid, false, -1, 800, 600); len(got.quads) != 0 {
+		t.Fatalf("非法物品状态 quads=%d，想要 0", len(got.quads))
 	}
-	if got := layoutHotbar(&layout, atlas, core.Hotbar{}, 0, 600); len(got.quads) != 0 {
+	if got := layoutInventory(&layout, atlas, core.Inventory{}, false, -1, 0, 600); len(got.quads) != 0 {
 		t.Fatalf("零宽 framebuffer quads=%d，想要 0", len(got.quads))
 	}
 }
@@ -153,7 +158,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 		}
 	}
 
-	if err := renderer.Prepare(fullTestHotbar(), 1280, 720, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare(fullTestInventory(), true, 5, 1280, 720, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	if len(upload.lastWrite) != 0 {
@@ -194,7 +199,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 func TestHotbarRendererSkipsEmptyPreparedLayout(t *testing.T) {
 	renderer := NewHotbarRenderer(&nameTagTestDevice{}, gfx.FormatRGBA8Unorm, newFakeNameTagAtlas())
 	defer renderer.Release()
-	if err := renderer.Prepare(core.Hotbar{}, 0, 0, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare(core.Inventory{}, false, -1, 0, 0, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	encoder := &nameTagTestEncoder{}
@@ -243,14 +248,14 @@ func TestHotbarPrepareReusesLayoutAndUploadStorage(t *testing.T) {
 		},
 		upload: make([]byte, hotbarUploadBytes),
 	}
-	hotbar := fullTestHotbar()
+	inventory := fullTestInventory()
 	budget := NewUploadBudget(1024)
-	if err := renderer.Prepare(hotbar, 1280, 720, budget); err != nil {
+	if err := renderer.Prepare(inventory, true, 3, 1280, 720, budget); err != nil {
 		t.Fatalf("warm Prepare: %v", err)
 	}
 	allocations := testing.AllocsPerRun(1000, func() {
 		source.requestCount = 0
-		if err := renderer.Prepare(hotbar, 1280, 720, budget); err != nil {
+		if err := renderer.Prepare(inventory, true, 3, 1280, 720, budget); err != nil {
 			panic(err)
 		}
 	})
@@ -283,7 +288,7 @@ func TestHotbarRendererHeadlessBlendOverExistingColor(t *testing.T) {
 	defer atlas.Release()
 	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas)
 	defer renderer.Release()
-	if err := renderer.Prepare(fullTestHotbar(), 128, 128, NewUploadBudget(1<<20)); err != nil {
+	if err := renderer.Prepare(fullTestInventory(), true, 0, 128, 128, NewUploadBudget(1<<20)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 
@@ -297,4 +302,49 @@ func TestHotbarRendererHeadlessBlendOverExistingColor(t *testing.T) {
 	dev.Submit(commands)
 	commands.Release()
 	dev.Poll(true)
+}
+
+// Mutation killed: mislaying the backpack rows, dropping the source highlight,
+// or letting hit-testing drift from the drawn geometry.
+func TestInventoryLayoutOpensThreeBackpackRows(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	for _, char := range hotbarDigits {
+		atlas.glyphs[char] = fakeNameTagGlyph(7)
+	}
+	var layout hotbarLayout
+	var inventory core.Inventory
+	got := layoutInventory(&layout, atlas, inventory, true, 12, 1280, 720)
+
+	// 选中框 + 来源高亮 + 36 个栏位背景。
+	if len(got.quads) != 2+core.InventorySlots {
+		t.Fatalf("打开时 quads=%d，想要 %d", len(got.quads), 2+core.InventorySlots)
+	}
+	hotbarY := float32(720) - hotbarBottomMargin - hotbarSlotSize
+	for slot := range core.InventorySlots {
+		x, y := inventorySlotOrigin(slot, true, 1280, 720)
+		if slot < core.HotbarSlots && y != hotbarY {
+			t.Fatalf("快捷栏格 %d 不在底行: y=%f", slot, y)
+		}
+		if slot >= core.HotbarSlots && y >= hotbarY {
+			t.Fatalf("背包格 %d 未排在快捷栏之上: y=%f", slot, y)
+		}
+		// 命中函数必须与绘制几何一致。
+		if got, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 1280, 720); !ok ||
+			got != uint8(slot) {
+			t.Fatalf("InventorySlotAt 命中 %d, %v，想要 %d", got, ok, slot)
+		}
+	}
+}
+
+func TestInventorySlotAtRejectsOutsideHits(t *testing.T) {
+	if _, ok := InventorySlotAt(0, 0, 1280, 720); ok {
+		t.Fatal("界外命中被接受")
+	}
+	x, y := inventorySlotOrigin(0, true, 1280, 720)
+	if _, ok := InventorySlotAt(float64(x)-1, float64(y)+1, 1280, 720); ok {
+		t.Fatal("格子左侧 1 像素被判为命中")
+	}
+	if _, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 0, 0); ok {
+		t.Fatal("零尺寸 framebuffer 被判为命中")
+	}
 }

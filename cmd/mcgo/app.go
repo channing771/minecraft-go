@@ -55,6 +55,8 @@ type application struct {
 	itemDropRenderer        *render.ItemDropRenderer
 	itemDrops               *client.ItemDrops
 	itemDropInstances       []render.ItemDrop
+	inventoryOpen           bool
+	inventorySource         int
 	serverTick              uint64
 	glyphAtlas              *render.GlyphAtlas
 	clientEndpoint          network.ClientEndpoint
@@ -433,28 +435,29 @@ func newApplicationWithDependencies(
 		Far:    2000,
 	}
 	app := &application{
-		window:         window,
-		dev:            dev,
-		surface:        surface,
-		color:          color,
-		colorView:      colorView,
-		frameWidth:     width,
-		frameHeight:    height,
-		clientEndpoint: clientEndpoint,
-		receiver:       receiver,
-		server:         running,
-		host:           host,
-		serverCancel:   serverCancel,
-		serverDone:     serverDone,
-		mirror:         client.NewMirror(),
-		itemDrops:      client.NewItemDrops(),
-		predictor:      client.NewPredictor(),
-		remotePlayers:  client.NewRemotePlayers(),
-		camera:         camera,
-		center:         cameraChunk(camera.Pos),
-		loadedChunks:   make(map[core.ChunkPos]struct{}),
-		ticks:          ticks,
-		saves:          saves,
+		window:          window,
+		dev:             dev,
+		surface:         surface,
+		color:           color,
+		colorView:       colorView,
+		frameWidth:      width,
+		frameHeight:     height,
+		clientEndpoint:  clientEndpoint,
+		receiver:        receiver,
+		server:          running,
+		host:            host,
+		serverCancel:    serverCancel,
+		serverDone:      serverDone,
+		mirror:          client.NewMirror(),
+		itemDrops:       client.NewItemDrops(),
+		inventorySource: -1,
+		predictor:       client.NewPredictor(),
+		remotePlayers:   client.NewRemotePlayers(),
+		camera:          camera,
+		center:          cameraChunk(camera.Pos),
+		loadedChunks:    make(map[core.ChunkPos]struct{}),
+		ticks:           ticks,
+		saves:           saves,
 		benchmarkTransport: func() string {
 			if options.BenchmarkTransport == "" {
 				return "memory"
@@ -896,10 +899,11 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	} else if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
 		return false, fmt.Errorf("准备远端玩家昵称: %w", err)
 	}
-	hotbar, hotbarConfirmed := a.inventory.Hotbar()
-	if hotbarConfirmed {
+	inventory, inventoryConfirmed := a.inventory.State()
+	if inventoryConfirmed {
 		if err := a.hotbarRenderer.Prepare(
-			hotbar, uint32(width), uint32(height), a.renderer.UploadBudget(),
+			inventory, a.inventoryOpen, a.inventorySource,
+			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
 		}
@@ -951,7 +955,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		renderTiming.recordNameTag(nameTagDuration + renderNow().Sub(started))
 	}
 	// HUD 在 terrain、avatar 与 name tag 之后绘制。
-	if hotbarConfirmed {
+	if inventoryConfirmed {
 		a.hotbarRenderer.Render(encoder, target)
 	}
 	command := encoder.Finish()
