@@ -138,6 +138,7 @@ func compareReportsWithScenarioUpgrade(
 				current.Ticks.P95MS,
 				current.Ticks.P99MS,
 				maxRegression,
+				0,
 			)
 		}
 	} else {
@@ -167,6 +168,7 @@ func compareReportsWithScenarioUpgrade(
 				current.Persistence.P95MS,
 				current.Persistence.P99MS,
 				maxRegression,
+				0,
 			)
 		} else {
 			failures = appendSummaryRegressions(
@@ -263,6 +265,7 @@ func compareReportsWithScenarioUpgrade(
 				currentPhase.P95MS,
 				currentPhase.P99MS,
 				maxRegression,
+				0,
 			)
 		} else {
 			failures = appendSummaryRegressions(
@@ -480,6 +483,7 @@ func appendV6MultiplayerRegressions(
 	latencies := []struct {
 		name              string
 		baseline, current client.LatencySummary
+		resolutionMS      float64
 	}{
 		{name: "remote_state_encode", baseline: baseline.RemoteStateEncode, current: current.RemoteStateEncode},
 		{name: "remote_state_decode", baseline: baseline.RemoteStateDecode, current: current.RemoteStateDecode},
@@ -487,14 +491,19 @@ func appendV6MultiplayerRegressions(
 		{name: "interpolation", baseline: baseline.Interpolation, current: current.Interpolation},
 		{name: "avatar_submit", baseline: baseline.AvatarSubmit, current: current.AvatarSubmit},
 		{name: "name_tag_submit", baseline: baseline.NameTagSubmit, current: current.NameTagSubmit},
-		{name: "remote_gpu_complete", baseline: baseline.RemoteGPUComplete, current: current.RemoteGPUComplete},
+		{
+			name:         "remote_gpu_complete",
+			baseline:     baseline.RemoteGPUComplete,
+			current:      current.RemoteGPUComplete,
+			resolutionMS: gpuCompletionResolutionMS(baseline.RemoteGPUCompleteBatch),
+		},
 	}
 	for _, latency := range latencies {
 		failures = appendStableSummaryRegressions(
 			failures, latency.name,
 			latency.baseline.P50MS, latency.baseline.P95MS, latency.baseline.P99MS,
 			latency.current.P50MS, latency.current.P95MS, latency.current.P99MS,
-			threshold,
+			threshold, latency.resolutionMS,
 		)
 	}
 	if includeServerProbe {
@@ -553,6 +562,20 @@ func appendM3BStableLatencyRegressions(
 	return failures
 }
 
+// pollCompletionTickMS 是宿主完成等待实现的固定节拍，实测约为 1.28ms。
+// 逐次计时的样本被量化到它的整数倍；批量分摊后每个样本只含一次该节拍。
+const pollCompletionTickMS = 1.28
+
+// gpuCompletionResolutionMS 返回 remote_gpu_complete 的最小可分辨增量。
+// batch 为 0 表示 v8–v11 的逐次计时，分辨率就是完整节拍；
+// v12 起按批次数量摊薄。
+func gpuCompletionResolutionMS(batch int) float64 {
+	if batch <= 0 {
+		return pollCompletionTickMS
+	}
+	return pollCompletionTickMS / float64(batch)
+}
+
 func appendM3BLatencyRegressions(
 	failures []string,
 	prefix string,
@@ -585,6 +608,7 @@ func appendStableSummaryRegressions(
 	baselineP50, baselineP95, baselineP99 float64,
 	currentP50, currentP95, currentP99 float64,
 	threshold float64,
+	resolutionMS float64,
 ) []string {
 	for _, metric := range []struct {
 		name              string
@@ -594,8 +618,8 @@ func appendStableSummaryRegressions(
 		{name: "p95_ms", baseline: baselineP95, current: currentP95},
 		{name: "p99_ms", baseline: baselineP99, current: currentP99},
 	} {
-		failures = appendRegression(
-			failures, prefix, metric.name, metric.baseline, metric.current, threshold,
+		failures = appendRegressionWithResolution(
+			failures, prefix, metric.name, metric.baseline, metric.current, threshold, resolutionMS,
 		)
 	}
 	return failures
@@ -632,6 +656,27 @@ func appendRegression(
 	current float64,
 	threshold float64,
 ) []string {
+	return appendRegressionWithResolution(failures, prefix, metric, baseline, current, threshold, 0)
+}
+
+// appendRegressionWithResolution 只在指标分辨率足以支撑相对判定时施加相对回归门禁。
+//
+// resolutionMS 是该指标单次测量的最小可分辨增量。当它相对基线值超过判定阈值时，
+// 相邻的两个可取值之间本身就跨过阈值，相对判定只会反映量化噪声而非真实退化，
+// 因此跳过；该指标的完整性与绝对上限门禁不受影响。resolutionMS 为 0 表示
+// 分辨率足够细，按普通相对判定处理。
+func appendRegressionWithResolution(
+	failures []string,
+	prefix string,
+	metric string,
+	baseline float64,
+	current float64,
+	threshold float64,
+	resolutionMS float64,
+) []string {
+	if resolutionMS > 0 && baseline > 0 && resolutionMS/baseline > threshold {
+		return failures
+	}
 	if !regressed(baseline, current, threshold) {
 		return failures
 	}
@@ -640,7 +685,7 @@ func appendRegression(
 		label = prefix + " " + metric
 	}
 	return append(failures, fmt.Sprintf(
-		"%s 退化 %.1f%%：基线=%.3f 当前=%.3f",
+		"%s 相对退化 %.1f%%：基线=%.3f 当前=%.3f",
 		label,
 		(current/baseline-1)*100,
 		baseline,

@@ -1,14 +1,14 @@
 ## 1. 前置确认
 
-- [ ] 1.1 确认 M4G 候选 `5eea131` 保持冻结、未被改写，其 v11 失败报告只作诊断证据；确认 M5 当前基线仍是 scenario v10 且 `docs/notes/perf-baseline-m5.json` 哈希未变。
-- [ ] 1.2 重新读取本 change 的 proposal、两份 delta specs、design 和 tasks，与代码核对后运行 `openspec validate stabilize-benchmark-gpu-timing --strict --no-interactive`。
+- [x] 1.1 确认 M4G 候选 `5eea131` 保持冻结、未被改写，其 v11 失败报告只作诊断证据；确认 M5 当前基线仍是 scenario v10 且 `docs/notes/perf-baseline-m5.json` 哈希未变。
+- [x] 1.2 重新读取本 change 的 proposal、两份 delta specs、design 和 tasks，与代码核对后运行 `openspec validate stabilize-benchmark-gpu-timing --strict --no-interactive`。
 
 ## 2. GPU 完成探针改用批量分摊
 
-- [ ] 2.1 在 `cmd/mcgo` 先写失败测试：`remote_gpu_complete` 一个样本为一批固定数量绘制的总耗时除以批次数量；批次数量与样本数固定并写入报告；空绘制与完整远端绘制的中位数可区分；p95/p50 明显小于 `2`。
-- [ ] 2.2 修改 `cmd/mcgo/multiplayer_benchmark.go` 的 `measureGPUCompletion` 为批量分摊，批次数量取 `1024`；保持既有 observer 卸载屏障，计时区间仍不含标签准备、编码与释放。
-- [ ] 2.3 在 `internal/client` 的报告结构中记录批次数量与样本数。
-- [ ] 2.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./internal/client -race -count=1'`、`go test ./internal/archcheck -count=1`、`gofmt -l .` 与 `git diff --check`，确认无窗口，通过后提交 `fix: GPU 完成探针改用批量分摊计时`。
+- [x] 2.1 在 `cmd/mcgo` 先写失败测试：`remote_gpu_complete` 一个样本为一批固定数量绘制的总耗时除以批次数量；批次数量与样本数固定并写入报告；空绘制与完整远端绘制的中位数可区分；p95/p50 明显小于 `2`。
+- [x] 2.2 修改 `cmd/mcgo/multiplayer_benchmark.go` 的 `measureGPUCompletion` 为批量分摊，批次数量取 `1024`；保持既有 observer 卸载屏障，计时区间仍不含标签准备、编码与释放。
+- [x] 2.3 在 `internal/client` 的报告结构中记录批次数量与样本数。
+- [x] 2.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./internal/client -race -count=1'`、`go test ./internal/archcheck -count=1`、`gofmt -l .` 与 `git diff --check`，确认无窗口，通过后提交 `fix: GPU 完成探针改用批量分摊计时`。
 
 ## 3. 门禁分辨率规则
 

@@ -345,11 +345,21 @@ func TestPerfcheckV10SameScenarioComparesMemoryAndTCP(t *testing.T) {
 	if failures, err := compareReports(baseline, sameScenarioCurrent, 0.20); err != nil || len(failures) != 0 {
 		t.Fatalf("v10 Memory/TCP comparison failures=%v error=%v", failures, err)
 	}
+	// v10 的 remote_gpu_complete 是逐次计时，分辨率不足以支撑相对判定，
+	// 因此同样幅度的变化不再报告相对回归；v12 的批量分摊指标仍然报告。
 	sameScenarioCurrent.Multiplayer.RemoteGPUComplete.P99MS *= 1.201
 	sameScenarioCurrent.Multiplayer.RemoteGPUComplete.MaxMS = sameScenarioCurrent.Multiplayer.RemoteGPUComplete.P99MS
-	if failures, err := compareReports(baseline, sameScenarioCurrent, 0.20); err != nil ||
+	if failures, err := compareReports(baseline, sameScenarioCurrent, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v10 量化 GPU 指标不应报告相对回归：failures=%v error=%v", failures, err)
+	}
+
+	v12Baseline := completeV12ComparableReport("memory")
+	v12Current := completeV12ComparableReport("tcp")
+	v12Current.Multiplayer.RemoteGPUComplete.P99MS *= 1.201
+	v12Current.Multiplayer.RemoteGPUComplete.MaxMS = v12Current.Multiplayer.RemoteGPUComplete.P99MS
+	if failures, err := compareReports(v12Baseline, v12Current, 0.20); err != nil ||
 		!strings.Contains(strings.Join(failures, "\n"), "remote_gpu_complete p99_ms") {
-		t.Fatalf("v10 stable regression failures=%v error=%v", failures, err)
+		t.Fatalf("v12 stable regression failures=%v error=%v", failures, err)
 	}
 }
 
@@ -696,11 +706,16 @@ func TestPerfcheckV6CrossTransportCoversApprovedStableFieldMatrix(t *testing.T) 
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			baseline := completeV6ComparableReport("memory")
+			// GPU 指标只有在批量分摊（v12 起）时才具备相对判定所需的分辨率。
+			newReport := completeV6ComparableReport
+			if test.name == "gpu" {
+				newReport = completeV12ComparableReport
+			}
+			baseline := newReport("memory")
 			baseline.Persistence = client.PersistenceSummary{
 				Snapshots: 10, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4,
 			}
-			current := completeV6ComparableReport("tcp")
+			current := newReport("tcp")
 			current.Persistence = baseline.Persistence
 			test.mutate(&current)
 			failures, err := compareReports(baseline, current, 0.20)
@@ -918,6 +933,14 @@ func completeV9ComparableReport(transport string) client.PerfReport {
 	return report
 }
 
+func completeV12ComparableReport(transport string) client.PerfReport {
+	report := completeV11ComparableReport(transport)
+	report.ScenarioVersion = 12
+	report.Multiplayer.RemoteGPUCompleteBatch = client.ScenarioV12GPUCompletionBatch
+	report.Multiplayer.RemoteGPUComplete.Samples = client.ScenarioV12GPUCompletionSamples
+	return report
+}
+
 func completeV11ComparableReport(transport string) client.PerfReport {
 	report := completeV10ComparableReport(transport)
 	report.ScenarioVersion = 11
@@ -1007,5 +1030,37 @@ func TestPerfcheckHistoricalScenariosRemainReadable(t *testing.T) {
 				t.Fatalf("v%d 自比较 failures=%v err=%v", test.version, failures, err)
 			}
 		})
+	}
+}
+
+func TestPerfcheckSkipsRelativeGateForQuantizedMetric(t *testing.T) {
+	// 分辨率为 1.28ms 的指标：基线 1.30ms、当前 2.53ms 是跨越一个量化步长，
+	// 不得报告相对回归；分辨率远细于阈值时同样幅度必须失败。
+	const threshold = 0.20
+	quantized := appendRegressionWithResolution(
+		nil, "remote_gpu_complete", "p95_ms", 1.300, 2.527, threshold, 1.28,
+	)
+	if len(quantized) != 0 {
+		t.Fatalf("量化指标报告了相对回归：%v", quantized)
+	}
+
+	fine := appendRegressionWithResolution(
+		nil, "remote_gpu_complete", "p95_ms", 0.0613, 0.1192, threshold, 1.28/1024,
+	)
+	if len(fine) != 1 {
+		t.Fatalf("高分辨率指标未报告相对回归：%v", fine)
+	}
+	if !strings.Contains(fine[0], "相对") {
+		t.Fatalf("失败信息未指明判定类型：%q", fine[0])
+	}
+}
+
+func TestPerfcheckQuantizedMetricKeepsCompletenessGate(t *testing.T) {
+	// 跳过相对判定不得放松完整性门禁：样本不足仍必须失败。
+	report := completeV11ComparableReport("memory")
+	report.Multiplayer.RemoteGPUComplete.Samples = 1
+	if err := validateV6Report("current", report); err == nil ||
+		!strings.Contains(err.Error(), "remote_gpu_complete") {
+		t.Fatalf("样本不足未被拒绝：%v", err)
 	}
 }
