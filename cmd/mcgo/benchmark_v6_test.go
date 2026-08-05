@@ -5,7 +5,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -17,10 +19,15 @@ import (
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
+	"minecraft-go/internal/render"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
 	"minecraft-go/internal/worldgen"
 )
+
+func readFloat32(data []byte, offset int) float32 {
+	return math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+}
 
 type benchmarkBlockingServerStream struct {
 	entered chan struct{}
@@ -648,6 +655,27 @@ func TestScenarioV13BenchmarkReportReusesV12GPUCompletionDefinition(t *testing.T
 	report.Multiplayer.RemoteGPUComplete.Samples = client.ScenarioV12GPUCompletionSamples
 	if err := validateBenchmarkReport(report); err != nil {
 		t.Fatalf("v13 批量分摊样本数被拒绝: %v", err)
+	}
+}
+
+// Mutation killed: still/flying 阶段若不再经过真实 renderFrame，terrain pass
+// 中的 sky draw 不会出现，sky uniform buffer 也不会被写入。
+func TestScenarioV13StillFlyingFrameIncludesCelestialSkyDraw(t *testing.T) {
+	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "星夜", 1, mgl32.Vec3{0, 0, -4})); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := app.frame(benchmarkMessageDrainMax, steadyFrameMeshWorkMax, fixedBenchmarkFrameDuration)
+	if err != nil || !rendered {
+		t.Fatalf("benchmark 帧 renderFrame=(%v,%v)", rendered, err)
+	}
+	sky := dev.bufferByLabel(t, "sky uniform")
+	if sky.writes != 1 {
+		t.Fatalf("sky uniform buffer 写入次数=%d，想要 benchmark 每帧包含一次天空 draw", sky.writes)
+	}
+	dayNight := render.DayNightAt(app.worldTimeTicks)
+	if got := readFloat32(sky.data, 76); got != dayNight.Daylight {
+		t.Fatalf("sky Daylight=%v want=%v", got, dayNight.Daylight)
 	}
 }
 

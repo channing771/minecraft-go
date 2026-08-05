@@ -497,11 +497,13 @@ func (d *integrationRenderDevice) releaseMarkers(labels []string) []string {
 type integrationBuffer struct {
 	desc    gfx.BufferDesc
 	data    []byte
+	writes  int
 	release func()
 }
 
 func (b *integrationBuffer) Size() uint64 { return b.desc.Size }
 func (b *integrationBuffer) Write(offset uint64, data []byte) {
+	b.writes++
 	end := int(offset) + len(data)
 	if len(b.data) < end {
 		b.data = make([]byte, end)
@@ -2046,6 +2048,24 @@ func TestApplicationRenderFrameCameraAndSkyParameters(t *testing.T) {
 	}
 	if !bytes.Equal(firstSky, sky.data) {
 		t.Fatalf("第二帧 sky uniform 变化:\nfirst=%x\nsecond=%x", firstSky, sky.data)
+	}
+}
+
+// Mutation killed: 每帧重复计算 ViewProj/逆矩阵会让 terrain 或 sky camera
+// buffer 的写入次数超过一次。
+func TestApplicationRenderFrameComputesCameraMatricesOnce(t *testing.T) {
+	glyphs := &integrationGlyphSource{}
+	app, dev := newRemoteRenderApplication(t, glyphs)
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
+	}
+	terrain := dev.bufferByLabel(t, "terrain camera")
+	sky := dev.bufferByLabel(t, "sky uniform")
+	if terrain.writes != 1 {
+		t.Fatalf("terrain camera buffer 写入次数=%d，想要每帧一次", terrain.writes)
+	}
+	if sky.writes != 1 {
+		t.Fatalf("sky uniform buffer 写入次数=%d，想要每帧一次", sky.writes)
 	}
 }
 
