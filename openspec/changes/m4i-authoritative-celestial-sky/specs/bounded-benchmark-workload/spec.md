@@ -58,3 +58,12 @@
 #### Scenario: 无窗口 workload 包含天空绘制
 - **WHEN** benchmark 执行 scenario v13 的 still 或 flying 帧
 - **THEN** 系统 MUST 在固定 2560x1440 离屏目标绘制与交互客户端相同的程序化天空，且不得创建、启动或聚焦游戏窗口
+
+#### Scenario: 实现优化保持 scenario v13
+- **GIVEN** 优化前后的天空视觉、每帧 fullscreen draw 数量、2560x1440 离屏目标、阶段时长、样本数和统计口径完全相同
+- **WHEN** 项目只减少 shader 工作或修复运行时资源滞留
+- **THEN** producer MUST 继续标记 scenario v13，且比较器 MUST 继续执行既有 v13 完整性和绝对门禁
+
+#### Scenario: workload 或测量口径变化不能藏在 v13
+- **WHEN** 性能修复改变天空 draw 数量、固定分辨率、阶段时长、样本数、场景运动、指标定义或其他 benchmark workload
+- **THEN** 项目 MUST 在再次生成正式报告前升级场景版本并修订迁移规则，不得把变化后的报告标记为 scenario v13

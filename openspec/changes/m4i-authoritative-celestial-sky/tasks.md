@@ -31,13 +31,26 @@
 - [x] 6.2 运行完整无窗口门禁：先执行 `gofmt -w internal/render/daylight.go internal/render/daylight_test.go internal/render/renderer.go internal/render/sky_test.go cmd/mcgo/app.go cmd/mcgo/app_test.go cmd/mcgo/benchmark.go cmd/mcgo/benchmark_v5_test.go cmd/mcgo/benchmark_v6_test.go cmd/gfxspike/main.go cmd/perfcheck/main.go cmd/perfcheck/main_test.go`，随后 `gofmt -l .` 必须无输出，再运行 `go test ./... -race`、`go vet ./...`、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod` 和 `openspec validate --all --strict --no-interactive`；任何失败修复根因，不修改 Hook 或放宽门禁。
 - [x] 6.3 核对 `git diff --check`、`git status --short` 和 `git diff --name-only`，确认没有修改 `internal/sim/drop.go`、`internal/client/drops.go`、`internal/render/drop.go`、协议、存档格式或二进制资产；提交候选后记录精确 `git rev-parse HEAD`，此后正式链前不得改动候选代码或规格。
 
-## 7. 建立 M5 scenario v13 基线
+## 7. 记录首个正式候选失败
 
-- [ ] 7.1 候选完整门禁进程退出并自然冷却至少 5 分钟后，使用 `uptime`、`pmset -g batt`、`pmset -g custom` 和 `pgrep -fl 'mcgo|perfcheck'` 间隔至少 30 秒采集两次只读宿主状态；两次都满足 load、AC、电量、低电量模式和无遗留进程条件后，令任务变量 `candidate` 等于 `git rev-parse HEAD` 的精确输出，绑定该 HEAD 与两个全新 `/tmp/mcgo-m5-v13-${candidate}-{memory,tcp}.json` 路径请求用户一次性正式授权。预检失败不得启动 producer、清理缓存或结束用户进程。
-- [ ] 7.2 获得精确授权后只执行一次 Memory producer：`go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output "/tmp/mcgo-m5-v13-${candidate}-memory.json"`；成功后运行 `go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current "/tmp/mcgo-m5-v13-${candidate}-memory.json" --max-regression 0.20 --allow-scenario-upgrade 12:13`。任一步失败立即停止，不重跑、不改报告、不运行 TCP。
-- [ ] 7.3 仅在 Memory 迁移验证通过后执行一次 TCP producer：`go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output "/tmp/mcgo-m5-v13-${candidate}-tcp.json"`；随后以 Memory 报告为 baseline 运行同场景 `cmd/perfcheck`。通过后才把 Memory 报告精确字节提升为 `docs/notes/perf-baseline-m5.json`，并在 `docs/notes/perf-baseline-m5.md`、`docs/notes/perf-baseline.md` 记录 HEAD、命令、硬件、哈希和 v12→v13 证据；`cmp` 验证基线与 Memory 报告字节一致，M2 基线保持不变。
+- [x] 7.1 候选 `f7d8f261e910863e189666f6e2181e606996f42f` 在完整门禁后自然冷却 `2026-08-05T23:51:51+0800` 至 `23:56:51+0800`，并于 `23:56:59`、`23:57:47` 完成两次只读静稳预检；两次均为 AC、100% 电量、低电量模式关闭、无遗留 `mcgo`/`perfcheck`，load 1m/5m 分别为 `2.81/2.78` 与 `2.25/2.63`。绑定两个全新 v13 路径后取得一次性正式授权。
+- [x] 7.2 只执行一次 Memory producer。still 为 `196.4 FPS`、p99 `5.702ms`、RSS `1378.9MiB`；flying 为 `309.9 FPS`、p99 `12.175ms`、RSS `2280.9MiB`；GPU 采样后 RSS 峰值 `2452.2MiB`，八会话服务端探针因 `rss=2571304960` 超过 `2GiB` 返回 exit 1。producer 未生成 JSON，未运行迁移 `perfcheck` 或 TCP，且未重跑。
+- [x] 7.3 核对两个正式输出路径均不存在、无遗留进程、工作树仍在精确失败候选且干净，`docs/notes/perf-baseline-m5.json` 与 M2 baseline 哈希仍为 `9eef96e0…e5313f`、`b2d04877…cb7f93`；旧候选与失败步骤从此只作证据。
 
-## 8. 收尾验证
+## 8. 定位并修复 v13 性能回归
 
-- [ ] 8.1 基线与文档更新后再次运行 `gofmt -l .`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod` 和 `openspec validate --all --strict --no-interactive`；`gofmt -l .` 必须无输出，所有命令必须成功。
-- [ ] 8.2 复核 proposal、三份 delta specs、design 与已勾选 tasks 和最终实现一致，确认协议/metadata/玩家/区块版本仍为 M4G 归档值、scenario v13 及 M5 基线证据准确，再准备规格同步、评审与归档；自动验收全程不得启动交互式客户端。
+- [ ] 8.1 先做不可提升的非正式诊断，不运行旧候选正式 producer：使用缩短阶段、独立 `diag` 路径和一次一个变量的临时 mutation，对比完整天空、跳过 sky draw、保留 draw 但简化 fragment 工作；结合现有阶段内存分解与 `GODEBUG=gctrace=1` 区分 Go 堆、Go runtime 和原生图形资源。每个 mutation 后恢复源码，诊断输出不得传给 `perfcheck` 或基线；把命令、HEAD、差异和结论记录到 `docs/notes/perf-baseline.md` 的失败证据段。
+- [ ] 8.2 根据 8.1 的单一根因先写失败测试或可重复的最小性能检查，再最小修复 flying/GPU 采样期间的资源滞留；不得提高 `clientMemoryLimit`、`2GiB` RSS、消息/mesher/queue 上限或减少天空 workload。运行受影响包 race 测试、零分配测试与同一诊断检查，证明修复前后只有目标内存来源变化。
+- [ ] 8.3 在 RSS 闭合后，用 headless 像素测试锁定正午/午夜、太阳/月亮方向、固定星图和地形遮挡，再最小减少等价 shader 工作；不得减少每帧一次 sky draw、降低 2560x1440 或加入纹理。运行 `go test ./internal/render -run 'TestSky|TestRendererRenderDoesNotAllocate' -race -count=1`，并用不可提升的 v13 诊断确认 flying p99 `<12ms`。
+- [ ] 8.4 核对最终实现没有改变 draw 数量、固定分辨率、阶段时长、样本、场景运动或指标定义，保持 scenario v13 与唯一 `12:13` 迁移；若任一项必须改变，停止实现并先把 proposal、delta specs、design、tasks 和 producer 更新为 v14。
+
+## 9. 冻结并验收新候选
+
+- [ ] 9.1 运行受影响范围与完整无窗口门禁：`gofmt -l .`、`go test ./internal/render ./cmd/mcgo ./cmd/perfcheck -race -count=1`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod`、相关 benchmark 和 `openspec validate --all --strict --no-interactive`；确认掉落、协议、存档、二进制资产和两份现有 baseline 未改，再提交并记录新候选 HEAD。
+- [ ] 9.2 新候选完整门禁退出并自然冷却至少 5 分钟后，间隔至少 30 秒采集两次 `uptime`、`pmset -g batt`、`pmset -g custom`、`pgrep -fl 'mcgo|perfcheck'`；通过后绑定新 HEAD 与两个全新路径请求新的精确一次性授权，不复用旧授权或旧路径。
+- [ ] 9.3 获得新授权后只执行一次 Memory producer；成功后用 `--allow-scenario-upgrade 12:13` 执行迁移完整性与绝对门禁，失败则立即停止。仅在 Memory 通过后执行一次 TCP producer及同场景比较；通过后才把 Memory 精确字节提升为 M5 baseline，并记录 HEAD、命令、硬件、哈希、v12→v13 与旧候选失败证据。M2 baseline 保持不变。
+
+## 10. 收尾验证
+
+- [ ] 10.1 基线与文档更新后再次运行 `gofmt -l .`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod` 和 `openspec validate --all --strict --no-interactive`；`gofmt -l .` 必须无输出，所有命令必须成功。
+- [ ] 10.2 复核 proposal、三份 delta specs、design 与已勾选 tasks 和最终实现一致，确认协议/metadata/玩家/区块版本仍为 M4G 归档值、scenario v13 及 M5 基线证据准确，再准备规格同步、评审与归档；自动验收全程不得启动交互式客户端。

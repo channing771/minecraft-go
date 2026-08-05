@@ -72,7 +72,19 @@ terrain camera uniform 保持现有 `80` 字节布局；sky uniform 使用 `96` 
 
 固定 2560x1440、still/flying 时长、消息/mesher 上限、RSS、服务端 tick、GPU 探针、样本数、最小有意义增量、绝对门禁和 `20%` 相对阈值全部不变。`remote_gpu_complete` 仍只测远端角色与昵称批量 draw；天空成本由真实 still/flying 帧覆盖，不污染该指标定义。
 
-### 7. 受影响文件与依赖方向
+### 7. 首个正式失败后先定位资源，再优化 shader
+
+首个冻结候选 `f7d8f261e910863e189666f6e2181e606996f42f` 在完整门禁、五分钟冷却、两次静稳预检和精确授权后只执行了一次 Memory producer。still 为 p99 `5.702ms`、RSS `1378.9MiB`；flying 为 p99 `12.175ms`、RSS `2280.9MiB`；GPU 采样后进程历史峰值升至 `2452.2MiB`，随后八会话服务端探针因 `rss=2571304960` 超过既有 `2GiB` 上限而拒绝结果。producer 以 exit 1 结束，没有生成 JSON，未运行 `perfcheck` 或 TCP，M5/M2 基线字节均未改变。
+
+修复不从调整门禁开始。第一阶段只执行明确标记、不可提升的诊断运行：使用缩短阶段和一次一个变量的临时 mutation，对比完整天空、跳过 sky draw、保留 draw 但简化 fragment 工作；同时用现有阶段内存分解与 `GODEBUG=gctrace=1` 区分 Go 堆、Go runtime 与原生图形资源。临时 mutation 必须在每个实验后恢复，不进入候选提交；若这些证据仍不能定位对象来源，才增加最小的 benchmark-only heap profile instrumentation，并在修复提交前移除。
+
+第二阶段先修复 RSS 根因，再处理 frame time。稳定 `Renderer.Render` 已有真实候选零分配测试，因此不能把“零 Go 分配”等同于“进程无资源滞留”；诊断必须覆盖 flying 的区块周转、sky command encoding、GPU sample 后回收和 `ru_maxrss` 的生命周期峰值。frame time 优化只允许减少等价 shader 工作，例如避免不可见星空的 hash 工作或合并重复方向计算；正午/午夜像素、太阳/月亮方向、固定星图、一次 fullscreen draw 与 uniform 契约必须保持不变。
+
+只要最终视觉、draw 数量、2560x1440、阶段时长、样本和指标定义不变，优化后的 producer 仍是 scenario v13。若必须降低分辨率、减少天空 draw、改变阶段/样本或修改测量定义，则该方案改变 workload，必须先把场景升级为 v14 并重新设计迁移；不得用它给 v13 制造通过。
+
+否决直接把 RSS 门禁提高到 `2.5GiB` 或把 p99 放宽到 `14ms`：M4G v12 的 M5 Memory 基线为 flying p99 `9.488ms`、进程峰值 `1672.8MiB`，本次 `2452.2MiB` 不是边界误差。否决直接重复旧 producer：一次性正式结果已经失败，重复运行既不能定位根因，也违反正式链约束。
+
+### 8. 受影响文件与依赖方向
 
 - `internal/render/daylight.go`、`daylight_test.go`：纯天体相位、方向和夜间可见度。
 - `internal/render/renderer.go`、相关 renderer 测试、`shader/sky.wgsl`：固定 sky pipeline、uniform、draw 顺序、生命周期和零分配。
@@ -90,11 +102,16 @@ terrain camera uniform 保持现有 `80` 字节布局；sky uniform 使用 `96` 
 - [sky draw 意外写深度或改变覆盖顺序] → pipeline 显式关闭 depth write，并用命令记录测试和有地形遮挡的 headless 像素测试验证。
 - [新增 uniform 造成逐帧分配] → 两份编码都写入 Renderer 自有固定数组，并用 `AllocsPerRun` 覆盖稳定 Render。
 - [WGSL 与 CPU 昼夜曲线漂移] → CPU 计算方向、昼夜亮度和星空可见度，shader 只做基于这些参数的颜色合成。
+- [诊断运行被误当成新基线] → 所有诊断路径使用独立 `diag` 名称，不执行正式迁移比较，不复制到 `docs/notes/perf-baseline*.json`；新正式运行仍需新 HEAD、全新路径和明确授权。
+- [只优化 p99 掩盖内存回归] → 固定先闭合 RSS 来源与 `2GiB` 门禁，再优化 shader；两者都通过后才能冻结候选。
+- [为了通过而静默改变 workload] → 逐项核对 draw 数量、分辨率、阶段、样本和指标定义；任一变化先升级到 v14，不能继续标记 v13。
 
 ## Migration Plan
 
 1. 核对 M4G 已完成性能接受、规格同步和归档，并确认协议 v9、存档版本、scenario v12 与 M5 v12 基线；若任一不同，先修订本 change 并重新严格校验。
 2. 先用纯函数和 fake/headless renderer 测试锁定相位、uniform、资源生命周期、draw 顺序和像素结果，再接入交互客户端与 `gfxspike`；自动验证保持无窗口。
 3. 把 benchmark producer 和比较器升级为 scenario v13，冻结候选并完成全仓、架构、零分配和渲染 benchmark 门禁。
-4. 候选自然冷却并通过两次宿主静稳预检后，绑定精确 HEAD 和全新输出路径请求一次性授权；Memory 通过 `12:13` 完整性/绝对门禁后只执行一次 TCP，同场景跨 transport 通过后才提升 M5 Memory 精确字节为 v13 基线。M2 文件保持不变。
-5. 回退时同时回退天空 renderer、scenario v13 比较规则和 M5 v13 基线，恢复 M4G 的 v12 基线；协议和全部世界/玩家数据无需回退或迁移。
+4. 保留候选 `f7d8f261e910863e189666f6e2181e606996f42f` 的正式失败证据，不重跑、不生成或修补报告、不运行 TCP；使用不可提升的诊断矩阵先定位 RSS，再定位 shader 成本。
+5. 提交保持 workload 不变的最小修复时继续使用 scenario v13；若诊断要求改变 workload 或测量口径，先修订产物并升级到 v14。新候选重新完成全仓门禁、冷却、静稳预检和精确授权。
+6. 新 Memory 通过相应场景迁移的完整性/绝对门禁后只执行一次 TCP，同场景跨 transport 通过后才提升 M5 Memory 精确字节。M2 文件保持不变。
+7. 回退时同时回退天空 renderer、场景比较规则和新 M5 基线，恢复 M4G 的 v12 基线；协议和全部世界/玩家数据无需回退或迁移。
