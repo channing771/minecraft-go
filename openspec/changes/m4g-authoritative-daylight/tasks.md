@@ -58,17 +58,17 @@
 
 ## 9. scenario v11 与中文文档
 
-- [ ] 9.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：producer 标记 v11、v10/v11 默认拒绝、仅 `10:11` 可显式迁移、`9:10` 退役、历史 v6-v10 可读取、v11 同场景与跨 transport 继续执行原门禁。
-- [ ] 9.2 修改 benchmark producer/comparator 为 scenario v11，不改变 2560x1440、still/flying、RSS、服务端 tick、2048 GPU 样本、Memory/TCP、绝对阈值或 `20%` 相对阈值；M2 与既有 M5 文件暂不改写。
-- [ ] 9.3 更新 `README.md`、`docs/notes/lan-server.md`、`docs/notes/perf-baseline.md`，说明 24000 tick 昼夜、直射天空光上限、metadata v2、协议 v9、备份/回退、scenario v11 与未实现的方块光/传播。
-- [ ] 9.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/network -race -count=1'`、`openspec validate --all --strict --no-interactive`、`gofmt -l .` 与 `git diff --check`，通过后提交 `feat: 升级 benchmark scenario v11`。
+- [x] 9.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：producer 标记 v11、v10/v11 默认拒绝、仅 `10:11` 可显式迁移、`9:10` 退役、历史 v6-v10 可读取、v11 同场景与跨 transport 继续执行原门禁。
+- [x] 9.2 修改 benchmark producer/comparator 为 scenario v11，不改变 2560x1440、still/flying、RSS、服务端 tick、2048 GPU 样本、Memory/TCP、绝对阈值或 `20%` 相对阈值；M2 与既有 M5 文件暂不改写。
+- [x] 9.3 更新 `README.md`、`docs/notes/lan-server.md`、`docs/notes/perf-baseline.md`，说明 24000 tick 昼夜、直射天空光上限、metadata v2、协议 v9、备份/回退、scenario v11 与未实现的方块光/传播。
+- [x] 9.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck ./internal/network -race -count=1'`、`openspec validate --all --strict --no-interactive`、`gofmt -l .` 与 `git diff --check`，通过后提交 `feat: 升级 benchmark scenario v11`。
 
 ## 10. 候选版本完整门禁
 
-- [ ] 10.1 对 proposal、三份 delta specs、design、tasks 与实现逐项映射；确认没有横向传播、方块光、透明方块、天气、天体、怪物规则、独立光照 worker 或额外存档负载。
-- [ ] 10.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 和 `openspec validate --all --strict --no-interactive`；任何失败只修根因，不放宽门禁或绕过 Hook。
-- [ ] 10.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/world ./internal/client -run "^$" -bench "Height|Sky|Mesher" -benchmem -count=3 && go test ./internal/storage ./internal/server -run "Metadata|WorldTime" -race -count=1 && go test ./internal/render -run "Test(TerrainDaylightHeadlessDraw|AvatarRendererHeadlessDraw|ItemDropRendererHeadlessDraw)$" -count=1'`；确认无前台窗口、无遗留 benchmark 进程、tracked 工作树只含 M4G 预期文件。
-- [ ] 10.4 勾选已完成任务并提交冻结候选 `chore: 关闭 M4G 权威昼夜`；提交后不修改 producer、场景、阈值、光照模型或热路径，除非新建修复提交并重新完成本组门禁。
+- [x] 10.1 对 proposal、三份 delta specs、design、tasks 与实现逐项映射；确认没有横向传播、方块光、透明方块、天气、天体、怪物规则、独立光照 worker 或额外存档负载。
+- [x] 10.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 和 `openspec validate --all --strict --no-interactive`；任何失败只修根因，不放宽门禁或绕过 Hook。
+- [x] 10.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/world ./internal/client -run "^$" -bench "Height|Sky|Mesher" -benchmem -count=3 && go test ./internal/storage ./internal/server -run "Metadata|WorldTime" -race -count=1 && go test ./internal/render -run "Test(TerrainDaylightHeadlessDraw|AvatarRendererHeadlessDraw|ItemDropRendererHeadlessDraw)$" -count=1'`；确认无前台窗口、无遗留 benchmark 进程、tracked 工作树只含 M4G 预期文件。
+- [x] 10.4 勾选已完成任务并提交冻结候选 `chore: 关闭 M4G 权威昼夜`；提交后不修改 producer、场景、阈值、光照模型或热路径，除非新建修复提交并重新完成本组门禁。
 
 ## 11. 一次性 M5 scenario v11 基线
 
