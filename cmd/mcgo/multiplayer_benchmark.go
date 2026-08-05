@@ -16,6 +16,7 @@ import (
 
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
+	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/render"
 	"minecraft-go/internal/server"
@@ -221,6 +222,10 @@ func benchmarkBillboardCamera(app *application) render.BillboardCamera {
 	}
 }
 
+// gpuCompletionChunks 是一个样本拆成的 command buffer 数量。
+const gpuCompletionChunks = client.ScenarioV12GPUCompletionBatch /
+	client.ScenarioV12GPUCompletionChunk
+
 func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) error {
 	avatars, tags := remoteRenderPresentations(probe.roster.Presentations())
 	// 一个样本是一批绘制只等待一次完成的总耗时除以批次数量：
@@ -229,21 +234,29 @@ func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) erro
 		if err := app.nameTagRenderer.Prepare(tags, app.renderer.UploadBudget()); err != nil {
 			return err
 		}
-		encoder := app.dev.CreateCommandEncoder()
-		for range client.ScenarioV12GPUCompletionBatch {
-			app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
-				ViewProj: app.camera.ViewProj(), Pos: app.camera.Pos,
-			}, avatars)
-			app.nameTagRenderer.Render(
-				encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app),
-			)
+		commands := make([]gfx.CommandBuffer, 0, gpuCompletionChunks)
+		for range gpuCompletionChunks {
+			encoder := app.dev.CreateCommandEncoder()
+			for range client.ScenarioV12GPUCompletionChunk {
+				app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
+					ViewProj: app.camera.ViewProj(), Pos: app.camera.Pos,
+				}, avatars)
+				app.nameTagRenderer.Render(
+					encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app),
+				)
+			}
+			commands = append(commands, encoder.Finish())
 		}
-		command := encoder.Finish()
 		started := probe.now()
-		app.dev.Submit(command)
+		app.dev.Submit(commands...)
 		app.dev.Poll(true)
 		probe.gpuComplete.Add(probe.now().Sub(started) / client.ScenarioV12GPUCompletionBatch)
-		command.Release()
+		for _, command := range commands {
+			command.Release()
+		}
+		// 计时区间之外再推进一次设备队列，确保本样本的 command buffer 被回收，
+		// 不会累积到下一个样本触发 Metal 的预算上限。
+		app.dev.Poll(true)
 	}
 	return nil
 }

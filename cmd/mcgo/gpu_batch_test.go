@@ -38,8 +38,17 @@ func TestScenarioV12GPUCompletionAmortizesOverFixedBatch(t *testing.T) {
 		t.Fatalf("样本 p50 = %v ms，想要摊薄后的 %v ms", summary.P50MS, wantMS)
 	}
 
-	// 每个样本只允许一次 submit/poll 与一对读钟；标签准备与释放位于计时区间之外。
-	want := []string{"finish", "now", "submit", "poll", "now", "release"}
+	// 每个样本只允许一次 submit/poll 与一对读钟；编码、标签准备与释放都在区间外。
+	chunks := client.ScenarioV12GPUCompletionBatch / client.ScenarioV12GPUCompletionChunk
+	want := make([]string, 0, chunks*2+4)
+	for range chunks {
+		want = append(want, "finish")
+	}
+	want = append(want, "now", "submit", "poll", "now")
+	for range chunks {
+		want = append(want, "release")
+	}
+	want = append(want, "poll")
 	if got, expected := len(dev.events), client.ScenarioV12GPUCompletionSamples*len(want); got != expected {
 		t.Fatalf("GPU 事件数 = %d，想要 %d", got, expected)
 	}
@@ -48,6 +57,20 @@ func TestScenarioV12GPUCompletionAmortizesOverFixedBatch(t *testing.T) {
 		if got := dev.events[start : start+len(want)]; !reflect.DeepEqual(got, want) {
 			t.Fatalf("样本 %d 事件 = %v，想要 %v", sample, got, want)
 		}
+	}
+}
+
+func TestScenarioV12GPUCompletionChunkStaysWithinCommandBufferBudget(t *testing.T) {
+	// 每次绘制会开启 avatar 与 name tag 两个 render pass。
+	// 单个 command buffer 的 pass 数必须留在 Metal 的 4096 预算之内。
+	const metalCommandBufferBudget = 4096
+	const passesPerDraw = 2
+	if passes := client.ScenarioV12GPUCompletionChunk * passesPerDraw; passes*2 > metalCommandBufferBudget {
+		t.Fatalf("单个 command buffer 的 pass 数 = %d，想要不超过预算的一半", passes)
+	}
+	if client.ScenarioV12GPUCompletionBatch%client.ScenarioV12GPUCompletionChunk != 0 {
+		t.Fatalf("批次数量 %d 必须能被分块大小 %d 整除",
+			client.ScenarioV12GPUCompletionBatch, client.ScenarioV12GPUCompletionChunk)
 	}
 }
 

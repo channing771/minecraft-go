@@ -24,10 +24,10 @@
 
 ## 5. scenario v12 与文档
 
-- [ ] 5.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：producer 标记 v12、v11/v12 默认拒绝、仅 `11:12` 可显式迁移、`10:11` 退役、历史 v6-v11 可读取、v12 同场景与跨 transport 继续执行原门禁。
-- [ ] 5.2 修改 producer 与比较器为 scenario v12，不改变分辨率、样本数、阶段时长、绝对阈值或 `20%` 相对阈值。
-- [ ] 5.3 更新 `README.md` 与 `docs/notes/perf-baseline.md`，说明批量分摊计时、量化指标不做相对判定、冷却窗口、scenario v12 与 `11:12` 迁移。
-- [ ] 5.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck -race -count=1'`、`openspec validate --all --strict --no-interactive`、gofmt 与 diff check，通过后提交 `feat: 升级 benchmark scenario v12`。
+- [x] 5.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：producer 标记 v12、v11/v12 默认拒绝、仅 `11:12` 可显式迁移、`10:11` 退役、历史 v6-v11 可读取、v12 同场景与跨 transport 继续执行原门禁。
+- [x] 5.2 修改 producer 与比较器为 scenario v12，不改变分辨率、样本数、阶段时长、绝对阈值或 `20%` 相对阈值。
+- [x] 5.3 更新 `README.md` 与 `docs/notes/perf-baseline.md`，说明批量分摊计时、量化指标不做相对判定、冷却窗口、scenario v12 与 `11:12` 迁移。
+- [x] 5.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./cmd/perfcheck -race -count=1'`、`openspec validate --all --strict --no-interactive`、gofmt 与 diff check，通过后提交 `feat: 升级 benchmark scenario v12`。
 
 ## 6. 候选版本完整门禁
 

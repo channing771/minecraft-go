@@ -97,7 +97,7 @@ scenario v8 及后续场景（包括 v12）MUST 继续使用现有 still、flyin
 - **THEN** 性能门禁 MUST 失败
 
 ### Requirement: benchmark 阶段之间执行固定冷却
-benchmark SHALL 在预热与 still、still 与 flying、flying 与 GPU 采样之间各执行一段固定时长的冷却，冷却期间 MUST NOT 提交渲染工作或推进相机脚本。冷却时长 MUST 记录在报告中，且 MUST NOT 改变任何被采集指标的定义、样本数或阶段时长。
+benchmark SHALL 在预热与 still、still 与 flying、flying 与 GPU 采样之间，以及 GPU 采样之后各执行一段固定时长的冷却；冷却期间 MUST NOT 提交渲染工作或推进相机脚本，并 SHALL 回收上一阶段产生的对象，避免其把后续阶段的 RSS 峰值推高。冷却时长 MUST 记录在报告中，且 MUST NOT 改变任何被采集指标的定义、样本数或阶段时长。
 
 #### Scenario: 冷却不改变被测量
 - **GIVEN** 一次完整的 scenario v12 运行
@@ -108,6 +108,11 @@ benchmark SHALL 在预热与 still、still 与 flying、flying 与 GPU 采样之
 - **GIVEN** flying 阶段刚刚结束
 - **WHEN** 系统准备采集 `remote_gpu_complete`
 - **THEN** 采样 MUST 在冷却窗口结束之后才开始
+
+#### Scenario: 采样产生的对象不推高后续 RSS 峰值
+- **GIVEN** GPU 采样阶段分配了大量一次性图形对象
+- **WHEN** 系统进入后续阶段并记录 RSS 峰值
+- **THEN** 冷却 MUST 先回收这些对象，且既有 RSS 上限门禁 MUST 保持不变
 
 #### Scenario: 报告记录冷却时长
 - **WHEN** benchmark 成功生成一份 scenario v12 报告

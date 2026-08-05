@@ -45,6 +45,9 @@ var (
 // runBenchmarkCooldown 在阶段之间等待固定时长，期间只泵送窗口事件，
 // 不提交任何渲染工作，也不推进相机脚本。
 func runBenchmarkCooldown(app *application, duration time.Duration) {
+	// 冷却是让系统回落的窗口：顺带回收上一阶段产生的对象，
+	// 避免它们把后续阶段的 RSS 峰值推高。
+	runtime.GC()
 	deadline := time.Now().Add(duration)
 	for time.Now().Before(deadline) {
 		if app.window != nil {
@@ -155,6 +158,8 @@ func runBenchmark(app *application, outputPath string) error {
 	if err := multiplayerProbe.measureGPUCompletionAfterTransportClose(app); err != nil {
 		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
 	}
+	// GPU 采样同样是满载阶段，其后也要冷却并回收，才轮到服务端探针。
+	runBenchmarkCooldown(app, benchmarkCooldown)
 	serverMultiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)
 	if err != nil {
 		return fmt.Errorf("测量八会话服务端: %w", err)
