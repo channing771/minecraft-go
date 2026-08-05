@@ -131,6 +131,8 @@ func (engine *Engine) Step() TickResult {
 	result := TickResult{Forget: make(map[SessionID][]core.ChunkKey)}
 	placements := make([]Command, 0, len(commands))
 	furnaceMoves := make([]Command, 0, len(commands))
+	// 命令阶段与后续掉落物/熔炉推进共用同一份待提交区块变更。
+	pending := make(map[core.ChunkKey]*pendingChunkChanges)
 	viewChanged := false
 	for _, command := range commands {
 		session := engine.sessions[command.Session]
@@ -304,6 +306,14 @@ func (engine *Engine) Step() TickResult {
 			}
 			player.inventory = next
 			player.inventoryDirty = true
+		case CommandDropSelectedItem:
+			if reason, rejected := engine.dropSelectedItem(session, pending); rejected {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   reason,
+				})
+			}
 		case CommandResync:
 			result.Resync = append(result.Resync, ResyncRequest{
 				Session:      command.Session,
@@ -335,7 +345,6 @@ func (engine *Engine) Step() TickResult {
 		engine.reconcileSubscriptions(&result)
 	}
 
-	pending := make(map[core.ChunkKey]*pendingChunkChanges)
 	engine.advanceDrops(pending)
 	engine.advanceFurnaces(pending)
 	for _, command := range furnaceMoves {

@@ -1,6 +1,7 @@
 package sim_test
 
 import (
+	"fmt"
 	"testing"
 
 	"minecraft-go/internal/core"
@@ -309,4 +310,74 @@ func readyWideViewPlayer(t *testing.T, viewRadius int) (*sim.Engine, sim.Session
 		t.Fatalf("玩家未 Ready: %+v", player)
 	}
 	return engine, session
+}
+
+func TestDropSelectedItemTransfersOneAuthoritativeItem(t *testing.T) {
+	for _, item := range []core.ItemID{
+		core.ItemStone,
+		core.ItemCoal,
+		core.ItemStonePickaxe,
+		core.ItemIronPickaxe,
+	} {
+		t.Run(fmt.Sprint(item), func(t *testing.T) {
+			inventory := core.Inventory{Hotbar: core.Hotbar{Selected: 2}}
+			inventory.Hotbar.Slots[2] = core.ItemStack{Item: item, Count: 1}
+			engine, session := readyFlatPlayerWithInventory(t, inventory)
+			engine.Enqueue(sim.Command{
+				Session: session, Sequence: 1, Kind: sim.CommandDropSelectedItem,
+			})
+			result := engine.Step()
+			if len(result.Rejected) != 0 || len(result.Inventories) != 1 {
+				t.Fatalf("result = %+v", result)
+			}
+			// 最后一件被丢弃后来源栏位清空。
+			if got := currentInventory(t, engine, session).Hotbar.Slots[2]; got != (core.ItemStack{}) {
+				t.Fatalf("来源栏位 = %+v", got)
+			}
+			_, drop := onlyDrop(t, engine)
+			// 创建 tick 立即计入第一个活动 tick，因此 step 后剩余 39。
+			if drop.Stack != (core.ItemStack{Item: item, Count: 1}) ||
+				drop.PickupDelayTicks != sim.PlayerDropPickupDelayTicks-1 {
+				t.Fatalf("主动掉落 = %+v", drop)
+			}
+		})
+	}
+}
+
+func TestDropSelectedItemKeepsRemainingCount(t *testing.T) {
+	inventory := core.Inventory{Hotbar: core.Hotbar{Selected: 0}}
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 3}
+	engine, session := readyFlatPlayerWithInventory(t, inventory)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 1, Kind: sim.CommandDropSelectedItem,
+	})
+	if result := engine.Step(); len(result.Rejected) != 0 {
+		t.Fatalf("被拒绝 = %+v", result.Rejected)
+	}
+	if got := currentInventory(t, engine, session).Hotbar.Slots[0]; got.Count != 2 {
+		t.Fatalf("剩余数量 = %+v，想要 2", got)
+	}
+	if _, drop := onlyDrop(t, engine); drop.Stack.Count != 1 {
+		t.Fatalf("掉落数量 = %+v，想要 1", drop.Stack)
+	}
+}
+
+func TestDropSelectedItemRejectionsLeaveAuthorityUnchanged(t *testing.T) {
+	t.Run("空选中栏位", func(t *testing.T) {
+		engine, session := readyFlatPlayerWithInventory(t, core.Inventory{})
+		before, _ := engine.PlayerHash(session)
+		engine.Enqueue(sim.Command{
+			Session: session, Sequence: 1, Kind: sim.CommandDropSelectedItem,
+		})
+		result := engine.Step()
+		if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectInvalidSlot {
+			t.Fatalf("拒绝 = %+v，想要 invalid_slot", result.Rejected)
+		}
+		if len(result.Inventories) != 0 {
+			t.Fatalf("拒绝后发布了背包更新：%+v", result.Inventories)
+		}
+		if after, _ := engine.PlayerHash(session); after != before {
+			t.Fatal("拒绝改变了权威玩家状态")
+		}
+	})
 }
