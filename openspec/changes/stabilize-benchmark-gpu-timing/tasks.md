@@ -31,10 +31,10 @@
 
 ## 6. 候选版本完整门禁
 
-- [ ] 6.1 对 proposal、两份 delta specs、design、tasks 与实现逐项映射；确认没有通用 GPU profiling 框架、逐 pass 计时或图形绑定更换，也没有改变 still/flying 时长、分辨率与相机脚本。
-- [ ] 6.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 和 `openspec validate --all --strict --no-interactive`；任何失败只修根因。
-- [ ] 6.3 用诊断运行确认修复生效：`remote_gpu_complete` 的 p95/p50 明显小于 `2`，分位数不再被量化到 `1.28ms` 的整数倍，且空绘制与完整远端绘制可区分。
-- [ ] 6.4 勾选已完成任务并提交冻结候选 `chore: 冻结 GPU 计时稳定化候选`；提交后不修改 producer、场景、阈值或探针，除非新建修复提交并重新完成本组门禁。
+- [x] 6.1 对 proposal、两份 delta specs、design、tasks 与实现逐项映射；确认没有通用 GPU profiling 框架、逐 pass 计时或图形绑定更换，也没有改变 still/flying 时长、分辨率与相机脚本。
+- [x] 6.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 和 `openspec validate --all --strict --no-interactive`；任何失败只修根因。
+- [x] 6.3 用诊断运行确认修复生效：`remote_gpu_complete` 的 p95/p50 明显小于 `2`，分位数不再被量化到 `1.28ms` 的整数倍，且空绘制与完整远端绘制可区分。
+- [x] 6.4 勾选已完成任务并提交冻结候选 `chore: 冻结 GPU 计时稳定化候选`；提交后不修改 producer、场景、阈值或探针，除非新建修复提交并重新完成本组门禁。
 
 ## 7. 一次性 M5 scenario v12 基线
 
