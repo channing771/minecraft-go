@@ -437,7 +437,8 @@ func cloneNeighborhood(
 	}
 
 	neighborhood := &world.Neighborhood{
-		Center: center.Chunk.Section(int(key.Pos.Y)).Clone(),
+		Center:   center.Chunk.Section(int(key.Pos.Y)).Clone(),
+		SectionY: int(key.Pos.Y),
 	}
 	stamps := make([]ChunkStamp, 0, 9)
 	for dz := int32(-1); dz <= 1; dz++ {
@@ -456,6 +457,9 @@ func cloneNeighborhood(
 			if !loaded || chunk.Chunk == nil {
 				continue
 			}
+			// 高度表与 section 取自同一份 revision 印章，保证光照输入同代。
+			neighborhood.Heights[dx+1][dz+1] = chunk.Chunk.Heights()
+			neighborhood.HeightsPresent[dx+1][dz+1] = true
 			for dy := int32(-1); dy <= 1; dy++ {
 				sectionY := key.Pos.Y + dy
 				if sectionY < 0 || sectionY >= core.SectionsPerChunk {

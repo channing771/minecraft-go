@@ -284,7 +284,7 @@ func TestDropAgePausesOutsideInterestRadius(t *testing.T) {
 // readyWideViewPlayer 构造一个视距大于掉落物半径且全部区块已 Ready 的引擎。
 func readyWideViewPlayer(t *testing.T, viewRadius int) (*sim.Engine, sim.SessionID) {
 	t.Helper()
-	engine := sim.NewEngine(viewRadius)
+	engine := sim.NewEngine(viewRadius, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	for range 4 * viewRadius {

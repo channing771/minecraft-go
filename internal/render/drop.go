@@ -130,8 +130,8 @@ func (renderer *ItemDropRenderer) Render(
 	encodeAvatarPartsInto(
 		renderer.upload[dropInstanceOffset:dropIndirectOffset], renderer.parts,
 	)
-	encodeAvatarFloat32sInto(
-		renderer.upload[avatarCameraOffset:avatarCameraBytes], camera.ViewProj[:],
+	encodeAvatarCameraInto(
+		renderer.upload[avatarCameraOffset:avatarCameraBytes], camera,
 	)
 	encodeAvatarUint32sInto(renderer.upload[dropIndirectOffset:dropUploadBytes], []uint32{
 		uint32(len(avatarCubeIndices)), uint32(len(renderer.parts)), 0, 0, 0,

@@ -29,6 +29,10 @@ var terrainShader string
 type Camera struct {
 	ViewProj mgl32.Mat4
 	Pos      mgl32.Vec3
+	// Daylight 是本帧的固定昼夜亮度，SkyColor 是对应的天空背景色，
+	// 两者都来自同一个 DayNightAt 相位。
+	Daylight float32
+	SkyColor [4]float32
 }
 
 // FrameStats 是最近一次 Render 的 CPU 侧候选集统计。
@@ -425,7 +429,7 @@ func (r *Renderer) Render(
 		Label:      "terrain pass",
 		ColorView:  target,
 		DepthView:  depth,
-		ClearColor: [4]float32{0.42, 0.68, 0.92, 1},
+		ClearColor: cam.SkyColor,
 		LoadClear:  true,
 	})
 	pass.SetPipeline(r.pipeline)
@@ -468,7 +472,7 @@ func cameraSection(pos mgl32.Vec3) core.SectionPos {
 func cameraBytes(cam Camera) []byte {
 	values := make([]float32, 0, 20)
 	values = append(values, cam.ViewProj[:]...)
-	values = append(values, cam.Pos[0], cam.Pos[1], cam.Pos[2], 0)
+	values = append(values, cam.Pos[0], cam.Pos[1], cam.Pos[2], cam.Daylight)
 	out := make([]byte, len(values)*4)
 	for i, v := range values {
 		binary.LittleEndian.PutUint32(out[i*4:], math.Float32bits(v))

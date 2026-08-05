@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -236,13 +237,13 @@ func TestCompareReportsPreservesV4NewFieldFallback(t *testing.T) {
 }
 
 func TestPerfcheckMultiplayerScenarioUpgradeAndProvenanceRules(t *testing.T) {
-	v9 := completeV9ComparableReport("memory")
 	v10 := completeV10ComparableReport("memory")
-	if _, err := compareReports(v9, v10, 0.20); err == nil || !strings.Contains(err.Error(), "scenario_version") {
+	v12 := completeV12ComparableReport("memory")
+	if _, err := compareReports(v10, v12, 0.20); err == nil || !strings.Contains(err.Error(), "scenario_version") {
 		t.Fatalf("default cross-scenario comparison error=%v", err)
 	}
-	if failures, err := compareReportsWithScenarioUpgrade(v9, v10, 0.20, "9:10"); err != nil || len(failures) != 0 {
-		t.Fatalf("explicit 9:10 migration failures=%v error=%v", failures, err)
+	if failures, err := compareReportsWithScenarioUpgrade(v10, v12, 0.20, "10:12"); err != nil || len(failures) != 0 {
+		t.Fatalf("explicit 10:12 migration failures=%v error=%v", failures, err)
 	}
 	for _, test := range []struct {
 		name  string
@@ -255,10 +256,10 @@ func TestPerfcheckMultiplayerScenarioUpgradeAndProvenanceRules(t *testing.T) {
 		{name: "framebuffer", clear: func(report *client.PerfReport) { report.Framebuffer = "" }},
 	} {
 		t.Run("empty "+test.name, func(t *testing.T) {
-			baseline, current := v9, v10
+			baseline, current := v10, v12
 			test.clear(&baseline)
 			test.clear(&current)
-			if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "9:10"); err == nil ||
+			if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "10:12"); err == nil ||
 				!strings.Contains(err.Error(), test.name) {
 				t.Fatalf("empty %s provenance error=%v", test.name, err)
 			}
@@ -268,9 +269,10 @@ func TestPerfcheckMultiplayerScenarioUpgradeAndProvenanceRules(t *testing.T) {
 		name, allow       string
 		baseline, current client.PerfReport
 	}{
-		{name: "reverse", allow: "10:9", baseline: v10, current: v9},
-		{name: "skip", allow: "8:10", baseline: completeV8ComparableReport("memory"), current: v10},
-		{name: "retired 8:9", allow: "8:9", baseline: completeV8ComparableReport("memory"), current: v9},
+		{name: "reverse", allow: "12:10", baseline: v12, current: v10},
+		{name: "skip", allow: "9:12", baseline: completeV9ComparableReport("memory"), current: v12},
+		{name: "retired 11:12", allow: "11:12", baseline: completeV11ComparableReport("memory"), current: v12},
+		{name: "retired 10:11", allow: "10:11", baseline: v10, current: completeV11ComparableReport("memory")},
 		{name: "retired 5:6", allow: "5:6", baseline: completeV5ComparableReport("memory"), current: completeV6ComparableReport("memory")},
 		{name: "retired 6:7", allow: "6:7", baseline: completeV6ComparableReport("memory"), current: completeV7ComparableReport("memory")},
 	} {
@@ -280,8 +282,8 @@ func TestPerfcheckMultiplayerScenarioUpgradeAndProvenanceRules(t *testing.T) {
 			}
 		})
 	}
-	v10.Hardware = "different"
-	if _, err := compareReportsWithScenarioUpgrade(v9, v10, 0.20, "9:10"); err == nil ||
+	v12.Hardware = "different"
+	if _, err := compareReportsWithScenarioUpgrade(v10, v12, 0.20, "10:12"); err == nil ||
 		!strings.Contains(err.Error(), "硬件标识不同") {
 		t.Fatalf("cross-hardware migration error=%v", err)
 	}
@@ -294,18 +296,18 @@ func TestPerfcheckScenarioUpgradeMatrix(t *testing.T) {
 		allow    string
 		wantErr  bool
 	}{
-		{9, 10, "", true},
-		{9, 10, "9:10", false},
-		{10, 9, "9:10", true},
-		{8, 10, "8:10", true},
-		{8, 9, "8:9", true},
-		{10, 10, "", false},
+		{10, 12, "", true},
+		{10, 12, "10:12", false},
+		{12, 10, "10:12", true},
+		{11, 12, "11:12", true},
+		{10, 11, "10:11", true},
+		{9, 10, "9:10", true},
+		{12, 12, "", false},
+		{11, 11, "", false},
 	}
 	for _, test := range tests {
-		baseline := completeV10ComparableReport("memory")
-		current := completeV10ComparableReport("memory")
-		baseline.ScenarioVersion = test.baseline
-		current.ScenarioVersion = test.current
+		baseline := scenarioComparableReport(test.baseline, "memory")
+		current := scenarioComparableReport(test.current, "memory")
 		_, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, test.allow)
 		if (err != nil) != test.wantErr {
 			t.Errorf("baseline=%d current=%d allow=%q error=%v, wantErr=%v", test.baseline, test.current, test.allow, err, test.wantErr)
@@ -341,11 +343,21 @@ func TestPerfcheckV10SameScenarioComparesMemoryAndTCP(t *testing.T) {
 	if failures, err := compareReports(baseline, sameScenarioCurrent, 0.20); err != nil || len(failures) != 0 {
 		t.Fatalf("v10 Memory/TCP comparison failures=%v error=%v", failures, err)
 	}
+	// v10 的 remote_gpu_complete 是逐次计时，分辨率不足以支撑相对判定，
+	// 因此同样幅度的变化不再报告相对回归；v12 的批量分摊指标仍然报告。
 	sameScenarioCurrent.Multiplayer.RemoteGPUComplete.P99MS *= 1.201
 	sameScenarioCurrent.Multiplayer.RemoteGPUComplete.MaxMS = sameScenarioCurrent.Multiplayer.RemoteGPUComplete.P99MS
-	if failures, err := compareReports(baseline, sameScenarioCurrent, 0.20); err != nil ||
+	if failures, err := compareReports(baseline, sameScenarioCurrent, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v10 量化 GPU 指标不应报告相对回归：failures=%v error=%v", failures, err)
+	}
+
+	v12Baseline := completeV12ComparableReport("memory")
+	v12Current := completeV12ComparableReport("tcp")
+	v12Current.Multiplayer.RemoteGPUComplete.P99MS *= 1.201
+	v12Current.Multiplayer.RemoteGPUComplete.MaxMS = v12Current.Multiplayer.RemoteGPUComplete.P99MS
+	if failures, err := compareReports(v12Baseline, v12Current, 0.20); err != nil ||
 		!strings.Contains(strings.Join(failures, "\n"), "remote_gpu_complete p99_ms") {
-		t.Fatalf("v10 stable regression failures=%v error=%v", failures, err)
+		t.Fatalf("v12 stable regression failures=%v error=%v", failures, err)
 	}
 }
 
@@ -377,11 +389,11 @@ func TestPerfcheckV8Requires2048GPUCompletionSamples(t *testing.T) {
 }
 
 func TestPerfcheckScenarioUpgradeSkipsRelativeRegressions(t *testing.T) {
-	baseline := completeV9ComparableReport("memory")
+	baseline := completeV10ComparableReport("memory")
 	baseline.Persistence = client.PersistenceSummary{
 		Snapshots: 10, P50MS: 1, P95MS: 1, P99MS: 1, MaxMS: 1,
 	}
-	current := completeV10ComparableReport("memory")
+	current := completeV12ComparableReport("memory")
 	current.LoadSeconds = 2
 	current.SnapshotSeconds = 2
 	current.Ticks = client.PhaseSummary{Frames: 200, P50MS: 2, P95MS: 3, P99MS: 4, MaxMS: 5}
@@ -398,29 +410,29 @@ func TestPerfcheckScenarioUpgradeSkipsRelativeRegressions(t *testing.T) {
 		}
 	}
 
-	failures, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "9:10")
+	failures, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "10:12")
 	if err != nil || len(failures) != 0 {
 		t.Fatalf("explicit migration failures=%v err=%v", failures, err)
 	}
 }
 
 func TestPerfcheckScenarioUpgradeKeepsAbsoluteAndSchemaGates(t *testing.T) {
-	baseline := completeV9ComparableReport("memory")
+	baseline := completeV10ComparableReport("memory")
 	t.Run("absolute", func(t *testing.T) {
-		current := completeV10ComparableReport("memory")
+		current := completeV12ComparableReport("memory")
 		phase := current.Phases["still"]
 		phase.P99MS = 12
 		phase.MaxMS = 12
 		current.Phases["still"] = phase
-		failures, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "9:10")
+		failures, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "10:12")
 		if err != nil || !strings.Contains(strings.Join(failures, "\n"), "still p99") {
 			t.Fatalf("absolute migration failures=%v err=%v", failures, err)
 		}
 	})
 	t.Run("schema", func(t *testing.T) {
-		current := completeV10ComparableReport("memory")
+		current := completeV12ComparableReport("memory")
 		current.Multiplayer.RosterApply = client.LatencySummary{}
-		if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "9:10"); err == nil ||
+		if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "10:12"); err == nil ||
 			!strings.Contains(err.Error(), "current") {
 			t.Fatalf("schema migration error=%v", err)
 		}
@@ -447,11 +459,11 @@ func TestPerfcheckScenarioUpgradeKeepsProducerAbsoluteGates(t *testing.T) {
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			baseline := completeV9ComparableReport("memory")
-			current := completeV10ComparableReport("memory")
+			baseline := completeV10ComparableReport("memory")
+			current := completeV12ComparableReport("memory")
 			test.mutate(&current)
 
-			failures, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "9:10")
+			failures, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "10:12")
 			if err != nil || !strings.Contains(strings.Join(failures, "\n"), test.want) {
 				t.Fatalf("absolute producer gate failures=%v err=%v want=%q", failures, err, test.want)
 			}
@@ -459,7 +471,7 @@ func TestPerfcheckScenarioUpgradeKeepsProducerAbsoluteGates(t *testing.T) {
 	}
 }
 
-func TestPerfcheckScenarioUpgradeRejectsIncompleteV10Report(t *testing.T) {
+func TestPerfcheckScenarioUpgradeRejectsIncompleteV12Report(t *testing.T) {
 	for _, test := range []struct {
 		name, want string
 		mutate     func(*client.PerfReport)
@@ -521,13 +533,13 @@ func TestPerfcheckScenarioUpgradeRejectsIncompleteV10Report(t *testing.T) {
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			baseline := completeV9ComparableReport("memory")
-			current := completeV10ComparableReport("memory")
+			baseline := completeV10ComparableReport("memory")
+			current := completeV12ComparableReport("memory")
 			test.mutate(&current)
 
-			if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "9:10"); err == nil ||
+			if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "10:12"); err == nil ||
 				!strings.Contains(err.Error(), "current") || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("incomplete v10 error=%v want=%q", err, test.want)
+				t.Fatalf("incomplete v12 error=%v want=%q", err, test.want)
 			}
 		})
 	}
@@ -584,8 +596,10 @@ func TestPerfcheckV6CrossTransportChecksStableTransportMetrics(t *testing.T) {
 			phase.MaxMS = phase.P99MS
 			report.Phases["still"] = phase
 		}},
-		{name: "persistence p95", want: "persistence p95_ms", mutate: func(report *client.PerfReport) {
-			report.Persistence.P95MS *= 1.201
+		// persistence 的尾分位数跨运行波动近两倍，已按实测豁免相对判定；
+		// 中位数极稳定（1.04x），因此仍必须被判定。
+		{name: "persistence p50", want: "persistence p50_ms", mutate: func(report *client.PerfReport) {
+			report.Persistence.P50MS *= 1.201
 		}},
 		{name: "avatar p99", want: "avatar_submit p99_ms", mutate: func(report *client.PerfReport) {
 			report.Multiplayer.AvatarSubmit.P99MS *= 1.201
@@ -648,8 +662,10 @@ func TestPerfcheckV6CrossTransportCoversApprovedStableFieldMatrix(t *testing.T) 
 		{name: "persistence p50", want: "persistence p50_ms", mutate: func(report *client.PerfReport) {
 			report.Persistence.P50MS *= 1.201
 		}},
-		{name: "persistence p99", want: "persistence p99_ms", mutate: func(report *client.PerfReport) {
-			report.Persistence.P99MS *= 1.201
+		{name: "persistence 尾部大幅退化", want: "persistence p99_ms", mutate: func(report *client.PerfReport) {
+			// 超过尾部固有波动的退化仍须失败；同时保持分位数单调。
+			report.Persistence.P99MS += persistenceTailNoiseFloorMS * 2
+			report.Persistence.MaxMS = report.Persistence.P99MS + 1
 		}},
 		{name: "protocol encode", want: "protocol encode_p99_ms", mutate: func(report *client.PerfReport) {
 			report.Protocol.EncodeP99MS *= 1.201
@@ -692,11 +708,16 @@ func TestPerfcheckV6CrossTransportCoversApprovedStableFieldMatrix(t *testing.T) 
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			baseline := completeV6ComparableReport("memory")
+			// GPU 指标只有在批量分摊（v12 起）时才具备相对判定所需的分辨率。
+			newReport := completeV6ComparableReport
+			if test.name == "gpu" {
+				newReport = completeV12ComparableReport
+			}
+			baseline := newReport("memory")
 			baseline.Persistence = client.PersistenceSummary{
 				Snapshots: 10, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4,
 			}
-			current := completeV6ComparableReport("tcp")
+			current := newReport("tcp")
 			current.Persistence = baseline.Persistence
 			test.mutate(&current)
 			failures, err := compareReports(baseline, current, 0.20)
@@ -914,6 +935,41 @@ func completeV9ComparableReport(transport string) client.PerfReport {
 	return report
 }
 
+// scenarioComparableReport 返回与给定场景版本一致的完整报告，
+// 包括该场景要求的 remote_gpu_complete 样本数与批次数量。
+func scenarioComparableReport(version int, transport string) client.PerfReport {
+	switch version {
+	case 12:
+		return completeV12ComparableReport(transport)
+	case 11:
+		return completeV11ComparableReport(transport)
+	case 10:
+		return completeV10ComparableReport(transport)
+	case 9:
+		return completeV9ComparableReport(transport)
+	case 8:
+		return completeV8ComparableReport(transport)
+	default:
+		report := completeV6ComparableReport(transport)
+		report.ScenarioVersion = version
+		return report
+	}
+}
+
+func completeV12ComparableReport(transport string) client.PerfReport {
+	report := completeV11ComparableReport(transport)
+	report.ScenarioVersion = 12
+	report.Multiplayer.RemoteGPUCompleteBatch = client.ScenarioV12GPUCompletionBatch
+	report.Multiplayer.RemoteGPUComplete.Samples = client.ScenarioV12GPUCompletionSamples
+	return report
+}
+
+func completeV11ComparableReport(transport string) client.PerfReport {
+	report := completeV10ComparableReport(transport)
+	report.ScenarioVersion = 11
+	return report
+}
+
 func completeV10ComparableReport(transport string) client.PerfReport {
 	report := completeV9ComparableReport(transport)
 	report.ScenarioVersion = 10
@@ -947,5 +1003,172 @@ func comparableReport() client.PerfReport {
 		Phases: map[string]client.PhaseSummary{
 			"still": {FPS: 100, P50MS: 1, P95MS: 1, P99MS: 1, MaxMS: 1, PeakRSSBytes: 1},
 		},
+	}
+}
+
+func TestPerfcheckV12SameScenarioAndCrossTransportKeepExistingGates(t *testing.T) {
+	// 同场景 v12 比较继续走既有稳定指标与绝对门禁。
+	baseline := completeV12ComparableReport("memory")
+	current := completeV12ComparableReport("memory")
+	if failures, err := compareReports(baseline, current, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v12 同场景比较 failures=%v err=%v", failures, err)
+	}
+
+	// 同硬件、同场景的 Memory→TCP 跨 transport 比较同样适用。
+	tcp := completeV12ComparableReport("tcp")
+	if failures, err := compareReports(baseline, tcp, 0.20); err != nil || len(failures) != 0 {
+		t.Fatalf("v12 跨 transport 比较 failures=%v err=%v", failures, err)
+	}
+
+	// 绝对门禁不因场景升级而放宽。
+	regressed := completeV12ComparableReport("memory")
+	phase := regressed.Phases["flying"]
+	phase.P99MS = 12
+	phase.MaxMS = 12
+	regressed.Phases["flying"] = phase
+	failures, err := compareReports(baseline, regressed, 0.20)
+	if err != nil || !strings.Contains(strings.Join(failures, "\n"), "flying p99") {
+		t.Fatalf("v12 flying 绝对门禁 failures=%v err=%v", failures, err)
+	}
+}
+
+func TestPerfcheckHistoricalScenariosRemainReadable(t *testing.T) {
+	// 历史报告按各自场景规则校验，不得被要求满足 v11 的新字段。
+	for _, test := range []struct {
+		version int
+		report  client.PerfReport
+	}{
+		{6, completeV6ComparableReport("memory")},
+		{7, completeV7ComparableReport("memory")},
+		{8, completeV8ComparableReport("memory")},
+		{9, completeV9ComparableReport("memory")},
+		{10, completeV10ComparableReport("memory")},
+		{11, completeV11ComparableReport("memory")},
+		{12, completeV12ComparableReport("memory")},
+	} {
+		t.Run(fmt.Sprintf("v%d", test.version), func(t *testing.T) {
+			if got := test.report.ScenarioVersion; got != test.version {
+				t.Fatalf("scenario_version=%d，想要 %d", got, test.version)
+			}
+			if failures, err := compareReports(test.report, test.report, 0.20); err != nil || len(failures) != 0 {
+				t.Fatalf("v%d 自比较 failures=%v err=%v", test.version, failures, err)
+			}
+		})
+	}
+}
+
+func TestPerfcheckSkipsRelativeGateForQuantizedMetric(t *testing.T) {
+	// 分辨率为 1.28ms 的指标：基线 1.30ms、当前 2.53ms 是跨越一个量化步长，
+	// 不得报告相对回归；分辨率远细于阈值时同样幅度必须失败。
+	const threshold = 0.20
+	quantized := appendRegressionWithResolution(
+		nil, "remote_gpu_complete", "p95_ms", 1.300, 2.527, threshold, 1.28,
+	)
+	if len(quantized) != 0 {
+		t.Fatalf("量化指标报告了相对回归：%v", quantized)
+	}
+
+	fine := appendRegressionWithResolution(
+		nil, "remote_gpu_complete", "p95_ms", 0.0613, 0.1192, threshold, 1.28/1024,
+	)
+	if len(fine) != 1 {
+		t.Fatalf("高分辨率指标未报告相对回归：%v", fine)
+	}
+	if !strings.Contains(fine[0], "相对") {
+		t.Fatalf("失败信息未指明判定类型：%q", fine[0])
+	}
+}
+
+func TestPerfcheckQuantizedMetricKeepsCompletenessGate(t *testing.T) {
+	// 跳过相对判定不得放松完整性门禁：样本不足仍必须失败。
+	report := completeV11ComparableReport("memory")
+	report.Multiplayer.RemoteGPUComplete.Samples = 1
+	if err := validateV6Report("current", report); err == nil ||
+		!strings.Contains(err.Error(), "remote_gpu_complete") {
+		t.Fatalf("样本不足未被拒绝：%v", err)
+	}
+}
+
+func TestPerfcheckLatencyNoiseFloorSuppressesSubMicrosecondJitter(t *testing.T) {
+	// 实测的跨运行抖动：这些微秒级墙钟指标的相对变化远超 20%，
+	// 但绝对增量只有 1-30µs，属于调度抖动而非性能退化。
+	for _, test := range []struct {
+		name              string
+		baseline, current float64
+	}{
+		{"remote_state_encode", 0.007, 0.008},
+		{"avatar_submit", 0.014, 0.021},
+		{"remote_gpu_complete p95", 0.120, 0.150},
+		{"remote_gpu_complete p99", 0.128, 0.156},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := appendRegressionWithResolution(
+				nil, test.name, "p99_ms", test.baseline, test.current, 0.20, latencyNoiseFloorMS,
+			)
+			if len(got) != 0 {
+				t.Fatalf("噪声级变化被判定为回归：%v", got)
+			}
+		})
+	}
+}
+
+func TestPerfcheckLatencyNoiseFloorStillCatchesRealRegression(t *testing.T) {
+	// 超过噪声地板的退化必须照常失败，否则门禁形同虚设。
+	for _, test := range []struct {
+		name              string
+		baseline, current float64
+		wantFail          bool
+	}{
+		{name: "明确在地板之内", baseline: 0.120, current: 0.120 + latencyNoiseFloorMS*0.8, wantFail: false},
+		{name: "越过地板且超阈值", baseline: 0.120, current: 0.120 + latencyNoiseFloorMS*1.5, wantFail: true},
+		{name: "远超地板", baseline: 0.120, current: 0.500, wantFail: true},
+		{name: "越过地板但未超阈值", baseline: 10.0, current: 10.06, wantFail: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := appendRegressionWithResolution(
+				nil, "metric", "p99_ms", test.baseline, test.current, 0.20, latencyNoiseFloorMS,
+			)
+			if failed := len(got) != 0; failed != test.wantFail {
+				t.Fatalf("判定 = %v，想要 %v（failures=%v）", failed, test.wantFail, got)
+			}
+		})
+	}
+}
+
+func TestPerfcheckPersistenceTailIsExemptButMedianIsNot(t *testing.T) {
+	// 实测 11 次运行：persistence p50 的最大/最小为 1.04x，而 p95/p99 达 1.97x。
+	// 尾分位数受页缓存与后台 flush 影响，跨运行波动本就接近两倍，
+	// 20% 相对判定测的是磁盘状态而非代码退化；中位数则必须继续受判定。
+	floors := persistenceFloors()
+
+	tail := appendStableSummaryRegressions(
+		nil, "persistence",
+		4.1, 9.991, 12.0,
+		4.1, 12.078, 16.5,
+		0.20, floors,
+	)
+	if len(tail) != 0 {
+		t.Fatalf("尾分位数的固有抖动被判定为回归：%v", tail)
+	}
+
+	median := appendStableSummaryRegressions(
+		nil, "persistence",
+		4.1, 9.991, 12.0,
+		5.5, 9.991, 12.0,
+		0.20, floors,
+	)
+	if len(median) != 1 || !strings.Contains(median[0], "p50_ms") {
+		t.Fatalf("中位数退化未被判定：%v", median)
+	}
+
+	// 尾部的真实大幅退化仍须失败。
+	severe := appendStableSummaryRegressions(
+		nil, "persistence",
+		4.1, 9.991, 12.0,
+		4.1, 30.0, 40.0,
+		0.20, floors,
+	)
+	if len(severe) == 0 {
+		t.Fatal("尾部大幅退化未被判定")
 	}
 }

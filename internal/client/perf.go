@@ -11,6 +11,20 @@ var ErrRSSUnsupported = errors.New("当前平台不支持进程 RSS 采样")
 
 const ScenarioV8GPUCompletionSamples = 2048
 
+// scenario v12 起 remote_gpu_complete 改为批量分摊：一个样本是一批
+// ScenarioV12GPUCompletionBatch 次远端绘制只等待一次完成的总耗时除以该数量。
+// 批次取 1024 使 Poll 的固定节拍（实测约 1.28ms）被摊薄到每次绘制成本的
+// 约 2%，远小于 20% 的相对回归判定阈值。
+const (
+	ScenarioV12GPUCompletionSamples = 128
+	ScenarioV12GPUCompletionBatch   = 256
+	// 一个样本的绘制拆到多个 command buffer 提交。每次绘制会开启 avatar 与
+	// name tag 两个 render pass，而该后端为每个 pass 分配一个 command buffer，
+	// 因此两次 Poll 之间的 pass 总数必须留在 Metal 的 4096 预算之内，
+	// 否则设备会因 outstanding command buffer 超限而丢失。
+	ScenarioV12GPUCompletionChunk = 128
+)
+
 // FrameSample 是固定场景的一帧性能样本。
 type FrameSample struct {
 	FrameMS           float64
@@ -94,19 +108,21 @@ type LatencySummary struct {
 
 // MultiplayerSummary 汇总固定八玩家场景的客户端、服务端和 GPU 提交指标。
 type MultiplayerSummary struct {
-	RemoteStateEncode   LatencySummary `json:"remote_state_encode"`
-	RemoteStateDecode   LatencySummary `json:"remote_state_decode"`
-	InterestDiff        LatencySummary `json:"interest_diff"`
-	RosterApply         LatencySummary `json:"roster_apply"`
-	Interpolation       LatencySummary `json:"interpolation"`
-	AvatarSubmit        LatencySummary `json:"avatar_submit"`
-	NameTagSubmit       LatencySummary `json:"name_tag_submit"`
-	RemoteGPUComplete   LatencySummary `json:"remote_gpu_complete"`
-	ServerOutboundBytes uint64         `json:"server_outbound_bytes"`
-	OutboxHighWater     int            `json:"outbox_high_water"`
-	PlayerJobsHighWater int            `json:"player_jobs_high_water"`
-	PlayerDoneHighWater int            `json:"player_done_high_water"`
-	PeakRSSBytes        uint64         `json:"peak_rss_bytes"`
+	RemoteStateEncode LatencySummary `json:"remote_state_encode"`
+	RemoteStateDecode LatencySummary `json:"remote_state_decode"`
+	InterestDiff      LatencySummary `json:"interest_diff"`
+	RosterApply       LatencySummary `json:"roster_apply"`
+	Interpolation     LatencySummary `json:"interpolation"`
+	AvatarSubmit      LatencySummary `json:"avatar_submit"`
+	NameTagSubmit     LatencySummary `json:"name_tag_submit"`
+	RemoteGPUComplete LatencySummary `json:"remote_gpu_complete"`
+	// RemoteGPUCompleteBatch 是每个 remote_gpu_complete 样本摊薄的绘制次数。
+	RemoteGPUCompleteBatch int    `json:"remote_gpu_complete_batch"`
+	ServerOutboundBytes    uint64 `json:"server_outbound_bytes"`
+	OutboxHighWater        int    `json:"outbox_high_water"`
+	PlayerJobsHighWater    int    `json:"player_jobs_high_water"`
+	PlayerDoneHighWater    int    `json:"player_done_high_water"`
+	PeakRSSBytes           uint64 `json:"peak_rss_bytes"`
 }
 
 // LatencyRecorder 在 Add 热路径中只覆写预分配的环形缓冲；Summary 才复制并排序。
@@ -213,14 +229,16 @@ func percentile(sorted []float64, p float64) float64 {
 
 // PerfReport 是 cmd/mcgo 与 cmd/perfcheck 共用的稳定 JSON 格式。
 type PerfReport struct {
-	ScenarioVersion   int                     `json:"scenario_version"`
-	Transport         string                  `json:"transport,omitempty"`
-	Hardware          string                  `json:"hardware"`
-	OS                string                  `json:"os"`
-	GoVersion         string                  `json:"go_version"`
-	GitCommit         string                  `json:"git_commit"`
-	Framebuffer       string                  `json:"framebuffer"`
-	LoadSeconds       float64                 `json:"load_seconds"`
+	ScenarioVersion int     `json:"scenario_version"`
+	Transport       string  `json:"transport,omitempty"`
+	Hardware        string  `json:"hardware"`
+	OS              string  `json:"os"`
+	GoVersion       string  `json:"go_version"`
+	GitCommit       string  `json:"git_commit"`
+	Framebuffer     string  `json:"framebuffer"`
+	LoadSeconds     float64 `json:"load_seconds"`
+	// CooldownSeconds 是各阶段之间的固定冷却时长，用于精确复现该次运行。
+	CooldownSeconds   float64                 `json:"cooldown_seconds"`
 	SnapshotSeconds   float64                 `json:"snapshot_seconds"`
 	Phases            map[string]PhaseSummary `json:"phases"`
 	Ticks             PhaseSummary            `json:"ticks"`

@@ -10,7 +10,7 @@ M4F 即将闭合资源、工具与权威采掘循环，但世界仍使用写死�
 - 让网格化使用现有 `Quad.Light` 高四位，并在最高遮挡变化时只标脏受影响的垂直范围与相邻边界。
 - 让地形、远端玩家、掉落物和天空背景按固定昼夜曲线变化；HUD 与昵称保持可读。
 - **BREAKING**：线上协议升级为 v9，在既有固定长度 `PlayerState` 末尾追加绝对世界时间；v8 或其他版本在登录前稳定拒绝。
-- benchmark 升级为 scenario v11，只允许显式 `10:11` 迁移；既有分辨率、样本数、绝对门禁和 `20%` 相对阈值不变。M4F 的 M5 scenario v10 基线与归档是本 change 的硬前置，M2 基线保持不变。
+- benchmark 工作负载随之改变；当时标记为 scenario v11，后因该场景的正式链失败而并入 `stabilize-benchmark-gpu-timing` 的 scenario v12。既有分辨率、样本数、绝对门禁和 `20%` 相对阈值不变；M4F 的 M5 scenario v10 基线与归档是本 change 的硬前置，M2 基线保持不变。
 
 非目标：横向天空光传播、方块光、火把、透明或半透明方块、动态阴影、太阳/月亮天体、天气、怪物生成规则，以及通用光照 worker 或调度框架。
 
@@ -20,10 +20,11 @@ M4F 即将闭合资源、工具与权威采掘循环，但世界仍使用写死�
 
 - `authoritative-daylight`: 定义权威世界时间、metadata v2 持久化、协议 v9 同步、直射天空光、增量重网格和昼夜呈现。
 
-### Modified Capabilities
+### 已转移的 Capabilities
 
-- `bounded-benchmark-workload`: 将协议、区块派生状态、网格和渲染工作量变化标记为 scenario v11，并要求显式 v10→v11 迁移。
-- `hardware-performance-baselines`: 规定 M4F v10 基线先完成，再用一次性无窗口 M5 Memory/TCP 正式链建立 v11 基线，同时保持 M2 基线不变。
+M4G 确实改变了 benchmark 工作负载，当时据此把 producer 标记为 scenario v11。但 v11 的一次性正式链在 Memory→TCP 跨 transport 比较失败：`remote_gpu_complete p95_ms` 报出 `94.4%` 退化，而同一对报告的 p50 与 p99 几乎不变。根因是该指标此前用「提交到阻塞轮询返回」的墙钟差逐次计时，取值被宿主轮询实现量化到约 `1.28ms` 的整数倍，与 M4G 的改动无关。
+
+因此 **v11 从未成为任何硬件的基线**，其 workload 变化随后并入 `stabilize-benchmark-gpu-timing` 的 scenario v12。`bounded-benchmark-workload` 与 `hardware-performance-baselines` 两个 capability 的修改由该 change 统一承担，本 change 不再重复声明，避免把从未生效的 v11 状态写进主规格。
 
 ## Impact
 

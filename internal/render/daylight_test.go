@@ -1,0 +1,195 @@
+package render
+
+import (
+	"math"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/go-gl/mathgl/mgl32"
+
+	"minecraft-go/internal/assets"
+	"minecraft-go/internal/core"
+	"minecraft-go/internal/gfx"
+	"minecraft-go/internal/mesh"
+)
+
+func closeEnough(got, want float32) bool {
+	return math.Abs(float64(got-want)) <= 1e-5
+}
+
+func TestDayNightPhaseFormula(t *testing.T) {
+	tests := []struct {
+		name         string
+		worldTime    uint64
+		wantSun      float32
+		wantDaylight float32
+	}{
+		{"黎明", 0, 0, 0.15},
+		{"正午", 6000, 1, 1},
+		{"黄昏", 12000, 0, 0.15},
+		{"午夜", 18000, 0, 0.15},
+		{"跨周期正午", DayLengthTicks + 6000, 1, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DayNightAt(tc.worldTime)
+			if !closeEnough(got.Sun, tc.wantSun) {
+				t.Fatalf("sun = %v，想要 %v", got.Sun, tc.wantSun)
+			}
+			if !closeEnough(got.Daylight, tc.wantDaylight) {
+				t.Fatalf("daylight = %v，想要 %v", got.Daylight, tc.wantDaylight)
+			}
+		})
+	}
+}
+
+func TestDayNightSunIsClampedAtNight(t *testing.T) {
+	// 相位 12000..24000 太阳位于地平线以下，sun 必须被夹到 0。
+	for phase := uint64(12001); phase < DayLengthTicks; phase += 137 {
+		got := DayNightAt(phase)
+		if got.Sun != 0 {
+			t.Fatalf("相位 %d 的 sun = %v，想要 0", phase, got.Sun)
+		}
+		if !closeEnough(got.Daylight, 0.15) {
+			t.Fatalf("相位 %d 的 daylight = %v，想要 0.15", phase, got.Daylight)
+		}
+	}
+}
+
+func TestDayNightIsPeriodicAndFinite(t *testing.T) {
+	for phase := uint64(0); phase < DayLengthTicks; phase += 251 {
+		base := DayNightAt(phase)
+		next := DayNightAt(phase + DayLengthTicks)
+		far := DayNightAt(phase + 1000*DayLengthTicks)
+		if base != next || base != far {
+			t.Fatalf("相位 %d 不是周期性的：%+v / %+v / %+v", phase, base, next, far)
+		}
+		values := []float32{base.Sun, base.Daylight}
+		values = append(values, base.ClearColor[:]...)
+		for _, value := range values {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				t.Fatalf("相位 %d 产生非有限值：%+v", phase, base)
+			}
+			if value < 0 || value > 1 {
+				t.Fatalf("相位 %d 的值 %v 超出 [0,1]", phase, value)
+			}
+		}
+	}
+}
+
+func TestDayNightClearColorInterpolatesBetweenNightAndDay(t *testing.T) {
+	noon := DayNightAt(6000).ClearColor
+	wantDay := [4]float32{0.42, 0.68, 0.92, 1}
+	for index := range noon {
+		if !closeEnough(noon[index], wantDay[index]) {
+			t.Fatalf("正午 clear color = %v，想要 %v", noon, wantDay)
+		}
+	}
+	midnight := DayNightAt(18000).ClearColor
+	wantNight := [4]float32{0.02, 0.03, 0.08, 1}
+	for index := range midnight {
+		if !closeEnough(midnight[index], wantNight[index]) {
+			t.Fatalf("午夜 clear color = %v，想要 %v", midnight, wantNight)
+		}
+	}
+}
+
+func TestTerrainBrightnessMatchesSpecification(t *testing.T) {
+	tests := []struct {
+		name     string
+		phase    uint64
+		sky      uint8
+		wantBase float32
+	}{
+		{"正午露天全亮", 6000, 15, 1},
+		{"正午遮蔽保留室内亮度", 6000, 0, 0.08},
+		{"午夜露天最低可见度", 18000, 15, 0.15},
+		{"午夜遮蔽室内亮度", 18000, 0, 0.08},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			daylight := DayNightAt(tc.phase).Daylight
+			if got := TerrainBrightness(daylight, tc.sky); !closeEnough(got, tc.wantBase) {
+				t.Fatalf("地形基础亮度 = %v，想要 %v", got, tc.wantBase)
+			}
+		})
+	}
+
+	// 中间天空光按线性插值落在室内与露天之间。
+	daylight := DayNightAt(6000).Daylight
+	mid := TerrainBrightness(daylight, 8)
+	if mid <= TerrainBrightness(daylight, 0) || mid >= TerrainBrightness(daylight, 15) {
+		t.Fatalf("中间天空光亮度 = %v，想要严格落在 0.08 与 1 之间", mid)
+	}
+}
+
+func TestTerrainDaylightHeadlessDraw(t *testing.T) {
+	dev, err := gfx.NewHeadlessDevice()
+	if err != nil {
+		t.Skipf("本机无可用 GPU 适配器: %v", err)
+	}
+	defer dev.Release()
+
+	color := dev.CreateTexture(gfx.TextureDesc{
+		Label: "terrain daylight color", Width: 64, Height: 64,
+		Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget,
+	})
+	defer color.Release()
+	colorView := color.View(gfx.TextureViewDesc{})
+	defer colorView.Release()
+	depth := dev.CreateTexture(gfx.TextureDesc{
+		Label: "terrain daylight depth", Width: 64, Height: 64,
+		Format: gfx.FormatDepth32Float, Usage: gfx.TextureUsageRenderTarget,
+	})
+	defer depth.Release()
+	depthView := depth.View(gfx.TextureViewDesc{Aspect: gfx.AspectDepthOnly})
+	defer depthView.Release()
+
+	renderer := New(dev, assets.NewRegistry(), gfx.FormatRGBA8Unorm)
+	defer renderer.Release()
+	renderer.QueueSection(core.SectionPos{Y: 4}, []mesh.Quad{
+		{W: 1, H: 1, Face: mesh.FacePosY, AO: 0xFF, Light: 0xF0},
+		{W: 1, H: 1, Face: mesh.FacePosY, AO: 0xFF, Light: 0x00},
+	})
+
+	// 同一份已上传网格必须能在正午和午夜之间只靠固定 uniform 切换。
+	for _, phase := range []uint64{0, 6000, 12000, 18000} {
+		dayNight := DayNightAt(phase)
+		encoder := dev.CreateCommandEncoder()
+		renderer.Render(encoder, colorView, depthView, Camera{
+			ViewProj: mgl32.Ident4(),
+			Daylight: dayNight.Daylight,
+			SkyColor: dayNight.ClearColor,
+		})
+		commands := encoder.Finish()
+		dev.Submit(commands)
+		commands.Release()
+		dev.Poll(true)
+	}
+}
+
+func TestScreenSpaceRenderersIgnoreWorldDaylight(t *testing.T) {
+	// HUD、容器、采掘进度和昵称都是屏幕空间元素：
+	// 它们的 camera 类型里根本没有昼夜字段，因此不可能乘上世界亮度。
+	var billboard BillboardCamera
+	if reflect.TypeOf(billboard).NumField() != 3 {
+		t.Fatalf("BillboardCamera 字段数 = %d，想要仅 ViewProj/Right/Up 三个",
+			reflect.TypeOf(billboard).NumField())
+	}
+	for _, name := range []string{"Daylight", "SkyColor", "Sun"} {
+		if _, found := reflect.TypeOf(billboard).FieldByName(name); found {
+			t.Fatalf("BillboardCamera 含世界亮度字段 %s", name)
+		}
+	}
+
+	// hotbar 与 name tag 的着色器不得引用昼夜亮度。
+	for name, source := range map[string]string{
+		"hotbar":   hotbarShader,
+		"name_tag": nameTagShader,
+	} {
+		if strings.Contains(source, "daylight") {
+			t.Fatalf("%s 着色器引用了 daylight", name)
+		}
+	}
+}

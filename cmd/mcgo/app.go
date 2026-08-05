@@ -36,30 +36,32 @@ type applicationOptions struct {
 }
 
 type application struct {
-	window                  applicationWindow
-	dev                     gfx.Device
-	surface                 gfx.Surface
-	color                   gfx.Texture
-	colorView               gfx.TextureView
-	frameWidth              int
-	frameHeight             int
-	renderer                *render.Renderer
-	remotePlayers           *client.RemotePlayers
-	remotePresentations     []client.RemotePresentation
-	remoteAvatars           []render.Avatar
-	remoteNameTags          []render.NameTag
-	avatarRenderer          *render.AvatarRenderer
-	nameTagRenderer         *render.NameTagRenderer
-	hotbarRenderer          *render.HotbarRenderer
-	inventory               client.InventoryMirror
-	furnace                 client.FurnaceMirror
-	miningOverlay           render.MiningOverlay
-	itemDropRenderer        *render.ItemDropRenderer
-	itemDrops               *client.ItemDrops
-	itemDropInstances       []render.ItemDrop
-	inventoryOpen           bool
-	inventorySource         int
-	serverTick              uint64
+	window              applicationWindow
+	dev                 gfx.Device
+	surface             gfx.Surface
+	color               gfx.Texture
+	colorView           gfx.TextureView
+	frameWidth          int
+	frameHeight         int
+	renderer            *render.Renderer
+	remotePlayers       *client.RemotePlayers
+	remotePresentations []client.RemotePresentation
+	remoteAvatars       []render.Avatar
+	remoteNameTags      []render.NameTag
+	avatarRenderer      *render.AvatarRenderer
+	nameTagRenderer     *render.NameTagRenderer
+	hotbarRenderer      *render.HotbarRenderer
+	inventory           client.InventoryMirror
+	furnace             client.FurnaceMirror
+	miningOverlay       render.MiningOverlay
+	itemDropRenderer    *render.ItemDropRenderer
+	itemDrops           *client.ItemDrops
+	itemDropInstances   []render.ItemDrop
+	inventoryOpen       bool
+	inventorySource     int
+	serverTick          uint64
+	// worldTimeTicks 是最后确认的权威绝对世界时间，只在接受更新状态时前进。
+	worldTimeTicks          uint64
 	glyphAtlas              *render.GlyphAtlas
 	clientEndpoint          network.ClientEndpoint
 	receiver                *client.Receiver
@@ -252,7 +254,7 @@ func openApplicationStore(
 		return nil, nil
 	}
 	metadata := storage.Metadata{
-		FormatVersion:  1,
+		FormatVersion:  2,
 		Seed:           options.Seed,
 		SpawnDimension: core.Overworld,
 		SpawnAnchor:    core.ChunkPos{},
@@ -935,9 +937,13 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		}
 	}
 	encoder := a.dev.CreateCommandEncoder()
+	// 每帧只从最后确认的权威世界时间计算一次昼夜，三个世界空间 renderer 共用。
+	dayNight := render.DayNightAt(a.worldTimeTicks)
 	a.renderer.Render(encoder, target, a.depth.view, render.Camera{
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
+		Daylight: dayNight.Daylight,
+		SkyColor: dayNight.ClearColor,
 	})
 	var started time.Time
 	if renderTiming != nil {
@@ -946,6 +952,8 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	a.avatarRenderer.Render(encoder, target, a.depth.view, render.Camera{
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
+		Daylight: dayNight.Daylight,
+		SkyColor: dayNight.ClearColor,
 	}, avatars)
 	if renderTiming != nil {
 		renderTiming.recordAvatar(renderNow().Sub(started))
@@ -957,6 +965,8 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	a.itemDropRenderer.Render(encoder, target, a.depth.view, render.Camera{
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
+		Daylight: dayNight.Daylight,
+		SkyColor: dayNight.ClearColor,
 	}, a.serverTick, a.itemDropInstances)
 	right := mgl32.Vec3{
 		float32(math.Cos(float64(a.camera.Yaw))),
@@ -1040,6 +1050,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 				return
 			}
 			a.serverTick = state.ServerTick
+			a.worldTimeTicks = state.WorldTimeTicks
 			if state.Reset || !state.MiningActive {
 				a.miningOverlay = render.MiningOverlay{}
 			} else {

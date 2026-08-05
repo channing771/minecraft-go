@@ -13,12 +13,36 @@ import (
 	"minecraft-go/internal/storage"
 )
 
+// saveKind 区分同一批 worker 处理的两类固定保存工作。
+type saveKind uint8
+
+const (
+	saveKindChunks saveKind = iota
+	saveKindMetadata
+)
+
 type saveJob struct {
+	Kind      saveKind
 	Region    storage.RegionKey
 	Snapshots []sim.ChunkSaveSnapshot
 	Attempt   uint32
 	Retry     bool
 	RetryID   uint64
+	// Metadata 只在 Kind 为 saveKindMetadata 时有效，是一份不可变的世界快照。
+	Metadata storage.Metadata
+}
+
+// metadataSaveState 是世界时间保存的固定调度状态：
+// 最新权威时间、待提交边界、最多一个 in-flight、失败次数与下一重试 tick。
+type metadataSaveState struct {
+	latest        uint64
+	committed     uint64
+	pending       bool
+	inFlight      bool
+	attempts      uint32
+	nextRetryTick uint64
+	lastError     string
+	lastErrorAt   time.Time
 }
 
 type saveCompletion struct {
@@ -44,6 +68,10 @@ type PersistenceStatus struct {
 	LastError       string
 	LastErrorAt     time.Time
 	AutosaveDrained bool
+	// 世界 metadata 保存有独立的固定调度状态，不进入按 region 分组的区块重试。
+	MetadataPending   bool
+	MetadataInFlight  bool
+	MetadataLastError string
 }
 
 func (server *Server) saveWorker() {
@@ -53,6 +81,15 @@ func (server *Server) saveWorker() {
 		case <-server.saveCtx.Done():
 			return
 		case job := <-server.saveJobs:
+			if job.Kind == saveKindMetadata {
+				err := server.store.SaveMetadata(server.saveCtx, job.Metadata)
+				select {
+				case server.saveCompletions <- saveCompletion{Job: job, Err: err}:
+				case <-server.saveCtx.Done():
+					return
+				}
+				continue
+			}
 			saves := make([]storage.ChunkSave, len(job.Snapshots))
 			for index, snapshot := range job.Snapshots {
 				saves[index] = storage.ChunkSave{
@@ -92,6 +129,9 @@ func (server *Server) drainSaveCompletionsWithError() error {
 }
 
 func (server *Server) applySaveCompletion(completion saveCompletion) error {
+	if completion.Job.Kind == saveKindMetadata {
+		return server.applyMetadataCompletion(completion)
+	}
 	uncommitted := make([]sim.ChunkSaveSnapshot, 0, len(completion.Job.Snapshots))
 	for _, snapshot := range completion.Job.Snapshots {
 		if revision, ok := completion.Result.Committed[snapshot.Key]; ok {
@@ -157,6 +197,68 @@ func (server *Server) schedulePersistence(tick uint64) {
 	stats := server.engine.PersistenceStats()
 	if stats.DirtyChunks == 0 && stats.InFlightChunks == 0 {
 		server.autosaveActive = false
+	}
+}
+
+// applyMetadataCompletion 结算唯一一份 in-flight metadata 保存。
+// 失败按现有 tick 退避重试，并保留 pending 以便下次提交最新值。
+func (server *Server) applyMetadataCompletion(completion saveCompletion) error {
+	server.metadataSave.inFlight = false
+	if completion.Err == nil {
+		server.metadataSave.attempts = 0
+		server.metadataSave.nextRetryTick = 0
+		server.metadataSave.lastError = ""
+		server.metadataSave.committed = max(
+			server.metadataSave.committed, completion.Job.Metadata.WorldTimeTicks,
+		)
+		server.lastSaveSuccess = time.Now()
+		return nil
+	}
+	server.metadataSave.attempts++
+	server.metadataSave.pending = true
+	server.metadataSave.nextRetryTick = saturatingAddUint64(
+		server.engine.TickCount(),
+		retryDelay(
+			server.config.RetryBaseTicks,
+			server.config.RetryMaxTicks,
+			server.metadataSave.attempts,
+		),
+	)
+	server.metadataSave.lastError = completion.Err.Error()
+	server.metadataSave.lastErrorAt = time.Now()
+	slog.Error(
+		"世界 metadata 保存失败，将按 tick 退避重试",
+		"attempt", server.metadataSave.attempts,
+		"next_tick", server.metadataSave.nextRetryTick,
+		"error", completion.Err,
+	)
+	return fmt.Errorf("save world metadata: %w", completion.Err)
+}
+
+// scheduleMetadataSave 在自动保存边界或退避到期时提交一份最新世界时间快照。
+// 队列满或已有 in-flight 时保留 pending，不阻塞 tick，也不形成无界队列。
+func (server *Server) scheduleMetadataSave(tick, worldTime uint64) {
+	server.metadataSave.latest = worldTime
+	if tick%server.config.AutosaveTicks == 0 {
+		server.metadataSave.pending = true
+	}
+	if server.metadataSave.attempts != 0 && tick >= server.metadataSave.nextRetryTick {
+		server.metadataSave.pending = true
+	}
+	if !server.metadataSave.pending || server.metadataSave.inFlight {
+		return
+	}
+	metadata := server.store.Metadata()
+	metadata.WorldTimeTicks = server.metadataSave.latest
+	select {
+	case server.saveJobs <- saveJob{
+		Kind:     saveKindMetadata,
+		Metadata: metadata,
+		Attempt:  server.metadataSave.attempts + 1,
+	}:
+		server.metadataSave.pending = false
+		server.metadataSave.inFlight = true
+	default:
 	}
 }
 
@@ -477,6 +579,9 @@ func (server *Server) PersistenceStatus() PersistenceStatus {
 		AutosaveDrained: !server.autosaveActive && stats.DirtyChunks == 0 &&
 			stats.InFlightChunks == 0 && len(server.retry) == 0 &&
 			len(server.retryInFlight) == 0,
+		MetadataPending:   server.metadataSave.pending,
+		MetadataInFlight:  server.metadataSave.inFlight,
+		MetadataLastError: server.metadataSave.lastError,
 	}
 }
 

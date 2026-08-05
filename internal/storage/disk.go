@@ -26,7 +26,8 @@ type DiskStore struct {
 	closing atomic.Bool
 	closed  bool
 
-	playerReplaceHooks atomicReplaceHooks
+	playerReplaceHooks   atomicReplaceHooks
+	metadataReplaceHooks atomicReplaceHooks
 }
 
 func OpenDisk(ctx context.Context, root string, options OpenOptions) (*DiskStore, error) {
@@ -44,6 +45,40 @@ func (store *DiskStore) Metadata() Metadata {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	return store.files.metadata
+}
+
+// SaveMetadata 把一份 metadata 快照原子写入 world.meta。
+// 失败时磁盘上保留完整旧版，内存中的值也不会前进。
+func (store *DiskStore) SaveMetadata(ctx context.Context, metadata Metadata) error {
+	if store.closing.Load() {
+		return os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	encoded, err := encodeMetadata(metadata)
+	if err != nil {
+		return fmt.Errorf("encode world metadata: %w", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.closed {
+		return os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	hooks := store.metadataReplaceHooks
+	hooks.beforeRename = ctx.Err
+	path := filepath.Join(store.files.root, "world.meta")
+	if err := replaceFileAtomicallyWithPatternAndHooks(
+		path, ".world.meta.tmp-*", encoded, 0o600, hooks,
+	); err != nil {
+		return fmt.Errorf("save world metadata %q: %w", path, err)
+	}
+	store.files.metadata = metadata
+	return nil
 }
 
 func (store *DiskStore) LoadChunk(

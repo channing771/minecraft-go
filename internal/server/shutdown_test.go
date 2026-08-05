@@ -631,12 +631,14 @@ type shutdownTestStore struct {
 	syncBy           time.Time
 	hasSyncBy        bool
 	saveStarted      chan int
+	metadataSaves    []storage.Metadata
+	metadataRespond  func(int, storage.Metadata) error
 }
 
 func newShutdownTestStore() *shutdownTestStore {
 	return &shutdownTestStore{
 		metadata: storage.Metadata{
-			FormatVersion:  1,
+			FormatVersion:  2,
 			Seed:           42,
 			SpawnDimension: core.Overworld,
 		},
@@ -647,6 +649,19 @@ func newShutdownTestStore() *shutdownTestStore {
 }
 
 func (store *shutdownTestStore) Metadata() storage.Metadata { return store.metadata }
+
+// SaveMetadata 记录每次 metadata 提交，供世界时间保存测试断言。
+func (store *shutdownTestStore) SaveMetadata(_ context.Context, metadata storage.Metadata) error {
+	store.mu.Lock()
+	call := len(store.metadataSaves)
+	store.metadataSaves = append(store.metadataSaves, metadata)
+	respond := store.metadataRespond
+	store.mu.Unlock()
+	if respond != nil {
+		return respond(call, metadata)
+	}
+	return nil
+}
 
 func (*shutdownTestStore) LoadChunk(
 	context.Context,

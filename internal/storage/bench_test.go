@@ -56,7 +56,7 @@ func BenchmarkChunkDecode(b *testing.B) {
 func BenchmarkDiskStoreSave32(b *testing.B) {
 	ctx := context.Background()
 	store, err := OpenDisk(ctx, b.TempDir(), OpenOptions{
-		Create: Metadata{FormatVersion: 1, Seed: 42},
+		Create: Metadata{FormatVersion: 2, Seed: 42},
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -92,7 +92,7 @@ func BenchmarkDiskStoreColdLoad(b *testing.B) {
 	root := b.TempDir()
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -2, Z: 3}}
 	store, err := OpenDisk(ctx, root, OpenOptions{
-		Create: Metadata{FormatVersion: 1, Seed: 42},
+		Create: Metadata{FormatVersion: 2, Seed: 42},
 	})
 	if err != nil {
 		b.Fatal(err)

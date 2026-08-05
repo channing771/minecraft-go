@@ -273,7 +273,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 	t.Helper()
 	const seed int64 = 160016
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{}}
-	memory := storage.NewMemory(storage.Metadata{FormatVersion: 1, Seed: seed, SpawnDimension: core.Overworld})
+	memory := storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: seed, SpawnDimension: core.Overworld})
 	if _, err := memory.SaveBatch(context.Background(), []storage.ChunkSave{{Key: key, Revision: 1, Chunk: multiplayerManualGenerator{}.GenerateChunk(key.Pos)}}); err != nil {
 		t.Fatalf("seed initial wanted union: %v", err)
 	}

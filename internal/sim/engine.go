@@ -69,13 +69,16 @@ type Engine struct {
 	acquired  []AcquiredChunk
 	generated []GeneratedChunk
 	tick      atomic.Uint64
+	// worldTime 是权威绝对世界时间，只由 simulation owner 在 Step 中推进。
+	worldTime atomic.Uint64
 }
 
-func NewEngine(viewRadius int) *Engine {
+// NewEngine 创建权威引擎。worldTime 是从 metadata 恢复的绝对世界时间。
+func NewEngine(viewRadius int, worldTime uint64) *Engine {
 	if viewRadius < 0 {
 		panic("sim: negative view radius")
 	}
-	return &Engine{
+	engine := &Engine{
 		viewRadius: viewRadius,
 		dimensions: map[core.DimensionID]*Dimension{
 			core.Overworld: NewDimension(core.Overworld),
@@ -84,7 +87,15 @@ func NewEngine(viewRadius int) *Engine {
 		wanted:        make(map[core.ChunkKey]struct{}),
 		inFlightSaves: make(map[core.ChunkKey]persistenceInFlight),
 	}
+	engine.worldTime.Store(worldTime)
+	return engine
 }
+
+// WorldTime 返回最近一个完成 tick 的绝对世界时间。
+func (engine *Engine) WorldTime() uint64 { return engine.worldTime.Load() }
+
+// advanceWorldTime 把绝对世界时间推进恰好一个 tick 并返回新值。
+func (engine *Engine) advanceWorldTime() uint64 { return engine.worldTime.Add(1) }
 
 // Enqueue 可由 endpoint reader 并发调用。
 func (engine *Engine) Enqueue(command Command) {
@@ -350,6 +361,7 @@ func (engine *Engine) Step() TickResult {
 	sortChunkKeys(result.Ready)
 
 	result.Tick = engine.tick.Add(1)
+	result.WorldTimeTicks = engine.advanceWorldTime()
 	engine.publishInventories(&result)
 	engine.publishFurnaces(&result)
 	engine.publishPlayers(&result)

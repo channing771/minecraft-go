@@ -38,6 +38,8 @@ type Metadata struct {
 	Seed           int64
 	SpawnDimension core.DimensionID
 	SpawnAnchor    core.ChunkPos
+	// WorldTimeTicks 是权威绝对世界时间，metadata v2 起持久化；v1 世界迁移后为零。
+	WorldTimeTicks uint64
 }
 
 type StoredChunk struct {
@@ -61,6 +63,8 @@ type SaveResult struct {
 
 type Store interface {
 	Metadata() Metadata
+	// SaveMetadata 原子提交一份世界 metadata 快照，失败时磁盘上必须保留完整旧版。
+	SaveMetadata(context.Context, Metadata) error
 	LoadChunk(context.Context, core.ChunkKey) (StoredChunk, error)
 	SaveBatch(context.Context, []ChunkSave) (SaveResult, error)
 	Sync(context.Context) error

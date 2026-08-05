@@ -266,7 +266,7 @@ func TestSaveCompletionAheadOfSnapshotAcceptsBoundedPersistedRevision(t *testing
 func TestSaveCompletionEqualToNewerAuthorityDoesNotClaimForeignContent(t *testing.T) {
 	key := chunkKey(0, 0)
 	memory := storage.NewMemory(storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	})
 	foreign := world.NewChunk(key.Pos)
 	foreign.SetBlock(7, 10, 7, core.DirtID)
@@ -891,7 +891,7 @@ func TestOldestDueRetryPreventsFixedRegionStarvation(t *testing.T) {
 	config := DefaultConfig(42)
 	config.RetryBaseTicks = 1
 	config.RetryMaxTicks = 1
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	running := &Server{
 		config:          config,
 		engine:          engine,
@@ -938,7 +938,7 @@ func TestOldestDueRetryPreventsFixedRegionStarvation(t *testing.T) {
 
 func TestPersistenceBackpressureQueuesAcquireUntilMemoryRecovers(t *testing.T) {
 	store := &blockingLoadStore{
-		metadata: storage.Metadata{FormatVersion: 1, Seed: 42},
+		metadata: storage.Metadata{FormatVersion: 2, Seed: 42},
 		started:  make(chan core.ChunkKey, 1),
 	}
 	_, endpoint := network.NewMemoryPair(64)
@@ -1013,16 +1013,18 @@ type persistenceTestStore struct {
 	gate     chan struct{}
 	respond  func(int, []storage.ChunkSave) (storage.SaveResult, error)
 
-	mu         sync.Mutex
-	calls      int
-	syncCalls  int
-	closeCalls int
+	mu              sync.Mutex
+	calls           int
+	syncCalls       int
+	closeCalls      int
+	metadataSaves   []storage.Metadata
+	metadataRespond func(int, storage.Metadata) error
 }
 
 func newPersistenceTestStore() *persistenceTestStore {
 	return &persistenceTestStore{
 		metadata: storage.Metadata{
-			FormatVersion:  1,
+			FormatVersion:  2,
 			Seed:           42,
 			SpawnDimension: core.Overworld,
 		},
@@ -1033,6 +1035,19 @@ func newPersistenceTestStore() *persistenceTestStore {
 }
 
 func (store *persistenceTestStore) Metadata() storage.Metadata { return store.metadata }
+
+// SaveMetadata 记录每次 metadata 提交，供世界时间保存测试断言。
+func (store *persistenceTestStore) SaveMetadata(_ context.Context, metadata storage.Metadata) error {
+	store.mu.Lock()
+	call := len(store.metadataSaves)
+	store.metadataSaves = append(store.metadataSaves, metadata)
+	respond := store.metadataRespond
+	store.mu.Unlock()
+	if respond != nil {
+		return respond(call, metadata)
+	}
+	return nil
+}
 
 func (*persistenceTestStore) LoadChunk(context.Context, core.ChunkKey) (storage.StoredChunk, error) {
 	return storage.StoredChunk{}, storage.ErrChunkNotFound
@@ -1133,7 +1148,7 @@ func newPersistenceServerWithoutCleanup(t *testing.T, store storage.Store) *Serv
 
 func dirtyReadyEngine(t *testing.T, keys []core.ChunkKey) *sim.Engine {
 	t.Helper()
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	for index, key := range keys {
 		session := sim.SessionID(index + 1)
 		engine.RegisterObserverSession(session)
@@ -1181,7 +1196,7 @@ func dirtyUnloadingEngine(t *testing.T, key core.ChunkKey) *sim.Engine {
 
 func dirtyPlayerEngine(t *testing.T, key core.ChunkKey) *sim.Engine {
 	t.Helper()
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	engine.RegisterSession(testSessionID, key.Dimension, key.Pos)
 	requested := engine.Step()
 	if !reflect.DeepEqual(requested.Acquire, []core.ChunkKey{key}) {

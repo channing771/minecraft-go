@@ -272,7 +272,7 @@ func TestForgetSplits4097ChunksIntoValidDeterministicPackets(t *testing.T) {
 
 func TestDefaultRadiusLargeCenterMovePublishesBoundedForgetPackets(t *testing.T) {
 	config := DefaultConfig(1)
-	engine := sim.NewEngine(config.ViewRadius)
+	engine := sim.NewEngine(config.ViewRadius, 0)
 	const observer = sim.SessionID(77)
 	engine.RegisterObserverSession(observer)
 	engine.Enqueue(sim.Command{

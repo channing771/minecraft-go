@@ -23,7 +23,7 @@ func TestPlayerStoreContract(t *testing.T) {
 			name: "memory",
 			open: func(t *testing.T) PlayerStore {
 				t.Helper()
-				return NewMemory(Metadata{FormatVersion: 1, Seed: 42})
+				return NewMemory(Metadata{FormatVersion: 2, Seed: 42})
 			},
 		},
 		{
@@ -31,7 +31,7 @@ func TestPlayerStoreContract(t *testing.T) {
 			open: func(t *testing.T) PlayerStore {
 				t.Helper()
 				store, err := OpenDisk(context.Background(), t.TempDir(), OpenOptions{
-					Create: Metadata{FormatVersion: 1, Seed: 42},
+					Create: Metadata{FormatVersion: 2, Seed: 42},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -639,7 +639,7 @@ func (directory *playerFaultDirectory) Sync() error {
 func openPlayerDisk(t *testing.T, root string) *DiskStore {
 	t.Helper()
 	store, err := OpenDisk(context.Background(), root, OpenOptions{
-		Create: Metadata{FormatVersion: 1, Seed: 42},
+		Create: Metadata{FormatVersion: 2, Seed: 42},
 	})
 	if err != nil {
 		t.Fatal(err)

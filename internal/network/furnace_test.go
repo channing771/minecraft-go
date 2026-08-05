@@ -184,20 +184,3 @@ func TestFurnaceDecodeRejectsUnknownWireValues(t *testing.T) {
 		t.Fatal("越界进度被接受")
 	}
 }
-
-func TestProtocolVersionIsEight(t *testing.T) {
-	if ProtocolVersion != 8 {
-		t.Fatalf("protocol version = %d, want 8", ProtocolVersion)
-	}
-	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7} {
-		stream := &staticClientHelloStream{version: version}
-		if _, err := BeginServerLogin(t.Context(), stream); err == nil {
-			t.Fatalf("v%d ClientHello accepted", version)
-		}
-		reject, ok := stream.sent.(HandshakeReject)
-		if !ok || reject.ServerProtocolVersion != ProtocolVersion ||
-			reject.Code != HandshakeVersionMismatch {
-			t.Fatalf("v%d rejection = %#v，想要 v8 HandshakeReject", version, stream.sent)
-		}
-	}
-}

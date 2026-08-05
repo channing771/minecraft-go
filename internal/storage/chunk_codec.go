@@ -501,6 +501,8 @@ func chunkFromDTO(dto chunkDTO) (*world.Chunk, error) {
 		}
 		chunk.Section(index).Blocks = container
 	}
+	// section 是直接装入的，派生高度表需要一次性重建。
+	chunk.RebuildHeights()
 	for slot, drop := range dto.Drops {
 		chunk.SetDrop(slot, drop)
 	}

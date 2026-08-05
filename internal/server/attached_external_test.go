@@ -19,7 +19,7 @@ func TestExternalCallerAttachesDynamicSession(t *testing.T) {
 		config,
 		server.FlatTestGenerator{},
 		storage.NewMemory(storage.Metadata{
-			FormatVersion:  1,
+			FormatVersion:  2,
 			Seed:           7,
 			SpawnDimension: core.Overworld,
 			SpawnAnchor:    core.ChunkPos{},

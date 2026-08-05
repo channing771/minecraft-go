@@ -29,6 +29,8 @@ type PlayerUpdate struct {
 	Ready             bool
 	Reset             bool
 	Mining            MiningUpdate
+	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。
+	WorldTimeTicks uint64
 }
 
 type PlayerLocation struct {
@@ -156,7 +158,7 @@ func (engine *Engine) Player(id SessionID) (PlayerUpdate, bool) {
 	if session == nil || session.player == nil {
 		return PlayerUpdate{}, false
 	}
-	return session.player.update(id, session), true
+	return session.player.update(id, session, engine.WorldTime()), true
 }
 
 func (engine *Engine) PlayerSnapshot(id SessionID) (PlayerSnapshot, bool) {
@@ -266,8 +268,10 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 func (player *playerState) update(
 	id SessionID,
 	session *sessionState,
+	worldTime uint64,
 ) PlayerUpdate {
 	return PlayerUpdate{
+		WorldTimeTicks:    worldTime,
 		Session:           id,
 		Dimension:         session.dimension,
 		ViewCenter:        session.center,
@@ -291,7 +295,9 @@ func (engine *Engine) publishPlayers(result *TickResult) {
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i] < sessions[j] })
 	for _, id := range sessions {
 		session := engine.sessions[id]
-		result.Players = append(result.Players, session.player.update(id, session))
+		result.Players = append(
+			result.Players, session.player.update(id, session, result.WorldTimeTicks),
+		)
 		session.player.reset = false
 	}
 }

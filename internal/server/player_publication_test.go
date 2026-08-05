@@ -334,7 +334,7 @@ func newRemotePublicationHarness(t *testing.T, ids ...sim.SessionID) *remotePubl
 	config.OutboxCapacity = 32
 	running := &Server{
 		config:         config,
-		engine:         sim.NewEngine(0),
+		engine:         sim.NewEngine(0, 0),
 		sessions:       make(map[sim.SessionID]*session),
 		playerSessions: make(map[core.PlayerID]sim.SessionID),
 		lifecycle:      serverRunning,

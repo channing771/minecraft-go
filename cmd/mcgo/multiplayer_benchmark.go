@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
+	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/render"
 	"minecraft-go/internal/server"
@@ -136,7 +138,7 @@ func newMultiplayerClientProbe(app *application) (*multiplayerClientProbe, error
 		rosterApply:  client.NewLatencyRecorder(benchmarkLatencyCapacity),
 		interpolate:  client.NewLatencyRecorder(benchmarkLatencyCapacity),
 		renderTiming: newMultiplayerRenderTiming(),
-		gpuComplete:  client.NewLatencyRecorder(client.ScenarioV8GPUCompletionSamples),
+		gpuComplete:  client.NewLatencyRecorder(client.ScenarioV12GPUCompletionSamples),
 		now:          time.Now,
 		tick:         1,
 	}
@@ -221,23 +223,44 @@ func benchmarkBillboardCamera(app *application) render.BillboardCamera {
 	}
 }
 
+// gpuCompletionChunks 是一个样本拆成的 command buffer 数量。
+const gpuCompletionChunks = client.ScenarioV12GPUCompletionBatch /
+	client.ScenarioV12GPUCompletionChunk
+
 func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) error {
 	avatars, tags := remoteRenderPresentations(probe.roster.Presentations())
-	for range client.ScenarioV8GPUCompletionSamples {
+	// 一个样本是一批绘制只等待一次完成的总耗时除以批次数量：
+	// Poll 的固定节拍在样本内只出现一次，被摊薄到可忽略。
+	for range client.ScenarioV12GPUCompletionSamples {
 		if err := app.nameTagRenderer.Prepare(tags, app.renderer.UploadBudget()); err != nil {
 			return err
 		}
-		encoder := app.dev.CreateCommandEncoder()
-		app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
-			ViewProj: app.camera.ViewProj(), Pos: app.camera.Pos,
-		}, avatars)
-		app.nameTagRenderer.Render(encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app))
-		command := encoder.Finish()
+		commands := make([]gfx.CommandBuffer, 0, gpuCompletionChunks)
+		for range gpuCompletionChunks {
+			encoder := app.dev.CreateCommandEncoder()
+			for range client.ScenarioV12GPUCompletionChunk {
+				app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
+					ViewProj: app.camera.ViewProj(), Pos: app.camera.Pos,
+				}, avatars)
+				app.nameTagRenderer.Render(
+					encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app),
+				)
+			}
+			commands = append(commands, encoder.Finish())
+		}
 		started := probe.now()
-		app.dev.Submit(command)
+		app.dev.Submit(commands...)
 		app.dev.Poll(true)
-		probe.gpuComplete.Add(probe.now().Sub(started))
-		command.Release()
+		probe.gpuComplete.Add(probe.now().Sub(started) / client.ScenarioV12GPUCompletionBatch)
+		for _, command := range commands {
+			command.Release()
+		}
+		// 计时区间之外再推进一次设备队列，确保本样本的 command buffer 被回收，
+		// 不会累积到下一个样本触发 Metal 的预算上限。
+		app.dev.Poll(true)
+		// 每个样本都回收：ru_maxrss 是进程生命周期的历史峰值，一旦被推高就无法
+		// 降回，因此必须阻止批量分摊产生的对象在采样过程中累积。
+		runtime.GC()
 	}
 	return nil
 }
@@ -245,13 +268,14 @@ func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) erro
 func (probe *multiplayerClientProbe) Summary() client.MultiplayerSummary {
 	avatarSubmit, nameTagSubmit := probe.renderTiming.Summaries()
 	return client.MultiplayerSummary{
-		RemoteStateEncode: probe.encode.Summary(),
-		RemoteStateDecode: probe.decode.Summary(),
-		RosterApply:       probe.rosterApply.Summary(),
-		Interpolation:     probe.interpolate.Summary(),
-		AvatarSubmit:      avatarSubmit,
-		NameTagSubmit:     nameTagSubmit,
-		RemoteGPUComplete: probe.gpuComplete.Summary(),
+		RemoteStateEncode:      probe.encode.Summary(),
+		RemoteStateDecode:      probe.decode.Summary(),
+		RosterApply:            probe.rosterApply.Summary(),
+		Interpolation:          probe.interpolate.Summary(),
+		AvatarSubmit:           avatarSubmit,
+		NameTagSubmit:          nameTagSubmit,
+		RemoteGPUComplete:      probe.gpuComplete.Summary(),
+		RemoteGPUCompleteBatch: client.ScenarioV12GPUCompletionBatch,
 	}
 }
 
@@ -477,7 +501,7 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 	config.ScheduledTickObserver = epoch.observeScheduledTick
 	config.InterestObserver = epoch.observeInterest
 	store := storage.NewMemory(storage.Metadata{
-		FormatVersion: 1, Seed: benchmarkSeed,
+		FormatVersion: 2, Seed: benchmarkSeed,
 		SpawnDimension: core.Overworld, SpawnAnchor: core.ChunkPos{},
 	})
 	host := server.NewHost(config, worldgen.New(benchmarkSeed), store)

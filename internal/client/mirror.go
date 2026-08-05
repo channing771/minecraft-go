@@ -168,8 +168,13 @@ func (mirror *Mirror) applyBlockChanges(
 	dirty := make(map[core.SectionKey]struct{})
 	for _, change := range changes.Changes {
 		x, _, z := change.Position.Local()
+		before := chunk.Chunk.HighestOpaque(x, z)
 		chunk.Chunk.SetBlock(x, change.Position.Y, z, change.Block)
 		mirror.addDirtyAround(dirty, changes.Dimension, change.Position)
+		// 只有最高遮挡变化才会改变直射天空光，此时补上精确的垂直跨度。
+		if after := chunk.Chunk.HighestOpaque(x, z); after != before {
+			mirror.addSkyDirtySpan(dirty, changes.Dimension, change.Position, before, after)
+		}
 	}
 	chunk.Revision = changes.NewRevision
 	return MirrorUpdate{Dirty: sortedSectionKeys(dirty)}, nil
@@ -256,6 +261,44 @@ func (mirror *Mirror) addDirtyAround(
 				if _, loaded := mirror.Chunk(dimension, neighbor.Chunk()); loaded {
 					dirty[core.SectionKey{Dimension: dimension, Pos: neighbor.Section()}] = struct{}{}
 				}
+			}
+		}
+	}
+}
+
+// addSkyDirtySpan 在最高遮挡变化后标脏新旧高度之间的区段。
+//
+// 采样该列天空光的面和 AO 位于 ±1 方块邻域内，因此水平范围最多跨四个区块；
+// 24 个区段高度下单次变化最多产生 96 个唯一 key，重复项由 dirty map 合并。
+func (mirror *Mirror) addSkyDirtySpan(
+	dirty map[core.SectionKey]struct{},
+	dimension core.DimensionID,
+	position core.BlockPos,
+	before, after int32,
+) {
+	low, high := min(before, after), max(before, after)
+	low = max(low, core.MinY)
+	high = min(high, core.MaxY-1)
+	if low > high {
+		return
+	}
+	lowSection := (low - core.MinY) >> core.SectionShift
+	highSection := (high - core.MinY) >> core.SectionShift
+
+	for dz := int32(-1); dz <= 1; dz++ {
+		for dx := int32(-1); dx <= 1; dx++ {
+			neighbor := core.ChunkPos{
+				X: (position.X + dx) >> core.SectionShift,
+				Z: (position.Z + dz) >> core.SectionShift,
+			}
+			if _, loaded := mirror.Chunk(dimension, neighbor); !loaded {
+				continue
+			}
+			for section := lowSection; section <= highSection; section++ {
+				dirty[core.SectionKey{
+					Dimension: dimension,
+					Pos:       core.SectionPos{X: neighbor.X, Y: section, Z: neighbor.Z},
+				}] = struct{}{}
 			}
 		}
 	}

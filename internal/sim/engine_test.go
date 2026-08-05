@@ -16,7 +16,7 @@ import (
 )
 
 func TestSubscriptionBeginsLoadingAndAcquiresInDistanceOrder(t *testing.T) {
-	engine := sim.NewEngine(1)
+	engine := sim.NewEngine(1, 0)
 	engine.RegisterObserverSession(1)
 	engine.Enqueue(sim.Command{
 		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
@@ -47,7 +47,7 @@ func TestSubscriptionBeginsLoadingAndAcquiresInDistanceOrder(t *testing.T) {
 }
 
 func TestAcquiredMissGeneratesExactlyOnceAndLoadErrorFails(t *testing.T) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	engine.RegisterObserverSession(1)
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -3}}
 	engine.Enqueue(sim.Command{
@@ -83,7 +83,7 @@ func TestAcquiredMissGeneratesExactlyOnceAndLoadErrorFails(t *testing.T) {
 }
 
 func TestAcquiredResultsApplyInChunkKeyOrderWithExactLoadState(t *testing.T) {
-	engine := sim.NewEngine(1)
+	engine := sim.NewEngine(1, 0)
 	engine.RegisterObserverSession(1)
 	engine.Enqueue(sim.Command{
 		Session: 1, Sequence: 1, Kind: sim.CommandTrustedObserverCenter,
@@ -116,7 +116,7 @@ func TestAcquiredResultsApplyInChunkKeyOrderWithExactLoadState(t *testing.T) {
 }
 
 func TestAcquiredResultsAfterForgetDoNotCreateCleanAuthority(t *testing.T) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	engine.RegisterObserverSession(1)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2}}
 	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 20}}
@@ -151,7 +151,7 @@ func TestAcquiredResultsAfterForgetDoNotCreateCleanAuthority(t *testing.T) {
 }
 
 func TestForgottenDirtyLoadedChunkRemainsUnloading(t *testing.T) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	engine.RegisterObserverSession(1)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -2}}
 	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 30}}
@@ -182,7 +182,7 @@ func TestForgottenDirtyLoadedChunkRemainsUnloading(t *testing.T) {
 }
 
 func TestSameTickCenterMoveDropsOldAcquisitionMiss(t *testing.T) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	const session = sim.SessionID(81)
 	engine.RegisterObserverSession(session)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -3}}
@@ -213,7 +213,7 @@ func TestSameTickCenterMoveDropsOldAcquisitionMiss(t *testing.T) {
 }
 
 func TestSameTickCenterMoveDoesNotPublishOldCleanHit(t *testing.T) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	const session = sim.SessionID(82)
 	engine.RegisterObserverSession(session)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -4, Z: 7}}
@@ -247,7 +247,7 @@ func TestSameTickCenterMoveDoesNotPublishOldCleanHit(t *testing.T) {
 }
 
 func TestSameTickCenterMoveRetainsLateGeneratedWithoutReady(t *testing.T) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	const session = sim.SessionID(83)
 	engine.RegisterObserverSession(session)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 6, Z: 9}}
@@ -443,7 +443,7 @@ func TestPlayerCommandsRejectRegisteredPendingPlayer(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			engine := sim.NewEngine(0)
+			engine := sim.NewEngine(0, 0)
 			const session = sim.SessionID(1)
 			engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 			command := tc.command
@@ -465,7 +465,7 @@ func TestPlayerCommandsRejectRegisteredPendingPlayer(t *testing.T) {
 }
 
 func TestPendingPlacementStaysRejectedWhenPlayerActivatesSameTick(t *testing.T) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	requested := engine.Step()
@@ -487,7 +487,7 @@ func TestPendingPlacementStaysRejectedWhenPlayerActivatesSameTick(t *testing.T) 
 }
 
 func TestEngineRunConsumesClockAndStopsIt(t *testing.T) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	clock := &oneTickClock{
 		ticks:   make(chan time.Time, 1),
 		stopped: make(chan struct{}),
@@ -531,7 +531,7 @@ func readyFlatEngineStocked(
 	hotbar core.Hotbar,
 ) (*sim.Engine, sim.SessionID, core.ChunkPos) {
 	t.Helper()
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	session := sim.SessionID(1)
 	chunkPos := core.ChunkPos{}
 	engine.RegisterPlayer(session, sim.PlayerRestore{

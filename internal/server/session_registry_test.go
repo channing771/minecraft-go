@@ -678,7 +678,7 @@ func testRestore() sim.PlayerRestore {
 
 func testStore() storage.Store {
 	return storage.NewMemory(storage.Metadata{
-		FormatVersion:  1,
+		FormatVersion:  2,
 		Seed:           1,
 		SpawnDimension: core.Overworld,
 		SpawnAnchor:    core.ChunkPos{},

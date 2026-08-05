@@ -17,7 +17,7 @@ import (
 
 func TestAcquireLoadsBeforeGenerating(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{}}
-	store := storage.NewMemory(storage.Metadata{FormatVersion: 1, Seed: 42})
+	store := storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: 42})
 	want := world.NewChunk(key.Pos)
 	want.SetBlock(0, 0, 0, core.DirtID)
 	if _, err := store.SaveBatch(context.Background(), []storage.ChunkSave{{
@@ -53,7 +53,7 @@ func TestAcquireOnlyTypedNotFoundFallsBackToGeneration(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			store := &loadResultStore{
-				metadata: storage.Metadata{FormatVersion: 1, Seed: 42},
+				metadata: storage.Metadata{FormatVersion: 2, Seed: 42},
 				err:      test.loadErr,
 			}
 			generator := &countingGenerator{}
@@ -79,7 +79,7 @@ func TestAcquireOnlyTypedNotFoundFallsBackToGeneration(t *testing.T) {
 
 func TestEmbeddedConstructorUsesStoreMetadata(t *testing.T) {
 	metadata := storage.Metadata{
-		FormatVersion:  1,
+		FormatVersion:  2,
 		Seed:           918273,
 		SpawnDimension: core.Overworld,
 		SpawnAnchor:    core.ChunkPos{X: 4, Z: -7},
@@ -105,7 +105,7 @@ func TestEmbeddedConstructorUsesStoreMetadata(t *testing.T) {
 
 func TestAcquireCancelsForgottenPendingLoads(t *testing.T) {
 	store := &blockingLoadStore{
-		metadata: storage.Metadata{FormatVersion: 1, Seed: 42},
+		metadata: storage.Metadata{FormatVersion: 2, Seed: 42},
 		started:  make(chan core.ChunkKey, 1),
 	}
 	_, endpoint := network.NewMemoryPair(64)
@@ -199,6 +199,8 @@ type loadResultStore struct {
 
 func (store *loadResultStore) Metadata() storage.Metadata { return store.metadata }
 
+func (*loadResultStore) SaveMetadata(context.Context, storage.Metadata) error { return nil }
+
 func (store *loadResultStore) LoadChunk(context.Context, core.ChunkKey) (storage.StoredChunk, error) {
 	return store.stored, store.err
 }
@@ -220,6 +222,8 @@ type blockingLoadStore struct {
 }
 
 func (store *blockingLoadStore) Metadata() storage.Metadata { return store.metadata }
+
+func (*blockingLoadStore) SaveMetadata(context.Context, storage.Metadata) error { return nil }
 
 func (store *blockingLoadStore) LoadChunk(
 	ctx context.Context,

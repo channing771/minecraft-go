@@ -93,7 +93,7 @@ func integrationPlayerID() core.PlayerID {
 func startDiskHost(t *testing.T, root, address string, generator Generator) integrationHost {
 	t.Helper()
 	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	}})
 	if err != nil {
 		t.Fatalf("OpenDisk: %v", err)
@@ -569,7 +569,7 @@ func TestTCPPlayerAndWorldFailureMatrixProtocolVersionAndUnknownPacket(t *testin
 		_, err := loginIntegrationClient(host.Addr, integrationIdentity(0x22, "Second"))
 		assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginServerFull))
 
-		for _, version := range []byte{7, byte(network.ProtocolVersion + 1)} {
+		for _, version := range []byte{7, 8, byte(network.ProtocolVersion + 1)} {
 			raw, err := net.Dial("tcp", host.Addr)
 			if err != nil {
 				t.Fatal(err)
@@ -901,7 +901,7 @@ func seedIntegrationPlayer(
 ) {
 	t.Helper()
 	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -1079,7 +1079,7 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	t.Helper()
 	identity := integrationIdentity(0x72, "MiningParity")
 	store := storage.NewMemory(storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	})
 	var inventory core.Inventory
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
@@ -1335,7 +1335,7 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	t.Helper()
 	identity := integrationIdentity(0x71, "Parity")
 	store := storage.NewMemory(storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	})
 	var initialInventory core.Inventory
 	initialInventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
@@ -1483,6 +1483,9 @@ func parityReadinessTranscript(
 		t.Fatalf("parity readiness ended without ready PlayerState: %+v", lastState)
 	}
 	lastState.ServerTick = 0
+	// 两次运行在脚本开始前的 tick 数不同，绝对世界时间不属于业务对等内容；
+	// 同一服务端上多客户端的时间一致性由多人昼夜测试覆盖。
+	lastState.WorldTimeTicks = 0
 	transcript := []string{fmt.Sprintf("PlayerState:%+v", lastState)}
 	for x := int32(-1); x <= 1; x++ {
 		for z := int32(-1); z <= 1; z++ {
@@ -1615,6 +1618,7 @@ func parityBusinessMessage(
 		return []string{fmt.Sprintf("ForgetChunks:%+v", message)}
 	case network.PlayerState:
 		message.ServerTick = 0
+		message.WorldTimeTicks = 0
 		return []string{fmt.Sprintf("PlayerState:%+v", message)}
 	case network.CommandRejected:
 		return []string{fmt.Sprintf("CommandRejected:%+v", message)}
@@ -1702,7 +1706,7 @@ func seedV2CraftingChunk(t *testing.T, root string, key core.ChunkKey) {
 		Stack: core.ItemStack{Item: core.ItemStone, Count: 4}, BlockIndex: index,
 	})
 	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	}})
 	if err != nil {
 		t.Fatal(err)

@@ -41,7 +41,7 @@ func TestSpawnCandidatesOrderByDistanceThenXZ(t *testing.T) {
 }
 
 func TestSpawnWaitsForEarlierUnknownCandidate(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	requested := engine.Step()
 	for _, key := range requested.Acquire {
@@ -68,7 +68,7 @@ func TestSpawnWaitsForEarlierUnknownCandidate(t *testing.T) {
 }
 
 func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	const sessionID = SessionID(1)
 	anchor := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{}}
 	target := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1}}
@@ -152,7 +152,7 @@ func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
 }
 
 func TestExhaustedSpawnRetriesOnlyAfterRevisionChange(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	dimension := engine.dimensions[core.Overworld]
 	for x := int32(-1); x <= 1; x++ {

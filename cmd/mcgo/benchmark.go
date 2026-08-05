@@ -30,14 +30,79 @@ import (
 const (
 	benchmarkSeed            = 20260726
 	benchmarkMessageDrainMax = 4096
-	scenarioVersion          = 10
+	scenarioVersion          = 12
 )
 
 var (
 	warmupDuration = 10 * time.Second
 	stillDuration  = 60 * time.Second
 	flyDuration    = 120 * time.Second
+	// benchmarkCooldown 是阶段之间的固定冷却，让 GPU 从满载回落。
+	// 它只影响阶段之间的时间轴，不改变任何被采集指标的定义、样本数或阶段时长。
+	benchmarkCooldown = 30 * time.Second
 )
+
+// runBenchmarkCooldown 在阶段之间等待固定时长，期间只泵送窗口事件，
+// 不提交任何渲染工作，也不推进相机脚本。
+func runBenchmarkCooldown(app *application, duration time.Duration) {
+	// 冷却是让系统回落的窗口：顺带回收上一阶段产生的对象，
+	// 避免它们把后续阶段的 RSS 峰值推高。
+	runtime.GC()
+	deadline := time.Now().Add(duration)
+	for time.Now().Before(deadline) {
+		if app.window != nil {
+			app.window.Poll()
+			if app.window.ShouldClose() {
+				app.window.CancelClose()
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// printMemoryBreakdown 打印进程 RSS 峰值与 Go 运行时的内存构成。
+//
+// RSS 取自 ru_maxrss，是进程生命周期的历史峰值，回收之后不会下降；
+// 把它与 Go 堆分开显示，才能判断峰值来自 Go 堆还是原生分配。
+func printMemoryBreakdown(label string) {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	const mib = 1 << 20
+	rss, err := client.ProcessRSSBytes()
+	if err != nil {
+		return
+	}
+	fmt.Printf(
+		"%s 内存：RSS 峰值 %.1fMiB｜Go 堆在用 %.1fMiB｜Go 堆保留 %.1fMiB｜Go 运行时合计 %.1fMiB｜非 Go %.1fMiB\n",
+		label,
+		float64(rss)/mib,
+		float64(stats.HeapAlloc)/mib,
+		float64(stats.HeapSys)/mib,
+		float64(stats.Sys)/mib,
+		(float64(rss)-float64(stats.Sys))/mib,
+	)
+}
+
+// benchmarkReportSkeleton 返回只含固定运行参数的报告骨架，供测试断言这些参数被记录。
+func benchmarkReportSkeleton() client.PerfReport {
+	return client.PerfReport{
+		ScenarioVersion: scenarioVersion,
+		CooldownSeconds: benchmarkCooldown.Seconds(),
+	}
+}
+
+// gpuCompletionMinSamples 返回该场景下 remote_gpu_complete 的最小样本数。
+// v8–v11 逐次计时取 2048；v12 起改为批量分摊，样本数相应减少。
+func gpuCompletionMinSamples(scenario int) int {
+	switch {
+	case scenario >= 12:
+		return client.ScenarioV12GPUCompletionSamples
+	case scenario >= 8:
+		return client.ScenarioV8GPUCompletionSamples
+	default:
+		return 256
+	}
+}
 
 func runBenchmark(app *application, outputPath string) error {
 	width, height := app.framebufferSize()
@@ -61,6 +126,7 @@ func runBenchmark(app *application, outputPath string) error {
 	if err := runWarmup(app, warmupDuration); err != nil {
 		return err
 	}
+	runBenchmarkCooldown(app, benchmarkCooldown)
 	multiplayerProbe, err := newMultiplayerClientProbe(app)
 	if err != nil {
 		return fmt.Errorf("创建多人客户端性能探针: %w", err)
@@ -72,6 +138,8 @@ func runBenchmark(app *application, outputPath string) error {
 	if err != nil {
 		return err
 	}
+	printMemoryBreakdown("still 后")
+	runBenchmarkCooldown(app, benchmarkCooldown)
 	flyingStart := app.camera.Pos
 	probe := server.NewTerrainProbe(benchmarkSeed)
 	flying, err := measurePhase(app, multiplayerProbe, "flying", flyDuration, func(elapsed time.Duration) {
@@ -87,6 +155,7 @@ func runBenchmark(app *application, outputPath string) error {
 	if err != nil {
 		return err
 	}
+	printMemoryBreakdown("flying 后")
 	finalCenter := app.center
 	if err := waitForBenchmarkCenterConsistency(
 		app,
@@ -109,9 +178,14 @@ func runBenchmark(app *application, outputPath string) error {
 			authoritativeHash, authoritativeRevision, authoritativeOK,
 			mirrorHash, mirrorRevision, mirrorOK)
 	}
+	// GPU 采样不得紧接 flying 的满载尾部。
+	runBenchmarkCooldown(app, benchmarkCooldown)
 	if err := multiplayerProbe.measureGPUCompletionAfterTransportClose(app); err != nil {
 		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
 	}
+	printMemoryBreakdown("GPU 采样后")
+	// GPU 采样同样是满载阶段，其后也要冷却并回收，才轮到服务端探针。
+	runBenchmarkCooldown(app, benchmarkCooldown)
 	serverMultiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)
 	if err != nil {
 		return fmt.Errorf("测量八会话服务端: %w", err)
@@ -142,6 +216,7 @@ func runBenchmark(app *application, outputPath string) error {
 		GitCommit:       commandOutput("git", "rev-parse", "HEAD"),
 		Framebuffer:     app.framebufferLabel(),
 		LoadSeconds:     loadSeconds,
+		CooldownSeconds: benchmarkCooldown.Seconds(),
 		SnapshotSeconds: snapshotDuration.Seconds(),
 		Phases: map[string]client.PhaseSummary{
 			"still":  still,
@@ -351,8 +426,8 @@ func validateBenchmarkReport(report client.PerfReport) error {
 			if name == "interest_diff" {
 				minimum = 1000
 			}
-			if name == "remote_gpu_complete" && report.ScenarioVersion >= 8 {
-				minimum = client.ScenarioV8GPUCompletionSamples
+			if name == "remote_gpu_complete" {
+				minimum = gpuCompletionMinSamples(report.ScenarioVersion)
 			}
 			if summary.Samples < minimum || summary.P50MS <= 0 || summary.P95MS <= 0 ||
 				summary.P99MS <= 0 || summary.MaxMS <= 0 {
@@ -437,7 +512,7 @@ func measureProtocolSummary() (client.ProtocolSummary, error) {
 
 func measurePlayerPersistenceSummary() (client.PersistenceSummary, error) {
 	store := storage.NewMemory(storage.Metadata{
-		FormatVersion: 1, Seed: benchmarkSeed, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: benchmarkSeed, SpawnDimension: core.Overworld,
 	})
 	id := core.PlayerID{0xa1, 0x63, 0xd4, 0x99, 0x36, 0x55, 0x43, 0xd5, 0x87, 0x30, 0xe5, 0x9d, 0x11, 0x0c, 0x21, 0x76}
 	recorder := newSaveRecorder(256)

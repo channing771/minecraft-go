@@ -15,9 +15,9 @@ import (
 	"minecraft-go/internal/client"
 )
 
-func TestBenchmarkScenarioVersionIncludesAuthoritativeMining(t *testing.T) {
-	if scenarioVersion != 10 {
-		t.Fatalf("scenarioVersion=%d，想要权威计时采掘后的 v10", scenarioVersion)
+func TestBenchmarkScenarioVersionIncludesStableGPUTiming(t *testing.T) {
+	if scenarioVersion != 12 {
+		t.Fatalf("scenarioVersion=%d，想要 GPU 计时稳定化后的 v12", scenarioVersion)
 	}
 }
 
