@@ -28,10 +28,10 @@
 
 ## 5. 有界 metadata 自动保存与关服屏障
 
-- [ ] 5.1 在 `internal/server` 先写失败测试，覆盖自动保存边界投递最新时间、最多一个 in-flight、普通 tick 不重复投递、in-flight 期间跨过新保存边界时合并最新值、队列满不阻塞 Step、失败按现有 tick 退避和状态可观察。
-- [ ] 5.2 扩展 `internal/server/server.go` 与 `persistence.go` 的固定 save job/completion，使现有 worker/channel 处理一份 metadata 快照；metadata 使用独立固定状态，不进入 region retry map，不新增 worker 或无界队列。
-- [ ] 5.3 在 `internal/server/shutdown_test.go` 和重启集成测试先覆盖最终时间 flush、失败可重试关服、context 超时、Store.Sync/Close 顺序、v1 世界迁移及 v2 重启延续，再修改 `shutdown.go` 与装配代码闭合屏障。
-- [ ] 5.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/storage -race -count=1'`，确认故障注入后 metadata 可重开为完整旧版或完整新版且无遗留 goroutine，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 异步保存权威世界时间`。
+- [x] 5.1 在 `internal/server` 先写失败测试，覆盖自动保存边界投递最新时间、最多一个 in-flight、普通 tick 不重复投递、in-flight 期间跨过新保存边界时合并最新值、队列满不阻塞 Step、失败按现有 tick 退避和状态可观察。
+- [x] 5.2 扩展 `internal/server/server.go` 与 `persistence.go` 的固定 save job/completion，使现有 worker/channel 处理一份 metadata 快照；metadata 使用独立固定状态，不进入 region retry map，不新增 worker 或无界队列。
+- [x] 5.3 在 `internal/server/shutdown_test.go` 和重启集成测试先覆盖最终时间 flush、失败可重试关服、context 超时、Store.Sync/Close 顺序、v1 世界迁移及 v2 重启延续，再修改 `shutdown.go` 与装配代码闭合屏障。
+- [x] 5.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/storage -race -count=1'`，确认故障注入后 metadata 可重开为完整旧版或完整新版且无遗留 goroutine，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 异步保存权威世界时间`。
 
 ## 6. 增量天空光重网格
 

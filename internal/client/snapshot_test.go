@@ -59,7 +59,7 @@ func TestMirrorSnapshotDirtiesOwnAndLoadedNeighborSections(t *testing.T) {
 }
 
 func snapshotFromChunk(
-	t *testing.T,
+	t testing.TB,
 	dimension core.DimensionID,
 	chunk *world.Chunk,
 	revision uint64,
