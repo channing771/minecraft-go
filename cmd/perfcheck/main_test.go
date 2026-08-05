@@ -596,8 +596,10 @@ func TestPerfcheckV6CrossTransportChecksStableTransportMetrics(t *testing.T) {
 			phase.MaxMS = phase.P99MS
 			report.Phases["still"] = phase
 		}},
-		{name: "persistence p95", want: "persistence p95_ms", mutate: func(report *client.PerfReport) {
-			report.Persistence.P95MS *= 1.201
+		// persistence 的尾分位数跨运行波动近两倍，已按实测豁免相对判定；
+		// 中位数极稳定（1.04x），因此仍必须被判定。
+		{name: "persistence p50", want: "persistence p50_ms", mutate: func(report *client.PerfReport) {
+			report.Persistence.P50MS *= 1.201
 		}},
 		{name: "avatar p99", want: "avatar_submit p99_ms", mutate: func(report *client.PerfReport) {
 			report.Multiplayer.AvatarSubmit.P99MS *= 1.201
@@ -660,8 +662,10 @@ func TestPerfcheckV6CrossTransportCoversApprovedStableFieldMatrix(t *testing.T) 
 		{name: "persistence p50", want: "persistence p50_ms", mutate: func(report *client.PerfReport) {
 			report.Persistence.P50MS *= 1.201
 		}},
-		{name: "persistence p99", want: "persistence p99_ms", mutate: func(report *client.PerfReport) {
-			report.Persistence.P99MS *= 1.201
+		{name: "persistence 尾部大幅退化", want: "persistence p99_ms", mutate: func(report *client.PerfReport) {
+			// 超过尾部固有波动的退化仍须失败；同时保持分位数单调。
+			report.Persistence.P99MS += persistenceTailNoiseFloorMS * 2
+			report.Persistence.MaxMS = report.Persistence.P99MS + 1
 		}},
 		{name: "protocol encode", want: "protocol encode_p99_ms", mutate: func(report *client.PerfReport) {
 			report.Protocol.EncodeP99MS *= 1.201
@@ -1082,5 +1086,89 @@ func TestPerfcheckQuantizedMetricKeepsCompletenessGate(t *testing.T) {
 	if err := validateV6Report("current", report); err == nil ||
 		!strings.Contains(err.Error(), "remote_gpu_complete") {
 		t.Fatalf("样本不足未被拒绝：%v", err)
+	}
+}
+
+func TestPerfcheckLatencyNoiseFloorSuppressesSubMicrosecondJitter(t *testing.T) {
+	// 实测的跨运行抖动：这些微秒级墙钟指标的相对变化远超 20%，
+	// 但绝对增量只有 1-30µs，属于调度抖动而非性能退化。
+	for _, test := range []struct {
+		name              string
+		baseline, current float64
+	}{
+		{"remote_state_encode", 0.007, 0.008},
+		{"avatar_submit", 0.014, 0.021},
+		{"remote_gpu_complete p95", 0.120, 0.150},
+		{"remote_gpu_complete p99", 0.128, 0.156},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := appendRegressionWithResolution(
+				nil, test.name, "p99_ms", test.baseline, test.current, 0.20, latencyNoiseFloorMS,
+			)
+			if len(got) != 0 {
+				t.Fatalf("噪声级变化被判定为回归：%v", got)
+			}
+		})
+	}
+}
+
+func TestPerfcheckLatencyNoiseFloorStillCatchesRealRegression(t *testing.T) {
+	// 超过噪声地板的退化必须照常失败，否则门禁形同虚设。
+	for _, test := range []struct {
+		name              string
+		baseline, current float64
+		wantFail          bool
+	}{
+		{name: "明确在地板之内", baseline: 0.120, current: 0.120 + latencyNoiseFloorMS*0.8, wantFail: false},
+		{name: "越过地板且超阈值", baseline: 0.120, current: 0.120 + latencyNoiseFloorMS*1.5, wantFail: true},
+		{name: "远超地板", baseline: 0.120, current: 0.500, wantFail: true},
+		{name: "越过地板但未超阈值", baseline: 10.0, current: 10.06, wantFail: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := appendRegressionWithResolution(
+				nil, "metric", "p99_ms", test.baseline, test.current, 0.20, latencyNoiseFloorMS,
+			)
+			if failed := len(got) != 0; failed != test.wantFail {
+				t.Fatalf("判定 = %v，想要 %v（failures=%v）", failed, test.wantFail, got)
+			}
+		})
+	}
+}
+
+func TestPerfcheckPersistenceTailIsExemptButMedianIsNot(t *testing.T) {
+	// 实测 11 次运行：persistence p50 的最大/最小为 1.04x，而 p95/p99 达 1.97x。
+	// 尾分位数受页缓存与后台 flush 影响，跨运行波动本就接近两倍，
+	// 20% 相对判定测的是磁盘状态而非代码退化；中位数则必须继续受判定。
+	floors := persistenceFloors()
+
+	tail := appendStableSummaryRegressions(
+		nil, "persistence",
+		4.1, 9.991, 12.0,
+		4.1, 12.078, 16.5,
+		0.20, floors,
+	)
+	if len(tail) != 0 {
+		t.Fatalf("尾分位数的固有抖动被判定为回归：%v", tail)
+	}
+
+	median := appendStableSummaryRegressions(
+		nil, "persistence",
+		4.1, 9.991, 12.0,
+		5.5, 9.991, 12.0,
+		0.20, floors,
+	)
+	if len(median) != 1 || !strings.Contains(median[0], "p50_ms") {
+		t.Fatalf("中位数退化未被判定：%v", median)
+	}
+
+	// 尾部的真实大幅退化仍须失败。
+	severe := appendStableSummaryRegressions(
+		nil, "persistence",
+		4.1, 9.991, 12.0,
+		4.1, 30.0, 40.0,
+		0.20, floors,
+	)
+	if len(severe) == 0 {
+		t.Fatal("尾部大幅退化未被判定")
 	}
 }
