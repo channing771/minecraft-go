@@ -37,6 +37,8 @@ type Actions struct {
 	ToggleInventory bool
 	// Click 是背包界面打开时的左键上升沿。
 	Click bool
+	// Drop 是 Q 的有效上升沿：请求丢弃权威选中栏位中的一个物品。
+	Drop bool
 }
 
 type InputState struct {
@@ -44,18 +46,23 @@ type InputState struct {
 	secondaryDown bool
 	numberDown    int
 	inventoryDown bool
+	dropDown      bool
 }
 
-// Update 把数字键 1..9 转换为一次快捷栏选择请求，把 E 的上升沿转换为界面开关。
-// inventoryOpen 为 true 时抑制挖掘、放置和快捷栏选择，只保留界面点击。
+// Update 把数字键 1..9 转换为一次快捷栏选择请求，把 E 与 Q 的上升沿分别转换为
+// 界面开关和丢弃请求。inventoryOpen 为 true 时抑制挖掘、放置、快捷栏选择和丢弃，
+// 只保留界面点击。
 func (state *InputState) Update(
 	primary, secondary bool,
 	number int,
-	inventoryKey, inventoryOpen bool,
+	inventoryKey, dropKey, inventoryOpen bool,
 ) Actions {
 	rising := primary && !state.primaryDown
 	actions := Actions{
 		ToggleInventory: inventoryKey && !state.inventoryDown,
+		// 界面打开时抑制丢弃，但下方仍记录 Q 的物理状态，
+		// 使抑制期间按住的 Q 在恢复后不会被当成新的上升沿。
+		Drop: dropKey && !state.dropDown && !inventoryOpen,
 	}
 	if inventoryOpen {
 		actions.Click = rising
@@ -71,5 +78,6 @@ func (state *InputState) Update(
 	state.secondaryDown = secondary
 	state.numberDown = number
 	state.inventoryDown = inventoryKey
+	state.dropDown = dropKey
 	return actions
 }
