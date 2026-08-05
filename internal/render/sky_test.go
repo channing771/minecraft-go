@@ -2,8 +2,10 @@ package render
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -15,6 +17,29 @@ import (
 )
 
 const skyHeadlessSize = 64
+
+func TestSkyHeadlessOnlySkipsUnavailableAdapter(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"adapter unavailable", errors.New("gfx: 请求 adapter 失败: no suitable adapter found"), true},
+		{"device request", errors.New("gfx: 请求 device 失败: device lost"), false},
+		{"other initialization", errors.New("gfx: unexpected initialization failure"), false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := skyHeadlessAdapterUnavailable(test.err); got != test.want {
+				t.Fatalf("skyHeadlessAdapterUnavailable(%q)=%v want=%v", test.err, got, test.want)
+			}
+		})
+	}
+}
+
+func skyHeadlessAdapterUnavailable(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "gfx: 请求 adapter 失败:")
+}
 
 func TestSkyPipelineConfiguration(t *testing.T) {
 	device := &skyTestDevice{}
@@ -148,7 +173,10 @@ func TestSkyUniformLayoutAndUpload(t *testing.T) {
 func TestSkyHeadlessPixels(t *testing.T) {
 	device, err := gfx.NewHeadlessDevice()
 	if err != nil {
-		t.Skipf("本机无可用 GPU 适配器: %v", err)
+		if skyHeadlessAdapterUnavailable(err) {
+			t.Skipf("本机无可用 GPU 适配器: %v", err)
+		}
+		t.Fatalf("创建 headless GPU device: %v", err)
 	}
 	defer device.Release()
 	renderer := newRenderer(device, assets.NewRegistry(), gfx.FormatRGBA8Unorm, 64, 1024, 8)

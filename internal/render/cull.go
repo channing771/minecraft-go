@@ -28,6 +28,7 @@ type culler struct {
 	hizView              gfx.TextureView
 	dummyHiZ             gfx.Texture
 	dummyHiZView         gfx.TextureView
+	uniformData          [128]byte
 }
 
 func newCuller(
@@ -127,7 +128,8 @@ func (c *culler) dispatchCamera(
 		c.hizView = z.fullView
 		c.rebuildBind()
 	}
-	c.uniforms.Write(0, cullUniformBytes(cam, z, enableHiZ))
+	writeCullUniformBytes(c.uniformData[:], cam, z, enableHiZ)
+	c.uniforms.Write(0, c.uniformData[:])
 	pass := enc.BeginComputePass("terrain cull pass")
 	pass.SetPipeline(c.pipeline)
 	pass.SetBindGroup(0, c.bind)
@@ -156,8 +158,8 @@ func (c *culler) Release() {
 	}
 }
 
-func cullUniformBytes(cam Camera, z *hiZ, enabled bool) []byte {
-	out := make([]byte, 128)
+func writeCullUniformBytes(out []byte, cam Camera, z *hiZ, enabled bool) {
+	clear(out)
 	putFloat := func(offset int, value float32) {
 		binary.LittleEndian.PutUint32(out[offset:], math.Float32bits(value))
 	}
@@ -177,7 +179,6 @@ func cullUniformBytes(cam Camera, z *hiZ, enabled bool) []byte {
 	if enabled {
 		binary.LittleEndian.PutUint32(out[112:], 1)
 	}
-	return out
 }
 
 // RunCullForTest 把 quads 当作单个区段送入 GPU 剔除并读回存活实例。
