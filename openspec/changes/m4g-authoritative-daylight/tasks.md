@@ -43,11 +43,11 @@
 
 ## 7. 固定昼夜渲染
 
-- [ ] 7.1 在 `internal/render` 先写失败测试，精确覆盖相位 0/6000/12000/18000、`sun/daylight/terrain` 公式、日夜 clear color、有限值和周期性；新增 `TestTerrainDaylightHeadlessDraw` 并覆盖 HUD/name tag 不接收世界亮度。
-- [ ] 7.2 修改 terrain renderer、camera uniform 和 WGSL，用 quad 天空光与 `daylight` 计算 8% 室内/15% 夜间露天/100% 正午亮度；只更新固定 uniform，不重新网格化或新增 pipeline/纹理。
-- [ ] 7.3 修改 avatar 与 item-drop renderer/uniform/WGSL 使用相同 `daylight`，保持 name-tag、hotbar、inventory、furnace 和 mining overlay 颜色不变。
-- [ ] 7.4 修改 `cmd/mcgo/app.go`，只从最后确认的 `PlayerState.WorldTimeTicks` 计算一次帧光照并传给三个世界空间 renderer；reset、重连和旧状态不得回退相位。
-- [ ] 7.5 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./cmd/mcgo ./internal/client -race -count=1 && go test ./internal/render -run "Test(TerrainDaylightHeadlessDraw|AvatarRendererHeadlessDraw|ItemDropRendererHeadlessDraw|HotbarRendererHeadlessBlendOverExistingColor)$" -count=1'`，确认没有创建或聚焦窗口，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 呈现权威昼夜循环`。
+- [x] 7.1 在 `internal/render` 先写失败测试，精确覆盖相位 0/6000/12000/18000、`sun/daylight/terrain` 公式、日夜 clear color、有限值和周期性；新增 `TestTerrainDaylightHeadlessDraw` 并覆盖 HUD/name tag 不接收世界亮度。
+- [x] 7.2 修改 terrain renderer、camera uniform 和 WGSL，用 quad 天空光与 `daylight` 计算 8% 室内/15% 夜间露天/100% 正午亮度；只更新固定 uniform，不重新网格化或新增 pipeline/纹理。
+- [x] 7.3 修改 avatar 与 item-drop renderer/uniform/WGSL 使用相同 `daylight`，保持 name-tag、hotbar、inventory、furnace 和 mining overlay 颜色不变。
+- [x] 7.4 修改 `cmd/mcgo/app.go`，只从最后确认的 `PlayerState.WorldTimeTicks` 计算一次帧光照并传给三个世界空间 renderer；reset、重连和旧状态不得回退相位。
+- [x] 7.5 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./cmd/mcgo ./internal/client -race -count=1 && go test ./internal/render -run "Test(TerrainDaylightHeadlessDraw|AvatarRendererHeadlessDraw|ItemDropRendererHeadlessDraw|HotbarRendererHeadlessBlendOverExistingColor)$" -count=1'`，确认没有创建或聚焦窗口，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 呈现权威昼夜循环`。
 
 ## 8. Memory/TCP、重启与兼容闭环
 

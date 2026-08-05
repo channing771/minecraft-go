@@ -569,7 +569,7 @@ func TestTCPPlayerAndWorldFailureMatrixProtocolVersionAndUnknownPacket(t *testin
 		_, err := loginIntegrationClient(host.Addr, integrationIdentity(0x22, "Second"))
 		assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginServerFull))
 
-		for _, version := range []byte{7, byte(network.ProtocolVersion + 1)} {
+		for _, version := range []byte{7, 8, byte(network.ProtocolVersion + 1)} {
 			raw, err := net.Dial("tcp", host.Addr)
 			if err != nil {
 				t.Fatal(err)
