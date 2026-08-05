@@ -45,7 +45,7 @@
 
 ## 8. 同步与归档
 
-- [ ] 8.1 重新运行全仓 race、vet、archcheck、gofmt、diff check 与 OpenSpec strict，确认全部任务勾选且 tracked 工作树干净。
-- [ ] 8.2 把两份 delta specs 同步到主规格，核对 GPU 探针语义、门禁分辨率规则、冷却窗口与 scenario v12 边界准确。
+- [x] 8.1 重新运行全仓 race、vet、archcheck、gofmt、diff check 与 OpenSpec strict，确认全部任务勾选且 tracked 工作树干净。
+- [x] 8.2 把两份 delta specs 同步到主规格，核对 GPU 探针语义、门禁分辨率规则、冷却窗口与 scenario v12 边界准确。
 - [ ] 8.3 归档 `stabilize-benchmark-gpu-timing`，再次运行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，提交 `chore: 归档 GPU 计时稳定化`。
 - [ ] 8.4 回到 M4G：确认其 v11 候选仍冻结，按新的 v12 基线继续完成 M4G 的第 12 组同步与归档。

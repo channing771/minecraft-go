@@ -13,6 +13,11 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `re
 - **WHEN** 比较 `remote_gpu_complete` 的 p50 与 p95
 - **THEN** p95 相对 p50 的比值 MUST 明显小于 `2`，不得呈现相邻取值成整数倍的量化分布
 
+#### Scenario: 样本只覆盖提交与完成轮询
+- **GIVEN** 一批远端绘制命令已经完成编码
+- **WHEN** benchmark 记录一次 `remote_gpu_complete` 样本
+- **THEN** 计时 MUST 紧邻该批命令提交开始并在阻塞轮询返回时结束，准备、编码和释放事件均位于计时区间之外
+
 #### Scenario: 空绘制与真实绘制可区分
 - **GIVEN** 同一台设备上分别以相同批次数量提交空绘制与完整远端角色绘制
 - **WHEN** 两者都按 `remote_gpu_complete` 的方式取样
@@ -35,12 +40,16 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `re
 - **WHEN** benchmark 成功生成一份 scenario v12 报告
 - **THEN** `remote_gpu_complete.samples` MUST 等于配置的固定样本数，且 p50、p95、p99 和 max MUST 完整、为正并保持单调
 
+#### Scenario: v10 报告样本完整
+- **WHEN** 比较器读取一份历史 scenario v10 报告
+- **THEN** `remote_gpu_complete.samples` MUST 等于 `2048`，且 p50、p95、p99 和 max MUST 完整、为正并保持单调
+
 #### Scenario: 自动性能验证不创建窗口
 - **WHEN** 开发者或 CI 运行 scenario v12 benchmark
 - **THEN** 系统 MUST 使用 headless device 和离屏纹理，不得创建、启动或聚焦游戏窗口
 
 ### Requirement: 工作负载变化使用新场景版本
-改用批量分摊计时并加入阶段间冷却窗口后的 benchmark 报告 MUST 标记为 scenario v12；既有 scenario v6/v7/v8/v9/v10/v11 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。当前基线场景与 v12 之间 MUST 只通过唯一一条显式授权迁移，该迁移 MUST 反映真实的基线历史而非版本号连续性，且只执行完整性与绝对门禁。
+改用批量分摊计时、加入阶段间冷却与 Go 堆软上限后的 benchmark 报告 MUST 标记为 scenario v12；既有 scenario v6/v7/v8/v9/v10/v11 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。当前基线场景与 v12 之间 MUST 只通过唯一一条显式授权迁移，该迁移 MUST 反映真实的基线历史而非版本号连续性，且只执行完整性与绝对门禁；所有更早的迁移参数 MUST 已退役并被拒绝。
 
 #### Scenario: v12 同场景比较
 - **WHEN** baseline 与 current 都是完整的 scenario v12 报告
@@ -48,6 +57,22 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `re
 
 #### Scenario: v11 同场景比较
 - **WHEN** baseline 与 current 都是完整的 scenario v11 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v10 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v10 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v9 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v9 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v8 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v8 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v7 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v7 报告
 - **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
 
 #### Scenario: 当前基线与 v12 不静默混比
@@ -61,6 +86,35 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `re
 #### Scenario: 从未成为基线的中间版本不提供迁移
 - **GIVEN** scenario v11 的正式链因 GPU 计时缺陷失败，v11 从未成为任何硬件的基线
 - **WHEN** 调用方使用 `11:12` 或 `10:11` 迁移参数
+- **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
+
+#### Scenario: v9 与 v10 不静默混比
+- **WHEN** baseline 为 scenario v9、current 为 scenario v10 且没有显式迁移授权
+- **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致
+
+#### Scenario: 显式授权 v9 到 v10 迁移
+- **GIVEN** `9:10` 迁移参数已随更晚场景的建立而退役
+- **WHEN** 调用方使用该参数比较 scenario v9 与 v10
+- **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
+
+#### Scenario: v8 与 v9 不静默混比
+- **WHEN** baseline 为 scenario v8、current 为 scenario v9 且没有显式迁移授权
+- **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致
+
+#### Scenario: 退役的 v8 到 v9 迁移参数被拒绝
+- **WHEN** 调用方使用已经退役的 `8:9` 迁移参数比较 scenario v8 与 v9
+- **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
+
+#### Scenario: v7 与 v8 不静默混比
+- **WHEN** baseline 为 scenario v7、current 为 scenario v8
+- **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致
+
+#### Scenario: 未授权的 v6 与 v7 比较
+- **WHEN** baseline 为 scenario v6、current 为 scenario v7 且没有显式迁移授权
+- **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
+
+#### Scenario: 退役的 v6 到 v7 迁移参数被拒绝
+- **WHEN** 调用方使用已经退役的 `6:7` 迁移参数比较 scenario v6 与 v7
 - **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
 
 #### Scenario: 历史报告保持可校验
@@ -81,6 +135,18 @@ scenario v8 及后续场景（包括 v12）MUST 继续使用现有 still、flyin
 #### Scenario: v12 权威 tick 绝对门禁保持不变
 - **WHEN** scenario v12 的服务端 tick p99 达到既有绝对上限
 - **THEN** 性能门禁 MUST 失败，不得因更换计时方式而放宽上限
+
+#### Scenario: v10 飞行尾延迟超限
+- **WHEN** scenario v10 的 flying p99 大于或等于 `12ms`
+- **THEN** 性能门禁 MUST 失败
+
+#### Scenario: v10 GPU 稳定分位数退化超限
+- **WHEN** 同硬件、同 scenario v10 的 `remote_gpu_complete` 受检分位数退化超过 `20%` 且绝对增量超过该指标的最小有意义增量
+- **THEN** 性能门禁 MUST 失败，不得因功能增加而提高阈值
+
+#### Scenario: v10 权威 tick 绝对门禁保持不变
+- **WHEN** scenario v10 的服务端 tick p99 达到既有绝对上限
+- **THEN** 性能门禁 MUST 失败，不得因增加功能而放宽上限
 
 ## ADDED Requirements
 
