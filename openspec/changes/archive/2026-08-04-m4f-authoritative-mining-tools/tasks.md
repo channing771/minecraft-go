@@ -65,6 +65,6 @@
 
 ## 11. 最终同步与归档
 
-- [ ] 11.1 重新运行全仓 race、vet、archcheck、gofmt、diff check、OpenSpec strict 与适用性能比较，确认全部任务已勾选且 tracked 工作树干净。
-- [ ] 11.2 把八份 delta specs 同步到主规格，核对新建 `authoritative-mining` purpose、被移除的 v7 requirement、协议 v8、schema v3/v4、scenario v10 和 M5/M2 基线边界均准确。
-- [ ] 11.3 归档 `m4f-authoritative-mining-tools` change，再次运行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，提交 `chore: 归档 M4F 权威计时采掘`。
+- [x] 11.1 重新运行全仓 race、vet、archcheck、gofmt、diff check、OpenSpec strict 与适用性能比较，确认全部任务已勾选且 tracked 工作树干净。
+- [x] 11.2 把八份 delta specs 同步到主规格，核对新建 `authoritative-mining` purpose、被移除的 v7 requirement、协议 v8、schema v3/v4、scenario v10 和 M5/M2 基线边界均准确。
+- [x] 11.3 归档 `m4f-authoritative-mining-tools` change，再次运行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，提交 `chore: 归档 M4F 权威计时采掘`。
