@@ -15,9 +15,9 @@ import (
 	"minecraft-go/internal/client"
 )
 
-func TestBenchmarkScenarioVersionIncludesAuthoritativeMining(t *testing.T) {
-	if scenarioVersion != 10 {
-		t.Fatalf("scenarioVersion=%d，想要权威计时采掘后的 v10", scenarioVersion)
+func TestBenchmarkScenarioVersionIncludesAuthoritativeDaylight(t *testing.T) {
+	if scenarioVersion != 11 {
+		t.Fatalf("scenarioVersion=%d，想要权威昼夜后的 v11", scenarioVersion)
 	}
 }
 

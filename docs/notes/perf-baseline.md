@@ -47,13 +47,17 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/m
 
 Memory 报告先通过 v8→v9 完整性、同硬件与绝对门禁；TCP 随后通过相对该 Memory 报告的同场景跨 transport 门禁。Memory/TCP 飞行阶段分别为 `621.8/638.5 FPS`、p95 `3.114/2.968ms`，`remote_gpu_complete` 都包含 2048 个样本。
 
-## M4F scenario v10 比较规则
+## M4G scenario v11 比较规则
 
-M4F 扩展固定长度玩家输入与状态、废止即时破坏消息，并在权威 tick 增加有界采掘判定，因此 benchmark producer 已标记 scenario v10。固定 `2560x1440` 离屏目标、still/flying 阶段、RSS、200 个 tick 样本、2048 个 `remote_gpu_complete` 样本、既有绝对门禁与 20% 相对退化阈值均未改变。
+M4G 加入权威世界时间与 metadata 保存、每区块 512 字节列顶派生状态、直射天空光网格属性和三个世界空间 renderer 的昼夜 uniform，这些都改变 benchmark 的工作负载语义，因此 benchmark producer 已标记 scenario v11。固定 `2560x1440` 离屏目标、still/flying 阶段、RSS、200 个 tick 样本、2048 个 `remote_gpu_complete` 样本、既有绝对门禁与 20% 相对退化阈值均未改变。
 
-当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 9:10`。迁移仍验证两份报告的完整性与来源、同硬件，以及当前 v10 报告的全部绝对门禁；只跳过跨 workload 的相对回归。默认 v9→v10、反向、跨两级和已退役的 `8:9` 参数均被拒绝；v6–v9 历史报告仍可读取，同版本报告仍可比较。相同 v10 及 Memory→TCP 比较继续执行既有稳定门禁。
+当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 10:11`。迁移仍验证两份报告的完整性与来源、同硬件，以及当前 v11 报告的全部绝对门禁；只跳过跨 workload 的相对回归。默认 v10→v11、反向、跨两级和已退役的 `9:10`、`8:9` 参数均被拒绝；v6–v10 历史报告仍可读取，同版本报告仍可比较。相同 v11 及 Memory→TCP 比较继续执行既有稳定门禁。
 
-无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。M5 当前接受的 `docs/notes/perf-baseline-m5.json` 是本页上方记录的 scenario v10 Memory 精确字节；同硬件后续报告只有同为 scenario v10 才能执行相对回归比较。
+无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。M5 当前接受的 `docs/notes/perf-baseline-m5.json` 在 M4G 正式链完成前仍是 scenario v10 Memory 精确字节；同硬件后续报告只有场景相同才能执行相对回归比较。
+
+## M4F scenario v10 历史比较规则
+
+M4F 扩展固定长度玩家输入与状态、废止即时破坏消息，并在权威 tick 增加有界采掘判定，因此当时的 benchmark producer 标记为 scenario v10，并通过已退役的 `9:10` 迁移建立了上方记录的 M5 v10 基线。v10 报告仍可单独读取与同场景比较。
 
 ## M4E scenario v9 历史升级规则
 

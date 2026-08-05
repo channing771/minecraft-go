@@ -51,9 +51,9 @@ func (*benchmarkBlockingServerStream) Recv(
 func (*benchmarkBlockingServerStream) Peer() string { return "benchmark-blocking" }
 func (*benchmarkBlockingServerStream) Close() error { return nil }
 
-func TestScenarioV10ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 10 {
-		t.Fatalf("scenarioVersion=%d, want 10", scenarioVersion)
+func TestScenarioV11ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 11 {
+		t.Fatalf("scenarioVersion=%d, want 11", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {

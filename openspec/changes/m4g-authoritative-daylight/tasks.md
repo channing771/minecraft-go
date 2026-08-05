@@ -51,10 +51,10 @@
 
 ## 8. Memory/TCP、重启与兼容闭环
 
-- [ ] 8.1 在 `internal/server` 与 `internal/client` 增加 Memory/TCP 纵向测试：两客户端同 tick 时间一致、v8 登录拒绝、重连延续；把收到的权威 snapshot/change 应用到 Mirror/Mesher，证明屋顶放置后下方变暗、移除后恢复且最终 chunk hash 和时间一致。
-- [ ] 8.2 增加磁盘纵向测试：v1 metadata 启动为零、自动保存迁移 v2、正常关服后的精确时间重启延续、metadata 保存失败不覆盖旧文件且关服返回错误。
-- [ ] 8.3 核对协议 packet ID、玩家 schema v3、区块 schema v4、chunk snapshot payload 和历史 golden 不变；用 `rg`/测试证明高度表及光照没有进入网络或区块存档。
-- [ ] 8.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/network ./internal/storage ./internal/client ./internal/render -race -count=1'`、archcheck、gofmt 与 diff check，通过后提交 `test: 闭合多人昼夜与重启语义`。
+- [x] 8.1 在 `internal/server` 与 `internal/client` 增加 Memory/TCP 纵向测试：两客户端同 tick 时间一致、v8 登录拒绝、重连延续；把收到的权威 snapshot/change 应用到 Mirror/Mesher，证明屋顶放置后下方变暗、移除后恢复且最终 chunk hash 和时间一致。
+- [x] 8.2 增加磁盘纵向测试：v1 metadata 启动为零、自动保存迁移 v2、正常关服后的精确时间重启延续、metadata 保存失败不覆盖旧文件且关服返回错误。
+- [x] 8.3 核对协议 packet ID、玩家 schema v3、区块 schema v4、chunk snapshot payload 和历史 golden 不变；用 `rg`/测试证明高度表及光照没有进入网络或区块存档。
+- [x] 8.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/network ./internal/storage ./internal/client ./internal/render -race -count=1'`、archcheck、gofmt 与 diff check，通过后提交 `test: 闭合多人昼夜与重启语义`。
 
 ## 9. scenario v11 与中文文档
 
