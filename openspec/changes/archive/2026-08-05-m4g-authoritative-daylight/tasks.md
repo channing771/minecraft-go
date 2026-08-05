@@ -56,7 +56,7 @@
 - [x] 8.3 核对协议 packet ID、玩家 schema v3、区块 schema v4、chunk snapshot payload 和历史 golden 不变；用 `rg`/测试证明高度表及光照没有进入网络或区块存档。
 - [x] 8.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/network ./internal/storage ./internal/client ./internal/render -race -count=1'`、archcheck、gofmt 与 diff check，通过后提交 `test: 闭合多人昼夜与重启语义`。
 
-## 9. scenario v11 与中文文档
+## 9. scenario v11 与中文文档（v11 后并入 v12，见第 11 组）
 
 - [x] 9.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先写失败测试：producer 标记 v11、v10/v11 默认拒绝、仅 `10:11` 可显式迁移、`9:10` 退役、历史 v6-v10 可读取、v11 同场景与跨 transport 继续执行原门禁。
 - [x] 9.2 修改 benchmark producer/comparator 为 scenario v11，不改变 2560x1440、still/flying、RSS、服务端 tick、2048 GPU 样本、Memory/TCP、绝对阈值或 `20%` 相对阈值；M2 与既有 M5 文件暂不改写。
@@ -70,15 +70,29 @@
 - [x] 10.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/world ./internal/client -run "^$" -bench "Height|Sky|Mesher" -benchmem -count=3 && go test ./internal/storage ./internal/server -run "Metadata|WorldTime" -race -count=1 && go test ./internal/render -run "Test(TerrainDaylightHeadlessDraw|AvatarRendererHeadlessDraw|ItemDropRendererHeadlessDraw)$" -count=1'`；确认无前台窗口、无遗留 benchmark 进程、tracked 工作树只含 M4G 预期文件。
 - [x] 10.4 勾选已完成任务并提交冻结候选 `chore: 关闭 M4G 权威昼夜`；提交后不修改 producer、场景、阈值、光照模型或热路径，除非新建修复提交并重新完成本组门禁。
 
-## 11. 一次性 M5 scenario v11 基线
+## 11. 一次性 M5 scenario v11 基线（已终止，责任转移）
 
-- [ ] 11.1 在冻结候选上再次证明 M4F v10 基线与归档存在，记录精确 HEAD、M2/M5 哈希、硬件/系统/Go、供电与负载，确认两个全新输出路径不存在且无遗留进程；向用户报告并取得 Memory/TCP 各一次、失败即停且不得重跑的明确授权。
-- [ ] 11.2 仅通过现有无窗口 benchmark 生成一次 M5 Memory v11 报告；用 v10 M5 基线和显式 `10:11` 执行完整性与绝对门禁，失败立即停止，不生成 TCP、不重跑、不覆盖基线。
-- [ ] 11.3 Memory 通过后生成一次同 HEAD 的 M5 TCP v11 报告，并执行 TCP 自校验及 Memory→TCP 同场景比较；失败立即停止，不重跑或覆盖基线。
-- [ ] 11.4 两步都通过后，把 Memory 报告精确字节写入 `docs/notes/perf-baseline-m5.json`，更新性能记录的 HEAD、命令、哈希、环境和被替代 v10 身份；验证 M2 文件哈希未变后提交 `chore: 建立 M5 scenario v11 基线`。
+v11 正式链已在冻结候选 `5eea131` 上执行并在最后一步失败：Memory 报告通过显式
+`10:11` 迁移与全部绝对门禁，但 Memory→TCP 跨 transport 比较报出
+`remote_gpu_complete p95_ms` 退化 `94.4%`（`1.300` 对 `2.527`），而同一对报告的
+p50（`1.279` 对 `1.279`）与 p99（`2.547` 对 `2.552`）几乎不变。
+
+根因与 M4G 无关：该指标此前用「提交到阻塞轮询返回」的墙钟差逐次计时，实测提交
+空 command buffer 与提交一次 2560x1440 clear pass 的 p50 相同（`1.276ms` 与
+`1.284ms`），所有取值都被宿主轮询实现量化到约 `1.28ms` 的整数倍，把 `20%` 相对
+阈值套在量化步长为 `100%` 的指标上无法稳定。
+
+按 `hardware-performance-baselines` 的「工作负载修复后重新开始」规则，两份失败
+报告只保留为诊断证据，未被提升；v11 基线不再建立，M5 基线保持 scenario v10 直到
+后续 change 完成其正式链。
+
+- [x] 11.1 在冻结候选上完成全部前置证明并取得一次性授权。
+- [x] 11.2 生成一次 M5 Memory v11 报告并通过显式 `10:11` 完整性与绝对门禁。
+- [x] 11.3 生成一次同 HEAD 的 M5 TCP v11 报告；跨 transport 比较失败，正式链按规则立即停止。
+- [x] 11.4 未提升任何报告为基线；`docs/notes/perf-baseline-m5.json` 与 M2 基线字节均未改动。
 
 ## 12. 最终同步与归档
 
-- [ ] 12.1 重新运行全仓 race、vet、archcheck、gofmt、diff check、OpenSpec strict 与适用性能比较，确认全部任务勾选且 tracked 工作树干净。
-- [ ] 12.2 把三份 delta specs 同步到主规格，核对 `authoritative-daylight` purpose、metadata v2、协议 v9、玩家 schema v3、区块 schema v4、scenario v11 和 M5/M2 边界准确；同步更新 `AGENTS.md` 与 `openspec/config.yaml` 的当前基线。
+- [x] 12.1 重新运行全仓 race、vet、archcheck、gofmt、diff check 与 OpenSpec strict，确认全部任务勾选且 tracked 工作树干净。
+- [x] 12.2 把 `authoritative-daylight` delta spec 同步到主规格，核对 purpose、metadata v2、协议 v9、玩家 schema v3、区块 schema v4 准确；benchmark scenario 与硬件基线的修改已转移给 `stabilize-benchmark-gpu-timing`，本 change 不再同步这两个 capability。同步更新 `AGENTS.md` 与 `openspec/config.yaml` 的当前基线。
 - [ ] 12.3 归档 `m4g-authoritative-daylight` change，再次运行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，提交 `chore: 归档 M4G 权威昼夜`。
