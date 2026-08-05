@@ -13,6 +13,8 @@ type Chunk struct {
 	sections [core.SectionsPerChunk]*Section
 	drops    [core.DropsPerChunk]DropSlot
 	furnaces [core.FurnacesPerChunk]FurnaceSlot
+	// heights 是由方块派生的每列最高非空气 Y，不进入存档、payload 或 Hash。
+	heights HeightMap
 }
 
 // NewChunk 创建一个全空气的区块。
@@ -20,6 +22,9 @@ func NewChunk(pos core.ChunkPos) *Chunk {
 	c := &Chunk{Pos: pos}
 	for i := range c.sections {
 		c.sections[i] = NewSection()
+	}
+	for i := range c.heights {
+		c.heights[i] = int16(EmptyColumnHeight)
 	}
 	return c
 }
@@ -29,7 +34,7 @@ func (c *Chunk) Section(i int) *Section { return c.sections[i] }
 
 // Clone 返回区块及其全部区段的深拷贝。
 func (c *Chunk) Clone() *Chunk {
-	clone := &Chunk{Pos: c.Pos, drops: c.drops, furnaces: c.furnaces}
+	clone := &Chunk{Pos: c.Pos, drops: c.drops, furnaces: c.furnaces, heights: c.heights}
 	for index, section := range c.sections {
 		clone.sections[index] = section.Clone()
 	}
@@ -124,6 +129,7 @@ func (c *Chunk) SetBlock(lx int, wy int32, lz int, id BlockID) {
 	}
 	si, ly := sectionIndexOf(wy)
 	c.sections[si].Blocks.Set(lx, ly, lz, id)
+	c.updateHeight(lx, wy, lz, id)
 }
 
 // Compact 对所有区段做惰性降级，应在一批批量写入之后调用。

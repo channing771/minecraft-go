@@ -49,10 +49,11 @@ func MeshSection(n *world.Neighborhood, reg Registry) []Quad {
 						continue
 					}
 					mask[vi][ui] = maskCell{
-						used:  true,
-						mat:   reg.Material(id, face),
-						ao:    computeAO(n, reg, p, axis, u, v, step),
-						light: 0xF0,
+						used: true,
+						mat:  reg.Material(id, face),
+						ao:   computeAO(n, reg, p, axis, u, v, step),
+						// 高四位是相邻空气位置的直射天空光，低四位方块光尚未实现。
+						light: n.SkyLight(q[0], q[1], q[2]) << 4,
 					}
 					any = true
 				}
