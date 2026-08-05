@@ -15,9 +15,9 @@ import (
 	"minecraft-go/internal/client"
 )
 
-func TestBenchmarkScenarioVersionIncludesAuthoritativeDaylight(t *testing.T) {
-	if scenarioVersion != 11 {
-		t.Fatalf("scenarioVersion=%d，想要权威昼夜后的 v11", scenarioVersion)
+func TestBenchmarkScenarioVersionIncludesStableGPUTiming(t *testing.T) {
+	if scenarioVersion != 12 {
+		t.Fatalf("scenarioVersion=%d，想要 GPU 计时稳定化后的 v12", scenarioVersion)
 	}
 }
 

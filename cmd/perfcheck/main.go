@@ -17,7 +17,7 @@ func main() {
 	baselinePath := flag.String("baseline", "", "基线 JSON")
 	currentPath := flag.String("current", "", "当前 JSON")
 	maxRegression := flag.Float64("max-regression", 0.20, "允许的最大相对退化")
-	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 10:11 场景迁移")
+	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 11:12 场景迁移")
 	flag.Parse()
 
 	if *baselinePath == "" || *currentPath == "" {
@@ -62,8 +62,8 @@ func compareReportsWithScenarioUpgrade(
 	allowScenarioUpgrade string,
 ) ([]string, error) {
 	scenarioUpgrade := baseline.ScenarioVersion != current.ScenarioVersion
-	allowedScenarioUpgrade := baseline.ScenarioVersion == 10 && current.ScenarioVersion == 11 &&
-		allowScenarioUpgrade == "10:11"
+	allowedScenarioUpgrade := baseline.ScenarioVersion == 11 && current.ScenarioVersion == 12 &&
+		allowScenarioUpgrade == "11:12"
 	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(
 			"scenario_version 不同：基线=%d 当前=%d",

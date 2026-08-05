@@ -18,9 +18,9 @@
 
 ## 4. 阶段间冷却窗口
 
-- [ ] 4.1 在 `cmd/mcgo` 先写失败测试：三个冷却窗口存在、冷却期间不提交渲染工作、各阶段时长与样本数不变、冷却时长写入报告。
-- [ ] 4.2 修改 `cmd/mcgo/benchmark.go` 加入固定冷却，并在 `internal/client` 的报告结构中记录冷却时长。
-- [ ] 4.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./internal/client -race -count=1'`、gofmt 与 diff check，通过后提交 `feat: benchmark 阶段之间加入固定冷却`。
+- [x] 4.1 在 `cmd/mcgo` 先写失败测试：三个冷却窗口存在、冷却期间不提交渲染工作、各阶段时长与样本数不变、冷却时长写入报告。
+- [x] 4.2 修改 `cmd/mcgo/benchmark.go` 加入固定冷却，并在 `internal/client` 的报告结构中记录冷却时长。
+- [x] 4.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/mcgo ./internal/client -race -count=1'`、gofmt 与 diff check，通过后提交 `feat: benchmark 阶段之间加入固定冷却`。
 
 ## 5. scenario v12 与文档
 

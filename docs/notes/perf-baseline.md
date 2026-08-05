@@ -47,13 +47,23 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/m
 
 Memory 报告先通过 v8→v9 完整性、同硬件与绝对门禁；TCP 随后通过相对该 Memory 报告的同场景跨 transport 门禁。Memory/TCP 飞行阶段分别为 `621.8/638.5 FPS`、p95 `3.114/2.968ms`，`remote_gpu_complete` 都包含 2048 个样本。
 
-## M4G scenario v11 比较规则
+## 当前 scenario v12 比较规则
 
-M4G 加入权威世界时间与 metadata 保存、每区块 512 字节列顶派生状态、直射天空光网格属性和三个世界空间 renderer 的昼夜 uniform，这些都改变 benchmark 的工作负载语义，因此 benchmark producer 已标记 scenario v11。固定 `2560x1440` 离屏目标、still/flying 阶段、RSS、200 个 tick 样本、2048 个 `remote_gpu_complete` 样本、既有绝对门禁与 20% 相对退化阈值均未改变。
+`remote_gpu_complete` 此前用「提交命令到阻塞轮询返回」的墙钟差逐次计时。实测该量几乎不含绘制信息：提交空 command buffer 与提交一次 2560x1440 clear pass 的 p50 相同（`1.276ms` 与 `1.284ms`），且所有取值都被量化到约 `1.28ms` 的整数倍，节拍位于 wgpu-native 内部无法调整。分位数因此在相邻整数倍之间跳变，`20%` 相对阈值套在量化步长为 `100%` 的指标上无法稳定。
 
-当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 10:11`。迁移仍验证两份报告的完整性与来源、同硬件，以及当前 v11 报告的全部绝对门禁；只跳过跨 workload 的相对回归。默认 v10→v11、反向、跨两级和已退役的 `9:10`、`8:9` 参数均被拒绝；v6–v10 历史报告仍可读取，同版本报告仍可比较。相同 v11 及 Memory→TCP 比较继续执行既有稳定门禁。
+scenario v12 起改为批量分摊：一个样本是一批 `1024` 次远端角色与昵称绘制编码进同一个 command buffer、提交后只等待一次完成的总耗时除以 `1024`。节拍在样本内只出现一次并被摊薄到每次绘制成本的约 `2%`。实测每次摊薄成本稳定在约 `0.06ms`，p95/p50 从 `1.976` 降到 `1.079`，p99/p50 降到 `1.143`。
 
-无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。M5 当前接受的 `docs/notes/perf-baseline-m5.json` 在 M4G 正式链完成前仍是 scenario v10 Memory 精确字节；同硬件后续报告只有场景相同才能执行相对回归比较。
+比较器同时引入指标分辨率规则：当单次测量的最小可分辨增量相对基线值超过判定阈值时跳过相对判定，只保留完整性与绝对上限门禁。因此 v8–v11 的逐次计时 GPU 指标不再参与相对回归判定，v12 起的批量分摊指标恢复参与。
+
+benchmark 还在预热与 still、still 与 flying、flying 与 GPU 采样之间各加入 `30` 秒冷却，降低持续满载与热节流；冷却写入报告的 `cooldown_seconds`，各阶段时长、样本数与统计口径完全不变。
+
+固定 `2560x1440` 离屏目标、still/flying 阶段时长、RSS、200 个 tick 样本、既有绝对门禁与 `20%` 相对退化阈值均未改变。当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 11:12`；默认 v11→v12、反向、跨两级和已退役的 `10:11`、`9:10` 参数均被拒绝；v6–v11 历史报告仍可读取，同版本报告仍可比较。
+
+无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。
+
+## M4G scenario v11 历史说明
+
+M4G 加入权威世界时间与直射天空光后标记为 scenario v11，其正式链在 Memory→TCP 跨 transport 比较失败：`remote_gpu_complete p95_ms` 报出 `94.4%` 退化（`1.300` 对 `2.527`），而同一对报告的 p50（`1.279` 对 `1.279`）与 p99（`2.547` 对 `2.552`）几乎不变。该失败是上述门禁缺陷所致，不是 M4G 引入的性能退化；两份报告只保留为诊断证据，未被提升为基线。
 
 ## M4F scenario v10 历史比较规则
 
