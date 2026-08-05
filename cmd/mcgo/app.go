@@ -61,19 +61,22 @@ type application struct {
 	inventorySource     int
 	serverTick          uint64
 	// worldTimeTicks 是最后确认的权威绝对世界时间，只在接受更新状态时前进。
-	worldTimeTicks          uint64
-	glyphAtlas              *render.GlyphAtlas
-	clientEndpoint          network.ClientEndpoint
-	receiver                *client.Receiver
-	server                  *server.Server
-	host                    applicationHost
-	serverCancel            context.CancelFunc
-	serverDone              chan error
-	mirror                  *client.Mirror
-	predictor               *client.Predictor
-	mesher                  *client.Mesher
-	depth                   *depthTarget
-	camera                  client.Camera
+	worldTimeTicks uint64
+	glyphAtlas     *render.GlyphAtlas
+	clientEndpoint network.ClientEndpoint
+	receiver       *client.Receiver
+	server         *server.Server
+	host           applicationHost
+	serverCancel   context.CancelFunc
+	serverDone     chan error
+	mirror         *client.Mirror
+	predictor      *client.Predictor
+	mesher         *client.Mesher
+	depth          *depthTarget
+	camera         client.Camera
+	// cameraViewProj 是 ViewProj 计算的注入点，测试用它证明每帧只计算一次；
+	// nil 时回退到 camera.ViewProj。
+	cameraViewProj          func() mgl32.Mat4
 	center                  core.ChunkPos
 	sequence                uint64
 	loadedChunks            map[core.ChunkPos]struct{}
@@ -941,6 +944,9 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	// terrain、avatar、item-drop 与天空共用同一正向矩阵和 daylight。
 	dayNight := render.DayNightAt(a.worldTimeTicks)
 	viewProj := a.camera.ViewProj()
+	if a.cameraViewProj != nil {
+		viewProj = a.cameraViewProj()
+	}
 	viewProjInv := viewProj.Inv()
 	a.renderer.Render(encoder, target, a.depth.view, render.Camera{
 		ViewProj:       viewProj,

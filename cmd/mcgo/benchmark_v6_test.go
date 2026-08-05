@@ -659,20 +659,37 @@ func TestScenarioV13BenchmarkReportReusesV12GPUCompletionDefinition(t *testing.T
 }
 
 // Mutation killed: still/flying 阶段若不再经过真实 renderFrame，terrain pass
-// 中的 sky draw 不会出现，sky uniform buffer 也不会被写入。
+// 中由 sky pipeline 发出的 fullscreen triangle draw 不会出现。
 func TestScenarioV13StillFlyingFrameIncludesCelestialSkyDraw(t *testing.T) {
 	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "星夜", 1, mgl32.Vec3{0, 0, -4})); err != nil {
 		t.Fatal(err)
 	}
+	// 与 measurePhase 相同的逐帧路径：benchmark 帧经 app.frame 到达 renderFrame。
 	rendered, err := app.frame(benchmarkMessageDrainMax, steadyFrameMeshWorkMax, fixedBenchmarkFrameDuration)
 	if err != nil || !rendered {
 		t.Fatalf("benchmark 帧 renderFrame=(%v,%v)", rendered, err)
 	}
-	sky := dev.bufferByLabel(t, "sky uniform")
-	if sky.writes != 1 {
-		t.Fatalf("sky uniform buffer 写入次数=%d，想要 benchmark 每帧包含一次天空 draw", sky.writes)
+	// sky fullscreen triangle 只由 terrain pass 发出；断言它先于地形 indirect draw。
+	skyIndex, indirectIndex := -1, -1
+	for i, draw := range dev.draws {
+		if draw == "sky triangle" && skyIndex < 0 {
+			skyIndex = i
+		}
+		if draw == "indirect" && indirectIndex < 0 {
+			indirectIndex = i
+		}
 	}
+	if skyIndex < 0 {
+		t.Fatalf("draws=%v，缺少 sky fullscreen triangle draw", dev.draws)
+	}
+	if indirectIndex < 0 {
+		t.Fatalf("draws=%v，缺少 terrain indirect draw", dev.draws)
+	}
+	if skyIndex > indirectIndex {
+		t.Fatalf("sky draw 索引=%d 晚于 terrain indirect draw=%d，draws=%v", skyIndex, indirectIndex, dev.draws)
+	}
+	sky := dev.bufferByLabel(t, "sky uniform")
 	dayNight := render.DayNightAt(app.worldTimeTicks)
 	if got := readFloat32(sky.data, 76); got != dayNight.Daylight {
 		t.Fatalf("sky Daylight=%v want=%v", got, dayNight.Daylight)

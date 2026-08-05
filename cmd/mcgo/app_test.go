@@ -424,6 +424,7 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 type integrationRenderDevice struct {
 	releases, passes []string
 	events           []string
+	draws            []string
 	buffers          map[string]*integrationBuffer
 }
 
@@ -562,7 +563,7 @@ type integrationEncoder struct{ device *integrationRenderDevice }
 
 func (e *integrationEncoder) BeginRenderPass(desc gfx.RenderPassDesc) gfx.RenderPass {
 	e.device.passes = append(e.device.passes, desc.Label)
-	return &integrationPass{}
+	return &integrationPass{device: e.device}
 }
 func (*integrationEncoder) BeginComputePass(string) gfx.ComputePass                           { return &integrationComputePass{} }
 func (*integrationEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {}
@@ -571,15 +572,23 @@ func (e *integrationEncoder) Finish() gfx.CommandBuffer {
 	return &integrationResource{release: func() { e.device.events = append(e.device.events, "release") }}
 }
 
-type integrationPass struct{}
+type integrationPass struct{ device *integrationRenderDevice }
 
 func (*integrationPass) SetPipeline(gfx.RenderPipeline)             {}
 func (*integrationPass) SetBindGroup(uint32, gfx.BindGroup)         {}
 func (*integrationPass) SetVertexBuffer(uint32, gfx.Buffer, uint64) {}
 func (*integrationPass) SetIndexBuffer(gfx.Buffer, uint64)          {}
-func (*integrationPass) DrawIndexedIndirect(gfx.Buffer, uint64)     {}
-func (*integrationPass) Draw(uint32, uint32)                        {}
-func (*integrationPass) End()                                       {}
+func (p *integrationPass) DrawIndexedIndirect(gfx.Buffer, uint64) {
+	p.device.draws = append(p.device.draws, "indirect")
+}
+func (p *integrationPass) Draw(vertexCount uint32, _ uint32) {
+	if vertexCount == 3 {
+		p.device.draws = append(p.device.draws, "sky triangle")
+		return
+	}
+	p.device.draws = append(p.device.draws, "draw")
+}
+func (*integrationPass) End() {}
 
 type integrationComputePass struct{}
 
@@ -2051,21 +2060,79 @@ func TestApplicationRenderFrameCameraAndSkyParameters(t *testing.T) {
 	}
 }
 
-// Mutation killed: 每帧重复计算 ViewProj/逆矩阵会让 terrain 或 sky camera
-// buffer 的写入次数超过一次。
+// Mutation killed: 每帧重复计算 ViewProj/逆矩阵会让注入计数超过一次，
+// 或让 terrain/avatar/item-drop 使用不同矩阵/lighting。
 func TestApplicationRenderFrameComputesCameraMatricesOnce(t *testing.T) {
 	glyphs := &integrationGlyphSource{}
 	app, dev := newRemoteRenderApplication(t, glyphs)
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{1, 2, 3})); err != nil {
+		t.Fatal(err)
+	}
+	drop := network.ItemDrop{
+		ID:   core.DropID{Dimension: core.Overworld, Slot: 0, Generation: 1},
+		Item: core.ItemStone, Count: 1, BlockIndex: 9,
+	}
+	if err := app.itemDrops.Apply(network.ItemDropUpserts{
+		ServerTick: 3, Drops: []network.ItemDrop{drop},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var viewProjCalls int
+	app.cameraViewProj = func() mgl32.Mat4 {
+		viewProjCalls++
+		return app.camera.ViewProj()
+	}
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
 	}
+	if viewProjCalls != 1 {
+		t.Fatalf("ViewProj 计算次数=%d，想要每帧一次", viewProjCalls)
+	}
+	dayNight := render.DayNightAt(app.worldTimeTicks)
+	wantViewProj := app.camera.ViewProj()
+	wantViewProjInv := wantViewProj.Inv()
+	readFloat := func(data []byte, offset int) float32 {
+		return math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+	}
+	mat4From := func(data []byte, offset int) mgl32.Mat4 {
+		var out mgl32.Mat4
+		for i := range out {
+			out[i] = readFloat(data, offset+i*4)
+		}
+		return out
+	}
 	terrain := dev.bufferByLabel(t, "terrain camera")
 	sky := dev.bufferByLabel(t, "sky uniform")
-	if terrain.writes != 1 {
-		t.Fatalf("terrain camera buffer 写入次数=%d，想要每帧一次", terrain.writes)
+	if got := mat4From(terrain.data, 0); !got.ApproxEqualThreshold(wantViewProj, 1e-4) {
+		t.Fatalf("terrain ViewProj=%v want=%v", got, wantViewProj)
 	}
-	if sky.writes != 1 {
-		t.Fatalf("sky uniform buffer 写入次数=%d，想要每帧一次", sky.writes)
+	if got := mat4From(sky.data, 0); !got.ApproxEqualThreshold(wantViewProjInv, 1e-4) {
+		t.Fatalf("sky ViewProjInv=%v want=%v", got, wantViewProjInv)
+	}
+	// avatar 与 item-drop 继续与 terrain 共享同一正向矩阵和 daylight。
+	for _, label := range []string{"avatar dynamic upload", "item drop dynamic upload"} {
+		buffer := dev.bufferByLabel(t, label)
+		if got := mat4From(buffer.data, 0); !got.ApproxEqualThreshold(wantViewProj, 1e-4) {
+			t.Fatalf("%s ViewProj=%v want=%v", label, got, wantViewProj)
+		}
+		if got := readFloat(buffer.data, 64); got != dayNight.Daylight {
+			t.Fatalf("%s Daylight=%v want=%v", label, got, dayNight.Daylight)
+		}
+	}
+	// sky uniform 布局：ViewProjInv 64 字节 + SunDirection xyz + Daylight + StarVisibility。
+	for i, want := range dayNight.SunDirection {
+		if got := readFloat(sky.data, 64+i*4); got != want {
+			t.Fatalf("sky SunDirection[%d]=%v want=%v", i, got, want)
+		}
+	}
+	if got := readFloat(sky.data, 76); got != dayNight.Daylight {
+		t.Fatalf("sky Daylight=%v want=%v", got, dayNight.Daylight)
+	}
+	if got := readFloat(sky.data, 80); got != dayNight.StarVisibility {
+		t.Fatalf("sky StarVisibility=%v want=%v", got, dayNight.StarVisibility)
+	}
+	if got := readFloat(terrain.data, 76); got != dayNight.Daylight {
+		t.Fatalf("terrain Daylight=%v want=%v", got, dayNight.Daylight)
 	}
 }
 
