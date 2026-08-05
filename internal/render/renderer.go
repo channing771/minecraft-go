@@ -25,14 +25,20 @@ const (
 //go:embed shader/terrain.wgsl
 var terrainShader string
 
+//go:embed shader/sky.wgsl
+var skyShader string
+
 // Camera 是 Renderer 每帧所需的相机数据。
 type Camera struct {
-	ViewProj mgl32.Mat4
-	Pos      mgl32.Vec3
+	ViewProj    mgl32.Mat4
+	ViewProjInv mgl32.Mat4
+	Pos         mgl32.Vec3
 	// Daylight 是本帧的固定昼夜亮度，SkyColor 是对应的天空背景色，
 	// 两者都来自同一个 DayNightAt 相位。
-	Daylight float32
-	SkyColor [4]float32
+	SunDirection   [3]float32
+	Daylight       float32
+	StarVisibility float32
+	SkyColor       [4]float32
 }
 
 // FrameStats 是最近一次 Render 的 CPU 侧候选集统计。
@@ -60,17 +66,20 @@ type Renderer struct {
 	instances gfx.Buffer
 	origins   gfx.Buffer
 	camera    gfx.Buffer
+	skyCamera gfx.Buffer
 	indirect  gfx.Buffer
 	index     gfx.Buffer
 	zeroArgs  gfx.Buffer
 	cull      *culler
 	hiz       *hiZ
 
-	atlas     gfx.Texture
-	atlasView gfx.TextureView
-	sampler   gfx.Sampler
-	pipeline  gfx.RenderPipeline
-	bind      gfx.BindGroup
+	atlas       gfx.Texture
+	atlasView   gfx.TextureView
+	sampler     gfx.Sampler
+	pipeline    gfx.RenderPipeline
+	bind        gfx.BindGroup
+	skyPipeline gfx.RenderPipeline
+	skyBind     gfx.BindGroup
 
 	sections map[core.SectionPos]sectionSlot
 	pending  map[core.SectionPos][]mesh.Quad
@@ -89,6 +98,8 @@ type Renderer struct {
 	visibilityScratch mesh.VisibilityScratch
 	visibleSections   []core.SectionPos
 	sectionRecords    []byte
+	terrainCameraData [80]byte
+	skyCameraData     [96]byte
 }
 
 // New 创建使用默认 M1 容量与 4 MB/帧上传预算的渲染器。
@@ -130,6 +141,11 @@ func newRenderer(
 	r.camera = dev.CreateBuffer(gfx.BufferDesc{
 		Label: "terrain camera",
 		Size:  80,
+		Usage: gfx.BufferUsageUniform | gfx.BufferUsageCopyDst,
+	})
+	r.skyCamera = dev.CreateBuffer(gfx.BufferDesc{
+		Label: "sky uniform",
+		Size:  96,
 		Usage: gfx.BufferUsageUniform | gfx.BufferUsageCopyDst,
 	})
 	r.indirect = dev.CreateBuffer(gfx.BufferDesc{
@@ -191,6 +207,32 @@ func newRenderer(
 			{Binding: 2, Buffer: r.origins},
 			{Binding: 3, Texture: r.atlasView},
 			{Binding: 4, Sampler: r.sampler},
+		},
+	})
+
+	skyLayout := gfx.BindGroupLayout{
+		Label: "sky layout",
+		Entries: []gfx.BindGroupLayoutEntry{
+			{Binding: 0, Type: gfx.BindingUniformBuffer, VisibleIn: gfx.StageVertex | gfx.StageFragment},
+		},
+	}
+	skyModule := dev.CreateShaderModule(skyShader)
+	r.skyPipeline = dev.CreateRenderPipeline(gfx.RenderPipelineDesc{
+		Label:         "sky",
+		Shader:        skyModule,
+		VertexEntry:   "vs_main",
+		FragmentEntry: "fs_main",
+		BindGroups:    []gfx.BindGroupLayout{skyLayout},
+		ColorFormat:   colorFmt,
+		DepthFormat:   gfx.FormatDepth32Float,
+		DepthWrite:    false,
+	})
+	skyModule.Release()
+	r.skyBind = dev.CreateBindGroup(gfx.BindGroupDesc{
+		Label:  "sky resources",
+		Layout: skyLayout,
+		Entries: []gfx.BindGroupEntry{
+			{Binding: 0, Buffer: r.skyCamera},
 		},
 	})
 	return r
@@ -419,7 +461,10 @@ func (r *Renderer) Render(
 	if len(records) > 0 {
 		r.cull.sections.Write(0, records)
 	}
-	r.camera.Write(0, cameraBytes(cam))
+	writeCameraBytes(r.terrainCameraData[:], cam)
+	r.camera.Write(0, r.terrainCameraData[:])
+	writeSkyCameraBytes(r.skyCameraData[:], cam)
+	r.skyCamera.Write(0, r.skyCameraData[:])
 	enc.CopyBufferToBuffer(r.zeroArgs, 0, r.indirect, 0, 20)
 	useHiZ := r.hiz != nil && r.hiz.valid && r.haveLastCamera &&
 		cameraStable(r.lastCamera, cam)
@@ -432,6 +477,9 @@ func (r *Renderer) Render(
 		ClearColor: cam.SkyColor,
 		LoadClear:  true,
 	})
+	pass.SetPipeline(r.skyPipeline)
+	pass.SetBindGroup(0, r.skyBind)
+	pass.Draw(3, 1)
 	pass.SetPipeline(r.pipeline)
 	pass.SetBindGroup(0, r.bind)
 	pass.SetIndexBuffer(r.index, 0)
@@ -469,15 +517,25 @@ func cameraSection(pos mgl32.Vec3) core.SectionPos {
 	return core.SectionPos{X: block.Chunk().X, Y: y, Z: block.Chunk().Z}
 }
 
-func cameraBytes(cam Camera) []byte {
-	values := make([]float32, 0, 20)
-	values = append(values, cam.ViewProj[:]...)
-	values = append(values, cam.Pos[0], cam.Pos[1], cam.Pos[2], cam.Daylight)
-	out := make([]byte, len(values)*4)
-	for i, v := range values {
-		binary.LittleEndian.PutUint32(out[i*4:], math.Float32bits(v))
+func writeCameraBytes(out []byte, cam Camera) {
+	for i, value := range cam.ViewProj {
+		binary.LittleEndian.PutUint32(out[i*4:], math.Float32bits(value))
 	}
-	return out
+	for i, value := range [...]float32{cam.Pos[0], cam.Pos[1], cam.Pos[2], cam.Daylight} {
+		binary.LittleEndian.PutUint32(out[64+i*4:], math.Float32bits(value))
+	}
+}
+
+func writeSkyCameraBytes(out []byte, cam Camera) {
+	for i, value := range cam.ViewProjInv {
+		binary.LittleEndian.PutUint32(out[i*4:], math.Float32bits(value))
+	}
+	for i, value := range [...]float32{
+		cam.SunDirection[0], cam.SunDirection[1], cam.SunDirection[2], cam.Daylight,
+		cam.StarVisibility,
+	} {
+		binary.LittleEndian.PutUint32(out[64+i*4:], math.Float32bits(value))
+	}
 }
 
 func uint32sToBytes(values []uint32) []byte {
@@ -506,6 +564,10 @@ func uint64sToBytes(values []uint64) []byte {
 
 // Release 释放 Renderer 持有的全部 GPU 资源。
 func (r *Renderer) Release() {
+	if r.dev == nil {
+		return
+	}
+	defer func() { r.dev = nil }()
 	if r.cull != nil {
 		r.cull.Release()
 	}
@@ -515,8 +577,14 @@ func (r *Renderer) Release() {
 	if r.bind != nil {
 		r.bind.Release()
 	}
+	if r.skyBind != nil {
+		r.skyBind.Release()
+	}
 	if r.pipeline != nil {
 		r.pipeline.Release()
+	}
+	if r.skyPipeline != nil {
+		r.skyPipeline.Release()
 	}
 	if r.atlasView != nil {
 		r.atlasView.Release()
@@ -528,7 +596,7 @@ func (r *Renderer) Release() {
 		r.atlas.Release()
 	}
 	for _, b := range []gfx.Buffer{
-		r.zeroArgs, r.index, r.indirect, r.camera, r.origins, r.instances, r.faces,
+		r.zeroArgs, r.index, r.indirect, r.skyCamera, r.camera, r.origins, r.instances, r.faces,
 	} {
 		if b != nil {
 			b.Release()

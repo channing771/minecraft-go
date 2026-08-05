@@ -10,9 +10,9 @@
 
 ## 3. 加入最小天空 draw
 
-- [ ] 3.1 在 `internal/render/sky_test.go` 先用 fake gfx 增加失败测试，固定 sky pipeline 的 color/depth format、关闭 depth write、单一 bind group、一次 `Draw(3, 1)`、sky-before-terrain 顺序和幂等资源释放；再在 `internal/render/renderer.go` 与 `internal/render/shader/sky.wgsl` 实现同一 terrain pass 内的 fullscreen sky。运行 `go test ./internal/render -run 'TestSky(Renderer|Pipeline|Draw|Release)' -race -count=1`。
-- [ ] 3.2 在 `internal/render/sky_test.go` 与 `hot_path_allocation_test.go` 先增加失败测试，固定 96 字节 sky uniform、太阳方向/亮度/星空可见度字段和稳定 Render 零分配；再让 Renderer 持有固定 terrain/sky 编码数组，把现有分配式 `cameraBytes` 改为写入调用方切片。运行 `go test ./internal/render -run 'Test(SkyUniform|RendererRenderDoesNotAllocate)' -count=1`。
-- [ ] 3.3 在 `internal/render/sky_test.go` 增加可跳过无 GPU 环境的 headless 像素测试，覆盖正午天顶太阳、午夜天顶月亮与星空、相机平移无视差、旋转往返图案一致以及地形覆盖天体；修正 WGSL 固定渐变、4° 圆盘、世界方向 hash 和地平线遮罩直到通过。运行 `go test ./internal/render -run 'TestSkyHeadless' -race -count=1`。
+- [x] 3.1 在 `internal/render/sky_test.go` 先用 fake gfx 增加失败测试，固定 sky pipeline 的 color/depth format、关闭 depth write、单一 bind group、一次 `Draw(3, 1)`、sky-before-terrain 顺序和幂等资源释放；再在 `internal/render/renderer.go` 与 `internal/render/shader/sky.wgsl` 实现同一 terrain pass 内的 fullscreen sky。运行 `go test ./internal/render -run 'TestSky(Renderer|Pipeline|Draw|Release)' -race -count=1`。
+- [x] 3.2 在 `internal/render/sky_test.go` 与 `hot_path_allocation_test.go` 先增加失败测试，固定 96 字节 sky uniform、太阳方向/亮度/星空可见度字段和稳定 Render 零分配；再让 Renderer 持有固定 terrain/sky 编码数组，把现有分配式 `cameraBytes` 改为写入调用方切片。运行 `go test ./internal/render -run 'Test(SkyUniform|RendererRenderDoesNotAllocate)' -count=1`。
+- [x] 3.3 在 `internal/render/sky_test.go` 增加可跳过无 GPU 环境的 headless 像素测试，覆盖正午天顶太阳、午夜天顶月亮与星空、相机平移无视差、旋转往返图案一致以及地形覆盖天体；修正 WGSL 固定渐变、4° 圆盘、世界方向 hash 和地平线遮罩直到通过。运行 `go test ./internal/render -run 'TestSkyHeadless' -race -count=1`。
 
 ## 4. 接入客户端与 spike
 

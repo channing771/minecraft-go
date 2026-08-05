@@ -8,10 +8,32 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/go-gl/mathgl/mgl32"
+
 	"minecraft-go/internal/gfx"
 )
 
 var embeddedGlyphFontDataSink []byte
+
+// 删除 Renderer 的固定 uniform 编码数组会让稳定帧重新产生堆分配。
+func TestRendererRenderDoesNotAllocate(t *testing.T) {
+	buffer := &allocationRenderBuffer{}
+	renderer := &Renderer{
+		camera: buffer, skyCamera: buffer,
+		zeroArgs: buffer, indirect: buffer, index: buffer,
+		cull: &culler{},
+	}
+	encoder := &allocationCommandEncoder{}
+	camera := Camera{ViewProj: mgl32.Ident4(), ViewProjInv: mgl32.Ident4()}
+
+	renderer.Render(encoder, nil, nil, camera)
+	allocations := testing.AllocsPerRun(1000, func() {
+		renderer.Render(encoder, nil, nil, camera)
+	})
+	if allocations != 0 {
+		t.Fatalf("warmed terrain Render allocations=%v want=0", allocations)
+	}
+}
 
 // Mutation killed: copying the avatar slice for sorting or rebuilding part
 // storage makes the warmed CPU path allocate on every rendered frame.
