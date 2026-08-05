@@ -40,11 +40,13 @@ M4I 直接基于已归档的 M4G 实现：协议 v9、玩家 schema v3、区块 
 
 ### 3. 世界方向由调用方提供的逆 ViewProj 重建
 
-`render.Camera` 增加值类型 `ViewProjInv`。`cmd/mcgo.renderFrame` 每帧只计算一次 `viewProj` 及其逆矩阵，把同一 `viewProj` 继续传给 terrain、avatar 和 item-drop，并只让 terrain renderer 消费逆矩阵。`cmd/gfxspike` 使用相同装配并固定在正午相位；单元测试使用 identity 矩阵。
+`render.Camera` 增加值类型 `ViewProjInv`。`cmd/mcgo.renderFrame` 每帧只调用一次 `Camera.ViewProj()`，再从该局部值派生一次逆矩阵，把同一 `viewProj` 继续传给 terrain、avatar 和 item-drop，并只让 terrain renderer 消费逆矩阵。`cmd/gfxspike` 使用相同装配并固定在正午相位；单元测试使用 identity 矩阵。
 
 vertex shader 用内建 `vertex_index` 生成 fullscreen triangle；fragment shader 将屏幕 NDC 的远平面点乘 `ViewProjInv` 并归一化为世界视线。uniform 不包含相机位置，因此平移没有天空视差。
 
-否决在 `Renderer.Render` 内求逆：该函数的其他调用点常用零值测试 Camera，隐式求逆会把不可逆输入变成 CPU panic，也会重复 app 已知的相机工作。否决传 yaw/pitch/FOV/aspect：这会复制 `client.Camera` 的投影规则并扩大 render 与 client 的耦合。
+测试通过真实 `renderFrame` 写入的 terrain、avatar、item-drop 与 sky uniform 验证正向矩阵、逆矩阵和 `Daylight` 的共享关系；单次计算保持为 `renderFrame` 内一个局部值及一次 `Inv()` 的直接源码结构，由评审核对，不为调用次数加入 production hook、接口或回调。
+
+否决在 `Renderer.Render` 内求逆：该函数的其他调用点常用零值测试 Camera，隐式求逆会把不可逆输入变成 CPU panic，也会重复 app 已知的相机工作。否决传 yaw/pitch/FOV/aspect：这会复制 `client.Camera` 的投影规则并扩大 render 与 client 的耦合。否决为自动计数抽象 camera 或注入矩阵函数：调用次数是局部实现约束，测试专用 production instrumentation 会扩大 API 且可能改变被测路径本身。
 
 ### 4. 一个 WGSL 同时生成渐变、天体和星空
 

@@ -16,7 +16,7 @@
 
 ## 4. 接入客户端与 spike
 
-- [x] 4.1 在 `cmd/mcgo/app_test.go` 先增加失败测试，证明一帧只计算一次 `ViewProj`/逆矩阵且 terrain、avatar、item-drop 继续共享同一正向矩阵与 `Daylight`；再修改 `cmd/mcgo/app.go` 填充 sky 所需的 `ViewProjInv` 和天体参数，不改 renderer 构造依赖或掉落路径。运行 `go test ./cmd/mcgo -run 'Test.*RenderFrame.*(Camera|Daylight|Sky)' -race -count=1`。
+- [ ] 4.1 在 `cmd/mcgo/app_test.go` 先增加失败测试，通过真实 `renderFrame` 的 uniform 写入证明 terrain、avatar、item-drop 共享同一正向矩阵与 `Daylight`，sky 使用由该矩阵派生的 inverse 和权威天体参数；再修改 `cmd/mcgo/app.go`，让一帧只调用一次 `Camera.ViewProj()` 并对该局部值调用一次 `Inv()`。不得为计数加入 production hook、接口或回调，不改 renderer 构造依赖或掉落路径；源码评审同时核对单次计算结构。运行 `go test ./cmd/mcgo -run 'Test.*RenderFrame.*(Camera|Daylight|Sky)' -race -count=1`。
 - [x] 4.2 修改 `cmd/gfxspike/main.go`，让固定演示相机提供 inverse ViewProj 并使用正午 `DayNightAt(6000)`；自动验证只运行 `go test ./cmd/gfxspike ./cmd/mcgo -race -count=1` 和 `go build ./cmd/gfxspike ./cmd/mcgo`，不得启动或聚焦窗口。
 
 ## 5. 升级性能场景而不放宽门禁
