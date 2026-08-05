@@ -40,10 +40,10 @@
 - **WHEN** 权威时钟继续产生 tick
 - **THEN** simulation MUST 继续推进，且待保存时间 MUST 合并到最新值而不得形成无界保存队列
 
-#### Scenario: metadata 保存失败保留旧文件
+#### Scenario: metadata 原子保存失败保持可恢复
 - **GIVEN** 磁盘上存在一份 CRC 有效的旧 metadata
-- **WHEN** 新 metadata 的临时写入、同步或原子替换失败
-- **THEN** 旧 metadata MUST 保持可读取，服务端 MUST 记录失败并按有界退避重试；最终关服仍失败时 MUST 返回错误
+- **WHEN** 新 metadata 在原子替换前失败，或在替换后的目录同步阶段失败
+- **THEN** 替换前失败 MUST 保留旧文件；替换后失败 MUST 只留下 CRC 有效的完整旧版或完整新版，服务端 MUST 记录失败并按有界退避重试；最终关服仍失败时 MUST 返回错误
 
 #### Scenario: 未来 metadata 稳定拒绝
 - **GIVEN** 世界 metadata 声明高于 v2 的版本

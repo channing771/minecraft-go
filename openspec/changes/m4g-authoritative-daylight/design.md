@@ -32,7 +32,7 @@
 
 `storage.Metadata` 追加 `WorldTimeTicks`，metadata v2 payload 在 v1 的种子、维度和出生锚点后追加一个 `uint64`。解码器同时接受 v1/v2：v1 读取后在内存中规范为 v2、时间为零；未来版本继续返回 `ErrFutureVersion`。`Store` 增加原子保存 metadata 的方法，Memory/Disk 共用相同值语义；Disk 复用现有临时文件、fsync、rename、目录 fsync 和 CRC 路径。
 
-现有 `saveJob` 增加固定 kind，使相同 worker/channel 能处理 chunk batch 或一份 metadata 快照。Server 只维护“最新待保存时间、最多一个 in-flight、失败次数与下一重试 tick”，完成旧快照时若权威时间已前进则继续保持 dirty。自动保存边界投递一次最新值；队列满时保留 dirty 而不阻塞。失败使用现有 `RetryBaseTicks/RetryMaxTicks`，但不塞进按 region 分组的区块 retry map。`flushFrozen` 把 metadata 与区块、玩家保存一起纳入可重试关服屏障。
+现有 `saveJob` 增加固定 kind，使相同 worker/channel 能处理 chunk batch 或一份 metadata 快照。Server 只维护“最新权威时间、待提交边界、最多一个 in-flight、失败次数与下一重试 tick”。每个自动保存边界请求提交当时最新值；若 in-flight 期间跨过新的自动保存边界，完成旧快照后继续保留 pending 并提交合并后的最新值。普通 tick 前进不会单独置 pending，避免退化为连续 metadata 写入。队列满时保留 pending 而不阻塞。失败使用现有 `RetryBaseTicks/RetryMaxTicks`，但不塞进按 region 分组的区块 retry map。`flushFrozen` 把 metadata 与区块、玩家保存一起纳入可重试关服屏障。
 
 否决每 tick 写 metadata，因为 20 Hz 磁盘 I/O 没有必要且会破坏 tick；否决另建 `world-time` 文件，因为它制造第二份世界级提交点和额外恢复组合。
 
@@ -71,7 +71,7 @@ daylight = 0.15 + 0.85*sun
 terrain = 0.08 + (sky/15)*(daylight-0.08)
 ```
 
-terrain camera uniform 在现有矩阵和位置后追加 `daylight`；shader 从 quad 读取 `sky` 并计算 `terrain`，再乘原有朝向与 AO。CPU 用 `sun` 在固定夜空色与既有日间 clear color 之间插值。Avatar 与 item-drop uniform 追加同一个 `daylight`；name-tag 与 hotbar pipeline 不改。`cmd/mcgo` 只把最后确认时间计算成同一份固定值传给三个世界空间 renderer。
+terrain camera uniform 在现有矩阵和位置后追加 `daylight`；shader 从 quad 读取 `sky` 并计算 `terrain`，再乘原有朝向与 AO。CPU 用 `sun` 在固定夜空色 `[0.02, 0.03, 0.08, 1]` 与既有日间 clear color `[0.42, 0.68, 0.92, 1]` 之间插值。Avatar 与 item-drop uniform 追加同一个 `daylight`；name-tag 与 hotbar pipeline 不改。`cmd/mcgo` 只把最后确认时间计算成同一份固定值传给三个世界空间 renderer。
 
 不新增天空 pipeline、纹理或 mesh 更新。也不按实体位置采样直射天空光：本批只要求玩家和掉落物与全局昼夜一致，实体遮蔽留到存在通用光场时处理。
 

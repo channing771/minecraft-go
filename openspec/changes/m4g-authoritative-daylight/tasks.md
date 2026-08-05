@@ -13,7 +13,7 @@
 
 ## 3. metadata v2 与原子保存接口
 
-- [ ] 3.1 在 `internal/storage` 先写失败的 golden、往返和故障注入测试，覆盖 metadata v1→v2 时间零迁移、v2 `WorldTimeTicks`、CRC、截断、未来版本拒绝、临时写入/fsync/rename/目录 fsync 失败时旧文件不变。
+- [ ] 3.1 在 `internal/storage` 先写失败的 golden、往返和故障注入测试，覆盖 metadata v1→v2 时间零迁移、v2 `WorldTimeTicks`、CRC、截断、未来版本拒绝；临时写入、临时文件 fsync 或 rename 失败必须保留旧文件，rename 后目录 fsync 失败则重开必须得到 CRC 有效的完整旧版或完整新版。
 - [ ] 3.2 修改 `internal/storage/types.go`、`metadata.go`、`memory.go`、`disk.go` 和 world files 装配：追加 metadata v2 字段与 `Store` 原子保存方法，Memory/Disk 保持相同值语义；不新增第二个世界状态文件。
 - [ ] 3.3 更新受影响的测试 Store 夹具和 metadata golden；验证旧程序边界只由版本拒绝表达，玩家 schema v3、区块 schema v4 及既有 chunk/player golden 字节保持不变。
 - [ ] 3.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage -race -count=1'`、archcheck、gofmt 与 diff check，通过后提交 `feat: 持久化 metadata v2 世界时间`。
@@ -28,10 +28,10 @@
 
 ## 5. 有界 metadata 自动保存与关服屏障
 
-- [ ] 5.1 在 `internal/server` 先写失败测试，覆盖自动保存边界投递最新时间、最多一个 in-flight、期间更新合并、队列满不阻塞 Step、成功旧快照后仍 dirty、失败按现有 tick 退避和状态可观察。
+- [ ] 5.1 在 `internal/server` 先写失败测试，覆盖自动保存边界投递最新时间、最多一个 in-flight、普通 tick 不重复投递、in-flight 期间跨过新保存边界时合并最新值、队列满不阻塞 Step、失败按现有 tick 退避和状态可观察。
 - [ ] 5.2 扩展 `internal/server/server.go` 与 `persistence.go` 的固定 save job/completion，使现有 worker/channel 处理一份 metadata 快照；metadata 使用独立固定状态，不进入 region retry map，不新增 worker 或无界队列。
 - [ ] 5.3 在 `internal/server/shutdown_test.go` 和重启集成测试先覆盖最终时间 flush、失败可重试关服、context 超时、Store.Sync/Close 顺序、v1 世界迁移及 v2 重启延续，再修改 `shutdown.go` 与装配代码闭合屏障。
-- [ ] 5.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/storage -race -count=1'`，确认故障注入后旧 metadata 可重开且无遗留 goroutine，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 异步保存权威世界时间`。
+- [ ] 5.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/storage -race -count=1'`，确认故障注入后 metadata 可重开为完整旧版或完整新版且无遗留 goroutine，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 异步保存权威世界时间`。
 
 ## 6. 增量天空光重网格
 
