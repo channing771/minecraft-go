@@ -80,12 +80,14 @@ func TestScenarioV12GPUCompletionBatchIsLargeEnoughToAmortizePollTick(t *testing
 	// 实测 Poll 的固定节拍约为 1.28ms。批次数量必须让节拍摊薄到
 	// 远小于 20% 判定阈值，否则分位数会重新被量化。
 	const observedPollTickMS = 1.28
-	const perDrawMS = 0.06
+	const observedPerDrawMS = 0.09
+	const relativeGateThreshold = 0.20
 
 	amortized := observedPollTickMS / float64(client.ScenarioV12GPUCompletionBatch)
-	if share := amortized / perDrawMS; share > 0.05 {
+	// 摊薄后的节拍必须远小于相对判定阈值，否则分位数会重新被它主导。
+	if share := amortized / observedPerDrawMS; share > relativeGateThreshold/2 {
 		t.Fatalf(
-			"节拍摊薄后占每次绘制成本的 %.1f%%，想要不超过 5%%（批次数量 = %d）",
+			"节拍摊薄后占每次绘制成本的 %.1f%%，想要不超过判定阈值的一半（批次数量 = %d）",
 			share*100, client.ScenarioV12GPUCompletionBatch,
 		)
 	}

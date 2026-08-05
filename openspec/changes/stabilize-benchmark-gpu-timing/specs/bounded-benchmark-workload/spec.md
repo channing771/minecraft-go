@@ -40,7 +40,7 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `re
 - **THEN** 系统 MUST 使用 headless device 和离屏纹理，不得创建、启动或聚焦游戏窗口
 
 ### Requirement: 工作负载变化使用新场景版本
-改用批量分摊计时并加入阶段间冷却窗口后的 benchmark 报告 MUST 标记为 scenario v12；既有 scenario v6/v7/v8/v9/v10/v11 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。v11 与 v12 之间 MUST 只通过显式授权迁移，且迁移只执行完整性与绝对门禁。
+改用批量分摊计时并加入阶段间冷却窗口后的 benchmark 报告 MUST 标记为 scenario v12；既有 scenario v6/v7/v8/v9/v10/v11 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。当前基线场景与 v12 之间 MUST 只通过唯一一条显式授权迁移，该迁移 MUST 反映真实的基线历史而非版本号连续性，且只执行完整性与绝对门禁。
 
 #### Scenario: v12 同场景比较
 - **WHEN** baseline 与 current 都是完整的 scenario v12 报告
@@ -50,16 +50,17 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `re
 - **WHEN** baseline 与 current 都是完整的 scenario v11 报告
 - **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
 
-#### Scenario: v11 与 v12 不静默混比
-- **WHEN** baseline 为 scenario v11、current 为 scenario v12 且没有显式迁移授权
+#### Scenario: 当前基线与 v12 不静默混比
+- **WHEN** baseline 为当前基线场景 v10、current 为 scenario v12 且没有显式迁移授权
 - **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致
 
-#### Scenario: 显式授权 v11 到 v12 迁移
-- **WHEN** 调用方显式授权 `11:12` 迁移且两份报告的硬件身份一致
+#### Scenario: 显式授权当前基线到 v12 的迁移
+- **WHEN** 调用方显式授权 `10:12` 迁移且两份报告的硬件身份一致
 - **THEN** 比较器 MUST 执行既有完整性与绝对门禁，并跳过不同 workload 之间无意义的相对回归判定
 
-#### Scenario: 退役的 v10 到 v11 迁移参数被拒绝
-- **WHEN** 调用方使用已经退役的 `10:11` 迁移参数比较 scenario v10 与 v11
+#### Scenario: 从未成为基线的中间版本不提供迁移
+- **GIVEN** scenario v11 的正式链因 GPU 计时缺陷失败，v11 从未成为任何硬件的基线
+- **WHEN** 调用方使用 `11:12` 或 `10:11` 迁移参数
 - **THEN** 比较器 MUST 拒绝比较并说明场景版本不一致
 
 #### Scenario: 历史报告保持可校验

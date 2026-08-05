@@ -17,7 +17,7 @@ const ScenarioV8GPUCompletionSamples = 2048
 // 约 2%，远小于 20% 的相对回归判定阈值。
 const (
 	ScenarioV12GPUCompletionSamples = 128
-	ScenarioV12GPUCompletionBatch   = 512
+	ScenarioV12GPUCompletionBatch   = 256
 	// 一个样本的绘制拆到多个 command buffer 提交。每次绘制会开启 avatar 与
 	// name tag 两个 render pass，而该后端为每个 pass 分配一个 command buffer，
 	// 因此两次 Poll 之间的 pass 总数必须留在 Metal 的 4096 预算之内，
