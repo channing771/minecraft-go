@@ -50,6 +50,42 @@ benchmark 还在预热与 still、still 与 flying、flying 与 GPU 采样之间
 
 回退到 M4G 时需要同时回退天空 draw、scenario v13 的 producer/比较器与 M5 基线文件（若已提升为 v13），恢复 M5 scenario v12 基线；协议 v9 与全部世界/玩家数据无需回退或迁移。
 
+## M4I scenario v13 冻结失败候选与不可提升诊断
+
+以下全部是**不可提升**证据：不得传给 `perfcheck`、复制为基线、覆盖 `docs/notes/perf-baseline-m5.json` 或 `docs/notes/perf-baseline.json`，也不消耗新候选的正式运行机会。
+
+候选 `f7d8f261e910863e189666f6e2181e606996f42f` 完成既有完整门禁后，自然冷却从 `2026-08-05T23:51:51+0800` 至 `23:56:51+0800`，并在 `23:56:59`、`23:57:47` 完成两次只读静稳预检：均为 AC、100% 电量、低电量模式关闭且无遗留 `mcgo`/`perfcheck`；load 1m/5m 分别为 `2.81/2.78` 和 `2.25/2.63`。绑定两个全新 v13 路径后获得一次性正式授权。唯一的 Memory producer 以 exit `1` 停止：still 为 `196.4 FPS`、p99 `5.702ms`、RSS `1378.9MiB`；flying 为 `309.9 FPS`、p99 `12.175ms`、RSS `2280.9MiB`；GPU 采样后 RSS 峰值为 `2452.2MiB`。八会话服务端探针因 `rss=2571304960` 超过既有 `2GiB` 上限拒绝结果。正式 JSON 未生成，未运行迁移 `perfcheck` 或 TCP，且未重跑；M5/M2 baseline 哈希继续分别为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f` 与 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。
+
+### 不可提升的诊断运行
+
+诊断均在 HEAD `34a03b57e585b827bbd96ce5548501f9c6be899a`，仅使用 Memory transport、独立 `/tmp/mcgo-m4i-diag-34a03b5-*` 路径与 `GODEBUG=gctrace=1`；未运行 TCP 或 `perfcheck`，每次临时 mutation 后均恢复源码。短时三路命令（`warmup/still/flying/cooldown` 暂为 `2s/10s/20s/5s`）如下：
+
+```sh
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-diag-34a03b5-full.json > /tmp/mcgo-m4i-diag-34a03b5-full.log 2>&1
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-diag-34a03b5-nosky.json > /tmp/mcgo-m4i-diag-34a03b5-nosky.log 2>&1
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-diag-34a03b5-nostars.json > /tmp/mcgo-m4i-diag-34a03b5-nostars.log 2>&1
+```
+
+| 变体（均不可提升） | 单一临时差异 | exit | flying p99 | GPU 采样后 RSS | 输出 |
+| --- | --- | ---: | ---: | ---: | --- |
+| full | 无 sky 差异 | 1 | `12.092ms` | `1588.8MiB` | `/tmp/mcgo-m4i-diag-34a03b5-full.log`；JSON 缺失 |
+| nosky | 跳过一次 sky draw | 1 | `12.145ms` | `1634.0MiB` | `/tmp/mcgo-m4i-diag-34a03b5-nosky.log`；JSON 缺失 |
+| nostars | 保留 draw，仅把 `sky.wgsl::fs_main` 的星光表达式改为 `let stars = 0.0;` | 0 | `11.555ms` | `1664.1MiB` | `/tmp/mcgo-m4i-diag-34a03b5-nostars.log`、`/tmp/mcgo-m4i-diag-34a03b5-nostars.json` |
+
+为确认短时观察，保持生产 `10s/60s/120s/30s` 时长，只以 `let stars = 0.0;` 替换星光表达式，唯一 producer 为：
+
+```sh
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-diag-34a03b5-confirm.json > /tmp/mcgo-m4i-diag-34a03b5-confirm.log 2>&1
+```
+
+该运行同样**不可提升**，exit `1`，`/tmp/mcgo-m4i-diag-34a03b5-confirm.json` 缺失，`/tmp/mcgo-m4i-diag-34a03b5-confirm.log` 存在。still p99 为 `5.432ms`，flying p99 为 `12.024ms`，仍未低于 `12ms`；GPU 采样后 RSS 为 `2353.3MiB`，八会话服务端探针记录 `rss=2467577856` 并拒绝结果。该运行未进行 TCP、`perfcheck` 或基线写入。
+
+### 不可提升的结论与下一步
+
+A/B 只支持以下边界：短时 no-sky 未改善 flying p99（相对 full `+0.053ms`），因此“完整 sky draw 本身”不是已观察到的短时改善来源；短时 no-stars 的 flying p99 降至 `11.555ms`，但完整时长 no-stars 仍为 `12.024ms`，故**未确认** `star_light` 是 flying p99 根因，也不存在生产修复。RSS 同样不可归因：短时 no-sky/no-stars 的 GPU 采样后 RSS 分别为 `1634.0/1664.1MiB`，高于 full 的 `1588.8MiB`；完整时长 no-stars 虽显示 Go 堆与 runtime 增长及大额非 Go 部分，却没有同 HEAD、同完整时长的 full-stars 对照，不能隔离 Go 堆、Go runtime 或原生图形资源的 RSS 根因。
+
+因此否决把阈值放宽、重跑冻结正式 producer、把完整 sky draw 或 `star_light` 直接当作根因，且不进入生产修复。Task 8.1 保持未完成：下一步必须先更新 active OpenSpec 以约束最小 benchmark-only heap profiling，再仅在 post-still、post-flying、post-GPU 三个边界采样；完成该隔离前不得进入 Task 8.2。
+
 ## M4F scenario v10 历史比较规则
 
 M4F 扩展固定长度玩家输入与状态、废止即时破坏消息，并在权威 tick 增加有界采掘判定，因此当时的 benchmark producer 标记为 scenario v10，并通过已退役的 `9:10` 迁移建立了上方记录的 M5 v10 基线。v10 报告仍可单独读取与同场景比较。
