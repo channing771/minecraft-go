@@ -454,3 +454,102 @@ func TestDropSelectedItemCapacityFailureOnlyRejectsRequester(t *testing.T) {
 		t.Fatal("拒绝后会话不再推进")
 	}
 }
+
+// TestDroppedItemSurvivesShutdownAndRestart 证明主动丢弃产生的掉落物跨正常关服持久：
+// 重开后保留 ID、物品、方块索引，且年龄与剩余拾取延迟是从持久值继续推进而非重置。
+//
+// 玩家背包一侧只在关服前断言：本夹具只装配 Server，不含 host 层的玩家保存调度，
+// 重新 Attach 时总是用固定 restore 覆盖背包。背包跨重启由带 host 的真实 TCP
+// 纵向测试覆盖，见 TestTCPDropSelectedItemSurvivesRestart。
+func TestDroppedItemSurvivesShutdownAndRestart(t *testing.T) {
+	root := t.TempDir()
+	first, firstStore, firstClient := newDropDiskWorld(t, root)
+	step := stepUntilDropReady(t, first, firstClient)
+
+	before, ok := first.PlayerSnapshotFor(1)
+	if !ok {
+		t.Fatal("玩家未 Active")
+	}
+	beforeCount := before.Inventory.Hotbar.Slots[0].Count
+	if beforeCount == 0 {
+		t.Fatal("测试夹具的选中栏位为空")
+	}
+
+	sendClientMessage(t, firstClient, network.DropSelectedItem{Sequence: 1})
+	var created network.ItemDrop
+	deadline := time.Now().Add(5 * time.Second)
+	for created.Count == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("等待主动丢弃产生掉落物超时")
+		}
+		messages, _ := step()
+		for _, batch := range messages.upserts {
+			if len(batch.Drops) != 0 {
+				created = batch.Drops[0]
+			}
+		}
+	}
+
+	// 多推进几个 tick 让掉落物累积年龄并消耗部分拾取延迟。
+	for range 5 {
+		step()
+	}
+	afterDrop, ok := first.PlayerSnapshotFor(1)
+	if !ok {
+		t.Fatal("丢弃后玩家不可用")
+	}
+	if got := afterDrop.Inventory.Hotbar.Slots[0].Count; got != beforeCount-1 {
+		t.Fatalf("丢弃后快捷栏 = %d，想要 %d", got, beforeCount-1)
+	}
+	key := core.ChunkKey{Dimension: created.ID.Dimension, Pos: created.ID.Chunk}
+	live, _, ok := first.CloneReadyChunkForTest(key)
+	if !ok {
+		t.Fatal("关服前区块不可用")
+	}
+	wantSlot := live.Drop(int(created.ID.Slot))
+
+	flushDropWorld(t, first, firstStore)
+
+	second, secondStore, _ := newDropDiskWorld(t, root)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := second.Shutdown(ctx); err != nil {
+			t.Errorf("second Shutdown: %v", err)
+		}
+		if err := secondStore.Close(); err != nil {
+			t.Errorf("second store Close: %v", err)
+		}
+	}()
+
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("等待重启后区块 Ready 超时")
+		}
+		second.StepForTest()
+		chunk, _, ok := second.CloneReadyChunkForTest(key)
+		if !ok {
+			continue
+		}
+		got := chunk.Drop(int(created.ID.Slot))
+		// 不可变字段必须逐字节保留。
+		if !got.Active || got.Generation != wantSlot.Generation ||
+			got.Stack != wantSlot.Stack || got.BlockIndex != wantSlot.BlockIndex {
+			t.Fatalf("重启后掉落物 = %+v，想要与 %+v 一致", got, wantSlot)
+		}
+		// 年龄与剩余延迟是从持久值继续推进的，不得被重置：
+		// 年龄只增不减，剩余延迟只减不增且仍未归零。
+		if got.AgeTicks < wantSlot.AgeTicks {
+			t.Fatalf("重启后年龄 = %d，早于关服前的 %d", got.AgeTicks, wantSlot.AgeTicks)
+		}
+		if got.PickupDelayTicks > wantSlot.PickupDelayTicks {
+			t.Fatalf("重启后剩余延迟 = %d，多于关服前的 %d",
+				got.PickupDelayTicks, wantSlot.PickupDelayTicks)
+		}
+		if got.PickupDelayTicks == 0 {
+			t.Fatal("重启后剩余延迟已归零，无法证明它是从持久值继续")
+		}
+		return
+	}
+}
