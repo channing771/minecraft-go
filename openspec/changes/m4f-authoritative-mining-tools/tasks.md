@@ -51,10 +51,10 @@
 
 ## 9. 候选版本完整门禁
 
-- [ ] 9.1 对本 change 的 proposal、八份 delta specs、design、tasks 与实现逐项映射，修正任何不一致；确认没有耐久、木材、多原料、裂纹或共享进度的越界实现。
-- [ ] 9.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 与 `openspec validate --all --strict --no-interactive`，任何失败只修根因且不得绕过 Hook 或放宽门禁。
-- [ ] 9.3 运行协议 fuzz/benchmark、采掘微基准及相关存档 golden/fuzz；核对无前台游戏窗口、无遗留 benchmark 进程、tracked 工作树只含 M4F 预期文件。
-- [ ] 9.4 勾选已完成任务并提交重新冻结候选 `chore: 重新冻结 M4F 正式候选`；提交后不再修改 producer、场景、阈值、采掘热路径或正式预检契约，除非新建修复提交并重新完成本组门禁。
+- [x] 9.1 对本 change 的 proposal、八份 delta specs、design、tasks 与实现逐项映射，修正任何不一致；确认没有耐久、木材、多原料、裂纹或共享进度的越界实现。
+- [x] 9.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 与 `openspec validate --all --strict --no-interactive`，任何失败只修根因且不得绕过 Hook 或放宽门禁。
+- [x] 9.3 运行协议 fuzz/benchmark、采掘微基准及相关存档 golden/fuzz；核对无前台游戏窗口、无遗留 benchmark 进程、tracked 工作树只含 M4F 预期文件。
+- [x] 9.4 勾选已完成任务并提交重新冻结候选 `chore: 重新冻结 M4F 正式候选`；提交后不再修改 producer、场景、阈值、采掘热路径或正式预检契约，除非新建修复提交并重新完成本组门禁。
 
 ## 10. 一次性 M5 scenario v10 基线
 
