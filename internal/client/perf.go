@@ -224,14 +224,16 @@ func percentile(sorted []float64, p float64) float64 {
 
 // PerfReport 是 cmd/mcgo 与 cmd/perfcheck 共用的稳定 JSON 格式。
 type PerfReport struct {
-	ScenarioVersion   int                     `json:"scenario_version"`
-	Transport         string                  `json:"transport,omitempty"`
-	Hardware          string                  `json:"hardware"`
-	OS                string                  `json:"os"`
-	GoVersion         string                  `json:"go_version"`
-	GitCommit         string                  `json:"git_commit"`
-	Framebuffer       string                  `json:"framebuffer"`
-	LoadSeconds       float64                 `json:"load_seconds"`
+	ScenarioVersion int     `json:"scenario_version"`
+	Transport       string  `json:"transport,omitempty"`
+	Hardware        string  `json:"hardware"`
+	OS              string  `json:"os"`
+	GoVersion       string  `json:"go_version"`
+	GitCommit       string  `json:"git_commit"`
+	Framebuffer     string  `json:"framebuffer"`
+	LoadSeconds     float64 `json:"load_seconds"`
+	// CooldownSeconds 是各阶段之间的固定冷却时长，用于精确复现该次运行。
+	CooldownSeconds   float64                 `json:"cooldown_seconds"`
 	SnapshotSeconds   float64                 `json:"snapshot_seconds"`
 	Phases            map[string]PhaseSummary `json:"phases"`
 	Ticks             PhaseSummary            `json:"ticks"`

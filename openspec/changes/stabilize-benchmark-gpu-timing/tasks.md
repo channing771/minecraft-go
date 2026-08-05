@@ -12,9 +12,9 @@
 
 ## 3. 门禁分辨率规则
 
-- [ ] 3.1 在 `cmd/perfcheck` 先写失败测试：量化指标不施加相对门禁但保留绝对上限；高分辨率指标退化超过 `20%` 仍失败；失败信息指明判定类型。
-- [ ] 3.2 修改 `cmd/perfcheck/main.go`，为每个受检指标显式声明判定类型；不放宽任何既有绝对上限。
-- [ ] 3.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/perfcheck -race -count=1'`、gofmt 与 diff check，通过后提交 `fix: 相对门禁只作用于高分辨率指标`。
+- [x] 3.1 在 `cmd/perfcheck` 先写失败测试：量化指标不施加相对门禁但保留绝对上限；高分辨率指标退化超过 `20%` 仍失败；失败信息指明判定类型。
+- [x] 3.2 修改 `cmd/perfcheck/main.go`，为每个受检指标显式声明判定类型；不放宽任何既有绝对上限。
+- [x] 3.3 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./cmd/perfcheck -race -count=1'`、gofmt 与 diff check，通过后提交 `fix: 相对门禁只作用于高分辨率指标`。
 
 ## 4. 阶段间冷却窗口
 

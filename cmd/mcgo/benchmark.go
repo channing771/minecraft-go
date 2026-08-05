@@ -37,7 +37,33 @@ var (
 	warmupDuration = 10 * time.Second
 	stillDuration  = 60 * time.Second
 	flyDuration    = 120 * time.Second
+	// benchmarkCooldown 是阶段之间的固定冷却，让 GPU 从满载回落。
+	// 它只影响阶段之间的时间轴，不改变任何被采集指标的定义、样本数或阶段时长。
+	benchmarkCooldown = 30 * time.Second
 )
+
+// runBenchmarkCooldown 在阶段之间等待固定时长，期间只泵送窗口事件，
+// 不提交任何渲染工作，也不推进相机脚本。
+func runBenchmarkCooldown(app *application, duration time.Duration) {
+	deadline := time.Now().Add(duration)
+	for time.Now().Before(deadline) {
+		if app.window != nil {
+			app.window.Poll()
+			if app.window.ShouldClose() {
+				app.window.CancelClose()
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// benchmarkReportSkeleton 返回只含固定运行参数的报告骨架，供测试断言这些参数被记录。
+func benchmarkReportSkeleton() client.PerfReport {
+	return client.PerfReport{
+		ScenarioVersion: scenarioVersion,
+		CooldownSeconds: benchmarkCooldown.Seconds(),
+	}
+}
 
 // gpuCompletionMinSamples 返回该场景下 remote_gpu_complete 的最小样本数。
 // v8–v11 逐次计时取 2048；v12 起改为批量分摊，样本数相应减少。
@@ -74,6 +100,7 @@ func runBenchmark(app *application, outputPath string) error {
 	if err := runWarmup(app, warmupDuration); err != nil {
 		return err
 	}
+	runBenchmarkCooldown(app, benchmarkCooldown)
 	multiplayerProbe, err := newMultiplayerClientProbe(app)
 	if err != nil {
 		return fmt.Errorf("创建多人客户端性能探针: %w", err)
@@ -85,6 +112,7 @@ func runBenchmark(app *application, outputPath string) error {
 	if err != nil {
 		return err
 	}
+	runBenchmarkCooldown(app, benchmarkCooldown)
 	flyingStart := app.camera.Pos
 	probe := server.NewTerrainProbe(benchmarkSeed)
 	flying, err := measurePhase(app, multiplayerProbe, "flying", flyDuration, func(elapsed time.Duration) {
@@ -122,6 +150,8 @@ func runBenchmark(app *application, outputPath string) error {
 			authoritativeHash, authoritativeRevision, authoritativeOK,
 			mirrorHash, mirrorRevision, mirrorOK)
 	}
+	// GPU 采样不得紧接 flying 的满载尾部。
+	runBenchmarkCooldown(app, benchmarkCooldown)
 	if err := multiplayerProbe.measureGPUCompletionAfterTransportClose(app); err != nil {
 		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
 	}
@@ -155,6 +185,7 @@ func runBenchmark(app *application, outputPath string) error {
 		GitCommit:       commandOutput("git", "rev-parse", "HEAD"),
 		Framebuffer:     app.framebufferLabel(),
 		LoadSeconds:     loadSeconds,
+		CooldownSeconds: benchmarkCooldown.Seconds(),
 		SnapshotSeconds: snapshotDuration.Seconds(),
 		Phases: map[string]client.PhaseSummary{
 			"still":  still,
