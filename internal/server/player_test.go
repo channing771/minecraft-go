@@ -173,6 +173,15 @@ func TestTranslatePlayerMessage(t *testing.T) {
 		want    sim.Command
 	}{
 		{
+			name:    "drop selected item carries only the sequence",
+			message: network.DropSelectedItem{Sequence: 17},
+			want: sim.Command{
+				Session:  testSessionID,
+				Sequence: 17,
+				Kind:     sim.CommandDropSelectedItem,
+			},
+		},
+		{
 			name: "input",
 			message: network.PlayerInput{
 				Sequence: 11,

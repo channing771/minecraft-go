@@ -15,8 +15,10 @@ import (
 )
 
 type dropMessages struct {
-	upserts []network.ItemDropUpserts
-	removes []network.ItemDropRemoves
+	upserts     []network.ItemDropUpserts
+	removes     []network.ItemDropRemoves
+	inventories []network.InventoryState
+	rejected    []network.CommandRejected
 }
 
 // dropDrainTick 读取一个会话在本 tick 的全部消息并分类掉落物差分。
@@ -46,6 +48,10 @@ func dropDrainTick(
 				t.Fatalf("非法 remove 批次: %v", err)
 			}
 			got.removes = append(got.removes, message)
+		case network.InventoryState:
+			got.inventories = append(got.inventories, message)
+		case network.CommandRejected:
+			got.rejected = append(got.rejected, message)
 		case network.PlayerState:
 			*ready = message.Ready
 			if message.ServerTick == throughTick {
@@ -353,5 +359,98 @@ func flushDropWorld(t *testing.T, running *server.Server, store *storage.DiskSto
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("store Close: %v", err)
+	}
+}
+
+// newDropWorldWithHotbar 与 newDropPublicationWorld 相同，但玩家快捷栏预置了物品。
+func newDropWorldWithHotbar(
+	t *testing.T,
+	item core.ItemID,
+) (*server.Server, network.ClientEndpoint) {
+	t.Helper()
+	clientEndpoint, serverEndpoint := network.NewMemoryPair(1024)
+	config := hotbarTestConfig(1)
+	running := newMemoryAttachedWorldWithHotbar(
+		config, serverEndpoint, server.FlatTestGenerator{}, stockedTestHotbar(item),
+	)
+	shutdownHotbarServer(t, running, clientEndpoint)
+	return running, clientEndpoint
+}
+
+func TestDropSelectedItemPublishesInventoryAndDrop(t *testing.T) {
+	running, clientEndpoint := newDropWorldWithHotbar(t, core.ItemCoal)
+	step := stepUntilDropReady(t, running, clientEndpoint)
+
+	sendClientMessage(t, clientEndpoint, network.DropSelectedItem{Sequence: 1})
+	var messages dropMessages
+	deadline := time.Now().Add(5 * time.Second)
+	for len(messages.upserts) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("主动丢弃没有产生掉落物 upsert")
+		}
+		messages, _ = step()
+	}
+
+	if len(messages.rejected) != 0 {
+		t.Fatalf("成功路径产生了拒绝：%+v", messages.rejected)
+	}
+	if len(messages.upserts) != 1 || len(messages.upserts[0].Drops) != 1 {
+		t.Fatalf("upsert = %+v，想要恰好一条", messages.upserts)
+	}
+	drop := messages.upserts[0].Drops[0]
+	// 已注册的非放置物品同样可以经线上掉落物传播。
+	if drop.Item != core.ItemCoal || drop.Count != 1 {
+		t.Fatalf("掉落物 = %+v，想要一个煤炭", drop)
+	}
+	if len(messages.inventories) == 0 {
+		t.Fatal("所属玩家没有收到完整背包状态")
+	}
+	final := messages.inventories[len(messages.inventories)-1]
+	if got := final.Inventory.Hotbar.Slots[0]; got.Count != core.MaxStackCount-1 {
+		t.Fatalf("发布的快捷栏 = %+v，想要少一个煤炭", got)
+	}
+}
+
+func TestDropSelectedItemCapacityFailureOnlyRejectsRequester(t *testing.T) {
+	running, clientEndpoint := newDropWorldWithHotbar(t, core.ItemCoal)
+	step := stepUntilDropReady(t, running, clientEndpoint)
+
+	// 用满堆且物品不匹配的槽占满 32 个容量。
+	key := core.ChunkKey{Dimension: core.Overworld}
+	for slot := range core.DropsPerChunk {
+		running.SetChunkDropForTest(key, slot, world.DropSlot{
+			Generation: 1, Active: true,
+			Stack:      core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount},
+			BlockIndex: uint32(slot), PickupDelayTicks: 200,
+		})
+	}
+	// 先把占位掉落物的进入兴趣 upsert 消化掉。
+	step()
+
+	sendClientMessage(t, clientEndpoint, network.DropSelectedItem{Sequence: 7})
+	var messages dropMessages
+	deadline := time.Now().Add(5 * time.Second)
+	for len(messages.rejected) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("容量已满没有返回拒绝")
+		}
+		messages, _ = step()
+	}
+
+	if got := messages.rejected[0]; got.Sequence != 7 ||
+		got.Reason != network.RejectDropCapacity {
+		t.Fatalf("拒绝 = %+v，想要 sequence 7 的 drop_capacity", got)
+	}
+	if len(messages.upserts) != 0 || len(messages.removes) != 0 {
+		t.Fatalf("拒绝仍发布了掉落物差分：%+v %+v", messages.upserts, messages.removes)
+	}
+	if len(messages.inventories) != 0 {
+		t.Fatalf("拒绝仍发布了背包更新：%+v", messages.inventories)
+	}
+
+	// 拒绝之后会话仍然健康：后续合法命令继续推进。
+	sendClientMessage(t, clientEndpoint, network.SelectHotbar{Sequence: 8, Slot: 3})
+	if _, tick := step(); tick == 0 {
+		t.Fatal("拒绝后会话不再推进")
 	}
 }
