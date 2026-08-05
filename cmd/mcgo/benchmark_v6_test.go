@@ -661,38 +661,56 @@ func TestScenarioV13BenchmarkReportReusesV12GPUCompletionDefinition(t *testing.T
 // Mutation killed: still/flying 阶段若不再经过真实 renderFrame，terrain pass
 // 中由 sky pipeline 发出的 fullscreen triangle draw 不会出现。
 func TestScenarioV13StillFlyingFrameIncludesCelestialSkyDraw(t *testing.T) {
-	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
-	if err := app.remotePlayers.Apply(remoteSpawn(1, "星夜", 1, mgl32.Vec3{0, 0, -4})); err != nil {
-		t.Fatal(err)
-	}
-	// 与 measurePhase 相同的逐帧路径：benchmark 帧经 app.frame 到达 renderFrame。
-	rendered, err := app.frame(benchmarkMessageDrainMax, steadyFrameMeshWorkMax, fixedBenchmarkFrameDuration)
-	if err != nil || !rendered {
-		t.Fatalf("benchmark 帧 renderFrame=(%v,%v)", rendered, err)
-	}
-	// sky fullscreen triangle 只由 terrain pass 发出；断言它先于地形 indirect draw。
-	skyIndex, indirectIndex := -1, -1
-	for i, draw := range dev.draws {
-		if draw == "sky triangle" && skyIndex < 0 {
-			skyIndex = i
-		}
-		if draw == "indirect" && indirectIndex < 0 {
-			indirectIndex = i
-		}
-	}
-	if skyIndex < 0 {
-		t.Fatalf("draws=%v，缺少 sky fullscreen triangle draw", dev.draws)
-	}
-	if indirectIndex < 0 {
-		t.Fatalf("draws=%v，缺少 terrain indirect draw", dev.draws)
-	}
-	if skyIndex > indirectIndex {
-		t.Fatalf("sky draw 索引=%d 晚于 terrain indirect draw=%d，draws=%v", skyIndex, indirectIndex, dev.draws)
-	}
-	sky := dev.bufferByLabel(t, "sky uniform")
-	dayNight := render.DayNightAt(app.worldTimeTicks)
-	if got := readFloat32(sky.data, 76); got != dayNight.Daylight {
-		t.Fatalf("sky Daylight=%v want=%v", got, dayNight.Daylight)
+	for _, phase := range []struct {
+		name   string
+		flying bool
+	}{
+		{name: "still"},
+		{name: "flying", flying: true},
+	} {
+		t.Run(phase.name, func(t *testing.T) {
+			app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+			probe, err := newMultiplayerClientProbe(app)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(probe.Close)
+
+			updated := false
+			var update func(time.Duration)
+			if phase.flying {
+				update = func(time.Duration) { updated = true }
+			}
+			summary, err := measurePhase(app, probe, phase.name, 50*time.Millisecond, update)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if summary.Frames == 0 {
+				t.Fatal("measurePhase 未执行真实 renderFrame")
+			}
+			if phase.flying && !updated {
+				t.Fatal("flying measurePhase 未执行相机更新")
+			}
+
+			// sky fullscreen triangle 只由 terrain pass 发出；断言它先于地形 indirect draw。
+			skyIndex, indirectIndex := -1, -1
+			for i, draw := range dev.draws {
+				if draw == "sky triangle" && skyIndex < 0 {
+					skyIndex = i
+				}
+				if draw == "indirect" && indirectIndex < 0 {
+					indirectIndex = i
+				}
+			}
+			if skyIndex < 0 || indirectIndex < 0 || skyIndex > indirectIndex {
+				t.Fatalf("draws=%v，sky/terrain draw 顺序=%d/%d", dev.draws, skyIndex, indirectIndex)
+			}
+			sky := dev.bufferByLabel(t, "sky uniform")
+			dayNight := render.DayNightAt(app.worldTimeTicks)
+			if got := readFloat32(sky.data, 76); got != dayNight.Daylight {
+				t.Fatalf("sky Daylight=%v want=%v", got, dayNight.Daylight)
+			}
+		})
 	}
 }
 

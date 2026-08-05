@@ -67,6 +67,9 @@ func compareReportsWithScenarioUpgrade(
 	// 因此当前唯一迁移是 v12 直接到 v13（天空 workload）。
 	allowedScenarioUpgrade := baseline.ScenarioVersion == 12 && current.ScenarioVersion == 13 &&
 		allowScenarioUpgrade == "12:13"
+	if allowScenarioUpgrade != "" && !allowedScenarioUpgrade {
+		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v12 到 v13 使用 12:13", allowScenarioUpgrade)
+	}
 	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(
 			"scenario_version 不同：基线=%d 当前=%d",
