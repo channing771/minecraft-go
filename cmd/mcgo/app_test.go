@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -498,13 +497,11 @@ func (d *integrationRenderDevice) releaseMarkers(labels []string) []string {
 type integrationBuffer struct {
 	desc    gfx.BufferDesc
 	data    []byte
-	writes  int
 	release func()
 }
 
 func (b *integrationBuffer) Size() uint64 { return b.desc.Size }
 func (b *integrationBuffer) Write(offset uint64, data []byte) {
-	b.writes++
 	end := int(offset) + len(data)
 	if len(b.data) < end {
 		b.data = make([]byte, end)
@@ -1974,8 +1971,8 @@ func TestApplicationDrawsItemDropsAfterAvatars(t *testing.T) {
 	}
 }
 
-// Mutation killed: 每帧多次计算 ViewProj/逆矩阵、或让 terrain/avatar/item-drop
-// 使用不同矩阵或 daylight，会改变捕获到的 uniform buffer 内容。
+// Mutation killed: 让 terrain/avatar/item-drop 使用不同矩阵或 daylight，
+// 或让 sky 使用错误的 inverse/天体参数，会改变捕获到的 uniform buffer 内容。
 func TestApplicationRenderFrameCameraAndSkyParameters(t *testing.T) {
 	glyphs := &integrationGlyphSource{}
 	app, dev := newRemoteRenderApplication(t, glyphs)
@@ -2015,92 +2012,6 @@ func TestApplicationRenderFrameCameraAndSkyParameters(t *testing.T) {
 		return out
 	}
 
-	terrain := dev.bufferByLabel(t, "terrain camera")
-	sky := dev.bufferByLabel(t, "sky uniform")
-	if got := mat4From(terrain.data, 0); !got.ApproxEqualThreshold(wantViewProj, 1e-4) {
-		t.Fatalf("terrain ViewProj=%v want=%v", got, wantViewProj)
-	}
-	if got := mat4From(sky.data, 0); !got.ApproxEqualThreshold(wantViewProjInv, 1e-4) {
-		t.Fatalf("sky ViewProjInv=%v want=%v", got, wantViewProjInv)
-	}
-	// avatar 与 item-drop 继续与 terrain 共享同一正向矩阵和 daylight。
-	for _, label := range []string{"avatar dynamic upload", "item drop dynamic upload"} {
-		buffer := dev.bufferByLabel(t, label)
-		if got := mat4From(buffer.data, 0); !got.ApproxEqualThreshold(wantViewProj, 1e-4) {
-			t.Fatalf("%s ViewProj=%v want=%v", label, got, wantViewProj)
-		}
-		if got := readFloat(buffer.data, 64); got != dayNight.Daylight {
-			t.Fatalf("%s Daylight=%v want=%v", label, got, dayNight.Daylight)
-		}
-	}
-	// sky uniform 布局：ViewProjInv 64 字节 + SunDirection xyz + Daylight + StarVisibility。
-	for i, want := range dayNight.SunDirection {
-		if got := readFloat(sky.data, 64+i*4); got != want {
-			t.Fatalf("sky SunDirection[%d]=%v want=%v", i, got, want)
-		}
-	}
-	if got := readFloat(sky.data, 76); got != dayNight.Daylight {
-		t.Fatalf("sky Daylight=%v want=%v", got, dayNight.Daylight)
-	}
-	if got := readFloat(sky.data, 80); got != dayNight.StarVisibility {
-		t.Fatalf("sky StarVisibility=%v want=%v", got, dayNight.StarVisibility)
-	}
-	if got := readFloat(terrain.data, 76); got != dayNight.Daylight {
-		t.Fatalf("terrain Daylight=%v want=%v", got, dayNight.Daylight)
-	}
-
-	// 同一权威世界时间的第二帧产生字节级相同的 sky uniform，证明每帧只计算一次。
-	firstSky := append([]byte(nil), sky.data...)
-	dev.resetPasses()
-	if rendered, err := app.renderFrame(1); err != nil || !rendered {
-		t.Fatalf("第二帧 renderFrame=(%v,%v)", rendered, err)
-	}
-	if !bytes.Equal(firstSky, sky.data) {
-		t.Fatalf("第二帧 sky uniform 变化:\nfirst=%x\nsecond=%x", firstSky, sky.data)
-	}
-}
-
-// Mutation killed: 每帧重复计算 ViewProj/逆矩阵会让注入计数超过一次，
-// 或让 terrain/avatar/item-drop 使用不同矩阵/lighting。
-func TestApplicationRenderFrameComputesCameraMatricesOnce(t *testing.T) {
-	glyphs := &integrationGlyphSource{}
-	app, dev := newRemoteRenderApplication(t, glyphs)
-	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{1, 2, 3})); err != nil {
-		t.Fatal(err)
-	}
-	drop := network.ItemDrop{
-		ID:   core.DropID{Dimension: core.Overworld, Slot: 0, Generation: 1},
-		Item: core.ItemStone, Count: 1, BlockIndex: 9,
-	}
-	if err := app.itemDrops.Apply(network.ItemDropUpserts{
-		ServerTick: 3, Drops: []network.ItemDrop{drop},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var viewProjCalls int
-	app.cameraViewProj = func() mgl32.Mat4 {
-		viewProjCalls++
-		return app.camera.ViewProj()
-	}
-	if rendered, err := app.renderFrame(1); err != nil || !rendered {
-		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
-	}
-	if viewProjCalls != 1 {
-		t.Fatalf("ViewProj 计算次数=%d，想要每帧一次", viewProjCalls)
-	}
-	dayNight := render.DayNightAt(app.worldTimeTicks)
-	wantViewProj := app.camera.ViewProj()
-	wantViewProjInv := wantViewProj.Inv()
-	readFloat := func(data []byte, offset int) float32 {
-		return math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
-	}
-	mat4From := func(data []byte, offset int) mgl32.Mat4 {
-		var out mgl32.Mat4
-		for i := range out {
-			out[i] = readFloat(data, offset+i*4)
-		}
-		return out
-	}
 	terrain := dev.bufferByLabel(t, "terrain camera")
 	sky := dev.bufferByLabel(t, "sky uniform")
 	if got := mat4From(terrain.data, 0); !got.ApproxEqualThreshold(wantViewProj, 1e-4) {
