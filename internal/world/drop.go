@@ -81,6 +81,8 @@ func (c *Chunk) CommitDrop(
 	drop := c.drops[slot]
 	if drop.Active {
 		drop.Stack.Count++
+		// 合并保留 ID、generation 与既有寿命，只把拾取禁止窗口延长到较长的来源延迟。
+		drop.PickupDelayTicks = max(drop.PickupDelayTicks, pickupDelay)
 		c.drops[slot] = drop
 		return drop.Generation
 	}
@@ -143,6 +145,8 @@ func (c *Chunk) PrepareDropBatch(
 				space := core.MaxStackCount - drop.Stack.Count
 				taken := min(space, remaining)
 				drop.Stack.Count += taken
+				// 与单件合并同一规则：保留既有寿命，延长到较长的来源延迟。
+				drop.PickupDelayTicks = max(drop.PickupDelayTicks, pickupDelay)
 				remaining -= taken
 				next[slot] = drop
 				continue

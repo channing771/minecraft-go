@@ -80,9 +80,10 @@ func TestChunkPrepareDropMergesSamePositionAndItem(t *testing.T) {
 	if got.Stack.Count != core.MaxStackCount || got.Generation != 7 {
 		t.Fatalf("合并后槽 2 = %+v，想要 64 个泥土且 ID 不变", got)
 	}
-	// 合并不得改写已生效的拾取延迟。
-	if got.PickupDelayTicks != 0 {
-		t.Fatalf("合并改写了拾取延迟: %+v", got)
+	// 合并把拾取禁止窗口延长到较长的来源延迟；旧值为 0 时取新来源的 10。
+	// 完整的短/等/长来源矩阵见 TestChunkCommitDropMergeUsesLongerPickupDelay。
+	if got.PickupDelayTicks != 10 {
+		t.Fatalf("合并后的拾取延迟 = %+v，想要 10", got)
 	}
 }
 
@@ -242,5 +243,60 @@ func TestChunkPayloadBytesCoversDropSlots(t *testing.T) {
 	chunk := dropTestChunk(t)
 	if got, want := chunk.PayloadBytes(), core.DropsPerChunk*world.DropSlotBytes; got <= want {
 		t.Fatalf("PayloadBytes = %d，必须覆盖 %d 字节固定掉落物负载", got, want)
+	}
+}
+
+func TestChunkCommitDropMergeUsesLongerPickupDelay(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		old      uint8
+		incoming uint8
+		want     uint8
+	}{
+		{name: "来源更短", old: 40, incoming: 10, want: 40},
+		{name: "来源相等", old: 10, incoming: 10, want: 10},
+		{name: "来源更长", old: 5, incoming: 40, want: 40},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			chunk := dropTestChunk(t)
+			index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+			chunk.SetDrop(2, world.DropSlot{
+				Generation: 7, Active: true,
+				Stack:      core.ItemStack{Item: core.ItemDirt, Count: 63},
+				BlockIndex: index, AgeTicks: 99, PickupDelayTicks: test.old,
+			})
+			slot, ok := chunk.PrepareDrop(core.ItemDirt, index)
+			if !ok || slot != 2 {
+				t.Fatalf("预检 = (%d,%v)，想要 (2,true)", slot, ok)
+			}
+			generation := chunk.CommitDrop(slot, core.ItemDirt, index, test.incoming)
+			got := chunk.Drop(slot)
+			// 合并不得重置 ID、generation、年龄或物品，只延长拾取禁止窗口。
+			if generation != 7 || got.Generation != 7 || got.AgeTicks != 99 ||
+				got.Stack.Count != 64 || got.PickupDelayTicks != test.want {
+				t.Fatalf("合并结果 = %+v generation=%d", got, generation)
+			}
+		})
+	}
+}
+
+func TestChunkPrepareDropBatchMergeUsesLongerPickupDelay(t *testing.T) {
+	chunk := dropTestChunk(t)
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 3, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemCoal, Count: 1},
+		BlockIndex: index, AgeTicks: 17, PickupDelayTicks: 2,
+	})
+	var stacks [4]core.ItemStack
+	stacks[0] = core.ItemStack{Item: core.ItemCoal, Count: 1}
+	next, ok := chunk.PrepareDropBatch(stacks, index, 10)
+	if !ok {
+		t.Fatal("batch 预检被拒绝")
+	}
+	got := next[0]
+	if got.Generation != 3 || got.AgeTicks != 17 || got.Stack.Count != 2 ||
+		got.PickupDelayTicks != 10 {
+		t.Fatalf("batch 合并 = %+v", got)
 	}
 }
