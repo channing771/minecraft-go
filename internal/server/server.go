@@ -54,6 +54,7 @@ type Server struct {
 	saveJobs        chan saveJob
 	saveCompletions chan saveCompletion
 	autosaveActive  bool
+	metadataSave    metadataSaveState
 	retry           map[storage.RegionKey][]retrySave
 	retryInFlight   map[uint64]retrySave
 	nextRetryID     uint64
@@ -237,6 +238,7 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 	server.appendChunkRequests(chunkJobLoad, result.Acquire)
 	server.appendChunkRequests(chunkJobGenerate, result.Generate)
 	server.schedulePersistence(result.Tick)
+	server.scheduleMetadataSave(result.Tick, result.WorldTimeTicks)
 	server.updatePersistenceBackpressure()
 	if !server.backpressured {
 		server.scheduleChunkJobs()

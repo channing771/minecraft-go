@@ -95,6 +95,9 @@ func (server *Server) Shutdown(ctx context.Context) error {
 	if err := server.flushFrozen(ctx); err != nil {
 		return err
 	}
+	if err := server.flushMetadata(ctx); err != nil {
+		return err
+	}
 	if server.storePhase == storeShutdownNeedsSync {
 		if err := server.store.Sync(ctx); err != nil {
 			return server.persistenceErrorWithContext(fmt.Errorf("sync world: %w", err), ctx)
@@ -183,6 +186,60 @@ func (server *Server) flushFrozen(ctx context.Context) error {
 				return server.shutdownOwnerContextError(ctx.Err(), nil, pending)
 			}
 			continue
+		}
+
+		select {
+		case completion := <-server.saveCompletions:
+			server.stepMu.Lock()
+			err := server.applySaveCompletion(completion)
+			server.stepMu.Unlock()
+			if err != nil {
+				return server.persistenceErrorWithContext(err, ctx)
+			}
+		case <-ctx.Done():
+			return server.shutdownOwnerContextError(ctx.Err(), nil, nil)
+		}
+	}
+}
+
+// flushMetadata 把冻结后的最终权威世界时间纳入可重试关服屏障。
+// 失败时返回错误并保留可重试状态，磁盘上的旧 metadata 保持完整。
+func (server *Server) flushMetadata(ctx context.Context) error {
+	server.stepMu.Lock()
+	target := server.engine.WorldTime()
+	server.metadataSave.latest = target
+	server.stepMu.Unlock()
+
+	for {
+		server.stepMu.Lock()
+		if err := server.drainSaveCompletionsWithError(); err != nil {
+			server.stepMu.Unlock()
+			return server.persistenceErrorWithContext(err, ctx)
+		}
+		inFlight := server.metadataSave.inFlight
+		done := !inFlight && server.metadataSave.committed >= target
+		metadata := server.store.Metadata()
+		metadata.WorldTimeTicks = target
+		server.stepMu.Unlock()
+		if done {
+			return nil
+		}
+
+		if !inFlight {
+			// 冻结后没有其他调度者，阻塞投递只等待 worker 取走这份最终快照。
+			select {
+			case server.saveJobs <- saveJob{
+				Kind:     saveKindMetadata,
+				Metadata: metadata,
+				Attempt:  1,
+			}:
+				server.stepMu.Lock()
+				server.metadataSave.pending = false
+				server.metadataSave.inFlight = true
+				server.stepMu.Unlock()
+			case <-ctx.Done():
+				return server.shutdownOwnerContextError(ctx.Err(), nil, nil)
+			}
 		}
 
 		select {

@@ -20,11 +20,11 @@
 
 ## 4. 权威世界时间与协议 v9
 
-- [ ] 4.1 在 `internal/sim` 先写失败测试，覆盖构造时恢复绝对时间、每次 `Step` 恰好加一、23999→24000 显示周期、八名玩家同 tick 发布相同时间、稳定推进零分配和重放确定性。
-- [ ] 4.2 修改 `internal/sim/engine.go`、`player.go` 及构造调用，让 simulation owner 唯一持有时间并把本 tick 最终值放入固定玩家更新；不得读取墙钟、storage、network 或 render。
-- [ ] 4.3 在 `internal/network` 先写失败的 codec golden、固定 payload、Validate、registry 和登录测试：协议为 v9、`PlayerState` 末尾携带 `uint64 WorldTimeTicks`、packet ID 不变、v8 在 Play 前拒绝。
-- [ ] 4.4 修改 `internal/network/message.go`、`codec.go`、`packet.go`，并在 `internal/server/publication.go`、`internal/client` 与 `cmd/mcgo` 只加入编译和状态映射所需字段；客户端继续按 `ServerTick` 忽略旧状态，不增加独立时间消息。
-- [ ] 4.5 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/network ./internal/client ./internal/server -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 同步协议 v9 权威世界时间`。
+- [x] 4.1 在 `internal/sim` 先写失败测试，覆盖构造时恢复绝对时间、每次 `Step` 恰好加一、23999→24000 显示周期、八名玩家同 tick 发布相同时间、稳定推进零分配和重放确定性。
+- [x] 4.2 修改 `internal/sim/engine.go`、`player.go` 及构造调用，让 simulation owner 唯一持有时间并把本 tick 最终值放入固定玩家更新；不得读取墙钟、storage、network 或 render。
+- [x] 4.3 在 `internal/network` 先写失败的 codec golden、固定 payload、Validate、registry 和登录测试：协议为 v9、`PlayerState` 末尾携带 `uint64 WorldTimeTicks`、packet ID 不变、v8 在 Play 前拒绝。
+- [x] 4.4 修改 `internal/network/message.go`、`codec.go`、`packet.go`，并在 `internal/server/publication.go`、`internal/client` 与 `cmd/mcgo` 只加入编译和状态映射所需字段；客户端继续按 `ServerTick` 忽略旧状态，不增加独立时间消息。
+- [x] 4.5 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/network ./internal/client ./internal/server -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 同步协议 v9 权威世界时间`。
 
 ## 5. 有界 metadata 自动保存与关服屏障
 
