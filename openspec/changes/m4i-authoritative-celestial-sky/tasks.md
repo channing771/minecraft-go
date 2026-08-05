@@ -39,7 +39,7 @@
 
 ## 8. 定位并修复 v13 性能回归
 
-- [ ] 8.1 先做不可提升的非正式诊断，不运行旧候选正式 producer：使用缩短阶段、独立 `diag` 路径和一次一个变量的临时 mutation，对比完整天空、跳过 sky draw、保留 draw 但简化 fragment 工作；结合现有阶段内存分解与 `GODEBUG=gctrace=1` 区分 Go 堆、Go runtime 和原生图形资源。每个 mutation 后恢复源码，诊断输出不得传给 `perfcheck` 或基线；把命令、HEAD、差异和结论记录到 `docs/notes/perf-baseline.md` 的失败证据段。
+- [ ] 8.1 先做不可提升的非正式诊断，不运行旧候选正式 producer：使用缩短阶段、独立 `diag` 路径和一次一个变量的临时 mutation，快速筛选完整天空、跳过 sky draw、保留 draw 但简化 fragment 工作；结合现有阶段内存分解与 `GODEBUG=gctrace=1` 区分 Go 堆、Go runtime 和原生图形资源。任何涉及 flying RSS 的根因假设在修复前必须用未改变的 `60s/120s` 阶段确认一次。每个 mutation 后恢复源码，诊断输出不得传给 `perfcheck` 或基线；把命令、HEAD、差异和结论记录到 `docs/notes/perf-baseline.md` 的失败证据段。
 - [ ] 8.2 根据 8.1 的单一根因先写失败测试或可重复的最小性能检查，再最小修复 flying/GPU 采样期间的资源滞留；不得提高 `clientMemoryLimit`、`2GiB` RSS、消息/mesher/queue 上限或减少天空 workload。运行受影响包 race 测试、零分配测试与同一诊断检查，证明修复前后只有目标内存来源变化。
 - [ ] 8.3 在 RSS 闭合后，用 headless 像素测试锁定正午/午夜、太阳/月亮方向、固定星图和地形遮挡，再最小减少等价 shader 工作；不得减少每帧一次 sky draw、降低 2560x1440 或加入纹理。运行 `go test ./internal/render -run 'TestSky|TestRendererRenderDoesNotAllocate' -race -count=1`，并用不可提升的 v13 诊断确认 flying p99 `<12ms`。
 - [ ] 8.4 核对最终实现没有改变 draw 数量、固定分辨率、阶段时长、样本、场景运动或指标定义，保持 scenario v13 与唯一 `12:13` 迁移；若任一项必须改变，停止实现并先把 proposal、delta specs、design、tasks 和 producer 更新为 v14。

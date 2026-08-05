@@ -76,7 +76,7 @@ terrain camera uniform 保持现有 `80` 字节布局；sky uniform 使用 `96` 
 
 首个冻结候选 `f7d8f261e910863e189666f6e2181e606996f42f` 在完整门禁、五分钟冷却、两次静稳预检和精确授权后只执行了一次 Memory producer。still 为 p99 `5.702ms`、RSS `1378.9MiB`；flying 为 p99 `12.175ms`、RSS `2280.9MiB`；GPU 采样后进程历史峰值升至 `2452.2MiB`，随后八会话服务端探针因 `rss=2571304960` 超过既有 `2GiB` 上限而拒绝结果。producer 以 exit 1 结束，没有生成 JSON，未运行 `perfcheck` 或 TCP，M5/M2 基线字节均未改变。
 
-修复不从调整门禁开始。第一阶段只执行明确标记、不可提升的诊断运行：使用缩短阶段和一次一个变量的临时 mutation，对比完整天空、跳过 sky draw、保留 draw 但简化 fragment 工作；同时用现有阶段内存分解与 `GODEBUG=gctrace=1` 区分 Go 堆、Go runtime 与原生图形资源。临时 mutation 必须在每个实验后恢复，不进入候选提交；若这些证据仍不能定位对象来源，才增加最小的 benchmark-only heap profile instrumentation，并在修复提交前移除。
+修复不从调整门禁开始。第一阶段只执行明确标记、不可提升的诊断运行：先用缩短阶段和一次一个变量的临时 mutation 快速筛选完整天空、跳过 sky draw、保留 draw 但简化 fragment 工作；同时用现有阶段内存分解与 `GODEBUG=gctrace=1` 区分 Go 堆、Go runtime 与原生图形资源。任何涉及 flying RSS 的假设在进入修复前，都必须用原封不动的 `60s/120s` still/flying 时长确认一次，不能用缩短阶段代替正式 workload 的资源结论。临时 mutation 必须在每个实验后恢复，不进入候选提交；若这些证据仍不能定位对象来源，才增加最小的 benchmark-only heap profile instrumentation，并在修复提交前移除。
 
 第二阶段先修复 RSS 根因，再处理 frame time。稳定 `Renderer.Render` 已有真实候选零分配测试，因此不能把“零 Go 分配”等同于“进程无资源滞留”；诊断必须覆盖 flying 的区块周转、sky command encoding、GPU sample 后回收和 `ru_maxrss` 的生命周期峰值。frame time 优化只允许减少等价 shader 工作，例如避免不可见星空的 hash 工作或合并重复方向计算；正午/午夜像素、太阳/月亮方向、固定星图、一次 fullscreen draw 与 uniform 契约必须保持不变。
 
