@@ -1,22 +1,22 @@
 ## MODIFIED Requirements
 
 ### Requirement: 远端 GPU 完成探针边界稳定
-scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集恰好 2048 个远端角色与昵称绘制样本；每个样本 MUST 由 GPU 时间戳查询给出该次绘制在 GPU 上的执行时间，MUST NOT 使用「提交到阻塞轮询返回」的墙钟差，也不得包含标签准备、命令编码或资源释放。设备不支持时间戳查询时，benchmark MUST 以明确错误失败且不写出报告，MUST NOT 回退到墙钟测量。自动执行 MUST 保持无窗口，不得启动或聚焦交互式客户端。
+scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `remote_gpu_complete`。一个样本 MUST 是一批固定数量远端角色与昵称绘制在同一个 command buffer 中提交、只等待一次完成的总耗时除以该批次数量；样本 MUST NOT 是单次提交到阻塞轮询返回的墙钟差，也不得包含标签准备、命令编码或资源释放。批次数量与样本数 MUST 固定且记录在报告中。自动执行 MUST 保持无窗口，不得启动或聚焦交互式客户端。
 
-#### Scenario: 样本反映 GPU 执行时间而非轮询节拍
-- **GIVEN** 一次远端绘制命令已经完成编码
+#### Scenario: 样本反映绘制成本而非轮询节拍
+- **GIVEN** 宿主的完成等待实现存在固定节拍开销
 - **WHEN** benchmark 记录一次 `remote_gpu_complete` 样本
-- **THEN** 样本 MUST 取自该次绘制在 GPU 上的开始与结束时间戳之差，且 MUST NOT 因宿主轮询实现的固定节拍而被量化
+- **THEN** 该节拍在一个样本内 MUST 最多出现一次并被批次数量摊薄，样本值 MUST 表示每次绘制的平均成本
+
+#### Scenario: 分位数不再被量化到固定步长
+- **GIVEN** 一次完整的 scenario v12 运行
+- **WHEN** 比较 `remote_gpu_complete` 的 p50 与 p95
+- **THEN** p95 相对 p50 的比值 MUST 明显小于 `2`，不得呈现相邻取值成整数倍的量化分布
 
 #### Scenario: 空绘制与真实绘制可区分
-- **GIVEN** 同一台设备上分别提交一次空绘制与一次完整远端角色绘制
+- **GIVEN** 同一台设备上分别以相同批次数量提交空绘制与完整远端角色绘制
 - **WHEN** 两者都按 `remote_gpu_complete` 的方式取样
 - **THEN** 完整绘制的中位数 MUST 明显大于空绘制的中位数，证明指标携带绘制信号
-
-#### Scenario: 缺少时间戳能力时明确失败
-- **GIVEN** 适配器不支持 GPU 时间戳查询
-- **WHEN** 开发者或 CI 运行 benchmark
-- **THEN** 运行 MUST 以说明该能力缺失的错误失败，且 MUST NOT 写出任何性能报告
 
 #### Scenario: 首个样本等待传输收尾完成
 - **GIVEN** benchmark 的 still/flying 阶段已经结束
@@ -33,14 +33,14 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集恰�
 
 #### Scenario: v12 报告样本完整
 - **WHEN** benchmark 成功生成一份 scenario v12 报告
-- **THEN** `remote_gpu_complete.samples` MUST 等于 `2048`，且 p50、p95、p99 和 max MUST 完整、为正并保持单调
+- **THEN** `remote_gpu_complete.samples` MUST 等于配置的固定样本数，且 p50、p95、p99 和 max MUST 完整、为正并保持单调
 
 #### Scenario: 自动性能验证不创建窗口
 - **WHEN** 开发者或 CI 运行 scenario v12 benchmark
 - **THEN** 系统 MUST 使用 headless device 和离屏纹理，不得创建、启动或聚焦游戏窗口
 
 ### Requirement: 工作负载变化使用新场景版本
-改用 GPU 时间戳计时并加入阶段间冷却窗口后的 benchmark 报告 MUST 标记为 scenario v12；既有 scenario v6/v7/v8/v9/v10/v11 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。v11 与 v12 之间 MUST 只通过显式授权迁移，且迁移只执行完整性与绝对门禁。
+改用批量分摊计时并加入阶段间冷却窗口后的 benchmark 报告 MUST 标记为 scenario v12；既有 scenario v6/v7/v8/v9/v10/v11 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。v11 与 v12 之间 MUST 只通过显式授权迁移，且迁移只执行完整性与绝对门禁。
 
 #### Scenario: v12 同场景比较
 - **WHEN** baseline 与 current 都是完整的 scenario v12 报告
@@ -71,7 +71,7 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集恰�
 - **THEN** 比较器 MUST 拒绝比较，且不得以场景升级为由执行跨硬件归一化
 
 ### Requirement: 性能阈值保持不变
-scenario v8 及后续场景（包括 v12）MUST 继续使用现有 still、flying、RSS、服务端 tick、GPU 和 Memory/TCP 比较阈值；GPU 计时方式变化与冷却窗口不得提高 `20%` 相对回归阈值或放宽绝对门禁。
+scenario v8 及后续场景（包括 v12）MUST 继续使用现有 still、flying、RSS、服务端 tick、GPU 和 Memory/TCP 比较阈值；GPU 计时口径变化与冷却窗口不得提高 `20%` 相对回归阈值或放宽绝对门禁。
 
 #### Scenario: v12 飞行尾延迟超限
 - **WHEN** scenario v12 的 flying p99 大于或等于 `12ms`
@@ -92,7 +92,7 @@ scenario v8 及后续场景（包括 v12）MUST 继续使用现有 still、flyin
 - **THEN** 该指标 MUST NOT 因跨越量化步长而报告相对回归失败，但其绝对上限门禁 MUST 继续生效
 
 #### Scenario: 高分辨率指标保留相对门禁
-- **GIVEN** 某个指标由 GPU 时间戳或纳秒级墙钟直接给出且未被量化
+- **GIVEN** 某个指标的测量分辨率远细于 `20%` 判定阈值
 - **WHEN** 同硬件、同场景的该指标退化超过 `20%`
 - **THEN** 性能门禁 MUST 失败
 
