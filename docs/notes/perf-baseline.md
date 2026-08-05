@@ -1,51 +1,36 @@
 # 性能基线
 
-## 当前已接受的 M5 scenario v10 基线
+## 当前已接受的 M5 scenario v12 基线
 
-2026-08-04 在冻结提交 `8fa7c08f327286223fb812c2f0f65f2aa2dcba03` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
+2026-08-05 在冻结提交 `a35be7f206dea52954716e6ca156b25b2622fb41` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
 
-- 当前 Memory 基线：`docs/notes/perf-baseline-m5.json`，SHA-256 `f681a888032bb3da6c96c854f66415d4268d26cada3bf407136b9a4adfc5a8b4`
-- 正式 Memory 报告：`/tmp/mcgo-m5-v10-8fa7c08f3272-memory.json`，SHA-256 同上
-- Memory 日志：`/tmp/mcgo-m5-v10-8fa7c08f3272-memory.log`，SHA-256 `6f44b9ae8d9dd54d9683f75020c455e554f26053c181d987b406f70567f18144`
-- 正式 TCP 报告：`/tmp/mcgo-m5-v10-8fa7c08f3272-tcp.json`，SHA-256 `cdfc2946967b00dc0cc90853c45ca005b8b9dd6d9a429c9e5d0454cbdb37e8fa`
-- TCP 日志：`/tmp/mcgo-m5-v10-8fa7c08f3272-tcp.log`，SHA-256 `dccce299294701d4279b6ccde43a0e9ee9478445f8d87885d6876a46c9614074`
-- 被替代的 M5 scenario v9 Memory 基线：提交 `96deb04ed9f9c396b4df8dbeed145be872ac9af7`，SHA-256 `70488080e09eb9fa52ce16f162a15768fd8d2bef85511c5e629a663e76140283`
+- 当前 Memory 基线：`docs/notes/perf-baseline-m5.json`，SHA-256 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`
+- 正式 Memory 报告：`/tmp/mcgo-m5-v12-a35be7f-memory.json`，SHA-256 同上
+- Memory 日志：`/tmp/mcgo-m5-v12-a35be7f-memory.log`，SHA-256 `4da8b75123db58272d839e9d5cda28352c68da87ca3c47d15b9d6015e7112c69`
+- 正式 TCP 报告：`/tmp/mcgo-m5-v12-a35be7f-tcp.json`，SHA-256 `0e36342a81b0877b2fa6d247beff5cd76a457675610e52eeb251b8939da384b5`
+- TCP 日志：`/tmp/mcgo-m5-v12-a35be7f-tcp.log`，SHA-256 `5f27c4af93818f7165eac38122354e9c33588566f072998534d6b51eb4a56d0a`
+- 被替代的 M5 scenario v10 基线：SHA-256 `f681a888032bb3da6c96c854f66415d4268d26cada3bf407136b9a4adfc5a8b4`，提交 `8fa7c08f327286223fb812c2f0f65f2aa2dcba03`
 - 未改动的 M2 scenario v6 基线：SHA-256 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`
 
-完整门禁结束后自然冷却至少 5 分钟。授权前两次采样间隔 49 秒，1 分钟/5 分钟负载分别为 `3.93/3.63` 和 `3.33/3.53`；两次均为 AC 供电、电量 97%、AC 低电量模式关闭且无遗留 `mcgo`/`perfcheck`。Memory 启动前复核为负载 `3.10/3.34`、AC 供电、电量 98%、低电量模式关闭、HEAD/路径不变且无遗留进程。没有主动终止用户进程、清理缓存或筛选重跑。
+启动前的环境：AC 供电、电量 `100%`、低电量模式关闭、无遗留 `mcgo`/`perfcheck` 进程、两个输出路径均不存在、tracked 工作树干净。授权前一小时机器上另有 iOS 模拟器等进程使负载达到 `9.20/12.15`，等这些进程退出、负载回落到 `2.61` 后才启动；没有终止任何用户进程，也没有筛选或重跑结果。
 
 以下四条正式命令各执行一次且均为 exit 0，全程没有启动或聚焦前台窗口：
 
 ```sh
 set -o pipefail
-TERM=xterm-256color zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/tmp/mcgo-m5-v10-8fa7c08f3272-memory.json'" | tee /tmp/mcgo-m5-v10-8fa7c08f3272-memory.log
-zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '/tmp/mcgo-m5-v10-8fa7c08f3272-memory.json' --max-regression 0.20 --allow-scenario-upgrade 9:10"
-set -o pipefail
-TERM=xterm-256color zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '/tmp/mcgo-m5-v10-8fa7c08f3272-tcp.json'" | tee /tmp/mcgo-m5-v10-8fa7c08f3272-tcp.log
-zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline '/tmp/mcgo-m5-v10-8fa7c08f3272-memory.json' --current '/tmp/mcgo-m5-v10-8fa7c08f3272-tcp.json' --max-regression 0.20"
+TERM=xterm-256color zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/tmp/mcgo-m5-v12-a35be7f-memory.json'"
+zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '/tmp/mcgo-m5-v12-a35be7f-memory.json' --max-regression 0.20 --allow-scenario-upgrade 10:12"
+TERM=xterm-256color zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '/tmp/mcgo-m5-v12-a35be7f-tcp.json'"
+zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline '/tmp/mcgo-m5-v12-a35be7f-memory.json' --current '/tmp/mcgo-m5-v12-a35be7f-tcp.json' --max-regression 0.20"
 ```
 
-Memory 先通过 v9→v10 报告完整性、同硬件和全部当前绝对门禁；TCP 随后通过相对该 Memory 报告的同场景跨 transport 门禁。Memory/TCP 的 still p99 为 `7.011/6.683ms`，flying p99 为 `7.766/7.258ms`；两份 `remote_gpu_complete` 均包含 2048 个样本。提升后另执行一次 TCP→TCP 自校验和一次 `perf-baseline-m5.json`→Memory 精确副本校验，两者均通过；它们只读取既有 JSON，没有重跑 producer。详细失败历史、阶段数据和预检证据见 `perf-baseline-m5.md`。
+Memory 先通过 v10→v12 报告完整性、同硬件与全部当前绝对门禁；TCP 随后通过相对该 Memory 报告的同场景跨 transport 门禁。Memory/TCP 的 still p99 为 `5.956/4.586ms`，flying p99 为 `9.488/9.872ms`，`remote_gpu_complete` 每次绘制摊薄成本 p50 为 `0.1057/0.0918ms`，各含 `128` 个样本、每样本摊薄 `256` 次绘制。进程 RSS 峰值为 `1672.8/1644.7MiB`，相对 `2GiB` 上限留有 `375/403MiB` 余量。
 
-## M5 scenario v9 历史基线
+## 被终止的 M4G scenario v11 正式链
 
-2026-08-04 在冻结提交 `96deb04ed9f9c396b4df8dbeed145be872ac9af7` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。采集从电池 79% 放电开始，结束时为 73%，启动前负载为 `5.76/4.87/4.14`；这组现实条件属于基线证据，不通过重跑筛选结果。
+M4G 曾在冻结提交 `5eea1310be620f28d8894329086f27b4a12ec546` 上执行 v11 正式链：Memory 报告通过显式 `10:11` 迁移与全部绝对门禁，但 Memory→TCP 跨 transport 比较报出 `remote_gpu_complete p95_ms` 退化 `94.4%`（`1.300` 对 `2.527`），而同一对报告的 p50（`1.279` 对 `1.279`）与 p99（`2.547` 对 `2.552`）几乎不变。
 
-- 当时的 Memory 基线：SHA-256 `70488080e09eb9fa52ce16f162a15768fd8d2bef85511c5e629a663e76140283`
-- 正式 Memory 报告：`/tmp/mcgo-m5-v9-96deb04ed9f9-memory.json`，SHA-256 同上
-- 正式 TCP 报告：`/tmp/mcgo-m5-v9-96deb04ed9f9-tcp.json`，SHA-256 `0ad12f022882159090115873678e4d7b7b3b7a489f40e870e8de0f4197b34b9e`
-- 被替代的 scenario v8 Memory JSON：SHA-256 `f5d7420535f41d88497cd91178eef9baf138bfa7f73efb487efc06bc02322c8e`；历史说明保留在 `perf-baseline-m5.md` 和 Git 历史中
-
-以下四条正式命令各执行一次且均为 exit 0，没有重跑，也没有启动或聚焦前台窗口：
-
-```sh
-zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m5-v9-96deb04ed9f9-memory.json'
-zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/mcgo-m5-v9-96deb04ed9f9-memory.json --max-regression 0.20 --allow-scenario-upgrade 8:9'
-zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output /tmp/mcgo-m5-v9-96deb04ed9f9-tcp.json'
-zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/mcgo-m5-v9-96deb04ed9f9-memory.json --current /tmp/mcgo-m5-v9-96deb04ed9f9-tcp.json --max-regression 0.20'
-```
-
-Memory 报告先通过 v8→v9 完整性、同硬件与绝对门禁；TCP 随后通过相对该 Memory 报告的同场景跨 transport 门禁。Memory/TCP 飞行阶段分别为 `621.8/638.5 FPS`、p95 `3.114/2.968ms`，`remote_gpu_complete` 都包含 2048 个样本。
+根因与 M4G 无关：该指标当时用「提交到阻塞轮询返回」的墙钟差逐次计时，实测提交空 command buffer 与提交一次 2560x1440 clear pass 的 p50 相同（`1.276ms` 与 `1.284ms`），取值被宿主轮询实现量化到约 `1.28ms` 的整数倍。按规则该正式链立即停止，两份报告只保留为诊断证据、未被提升；v11 从未成为任何硬件的基线，其 workload 变化并入本页上方的 scenario v12。用修复后的判据回放那对报告，比较通过，印证该次失败确实是门禁缺陷。
 
 ## 当前 scenario v12 比较规则
 
@@ -60,10 +45,6 @@ benchmark 还在预热与 still、still 与 flying、flying 与 GPU 采样之间
 固定 `2560x1440` 离屏目标、still/flying 阶段时长、RSS、200 个 tick 样本、既有绝对门禁与 `20%` 相对退化阈值均未改变。当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 10:12`。该参数反映真实的基线历史：scenario v11 的正式链因上述 GPU 计时缺陷失败，v11 从未成为任何硬件的基线，因此没有经过 v11 的迁移路径。默认跨场景比较、反向、跨更多级和 `11:12`、`10:11`、`9:10` 参数均被拒绝；v6–v11 历史报告仍可读取，同版本报告仍可比较。
 
 无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。
-
-## M4G scenario v11 历史说明
-
-M4G 加入权威世界时间与直射天空光后标记为 scenario v11，其正式链在 Memory→TCP 跨 transport 比较失败：`remote_gpu_complete p95_ms` 报出 `94.4%` 退化（`1.300` 对 `2.527`），而同一对报告的 p50（`1.279` 对 `1.279`）与 p99（`2.547` 对 `2.552`）几乎不变。该失败是上述门禁缺陷所致，不是 M4G 引入的性能退化；两份报告只保留为诊断证据，未被提升为基线。
 
 ## M4F scenario v10 历史比较规则
 
