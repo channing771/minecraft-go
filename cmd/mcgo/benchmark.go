@@ -158,6 +158,9 @@ func runBenchmark(app *application, outputPath string) error {
 	if err := multiplayerProbe.measureGPUCompletionAfterTransportClose(app); err != nil {
 		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
 	}
+	if rss, err := client.ProcessRSSBytes(); err == nil {
+		fmt.Printf("GPU 采样完成：进程 RSS 峰值 %.1fMiB\n", float64(rss)/(1<<20))
+	}
 	// GPU 采样同样是满载阶段，其后也要冷却并回收，才轮到服务端探针。
 	runBenchmarkCooldown(app, benchmarkCooldown)
 	serverMultiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)

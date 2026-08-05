@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -257,6 +258,9 @@ func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) erro
 		// 计时区间之外再推进一次设备队列，确保本样本的 command buffer 被回收，
 		// 不会累积到下一个样本触发 Metal 的预算上限。
 		app.dev.Poll(true)
+		// 每个样本都回收：ru_maxrss 是进程生命周期的历史峰值，一旦被推高就无法
+		// 降回，因此必须阻止批量分摊产生的对象在采样过程中累积。
+		runtime.GC()
 	}
 	return nil
 }

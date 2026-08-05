@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,5 +105,27 @@ func TestScenarioV12GPUCompletionBatchIsRecordedInReport(t *testing.T) {
 	summary := probe.Summary()
 	if got := summary.RemoteGPUCompleteBatch; got != client.ScenarioV12GPUCompletionBatch {
 		t.Fatalf("报告中的批次数量 = %d，想要 %d", got, client.ScenarioV12GPUCompletionBatch)
+	}
+}
+
+func TestScenarioV12GPUCompletionReclaimsEverySample(t *testing.T) {
+	// ru_maxrss 是进程生命周期的历史峰值，一旦被推高就无法降回。
+	// 因此批量分摊产生的对象必须逐样本回收，不能等到阶段之间的冷却。
+	source, err := os.ReadFile("multiplayer_benchmark.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(source)
+	start := strings.Index(body, "func (probe *multiplayerClientProbe) measureGPUCompletion(")
+	if start < 0 {
+		t.Fatal("找不到 measureGPUCompletion")
+	}
+	end := strings.Index(body[start:], "\nfunc ")
+	if end < 0 {
+		end = len(body) - start
+	}
+	sampling := body[start : start+end]
+	if !strings.Contains(sampling, "runtime.GC()") {
+		t.Fatal("采样循环内没有逐样本回收，RSS 峰值会随样本数累积")
 	}
 }
