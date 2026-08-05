@@ -60,6 +60,29 @@ func runBenchmarkCooldown(app *application, duration time.Duration) {
 	}
 }
 
+// printMemoryBreakdown 打印进程 RSS 峰值与 Go 运行时的内存构成。
+//
+// RSS 取自 ru_maxrss，是进程生命周期的历史峰值，回收之后不会下降；
+// 把它与 Go 堆分开显示，才能判断峰值来自 Go 堆还是原生分配。
+func printMemoryBreakdown(label string) {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	const mib = 1 << 20
+	rss, err := client.ProcessRSSBytes()
+	if err != nil {
+		return
+	}
+	fmt.Printf(
+		"%s 内存：RSS 峰值 %.1fMiB｜Go 堆在用 %.1fMiB｜Go 堆保留 %.1fMiB｜Go 运行时合计 %.1fMiB｜非 Go %.1fMiB\n",
+		label,
+		float64(rss)/mib,
+		float64(stats.HeapAlloc)/mib,
+		float64(stats.HeapSys)/mib,
+		float64(stats.Sys)/mib,
+		(float64(rss)-float64(stats.Sys))/mib,
+	)
+}
+
 // benchmarkReportSkeleton 返回只含固定运行参数的报告骨架，供测试断言这些参数被记录。
 func benchmarkReportSkeleton() client.PerfReport {
 	return client.PerfReport{
@@ -115,6 +138,7 @@ func runBenchmark(app *application, outputPath string) error {
 	if err != nil {
 		return err
 	}
+	printMemoryBreakdown("still 后")
 	runBenchmarkCooldown(app, benchmarkCooldown)
 	flyingStart := app.camera.Pos
 	probe := server.NewTerrainProbe(benchmarkSeed)
@@ -131,6 +155,7 @@ func runBenchmark(app *application, outputPath string) error {
 	if err != nil {
 		return err
 	}
+	printMemoryBreakdown("flying 后")
 	finalCenter := app.center
 	if err := waitForBenchmarkCenterConsistency(
 		app,
@@ -158,9 +183,7 @@ func runBenchmark(app *application, outputPath string) error {
 	if err := multiplayerProbe.measureGPUCompletionAfterTransportClose(app); err != nil {
 		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
 	}
-	if rss, err := client.ProcessRSSBytes(); err == nil {
-		fmt.Printf("GPU 采样完成：进程 RSS 峰值 %.1fMiB\n", float64(rss)/(1<<20))
-	}
+	printMemoryBreakdown("GPU 采样后")
 	// GPU 采样同样是满载阶段，其后也要冷却并回收，才轮到服务端探针。
 	runBenchmarkCooldown(app, benchmarkCooldown)
 	serverMultiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)

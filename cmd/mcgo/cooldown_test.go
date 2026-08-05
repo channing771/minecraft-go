@@ -36,3 +36,23 @@ func TestBenchmarkCooldownIsRecordedInReport(t *testing.T) {
 		t.Fatalf("报告中的冷却秒数 = %v，想要 %v", got, benchmarkCooldown.Seconds())
 	}
 }
+
+func TestClientMemoryLimitLeavesHeadroomAboveLiveHeap(t *testing.T) {
+	// 实测 flying 阶段的活跃堆峰值约 1252MiB。软上限必须明显高于它，
+	// 否则 GC 会长期贴着上限运行，把 CPU 与帧时间拖垮。
+	const observedLiveHeapMiB = 1252
+	limitMiB := clientMemoryLimit / (1 << 20)
+	if limitMiB <= observedLiveHeapMiB {
+		t.Fatalf("内存上限 %dMiB 不高于实测活跃堆 %dMiB", limitMiB, observedLiveHeapMiB)
+	}
+	if headroom := float64(limitMiB-observedLiveHeapMiB) / observedLiveHeapMiB; headroom < 0.15 {
+		t.Fatalf("内存上限相对活跃堆只有 %.1f%% 余量，想要至少 15%%", headroom*100)
+	}
+
+	// 上限加上非 Go 分配仍须明显低于既有 2GiB RSS 门禁。
+	const observedNonGoMiB = 230
+	const rssGateMiB = 2048
+	if projected := limitMiB + observedNonGoMiB; projected >= rssGateMiB {
+		t.Fatalf("预计 RSS 峰值 %dMiB 未低于门禁 %dMiB", projected, rssGateMiB)
+	}
+}

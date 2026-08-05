@@ -96,6 +96,19 @@ scenario v8 及后续场景（包括 v12）MUST 继续使用现有 still、flyin
 - **WHEN** 同硬件、同场景的该指标退化超过 `20%`
 - **THEN** 性能门禁 MUST 失败
 
+### Requirement: 客户端进程使用固定 Go 堆软上限
+客户端进程 SHALL 设置一个固定的 Go 堆软上限，使高周转阶段不会把尚未回收的空闲堆累积进进程 RSS 峰值。该上限 MUST 明显高于实测活跃堆峰值，避免 GC 长期贴近上限运行；加上非 Go 分配后 MUST 仍明显低于既有 RSS 门禁。设置该上限 MUST NOT 改变任何被采集指标的定义、样本数或阶段时长，也 MUST NOT 放宽 RSS 门禁本身。
+
+#### Scenario: 空闲堆不再进入 RSS 峰值
+- **GIVEN** flying 阶段的密集区块周转产生大量短命分配
+- **WHEN** 系统记录进程 RSS 峰值
+- **THEN** 峰值 MUST 明显低于不设上限时的峰值，且活跃数据量 MUST NOT 因此减少
+
+#### Scenario: 上限保留足够余量
+- **GIVEN** 实测的活跃堆峰值
+- **WHEN** 选定 Go 堆软上限
+- **THEN** 上限 MUST 高于活跃堆峰值并保留足够余量，使 still 与 flying 的帧时间分位数 MUST NOT 因 GC 变频繁而越过既有绝对门禁
+
 ### Requirement: benchmark 阶段之间执行固定冷却
 benchmark SHALL 在预热与 still、still 与 flying、flying 与 GPU 采样之间，以及 GPU 采样之后各执行一段固定时长的冷却；冷却期间 MUST NOT 提交渲染工作或推进相机脚本，并 SHALL 回收上一阶段产生的对象，避免其把后续阶段的 RSS 峰值推高。冷却时长 MUST 记录在报告中，且 MUST NOT 改变任何被采集指标的定义、样本数或阶段时长。
 

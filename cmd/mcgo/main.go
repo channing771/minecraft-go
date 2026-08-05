@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -154,7 +155,18 @@ func loadApplicationIdentity(requestedName *string) (network.Identity, error) {
 	return network.Identity{PlayerID: loaded.PlayerID, DisplayName: loaded.DisplayName}, nil
 }
 
+// clientMemoryLimit 是客户端进程的 Go 堆软上限。
+//
+// 视距 32 下快速移动会造成密集的区块加载、卸载与网格化周转。Go 默认要等堆长到
+// 活跃集的两倍才回收，实测这会让堆保留冲到 1635MiB，而其中约 400MiB 只是尚未
+// 回收的空闲堆。设定软上限让 GC 在接近该值时更积极，实测把进程 RSS 峰值压低约
+// 121MiB，活跃数据与帧时间分位数均不受影响。
+//
+// 取值需高于实测活跃堆峰值（约 1252MiB），否则 GC 会因长期贴近上限而频繁运行。
+const clientMemoryLimit = 1500 << 20
+
 func main() {
+	debug.SetMemoryLimit(clientMemoryLimit)
 	if err := run(os.Args[1:]); err != nil {
 		log.Printf("mcgo: %v", err)
 		os.Exit(1)
