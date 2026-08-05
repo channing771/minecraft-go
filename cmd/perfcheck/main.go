@@ -429,8 +429,12 @@ func validateV6Report(label string, report client.PerfReport) error {
 			report.Multiplayer.InterestDiff.Samples,
 		)
 	}
+	// v8–v11 逐次计时取 2048；v12 起改为批量分摊，样本数相应减少。
 	remoteGPUCompletionSamples := 256
-	if report.ScenarioVersion >= 8 {
+	switch {
+	case report.ScenarioVersion >= 12:
+		remoteGPUCompletionSamples = client.ScenarioV12GPUCompletionSamples
+	case report.ScenarioVersion >= 8:
 		remoteGPUCompletionSamples = client.ScenarioV8GPUCompletionSamples
 	}
 	latencies := []struct {

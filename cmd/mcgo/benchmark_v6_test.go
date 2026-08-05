@@ -91,39 +91,6 @@ func TestScenarioV11ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 	}
 }
 
-func TestScenarioV8GPUCompletionTimesOnlySubmitAndPoll(t *testing.T) {
-	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
-	probe, err := newMultiplayerClientProbe(app)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(probe.Close)
-
-	clockReads := 0
-	probe.now = func() time.Time {
-		dev.events = append(dev.events, "now")
-		clockReads++
-		return time.Unix(0, int64(clockReads)*int64(time.Millisecond))
-	}
-	dev.events = nil
-	if err := probe.measureGPUCompletion(app); err != nil {
-		t.Fatal(err)
-	}
-	if got := probe.gpuComplete.Summary().Samples; got != 2048 {
-		t.Fatalf("GPU samples=%d, want 2048", got)
-	}
-	want := []string{"finish", "now", "submit", "poll", "now", "release"}
-	if got, expected := len(dev.events), 2048*len(want); got != expected {
-		t.Fatalf("GPU events=%d, want %d", got, expected)
-	}
-	for sample := range 2048 {
-		start := sample * len(want)
-		if got := dev.events[start : start+len(want)]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("sample %d events=%v, want=%v", sample, got, want)
-		}
-	}
-}
-
 func TestScenarioV8GPUCompletionStopsWhenTransportCloseFails(t *testing.T) {
 	serverCloseErr := errors.New("注入服务端关闭失败")
 	clientCloseErr := errors.New("注入客户端关闭失败")

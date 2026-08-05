@@ -39,6 +39,19 @@ var (
 	flyDuration    = 120 * time.Second
 )
 
+// gpuCompletionMinSamples 返回该场景下 remote_gpu_complete 的最小样本数。
+// v8–v11 逐次计时取 2048；v12 起改为批量分摊，样本数相应减少。
+func gpuCompletionMinSamples(scenario int) int {
+	switch {
+	case scenario >= 12:
+		return client.ScenarioV12GPUCompletionSamples
+	case scenario >= 8:
+		return client.ScenarioV8GPUCompletionSamples
+	default:
+		return 256
+	}
+}
+
 func runBenchmark(app *application, outputPath string) error {
 	width, height := app.framebufferSize()
 	if width != 2560 || height != 1440 {
@@ -351,8 +364,8 @@ func validateBenchmarkReport(report client.PerfReport) error {
 			if name == "interest_diff" {
 				minimum = 1000
 			}
-			if name == "remote_gpu_complete" && report.ScenarioVersion >= 8 {
-				minimum = client.ScenarioV8GPUCompletionSamples
+			if name == "remote_gpu_complete" {
+				minimum = gpuCompletionMinSamples(report.ScenarioVersion)
 			}
 			if summary.Samples < minimum || summary.P50MS <= 0 || summary.P95MS <= 0 ||
 				summary.P99MS <= 0 || summary.MaxMS <= 0 {

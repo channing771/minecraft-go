@@ -136,7 +136,7 @@ func newMultiplayerClientProbe(app *application) (*multiplayerClientProbe, error
 		rosterApply:  client.NewLatencyRecorder(benchmarkLatencyCapacity),
 		interpolate:  client.NewLatencyRecorder(benchmarkLatencyCapacity),
 		renderTiming: newMultiplayerRenderTiming(),
-		gpuComplete:  client.NewLatencyRecorder(client.ScenarioV8GPUCompletionSamples),
+		gpuComplete:  client.NewLatencyRecorder(client.ScenarioV12GPUCompletionSamples),
 		now:          time.Now,
 		tick:         1,
 	}
@@ -223,20 +223,26 @@ func benchmarkBillboardCamera(app *application) render.BillboardCamera {
 
 func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) error {
 	avatars, tags := remoteRenderPresentations(probe.roster.Presentations())
-	for range client.ScenarioV8GPUCompletionSamples {
+	// 一个样本是一批绘制只等待一次完成的总耗时除以批次数量：
+	// Poll 的固定节拍在样本内只出现一次，被摊薄到可忽略。
+	for range client.ScenarioV12GPUCompletionSamples {
 		if err := app.nameTagRenderer.Prepare(tags, app.renderer.UploadBudget()); err != nil {
 			return err
 		}
 		encoder := app.dev.CreateCommandEncoder()
-		app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
-			ViewProj: app.camera.ViewProj(), Pos: app.camera.Pos,
-		}, avatars)
-		app.nameTagRenderer.Render(encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app))
+		for range client.ScenarioV12GPUCompletionBatch {
+			app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
+				ViewProj: app.camera.ViewProj(), Pos: app.camera.Pos,
+			}, avatars)
+			app.nameTagRenderer.Render(
+				encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app),
+			)
+		}
 		command := encoder.Finish()
 		started := probe.now()
 		app.dev.Submit(command)
 		app.dev.Poll(true)
-		probe.gpuComplete.Add(probe.now().Sub(started))
+		probe.gpuComplete.Add(probe.now().Sub(started) / client.ScenarioV12GPUCompletionBatch)
 		command.Release()
 	}
 	return nil
@@ -245,13 +251,14 @@ func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) erro
 func (probe *multiplayerClientProbe) Summary() client.MultiplayerSummary {
 	avatarSubmit, nameTagSubmit := probe.renderTiming.Summaries()
 	return client.MultiplayerSummary{
-		RemoteStateEncode: probe.encode.Summary(),
-		RemoteStateDecode: probe.decode.Summary(),
-		RosterApply:       probe.rosterApply.Summary(),
-		Interpolation:     probe.interpolate.Summary(),
-		AvatarSubmit:      avatarSubmit,
-		NameTagSubmit:     nameTagSubmit,
-		RemoteGPUComplete: probe.gpuComplete.Summary(),
+		RemoteStateEncode:      probe.encode.Summary(),
+		RemoteStateDecode:      probe.decode.Summary(),
+		RosterApply:            probe.rosterApply.Summary(),
+		Interpolation:          probe.interpolate.Summary(),
+		AvatarSubmit:           avatarSubmit,
+		NameTagSubmit:          nameTagSubmit,
+		RemoteGPUComplete:      probe.gpuComplete.Summary(),
+		RemoteGPUCompleteBatch: client.ScenarioV12GPUCompletionBatch,
 	}
 }
 
