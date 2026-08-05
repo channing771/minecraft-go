@@ -51,14 +51,14 @@
 
 ## 9. 候选版本完整门禁
 
-- [x] 9.1 对本 change 的 proposal、八份 delta specs、design、tasks 与实现逐项映射，修正任何不一致；确认没有耐久、木材、多原料、裂纹或共享进度的越界实现。
-- [x] 9.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 与 `openspec validate --all --strict --no-interactive`，任何失败只修根因且不得绕过 Hook 或放宽门禁。
-- [x] 9.3 运行协议 fuzz/benchmark、采掘微基准及相关存档 golden/fuzz；核对无前台游戏窗口、无遗留 benchmark 进程、tracked 工作树只含 M4F 预期文件。
-- [x] 9.4 勾选已完成任务并提交冻结候选 `chore: 关闭 M4F 权威计时采掘`；提交后不再修改 producer、场景、阈值或采掘热路径，除非新建修复提交并重新完成本组门禁。
+- [ ] 9.1 对本 change 的 proposal、八份 delta specs、design、tasks 与实现逐项映射，修正任何不一致；确认没有耐久、木材、多原料、裂纹或共享进度的越界实现。
+- [ ] 9.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 与 `openspec validate --all --strict --no-interactive`，任何失败只修根因且不得绕过 Hook 或放宽门禁。
+- [ ] 9.3 运行协议 fuzz/benchmark、采掘微基准及相关存档 golden/fuzz；核对无前台游戏窗口、无遗留 benchmark 进程、tracked 工作树只含 M4F 预期文件。
+- [ ] 9.4 勾选已完成任务并提交重新冻结候选 `chore: 重新冻结 M4F 正式候选`；提交后不再修改 producer、场景、阈值、采掘热路径或正式预检契约，除非新建修复提交并重新完成本组门禁。
 
 ## 10. 一次性 M5 scenario v10 基线
 
-- [ ] 10.1 在冻结候选提交上记录精确 HEAD、M2/M5 既有基线哈希、硬件/系统/Go 身份、供电与负载，确认两个全新临时输出路径不存在且无遗留进程；向用户报告边界并取得 Memory/TCP 各一次、失败即停且不得重跑的明确授权。
+- [ ] 10.1 在重新冻结候选的最后一个完整门禁进程退出后自然冷却至少 5 分钟，再间隔至少 30 秒采集两次宿主状态；确认两次 1 分钟/5 分钟 load average 都小于 `6.0`、AC 供电、低电量模式关闭、电池不少于 `50%` 且无遗留 `mcgo`/`perfcheck`。预检失败时在 producer 与授权前停止且不得主动清理宿主；通过后记录精确 HEAD、M2/M5 既有基线哈希、硬件/系统/Go 身份及两个全新报告路径和日志路径，向用户取得 Memory/TCP 各一次、失败即停且不得重跑的明确授权，并在 Memory 启动前复核相同条件。
 - [ ] 10.2 仅通过现有无窗口 benchmark 路径生成一次 M5 Memory v10 报告；用既有 v9 M5 基线和显式 `9:10` 执行完整性/绝对门禁，失败立即停止且不得生成 TCP 或覆盖基线。
 - [ ] 10.3 Memory 通过后生成一次同 HEAD 的 M5 TCP v10 报告，并执行 TCP 自校验及 Memory→TCP 同场景比较；失败立即停止且不得重跑或覆盖基线。
 - [ ] 10.4 两步都通过后，把 Memory 报告精确字节写入 `docs/notes/perf-baseline-m5.json`，更新两份性能记录的 HEAD、命令、哈希、环境和被替代 v9 身份；校验 M2 文件哈希未变后提交 `chore: 建立 M5 scenario v10 基线`。

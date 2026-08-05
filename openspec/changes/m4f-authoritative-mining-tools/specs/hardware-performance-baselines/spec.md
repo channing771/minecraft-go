@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: 新硬件基线只能由通过门禁的无窗口报告建立
-新建或升级硬件基线 MUST 来自当前冻结的 scenario v10、Memory transport、2560x1440 无窗口正式报告；该报告 MUST 通过完整性和绝对门禁，并 MUST 与同一硬件、同一场景的一次 TCP 报告通过现有跨 transport 比较后才能接受。升级既有硬件基线时 MUST 明确记录被替代场景和失败证据，不得把旧场景报告与新场景报告作相对回归证明。
+新建或升级硬件基线 MUST 来自当前冻结的 scenario v10、Memory transport、2560x1440 无窗口正式报告；正式报告启动前 MUST 通过 `bounded-benchmark-workload` 定义的宿主静稳预检。该报告 MUST 通过完整性和绝对门禁，并 MUST 与同一硬件、同一场景的一次 TCP 报告通过现有跨 transport 比较后才能接受。升级既有硬件基线时 MUST 明确记录被替代场景和失败证据，不得把旧场景报告与新场景报告作相对回归证明。
 
 #### Scenario: v10 正式链全部通过
 - **GIVEN** scenario v10 生产代码和计划已提交，且 Memory/TCP 使用两个全新临时路径
@@ -11,6 +11,14 @@
 #### Scenario: 正式链任一步失败
 - **WHEN** 无窗口报告生成、完整性门禁或跨 transport 比较任一步失败
 - **THEN** 项目 MUST 停止正式链，不得重跑失败步骤、放宽阈值、提升诊断报告或创建和覆盖正式基线
+
+#### Scenario: 宿主静稳预检不消耗正式运行机会
+- **WHEN** 静稳预检或 Memory 启动前只读复核失败
+- **THEN** 项目 MUST 不启动 producer、不创建正式输出且不把该次预检计为 Memory/TCP 正式运行；后续只有在重新通过预检并取得绑定新证据的明确授权后才能开始
+
+#### Scenario: 不主动改写宿主状态制造通过
+- **WHEN** 宿主静稳预检未通过
+- **THEN** 自动执行 MUST NOT 终止用户进程、清理系统缓存、切换供电模式或删除既有证据来制造通过条件，只能停止并保留只读证据
 
 #### Scenario: 工作负载修复后重新开始
 - **WHEN** 旧场景的正式链已经失败，且 benchmark 工作负载修复后升级为新场景

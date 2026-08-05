@@ -1090,9 +1090,9 @@ OpenSpec 覆盖：9.1–9.4。
 把 OpenSpec 任务 1–9 标为完成并提交：
 
     git add openspec/changes/m4f-authoritative-mining-tools
-    git commit -m "chore: 关闭 M4F 权威计时采掘"
+    git commit -m "chore: 重新冻结 M4F 正式候选"
 
-记录所得完整 HEAD。此后若没有新修复提交并重跑任务 9，不得改变 producer、阈值、scenario 或采掘热路径。
+记录所得完整 HEAD。此后若没有新修复提交并重跑任务 9，不得改变 producer、阈值、scenario、采掘热路径或正式预检契约。
 
 ---
 
@@ -1106,9 +1106,35 @@ OpenSpec 覆盖：10.1–10.4。
 - 两次运行都通过后修改：docs/notes/perf-baseline.md
 - 两次运行都通过后修改：docs/notes/perf-baseline-m5.md
 
-- [ ] 步骤 1：暂停并请求明确授权。
+**已停止的旧正式边界：**
 
-先采集只读身份：
+- 冻结 HEAD：`01d28d9f5b4eeedee4200bb62f35a42ca7c1d83c`；
+- 唯一一次 Memory 正式运行因 flying p99 `31.152ms` 未满足 `< 12ms` 绝对门禁而停止；
+- 正式日志：`/tmp/mcgo-m5-v10-01d28d9f5b4e-memory.log`，SHA-256 为 `4d4f4fe62e3de6c053b3f5ddf292b7057b35e2d12229fb18440da003575a5201`；
+- 未生成正式 JSON，未运行 TCP，未覆盖 M2/M5 基线；
+- 后续同 HEAD 诊断报告 SHA-256 为 `3fa70f241ad367b2de9be595b483a9d67790e179c9edf22e5495748486cc77bd`，日志 SHA-256 为 `a65383a2a6d2e69866b14955b0279588bb2ff1d5534b6b601be440ca7786a073`；它们只证明宿主负载污染，不得复制、改名或提升为正式证据。
+
+- [ ] 步骤 1：完成宿主静稳预检，再暂停并请求明确授权。
+
+从任务 9 的最后一个完整门禁进程退出时开始记录 UTC 时间，此后至少 5 分钟不运行新的全仓 race、fuzz、benchmark 或正式 producer。自然冷却结束后采集第一组只读证据：
+
+    date -u '+%Y-%m-%dT%H:%M:%SZ'
+    sysctl -n vm.loadavg
+    pmset -g batt
+    pmset -g custom
+    pgrep -fl 'mcgo|perfcheck'
+
+至少等待 30 秒，再重复相同五条命令采集第二组证据。两组都必须满足：
+
+- 1 分钟和 5 分钟 load average 均小于 `6.0`；
+- 当前供电为 `AC Power`；
+- `AC Power` 配置中的 `lowpowermode` 为 `0`；
+- 电池电量不少于 `50%`；
+- 不存在遗留 `mcgo` 或 `perfcheck` 进程。
+
+任一条件不满足就停止，不请求正式授权、不启动 producer、不创建或删除输出；不得主动终止用户进程、清理系统缓存或切换供电状态。之后可以在自然满足条件时重新执行只读预检，这不算重跑正式 benchmark。
+
+预检通过后采集精确身份：
 
     git rev-parse HEAD
     shasum -a 256 docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json
@@ -1117,19 +1143,7 @@ OpenSpec 覆盖：10.1–10.4。
     zsh -ic 'gvm use go1.26.0 >/dev/null && go version'
     pgrep -fl 'mcgo|perfcheck'
 
-报告：
-
-- frozen candidate HEAD;
-- SHA-256 of docs/notes/perf-baseline.json and docs/notes/perf-baseline-m5.json;
-- exact M5 hardware/OS/Go identity;
-- two new non-existent output paths containing the frozen HEAD;
-- Memory first, TCP second;
-- any failure stops the chain;
-- no rerun and no baseline overwrite on failure.
-
-用户明确授权这一精确边界前，不得执行正式 benchmark。
-
-- [ ] 步骤 2：解析并验证精确的一次性路径。
+解析四个新路径并确认均不存在：
 
     M4F_HEAD=$(git rev-parse --short=12 HEAD)
     M4F_MEMORY_REPORT=/tmp/mcgo-m5-v10-$M4F_HEAD-memory.json
@@ -1141,7 +1155,34 @@ OpenSpec 覆盖：10.1–10.4。
     test ! -e "$M4F_TCP_REPORT"
     test ! -e "$M4F_TCP_LOG"
 
-若任一路径已存在，正式运行前停止并与用户确定新的明确后缀；不得删除或覆盖旧证据。
+若任一路径已存在，授权前停止并与用户确定新的明确后缀；不得删除或覆盖旧证据。
+
+报告：
+
+- frozen candidate HEAD;
+- SHA-256 of docs/notes/perf-baseline.json and docs/notes/perf-baseline-m5.json;
+- exact M5 hardware/OS/Go identity;
+- two new non-existent report paths and their log paths, all containing the frozen HEAD;
+- the cooldown timestamp and both preflight samples;
+- Memory first, TCP second;
+- any failure stops the chain;
+- no rerun and no baseline overwrite on failure.
+
+用户明确授权这一精确边界前，不得执行正式 benchmark。
+
+- [ ] 步骤 2：授权后复核精确边界与一次性路径。
+
+    M4F_HEAD=$(git rev-parse --short=12 HEAD)
+    M4F_MEMORY_REPORT=/tmp/mcgo-m5-v10-$M4F_HEAD-memory.json
+    M4F_MEMORY_LOG=/tmp/mcgo-m5-v10-$M4F_HEAD-memory.log
+    M4F_TCP_REPORT=/tmp/mcgo-m5-v10-$M4F_HEAD-tcp.json
+    M4F_TCP_LOG=/tmp/mcgo-m5-v10-$M4F_HEAD-tcp.log
+    test ! -e "$M4F_MEMORY_REPORT"
+    test ! -e "$M4F_MEMORY_LOG"
+    test ! -e "$M4F_TCP_REPORT"
+    test ! -e "$M4F_TCP_LOG"
+
+若任一路径已存在，正式运行前停止并与用户确定新的明确后缀；不得删除或覆盖旧证据。重复一次 `git rev-parse HEAD`、`sysctl -n vm.loadavg`、`pmset -g batt`、`pmset -g custom` 和 `pgrep -fl 'mcgo|perfcheck'` 只读复核；HEAD、路径或任一静稳条件变化都停止，重新完成双采样并请求新授权，不消耗正式运行机会。
 
 - [ ] 步骤 3：通过既有无窗口路径只生成一次 Memory 报告。
 
