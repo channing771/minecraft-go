@@ -104,5 +104,5 @@ func benchmarkPlayerSave(revision uint64) PlayerSave {
 }
 
 func benchmarkPlayerMetadata() Metadata {
-	return Metadata{FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld}
+	return Metadata{FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld}
 }

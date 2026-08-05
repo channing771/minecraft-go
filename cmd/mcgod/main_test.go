@@ -40,7 +40,7 @@ func TestRunPassesMaxPlayersToHost(t *testing.T) {
 	var got int
 	err := run(context.Background(), []string{"--max-players=3"}, dependencies{
 		openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
-			return storage.NewMemory(storage.Metadata{FormatVersion: 1, Seed: 42}), nil
+			return storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: 42}), nil
 		},
 		listenTCP: func(string) (network.Listener, error) { return mcgodTestListener{}, nil },
 		newHost: func(config server.Config, _ server.Generator, _ storage.WorldStore) mcgodHost {
@@ -69,7 +69,7 @@ func TestParseOptionsRejectsInvalidArguments(t *testing.T) {
 func TestRunOpensWorldBeforeListeningAndUsesStoredSeed(t *testing.T) {
 	var events []string
 	store := storage.NewMemory(storage.Metadata{
-		FormatVersion:  1,
+		FormatVersion:  2,
 		Seed:           91,
 		SpawnDimension: core.Overworld,
 	})
@@ -109,7 +109,7 @@ func TestRunOpensWorldBeforeListeningAndUsesStoredSeed(t *testing.T) {
 }
 
 func TestRunClosesWorldWhenListeningFails(t *testing.T) {
-	store := &mcgodClosingStore{WorldStore: storage.NewMemory(storage.Metadata{FormatVersion: 1})}
+	store := &mcgodClosingStore{WorldStore: storage.NewMemory(storage.Metadata{FormatVersion: 2})}
 	listenErr := errors.New("address already in use")
 	err := run(context.Background(), nil, dependencies{
 		openDisk:  func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) { return store, nil },
@@ -127,7 +127,7 @@ func TestRunCancellationLetsHostPerformSafeShutdown(t *testing.T) {
 	go func() {
 		done <- run(ctx, nil, dependencies{
 			openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
-				return storage.NewMemory(storage.Metadata{FormatVersion: 1}), nil
+				return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 			},
 			listenTCP: func(string) (network.Listener, error) { return mcgodTestListener{addr: "127.0.0.1:9"}, nil },
 			newHost:   func(server.Config, server.Generator, storage.WorldStore) mcgodHost { return host },
@@ -148,7 +148,7 @@ func TestRunPreservesFlushFailures(t *testing.T) {
 		t.Run(want.Error(), func(t *testing.T) {
 			err := run(context.Background(), nil, dependencies{
 				openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
-					return storage.NewMemory(storage.Metadata{FormatVersion: 1}), nil
+					return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 				},
 				listenTCP: func(string) (network.Listener, error) { return mcgodTestListener{}, nil },
 				newHost: func(server.Config, server.Generator, storage.WorldStore) mcgodHost {
@@ -175,7 +175,7 @@ func TestRunCancellationDoesNotMaskFlushFailure(t *testing.T) {
 	go func() {
 		done <- run(ctx, nil, dependencies{
 			openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
-				return storage.NewMemory(storage.Metadata{FormatVersion: 1}), nil
+				return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 			},
 			listenTCP: func(string) (network.Listener, error) { return mcgodTestListener{}, nil },
 			newHost:   func(server.Config, server.Generator, storage.WorldStore) mcgodHost { return host },

@@ -14,10 +14,13 @@ import (
 )
 
 const (
-	currentMetadataVersion uint32 = 1
-	metadataPayloadLength  uint32 = 20
-	metadataHeaderLength          = 12
-	metadataChecksumLength        = 4
+	currentMetadataVersion uint32 = 2
+	metadataPayloadLength  uint32 = 28
+	// legacyMetadataVersion 是仍可读取的 v1；v1 只被读取和迁移，不再写出。
+	legacyMetadataVersion       uint32 = 1
+	legacyMetadataPayloadLength uint32 = 20
+	metadataHeaderLength               = 12
+	metadataChecksumLength             = 4
 )
 
 var (
@@ -61,6 +64,7 @@ func encodeMetadata(metadata Metadata) ([]byte, error) {
 	encoded = binary.LittleEndian.AppendUint32(encoded, uint32(metadata.SpawnDimension))
 	encoded = binary.LittleEndian.AppendUint32(encoded, uint32(metadata.SpawnAnchor.X))
 	encoded = binary.LittleEndian.AppendUint32(encoded, uint32(metadata.SpawnAnchor.Z))
+	encoded = binary.LittleEndian.AppendUint64(encoded, metadata.WorldTimeTicks)
 	encoded = binary.LittleEndian.AppendUint32(
 		encoded, crc32.Checksum(encoded, metadataCRCTable),
 	)
@@ -79,12 +83,19 @@ func decodeMetadata(encoded []byte) (Metadata, error) {
 	if version > currentMetadataVersion {
 		return Metadata{}, fmt.Errorf("%w: metadata version %d", ErrFutureVersion, version)
 	}
-	if version != currentMetadataVersion {
+	// v1 与 v2 各自有固定 payload 长度；v1 读取后在内存中规范为 v2、世界时间为零。
+	var wantPayloadLength uint32
+	switch version {
+	case currentMetadataVersion:
+		wantPayloadLength = metadataPayloadLength
+	case legacyMetadataVersion:
+		wantPayloadLength = legacyMetadataPayloadLength
+	default:
 		return Metadata{}, fmt.Errorf("%w: unsupported metadata version %d", ErrCorrupt, version)
 	}
 
 	payloadLength := binary.LittleEndian.Uint32(encoded[8:12])
-	if payloadLength != metadataPayloadLength {
+	if payloadLength != wantPayloadLength {
 		return Metadata{}, fmt.Errorf("%w: metadata payload length %d", ErrCorrupt, payloadLength)
 	}
 	wantLength := metadataHeaderLength + int(payloadLength) + metadataChecksumLength
@@ -102,15 +113,19 @@ func decodeMetadata(encoded []byte) (Metadata, error) {
 	}
 
 	payload := encoded[metadataHeaderLength:checksumOffset]
-	return Metadata{
-		FormatVersion:  version,
+	metadata := Metadata{
+		FormatVersion:  currentMetadataVersion,
 		Seed:           int64(binary.LittleEndian.Uint64(payload[0:8])),
 		SpawnDimension: core.DimensionID(int32(binary.LittleEndian.Uint32(payload[8:12]))),
 		SpawnAnchor: core.ChunkPos{
 			X: int32(binary.LittleEndian.Uint32(payload[12:16])),
 			Z: int32(binary.LittleEndian.Uint32(payload[16:20])),
 		},
-	}, nil
+	}
+	if version == currentMetadataVersion {
+		metadata.WorldTimeTicks = binary.LittleEndian.Uint64(payload[20:28])
+	}
+	return metadata, nil
 }
 
 func replaceFileAtomically(

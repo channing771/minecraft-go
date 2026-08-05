@@ -32,20 +32,14 @@ func TestMetadataEncodingIsDeterministic(t *testing.T) {
 		t.Fatal("same metadata encoded differently")
 	}
 
-	wantPrefix := []byte{
-		'M', 'C', 'G', 'M',
-		1, 0, 0, 0,
-		20, 0, 0, 0,
-		0xd6, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		0xfd, 0xff, 0xff, 0xff,
-		7, 0, 0, 0,
-		0xf5, 0xff, 0xff, 0xff,
+	// 精确字节由 TestMetadataV2GoldenBytes 覆盖，这里只保证确定性与往返。
+	wantLength := metadataHeaderLength + int(metadataPayloadLength) + metadataChecksumLength
+	if len(one) != wantLength {
+		t.Fatalf("metadata length = %d, want %d", len(one), wantLength)
 	}
-	if len(one) != len(wantPrefix)+4 || !bytes.Equal(one[:len(wantPrefix)], wantPrefix) {
-		t.Fatalf("metadata bytes = %x, want prefix %x plus CRC32C", one, wantPrefix)
-	}
-	wantCRC := crc32.Checksum(wantPrefix, crc32.MakeTable(crc32.Castagnoli))
-	if got := binary.LittleEndian.Uint32(one[len(wantPrefix):]); got != wantCRC {
+	checksumOffset := wantLength - metadataChecksumLength
+	wantCRC := crc32.Checksum(one[:checksumOffset], crc32.MakeTable(crc32.Castagnoli))
+	if got := binary.LittleEndian.Uint32(one[checksumOffset:]); got != wantCRC {
 		t.Fatalf("metadata CRC32C = %#x, want %#x", got, wantCRC)
 	}
 

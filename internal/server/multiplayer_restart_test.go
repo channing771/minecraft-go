@@ -68,7 +68,7 @@ func runEightPlayersSurviveDiskRestart(t *testing.T) {
 	root := t.TempDir()
 	identities := make([]network.Identity, multiplayerClientCount)
 	seedStore, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion: 1, Seed: seed, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: seed, SpawnDimension: core.Overworld,
 	}})
 	if err != nil {
 		t.Fatalf("OpenDisk seed: %v", err)
@@ -259,7 +259,7 @@ func runEightPlayersSurviveDiskRestart(t *testing.T) {
 func startMultiplayerRestartHost(t *testing.T, root string, seed int64) multiplayerRestartHost {
 	t.Helper()
 	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion: 1, Seed: seed, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: seed, SpawnDimension: core.Overworld,
 	}})
 	if err != nil {
 		t.Fatalf("OpenDisk host: %v", err)

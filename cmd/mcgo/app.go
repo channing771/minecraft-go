@@ -252,7 +252,7 @@ func openApplicationStore(
 		return nil, nil
 	}
 	metadata := storage.Metadata{
-		FormatVersion:  1,
+		FormatVersion:  2,
 		Seed:           options.Seed,
 		SpawnDimension: core.Overworld,
 		SpawnAnchor:    core.ChunkPos{},

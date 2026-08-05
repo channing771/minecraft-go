@@ -22,7 +22,7 @@ func newMemoryAttachedWorldWithHotbar(
 	generator server.Generator,
 	hotbar core.Hotbar,
 ) *server.Server {
-	running := server.NewWorld(config, generator, storage.NewMemory(storage.Metadata{FormatVersion: 1, Seed: config.Seed, SpawnDimension: config.SpawnDimension, SpawnAnchor: config.SpawnAnchor}))
+	running := server.NewWorld(config, generator, storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: config.Seed, SpawnDimension: config.SpawnDimension, SpawnAnchor: config.SpawnAnchor}))
 	if config.TrustedObserver {
 		if err := running.AttachTrustedObserver(endpoint); err != nil {
 			panic(err)

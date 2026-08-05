@@ -45,7 +45,23 @@ func NewMemory(metadata Metadata) *MemoryStore {
 }
 
 func (store *MemoryStore) Metadata() Metadata {
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	return store.metadata
+}
+
+// SaveMetadata 用值语义替换内存中的 metadata，与 DiskStore 行为一致。
+func (store *MemoryStore) SaveMetadata(ctx context.Context, metadata Metadata) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, err := encodeMetadata(metadata); err != nil {
+		return err
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.metadata = metadata
+	return nil
 }
 
 func (store *MemoryStore) LoadChunk(

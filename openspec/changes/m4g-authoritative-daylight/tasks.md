@@ -1,15 +1,15 @@
 ## 1. M4F 前置与规划复核
 
-- [ ] 1.1 在开始实现前确认 M4F 已完成 scenario v10 正式基线、delta specs 同步与归档；用 `openspec list --json`、`jq -e '.scenario_version == 10' docs/notes/perf-baseline-m5.json` 和 `rg` 核对协议 v8、metadata v1、玩家 schema v3、区块 schema v4，任一不满足则停止。
-- [ ] 1.2 重新读取本 change 的 proposal、三份 delta specs、design 和 tasks，并与归档后的 M4F 主规格及代码逐项比对；若 M4F 收尾改变起点，先更新本 change，再运行 `openspec validate m4g-authoritative-daylight --strict --no-interactive`。
+- [x] 1.1 在开始实现前确认 M4F 已完成 scenario v10 正式基线、delta specs 同步与归档；用 `openspec list --json`、`jq -e '.scenario_version == 10' docs/notes/perf-baseline-m5.json` 和 `rg` 核对协议 v8、metadata v1、玩家 schema v3、区块 schema v4，任一不满足则停止。
+- [x] 1.2 重新读取本 change 的 proposal、三份 delta specs、design 和 tasks，并与归档后的 M4F 主规格及代码逐项比对；若 M4F 收尾改变起点，先更新本 change，再运行 `openspec validate m4g-authoritative-daylight --strict --no-interactive`。
 
 ## 2. 固定列顶与直射天空光
 
-- [ ] 2.1 在 `internal/world` 先写失败测试，覆盖空列 `MinY-1`、升序写入、非列顶修改、移除列顶、384 格最坏扫描、Clone 和从 section 重建后的 `[256]int16` 最高遮挡一致性。
-- [ ] 2.2 修改 `internal/world/chunk.go`，增加恰好 512 字节的固定高度表、查询和重建；让 `NewChunk`、`SetBlock`、`Clone` 及 snapshot/存档装入路径维护派生值，不改变区块 Hash、payload 或 schema。
-- [ ] 2.3 在 `internal/world/neighborhood_test.go` 与 `internal/mesh/greedy_test.go` 先写失败测试，覆盖露天 `0xF0`、屋顶下 `0x00`、缺失邻区为暗、跨区块列查询以及不同天空光 quad 不合并。
-- [ ] 2.4 修改 `internal/world/neighborhood.go` 和 `internal/mesh/greedy.go`，让不可变邻域携带九个固定高度快照并由相邻空气决定 `Quad.Light`；不得引入每面向上扫描、动态光照表或新 goroutine。
-- [ ] 2.5 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world ./internal/mesh -race -count=1'`、`go test ./internal/archcheck -count=1`、`gofmt -l .` 与 `git diff --check`，通过后提交 `feat: 派生直射天空光`。
+- [x] 2.1 在 `internal/world` 先写失败测试，覆盖空列 `MinY-1`、升序写入、非列顶修改、移除列顶、384 格最坏扫描、Clone 和从 section 重建后的 `[256]int16` 最高遮挡一致性。
+- [x] 2.2 修改 `internal/world/chunk.go`，增加恰好 512 字节的固定高度表、查询和重建；让 `NewChunk`、`SetBlock`、`Clone` 及 snapshot/存档装入路径维护派生值，不改变区块 Hash、payload 或 schema。
+- [x] 2.3 在 `internal/world/neighborhood_test.go` 与 `internal/mesh/greedy_test.go` 先写失败测试，覆盖露天 `0xF0`、屋顶下 `0x00`、缺失邻区为暗、跨区块列查询以及不同天空光 quad 不合并。
+- [x] 2.4 修改 `internal/world/neighborhood.go` 和 `internal/mesh/greedy.go`，让不可变邻域携带九个固定高度快照并由相邻空气决定 `Quad.Light`；不得引入每面向上扫描、动态光照表或新 goroutine。
+- [x] 2.5 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world ./internal/mesh -race -count=1'`、`go test ./internal/archcheck -count=1`、`gofmt -l .` 与 `git diff --check`，通过后提交 `feat: 派生直射天空光`。
 
 ## 3. metadata v2 与原子保存接口
 

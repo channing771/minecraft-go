@@ -1145,7 +1145,7 @@ func (store *hostTestStore) Close() error {
 
 func newHostTestStore() *hostTestStore {
 	return &hostTestStore{MemoryStore: storage.NewMemory(storage.Metadata{
-		FormatVersion:  1,
+		FormatVersion:  2,
 		Seed:           42,
 		SpawnDimension: core.Overworld,
 	})}

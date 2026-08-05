@@ -29,7 +29,7 @@ func TestMCGodProcess(t *testing.T) {
 	if os.Getenv("MCGOD_PROCESS_FAIL_SAVE") == "1" {
 		err := run(context.Background(), args, dependencies{
 			openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
-				return storage.NewMemory(storage.Metadata{FormatVersion: 1}), nil
+				return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 			},
 			listenTCP: func(string) (network.Listener, error) {
 				return mcgodTestListener{}, nil

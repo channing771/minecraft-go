@@ -16,7 +16,7 @@ import (
 func TestExistingMetadataOverridesCreateOptions(t *testing.T) {
 	root := t.TempDir()
 	first, err := openWorldFiles(context.Background(), root, OpenOptions{
-		Create: Metadata{FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		Create: Metadata{FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 			SpawnAnchor: core.ChunkPos{X: 3, Z: -2}},
 	})
 	if err != nil {
@@ -27,7 +27,7 @@ func TestExistingMetadataOverridesCreateOptions(t *testing.T) {
 	}
 
 	second, err := openWorldFiles(context.Background(), root, OpenOptions{
-		Create: Metadata{FormatVersion: 1, Seed: 999},
+		Create: Metadata{FormatVersion: 2, Seed: 999},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestExistingMetadataOverridesCreateOptions(t *testing.T) {
 func TestWorldLockRejectsConcurrentOpenBeforeMetadataRead(t *testing.T) {
 	root := t.TempDir()
 	first, err := openWorldFiles(context.Background(), root, OpenOptions{
-		Create: Metadata{FormatVersion: 1, Seed: 42},
+		Create: Metadata{FormatVersion: 2, Seed: 42},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestWorldLockRejectsConcurrentOpenBeforeMetadataRead(t *testing.T) {
 func TestWorldLockCloseReleasesLock(t *testing.T) {
 	root := t.TempDir()
 	first, err := openWorldFiles(context.Background(), root, OpenOptions{
-		Create: Metadata{FormatVersion: 1, Seed: 42},
+		Create: Metadata{FormatVersion: 2, Seed: 42},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestMetadataOpenRejectsCorruptionWithoutRewriting(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			files, err := openWorldFiles(context.Background(), root, OpenOptions{
-				Create: Metadata{FormatVersion: 1, Seed: 42},
+				Create: Metadata{FormatVersion: 2, Seed: 42},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -138,7 +138,7 @@ func TestMetadataOpenRejectsCorruptionWithoutRewriting(t *testing.T) {
 			}
 
 			opened, err := openWorldFiles(context.Background(), root, OpenOptions{
-				Create: Metadata{FormatVersion: 1, Seed: 999},
+				Create: Metadata{FormatVersion: 2, Seed: 999},
 			})
 			if opened != nil {
 				opened.close()
@@ -164,7 +164,7 @@ func TestMetadataCanceledCreateLeavesNoFile(t *testing.T) {
 	cancel()
 
 	files, err := openWorldFiles(ctx, root, OpenOptions{
-		Create: Metadata{FormatVersion: 1, Seed: 42},
+		Create: Metadata{FormatVersion: 2, Seed: 42},
 	})
 	if files != nil {
 		files.close()
@@ -182,7 +182,7 @@ func TestWorldFilesCreatesAndValidatesRealPlayersDirectory(t *testing.T) {
 	t.Run("creates players directory", func(t *testing.T) {
 		root := t.TempDir()
 		files, err := openWorldFiles(context.Background(), root, OpenOptions{
-			Create: Metadata{FormatVersion: 1, Seed: 42},
+			Create: Metadata{FormatVersion: 2, Seed: 42},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -204,7 +204,7 @@ func TestWorldFilesCreatesAndValidatesRealPlayersDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 		files, err := openWorldFiles(context.Background(), root, OpenOptions{
-			Create: Metadata{FormatVersion: 1, Seed: 42},
+			Create: Metadata{FormatVersion: 2, Seed: 42},
 		})
 		if files != nil {
 			files.close()
@@ -230,7 +230,7 @@ func TestWorldFilesCreatesAndValidatesRealPlayersDirectory(t *testing.T) {
 			t.Skipf("symlink unavailable: %v", err)
 		}
 		files, err := openWorldFiles(context.Background(), root, OpenOptions{
-			Create: Metadata{FormatVersion: 1, Seed: 42},
+			Create: Metadata{FormatVersion: 2, Seed: 42},
 		})
 		if files != nil {
 			files.close()

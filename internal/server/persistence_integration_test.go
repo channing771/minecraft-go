@@ -647,7 +647,7 @@ func openPersistentDiskStore(t *testing.T, root string) *storage.DiskStore {
 	t.Helper()
 	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{
 		Create: storage.Metadata{
-			FormatVersion:  1,
+			FormatVersion:  2,
 			Seed:           42,
 			SpawnDimension: core.Overworld,
 			SpawnAnchor:    core.ChunkPos{},

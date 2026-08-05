@@ -94,7 +94,7 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 	}
 	dependencies := mergeDependencies(injected)
 	store, err := dependencies.openDisk(ctx, options.World, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion:  1,
+		FormatVersion:  2,
 		Seed:           options.Seed,
 		SpawnDimension: core.Overworld,
 	}})

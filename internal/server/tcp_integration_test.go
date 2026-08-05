@@ -93,7 +93,7 @@ func integrationPlayerID() core.PlayerID {
 func startDiskHost(t *testing.T, root, address string, generator Generator) integrationHost {
 	t.Helper()
 	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	}})
 	if err != nil {
 		t.Fatalf("OpenDisk: %v", err)
@@ -901,7 +901,7 @@ func seedIntegrationPlayer(
 ) {
 	t.Helper()
 	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -1079,7 +1079,7 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	t.Helper()
 	identity := integrationIdentity(0x72, "MiningParity")
 	store := storage.NewMemory(storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	})
 	var inventory core.Inventory
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
@@ -1335,7 +1335,7 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	t.Helper()
 	identity := integrationIdentity(0x71, "Parity")
 	store := storage.NewMemory(storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	})
 	var initialInventory core.Inventory
 	initialInventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
@@ -1702,7 +1702,7 @@ func seedV2CraftingChunk(t *testing.T, root string, key core.ChunkKey) {
 		Stack: core.ItemStack{Item: core.ItemStone, Count: 4}, BlockIndex: index,
 	})
 	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
-		FormatVersion: 1, Seed: 42, SpawnDimension: core.Overworld,
+		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	}})
 	if err != nil {
 		t.Fatal(err)
