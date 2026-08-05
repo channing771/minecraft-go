@@ -33,7 +33,7 @@ func TestAvatarRendererBatchesOneDynamicUploadPerNonEmptyRender(t *testing.T) {
 		t.Fatalf("bind groups=%d want=%d", got, want)
 	}
 	bind := dev.bindDescs[0]
-	assertBufferBindingRange(t, bind, 0, upload, 0, 64)
+	assertBufferBindingRange(t, bind, 0, upload, 0, 80)
 	assertBufferBindingRange(t, bind, 1, upload, 256, 3360)
 
 	dev.resetWrites()

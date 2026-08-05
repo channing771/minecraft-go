@@ -20,7 +20,7 @@ const (
 	avatarInstanceBytes = 80
 
 	avatarCameraOffset   = 0
-	avatarCameraBytes    = 64
+	avatarCameraBytes    = 80
 	avatarInstanceOffset = 256
 	avatarInstanceSize   = maxAvatarParts * avatarInstanceBytes
 	avatarIndirectOffset = avatarInstanceOffset + avatarInstanceSize
@@ -138,7 +138,9 @@ func (renderer *AvatarRenderer) Render(
 		return
 	}
 	encodeAvatarPartsInto(renderer.upload[avatarInstanceOffset:avatarIndirectOffset], renderer.parts)
-	encodeAvatarFloat32sInto(renderer.upload[avatarCameraOffset:avatarCameraBytes], camera.ViewProj[:])
+	encodeAvatarCameraInto(
+		renderer.upload[avatarCameraOffset:avatarCameraBytes], camera,
+	)
 	encodeAvatarUint32sInto(renderer.upload[avatarIndirectOffset:avatarUploadBytes], []uint32{
 		uint32(len(avatarCubeIndices)), uint32(len(renderer.parts)), 0, 0, 0,
 	})
@@ -167,6 +169,15 @@ func encodeAvatarPartsInto(dst []byte, parts []avatarPart) {
 		for index, value := range part.color {
 			binary.LittleEndian.PutUint32(dst[offset+64+index*4:], math.Float32bits(value))
 		}
+	}
+}
+
+// encodeAvatarCameraInto 写入视图投影矩阵，并在其后追加本帧固定 daylight。
+func encodeAvatarCameraInto(dst []byte, camera Camera) {
+	encodeAvatarFloat32sInto(dst, camera.ViewProj[:])
+	binary.LittleEndian.PutUint32(dst[64:], math.Float32bits(camera.Daylight))
+	for index := 68; index < len(dst); index += 4 {
+		binary.LittleEndian.PutUint32(dst[index:], 0)
 	}
 }
 

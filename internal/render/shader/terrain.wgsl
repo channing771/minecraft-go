@@ -1,5 +1,6 @@
 struct Camera {
     view_proj: mat4x4f,
+    // cam_pos.xyz 是相机位置，cam_pos.w 是本帧固定昼夜亮度 daylight。
     cam_pos:   vec4f,
 };
 
@@ -68,12 +69,15 @@ fn vs_main(
     let ao_level = f32((ao >> (vi * 2u)) & 0x3u);
     let ao_factor = 0.55 + 0.45 * (ao_level / 3.0);
     let sky = f32((light >> 4u) & 0xFu) / 15.0;
+    // 直射天空光为 0 的面保留 8% 室内亮度，露天面随昼夜在 15%..100% 之间变化。
+    let daylight = camera.cam_pos.w;
+    let base = 0.08 + sky * (daylight - 0.08);
 
     var out: VsOut;
     out.clip  = camera.view_proj * vec4f(world, 1.0);
     out.uv    = vec2f(cu[vi] * w, cv[vi] * h);
     out.layer = f32(mat);
-    out.shade = face_shade(face) * ao_factor * sky;
+    out.shade = face_shade(face) * ao_factor * base;
     return out;
 }
 

@@ -35,11 +35,11 @@
 
 ## 6. 增量天空光重网格
 
-- [ ] 6.1 在 `internal/client` 先写失败测试，覆盖 snapshot 重建高度、非列顶变化只走既有 dirty、屋顶放置/移除只标记新旧高度跨度、chunk 边/角最多跨四个 chunk、单变化不超过 96 个 section key。
-- [ ] 6.2 修改 `internal/client/mirror.go`，在应用 block change 前后比较最高遮挡并追加精确垂直/水平 dirty；保持 revision、resync、forget 和只读镜像语义不变。
-- [ ] 6.3 扩展 `internal/client/mesher.go` 的 clone job 和 stale-result 测试，使九个高度表与既有 ChunkStamp 同代；覆盖 in-flight 时屋顶变化只接受最新光照结果、邻区到达消除暗边界。
-- [ ] 6.4 增加 `BenchmarkSkyDirtyRange`、`BenchmarkMesherSkySnapshot`，覆盖最坏高度跨度、重复 dirty 合并和稳定网格分配/调度，确认现有 job/result 容量与每帧 64 调度/回收上限不变。
-- [ ] 6.5 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/world ./internal/mesh -race -count=1 && go test ./internal/client -run "^$" -bench "Mesher|Sky" -benchmem -count=3'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 增量更新直射天空光网格`。
+- [x] 6.1 在 `internal/client` 先写失败测试，覆盖 snapshot 重建高度、非列顶变化只走既有 dirty、屋顶放置/移除只标记新旧高度跨度、chunk 边/角最多跨四个 chunk、单变化不超过 96 个 section key。
+- [x] 6.2 修改 `internal/client/mirror.go`，在应用 block change 前后比较最高遮挡并追加精确垂直/水平 dirty；保持 revision、resync、forget 和只读镜像语义不变。
+- [x] 6.3 扩展 `internal/client/mesher.go` 的 clone job 和 stale-result 测试，使九个高度表与既有 ChunkStamp 同代；覆盖 in-flight 时屋顶变化只接受最新光照结果、邻区到达消除暗边界。
+- [x] 6.4 增加 `BenchmarkSkyDirtyRange`、`BenchmarkMesherSkySnapshot`，覆盖最坏高度跨度、重复 dirty 合并和稳定网格分配/调度，确认现有 job/result 容量与每帧 64 调度/回收上限不变。
+- [x] 6.5 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/client ./internal/world ./internal/mesh -race -count=1 && go test ./internal/client -run "^$" -bench "Mesher|Sky" -benchmem -count=3'`，再运行 archcheck、gofmt 与 diff check，通过后提交 `feat: 增量更新直射天空光网格`。
 
 ## 7. 固定昼夜渲染
 

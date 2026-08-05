@@ -937,9 +937,13 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		}
 	}
 	encoder := a.dev.CreateCommandEncoder()
+	// 每帧只从最后确认的权威世界时间计算一次昼夜，三个世界空间 renderer 共用。
+	dayNight := render.DayNightAt(a.worldTimeTicks)
 	a.renderer.Render(encoder, target, a.depth.view, render.Camera{
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
+		Daylight: dayNight.Daylight,
+		SkyColor: dayNight.ClearColor,
 	})
 	var started time.Time
 	if renderTiming != nil {
@@ -948,6 +952,8 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	a.avatarRenderer.Render(encoder, target, a.depth.view, render.Camera{
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
+		Daylight: dayNight.Daylight,
+		SkyColor: dayNight.ClearColor,
 	}, avatars)
 	if renderTiming != nil {
 		renderTiming.recordAvatar(renderNow().Sub(started))
@@ -959,6 +965,8 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	a.itemDropRenderer.Render(encoder, target, a.depth.view, render.Camera{
 		ViewProj: a.camera.ViewProj(),
 		Pos:      a.camera.Pos,
+		Daylight: dayNight.Daylight,
+		SkyColor: dayNight.ClearColor,
 	}, a.serverTick, a.itemDropInstances)
 	right := mgl32.Vec3{
 		float32(math.Cos(float64(a.camera.Yaw))),

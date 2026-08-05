@@ -1,5 +1,7 @@
 struct Camera {
     view_proj: mat4x4f,
+    // daylight.x 是本帧固定昼夜亮度，与地形使用同一相位。
+    daylight:  vec4f,
 };
 
 struct AvatarInstance {
@@ -38,7 +40,8 @@ fn vs_main(
 
     var out: VsOut;
     out.clip = camera.view_proj * world;
-    out.color = instance.color;
+    // camera 只对 vertex 阶段可见，昼夜亮度在这里乘入颜色再插值到片元。
+    out.color = vec4f(instance.color.rgb * camera.daylight.x, instance.color.a);
     out.normal = normalize(mat3x3f(
         instance.transform[0].xyz,
         instance.transform[1].xyz,
