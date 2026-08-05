@@ -53,6 +53,7 @@ type application struct {
 	hotbarRenderer          *render.HotbarRenderer
 	inventory               client.InventoryMirror
 	furnace                 client.FurnaceMirror
+	miningOverlay           render.MiningOverlay
 	itemDropRenderer        *render.ItemDropRenderer
 	itemDrops               *client.ItemDrops
 	itemDropInstances       []render.ItemDrop
@@ -813,6 +814,7 @@ func (a *application) closeClientSession(cause error) {
 		}
 		a.inventory.Reset()
 		a.furnace.Reset()
+		a.miningOverlay = render.MiningOverlay{}
 		a.inventoryOpen = false
 		a.inventorySource = -1
 		a.itemDrops.Reset()
@@ -917,6 +919,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		}
 		if err := a.hotbarRenderer.Prepare(
 			inventory, a.inventoryOpen, a.inventorySource, overlay,
+			a.miningOverlay,
 			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
@@ -1025,7 +1028,9 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 		}
 		if state, ok := message.(network.PlayerState); ok {
-			a.serverTick = state.ServerTick
+			if state.ServerTick <= a.serverTick {
+				continue
+			}
 			result, err := a.predictor.ApplyPlayerState(state, client.MirrorCollisionSource{
 				Mirror:    a.mirror,
 				Dimension: core.Overworld,
@@ -1033,6 +1038,17 @@ func (a *application) drainServerMessages(maxMessages int) {
 			if err != nil {
 				a.closeClientSession(err)
 				return
+			}
+			a.serverTick = state.ServerTick
+			if state.Reset || !state.MiningActive {
+				a.miningOverlay = render.MiningOverlay{}
+			} else {
+				a.miningOverlay = render.MiningOverlay{
+					Active:        true,
+					ProgressTicks: state.MiningProgressTicks,
+					RequiredTicks: state.MiningRequiredTicks,
+					Harvestable:   state.MiningHarvestable,
+				}
 			}
 			if state.Reset {
 				if _, opened := a.furnace.State(); opened {
@@ -1135,19 +1151,6 @@ func (a *application) drainServerMessages(maxMessages int) {
 				a.mesher.ForgetChunk(key.Dimension, core.ChunkPos{X: key.Pos.X, Z: key.Pos.Z})
 			}
 		}
-	}
-}
-
-func (a *application) breakBlock() {
-	if _, ready := a.predictor.State(); !ready {
-		return
-	}
-	if err := a.send(network.BreakBlock{
-		Sequence: a.nextSequence(),
-		Yaw:      a.camera.Yaw,
-		Pitch:    a.camera.Pitch,
-	}); err != nil {
-		log.Printf("发送挖掘命令失败: %v", err)
 	}
 }
 

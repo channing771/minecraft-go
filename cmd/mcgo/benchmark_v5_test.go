@@ -15,9 +15,9 @@ import (
 	"minecraft-go/internal/client"
 )
 
-func TestBenchmarkScenarioVersionIncludesPersistencePath(t *testing.T) {
-	if scenarioVersion != 9 {
-		t.Fatalf("scenarioVersion=%d，想要权威熔炼资源链后的 v9", scenarioVersion)
+func TestBenchmarkScenarioVersionIncludesAuthoritativeMining(t *testing.T) {
+	if scenarioVersion != 10 {
+		t.Fatalf("scenarioVersion=%d，想要权威计时采掘后的 v10", scenarioVersion)
 	}
 }
 

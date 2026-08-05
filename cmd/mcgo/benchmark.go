@@ -30,7 +30,7 @@ import (
 const (
 	benchmarkSeed            = 20260726
 	benchmarkMessageDrainMax = 4096
-	scenarioVersion          = 9
+	scenarioVersion          = 10
 )
 
 var (

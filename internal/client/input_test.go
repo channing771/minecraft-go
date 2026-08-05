@@ -24,27 +24,27 @@ func TestMovementFromKeysCancelsOpposites(t *testing.T) {
 	}
 }
 
-func TestInputStateUsesRisingEdgesAndHotbarSelection(t *testing.T) {
+func TestInputStateKeepsMiningHeldAndUsesRisingEdgesForOtherActions(t *testing.T) {
 	var state client.InputState
 
 	first := state.Update(true, true, 0, false, false)
-	if !first.Break || !first.Place || first.Select {
+	if !first.Mining || !first.Place || first.Select {
 		t.Fatalf("首次按下 = %+v", first)
 	}
 	held := state.Update(true, true, 2, false, false)
-	if held.Break || held.Place || !held.Select || held.SelectSlot != 1 {
+	if !held.Mining || held.Place || !held.Select || held.SelectSlot != 1 {
 		t.Fatalf("持续按下并按下数字 2 = %+v", held)
 	}
 	repeat := state.Update(true, true, 2, false, false)
-	if repeat.Select {
-		t.Fatalf("按住同一数字重复发送选择: %+v", repeat)
+	if !repeat.Mining || repeat.Select {
+		t.Fatalf("连续按住主键或数字键状态错误: %+v", repeat)
 	}
 	released := state.Update(false, false, 0, false, false)
-	if released.Break || released.Place || released.Select {
+	if released.Mining || released.Place || released.Select {
 		t.Fatalf("释放 = %+v", released)
 	}
 	again := state.Update(true, false, 9, false, false)
-	if !again.Break || again.Place || !again.Select || again.SelectSlot != core.HotbarSlots-1 {
+	if !again.Mining || again.Place || !again.Select || again.SelectSlot != core.HotbarSlots-1 {
 		t.Fatalf("再次按下并按下数字 9 = %+v", again)
 	}
 }
@@ -77,13 +77,13 @@ func TestInputStateTogglesInventoryOnRisingEdge(t *testing.T) {
 func TestInputStateSuppressesGameActionsWhileInventoryOpen(t *testing.T) {
 	var state client.InputState
 	got := state.Update(true, true, 3, false, true)
-	if got.Break || got.Place || got.Select {
+	if got.Mining || got.Place || got.Select {
 		t.Fatalf("界面打开时未抑制游戏操作: %+v", got)
 	}
 	if !got.Click {
 		t.Fatalf("界面打开时左键未产生点击: %+v", got)
 	}
-	if held := state.Update(true, true, 3, false, true); held.Click {
-		t.Fatalf("按住左键重复点击: %+v", held)
+	if held := state.Update(true, true, 3, false, true); held.Mining || held.Click {
+		t.Fatalf("界面打开时按住左键产生采掘或重复点击: %+v", held)
 	}
 }

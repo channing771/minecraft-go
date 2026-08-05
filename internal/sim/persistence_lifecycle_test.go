@@ -267,10 +267,14 @@ func TestPersistenceLifecycleBlockChangeAdvancesDirtyRevision(t *testing.T) {
 	engine.Enqueue(Command{
 		Session:  session,
 		Sequence: 1,
-		Kind:     CommandBreakBlock,
+		Kind:     CommandPlayerInput,
 		Pitch:    -float32(math.Pi)/2 + 0.01,
+		Mining:   true,
 	})
-	result := engine.Step()
+	var result TickResult
+	for range 5 {
+		result = engine.Step()
+	}
 	if len(result.Changes) != 1 {
 		t.Fatalf("block change batches=%+v", result.Changes)
 	}

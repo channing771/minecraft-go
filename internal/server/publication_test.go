@@ -60,20 +60,19 @@ func TestInitialSnapshotCapturesSameTickChangesBeforeDelta(t *testing.T) {
 	if len(ready.Ready) != 1 || !ready.Players[0].Ready {
 		t.Fatalf("spawn ready = %+v", ready)
 	}
+	running.engine.Enqueue(sim.Command{
+		Session: testSessionID, Sequence: 2, Kind: sim.CommandPlayerInput,
+		Yaw: 0, Pitch: -1.5, Mining: true,
+	})
+	for range 4 {
+		if primed := running.engine.Step(); len(primed.Changes) != 0 {
+			t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+		}
+	}
 	running.sessions[testSessionID].queueSnapshot(core.ChunkKey{
 		Dimension: core.Overworld,
 		Pos:       core.ChunkPos{},
 	}, false)
-	running.incoming <- incomingCommand{
-		Session: testSessionID, Generation: 1,
-		Command: sim.Command{
-			Session:  testSessionID,
-			Sequence: 2,
-			Kind:     sim.CommandBreakBlock,
-			Yaw:      0,
-			Pitch:    -1.5,
-		},
-	}
 	result := running.Step()
 	if len(result.Changes) != 1 {
 		t.Fatalf("同 tick Changes = %+v", result.Changes)
@@ -94,14 +93,14 @@ func TestPublishedDeltaIsContiguousAfterSnapshot(t *testing.T) {
 		t.Fatalf("初始 revision = %d", snapshot.Revision)
 	}
 
-	running.incoming <- incomingCommand{
-		Session: testSessionID, Generation: 1,
-		Command: sim.Command{
-			Session:  testSessionID,
-			Sequence: 2,
-			Kind:     sim.CommandBreakBlock,
-			Pitch:    -1.5,
-		},
+	running.engine.Enqueue(sim.Command{
+		Session: testSessionID, Sequence: 2, Kind: sim.CommandPlayerInput,
+		Pitch: -1.5, Mining: true,
+	})
+	for range 4 {
+		if primed := running.engine.Step(); len(primed.Changes) != 0 {
+			t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+		}
 	}
 	running.Step()
 	delta := recvWorldServerMessage(t, client).(network.BlockChanges)
@@ -175,6 +174,67 @@ func TestForgetRemovesPendingSnapshotsAndSortsChunks(t *testing.T) {
 		t.Fatalf("ForgetChunks = %+v，想要 %+v", forgotten.Chunks, want)
 	}
 	assertNoWorldServerMessage(t, client)
+}
+
+func TestPublishLocalResultMapsCanonicalMiningStateIntoSinglePlayerState(t *testing.T) {
+	current := &session{id: testSessionID, outbox: make(chan network.ServerMessage, 2)}
+	player := sim.PlayerUpdate{
+		Session: testSessionID,
+		Mining: sim.MiningUpdate{
+			Active:        true,
+			Target:        core.BlockPos{X: 1, Y: 2, Z: 3},
+			ProgressTicks: 6,
+			RequiredTicks: 15,
+			Harvestable:   true,
+		},
+	}
+	(&Server{}).publishLocalResult(current, sim.TickResult{Tick: 9}, player)
+
+	if len(current.outbox) != 1 {
+		t.Fatalf("本地发布消息数 = %d，想要唯一 PlayerState", len(current.outbox))
+	}
+	state, ok := (<-current.outbox).(network.PlayerState)
+	if !ok {
+		t.Fatalf("本地发布消息 = %T，想要 PlayerState", state)
+	}
+	if !state.MiningActive || state.MiningTarget != player.Mining.Target ||
+		state.MiningProgressTicks != player.Mining.ProgressTicks ||
+		state.MiningRequiredTicks != player.Mining.RequiredTicks ||
+		state.MiningHarvestable != player.Mining.Harvestable {
+		t.Fatalf("采掘映射 = %+v，想要 %+v", state, player.Mining)
+	}
+	if err := state.Validate(); err != nil {
+		t.Fatalf("映射后的 PlayerState 非法: %v", err)
+	}
+}
+
+func TestRemotePlayerStatesDoNotPublishMiningState(t *testing.T) {
+	h := newRemotePublicationHarness(t, 1, 2)
+	h.markSnapshotSent(1, core.ChunkPos{})
+	observer := h.playerUpdate(1, true, core.Overworld, [3]float32{0.5, 2, 0.5})
+	target := h.playerUpdate(2, true, core.Overworld, [3]float32{0.5, 2, 0.5})
+	target.Mining = sim.MiningUpdate{
+		Active: true, Target: core.BlockPos{X: 1, Y: 2, Z: 3},
+		ProgressTicks: 6, RequiredTicks: 15, Harvestable: true,
+	}
+	h.publish(sim.TickResult{Tick: 1, Players: []sim.PlayerUpdate{observer, target}})
+	h.drain(1)
+	h.publish(sim.TickResult{Tick: 2, Players: []sim.PlayerUpdate{observer, target}})
+	active := onlyRemotePlayerMessages(h.drain(1))
+	target.Mining = sim.MiningUpdate{}
+	h.publish(sim.TickResult{Tick: 3, Players: []sim.PlayerUpdate{observer, target}})
+	inactive := onlyRemotePlayerMessages(h.drain(1))
+
+	if len(active) != 1 || len(inactive) != 1 {
+		t.Fatalf("远端状态消息数 active=%d inactive=%d", len(active), len(inactive))
+	}
+	activeStates, activeOK := active[0].(network.RemotePlayerStates)
+	inactiveStates, inactiveOK := inactive[0].(network.RemotePlayerStates)
+	activeStates.ServerTick = 0
+	inactiveStates.ServerTick = 0
+	if !activeOK || !inactiveOK || !reflect.DeepEqual(activeStates, inactiveStates) {
+		t.Fatalf("远端状态受采掘影响: active=%#v inactive=%#v", active[0], inactive[0])
+	}
 }
 
 func TestForgetSplits4097ChunksIntoValidDeterministicPackets(t *testing.T) {

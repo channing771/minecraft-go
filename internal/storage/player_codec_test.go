@@ -30,13 +30,18 @@ func fixturePlayerInventory() core.Inventory {
 	var inventory core.Inventory
 	inventory.Hotbar.Selected = 3
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	inventory.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
 	inventory.Hotbar.Slots[6] = core.ItemStack{Item: core.ItemGrass, Count: 1}
 	inventory.Backpack[0] = core.ItemStack{Item: core.ItemDirt, Count: 12}
+	inventory.Backpack[7] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
 	inventory.Backpack[core.BackpackSlots-1] = core.ItemStack{Item: core.ItemStone, Count: 5}
 	return inventory
 }
 
 func TestPlayerCodecRoundTrip(t *testing.T) {
+	if currentPlayerSchema != 3 {
+		t.Fatalf("玩家 schema=%d，工具没有改变栏位布局", currentPlayerSchema)
+	}
 	id := fixturePlayerID()
 	want := fixturePlayerSave(id, 7)
 	encoded, err := encodePlayer(want)
@@ -112,6 +117,8 @@ func TestPlayerCodecRejectsInvalidHotbarPayload(t *testing.T) {
 		{"数量超过上限", func(h *core.Hotbar) {
 			h.Slots[1] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount + 1}
 		}},
+		// M4E 二进制的注册范围止于 9，因此同样会拒绝 ID 10/11；
+		// 这里保留真正未知的 4242，不能复制一份冻结的旧 decoder。
 		{"未知物品", func(h *core.Hotbar) {
 			h.Slots[2] = core.ItemStack{Item: core.ItemID(4242), Count: 1}
 		}},

@@ -22,10 +22,9 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"hello", StateHandshake, ClientHello{ProtocolVersion: 7}, 0, "07"},
+		{"hello", StateHandshake, ClientHello{ProtocolVersion: 8}, 0, "08"},
 		{"login start", StateLogin, LoginStart{PlayerID: id, DisplayName: "Chen"}, 0, "00112233445546778899aabbccddeeff044368656e"},
-		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5}, 0, "0100000000000000ff01010000c03f000000bf"},
-		{"break", StatePlay, BreakBlock{Sequence: 2}, 1, "02000000000000000000000000000000"},
+		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5, Mining: true}, 0, "0100000000000000ff01010000c03f000000bf01"},
 		{"place", StatePlay, PlaceBlock{Sequence: 3, Yaw: 2, Pitch: -1, Slot: 4}, 2, "030000000000000000000040000080bf04"},
 		{"resync", StatePlay, RequestChunkResync{Sequence: 4, Dimension: core.Overworld, Chunk: core.ChunkPos{X: -2, Z: 3}, HaveRevision: 5}, 3, "040000000000000000000000feffffff030000000500000000000000"},
 		{"keep alive reply", StatePlay, KeepAliveReply{Token: 6}, 4, "0600000000000000"},
@@ -58,13 +57,14 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 7}, 0, "07"},
-		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 7, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0701026e6f"},
+		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 8}, 0, "08"},
+		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 8, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0801026e6f"},
 		{"login success", StateLogin, LoginSuccess{PlayerID: id}, 0, "00112233445546778899aabbccddeeff"},
 		{"login reject", StateLogin, LoginReject{Code: LoginInvalidIdentity, Message: "no"}, 1, "02026e6f"},
 		{"block changes", StatePlay, BlockChanges{Dimension: core.Overworld, Chunk: core.ChunkPos{X: 1, Z: -1}, BaseRevision: 1, NewRevision: 2, Changes: []BlockChange{{Position: core.BlockPos{X: 16, Y: -64, Z: -1}, Block: core.StoneID}}}, 1, "0000000001000000ffffffff010000000000000002000000000000000110000000c0ffffffffffffff0200"},
 		{"forget chunks", StatePlay, ForgetChunks{Dimension: core.Overworld, Chunks: []core.ChunkPos{{X: 1, Z: -1}, {X: 2, Z: 3}}}, 2, "000000000201000000ffffffff0200000003000000"},
-		{"player state", StatePlay, PlayerState{ServerTick: 1, LastInputSequence: 2, Dimension: core.Overworld, Position: mgl32.Vec3{1, 2, 3}, Velocity: mgl32.Vec3{-1, 0.5, 1.5}, Yaw: 4, Pitch: -5, OnGround: true, Reset: true}, 3, "01000000000000000200000000000000000000000000803f0000004000004040000080bf0000003f0000c03f000080400000a0c0010001"},
+		{"inactive player state", StatePlay, PlayerState{}, 3, "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},
+		{"active player state", StatePlay, PlayerState{Dimension: core.Overworld, MiningActive: true, MiningTarget: core.BlockPos{X: 1, Y: 2, Z: 3}, MiningProgressTicks: 6, MiningRequiredTicks: 15, MiningHarvestable: true}, 3, "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101000000020000000300000006000f0001"},
 		{"command rejected", StatePlay, CommandRejected{Sequence: 7, Reason: RejectOccupied}, 4, "070000000000000006"},
 		{"keep alive", StatePlay, KeepAlive{Token: 8}, 5, "0800000000000000"},
 		{"disconnect", StatePlay, Disconnect{Code: DisconnectTimeout, Message: "bye"}, 6, "0203627965"},
@@ -86,6 +86,12 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPlayClientPacketIDOneIsUnknown(t *testing.T) {
+	if _, err := decodeClientPacketPayload(StatePlay, 1, nil); !errors.Is(err, errUnknownPacketID) {
+		t.Fatalf("Play client packet ID 1 解码错误 = %v，想要 %v", err, errUnknownPacketID)
 	}
 }
 
@@ -184,7 +190,7 @@ func TestSmallPacketErrorCodeWireValues(t *testing.T) {
 		packet ServerPacket
 		want   string
 	}{
-		{HandshakeReject{ServerProtocolVersion: 7, Code: HandshakeVersionMismatch}, "070100"},
+		{HandshakeReject{ServerProtocolVersion: 8, Code: HandshakeVersionMismatch}, "080100"},
 		{LoginReject{Code: LoginServerFull}, "0100"},
 		{LoginReject{Code: LoginInvalidIdentity}, "0200"},
 		{LoginReject{Code: LoginPlayerDataCorrupt}, "0300"},
@@ -290,6 +296,10 @@ func TestSmallPacketRejectsMalformedPayloads(t *testing.T) {
 		}},
 		{"invalid bool", func() error {
 			_, err := decodeClientPacketPayload(StatePlay, 0, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0})
+			return err
+		}},
+		{"invalid mining bool", func() error {
+			_, err := decodeClientPacketPayload(StatePlay, 0, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2})
 			return err
 		}},
 		{"invalid float", func() error {
@@ -569,9 +579,6 @@ func sameClientPacket(got, want ClientPacket) bool {
 		return ok && got == other
 	case PlayerInput:
 		other, ok := want.(PlayerInput)
-		return ok && got == other
-	case BreakBlock:
-		other, ok := want.(BreakBlock)
 		return ok && got == other
 	case PlaceBlock:
 		other, ok := want.(PlaceBlock)

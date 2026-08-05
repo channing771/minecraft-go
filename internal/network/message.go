@@ -30,6 +30,7 @@ type PlayerInput struct {
 	Jump     bool
 	Yaw      float32
 	Pitch    float32
+	Mining   bool
 }
 
 func (PlayerInput) clientMessage() {}
@@ -38,21 +39,6 @@ func (PlayerInput) clientPacket()  {}
 func (input PlayerInput) Validate() error {
 	if !finite32(input.Yaw) || !finite32(input.Pitch) {
 		return errors.New("network: player input has non-finite rotation")
-	}
-	return nil
-}
-
-type BreakBlock struct {
-	Sequence   uint64
-	Yaw, Pitch float32
-}
-
-func (BreakBlock) clientMessage() {}
-func (BreakBlock) clientPacket()  {}
-
-func (command BreakBlock) Validate() error {
-	if !finite32(command.Yaw) || !finite32(command.Pitch) {
-		return errors.New("network: break block has non-finite rotation")
 	}
 	return nil
 }
@@ -296,15 +282,20 @@ func (forget ForgetChunks) Validate() error {
 }
 
 type PlayerState struct {
-	ServerTick        uint64
-	LastInputSequence uint64
-	Dimension         core.DimensionID
-	Position          mgl32.Vec3
-	Velocity          mgl32.Vec3
-	Yaw, Pitch        float32
-	OnGround          bool
-	Ready             bool
-	Reset             bool
+	ServerTick          uint64
+	LastInputSequence   uint64
+	Dimension           core.DimensionID
+	Position            mgl32.Vec3
+	Velocity            mgl32.Vec3
+	Yaw, Pitch          float32
+	OnGround            bool
+	Ready               bool
+	Reset               bool
+	MiningActive        bool
+	MiningTarget        core.BlockPos
+	MiningProgressTicks uint16
+	MiningRequiredTicks uint16
+	MiningHarvestable   bool
 }
 
 type RemotePlayerSpawn struct {
@@ -396,6 +387,16 @@ func (state PlayerState) Validate() error {
 	}
 	if !finite32(state.Yaw) || !finite32(state.Pitch) {
 		return errors.New("network: player state has non-finite rotation")
+	}
+	if !state.MiningActive {
+		if state.MiningTarget != (core.BlockPos{}) || state.MiningProgressTicks != 0 ||
+			state.MiningRequiredTicks != 0 || state.MiningHarvestable {
+			return errors.New("network: inactive player state has mining fields")
+		}
+		return nil
+	}
+	if state.MiningProgressTicks == 0 || state.MiningProgressTicks >= state.MiningRequiredTicks {
+		return errors.New("network: active player state has invalid mining progress")
 	}
 	return nil
 }

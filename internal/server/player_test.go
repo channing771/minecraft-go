@@ -166,7 +166,7 @@ func TestTrustedObserverAppliedCenterWaitsForStepWithPreloadedTarget(t *testing.
 	}
 }
 
-func TestPlayerMessageTranslation(t *testing.T) {
+func TestTranslatePlayerMessage(t *testing.T) {
 	tests := []struct {
 		name    string
 		message network.ClientMessage
@@ -181,6 +181,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Jump:     true,
 				Yaw:      0.75,
 				Pitch:    -0.25,
+				Mining:   true,
 			},
 			want: sim.Command{
 				Session:  testSessionID,
@@ -191,21 +192,7 @@ func TestPlayerMessageTranslation(t *testing.T) {
 				Jump:     true,
 				Yaw:      0.75,
 				Pitch:    -0.25,
-			},
-		},
-		{
-			name: "break block uses only player look",
-			message: network.BreakBlock{
-				Sequence: 12,
-				Yaw:      -1.25,
-				Pitch:    0.5,
-			},
-			want: sim.Command{
-				Session:  testSessionID,
-				Sequence: 12,
-				Kind:     sim.CommandBreakBlock,
-				Yaw:      -1.25,
-				Pitch:    0.5,
+				Mining:   true,
 			},
 		},
 		{
@@ -365,23 +352,22 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		t.Fatalf("Ready tick 尾消息 = %#v", readyMessages[2])
 	}
 
-	running.incoming <- incomingCommand{
-		Session: testSessionID, Generation: 1,
-		Command: sim.Command{
-			Session:  testSessionID,
-			Sequence: 1,
-			Kind:     sim.CommandBreakBlock,
-			Yaw:      0,
-			Pitch:    -1.5,
-		},
+	running.engine.Enqueue(sim.Command{
+		Session: testSessionID, Sequence: 1, Kind: sim.CommandPlayerInput,
+		Yaw: 0, Pitch: -1.5, Mining: true,
+	})
+	for range 4 {
+		if primed := running.engine.Step(); len(primed.Changes) != 0 {
+			t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+		}
 	}
 	running.incoming <- incomingCommand{
 		Session: testSessionID, Generation: 1,
 		Command: sim.Command{
 			Session:  testSessionID,
 			Sequence: 2,
-			Kind:     sim.CommandPlayerInput,
-			MoveX:    2,
+			Kind:     sim.CommandSelectHotbar,
+			Slot:     core.HotbarSlots,
 		},
 	}
 	changed := running.StepForTest()
@@ -400,11 +386,11 @@ func TestPlayerStatePublicationOrder(t *testing.T) {
 		t.Fatalf("change tick 次消息 = %#v", changedMessages[1])
 	}
 	rejection, ok := changedMessages[2].(network.CommandRejected)
-	if !ok || rejection.Sequence != 2 || rejection.Reason != network.RejectInvalidInput {
+	if !ok || rejection.Sequence != 2 || rejection.Reason != network.RejectInvalidSlot {
 		t.Fatalf("change tick 第三条消息 = %#v", changedMessages[2])
 	}
 	state, ok := changedMessages[3].(network.PlayerState)
-	if !ok || state.ServerTick != changed.Tick || state.LastInputSequence != 2 {
+	if !ok || state.ServerTick != changed.Tick || state.LastInputSequence != 1 {
 		t.Fatalf("change tick 尾消息 = %#v", changedMessages[3])
 	}
 

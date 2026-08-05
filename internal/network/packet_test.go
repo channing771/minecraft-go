@@ -18,8 +18,7 @@ func TestValidateClientPacket(t *testing.T) {
 	}{
 		{"hello", StateHandshake, ClientHello{ProtocolVersion: ProtocolVersion}},
 		{"login start", StateLogin, LoginStart{PlayerID: validID, DisplayName: "Chen"}},
-		{"input", StatePlay, PlayerInput{Yaw: 90, Pitch: -15}},
-		{"break", StatePlay, BreakBlock{Yaw: 90, Pitch: -15}},
+		{"input", StatePlay, PlayerInput{Yaw: 90, Pitch: -15, Mining: true}},
 		{"place", StatePlay, PlaceBlock{Yaw: 90, Pitch: -15, Slot: 8}},
 		{"select hotbar", StatePlay, SelectHotbar{Slot: 8}},
 		{"move inventory stack", StatePlay, MoveInventoryStack{From: 0, To: core.InventorySlots - 1}},
@@ -46,7 +45,6 @@ func TestValidateClientPacket(t *testing.T) {
 		{"invalid display name", StateLogin, LoginStart{PlayerID: validID, DisplayName: "Chen\nName"}},
 		{"zero keep alive token", StatePlay, KeepAliveReply{}},
 		{"input NaN", StatePlay, PlayerInput{Yaw: float32(math.NaN())}},
-		{"break infinity", StatePlay, BreakBlock{Pitch: float32(math.Inf(1))}},
 		{"place NaN", StatePlay, PlaceBlock{Yaw: float32(math.NaN())}},
 		{"place slot out of range", StatePlay, PlaceBlock{Slot: core.HotbarSlots}},
 		{"select hotbar slot out of range", StatePlay, SelectHotbar{Slot: core.HotbarSlots}},
@@ -81,8 +79,8 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 			t.Fatalf("%s state = %d, want %d", tc.name, tc.got, tc.want)
 		}
 	}
-	if ProtocolVersion != 7 {
-		t.Fatalf("protocol version = %d, want 7", ProtocolVersion)
+	if ProtocolVersion != 8 {
+		t.Fatalf("protocol version = %d, want 8", ProtocolVersion)
 	}
 
 	codes := []struct {
@@ -125,7 +123,7 @@ func TestValidateServerPacket(t *testing.T) {
 		{"snapshot", StatePlay, validPacketSnapshot()},
 		{"block changes", StatePlay, validPacketBlockChanges()},
 		{"forget chunks", StatePlay, ForgetChunks{Chunks: []core.ChunkPos{{}}}},
-		{"player state", StatePlay, PlayerState{Position: mgl32.Vec3{1, 2, 3}, Velocity: mgl32.Vec3{4, 5, 6}, Yaw: 90, Pitch: -15}},
+		{"player state", StatePlay, PlayerState{Position: mgl32.Vec3{1, 2, 3}, Velocity: mgl32.Vec3{4, 5, 6}, Yaw: 90, Pitch: -15, MiningActive: true, MiningTarget: core.BlockPos{X: 1, Y: 2, Z: 3}, MiningProgressTicks: 6, MiningRequiredTicks: 15, MiningHarvestable: true}},
 		{"command reject", StatePlay, CommandRejected{Reason: RejectInvalidRay}},
 		{"keep alive", StatePlay, KeepAlive{Token: 1}},
 		{"disconnect", StatePlay, Disconnect{Code: DisconnectTimeout}},
@@ -166,6 +164,13 @@ func TestValidateServerPacket(t *testing.T) {
 		{"too many block changes", StatePlay, tooManyValidBlockChanges()},
 		{"player state NaN", StatePlay, PlayerState{Position: mgl32.Vec3{float32(math.NaN()), 0, 0}}},
 		{"player state infinity", StatePlay, PlayerState{Velocity: mgl32.Vec3{0, float32(math.Inf(1)), 0}}},
+		{"inactive player state has target", StatePlay, PlayerState{MiningTarget: core.BlockPos{X: 1}}},
+		{"inactive player state has progress", StatePlay, PlayerState{MiningProgressTicks: 1}},
+		{"inactive player state has required", StatePlay, PlayerState{MiningRequiredTicks: 1}},
+		{"inactive player state is harvestable", StatePlay, PlayerState{MiningHarvestable: true}},
+		{"active player state has zero progress", StatePlay, PlayerState{MiningActive: true, MiningRequiredTicks: 1}},
+		{"active player state completes", StatePlay, PlayerState{MiningActive: true, MiningProgressTicks: 1, MiningRequiredTicks: 1}},
+		{"active player state exceeds completion", StatePlay, PlayerState{MiningActive: true, MiningProgressTicks: 2, MiningRequiredTicks: 1}},
 		{"unknown command rejection", StatePlay, CommandRejected{Reason: RejectReason("other")}},
 		{"inventory state out of range", StatePlay, InventoryState{Inventory: core.Inventory{Hotbar: core.Hotbar{Selected: core.HotbarSlots}}}},
 		{"empty drop upserts", StatePlay, ItemDropUpserts{}},

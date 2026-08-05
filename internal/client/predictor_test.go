@@ -167,7 +167,7 @@ func TestPredictorSamplesControlAfterFixedDelta(t *testing.T) {
 	sequence := uint64(40)
 	advance := func(elapsed time.Duration) error {
 		return p.Advance(elapsed, Control{
-			MoveX: 1, MoveZ: -1, Jump: true, Yaw: 0.25, Pitch: -0.5,
+			MoveX: 1, MoveZ: -1, Jump: true, Yaw: 0.25, Pitch: -0.5, Mining: true,
 		}, loadedAirSource{}, func() uint64 {
 			sequence++
 			return sequence
@@ -186,7 +186,7 @@ func TestPredictorSamplesControlAfterFixedDelta(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := network.PlayerInput{
-		Sequence: 41, MoveX: 1, MoveZ: -1, Jump: true, Yaw: 0.25, Pitch: -0.5,
+		Sequence: 41, MoveX: 1, MoveZ: -1, Jump: true, Yaw: 0.25, Pitch: -0.5, Mining: true,
 	}
 	if len(sent) != 1 || sent[0] != want || p.HistoryLen() != 1 {
 		t.Fatalf("sent=%+v history=%d，想要 %+v", sent, p.HistoryLen(), want)
@@ -211,7 +211,7 @@ func TestPredictorRunsAtMostFiveFixedStepsPerFrame(t *testing.T) {
 	p := readyPredictor(t)
 	var sent []network.PlayerInput
 	var sequence uint64
-	err := p.Advance(260*time.Millisecond, Control{MoveZ: 1}, loadedAirSource{},
+	err := p.Advance(260*time.Millisecond, Control{MoveZ: 1, Mining: true}, loadedAirSource{},
 		func() uint64 { sequence++; return sequence },
 		func(input network.PlayerInput) error { sent = append(sent, input); return nil })
 	if err != nil {
@@ -219,6 +219,11 @@ func TestPredictorRunsAtMostFiveFixedStepsPerFrame(t *testing.T) {
 	}
 	if len(sent) != 5 || p.HistoryLen() != 5 {
 		t.Fatalf("sent=%d history=%d", len(sent), p.HistoryLen())
+	}
+	for index, input := range sent {
+		if !input.Mining {
+			t.Fatalf("固定步 %d 丢失采掘状态: %+v", index, input)
+		}
 	}
 }
 
@@ -300,7 +305,7 @@ func TestPredictorSuspendsWithOneNeutralInputAtHistoryCapacity(t *testing.T) {
 	before, _ := p.State()
 	var sent []network.PlayerInput
 	callbackSawSuspended := false
-	control := Control{MoveX: 1, MoveZ: -1, Jump: true, Yaw: 0.4, Pitch: -0.3}
+	control := Control{MoveX: 1, MoveZ: -1, Jump: true, Yaw: 0.4, Pitch: -0.3, Mining: true}
 	err := p.Advance(physics.FixedDelta, control, loadedAirSource{}, func() uint64 {
 		(*sequence)++
 		return *sequence
@@ -317,7 +322,7 @@ func TestPredictorSuspendsWithOneNeutralInputAtHistoryCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := network.PlayerInput{Sequence: 257, Yaw: control.Yaw, Pitch: control.Pitch}
-	if len(sent) != 1 || sent[0] != want || !callbackSawSuspended {
+	if len(sent) != 1 || sent[0] != want || sent[0].Mining || !callbackSawSuspended {
 		t.Fatalf("suspension sent=%+v callbackSawSuspended=%v，想要 %+v", sent, callbackSawSuspended, want)
 	}
 	after, _ := p.State()
@@ -565,6 +570,36 @@ func TestApplyPlayerStateIgnoresStaleAndEqualTicks(t *testing.T) {
 			}
 			assertPredictorSame(t, p, before)
 		})
+	}
+}
+
+func TestApplyPlayerStateAcceptsCanonicalMiningWithoutPredictingIt(t *testing.T) {
+	p := readyPredictor(t)
+	state := nextAuthority(p)
+	state.MiningActive = true
+	state.MiningTarget = core.BlockPos{X: 1, Y: 2, Z: 3}
+	state.MiningProgressTicks = 6
+	state.MiningRequiredTicks = 15
+	state.MiningHarvestable = true
+	if err := state.Validate(); err != nil {
+		t.Fatalf("测试 PlayerState 非法: %v", err)
+	}
+	if _, err := p.ApplyPlayerState(state, flatClientWorld{}); err != nil {
+		t.Fatalf("ApplyPlayerState(active mining): %v", err)
+	}
+	got, ready := p.State()
+	want := physics.State{Position: state.Position, Velocity: state.Velocity, OnGround: state.OnGround}
+	if !ready {
+		t.Fatal("规范采掘状态使 Predictor 退出 Ready")
+	}
+	assertStateNear(t, got, want, 1e-6)
+
+	inactive := nextAuthority(p)
+	if err := inactive.Validate(); err != nil {
+		t.Fatalf("测试 inactive PlayerState 非法: %v", err)
+	}
+	if _, err := p.ApplyPlayerState(inactive, flatClientWorld{}); err != nil {
+		t.Fatalf("ApplyPlayerState(inactive mining): %v", err)
 	}
 }
 

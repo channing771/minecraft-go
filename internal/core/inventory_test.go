@@ -178,6 +178,61 @@ func TestInventoryAddStackRejectsInvalidStack(t *testing.T) {
 	}
 }
 
+func TestInventoryToolStackLimits(t *testing.T) {
+	t.Run("第二把石镐使用下一个空格", func(t *testing.T) {
+		var inventory core.Inventory
+		first, remainder := inventory.AddStack(core.ItemStack{Item: core.ItemStonePickaxe, Count: 1})
+		if remainder != (core.ItemStack{}) {
+			t.Fatalf("第一把石镐余量 = %+v", remainder)
+		}
+		next, remainder := first.AddStack(core.ItemStack{Item: core.ItemStonePickaxe, Count: 1})
+		if remainder != (core.ItemStack{}) {
+			t.Fatalf("第二把石镐余量 = %+v", remainder)
+		}
+		if next.Hotbar.Slots[0] != (core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}) ||
+			next.Hotbar.Slots[1] != (core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}) {
+			t.Fatalf("两把石镐落点 = %+v / %+v，想要两个单格工具", next.Hotbar.Slots[0], next.Hotbar.Slots[1])
+		}
+	})
+
+	t.Run("同类工具不能移动合并", func(t *testing.T) {
+		var inventory core.Inventory
+		inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+		inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+		next, ok := inventory.MoveStack(0, 1)
+		if ok || next != inventory {
+			t.Fatalf("同类工具移动 = %+v, %v，想要原值和 false", next, ok)
+		}
+	})
+
+	t.Run("不同工具互换", func(t *testing.T) {
+		var inventory core.Inventory
+		inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+		inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
+		next, ok := inventory.MoveStack(0, 1)
+		if !ok || next.Hotbar.Slots[0].Item != core.ItemIronPickaxe || next.Hotbar.Slots[1].Item != core.ItemStonePickaxe {
+			t.Fatalf("不同工具交换 = %+v, %v", next, ok)
+		}
+	})
+
+	t.Run("普通物品仍合并至 64", func(t *testing.T) {
+		var inventory core.Inventory
+		inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+		inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStone, Count: 63}
+		next, ok := inventory.MoveStack(0, 1)
+		if !ok || next.Hotbar.Slots[0] != (core.ItemStack{}) || next.Hotbar.Slots[1].Count != 64 {
+			t.Fatalf("普通物品合并 = %+v, %v", next, ok)
+		}
+	})
+
+	t.Run("SetSlot 拒绝两个工具", func(t *testing.T) {
+		inventory, ok := (core.Inventory{}).SetSlot(0, core.ItemStack{Item: core.ItemStonePickaxe, Count: 2})
+		if ok || inventory != (core.Inventory{}) {
+			t.Fatalf("SetSlot 接受两个工具: %+v, %v", inventory, ok)
+		}
+	})
+}
+
 func TestInventoryMoveStackIntoEmptySlot(t *testing.T) {
 	var inventory core.Inventory
 	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStone, Count: 7}

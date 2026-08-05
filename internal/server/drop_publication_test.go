@@ -278,8 +278,8 @@ func TestDropSurvivesShutdownAndRestart(t *testing.T) {
 	first, firstStore, firstClient := newDropDiskWorld(t, root)
 	step := stepUntilDropReady(t, first, firstClient)
 
-	sendClientMessage(t, firstClient, network.BreakBlock{
-		Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
+	sendClientMessage(t, firstClient, network.PlayerInput{
+		Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01, Mining: true,
 	})
 	var created network.ItemDrop
 	deadline := time.Now().Add(5 * time.Second)

@@ -19,11 +19,12 @@ const (
 
 // Control 是渲染帧提供给固定步预测器的当前控制意图。
 type Control struct {
-	MoveX int8
-	MoveZ int8
-	Jump  bool
-	Yaw   float32
-	Pitch float32
+	MoveX  int8
+	MoveZ  int8
+	Jump   bool
+	Yaw    float32
+	Pitch  float32
+	Mining bool
 }
 
 // ReconcileResult 描述权威状态和解对视角的影响。
@@ -148,6 +149,7 @@ func (p *Predictor) Advance(
 			Jump:     control.Jump,
 			Yaw:      control.Yaw,
 			Pitch:    control.Pitch,
+			Mining:   control.Mining,
 		}
 		if err := send(message); err != nil {
 			return err

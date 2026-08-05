@@ -312,14 +312,14 @@ func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
 		Yaw: yaw, Slot: 0,
 	})
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 3, Kind: sim.CommandBreakBlock,
-		Yaw: yaw,
+		Session: session, Sequence: 3, Kind: sim.CommandSelectHotbar,
+		Slot: 1,
 	})
 	result := engine.Step()
 	if len(result.Rejected) != 0 {
 		t.Fatalf("命令被拒绝: %+v", result.Rejected)
 	}
-	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 1 {
+	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 2 {
 		t.Fatalf("Changes = %+v", result.Changes)
 	}
 
@@ -330,13 +330,16 @@ func TestEngineSortsCommandsAndDeduplicatesSequence(t *testing.T) {
 	if !ok || revision != 2 {
 		t.Fatalf("CloneReadyChunk revision = %d, ok=%v", revision, ok)
 	}
-	if got := chunk.BlockAt(0, 2, 4); got != core.DirtID {
-		t.Fatalf("最终 block = %d，想要 dirt", got)
+	if got := chunk.BlockAt(0, 2, 4); got != core.StoneID {
+		t.Fatalf("较早命令 block = %d，想要 stone", got)
+	}
+	if got := chunk.BlockAt(0, 2, 3); got != core.DirtID {
+		t.Fatalf("较晚命令 block = %d，想要 dirt", got)
 	}
 
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 4, Kind: sim.CommandBreakBlock,
-		Yaw: yaw,
+		Session: session, Sequence: 4, Kind: sim.CommandPlaceBlock,
+		Yaw: yaw, Slot: 1,
 	})
 	duplicate := engine.Step()
 	if len(duplicate.Changes) != 0 || len(duplicate.Rejected) != 0 {
@@ -432,9 +435,9 @@ func TestPlayerCommandsRejectRegisteredPendingPlayer(t *testing.T) {
 			},
 		},
 		{
-			name: "interaction",
+			name: "placement",
 			command: sim.Command{
-				Kind: sim.CommandBreakBlock,
+				Kind: sim.CommandPlaceBlock,
 			},
 		},
 	}
@@ -461,7 +464,7 @@ func TestPlayerCommandsRejectRegisteredPendingPlayer(t *testing.T) {
 	}
 }
 
-func TestPendingInteractionStaysRejectedWhenPlayerActivatesSameTick(t *testing.T) {
+func TestPendingPlacementStaysRejectedWhenPlayerActivatesSameTick(t *testing.T) {
 	engine := sim.NewEngine(0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
@@ -473,7 +476,7 @@ func TestPendingInteractionStaysRejectedWhenPlayerActivatesSameTick(t *testing.T
 		Chunk:     generateFlatChunk(core.ChunkPos{}),
 	})
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 1, Kind: sim.CommandBreakBlock,
+		Session: session, Sequence: 1, Kind: sim.CommandPlaceBlock,
 	})
 
 	result := engine.Step()

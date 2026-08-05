@@ -604,14 +604,7 @@ func translateClientMessage(
 			Jump:     message.Jump,
 			Yaw:      message.Yaw,
 			Pitch:    message.Pitch,
-		}, true
-	case network.BreakBlock:
-		return sim.Command{
-			Session:  id,
-			Sequence: message.Sequence,
-			Kind:     sim.CommandBreakBlock,
-			Yaw:      message.Yaw,
-			Pitch:    message.Pitch,
+			Mining:   message.Mining,
 		}, true
 	case network.PlaceBlock:
 		return sim.Command{

@@ -12,7 +12,7 @@ func TestProtocolV1PacketIDsAreFrozen(t *testing.T) {
 		id     uint32
 	}{
 		{StateHandshake, ClientHello{}, 0}, {StateLogin, LoginStart{}, 0},
-		{StatePlay, PlayerInput{}, 0}, {StatePlay, BreakBlock{}, 1},
+		{StatePlay, PlayerInput{}, 0},
 		{StatePlay, PlaceBlock{}, 2}, {StatePlay, RequestChunkResync{}, 3},
 		{StatePlay, KeepAliveReply{}, 4},
 	}
@@ -30,6 +30,15 @@ func TestProtocolV1PacketIDsAreFrozen(t *testing.T) {
 	}
 	assertClientRegistry(t, client)
 	assertServerRegistry(t, server)
+	if _, ok := clientPacketForID(StatePlay, 1); ok {
+		t.Fatal("Play client packet ID 1 必须保持未分配")
+	}
+	if id, ok := clientPacketID(StatePlay, PlaceBlock{}); !ok || id != 2 {
+		t.Fatalf("PlaceBlock ID = %d, ok=%v，想要 2, true", id, ok)
+	}
+	if id, ok := clientPacketID(StatePlay, CloseFurnace{}); !ok || id != 10 {
+		t.Fatalf("CloseFurnace ID = %d, ok=%v，想要 10, true", id, ok)
+	}
 }
 
 func TestProtocolV2RemotePlayerPacketIDsAreFrozen(t *testing.T) {
@@ -164,9 +173,6 @@ func sameClientPacketType(left, right ClientPacket) bool {
 		return ok
 	case PlayerInput:
 		_, ok := right.(PlayerInput)
-		return ok
-	case BreakBlock:
-		_, ok := right.(BreakBlock)
 		return ok
 	case PlaceBlock:
 		_, ok := right.(PlaceBlock)

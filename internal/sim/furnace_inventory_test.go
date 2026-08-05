@@ -275,8 +275,10 @@ func TestPlaceIronBlockDoesNotAllocateFurnaceSlot(t *testing.T) {
 	}
 }
 
-func TestBreakFurnaceDropsBodyAndContents(t *testing.T) {
-	engine, session := readyFlatPlayer(t)
+func TestMiningFurnaceDropsBodyAndContents(t *testing.T) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	engine, session := readyFlatPlayerWithInventory(t, inventory)
 	key := core.ChunkKey{Dimension: core.Overworld}
 	index := dropTargetIndex(t)
 	engine.SetBlockForTest(core.BlockPos{}, core.FurnaceID)
@@ -288,10 +290,8 @@ func TestBreakFurnaceDropsBodyAndContents(t *testing.T) {
 		Output: core.ItemStack{Item: core.ItemIronIngot, Count: core.MaxStackCount},
 	})
 
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-	result := engine.Step()
+	sequence := uint64(1)
+	result := mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 15)
 	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
 		t.Fatalf("破坏熔炉 result=%+v", result)
 	}
@@ -317,8 +317,10 @@ func TestBreakFurnaceDropsBodyAndContents(t *testing.T) {
 	}
 }
 
-func TestBreakFurnaceRejectsWhenDropsAreFull(t *testing.T) {
-	engine, session := readyFlatPlayer(t)
+func TestMiningFurnaceRejectsWhenDropsAreFull(t *testing.T) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	engine, session := readyFlatPlayerWithInventory(t, inventory)
 	key := core.ChunkKey{Dimension: core.Overworld}
 	index := dropTargetIndex(t)
 	elsewhere, ok := world.ChunkBlockIndex(core.BlockPos{X: 9, Y: 5, Z: 9})
@@ -338,10 +340,8 @@ func TestBreakFurnaceRejectsWhenDropsAreFull(t *testing.T) {
 		})
 	}
 
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-	result := engine.Step()
+	sequence := uint64(1)
+	result := mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 15)
 	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectDropCapacity {
 		t.Fatalf("掉落容量不足 result=%+v", result)
 	}

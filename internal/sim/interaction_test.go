@@ -8,7 +8,7 @@ import (
 	"minecraft-go/internal/sim"
 )
 
-func TestEngineBreakValidation(t *testing.T) {
+func TestEngineMiningValidation(t *testing.T) {
 	tests := []struct {
 		name      string
 		yaw       float32
@@ -17,12 +17,16 @@ func TestEngineBreakValidation(t *testing.T) {
 		reason    sim.RejectReason
 		wantBlock core.BlockID
 		position  core.BlockPos
+		ticks     int
+		changed   bool
 	}{
 		{
 			name:      "grass breaks to air",
 			pitch:     -float32(math.Pi)/2 + 0.01,
 			wantBlock: core.AirID,
 			position:  core.BlockPos{X: 0, Y: 0, Z: 0},
+			ticks:     5,
+			changed:   true,
 		},
 		{
 			name:      "invalid look",
@@ -31,29 +35,26 @@ func TestEngineBreakValidation(t *testing.T) {
 			reason:    sim.RejectInvalidInput,
 			wantBlock: core.GrassID,
 			position:  core.BlockPos{X: 0, Y: 0, Z: 0},
+			ticks:     1,
 		},
 		{
 			name:      "no target",
 			pitch:     float32(math.Pi)/2 - 0.01,
-			rejected:  true,
-			reason:    sim.RejectNoTarget,
 			wantBlock: core.GrassID,
 			position:  core.BlockPos{X: 0, Y: 0, Z: 0},
+			ticks:     1,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			engine, session, chunkPos := readyFlatEngine(t)
-			engine.Enqueue(sim.Command{
-				Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
-				Yaw: tc.yaw, Pitch: tc.pitch,
-			})
-			result := engine.Step()
+			sequence := uint64(1)
+			result := mineUntilComplete(t, engine, session, &sequence, tc.yaw, tc.pitch, tc.ticks)
 			if tc.rejected {
 				assertRejected(t, result, tc.reason)
 			} else {
-				if len(result.Rejected) != 0 || len(result.Changes) == 0 {
+				if len(result.Rejected) != 0 || (len(result.Changes) != 0) != tc.changed {
 					t.Fatalf("成功命令结果 = %+v", result)
 				}
 			}
@@ -115,13 +116,14 @@ func TestEnginePlaceValidationAndWhitelist(t *testing.T) {
 	})
 }
 
-func TestPlayerIntentRejectsTraversalIntoUnknownAdjacentChunk(t *testing.T) {
+func TestPlayerIntentDoesNotModifyReadyChunkWhenRayEntersUnknownChunk(t *testing.T) {
 	tests := []struct {
-		name    string
-		command sim.Command
+		name       string
+		command    sim.Command
+		wantReject bool
 	}{
-		{name: "break", command: sim.Command{Kind: sim.CommandBreakBlock}},
-		{name: "place", command: sim.Command{Kind: sim.CommandPlaceBlock, Slot: 0}},
+		{name: "mine", command: sim.Command{Kind: sim.CommandPlayerInput, Mining: true}},
+		{name: "place", command: sim.Command{Kind: sim.CommandPlaceBlock, Slot: 0}, wantReject: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -164,7 +166,12 @@ func TestPlayerIntentRejectsTraversalIntoUnknownAdjacentChunk(t *testing.T) {
 			command.Sequence = 2
 			command.Yaw = float32(math.Pi) / 2
 			engine.Enqueue(command)
-			assertRejected(t, engine.Step(), sim.RejectChunkNotReady)
+			result := engine.Step()
+			if test.wantReject {
+				assertRejected(t, result, sim.RejectChunkNotReady)
+			} else if len(result.Rejected) != 0 || onlyPlayer(t, result).Mining.Active {
+				t.Fatalf("未知 chunk 采掘没有正常清零: %+v", result)
+			}
 
 			afterHash, afterRevision, ok := engine.ChunkHash(core.ChunkKey{
 				Dimension: core.Overworld,

@@ -11,14 +11,10 @@ import (
 	"minecraft-go/internal/world"
 )
 
-func TestBreakBlockUsesAuthoritativeEye(t *testing.T) {
+func TestMiningUsesAuthoritativeEye(t *testing.T) {
 	engine, session := readyFlatPlayer(t)
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
-		Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
-	})
-
-	result := engine.Step()
+	sequence := uint64(1)
+	result := mineUntilComplete(t, engine, session, &sequence, 0, -float32(math.Pi)/2+0.01, 5)
 	if len(result.Rejected) != 0 || len(result.Changes) != 1 ||
 		len(result.Changes[0].Changes) != 1 ||
 		result.Changes[0].Changes[0].Position != (core.BlockPos{X: 0, Y: 0, Z: 0}) {
@@ -48,7 +44,7 @@ func TestPlayerInteractionRejectsPendingSpawn(t *testing.T) {
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 1, Kind: sim.CommandBreakBlock,
+		Session: session, Sequence: 1, Kind: sim.CommandPlayerInput, Mining: true,
 		Pitch: -float32(math.Pi)/2 + 0.01,
 	})
 
@@ -60,14 +56,14 @@ func TestPlayerInteractionRejectsPendingSpawn(t *testing.T) {
 	}
 }
 
-func TestPlayerInteractionInvalidLookDoesNotChangeHeldMovement(t *testing.T) {
+func TestPlayerInputInvalidLookClearsHeldMovement(t *testing.T) {
 	engine, session := readyFlatPlayer(t)
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 1, Kind: sim.CommandPlayerInput,
 		MoveZ: 1, Yaw: 0,
 	})
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
+		Session: session, Sequence: 2, Kind: sim.CommandPlayerInput, Mining: true,
 		Yaw: float32(math.Pi) / 2, Pitch: float32(math.Pi) / 2,
 	})
 
@@ -78,8 +74,8 @@ func TestPlayerInteractionInvalidLookDoesNotChangeHeldMovement(t *testing.T) {
 	}
 	player := onlyPlayer(t, result)
 	if player.Yaw != 0 || player.Pitch != 0 || player.State.Position.X() != 0.5 ||
-		player.State.Position.Z() >= 0.5 {
-		t.Fatalf("非法 action look 改写权威 look/held movement: %+v", player)
+		player.State.Position.Z() != 0.5 || player.LastInputSequence != 2 {
+		t.Fatalf("非法输入没有清空 held movement: %+v", player)
 	}
 }
 
@@ -90,17 +86,17 @@ func TestPlayerInteractionValidLookAffectsSameTickMovement(t *testing.T) {
 		MoveZ: 1, Yaw: float32(math.Pi) / 2,
 	})
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
-		Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
+		Session: session, Sequence: 2, Kind: sim.CommandPlayerInput, Mining: true,
+		MoveZ: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
 	})
 
 	result := engine.Step()
-	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
+	if len(result.Rejected) != 0 || len(result.Changes) != 0 {
 		t.Fatalf("valid look result=%+v", result)
 	}
 	player := onlyPlayer(t, result)
 	if player.Yaw != 0 || player.Pitch != -float32(math.Pi)/2+0.01 ||
-		player.LastInputSequence != 1 || player.State.Position.X() != 0.5 ||
+		player.LastInputSequence != 2 || player.State.Position.X() != 0.5 ||
 		player.State.Position.Z() >= 0.5 {
 		t.Fatalf("action look 没有在 physics 前更新 held yaw: %+v", player)
 	}
@@ -121,15 +117,10 @@ func TestPlayerInteractionUsesSixBlockReach(t *testing.T) {
 			engine, session := readyFlatPlayerWithTarget(t, map[core.BlockPos]core.BlockID{
 				position: core.StoneID,
 			})
-			engine.Enqueue(sim.Command{
-				Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
-				Yaw: float32(math.Pi), Pitch: 0,
-			})
-
-			result := engine.Step()
+			sequence := uint64(1)
+			result := mineUntilComplete(t, engine, session, &sequence, float32(math.Pi), 0, 30)
 			if tc.wantReject {
-				if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectNoTarget ||
-					len(result.Changes) != 0 {
+				if len(result.Rejected) != 0 || len(result.Changes) != 0 || onlyPlayer(t, result).Mining.Active {
 					t.Fatalf("六格外 result=%+v", result)
 				}
 				return
@@ -147,14 +138,9 @@ func TestPlayerInteractionProtectsBedrock(t *testing.T) {
 	engine, session := readyFlatPlayerWithTarget(t, map[core.BlockPos]core.BlockID{
 		position: core.BedrockID,
 	})
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
-		Pitch: -float32(math.Pi)/2 + 0.01,
-	})
-
-	result := engine.Step()
-	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectProtectedBlock ||
-		len(result.Changes) != 0 {
+	sequence := uint64(1)
+	result := mineUntilComplete(t, engine, session, &sequence, 0, -float32(math.Pi)/2+0.01, 30)
+	if len(result.Rejected) != 0 || len(result.Changes) != 0 || onlyPlayer(t, result).Mining.Active {
 		t.Fatalf("bedrock result=%+v", result)
 	}
 }
@@ -179,26 +165,51 @@ func TestPlayerInteractionPlacesAdjacentBlock(t *testing.T) {
 	}
 }
 
-func TestPlayerInteractionActionsObserveSequenceOrder(t *testing.T) {
+func TestPlayerInteractionPlacementAfterMining(t *testing.T) {
 	var stocked core.Hotbar
 	stocked.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
-	engine, session := readyFlatPlayerRestored(t, nil, stocked)
-	pitch := -float32(math.Pi)/2 + 0.01
+	target := core.BlockPos{X: 0, Y: 2, Z: 3}
+	engine, session := readyFlatPlayerRestored(t, map[core.BlockPos]core.BlockID{
+		target:             core.GrassID,
+		{X: 0, Y: 2, Z: 4}: core.StoneID,
+	}, stocked)
+	sequence := uint64(1)
+	mined := mineUntilComplete(t, engine, session, &sequence, float32(math.Pi), 0, 5)
+	if len(mined.Rejected) != 0 || len(mined.Changes) != 1 {
+		t.Fatalf("采掘 result=%+v", mined)
+	}
 	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 3, Kind: sim.CommandPlaceBlock,
-		Pitch: pitch, Slot: 0,
-	})
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock,
-		Pitch: pitch,
+		Session: session, Sequence: sequence + 1, Kind: sim.CommandPlaceBlock,
+		Yaw: float32(math.Pi), Slot: 0,
 	})
 
 	result := engine.Step()
-	want := sim.BlockChange{Position: core.BlockPos{X: 0, Y: 0, Z: 0}, Block: core.StoneID}
+	want := sim.BlockChange{Position: target, Block: core.StoneID}
 	if len(result.Rejected) != 0 || len(result.Changes) != 1 ||
 		len(result.Changes[0].Changes) != 1 || result.Changes[0].Changes[0] != want {
 		t.Fatalf("same-tick sequence result=%+v", result)
 	}
+}
+
+func mineUntilComplete(
+	t *testing.T,
+	engine *sim.Engine,
+	session sim.SessionID,
+	sequence *uint64,
+	yaw, pitch float32,
+	ticks int,
+) sim.TickResult {
+	t.Helper()
+	*sequence = *sequence + 1
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: *sequence, Kind: sim.CommandPlayerInput,
+		Yaw: yaw, Pitch: pitch, Mining: true,
+	})
+	var result sim.TickResult
+	for range ticks {
+		result = engine.Step()
+	}
+	return result
 }
 
 func readyFlatPlayer(t *testing.T) (*sim.Engine, sim.SessionID) {

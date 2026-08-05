@@ -15,6 +15,8 @@ const (
 	ItemIronIngot
 	ItemFurnace
 	ItemIronBlock
+	ItemStonePickaxe
+	ItemIronPickaxe
 )
 
 const (
@@ -36,15 +38,16 @@ type Hotbar struct {
 	Slots    [HotbarSlots]ItemStack
 }
 
-// Valid 报告栏位值是否规范：空栏位数量必须为零，非空栏位必须是已注册物品且数量在 1..MaxStackCount。
+// Valid 报告栏位值是否规范：空栏位数量必须为零，非空栏位必须是已注册物品且数量不超过物品上限。
 func (s ItemStack) Valid() bool {
-	if s.Item == ItemNone {
-		return s.Count == 0
+	limit, ok := ItemStackLimit(s.Item)
+	if !ok {
+		return s.Item == ItemNone && s.Count == 0
 	}
-	if !RegisteredItem(s.Item) {
+	if s.Count == 0 {
 		return false
 	}
-	return s.Count >= 1 && s.Count <= MaxStackCount
+	return s.Count <= limit
 }
 
 // Valid 报告整个快捷栏是否规范。
@@ -63,11 +66,12 @@ func (h Hotbar) Valid() bool {
 // Add 把一个物品放入快捷栏副本：先补最低索引的同类未满栏位，否则用最低索引的空栏位。
 // 没有空间或物品未注册时返回原值和 false。
 func (h Hotbar) Add(item ItemID) (Hotbar, bool) {
-	if !RegisteredItem(item) {
+	limit, ok := ItemStackLimit(item)
+	if !ok {
 		return h, false
 	}
 	for i := range h.Slots {
-		if h.Slots[i].Item == item && h.Slots[i].Count < MaxStackCount {
+		if h.Slots[i].Item == item && h.Slots[i].Count < limit {
 			h.Slots[i].Count++
 			return h, true
 		}
@@ -123,10 +127,24 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 	}
 }
 
+// ItemStackLimit 返回物品的单格上限；未知物品返回 false。
+func ItemStackLimit(item ItemID) (uint8, bool) {
+	switch item {
+	case ItemStone, ItemDirt, ItemGrass, ItemStoneBrick, ItemCoal,
+		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock:
+		return MaxStackCount, true
+	case ItemStonePickaxe, ItemIronPickaxe:
+		return 1, true
+	default:
+		return 0, false
+	}
+}
+
 // RegisteredItem 报告该物品是否是已注册的合法物品。
 // 合法性与放置映射分离：煤炭、粗铁和铁锭合法但不可直接放置。
 func RegisteredItem(item ItemID) bool {
-	return item >= ItemStone && item <= ItemIronBlock
+	_, ok := ItemStackLimit(item)
+	return ok
 }
 
 // ItemPlacement 返回该物品放置后写入世界的方块；不可放置的物品返回 false。

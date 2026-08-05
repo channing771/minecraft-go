@@ -71,6 +71,7 @@ func (inventory Inventory) AddStack(stack ItemStack) (Inventory, ItemStack) {
 
 // fillPhase 在一段固定栏位上合并或占用空格，返回剩余堆。
 func (inventory *Inventory) fillPhase(stack ItemStack, backpack, merge bool) ItemStack {
+	limit, _ := ItemStackLimit(stack.Item)
 	first, last := uint8(0), uint8(HotbarSlots)
 	if backpack {
 		first, last = HotbarSlots, InventorySlots
@@ -81,7 +82,7 @@ func (inventory *Inventory) fillPhase(stack ItemStack, backpack, merge bool) Ite
 		}
 		current, _ := inventory.Slot(slot)
 		if merge {
-			if current.Item != stack.Item || current.Count >= MaxStackCount {
+			if current.Item != stack.Item || current.Count >= limit {
 				continue
 			}
 		} else if current.Item != ItemNone {
@@ -90,7 +91,7 @@ func (inventory *Inventory) fillPhase(stack ItemStack, backpack, merge bool) Ite
 		if !merge {
 			current = ItemStack{Item: stack.Item}
 		}
-		space := MaxStackCount - current.Count
+		space := limit - current.Count
 		moved := min(space, stack.Count)
 		current.Count += moved
 		stack.Count -= moved
@@ -121,7 +122,8 @@ func (inventory Inventory) MoveStack(from, to uint8) (Inventory, bool) {
 		inventory.setSlot(to, source)
 		inventory.setSlot(from, ItemStack{})
 	case target.Item == source.Item:
-		space := MaxStackCount - target.Count
+		limit, _ := ItemStackLimit(source.Item)
+		space := limit - target.Count
 		if space == 0 {
 			return inventory, false
 		}

@@ -1,7 +1,6 @@
 package sim_test
 
 import (
-	"math"
 	"testing"
 
 	"minecraft-go/internal/core"
@@ -36,47 +35,6 @@ func BenchmarkEngineStepPlayer(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		engine.Step()
-	}
-}
-
-func BenchmarkEngineStepBlockChanges(b *testing.B) {
-	engine := sim.NewEngine(0)
-	session := sim.SessionID(1)
-	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
-	requested := engine.Step()
-	submitAcquiredMisses(engine, requested.Acquire)
-	engine.Step()
-	chunk := generateFlatChunk(core.ChunkPos{})
-	chunk.SetBlock(0, 2, 5, core.StoneID)
-	engine.SubmitGenerated(sim.GeneratedChunk{
-		Dimension: core.Overworld,
-		Pos:       core.ChunkPos{},
-		Chunk:     chunk,
-	})
-	result := engine.Step()
-	if len(result.Players) != 1 || !result.Players[0].Ready {
-		b.Fatalf("玩家未 Ready: %+v", result.Players)
-	}
-
-	sequence := uint64(1)
-	// 先挖掘再放置，使放置总能从栏位 0 取到刚采集的物品。
-	placing := false
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		command := sim.Command{
-			Session: session, Sequence: sequence, Yaw: float32(math.Pi),
-		}
-		if placing {
-			command.Kind = sim.CommandPlaceBlock
-			command.Slot = 0
-		} else {
-			command.Kind = sim.CommandBreakBlock
-		}
-		engine.Enqueue(command)
-		engine.Step()
-		sequence++
-		placing = !placing
 	}
 }
 

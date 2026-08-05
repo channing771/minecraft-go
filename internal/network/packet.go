@@ -7,8 +7,8 @@ import (
 	"minecraft-go/internal/core"
 )
 
-// ProtocolVersion 是 M4E 唯一支持的协议版本。
-const ProtocolVersion uint32 = 7
+// ProtocolVersion 是 M4F 唯一支持的协议版本。
+const ProtocolVersion uint32 = 8
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -146,8 +146,6 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 	case StatePlay:
 		switch clientPacket := packet.(type) {
 		case PlayerInput:
-			return clientPacket.Validate()
-		case BreakBlock:
 			return clientPacket.Validate()
 		case PlaceBlock:
 			return clientPacket.Validate()

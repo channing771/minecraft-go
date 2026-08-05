@@ -51,7 +51,6 @@ type multiplayerScriptStep struct {
 	Tick   uint64
 	Player int
 	Input  *network.PlayerInput
-	Break  *network.BreakBlock
 	Place  *network.PlaceBlock
 }
 
@@ -99,7 +98,7 @@ func TestEightMemorySessionsAreDeterministicFor2000Ticks(t *testing.T) {
 	runEightMemorySessionsDeterminism(t, 2000)
 }
 
-func TestEightPlayerMemoryTCPParity(t *testing.T) {
+func TestMultiplayerMemoryTCPMiningCompetition(t *testing.T) {
 	runEightPlayerMemoryTCPParity(t, 200)
 }
 
@@ -130,31 +129,43 @@ func TestCanceledMultiplayerPacketAcceptClosesLateStreamAndJoinsWorker(t *testin
 
 func fixedEightPlayerScript(ticks uint64) []multiplayerScriptStep {
 	steps := make([]multiplayerScriptStep, 0, int(ticks)*multiplayerClientCount+int(ticks/20))
+	var miningUntil [multiplayerClientCount]uint64
 	for tick := uint64(1); tick <= ticks; tick++ {
+		if tick%20 == 0 && (tick/20)%2 == 1 {
+			player := int((tick/20 - 1) % multiplayerClientCount)
+			miningUntil[player] = tick + 29
+			if tick == 20 {
+				miningUntil[1] = tick + 29
+			}
+		}
 		sign := int8(1)
 		if ((tick - 1) / 10 % 2) != 0 {
 			sign = -1
 		}
 		for player := 0; player < multiplayerClientCount; player++ {
 			input := network.PlayerInput{Sequence: tick*2 - 1, Yaw: 0, Pitch: -0.2}
-			switch player % 4 {
-			case 0:
-				input.MoveX = sign
-			case 1:
-				input.MoveX = -sign
-			case 2:
-				input.MoveZ = sign
-			case 3:
-				input.MoveZ = -sign
+			if tick <= miningUntil[player] {
+				input.Yaw = math.Pi
+				input.Mining = true
+			} else if player < 2 && tick < 20 {
+				// 前两名玩家保持同一出生位置，以便 tick 20 竞争同一方块。
+			} else {
+				switch player % 4 {
+				case 0:
+					input.MoveX = sign
+				case 1:
+					input.MoveX = -sign
+				case 2:
+					input.MoveZ = sign
+				case 3:
+					input.MoveZ = -sign
+				}
 			}
 			steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Input: &input})
 		}
 		if tick%20 == 0 {
 			player := int((tick/20 - 1) % multiplayerClientCount)
-			if (tick/20)%2 == 1 {
-				command := network.BreakBlock{Sequence: tick * 2, Yaw: math.Pi, Pitch: -0.2}
-				steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Break: &command})
-			} else {
+			if (tick/20)%2 == 0 && miningUntil[player] < tick {
 				command := network.PlaceBlock{Sequence: tick * 2, Yaw: math.Pi, Pitch: -0.2, Slot: 0}
 				steps = append(steps, multiplayerScriptStep{Tick: tick, Player: player, Place: &command})
 			}
@@ -184,11 +195,13 @@ func canonicalMultiplayerEvent(output interface{ Write([]byte) (int, error) }, v
 	write := func(format string, args ...any) { _, _ = fmt.Fprintf(output, format+"\n", args...) }
 	switch message := value.(type) {
 	case network.PlayerState:
-		write("PlayerState|tick=%d|sequence=%d|dimension=%d|position=%08x,%08x,%08x|velocity=%08x,%08x,%08x|yaw=%08x|pitch=%08x|ground=%t|ready=%t|reset=%t",
+		write("PlayerState|tick=%d|sequence=%d|dimension=%d|position=%08x,%08x,%08x|velocity=%08x,%08x,%08x|yaw=%08x|pitch=%08x|ground=%t|ready=%t|reset=%t|mining=%t|target=%d,%d,%d|progress=%d/%d|harvestable=%t",
 			message.ServerTick-baseTick, message.LastInputSequence, message.Dimension,
 			math.Float32bits(message.Position[0]), math.Float32bits(message.Position[1]), math.Float32bits(message.Position[2]),
 			math.Float32bits(message.Velocity[0]), math.Float32bits(message.Velocity[1]), math.Float32bits(message.Velocity[2]),
-			math.Float32bits(message.Yaw), math.Float32bits(message.Pitch), message.OnGround, message.Ready, message.Reset)
+			math.Float32bits(message.Yaw), math.Float32bits(message.Pitch), message.OnGround, message.Ready, message.Reset,
+			message.MiningActive, message.MiningTarget.X, message.MiningTarget.Y, message.MiningTarget.Z,
+			message.MiningProgressTicks, message.MiningRequiredTicks, message.MiningHarvestable)
 	case network.RemotePlayerSpawn:
 		write("RemotePlayerSpawn|tick=%d|player=%s|name=%q|dimension=%d|position=%08x,%08x,%08x|yaw=%08x|pitch=%08x",
 			message.ServerTick-baseTick, message.PlayerID, message.DisplayName, message.Dimension,
@@ -345,7 +358,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		}
 		clients[index] = &multiplayerTCPClient{
 			identity: identity, endpoint: endpoint, receiver: client.NewReceiver(endpoint, 4096),
-			mirror: client.NewMirror(), remotes: client.NewRemotePlayers(),
+			mirror: client.NewMirror(), drops: client.NewItemDrops(), remotes: client.NewRemotePlayers(),
 		}
 		connected := clients[index]
 		t.Cleanup(func() {
@@ -392,14 +405,11 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 			var message network.ClientMessage
 			switch {
 			case step.Input != nil:
+				if step.Input.Mining && multiplayerManualTarget.Chunk() != initialChunk {
+					t.Fatalf("mining target escaped initial chunk: %+v", multiplayerManualTarget)
+				}
 				message = *step.Input
 				pendingSequences = append(pendingSequences, fmt.Sprintf("p%d/input/%d", step.Player, step.Input.Sequence))
-			case step.Break != nil:
-				if multiplayerManualTarget.Chunk() != initialChunk {
-					t.Fatalf("break target escaped initial chunk: %+v", multiplayerManualTarget)
-				}
-				message = *step.Break
-				pendingSequences = append(pendingSequences, fmt.Sprintf("p%d/break/%d", step.Player, step.Break.Sequence))
 			case step.Place != nil:
 				if multiplayerManualTarget.Chunk() != initialChunk {
 					t.Fatalf("place target escaped initial chunk: %+v", multiplayerManualTarget)
@@ -433,6 +443,9 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		drainMultiplayerClientsToTick(t, drainCtx, transport, clients, result.Tick)
 		drainCancel()
+		if tick == 49 {
+			assertMultiplayerMiningCompetition(t, transport, clients[:2])
+		}
 		if got := len(running.incoming); got != 0 {
 			t.Fatalf("%s tick %d ends with incoming=%d\n%s", transport, tick, got, multiplayerDiagnosticsMany(clients))
 		}
@@ -481,6 +494,104 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		t.Fatalf("cleanup %s multiplayer: %v", transport, err)
 	}
 	return outcome
+}
+
+func assertMultiplayerMiningCompetition(t *testing.T, transport string, clients []*multiplayerTCPClient) {
+	t.Helper()
+	blockIndex, ok := world.ChunkBlockIndex(multiplayerManualTarget)
+	if !ok {
+		t.Fatal("多人采掘目标无区块索引")
+	}
+	var sharedDrop client.ItemDropPresentation
+	for index, connected := range clients {
+		progress := make([]uint16, 0, 29)
+		changes := 0
+		completionIndex := -1
+		for eventIndex, event := range connected.transcript {
+			switch message := event.message.(type) {
+			case network.PlayerState:
+				if message.MiningActive && message.MiningTarget == multiplayerManualTarget {
+					progress = append(progress, message.MiningProgressTicks)
+				}
+			case network.BlockChanges:
+				for _, change := range message.Changes {
+					if change.Position == multiplayerManualTarget && change.Block == core.AirID {
+						changes++
+						completionIndex = eventIndex
+					}
+				}
+			}
+		}
+		if len(progress) != 29 {
+			t.Fatalf("%s 竞争玩家 %d 进度长度=%d，想要 29: %v", transport, index, len(progress), progress)
+		}
+		for offset, got := range progress {
+			if want := uint16(offset + 1); got != want {
+				t.Fatalf("%s 竞争玩家 %d 进度[%d]=%d，想要 %d", transport, index, offset, got, want)
+			}
+		}
+		if changes != 1 {
+			t.Fatalf("%s 竞争玩家 %d 收到完成变更=%d，想要 1", transport, index, changes)
+		}
+		if completionIndex < 0 {
+			t.Fatalf("%s 竞争玩家 %d 缺少完成帧", transport, index)
+		}
+		upsertCount := 0
+		var completedDrop network.ItemDrop
+		foundInactive := false
+		for _, event := range connected.transcript[completionIndex+1:] {
+			switch message := event.message.(type) {
+			case network.ItemDropUpserts:
+				upsertCount++
+				if err := message.Validate(); err != nil {
+					t.Fatalf("%s 竞争玩家 %d ItemDropUpserts 非法: %v", transport, index, err)
+				}
+				if len(message.Drops) != 1 {
+					t.Fatalf("%s 竞争玩家 %d 完成帧掉落数=%d，想要 1", transport, index, len(message.Drops))
+				}
+				completedDrop = message.Drops[0]
+			case network.PlayerState:
+				if err := message.Validate(); err != nil {
+					t.Fatalf("%s 竞争玩家 %d 完成 PlayerState 非法: %v", transport, index, err)
+				}
+				if canonicalMiningState(message) != (miningTranscriptEntry{}) {
+					t.Fatalf("%s 竞争玩家 %d 完成状态不规范: %+v", transport, index, message)
+				}
+				foundInactive = true
+			}
+			if foundInactive {
+				break
+			}
+		}
+		if !foundInactive || upsertCount != 1 {
+			t.Fatalf("%s 竞争玩家 %d 完成帧 inactive=%t upserts=%d，想要 true/1",
+				transport, index, foundInactive, upsertCount)
+		}
+		if completedDrop.BlockIndex != blockIndex || completedDrop.Item != core.ItemStone || completedDrop.Count != 1 {
+			t.Fatalf("%s 竞争玩家 %d 掉落内容不匹配: %+v", transport, index, completedDrop)
+		}
+		presentations := connected.drops.Presentations()
+		if len(presentations) != 1 {
+			t.Fatalf("%s 竞争玩家 %d 掉落镜像数=%d，想要 1: %+v", transport, index, len(presentations), presentations)
+		}
+		presentation := presentations[0]
+		if presentation.ID != completedDrop.ID || presentation.BlockIndex != completedDrop.BlockIndex ||
+			presentation.Item != completedDrop.Item || presentation.Count != completedDrop.Count {
+			t.Fatalf("%s 竞争玩家 %d 掉落镜像未收敛: mirror=%+v upsert=%+v",
+				transport, index, presentation, completedDrop)
+		}
+		if canonicalMiningState(connected.local) != (miningTranscriptEntry{}) {
+			t.Fatalf("%s 竞争玩家 %d 本地状态不规范: %+v", transport, index, connected.local)
+		}
+		if err := connected.local.Validate(); err != nil {
+			t.Fatalf("%s 竞争玩家 %d 本地状态非法: %v", transport, index, err)
+		}
+		if index == 0 {
+			sharedDrop = presentation
+		} else if presentation != sharedDrop {
+			t.Fatalf("%s 竞争客户端掉落物不一致: first=%+v player%d=%+v", transport, sharedDrop, index, presentation)
+		}
+	}
 }
 
 func cleanupEightManualMultiplayer(

@@ -33,23 +33,42 @@ func TestEngineAppliesOnlyLatestPlayerInputOncePerTick(t *testing.T) {
 
 func TestInvalidLatestInputIsAckedAndNeutral(t *testing.T) {
 	engine, session := readyMovementPlayer(t)
-	engine.Enqueue(Command{Session: session, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1})
+	engine.Enqueue(Command{
+		Session: session, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1, Mining: true,
+	})
 	moving := onlyMovementPlayer(t, engine.Step())
+	if !engine.sessions[session].player.miningHeld {
+		t.Fatal("有效输入未保存持续采掘意图")
+	}
+	engine.Enqueue(Command{Session: session, Sequence: 3, Kind: CommandPlayerInput})
+	onlyMovementPlayer(t, engine.Step())
+	if engine.sessions[session].player.miningHeld {
+		t.Fatal("中性输入未清空持续采掘意图")
+	}
+	engine.Enqueue(Command{
+		Session: session, Sequence: 4, Kind: CommandPlayerInput, Mining: true,
+	})
+	moving = onlyMovementPlayer(t, engine.Step())
 
-	engine.Enqueue(Command{Session: session, Sequence: 3, Kind: CommandPlayerInput, MoveZ: 1})
-	engine.Enqueue(Command{Session: session, Sequence: 4, Kind: CommandPlayerInput, MoveZ: 2})
+	engine.Enqueue(Command{
+		Session: session, Sequence: 5, Kind: CommandPlayerInput,
+		MoveZ: 2, Yaw: float32(math.NaN()), Mining: true,
+	})
 	result := engine.Step()
 	after := onlyMovementPlayer(t, result)
-	if after.LastInputSequence != 4 || len(result.Rejected) != 1 ||
-		result.Rejected[0] != (Rejection{Session: session, Sequence: 4, Reason: RejectInvalidInput}) {
+	if after.LastInputSequence != 5 || len(result.Rejected) != 1 ||
+		result.Rejected[0] != (Rejection{Session: session, Sequence: 5, Reason: RejectInvalidInput}) {
 		t.Fatalf("result=%+v", result)
 	}
 	if after.State.Position != moving.State.Position || after.State.Velocity != (mgl32.Vec3{}) {
 		t.Fatalf("非法最新输入没有改用中立状态: moving=%+v after=%+v", moving.State, after.State)
 	}
+	if engine.sessions[session].player.miningHeld {
+		t.Fatal("非法最新输入未清空持续采掘意图")
+	}
 
 	held := onlyMovementPlayer(t, engine.Step())
-	if held.State != after.State || held.LastInputSequence != 4 {
+	if held.State != after.State || held.LastInputSequence != 5 {
 		t.Fatalf("非法输入后的 held 状态不是中立: after=%+v held=%+v", after, held)
 	}
 }
@@ -401,8 +420,8 @@ func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {
 		Session: sessionID, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1,
 	})
 	engine.Enqueue(Command{
-		Session: sessionID, Sequence: 3, Kind: CommandBreakBlock,
-		Pitch: -float32(math.Pi)/2 + 0.01,
+		Session: sessionID, Sequence: 3, Kind: CommandPlayerInput,
+		MoveX: 1, Pitch: -float32(math.Pi)/2 + 0.01, Mining: true,
 	})
 
 	result := engine.Step()
@@ -410,12 +429,12 @@ func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {
 	if after.ViewCenter != nextChunk || after.State.Position.X() < 16 {
 		t.Fatalf("订阅中心没有使用本 tick 权威移动结果: %+v", after)
 	}
-	if len(result.Rejected) != 0 || len(result.Changes) != 1 {
+	if len(result.Rejected) != 0 || !after.Mining.Active || after.Mining.Target.Chunk() != nextChunk {
 		t.Fatalf("移动后的新订阅没有在交互前生效: %+v", result)
 	}
 	chunk, _, ok := engine.CloneReadyChunk(core.ChunkKey{Dimension: core.Overworld, Pos: nextChunk})
-	if !ok || chunk.BlockAt(0, 0, 0) != core.AirID {
-		t.Fatalf("新订阅区块交互未执行: ok=%v chunk=%v", ok, chunk)
+	if !ok || chunk.BlockAt(0, 0, 0) != core.GrassID {
+		t.Fatalf("权威采掘完成前修改了新订阅区块: ok=%v chunk=%v", ok, chunk)
 	}
 }
 

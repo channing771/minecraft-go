@@ -33,6 +33,7 @@ type multiplayerTCPClient struct {
 	endpoint        network.ClientEndpoint
 	receiver        *client.Receiver
 	mirror          *client.Mirror
+	drops           *client.ItemDrops
 	remotes         *client.RemotePlayers
 	local           network.PlayerState
 	transcript      []multiplayerEvent
@@ -86,10 +87,11 @@ func TestMultiplayerTCPClientsSeeMoveEditAndDespawn(t *testing.T) {
 	})
 
 	target := core.BlockPos{X: 0, Y: 1, Z: -6}
-	mustSendMultiplayer(t, deadline, a, network.BreakBlock{
+	mustSendMultiplayer(t, deadline, a, network.PlayerInput{
 		Sequence: 9,
 		Yaw:      0,
 		Pitch:    -0.2,
+		Mining:   true,
 	})
 	// Kills one-sided block fanout, incorrect block IDs, revision-only equality,
 	// hash-only equality, and a driver that compares a mirror with itself.
@@ -338,8 +340,6 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 				switch {
 				case step.Input != nil:
 					message = *step.Input
-				case step.Break != nil:
-					message = *step.Break
 				case step.Place != nil:
 					message = *step.Place
 				}
@@ -436,7 +436,8 @@ func task16CleanupProbeClient(name string) *multiplayerTCPClient {
 	clientEndpoint, _ := network.NewMemoryPair(1)
 	return &multiplayerTCPClient{
 		identity: network.Identity{DisplayName: name}, endpoint: clientEndpoint,
-		receiver: client.NewReceiver(clientEndpoint, 1), mirror: client.NewMirror(), remotes: client.NewRemotePlayers(),
+		receiver: client.NewReceiver(clientEndpoint, 1), mirror: client.NewMirror(), drops: client.NewItemDrops(),
+		remotes: client.NewRemotePlayers(),
 	}
 }
 
@@ -653,6 +654,9 @@ func drainOneTask16(connected *multiplayerTCPClient) (bool, error) {
 	connected.transcript = append(connected.transcript, multiplayerEvent{message: message})
 	switch message := message.(type) {
 	case network.PlayerState:
+		if err := message.Validate(); err != nil {
+			return true, fmt.Errorf("PlayerState.Validate: %w", err)
+		}
 		connected.local = message
 	case network.ChunkSnapshot, network.BlockChanges, network.ForgetChunks, network.CommandRejected:
 		update, err := connected.mirror.Apply(message)
@@ -661,6 +665,10 @@ func drainOneTask16(connected *multiplayerTCPClient) (bool, error) {
 		}
 		if update.Resync != nil {
 			return true, fmt.Errorf("Mirror.Apply(%T) requested resync %+v", message, *update.Resync)
+		}
+	case network.ItemDropUpserts, network.ItemDropRemoves:
+		if err := connected.drops.Apply(message); err != nil {
+			return true, fmt.Errorf("ItemDrops.Apply(%T): %w", message, err)
 		}
 	case network.RemotePlayerSpawn, network.RemotePlayerStates, network.RemotePlayerDespawn:
 		if err := connected.remotes.Apply(message); err != nil {
@@ -784,6 +792,7 @@ func connectMultiplayerTCPClient(
 		endpoint: endpoint,
 		receiver: client.NewReceiver(endpoint, 1024),
 		mirror:   client.NewMirror(),
+		drops:    client.NewItemDrops(),
 		remotes:  client.NewRemotePlayers(),
 	}, nil
 }
@@ -832,6 +841,9 @@ func (connected *multiplayerTCPClient) drainOne() (bool, error) {
 	connected.transcript = append(connected.transcript, multiplayerEvent{message: message})
 	switch message := message.(type) {
 	case network.PlayerState:
+		if err := message.Validate(); err != nil {
+			return true, fmt.Errorf("PlayerState.Validate: %w", err)
+		}
 		connected.local = message
 	case network.ChunkSnapshot, network.BlockChanges, network.ForgetChunks, network.CommandRejected:
 		update, err := connected.mirror.Apply(message)
@@ -843,6 +855,10 @@ func (connected *multiplayerTCPClient) drainOne() (bool, error) {
 		}
 		if update.Rejected != nil {
 			return true, fmt.Errorf("command rejected: %+v", *update.Rejected)
+		}
+	case network.ItemDropUpserts, network.ItemDropRemoves:
+		if err := connected.drops.Apply(message); err != nil {
+			return true, fmt.Errorf("ItemDrops.Apply(%T): %w", message, err)
 		}
 	case network.RemotePlayerSpawn, network.RemotePlayerStates, network.RemotePlayerDespawn:
 		if err := connected.remotes.Apply(message); err != nil {
@@ -1091,7 +1107,10 @@ func multiplayerDiagnostics(first, second *multiplayerTCPClient) string {
 func multiplayerEventSummary(message network.ServerMessage) string {
 	switch message := message.(type) {
 	case network.PlayerState:
-		return fmt.Sprintf("PlayerState tick=%d input=%d pos=%v ready=%v reset=%v", message.ServerTick, message.LastInputSequence, message.Position, message.Ready, message.Reset)
+		return fmt.Sprintf("PlayerState tick=%d input=%d pos=%v ready=%v reset=%v mining=%t target=%+v progress=%d/%d harvestable=%t",
+			message.ServerTick, message.LastInputSequence, message.Position, message.Ready, message.Reset,
+			message.MiningActive, message.MiningTarget, message.MiningProgressTicks,
+			message.MiningRequiredTicks, message.MiningHarvestable)
 	case network.ChunkSnapshot:
 		return fmt.Sprintf("ChunkSnapshot chunk=%+v revision=%d", message.Chunk, message.Revision)
 	case network.BlockChanges:

@@ -26,7 +26,7 @@ func TestAuthoritativePlayerConvergesAfterThreeTickStateDelay(t *testing.T) {
 	h.hold(client.Movement{MoveZ: 1, Jump: true}, 1)
 	h.hold(client.Movement{MoveZ: 1}, 20) // clear the one-block test obstacle without tunneling
 	h.clickPlaceDown(0)                   // 空快捷栏栏位无法放置: invalid_block
-	h.clickBreakDown()                    // then break support through the authoritative eye ray
+	h.holdMiningUntilComplete()           // 然后通过权威眼睛射线完成采掘
 	h.hold(client.Movement{}, 10)
 	h.flushAllStates()
 	h.assertConverged(1e-5)
@@ -201,6 +201,7 @@ type delayedPlayerHarness struct {
 	yaw            float32
 	pitch          float32
 	movement       client.Movement
+	mining         bool
 	pendingStates  []delayedPlayerState
 	lastApplied    network.PlayerState
 	hasApplied     bool
@@ -329,17 +330,16 @@ func (h *delayedPlayerHarness) clickPlaceDown(slot uint8) {
 	})
 }
 
-func (h *delayedPlayerHarness) clickBreakDown() {
+func (h *delayedPlayerHarness) holdMiningUntilComplete() {
 	h.t.Helper()
 	h.pitch = -float32(math.Pi)/2 + 0.01
-	h.advanceInputTick(func() network.ClientMessage {
-		h.breakSequence = h.nextSequence()
-		return network.BreakBlock{
-			Sequence: h.breakSequence,
-			Yaw:      h.yaw,
-			Pitch:    h.pitch,
-		}
-	})
+	h.movement = client.Movement{}
+	h.mining = true
+	h.breakSequence = h.advanceInputTick(nil)
+	for range 4 {
+		h.breakSequence = h.advanceInputTick(nil)
+	}
+	h.mining = false
 }
 
 func (h *delayedPlayerHarness) advanceInputTick(
@@ -353,11 +353,12 @@ func (h *delayedPlayerHarness) advanceInputTick(
 		sent++
 	}
 	control := client.Control{
-		MoveX: h.movement.MoveX,
-		MoveZ: h.movement.MoveZ,
-		Jump:  h.movement.Jump,
-		Yaw:   h.yaw,
-		Pitch: h.pitch,
+		MoveX:  h.movement.MoveX,
+		MoveZ:  h.movement.MoveZ,
+		Jump:   h.movement.Jump,
+		Yaw:    h.yaw,
+		Pitch:  h.pitch,
+		Mining: h.mining,
 	}
 	if err := h.predictor.Advance(
 		physics.FixedDelta,
@@ -717,7 +718,7 @@ func runDelayedPlayerScript(t *testing.T) delayedReplayResult {
 	h.hold(client.Movement{MoveZ: 1, Jump: true}, 1)
 	h.hold(client.Movement{MoveZ: 1}, 20)
 	h.clickPlaceDown(0)
-	h.clickBreakDown()
+	h.holdMiningUntilComplete()
 	h.hold(client.Movement{}, 10)
 	h.flushAllStates()
 	h.assertConverged(1e-5)

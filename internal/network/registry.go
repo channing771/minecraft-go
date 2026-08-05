@@ -13,8 +13,6 @@ func clientPacketID(state State, packet ClientPacket) (uint32, bool) {
 		switch packet.(type) {
 		case PlayerInput:
 			return 0, true
-		case BreakBlock:
-			return 1, true
 		case PlaceBlock:
 			return 2, true
 		case RequestChunkResync:
@@ -53,8 +51,6 @@ func clientPacketForID(state State, id uint32) (ClientPacket, bool) {
 		switch id {
 		case 0:
 			return PlayerInput{}, true
-		case 1:
-			return BreakBlock{}, true
 		case 2:
 			return PlaceBlock{}, true
 		case 3:

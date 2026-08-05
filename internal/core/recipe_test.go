@@ -289,3 +289,53 @@ func TestCraftIronBlockRejectsWithoutMutating(t *testing.T) {
 		t.Fatalf("产物未放回释放出的格: %+v", next.Backpack[7])
 	}
 }
+
+func TestToolRecipesAreFixedAndAtomic(t *testing.T) {
+	if core.RecipeStonePickaxe != 4 || core.RecipeIronPickaxe != 5 {
+		t.Fatalf("工具配方 ID 发生变化: stone=%d iron=%d", core.RecipeStonePickaxe, core.RecipeIronPickaxe)
+	}
+	for _, tc := range []struct {
+		name   string
+		id     core.RecipeID
+		input  core.ItemID
+		output core.ItemID
+	}{
+		{"石镐", core.RecipeStonePickaxe, core.ItemStone, core.ItemStonePickaxe},
+		{"铁镐", core.RecipeIronPickaxe, core.ItemIronIngot, core.ItemIronPickaxe},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recipe, ok := core.Recipe(tc.id)
+			if !ok || recipe.Input != (core.ItemStack{Item: tc.input, Count: 3}) ||
+				recipe.Output != (core.ItemStack{Item: tc.output, Count: 1}) {
+				t.Fatalf("配方 = %+v, %v", recipe, ok)
+			}
+
+			var inventory core.Inventory
+			inventory.Hotbar.Slots[2] = core.ItemStack{Item: tc.input, Count: 1}
+			inventory.Backpack[0] = core.ItemStack{Item: tc.input, Count: 2}
+			next, ok := inventory.Craft(tc.id)
+			if !ok {
+				t.Fatal("跨栏位的三份原料应当可以合成")
+			}
+			if next.Hotbar.Slots[2] != (core.ItemStack{}) || next.Backpack[0] != (core.ItemStack{}) {
+				t.Fatalf("原料未被跨栏位扣除: %+v / %+v", next.Hotbar.Slots[2], next.Backpack[0])
+			}
+			if next.Hotbar.Slots[0] != (core.ItemStack{Item: tc.output, Count: 1}) {
+				t.Fatalf("产物 = %+v，想要单个工具", next.Hotbar.Slots[0])
+			}
+		})
+	}
+
+	full := core.Inventory{}
+	for slot := range full.Hotbar.Slots {
+		full.Hotbar.Slots[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+	}
+	for slot := range full.Backpack {
+		full.Backpack[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+	}
+	full.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
+	next, ok := full.Craft(core.RecipeStonePickaxe)
+	if ok || next != full {
+		t.Fatalf("36 格都被占用时合成必须原子失败: %+v, %v", next, ok)
+	}
+}

@@ -63,18 +63,15 @@ func TestHotbarSelectSameSlotDoesNotRepublish(t *testing.T) {
 	}
 }
 
-func TestHotbarBreakRejectsBlockWithoutDrop(t *testing.T) {
+func TestHotbarMiningIgnoresBlockWithoutRule(t *testing.T) {
 	position := core.BlockPos{X: 0, Y: 0, Z: 0}
 	engine, session := readyFlatPlayerWithTarget(t, map[core.BlockPos]core.BlockID{
 		position: core.BarrierID,
 	})
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
-	})
-
-	result := engine.Step()
-	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectProtectedBlock ||
-		len(result.Changes) != 0 || len(result.Inventories) != 0 {
+	sequence := uint64(1)
+	result := mineUntilComplete(t, engine, session, &sequence, 0, lookDown, 5)
+	if len(result.Rejected) != 0 || len(result.Changes) != 0 ||
+		len(result.Inventories) != 0 || onlyPlayer(t, result).Mining.Active {
 		t.Fatalf("无掉落物方块 result=%+v", result)
 	}
 }
@@ -183,13 +180,19 @@ func TestHotbarFailedPlaceKeepsItem(t *testing.T) {
 func TestHotbarSameTickCommandsPublishFinalStateOnce(t *testing.T) {
 	var stocked core.Hotbar
 	stocked.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
-	engine, session := readyFlatPlayerRestored(t, nil, stocked)
+	target := core.BlockPos{X: 0, Y: 2, Z: 3}
+	engine, session := readyFlatPlayerRestored(t, map[core.BlockPos]core.BlockID{
+		target:             core.GrassID,
+		{X: 0, Y: 2, Z: 4}: core.StoneID,
+	}, stocked)
+	sequence := uint64(1)
+	mined := mineUntilComplete(t, engine, session, &sequence, float32(math.Pi), 0, 5)
+	if len(mined.Rejected) != 0 || len(mined.Changes) != 1 {
+		t.Fatalf("采掘 result=%+v", mined)
+	}
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 4, Kind: sim.CommandPlaceBlock,
-		Pitch: lookDown, Slot: 0,
-	})
-	engine.Enqueue(sim.Command{
-		Session: session, Sequence: 2, Kind: sim.CommandBreakBlock, Pitch: lookDown,
+		Yaw: float32(math.Pi), Slot: 0,
 	})
 	engine.Enqueue(sim.Command{
 		Session: session, Sequence: 3, Kind: sim.CommandSelectHotbar, Slot: 7,
@@ -206,7 +209,7 @@ func TestHotbarSameTickCommandsPublishFinalStateOnce(t *testing.T) {
 	if hotbar.Selected != 7 || hotbar.Slots[0] != (core.ItemStack{}) {
 		t.Fatalf("最终快捷栏 = %+v，想要选中 7 且放置已消耗物品", hotbar)
 	}
-	want := sim.BlockChange{Position: core.BlockPos{X: 0, Y: 0, Z: 0}, Block: core.StoneID}
+	want := sim.BlockChange{Position: target, Block: core.StoneID}
 	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 1 ||
 		result.Changes[0].Changes[0] != want {
 		t.Fatalf("同 tick 世界变更 =%+v", result.Changes)

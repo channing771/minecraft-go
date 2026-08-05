@@ -16,7 +16,6 @@ type CommandKind uint8
 const (
 	CommandTrustedObserverCenter CommandKind = iota
 	CommandPlayerInput
-	CommandBreakBlock
 	CommandPlaceBlock
 	CommandResync
 	CommandSelectHotbar
@@ -72,6 +71,7 @@ type Command struct {
 	Jump         bool
 	Yaw          float32
 	Pitch        float32
+	Mining       bool
 }
 
 type GeneratedChunk struct {

@@ -225,14 +225,16 @@ func TestSaveCompletionAheadOfSnapshotAcceptsBoundedPersistedRevision(t *testing
 		t.Fatalf("save call=%+v, want revision 1", call)
 	}
 	for sequence, wantRevision := range []uint64{2, 3} {
-		running.incoming <- incomingCommand{
-			Session: testSessionID, Generation: 1,
-			Command: sim.Command{
-				Session:  testSessionID,
-				Sequence: uint64(sequence + 1),
-				Kind:     sim.CommandBreakBlock,
-				Pitch:    -1.5,
-			}}
+		running.engine.SetBlockForTest(core.BlockPos{}, core.GrassID)
+		running.engine.Enqueue(sim.Command{
+			Session: testSessionID, Sequence: uint64(sequence + 1),
+			Kind: sim.CommandPlayerInput, Pitch: -1.5, Mining: true,
+		})
+		for range 4 {
+			if primed := running.engine.Step(); len(primed.Changes) != 0 {
+				t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+			}
+		}
 		changed := running.StepForTest()
 		if len(changed.Changes) != 1 || changed.Changes[0].NewRevision != wantRevision {
 			t.Fatalf("change %d=%+v, want revision %d", sequence, changed.Changes, wantRevision)
@@ -288,12 +290,14 @@ func TestSaveCompletionEqualToNewerAuthorityDoesNotClaimForeignContent(t *testin
 	if len(call) != 1 || call[0].Revision != 1 {
 		t.Fatalf("save call=%+v, want revision 1", call)
 	}
-	running.incoming <- incomingCommand{
-		Session: testSessionID, Generation: 1,
-		Command: sim.Command{
-			Session: testSessionID, Sequence: 1,
-			Kind: sim.CommandBreakBlock, Pitch: -1.5,
-		},
+	running.engine.Enqueue(sim.Command{
+		Session: testSessionID, Sequence: 1, Kind: sim.CommandPlayerInput,
+		Pitch: -1.5, Mining: true,
+	})
+	for range 4 {
+		if primed := running.engine.Step(); len(primed.Changes) != 0 {
+			t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+		}
 	}
 	changed := running.StepForTest()
 	if len(changed.Changes) != 1 || changed.Changes[0].NewRevision != 2 {
@@ -731,12 +735,14 @@ func TestMutationDuringRetrySelectsNewRevisionOnceAfterOldCommit(t *testing.T) {
 	}
 	waitSaveReturned(t, store)
 	waitCompletionQueued(t, running)
-	running.incoming <- incomingCommand{
-		Session: testSessionID, Generation: 1,
-		Command: sim.Command{
-			Session: testSessionID, Sequence: 1,
-			Kind: sim.CommandBreakBlock, Pitch: -1.5,
-		},
+	running.engine.Enqueue(sim.Command{
+		Session: testSessionID, Sequence: 1, Kind: sim.CommandPlayerInput,
+		Pitch: -1.5, Mining: true,
+	})
+	for range 4 {
+		if primed := running.engine.Step(); len(primed.Changes) != 0 {
+			t.Fatalf("采掘完成前出现变更: %+v", primed.Changes)
+		}
 	}
 	changed := running.StepForTest()
 	if len(changed.Changes) != 1 || changed.Changes[0].NewRevision != 2 {

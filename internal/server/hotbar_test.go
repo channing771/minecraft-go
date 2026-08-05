@@ -80,6 +80,7 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	// 阶段 0 等待两人 Ready，阶段 1 验证玩家甲采集且玩家乙不受影响。
 	stage := 0
+	stopped := false
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待两名玩家快捷栏同步超时")
@@ -92,12 +93,18 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 			if !firstReady || !secondReady {
 				continue
 			}
-			sendClientMessage(t, firstClient, network.BreakBlock{
-				Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
+			sendClientMessage(t, firstClient, network.PlayerInput{
+				Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01, Mining: true,
 			})
 			stage = 1
 		case 1:
 			// 玩家甲挖掘后在原地拾取；同一 tick 内玩家乙不得收到任何快捷栏更新。
+			if !stopped && len(result.Changes) != 0 {
+				sendClientMessage(t, firstClient, network.PlayerInput{
+					Sequence: 2, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
+				})
+				stopped = true
+			}
 			if len(secondStates) != 0 {
 				t.Fatalf("玩家乙收到了不属于自己的快捷栏更新: %+v", secondStates)
 			}
@@ -226,8 +233,8 @@ func TestFullHotbarStillBreaksBlockIntoGroundDrop(t *testing.T) {
 			return
 		}
 		if ready {
-			sendClientMessage(t, clientEndpoint, network.BreakBlock{
-				Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01,
+			sendClientMessage(t, clientEndpoint, network.PlayerInput{
+				Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01, Mining: true,
 			})
 			broken = true
 		}

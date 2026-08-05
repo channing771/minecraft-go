@@ -187,16 +187,21 @@ func (server *Server) publishLocalResult(
 	}
 	if playerUpdate.Session == current.id {
 		if !current.enqueue(network.PlayerState{
-			ServerTick:        result.Tick,
-			LastInputSequence: playerUpdate.LastInputSequence,
-			Dimension:         playerUpdate.Dimension,
-			Position:          playerUpdate.State.Position,
-			Velocity:          playerUpdate.State.Velocity,
-			Yaw:               playerUpdate.Yaw,
-			Pitch:             playerUpdate.Pitch,
-			OnGround:          playerUpdate.State.OnGround,
-			Ready:             playerUpdate.Ready,
-			Reset:             playerUpdate.Reset,
+			ServerTick:          result.Tick,
+			LastInputSequence:   playerUpdate.LastInputSequence,
+			Dimension:           playerUpdate.Dimension,
+			Position:            playerUpdate.State.Position,
+			Velocity:            playerUpdate.State.Velocity,
+			Yaw:                 playerUpdate.Yaw,
+			Pitch:               playerUpdate.Pitch,
+			OnGround:            playerUpdate.State.OnGround,
+			Ready:               playerUpdate.Ready,
+			Reset:               playerUpdate.Reset,
+			MiningActive:        playerUpdate.Mining.Active,
+			MiningTarget:        playerUpdate.Mining.Target,
+			MiningProgressTicks: playerUpdate.Mining.ProgressTicks,
+			MiningRequiredTicks: playerUpdate.Mining.RequiredTicks,
+			MiningHarvestable:   playerUpdate.Mining.Harvestable,
 		}) {
 			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 		}

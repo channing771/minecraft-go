@@ -118,7 +118,7 @@ func (engine *Engine) Step() TickResult {
 	})
 
 	result := TickResult{Forget: make(map[SessionID][]core.ChunkKey)}
-	interactions := make([]Command, 0, len(commands))
+	placements := make([]Command, 0, len(commands))
 	furnaceMoves := make([]Command, 0, len(commands))
 	viewChanged := false
 	for _, command := range commands {
@@ -148,7 +148,7 @@ func (engine *Engine) Step() TickResult {
 		}
 		session.lastSequence = command.Sequence
 		switch command.Kind {
-		case CommandBreakBlock, CommandPlaceBlock:
+		case CommandPlaceBlock:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
@@ -169,9 +169,13 @@ func (engine *Engine) Step() TickResult {
 			player.yaw = normalizeYaw(command.Yaw)
 			player.pitch = command.Pitch
 			player.input.Yaw = player.yaw
-			interactions = append(interactions, command)
+			placements = append(placements, command)
 		case CommandPlayerInput:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
+				if session.player != nil {
+					session.player.miningHeld = false
+					session.player.mining = playerMiningState{}
+				}
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
 					Sequence: command.Sequence,
@@ -183,6 +187,8 @@ func (engine *Engine) Step() TickResult {
 			player.lastInputSequence = command.Sequence
 			if !validPlayerInput(command) {
 				player.input = physics.Input{Yaw: player.yaw}
+				player.miningHeld = false
+				player.mining = playerMiningState{}
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
 					Sequence: command.Sequence,
@@ -197,6 +203,7 @@ func (engine *Engine) Step() TickResult {
 				Jump:  command.Jump,
 				Yaw:   yaw,
 			}
+			player.miningHeld = command.Mining
 			player.yaw = yaw
 			player.pitch = command.Pitch
 		case CommandSelectHotbar:
@@ -329,8 +336,8 @@ func (engine *Engine) Step() TickResult {
 			})
 		}
 	}
-	for _, command := range interactions {
-		if reason, rejected := engine.executeInteraction(command, pending); rejected {
+	for _, command := range placements {
+		if reason, rejected := engine.executePlacement(command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{
 				Session:  command.Session,
 				Sequence: command.Sequence,
@@ -338,6 +345,7 @@ func (engine *Engine) Step() TickResult {
 			})
 		}
 	}
+	engine.advanceMining(pending, &result)
 	engine.finishChanges(pending, &result)
 	sortChunkKeys(result.Ready)
 
@@ -660,12 +668,12 @@ func (engine *Engine) applyGenerated(
 	}
 }
 
-func (engine *Engine) executeInteraction(
+func (engine *Engine) executePlacement(
 	command Command,
 	pending map[core.ChunkKey]*pendingChunkChanges,
 ) (RejectReason, bool) {
 	session := engine.sessions[command.Session]
-	if command.Kind != CommandBreakBlock && command.Kind != CommandPlaceBlock {
+	if command.Kind != CommandPlaceBlock {
 		return RejectInvalidRay, true
 	}
 	if session == nil || session.player == nil ||
@@ -693,22 +701,16 @@ func (engine *Engine) executeInteraction(
 	}
 	player := session.player
 	// 放置先从请求栏位解析物品和方块，并在快捷栏副本上预演扣除。
-	var placement core.BlockID
-	var consumed core.Hotbar
-	if command.Kind == CommandPlaceBlock {
-		if command.Slot >= core.HotbarSlots {
-			return RejectInvalidSlot, true
-		}
-		block, ok := core.ItemPlacement(player.inventory.Hotbar.Slots[command.Slot].Item)
-		if !ok {
-			return RejectInvalidBlock, true
-		}
-		next, ok := player.inventory.Hotbar.Consume(command.Slot)
-		if !ok {
-			return RejectInvalidBlock, true
-		}
-		placement = block
-		consumed = next
+	if command.Slot >= core.HotbarSlots {
+		return RejectInvalidSlot, true
+	}
+	placement, ok := core.ItemPlacement(player.inventory.Hotbar.Slots[command.Slot].Item)
+	if !ok {
+		return RejectInvalidBlock, true
+	}
+	consumed, ok := player.inventory.Hotbar.Consume(command.Slot)
+	if !ok {
+		return RejectInvalidBlock, true
 	}
 
 	hit, ok, err := core.RaycastBlocks(
@@ -733,126 +735,57 @@ func (engine *Engine) executeInteraction(
 		return RejectNoTarget, true
 	}
 
-	switch command.Kind {
-	case CommandBreakBlock:
-		block, ready := dimension.BlockAt(hit.Block)
-		if !ready {
-			return RejectChunkNotReady, true
-		}
-		if block == core.BedrockID {
-			return RejectProtectedBlock, true
-		}
-		item, ok := core.BlockDrop(block)
-		if !ok {
-			return RejectProtectedBlock, true
-		}
-		// 先预检所属区块的掉落物容量，容量不足时方块保持不变。
-		record, recordOK := dimension.records[hit.Block.Chunk()]
-		blockIndex, indexOK := world.ChunkBlockIndex(hit.Block)
-		if !recordOK || record.Chunk == nil || !indexOK {
-			return RejectChunkNotReady, true
-		}
-		// 熔炉的本体与三格内容必须一次性全部掉落，否则整条命令拒绝。
-		furnaceSlot, isFurnace := -1, false
-		var batch [core.DropsPerChunk]world.DropSlot
-		var dropSlot int
-		if block == core.FurnaceID {
-			slot, found := record.Chunk.FurnaceAt(blockIndex)
-			if !found {
-				return RejectChunkNotReady, true
-			}
-			furnace := record.Chunk.Furnace(slot)
-			next, batchOK := record.Chunk.PrepareDropBatch([4]core.ItemStack{
-				{Item: item, Count: 1},
-				furnace.Input,
-				furnace.Fuel,
-				furnace.Output,
-			}, blockIndex, DropPickupDelayTicks)
-			if !batchOK {
-				return RejectDropCapacity, true
-			}
-			batch, furnaceSlot, isFurnace = next, slot, true
-		} else {
-			var capacityOK bool
-			dropSlot, capacityOK = record.Chunk.PrepareDrop(item, blockIndex)
-			if !capacityOK {
-				return RejectDropCapacity, true
-			}
-		}
-		_, changed, setErr := dimension.SetBlock(hit.Block, core.AirID)
-		if setErr != nil {
-			return mapSetBlockError(setErr), true
-		}
-		if changed {
-			engine.recordChange(
-				dimensionID,
-				hit.Block,
-				core.AirID,
-				pending,
-			)
-			if isFurnace {
-				record.Chunk.DeactivateFurnace(furnaceSlot)
-				record.Chunk.CommitDropBatch(batch)
-			} else {
-				record.Chunk.CommitDrop(dropSlot, item, blockIndex, DropPickupDelayTicks)
-			}
-		}
-		return 0, false
-
-	case CommandPlaceBlock:
-		if hit.Face == core.BlockFaceNone {
-			return RejectOccupied, true
-		}
-		target := adjacentBlock(hit.Block, hit.Face)
-		if target.Y < core.MinY || target.Y >= core.MaxY {
-			return RejectChunkNotReady, true
-		}
-		block, ready := dimension.BlockAt(target)
-		if !ready {
-			return RejectChunkNotReady, true
-		}
-		occupied := block != core.AirID || placementOverlapsPlayer(
-			placement,
-			target,
-			player.state.Position,
-		)
-		if occupied {
-			return RejectOccupied, true
-		}
-		// 放置熔炉必须先预留槽位；槽位耗尽时不改方块也不扣物品。
-		targetRecord, targetOK := dimension.records[target.Chunk()]
-		targetIndex, targetIndexed := world.ChunkBlockIndex(target)
-		furnaceSlot, reserveFurnace := -1, false
-		if placement == core.FurnaceID {
-			if !targetOK || targetRecord.Chunk == nil || !targetIndexed {
-				return RejectChunkNotReady, true
-			}
-			slot, ok := targetRecord.Chunk.PrepareFurnace(targetIndex)
-			if !ok {
-				return RejectFurnaceCapacity, true
-			}
-			furnaceSlot, reserveFurnace = slot, true
-		}
-		_, changed, setErr := dimension.SetBlock(target, placement)
-		if setErr != nil {
-			return mapSetBlockError(setErr), true
-		}
-		if changed {
-			engine.recordChange(
-				dimensionID,
-				target,
-				placement,
-				pending,
-			)
-			if reserveFurnace {
-				targetRecord.Chunk.CommitFurnace(furnaceSlot, targetIndex)
-			}
-			player.inventory.Hotbar = consumed
-			player.inventoryDirty = true
-		}
-		return 0, false
+	if hit.Face == core.BlockFaceNone {
+		return RejectOccupied, true
 	}
-	return RejectInvalidRay, true
+	target := adjacentBlock(hit.Block, hit.Face)
+	if target.Y < core.MinY || target.Y >= core.MaxY {
+		return RejectChunkNotReady, true
+	}
+	block, ready := dimension.BlockAt(target)
+	if !ready {
+		return RejectChunkNotReady, true
+	}
+	occupied := block != core.AirID || placementOverlapsPlayer(
+		placement,
+		target,
+		player.state.Position,
+	)
+	if occupied {
+		return RejectOccupied, true
+	}
+	// 放置熔炉必须先预留槽位；槽位耗尽时不改方块也不扣物品。
+	targetRecord, targetOK := dimension.records[target.Chunk()]
+	targetIndex, targetIndexed := world.ChunkBlockIndex(target)
+	furnaceSlot, reserveFurnace := -1, false
+	if placement == core.FurnaceID {
+		if !targetOK || targetRecord.Chunk == nil || !targetIndexed {
+			return RejectChunkNotReady, true
+		}
+		slot, ok := targetRecord.Chunk.PrepareFurnace(targetIndex)
+		if !ok {
+			return RejectFurnaceCapacity, true
+		}
+		furnaceSlot, reserveFurnace = slot, true
+	}
+	_, changed, setErr := dimension.SetBlock(target, placement)
+	if setErr != nil {
+		return mapSetBlockError(setErr), true
+	}
+	if changed {
+		engine.recordChange(
+			dimensionID,
+			target,
+			placement,
+			pending,
+		)
+		if reserveFurnace {
+			targetRecord.Chunk.CommitFurnace(furnaceSlot, targetIndex)
+		}
+		player.inventory.Hotbar = consumed
+		player.inventoryDirty = true
+	}
+	return 0, false
 }
 
 func validPlayerInput(command Command) bool {
