@@ -202,6 +202,7 @@ func (server *Server) publishLocalResult(
 			MiningProgressTicks: playerUpdate.Mining.ProgressTicks,
 			MiningRequiredTicks: playerUpdate.Mining.RequiredTicks,
 			MiningHarvestable:   playerUpdate.Mining.Harvestable,
+			WorldTimeTicks:      playerUpdate.WorldTimeTicks,
 		}) {
 			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 		}

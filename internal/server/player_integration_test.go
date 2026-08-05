@@ -649,6 +649,9 @@ func (h *delayedPlayerHarness) replayResult() delayedReplayResult {
 	if !ok {
 		h.t.Fatalf("replay 最终区块 %+v hash 不可用", chunk)
 	}
+	// 本 harness 由真实时钟驱动，两次运行的总 tick 数不同，
+	// 因此绝对世界时间不属于被比较的权威结果；它的推进由 sim 的世界时间测试覆盖。
+	player.WorldTimeTicks = 0
 	return delayedReplayResult{
 		Player:     player,
 		PlayerHash: playerHash,

@@ -643,7 +643,7 @@ func readyMiningPlayers(
 
 func readyMiningBenchmarkPlayers(b *testing.B) *Engine {
 	b.Helper()
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	dimension := engine.dimensions[core.Overworld]
 	if !dimension.BeginGeneration(core.ChunkPos{}) {
 		b.Fatal("benchmark 区块未开始生成")

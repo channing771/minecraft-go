@@ -36,30 +36,32 @@ type applicationOptions struct {
 }
 
 type application struct {
-	window                  applicationWindow
-	dev                     gfx.Device
-	surface                 gfx.Surface
-	color                   gfx.Texture
-	colorView               gfx.TextureView
-	frameWidth              int
-	frameHeight             int
-	renderer                *render.Renderer
-	remotePlayers           *client.RemotePlayers
-	remotePresentations     []client.RemotePresentation
-	remoteAvatars           []render.Avatar
-	remoteNameTags          []render.NameTag
-	avatarRenderer          *render.AvatarRenderer
-	nameTagRenderer         *render.NameTagRenderer
-	hotbarRenderer          *render.HotbarRenderer
-	inventory               client.InventoryMirror
-	furnace                 client.FurnaceMirror
-	miningOverlay           render.MiningOverlay
-	itemDropRenderer        *render.ItemDropRenderer
-	itemDrops               *client.ItemDrops
-	itemDropInstances       []render.ItemDrop
-	inventoryOpen           bool
-	inventorySource         int
-	serverTick              uint64
+	window              applicationWindow
+	dev                 gfx.Device
+	surface             gfx.Surface
+	color               gfx.Texture
+	colorView           gfx.TextureView
+	frameWidth          int
+	frameHeight         int
+	renderer            *render.Renderer
+	remotePlayers       *client.RemotePlayers
+	remotePresentations []client.RemotePresentation
+	remoteAvatars       []render.Avatar
+	remoteNameTags      []render.NameTag
+	avatarRenderer      *render.AvatarRenderer
+	nameTagRenderer     *render.NameTagRenderer
+	hotbarRenderer      *render.HotbarRenderer
+	inventory           client.InventoryMirror
+	furnace             client.FurnaceMirror
+	miningOverlay       render.MiningOverlay
+	itemDropRenderer    *render.ItemDropRenderer
+	itemDrops           *client.ItemDrops
+	itemDropInstances   []render.ItemDrop
+	inventoryOpen       bool
+	inventorySource     int
+	serverTick          uint64
+	// worldTimeTicks 是最后确认的权威绝对世界时间，只在接受更新状态时前进。
+	worldTimeTicks          uint64
 	glyphAtlas              *render.GlyphAtlas
 	clientEndpoint          network.ClientEndpoint
 	receiver                *client.Receiver
@@ -1040,6 +1042,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 				return
 			}
 			a.serverTick = state.ServerTick
+			a.worldTimeTicks = state.WorldTimeTicks
 			if state.Reset || !state.MiningActive {
 				a.miningOverlay = render.MiningOverlay{}
 			} else {

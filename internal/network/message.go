@@ -296,6 +296,8 @@ type PlayerState struct {
 	MiningProgressTicks uint16
 	MiningRequiredTicks uint16
 	MiningHarvestable   bool
+	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间，协议 v9 起随玩家状态同步。
+	WorldTimeTicks uint64
 }
 
 type RemotePlayerSpawn struct {

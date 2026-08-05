@@ -1483,6 +1483,9 @@ func parityReadinessTranscript(
 		t.Fatalf("parity readiness ended without ready PlayerState: %+v", lastState)
 	}
 	lastState.ServerTick = 0
+	// 两次运行在脚本开始前的 tick 数不同，绝对世界时间不属于业务对等内容；
+	// 同一服务端上多客户端的时间一致性由多人昼夜测试覆盖。
+	lastState.WorldTimeTicks = 0
 	transcript := []string{fmt.Sprintf("PlayerState:%+v", lastState)}
 	for x := int32(-1); x <= 1; x++ {
 		for z := int32(-1); z <= 1; z++ {
@@ -1615,6 +1618,7 @@ func parityBusinessMessage(
 		return []string{fmt.Sprintf("ForgetChunks:%+v", message)}
 	case network.PlayerState:
 		message.ServerTick = 0
+		message.WorldTimeTicks = 0
 		return []string{fmt.Sprintf("PlayerState:%+v", message)}
 	case network.CommandRejected:
 		return []string{fmt.Sprintf("CommandRejected:%+v", message)}

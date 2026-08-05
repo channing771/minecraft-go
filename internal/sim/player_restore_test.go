@@ -12,7 +12,7 @@ import (
 )
 
 func TestPlayerRestoreUsesValidCurrentBeforeSafe(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(7)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -44,7 +44,7 @@ func TestPlayerRestoreUsesValidCurrentBeforeSafe(t *testing.T) {
 }
 
 func TestPlayerRestoreKeepsAirborneCurrentExact(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(8)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -80,7 +80,7 @@ func TestPlayerRestoreRejectsCurrentOutsideWorldHeight(t *testing.T) {
 	}
 	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			engine := NewEngine(0)
+			engine := NewEngine(0, 0)
 			id := SessionID(30 + index)
 			current := PlayerLocation{
 				Dimension: core.Overworld,
@@ -106,7 +106,7 @@ func TestPlayerRestoreRejectsCurrentOutsideWorldHeight(t *testing.T) {
 }
 
 func TestPlayerRestoreRejectsOutOfHeightSafeBeforeSpawnFallback(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(34)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -131,7 +131,7 @@ func TestPlayerRestoreRejectsOutOfHeightSafeBeforeSpawnFallback(t *testing.T) {
 }
 
 func TestPlayerRestoreFallsBackFromBlockedCurrentToSafe(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(9)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -162,7 +162,7 @@ func TestPlayerRestoreFallsBackFromBlockedCurrentToSafe(t *testing.T) {
 }
 
 func TestPlayerRestoreFallsBackFromUnsupportedSafeToSpawn(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(10)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -190,7 +190,7 @@ func TestPlayerRestoreFallsBackFromUnsupportedSafeToSpawn(t *testing.T) {
 }
 
 func TestPlayerRestoreRejectsPartiallySupportedSafe(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(12)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -233,7 +233,7 @@ func TestPlayerRestoreCurrentOnGroundMatchesPhysicsContact(t *testing.T) {
 			completeSupport, anyGroundContact)
 	}
 
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(14)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -259,7 +259,7 @@ func TestPlayerRestoreCurrentOnGroundMatchesPhysicsContact(t *testing.T) {
 }
 
 func TestPlayerRestoreWaitsForEveryCandidateChunkBeforeFallingBack(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(11)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -298,7 +298,7 @@ func TestPlayerRestoreReplayProducesIdenticalPlayerAndWorldHashes(t *testing.T) 
 		revision   uint64
 	}
 	run := func() replayState {
-		engine := NewEngine(0)
+		engine := NewEngine(0, 0)
 		id := SessionID(13)
 		current := PlayerLocation{
 			Dimension: core.Overworld,
@@ -347,7 +347,7 @@ func TestPlayerRestoreReplayProducesIdenticalPlayerAndWorldHashes(t *testing.T) 
 }
 
 func TestRuntimeResetDoesNotReplayLoginRestoreCandidates(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(15)
 	current := PlayerLocation{
 		Dimension: core.Overworld,

@@ -43,7 +43,7 @@ func TestSafeLocationUpdatesOnlyAfterCompleteReadyGroundContact(t *testing.T) {
 	}
 	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			engine := NewEngine(0)
+			engine := NewEngine(0, 0)
 			id := SessionID(20 + index)
 			current := PlayerLocation{
 				Dimension: core.Overworld,
@@ -90,7 +90,7 @@ func TestSafeLocationUpdatesOnlyAfterCompleteReadyGroundContact(t *testing.T) {
 }
 
 func TestUnregisterActiveReturnsLastSnapshotAndDropsOldCommands(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(31)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -151,7 +151,7 @@ func TestUnregisterActiveReturnsLastSnapshotAndDropsOldCommands(t *testing.T) {
 }
 
 func TestUnregisterPendingReturnsNoSnapshotAndShrinksSubscriptions(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(32)
 	engine.RegisterPlayer(id, PlayerRestore{
 		SpawnDimension: core.Overworld,
@@ -183,7 +183,7 @@ func TestUnregisterPendingReturnsNoSnapshotAndShrinksSubscriptions(t *testing.T)
 }
 
 func TestOnlyRegisteredObserverAcceptsObserverCommands(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	engine.Enqueue(Command{
 		Session: 40, Sequence: 1, Kind: CommandTrustedObserverCenter,
 		Dimension: core.Overworld, Center: core.ChunkPos{X: 7},
@@ -223,7 +223,7 @@ func TestOnlyRegisteredObserverAcceptsObserverCommands(t *testing.T) {
 }
 
 func TestUnregisterObserverRemovesSubscriptionAndAllowsReregister(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	const observer = SessionID(71)
 	key := core.ChunkKey{
 		Dimension: core.Overworld,
@@ -251,7 +251,7 @@ func TestUnregisterObserverRemovesSubscriptionAndAllowsReregister(t *testing.T) 
 }
 
 func TestPlayerRestoreAndSnapshotDeepCopySafeLocation(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(42)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -285,7 +285,7 @@ func TestPlayerRestoreAndSnapshotDeepCopySafeLocation(t *testing.T) {
 }
 
 func TestUpdateSafeLocationDoesNotAllocateAfterInitialization(t *testing.T) {
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	id := SessionID(43)
 	current := PlayerLocation{
 		Dimension: core.Overworld,

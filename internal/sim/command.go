@@ -132,6 +132,8 @@ type TickResult struct {
 	Furnaces    []FurnaceUpdate
 	FurnaceEnds []FurnaceEnd
 	Tick        uint64
+	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。
+	WorldTimeTicks uint64
 }
 
 // FurnaceUpdate 是本 tick 发给某个查看者的完整权威熔炉状态。

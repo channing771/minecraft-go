@@ -9,7 +9,7 @@ import (
 )
 
 func BenchmarkEngineStepIdle(b *testing.B) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	b.ReportAllocs()
 	for b.Loop() {
 		engine.Step()
@@ -17,7 +17,7 @@ func BenchmarkEngineStepIdle(b *testing.B) {
 }
 
 func BenchmarkEngineStepPlayer(b *testing.B) {
-	engine := sim.NewEngine(0)
+	engine := sim.NewEngine(0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	requested := engine.Step()
 	submitAcquiredMisses(engine, requested.Acquire)
@@ -40,7 +40,7 @@ func BenchmarkEngineStepPlayer(b *testing.B) {
 
 // BenchmarkItemDropWorstCaseScan 覆盖 8 名玩家 × 25 区块 × 32 槽的最坏合法扫描。
 func BenchmarkItemDropWorstCaseScan(b *testing.B) {
-	engine := sim.NewEngine(sim.DropInterestRadius)
+	engine := sim.NewEngine(sim.DropInterestRadius, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	for range 8 {
@@ -78,7 +78,7 @@ func BenchmarkItemDropWorstCaseScan(b *testing.B) {
 
 // BenchmarkItemDropSessionSnapshot 覆盖单会话 800 项快照的复用路径。
 func BenchmarkItemDropSessionSnapshot(b *testing.B) {
-	engine := sim.NewEngine(sim.DropInterestRadius)
+	engine := sim.NewEngine(sim.DropInterestRadius, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	for range 8 {

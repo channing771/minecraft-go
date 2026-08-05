@@ -13,10 +13,10 @@
 
 ## 3. metadata v2 与原子保存接口
 
-- [ ] 3.1 在 `internal/storage` 先写失败的 golden、往返和故障注入测试，覆盖 metadata v1→v2 时间零迁移、v2 `WorldTimeTicks`、CRC、截断、未来版本拒绝；临时写入、临时文件 fsync 或 rename 失败必须保留旧文件，rename 后目录 fsync 失败则重开必须得到 CRC 有效的完整旧版或完整新版。
-- [ ] 3.2 修改 `internal/storage/types.go`、`metadata.go`、`memory.go`、`disk.go` 和 world files 装配：追加 metadata v2 字段与 `Store` 原子保存方法，Memory/Disk 保持相同值语义；不新增第二个世界状态文件。
-- [ ] 3.3 更新受影响的测试 Store 夹具和 metadata golden；验证旧程序边界只由版本拒绝表达，玩家 schema v3、区块 schema v4 及既有 chunk/player golden 字节保持不变。
-- [ ] 3.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage -race -count=1'`、archcheck、gofmt 与 diff check，通过后提交 `feat: 持久化 metadata v2 世界时间`。
+- [x] 3.1 在 `internal/storage` 先写失败的 golden、往返和故障注入测试，覆盖 metadata v1→v2 时间零迁移、v2 `WorldTimeTicks`、CRC、截断、未来版本拒绝；临时写入、临时文件 fsync 或 rename 失败必须保留旧文件，rename 后目录 fsync 失败则重开必须得到 CRC 有效的完整旧版或完整新版。
+- [x] 3.2 修改 `internal/storage/types.go`、`metadata.go`、`memory.go`、`disk.go` 和 world files 装配：追加 metadata v2 字段与 `Store` 原子保存方法，Memory/Disk 保持相同值语义；不新增第二个世界状态文件。
+- [x] 3.3 更新受影响的测试 Store 夹具和 metadata golden；验证旧程序边界只由版本拒绝表达，玩家 schema v3、区块 schema v4 及既有 chunk/player golden 字节保持不变。
+- [x] 3.4 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage -race -count=1'`、archcheck、gofmt 与 diff check，通过后提交 `feat: 持久化 metadata v2 世界时间`。
 
 ## 4. 权威世界时间与协议 v9
 

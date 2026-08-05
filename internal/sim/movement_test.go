@@ -370,7 +370,7 @@ func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
 	}
 
 	const sessionID = SessionID(73)
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	engine.sessions[sessionID] = &sessionState{
 		dimension: core.DimensionID(0x0c0d0e0f),
 		player: &playerState{
@@ -464,7 +464,7 @@ func TestPlayerCenterDerivationAlsoRunsWhenTrustedObserverChanges(t *testing.T) 
 
 func readyMovementPlayer(t *testing.T) (*Engine, SessionID) {
 	t.Helper()
-	engine := NewEngine(0)
+	engine := NewEngine(0, 0)
 	session := SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	requested := engine.Step()
