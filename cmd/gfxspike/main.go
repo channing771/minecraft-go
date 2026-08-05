@@ -125,7 +125,17 @@ func fixedCamera(aspect float32) render.Camera {
 	target := mgl32.Vec3{64, 48, 64}
 	view := mgl32.LookAtV(pos, target, mgl32.Vec3{0, 1, 0})
 	proj := core.Perspective(mgl32.DegToRad(55), aspect, 0.1, 1000)
-	return render.Camera{ViewProj: proj.Mul4(view), Pos: pos}
+	viewProj := proj.Mul4(view)
+	noon := render.DayNightAt(6000)
+	return render.Camera{
+		ViewProj:       viewProj,
+		ViewProjInv:    viewProj.Inv(),
+		Pos:            pos,
+		SunDirection:   noon.SunDirection,
+		Daylight:       noon.Daylight,
+		StarVisibility: noon.StarVisibility,
+		SkyColor:       noon.ClearColor,
+	}
 }
 
 type depthTarget struct {

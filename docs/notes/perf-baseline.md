@@ -42,9 +42,13 @@ scenario v12 起改为批量分摊：一个样本是一批 `256` 次远端角色
 
 benchmark 还在预热与 still、still 与 flying、flying 与 GPU 采样之间以及 GPU 采样之后各加入 `30` 秒冷却，降低持续满载与热节流；冷却写入报告的 `cooldown_seconds`，各阶段时长、样本数与统计口径完全不变。客户端另设 `1500MiB` 的 Go 堆软上限，避免高周转阶段把尚未回收的空闲堆累积进 RSS 峰值。
 
-固定 `2560x1440` 离屏目标、still/flying 阶段时长、RSS、200 个 tick 样本、既有绝对门禁与 `20%` 相对退化阈值均未改变。当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 10:12`。该参数反映真实的基线历史：scenario v11 的正式链因上述 GPU 计时缺陷失败，v11 从未成为任何硬件的基线，因此没有经过 v11 的迁移路径。默认跨场景比较、反向、跨更多级和 `11:12`、`10:11`、`9:10` 参数均被拒绝；v6–v11 历史报告仍可读取，同版本报告仍可比较。
+固定 `2560x1440` 离屏目标、still/flying 阶段时长、RSS、200 个 tick 样本、既有绝对门禁与 `20%` 相对退化阈值均未改变。M4I 在每帧加入程序化天空 draw 后，producer 标记为 scenario v13；`remote_gpu_complete` 仍沿用 v12 的批量分摊定义（`128` 个样本、每样本摊薄 `256` 次绘制），天空成本由真实 still/flying 帧覆盖，不污染该指标。当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 12:13`。该参数反映真实的基线历史：scenario v11 的正式链因上述 GPU 计时缺陷失败，v11 从未成为任何硬件的基线；v12 是 M5 已接受基线，因此唯一迁移是从 v12 直接到 v13。默认跨场景比较、反向、跨更多级和 `11:13`、`10:13`、`10:12`、`11:12`、`10:11`、`9:10` 参数均被拒绝；v6–v12 历史报告仍可读取，同版本报告仍可比较。
 
 无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。
+
+## scenario v13 回退说明
+
+回退到 M4G 时需要同时回退天空 draw、scenario v13 的 producer/比较器与 M5 基线文件（若已提升为 v13），恢复 M5 scenario v12 基线；协议 v9 与全部世界/玩家数据无需回退或迁移。
 
 ## M4F scenario v10 历史比较规则
 

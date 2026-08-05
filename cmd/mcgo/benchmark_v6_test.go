@@ -51,9 +51,9 @@ func (*benchmarkBlockingServerStream) Recv(
 func (*benchmarkBlockingServerStream) Peer() string { return "benchmark-blocking" }
 func (*benchmarkBlockingServerStream) Close() error { return nil }
 
-func TestScenarioV12ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 12 {
-		t.Fatalf("scenarioVersion=%d, want 12", scenarioVersion)
+func TestScenarioV13ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 13 {
+		t.Fatalf("scenarioVersion=%d, want 13", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {
@@ -633,6 +633,21 @@ func TestScenarioV8BenchmarkReportRequires2048GPUCompletionSamples(t *testing.T)
 	report.Multiplayer.RemoteGPUComplete.Samples = 256
 	if err := validateBenchmarkReport(report); err != nil {
 		t.Fatalf("v7 256 GPU samples rejected: %v", err)
+	}
+}
+
+func TestScenarioV13BenchmarkReportReusesV12GPUCompletionDefinition(t *testing.T) {
+	report := validBenchmarkReport()
+	report.ScenarioVersion = 13
+	report.Multiplayer = validMultiplayerSummary()
+	report.Multiplayer.RemoteGPUComplete.Samples = client.ScenarioV12GPUCompletionSamples - 1
+	if err := validateBenchmarkReport(report); err == nil ||
+		!strings.Contains(err.Error(), "remote_gpu_complete") {
+		t.Fatalf("v13 低于批量分摊样本数未被拒绝: %v", err)
+	}
+	report.Multiplayer.RemoteGPUComplete.Samples = client.ScenarioV12GPUCompletionSamples
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("v13 批量分摊样本数被拒绝: %v", err)
 	}
 }
 
