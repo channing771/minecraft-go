@@ -18,6 +18,10 @@ func closeEnough(got, want float32) bool {
 	return math.Abs(float64(got-want)) <= 1e-5
 }
 
+func closeDirection(got, want [3]float32) bool {
+	return closeEnough(got[0], want[0]) && closeEnough(got[1], want[1]) && closeEnough(got[2], want[2])
+}
+
 func TestDayNightPhaseFormula(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -92,6 +96,50 @@ func TestDayNightClearColorInterpolatesBetweenNightAndDay(t *testing.T) {
 		if !closeEnough(midnight[index], wantNight[index]) {
 			t.Fatalf("午夜 clear color = %v，想要 %v", midnight, wantNight)
 		}
+	}
+}
+
+func TestCelestialDirectionsFollowAuthoritativePhase(t *testing.T) {
+	tests := []struct {
+		name           string
+		worldTime      uint64
+		wantSun        [3]float32
+		wantMoon       [3]float32
+		wantSunLevel   float32
+		wantDaylight   float32
+		wantClearColor [4]float32
+	}{
+		{"日出", 0, [3]float32{1, 0, 0}, [3]float32{-1, 0, 0}, 0, 0.15, [4]float32{0.02, 0.03, 0.08, 1}},
+		{"正午", 6000, [3]float32{0, 1, 0}, [3]float32{0, -1, 0}, 1, 1, [4]float32{0.42, 0.68, 0.92, 1}},
+		{"日落", 12000, [3]float32{-1, 0, 0}, [3]float32{1, 0, 0}, 0, 0.15, [4]float32{0.02, 0.03, 0.08, 1}},
+		{"午夜", 18000, [3]float32{0, -1, 0}, [3]float32{0, 1, 0}, 0, 0.15, [4]float32{0.02, 0.03, 0.08, 1}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DayNightAt(tc.worldTime)
+			if !closeDirection(got.SunDirection, tc.wantSun) || !closeDirection(got.MoonDirection, tc.wantMoon) {
+				t.Fatalf("天体方向 = sun %v moon %v，想要 sun %v moon %v", got.SunDirection, got.MoonDirection, tc.wantSun, tc.wantMoon)
+			}
+			if !closeEnough(got.Sun, tc.wantSunLevel) || !closeEnough(got.Daylight, tc.wantDaylight) || got.ClearColor != tc.wantClearColor {
+				t.Fatalf("既有昼夜值 = %+v，想要 sun=%v daylight=%v clear=%v", got, tc.wantSunLevel, tc.wantDaylight, tc.wantClearColor)
+			}
+		})
+	}
+}
+
+func TestCelestialStarVisibilitySmoothlyAppearsNearHorizonAndAtNight(t *testing.T) {
+	midnight := DayNightAt(18000).StarVisibility
+	nearSunrise := DayNightAt(500).StarVisibility
+	nearSunset := DayNightAt(11500).StarVisibility
+	day := DayNightAt(1000).StarVisibility
+	if midnight != 1 {
+		t.Fatalf("午夜星空可见度 = %v，想要 1", midnight)
+	}
+	if nearSunrise <= 0 || nearSunrise >= 1 || !closeEnough(nearSunrise, nearSunset) {
+		t.Fatalf("近地平线星空可见度 = %v/%v，想要相等且严格介于 0 与 1", nearSunrise, nearSunset)
+	}
+	if day != 0 {
+		t.Fatalf("日间星空可见度 = %v，想要 0", day)
 	}
 }
 

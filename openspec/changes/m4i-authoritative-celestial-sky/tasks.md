@@ -5,8 +5,8 @@
 
 ## 2. 固定权威天体参数
 
-- [ ] 2.1 在 `internal/render/daylight_test.go` 先增加失败测试，覆盖 `0/6000/12000/18000` 四个相位的太阳方向、相反月亮方向、既有 `Sun/Daylight/ClearColor` 不漂移及星空只在近地平线/夜间平滑出现；再最小扩展 `internal/render/daylight.go` 的 `DayNightAt` 返回值。运行 `go test ./internal/render -run 'Test(DayNight|Celestial)' -race -count=1`。
-- [ ] 2.2 在 `cmd/mcgo/app_test.go` 增加失败测试，证明 app 仍只在接受更新 `ServerTick` 时推进 `worldTimeTicks`，旧/重复状态不会改变传给天空的天体参数，Memory/TCP 相同状态得到相同结果；复用现有接收路径，不新增消息或时钟。运行 `go test ./cmd/mcgo -run 'Test.*(WorldTime|DayNight|Celestial)' -race -count=1`。
+- [x] 2.1 在 `internal/render/daylight_test.go` 先增加失败测试，覆盖 `0/6000/12000/18000` 四个相位的太阳方向、相反月亮方向、既有 `Sun/Daylight/ClearColor` 不漂移及星空只在近地平线/夜间平滑出现；再最小扩展 `internal/render/daylight.go` 的 `DayNightAt` 返回值。运行 `go test ./internal/render -run 'Test(DayNight|Celestial)' -race -count=1`。
+- [x] 2.2 在 `cmd/mcgo/app_test.go` 增加失败测试，证明 app 仍只在接受更新 `ServerTick` 时推进 `worldTimeTicks`，旧/重复状态不会改变传给天空的天体参数，Memory/TCP 相同状态得到相同结果；复用现有接收路径，不新增消息或时钟。运行 `go test ./cmd/mcgo -run 'Test.*(WorldTime|DayNight|Celestial)' -race -count=1`。
 
 ## 3. 加入最小天空 draw
 
