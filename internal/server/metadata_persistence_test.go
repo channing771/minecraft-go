@@ -289,9 +289,7 @@ func TestShutdownMetadataContextTimeoutDefersToRetry(t *testing.T) {
 	}
 
 	setMetadataRespond(store, nil)
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
-		t.Fatalf("超时后重试 Shutdown 错误 = %v", err)
-	}
+	recoverShutdownAfterExpectedFailure(t, running, context.Canceled)
 	if store.worldOwned() {
 		t.Fatal("成功关服仍保留 Store 所有权")
 	}
