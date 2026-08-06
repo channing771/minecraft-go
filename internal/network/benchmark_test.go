@@ -28,6 +28,7 @@ func BenchmarkSmallPacketCodec(b *testing.B) {
 		{"PlaceBlock", StatePlay, PlaceBlock{Sequence: 3, Yaw: 0.5, Pitch: -0.25, Slot: 2}},
 		{"RequestChunkResync", StatePlay, RequestChunkResync{Sequence: 4, Dimension: core.Overworld, Chunk: core.ChunkPos{X: -2, Z: 3}, HaveRevision: 7}},
 		{"KeepAliveReply", StatePlay, KeepAliveReply{Token: 9}},
+		{"DropSelectedItem", StatePlay, DropSelectedItem{Sequence: 12}},
 	}
 	serverPackets := []struct {
 		name  string

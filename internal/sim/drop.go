@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"math"
 	"sort"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -12,8 +13,11 @@ import (
 const (
 	// DropInterestRadius 是掉落物 tick 与同步的固定区块半径。
 	DropInterestRadius = core.DropInterestRadius
-	// DropPickupDelayTicks 是新掉落物可被拾取前的活动 tick 数。
+	// DropPickupDelayTicks 是采掘与方块破坏产生的掉落物可被拾取前的活动 tick 数。
 	DropPickupDelayTicks = 10
+	// PlayerDropPickupDelayTicks 是玩家主动丢弃的掉落物可被拾取前的活动 tick 数。
+	// 它比方块破坏更长，避免刚丢出的物品被自己立刻拾回。
+	PlayerDropPickupDelayTicks = 40
 	// DropLifetimeTicks 是掉落物累计活动 tick 的寿命上限。
 	DropLifetimeTicks = 6000
 	// dropPickupRange 是玩家到方块中心的最大拾取距离。
@@ -315,4 +319,51 @@ func appendChunkDrops(
 		})
 	}
 	return dst
+}
+
+// dropSelectedItem 在单写者 tick 内把权威选中快捷栏中的一个物品原地转移为掉落物。
+//
+// 全部预检在任何写入之前完成：任一失败都不改变背包、掉落物、区块 revision
+// 或 persistence 状态。位置取玩家脚底方块，栏位取权威选中格，两者都不由客户端提供。
+func (engine *Engine) dropSelectedItem(
+	session *sessionState,
+	pending map[core.ChunkKey]*pendingChunkChanges,
+) (RejectReason, bool) {
+	if session.player == nil || session.player.lifecycle != PlayerActive {
+		return RejectPlayerNotReady, true
+	}
+	player := session.player
+	selected := player.inventory.Hotbar.Selected
+	nextHotbar, ok := player.inventory.Hotbar.Consume(selected)
+	if !ok {
+		return RejectInvalidSlot, true
+	}
+	stack := player.inventory.Hotbar.Slots[selected]
+	position := core.BlockPos{
+		X: int32(math.Floor(float64(player.state.Position.X()))),
+		Y: int32(math.Floor(float64(player.state.Position.Y()))),
+		Z: int32(math.Floor(float64(player.state.Position.Z()))),
+	}
+	key := core.ChunkKey{Dimension: session.dimension, Pos: position.Chunk()}
+	dimension := engine.dimensions[key.Dimension]
+	if dimension == nil {
+		return RejectChunkNotReady, true
+	}
+	record := dimension.records[key.Pos]
+	if record == nil || record.State != ChunkReady || record.Chunk == nil {
+		return RejectChunkNotReady, true
+	}
+	blockIndex, ok := world.ChunkBlockIndex(position)
+	if !ok {
+		return RejectChunkNotReady, true
+	}
+	dropSlot, ok := record.Chunk.PrepareDrop(stack.Item, blockIndex)
+	if !ok {
+		return RejectDropCapacity, true
+	}
+	record.Chunk.CommitDrop(dropSlot, stack.Item, blockIndex, PlayerDropPickupDelayTicks)
+	player.inventory.Hotbar = nextHotbar
+	player.inventoryDirty = true
+	engine.touchChunk(key, pending)
+	return 0, false
 }

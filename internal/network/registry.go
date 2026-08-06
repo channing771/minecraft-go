@@ -31,6 +31,8 @@ func clientPacketID(state State, packet ClientPacket) (uint32, bool) {
 			return 9, true
 		case CloseFurnace:
 			return 10, true
+		case DropSelectedItem:
+			return 11, true
 		}
 	}
 	return 0, false
@@ -69,6 +71,8 @@ func clientPacketForID(state State, id uint32) (ClientPacket, bool) {
 			return MoveFurnaceStack{}, true
 		case 10:
 			return CloseFurnace{}, true
+		case 11:
+			return DropSelectedItem{}, true
 		}
 	}
 	return nil, false

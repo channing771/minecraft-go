@@ -154,3 +154,27 @@ func TestBlockChangesAllowZeroChangeRevisionBarrier(t *testing.T) {
 		t.Fatalf("barrier 往返 = %#v", decoded)
 	}
 }
+
+func TestItemDropUpsertsAcceptEveryRegisteredItem(t *testing.T) {
+	for _, item := range []core.ItemID{
+		core.ItemCoal,
+		core.ItemRawIron,
+		core.ItemIronIngot,
+		core.ItemStonePickaxe,
+		core.ItemIronPickaxe,
+	} {
+		message := ItemDropUpserts{Drops: []ItemDrop{{
+			ID: dropTestID(0, 1), BlockIndex: 9, Item: item, Count: 1,
+		}}}
+		if err := message.Validate(); err != nil {
+			t.Fatalf("已注册物品 %d 被拒绝: %v", item, err)
+		}
+		packetID, payload, err := encodeServerControlPayload(StatePlay, message)
+		if err != nil {
+			t.Fatalf("编码已注册物品 %d: %v", item, err)
+		}
+		if _, err := decodeServerControlPayload(StatePlay, packetID, payload); err != nil {
+			t.Fatalf("解码已注册物品 %d: %v", item, err)
+		}
+	}
+}

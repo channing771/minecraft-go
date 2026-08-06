@@ -129,8 +129,10 @@ func (engine *Engine) Step() TickResult {
 	})
 
 	result := TickResult{Forget: make(map[SessionID][]core.ChunkKey)}
-	placements := make([]Command, 0, len(commands))
+	interactions := make([]Command, 0, len(commands))
 	furnaceMoves := make([]Command, 0, len(commands))
+	// 命令阶段与后续掉落物/熔炉推进共用同一份待提交区块变更。
+	pending := make(map[core.ChunkKey]*pendingChunkChanges)
 	viewChanged := false
 	for _, command := range commands {
 		session := engine.sessions[command.Session]
@@ -180,7 +182,7 @@ func (engine *Engine) Step() TickResult {
 			player.yaw = normalizeYaw(command.Yaw)
 			player.pitch = command.Pitch
 			player.input.Yaw = player.yaw
-			placements = append(placements, command)
+			interactions = append(interactions, command)
 		case CommandPlayerInput:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
 				if session.player != nil {
@@ -234,11 +236,7 @@ func (engine *Engine) Step() TickResult {
 				})
 				continue
 			}
-			player := session.player
-			if player.inventory.Hotbar.Selected != command.Slot {
-				player.inventory.Hotbar.Selected = command.Slot
-				player.inventoryDirty = true
-			}
+			interactions = append(interactions, command)
 		case CommandMoveInventoryStack:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
 				result.Rejected = append(result.Rejected, Rejection{
@@ -304,6 +302,24 @@ func (engine *Engine) Step() TickResult {
 			}
 			player.inventory = next
 			player.inventoryDirty = true
+		case CommandDropSelectedItem:
+			if session.player == nil || session.player.lifecycle != PlayerActive {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectPlayerNotReady,
+				})
+				continue
+			}
+			if session.player.inventory.Hotbar.Selected >= core.HotbarSlots {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectInvalidSlot,
+				})
+				continue
+			}
+			interactions = append(interactions, command)
 		case CommandResync:
 			result.Resync = append(result.Resync, ResyncRequest{
 				Session:      command.Session,
@@ -335,20 +351,36 @@ func (engine *Engine) Step() TickResult {
 		engine.reconcileSubscriptions(&result)
 	}
 
-	pending := make(map[core.ChunkKey]*pendingChunkChanges)
+	for _, command := range interactions {
+		switch command.Kind {
+		case CommandPlaceBlock:
+			if reason, rejected := engine.executePlacement(command, pending); rejected {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   reason,
+				})
+			}
+		case CommandSelectHotbar:
+			player := engine.sessions[command.Session].player
+			if player.inventory.Hotbar.Selected != command.Slot {
+				player.inventory.Hotbar.Selected = command.Slot
+				player.inventoryDirty = true
+			}
+		case CommandDropSelectedItem:
+			if reason, rejected := engine.dropSelectedItem(engine.sessions[command.Session], pending); rejected {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   reason,
+				})
+			}
+		}
+	}
 	engine.advanceDrops(pending)
 	engine.advanceFurnaces(pending)
 	for _, command := range furnaceMoves {
 		if reason, rejected := engine.applyFurnaceMove(command.Session, command, pending); rejected {
-			result.Rejected = append(result.Rejected, Rejection{
-				Session:  command.Session,
-				Sequence: command.Sequence,
-				Reason:   reason,
-			})
-		}
-	}
-	for _, command := range placements {
-		if reason, rejected := engine.executePlacement(command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{
 				Session:  command.Session,
 				Sequence: command.Sequence,

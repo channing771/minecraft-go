@@ -7,8 +7,8 @@ import (
 	"minecraft-go/internal/core"
 )
 
-// ProtocolVersion 是 M4G 唯一支持的协议版本。
-const ProtocolVersion uint32 = 9
+// ProtocolVersion 是 M4H 唯一支持的协议版本。
+const ProtocolVersion uint32 = 10
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -160,6 +160,8 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 		case MoveFurnaceStack:
 			return clientPacket.Validate()
 		case CloseFurnace:
+			return clientPacket.Validate()
+		case DropSelectedItem:
 			return clientPacket.Validate()
 		case RequestChunkResync:
 			return clientPacket.Validate()

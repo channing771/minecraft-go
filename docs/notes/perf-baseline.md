@@ -48,7 +48,7 @@ benchmark 还在预热与 still、still 与 flying、flying 与 GPU 采样之间
 
 ## scenario v13 回退说明
 
-回退到 M4G 时需要同时回退天空 draw、scenario v13 的 producer/比较器与 M5 基线文件（若已提升为 v13），恢复 M5 scenario v12 基线；协议 v9 与全部世界/玩家数据无需回退或迁移。
+回退到 M4H 时需要同时回退天空 draw、scenario v13 的 producer/比较器与 M5 基线文件（若已提升为 v13），恢复 M5 scenario v12 基线；协议 v10 与全部世界/玩家数据无需回退或迁移。
 
 ## M4I scenario v13 冻结失败候选与不可提升诊断
 

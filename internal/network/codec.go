@@ -59,6 +59,8 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 			e.u64(message.Sequence)
 			e.u8(message.From)
 			e.u8(message.To)
+		case DropSelectedItem:
+			e.u64(message.Sequence)
 		case CraftRecipe:
 			e.u64(message.Sequence)
 			e.u8(uint8(message.Recipe))
@@ -236,6 +238,10 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			var closeFurnace CloseFurnace
 			closeFurnace.Sequence, err = d.u64()
 			packet = closeFurnace
+		case 11:
+			var drop DropSelectedItem
+			drop.Sequence, err = d.u64()
+			packet = drop
 		default:
 			return nil, codecError("decode client", state, packetID, errUnknownPacketID)
 		}

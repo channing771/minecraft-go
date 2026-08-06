@@ -7,15 +7,15 @@ import (
 	"minecraft-go/internal/core"
 )
 
-func TestProtocolVersionIsNine(t *testing.T) {
-	if ProtocolVersion != 9 {
-		t.Fatalf("协议版本 = %d，想要 9", ProtocolVersion)
+func TestProtocolVersionIsTen(t *testing.T) {
+	if ProtocolVersion != 10 {
+		t.Fatalf("协议版本 = %d，想要 10", ProtocolVersion)
 	}
 }
 
-func TestProtocolV9RejectsVersionEightBeforePlay(t *testing.T) {
-	// v8 是上一版本，必须和更早版本一样在 Handshake 阶段稳定拒绝。
-	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7, 8} {
+func TestProtocolV10RejectsVersionNineBeforePlay(t *testing.T) {
+	// v9 是上一版本，必须和更早版本一样在 Handshake 阶段稳定拒绝。
+	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9} {
 		stream := &staticClientHelloStream{version: version}
 		if _, err := BeginServerLogin(t.Context(), stream); err == nil {
 			t.Fatalf("v%d ClientHello 被接受", version)
@@ -84,6 +84,30 @@ func TestProtocolV9PlayerStateWorldTimeAcceptsFullRange(t *testing.T) {
 		}
 		if round.(PlayerState).WorldTimeTicks != ticks {
 			t.Fatalf("往返时间 = %d，想要 %d", round.(PlayerState).WorldTimeTicks, ticks)
+		}
+	}
+}
+
+func TestProtocolV10DropSelectedItemRegistryIsFrozen(t *testing.T) {
+	// 新 packet 只占用此前未分配的 ID 11；ID 1 继续保持未分配且不复用。
+	if id, ok := clientPacketID(StatePlay, DropSelectedItem{}); !ok || id != 11 {
+		t.Fatalf("DropSelectedItem packet ID = (%d,%v)，想要 (11,true)", id, ok)
+	}
+	packet, ok := clientPacketForID(StatePlay, 11)
+	if !ok {
+		t.Fatal("Play client packet ID 11 未注册")
+	}
+	if _, isDrop := packet.(DropSelectedItem); !isDrop {
+		t.Fatalf("ID 11 解析为 %T，想要 DropSelectedItem", packet)
+	}
+	if _, ok := clientPacketForID(StatePlay, 1); ok {
+		t.Fatal("Play client packet ID 1 必须保持未分配")
+	}
+
+	// 该消息在 Handshake 与 Login 阶段无效，只属于 Play。
+	for _, state := range []State{StateHandshake, StateLogin} {
+		if _, _, err := encodeClientPacketPayload(state, DropSelectedItem{}); err == nil {
+			t.Fatalf("状态 %d 接受了 DropSelectedItem", state)
 		}
 	}
 }

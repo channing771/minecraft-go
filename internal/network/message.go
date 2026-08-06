@@ -449,6 +449,17 @@ type ItemDrop struct {
 	Count      uint8
 }
 
+// DropSelectedItem 请求把权威选中快捷栏中的一个物品原地转移为掉落物。
+// 客户端不携带栏位或位置：权威选中格与脚底坐标都由服务端决定。
+type DropSelectedItem struct {
+	Sequence uint64
+}
+
+func (DropSelectedItem) clientMessage() {}
+func (DropSelectedItem) clientPacket()  {}
+
+func (DropSelectedItem) Validate() error { return nil }
+
 func (drop ItemDrop) validate() error {
 	if !drop.ID.Valid() {
 		return errors.New("network: invalid item drop ID")
@@ -456,7 +467,7 @@ func (drop ItemDrop) validate() error {
 	if drop.BlockIndex >= maxChunkBlockIndex {
 		return errors.New("network: item drop block index is outside the chunk")
 	}
-	if _, ok := core.ItemPlacement(drop.Item); !ok {
+	if !core.RegisteredItem(drop.Item) {
 		return errors.New("network: unknown item drop item")
 	}
 	if drop.Count < 1 || drop.Count > core.MaxStackCount {

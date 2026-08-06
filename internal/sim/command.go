@@ -24,6 +24,7 @@ const (
 	CommandOpenFurnace
 	CommandCloseFurnace
 	CommandMoveFurnaceStack
+	CommandDropSelectedItem
 )
 
 // LookDirection 把玩家 look 角转换为单位方向；yaw=0、pitch=0 朝向 -Z。

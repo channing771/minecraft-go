@@ -59,8 +59,8 @@
 ### 合并 M4H 正式起点
 
 - [x] 8.5 核对 `origin/main@15f2cf84d6b7e7186b17a0efb6d1ab5c019201e0` 已归档 M4H，确认协议 v10、玩家 schema v3、区块 schema v4、metadata v2、scenario v12 与 M5 v12 baseline；把 proposal、三份 delta specs、design 与 tasks 同步为 M4H 正式起点，并运行 `openspec validate --all --strict --no-interactive`。合并前候选 `4410dc8b5ec76acad7d5a28980ca88b83434d35f` 及其诊断只作不可提升证据。
-- [ ] 8.6 合并 `origin/main@15f2cf84d6b7e7186b17a0efb6d1ab5c019201e0`，只解决 M4I 与 M4H 的真实冲突：`README.md` 同时保留程序化天空与主动丢弃说明；`cmd/mcgo/app.go`、`app_test.go` 同时保留单次 ViewProj/天空 uniform 与主动丢弃路径；协议保持 v10，scenario 保持 v13，玩家 schema v3、区块 schema v4、metadata v2 不变。不得删除任一侧行为测试或修改默认 benchmark workload。
-- [ ] 8.7 合并后运行 `go test ./internal/render ./cmd/mcgo ./internal/core ./internal/world ./internal/sim ./internal/server ./internal/network ./internal/client ./internal/storage ./cmd/perfcheck -race -count=1`、协议 golden/fuzz、主动丢弃聚焦测试、`go test ./internal/archcheck -count=1` 与 OpenSpec strict；再用 `rg` 核对 protocol v10、scenario v13、schema v3/v4、metadata v2、一次 sky draw、固定分辨率/阶段/样本和唯一 `12:13` 迁移。通过前不得冻结正式候选。
+- [x] 8.6 合并 `origin/main@15f2cf84d6b7e7186b17a0efb6d1ab5c019201e0`，只解决 M4I 与 M4H 的真实冲突：`README.md` 同时保留程序化天空与主动丢弃说明；`cmd/mcgo/app.go`、`app_test.go` 同时保留单次 ViewProj/天空 uniform 与主动丢弃路径；协议保持 v10，scenario 保持 v13，玩家 schema v3、区块 schema v4、metadata v2 不变。不得删除任一侧行为测试或修改默认 benchmark workload。
+- [x] 8.7 合并后运行 `go test ./internal/render ./cmd/mcgo ./internal/core ./internal/world ./internal/sim ./internal/server ./internal/network ./internal/client ./internal/storage ./cmd/perfcheck -race -count=1`、协议 golden/fuzz、主动丢弃聚焦测试、`go test ./internal/archcheck -count=1` 与 OpenSpec strict；再用 `rg` 核对 protocol v10、scenario v13、schema v3/v4、metadata v2、一次 sky draw、固定分辨率/阶段/样本和唯一 `12:13` 迁移。通过前不得冻结正式候选。
 
 ## 9. 冻结并验收新候选
 
