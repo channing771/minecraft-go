@@ -464,6 +464,12 @@ func TestPlayerCenterDerivationAlsoRunsWhenTrustedObserverChanges(t *testing.T) 
 
 func readyMovementPlayer(t *testing.T) (*Engine, SessionID) {
 	t.Helper()
+	return readyMovementPlayerForBench(t)
+}
+
+// readyMovementPlayerForBench 与 readyMovementPlayer 相同，但接受 testing.TB 以供 benchmark 使用。
+func readyMovementPlayerForBench(t testing.TB) (*Engine, SessionID) {
+	t.Helper()
 	engine := NewEngine(0, 0)
 	session := SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
@@ -490,7 +496,7 @@ func readyMovementPlayer(t *testing.T) (*Engine, SessionID) {
 	return engine, session
 }
 
-func onlyMovementPlayer(t *testing.T, result TickResult) PlayerUpdate {
+func onlyMovementPlayer(t testing.TB, result TickResult) PlayerUpdate {
 	t.Helper()
 	if len(result.Players) != 1 {
 		t.Fatalf("Players=%+v，想要恰好一个", result.Players)

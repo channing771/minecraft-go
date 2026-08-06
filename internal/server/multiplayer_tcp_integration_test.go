@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,8 @@ import (
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
+	"minecraft-go/internal/storage"
+	"minecraft-go/internal/world"
 )
 
 type multiplayerTCPHost struct {
@@ -125,6 +128,196 @@ func TestMultiplayerTCPClientsSeeMoveEditAndDespawn(t *testing.T) {
 	if !a.sawExactlyOneTerminalDespawn(bIdentity.PlayerID) {
 		t.Fatalf("B did not have one terminal Despawn after A continued\n%s", multiplayerDiagnostics(a, b))
 	}
+}
+
+func TestDropSelectedItemOverTCPConvergesAndCapacityFailureIsIsolated(t *testing.T) {
+	deadline, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	host := startMultiplayerTCPHost(t)
+	var first, second *multiplayerTCPClient
+	cleanupMultiplayerTCPTest(t, host, &first, &second)
+	firstIdentity := multiplayerIdentity(0xc1, "丢弃者")
+	secondIdentity := multiplayerIdentity(0xc2, "观察者")
+	store, ok := host.Host.world.store.(*hostTestStore)
+	if !ok {
+		t.Fatalf("TCP 测试 store=%T，想要 *hostTestStore", host.Host.world.store)
+	}
+	location := storage.PlayerLocation{
+		Dimension: core.Overworld, Position: [3]float32{8.5, 1.001, 8.5},
+	}
+	firstInventory := core.Inventory{}
+	firstInventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemCoal, Count: 5}
+	for _, seeded := range []struct {
+		identity  network.Identity
+		inventory core.Inventory
+	}{
+		{identity: firstIdentity, inventory: firstInventory},
+		{identity: secondIdentity},
+	} {
+		if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{
+			PlayerID: seeded.identity.PlayerID, Revision: 1, DisplayName: seeded.identity.DisplayName,
+			Current: location, Safe: &location, Inventory: seeded.inventory,
+		}); err != nil {
+			t.Fatalf("预置 TCP 玩家 %s: %v", seeded.identity.DisplayName, err)
+		}
+	}
+
+	first = mustConnectMultiplayerTCPClient(t, deadline, host.Addr, firstIdentity)
+	second = mustConnectMultiplayerTCPClient(t, deadline, host.Addr, secondIdentity)
+	mustDrainMultiplayer(t, deadline, first, second, "两个 TCP 客户端 Ready", func() bool {
+		return first.readyWithFootSnapshot() && second.readyWithFootSnapshot()
+	})
+	if got, ok := first.latestInventory(); !ok || got != firstInventory {
+		t.Fatalf("发起者初始完整背包 = %+v/%t，想要 %+v", got, ok, firstInventory)
+	}
+	if got, ok := second.latestInventory(); !ok || got != (core.Inventory{}) {
+		t.Fatalf("观察者初始完整背包 = %+v/%t，想要空", got, ok)
+	}
+
+	mustSendMultiplayer(t, deadline, first, network.DropSelectedItem{Sequence: 1})
+	wantInventory := firstInventory
+	wantInventory.Hotbar.Slots[0].Count = 4
+	mustDrainMultiplayer(t, deadline, first, second, "TCP 主动丢弃在双方镜像收敛", func() bool {
+		inventory, inventoryOK := first.latestInventory()
+		firstDrops := first.drops.Presentations()
+		secondDrops := second.drops.Presentations()
+		if !inventoryOK || inventory != wantInventory || len(firstDrops) != 1 || len(secondDrops) != 1 ||
+			firstDrops[0] != secondDrops[0] {
+			return false
+		}
+		_, firstRevision, firstOK := first.mirror.Hash(firstDrops[0].ID.Dimension, firstDrops[0].ID.Chunk)
+		_, secondRevision, secondOK := second.mirror.Hash(secondDrops[0].ID.Dimension, secondDrops[0].ID.Chunk)
+		return firstOK && secondOK && firstRevision == secondRevision
+	})
+	firstDrop := first.drops.Presentations()[0]
+	secondDrop := second.drops.Presentations()[0]
+	if firstDrop != secondDrop || firstDrop.Item != core.ItemCoal || firstDrop.Count != 1 {
+		t.Fatalf("TCP 双端掉落物不一致: first=%+v second=%+v", firstDrop, secondDrop)
+	}
+	wantIndex, ok := world.ChunkBlockIndex(vec3BlockPos(first.local.Position))
+	if !ok || firstDrop.BlockIndex != wantIndex {
+		t.Fatalf("TCP 掉落物 block index=%d，想要 %d", firstDrop.BlockIndex, wantIndex)
+	}
+	_, firstRevision, firstOK := first.mirror.Hash(firstDrop.ID.Dimension, firstDrop.ID.Chunk)
+	_, secondRevision, secondOK := second.mirror.Hash(secondDrop.ID.Dimension, secondDrop.ID.Chunk)
+	_, authorityRevision, authorityOK := host.Host.world.ChunkHash(firstDrop.ID.Dimension, firstDrop.ID.Chunk)
+	if !firstOK || !secondOK || !authorityOK || firstRevision != secondRevision || firstRevision != authorityRevision {
+		t.Fatalf("TCP 承载区块 revision = first:%d/%t second:%d/%t authority:%d/%t",
+			firstRevision, firstOK, secondRevision, secondOK, authorityRevision, authorityOK)
+	}
+	active := activeLoginForPlayer(t, host.Host, firstIdentity.PlayerID)
+	authorityPlayer, ok := host.Host.world.PlayerSnapshotFor(active.Session)
+	if !ok || authorityPlayer.Inventory != wantInventory {
+		t.Fatalf("TCP 发起者权威背包 = %+v/%t，想要 %+v", authorityPlayer.Inventory, ok, wantInventory)
+	}
+	key := core.ChunkKey{Dimension: firstDrop.ID.Dimension, Pos: firstDrop.ID.Chunk}
+	for slot := range core.DropsPerChunk {
+		host.Host.world.SetChunkDropForTest(key, slot, world.DropSlot{
+			Generation: uint32(slot + 2), Active: true,
+			Stack:      core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount},
+			BlockIndex: uint32(slot), PickupDelayTicks: 200,
+		})
+	}
+	mustDrainMultiplayer(t, deadline, first, second, "TCP 容量场景进入双方镜像", func() bool {
+		return len(first.drops.Presentations()) == core.DropsPerChunk &&
+			len(second.drops.Presentations()) == core.DropsPerChunk
+	})
+	beforeFirstInventory, _ := first.latestInventory()
+	beforeSecondInventory, _ := second.latestInventory()
+	beforeFirstDrops := append([]client.ItemDropPresentation(nil), first.drops.Presentations()...)
+	beforeSecondDrops := append([]client.ItemDropPresentation(nil), second.drops.Presentations()...)
+	firstStart, secondStart := len(first.transcript), len(second.transcript)
+	mustSendMultiplayer(t, deadline, first, network.DropSelectedItem{Sequence: 2})
+
+	rejectCtx, rejectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer rejectCancel()
+	for {
+		rejected := false
+		tailTick := uint64(0)
+		for _, event := range first.transcript[firstStart:] {
+			switch message := event.message.(type) {
+			case network.CommandRejected:
+				rejected = rejected || message.Sequence == 2 && message.Reason == network.RejectDropCapacity
+			case network.PlayerState:
+				if rejected {
+					tailTick = message.ServerTick
+				}
+			}
+			if tailTick != 0 {
+				break
+			}
+		}
+		if tailTick != 0 && second.local.ServerTick >= tailTick {
+			break
+		}
+		progressed := false
+		for _, connected := range []*multiplayerTCPClient{first, second} {
+			got, err := drainOneTask16(connected)
+			if err != nil {
+				t.Fatalf("排空预期容量拒绝: %v\n%s", err, multiplayerDiagnostics(first, second))
+			}
+			progressed = progressed || got
+		}
+		if progressed {
+			continue
+		}
+		select {
+		case <-rejectCtx.Done():
+			t.Fatalf("等待 TCP 容量拒绝: %v\n%s", rejectCtx.Err(), multiplayerDiagnostics(first, second))
+		default:
+			runtime.Gosched()
+		}
+	}
+
+	for index, checked := range []struct {
+		client *multiplayerTCPClient
+		start  int
+	}{
+		{client: first, start: firstStart},
+		{client: second, start: secondStart},
+	} {
+		rejections, inventories, dropDiffs := 0, 0, 0
+		for _, event := range checked.client.transcript[checked.start:] {
+			switch message := event.message.(type) {
+			case network.CommandRejected:
+				rejections++
+				if index != 0 || message.Sequence != 2 || message.Reason != network.RejectDropCapacity {
+					t.Fatalf("TCP 会话 %d 收到意外拒绝: %+v", index, message)
+				}
+			case network.InventoryState:
+				inventories++
+			case network.ItemDropUpserts, network.ItemDropRemoves:
+				dropDiffs++
+			}
+		}
+		wantRejections := 0
+		if index == 0 {
+			wantRejections = 1
+		}
+		if rejections != wantRejections || inventories != 0 || dropDiffs != 0 {
+			t.Fatalf("TCP 会话 %d 容量失败消息 = rejection:%d inventory:%d drop:%d",
+				index, rejections, inventories, dropDiffs)
+		}
+	}
+	if got, _ := first.latestInventory(); got != beforeFirstInventory {
+		t.Fatalf("TCP 容量失败改变发起者背包: got=%+v want=%+v", got, beforeFirstInventory)
+	}
+	if got, _ := second.latestInventory(); got != beforeSecondInventory {
+		t.Fatalf("TCP 容量失败改变观察者背包: got=%+v want=%+v", got, beforeSecondInventory)
+	}
+	if got := first.drops.Presentations(); !slices.Equal(got, beforeFirstDrops) {
+		t.Fatalf("TCP 容量失败改变发起者掉落物: got=%+v want=%+v", got, beforeFirstDrops)
+	}
+	if got := second.drops.Presentations(); !slices.Equal(got, beforeSecondDrops) {
+		t.Fatalf("TCP 容量失败改变观察者掉落物: got=%+v want=%+v", got, beforeSecondDrops)
+	}
+	// 隔离拒绝后两个真实 TCP 连接都必须继续处理命令。
+	mustSendMultiplayer(t, deadline, first, network.PlayerInput{Sequence: 3})
+	mustSendMultiplayer(t, deadline, second, network.PlayerInput{Sequence: 1})
+	mustDrainMultiplayer(t, deadline, first, second, "TCP 容量拒绝后双方继续健康推进", func() bool {
+		return first.local.LastInputSequence >= 3 && second.local.LastInputSequence >= 1
+	})
 }
 
 func TestEightTCPClientsSoakIsBounded(t *testing.T) {
@@ -970,6 +1163,15 @@ func (connected *multiplayerTCPClient) readyWithFootSnapshot() bool {
 	}
 	_, ok := connected.mirror.Chunk(connected.local.Dimension, vec3BlockPos(connected.local.Position).Chunk())
 	return ok
+}
+
+func (connected *multiplayerTCPClient) latestInventory() (core.Inventory, bool) {
+	for index := len(connected.transcript) - 1; index >= 0; index-- {
+		if state, ok := connected.transcript[index].message.(network.InventoryState); ok {
+			return state.Inventory, true
+		}
+	}
+	return core.Inventory{}, false
 }
 
 func (connected *multiplayerTCPClient) sawSingleSpawnAfterFootSnapshot(want network.Identity) bool {

@@ -69,6 +69,11 @@ func TestReceiverClosesSlowConsumerWhenInboxIsFull(t *testing.T) {
 	if err := receiver.Err(); err == nil {
 		t.Fatal("receiver did not report a full inbox")
 	}
+	select {
+	case <-receiver.done:
+	case <-time.After(time.Second):
+		t.Fatal("receiver did not finish after inbox overflow")
+	}
 	if !endpoint.isClosed() {
 		t.Fatal("receiver did not close endpoint after inbox overflow")
 	}

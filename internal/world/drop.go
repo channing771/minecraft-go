@@ -68,7 +68,8 @@ func (c *Chunk) PrepareDrop(item core.ItemID, blockIndex uint32) (int, bool) {
 }
 
 // CommitDrop 把一个物品写入 PrepareDrop 返回的槽并返回该堆的 generation。
-// 合并到已有堆时保留原 generation 与拾取延迟，启用空槽时 generation 加一。
+// 合并保留 ID、generation 和年龄，PickupDelayTicks 取 old 与 incoming 的较大值；
+// 启用空槽时 generation 加一。
 func (c *Chunk) CommitDrop(
 	slot int,
 	item core.ItemID,
@@ -81,6 +82,8 @@ func (c *Chunk) CommitDrop(
 	drop := c.drops[slot]
 	if drop.Active {
 		drop.Stack.Count++
+		// 合并保留 ID、generation 与既有寿命，只把拾取禁止窗口延长到较长的来源延迟。
+		drop.PickupDelayTicks = max(drop.PickupDelayTicks, pickupDelay)
 		c.drops[slot] = drop
 		return drop.Generation
 	}
@@ -143,6 +146,8 @@ func (c *Chunk) PrepareDropBatch(
 				space := core.MaxStackCount - drop.Stack.Count
 				taken := min(space, remaining)
 				drop.Stack.Count += taken
+				// 与单件合并同一规则：保留既有寿命，延长到较长的来源延迟。
+				drop.PickupDelayTicks = max(drop.PickupDelayTicks, pickupDelay)
 				remaining -= taken
 				next[slot] = drop
 				continue

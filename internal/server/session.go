@@ -645,6 +645,13 @@ func translateClientMessage(
 			Sequence: message.Sequence,
 			Kind:     sim.CommandCloseFurnace,
 		}, true
+	case network.DropSelectedItem:
+		// 只搬运序号：栏位与位置都由 sim 从权威状态取得，server 不做第二次校验。
+		return sim.Command{
+			Session:  id,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandDropSelectedItem,
+		}, true
 	case network.CraftRecipe:
 		return sim.Command{
 			Session:  id,

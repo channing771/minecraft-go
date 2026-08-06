@@ -1,6 +1,8 @@
 package sim_test
 
 import (
+	"fmt"
+	"math"
 	"testing"
 
 	"minecraft-go/internal/core"
@@ -182,6 +184,31 @@ func TestDropPickupWaitsForDelayThenFillsHotbar(t *testing.T) {
 	}
 }
 
+func TestToolDropPileSplitsAcrossInventorySlots(t *testing.T) {
+	engine, session := readyFlatPlayer(t)
+	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
+		Generation: 1, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 2},
+		BlockIndex: dropTargetIndex(t),
+	})
+
+	result := engine.Step()
+	chunk, _, ok := engine.CloneReadyChunk(core.ChunkKey{Dimension: core.Overworld})
+	if !ok {
+		t.Fatal("中心区块不可用")
+	}
+	if drop := chunk.Drop(0); drop.Active {
+		t.Fatalf("拾取后掉落物仍活动: %+v", drop)
+	}
+	want := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	if got := currentInventory(t, engine, session).Hotbar; got.Slots[0] != want || got.Slots[1] != want {
+		t.Fatalf("拾取后快捷栏 = %+v，想要栏位 0 和 1 各有一把石镐", got)
+	}
+	if len(result.Inventories) != 1 {
+		t.Fatalf("拾取应当只发布一次最终背包: %+v", result.Inventories)
+	}
+}
+
 func TestDropPartialPickupKeepsRemainder(t *testing.T) {
 	// 快捷栏与背包都装满，只在一格留下 2 个空间。
 	nearlyFull := fullTestInventory()
@@ -309,4 +336,114 @@ func readyWideViewPlayer(t *testing.T, viewRadius int) (*sim.Engine, sim.Session
 		t.Fatalf("玩家未 Ready: %+v", player)
 	}
 	return engine, session
+}
+
+func TestPlaceBeforeDropUsesGlobalSequenceOrder(t *testing.T) {
+	var hotbar core.Hotbar
+	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+	target := core.BlockPos{X: 0, Y: 2, Z: 3}
+	want := core.BlockPos{X: 0, Y: 2, Z: 2}
+	engine, session := readyFlatPlayerRestored(t, map[core.BlockPos]core.BlockID{
+		target: core.StoneID,
+	}, hotbar)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+		Yaw: float32(math.Pi), Slot: 0,
+	})
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 3, Kind: sim.CommandDropSelectedItem,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 1 || result.Rejected[0] != (sim.Rejection{
+		Session: session, Sequence: 3, Reason: sim.RejectInvalidSlot,
+	}) {
+		t.Fatalf("拒绝 = %+v，想要丢弃以 invalid_slot 拒绝", result.Rejected)
+	}
+	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 1 ||
+		result.Changes[0].Changes[0] != (sim.BlockChange{Position: want, Block: core.StoneID}) {
+		t.Fatalf("放置变更 = %+v", result.Changes)
+	}
+	if got := currentInventory(t, engine, session); got != (core.Inventory{}) {
+		t.Fatalf("背包 = %+v，想要清空", got)
+	}
+	chunk, _, ok := engine.CloneReadyChunk(core.ChunkKey{Dimension: core.Overworld})
+	if !ok {
+		t.Fatal("中心区块不可用")
+	}
+	for slot := range core.DropsPerChunk {
+		if drop := chunk.Drop(slot); drop.Active {
+			t.Fatalf("地面不应有掉落物：槽 %d = %+v", slot, drop)
+		}
+	}
+}
+
+func TestDropSelectedItemTransfersOneAuthoritativeItem(t *testing.T) {
+	for _, item := range []core.ItemID{
+		core.ItemStone,
+		core.ItemCoal,
+		core.ItemStonePickaxe,
+		core.ItemIronPickaxe,
+	} {
+		t.Run(fmt.Sprint(item), func(t *testing.T) {
+			inventory := core.Inventory{Hotbar: core.Hotbar{Selected: 2}}
+			inventory.Hotbar.Slots[2] = core.ItemStack{Item: item, Count: 1}
+			engine, session := readyFlatPlayerWithInventory(t, inventory)
+			engine.Enqueue(sim.Command{
+				Session: session, Sequence: 1, Kind: sim.CommandDropSelectedItem,
+			})
+			result := engine.Step()
+			if len(result.Rejected) != 0 || len(result.Inventories) != 1 {
+				t.Fatalf("result = %+v", result)
+			}
+			// 最后一件被丢弃后来源栏位清空。
+			if got := currentInventory(t, engine, session).Hotbar.Slots[2]; got != (core.ItemStack{}) {
+				t.Fatalf("来源栏位 = %+v", got)
+			}
+			_, drop := onlyDrop(t, engine)
+			// 创建 tick 立即计入第一个活动 tick，因此 step 后剩余 39。
+			if drop.Stack != (core.ItemStack{Item: item, Count: 1}) ||
+				drop.PickupDelayTicks != sim.PlayerDropPickupDelayTicks-1 {
+				t.Fatalf("主动掉落 = %+v", drop)
+			}
+		})
+	}
+}
+
+func TestDropSelectedItemKeepsRemainingCount(t *testing.T) {
+	inventory := core.Inventory{Hotbar: core.Hotbar{Selected: 0}}
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 3}
+	engine, session := readyFlatPlayerWithInventory(t, inventory)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 1, Kind: sim.CommandDropSelectedItem,
+	})
+	if result := engine.Step(); len(result.Rejected) != 0 {
+		t.Fatalf("被拒绝 = %+v", result.Rejected)
+	}
+	if got := currentInventory(t, engine, session).Hotbar.Slots[0]; got.Count != 2 {
+		t.Fatalf("剩余数量 = %+v，想要 2", got)
+	}
+	if _, drop := onlyDrop(t, engine); drop.Stack.Count != 1 {
+		t.Fatalf("掉落数量 = %+v，想要 1", drop.Stack)
+	}
+}
+
+func TestDropSelectedItemRejectionsLeaveAuthorityUnchanged(t *testing.T) {
+	t.Run("空选中栏位", func(t *testing.T) {
+		engine, session := readyFlatPlayerWithInventory(t, core.Inventory{})
+		before, _ := engine.PlayerHash(session)
+		engine.Enqueue(sim.Command{
+			Session: session, Sequence: 1, Kind: sim.CommandDropSelectedItem,
+		})
+		result := engine.Step()
+		if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectInvalidSlot {
+			t.Fatalf("拒绝 = %+v，想要 invalid_slot", result.Rejected)
+		}
+		if len(result.Inventories) != 0 {
+			t.Fatalf("拒绝后发布了背包更新：%+v", result.Inventories)
+		}
+		if after, _ := engine.PlayerHash(session); after != before {
+			t.Fatal("拒绝改变了权威玩家状态")
+		}
+	})
 }

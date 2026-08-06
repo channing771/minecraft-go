@@ -226,7 +226,8 @@ func runInteractive(app *application) error {
 		number := pressedHotbarNumber(app.window)
 		actions := input.Update(
 			clickDown, app.window.SecondaryButtonDown(), number,
-			app.window.KeyDown(client.KeyE), app.inventoryOpen,
+			app.window.KeyDown(client.KeyE), app.window.KeyDown(client.KeyQ),
+			app.inventoryOpen,
 		)
 		if actions.ToggleInventory {
 			app.setInventoryOpen(!app.inventoryOpen)
@@ -295,6 +296,9 @@ func (a *application) applyInteractiveInput(
 		}
 		if actions.Place {
 			a.placeBlock()
+		}
+		if actions.Drop {
+			a.dropSelectedItem()
 		}
 	}
 

@@ -2217,3 +2217,53 @@ func recipeButtonCenter(t *testing.T, recipe core.RecipeID, width, height uint32
 	t.Fatalf("找不到 recipe %d 的按钮像素", recipe)
 	return 0, 0
 }
+
+func TestInteractiveDropSendsOnlyWhenReadyAndAllowed(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	ready := network.PlayerState{
+		ServerTick: 1,
+		Dimension:  core.Overworld,
+		Position:   mgl32.Vec3{0.5, 10, 0.5},
+		OnGround:   true,
+		Ready:      true,
+		Reset:      true,
+	}
+
+	// 未 Ready：不得发送，也不得分配序号。
+	app.applyInteractiveInput(0, client.Movement{}, client.Actions{Drop: true}, true)
+	if app.sequence != 0 {
+		t.Fatalf("未 Ready 时分配了 sequence=%d", app.sequence)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+
+	sendInteractiveServerMessage(t, serverEndpoint, ready)
+	app.drainServerMessages(1)
+
+	// Ready 但操作被抑制：同样不得发送。
+	app.applyInteractiveInput(0, client.Movement{}, client.Actions{Drop: true}, false)
+	if app.sequence != 0 {
+		t.Fatalf("allowActions=false 时分配了 sequence=%d", app.sequence)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+
+	// Ready 且允许：恰好发送一条只携带序号的请求。
+	beforeInventory, beforeHasInventory := app.inventory.State()
+	beforeDrops := len(app.itemDrops.Presentations())
+	app.applyInteractiveInput(0, client.Movement{}, client.Actions{Drop: true}, true)
+
+	message := receiveInteractiveClientMessage(t, serverEndpoint)
+	drop, ok := message.(network.DropSelectedItem)
+	if !ok {
+		t.Fatalf("上行消息 = %T，想要 DropSelectedItem", message)
+	}
+	if drop.Sequence != 1 {
+		t.Fatalf("序号 = %d，想要 1", drop.Sequence)
+	}
+	// 客户端不预测：本地背包与掉落物镜像都不得改变。
+	if got, has := app.inventory.State(); got != beforeInventory || has != beforeHasInventory {
+		t.Fatalf("客户端预测了背包扣减：%+v", got)
+	}
+	if got := len(app.itemDrops.Presentations()); got != beforeDrops {
+		t.Fatalf("客户端创建了本地掉落物：%d", got)
+	}
+}

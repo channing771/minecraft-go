@@ -172,6 +172,10 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 	for len(wrongTool) < 30 {
 		tickMessages := make([]network.ServerMessage, 0, 2)
 		state := nextMemoryMiningState(t, running, clientEndpoint, mirror, func(message network.ServerMessage) {
+			// 异步生成完成的相邻快照可与采掘完成同 tick 发布；它不属于完成帧的 delta+PlayerState 契约。
+			if _, ok := message.(network.ChunkSnapshot); ok {
+				return
+			}
 			tickMessages = append(tickMessages, message)
 		})
 		if state.LastInputSequence < 5 {
@@ -189,6 +193,11 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 		}
 	}
 	assertWrongToolMiningCompletionFrame(t, completionMessages, target)
+	completionContext, cancelCompletion := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelCompletion()
+	if message, err := clientEndpoint.Recv(completionContext); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("采掘完成后意外 server message = %#v, err=%v", message, err)
+	}
 	if block, loaded := mirror.BlockAt(core.Overworld, target); !loaded || block != core.AirID {
 		t.Fatalf("错误工具完成后方块 = %d,%t", block, loaded)
 	}
