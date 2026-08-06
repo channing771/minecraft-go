@@ -121,6 +121,59 @@ func TestTCPDropSelectedItemSurvivesRestart(t *testing.T) {
 	}
 }
 
+// TestTCPToolDurabilitySurvivesRestart 证明工具耐久随 InventoryState 抵达
+// 真实 TCP 客户端，并跨正常关服精确保留。
+func TestTCPToolDurabilitySurvivesRestart(t *testing.T) {
+	const seed int64 = 990012
+	root := t.TempDir()
+	identity := multiplayerIdentity(0xd8, "磨损者")
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	want := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full - 5}
+
+	seedStore, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{Create: storage.Metadata{
+		FormatVersion: 2, Seed: seed, SpawnDimension: core.Overworld,
+	}})
+	if err != nil {
+		t.Fatalf("OpenDisk seed: %v", err)
+	}
+	location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{8.5, 1.001, 8.5}}
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = want
+	if _, err := seedStore.SavePlayer(context.Background(), storage.PlayerSave{
+		PlayerID: identity.PlayerID, Revision: 1, DisplayName: identity.DisplayName,
+		Current: location, Safe: &location, Inventory: inventory,
+	}); err != nil {
+		_ = seedStore.Close()
+		t.Fatalf("预置玩家存档: %v", err)
+	}
+	if err := seedStore.Close(); err != nil {
+		t.Fatalf("关闭种子 store: %v", err)
+	}
+
+	first := startMultiplayerRestartHost(t, root, seed)
+	clients := connectRestartClients(t, first.addr, []network.Identity{identity}, nil)
+	waitSingleRestartClientReady(t, clients[0])
+	if got := waitRestartInventoryStack(t, clients[0], core.ItemStonePickaxe); got != want {
+		t.Fatalf("关服前 TCP 石镐 = %+v，想要 %+v", got, want)
+	}
+	if err := shutdownRestartHost(first, clients); err != nil {
+		t.Fatalf("首次关服: %v", err)
+	}
+
+	var reconnected []*multiplayerTCPClient
+	second := startMultiplayerRestartHost(t, root, seed)
+	t.Cleanup(func() {
+		if err := shutdownRestartHost(second, reconnected); err != nil {
+			t.Errorf("清理关服: %v", err)
+		}
+	})
+	reconnected = connectRestartClients(t, second.addr, []network.Identity{identity}, nil)
+	waitSingleRestartClientReady(t, reconnected[0])
+	if got := waitRestartInventoryStack(t, reconnected[0], core.ItemStonePickaxe); got != want {
+		t.Fatalf("重启后 TCP 石镐 = %+v，想要 %+v", got, want)
+	}
+}
+
 // waitSingleRestartClientReady 等待单个客户端就绪。
 // 既有的 waitRestartClientsReady 额外要求看到 7 个远端玩家，只适用于八客户端场景。
 func waitSingleRestartClientReady(t *testing.T, connected *multiplayerTCPClient) {
@@ -134,6 +187,36 @@ func waitSingleRestartClientReady(t *testing.T, connected *multiplayerTCPClient)
 			t.Fatalf("drain: %v", err)
 		}
 	}
+}
+
+// waitRestartInventoryStack 先检查 transcript 中已有的最新背包，找不到目标物品时才继续接收。
+func waitRestartInventoryStack(t *testing.T, connected *multiplayerTCPClient, item core.ItemID) core.ItemStack {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var got core.ItemStack
+	if err := connected.drainUntil(ctx, func() bool {
+		inventory, ok := connected.latestInventory()
+		if !ok {
+			return false
+		}
+		for _, slot := range inventory.Hotbar.Slots {
+			if slot.Item == item {
+				got = slot
+				return true
+			}
+		}
+		for _, slot := range inventory.Backpack {
+			if slot.Item == item {
+				got = slot
+				return true
+			}
+		}
+		return false
+	}); err != nil {
+		t.Fatalf("等待物品 %d 的权威背包: %v\n%s", item, err, multiplayerDiagnostics(connected, nil))
+	}
+	return got
 }
 
 // inventoryCount 返回该客户端收到的最新权威背包中某物品的总数。
