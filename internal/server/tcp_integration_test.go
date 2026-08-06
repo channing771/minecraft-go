@@ -538,8 +538,8 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	}
 	firstHost.WaitPlayerReleased(t, secondIdentity.PlayerID)
 	firstHost.Shutdown(t)
-	if schema := integrationStoredChunkSchema(t, root, key); schema != 4 {
-		t.Fatalf("正常刷新后的区块 schema=%d，想要 4", schema)
+	if schema := integrationStoredChunkSchema(t, root, key); schema != 5 {
+		t.Fatalf("正常刷新后的区块 schema=%d，想要 5", schema)
 	}
 
 	secondHost := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})
@@ -1742,6 +1742,21 @@ func rewriteIntegrationChunkSchema(t *testing.T, root string, key core.ChunkKey,
 		t.Fatal(err)
 	}
 	binary.LittleEndian.PutUint32(logical[4:], schema)
+	// schema v4 及更早的掉落物槽没有 Durability；当前 v5 槽的 offset 8:10
+	// 是耐久字段，按固定槽顺序原地删除后才能交给旧 decoder。
+	if schema < 5 {
+		furnaceBytes := core.FurnacesPerChunk * world.FurnaceSlotBytes
+		dropBytes := core.DropsPerChunk * world.DropSlotBytes
+		dropStart := len(logical) - furnaceBytes - dropBytes
+		write := dropStart
+		for slot := range core.DropsPerChunk {
+			start := dropStart + slot*world.DropSlotBytes
+			write += copy(logical[write:], logical[start:start+8])
+			write += copy(logical[write:], logical[start+10:start+world.DropSlotBytes])
+		}
+		write += copy(logical[write:], logical[dropStart+dropBytes:])
+		logical = logical[:write]
+	}
 	// 逻辑负载末尾是固定长度的熔炉槽；标注为 v4 之前的 schema 时必须一并截掉，
 	// 否则旧版本解码会把它们当作尾随字节而拒绝整个区块。
 	if schema < 4 {
