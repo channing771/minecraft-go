@@ -42,9 +42,9 @@
 
 ## 7. 权威扣减与损坏转换
 
-- [ ] 7.1 在 `internal/sim/mining_test.go` 写失败测试：成功破坏扣减一点耐久、最后一点耐久破坏仍然生效并转为损坏物品、三条拒绝路径不消耗耐久、损坏工具采掘等同空手（遍历全部方块）、换栏/丢弃/损坏三种方式各自重置采掘进度。
+- [x] 7.1 在 `internal/sim/mining_test.go` 写失败测试：成功破坏扣减一点耐久、最后一点耐久破坏仍然生效并转为损坏物品、三条拒绝路径不消耗耐久、损坏工具采掘等同空手（遍历全部方块）、换栏/丢弃/损坏三种方式各自重置采掘进度。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -run "Durability|BrokenForm|BrokenTool|ResetsProgressWhenHeldToolLeavesHand" -count=1'`
-- [ ] 7.2 `internal/sim/mining.go` 的 `miningRule` 把两个损坏物品并入石头方块的空手分支；新增 `consumeToolDurability(player *playerState) bool`；在 `completeMining`/`advanceMining` 未被拒绝的分支调用它并标记 `inventoryDirty`。
+- [x] 7.2 `internal/sim/mining.go` 的 `miningRule` 把两个损坏物品并入石头方块的空手分支；新增 `consumeToolDurability(player *playerState) bool`；在 `completeMining`/`advanceMining` 未被拒绝的分支调用它并标记 `inventoryDirty`。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world ./internal/core -race -count=1'`；`go test ./internal/archcheck -count=1`；`gofmt -l .`；`git diff --check`；`go test ./internal/sim -run "^$" -bench "." -benchmem -count=1 -benchtime=100x`（仅确认无分配回归，不设新阈值）
 
 ## 8. 快捷栏耐久条
