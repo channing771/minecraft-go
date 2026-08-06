@@ -4,7 +4,7 @@
 新建或升级硬件基线 MUST 来自当前冻结的 scenario v13、Memory transport、2560x1440 无窗口正式报告；该报告 MUST 通过完整性和绝对门禁，并 MUST 与同一硬件、同一场景的一次 TCP 报告通过现有跨 transport 比较后才能接受。升级既有硬件基线时 MUST 明确记录被替代场景和失败证据，不得把旧场景报告与新场景报告作相对回归证明。
 
 #### Scenario: v13 正式链全部通过
-- **GIVEN** scenario v13 生产代码和计划已提交，且 Memory/TCP 使用两个全新临时路径
+- **GIVEN** M4H 基线合并与 scenario v13 生产代码和计划已提交，且 Memory/TCP 使用两个全新临时路径
 - **WHEN** M5 Memory 报告通过显式 `12:13` 完整性和绝对门禁，且同次 M5 TCP 报告相对该 Memory 报告通过跨 transport 比较
 - **THEN** 项目接受该 Memory 报告的精确字节作为 M5 当前基线，并记录硬件、提交、命令、报告哈希和被替代的 scenario v12
 
@@ -20,6 +20,11 @@
 #### Scenario: 诊断输出不得提升
 - **WHEN** 项目使用缩短阶段、临时 instrumentation、禁用部分天空工作或其他非正式方法定位性能根因
 - **THEN** 这些输出 MUST 明确标记为诊断证据，不得传给正式迁移比较、复制为基线或消耗新候选的一次性正式运行机会
+
+#### Scenario: 合并前诊断候选不得进入正式链
+- **GIVEN** 一个 scenario v13 诊断候选仍基于 M4G，而目标分支已经归档 M4H
+- **WHEN** 项目准备建立 M4I 正式基线
+- **THEN** 该候选及其诊断输出 MUST 只保留为不可提升证据；项目 MUST 先合并 M4H、重新完成门禁与静稳预检，并为新的精确 HEAD 和两个全新路径取得明确授权
 
 #### Scenario: v12 正式链全部通过
 - **GIVEN** scenario v12 生产代码和计划已提交，且 Memory/TCP 使用两个全新临时路径

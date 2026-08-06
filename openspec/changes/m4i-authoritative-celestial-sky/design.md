@@ -1,8 +1,8 @@
 ## Context
 
-动机见 `proposal.md`。当前 M4G 客户端在 `render.DayNightAt` 中从最后确认的 `WorldTimeTicks` 得到 `Sun`、`Daylight` 和一项整屏 `ClearColor`；`cmd/mcgo.renderFrame` 把同一 `Daylight` 传给 terrain、avatar 和 item-drop renderer。`render.Renderer.Render` 已拥有第一个带 color/depth clear 的 terrain pass，先执行 GPU cull，再绘制地形。`Camera` 只带 `ViewProj`、位置、昼夜亮度和 clear color；`cameraBytes` 每帧临时分配编码切片。
+动机见 `proposal.md`。当前 M4H 客户端在 `render.DayNightAt` 中从最后确认的 `WorldTimeTicks` 得到 `Sun`、`Daylight` 和一项整屏 `ClearColor`；`cmd/mcgo.renderFrame` 把同一 `Daylight` 传给 terrain、avatar 和 item-drop renderer。`render.Renderer.Render` 已拥有第一个带 color/depth clear 的 terrain pass，先执行 GPU cull，再绘制地形。`Camera` 只带 `ViewProj`、位置、昼夜亮度和 clear color；`cameraBytes` 每帧临时分配编码切片。
 
-M4I 直接基于已归档的 M4G 实现：协议 v9、玩家 schema v3、区块 schema v4、世界 metadata v2 和 scenario v12 已由代码、主规格与 M5 基线确认。本 change 不改协议或存档，只把包含天空 draw 的 workload 推进到 scenario v13；仍在另一工作区规划的 M4H 后续以 M4I 的归档结果为起点。
+M4I 最终基于已归档的 M4H 实现：协议 v10、玩家 schema v3、区块 schema v4、世界 metadata v2 和 scenario v12 已由代码、主规格与 M5 基线确认。本 change 不改协议或存档，只把包含天空 draw 的 workload 推进到 scenario v13。早期实现与 M4H 并行开发；正式性能链前必须合并 M4H，并重新冻结候选。
 
 ## Goals / Non-Goals
 
@@ -17,7 +17,7 @@ M4I 直接基于已归档的 M4G 实现：协议 v9、玩家 schema v3、区块 
 
 - 不抽象通用 sky system、celestial entity、material graph 或多维度天空接口。
 - 不增加纹理、mesh 资源、云、天气、雾、阴影、横向光传播或方块光。
-- 不改变 avatar、item-drop、name-tag 或 hotbar pipeline；尤其不预先实现或修改后续 M4H 的掉落协议、模拟、镜像和 renderer。
+- 不改变 avatar、item-drop、name-tag 或 hotbar pipeline；尤其不修改 M4H 已归档的主动丢弃协议、模拟、镜像、持久化和 renderer 语义。
 - 不为 shader 参数增加用户配置；视觉常量只有出现真实可调需求时再提升。
 
 ## Decisions
@@ -68,7 +68,7 @@ terrain camera uniform 保持现有 `80` 字节布局；sky uniform 使用 `96` 
 
 ### 6. 性能场景从 v12 升至 v13
 
-程序化天空改变 still/flying 每一帧的 GPU workload，因此不能与 M4G 接受的 scenario v12 静默相对比较。producer、完整性校验和 `perfcheck` 只增加精确 `12:13` 迁移；该迁移继续只做报告完整性、硬件一致性和现有绝对门禁，不做跨 workload 相对比较。建立 v13 后，`12:13` 以外的旧迁移参数全部退役；历史 v6-v12 报告仍可单独校验和同场景比较。
+程序化天空改变 still/flying 每一帧的 GPU workload，因此不能与 M4H 保留的 scenario v12 静默相对比较。producer、完整性校验和 `perfcheck` 只增加精确 `12:13` 迁移；该迁移继续只做报告完整性、硬件一致性和现有绝对门禁，不做跨 workload 相对比较。建立 v13 后，`12:13` 以外的旧迁移参数全部退役；历史 v6-v12 报告仍可单独校验和同场景比较。
 
 固定 2560x1440、still/flying 时长、消息/mesher 上限、RSS、服务端 tick、GPU 探针、样本数、最小有意义增量、绝对门禁和 `20%` 相对阈值全部不变。`remote_gpu_complete` 仍只测远端角色与昵称批量 draw；天空成本由真实 still/flying 帧覆盖，不污染该指标定义。
 
@@ -98,9 +98,17 @@ instrumentation 只在一次 full-stars、生产 `10s/60s/120s/30s`、Memory tra
 
 只要最终视觉、draw 数量、2560x1440、阶段时长、样本和指标定义不变，优化后的 producer 仍是 scenario v13。若必须降低分辨率、减少天空 draw、改变阶段/样本或修改测量定义，则该方案改变 workload，必须先把场景升级为 v14 并重新设计迁移；不得用它给 v13 制造通过。
 
-否决直接把 RSS 门禁提高到 `2.5GiB` 或把 p99 放宽到 `14ms`：M4G v12 的 M5 Memory 基线为 flying p99 `9.488ms`、进程峰值 `1672.8MiB`，本次 `2452.2MiB` 不是边界误差。否决直接重复旧 producer：一次性正式结果已经失败，重复运行既不能定位根因，也违反正式链约束。
+否决直接把 RSS 门禁提高到 `2.5GiB` 或把 p99 放宽到 `14ms`：M4H 保留的 M5 v12 Memory 基线为 flying p99 `9.488ms`、进程峰值 `1672.8MiB`，本次 `2452.2MiB` 不是边界误差。否决直接重复旧 producer：一次性正式结果已经失败，重复运行既不能定位根因，也违反正式链约束。
 
-### 8. 受影响文件与依赖方向
+### 8. 合并 M4H 后重新冻结正式候选
+
+星空短路候选 `4410dc8b5ec76acad7d5a28980ca88b83434d35f` 完成了 pre-M4H 的全仓门禁和不可提升诊断，但远端 `main` 随后归档到 M4H `15f2cf84d6b7e7186b17a0efb6d1ab5c019201e0`。该候选及诊断只证明 shader 与 encoded MemoryStore 的局部结论，不得进入正式迁移、TCP 比较或基线。
+
+合并时保留 M4H 的 protocol v10、主动丢弃输入/模拟/网络/存档/呈现与主规格，同时保留 M4I 的权威天空、MemoryStore 编码保留、scenario v13 和唯一 `12:13` 迁移。`README.md`、`cmd/mcgo/app.go` 与 `app_test.go` 的冲突按两项能力并存解决；不得删除任一侧测试或把 M4H 的 protocol/scenario 值退回 v9/v12。M4H 主动丢弃在默认 benchmark 脚本中没有输入，不改变 still/flying workload，因此合并后仍使用 scenario v13；若冲突解决必须改变 draw、分辨率、阶段、样本、运动或指标定义，则先升级 v14。
+
+合并完成后重新运行天空、主动丢弃、Memory/TCP、协议、存储、全仓 race、vet、archcheck、相关 benchmark 和 OpenSpec strict；通过后提交新的精确 HEAD。只有该 HEAD 完成五分钟冷却、两次静稳预检并绑定两个全新路径后，才能请求新的正式授权。
+
+### 9. 受影响文件与依赖方向
 
 - `internal/render/daylight.go`、`daylight_test.go`：纯天体相位、方向和夜间可见度。
 - `internal/render/renderer.go`、相关 renderer 测试、`shader/sky.wgsl`：固定 sky pipeline、uniform、draw 顺序、生命周期和零分配。
@@ -113,7 +121,7 @@ instrumentation 只在一次 full-stars、生产 `10s/60s/120s/30s`、Memory tra
 
 ## Risks / Trade-offs
 
-- [实现起点与 M4G 归档值漂移] → 实现前核对归档代码、主规格和 M5 基线；任何落号差异先更新本 change 全部产物，禁止带着错误起点编码。
+- [实现起点与 M4H 归档值漂移] → 正式链前核对归档代码、主规格和 M5 基线；任何落号差异先更新本 change 全部产物，禁止带着错误起点编码。
 - [fullscreen shader 增加 fill-rate 成本] → 只画一个 triangle、无纹理采样且与 terrain 同 pass；用固定分辨率 headless benchmark 和既有门禁验证，不提高阈值。
 - [星点在量化边界闪烁或地平线出现接缝] → hash 使用世界方向而非屏幕坐标并以平滑边缘限制亮度；用固定相机的 headless 像素与旋转往返测试锁定稳定性。
 - [sky draw 意外写深度或改变覆盖顺序] → pipeline 显式关闭 depth write，并用命令记录测试和有地形遮挡的 headless 像素测试验证。
@@ -129,10 +137,11 @@ instrumentation 只在一次 full-stars、生产 `10s/60s/120s/30s`、Memory tra
 
 ## Migration Plan
 
-1. 核对 M4G 已完成性能接受、规格同步和归档，并确认协议 v9、存档版本、scenario v12 与 M5 v12 基线；若任一不同，先修订本 change 并重新严格校验。
+1. 核对 M4H 已完成规格同步和归档，并确认协议 v10、玩家 schema v3、区块 schema v4、metadata v2、scenario v12 与 M5 v12 基线；若任一不同，先修订本 change 并重新严格校验。
 2. 先用纯函数和 fake/headless renderer 测试锁定相位、uniform、资源生命周期、draw 顺序和像素结果，再接入交互客户端与 `gfxspike`；自动验证保持无窗口。
 3. 把 benchmark producer 和比较器升级为 scenario v13，冻结候选并完成全仓、架构、零分配和渲染 benchmark 门禁。
 4. 保留候选 `f7d8f261e910863e189666f6e2181e606996f42f` 的正式失败证据，不重跑、不生成或修补报告、不运行 TCP；短时 A/B 与完整 no-stars 为负面证据，唯一三阶段 heap profile 已把 RSS 的最大 live owner 隔离到 `MemoryStore.chunks`，临时 instrumentation 已移除。
 5. 先让 MemoryStore 以现有 chunk v4 payload 保留区块，完成确定性 retention/原子性测试、storage race 测试与不可提升的 full-stars 生产时长 Memory 诊断；RSS 来源闭合后再处理 shader p99。保持 workload 不变时继续使用 scenario v13；若必须改变 workload 或测量口径，先修订产物并升级到 v14。
-6. 新 Memory 通过相应场景迁移的完整性/绝对门禁后只执行一次 TCP，同场景跨 transport 通过后才提升 M5 Memory 精确字节。M2 文件保持不变。
-7. 回退时同时回退天空 renderer、场景比较规则和新 M5 基线，恢复 M4G 的 v12 基线；协议和全部世界/玩家数据无需回退或迁移。
+6. 合并 M4H 后重新运行完整门禁并冻结新候选；pre-M4H 候选与诊断只作不可提升证据，不复用其授权或路径。
+7. 新 Memory 通过相应场景迁移的完整性/绝对门禁后只执行一次 TCP，同场景跨 transport 通过后才提升 M5 Memory 精确字节。M2 文件保持不变。
+8. 回退时同时回退天空 renderer、场景比较规则和新 M5 基线，恢复 M4H 的 v12 基线；保留 M4H protocol v10 与主动丢弃能力，全部世界/玩家数据无需迁移。

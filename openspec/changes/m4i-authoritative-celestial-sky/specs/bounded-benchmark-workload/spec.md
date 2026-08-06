@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: 工作负载变化使用新场景版本
-在 M4G scenario v12 工作负载上加入每帧程序化天空 fullscreen draw 后，benchmark 报告 MUST 标记为 scenario v13；交互客户端与无窗口 benchmark 的 still/flying 帧 MUST 执行同一天空绘制。既有 scenario v6/v7/v8/v9/v10/v11/v12 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。scenario v12 与 v13 之间 MUST 只通过唯一一条显式 `12:13` 授权迁移，该迁移只执行完整性与绝对门禁；所有更早的迁移参数 MUST 已退役并被拒绝。
+在 M4H scenario v12 工作负载上加入每帧程序化天空 fullscreen draw 后，benchmark 报告 MUST 标记为 scenario v13；交互客户端与无窗口 benchmark 的 still/flying 帧 MUST 执行同一天空绘制。既有 scenario v6/v7/v8/v9/v10/v11/v12 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 当作同一工作负载静默相对比较。scenario v12 与 v13 之间 MUST 只通过唯一一条显式 `12:13` 授权迁移，该迁移只执行完整性与绝对门禁；所有更早的迁移参数 MUST 已退役并被拒绝。
 
 #### Scenario: v13 同场景比较
 - **WHEN** baseline 与 current 都是完整的 scenario v13 报告

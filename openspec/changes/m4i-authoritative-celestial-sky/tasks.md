@@ -1,4 +1,4 @@
-## 1. 锁定 M4G 起点
+## 1. 锁定最初 M4G 起点
 
 - [x] 1.1 确认 M4G 已完成性能接受、规格同步和归档；在干净工作区运行 `git status --short --branch`、`openspec list --json`、`rg -n "ProtocolVersion|scenarioVersion|currentPlayerSchema|currentChunkSchema|metadataFormatVersion" internal/network internal/storage cmd/mcgo`，核对协议 v9、scenario v12、玩家 schema v3、区块 schema v4、metadata v2 与 M5 v12 当前基线。任一落号不同都先更新本 change 的 proposal、三份 delta specs、design 和 tasks，并运行 `openspec validate --all --strict --no-interactive`，不得直接编码。
 - [x] 1.2 在 M4G 归档 HEAD 上运行 `go test ./internal/render ./cmd/mcgo ./cmd/perfcheck -race -count=1` 与 `go test ./internal/archcheck -count=1`，确认本 change 的渲染和性能起点无已有失败，并记录精确 `git rev-parse HEAD` 供后续差异核对。
@@ -56,13 +56,19 @@
   - [x] 8.3.3 在已评审且干净的新 HEAD 上冻结 pre-run provenance，用全新 `diag` 路径只执行一次 full-stars、生产 `10s/60s/120s/30s` Memory v13 producer；不得启用 heap instrumentation、运行 `perfcheck`/TCP、复制 baseline 或失败后重试。只有 producer exit `0`、写出完整报告、既有绝对门禁全部保持且 flying p99 `<12ms` 时才记录不可提升证据并勾选 8.3；否则保持 8.3 pending，先更新本 change。
 - [x] 8.4 核对最终实现没有改变 draw 数量、固定分辨率、阶段时长、样本、场景运动或指标定义，保持 scenario v13 与唯一 `12:13` 迁移；若任一项必须改变，停止实现并先把 proposal、delta specs、design、tasks 和 producer 更新为 v14。
 
+### 合并 M4H 正式起点
+
+- [x] 8.5 核对 `origin/main@15f2cf84d6b7e7186b17a0efb6d1ab5c019201e0` 已归档 M4H，确认协议 v10、玩家 schema v3、区块 schema v4、metadata v2、scenario v12 与 M5 v12 baseline；把 proposal、三份 delta specs、design 与 tasks 同步为 M4H 正式起点，并运行 `openspec validate --all --strict --no-interactive`。合并前候选 `4410dc8b5ec76acad7d5a28980ca88b83434d35f` 及其诊断只作不可提升证据。
+- [ ] 8.6 合并 `origin/main@15f2cf84d6b7e7186b17a0efb6d1ab5c019201e0`，只解决 M4I 与 M4H 的真实冲突：`README.md` 同时保留程序化天空与主动丢弃说明；`cmd/mcgo/app.go`、`app_test.go` 同时保留单次 ViewProj/天空 uniform 与主动丢弃路径；协议保持 v10，scenario 保持 v13，玩家 schema v3、区块 schema v4、metadata v2 不变。不得删除任一侧行为测试或修改默认 benchmark workload。
+- [ ] 8.7 合并后运行 `go test ./internal/render ./cmd/mcgo ./internal/core ./internal/world ./internal/sim ./internal/server ./internal/network ./internal/client ./internal/storage ./cmd/perfcheck -race -count=1`、协议 golden/fuzz、主动丢弃聚焦测试、`go test ./internal/archcheck -count=1` 与 OpenSpec strict；再用 `rg` 核对 protocol v10、scenario v13、schema v3/v4、metadata v2、一次 sky draw、固定分辨率/阶段/样本和唯一 `12:13` 迁移。通过前不得冻结正式候选。
+
 ## 9. 冻结并验收新候选
 
-- [x] 9.1 运行受影响范围与完整无窗口门禁：`gofmt -l .`、`go test ./internal/render ./cmd/mcgo ./cmd/perfcheck -race -count=1`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod`、相关 benchmark 和 `openspec validate --all --strict --no-interactive`；确认掉落、协议、存档、二进制资产和两份现有 baseline 未改，再提交并记录新候选 HEAD。
+- [ ] 9.1 在 M4H 合并提交上重新运行受影响范围与完整无窗口门禁：`gofmt -l .`、`go test ./internal/render ./cmd/mcgo ./cmd/perfcheck -race -count=1`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod`、相关 benchmark 和 `openspec validate --all --strict --no-interactive`；确认 M4H 主动丢弃、协议 v10、存档格式、天空、二进制资产和两份现有 baseline 未意外改变，再提交并记录新的精确候选 HEAD。
 - [ ] 9.2 新候选完整门禁退出并自然冷却至少 5 分钟后，间隔至少 30 秒采集两次 `uptime`、`pmset -g batt`、`pmset -g custom`、`pgrep -fl 'mcgo|perfcheck'`；通过后绑定新 HEAD 与两个全新路径请求新的精确一次性授权，不复用旧授权或旧路径。
 - [ ] 9.3 获得新授权后只执行一次 Memory producer；成功后用 `--allow-scenario-upgrade 12:13` 执行迁移完整性与绝对门禁，失败则立即停止。仅在 Memory 通过后执行一次 TCP producer及同场景比较；通过后才把 Memory 精确字节提升为 M5 baseline，并记录 HEAD、命令、硬件、哈希、v12→v13 与旧候选失败证据。M2 baseline 保持不变。
 
 ## 10. 收尾验证
 
 - [ ] 10.1 基线与文档更新后再次运行 `gofmt -l .`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod` 和 `openspec validate --all --strict --no-interactive`；`gofmt -l .` 必须无输出，所有命令必须成功。
-- [ ] 10.2 复核 proposal、三份 delta specs、design 与已勾选 tasks 和最终实现一致，确认协议/metadata/玩家/区块版本仍为 M4G 归档值、scenario v13 及 M5 基线证据准确，再准备规格同步、评审与归档；自动验收全程不得启动交互式客户端。
+- [ ] 10.2 复核 proposal、三份 delta specs、design 与已勾选 tasks 和最终实现一致，确认协议 v10、metadata v2、玩家 schema v3、区块 schema v4、scenario v13 及 M5 基线证据准确，再准备规格同步、评审与归档；自动验收全程不得启动交互式客户端。
