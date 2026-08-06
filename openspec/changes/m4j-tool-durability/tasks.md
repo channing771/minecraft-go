@@ -28,9 +28,9 @@
 
 ## 5. 协议 v11 与共享物品堆编解码
 
-- [ ] 5.1 在 `internal/network/codec_test.go`、`worldtime_test.go`、`packet_test.go`、`drop_test.go` 写失败测试：版本 golden 推进到 `11`、旧版本（含 v10）在 Play 前被拒绝、`ItemDrop` 耐久往返、非工具携带耐久被 `Validate` 拒绝。
+- [x] 5.1 在 `internal/network/codec_test.go`、`worldtime_test.go`、`packet_test.go`、`drop_test.go` 写失败测试：版本 golden 推进到 `11`、旧版本（含 v10）在 Play 前被拒绝、`ItemDrop` 耐久往返、非工具携带耐久被 `Validate` 拒绝。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "ProtocolVersion|RejectsVersion|Durability" -count=1'`
-- [ ] 5.2 `internal/network/packet.go` 的 `ProtocolVersion` 升为 `11`；复用已经贯通 `sim.DropSnapshot`、`network.ItemDrop`、服务端发布与客户端镜像的 `Durability` 字段；`codec.go` 新增共享 `encodeItemStack` 并改造既有 `decodeItemStack`，`InventoryState`、`FurnaceState`、`ItemDrop` 三处编解码统一改用 5 字节物品堆。删除 v10 的 Inventory/ItemDrop“工具必须满耐久”门禁及两处解码补满 shim，改为读取真实字段；同步更新固定长度常量与 golden 十六进制串。
+- [x] 5.2 `internal/network/packet.go` 的 `ProtocolVersion` 升为 `11`；复用已经贯通 `sim.DropSnapshot`、`network.ItemDrop`、服务端发布与客户端镜像的 `Durability` 字段；`codec.go` 新增共享 `encodeItemStack` 并改造既有 `decodeItemStack`，`InventoryState`、`FurnaceState`、`ItemDrop` 三处编解码统一改用 5 字节物品堆。删除 v10 的 Inventory/ItemDrop“工具必须满耐久”门禁及两处解码补满 shim，改为读取真实字段；同步更新固定长度常量与 golden 十六进制串。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -race -count=1'`；`go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s`；`go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 -benchtime=200x`；`go test ./internal/archcheck -count=1`；`gofmt -l .`；`git diff --check`
 
 ## 6. 玩家 schema v4 与区块 schema v5
