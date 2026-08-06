@@ -68,6 +68,6 @@
 天体天空 SHALL 只消费现有玩家状态中已确认的权威世界时间和本地相机，不得增加客户端消息、服务端消息、世界 metadata 字段、玩家字段、区块字段或掉落物状态。
 
 #### Scenario: 升级后直接打开既有世界
-- **GIVEN** 一个由 M4H 正常关闭的有效世界与玩家存档
+- **GIVEN** 一个由 M4J 正常关闭的有效世界与玩家存档
 - **WHEN** 带程序化天空的客户端和服务端打开该世界
-- **THEN** 系统 MUST 不执行天空相关数据迁移，且协议 MUST 保持 v10、metadata MUST 保持 v2、玩家 schema MUST 保持 v3、区块 schema MUST 保持 v4
+- **THEN** 系统 MUST 不执行天空相关数据迁移，且协议 MUST 保持 v11、metadata MUST 保持 v2、玩家 schema MUST 保持 v4、区块 schema MUST 保持 v5
