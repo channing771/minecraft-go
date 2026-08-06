@@ -622,7 +622,7 @@ func translateClientMessage(
 			Kind:     sim.CommandSelectHotbar,
 			Slot:     message.Slot,
 		}, true
-	case network.OpenFurnace:
+	case network.OpenContainer:
 		return sim.Command{
 			Session:  id,
 			Sequence: message.Sequence,
@@ -630,16 +630,16 @@ func translateClientMessage(
 			Yaw:      message.Yaw,
 			Pitch:    message.Pitch,
 		}, true
-	case network.MoveFurnaceStack:
+	case network.MoveContainerStack:
 		return sim.Command{
 			Session:  id,
 			Sequence: message.Sequence,
 			Kind:     sim.CommandMoveFurnaceStack,
-			Furnace:  message.Furnace,
+			Furnace:  message.Container,
 			Slot:     message.From,
 			ToSlot:   message.To,
 		}, true
-	case network.CloseFurnace:
+	case network.CloseContainer:
 		return sim.Command{
 			Session:  id,
 			Sequence: message.Sequence,

@@ -1888,10 +1888,10 @@ func TestFurnaceSharedByTwoPlayersOverTCP(t *testing.T) {
 	})
 
 	// 两名玩家同时打开同一个熔炉。
-	sendIntegration(t, firstClient.Endpoint, network.OpenFurnace{
+	sendIntegration(t, firstClient.Endpoint, network.OpenContainer{
 		Sequence: 10, Pitch: -float32(math.Pi)/2 + 0.01,
 	})
-	sendIntegration(t, secondClient.Endpoint, network.OpenFurnace{
+	sendIntegration(t, secondClient.Endpoint, network.OpenContainer{
 		Sequence: 10, Pitch: -float32(math.Pi)/2 + 0.01,
 	})
 	firstRef := waitFurnaceState(t, firstClient, func(network.FurnaceState) bool { return true })
@@ -1908,8 +1908,8 @@ func TestFurnaceSharedByTwoPlayersOverTCP(t *testing.T) {
 	waitFurnaceState(t, secondClient, produced)
 
 	// 第一名玩家取走输出后，另一名玩家必须看到输出为空。
-	sendIntegration(t, firstClient.Endpoint, network.MoveFurnaceStack{
-		Sequence: 11, Furnace: firstRef.Furnace,
+	sendIntegration(t, firstClient.Endpoint, network.MoveContainerStack{
+		Sequence: 11, Container: firstRef.Furnace,
 		From: core.FurnaceOutputSlot, To: 0,
 	})
 	emptied := func(state network.FurnaceState) bool {
@@ -1920,8 +1920,8 @@ func TestFurnaceSharedByTwoPlayersOverTCP(t *testing.T) {
 	// 旧 generation 的引用必须稳定拒绝。
 	stale := firstRef.Furnace
 	stale.Generation++
-	sendIntegration(t, secondClient.Endpoint, network.MoveFurnaceStack{
-		Sequence: 12, Furnace: stale, From: 0, To: core.FurnaceInputSlot,
+	sendIntegration(t, secondClient.Endpoint, network.MoveContainerStack{
+		Sequence: 12, Container: stale, From: 0, To: core.FurnaceInputSlot,
 	})
 	waitIntegrationRejection(t, secondClient, 12, network.RejectInvalidInput)
 

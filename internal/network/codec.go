@@ -64,16 +64,16 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 		case CraftRecipe:
 			e.u64(message.Sequence)
 			e.u8(uint8(message.Recipe))
-		case OpenFurnace:
+		case OpenContainer:
 			e.u64(message.Sequence)
 			e.f32(message.Yaw)
 			e.f32(message.Pitch)
-		case MoveFurnaceStack:
+		case MoveContainerStack:
 			e.u64(message.Sequence)
-			encodeFurnaceRef(&e, message.Furnace)
+			encodeContainerRef(&e, message.Container)
 			e.u8(message.From)
 			e.u8(message.To)
-		case CloseFurnace:
+		case CloseContainer:
 			e.u64(message.Sequence)
 		case RequestChunkResync:
 			e.u64(message.Sequence)
@@ -212,7 +212,7 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			}
 			packet = CraftRecipe{Sequence: sequence, Recipe: core.RecipeID(recipe)}
 		case 8:
-			var open OpenFurnace
+			var open OpenContainer
 			open.Sequence, err = d.u64()
 			if err == nil {
 				open.Yaw, err = d.f32()
@@ -222,10 +222,10 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			}
 			packet = open
 		case 9:
-			var move MoveFurnaceStack
+			var move MoveContainerStack
 			move.Sequence, err = d.u64()
 			if err == nil {
-				move.Furnace, err = decodeFurnaceRef(&d)
+				move.Container, err = decodeContainerRef(&d)
 			}
 			if err == nil {
 				move.From, err = d.u8()
@@ -235,9 +235,9 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			}
 			packet = move
 		case 10:
-			var closeFurnace CloseFurnace
-			closeFurnace.Sequence, err = d.u64()
-			packet = closeFurnace
+			var closeContainer CloseContainer
+			closeContainer.Sequence, err = d.u64()
+			packet = closeContainer
 		case 11:
 			var drop DropSelectedItem
 			drop.Sequence, err = d.u64()
@@ -399,14 +399,19 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 				encodeItemStack(&e, stack)
 			}
 		case FurnaceState:
-			encodeFurnaceRef(&e, message.Furnace)
+			encodeContainerRef(&e, message.Furnace)
 			for _, stack := range [3]core.ItemStack{message.Input, message.Fuel, message.Output} {
 				encodeItemStack(&e, stack)
 			}
 			e.u8(message.ProgressTicks)
 			e.u16(message.BurnTicks)
-		case FurnaceClosed:
-			encodeFurnaceRef(&e, message.Furnace)
+		case ChestState:
+			encodeContainerRef(&e, message.Chest)
+			for _, stack := range message.Items {
+				encodeItemStack(&e, stack)
+			}
+		case ContainerClosed:
+			encodeContainerRef(&e, message.Container)
 		case ItemDropUpserts:
 			e.u64(message.ServerTick)
 			e.uvarint(uint32(len(message.Drops)))
@@ -633,7 +638,7 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 			packet = InventoryState{Inventory: inventory}
 		case 13:
 			var state FurnaceState
-			state.Furnace, err = decodeFurnaceRef(&d)
+			state.Furnace, err = decodeContainerRef(&d)
 			state.Input, err = decodeItemStack(&d, err)
 			state.Fuel, err = decodeItemStack(&d, err)
 			state.Output, err = decodeItemStack(&d, err)
@@ -645,9 +650,16 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 			}
 			packet = state
 		case 14:
-			var closed FurnaceClosed
-			closed.Furnace, err = decodeFurnaceRef(&d)
+			var closed ContainerClosed
+			closed.Container, err = decodeContainerRef(&d)
 			packet = closed
+		case 15:
+			var chest ChestState
+			chest.Chest, err = decodeContainerRef(&d)
+			for index := range chest.Items {
+				chest.Items[index], err = decodeItemStack(&d, err)
+			}
+			packet = chest
 		default:
 			return nil, codecError("decode server", state, packetID, errUnknownPacketID)
 		}
@@ -700,35 +712,45 @@ func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
 	}, nil
 }
 
-// furnaceRefWireBytes 是熔炉引用的固定编码长度。
-const furnaceRefWireBytes = 4 + 4 + 4 + 1 + 4
+// containerRefWireBytes 是容器引用（熔炉与箱子共用）的固定编码长度：
+// 在原熔炉引用 17 字节的基础上追加 1 字节 Kind。
+const containerRefWireBytes = 4 + 4 + 4 + 1 + 1 + 4
 
-func encodeFurnaceRef(e *byteEncoder, ref core.FurnaceRef) {
+// encodeContainerRef 是熔炉与箱子共用的唯一容器引用编码 helper，
+// 禁止为箱子单独维护一份重复实现。
+func encodeContainerRef(e *byteEncoder, ref core.ContainerRef) {
 	e.i32(int32(ref.Dimension))
 	e.i32(ref.Chunk.X)
 	e.i32(ref.Chunk.Z)
+	e.u8(uint8(ref.Kind))
 	e.u8(ref.Slot)
 	e.u32(ref.Generation)
 }
 
-func decodeFurnaceRef(d *byteDecoder) (core.FurnaceRef, error) {
-	var ref core.FurnaceRef
+// decodeContainerRef 是 encodeContainerRef 对应的唯一解码 helper。
+func decodeContainerRef(d *byteDecoder) (core.ContainerRef, error) {
+	var ref core.ContainerRef
 	dimension, err := d.i32()
 	if err != nil {
-		return core.FurnaceRef{}, err
+		return core.ContainerRef{}, err
 	}
 	ref.Dimension = core.DimensionID(dimension)
 	if ref.Chunk.X, err = d.i32(); err != nil {
-		return core.FurnaceRef{}, err
+		return core.ContainerRef{}, err
 	}
 	if ref.Chunk.Z, err = d.i32(); err != nil {
-		return core.FurnaceRef{}, err
+		return core.ContainerRef{}, err
 	}
+	kind, err := d.u8()
+	if err != nil {
+		return core.ContainerRef{}, err
+	}
+	ref.Kind = core.ContainerKind(kind)
 	if ref.Slot, err = d.u8(); err != nil {
-		return core.FurnaceRef{}, err
+		return core.ContainerRef{}, err
 	}
 	if ref.Generation, err = d.u32(); err != nil {
-		return core.FurnaceRef{}, err
+		return core.ContainerRef{}, err
 	}
 	return ref, nil
 }

@@ -1096,13 +1096,13 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 			continue
 		}
-		if closed, ok := message.(network.FurnaceClosed); ok {
+		if closed, ok := message.(network.ContainerClosed); ok {
 			current, opened := a.furnace.Ref()
 			if err := a.furnace.Close(closed); err != nil {
 				a.closeClientSession(err)
 				return
 			}
-			if opened && current == closed.Furnace {
+			if opened && current == closed.Container {
 				a.clearFurnaceUI()
 			}
 			continue
@@ -1194,7 +1194,7 @@ func (a *application) placeBlock() {
 	} else if found {
 		block, loaded := a.mirror.BlockAt(core.Overworld, hit.Block)
 		if loaded && block == core.FurnaceID {
-			if err := a.send(network.OpenFurnace{
+			if err := a.send(network.OpenContainer{
 				Sequence: a.nextSequence(), Yaw: a.camera.Yaw, Pitch: a.camera.Pitch,
 			}); err != nil {
 				log.Printf("发送打开熔炉请求失败: %v", err)
@@ -1222,7 +1222,7 @@ func (a *application) setInventoryOpen(open bool) {
 	if !open {
 		if _, opened := a.furnace.State(); opened {
 			a.clearFurnaceUI()
-			if err := a.send(network.CloseFurnace{Sequence: a.nextSequence()}); err != nil {
+			if err := a.send(network.CloseContainer{Sequence: a.nextSequence()}); err != nil {
 				log.Printf("发送关闭熔炉请求失败: %v", err)
 			}
 			return
@@ -1294,8 +1294,8 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 		if slot == core.FurnaceOutputSlot {
 			return
 		}
-		if err := a.send(network.MoveFurnaceStack{
-			Sequence: a.nextSequence(), Furnace: furnace.Furnace, From: from, To: slot,
+		if err := a.send(network.MoveContainerStack{
+			Sequence: a.nextSequence(), Container: furnace.Furnace, From: from, To: slot,
 		}); err != nil {
 			log.Printf("发送熔炉移动失败: %v", err)
 		}

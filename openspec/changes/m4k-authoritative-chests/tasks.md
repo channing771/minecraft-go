@@ -23,11 +23,11 @@
 
 ## 4. 容器引用收敛与协议 v12
 
-- [ ] 4.1 在 `internal/core` 先写失败测试，锁定 `ContainerRef` 的字段与 `ContainerKind` 稳定值，且 `ContainerKind` 的零值必须表示熔炉，使既有存档与测试构造的引用不被误判为箱子；确认 `FurnaceRef` 是 `ContainerRef` 的类型别名且既有调用点不需要改动。
-- [ ] 4.2 在 `internal/network` 先写失败的 packet/registry/codec/golden/fuzz 测试，覆盖 `OpenContainer`/`MoveContainerStack`/`CloseContainer`/`ContainerClosed` 保持原有 packet ID `8`/`9`/`10`/`14`、`FurnaceState` 保持 `13`、新增 `ChestState` 使用 `15`，`ChestState` 固定 153 字节，以及未知容器类型、越界统一索引、截断、尾随字节与 v11 登录拒绝。
-- [ ] 4.3 把 `ProtocolVersion` 升为 12，按容器中性命名重命名既有消息类型并新增 `ChestState`；容器引用编解码只保留一份 helper，禁止可变长度集合。
-- [ ] 4.4 在 `internal/client` 扩展只读镜像：容器镜像只接受服务端确认的完整状态与关闭通知，新引用替换旧界面，过期状态或过期关闭不影响当前界面，非法状态返回 error，`Reset` 清空，`State` 返回值副本。
-- [ ] 4.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/network ./internal/client -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 收敛容器协议并升级 v12`，然后自动进入第 5 组。
+- [x] 4.1 在 `internal/core` 先写失败测试，锁定 `ContainerRef` 的字段与 `ContainerKind` 稳定值，且 `ContainerKind` 的零值必须表示熔炉，使既有存档与测试构造的引用不被误判为箱子；确认 `FurnaceRef` 是 `ContainerRef` 的类型别名且既有调用点不需要改动。
+- [x] 4.2 在 `internal/network` 先写失败的 packet/registry/codec/golden/fuzz 测试，覆盖 `OpenContainer`/`MoveContainerStack`/`CloseContainer`/`ContainerClosed` 保持原有 packet ID `8`/`9`/`10`/`14`、`FurnaceState` 保持 `13`、新增 `ChestState` 使用 `15`，`ChestState` 固定 153 字节，以及未知容器类型、越界统一索引、截断、尾随字节与 v11 登录拒绝。
+- [x] 4.3 把 `ProtocolVersion` 升为 12，按容器中性命名重命名既有消息类型并新增 `ChestState`；容器引用编解码只保留一份 helper，禁止可变长度集合。
+- [x] 4.4 在 `internal/client` 扩展只读镜像：容器镜像只接受服务端确认的完整状态与关闭通知，新引用替换旧界面，过期状态或过期关闭不影响当前界面，非法状态返回 error，`Reset` 清空，`State` 返回值副本。
+- [x] 4.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/network ./internal/client -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 收敛容器协议并升级 v12`，然后自动进入第 5 组。
 
 ## 5. 共用查看生命周期与跨容器事务
 

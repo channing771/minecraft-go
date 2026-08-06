@@ -1667,8 +1667,8 @@ func TestPlaceOpensLocalMirrorFurnaceWithoutPredictingUI(t *testing.T) {
 
 	app.placeBlock()
 	message := receiveInteractiveClientMessage(t, serverEndpoint)
-	open, ok := message.(network.OpenFurnace)
-	if !ok || open != (network.OpenFurnace{Sequence: 1}) {
+	open, ok := message.(network.OpenContainer)
+	if !ok || open != (network.OpenContainer{Sequence: 1}) {
 		t.Fatalf("打开熔炉请求 = %#v，想要 sequence 1 与当前视角", message)
 	}
 	if app.inventoryOpen {
@@ -1932,10 +1932,10 @@ func TestFurnaceTwoClicksSendOneMoveWithoutPrediction(t *testing.T) {
 	app.clickInventorySlot(targetX, targetY, width, height)
 
 	message := receiveInteractiveClientMessage(t, serverEndpoint)
-	want := network.MoveFurnaceStack{
-		Sequence: 1, Furnace: state.Furnace, From: 1, To: core.FurnaceInputSlot,
+	want := network.MoveContainerStack{
+		Sequence: 1, Container: state.Furnace, From: 1, To: core.FurnaceInputSlot,
 	}
-	if got, ok := message.(network.MoveFurnaceStack); !ok || got != want {
+	if got, ok := message.(network.MoveContainerStack); !ok || got != want {
 		t.Fatalf("跨容器移动 = %#v，想要 %+v", message, want)
 	}
 	assertNoInteractiveClientMessage(t, serverEndpoint)
@@ -1962,7 +1962,7 @@ func TestExplicitFurnaceCloseClearsUIAndSendsOnce(t *testing.T) {
 
 	app.setInventoryOpen(false)
 	message := receiveInteractiveClientMessage(t, serverEndpoint)
-	if got, ok := message.(network.CloseFurnace); !ok || got != (network.CloseFurnace{Sequence: 1}) {
+	if got, ok := message.(network.CloseContainer); !ok || got != (network.CloseContainer{Sequence: 1}) {
 		t.Fatalf("关闭熔炉请求 = %#v", message)
 	}
 	app.setInventoryOpen(false)
@@ -1987,7 +1987,7 @@ func TestFurnaceClosedMessageClearsUIWithoutEcho(t *testing.T) {
 	app.drainServerMessages(1)
 	app.inventorySource = core.FurnaceOutputSlot
 
-	sendInteractiveServerMessage(t, serverEndpoint, network.FurnaceClosed{Furnace: state.Furnace})
+	sendInteractiveServerMessage(t, serverEndpoint, network.ContainerClosed{Container: state.Furnace})
 	app.drainServerMessages(1)
 	if app.inventoryOpen || app.inventorySource != -1 {
 		t.Fatalf("服务端关闭后 ui=%v source=%d", app.inventoryOpen, app.inventorySource)

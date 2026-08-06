@@ -180,7 +180,7 @@ func (server *Server) publishLocalResult(
 		if ended.Session != current.id {
 			continue
 		}
-		if !current.enqueue(network.FurnaceClosed{Furnace: ended.Furnace}) {
+		if !current.enqueue(network.ContainerClosed{Container: ended.Furnace}) {
 			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 			return
 		}

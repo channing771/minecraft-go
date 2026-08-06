@@ -25,11 +25,11 @@ func clientPacketID(state State, packet ClientPacket) (uint32, bool) {
 			return 6, true
 		case CraftRecipe:
 			return 7, true
-		case OpenFurnace:
+		case OpenContainer:
 			return 8, true
-		case MoveFurnaceStack:
+		case MoveContainerStack:
 			return 9, true
-		case CloseFurnace:
+		case CloseContainer:
 			return 10, true
 		case DropSelectedItem:
 			return 11, true
@@ -66,11 +66,11 @@ func clientPacketForID(state State, id uint32) (ClientPacket, bool) {
 		case 7:
 			return CraftRecipe{}, true
 		case 8:
-			return OpenFurnace{}, true
+			return OpenContainer{}, true
 		case 9:
-			return MoveFurnaceStack{}, true
+			return MoveContainerStack{}, true
 		case 10:
-			return CloseFurnace{}, true
+			return CloseContainer{}, true
 		case 11:
 			return DropSelectedItem{}, true
 		}
@@ -125,8 +125,10 @@ func serverPacketID(state State, packet ServerPacket) (uint32, bool) {
 			return 12, true
 		case FurnaceState:
 			return 13, true
-		case FurnaceClosed:
+		case ContainerClosed:
 			return 14, true
+		case ChestState:
+			return 15, true
 		}
 	}
 	return 0, false
@@ -180,7 +182,9 @@ func serverPacketForID(state State, id uint32) (ServerPacket, bool) {
 		case 13:
 			return FurnaceState{}, true
 		case 14:
-			return FurnaceClosed{}, true
+			return ContainerClosed{}, true
+		case 15:
+			return ChestState{}, true
 		}
 	}
 	return nil, false
