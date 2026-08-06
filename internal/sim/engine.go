@@ -39,9 +39,9 @@ type sessionState struct {
 	center                      core.ChunkPos
 	wanted                      map[core.ChunkKey]struct{}
 	player                      *playerState
-	// 每名玩家最多查看一个熔炉；引用失效时由权威 tick 统一清除。
-	furnace     core.FurnaceRef
-	viewFurnace bool
+	// 每名玩家同时最多查看一个容器（熔炉或箱子）；引用失效时由权威 tick 统一清除。
+	container     core.ContainerRef
+	viewContainer bool
 }
 
 type pendingChunkChanges struct {
@@ -59,10 +59,10 @@ type Engine struct {
 	subscriptionsDirty bool
 
 	// 掉落物 tick 的复用 scratch，避免每 tick 分配固定上限集合。
-	dropKeySeen          map[core.ChunkKey]struct{}
-	dropKeyScratch       []core.ChunkKey
-	furnaceViewerScratch []SessionID
-	dropSessionScratch   []SessionID
+	dropKeySeen            map[core.ChunkKey]struct{}
+	dropKeyScratch         []core.ChunkKey
+	containerViewerScratch []SessionID
+	dropSessionScratch     []SessionID
 
 	inboxMu   sync.Mutex
 	commands  []Command
@@ -130,7 +130,7 @@ func (engine *Engine) Step() TickResult {
 
 	result := TickResult{Forget: make(map[SessionID][]core.ChunkKey)}
 	interactions := make([]Command, 0, len(commands))
-	furnaceMoves := make([]Command, 0, len(commands))
+	containerMoves := make([]Command, 0, len(commands))
 	// 命令阶段与后续掉落物/熔炉推进共用同一份待提交区块变更。
 	pending := make(map[core.ChunkKey]*pendingChunkChanges)
 	viewChanged := false
@@ -267,7 +267,7 @@ func (engine *Engine) Step() TickResult {
 			player.inventory = next
 			player.inventoryDirty = true
 		case CommandOpenFurnace:
-			if reason, rejected := engine.openFurnace(command.Session, command); rejected {
+			if reason, rejected := engine.openContainer(command.Session, command); rejected {
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
 					Sequence: command.Sequence,
@@ -276,11 +276,11 @@ func (engine *Engine) Step() TickResult {
 			}
 		case CommandMoveFurnaceStack:
 			// 跨容器移动会改动区块，必须与其他交互共享同一批 pending 变化。
-			furnaceMoves = append(furnaceMoves, command)
+			containerMoves = append(containerMoves, command)
 		case CommandCloseFurnace:
 			// 关闭永远成功：客户端可以随时结束查看关系。
-			session.viewFurnace = false
-			session.furnace = core.FurnaceRef{}
+			session.viewContainer = false
+			session.container = core.ContainerRef{}
 		case CommandCraftRecipe:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
 				result.Rejected = append(result.Rejected, Rejection{
@@ -379,8 +379,8 @@ func (engine *Engine) Step() TickResult {
 	}
 	engine.advanceDrops(pending)
 	engine.advanceFurnaces(pending)
-	for _, command := range furnaceMoves {
-		if reason, rejected := engine.applyFurnaceMove(command.Session, command, pending); rejected {
+	for _, command := range containerMoves {
+		if reason, rejected := engine.applyContainerMove(command.Session, command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{
 				Session:  command.Session,
 				Sequence: command.Sequence,
@@ -395,7 +395,7 @@ func (engine *Engine) Step() TickResult {
 	result.Tick = engine.tick.Add(1)
 	result.WorldTimeTicks = engine.advanceWorldTime()
 	engine.publishInventories(&result)
-	engine.publishFurnaces(&result)
+	engine.publishContainers(&result)
 	engine.publishPlayers(&result)
 	return result
 }

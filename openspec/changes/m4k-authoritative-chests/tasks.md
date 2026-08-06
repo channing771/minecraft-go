@@ -31,10 +31,10 @@
 
 ## 5. 共用查看生命周期与跨容器事务
 
-- [ ] 5.1 在 `internal/sim` 先写失败测试，覆盖打开命令的 Ready、sequence、有限视角与服务端六格射线；命中箱子时建立箱子查看关系并结束原有熔炉查看关系；一人最多一个、多人可同看；超距、方块改变、generation 变化、区块卸载、维度 reset 时精确一次关闭；断线直接移除查看者。
-- [ ] 5.2 先写跨容器事务失败测试：物品栏与箱子之间的空目标整堆、同类合并留余量、异类交换、箱子接受任何已注册物品与带耐久工具、物品栏满时取出失败、越界统一索引、过期 generation 或 sequence 均整条拒绝且两侧不变、多玩家同 tick 按 session/sequence 稳定串行。
-- [ ] 5.3 把 `sessionState` 的熔炉查看字段替换为容器中性字段，并把 `moveFurnaceStack` 泛化为在玩家物品与一个容器视图的值副本上计算：熔炉保留三格物品约束，箱子只校验 `ItemStack.Valid`；成功才同时写回，箱子不引入新的拒绝理由。
-- [ ] 5.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/archcheck -count=1'`，确认既有熔炉测试全部保持通过、`gofmt` 与 `git diff --check` 无输出；提交 `feat: 共用容器查看与跨容器事务`，然后自动进入第 6 组。
+- [x] 5.1 在 `internal/sim` 先写失败测试，覆盖打开命令的 Ready、sequence、有限视角与服务端六格射线；命中箱子时建立箱子查看关系并结束原有熔炉查看关系；一人最多一个、多人可同看；超距、方块改变、generation 变化、区块卸载、维度 reset 时精确一次关闭；断线直接移除查看者。
+- [x] 5.2 先写跨容器事务失败测试：物品栏与箱子之间的空目标整堆、同类合并留余量、异类交换、箱子接受任何已注册物品与带耐久工具、物品栏满时取出失败、越界统一索引、过期 generation 或 sequence 均整条拒绝且两侧不变、多玩家同 tick 按 session/sequence 稳定串行。
+- [x] 5.3 把 `sessionState` 的熔炉查看字段替换为容器中性字段，并把 `moveFurnaceStack` 泛化为在玩家物品与一个容器视图的值副本上计算：熔炉保留三格物品约束，箱子只校验 `ItemStack.Valid`；成功才同时写回，箱子不引入新的拒绝理由。
+- [x] 5.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/archcheck -count=1'`，确认既有熔炉测试全部保持通过、`gofmt` 与 `git diff --check` 无输出；提交 `feat: 共用容器查看与跨容器事务`，然后自动进入第 6 组。
 
 ## 6. 放置与原子破坏
 

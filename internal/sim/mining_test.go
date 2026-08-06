@@ -159,7 +159,7 @@ func TestMiningInvalidTargetsClearWithoutRejection(t *testing.T) {
 		{
 			name: "打开熔炉",
 			mutate: func(_ *Engine, session *sessionState, _ core.BlockPos) {
-				session.viewFurnace = true
+				session.viewContainer = true
 			},
 		},
 		{
