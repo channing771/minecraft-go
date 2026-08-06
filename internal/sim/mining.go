@@ -242,11 +242,12 @@ func (engine *Engine) completeMining(
 		if err != nil {
 			return mapSetBlockError(err), true
 		}
-		if changed {
-			engine.recordChange(dimensionID, target, core.AirID, pending)
-			record.Chunk.DeactivateFurnace(furnaceSlot)
-			record.Chunk.CommitDropBatch(next)
+		if !changed {
+			return RejectNoTarget, true
 		}
+		engine.recordChange(dimensionID, target, core.AirID, pending)
+		record.Chunk.DeactivateFurnace(furnaceSlot)
+		record.Chunk.CommitDropBatch(next)
 		return 0, false
 	}
 
@@ -262,16 +263,17 @@ func (engine *Engine) completeMining(
 	if err != nil {
 		return mapSetBlockError(err), true
 	}
-	if changed {
-		engine.recordChange(dimensionID, target, core.AirID, pending)
-		if harvestable {
-			record.Chunk.CommitDrop(
-				dropSlot,
-				core.ItemStack{Item: item, Count: 1},
-				blockIndex,
-				DropPickupDelayTicks,
-			)
-		}
+	if !changed {
+		return RejectNoTarget, true
+	}
+	engine.recordChange(dimensionID, target, core.AirID, pending)
+	if harvestable {
+		record.Chunk.CommitDrop(
+			dropSlot,
+			core.ItemStack{Item: item, Count: 1},
+			blockIndex,
+			DropPickupDelayTicks,
+		)
 	}
 	return 0, false
 }

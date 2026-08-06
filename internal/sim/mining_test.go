@@ -472,6 +472,53 @@ func TestMiningProtectedAndUnreadyRejectionsPreserveDurability(t *testing.T) {
 	}
 }
 
+func TestCompleteMiningRejectsNoOp(t *testing.T) {
+	tests := []struct {
+		name  string
+		block core.BlockID
+		setup func(*testing.T, *Engine, core.BlockPos)
+	}{
+		{
+			name:  "普通方块",
+			block: core.StoneID,
+			setup: func(_ *testing.T, engine *Engine, target core.BlockPos) {
+				engine.SetBlockForTest(target, core.AirID)
+			},
+		},
+		{
+			name:  "熔炉",
+			block: core.FurnaceID,
+			setup: func(t *testing.T, engine *Engine, target core.BlockPos) {
+				setMiningFurnace(t, engine, target, world.FurnaceSlot{Generation: 1})
+				engine.SetBlockForTest(target, core.AirID)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, _, targets := readyMiningPlayers(t, 1)
+			target := targets[0]
+			test.setup(t, engine, target)
+			record := miningTargetRecord(t, engine, target)
+			beforeHash := record.Chunk.Hash()
+			pending := make(map[core.ChunkKey]*pendingChunkChanges)
+
+			reason, rejected := engine.completeMining(
+				core.Overworld, target, test.block, true, pending,
+			)
+
+			if !rejected || reason != RejectNoTarget {
+				t.Fatalf("no-op 完成结果 = (%d, %v)，想要 (%d, true)",
+					reason, rejected, RejectNoTarget)
+			}
+			if got := record.Chunk.Hash(); got != beforeHash || len(pending) != 0 {
+				t.Fatalf("no-op 完成修改了区块或 pending：hash=%x/%x pending=%+v",
+					got, beforeHash, pending)
+			}
+		})
+	}
+}
+
 func TestMiningDoesNotConsumeDurabilityFromNonTools(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -743,8 +790,9 @@ func TestMiningTwoSessionsCompleteOneTargetOnce(t *testing.T) {
 		player := engine.sessions[id].player
 		player.state.Position = mgl32.Vec3{0.5, 1, 8.5}
 		player.pitch = 0
+		setMiningHeldItem(player, core.ItemStonePickaxe)
 	}
-	for range 29 {
+	for range 14 {
 		advanceMiningOnce(engine)
 	}
 	result := advanceMiningOnce(engine)
@@ -757,6 +805,13 @@ func TestMiningTwoSessionsCompleteOneTargetOnce(t *testing.T) {
 	}
 	if engine.sessions[sessions[1]].player.mining != (playerMiningState{}) {
 		t.Fatalf("后处理会话未看到空气并清零: %+v", engine.sessions[sessions[1]].player.mining)
+	}
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	if got := engine.sessions[sessions[0]].player.inventory.Hotbar.Slots[0].Durability; got != full-1 {
+		t.Fatalf("实际移除方块的玩家耐久 = %d，想要 %d", got, full-1)
+	}
+	if got := engine.sessions[sessions[1]].player.inventory.Hotbar.Slots[0].Durability; got != full {
+		t.Fatalf("未移除方块的玩家耐久 = %d，想要保持 %d", got, full)
 	}
 }
 
