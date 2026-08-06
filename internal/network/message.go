@@ -202,10 +202,7 @@ func validFurnaceRef(ref core.FurnaceRef) error {
 
 // validFurnaceStack 报告某个熔炉格是否为空或恰好装着允许的物品。
 func validFurnaceStack(stack core.ItemStack, allowed core.ItemID) bool {
-	if stack.Item == core.ItemNone {
-		return stack.Count == 0
-	}
-	return stack.Item == allowed && stack.Count >= 1 && stack.Count <= core.MaxStackCount
+	return stack.Valid() && (stack.Item == core.ItemNone || stack.Item == allowed)
 }
 
 // InventoryState 是服务端发给所属玩家的完整权威物品状态。

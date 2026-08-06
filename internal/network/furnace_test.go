@@ -147,6 +147,8 @@ func TestFurnaceMessagesRejectInvalidValues(t *testing.T) {
 		FurnaceState{Furnace: ref, Input: core.ItemStack{Item: core.ItemCoal, Count: 1}},
 		FurnaceState{Furnace: ref, Fuel: core.ItemStack{Item: core.ItemRawIron, Count: 1}},
 		FurnaceState{Furnace: ref, Output: core.ItemStack{Item: core.ItemStone, Count: 1}},
+		FurnaceState{Furnace: ref, Input: core.ItemStack{Item: core.ItemRawIron, Count: 1, Durability: 1}},
+		FurnaceState{Furnace: ref, Fuel: core.ItemStack{Durability: 1}},
 		FurnaceState{Furnace: ref, ProgressTicks: core.FurnaceSmeltTicks},
 		FurnaceState{Furnace: ref, BurnTicks: core.FurnaceBurnTicks + 1},
 		FurnaceClosed{Furnace: core.FurnaceRef{Dimension: core.Overworld}},
