@@ -22,6 +22,7 @@ func TestMiningRule(t *testing.T) {
 		{core.DirtID, core.ItemNone, 5, true},
 		{core.GrassID, core.ItemDirt, 5, true},
 		{core.StoneID, core.ItemNone, 30, true},
+		{core.StoneID, core.ItemBrokenStonePickaxe, 30, true},
 		{core.StoneID, core.ItemDirt, 30, false},
 		{core.StoneID, core.ItemStonePickaxe, 15, true},
 		{core.StoneID, core.ItemIronPickaxe, 8, true},
@@ -29,6 +30,7 @@ func TestMiningRule(t *testing.T) {
 		{core.StoneBrickID, core.ItemStonePickaxe, 15, true},
 		{core.FurnaceID, core.ItemIronPickaxe, 8, true},
 		{core.CoalOreID, core.ItemStonePickaxe, 15, true},
+		{core.CoalOreID, core.ItemBrokenIronPickaxe, 30, false},
 		{core.IronOreID, core.ItemIronPickaxe, 8, true},
 		{core.IronBlockID, core.ItemNone, 40, false},
 		{core.IronBlockID, core.ItemStonePickaxe, 20, false},
@@ -307,16 +309,284 @@ func TestMiningCompletionUsesFixedToolAndDropRules(t *testing.T) {
 	}
 }
 
-func TestMiningHarvestableCapacityFailureIsAtomicAndRejectsOnce(t *testing.T) {
+func TestMiningConsumesOneDurabilityPerBrokenBlock(t *testing.T) {
+	tests := []struct {
+		name  string
+		tool  core.ItemID
+		block core.BlockID
+		ticks int
+	}{
+		{name: "石镐", tool: core.ItemStonePickaxe, block: core.CoalOreID, ticks: 15},
+		{name: "铁镐", tool: core.ItemIronPickaxe, block: core.IronBlockID, ticks: 10},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, sessions, targets := readyMiningPlayers(t, 1)
+			player := engine.sessions[sessions[0]].player
+			engine.SetBlockForTest(targets[0], test.block)
+			setMiningHeldItem(player, test.tool)
+			full, _ := core.ItemMaxDurability(test.tool)
+
+			for range test.ticks {
+				advanceMiningOnce(engine)
+			}
+
+			got := player.inventory.Hotbar.Slots[0]
+			if got != (core.ItemStack{Item: test.tool, Count: 1, Durability: full - 1}) {
+				t.Fatalf("破坏一个方块后栏位 = %+v，想要 %d 耐久 %d", got, test.tool, full-1)
+			}
+			if !player.inventoryDirty {
+				t.Fatal("扣减耐久没有标记 inventoryDirty")
+			}
+		})
+	}
+}
+
+func TestMiningWrongToolStillConsumesDurability(t *testing.T) {
+	engine, sessions, targets := readyMiningPlayers(t, 1)
+	player := engine.sessions[sessions[0]].player
+	target := targets[0]
+	engine.SetBlockForTest(target, core.IronBlockID)
+	setMiningHeldItem(player, core.ItemStonePickaxe)
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+
+	for range 20 {
+		advanceMiningOnce(engine)
+	}
+
+	record := miningTargetRecord(t, engine, target)
+	x, _, z := target.Local()
+	if got := record.Chunk.BlockAt(x, target.Y, z); got != core.AirID {
+		t.Fatalf("用错等级的工具完成后方块 = %d，想要空气", got)
+	}
+	if got := miningDropTotals(record.Chunk); len(got) != 0 {
+		t.Fatalf("用错等级的工具产生了掉落 = %+v", got)
+	}
+	if got := player.inventory.Hotbar.Slots[0].Durability; got != full-1 {
+		t.Fatalf("用错等级的工具破坏方块后耐久 = %d，想要 %d", got, full-1)
+	}
+	if !player.inventoryDirty {
+		t.Fatal("用错等级的工具扣减耐久没有标记 inventoryDirty")
+	}
+}
+
+func TestMiningTurnsToolIntoBrokenFormAtZero(t *testing.T) {
+	tests := []struct {
+		name     string
+		tool     core.ItemID
+		broken   core.ItemID
+		block    core.BlockID
+		wantDrop core.ItemID
+		ticks    int
+	}{
+		{
+			name: "石镐", tool: core.ItemStonePickaxe, broken: core.ItemBrokenStonePickaxe,
+			block: core.CoalOreID, wantDrop: core.ItemCoal, ticks: 15,
+		},
+		{
+			name: "铁镐", tool: core.ItemIronPickaxe, broken: core.ItemBrokenIronPickaxe,
+			block: core.IronBlockID, wantDrop: core.ItemIronBlock, ticks: 10,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, sessions, targets := readyMiningPlayers(t, 1)
+			player := engine.sessions[sessions[0]].player
+			target := targets[0]
+			engine.SetBlockForTest(target, test.block)
+			setMiningHeldItem(player, test.tool)
+			player.inventory.Hotbar.Slots[0].Durability = 1
+
+			var result TickResult
+			for range test.ticks {
+				result = advanceMiningOnce(engine)
+			}
+
+			if len(result.Rejected) != 0 {
+				t.Fatalf("最后一次采掘被拒绝 = %+v", result.Rejected)
+			}
+			record := miningTargetRecord(t, engine, target)
+			x, _, z := target.Local()
+			if got := record.Chunk.BlockAt(x, target.Y, z); got != core.AirID {
+				t.Fatalf("完成后方块 = %d，想要空气", got)
+			}
+			if got := miningDropTotals(record.Chunk); got[test.wantDrop] != 1 || len(got) != 1 {
+				t.Fatalf("最后一次采掘掉落 = %+v，想要一个 %d", got, test.wantDrop)
+			}
+			if got := player.inventory.Hotbar.Slots[0]; got != (core.ItemStack{Item: test.broken, Count: 1}) {
+				t.Fatalf("耐久耗尽后栏位 = %+v，想要一个损坏工具 %d", got, test.broken)
+			}
+			if !player.inventoryDirty {
+				t.Fatal("工具损坏没有标记 inventoryDirty")
+			}
+		})
+	}
+}
+
+func TestMiningProtectedAndUnreadyRejectionsPreserveDurability(t *testing.T) {
+	tests := []struct {
+		name   string
+		block  core.BlockID
+		want   RejectReason
+		mutate func(*Engine, core.BlockPos)
+	}{
+		{
+			name: "受保护方块", block: core.BedrockID, want: RejectProtectedBlock,
+			mutate: func(engine *Engine, target core.BlockPos) {
+				engine.SetBlockForTest(target, core.BedrockID)
+			},
+		},
+		{
+			name: "区块未就绪", block: core.StoneID, want: RejectChunkNotReady,
+			mutate: func(engine *Engine, target core.BlockPos) {
+				delete(engine.dimensions[core.Overworld].records, target.Chunk())
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, sessions, targets := readyMiningPlayers(t, 1)
+			player := engine.sessions[sessions[0]].player
+			setMiningHeldItem(player, core.ItemStonePickaxe)
+			before := player.inventory.Hotbar.Slots[0]
+			target := targets[0]
+			test.mutate(engine, target)
+
+			reason, rejected := engine.completeMining(
+				core.Overworld,
+				target,
+				test.block,
+				true,
+				make(map[core.ChunkKey]*pendingChunkChanges),
+			)
+			if !rejected || reason != test.want {
+				t.Fatalf("拒绝 = (%d, %v)，想要 (%d, true)", reason, rejected, test.want)
+			}
+			if got := player.inventory.Hotbar.Slots[0]; got != before {
+				t.Fatalf("拒绝路径修改了工具：got=%+v want=%+v", got, before)
+			}
+			if player.inventoryDirty {
+				t.Fatal("拒绝路径标记了 inventoryDirty")
+			}
+		})
+	}
+}
+
+func TestMiningDoesNotConsumeDurabilityFromNonTools(t *testing.T) {
+	tests := []struct {
+		name  string
+		stack core.ItemStack
+	}{
+		{name: "空手"},
+		{name: "普通物品", stack: core.ItemStack{Item: core.ItemDirt, Count: 1}},
+		{name: "损坏物品", stack: core.ItemStack{Item: core.ItemBrokenStonePickaxe, Count: 1}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, sessions, targets := readyMiningPlayers(t, 1)
+			player := engine.sessions[sessions[0]].player
+			engine.SetBlockForTest(targets[0], core.DirtID)
+			player.inventory.Hotbar.Slots[0] = test.stack
+
+			for range 5 {
+				advanceMiningOnce(engine)
+			}
+
+			if got := player.inventory.Hotbar.Slots[0]; got != test.stack {
+				t.Fatalf("非工具栏位被修改：got=%+v want=%+v", got, test.stack)
+			}
+			if player.inventoryDirty {
+				t.Fatal("非工具完成采掘却标记了 inventoryDirty")
+			}
+		})
+	}
+}
+
+func TestBrokenToolMinesLikeBareHand(t *testing.T) {
+	blocks := []core.BlockID{
+		core.DirtID,
+		core.GrassID,
+		core.StoneID,
+		core.StoneBrickID,
+		core.FurnaceID,
+		core.CoalOreID,
+		core.IronOreID,
+		core.IronBlockID,
+		core.BedrockID,
+		core.BarrierID,
+	}
+	for _, block := range blocks {
+		bareTicks, bareHarvest := miningRule(block, core.ItemNone)
+		for _, broken := range []core.ItemID{
+			core.ItemBrokenStonePickaxe,
+			core.ItemBrokenIronPickaxe,
+		} {
+			ticks, harvest := miningRule(block, broken)
+			if ticks != bareTicks || harvest != bareHarvest {
+				t.Fatalf("方块 %d 损坏工具 %d = (%d,%v)，空手 = (%d,%v)，两者必须一致",
+					block, broken, ticks, harvest, bareTicks, bareHarvest)
+			}
+		}
+	}
+}
+
+func TestMiningResetsProgressWhenHeldToolLeavesHand(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*playerState)
+	}{
+		{name: "换到空栏位", mutate: func(player *playerState) {
+			player.inventory.Hotbar.Selected = 5
+		}},
+		{name: "丢弃工具", mutate: func(player *playerState) {
+			player.inventory.Hotbar.Slots[0] = core.ItemStack{}
+		}},
+		{name: "工具损坏", mutate: func(player *playerState) {
+			player.inventory.Hotbar.Slots[0] = core.ItemStack{
+				Item: core.ItemBrokenStonePickaxe, Count: 1,
+			}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, sessions, targets := readyMiningPlayers(t, 1)
+			player := engine.sessions[sessions[0]].player
+			engine.SetBlockForTest(targets[0], core.CoalOreID)
+			setMiningHeldItem(player, core.ItemStonePickaxe)
+
+			for range 3 {
+				advanceMiningOnce(engine)
+			}
+			if player.mining.progressTicks != 3 {
+				t.Fatalf("进度 = %d，想要 3", player.mining.progressTicks)
+			}
+
+			test.mutate(player)
+			advanceMiningOnce(engine)
+
+			if player.mining.progressTicks != 1 {
+				t.Fatalf("工具离手后进度 = %d，想要重新从 1 开始", player.mining.progressTicks)
+			}
+			if player.mining.held == core.ItemStonePickaxe {
+				t.Fatal("状态机仍记录着已经离手的石镐")
+			}
+		})
+	}
+}
+
+func TestMiningHarvestableCapacityFailureIsAtomicRejectsOnceAndPreservesDurability(t *testing.T) {
 	engine, sessions, targets := readyMiningPlayers(t, 1)
 	session, target := sessions[0], targets[0]
+	player := engine.sessions[session].player
+	setMiningHeldItem(player, core.ItemStonePickaxe)
+	beforeTool := player.inventory.Hotbar.Slots[0]
 	fillMiningDrops(engine, target)
 	record := miningTargetRecord(t, engine, target)
 	beforeHash := record.Chunk.Hash()
 	beforeRevision := record.Revision
 
 	var result TickResult
-	for range 30 {
+	for range 15 {
 		result = advanceMiningOnce(engine)
 	}
 	if len(result.Rejected) != 1 || result.Rejected[0] != (Rejection{
@@ -330,6 +600,12 @@ func TestMiningHarvestableCapacityFailureIsAtomicAndRejectsOnce(t *testing.T) {
 	}
 	if engine.sessions[session].player.mining != (playerMiningState{}) {
 		t.Fatalf("容量失败后 mining=%+v，想要清零", engine.sessions[session].player.mining)
+	}
+	if got := player.inventory.Hotbar.Slots[0]; got != beforeTool {
+		t.Fatalf("容量拒绝修改了工具：got=%+v want=%+v", got, beforeTool)
+	}
+	if player.inventoryDirty {
+		t.Fatal("容量拒绝标记了 inventoryDirty")
 	}
 
 	next := advanceMiningOnce(engine)

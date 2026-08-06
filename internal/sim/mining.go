@@ -45,7 +45,7 @@ func miningRule(block core.BlockID, held core.ItemID) (uint16, bool) {
 		return 5, true
 	case core.StoneID:
 		switch held {
-		case core.ItemNone:
+		case core.ItemNone, core.ItemBrokenStonePickaxe, core.ItemBrokenIronPickaxe:
 			return 30, true
 		case core.ItemStonePickaxe:
 			return 15, true
@@ -167,8 +167,33 @@ func (engine *Engine) advanceMining(
 			result.Rejected = append(result.Rejected, Rejection{
 				Session: id, Sequence: player.lastInputSequence, Reason: reason,
 			})
+			continue
+		}
+		if consumeToolDurability(player) {
+			player.inventoryDirty = true
 		}
 	}
+}
+
+// consumeToolDurability 在成功破坏方块后扣减选中工具的耐久。
+// 耐久归零时把栏位整体替换为损坏形态。返回背包是否发生变化。
+func consumeToolDurability(player *playerState) bool {
+	selected := player.inventory.Hotbar.Selected
+	stack := player.inventory.Hotbar.Slots[selected]
+	if _, ok := core.ItemMaxDurability(stack.Item); !ok {
+		return false
+	}
+	if stack.Durability > 1 {
+		stack.Durability--
+		player.inventory.Hotbar.Slots[selected] = stack
+		return true
+	}
+	broken, ok := core.ItemBrokenForm(stack.Item)
+	if !ok {
+		return false
+	}
+	player.inventory.Hotbar.Slots[selected] = core.ItemStack{Item: broken, Count: 1}
+	return true
 }
 
 func (engine *Engine) completeMining(
