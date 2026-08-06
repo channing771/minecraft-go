@@ -9,7 +9,8 @@ import (
 )
 
 // DropSlotBytes 是单个掉落物槽的固定线上/存档编码长度。
-const DropSlotBytes = 4 + 1 + 2 + 1 + 4 + 4 + 1
+// schema v5 起物品堆包含 Item、Count 与 Durability。
+const DropSlotBytes = 4 + 1 + 2 + 1 + 2 + 4 + 4 + 1
 
 // DropSlot 是区块中的一个固定掉落物槽。
 // 槽始终保留 Generation，Active 为 false 时其余字段无意义。
@@ -49,22 +50,7 @@ func (c *Chunk) ClearDrop(slot int) {
 // PrepareDrop 预检可接收一个 item 的槽：先找同物品、同方块位置的最低未满堆，
 // 否则用最低的可复用空槽。它不修改区块，因此调用方可以先预检再原子提交。
 func (c *Chunk) PrepareDrop(item core.ItemID, blockIndex uint32) (int, bool) {
-	if !core.RegisteredItem(item) {
-		return 0, false
-	}
-	for slot := range c.drops {
-		drop := c.drops[slot]
-		if drop.Active && drop.Stack.Item == item && drop.BlockIndex == blockIndex &&
-			drop.Stack.Count < core.MaxStackCount {
-			return slot, true
-		}
-	}
-	for slot := range c.drops {
-		if !c.drops[slot].Active && c.drops[slot].Generation != math.MaxUint32 {
-			return slot, true
-		}
-	}
-	return 0, false
+	return prepareDropSlot(c.drops, item, blockIndex)
 }
 
 // CommitDrop 把一个物品写入 PrepareDrop 返回的槽并返回该堆的 generation。
@@ -72,11 +58,11 @@ func (c *Chunk) PrepareDrop(item core.ItemID, blockIndex uint32) (int, bool) {
 // 启用空槽时 generation 加一。
 func (c *Chunk) CommitDrop(
 	slot int,
-	item core.ItemID,
+	stack core.ItemStack,
 	blockIndex uint32,
 	pickupDelay uint8,
 ) uint32 {
-	if slot < 0 || slot >= core.DropsPerChunk {
+	if slot < 0 || slot >= core.DropsPerChunk || stack.Count != 1 || !stack.Valid() {
 		return 0
 	}
 	drop := c.drops[slot]
@@ -90,7 +76,7 @@ func (c *Chunk) CommitDrop(
 	c.drops[slot] = DropSlot{
 		Generation:       drop.Generation + 1,
 		Active:           true,
-		Stack:            core.ItemStack{Item: item, Count: 1},
+		Stack:            stack,
 		BlockIndex:       blockIndex,
 		PickupDelayTicks: pickupDelay,
 	}
@@ -110,9 +96,10 @@ func (c *Chunk) DropsHash() [sha256.Size]byte {
 		}
 		binary.LittleEndian.PutUint16(encoded[5:], uint16(drop.Stack.Item))
 		encoded[7] = drop.Stack.Count
-		binary.LittleEndian.PutUint32(encoded[8:], drop.BlockIndex)
-		binary.LittleEndian.PutUint32(encoded[12:], drop.AgeTicks)
-		encoded[16] = drop.PickupDelayTicks
+		binary.LittleEndian.PutUint16(encoded[8:], drop.Stack.Durability)
+		binary.LittleEndian.PutUint32(encoded[10:], drop.BlockIndex)
+		binary.LittleEndian.PutUint32(encoded[14:], drop.AgeTicks)
+		encoded[18] = drop.PickupDelayTicks
 		_, _ = hash.Write(encoded[:])
 	}
 	var sum [sha256.Size]byte
@@ -129,12 +116,13 @@ func (c *Chunk) PrepareDropBatch(
 ) ([core.DropsPerChunk]DropSlot, bool) {
 	next := c.drops
 	for _, stack := range stacks {
-		if stack.Item == core.ItemNone || stack.Count == 0 {
+		if stack == (core.ItemStack{}) {
 			continue
 		}
-		if !core.RegisteredItem(stack.Item) {
+		if !stack.Valid() {
 			return c.drops, false
 		}
+		limit, _ := core.ItemStackLimit(stack.Item)
 		remaining := stack.Count
 		for remaining > 0 {
 			slot, ok := prepareDropSlot(next, stack.Item, blockIndex)
@@ -143,7 +131,7 @@ func (c *Chunk) PrepareDropBatch(
 			}
 			drop := next[slot]
 			if drop.Active {
-				space := core.MaxStackCount - drop.Stack.Count
+				space := limit - drop.Stack.Count
 				taken := min(space, remaining)
 				drop.Stack.Count += taken
 				// 与单件合并同一规则：保留既有寿命，延长到较长的来源延迟。
@@ -152,11 +140,13 @@ func (c *Chunk) PrepareDropBatch(
 				next[slot] = drop
 				continue
 			}
-			taken := min(uint8(core.MaxStackCount), remaining)
+			taken := min(limit, remaining)
+			incoming := stack
+			incoming.Count = taken
 			next[slot] = DropSlot{
 				Generation:       drop.Generation + 1,
 				Active:           true,
-				Stack:            core.ItemStack{Item: stack.Item, Count: taken},
+				Stack:            incoming,
 				BlockIndex:       blockIndex,
 				PickupDelayTicks: pickupDelay,
 			}
@@ -171,16 +161,22 @@ func (c *Chunk) CommitDropBatch(next [core.DropsPerChunk]DropSlot) {
 	c.drops = next
 }
 
-// prepareDropSlot 在给定数组上复用 PrepareDrop 的选槽规则。
+// prepareDropSlot 是选槽的唯一实现：PrepareDrop 与 PrepareDropBatch 都复用它，
+// 避免两处各自硬编码堆叠上限而彼此走样。
 func prepareDropSlot(
 	drops [core.DropsPerChunk]DropSlot,
 	item core.ItemID,
 	blockIndex uint32,
 ) (int, bool) {
+	// 合并必须遵守该物品自己的单格上限：工具上限为 1，因此永不合并。
+	limit, ok := core.ItemStackLimit(item)
+	if !ok {
+		return 0, false
+	}
 	for slot := range drops {
 		drop := drops[slot]
 		if drop.Active && drop.Stack.Item == item && drop.BlockIndex == blockIndex &&
-			drop.Stack.Count < core.MaxStackCount {
+			drop.Stack.Count < limit {
 			return slot, true
 		}
 	}

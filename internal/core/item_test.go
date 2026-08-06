@@ -44,10 +44,11 @@ func TestToolIDsAndStackLimitsAreStable(t *testing.T) {
 		}
 	}
 	for _, tool := range []core.ItemID{core.ItemStonePickaxe, core.ItemIronPickaxe} {
-		if !(core.ItemStack{Item: tool, Count: 1}).Valid() {
+		full, _ := core.ItemMaxDurability(tool)
+		if !(core.ItemStack{Item: tool, Count: 1, Durability: full}).Valid() {
 			t.Errorf("单个工具 %d 应当有效", tool)
 		}
-		if (core.ItemStack{Item: tool, Count: 2}).Valid() {
+		if (core.ItemStack{Item: tool, Count: 2, Durability: full}).Valid() {
 			t.Errorf("两个工具 %d 必须无效", tool)
 		}
 	}
@@ -201,6 +202,21 @@ func TestHotbarAddRejectsUnknownItem(t *testing.T) {
 	}
 }
 
+func TestHotbarAddRejectsToolsWithoutDurability(t *testing.T) {
+	var hotbar core.Hotbar
+	for _, item := range []core.ItemID{core.ItemStonePickaxe, core.ItemIronPickaxe} {
+		got, ok := hotbar.Add(item)
+		if ok || got != hotbar {
+			t.Fatalf("Add(%d) = %+v, %v，没有耐久参数时必须拒绝工具", item, got, ok)
+		}
+	}
+
+	got, ok := hotbar.Add(core.ItemDirt)
+	if !ok || got.Slots[0] != (core.ItemStack{Item: core.ItemDirt, Count: 1}) {
+		t.Fatalf("普通物品 Add = %+v, %v", got, ok)
+	}
+}
+
 func TestHotbarConsumeNormalizesEmptySlot(t *testing.T) {
 	var h core.Hotbar
 	h.Slots[4] = core.ItemStack{Item: core.ItemDirt, Count: 1}
@@ -297,5 +313,92 @@ func TestBlockDropAndItemPlacementRoundTrip(t *testing.T) {
 		if !ok || got != block {
 			t.Fatalf("ItemPlacement(BlockDrop(%d)) = (%d, %v)，想要 (%d, true)", block, got, ok, block)
 		}
+	}
+}
+
+func TestItemMaxDurabilityCoversToolsOnly(t *testing.T) {
+	for _, test := range []struct {
+		item core.ItemID
+		want uint16
+	}{
+		{core.ItemStonePickaxe, 131},
+		{core.ItemIronPickaxe, 250},
+	} {
+		got, ok := core.ItemMaxDurability(test.item)
+		if !ok || got != test.want {
+			t.Fatalf("物品 %d 耐久上限 = (%d,%v)，想要 (%d,true)", test.item, got, ok, test.want)
+		}
+	}
+	// 非工具、损坏物品与未注册物品都没有耐久上限。
+	for _, item := range []core.ItemID{
+		core.ItemStone, core.ItemCoal, core.ItemIronIngot,
+		core.ItemBrokenStonePickaxe, core.ItemBrokenIronPickaxe,
+		core.ItemNone,
+	} {
+		if got, ok := core.ItemMaxDurability(item); ok || got != 0 {
+			t.Fatalf("物品 %d 耐久上限 = (%d,%v)，想要 (0,false)", item, got, ok)
+		}
+	}
+}
+
+func TestItemBrokenFormMapsEachTool(t *testing.T) {
+	for _, test := range []struct {
+		item core.ItemID
+		want core.ItemID
+	}{
+		{core.ItemStonePickaxe, core.ItemBrokenStonePickaxe},
+		{core.ItemIronPickaxe, core.ItemBrokenIronPickaxe},
+	} {
+		got, ok := core.ItemBrokenForm(test.item)
+		if !ok || got != test.want {
+			t.Fatalf("物品 %d 损坏形态 = (%d,%v)，想要 (%d,true)", test.item, got, ok, test.want)
+		}
+	}
+	// 损坏物品不会再损坏一次。
+	for _, item := range []core.ItemID{
+		core.ItemStone, core.ItemBrokenStonePickaxe, core.ItemBrokenIronPickaxe,
+	} {
+		if got, ok := core.ItemBrokenForm(item); ok || got != core.ItemNone {
+			t.Fatalf("物品 %d 损坏形态 = (%d,%v)，想要 (ItemNone,false)", item, got, ok)
+		}
+	}
+}
+
+func TestBrokenToolsAreRegisteredAndUnstackable(t *testing.T) {
+	for _, item := range []core.ItemID{
+		core.ItemBrokenStonePickaxe, core.ItemBrokenIronPickaxe,
+	} {
+		if !core.RegisteredItem(item) {
+			t.Fatalf("损坏物品 %d 未注册", item)
+		}
+		if limit, ok := core.ItemStackLimit(item); !ok || limit != 1 {
+			t.Fatalf("损坏物品 %d 单格上限 = (%d,%v)，想要 (1,true)", item, limit, ok)
+		}
+	}
+}
+
+func TestItemStackValidEnforcesDurabilityDomain(t *testing.T) {
+	// 有耐久上限的物品：耐久必须落在 1..上限。
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	for _, test := range []struct {
+		name  string
+		stack core.ItemStack
+		want  bool
+	}{
+		{"满耐久工具", core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}, true},
+		{"半耐久工具", core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 1}, true},
+		{"零耐久工具", core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 0}, false},
+		{"超上限工具", core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full + 1}, false},
+		{"非工具带耐久", core.ItemStack{Item: core.ItemStone, Count: 1, Durability: 1}, false},
+		{"非工具零耐久", core.ItemStack{Item: core.ItemStone, Count: 1}, true},
+		{"损坏物品带耐久", core.ItemStack{Item: core.ItemBrokenStonePickaxe, Count: 1, Durability: 1}, false},
+		{"损坏物品零耐久", core.ItemStack{Item: core.ItemBrokenStonePickaxe, Count: 1}, true},
+		{"空栏位", core.ItemStack{}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.stack.Valid(); got != test.want {
+				t.Fatalf("Valid() = %v，想要 %v", got, test.want)
+			}
+		})
 	}
 }

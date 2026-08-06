@@ -31,6 +31,16 @@ var playerMigrations = map[uint32]playerMigration{
 		dto.Inventory.Backpack = [core.BackpackSlots]core.ItemStack{}
 		return dto, nil
 	},
+	// v3 没有耐久字段，旧工具一律迁移为满耐久。
+	3: func(dto playerDTO) (playerDTO, error) {
+		for slot, stack := range dto.Inventory.Hotbar.Slots {
+			dto.Inventory.Hotbar.Slots[slot] = fillFullDurability(stack)
+		}
+		for slot, stack := range dto.Inventory.Backpack {
+			dto.Inventory.Backpack[slot] = fillFullDurability(stack)
+		}
+		return dto, nil
+	},
 }
 
 func migratePlayer(from uint32, dto playerDTO) (playerDTO, bool, error) {

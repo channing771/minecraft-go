@@ -18,6 +18,7 @@ type ItemDropPresentation struct {
 	BlockIndex uint32
 	Item       core.ItemID
 	Count      uint8
+	Durability uint16
 }
 
 // ItemDrops 是权威掉落物的固定容量只读镜像。
@@ -66,6 +67,7 @@ func (mirror *ItemDrops) applyUpserts(upserts network.ItemDropUpserts) error {
 	for _, drop := range upserts.Drops {
 		mirror.drops[drop.ID] = ItemDropPresentation{
 			ID: drop.ID, BlockIndex: drop.BlockIndex, Item: drop.Item, Count: drop.Count,
+			Durability: drop.Durability,
 		}
 	}
 	return nil

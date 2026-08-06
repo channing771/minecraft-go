@@ -295,6 +295,15 @@ func testAppendSection(dst []byte, index uint32, snapshot world.ContainerSnapsho
 }
 
 func testEnvelope(key core.ChunkKey, revision uint64, logical []byte) []byte {
+	return testEnvelopeForSchema(key, revision, currentChunkSchema, logical)
+}
+
+func testEnvelopeForSchema(
+	key core.ChunkKey,
+	revision uint64,
+	schema uint32,
+	logical []byte,
+) []byte {
 	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderCRC(true))
 	if err != nil {
 		panic(err)
@@ -305,7 +314,7 @@ func testEnvelope(key core.ChunkKey, revision uint64, logical []byte) []byte {
 	payload := make([]byte, 0, 44+len(compressed))
 	payload = append(payload, "CHNK"...)
 	payload = testAppendU32(payload, 1)
-	payload = testAppendU32(payload, currentChunkSchema)
+	payload = testAppendU32(payload, schema)
 	payload = testAppendU32(payload, uint32(key.Dimension))
 	payload = testAppendU32(payload, uint32(key.Pos.X))
 	payload = testAppendU32(payload, uint32(key.Pos.Z))

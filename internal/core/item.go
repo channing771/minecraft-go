@@ -17,6 +17,10 @@ const (
 	ItemIronBlock
 	ItemStonePickaxe
 	ItemIronPickaxe
+	// 以下是工具耐久耗尽后的形态，只能追加在末尾：
+	// 插入会平移后续物品 ID，破坏既有存档与线上字节。
+	ItemBrokenStonePickaxe
+	ItemBrokenIronPickaxe
 )
 
 const (
@@ -30,6 +34,8 @@ const (
 type ItemStack struct {
 	Item  ItemID
 	Count uint8
+	// Durability 只对有耐久上限的工具有意义，其余物品恒为 0。
+	Durability uint16
 }
 
 // Hotbar 是玩家的固定容量快捷栏，Selected 取值 0..HotbarSlots-1。
@@ -38,16 +44,22 @@ type Hotbar struct {
 	Slots    [HotbarSlots]ItemStack
 }
 
-// Valid 报告栏位值是否规范：空栏位数量必须为零，非空栏位必须是已注册物品且数量不超过物品上限。
+// Valid 报告栏位值是否规范：空栏位数量必须为零，非空栏位必须是已注册物品且数量不超过物品上限；
+// 有耐久上限的工具，耐久必须落在 1..上限，没有耐久概念的物品耐久必须保持零值。
 func (s ItemStack) Valid() bool {
 	limit, ok := ItemStackLimit(s.Item)
 	if !ok {
-		return s.Item == ItemNone && s.Count == 0
+		return s.Item == ItemNone && s.Count == 0 && s.Durability == 0
 	}
-	if s.Count == 0 {
+	if s.Count == 0 || s.Count > limit {
 		return false
 	}
-	return s.Count <= limit
+	maxDurability, hasDurability := ItemMaxDurability(s.Item)
+	if !hasDurability {
+		// 没有耐久概念的物品必须保持零值，否则同物品的两个栈会因无意义字段拒绝合并。
+		return s.Durability == 0
+	}
+	return s.Durability >= 1 && s.Durability <= maxDurability
 }
 
 // Valid 报告整个快捷栏是否规范。
@@ -68,6 +80,9 @@ func (h Hotbar) Valid() bool {
 func (h Hotbar) Add(item ItemID) (Hotbar, bool) {
 	limit, ok := ItemStackLimit(item)
 	if !ok {
+		return h, false
+	}
+	if _, ok := ItemMaxDurability(item); ok {
 		return h, false
 	}
 	for i := range h.Slots {
@@ -133,10 +148,35 @@ func ItemStackLimit(item ItemID) (uint8, bool) {
 	case ItemStone, ItemDirt, ItemGrass, ItemStoneBrick, ItemCoal,
 		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock:
 		return MaxStackCount, true
-	case ItemStonePickaxe, ItemIronPickaxe:
+	case ItemStonePickaxe, ItemIronPickaxe,
+		ItemBrokenStonePickaxe, ItemBrokenIronPickaxe:
 		return 1, true
 	default:
 		return 0, false
+	}
+}
+
+// ItemMaxDurability 返回工具的耐久上限；没有耐久的物品返回 0 与 false。
+func ItemMaxDurability(item ItemID) (uint16, bool) {
+	switch item {
+	case ItemStonePickaxe:
+		return 131, true
+	case ItemIronPickaxe:
+		return 250, true
+	default:
+		return 0, false
+	}
+}
+
+// ItemBrokenForm 返回工具耐久耗尽后的形态；不会损坏的物品返回 ItemNone 与 false。
+func ItemBrokenForm(item ItemID) (ItemID, bool) {
+	switch item {
+	case ItemStonePickaxe:
+		return ItemBrokenStonePickaxe, true
+	case ItemIronPickaxe:
+		return ItemBrokenIronPickaxe, true
+	default:
+		return ItemNone, false
 	}
 }
 

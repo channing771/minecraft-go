@@ -210,6 +210,7 @@ func TestItemDropColorCoversRegisteredNonPlaceableItems(t *testing.T) {
 	for _, item := range []core.ItemID{
 		core.ItemCoal, core.ItemRawIron, core.ItemIronIngot,
 		core.ItemFurnace, core.ItemIronBlock,
+		core.ItemBrokenStonePickaxe, core.ItemBrokenIronPickaxe,
 	} {
 		color, ok := itemDropColor(item)
 		if !ok {
