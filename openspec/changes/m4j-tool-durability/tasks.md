@@ -56,11 +56,11 @@
 
 ## 9. 纵向闭环、文档与全门禁
 
-- [ ] 9.1 在 `internal/server/drop_restart_test.go` 写 TCP/重启纵向测试，证明工具耐久跨 TCP 传输与正常关服重启精确保留；在 `internal/server/tcp_integration_test.go` 的版本拒绝矩阵中补入上一版本（v10）。
+- [x] 9.1 在 `internal/server/drop_restart_test.go` 写 TCP/重启纵向测试，证明工具耐久跨 TCP 传输与正常关服重启精确保留；在 `internal/server/tcp_integration_test.go` 的版本拒绝矩阵中补入上一版本（v10）。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server ./internal/network ./internal/storage ./cmd/mcgod -race -count=1'`；`CGO_ENABLED=0 GOOS=linux go build -o /private/tmp/mcgod-m4j ./cmd/mcgod`
-- [ ] 9.2 更新 `README.md` 与 `docs/notes/lan-server.md`：工具耐久上限、消耗与损坏行为、协议 v11（v10 拒绝）、玩家 schema v4、区块 schema v5、metadata v2 不变、升级前需备份世界目录、回退到 v10 程序必须恢复该备份。
+- [x] 9.2 更新 `README.md` 与 `docs/notes/lan-server.md`：工具耐久上限、消耗与损坏行为、协议 v11（v10 拒绝）、玩家 schema v4、区块 schema v5、metadata v2 不变、升级前需备份世界目录、回退到 v10 程序必须恢复该备份。
   - 验证：`git diff --exit-code origin/main -- docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json`；`rg -n 'scenarioVersion[[:space:]]*= 12' cmd/mcgo/benchmark.go`；`shasum -a 256 docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json`（与 1.1 记录的哈希比对，必须完全一致）
-- [ ] 9.3 全仓门禁与最终范围核对。
+- [x] 9.3 全仓门禁与最终范围核对。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`；`go vet ./...`；`go test ./internal/archcheck -count=1`；`go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s`；`gofmt -l .`；`git diff --check`；`openspec validate --all --strict --no-interactive`；`git diff --stat origin/main...HEAD`
 
 ## 10. 主规格同步与归档
