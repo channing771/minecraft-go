@@ -9,7 +9,8 @@ import (
 )
 
 // DropSlotBytes 是单个掉落物槽的固定线上/存档编码长度。
-const DropSlotBytes = 4 + 1 + 2 + 1 + 4 + 4 + 1
+// schema v5 起物品堆包含 Item、Count 与 Durability。
+const DropSlotBytes = 4 + 1 + 2 + 1 + 2 + 4 + 4 + 1
 
 // DropSlot 是区块中的一个固定掉落物槽。
 // 槽始终保留 Generation，Active 为 false 时其余字段无意义。
@@ -85,8 +86,7 @@ func (c *Chunk) CommitDrop(
 // DropsHash 返回只由固定槽顺序与槽字段决定的稳定 SHA-256。
 func (c *Chunk) DropsHash() [sha256.Size]byte {
 	hash := sha256.New()
-	// 哈希先独立纳入耐久值，同时保持 schema v4 的 DropSlotBytes=17；Task 6 升级 schema 后再统一布局。
-	var encoded [19]byte
+	var encoded [DropSlotBytes]byte
 	for slot := range c.drops {
 		drop := c.drops[slot]
 		binary.LittleEndian.PutUint32(encoded[0:], drop.Generation)

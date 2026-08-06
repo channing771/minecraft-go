@@ -41,8 +41,8 @@ func fixturePlayerInventory() core.Inventory {
 }
 
 func TestPlayerCodecRoundTrip(t *testing.T) {
-	if currentPlayerSchema != 3 {
-		t.Fatalf("玩家 schema=%d，工具没有改变栏位布局", currentPlayerSchema)
+	if currentPlayerSchema != 4 {
+		t.Fatalf("玩家 schema=%d，想要 4", currentPlayerSchema)
 	}
 	id := fixturePlayerID()
 	want := fixturePlayerSave(id, 7)
@@ -58,7 +58,7 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 	if got.NeedsRewrite {
-		t.Fatal("v3 player unexpectedly needs rewrite")
+		t.Fatal("v4 玩家意外需要重写")
 	}
 	got.Safe.Position[0] = 99
 	if want.Safe.Position[0] == 99 {
@@ -66,39 +66,30 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPlayerV3EncodingRejectsWornTools(t *testing.T) {
-	full := fixturePlayerSave(fixturePlayerID(), 7)
-	if _, err := encodePlayer(full); err != nil {
-		t.Fatalf("满耐久工具应当可用玩家 schema v3 编码: %v", err)
-	}
+func TestPlayerSchemaV4DecodeKeepsWornDurability(t *testing.T) {
+	save := fixturePlayerSave(fixturePlayerID(), 7)
+	save.Inventory.Hotbar.Slots[4].Durability = 73
+	save.Inventory.Backpack[7].Durability = 149
 
-	for _, test := range []struct {
-		name   string
-		mutate func(*core.Inventory)
-	}{
-		{"快捷栏磨损石镐", func(inventory *core.Inventory) {
-			inventory.Hotbar.Slots[4].Durability = 73
-		}},
-		{"背包磨损铁镐", func(inventory *core.Inventory) {
-			inventory.Backpack[7].Durability = 149
-		}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			save := full
-			test.mutate(&save.Inventory)
-			if _, err := encodePlayer(save); !errors.Is(err, ErrCorrupt) {
-				t.Fatalf("玩家 schema v3 编码磨损工具错误 = %v，想要 ErrCorrupt", err)
-			}
-		})
+	encoded, err := encodePlayer(save)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodePlayer(save.PlayerID, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Inventory != save.Inventory {
+		t.Fatalf("v4 磨损工具往返后 inventory=%+v，想要 %+v", got.Inventory, save.Inventory)
 	}
 }
 
-func TestPlayerV3Fixture(t *testing.T) {
+func TestPlayerV4Fixture(t *testing.T) {
 	encoded, err := encodePlayer(fixturePlayerSave(fixturePlayerID(), 19))
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "player-v3.bin")
+	path := filepath.Join("testdata", "player-v4.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -109,7 +100,24 @@ func TestPlayerV3Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, encoded) {
-		t.Fatal("v3 fixture drift; change schema version")
+		t.Fatal("v4 fixture drift; change schema version")
+	}
+}
+
+func TestPlayerV3FixtureMigratesLosslessly(t *testing.T) {
+	encoded, err := os.ReadFile(filepath.Join("testdata", "player-v3.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodePlayer(fixturePlayerID(), encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Inventory != fixturePlayerInventory() {
+		t.Fatalf("v3 迁移改变了物品状态: %+v", got.Inventory)
+	}
+	if !got.NeedsRewrite {
+		t.Fatal("v3 玩家必须标记为需要重写")
 	}
 }
 
@@ -154,6 +162,9 @@ func TestPlayerCodecRejectsInvalidHotbarPayload(t *testing.T) {
 		{"空物品非零数量", func(h *core.Hotbar) {
 			h.Slots[3] = core.ItemStack{Item: core.ItemNone, Count: 5}
 		}},
+		{"非工具携带耐久", func(h *core.Hotbar) {
+			h.Slots[5] = core.ItemStack{Item: core.ItemStone, Count: 1, Durability: 1}
+		}},
 	}
 	for _, tc := range invalid {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,13 +189,14 @@ func playerWireWithHotbar(t *testing.T, id core.PlayerID, hotbar core.Hotbar) []
 		t.Fatal(err)
 	}
 	wire := bytes.Clone(encoded)
-	offset := len(wire) - (1 + core.HotbarSlots*3)
+	offset := len(wire) - playerBackpackBytes - playerHotbarBytes
 	wire[offset] = hotbar.Selected
 	offset++
 	for _, stack := range hotbar.Slots {
 		binary.LittleEndian.PutUint16(wire[offset:], uint16(stack.Item))
 		wire[offset+2] = stack.Count
-		offset += 3
+		binary.LittleEndian.PutUint16(wire[offset+3:], stack.Durability)
+		offset += 5
 	}
 	hasher := crc32.New(playerCRCTable)
 	_, _ = hasher.Write(wire[8:40])

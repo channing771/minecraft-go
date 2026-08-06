@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -14,7 +13,7 @@ import (
 )
 
 const (
-	currentChunkSchema uint32 = 4
+	currentChunkSchema uint32 = 5
 	maxCompressedChunk        = 1 << 20
 	maxDecodedChunk           = 2 << 20
 
@@ -232,10 +231,6 @@ func validateDropSlot(drop world.DropSlot) error {
 	if !drop.Stack.Valid() {
 		return errors.New("drop stack is invalid")
 	}
-	if full, ok := core.ItemMaxDurability(drop.Stack.Item); ok && drop.Stack.Durability != full {
-		// schema v4 没有耐久字段，只能无损表示满耐久工具；Task 6 的 schema v5 将移除此门禁并读取实际字段。
-		return errors.New("chunk schema v4 drop tool is not at full durability")
-	}
 	if drop.BlockIndex >= core.SectionsPerChunk*core.BlocksPerSection {
 		return fmt.Errorf("drop block index %d is outside the chunk", drop.BlockIndex)
 	}
@@ -251,6 +246,7 @@ func appendLogicalDropSlot(dst []byte, drop world.DropSlot) []byte {
 	dst = append(dst, active)
 	dst = binary.LittleEndian.AppendUint16(dst, uint16(drop.Stack.Item))
 	dst = append(dst, drop.Stack.Count)
+	dst = binary.LittleEndian.AppendUint16(dst, drop.Stack.Durability)
 	dst = appendU32(dst, drop.BlockIndex)
 	dst = appendU32(dst, drop.AgeTicks)
 	return append(dst, drop.PickupDelayTicks)
@@ -278,11 +274,8 @@ func decodeLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
 	if drop.Stack.Count, err = d.u8(); err != nil {
 		return world.DropSlot{}, err
 	}
-	// schema v4 没有耐久字段；Task 6 的 schema v5 将改为读取持久化耐久值。
-	if drop.Active {
-		if full, ok := core.ItemMaxDurability(drop.Stack.Item); ok {
-			drop.Stack.Durability = full
-		}
+	if drop.Stack.Durability, err = d.u16(); err != nil {
+		return world.DropSlot{}, err
 	}
 	if drop.BlockIndex, err = d.u32(); err != nil {
 		return world.DropSlot{}, err
@@ -293,72 +286,62 @@ func decodeLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
 	if drop.PickupDelayTicks, err = d.u8(); err != nil {
 		return world.DropSlot{}, err
 	}
-	if err := validateLegacyDropSlot(drop); err != nil {
+	if err := validateDropSlot(drop); err != nil {
 		return world.DropSlot{}, err
 	}
 	return drop, nil
 }
 
-// validateLegacyDropSlot 接受旧 v4 wire 可能留下的多件工具堆；当前编码仍由 validateDropSlot 严格校验。
-func validateLegacyDropSlot(drop world.DropSlot) error {
+func decodeLegacyLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
+	var drop world.DropSlot
+	var err error
+	if drop.Generation, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	active, err := d.u8()
+	if err != nil {
+		return world.DropSlot{}, err
+	}
+	if active > 1 {
+		return world.DropSlot{}, fmt.Errorf("invalid drop active flag %d", active)
+	}
+	drop.Active = active == 1
+	item, err := d.u16()
+	if err != nil {
+		return world.DropSlot{}, err
+	}
+	drop.Stack.Item = core.ItemID(item)
+	if drop.Stack.Count, err = d.u8(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.BlockIndex, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.AgeTicks, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.PickupDelayTicks, err = d.u8(); err != nil {
+		return world.DropSlot{}, err
+	}
 	if !drop.Active {
-		return nil
+		return drop, nil
 	}
 	if drop.Generation == 0 {
-		return errors.New("active drop slot has zero generation")
+		return world.DropSlot{}, errors.New("active drop slot has zero generation")
 	}
 	if drop.BlockIndex >= core.SectionsPerChunk*core.BlocksPerSection {
-		return fmt.Errorf("drop block index %d is outside the chunk", drop.BlockIndex)
+		return world.DropSlot{}, fmt.Errorf("drop block index %d is outside the chunk", drop.BlockIndex)
 	}
-	if full, ok := core.ItemMaxDurability(drop.Stack.Item); ok {
-		if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount ||
-			drop.Stack.Durability != full {
-			return errors.New("legacy tool drop stack is invalid")
+	if _, ok := core.ItemMaxDurability(drop.Stack.Item); ok {
+		if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount {
+			return world.DropSlot{}, errors.New("legacy tool drop stack is invalid")
 		}
-		return nil
+		return drop, nil
 	}
 	if !drop.Stack.Valid() {
-		return errors.New("drop stack is invalid")
+		return world.DropSlot{}, errors.New("drop stack is invalid")
 	}
-	return nil
-}
-
-func normalizeV4LegacyToolDropStacks(dto *chunkDTO) (bool, error) {
-	sources := dto.Drops
-	normalized := dto.Drops
-	changed := false
-	for sourceSlot, source := range sources {
-		if !source.Active || source.Stack.Count <= 1 {
-			continue
-		}
-		if _, ok := core.ItemMaxDurability(source.Stack.Item); !ok {
-			continue
-		}
-
-		changed = true
-		normalized[sourceSlot].Stack.Count = 1
-		for extra := uint8(1); extra < source.Stack.Count; extra++ {
-			targetSlot := -1
-			for slot, candidate := range normalized {
-				if !candidate.Active && candidate.Generation != math.MaxUint32 {
-					targetSlot = slot
-					break
-				}
-			}
-			if targetSlot < 0 {
-				return false, fmt.Errorf(
-					"%w: legacy tool drop slot %d has insufficient reusable drop slots",
-					ErrCorrupt, sourceSlot,
-				)
-			}
-			target := source
-			target.Generation = normalized[targetSlot].Generation + 1
-			target.Stack.Count = 1
-			normalized[targetSlot] = target
-		}
-	}
-	dto.Drops = normalized
-	return changed, nil
+	return drop, nil
 }
 
 func appendLogicalSection(dst []byte, index uint32, snapshot world.ContainerSnapshot) []byte {
@@ -477,13 +460,6 @@ func decodeChunkPayload(
 	if err != nil {
 		return decodedPayload{}, err
 	}
-	// schema v4 过渡期在构造区块前归一化 M4H 可能写出的工具堆；Task 6 升到 schema v5 时
-	// 应把补满与拆分正式并入 v4→v5 migration，并删除这里的过渡调用，避免双重处理。
-	normalized, err := normalizeV4LegacyToolDropStacks(&dto)
-	if err != nil {
-		return decodedPayload{}, err
-	}
-	migrated = migrated || normalized
 	chunk, err := chunkFromDTO(dto)
 	if err != nil {
 		return decodedPayload{}, err
@@ -547,7 +523,12 @@ func decodeLogicalChunk(
 	}
 	if schema >= 2 {
 		for slot := range core.DropsPerChunk {
-			drop, err := decodeLogicalDropSlot(&logical)
+			var drop world.DropSlot
+			if schema >= 5 {
+				drop, err = decodeLogicalDropSlot(&logical)
+			} else {
+				drop, err = decodeLegacyLogicalDropSlot(&logical)
+			}
 			if err != nil {
 				return chunkDTO{}, fmt.Errorf("%w: drop slot %d: %v", ErrCorrupt, slot, err)
 			}

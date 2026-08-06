@@ -57,8 +57,8 @@ func TestChunkCodecRoundTripsFurnaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 4 {
-		t.Fatalf("schema = %d，想要 4", got.Schema)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 5 {
+		t.Fatalf("schema = %d，想要 5", got.Schema)
 	}
 	for slot := range core.FurnacesPerChunk {
 		if got.Chunk.Furnace(slot) != want.Furnace(slot) {
@@ -101,7 +101,7 @@ func TestChunkV3FixtureMigratesToEmptyFurnaces(t *testing.T) {
 		t.Fatalf("迁移后 schema = %d，想要 %d", got.Schema, currentChunkSchema)
 	}
 	if !got.Migrated {
-		t.Fatal("v3 区块必须标记为已迁移，才能在下次保存时改写为 v4")
+		t.Fatal("v3 区块必须标记为已迁移，才能在下次保存时改写为当前 schema")
 	}
 }
 
@@ -131,7 +131,7 @@ func TestChunkV1AndV2StillMigrateThroughChain(t *testing.T) {
 	}
 }
 
-func TestChunkV4Fixture(t *testing.T) {
+func TestChunkV5Fixture(t *testing.T) {
 	want := furnaceFixtureChunk(t, core.ChunkPos{X: -3, Z: 7})
 	encoded, err := encodeChunkPayload(ChunkSave{
 		Key:      core.ChunkKey{Dimension: core.Overworld, Pos: want.Pos},
@@ -141,7 +141,7 @@ func TestChunkV4Fixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "chunk-v4.bin")
+	path := filepath.Join("testdata", "chunk-v5.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -152,7 +152,31 @@ func TestChunkV4Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, encoded) {
-		t.Fatal("v4 fixture drift; change schema version")
+		t.Fatal("v5 fixture drift; change schema version")
+	}
+}
+
+func TestChunkV4FixtureMigratesLosslessly(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	encoded, err := os.ReadFile(filepath.Join("testdata", "chunk-v4.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeChunkPayload(key, 19, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := furnaceFixtureChunk(t, key.Pos)
+	if got.Chunk.Hash() != want.Hash() || got.Chunk.DropsHash() != want.DropsHash() {
+		t.Fatal("v4 迁移改变了方块或掉落物状态")
+	}
+	for slot := range core.FurnacesPerChunk {
+		if got.Chunk.Furnace(slot) != want.Furnace(slot) {
+			t.Fatalf("v4 迁移改变了熔炉槽 %d", slot)
+		}
+	}
+	if !got.Migrated || got.Schema != currentChunkSchema {
+		t.Fatalf("v4 迁移结果 schema=%d migrated=%v", got.Schema, got.Migrated)
 	}
 }
 
@@ -256,9 +280,9 @@ func TestChunkCodecRejectsFutureSchema(t *testing.T) {
 	_ = key
 }
 
-func TestPlayerSchemaStaysThreeWithM4EItems(t *testing.T) {
-	if currentPlayerSchema != 3 {
-		t.Fatalf("玩家 schema = %d，M4E 不改变布局", currentPlayerSchema)
+func TestPlayerSchemaV4KeepsM4EItems(t *testing.T) {
+	if currentPlayerSchema != 4 {
+		t.Fatalf("玩家 schema = %d，想要 4", currentPlayerSchema)
 	}
 	var inventory core.Inventory
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemCoal, Count: 12}

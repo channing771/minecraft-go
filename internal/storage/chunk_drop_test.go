@@ -133,13 +133,6 @@ func TestChunkCodecRejectsInvalidDropSlots(t *testing.T) {
 			Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 1},
 			BlockIndex: index,
 		}},
-		{"schema v4 磨损工具", world.DropSlot{
-			Generation: 1, Active: true,
-			Stack: core.ItemStack{
-				Item: core.ItemStonePickaxe, Count: 1, Durability: full - 1,
-			},
-			BlockIndex: index,
-		}},
 		{"非工具携带耐久", world.DropSlot{
 			Generation: 1, Active: true,
 			Stack:      core.ItemStack{Item: core.ItemStone, Count: 1, Durability: 1},
@@ -168,26 +161,53 @@ func TestChunkV4ToolDropRestoresFullDurabilityAndCanBePickedUp(t *testing.T) {
 	if !ok {
 		t.Fatal("固定测试方块没有区块索引")
 	}
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 1, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 1},
+		BlockIndex: index,
+	})
+
+	encoded := legacyV4ChunkPayload(t, key, 19, chunk)
+	got, err := decodeChunkPayload(key, 19, encoded)
+	if err != nil {
+		t.Fatalf("解码 schema v4 工具: %v", err)
+	}
 	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
 	want := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}
+	if got.Schema != currentChunkSchema || got.Chunk.Drop(0).Stack != want || !got.Migrated {
+		t.Fatalf("schema v4 工具掉落物 = %+v，想要 %+v", got.Chunk.Drop(0).Stack, want)
+	}
+	inventory, remainder := (core.Inventory{}).AddStack(got.Chunk.Drop(0).Stack)
+	if remainder != (core.ItemStack{}) || inventory.Hotbar.Slots[0] != want {
+		t.Fatalf("拾取 schema v4 工具后 inventory=%+v remainder=%+v", inventory, remainder)
+	}
+}
+
+func TestChunkSchemaV5DecodeKeepsWornDurability(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	chunk := codecFixtureChunk(key.Pos)
+	index, ok := world.ChunkBlockIndex(core.BlockPos{
+		X: key.Pos.X << core.SectionShift, Y: 5, Z: key.Pos.Z << core.SectionShift,
+	})
+	if !ok {
+		t.Fatal("固定测试方块没有区块索引")
+	}
+	want := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 73}
 	chunk.SetDrop(0, world.DropSlot{
 		Generation: 1, Active: true, Stack: want, BlockIndex: index,
 	})
 
 	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 19, Chunk: chunk})
 	if err != nil {
-		t.Fatalf("编码 schema v4 满耐久工具: %v", err)
+		t.Fatal(err)
 	}
 	got, err := decodeChunkPayload(key, 19, encoded)
 	if err != nil {
-		t.Fatalf("解码 schema v4 满耐久工具: %v", err)
+		t.Fatal(err)
 	}
-	if got.Schema != 4 || got.Chunk.Drop(0).Stack != want {
-		t.Fatalf("schema v4 工具掉落物 = %+v，想要 %+v", got.Chunk.Drop(0).Stack, want)
-	}
-	inventory, remainder := (core.Inventory{}).AddStack(got.Chunk.Drop(0).Stack)
-	if remainder != (core.ItemStack{}) || inventory.Hotbar.Slots[0] != want {
-		t.Fatalf("拾取 schema v4 工具后 inventory=%+v remainder=%+v", inventory, remainder)
+	if got.Schema != 5 || got.Migrated || got.Chunk.Drop(0).Stack != want {
+		t.Fatalf("v5 磨损工具往返结果 schema=%d migrated=%v stack=%+v",
+			got.Schema, got.Migrated, got.Chunk.Drop(0).Stack)
 	}
 }
 
@@ -206,16 +226,16 @@ func TestChunkV4LegacyToolDropStackSplitsDeterministically(t *testing.T) {
 	chunk.SetDrop(2, world.DropSlot{Generation: 7})
 	chunk.SetDrop(5, world.DropSlot{
 		Generation: 11, Active: true,
-		Stack:      core.ItemStack{Item: core.ItemStone, Count: 2},
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 2},
 		BlockIndex: firstIndex, AgeTicks: 101, PickupDelayTicks: 9,
 	})
 	chunk.SetDrop(8, world.DropSlot{
 		Generation: 13, Active: true,
-		Stack:      core.ItemStack{Item: core.ItemStone, Count: 2},
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 2},
 		BlockIndex: secondIndex, AgeTicks: 202, PickupDelayTicks: 4,
 	})
 
-	payload := legacyV4ToolDropPayload(t, key, 19, chunk, 5, 8)
+	payload := legacyV4ChunkPayload(t, key, 19, chunk)
 	decoded, err := decodeChunkPayload(key, 19, payload)
 	if err != nil {
 		t.Fatalf("解码遗留 schema v4 工具堆: %v", err)
@@ -263,7 +283,7 @@ func TestChunkV4LegacyToolDropStackRejectsInsufficientCapacity(t *testing.T) {
 	}
 	chunk.SetDrop(0, world.DropSlot{
 		Generation: 1, Active: true,
-		Stack:      core.ItemStack{Item: core.ItemStone, Count: 2},
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 2},
 		BlockIndex: index,
 	})
 	for slot := 1; slot < core.DropsPerChunk; slot++ {
@@ -278,32 +298,53 @@ func TestChunkV4LegacyToolDropStackRejectsInsufficientCapacity(t *testing.T) {
 		})
 	}
 
-	payload := legacyV4ToolDropPayload(t, key, 19, chunk, 0)
+	payload := legacyV4ChunkPayload(t, key, 19, chunk)
+	before := bytes.Clone(payload)
 	if _, err := decodeChunkPayload(key, 19, payload); !errors.Is(err, ErrCorrupt) ||
 		!strings.Contains(err.Error(), "insufficient reusable drop slots") {
 		t.Fatalf("容量不足 error=%v，想要明确的 ErrCorrupt", err)
 	}
+	if !bytes.Equal(payload, before) {
+		t.Fatal("失败迁移修改了原始存档字节")
+	}
 }
 
-func legacyV4ToolDropPayload(
+func legacyV4ChunkPayload(
 	t *testing.T,
 	key core.ChunkKey,
 	revision uint64,
 	chunk *world.Chunk,
-	toolSlots ...int,
 ) []byte {
 	t.Helper()
-	logical, err := encodeLogicalChunk(ChunkSave{Key: key, Revision: revision, Chunk: chunk})
-	if err != nil {
-		t.Fatalf("编码 v4 测试基线: %v", err)
+	logical := make([]byte, 0, 32)
+	logical = append(logical, chunkLogicalMagic[:]...)
+	logical = appendU32(logical, 4)
+	logical = appendU32(logical, uint32(key.Dimension))
+	logical = appendU32(logical, uint32(key.Pos.X))
+	logical = appendU32(logical, uint32(key.Pos.Z))
+	logical = appendU64(logical, revision)
+	logical = appendU32(logical, core.SectionsPerChunk)
+	for index := range core.SectionsPerChunk {
+		logical = appendLogicalSection(logical, uint32(index), chunk.Section(index).Blocks.Snapshot())
 	}
-	dropStart := len(logical) - core.FurnacesPerChunk*world.FurnaceSlotBytes -
-		core.DropsPerChunk*world.DropSlotBytes
-	for _, slot := range toolSlots {
-		itemOffset := dropStart + slot*world.DropSlotBytes + 5
-		binary.LittleEndian.PutUint16(logical[itemOffset:], uint16(core.ItemStonePickaxe))
+	for slot := range core.DropsPerChunk {
+		drop := chunk.Drop(slot)
+		logical = appendU32(logical, drop.Generation)
+		active := byte(0)
+		if drop.Active {
+			active = 1
+		}
+		logical = append(logical, active)
+		logical = binary.LittleEndian.AppendUint16(logical, uint16(drop.Stack.Item))
+		logical = append(logical, drop.Stack.Count)
+		logical = appendU32(logical, drop.BlockIndex)
+		logical = appendU32(logical, drop.AgeTicks)
+		logical = append(logical, drop.PickupDelayTicks)
 	}
-	return testEnvelope(key, revision, logical)
+	for slot := range core.FurnacesPerChunk {
+		logical = appendLogicalFurnaceSlot(logical, chunk.Furnace(slot))
+	}
+	return testEnvelopeForSchema(key, revision, 4, logical)
 }
 
 func TestChunkCodecRejectsWrongDropSlotCount(t *testing.T) {
@@ -362,11 +403,11 @@ func TestChunkV2FixtureMigratesLosslesslyAndNeedsRewrite(t *testing.T) {
 		t.Fatalf("迁移后 schema = %d，想要 %d", got.Schema, currentChunkSchema)
 	}
 	if !got.Migrated {
-		t.Fatal("v2 区块必须标记为已迁移，才能在下次保存时改写为 v3")
+		t.Fatal("v2 区块必须标记为已迁移，才能在下次保存时改写为当前 schema")
 	}
 }
 
-func TestChunkV3FixtureDoesNotNeedRewrite(t *testing.T) {
+func TestCurrentChunkSchemaDoesNotNeedRewrite(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	encoded, err := encodeChunkPayload(ChunkSave{
 		Key: key, Revision: 19, Chunk: dropFixtureChunk(t, key.Pos),
