@@ -49,9 +49,9 @@
 
 ## 8. 快捷栏耐久条
 
-- [ ] 8.1 在 `internal/render/hotbar_test.go` 写失败测试：`appendDurabilityBar` 只对磨损中的耐久工具产生 quad，满耐久/损坏物品/普通物品/空栏位不产生；填充宽度随剩余耐久变化。
+- [x] 8.1 在 `internal/render/hotbar_test.go` 写失败测试：`appendDurabilityBar` 只对磨损中的耐久工具产生 quad，满耐久/损坏物品/普通物品/空栏位不产生；填充宽度随剩余耐久变化。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render -run "DurabilityBar" -count=1'`
-- [ ] 8.2 `internal/render/hotbar.go` 新增 `appendDurabilityBar`，在 `layoutInventory` 中对九个快捷栏格调用；提高 `maxHotbarQuads` 以覆盖新增 quad 上限；修正满界面/关闭界面的既有 quad 数量断言（按用例实际内容调整，不放宽上限比较）。
+- [x] 8.2 `internal/render/hotbar.go` 新增 `appendDurabilityBar`，在 `layoutInventory` 中对九个快捷栏格调用；提高 `maxHotbarQuads` 以覆盖新增 quad 上限；修正满界面/关闭界面的既有 quad 数量断言（按用例实际内容调整，不放宽上限比较）。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./cmd/mcgo -race -count=1'`；`go test ./internal/archcheck -count=1`；`gofmt -l .`；`git diff --check`（自动验证不得创建或聚焦前台窗口）
 
 ## 9. 纵向闭环、文档与全门禁
