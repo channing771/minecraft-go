@@ -817,6 +817,10 @@ func decodeItemDropUpserts(d *byteDecoder) (ServerPacket, error) {
 		if drop.Count, err = d.u8(); err != nil {
 			return nil, err
 		}
+		// 协议 v10 没有耐久字段；Task 5 的 v11 将改为读取线上耐久值。
+		if full, ok := core.ItemMaxDurability(drop.Item); ok {
+			drop.Durability = full
+		}
 	}
 	return result, nil
 }

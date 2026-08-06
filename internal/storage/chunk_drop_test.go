@@ -93,6 +93,7 @@ func TestChunkCodecRejectsInvalidDropSlots(t *testing.T) {
 	if !ok {
 		t.Fatal("固定测试方块没有区块索引")
 	}
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
 	cases := []struct {
 		name string
 		slot world.DropSlot
@@ -118,6 +119,30 @@ func TestChunkCodecRejectsInvalidDropSlots(t *testing.T) {
 			Stack:      core.ItemStack{Item: core.ItemStone, Count: 1},
 			BlockIndex: core.SectionsPerChunk * core.BlocksPerSection,
 		}},
+		{"工具数量大于一", world.DropSlot{
+			Generation: 1, Active: true,
+			Stack: core.ItemStack{
+				Item: core.ItemStonePickaxe, Count: 2, Durability: full,
+			},
+			BlockIndex: index,
+		}},
+		{"工具零耐久", world.DropSlot{
+			Generation: 1, Active: true,
+			Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 1},
+			BlockIndex: index,
+		}},
+		{"schema v4 磨损工具", world.DropSlot{
+			Generation: 1, Active: true,
+			Stack: core.ItemStack{
+				Item: core.ItemStonePickaxe, Count: 1, Durability: full - 1,
+			},
+			BlockIndex: index,
+		}},
+		{"非工具携带耐久", world.DropSlot{
+			Generation: 1, Active: true,
+			Stack:      core.ItemStack{Item: core.ItemStone, Count: 1, Durability: 1},
+			BlockIndex: index,
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -129,6 +154,38 @@ func TestChunkCodecRejectsInvalidDropSlots(t *testing.T) {
 				t.Fatalf("编码非法槽 error = %v，想要 ErrCorrupt", err)
 			}
 		})
+	}
+}
+
+func TestChunkV4ToolDropRestoresFullDurabilityAndCanBePickedUp(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	chunk := codecFixtureChunk(key.Pos)
+	index, ok := world.ChunkBlockIndex(core.BlockPos{
+		X: key.Pos.X << core.SectionShift, Y: 5, Z: key.Pos.Z << core.SectionShift,
+	})
+	if !ok {
+		t.Fatal("固定测试方块没有区块索引")
+	}
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	want := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 1, Active: true, Stack: want, BlockIndex: index,
+	})
+
+	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 19, Chunk: chunk})
+	if err != nil {
+		t.Fatalf("编码 schema v4 满耐久工具: %v", err)
+	}
+	got, err := decodeChunkPayload(key, 19, encoded)
+	if err != nil {
+		t.Fatalf("解码 schema v4 满耐久工具: %v", err)
+	}
+	if got.Schema != 4 || got.Chunk.Drop(0).Stack != want {
+		t.Fatalf("schema v4 工具掉落物 = %+v，想要 %+v", got.Chunk.Drop(0).Stack, want)
+	}
+	inventory, remainder := (core.Inventory{}).AddStack(got.Chunk.Drop(0).Stack)
+	if remainder != (core.ItemStack{}) || inventory.Hotbar.Slots[0] != want {
+		t.Fatalf("拾取 schema v4 工具后 inventory=%+v remainder=%+v", inventory, remainder)
 	}
 }
 

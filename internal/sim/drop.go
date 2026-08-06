@@ -259,6 +259,7 @@ type DropSnapshot struct {
 	BlockIndex uint32
 	Item       core.ItemID
 	Count      uint8
+	Durability uint16
 }
 
 // MaxSessionDrops 是单个会话镜像的固定上限：25 个兴趣区块 × 每区块 32 槽。
@@ -316,6 +317,7 @@ func appendChunkDrops(
 			BlockIndex: drop.BlockIndex,
 			Item:       drop.Stack.Item,
 			Count:      drop.Stack.Count,
+			Durability: drop.Stack.Durability,
 		})
 	}
 	return dst

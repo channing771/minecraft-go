@@ -26,16 +26,9 @@ func (server *Server) publishDrops(current *session, tick uint64) bool {
 	sortDropIDs(removes)
 	current.dropRemoveScratch = removes
 
-	upserts := current.dropUpsertScratch[:0]
-	for _, drop := range current.dropScratch {
-		published, known := current.publishedDrops[drop.ID]
-		if known && published == drop {
-			continue
-		}
-		upserts = append(upserts, network.ItemDrop{
-			ID: drop.ID, BlockIndex: drop.BlockIndex, Item: drop.Item, Count: drop.Count,
-		})
-	}
+	upserts := appendChangedDropUpserts(
+		current.dropUpsertScratch[:0], current.dropScratch, current.publishedDrops,
+	)
 	current.dropUpsertScratch = upserts
 
 	for start := 0; start < len(removes); start += network.MaxItemDropBatch {
@@ -58,12 +51,35 @@ func (server *Server) publishDrops(current *session, tick uint64) bool {
 			return false
 		}
 		for _, drop := range upserts[start:end] {
-			current.publishedDrops[drop.ID] = sim.DropSnapshot{
-				ID: drop.ID, BlockIndex: drop.BlockIndex, Item: drop.Item, Count: drop.Count,
-			}
+			current.publishedDrops[drop.ID] = dropSnapshotFromItemDrop(drop)
 		}
 	}
 	return true
+}
+
+func appendChangedDropUpserts(
+	dst []network.ItemDrop,
+	drops []sim.DropSnapshot,
+	published map[core.DropID]sim.DropSnapshot,
+) []network.ItemDrop {
+	for _, drop := range drops {
+		previous, known := published[drop.ID]
+		if known && previous == drop {
+			continue
+		}
+		dst = append(dst, network.ItemDrop{
+			ID: drop.ID, BlockIndex: drop.BlockIndex, Item: drop.Item, Count: drop.Count,
+			Durability: drop.Durability,
+		})
+	}
+	return dst
+}
+
+func dropSnapshotFromItemDrop(drop network.ItemDrop) sim.DropSnapshot {
+	return sim.DropSnapshot{
+		ID: drop.ID, BlockIndex: drop.BlockIndex, Item: drop.Item, Count: drop.Count,
+		Durability: drop.Durability,
+	}
 }
 
 func containsDropID(drops []sim.DropSnapshot, id core.DropID) bool {

@@ -447,6 +447,7 @@ type ItemDrop struct {
 	BlockIndex uint32
 	Item       core.ItemID
 	Count      uint8
+	Durability uint16
 }
 
 // DropSelectedItem 请求把权威选中快捷栏中的一个物品原地转移为掉落物。
@@ -467,11 +468,15 @@ func (drop ItemDrop) validate() error {
 	if drop.BlockIndex >= maxChunkBlockIndex {
 		return errors.New("network: item drop block index is outside the chunk")
 	}
-	if !core.RegisteredItem(drop.Item) {
-		return errors.New("network: unknown item drop item")
+	stack := core.ItemStack{
+		Item: drop.Item, Count: drop.Count, Durability: drop.Durability,
 	}
-	if drop.Count < 1 || drop.Count > core.MaxStackCount {
-		return errors.New("network: item drop count is outside 1..64")
+	if !stack.Valid() {
+		return errors.New("network: invalid item drop stack")
+	}
+	if full, ok := core.ItemMaxDurability(drop.Item); ok && drop.Durability != full {
+		// 协议 v10 没有耐久字段，只能无损表示满耐久工具；Task 5 的 v11 将只移除此过渡限制。
+		return errors.New("network: protocol v10 item drop tool is not at full durability")
 	}
 	return nil
 }

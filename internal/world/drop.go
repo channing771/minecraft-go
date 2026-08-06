@@ -85,7 +85,8 @@ func (c *Chunk) CommitDrop(
 // DropsHash 返回只由固定槽顺序与槽字段决定的稳定 SHA-256。
 func (c *Chunk) DropsHash() [sha256.Size]byte {
 	hash := sha256.New()
-	var encoded [DropSlotBytes]byte
+	// 哈希先独立纳入耐久值，同时保持 schema v4 的 DropSlotBytes=17；Task 6 升级 schema 后再统一布局。
+	var encoded [19]byte
 	for slot := range c.drops {
 		drop := c.drops[slot]
 		binary.LittleEndian.PutUint32(encoded[0:], drop.Generation)
@@ -95,9 +96,10 @@ func (c *Chunk) DropsHash() [sha256.Size]byte {
 		}
 		binary.LittleEndian.PutUint16(encoded[5:], uint16(drop.Stack.Item))
 		encoded[7] = drop.Stack.Count
-		binary.LittleEndian.PutUint32(encoded[8:], drop.BlockIndex)
-		binary.LittleEndian.PutUint32(encoded[12:], drop.AgeTicks)
-		encoded[16] = drop.PickupDelayTicks
+		binary.LittleEndian.PutUint16(encoded[8:], drop.Stack.Durability)
+		binary.LittleEndian.PutUint32(encoded[10:], drop.BlockIndex)
+		binary.LittleEndian.PutUint32(encoded[14:], drop.AgeTicks)
+		encoded[18] = drop.PickupDelayTicks
 		_, _ = hash.Write(encoded[:])
 	}
 	var sum [sha256.Size]byte

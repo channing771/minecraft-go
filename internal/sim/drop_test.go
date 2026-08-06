@@ -217,6 +217,23 @@ func TestToolDropsKeepDurabilityAcrossInventorySlots(t *testing.T) {
 	}
 }
 
+func TestAppendSessionDropsKeepsToolDurability(t *testing.T) {
+	engine, session := readyFlatPlayer(t)
+	stack := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 73}
+	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
+		Generation: 1,
+		Active:     true,
+		Stack:      stack,
+		BlockIndex: dropTargetIndex(t),
+	})
+
+	got := engine.AppendSessionDrops(session, nil)
+	if len(got) != 1 || got[0].Item != stack.Item || got[0].Count != stack.Count ||
+		got[0].Durability != stack.Durability {
+		t.Fatalf("掉落物快照 = %+v，想要完整物品堆 %+v", got, stack)
+	}
+}
+
 func TestDropPartialPickupKeepsRemainder(t *testing.T) {
 	// 快捷栏与背包都装满，只在一格留下 2 个空间。
 	nearlyFull := fullTestInventory()

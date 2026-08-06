@@ -245,6 +245,24 @@ func TestChunkDropsHashCoversEverySlotField(t *testing.T) {
 	}
 }
 
+func TestChunkDropsHashCoversToolDurability(t *testing.T) {
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	first := dropTestChunk(t)
+	first.SetDrop(1, world.DropSlot{
+		Generation: 3, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 73},
+		BlockIndex: index, AgeTicks: 11, PickupDelayTicks: 7,
+	})
+	second := first.Clone()
+	drop := second.Drop(1)
+	drop.Stack.Durability--
+	second.SetDrop(1, drop)
+
+	if first.DropsHash() == second.DropsHash() {
+		t.Fatal("仅修改工具耐久没有改变掉落物哈希")
+	}
+}
+
 func TestChunkDropsHashIsSlotPositional(t *testing.T) {
 	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
 	drop := world.DropSlot{

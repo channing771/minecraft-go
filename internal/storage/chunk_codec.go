@@ -228,11 +228,12 @@ func validateDropSlot(drop world.DropSlot) error {
 	if drop.Generation == 0 {
 		return errors.New("active drop slot has zero generation")
 	}
-	if !core.RegisteredItem(drop.Stack.Item) {
-		return fmt.Errorf("unknown drop item %d", drop.Stack.Item)
+	if !drop.Stack.Valid() {
+		return errors.New("drop stack is invalid")
 	}
-	if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount {
-		return fmt.Errorf("drop count %d is outside 1..64", drop.Stack.Count)
+	if full, ok := core.ItemMaxDurability(drop.Stack.Item); ok && drop.Stack.Durability != full {
+		// schema v4 没有耐久字段，只能无损表示满耐久工具；Task 6 的 schema v5 将移除此门禁并读取实际字段。
+		return errors.New("chunk schema v4 drop tool is not at full durability")
 	}
 	if drop.BlockIndex >= core.SectionsPerChunk*core.BlocksPerSection {
 		return fmt.Errorf("drop block index %d is outside the chunk", drop.BlockIndex)
@@ -275,6 +276,12 @@ func decodeLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
 	drop.Stack.Item = core.ItemID(item)
 	if drop.Stack.Count, err = d.u8(); err != nil {
 		return world.DropSlot{}, err
+	}
+	// schema v4 没有耐久字段；Task 6 的 schema v5 将改为读取持久化耐久值。
+	if drop.Active {
+		if full, ok := core.ItemMaxDurability(drop.Stack.Item); ok {
+			drop.Stack.Durability = full
+		}
 	}
 	if drop.BlockIndex, err = d.u32(); err != nil {
 		return world.DropSlot{}, err
