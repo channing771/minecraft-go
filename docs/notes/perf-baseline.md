@@ -84,7 +84,77 @@ GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --p
 
 A/B 只支持以下边界：短时 no-sky 未改善 flying p99（相对 full `+0.053ms`），因此“完整 sky draw 本身”不是已观察到的短时改善来源；短时 no-stars 的 flying p99 降至 `11.555ms`，但完整时长 no-stars 仍为 `12.024ms`，故**未确认** `star_light` 是 flying p99 根因，也不存在生产修复。RSS 同样不可归因：短时 no-sky/no-stars 的 GPU 采样后 RSS 分别为 `1634.0/1664.1MiB`，高于 full 的 `1588.8MiB`；完整时长 no-stars 虽显示 Go 堆与 runtime 增长及大额非 Go 部分，却没有同 HEAD、同完整时长的 full-stars 对照，不能隔离 Go 堆、Go runtime 或原生图形资源的 RSS 根因。
 
-因此否决把阈值放宽、重跑冻结正式 producer、把完整 sky draw 或 `star_light` 直接当作根因，且不进入生产修复。Task 8.1 保持未完成：下一步必须先更新 active OpenSpec 以约束最小 benchmark-only heap profiling，再仅在 post-still、post-flying、post-GPU 三个边界采样；完成该隔离前不得进入 Task 8.2。
+因此否决把阈值放宽、重跑冻结正式 producer、把完整 sky draw 或 `star_light` 直接当作根因。该轮 A/B 本身没有支持生产修复；随后按 active OpenSpec 约束完成了以下唯一一次 benchmark-only heap profiling。
+
+### 完整时长 full-stars heap profile 隔离
+
+判定为 `GO_HEAP_ISOLATED`。诊断 HEAD 为 `b932d579d3e09fe5af7284baa72294606a9fbee1`，只含临时 heap instrumentation 提交 `b932d57`；相对 instrumentation 前的 `76adf10eafd939e6387d461705fdceb6fcef9e7a`，运行时代码差异只有标准库 helper、私有环境变量入口和 post-still/post-flying/post-GPU 三个既有边界调用。运行使用 Memory transport、scenario v13 full-stars、`2560x1440` 与生产 `10s/60s/120s/30s` 阶段，精确执行一次且没有重跑：
+
+```sh
+MCGO_BENCHMARK_HEAP_PROFILE_PREFIX=/tmp/mcgo-m4i-heapdiag-v13-20260806 GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-heapdiag-v13-20260806.json > /tmp/mcgo-m4i-heapdiag-v13-20260806.log 2>&1
+```
+
+运行日志从 `2026-08-06T08:18:46+0800` 持续到 `08:24:51+0800`。运行前只读 sidecar 的 SHA-256 为 `093e35ad3fbdea8300379c6152e226b8c0d9aa8b3af19daca690f3b12e622daf`，运行后 sidecar 为 `83557c3d3ca9b185d7421226c638f095f7ae02deaf7956c36f60b22b07178acc`。原始日志和三个 profile 的 SHA-256 分别为：
+
+```text
+8fce2aa98b8170b90df3132fc6730308eb0de03f15fbd2c071a3375326b13497  /tmp/mcgo-m4i-heapdiag-v13-20260806.log
+4b562b889eeb34e6a9a6d485fdd34487d96d71661d82627bc4bdee8b4a08eba7  /tmp/mcgo-m4i-heapdiag-v13-20260806-post-still.pprof
+50499ba288324ed3f696c3f0321662a73c8a27db4fbe101540088327bb56b69e  /tmp/mcgo-m4i-heapdiag-v13-20260806-post-flying.pprof
+8178c5fb54f351aa1b786906e925e37441dd426c07a3373af7c8d84af632ee26  /tmp/mcgo-m4i-heapdiag-v13-20260806-post-gpu.pprof
+```
+
+关键日志原文：
+
+```text
+固定场景加载完成，用时 27.59 秒；开始预热
+still: fps=200.3 p50=4.954ms p95=5.256ms p99=5.645ms max=19.534ms RSS=1336.6MiB
+still 后 内存：RSS 峰值 1336.6MiB｜Go 堆在用 360.3MiB｜Go 堆保留 515.2MiB｜Go 运行时合计 534.4MiB｜非 Go 802.2MiB
+flying: fps=305.3 p50=2.714ms p95=6.752ms p99=12.584ms max=30.174ms RSS=2056.9MiB
+flying 后 内存：RSS 峰值 2056.9MiB｜Go 堆在用 1048.1MiB｜Go 堆保留 1403.1MiB｜Go 运行时合计 1447.3MiB｜非 Go 609.6MiB
+GPU 采样后 内存：RSS 峰值 2295.0MiB｜Go 堆在用 779.1MiB｜Go 堆保留 1563.3MiB｜Go 运行时合计 1607.5MiB｜非 Go 687.5MiB
+2026/08/06 08:24:51 mcgo: 性能门禁失败: 测量八会话服务端: 多人服务端探针不完整: overflow=false outbound=610735 interest={Samples:1600 P50MS:0.027375 P95MS:0.079625 P99MS:0.112584 MaxMS:0.16675} ticks={Frames:200 FPS:0 P50MS:0.555167 P95MS:0.64675 P99MS:0.707875 MaxMS:0.901708 PeakRSSBytes:0 MeanCandidateSections:0 MeanCandidateBytes:0 MeanCandidateFaces:0 MaxPendingUploads:0 DroppedRingBufferSamples:0} queues=1/6/2 rss=2406432768
+exit status 1
+```
+
+阶段边界内存增量如下。`printMemoryBreakdown` 位于 profile 的两次强制 GC 之前，因此这里的 `HeapAlloc` 与强制 GC 后的 profile total 是相邻但不同的观测点。
+
+| 阶段增量 | RSS 峰值 | HeapAlloc | HeapSys | runtime Sys | 非 Go 估算 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| still → flying | `+720.3MiB` | `+687.8MiB` | `+887.9MiB` | `+912.9MiB` | `-192.6MiB` |
+| flying → GPU | `+238.1MiB` | `-269.0MiB` | `+160.2MiB` | `+160.2MiB` | `+77.9MiB` |
+| still → GPU | `+958.4MiB` | `+418.8MiB` | `+1048.1MiB` | `+1073.1MiB` | `-114.7MiB` |
+
+三个 profile 的 totals 与增量为：
+
+| profile | inuse_space total | inuse_objects total | alloc_space total |
+| --- | ---: | ---: | ---: |
+| post-still | `231.63MB` | `716,597` | `9,078.32MB` |
+| post-flying | `754.88MB` | `2,702,133` | `59,743.28MB` |
+| post-GPU | `776.40MB` | `2,529,736` | `60,840.27MB` |
+| still → flying | `+523.25MB` | `+1,985,536` | `+50,664.96MB` |
+| flying → GPU | `+21.52MB` | `-172,397` | `+1,096.99MB` |
+| still → GPU | `+544.77MB` | `+1,813,139` | `+51,761.95MB` |
+
+post-flying 的 live Go heap 增量已解释 RSS 增量的主要部分；profile 前 `HeapAlloc` 增量约为 RSS 增量的 `95.5%`，且非 Go 估算反而减少。唯一最大的实际保留链为：
+
+```text
+server.(*Server).saveWorker
+  → storage.(*MemoryStore).SaveBatch
+    → world.(*Chunk).Clone
+      → world.(*Section).Clone
+        → world.(*PalettedContainer).Clone
+```
+
+post-flying 时该链累计保留 `402.35MB`、`1,492,526` 个对象，占 profile live space 的 `53.30%`；post-GPU 时增加到 `622.23MB`、`2,179,047` 个对象，占 `80.14%`。调用方与所有权已经由源码闭合：benchmark 在 `cmd/mcgo/app.go` 创建 `storage.NewMemory`；flying 相机更新 trusted observer，使离开 wanted union 的 dirty chunk 进入持久化；权威 tick 的 `schedulePersistence` 经 `PersistenceSnapshots` 取得第一份快照并把 job 交给 `saveWorker`；`saveWorker` 调用 `SaveBatch`，后者为更新 revision 再深拷贝一次，并把结果放进进程生命周期的 `MemoryStore.chunks` map。该 map 是最终 owner，不随 sim 卸载确认、客户端 forget 或 renderer drop 删除；flying 持续访问新的 `ChunkKey`，所以保留集合持续增长。
+
+以下来源被排除为本次 flying RSS 的单一根因：
+
+- client mirror 在 post-flying/post-GPU 的 live cumulative 仅为 `75.64/77.14MB`，并由 `ForgetChunks` 删除视距外 chunk。
+- mesher 的 `cloneNeighborhood` 在 post-flying 累计分配 `43,534.94MB`，但 live 仅 `13.03MB`（post-GPU `23.05MB`），属于有界 jobs/results 通道中的 churn，不是持续 owner。
+- renderer upload live 从 post-still `7.09MB` 降到 post-flying `6.67MB`，且 `DropOutside` 会回收视距外 section；render cache 没有同量增长。
+- full-stars shader 在 GPU 执行，不产生这条 Go heap 保留链；此前 no-sky/no-stars A/B 未隔离 RSS，而本次 Go live delta 已解释 flying RSS 的主要变化，所以无需把 sky/WebGPU/Metal 猜作该阶段根因。
+
+这次 producer 因八会话服务端探针 `rss=2406432768` 超过既有 `2GiB` 门禁而 exit `1`；失败发生在报告写入前，所以 JSON 不存在。profile 前的强制 GC 与序列化改变后续时序，因此本次帧时、RSS、日志和 profile 全部只作不可提升的诊断证据，不能传给 `perfcheck`、复制为 baseline 或用于新候选验收。没有运行 TCP 或 `perfcheck`；M5/M2 baseline 哈希仍为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f` 与 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。Task 8.1 的诊断闭合；8.2 的修复仍保持 pending，本次不进入实现。
 
 ## M4F scenario v10 历史比较规则
 

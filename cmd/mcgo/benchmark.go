@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/pprof"
 	"slices"
 	"strconv"
 	"strings"
@@ -84,28 +83,6 @@ func printMemoryBreakdown(label string) {
 	)
 }
 
-func writeBenchmarkHeapProfile(prefix, stage string) error {
-	if prefix == "" {
-		return nil
-	}
-	runtime.GC()
-	runtime.GC()
-	path := prefix + "-" + stage + ".pprof"
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("创建 benchmark heap profile stage=%s path=%s: %w", stage, path, err)
-	}
-	writeErr := pprof.WriteHeapProfile(file)
-	if writeErr != nil {
-		writeErr = fmt.Errorf("写 benchmark heap profile stage=%s path=%s: %w", stage, path, writeErr)
-	}
-	closeErr := file.Close()
-	if closeErr != nil {
-		closeErr = fmt.Errorf("关闭 benchmark heap profile stage=%s path=%s: %w", stage, path, closeErr)
-	}
-	return errors.Join(writeErr, closeErr)
-}
-
 // benchmarkReportSkeleton 返回只含固定运行参数的报告骨架，供测试断言这些参数被记录。
 func benchmarkReportSkeleton() client.PerfReport {
 	return client.PerfReport{
@@ -128,7 +105,6 @@ func gpuCompletionMinSamples(scenario int) int {
 }
 
 func runBenchmark(app *application, outputPath string) error {
-	heapProfilePrefix := os.Getenv("MCGO_BENCHMARK_HEAP_PROFILE_PREFIX")
 	width, height := app.framebufferSize()
 	if width != 2560 || height != 1440 {
 		return fmt.Errorf("benchmark framebuffer=%dx%d，要求精确 2560x1440", width, height)
@@ -163,9 +139,6 @@ func runBenchmark(app *application, outputPath string) error {
 		return err
 	}
 	printMemoryBreakdown("still 后")
-	if err := writeBenchmarkHeapProfile(heapProfilePrefix, "post-still"); err != nil {
-		return err
-	}
 	runBenchmarkCooldown(app, benchmarkCooldown)
 	flyingStart := app.camera.Pos
 	probe := server.NewTerrainProbe(benchmarkSeed)
@@ -183,9 +156,6 @@ func runBenchmark(app *application, outputPath string) error {
 		return err
 	}
 	printMemoryBreakdown("flying 后")
-	if err := writeBenchmarkHeapProfile(heapProfilePrefix, "post-flying"); err != nil {
-		return err
-	}
 	finalCenter := app.center
 	if err := waitForBenchmarkCenterConsistency(
 		app,
@@ -214,9 +184,6 @@ func runBenchmark(app *application, outputPath string) error {
 		return fmt.Errorf("测量远端 GPU 完成时间: %w", err)
 	}
 	printMemoryBreakdown("GPU 采样后")
-	if err := writeBenchmarkHeapProfile(heapProfilePrefix, "post-gpu"); err != nil {
-		return err
-	}
 	// GPU 采样同样是满载阶段，其后也要冷却并回收，才轮到服务端探针。
 	runBenchmarkCooldown(app, benchmarkCooldown)
 	serverMultiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)
