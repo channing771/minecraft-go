@@ -1,9 +1,9 @@
 ## 1. 稳定资源与箱子配方
 
-- [ ] 1.1 在 `internal/core` 先写失败测试，覆盖稳定 `ChestID` 与 `ItemChest` 追加在既有编号末尾且不漂移、`RegisteredItem` 接受箱子物品、箱子可放置并掉落自身，以及 8 石头合成 1 箱子的新 recipe ID、最低索引扣料与产物无容量原子失败。
-- [ ] 1.2 在 `internal/core` 最小实现：现有 enum 末尾追加 ID，`BlockDrop`、`ItemPlacement`、`Recipe` 只追加确切 case；不新增注册表、接口或配置。
-- [ ] 1.3 在 `internal/assets` 追加箱子的程序化材质层，在 `internal/render` 让 `hotbarItemColor` 与 `itemDropColor` 覆盖箱子物品；补材质索引唯一、颜色非零与 drop 渲染测试，不新增 shader、pipeline 或二进制资源。
-- [ ] 1.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/assets ./internal/render -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/assets internal/render` 与 `git diff --check` 无输出；只暂存本组与任务勾选，提交 `feat: 定义箱子资源与配方`，然后自动进入第 2 组。
+- [x] 1.1 在 `internal/core` 先写失败测试，覆盖稳定 `ChestID` 与 `ItemChest` 追加在既有编号末尾且不漂移、`RegisteredItem` 接受箱子物品、箱子可放置并掉落自身，以及 8 石头合成 1 箱子的新 recipe ID、最低索引扣料与产物无容量原子失败。
+- [x] 1.2 在 `internal/core` 最小实现：现有 enum 末尾追加 ID，`BlockDrop`、`ItemPlacement`、`Recipe` 只追加确切 case；不新增注册表、接口或配置。
+- [x] 1.3 在 `internal/assets` 追加箱子的程序化材质层，在 `internal/render` 让 `hotbarItemColor` 与 `itemDropColor` 覆盖箱子物品；补材质索引唯一、颜色非零与 drop 渲染测试，不新增 shader、pipeline 或二进制资源。
+- [x] 1.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/assets ./internal/render -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/assets internal/render` 与 `git diff --check` 无输出；只暂存本组与任务勾选，提交 `feat: 定义箱子资源与配方`，然后自动进入第 2 组。
 
 ## 2. 区块箱子槽与负载实测
 

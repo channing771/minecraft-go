@@ -268,6 +268,17 @@ func TestBrokenToolColorsAreVisibleAndDistinct(t *testing.T) {
 	}
 }
 
+// 杀死变异：箱子物品落入默认分支会得到全零色，无法在 HUD 与掉落物中可见。
+func TestChestItemColorIsVisible(t *testing.T) {
+	color := hotbarItemColor(core.ItemChest)
+	if color == ([4]float32{}) || color[3] != 1 {
+		t.Fatalf("箱子颜色 = %v，想要可见且 alpha=1", color)
+	}
+	if color == hotbarItemColor(core.ItemDirt) {
+		t.Fatal("箱子颜色与泥土相同")
+	}
+}
+
 // 杀死变异：预测进度、错误比例/颜色或容器打开仍绘制都会改变固定实例。
 func TestMiningOverlayUsesOnlyConfirmedFixedGeometry(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
