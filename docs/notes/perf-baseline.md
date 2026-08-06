@@ -170,6 +170,12 @@ GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --p
 
 此输出只证明 encoded MemoryStore 移除了 8.1 的 retained-heap owner 并闭合 RSS 诊断；它不得传给 `perfcheck`、TCP、正式链或任何 baseline，未复制或改写 M5/M2 baseline，且不进入 8.3+。
 
+### 星空短路单次完整 p99 诊断闭合
+
+判定为 `STAR_SHORT_CIRCUIT_P99_CLOSED`。在干净的 detached HEAD `aa45a3032771dbf6d9f2b232ef4d1748482edc34`，pre-run provenance SHA-256 为 `001b4f9d232e916a36e830fd005f96a1d80c38d99858747928745c5f6fcc1ec0`；唯一一次不可提升的 full-stars、Memory、scenario v13 producer 使用生产 `10s/60s/120s/30s` 阶段与 `2560x1440` 目标，未启用 heap instrumentation，exit `0` 并写出完整 JSON。still 为 `275.9 FPS`、p99 `5.904ms`、RSS `1199.8MiB`；flying 为 `544.5 FPS`、p99 `9.312ms`、RSS `1274.9MiB`；GPU 采样后 RSS 为 `1562.6MiB`，`remote_gpu_complete` p99 为 `0.188827ms`，八会话 server probe RSS 为 `1638531072` bytes。日志/JSON SHA-256 分别为 `40223db1e4e0d6551f66e28ae01e34026b5d94646ec933fa5e2ad2944360ad88`/`7ebe3a160dc7395b40859c5044f4b8a8bcbe71fe078a4d043bb220145157ff67`。
+
+该运行没有执行 `perfcheck` 或 TCP，也没有生成 heap profile、复制或改写 baseline；运行后无遗留 `mcgo`/`perfcheck` 进程。M5/M2 baseline 哈希仍为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`/`b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。此结果只闭合 Task 8.3，不得提升为正式报告或基线。
+
 ## M4F scenario v10 历史比较规则
 
 M4F 扩展固定长度玩家输入与状态、废止即时破坏消息，并在权威 tick 增加有界采掘判定，因此当时的 benchmark producer 标记为 scenario v10，并通过已退役的 `9:10` 迁移建立了上方记录的 M5 v10 基线。v10 报告仍可单独读取与同场景比较。
