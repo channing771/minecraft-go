@@ -979,16 +979,25 @@ func TestMiningCompletionOraclesRejectOrderDuplicatesAndMirrorDivergence(t *test
 		ID:         core.DropID{Dimension: core.Overworld, Chunk: target.Chunk(), Generation: 1},
 		BlockIndex: blockIndex, Item: core.ItemStone, Count: 1,
 	}}}
+	full, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
+	var hotbar core.Hotbar
+	hotbar.Selected = 1
+	hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: full - 1}
+	inventory := network.InventoryState{Inventory: core.Inventory{Hotbar: hotbar}}
+	wrongDurability := inventory
+	wrongDurability.Inventory.Hotbar.Slots[1].Durability--
 	inactive := network.PlayerState{ServerTick: 2}
-	valid := []network.ServerMessage{delta, upsert, inactive}
+	valid := []network.ServerMessage{delta, upsert, inventory, inactive}
 	tests := []struct {
 		name     string
 		messages []network.ServerMessage
 		wantErr  bool
 	}{
 		{name: "规范完成帧", messages: valid},
-		{name: "交换 BlockChanges 和 drop", messages: []network.ServerMessage{upsert, delta, inactive}, wantErr: true},
-		{name: "重复 drop upsert", messages: []network.ServerMessage{delta, upsert, upsert, inactive}, wantErr: true},
+		{name: "交换 BlockChanges 和 drop", messages: []network.ServerMessage{upsert, delta, inventory, inactive}, wantErr: true},
+		{name: "重复 drop upsert", messages: []network.ServerMessage{delta, upsert, upsert, inventory, inactive}, wantErr: true},
+		{name: "缺少 InventoryState", messages: []network.ServerMessage{delta, upsert, inactive}, wantErr: true},
+		{name: "工具耐久错误", messages: []network.ServerMessage{delta, upsert, wrongDurability, inactive}, wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1008,8 +1017,8 @@ func TestMiningCompletionOraclesRejectOrderDuplicatesAndMirrorDivergence(t *test
 }
 
 func validateMiningCompletionFrame(messages []network.ServerMessage, target core.BlockPos) error {
-	if len(messages) != 3 {
-		return fmt.Errorf("采掘完成帧消息数=%d，想要 3: %+v", len(messages), messages)
+	if len(messages) != 4 {
+		return fmt.Errorf("采掘完成帧消息数=%d，想要 4: %+v", len(messages), messages)
 	}
 	delta, ok := messages[0].(network.BlockChanges)
 	if !ok {
@@ -1034,9 +1043,23 @@ func validateMiningCompletionFrame(messages []network.ServerMessage, target core
 		upserts.Drops[0].Item != core.ItemStone || upserts.Drops[0].Count != 1 {
 		return fmt.Errorf("采掘掉落物不唯一或内容不匹配: %+v", upserts)
 	}
-	state, ok := messages[2].(network.PlayerState)
+	inventory, ok := messages[2].(network.InventoryState)
 	if !ok {
-		return fmt.Errorf("采掘完成帧第三条=%T，想要 PlayerState", messages[2])
+		return fmt.Errorf("采掘完成帧第三条=%T，想要 InventoryState", messages[2])
+	}
+	if err := inventory.Validate(); err != nil {
+		return fmt.Errorf("采掘 InventoryState 非法: %w", err)
+	}
+	full, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
+	hotbar := inventory.Inventory.Hotbar
+	if hotbar.Selected != 1 || hotbar.Slots[1] != (core.ItemStack{
+		Item: core.ItemIronPickaxe, Count: 1, Durability: full - 1,
+	}) {
+		return fmt.Errorf("采掘 InventoryState 未精确扣减选中铁镐耐久: %+v", inventory)
+	}
+	state, ok := messages[3].(network.PlayerState)
+	if !ok {
+		return fmt.Errorf("采掘完成帧第四条=%T，想要 PlayerState", messages[3])
 	}
 	if err := state.Validate(); err != nil {
 		return fmt.Errorf("采掘 PlayerState 非法: %w", err)
