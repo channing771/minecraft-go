@@ -49,7 +49,7 @@ func (inventory *Inventory) setSlot(slot uint8, stack ItemStack) {
 // AddStack 按快捷栏同类、快捷栏空格、背包同类、背包空格的顺序装入整堆，
 // 返回新的完整状态和装不下的余量；非法堆原样返回。
 func (inventory Inventory) AddStack(stack ItemStack) (Inventory, ItemStack) {
-	if stack.Item == ItemNone || !stack.Valid() {
+	if _, ok := ItemStackLimit(stack.Item); !ok || stack.Count == 0 || stack.Count > MaxStackCount {
 		return inventory, stack
 	}
 	for _, phase := range [4]struct {

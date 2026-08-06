@@ -183,6 +183,31 @@ func TestDropPickupWaitsForDelayThenFillsHotbar(t *testing.T) {
 	}
 }
 
+func TestToolDropPileSplitsAcrossInventorySlots(t *testing.T) {
+	engine, session := readyFlatPlayer(t)
+	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
+		Generation: 1, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 2},
+		BlockIndex: dropTargetIndex(t),
+	})
+
+	result := engine.Step()
+	chunk, _, ok := engine.CloneReadyChunk(core.ChunkKey{Dimension: core.Overworld})
+	if !ok {
+		t.Fatal("中心区块不可用")
+	}
+	if drop := chunk.Drop(0); drop.Active {
+		t.Fatalf("拾取后掉落物仍活动: %+v", drop)
+	}
+	want := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	if got := currentInventory(t, engine, session).Hotbar; got.Slots[0] != want || got.Slots[1] != want {
+		t.Fatalf("拾取后快捷栏 = %+v，想要栏位 0 和 1 各有一把石镐", got)
+	}
+	if len(result.Inventories) != 1 {
+		t.Fatalf("拾取应当只发布一次最终背包: %+v", result.Inventories)
+	}
+}
+
 func TestDropPartialPickupKeepsRemainder(t *testing.T) {
 	// 快捷栏与背包都装满，只在一格留下 2 个空间。
 	nearlyFull := fullTestInventory()
