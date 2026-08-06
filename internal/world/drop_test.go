@@ -300,3 +300,50 @@ func TestChunkPrepareDropBatchMergeUsesLongerPickupDelay(t *testing.T) {
 		t.Fatalf("batch 合并 = %+v", got)
 	}
 }
+
+func TestChunkPrepareDropRespectsPerItemStackLimit(t *testing.T) {
+	chunk := dropTestChunk(t)
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	// 镐的单格上限是 1，已有一把时不得再合并进同一槽。
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 5, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 1},
+		BlockIndex: index,
+	})
+
+	slot, ok := chunk.PrepareDrop(core.ItemStonePickaxe, index)
+	if !ok {
+		t.Fatal("第二把镐应当占用新槽而不是被拒绝")
+	}
+	if slot == 0 {
+		t.Fatal("第二把镐被合并进了已满的槽，违反单格上限 1")
+	}
+
+	chunk.CommitDrop(slot, core.ItemStonePickaxe, index, 10)
+	if got := chunk.Drop(0).Stack.Count; got != 1 {
+		t.Fatalf("原槽数量 = %d，想要保持 1", got)
+	}
+	if got := chunk.Drop(slot).Stack.Count; got != 1 {
+		t.Fatalf("新槽数量 = %d，想要 1", got)
+	}
+}
+
+func TestChunkPrepareDropStillMergesStackableItems(t *testing.T) {
+	chunk := dropTestChunk(t)
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	// 可堆叠物品的合并行为不得被本次修复改变。
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 5, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemDirt, Count: 63},
+		BlockIndex: index,
+	})
+
+	slot, ok := chunk.PrepareDrop(core.ItemDirt, index)
+	if !ok || slot != 0 {
+		t.Fatalf("可堆叠物品预检 = (%d,%v)，想要 (0,true)", slot, ok)
+	}
+	chunk.CommitDrop(slot, core.ItemDirt, index, 10)
+	if got := chunk.Drop(0).Stack.Count; got != core.MaxStackCount {
+		t.Fatalf("合并后数量 = %d，想要 64", got)
+	}
+}

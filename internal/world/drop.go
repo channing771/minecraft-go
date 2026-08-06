@@ -49,22 +49,7 @@ func (c *Chunk) ClearDrop(slot int) {
 // PrepareDrop 预检可接收一个 item 的槽：先找同物品、同方块位置的最低未满堆，
 // 否则用最低的可复用空槽。它不修改区块，因此调用方可以先预检再原子提交。
 func (c *Chunk) PrepareDrop(item core.ItemID, blockIndex uint32) (int, bool) {
-	if !core.RegisteredItem(item) {
-		return 0, false
-	}
-	for slot := range c.drops {
-		drop := c.drops[slot]
-		if drop.Active && drop.Stack.Item == item && drop.BlockIndex == blockIndex &&
-			drop.Stack.Count < core.MaxStackCount {
-			return slot, true
-		}
-	}
-	for slot := range c.drops {
-		if !c.drops[slot].Active && c.drops[slot].Generation != math.MaxUint32 {
-			return slot, true
-		}
-	}
-	return 0, false
+	return prepareDropSlot(c.drops, item, blockIndex)
 }
 
 // CommitDrop 把一个物品写入 PrepareDrop 返回的槽并返回该堆的 generation。
@@ -132,7 +117,8 @@ func (c *Chunk) PrepareDropBatch(
 		if stack.Item == core.ItemNone || stack.Count == 0 {
 			continue
 		}
-		if !core.RegisteredItem(stack.Item) {
+		limit, ok := core.ItemStackLimit(stack.Item)
+		if !ok {
 			return c.drops, false
 		}
 		remaining := stack.Count
@@ -143,7 +129,7 @@ func (c *Chunk) PrepareDropBatch(
 			}
 			drop := next[slot]
 			if drop.Active {
-				space := core.MaxStackCount - drop.Stack.Count
+				space := limit - drop.Stack.Count
 				taken := min(space, remaining)
 				drop.Stack.Count += taken
 				// 与单件合并同一规则：保留既有寿命，延长到较长的来源延迟。
@@ -152,7 +138,7 @@ func (c *Chunk) PrepareDropBatch(
 				next[slot] = drop
 				continue
 			}
-			taken := min(uint8(core.MaxStackCount), remaining)
+			taken := min(limit, remaining)
 			next[slot] = DropSlot{
 				Generation:       drop.Generation + 1,
 				Active:           true,
@@ -171,16 +157,22 @@ func (c *Chunk) CommitDropBatch(next [core.DropsPerChunk]DropSlot) {
 	c.drops = next
 }
 
-// prepareDropSlot 在给定数组上复用 PrepareDrop 的选槽规则。
+// prepareDropSlot 是选槽的唯一实现：PrepareDrop 与 PrepareDropBatch 都复用它，
+// 避免两处各自硬编码堆叠上限而彼此走样。
 func prepareDropSlot(
 	drops [core.DropsPerChunk]DropSlot,
 	item core.ItemID,
 	blockIndex uint32,
 ) (int, bool) {
+	// 合并必须遵守该物品自己的单格上限：工具上限为 1，因此永不合并。
+	limit, ok := core.ItemStackLimit(item)
+	if !ok {
+		return 0, false
+	}
 	for slot := range drops {
 		drop := drops[slot]
 		if drop.Active && drop.Stack.Item == item && drop.BlockIndex == blockIndex &&
-			drop.Stack.Count < core.MaxStackCount {
+			drop.Stack.Count < limit {
 			return slot, true
 		}
 	}
