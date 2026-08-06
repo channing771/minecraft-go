@@ -88,9 +88,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4f {
     );
     var color = mix(night, day, clamp(sky.sun_daylight.w, 0.0, 1.0));
 
-    let stars = star_light(direction)
-        * clamp(sky.star_visibility.x, 0.0, 1.0)
-        * smoothstep(0.0, 0.08, direction.y);
+    let star_visibility = clamp(sky.star_visibility.x, 0.0, 1.0);
+    var stars = 0.0;
+    if (star_visibility > 0.0 && direction.y > 0.0) {
+        stars = star_light(direction)
+            * star_visibility
+            * smoothstep(0.0, 0.08, direction.y);
+    }
     color += vec3f(stars * 0.9);
 
     let sun_direction = normalize(sky.sun_daylight.xyz);
