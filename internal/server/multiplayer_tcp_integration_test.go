@@ -228,18 +228,27 @@ func TestDropSelectedItemOverTCPConvergesAndCapacityFailureIsIsolated(t *testing
 	beforeFirstDrops := append([]client.ItemDropPresentation(nil), first.drops.Presentations()...)
 	beforeSecondDrops := append([]client.ItemDropPresentation(nil), second.drops.Presentations()...)
 	firstStart, secondStart := len(first.transcript), len(second.transcript)
-	beforeTick := min(first.local.ServerTick, second.local.ServerTick)
 	mustSendMultiplayer(t, deadline, first, network.DropSelectedItem{Sequence: 2})
 
 	rejectCtx, rejectCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer rejectCancel()
 	for {
 		rejected := false
+		tailTick := uint64(0)
 		for _, event := range first.transcript[firstStart:] {
-			message, ok := event.message.(network.CommandRejected)
-			rejected = rejected || ok && message.Sequence == 2 && message.Reason == network.RejectDropCapacity
+			switch message := event.message.(type) {
+			case network.CommandRejected:
+				rejected = rejected || message.Sequence == 2 && message.Reason == network.RejectDropCapacity
+			case network.PlayerState:
+				if rejected {
+					tailTick = message.ServerTick
+				}
+			}
+			if tailTick != 0 {
+				break
+			}
 		}
-		if rejected && first.local.ServerTick > beforeTick && second.local.ServerTick > beforeTick {
+		if tailTick != 0 && second.local.ServerTick >= tailTick {
 			break
 		}
 		progressed := false
