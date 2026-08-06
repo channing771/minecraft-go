@@ -501,6 +501,9 @@ func TestCompleteMiningRejectsNoOp(t *testing.T) {
 			test.setup(t, engine, target)
 			record := miningTargetRecord(t, engine, target)
 			beforeHash := record.Chunk.Hash()
+			beforeDropsHash := record.Chunk.DropsHash()
+			beforeFurnace := record.Chunk.Furnace(0)
+			beforeRevision := record.Revision
 			pending := make(map[core.ChunkKey]*pendingChunkChanges)
 
 			reason, rejected := engine.completeMining(
@@ -511,9 +514,18 @@ func TestCompleteMiningRejectsNoOp(t *testing.T) {
 				t.Fatalf("no-op 完成结果 = (%d, %v)，想要 (%d, true)",
 					reason, rejected, RejectNoTarget)
 			}
-			if got := record.Chunk.Hash(); got != beforeHash || len(pending) != 0 {
-				t.Fatalf("no-op 完成修改了区块或 pending：hash=%x/%x pending=%+v",
-					got, beforeHash, pending)
+			if got := record.Chunk.Hash(); got != beforeHash {
+				t.Fatalf("no-op 完成修改了方块：hash=%x/%x", got, beforeHash)
+			}
+			if got := record.Chunk.DropsHash(); got != beforeDropsHash {
+				t.Fatalf("no-op 完成修改了掉落物：hash=%x/%x", got, beforeDropsHash)
+			}
+			if got := record.Chunk.Furnace(0); got != beforeFurnace {
+				t.Fatalf("no-op 完成修改了熔炉：got=%+v want=%+v", got, beforeFurnace)
+			}
+			if record.Revision != beforeRevision || len(pending) != 0 {
+				t.Fatalf("no-op 完成修改了 revision 或 pending：revision=%d/%d pending=%+v",
+					record.Revision, beforeRevision, pending)
 			}
 		})
 	}
