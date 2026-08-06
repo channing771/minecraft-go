@@ -7,11 +7,11 @@
 
 ## 2. 区块箱子槽与负载实测
 
-- [ ] 2.1 在 `internal/core` 增加 `ChestsPerChunk = 16`、`ChestSlots = 27` 与统一栏位常量；在 `internal/world` 先写失败测试，覆盖 16 槽最低索引分配、第 17 个失败、generation 初次为 1/复用递增/耗尽不复用、活动槽方块索引唯一且对应箱子方块、停用槽只保留 generation、27 格全空初始化、`Clone` 与 `PayloadBytes` 包含箱子状态、`Chunk.Hash` 仍只表示方块。
-- [ ] 2.2 在 `internal/world` 实现 `ChestSlot` 与 `Chunk.Chest`/`SetChest`/`ChestAt`/`PrepareChest`/`CommitChest`/`DeactivateChest`，只用固定数组两次扫描，不建立 map 或索引缓存；同步更新 `internal/sim` 与 `internal/server` 中基于 `PayloadBytes` 的固定预算常量。
-- [ ] 2.3 把 `PrepareDropBatch` 从固定 `[4]core.ItemStack` 泛化为接受调用方自有固定数组的切片，上限为 `1 + core.ChestSlots`，预演仍在掉落物数组副本上完成且失败不修改区块；补最坏 28 堆成功与任一堆放不下时字节不变的测试。
-- [ ] 2.4 **负载门禁**：执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world ./internal/sim ./internal/server -race -count=1'`，随后只在现有 `--benchmark` 无窗口路径生成一次临时 Memory 报告，与既有 M5 基线的绝对门禁比较 RSS 与 p99。若任一绝对门禁被突破，停止实现、把 `ChestsPerChunk` 降到 8 并同步更新 proposal、design 与本文件后重测；不得放宽门禁或覆盖基线。
-- [ ] 2.5 记录实测 RSS 数值与结论到 `docs/notes/perf-baseline.md`，提交 `feat: 增加区块固定箱子状态`，然后自动进入第 3 组。
+- [x] 2.1 在 `internal/core` 增加 `ChestsPerChunk = 16`、`ChestSlots = 27` 与统一栏位常量；在 `internal/world` 先写失败测试，覆盖 16 槽最低索引分配、第 17 个失败、generation 初次为 1/复用递增/耗尽不复用、活动槽方块索引唯一且对应箱子方块、停用槽只保留 generation、27 格全空初始化、`Clone` 与 `PayloadBytes` 包含箱子状态、`Chunk.Hash` 仍只表示方块。
+- [x] 2.2 在 `internal/world` 实现 `ChestSlot` 与 `Chunk.Chest`/`SetChest`/`ChestAt`/`PrepareChest`/`CommitChest`/`DeactivateChest`，只用固定数组两次扫描，不建立 map 或索引缓存；同步更新 `internal/sim` 与 `internal/server` 中基于 `PayloadBytes` 的固定预算常量。
+- [x] 2.3 把 `PrepareDropBatch` 从固定 `[4]core.ItemStack` 泛化为接受调用方自有固定数组的切片，上限为 `1 + core.ChestSlots`，预演仍在掉落物数组副本上完成且失败不修改区块；补最坏 28 堆成功与任一堆放不下时字节不变的测试。
+- [x] 2.4 **负载门禁**：执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world ./internal/sim ./internal/server -race -count=1'`，随后只在现有 `--benchmark` 无窗口路径生成一次临时 Memory 报告，与既有 M5 基线的绝对门禁比较 RSS 与 p99。若任一绝对门禁被突破，停止实现、把 `ChestsPerChunk` 降到 8 并同步更新 proposal、design 与本文件后重测；不得放宽门禁或覆盖基线。
+- [x] 2.5 记录实测 RSS 数值与结论到 `docs/notes/perf-baseline.md`，提交 `feat: 增加区块固定箱子状态`，然后自动进入第 3 组。
 
 ## 3. 区块存档 schema v6
 

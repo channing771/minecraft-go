@@ -339,7 +339,7 @@ func TestChunkPrepareDropBatchMergeUsesLongerPickupDelay(t *testing.T) {
 	})
 	var stacks [4]core.ItemStack
 	stacks[0] = core.ItemStack{Item: core.ItemCoal, Count: 1}
-	next, ok := chunk.PrepareDropBatch(stacks, index, 10)
+	next, ok := chunk.PrepareDropBatch(stacks[:], index, 10)
 	if !ok {
 		t.Fatal("batch 预检被拒绝")
 	}
@@ -355,7 +355,7 @@ func TestChunkPrepareDropBatchPreservesToolDurability(t *testing.T) {
 	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
 	worn := core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 149}
 	stacks := [4]core.ItemStack{worn}
-	next, ok := chunk.PrepareDropBatch(stacks, index, 10)
+	next, ok := chunk.PrepareDropBatch(stacks[:], index, 10)
 	if !ok || next[0].Stack != worn {
 		t.Fatalf("batch 掉落物 = %+v, %v，想要保留来源工具 %+v", next[0].Stack, ok, worn)
 	}
@@ -370,7 +370,7 @@ func TestChunkPrepareDropBatchRejectsInvalidStacks(t *testing.T) {
 	} {
 		chunk := dropTestChunk(t)
 		stacks := [4]core.ItemStack{stack}
-		if next, ok := chunk.PrepareDropBatch(stacks, index, 10); ok || next != [core.DropsPerChunk]world.DropSlot{} {
+		if next, ok := chunk.PrepareDropBatch(stacks[:], index, 10); ok || next != [core.DropsPerChunk]world.DropSlot{} {
 			t.Fatalf("非法 batch 堆 %+v 被接受: ok=%v next=%+v", stack, ok, next)
 		}
 	}

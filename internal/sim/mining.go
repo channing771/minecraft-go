@@ -233,7 +233,7 @@ func (engine *Engine) completeMining(
 			stacks[0] = core.ItemStack{Item: core.ItemFurnace, Count: 1}
 		}
 		next, capacityOK := record.Chunk.PrepareDropBatch(
-			stacks, blockIndex, DropPickupDelayTicks,
+			stacks[:], blockIndex, DropPickupDelayTicks,
 		)
 		if !capacityOK {
 			return RejectDropCapacity, true

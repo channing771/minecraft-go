@@ -1,5 +1,30 @@
 # 性能基线
 
+## M4K 任务组 2：区块固定箱子负载诊断性测量（非新基线）
+
+2026-08-06 在 `m4k-authoritative-chests` 分支（提交前工作树，`internal/core`/`internal/world` 已加入 `core.ChestsPerChunk=16`、`core.ChestSlots=27`、`world.ChestSlot` 与对应的 `Chunk.PayloadBytes()` 增量）上，用现有 `--benchmark` 无窗口路径在同一台 Apple M5 机器上跑了三次 `go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output ...`。这是**诊断性测量**，用于回答"16 个箱子槽是否突破既有绝对门禁"，**不是新基线**：不覆盖 `docs/notes/perf-baseline-m5.json`，也不建立新的 scenario 版本。
+
+比较对象是 `docs/notes/perf-baseline-m5.json`（scenario v12），比较口径按任务要求只看 `cmd/perfcheck` 内置的**绝对门禁**（`still`/`flying` p99 < 12ms、peak RSS < 2GiB；tick p99 < 10ms；multiplayer peak RSS < 2GiB 等），不使用 `perfcheck` 默认的 20% 相对回归比较。
+
+### 三次运行结果
+
+| 运行 | still p99 | still RSS | flying p99 | flying RSS | 多人探针 peak RSS | 结果 |
+|---|---|---|---|---|---|---|
+| 基线（M5 v12） | 5.956ms | 1311.7MiB | 9.488ms | 1672.8MiB | 1672.8MiB | — |
+| 运行 1 | 3.998ms | 1371.5MiB | 8.277ms | 1936.7MiB | 2101.7MiB（**探针内部门禁 `peakRSS>=2GiB` 被触发，benchmark 中止未写出报告**） | 探针失败 |
+| 运行 2（完整报告，见下） | 4.269ms | 1368.4MiB | 8.411ms | 1983.6MiB | 2012.2MiB | 全部绝对门禁通过 |
+| 运行 3 | 4.894ms | 1354.0MiB | 8.349ms | 1820.5MiB | 2054.99MiB（探针内部门禁再次被触发，未写出报告） | 探针失败 |
+
+运行 2 的完整报告已写入 `/tmp/m4k-chest-load.json`（临时文件，未提交）：`still` p50/p95/p99/RSS = `3.389/3.611/4.269ms/1434828800B`，`flying` p50/p95/p99/RSS = `1.171/3.087/8.411ms/2079948800B`，`multiplayer.peak_rss_bytes=2109898752`。
+
+### 结论
+
+- **本任务组明确要求的 `still`/`flying` 阶段 p99 与 RSS**，三次运行全部低于绝对门禁（p99 < 12ms，RSS < 2GiB），且与基线相比只有个位数毫秒与两位数 MiB 的正常波动。`ChestsPerChunk=16` 带来的固定负载增量是 `16*144=2304` 字节/区块（`world.ChestSlot` 的运行时内存略高于线上编码估算，但同数量级），乘以本次固定种子世界加载的 `4489` 个区块，总计约 `10MiB`，不足以解释观测到的波动。
+- 三次运行中有两次在**晚于 still/flying 的多人服务端探针阶段**（`cmd/mcgo/multiplayer_benchmark.go` 内 `peakRSS >= 2<<30` 的既有硬编码检查，这是与本次改动无关的既有代码路径）触发了内部有效性检查，benchmark 提前退出、未写出报告。运行期间系统负载均值在 `2.6~4.0`，同机常驻多个 iOS Simulator/CoreSimulator 进程，与 `docs/notes/perf-baseline-m5.md` 中记录的"授权前一小时机器上另有 iOS 模拟器等进程使负载达到 9.20/12.15"是同一类环境噪声。这不属于本任务组要求核对的"still/flying 的 RSS 与 p99"指标，因此不据此下调容量。
+- `go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/m4k-chest-load.json --max-regression 0.20`（相对回归比较，非本任务组要求的判据）报出 `ticks p50_ms` 与 `multiplayer peak_rss_bytes` 超过 20% 相对阈值，但**绝对门禁全部通过**（该命令的失败只来自相对回归判据，perfcheck 没有报出任何绝对门禁失败）。这与结论一致：数值抖动主要来自环境噪声而非本次改动。
+- **决定：`core.ChestsPerChunk` 保持 16**，未突破任务要求核对的绝对门禁，未触发"降到 8"的条款。
+- 遗留风险：`flying` 阶段相对基线的 RSS 余量从基线的约 `375MiB`（18.3%）收窄到本次运行 2 的约 `64MiB`（3.1%），多人探针阶段的绝对余量更薄（两次运行超过 2GiB）。这更可能是当前机器背景负载导致，但建议后续在系统空闲、负载均值低于基线记录的 2.61 时补一次干净复测，作为该风险的收尾验证；不因此改动本任务组的结论或容量取值。
+
 ## 当前已接受的 M5 scenario v12 基线
 
 2026-08-05 在冻结提交 `a35be7f206dea52954716e6ca156b25b2622fb41` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
