@@ -288,11 +288,6 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 	if err := validateServerWirePacket(state, packet); err != nil {
 		return 0, nil, codecError("encode server", state, 0, err)
 	}
-	// 协议 v10 不能表示磨损值；过渡期只允许满耐久工具进入编码器，
-	// 避免解码 shim 把磨损值静默补满。Task 5 升级到 v11 时与该 shim 一并删除。
-	if message, ok := packet.(InventoryState); ok && !inventoryRepresentableV10(message.Inventory) {
-		return 0, nil, codecError("encode server", state, 0, errors.New("network: protocol v10 cannot encode worn tool durability"))
-	}
 	packetID, ok := serverPacketID(state, packet)
 	if !ok {
 		return 0, nil, codecError("encode server", state, 0, invalidServerPacket(state, packet))
@@ -398,18 +393,15 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 		case InventoryState:
 			e.u8(message.Inventory.Hotbar.Selected)
 			for _, stack := range message.Inventory.Hotbar.Slots {
-				e.u16(uint16(stack.Item))
-				e.u8(stack.Count)
+				encodeItemStack(&e, stack)
 			}
 			for _, stack := range message.Inventory.Backpack {
-				e.u16(uint16(stack.Item))
-				e.u8(stack.Count)
+				encodeItemStack(&e, stack)
 			}
 		case FurnaceState:
 			encodeFurnaceRef(&e, message.Furnace)
 			for _, stack := range [3]core.ItemStack{message.Input, message.Fuel, message.Output} {
-				e.u16(uint16(stack.Item))
-				e.u8(stack.Count)
+				encodeItemStack(&e, stack)
 			}
 			e.u8(message.ProgressTicks)
 			e.u16(message.BurnTicks)
@@ -421,8 +413,9 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 			for _, drop := range message.Drops {
 				encodeDropID(&e, drop.ID)
 				e.u32(drop.BlockIndex)
-				e.u16(uint16(drop.Item))
-				e.u8(drop.Count)
+				encodeItemStack(&e, core.ItemStack{
+					Item: drop.Item, Count: drop.Count, Durability: drop.Durability,
+				})
 			}
 		case ItemDropRemoves:
 			e.u64(message.ServerTick)
@@ -675,8 +668,15 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 
 const (
 	dropIDWireBytes   = 4 + 4 + 4 + 1 + 4
-	itemDropWireBytes = dropIDWireBytes + 4 + 2 + 1
+	itemDropWireBytes = dropIDWireBytes + 4 + 2 + 1 + 2
 )
+
+// encodeItemStack 是所有携带物品堆的消息共用的 5 字节固定编码。
+func encodeItemStack(e *byteEncoder, stack core.ItemStack) {
+	e.u16(uint16(stack.Item))
+	e.u8(stack.Count)
+	e.u16(stack.Durability)
+}
 
 // decodeItemStack 读取一格固定编码；沿用已有错误则原样返回。
 func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
@@ -691,24 +691,13 @@ func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
 	if err != nil {
 		return core.ItemStack{}, err
 	}
-	stack := core.ItemStack{Item: core.ItemID(item), Count: count}
-	// 协议 v10 的物品负载只有 Item/Count，没有耐久字节；编码器已拒绝磨损工具，
-	// 因此解码时只会恢复满耐久工具。Task 5 升级到 v11 读取真实字段时必须
-	// 把这个 shim 与编码可表示性门禁一并删除。
-	if max, ok := core.ItemMaxDurability(stack.Item); ok {
-		stack.Durability = max
+	durability, err := d.u16()
+	if err != nil {
+		return core.ItemStack{}, err
 	}
-	return stack, nil
-}
-
-func inventoryRepresentableV10(inventory core.Inventory) bool {
-	for slot := uint8(0); slot < core.InventorySlots; slot++ {
-		stack, _ := inventory.Slot(slot)
-		if max, ok := core.ItemMaxDurability(stack.Item); ok && stack.Durability != max {
-			return false
-		}
-	}
-	return true
+	return core.ItemStack{
+		Item: core.ItemID(item), Count: count, Durability: durability,
+	}, nil
 }
 
 // furnaceRefWireBytes 是熔炉引用的固定编码长度。
@@ -809,18 +798,13 @@ func decodeItemDropUpserts(d *byteDecoder) (ServerPacket, error) {
 		if drop.BlockIndex, err = d.u32(); err != nil {
 			return nil, err
 		}
-		item, err := d.u16()
+		stack, err := decodeItemStack(d, nil)
 		if err != nil {
 			return nil, err
 		}
-		drop.Item = core.ItemID(item)
-		if drop.Count, err = d.u8(); err != nil {
-			return nil, err
-		}
-		// 协议 v10 没有耐久字段；Task 5 的 v11 将改为读取线上耐久值。
-		if full, ok := core.ItemMaxDurability(drop.Item); ok {
-			drop.Durability = full
-		}
+		drop.Item = stack.Item
+		drop.Count = stack.Count
+		drop.Durability = stack.Durability
 	}
 	return result, nil
 }

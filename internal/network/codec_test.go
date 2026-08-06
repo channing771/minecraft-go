@@ -22,7 +22,7 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"hello", StateHandshake, ClientHello{ProtocolVersion: 10}, 0, "0a"},
+		{"hello", StateHandshake, ClientHello{ProtocolVersion: 11}, 0, "0b"},
 		{"login start", StateLogin, LoginStart{PlayerID: id, DisplayName: "Chen"}, 0, "00112233445546778899aabbccddeeff044368656e"},
 		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5, Mining: true}, 0, "0100000000000000ff01010000c03f000000bf01"},
 		{"place", StatePlay, PlaceBlock{Sequence: 3, Yaw: 2, Pitch: -1, Slot: 4}, 2, "030000000000000000000040000080bf04"},
@@ -60,8 +60,8 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 10}, 0, "0a"},
-		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 10, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0a01026e6f"},
+		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 11}, 0, "0b"},
+		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 11, Code: HandshakeVersionMismatch, Message: "no"}, 1, "0b01026e6f"},
 		{"login success", StateLogin, LoginSuccess{PlayerID: id}, 0, "00112233445546778899aabbccddeeff"},
 		{"login reject", StateLogin, LoginReject{Code: LoginInvalidIdentity, Message: "no"}, 1, "02026e6f"},
 		{"block changes", StatePlay, BlockChanges{Dimension: core.Overworld, Chunk: core.ChunkPos{X: 1, Z: -1}, BaseRevision: 1, NewRevision: 2, Changes: []BlockChange{{Position: core.BlockPos{X: 16, Y: -64, Z: -1}, Block: core.StoneID}}}, 1, "0000000001000000ffffffff010000000000000002000000000000000110000000c0ffffffffffffff0200"},
@@ -452,37 +452,21 @@ func TestSmallPacketRejectsInvalidSemanticPackets(t *testing.T) {
 	}
 }
 
-func TestProtocolV10InventoryEncodingRejectsWornTools(t *testing.T) {
-	var full core.Inventory
-	full.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 131}
-	full.Backpack[0] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 250}
-	packetID, payload, err := encodeServerControlPayload(StatePlay, InventoryState{Inventory: full})
+func TestProtocolV11InventoryCarriesWornToolDurability(t *testing.T) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 73}
+	inventory.Backpack[0] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 149}
+	packet := InventoryState{Inventory: inventory}
+	packetID, payload, err := encodeServerControlPayload(StatePlay, packet)
 	if err != nil {
-		t.Fatalf("满耐久工具应当可用协议 v10 编码: %v", err)
+		t.Fatalf("编码磨损工具背包: %v", err)
+	}
+	if packetID != 10 || len(payload) != 1+core.InventorySlots*5 {
+		t.Fatalf("InventoryState id=%d payload=%d，想要 id=10 payload=181", packetID, len(payload))
 	}
 	decoded, err := decodeServerControlPayload(StatePlay, packetID, payload)
-	if err != nil || decoded != (InventoryState{Inventory: full}) {
-		t.Fatalf("满耐久工具往返 = %+v, %v", decoded, err)
-	}
-
-	for _, test := range []struct {
-		name   string
-		mutate func(*core.Inventory)
-	}{
-		{"快捷栏磨损石镐", func(inventory *core.Inventory) {
-			inventory.Hotbar.Slots[0].Durability = 73
-		}},
-		{"背包磨损铁镐", func(inventory *core.Inventory) {
-			inventory.Backpack[0].Durability = 149
-		}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			inventory := full
-			test.mutate(&inventory)
-			if _, payload, err := encodeServerControlPayload(StatePlay, InventoryState{Inventory: inventory}); err == nil || payload != nil {
-				t.Fatalf("协议 v10 编码磨损工具: payload=%x err=%v", payload, err)
-			}
-		})
+	if err != nil || decoded != packet {
+		t.Fatalf("磨损工具背包往返 = %+v, %v，想要 %+v", decoded, err, packet)
 	}
 }
 
@@ -576,26 +560,29 @@ func goldenInventoryState() InventoryState {
 	return InventoryState{Inventory: inventory}
 }
 
-// goldenInventoryStateHex 是 1 字节选中栏位加 36 格固定编码，共 109 字节。
+// goldenInventoryStateHex 是 1 字节选中栏位加 36 格固定编码，共 181 字节。
 func goldenInventoryStateHex() string {
-	empty := "000000"
-	hex := "02" + "010005" + empty + empty + empty + "030040"
+	empty := "0000000000"
+	hex := "02" + "0100050000" + empty + empty + empty + "0300400000"
 	for range 4 {
 		hex += empty
 	}
-	hex += "020001"
+	hex += "0200010000"
 	for range core.BackpackSlots - 2 {
 		hex += empty
 	}
-	return hex + "010009"
+	return hex + "0100090000"
 }
 
 // inventoryStateWire 手工构造固定负载，用于绕过编码器校验注入非法状态。
 func inventoryStateWire(inventory core.Inventory) []byte {
-	wire := make([]byte, 0, 1+core.InventorySlots*3)
+	wire := make([]byte, 0, 1+core.InventorySlots*5)
 	wire = append(wire, inventory.Hotbar.Selected)
 	appendStack := func(stack core.ItemStack) {
-		wire = append(wire, byte(stack.Item), byte(stack.Item>>8), stack.Count)
+		wire = append(wire,
+			byte(stack.Item), byte(stack.Item>>8), stack.Count,
+			byte(stack.Durability), byte(stack.Durability>>8),
+		)
 	}
 	for _, stack := range inventory.Hotbar.Slots {
 		appendStack(stack)

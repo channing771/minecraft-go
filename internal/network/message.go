@@ -474,10 +474,6 @@ func (drop ItemDrop) validate() error {
 	if !stack.Valid() {
 		return errors.New("network: invalid item drop stack")
 	}
-	if full, ok := core.ItemMaxDurability(drop.Item); ok && drop.Durability != full {
-		// 协议 v10 没有耐久字段，只能无损表示满耐久工具；Task 5 的 v11 将只移除此过渡限制。
-		return errors.New("network: protocol v10 item drop tool is not at full durability")
-	}
 	return nil
 }
 

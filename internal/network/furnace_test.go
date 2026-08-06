@@ -89,7 +89,7 @@ func TestProtocolV7FurnacePayloadsAreFixedLength(t *testing.T) {
 			Fuel:          core.ItemStack{Item: core.ItemCoal, Count: 2},
 			Output:        core.ItemStack{Item: core.ItemIronIngot, Count: 5},
 			ProgressTicks: 137, BurnTicks: 1463,
-		}, 29},
+		}, 35},
 		{"closed", FurnaceClosed{Furnace: ref}, 17},
 	}
 	for _, tc := range servers {
