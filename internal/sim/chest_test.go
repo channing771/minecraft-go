@@ -3,6 +3,8 @@ package sim_test
 import (
 	"testing"
 
+	"github.com/go-gl/mathgl/mgl32"
+
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/sim"
 	"minecraft-go/internal/world"
@@ -231,5 +233,29 @@ func TestOpeningFurnaceEndsExistingChestView(t *testing.T) {
 
 	if next := engine.Step(); len(next.Chests) != 0 {
 		t.Fatalf("原箱子查看关系未结束: %+v", next.Chests)
+	}
+}
+
+// TestChestViewEndsExactlyOnceWhenPlayerResets 覆盖"维度 reset"这条失效路径：
+// 玩家跌出世界高度下界会触发 beginReset，把 lifecycle 打回 PlayerPendingSpawn，
+// publishContainers 里 `lifecycle != PlayerActive` 分支必须精确关闭一次查看关系。
+func TestChestViewEndsExactlyOnceWhenPlayerResets(t *testing.T) {
+	engine, session, _ := readyChestPlayer(t, stockedChest(0))
+	engine.Enqueue(openFurnaceCommand(session, 2))
+	if result := engine.Step(); len(result.Chests) != 1 {
+		t.Fatalf("打开箱子失败: %+v", result)
+	}
+
+	engine.SetPlayerPositionForTest(session, mgl32.Vec3{0.5, float32(core.MinY) - 20, 0.5})
+
+	result := engine.Step()
+	if len(result.FurnaceEnds) != 1 || result.FurnaceEnds[0].Session != session {
+		t.Fatalf("维度 reset 未精确关闭一次: %+v", result.FurnaceEnds)
+	}
+	if len(result.Chests) != 0 {
+		t.Fatalf("reset 后仍发布箱子状态: %+v", result.Chests)
+	}
+	if next := engine.Step(); len(next.FurnaceEnds) != 0 {
+		t.Fatalf("关闭通知被重复发送: %+v", next.FurnaceEnds)
 	}
 }

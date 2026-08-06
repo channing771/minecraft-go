@@ -126,19 +126,15 @@ func (engine *Engine) ActiveInterestKeysForTest() []core.ChunkKey {
 // furnaceView 定位一个熔炉引用当前指向的槽；引用失效时返回 false。
 // 区块未加载、槽位停用或 generation 不匹配都视为失效。
 func (engine *Engine) furnaceView(ref core.FurnaceRef) (*world.Chunk, world.FurnaceSlot, bool) {
-	dimension := engine.dimensions[ref.Dimension]
-	if dimension == nil {
+	chunk, ok := engine.containerChunk(ref)
+	if !ok {
 		return nil, world.FurnaceSlot{}, false
 	}
-	record, ok := dimension.records[ref.Chunk]
-	if !ok || record.State != ChunkReady || record.Chunk == nil {
-		return nil, world.FurnaceSlot{}, false
-	}
-	furnace := record.Chunk.Furnace(int(ref.Slot))
+	furnace := chunk.Furnace(int(ref.Slot))
 	if !furnace.Active || furnace.Generation != ref.Generation {
 		return nil, world.FurnaceSlot{}, false
 	}
-	return record.Chunk, furnace, true
+	return chunk, furnace, true
 }
 
 // moveFurnaceStack 在玩家物品与熔炉的值副本上计算一次整堆移动，

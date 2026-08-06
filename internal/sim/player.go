@@ -170,6 +170,16 @@ func (engine *Engine) PlayerSnapshot(id SessionID) (PlayerSnapshot, bool) {
 	return session.player.snapshot(session.dimension), true
 }
 
+// SetPlayerPositionForTest 直接写入某个会话玩家的权威位置，仅供测试构造固定场景，
+// 例如把玩家踩到世界高度下界以下触发 beginReset。
+func (engine *Engine) SetPlayerPositionForTest(id SessionID, position mgl32.Vec3) {
+	session := engine.sessions[id]
+	if session == nil || session.player == nil {
+		return
+	}
+	session.player.state.Position = position
+}
+
 func (engine *Engine) UnregisterSession(id SessionID) (PlayerSnapshot, bool) {
 	session := engine.sessions[id]
 	if session == nil {
