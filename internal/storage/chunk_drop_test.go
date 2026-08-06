@@ -220,6 +220,9 @@ func TestChunkV4LegacyToolDropStackSplitsDeterministically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("解码遗留 schema v4 工具堆: %v", err)
 	}
+	if !decoded.Migrated {
+		t.Fatal("遗留 schema v4 工具堆拆分后未标记为需要重写")
+	}
 	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
 	wantFirst := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}
 	for _, slot := range []int{5, 0} {

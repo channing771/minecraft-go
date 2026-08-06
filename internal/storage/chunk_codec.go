@@ -323,9 +323,10 @@ func validateLegacyDropSlot(drop world.DropSlot) error {
 	return nil
 }
 
-func normalizeV4LegacyToolDropStacks(dto *chunkDTO) error {
+func normalizeV4LegacyToolDropStacks(dto *chunkDTO) (bool, error) {
 	sources := dto.Drops
 	normalized := dto.Drops
+	changed := false
 	for sourceSlot, source := range sources {
 		if !source.Active || source.Stack.Count <= 1 {
 			continue
@@ -334,6 +335,7 @@ func normalizeV4LegacyToolDropStacks(dto *chunkDTO) error {
 			continue
 		}
 
+		changed = true
 		normalized[sourceSlot].Stack.Count = 1
 		for extra := uint8(1); extra < source.Stack.Count; extra++ {
 			targetSlot := -1
@@ -344,7 +346,7 @@ func normalizeV4LegacyToolDropStacks(dto *chunkDTO) error {
 				}
 			}
 			if targetSlot < 0 {
-				return fmt.Errorf(
+				return false, fmt.Errorf(
 					"%w: legacy tool drop slot %d has insufficient reusable drop slots",
 					ErrCorrupt, sourceSlot,
 				)
@@ -356,7 +358,7 @@ func normalizeV4LegacyToolDropStacks(dto *chunkDTO) error {
 		}
 	}
 	dto.Drops = normalized
-	return nil
+	return changed, nil
 }
 
 func appendLogicalSection(dst []byte, index uint32, snapshot world.ContainerSnapshot) []byte {
@@ -477,9 +479,11 @@ func decodeChunkPayload(
 	}
 	// schema v4 过渡期在构造区块前归一化 M4H 可能写出的工具堆；Task 6 升到 schema v5 时
 	// 应把补满与拆分正式并入 v4→v5 migration，并删除这里的过渡调用，避免双重处理。
-	if err := normalizeV4LegacyToolDropStacks(&dto); err != nil {
+	normalized, err := normalizeV4LegacyToolDropStacks(&dto)
+	if err != nil {
 		return decodedPayload{}, err
 	}
+	migrated = migrated || normalized
 	chunk, err := chunkFromDTO(dto)
 	if err != nil {
 		return decodedPayload{}, err
