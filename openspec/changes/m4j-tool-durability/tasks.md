@@ -35,9 +35,9 @@
 
 ## 6. 玩家 schema v4 与区块 schema v5
 
-- [ ] 6.1 在 `internal/storage/player_migration_test.go`、`migration_test.go` 写失败测试：v3→v4 玩家迁移、v4→v5 区块迁移都把旧工具补为满耐久，非工具耐久保持 `0`；v4 遗留多件工具堆稳定拆为单件槽并标记重写，容量不足时返回 `ErrCorrupt` 而不截断。
+- [x] 6.1 在 `internal/storage/player_migration_test.go`、`migration_test.go` 写失败测试：v3→v4 玩家迁移、v4→v5 区块迁移都把旧工具补为满耐久，非工具耐久保持 `0`；v4 遗留多件工具堆稳定拆为单件槽并标记重写，容量不足时返回 `ErrCorrupt` 而不截断。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage -run "MigrationFillsFullToolDurability" -count=1'`
-- [ ] 6.2 `internal/storage/player_codec.go` 的 `currentPlayerSchema` 升为 `4`；`chunk_codec.go` 的 `currentChunkSchema` 升为 `5`；`internal/world/drop.go` 的 `DropSlotBytes` 由 17 增至 19；`internal/storage/migration.go` 新增共用的 `fillFullDurability` 并在 `playerMigrations`/`chunkMigrations` 注册对应键。把当前 v4 解码阶段的“补满+拆分”过渡逻辑正式移入 v4→v5 migration，删除玩家 v3/区块 v4 的满耐久编码门禁和解码 shim；编解码逐处从「u16+u8」改为「u16+u8+u16」。既有 v3 玩家 golden 与 v4 区块 golden 字节保持不变，新增一份 v4 玩家与 v5 区块 golden，并用磨损工具往返测试证明真实耐久不会被重置。
+- [x] 6.2 `internal/storage/player_codec.go` 的 `currentPlayerSchema` 升为 `4`；`chunk_codec.go` 的 `currentChunkSchema` 升为 `5`；`internal/world/drop.go` 的 `DropSlotBytes` 由 17 增至 19；`internal/storage/migration.go` 新增共用的 `fillFullDurability` 并在 `playerMigrations`/`chunkMigrations` 注册对应键。把当前 v4 解码阶段的“补满+拆分”过渡逻辑正式移入 v4→v5 migration，删除玩家 v3/区块 v4 的满耐久编码门禁和解码 shim；编解码逐处从「u16+u8」改为「u16+u8+u16」。既有 v3 玩家 golden 与 v4 区块 golden 字节保持不变，新增一份 v4 玩家与 v5 区块 golden，并用磨损工具往返测试证明真实耐久不会被重置。
   - 验证：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/world -race -count=1'`；`go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s`；`go test ./internal/storage -run "^$" -fuzz FuzzDecodePlayer -fuzztime=10s`；`go test ./internal/archcheck -count=1`；`gofmt -l .`；`git diff --check`
 
 ## 7. 权威扣减与损坏转换
