@@ -172,6 +172,10 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 	for len(wrongTool) < 30 {
 		tickMessages := make([]network.ServerMessage, 0, 2)
 		state := nextMemoryMiningState(t, running, clientEndpoint, mirror, func(message network.ServerMessage) {
+			// 异步生成完成的相邻快照可与采掘完成同 tick 发布；它不属于完成帧的 delta+PlayerState 契约。
+			if _, ok := message.(network.ChunkSnapshot); ok {
+				return
+			}
 			tickMessages = append(tickMessages, message)
 		})
 		if state.LastInputSequence < 5 {
