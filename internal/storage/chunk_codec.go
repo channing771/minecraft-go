@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -292,10 +293,70 @@ func decodeLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
 	if drop.PickupDelayTicks, err = d.u8(); err != nil {
 		return world.DropSlot{}, err
 	}
-	if err := validateDropSlot(drop); err != nil {
+	if err := validateLegacyDropSlot(drop); err != nil {
 		return world.DropSlot{}, err
 	}
 	return drop, nil
+}
+
+// validateLegacyDropSlot 接受旧 v4 wire 可能留下的多件工具堆；当前编码仍由 validateDropSlot 严格校验。
+func validateLegacyDropSlot(drop world.DropSlot) error {
+	if !drop.Active {
+		return nil
+	}
+	if drop.Generation == 0 {
+		return errors.New("active drop slot has zero generation")
+	}
+	if drop.BlockIndex >= core.SectionsPerChunk*core.BlocksPerSection {
+		return fmt.Errorf("drop block index %d is outside the chunk", drop.BlockIndex)
+	}
+	if full, ok := core.ItemMaxDurability(drop.Stack.Item); ok {
+		if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount ||
+			drop.Stack.Durability != full {
+			return errors.New("legacy tool drop stack is invalid")
+		}
+		return nil
+	}
+	if !drop.Stack.Valid() {
+		return errors.New("drop stack is invalid")
+	}
+	return nil
+}
+
+func normalizeV4LegacyToolDropStacks(dto *chunkDTO) error {
+	sources := dto.Drops
+	normalized := dto.Drops
+	for sourceSlot, source := range sources {
+		if !source.Active || source.Stack.Count <= 1 {
+			continue
+		}
+		if _, ok := core.ItemMaxDurability(source.Stack.Item); !ok {
+			continue
+		}
+
+		normalized[sourceSlot].Stack.Count = 1
+		for extra := uint8(1); extra < source.Stack.Count; extra++ {
+			targetSlot := -1
+			for slot, candidate := range normalized {
+				if !candidate.Active && candidate.Generation != math.MaxUint32 {
+					targetSlot = slot
+					break
+				}
+			}
+			if targetSlot < 0 {
+				return fmt.Errorf(
+					"%w: legacy tool drop slot %d has insufficient reusable drop slots",
+					ErrCorrupt, sourceSlot,
+				)
+			}
+			target := source
+			target.Generation = normalized[targetSlot].Generation + 1
+			target.Stack.Count = 1
+			normalized[targetSlot] = target
+		}
+	}
+	dto.Drops = normalized
+	return nil
 }
 
 func appendLogicalSection(dst []byte, index uint32, snapshot world.ContainerSnapshot) []byte {
@@ -412,6 +473,11 @@ func decodeChunkPayload(
 	}
 	dto, migrated, err := migrateChunk(schema, dto)
 	if err != nil {
+		return decodedPayload{}, err
+	}
+	// schema v4 过渡期在构造区块前归一化 M4H 可能写出的工具堆；Task 6 升到 schema v5 时
+	// 应把补满与拆分正式并入 v4→v5 migration，并删除这里的过渡调用，避免双重处理。
+	if err := normalizeV4LegacyToolDropStacks(&dto); err != nil {
 		return decodedPayload{}, err
 	}
 	chunk, err := chunkFromDTO(dto)

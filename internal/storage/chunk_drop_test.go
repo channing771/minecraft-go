@@ -2,10 +2,12 @@ package storage
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"minecraft-go/internal/core"
@@ -187,6 +189,118 @@ func TestChunkV4ToolDropRestoresFullDurabilityAndCanBePickedUp(t *testing.T) {
 	if remainder != (core.ItemStack{}) || inventory.Hotbar.Slots[0] != want {
 		t.Fatalf("拾取 schema v4 工具后 inventory=%+v remainder=%+v", inventory, remainder)
 	}
+}
+
+func TestChunkV4LegacyToolDropStackSplitsDeterministically(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	chunk := codecFixtureChunk(key.Pos)
+	firstIndex, ok := world.ChunkBlockIndex(core.BlockPos{
+		X: key.Pos.X << core.SectionShift, Y: 5, Z: key.Pos.Z << core.SectionShift,
+	})
+	if !ok {
+		t.Fatal("第一个固定测试方块没有区块索引")
+	}
+	secondIndex := firstIndex + 1
+	chunk.SetDrop(0, world.DropSlot{Generation: 4})
+	chunk.SetDrop(1, world.DropSlot{Generation: math.MaxUint32})
+	chunk.SetDrop(2, world.DropSlot{Generation: 7})
+	chunk.SetDrop(5, world.DropSlot{
+		Generation: 11, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStone, Count: 2},
+		BlockIndex: firstIndex, AgeTicks: 101, PickupDelayTicks: 9,
+	})
+	chunk.SetDrop(8, world.DropSlot{
+		Generation: 13, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStone, Count: 2},
+		BlockIndex: secondIndex, AgeTicks: 202, PickupDelayTicks: 4,
+	})
+
+	payload := legacyV4ToolDropPayload(t, key, 19, chunk, 5, 8)
+	decoded, err := decodeChunkPayload(key, 19, payload)
+	if err != nil {
+		t.Fatalf("解码遗留 schema v4 工具堆: %v", err)
+	}
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	wantFirst := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}
+	for _, slot := range []int{5, 0} {
+		drop := decoded.Chunk.Drop(slot)
+		if drop.Stack != wantFirst || drop.BlockIndex != firstIndex ||
+			drop.AgeTicks != 101 || drop.PickupDelayTicks != 9 {
+			t.Fatalf("第一堆拆分槽 %d = %+v", slot, drop)
+		}
+	}
+	if decoded.Chunk.Drop(5).Generation != 11 || decoded.Chunk.Drop(0).Generation != 5 {
+		t.Fatalf("第一堆 generation 原槽=%d 新槽=%d，想要 11/5",
+			decoded.Chunk.Drop(5).Generation, decoded.Chunk.Drop(0).Generation)
+	}
+	for _, slot := range []int{8, 2} {
+		drop := decoded.Chunk.Drop(slot)
+		if drop.Stack != wantFirst || drop.BlockIndex != secondIndex ||
+			drop.AgeTicks != 202 || drop.PickupDelayTicks != 4 {
+			t.Fatalf("第二堆拆分槽 %d = %+v", slot, drop)
+		}
+	}
+	if decoded.Chunk.Drop(8).Generation != 13 || decoded.Chunk.Drop(2).Generation != 8 {
+		t.Fatalf("第二堆 generation 原槽=%d 新槽=%d，想要 13/8",
+			decoded.Chunk.Drop(8).Generation, decoded.Chunk.Drop(2).Generation)
+	}
+	if got := decoded.Chunk.Drop(1); got != (world.DropSlot{Generation: math.MaxUint32}) {
+		t.Fatalf("耗尽槽被复用或修改: %+v", got)
+	}
+}
+
+func TestChunkV4LegacyToolDropStackRejectsInsufficientCapacity(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	chunk := codecFixtureChunk(key.Pos)
+	index, ok := world.ChunkBlockIndex(core.BlockPos{
+		X: key.Pos.X << core.SectionShift, Y: 5, Z: key.Pos.Z << core.SectionShift,
+	})
+	if !ok {
+		t.Fatal("固定测试方块没有区块索引")
+	}
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 1, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStone, Count: 2},
+		BlockIndex: index,
+	})
+	for slot := 1; slot < core.DropsPerChunk; slot++ {
+		if slot%2 == 0 {
+			chunk.SetDrop(slot, world.DropSlot{Generation: math.MaxUint32})
+			continue
+		}
+		chunk.SetDrop(slot, world.DropSlot{
+			Generation: uint32(slot), Active: true,
+			Stack:      core.ItemStack{Item: core.ItemStone, Count: 1},
+			BlockIndex: index,
+		})
+	}
+
+	payload := legacyV4ToolDropPayload(t, key, 19, chunk, 0)
+	if _, err := decodeChunkPayload(key, 19, payload); !errors.Is(err, ErrCorrupt) ||
+		!strings.Contains(err.Error(), "insufficient reusable drop slots") {
+		t.Fatalf("容量不足 error=%v，想要明确的 ErrCorrupt", err)
+	}
+}
+
+func legacyV4ToolDropPayload(
+	t *testing.T,
+	key core.ChunkKey,
+	revision uint64,
+	chunk *world.Chunk,
+	toolSlots ...int,
+) []byte {
+	t.Helper()
+	logical, err := encodeLogicalChunk(ChunkSave{Key: key, Revision: revision, Chunk: chunk})
+	if err != nil {
+		t.Fatalf("编码 v4 测试基线: %v", err)
+	}
+	dropStart := len(logical) - core.FurnacesPerChunk*world.FurnaceSlotBytes -
+		core.DropsPerChunk*world.DropSlotBytes
+	for _, slot := range toolSlots {
+		itemOffset := dropStart + slot*world.DropSlotBytes + 5
+		binary.LittleEndian.PutUint16(logical[itemOffset:], uint16(core.ItemStonePickaxe))
+	}
+	return testEnvelope(key, revision, logical)
 }
 
 func TestChunkCodecRejectsWrongDropSlotCount(t *testing.T) {
