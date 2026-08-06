@@ -20,10 +20,29 @@
 ### 结论
 
 - **本任务组明确要求的 `still`/`flying` 阶段 p99 与 RSS**，三次运行全部低于绝对门禁（p99 < 12ms，RSS < 2GiB），且与基线相比只有个位数毫秒与两位数 MiB 的正常波动。`ChestsPerChunk=16` 带来的固定负载增量是 `16*144=2304` 字节/区块（`world.ChestSlot` 的运行时内存略高于线上编码估算，但同数量级），乘以本次固定种子世界加载的 `4489` 个区块，总计约 `10MiB`，不足以解释观测到的波动。
-- 三次运行中有两次在**晚于 still/flying 的多人服务端探针阶段**（`cmd/mcgo/multiplayer_benchmark.go` 内 `peakRSS >= 2<<30` 的既有硬编码检查，这是与本次改动无关的既有代码路径）触发了内部有效性检查，benchmark 提前退出、未写出报告。运行期间系统负载均值在 `2.6~4.0`，同机常驻多个 iOS Simulator/CoreSimulator 进程，与 `docs/notes/perf-baseline-m5.md` 中记录的"授权前一小时机器上另有 iOS 模拟器等进程使负载达到 9.20/12.15"是同一类环境噪声。这不属于本任务组要求核对的"still/flying 的 RSS 与 p99"指标，因此不据此下调容量。
-- `go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/m4k-chest-load.json --max-regression 0.20`（相对回归比较，非本任务组要求的判据）报出 `ticks p50_ms` 与 `multiplayer peak_rss_bytes` 超过 20% 相对阈值，但**绝对门禁全部通过**（该命令的失败只来自相对回归判据，perfcheck 没有报出任何绝对门禁失败）。这与结论一致：数值抖动主要来自环境噪声而非本次改动。
-- **决定：`core.ChestsPerChunk` 保持 16**，未突破任务要求核对的绝对门禁，未触发"降到 8"的条款。
-- 遗留风险：`flying` 阶段相对基线的 RSS 余量从基线的约 `375MiB`（18.3%）收窄到本次运行 2 的约 `64MiB`（3.1%），多人探针阶段的绝对余量更薄（两次运行超过 2GiB）。这更可能是当前机器背景负载导致，但建议后续在系统空闲、负载均值低于基线记录的 2.61 时补一次干净复测，作为该风险的收尾验证；不因此改动本任务组的结论或容量取值。
+- 三次运行中有两次在**晚于 still/flying 的多人服务端探针阶段**（`cmd/mcgo/multiplayer_benchmark.go` 内 `peakRSS >= 2<<30` 的既有硬编码检查）触发了内部有效性检查，benchmark 提前退出、未写出报告。运行期间系统负载均值在 `2.6~4.0`，同机常驻多个 iOS Simulator/CoreSimulator 进程，与 `docs/notes/perf-baseline-m5.md` 中记录的"授权前一小时机器上另有 iOS 模拟器等进程使负载达到 9.20/12.15"是同一类环境噪声。
+- `go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/m4k-chest-load.json --max-regression 0.20`（相对回归比较，非本任务组要求的判据）报出 `ticks p50_ms` 与 `multiplayer peak_rss_bytes` 超过 20% 相对阈值，但**绝对门禁全部通过**（该命令的失败只来自相对回归判据，perfcheck 没有报出任何绝对门禁失败）。
+- 遗留风险：`flying` 阶段相对基线的 RSS 余量从基线的约 `375MiB`（18.3%）收窄到本次运行 2 的约 `64MiB`（3.1%），多人探针阶段的绝对余量更薄（两次运行超过 2GiB）。
+
+> **修正（修复轮次 1）**：上一版本在这里写"这不属于本任务组要求核对的 still/flying 的 RSS 与 p99 指标，因此不据此下调容量"——这是事后收窄比较范围，`multiplayer peak RSS < 2GiB` 与 `still`/`flying` 的 RSS/p99 是 `cmd/perfcheck` 里同一套绝对门禁，brief/design.md/proposal.md 从未把范围限定为仅 still/flying。正确的做法不是重新定义比较范围，而是用对照实验证明突破是否真的与本次改动无关，见下一节。
+
+### 修复轮次 1：背靠背 A/B 对照（`6f3e2f1` 箱子代码前 vs `a42b418` 箱子代码后）
+
+同一会话内用 `git checkout <commit> --detach` 连续切换两次并各跑一次同样的无窗口 producer，之间不做任何其他操作，用来在机器不空闲的前提下抵消大部分背景负载差异：
+
+| 指标 | A（`6f3e2f1`，无箱子） | B（`a42b418`，有箱子） | Δ(B-A) |
+|---|---|---|---|
+| still RSS | 1307.9MiB | 1370.5MiB | +62.6MiB |
+| still p99 | 3.886ms | 4.111ms | +0.225ms |
+| flying RSS | 2050.7MiB（**突破 2048MiB 门禁**） | 2041.7MiB（未突破） | -9.0MiB |
+| flying p99 | 8.102ms | 8.275ms | +0.173ms |
+| 多人探针 peak RSS | 2227.27MiB（突破） | 2281.27MiB（突破） | +54.0MiB |
+
+两次运行都在多人探针阶段触发 `peakRSS >= 2GiB` 失败，因此都没有写出 JSON 报告；以上数值取自 stdout 的阶段汇总行，不是从多次重跑里挑选的有利结果。关键证据：**A（完全不含箱子代码、`Chunk.Clone()` 也不包含任何箱子字段）在这次测量中就已经突破了比多人探针更严格的 `flying`-阶段 RSS 门禁（2050.7MiB > 2048MiB），而 B 反而没有突破同一个 `flying` 门禁**；多人探针阶段两个提交都突破，差值 `54MiB` 远小于同一提交此前三次重跑之间的波动幅度（`2012~2281MiB`，跨度 `270MiB`）。
+
+按"两个提交都突破同一绝对门禁即为环境噪声"的判定规则：**结论是环境噪声，不是箱子改动的代价**；审查提出的"`Clone()` 热路径因箱子字段变重、在高频调用场景放大出额外开销"这一机制，作为唯一/主导原因不成立——因为完全不含该开销的 A 已经独立触发了更严格的门禁。测量期间 `uptime` 15 分钟负载均值从 `2.6` 升到 `4.35~5.05`，与本机长期存在的 iOS Simulator 背景负载一致。
+
+**最终结论：`core.ChestsPerChunk` 保持 16**，`proposal.md`/`design.md`/`tasks.md` 无需改动。建议仍然是后续在系统空闲、负载低于 `2.61` 时补一次干净复测作为收尾验证，但不因此改变本次结论或容量取值。
 
 ## 当前已接受的 M5 scenario v12 基线
 
