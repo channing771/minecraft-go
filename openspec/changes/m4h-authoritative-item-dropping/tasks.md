@@ -44,6 +44,9 @@
 - [x] 8.1 逐条把 proposal、delta spec、design、tasks 映射到实现和测试；确认全部已注册物品可经线上掉落物传播，且没有物理、整组丢弃、死亡掉落、客户端预测、新 UI、WAL/ECS、额外存档负载或 scenario 变更。
 - [x] 8.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`gofmt -l .`、`git diff --check` 与 `openspec validate --all --strict --no-interactive`；任何失败只修根因，不放宽门禁或绕过 Hook。
 - [x] 8.3 运行协议 fuzz/small-packet benchmark、`BenchmarkDropSelectedItem`，以及 Memory/TCP/磁盘重启定向测试；确认无前台窗口、无遗留进程、tracked 工作树只含 M4H 预期文件后，提交冻结候选。
+- [ ] 8.4 审核修复先写失败测试：一个含两把同类镐的可拾取地面堆必须拆入两个合法栏位；同 tick 序号较早的有效放置必须先消耗最后一个物品，较晚主动丢弃返回 `invalid_slot` 且不创建掉落物。
+- [ ] 8.5 最小修复共享根因：`Inventory.AddStack` 接受数量 `1..64` 的已注册来源堆并继续按 `ItemStackLimit` 写入合法栏位；`Engine.Step` 用既有有界命令切片按序执行放置、选栏和主动丢弃，再推进掉落物，不新增协议、存档字段、锁、goroutine 或无界状态。
+- [ ] 8.6 运行 `internal/core`、`internal/world`、`internal/sim`、`internal/server`、`internal/network`、`internal/client` 与 `cmd/mcgo` 的无窗口 race 测试，再运行全仓 race、vet、archcheck、gofmt、diff check、OpenSpec strict validate 和相关 benchmark；通过后提交审核修复候选。
 
 ## 9. 主规格同步与归档
 
