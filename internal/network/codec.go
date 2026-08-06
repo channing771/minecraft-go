@@ -686,7 +686,14 @@ func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
 	if err != nil {
 		return core.ItemStack{}, err
 	}
-	return core.ItemStack{Item: core.ItemID(item), Count: count}, nil
+	stack := core.ItemStack{Item: core.ItemID(item), Count: count}
+	// 协议 v10 的物品负载只有 Item/Count，没有耐久字节；本批次尚未实现耐久扣减，
+	// 因此权威侧发出的每把工具事实上都仍是满耐久，解码时据此补上。等协议 v11
+	// 真正上线耐久字段后，这里应改为读取 wire 上的值而不是重新计算满值。
+	if max, ok := core.ItemMaxDurability(stack.Item); ok {
+		stack.Durability = max
+	}
+	return stack, nil
 }
 
 // furnaceRefWireBytes 是熔炉引用的固定编码长度。

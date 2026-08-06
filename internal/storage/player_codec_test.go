@@ -30,10 +30,12 @@ func fixturePlayerInventory() core.Inventory {
 	var inventory core.Inventory
 	inventory.Hotbar.Selected = 3
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
-	inventory.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	ironFull, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
+	inventory.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
 	inventory.Hotbar.Slots[6] = core.ItemStack{Item: core.ItemGrass, Count: 1}
 	inventory.Backpack[0] = core.ItemStack{Item: core.ItemDirt, Count: 12}
-	inventory.Backpack[7] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
+	inventory.Backpack[7] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: ironFull}
 	inventory.Backpack[core.BackpackSlots-1] = core.ItemStack{Item: core.ItemStone, Count: 5}
 	return inventory
 }

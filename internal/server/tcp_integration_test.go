@@ -456,7 +456,8 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	firstIdentity := integrationIdentity(0x81, "Crafter")
 	secondIdentity := integrationIdentity(0x82, "Observer")
 	spawn := integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil)
-	spawn.Inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	spawn.Inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
 	seedIntegrationPlayer(t, root, firstIdentity, spawn)
 	seedIntegrationPlayer(t, root, secondIdentity, integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil))
 
@@ -1081,9 +1082,11 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	store := storage.NewMemory(storage.Metadata{
 		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	})
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	ironFull, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
 	var inventory core.Inventory
-	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
-	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
+	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: ironFull}
 	inventory.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemDirt, Count: 1}
 	location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{0.5, 1.001, 0.5}}
 	if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{

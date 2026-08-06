@@ -386,8 +386,9 @@ func TestDropSelectedItemTransfersOneAuthoritativeItem(t *testing.T) {
 		core.ItemIronPickaxe,
 	} {
 		t.Run(fmt.Sprint(item), func(t *testing.T) {
+			full, _ := core.ItemMaxDurability(item)
 			inventory := core.Inventory{Hotbar: core.Hotbar{Selected: 2}}
-			inventory.Hotbar.Slots[2] = core.ItemStack{Item: item, Count: 1}
+			inventory.Hotbar.Slots[2] = core.ItemStack{Item: item, Count: 1, Durability: full}
 			engine, session := readyFlatPlayerWithInventory(t, inventory)
 			engine.Enqueue(sim.Command{
 				Session: session, Sequence: 1, Kind: sim.CommandDropSelectedItem,
@@ -402,6 +403,8 @@ func TestDropSelectedItemTransfersOneAuthoritativeItem(t *testing.T) {
 			}
 			_, drop := onlyDrop(t, engine)
 			// 创建 tick 立即计入第一个活动 tick，因此 step 后剩余 39。
+			// 权威掉落目前只携带 Item/Count（world.DropSlot 尚未接线耐久，
+			// 属于后续 sim 扣减任务的范围），因此期望值仍是零耐久。
 			if drop.Stack != (core.ItemStack{Item: item, Count: 1}) ||
 				drop.PickupDelayTicks != sim.PlayerDropPickupDelayTicks-1 {
 				t.Fatalf("主动掉落 = %+v", drop)

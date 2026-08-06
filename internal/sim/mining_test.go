@@ -96,8 +96,9 @@ func TestMiningTargetBlockAndToolChangesRestartAtOne(t *testing.T) {
 		{
 			name: "选中工具变化",
 			mutate: func(_ *Engine, session *sessionState, _ core.BlockPos) {
+				full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
 				session.player.inventory.Hotbar.Slots[0] = core.ItemStack{
-					Item: core.ItemStonePickaxe, Count: 1,
+					Item: core.ItemStonePickaxe, Count: 1, Durability: full,
 				}
 			},
 			want: core.BlockPos{X: 0, Y: 1, Z: 5},
@@ -544,7 +545,8 @@ func setMiningHeldItem(player *playerState, item core.ItemID) {
 		player.inventory.Hotbar.Slots[0] = core.ItemStack{}
 		return
 	}
-	player.inventory.Hotbar.Slots[0] = core.ItemStack{Item: item, Count: 1}
+	full, _ := core.ItemMaxDurability(item)
+	player.inventory.Hotbar.Slots[0] = core.ItemStack{Item: item, Count: 1, Durability: full}
 }
 
 func miningTargetRecord(t *testing.T, engine *Engine, target core.BlockPos) *ChunkRecord {

@@ -189,7 +189,14 @@ func decodePlayerStack(decoder *byteDecoder) (core.ItemStack, error) {
 	if err != nil {
 		return core.ItemStack{}, err
 	}
-	return core.ItemStack{Item: core.ItemID(item), Count: count}, nil
+	stack := core.ItemStack{Item: core.ItemID(item), Count: count}
+	// schema v3 的物品负载只有 Item/Count，没有耐久字节；本批次尚未实现耐久扣减，
+	// 所以现存存档里的每把工具事实上都仍是满耐久，解码时据此补上。等 schema v4
+	// 真正持久化耐久值后，这里应改为读取 wire 上的字段而不是重新计算满值。
+	if max, ok := core.ItemMaxDurability(stack.Item); ok {
+		stack.Durability = max
+	}
+	return stack, nil
 }
 
 // decodePlayerPayload 按 schema 解析 payload；v1 没有快捷栏字段。
