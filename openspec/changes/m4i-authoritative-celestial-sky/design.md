@@ -86,7 +86,7 @@ instrumentation 只在一次 full-stars、生产 `10s/60s/120s/30s`、Memory tra
 
 `SaveBatch` 必须继续全批校验后才产生可见提交。实现先完成 revision/hash 冲突归并，再为全部 pending candidate 编码；任一编码或 context 错误直接返回且 `store.chunks` 不变，只有全部编码成功后才逐项替换 map。编码返回的新切片已经由 Store 独占，不再额外 `bytes.Clone`。`LoadChunk` 在既有 mutex 保护下直接解码不可变 payload；先保持当前简单锁边界，只有实际竞争证据才考虑复制 payload 后解锁或引入 codec pool。
 
-现有 M2 微基准显示单 chunk encode 约 `0.21ms`、decode 约 `0.22ms`；encode 的约 `1.79MB/op` 是短期分配而非长期 owner。保存仍运行在两个有界后台 worker，不阻塞权威 tick；8.2 必须用 storage race 测试、确定性 retained-payload 检查、现有 codec/golden 覆盖和修复后的不可提升 full-stars 生产时长 Memory 诊断共同验证。如果 live heap owner 已消失但 p99 或 RSS 仍失败，保留该正确性修复并以新证据更新后续计划，不能预先加入 zstd pool 或放宽门禁。
+现有 M2 微基准显示单 chunk encode 约 `0.21ms`、decode 约 `0.22ms`；encode 的约 `1.79MB/op` 是短期分配而非长期 owner。保存仍运行在两个有界后台 worker，不阻塞权威 tick；8.2 必须用公开 Store API 的确定性 retained-heap 检查、既有无别名测试、storage race 测试、现有 codec/golden 覆盖和修复后的不可提升 full-stars 生产时长 Memory 诊断共同验证。如果 live heap owner 已消失但 p99 或 RSS 仍失败，保留该正确性修复并以新证据更新后续计划，不能预先加入 zstd pool 或放宽门禁。
 
 否决 benchmark 专用丢弃、LRU 或限容 Store：它们会让已确认保存的旧 ChunkKey 在重载时丢失，破坏单机与正式 Store 的持久化语义。否决把 benchmark 改到临时 DiskStore：它会把文件系统、region cache 与 compaction I/O 混入 v13 workload。否决自建无压缩 memory codec 或提前池化 zstd：现有 chunk v4 codec 已提供上限、校验和重建路径，只有实测证明 codec CPU/临时分配仍阻止门禁时才扩展。
 
