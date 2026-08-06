@@ -133,10 +133,15 @@ func TestMemoryStoreRejectsUnencodableBatchAtomically(t *testing.T) {
 		Dimension: core.Overworld,
 		Pos:       core.ChunkPos{X: 1, Z: 2},
 	}
+	existingKey := core.ChunkKey{
+		Dimension: core.Overworld,
+		Pos:       core.ChunkPos{X: 5, Z: 6},
+	}
 	invalidKey := core.ChunkKey{
 		Dimension: core.Overworld,
 		Pos:       core.ChunkPos{X: 3, Z: 4},
 	}
+	saveChunk(t, store, existingKey, 1, chunkWithBlock(existingKey.Pos, core.StoneID))
 	invalid := world.NewChunk(invalidKey.Pos)
 	invalid.SetFurnace(0, world.FurnaceSlot{
 		Generation: 1,
@@ -149,6 +154,10 @@ func TestMemoryStoreRejectsUnencodableBatchAtomically(t *testing.T) {
 			Key: validKey, Revision: 1,
 			Chunk: chunkWithBlock(validKey.Pos, core.StoneID),
 		},
+		{
+			Key: existingKey, Revision: 2,
+			Chunk: chunkWithBlock(existingKey.Pos, core.DirtID),
+		},
 		{Key: invalidKey, Revision: 1, Chunk: invalid},
 	})
 	if !errors.Is(err, storage.ErrCorrupt) {
@@ -156,6 +165,10 @@ func TestMemoryStoreRejectsUnencodableBatchAtomically(t *testing.T) {
 	}
 	if _, err := store.LoadChunk(context.Background(), validKey); !errors.Is(err, storage.ErrChunkNotFound) {
 		t.Fatalf("编码失败后合法 chunk 可见: %v", err)
+	}
+	loaded, err := store.LoadChunk(context.Background(), existingKey)
+	if err != nil || loaded.Revision != 1 || loaded.Chunk.BlockAt(0, 0, 0) != core.StoneID {
+		t.Fatalf("编码失败后已有 chunk = %+v, %v", loaded, err)
 	}
 }
 
@@ -194,6 +207,23 @@ func TestMemoryStoreRetainedHeapIsBounded(t *testing.T) {
 	const limit = 8 << 20
 	if retained := after.HeapAlloc - before.HeapAlloc; retained >= limit {
 		t.Fatalf("retained HeapAlloc = %d，必须小于 %d", retained, limit)
+	}
+
+	for index := 0; index < 192; index++ {
+		key := core.ChunkKey{
+			Dimension: core.Overworld,
+			Pos:       core.ChunkPos{X: int32(index)},
+		}
+		loaded, err := store.LoadChunk(context.Background(), key)
+		if err != nil || loaded.Revision != 1 {
+			t.Fatalf("LoadChunk(%+v) = %+v, %v", key, loaded, err)
+		}
+		for section := 0; section < core.SectionsPerChunk; section++ {
+			y := int32(core.MinY + section*core.SectionSize)
+			if got := loaded.Chunk.BlockAt(section%core.SectionSize, y, section/core.SectionSize); got != core.StoneID {
+				t.Fatalf("LoadChunk(%+v) section %d block = %v，想要 Stone", key, section, got)
+			}
+		}
 	}
 }
 
