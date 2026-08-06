@@ -90,7 +90,11 @@ instrumentation 只在一次 full-stars、生产 `10s/60s/120s/30s`、Memory tra
 
 否决 benchmark 专用丢弃、LRU 或限容 Store：它们会让已确认保存的旧 ChunkKey 在重载时丢失，破坏单机与正式 Store 的持久化语义。否决把 benchmark 改到临时 DiskStore：它会把文件系统、region cache 与 compaction I/O 混入 v13 workload。否决自建无压缩 memory codec 或提前池化 zstd：现有 chunk v4 codec 已提供上限、校验和重建路径，只有实测证明 codec CPU/临时分配仍阻止门禁时才扩展。
 
-根因闭合后先修复 RSS，再处理 frame time。稳定 `Renderer.Render` 已有真实候选零分配测试，因此不能把“零 Go 分配”等同于“进程无资源滞留”；RSS 诊断必须覆盖 flying 的区块周转、sky command encoding、GPU sample 后回收和 `ru_maxrss` 的生命周期峰值。frame time 优化只允许减少等价 shader 工作，例如避免不可见星空的 hash 工作或合并重复方向计算；正午/午夜像素、太阳/月亮方向、固定星图、一次 fullscreen draw 与 uniform 契约必须保持不变。
+8.2 的唯一一次 full-stars、生产 `10s/60s/120s/30s` Memory 诊断已经闭合 RSS：flying RSS/HeapAlloc 为 `1459.7/562.5MiB`，GPU 后与八会话 server probe 峰值均为 `1652.0MiB`，producer exit `0` 并写出 JSON。该输出只证明 encoded MemoryStore 移除了已定位的 retained owner；它没有运行 `perfcheck` 或 TCP，也不得提升为 baseline。稳定 `Renderer.Render` 已有真实候选零分配测试，因此不能把“零 Go 分配”等同于“进程无资源滞留”。
+
+8.3 只做一个等价 shader 短路。`fs_main` 先把 `sky.star_visibility.x` clamp 到 `[0,1]`，令星光初值为 `0`；只有 visibility `>0` 且 `direction.y>0` 时才调用现有 `star_light`，随后继续乘原有 `smoothstep(0, 0.08, direction.y)`。这只跳过结果必为零的完整 cube-face、整数 hash、cell 与圆点计算；`star_light` 本身、hash 常量、星点密度/亮度、地平线渐隐、天空颜色、太阳/月亮圆盘、world-direction 重建、一次 fullscreen draw 和 `96` 字节 uniform 全部逐字保持。否决重写 hash、降低星点密度、移除 draw、降低分辨率、增加纹理或 CPU 分支，因为它们会改变固定星图、视觉或 workload；也不增加只锁定 WGSL 私有源码形状的测试，既有真实 headless 像素与零分配测试负责锁定可观察行为，评审直接核对受限 shader diff。
+
+实现前后运行同一组 `TestSkyHeadless`、sky pipeline/draw/uniform 与 `TestRendererRenderDoesNotAllocate` 特征测试。通过后在已评审、干净的新 HEAD 上只执行一次不可提升的 full-stars、生产 `10s/60s/120s/30s` Memory v13 诊断，使用全新 `diag` 路径且不启用 heap instrumentation；不得运行 `perfcheck`、TCP、复制 baseline 或在失败后重试。只有 producer 正常写出报告、全部既有绝对门禁保持且 flying p99 `<12ms` 时才完成 8.3；否则保留证据、保持 8.3 未完成并先修订本 change，不能继续猜测另一项 shader 优化。
 
 只要最终视觉、draw 数量、2560x1440、阶段时长、样本和指标定义不变，优化后的 producer 仍是 scenario v13。若必须降低分辨率、减少天空 draw、改变阶段/样本或修改测量定义，则该方案改变 workload，必须先把场景升级为 v14 并重新设计迁移；不得用它给 v13 制造通过。
 
@@ -120,6 +124,7 @@ instrumentation 只在一次 full-stars、生产 `10s/60s/120s/30s`、Memory tra
 - [编码降低 live heap 但增加后台 CPU 与短期分配] → 先复用现有有界 codec 和两个 save worker，用 storage 微基准与完整诊断观察；没有证据时不增加 pool、缓存或并行度。
 - [编码失败造成半批提交] → pending candidate 全部编码成功后才替换 `MemoryStore.chunks`，并用含一个不可编码 chunk 的批次测试锁定零部分提交。
 - [只优化 p99 掩盖内存回归] → 固定先闭合 RSS 来源与 `2GiB` 门禁，再优化 shader；两者都通过后才能冻结候选。
+- [动态分支反而产生 GPU divergence] → 只在全帧一致的 daytime visibility 为零或地平线以下像素短路；用真实 full-stars v13 诊断判定，不根据静态指令数宣称收益，失败后不叠加第二项优化。
 - [为了通过而静默改变 workload] → 逐项核对 draw 数量、分辨率、阶段、样本和指标定义；任一变化先升级到 v14，不能继续标记 v13。
 
 ## Migration Plan
