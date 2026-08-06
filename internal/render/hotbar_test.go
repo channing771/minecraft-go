@@ -38,6 +38,19 @@ func fullTestInventory() core.Inventory {
 	return inventory
 }
 
+// maxQuadTestInventory 是合法的 quad 上限见证：九格磨损工具各自数量为 1，
+// 背包仍填满普通可堆叠物品。
+func maxQuadTestInventory() core.Inventory {
+	inventory := fullTestInventory()
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	for slot := range inventory.Hotbar.Slots {
+		inventory.Hotbar.Slots[slot] = core.ItemStack{
+			Item: core.ItemStonePickaxe, Count: 1, Durability: full / 2,
+		}
+	}
+	return inventory
+}
+
 // Mutation killed: dropping the selection frame, mislaying slots, or letting the
 // layout depend on anything but framebuffer size and hotbar value changes the
 // exact instance rectangles below.
@@ -118,12 +131,20 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
-	got := layoutInventory(&layout, atlas, fullTestInventory(), true, 5, nil, MiningOverlay{}, 1280, 720)
-	if len(got.quads) != maxHotbarQuads {
-		t.Fatalf("满界面 quads=%d，想要 %d", len(got.quads), maxHotbarQuads)
+	quadWitness := layoutInventory(
+		&layout, atlas, maxQuadTestInventory(), true, 5, nil, MiningOverlay{}, 1280, 720,
+	)
+	if len(quadWitness.quads) != maxHotbarQuads {
+		t.Fatalf("quad 上限见证 quads=%d，想要 %d", len(quadWitness.quads), maxHotbarQuads)
 	}
-	if len(got.glyphs) != maxHotbarGlyphs {
-		t.Fatalf("满界面数字=%d，想要 %d", len(got.glyphs), maxHotbarGlyphs)
+	glyphWitness := layoutInventory(
+		&layout, atlas, fullTestInventory(), true, 5, nil, MiningOverlay{}, 1280, 720,
+	)
+	if len(glyphWitness.glyphs) != maxHotbarGlyphs {
+		t.Fatalf("glyph 上限见证数字=%d，想要 %d", len(glyphWitness.glyphs), maxHotbarGlyphs)
+	}
+	if len(glyphWitness.quads) > maxHotbarQuads {
+		t.Fatalf("glyph 上限见证 quads=%d，超过固定上限 %d", len(glyphWitness.quads), maxHotbarQuads)
 	}
 	closed := layoutInventory(
 		&layout, atlas, fullTestInventory(), false, -1, nil,
@@ -132,6 +153,118 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 	)
 	if len(closed.quads) != 1+core.HotbarSlots*2+2 || len(closed.quads) > maxHotbarQuads {
 		t.Fatalf("关闭界面加采掘条 quads=%d，固定上限=%d", len(closed.quads), maxHotbarQuads)
+	}
+}
+
+// 杀死变异：放宽显示条件会让满耐久、损坏形态或普通物品多出 quad。
+func TestDurabilityBarAppearsOnlyForWornTools(t *testing.T) {
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	for _, test := range []struct {
+		name  string
+		stack core.ItemStack
+		want  int
+	}{
+		{"满耐久工具不显示", core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}, 0},
+		{"磨损工具显示两个 quad", core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full / 2}, 2},
+		{"损坏物品不显示", core.ItemStack{Item: core.ItemBrokenStonePickaxe, Count: 1}, 0},
+		{"普通方块不显示", core.ItemStack{Item: core.ItemStone, Count: 64}, 0},
+		{"空栏位不显示", core.ItemStack{}, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var layout hotbarLayout
+			appendDurabilityBar(&layout, 0, test.stack, 1920, 1080)
+			if got := len(layout.quads); got != test.want {
+				t.Fatalf("quad 数量 = %d，想要 %d", got, test.want)
+			}
+		})
+	}
+}
+
+// 杀死变异：固定宽度或整数相除会让低耐久填充条不再正且短于高耐久。
+func TestDurabilityBarFillTracksRemaining(t *testing.T) {
+	full, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
+	var low, high hotbarLayout
+	appendDurabilityBar(&low, 0, core.ItemStack{
+		Item: core.ItemIronPickaxe, Count: 1, Durability: 1,
+	}, 1920, 1080)
+	appendDurabilityBar(&high, 0, core.ItemStack{
+		Item: core.ItemIronPickaxe, Count: 1, Durability: full - 1,
+	}, 1920, 1080)
+
+	if len(low.quads) != 2 || len(high.quads) != 2 {
+		t.Fatalf("quad 数量 = %d / %d，想要各 2", len(low.quads), len(high.quads))
+	}
+	if low.quads[1].Width >= high.quads[1].Width {
+		t.Fatalf("低耐久填充宽度 %v 不小于高耐久 %v", low.quads[1].Width, high.quads[1].Width)
+	}
+	if low.quads[1].Width <= 0 {
+		t.Fatalf("填充宽度 = %v，想要正值", low.quads[1].Width)
+	}
+}
+
+// 杀死变异：遍历全部 36 格或使用 open 几何会让背包工具也出条或位置漂移。
+func TestDurabilityBarLayoutUsesOnlyHotbarGeometry(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	base := core.Inventory{}
+	base.Hotbar.Slots[3] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}
+	base.Backpack[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}
+	hotbarWorn := base
+	hotbarWorn.Hotbar.Slots[3].Durability--
+	backpackWorn := base
+	backpackWorn.Backpack[0].Durability--
+
+	var layout hotbarLayout
+	closedBase := len(layoutInventory(
+		&layout, atlas, base, false, -1, nil, MiningOverlay{}, 1280, 720,
+	).quads)
+	closed := layoutInventory(
+		&layout, atlas, hotbarWorn, false, -1, nil, MiningOverlay{}, 1280, 720,
+	)
+	if len(closed.quads) != closedBase+2 {
+		t.Fatalf("关闭背包的磨损工具 quads=%d，想要 %d", len(closed.quads), closedBase+2)
+	}
+	closedBars := [2]hotbarInstance{closed.quads[len(closed.quads)-2], closed.quads[len(closed.quads)-1]}
+
+	openBase := len(layoutInventory(
+		&layout, atlas, base, true, -1, nil, MiningOverlay{}, 1280, 720,
+	).quads)
+	open := layoutInventory(
+		&layout, atlas, hotbarWorn, true, -1, nil, MiningOverlay{}, 1280, 720,
+	)
+	if len(open.quads) != openBase+2 {
+		t.Fatalf("打开背包的快捷栏磨损工具 quads=%d，想要 %d", len(open.quads), openBase+2)
+	}
+	barStart := len(open.quads) - recipeQuads - 2
+	openBars := [2]hotbarInstance{open.quads[barStart], open.quads[barStart+1]}
+	if openBars != closedBars {
+		t.Fatalf("打开/关闭背包的耐久条几何不同: open=%+v closed=%+v", openBars, closedBars)
+	}
+	if got := len(layoutInventory(
+		&layout, atlas, backpackWorn, true, -1, nil, MiningOverlay{}, 1280, 720,
+	).quads); got != openBase {
+		t.Fatalf("背包栏磨损工具 quads=%d，想要 %d", got, openBase)
+	}
+}
+
+// 杀死变异：损坏工具落入默认分支会得到全零色，与完好工具同色则无法表达损坏状态。
+func TestBrokenToolColorsAreVisibleAndDistinct(t *testing.T) {
+	pairs := [][2]core.ItemID{
+		{core.ItemBrokenStonePickaxe, core.ItemStonePickaxe},
+		{core.ItemBrokenIronPickaxe, core.ItemIronPickaxe},
+	}
+	var brokenColors [2][4]float32
+	for index, pair := range pairs {
+		brokenColors[index] = hotbarItemColor(pair[0])
+		if brokenColors[index] == ([4]float32{}) || brokenColors[index][3] != 1 {
+			t.Fatalf("损坏工具 %d 颜色=%v，想要可见且 alpha=1", pair[0], brokenColors[index])
+		}
+		if brokenColors[index] == hotbarItemColor(pair[1]) {
+			t.Fatalf("损坏工具 %d 与完好工具颜色相同", pair[0])
+		}
+	}
+	if brokenColors[0] == brokenColors[1] {
+		t.Fatal("两种损坏工具颜色相同")
 	}
 }
 
@@ -264,7 +397,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 	if got, want := pass.pipelineLabels, []string{"hotbar quad", "hotbar glyph"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("pipeline 顺序=%v want=%v", got, want)
 	}
-	want := []uint32{maxHotbarQuads, maxHotbarGlyphs}
+	want := []uint32{2 + core.InventorySlots*2 + recipeQuads, maxHotbarGlyphs}
 	if got := pass.drawInstances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("draw 实例数=%v want=%v", got, want)
 	}

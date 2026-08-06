@@ -11,8 +11,8 @@ import (
 
 const (
 	// 固定容量按最坏布局：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块，
-	// 再加固定合成行与熔炉视图中较大的一个。
-	maxHotbarQuads = 2 + core.InventorySlots*2 + maxOverlayQuads
+	// 九格快捷栏耐久条，再加固定合成行与熔炉视图中较大的一个。
+	maxHotbarQuads = 2 + core.InventorySlots*2 + core.HotbarSlots*2 + maxOverlayQuads
 	// 数量最多两位数（1..64），每格最多两个数字。
 	maxHotbarGlyphs = core.InventorySlots*2 + maxOverlayGlyphs
 
@@ -36,15 +36,17 @@ const (
 	hotbarGlyphSize      = maxHotbarGlyphs * hotbarInstanceBytes
 	hotbarUploadBytes    = hotbarGlyphOffset + hotbarGlyphSize
 
-	hotbarSlotSize     = float32(48)
-	hotbarSlotGap      = float32(4)
-	hotbarBottomMargin = float32(24)
-	hotbarSelectBorder = float32(3)
-	hotbarSwatchInset  = float32(10)
-	hotbarDigitMargin  = float32(3)
-	miningBarWidth     = float32(240)
-	miningBarHeight    = float32(12)
-	miningBarGap       = float32(16)
+	hotbarSlotSize      = float32(48)
+	hotbarSlotGap       = float32(4)
+	hotbarBottomMargin  = float32(24)
+	hotbarSelectBorder  = float32(3)
+	hotbarSwatchInset   = float32(10)
+	hotbarDigitMargin   = float32(3)
+	durabilityBarHeight = float32(3)
+	durabilityBarInset  = float32(4)
+	miningBarWidth      = float32(240)
+	miningBarHeight     = float32(12)
+	miningBarGap        = float32(16)
 	// 背包界面在快捷栏之上再放 3 行，并与快捷栏留出一段间隔。
 	inventoryRowGap = float32(12)
 	// 合成行位于背包最上一行之上。
@@ -314,6 +316,9 @@ func layoutInventory(
 		x, y := inventorySlotOrigin(slot, open, width, height)
 		appendHotbarCount(dst, atlas, stack.Count, x, y)
 	}
+	for slot, stack := range inventory.Hotbar.Slots {
+		appendDurabilityBar(dst, slot, stack, width, height)
+	}
 	if open {
 		if overlay != nil {
 			appendFurnaceRow(dst, atlas, *overlay, width, height)
@@ -324,6 +329,37 @@ func layoutInventory(
 		appendMiningBar(dst, mining, width, height)
 	}
 	return *dst
+}
+
+// appendDurabilityBar 在快捷栏栏位下沿绘制背景和剩余耐久比例填充。
+// 只有存在耐久上限且尚未满耐久的物品才显示。
+func appendDurabilityBar(
+	dst *hotbarLayout,
+	slot int,
+	stack core.ItemStack,
+	width, height float32,
+) {
+	maxDurability, ok := core.ItemMaxDurability(stack.Item)
+	if !ok || maxDurability == 0 || stack.Durability == 0 || stack.Durability >= maxDurability {
+		return
+	}
+	slotX, slotY := inventorySlotOrigin(slot, false, width, height)
+	barWidth := hotbarSlotSize - durabilityBarInset*2
+	x := slotX + durabilityBarInset
+	y := slotY + hotbarSlotSize - durabilityBarInset - durabilityBarHeight
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: x, Y: y, Width: barWidth, Height: durabilityBarHeight,
+		Color: [4]float32{0.05, 0.05, 0.06, 0.85},
+	})
+	fraction := float32(stack.Durability) / float32(maxDurability)
+	color := [4]float32{0.30, 0.78, 0.36, 0.95}
+	if fraction < 0.25 {
+		color = [4]float32{0.90, 0.35, 0.25, 0.95}
+	}
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: x, Y: y, Width: barWidth * fraction, Height: durabilityBarHeight,
+		Color: color,
+	})
 }
 
 // MiningOverlay 是最后确认的权威采掘状态；渲染器不会自行推进它。
@@ -623,6 +659,10 @@ func hotbarItemColor(item core.ItemID) [4]float32 {
 		return [4]float32{104.0 / 255, 112.0 / 255, 120.0 / 255, 1}
 	case core.ItemIronPickaxe:
 		return [4]float32{190.0 / 255, 198.0 / 255, 210.0 / 255, 1}
+	case core.ItemBrokenStonePickaxe:
+		return [4]float32{66.0 / 255, 60.0 / 255, 58.0 / 255, 1}
+	case core.ItemBrokenIronPickaxe:
+		return [4]float32{96.0 / 255, 88.0 / 255, 92.0 / 255, 1}
 	default:
 		return [4]float32{}
 	}
