@@ -156,6 +156,20 @@ post-flying 时该链累计保留 `402.35MB`、`1,492,526` 个对象，占 profi
 
 这次 producer 因八会话服务端探针 `rss=2406432768` 超过既有 `2GiB` 门禁而 exit `1`；失败发生在报告写入前，所以 JSON 不存在。profile 前的强制 GC 与序列化改变后续时序，因此本次帧时、RSS、日志和 profile 全部只作不可提升的诊断证据，不能传给 `perfcheck`、复制为 baseline 或用于新候选验收。没有运行 TCP 或 `perfcheck`；M5/M2 baseline 哈希仍为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f` 与 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。Task 8.1 的诊断闭合；8.2 的修复仍保持 pending，本次不进入实现。
 
+### encoded MemoryStore 单次完整 RSS 诊断闭合
+
+判定为 `ENCODED_STORE_RSS_CLOSED`。在已评审的 Task 1 HEAD `5e08ad839cd9271ada6770a2cca9992c908acfc3`，先冻结只读 pre-run provenance（SHA-256 `f39ec8520d2b8405d53a98dffdd984451e5d59854aa7f0475bffda3ba388064f`），确认 scenario v13 的 full-stars `Draw(3, 1)` 和精确 `10s/60s/120s/30s` 未变、M5/M2 baseline 哈希仍为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`/`b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`，并通过 `TestMemoryStoreOwnsSavedAndLoadedChunks` 与 `TestMemoryStoreRetainedHeapIsBounded`。
+
+唯一一次不可提升的 producer 为：
+
+```sh
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-encoded-store-diag-v13-20260806.json > /tmp/mcgo-m4i-encoded-store-diag-v13-20260806.log 2>&1
+```
+
+它 exit `0`，JSON 已在报告写入后生成；日志/JSON SHA-256 分别为 `d24c03778f737321d3711c486b93458353c51442938e089cd5fbe8060b27fd09`/`09755335ca08b59f408aefcc36a2b37a71b4813c52cb177d3613308d40b53e3e`。相对 8.1 的完整时长 full-stars 诊断，still 为 RSS `1347.6MiB`（`+11.0MiB`）、HeapAlloc `360.6MiB`（`+0.3MiB`）、p99 `5.337ms`；flying 为 RSS `1459.7MiB`（`-597.2MiB`）、HeapAlloc `562.5MiB`（`-485.6MiB`）、p99 `11.585ms`；GPU 采样后为 RSS `1652.0MiB`（`-643.0MiB`）、HeapAlloc `164.3MiB`（`-614.8MiB`）、`remote_gpu_complete` p99 `0.168247ms`。所有阶段的 HeapSys/runtime Sys/非 Go 估算分别为 still `515.2/534.4/813.2MiB`、flying `755.1/777.7/682.0MiB`、GPU `851.3/873.7/778.3MiB`。八会话 server probe RSS 为 `1732214784` bytes（`1652.0MiB`，相对 `2406432768` bytes 下降 `674217984` bytes），完整且未触发 RSS 失败；运行后无遗留 `mcgo` 或匹配 `go run` 进程。
+
+此输出只证明 encoded MemoryStore 移除了 8.1 的 retained-heap owner 并闭合 RSS 诊断；它不得传给 `perfcheck`、TCP、正式链或任何 baseline，未复制或改写 M5/M2 baseline，且不进入 8.3+。
+
 ## M4F scenario v10 历史比较规则
 
 M4F 扩展固定长度玩家输入与状态、废止即时破坏消息，并在权威 tick 增加有界采掘判定，因此当时的 benchmark producer 标记为 scenario v10，并通过已退役的 `9:10` 迁移建立了上方记录的 M5 v10 基线。v10 报告仍可单独读取与同场景比较。
