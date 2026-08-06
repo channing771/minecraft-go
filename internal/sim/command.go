@@ -51,8 +51,8 @@ const (
 	RejectInvalidSlot    RejectReason = 8
 	RejectHotbarFull     RejectReason = 9
 	RejectDropCapacity   RejectReason = 10
-	// RejectFurnaceCapacity 表示区块的 32 个熔炉槽已经用尽。
-	RejectFurnaceCapacity RejectReason = 11
+	// RejectContainerCapacity 表示区块某类容器（熔炉或箱子）的固定槽位已经用尽。
+	RejectContainerCapacity RejectReason = 11
 )
 
 type Command struct {

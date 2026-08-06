@@ -38,9 +38,9 @@
 
 ## 6. 放置与原子破坏
 
-- [ ] 6.1 在 `internal/sim` 先写失败测试：箱子物品放置同时启用最低槽并扣 1；第 17 个箱子原子拒绝且不扣物品、不改方块与 revision；破坏空箱子只掉本体；满 27 格箱子按本体→`36..62` 稳定预演；掉落容量不足时方块、箱子、掉落物与 revision 全不变；成功后停用槽保留 generation 且内容清零。
-- [ ] 6.2 把箱子接在既有共享交互原子点：放置时先预留槽再写方块、启用槽并扣物品；破坏时先预演批量掉落再清方块、停用槽并提交；全部变化仍走既有 pending chunk change，不重复提升 revision。
-- [ ] 6.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 原子放置与破坏箱子`，然后自动进入第 7 组。
+- [x] 6.1 在 `internal/sim` 先写失败测试：箱子物品放置同时启用最低槽并扣 1；第 17 个箱子原子拒绝且不扣物品、不改方块与 revision；破坏空箱子只掉本体；满 27 格箱子按本体→`36..62` 稳定预演；掉落容量不足时方块、箱子、掉落物与 revision 全不变；成功后停用槽保留 generation 且内容清零。
+- [x] 6.2 把箱子接在既有共享交互原子点：放置时先预留槽再写方块、启用槽并扣物品；破坏时先预演批量掉落再清方块、停用槽并提交；全部变化仍走既有 pending chunk change，不重复提升 revision。
+- [x] 6.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 原子放置与破坏箱子`，然后自动进入第 7 组。
 
 ## 7. 服务端接线与 Memory/TCP 闭环
 

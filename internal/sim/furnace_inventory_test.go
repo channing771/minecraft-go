@@ -245,7 +245,7 @@ func TestPlaceFurnaceRejectsWhenSlotsAreFull(t *testing.T) {
 		Yaw: placeYaw, Slot: 0,
 	})
 	result := engine.Step()
-	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectFurnaceCapacity {
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectContainerCapacity {
 		t.Fatalf("第 33 个熔炉 result=%+v", result)
 	}
 	if len(result.Changes) != 0 {

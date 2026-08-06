@@ -798,19 +798,30 @@ func (engine *Engine) executePlacement(
 	if occupied {
 		return RejectOccupied, true
 	}
-	// 放置熔炉必须先预留槽位；槽位耗尽时不改方块也不扣物品。
+	// 放置熔炉或箱子必须先预留槽位；槽位耗尽时不改方块也不扣物品。
 	targetRecord, targetOK := dimension.records[target.Chunk()]
 	targetIndex, targetIndexed := world.ChunkBlockIndex(target)
 	furnaceSlot, reserveFurnace := -1, false
+	chestSlot, reserveChest := -1, false
 	if placement == core.FurnaceID {
 		if !targetOK || targetRecord.Chunk == nil || !targetIndexed {
 			return RejectChunkNotReady, true
 		}
 		slot, ok := targetRecord.Chunk.PrepareFurnace(targetIndex)
 		if !ok {
-			return RejectFurnaceCapacity, true
+			return RejectContainerCapacity, true
 		}
 		furnaceSlot, reserveFurnace = slot, true
+	}
+	if placement == core.ChestID {
+		if !targetOK || targetRecord.Chunk == nil || !targetIndexed {
+			return RejectChunkNotReady, true
+		}
+		slot, ok := targetRecord.Chunk.PrepareChest(targetIndex)
+		if !ok {
+			return RejectContainerCapacity, true
+		}
+		chestSlot, reserveChest = slot, true
 	}
 	_, changed, setErr := dimension.SetBlock(target, placement)
 	if setErr != nil {
@@ -825,6 +836,9 @@ func (engine *Engine) executePlacement(
 		)
 		if reserveFurnace {
 			targetRecord.Chunk.CommitFurnace(furnaceSlot, targetIndex)
+		}
+		if reserveChest {
+			targetRecord.Chunk.CommitChest(chestSlot, targetIndex)
 		}
 		player.inventory.Hotbar = consumed
 		player.inventoryDirty = true

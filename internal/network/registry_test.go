@@ -107,7 +107,7 @@ func TestCommandRejectReasonIDsAreFrozen(t *testing.T) {
 		{RejectProtectedBlock, 4}, {RejectInvalidBlock, 5}, {RejectOccupied, 6},
 		{RejectInvalidInput, 7}, {RejectPlayerNotReady, 8},
 		{RejectInvalidSlot, 9}, {RejectHotbarFull, 10}, {RejectDropCapacity, 11},
-		{RejectFurnaceCapacity, 12},
+		{RejectContainerCapacity, 12},
 	}
 	for _, tc := range reasons {
 		got, ok := commandRejectReasonID(tc.reason)
