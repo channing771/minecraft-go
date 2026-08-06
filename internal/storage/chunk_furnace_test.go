@@ -57,8 +57,8 @@ func TestChunkCodecRoundTripsFurnaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 5 {
-		t.Fatalf("schema = %d，想要 5", got.Schema)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 6 {
+		t.Fatalf("schema = %d，想要 6", got.Schema)
 	}
 	for slot := range core.FurnacesPerChunk {
 		if got.Chunk.Furnace(slot) != want.Furnace(slot) {
@@ -128,31 +128,6 @@ func TestChunkV1AndV2StillMigrateThroughChain(t *testing.T) {
 				t.Fatalf("%s 迁移未初始化空熔炉: 槽 %d", name, slot)
 			}
 		}
-	}
-}
-
-func TestChunkV5Fixture(t *testing.T) {
-	want := furnaceFixtureChunk(t, core.ChunkPos{X: -3, Z: 7})
-	encoded, err := encodeChunkPayload(ChunkSave{
-		Key:      core.ChunkKey{Dimension: core.Overworld, Pos: want.Pos},
-		Revision: 19,
-		Chunk:    want,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join("testdata", "chunk-v5.bin")
-	if *updateStorageFixtures {
-		if err := os.WriteFile(path, encoded, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, encoded) {
-		t.Fatal("v5 fixture drift; change schema version")
 	}
 }
 

@@ -15,11 +15,11 @@
 
 ## 3. 区块存档 schema v6
 
-- [ ] 3.1 在 `internal/storage` 先写失败测试，覆盖 v6 的 27 格物品与耐久 roundtrip、v5 方块/掉落物/熔炉无损迁移且 `NeedsRewrite=true`、v1–v4 链式迁移、v6 fixture 不迁移、未来版本拒绝。
-- [ ] 3.2 先写损坏与故障失败测试：活动槽 generation=0、标志非 0/1、重复方块索引、索引越界、对应方块不是箱子、未知物品、数量越界、停用槽残留字段、截断与尾随字节，以及 DiskStore 部分写入失败后旧记录仍可加载。
-- [ ] 3.3 把 `currentChunkSchema` 升为 6，逻辑负载按 sections → 掉落物 → 熔炉 → 16 箱子槽追加定长编码，migration registry 只增加 `5: 空箱子集合`；encode 与 decode 共用同一套校验，先重建 sections 再验证活动槽与箱子方块对应关系。
-- [ ] 3.4 冻结 v5 fixture 为迁移输入并新增 v6 golden；把两者都加入 `FuzzDecodeChunkPayload` 语料。
-- [ ] 3.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/server -race -count=1 && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s && go test ./internal/storage -run "^$" -bench "Chunk(Encode|Decode)" -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认无 panic、旧 fixture 无漂移、`gofmt` 与 `git diff --check` 通过；提交 `feat: 升级箱子区块存档 schema v6`，然后自动进入第 4 组。
+- [x] 3.1 在 `internal/storage` 先写失败测试，覆盖 v6 的 27 格物品与耐久 roundtrip、v5 方块/掉落物/熔炉无损迁移且 `NeedsRewrite=true`、v1–v4 链式迁移、v6 fixture 不迁移、未来版本拒绝。
+- [x] 3.2 先写损坏与故障失败测试：活动槽 generation=0、标志非 0/1、重复方块索引、索引越界、对应方块不是箱子、未知物品、数量越界、停用槽残留字段、截断与尾随字节，以及 DiskStore 部分写入失败后旧记录仍可加载。
+- [x] 3.3 把 `currentChunkSchema` 升为 6，逻辑负载按 sections → 掉落物 → 熔炉 → 16 箱子槽追加定长编码，migration registry 只增加 `5: 空箱子集合`；encode 与 decode 共用同一套校验，先重建 sections 再验证活动槽与箱子方块对应关系。
+- [x] 3.4 冻结 v5 fixture 为迁移输入并新增 v6 golden；把两者都加入 `FuzzDecodeChunkPayload` 语料。
+- [x] 3.5 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage ./internal/server -race -count=1 && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s && go test ./internal/storage -run "^$" -bench "Chunk(Encode|Decode)" -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认无 panic、旧 fixture 无漂移、`gofmt` 与 `git diff --check` 通过；提交 `feat: 升级箱子区块存档 schema v6`，然后自动进入第 4 组。
 
 ## 4. 容器引用收敛与协议 v12
 
