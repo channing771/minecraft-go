@@ -11,7 +11,8 @@ import (
 )
 
 // TestTCPDropSelectedItemSurvivesRestart 用真实 TCP 与 host 层玩家保存证明主动丢弃
-// 的两侧结果都跨正常关服持久：玩家背包少一件，掉落物仍在同一区块槽位。
+// 的两侧结果都跨正常关服持久：玩家背包少一件，TCP 镜像中的掉落物
+// ID、值与承载区块 revision 在重连后保持一致。
 //
 // 与 TestDroppedItemSurvivesShutdownAndRestart 的区别是本测试装配完整 Host，
 // 因此玩家存档会被真正写入并在重连时读回。
@@ -54,18 +55,30 @@ func TestTCPDropSelectedItemSurvivesRestart(t *testing.T) {
 	}
 	cancel()
 
-	// 等待权威把扣减后的背包发布回发起者。
+	// 等待权威把扣减后的背包、掉落物与承载区块 revision 发布回发起者。
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if time.Now().After(deadline) {
-			t.Fatal("等待主动丢弃后的背包发布超时")
+			t.Fatal("等待主动丢弃后的 TCP 镜像收敛超时")
 		}
 		if _, err := clients[0].drainOne(); err != nil {
 			t.Fatalf("drain: %v", err)
 		}
-		if clients[0].inventoryCount(core.ItemCoal) == 4 {
+		presentations := clients[0].drops.Presentations()
+		if clients[0].inventoryCount(core.ItemCoal) == 4 && len(presentations) == 1 {
+			_, _, loaded := clients[0].mirror.Hash(
+				presentations[0].ID.Dimension, presentations[0].ID.Chunk,
+			)
+			if !loaded {
+				continue
+			}
 			break
 		}
+	}
+	created := clients[0].drops.Presentations()[0]
+	_, createdRevision, ok := clients[0].mirror.Hash(created.ID.Dimension, created.ID.Chunk)
+	if !ok || created.Item != core.ItemCoal || created.Count != 1 {
+		t.Fatalf("关服前 TCP 掉落镜像 = %+v revision=%d loaded=%t", created, createdRevision, ok)
 	}
 
 	if err := shutdownRestartHost(first, clients); err != nil {
@@ -86,15 +99,25 @@ func TestTCPDropSelectedItemSurvivesRestart(t *testing.T) {
 	deadline = time.Now().Add(10 * time.Second)
 	for {
 		if time.Now().After(deadline) {
-			t.Fatalf("重启后煤炭数量 = %d，想要 4",
-				reconnected[0].inventoryCount(core.ItemCoal))
+			t.Fatalf("重启后 TCP 镜像未恢复: coal=%d drops=%+v",
+				reconnected[0].inventoryCount(core.ItemCoal), reconnected[0].drops.Presentations())
 		}
 		if _, err := reconnected[0].drainOne(); err != nil {
 			t.Fatalf("重连 drain: %v", err)
 		}
-		if reconnected[0].inventoryCount(core.ItemCoal) == 4 {
-			return
+		presentations := reconnected[0].drops.Presentations()
+		if reconnected[0].inventoryCount(core.ItemCoal) != 4 || len(presentations) != 1 {
+			continue
 		}
+		_, revision, loaded := reconnected[0].mirror.Hash(created.ID.Dimension, created.ID.Chunk)
+		if !loaded {
+			continue
+		}
+		if presentations[0] != created || revision != createdRevision {
+			t.Fatalf("重启后 TCP 掉落镜像 = %+v revision=%d，想要 %+v revision=%d",
+				presentations[0], revision, created, createdRevision)
+		}
+		return
 	}
 }
 

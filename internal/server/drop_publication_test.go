@@ -3,9 +3,11 @@ package server_test
 import (
 	"context"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
+	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
@@ -21,12 +23,57 @@ type dropMessages struct {
 	rejected    []network.CommandRejected
 }
 
+type dropClientMirrors struct {
+	chunks    *client.Mirror
+	drops     *client.ItemDrops
+	inventory client.InventoryMirror
+	player    network.PlayerState
+}
+
+func newDropClientMirrors() *dropClientMirrors {
+	return &dropClientMirrors{chunks: client.NewMirror(), drops: client.NewItemDrops()}
+}
+
+func dropPlayerBlockPos(state network.PlayerState) core.BlockPos {
+	return core.BlockPos{
+		X: int32(math.Floor(float64(state.Position.X()))),
+		Y: int32(math.Floor(float64(state.Position.Y()))),
+		Z: int32(math.Floor(float64(state.Position.Z()))),
+	}
+}
+
+// apply 应用真实服务端消息到客户端只读镜像。
+func (mirrors *dropClientMirrors) apply(t *testing.T, message network.ServerMessage) {
+	t.Helper()
+	switch message := message.(type) {
+	case network.ChunkSnapshot, network.BlockChanges, network.ForgetChunks:
+		update, err := mirrors.chunks.Apply(message)
+		if err != nil {
+			t.Fatalf("应用区块镜像消息 %T: %v", message, err)
+		}
+		if update.Resync != nil {
+			t.Fatalf("区块镜像请求重同步: %+v", *update.Resync)
+		}
+	case network.ItemDropUpserts, network.ItemDropRemoves:
+		if err := mirrors.drops.Apply(message); err != nil {
+			t.Fatalf("应用掉落物镜像消息 %T: %v", message, err)
+		}
+	case network.InventoryState:
+		if err := mirrors.inventory.Apply(message); err != nil {
+			t.Fatalf("应用背包镜像: %v", err)
+		}
+	case network.PlayerState:
+		mirrors.player = message
+	}
+}
+
 // dropDrainTick 读取一个会话在本 tick 的全部消息并分类掉落物差分。
 func dropDrainTick(
 	t *testing.T,
 	endpoint network.ClientEndpoint,
 	throughTick uint64,
 	ready *bool,
+	mirrors ...*dropClientMirrors,
 ) dropMessages {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -36,6 +83,9 @@ func dropDrainTick(
 		message, err := endpoint.Recv(ctx)
 		if err != nil {
 			t.Fatalf("接收服务端消息: %v", err)
+		}
+		if len(mirrors) != 0 {
+			mirrors[0].apply(t, message)
 		}
 		switch message := message.(type) {
 		case network.ItemDropUpserts:
@@ -408,6 +458,198 @@ func TestDropSelectedItemPublishesInventoryAndDrop(t *testing.T) {
 	final := messages.inventories[len(messages.inventories)-1]
 	if got := final.Inventory.Hotbar.Slots[0]; got.Count != core.MaxStackCount-1 {
 		t.Fatalf("发布的快捷栏 = %+v，想要少一个煤炭", got)
+	}
+}
+
+func TestDropSelectedItemTwoMemorySessionsConverge(t *testing.T) {
+	firstClient, firstServer := network.NewMemoryPair(1024)
+	secondClient, secondServer := network.NewMemoryPair(1024)
+	running := newMemoryAttachedWorldWithHotbar(
+		hotbarTestConfig(2), firstServer, server.FlatTestGenerator{}, stockedTestHotbar(core.ItemCoal),
+	)
+	if _, err := running.AttachSession(externalSessionSpec(2, 1, secondServer, sim.PlayerRestore{
+		SpawnDimension: core.Overworld,
+	})); err != nil {
+		t.Fatalf("附加第二个会话: %v", err)
+	}
+	shutdownHotbarServer(t, running, firstClient, secondClient)
+	firstMirrors, secondMirrors := newDropClientMirrors(), newDropClientMirrors()
+	firstReady, secondReady := false, false
+	deadline := time.Now().Add(5 * time.Second)
+	for !firstReady || !secondReady {
+		if time.Now().After(deadline) {
+			t.Fatal("等待两名 Memory 玩家 Ready 超时")
+		}
+		result := running.StepForTest()
+		dropDrainTick(t, firstClient, result.Tick, &firstReady, firstMirrors)
+		dropDrainTick(t, secondClient, result.Tick, &secondReady, secondMirrors)
+	}
+	beforeFirst, ok := firstMirrors.inventory.State()
+	if !ok {
+		t.Fatal("发起者缺少初始完整背包")
+	}
+	beforeSecond, ok := secondMirrors.inventory.State()
+	if !ok {
+		t.Fatal("第二会话缺少初始完整背包")
+	}
+	wantFirst := beforeFirst
+	wantFirst.Hotbar.Slots[0].Count--
+
+	sendClientMessage(t, firstClient, network.DropSelectedItem{Sequence: 1})
+	firstInventories, secondInventories := 0, 0
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("等待双会话 Memory 主动丢弃收敛超时")
+		}
+		result := running.StepForTest()
+		first := dropDrainTick(t, firstClient, result.Tick, &firstReady, firstMirrors)
+		second := dropDrainTick(t, secondClient, result.Tick, &secondReady, secondMirrors)
+		firstInventories += len(first.inventories)
+		secondInventories += len(second.inventories)
+		if len(first.rejected) != 0 || len(second.rejected) != 0 {
+			t.Fatalf("成功路径产生拒绝: first=%+v second=%+v", first.rejected, second.rejected)
+		}
+		firstDrops := firstMirrors.drops.Presentations()
+		secondDrops := secondMirrors.drops.Presentations()
+		gotFirst, firstOK := firstMirrors.inventory.State()
+		if firstOK && gotFirst == wantFirst && len(firstDrops) == 1 && len(secondDrops) == 1 {
+			break
+		}
+	}
+
+	if firstInventories != 1 || secondInventories != 0 {
+		t.Fatalf("成功后的完整背包发布数 = %d/%d，想要 1/0", firstInventories, secondInventories)
+	}
+	if got, _ := secondMirrors.inventory.State(); got != beforeSecond {
+		t.Fatalf("第二会话背包镜像改变: got=%+v want=%+v", got, beforeSecond)
+	}
+	firstDrop := firstMirrors.drops.Presentations()[0]
+	secondDrop := secondMirrors.drops.Presentations()[0]
+	if firstDrop != secondDrop || firstDrop.Item != core.ItemCoal || firstDrop.Count != 1 {
+		t.Fatalf("双方掉落物镜像不一致: first=%+v second=%+v", firstDrop, secondDrop)
+	}
+	position := dropPlayerBlockPos(firstMirrors.player)
+	wantIndex, ok := world.ChunkBlockIndex(position)
+	if !ok || firstDrop.BlockIndex != wantIndex {
+		t.Fatalf("掉落物 block index=%d，想要脚底 %+v 的 %d", firstDrop.BlockIndex, position, wantIndex)
+	}
+	_, firstRevision, firstOK := firstMirrors.chunks.Hash(firstDrop.ID.Dimension, firstDrop.ID.Chunk)
+	_, secondRevision, secondOK := secondMirrors.chunks.Hash(secondDrop.ID.Dimension, secondDrop.ID.Chunk)
+	_, authorityRevision, authorityOK := running.ChunkHash(firstDrop.ID.Dimension, firstDrop.ID.Chunk)
+	if !firstOK || !secondOK || !authorityOK || firstRevision != secondRevision || firstRevision != authorityRevision {
+		t.Fatalf("承载区块 revision = first:%d/%t second:%d/%t authority:%d/%t",
+			firstRevision, firstOK, secondRevision, secondOK, authorityRevision, authorityOK)
+	}
+}
+
+func TestDropSelectedItemCapacityFailureIsolatedBetweenMemorySessions(t *testing.T) {
+	firstClient, firstServer := network.NewMemoryPair(1024)
+	secondClient, secondServer := network.NewMemoryPair(1024)
+	running := newMemoryAttachedWorldWithHotbar(
+		hotbarTestConfig(2), firstServer, server.FlatTestGenerator{}, stockedTestHotbar(core.ItemCoal),
+	)
+	if _, err := running.AttachSession(externalSessionSpec(2, 1, secondServer, sim.PlayerRestore{
+		SpawnDimension: core.Overworld,
+	})); err != nil {
+		t.Fatalf("附加第二个会话: %v", err)
+	}
+	shutdownHotbarServer(t, running, firstClient, secondClient)
+	firstMirrors, secondMirrors := newDropClientMirrors(), newDropClientMirrors()
+	firstReady, secondReady := false, false
+	deadline := time.Now().Add(5 * time.Second)
+	for !firstReady || !secondReady {
+		if time.Now().After(deadline) {
+			t.Fatal("等待两名 Memory 玩家 Ready 超时")
+		}
+		result := running.StepForTest()
+		dropDrainTick(t, firstClient, result.Tick, &firstReady, firstMirrors)
+		dropDrainTick(t, secondClient, result.Tick, &secondReady, secondMirrors)
+	}
+	position := dropPlayerBlockPos(firstMirrors.player)
+	key := core.ChunkKey{Dimension: firstMirrors.player.Dimension, Pos: position.Chunk()}
+	for slot := range core.DropsPerChunk {
+		running.SetChunkDropForTest(key, slot, world.DropSlot{
+			Generation: uint32(slot + 1), Active: true,
+			Stack:      core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount},
+			BlockIndex: uint32(slot), PickupDelayTicks: 200,
+		})
+	}
+	result := running.StepForTest()
+	dropDrainTick(t, firstClient, result.Tick, &firstReady, firstMirrors)
+	dropDrainTick(t, secondClient, result.Tick, &secondReady, secondMirrors)
+	if len(firstMirrors.drops.Presentations()) != core.DropsPerChunk ||
+		len(secondMirrors.drops.Presentations()) != core.DropsPerChunk {
+		t.Fatalf("容量场景未进入双方镜像: first=%d second=%d",
+			len(firstMirrors.drops.Presentations()), len(secondMirrors.drops.Presentations()))
+	}
+	beforeFirst, _ := firstMirrors.inventory.State()
+	beforeSecond, _ := secondMirrors.inventory.State()
+	beforeFirstDrops := append([]client.ItemDropPresentation(nil), firstMirrors.drops.Presentations()...)
+	beforeSecondDrops := append([]client.ItemDropPresentation(nil), secondMirrors.drops.Presentations()...)
+
+	sendClientMessage(t, firstClient, network.DropSelectedItem{Sequence: 7})
+	var firstAfter, secondAfter dropMessages
+	deadline = time.Now().Add(5 * time.Second)
+	for len(firstAfter.rejected) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("等待双会话 Memory 容量拒绝超时")
+		}
+		result = running.StepForTest()
+		first := dropDrainTick(t, firstClient, result.Tick, &firstReady, firstMirrors)
+		second := dropDrainTick(t, secondClient, result.Tick, &secondReady, secondMirrors)
+		firstAfter.upserts = append(firstAfter.upserts, first.upserts...)
+		firstAfter.removes = append(firstAfter.removes, first.removes...)
+		firstAfter.inventories = append(firstAfter.inventories, first.inventories...)
+		firstAfter.rejected = append(firstAfter.rejected, first.rejected...)
+		secondAfter.upserts = append(secondAfter.upserts, second.upserts...)
+		secondAfter.removes = append(secondAfter.removes, second.removes...)
+		secondAfter.inventories = append(secondAfter.inventories, second.inventories...)
+		secondAfter.rejected = append(secondAfter.rejected, second.rejected...)
+	}
+	if len(firstAfter.rejected) != 1 || firstAfter.rejected[0] != (network.CommandRejected{
+		Sequence: 7, Reason: network.RejectDropCapacity,
+	}) {
+		t.Fatalf("发起者拒绝 = %+v", firstAfter.rejected)
+	}
+	if len(secondAfter.rejected) != 0 || len(secondAfter.inventories) != 0 ||
+		len(secondAfter.upserts) != 0 || len(secondAfter.removes) != 0 {
+		t.Fatalf("容量失败影响第二会话: %+v", secondAfter)
+	}
+	if len(firstAfter.inventories) != 0 || len(firstAfter.upserts) != 0 || len(firstAfter.removes) != 0 {
+		t.Fatalf("容量失败仍向发起者发布副作用: %+v", firstAfter)
+	}
+	if got, _ := firstMirrors.inventory.State(); got != beforeFirst {
+		t.Fatalf("发起者背包镜像改变: got=%+v want=%+v", got, beforeFirst)
+	}
+	if got, _ := secondMirrors.inventory.State(); got != beforeSecond {
+		t.Fatalf("第二会话背包镜像改变: got=%+v want=%+v", got, beforeSecond)
+	}
+	if got := firstMirrors.drops.Presentations(); !slices.Equal(got, beforeFirstDrops) {
+		t.Fatalf("发起者掉落物镜像改变: got=%+v want=%+v", got, beforeFirstDrops)
+	}
+	if got := secondMirrors.drops.Presentations(); !slices.Equal(got, beforeSecondDrops) {
+		t.Fatalf("第二会话掉落物镜像改变: got=%+v want=%+v", got, beforeSecondDrops)
+	}
+	firstSnapshot, firstOK := running.PlayerSnapshotFor(1)
+	secondSnapshot, secondOK := running.PlayerSnapshotFor(2)
+	if !firstOK || firstSnapshot.Inventory != beforeFirst || !secondOK || secondSnapshot.Inventory != beforeSecond {
+		t.Fatalf("容量失败改变权威背包: first=%+v/%t second=%+v/%t",
+			firstSnapshot.Inventory, firstOK, secondSnapshot.Inventory, secondOK)
+	}
+
+	// 两个会话在隔离拒绝后都必须继续处理合法命令。
+	sendClientMessage(t, firstClient, network.PlayerInput{Sequence: 8})
+	sendClientMessage(t, secondClient, network.PlayerInput{Sequence: 1})
+	deadline = time.Now().Add(5 * time.Second)
+	for firstMirrors.player.LastInputSequence < 8 || secondMirrors.player.LastInputSequence < 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("容量拒绝后会话未继续推进: first=%d second=%d",
+				firstMirrors.player.LastInputSequence, secondMirrors.player.LastInputSequence)
+		}
+		result = running.StepForTest()
+		dropDrainTick(t, firstClient, result.Tick, &firstReady, firstMirrors)
+		dropDrainTick(t, secondClient, result.Tick, &secondReady, secondMirrors)
 	}
 }
 

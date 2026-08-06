@@ -68,7 +68,8 @@ func (c *Chunk) PrepareDrop(item core.ItemID, blockIndex uint32) (int, bool) {
 }
 
 // CommitDrop 把一个物品写入 PrepareDrop 返回的槽并返回该堆的 generation。
-// 合并到已有堆时保留原 generation 与拾取延迟，启用空槽时 generation 加一。
+// 合并保留 ID、generation 和年龄，PickupDelayTicks 取 old 与 incoming 的较大值；
+// 启用空槽时 generation 加一。
 func (c *Chunk) CommitDrop(
 	slot int,
 	item core.ItemID,
