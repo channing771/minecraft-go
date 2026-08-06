@@ -86,7 +86,11 @@ type ItemStack struct {
 
 三者都只消费 `internal/core` 定义的 `ItemStack`/`ItemMaxDurability`/`ItemBrokenForm`，不反向依赖 `sim`/`storage`/`network`，符合既有依赖方向（`core` 在依赖图最底层，`sim`/`storage`/`network` 各自向上组合）。
 
-**迁移规则统一**：旧存档中的工具一律视为满耐久，两处迁移共用 `internal/storage` 的同一条 `fillFullDurability` 规则。v3 玩家档与 v4 区块档均可无损单向升级，不需要备份即可读取。反向不兼容：回退到 v10 程序必须恢复升级前的备份，与 M4G 的 metadata v2 边界一致，须写入 README 与 `docs/notes/lan-server.md`。
+**迁移规则统一**：旧存档中的工具一律视为满耐久，两处迁移共用 `internal/storage` 的同一条 `fillFullDurability` 规则。M4H 的旧掉落合并缺陷可能把 `Count=2..64` 的工具堆写入 schema v4；v4→v5 迁移按源槽顺序保留一把，并把额外工具稳定写入最低可复用空槽，沿用源槽的位置、年龄和拾取延迟，新槽 generation 使用原空槽 generation + 1。拆分后记录必须标记重写；若固定 32 槽无法容纳全部工具，则返回 `ErrCorrupt` 并保持原存档字节不变，绝不截断或覆盖活动槽。
+
+Task 3 到格式正式升版之间使用显式过渡门禁：协议 v10、玩家 schema v3 与区块 schema v4 只允许编码满耐久工具，旧格式解码时补为满耐久；掉落逻辑快照、服务端镜像与客户端镜像已经保留完整 `Durability`。Task 5/6 读取真实字段时必须同时删除这些“必须满耐久”门禁和解码 shim，并把 v4 工具堆归一化从过渡解码调用正式移入 v4→v5 migration。
+
+v3 玩家档与 v4 区块档均可单向升级。反向不兼容：回退到 v10 程序必须恢复升级前的备份，与 M4G 的 metadata v2 边界一致，须写入 README 与 `docs/notes/lan-server.md`。
 
 **golden 策略**：v3 玩家档与 v4 区块档的既有 golden 字节保持不变，用于证明迁移能读旧数据；v4 玩家档与 v5 区块档各新增一份 golden。
 

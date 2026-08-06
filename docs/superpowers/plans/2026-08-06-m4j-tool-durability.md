@@ -144,7 +144,7 @@ Modify:
 
 ---
 
-## Task 0: 建立 active OpenSpec change
+## Task 0: 建立 active OpenSpec change（已完成）
 
 M4J 修改 `internal/network/codec.go`、`internal/network/packet.go`、`internal/storage/player_codec.go`、`internal/storage/chunk_codec.go`、`internal/storage/player_migration.go`，全部命中 `scripts/agent-hooks/guard.mjs` 的 `highRiskPatterns`。没有 active change 时，Stop hook 会从第一个 Go 提交起持续失败，且**不得**用 `MINECRAFT_GO_HOOKS_ALLOW_NO_SPEC=1` 绕过。因此这必须是第一个任务。
 
@@ -158,7 +158,7 @@ M4J 修改 `internal/network/codec.go`、`internal/network/packet.go`、`interna
 - Consumes: `openspec/config.yaml` 的 rules；`docs/superpowers/specs/2026-08-06-m4j-tool-durability-design.md`。
 - Produces: 一个通过 strict 校验的 active change，解除后续所有任务的 Stop hook 阻塞。
 
-- [ ] **Step 1: 参照已归档的 M4H 结构**
+- [x] **Step 1: 参照已归档的 M4H 结构**
 
 ```bash
 find openspec/changes/archive/2026-08-05-m4h-authoritative-item-dropping -type f
@@ -169,11 +169,11 @@ cat openspec/config.yaml
 
 按 `openspec/config.yaml` 的 `rules` 撰写，全部使用中文，保留 OpenSpec 要求的英文结构标题与 SHALL/MUST。
 
-- [ ] **Step 2: 写 proposal.md**
+- [x] **Step 2: 写 proposal.md**
 
 背景、目标、非目标直接取自设计文档的对应章节。必须明确写出兼容性影响：协议 v10→v11、玩家 schema v3→v4、区块 schema v4→v5、metadata 保持 v2、benchmark scenario 保持 v12 且不重建性能基线；旧存档单向无损升级（旧工具视为满耐久），回退到 v10 程序必须恢复升级前的备份。
 
-- [ ] **Step 3: 写 delta spec**
+- [x] **Step 3: 写 delta spec**
 
 `specs/tool-durability/spec.md` 只描述可观察行为，每条 Requirement 至少一个 Given/When/Then Scenario。至少覆盖：
 
@@ -188,13 +188,13 @@ cat openspec/config.yaml
 
 实现选择（字段布局、查表函数、编码字节数）**不要**写进 spec.md，放 design.md。
 
-- [ ] **Step 4: 写 design.md 与 tasks.md**
+- [x] **Step 4: 写 design.md 与 tasks.md**
 
 `design.md` 记录数据所有权、依赖方向、受影响文件、迁移与回退方案，以及设计文档里三个被否决的替代方案（并行耐久表、耐久只存背包、耐久编码进 `Count` 高位）及其理由。
 
 `tasks.md` 按本计划的 Task 1..9 逐条列出，每项写明目标包与验证命令。收尾任务必须包含 `gofmt`、`go vet ./...`、`go test ./... -race` 与 OpenSpec 严格校验。
 
-- [ ] **Step 5: 校验**
+- [x] **Step 5: 校验**
 
 ```bash
 openspec validate --all --strict --no-interactive
@@ -202,7 +202,7 @@ openspec validate --all --strict --no-interactive
 
 期望：退出码为零，新 change 被识别为完整 active change。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add openspec/changes/m4j-tool-durability
@@ -211,7 +211,7 @@ git commit -m "spec: 建立 M4J 工具耐久 change"
 
 ---
 
-## Task 1: 冻结起点并核对契约
+## Task 1: 冻结起点并核对契约（已完成）
 
 **Files:**
 - Verify: `internal/network/packet.go`
@@ -225,7 +225,7 @@ git commit -m "spec: 建立 M4J 工具耐久 change"
 - Consumes: 已归档的 M4H 主规格。
 - Produces: 一个干净、已验证的起点；无代码改动。
 
-- [ ] **Step 1: 核对五个冻结值与归档状态**
+- [x] **Step 1: 核对五个冻结值与归档状态**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go version'
@@ -238,7 +238,7 @@ git status --short --branch
 
 期望：strict 校验通过；M4H 归档存在；五个值分别为 10、3、4、2、12；`scenario_version` 为 12；tracked 工作树没有无关改动。任一条不满足就停下来先更新计划。
 
-- [ ] **Step 2: 记录两条 baseline 的哈希，供最后一个任务比对**
+- [x] **Step 2: 记录两条 baseline 的哈希，供最后一个任务比对**
 
 ```bash
 shasum -a 256 docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json
@@ -246,7 +246,7 @@ shasum -a 256 docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json
 
 把输出抄进本任务的执行记录。Task 9 会再算一次并要求完全一致。
 
-- [ ] **Step 3: 通读设计文档，确认范围**
+- [x] **Step 3: 通读设计文档，确认范围**
 
 ```bash
 sed -n '1,200p' docs/superpowers/specs/2026-08-06-m4j-tool-durability-design.md
@@ -254,11 +254,11 @@ sed -n '1,200p' docs/superpowers/specs/2026-08-06-m4j-tool-durability-design.md
 
 确认只做：耐久字段、两个损坏物品 ID、成功破坏才扣、三处 schema 升版、快捷栏耐久条、`prepareDropSlot` 缺陷修复。出现工具修复、耐久影响速度、新材质等级、scenario 升级就停下。
 
-- [ ] **Step 4: 只读任务，无需提交**
+- [x] **Step 4: 只读任务，无需提交**
 
 ---
 
-## Task 2: 修复掉落物合并不遵守单格上限
+## Task 2: 修复掉落物合并不遵守单格上限（已完成）
 
 这是耐久的阻塞性前置：两把不同耐久的镐一旦合并，耐久必然丢失。它本身也是 M4H 遗留的真实缺陷，独立成一个提交。
 
@@ -270,7 +270,7 @@ sed -n '1,200p' docs/superpowers/specs/2026-08-06-m4j-tool-durability-design.md
 - Consumes: 既有 `core.ItemStackLimit(item) (uint8, bool)`。
 - Produces: `prepareDropSlot` 遵守单格上限；工具从此永不合并。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 追加到 `internal/world/drop_test.go`：
 
@@ -323,7 +323,7 @@ func TestChunkPrepareDropStillMergesStackableItems(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行，确认第一个测试失败**
+- [x] **Step 2: 运行，确认第一个测试失败**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world -run "PrepareDropRespectsPerItemStackLimit|PrepareDropStillMergesStackableItems" -count=1'
@@ -331,7 +331,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world -run "PrepareDr
 
 期望：`TestChunkPrepareDropRespectsPerItemStackLimit` 失败，信息为「第二把镐被合并进了已满的槽」；`TestChunkPrepareDropStillMergesStackableItems` 通过。
 
-- [ ] **Step 3: 改判据**
+- [x] **Step 3: 改判据**
 
 `internal/world/drop.go` 的 `prepareDropSlot`，把硬编码上限换成查表：
 
@@ -362,7 +362,7 @@ func prepareDropSlot(
 }
 ```
 
-- [ ] **Step 4: 检查 `PrepareDropBatch` 的同一判据**
+- [x] **Step 4: 检查 `PrepareDropBatch` 的同一判据**
 
 ```bash
 rg -n 'MaxStackCount' internal/world/drop.go
@@ -376,7 +376,7 @@ space := limit - drop.Stack.Count
 
 其中 `limit` 由该批次物品的 `core.ItemStackLimit` 得到。若该函数目前没有 `limit` 变量，在循环外取一次。
 
-- [ ] **Step 5: 运行验证**
+- [x] **Step 5: 运行验证**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/world ./internal/sim ./internal/server -race -count=1'
@@ -387,7 +387,7 @@ git diff --check
 
 期望：全部通过；`gofmt -l .` 无输出。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add internal/world/drop.go internal/world/drop_test.go
@@ -396,7 +396,9 @@ git commit -m "fix: 掉落物合并遵守单格上限"
 
 ---
 
-## Task 3: 在 core 定义耐久语义
+## Task 3: 在 core 定义耐久语义（已完成并通过四轮审查修复）
+
+> 实际实现还补齐了背包/掉落物/快照投影的耐久保真、v10/v3/v4 的过渡门禁，以及 M4H 遗留多件工具堆的确定性拆分与重写标记。对应提交为 `c37611f`、`4d4e61b`、`234bf09`、`3a7a84a`、`e5c51f6`；最终复审 clean。
 
 **Files:**
 - Modify: `internal/core/item.go`
@@ -406,7 +408,7 @@ git commit -m "fix: 掉落物合并遵守单格上限"
 - Consumes: 既有 `ItemStackLimit`、`RegisteredItem`。
 - Produces: `ItemStack.Durability uint16`；`ItemMaxDurability(ItemID) (uint16, bool)`；`ItemBrokenForm(ItemID) (ItemID, bool)`；两个新物品 ID；收紧后的 `ItemStack.Valid()`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 追加到 `internal/core/item_test.go`：
 
@@ -499,7 +501,7 @@ func TestItemStackValidEnforcesDurabilityDomain(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行，确认编译失败**
+- [x] **Step 2: 运行，确认编译失败**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core -run "Durability|BrokenForm|BrokenTools" -count=1'
@@ -507,7 +509,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core -run "Durability
 
 期望：编译失败，提示 `ItemBrokenStonePickaxe`、`ItemMaxDurability`、`ItemBrokenForm` 与 `Durability` 字段未定义。
 
-- [ ] **Step 3: 追加物品 ID 与字段**
+- [x] **Step 3: 追加物品 ID 与字段**
 
 `internal/core/item.go`，在 `ItemIronPickaxe` 之后**追加**（不得插入中间）：
 
@@ -533,7 +535,7 @@ type ItemStack struct {
 }
 ```
 
-- [ ] **Step 4: 加两张查表并收紧 Valid**
+- [x] **Step 4: 加两张查表并收紧 Valid**
 
 ```go
 // ItemMaxDurability 返回工具的耐久上限；没有耐久的物品返回 0 与 false。
@@ -589,7 +591,7 @@ func (s ItemStack) Valid() bool {
 }
 ```
 
-- [ ] **Step 5: 运行验证**
+- [x] **Step 5: 运行验证**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core -race -count=1'
@@ -597,7 +599,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core -race -count=1'
 
 期望：通过。若既有测试因为构造了 `ItemStack{Item: ItemStonePickaxe, Count: 1}`（耐久为 0）而失败，这是本次收紧的**预期结果**——把它们改为携带满耐久，不要放宽 `Valid`。
 
-- [ ] **Step 6: 在本任务内修完全仓的工具构造点**
+- [x] **Step 6: 在本任务内修完全仓的工具构造点**
 
 `ItemStack` 加字段不破坏编译（字段有零值），但 `Valid()` 收紧后，**任何构造工具栈却不给耐久的地方都成了非法值**。这些点散落在四个包里，不能推迟到后续任务——本计划的全局约束要求每个任务独立通过验证。
 
@@ -619,7 +621,7 @@ rg -n 'ItemStonePickaxe|ItemIronPickaxe' --type go | rg -v 'internal/core/item(_
 
 `internal/sim/mining_test.go` 的 `setMiningHeldItem` 是集中构造点，改它一处即可覆盖该文件的大部分引用（具体见 Task 7 Step 1，两处任选其一先做，另一处届时确认已生效即可）。
 
-- [ ] **Step 7: 运行全仓验证**
+- [x] **Step 7: 运行全仓验证**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'
@@ -631,7 +633,7 @@ git diff --check
 
 期望：全部通过。本任务是唯一一个需要全仓测试的中间任务——`Valid()` 的收紧影响面就是全仓。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add -u
@@ -642,7 +644,9 @@ git commit -m "feat: 定义工具耐久与损坏形态"
 
 ---
 
-## Task 4: 合成产出满耐久
+## Task 4: 合成产出满耐久（已折叠进 Task 3 审查修复）
+
+> `AddStack` 改为严格校验完整物品堆后，零耐久配方会让工具合成失效；因此本任务作为 Task 3 Important finding 的必要依赖在 `4d4e61b` 中完成，并已随 Task 3 一起复审。
 
 **Files:**
 - Modify: `internal/core/recipe.go`
@@ -652,7 +656,7 @@ git commit -m "feat: 定义工具耐久与损坏形态"
 - Consumes: `ItemMaxDurability`。
 - Produces: 合成是耐久的唯一来源；两条镐配方产出满耐久工具。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 追加到 `internal/core/recipe_test.go`：
 
@@ -697,7 +701,7 @@ func TestNonToolRecipesOutputZeroDurability(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行，确认失败**
+- [x] **Step 2: 运行，确认失败**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core -run "RecipesOutput" -count=1'
@@ -705,7 +709,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core -run "RecipesOut
 
 期望：`TestPickaxeRecipesOutputFullDurability` 失败，产出耐久为 0 而非 131/250。
 
-- [ ] **Step 3: 让两条镐配方带满耐久**
+- [x] **Step 3: 让两条镐配方带满耐久**
 
 `internal/core/recipe.go` 的 `Recipe`（返回 `CraftingRecipe`）：
 
@@ -724,7 +728,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core -run "RecipesOut
 
 耐久值直接写字面量以保持配方表是纯数据。
 
-- [ ] **Step 4: 运行验证**
+- [x] **Step 4: 运行验证**
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/sim -race -count=1'
@@ -735,7 +739,7 @@ git diff --check
 
 期望：全部通过。`internal/sim` 的合成测试若断言产出等于 `ItemStack{Item: ItemStonePickaxe, Count: 1}`，把期望改为携带满耐久。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add internal/core/recipe.go internal/core/recipe_test.go internal/sim
@@ -849,9 +853,9 @@ func TestItemDropRejectsDurabilityOnNonTool(t *testing.T) {
 zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "ProtocolVersion|RejectsVersion|Durability" -count=1'
 ```
 
-期望：版本断言失败（当前为 10），`ItemDrop` 的 `Durability` 字段未定义导致编译失败。
+期望：版本断言失败（当前为 10），磨损的 `InventoryState` / `ItemDropUpserts` 仍被 v10 过渡门禁拒绝，证明 v11 尚未读取真实耐久字段。
 
-- [ ] **Step 3: 升版本并给 ItemDrop 加字段**
+- [ ] **Step 3: 升版本并解除 v10 过渡限制**
 
 `internal/network/packet.go`：
 
@@ -860,30 +864,47 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network -run "Protoco
 const ProtocolVersion uint32 = 11
 ```
 
-`internal/network/message.go` 的 `ItemDrop` 追加字段：
+`internal/network/message.go` 的 `ItemDrop.Durability`、`sim.DropSnapshot`、服务端发布镜像与客户端镜像已在 Task 3 审查修复中贯通，不再重复加字段。把 `ItemDrop.validate()` 当前这条 v10 限制删除：
 
 ```go
-	Item       core.ItemID
-	Count      uint8
-	Durability uint16
-```
-
-`ItemDrop.validate()` 追加耐久域校验（放在既有 `RegisteredItem` 检查之后）：
-
-```go
-	maxDurability, hasDurability := core.ItemMaxDurability(drop.Item)
-	if !hasDurability {
-		if drop.Durability != 0 {
-			return errors.New("network: item drop durability on non-tool item")
-		}
-	} else if drop.Durability < 1 || drop.Durability > maxDurability {
-		return errors.New("network: item drop durability is out of range")
+	if full, ok := core.ItemMaxDurability(drop.Item); ok && drop.Durability != full {
+		return errors.New("network: protocol v10 item drop tool is not at full durability")
 	}
 ```
 
+完整 `core.ItemStack.Valid()` 域校验继续保留，因此非工具伪耐久、工具数量大于一和越界耐久仍会拒绝。v11 只解除“必须满耐久”，不能放宽真实物品堆校验。
+
 - [ ] **Step 4: 加共享编解码并改三处调用点**
 
-`internal/network/codec.go` 新增一对函数（放在既有 `encodeFurnaceRef` 附近）：
+**先读现状——本步的起点与计划初稿的假设不同：**
+
+`decodeItemStack` **已经存在**于 `internal/network/codec.go:677`，且已被 `InventoryState` 与 `FurnaceState` 的解码路径共用。它采用 error-threading 签名：
+
+```go
+func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error)
+```
+
+**不要**新建一个签名不同的同名函数，改造既有这个。编码侧则相反：没有共享函数，`e.u16(uint16(stack.Item)); e.u8(stack.Count)` 在四处内联展开（约 396、400、406 行的 Inventory/Furnace，419 行的 `ItemDrop`）。
+
+**必须成对移除 Task 3 留下的全部 v10 过渡逻辑：**
+
+1. `encodeServerControlPayload` 中 `InventoryState` 调用 `inventoryRepresentableV10` 的满耐久门禁，以及函数本身；
+2. `decodeItemStack` 为工具补满耐久的 shim；
+3. `ItemDrop.validate()` 的“protocol v10 item drop tool is not at full durability”限制；
+4. `decodeItemDropUpserts` 为工具补满耐久的 shim。
+
+其中 `decodeItemStack` 当前包含：
+
+```go
+	// 协议 v10 的物品负载只有 Item/Count，没有耐久字节；……
+	if max, ok := core.ItemMaxDurability(stack.Item); ok {
+		stack.Durability = max
+	}
+```
+
+v11 起 wire 上有真实耐久字段，这四处**必须一起删除/改造**——漏掉任意 shim 都会把收到的真实耐久覆盖成满耐久；漏掉任意门禁则会让 v11 继续错误拒绝合法磨损工具。
+
+新增编码函数（放在既有 `encodeFurnaceRef` 附近）：
 
 ```go
 // encodeItemStack 是所有携带物品堆的消息共用的固定长度编码，共 5 字节。
@@ -893,18 +914,14 @@ func encodeItemStack(e *byteEncoder, stack core.ItemStack) {
 	e.u8(stack.Count)
 	e.u16(stack.Durability)
 }
+```
 
-// decodeItemStack 是 encodeItemStack 的逆操作。
-func decodeItemStack(d *byteDecoder) (core.ItemStack, error) {
-	item, err := d.u16()
-	if err != nil {
-		return core.ItemStack{}, err
-	}
-	count, err := d.u8()
-	if err != nil {
-		return core.ItemStack{}, err
-	}
-	durability, err := d.u16()
+改造既有解码函数，保持其 error-threading 签名不变：
+
+```go
+func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
+	// ……既有的 item / count 读取与 err 检查保持原样……
+	durability, err := d.u16(err)
 	if err != nil {
 		return core.ItemStack{}, err
 	}
@@ -913,6 +930,8 @@ func decodeItemStack(d *byteDecoder) (core.ItemStack, error) {
 	}, nil
 }
 ```
+
+`d.u16` 的实际签名以文件里既有用法为准；照该文件已有的 error-threading 写法追加这一次读取即可。
 
 把 `InventoryState` 编码改为：
 
@@ -941,7 +960,7 @@ func decodeItemStack(d *byteDecoder) (core.ItemStack, error) {
 
 熔炉当前只接受煤炭与粗铁，耐久恒为 0；统一编码是为了让「携带物品堆的消息」只有一种字节布局，而不是让熔炉支持工具。
 
-对应的三处**解码**同样改用 `decodeItemStack`。`ItemDrop` 的编解码也改用同一对函数（注意 `ItemDrop` 的字段顺序须与编码一致）。
+对应的三处**解码**同样改用 `decodeItemStack`。`ItemDrop` 的编解码也改用同一对函数（注意 `ItemDrop` 的字段顺序须与编码一致），并删除 `decodeItemDropUpserts` 的补满逻辑。至少用一个非满耐久工具分别做 `InventoryState` 与 `ItemDropUpserts` 往返，断言精确保留，防止旧 shim 漏删。
 
 - [ ] **Step 5: 更新受影响的 golden 与固定长度**
 
@@ -1046,6 +1065,8 @@ func TestChunkV4MigrationFillsFullToolDurability(t *testing.T) {
 }
 ```
 
+再把 `internal/storage/chunk_drop_test.go` 已有的真实 v4 多件工具堆 fixture 下沉为 migration 测试：v4→v5 迁移必须稳定拆分、标记 changed；最低可复用槽、generation+1、字段复制与容量不足 `ErrCorrupt` 的语义保持不变。
+
 上面两个测试若与本仓库实际的 DTO 字段名不符，先运行 `rg -n 'type playerDTO|type chunkDTO' -A 12 internal/storage` 确认后替换。
 
 - [ ] **Step 2: 运行，确认失败**
@@ -1113,15 +1134,51 @@ func fillFullDurability(stack core.ItemStack) core.ItemStack {
 		for slot := range dto.Drops {
 			dto.Drops[slot].Stack = fillFullDurability(dto.Drops[slot].Stack)
 		}
-		return dto, nil
+		// 同时把 M4H 可能写出的 Count>1 工具堆稳定拆到最低可复用空槽；
+		// 容量不足时返回 ErrCorrupt，不截断或覆盖任何活动槽。
+		return normalizeLegacyToolDropStacks(dto)
 	},
 ```
 
-`fillFullDurability` 放在 `internal/storage/migration.go`，两处迁移共用一份。熔炉槽只装煤炭与粗铁，不需要补齐。
+`fillFullDurability` 与拆分 helper 放在 `internal/storage/migration.go`。Task 3 当前 `chunk_codec.go` 中的 `normalizeV4LegacyToolDropStacks`、宽松 legacy 校验和解码后的过渡调用要移入/收敛到这条 migration，不能在 v5 当前格式上继续运行。熔炉槽只装煤炭与粗铁，不需要补齐。
 
-- [ ] **Step 4: 改编解码并保留旧 golden**
+- [ ] **Step 4: 改编解码、移除过渡 shim 并保留旧 golden**
 
-玩家与区块的编解码里，每个物品堆由「u16 + u8」改为「u16 + u8 + u16」。**既有的 v3 玩家 golden 与 v4 区块 golden 字节不得修改**——它们证明迁移能读旧数据；为 v4 玩家与 v5 区块**各新增**一份 golden。
+玩家与区块的编解码里，每个物品堆由「u16 + u8」改为「u16 + u8 + u16」。
+
+**必须移除 Task 3 留下的全部存档过渡门禁与 shim。** 玩家侧包括 `encodePlayer` 调用 `playerInventoryRepresentableV3` 的满耐久门禁（连同函数）和 `decodePlayerStack` 的补满 shim：
+
+```go
+	// schema v3 的物品负载只有 Item/Count，没有耐久字节；……
+	if max, ok := core.ItemMaxDurability(stack.Item); ok {
+		stack.Durability = max
+	}
+```
+
+schema v4 起磁盘上有真实耐久字段，这些逻辑**必须删掉**——门禁会错误拒绝磨损工具，shim 会把读到的真实耐久覆盖成满耐久。删除后，"旧工具视为满耐久"只由 v3→v4 migration 承担。
+
+区块侧同样删除/迁移以下 v4 过渡逻辑：`validateDropSlot` 的“schema v4 工具必须满耐久”限制、`decodeLogicalDropSlot` 的补满 shim、`validateLegacyDropSlot`、`decodeChunkPayload` 对 `normalizeV4LegacyToolDropStacks` 的直接调用。v5 解码必须读取真实耐久并走严格 `ItemStack.Valid()`；旧 v4 的补满与拆分只由 v4→v5 migration 承担。`DropsHash` 已采用 19 字节布局，`DropSlotBytes` 升为 19 后应与正式槽布局保持相同字段顺序。
+
+**既有的 v3 玩家 golden 与 v4 区块 golden 字节不得修改**——它们证明迁移能读旧数据；为 v4 玩家与 v5 区块**各新增**一份 golden。
+
+新增一条回归测试，钉死"解码器不再兜底"：
+
+```go
+func TestPlayerSchemaV4DecodeKeepsWornDurability(t *testing.T) {
+	// 磨损工具经过一次编码/解码往返后耐久必须原样保留，
+	// 不得被任何"补满耐久"的兜底逻辑覆盖。
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{
+		Item: core.ItemStonePickaxe, Count: 1, Durability: full - 7,
+	}
+	// ……编码为 v4 payload 再解码，断言 Durability == full-7……
+}
+```
+
+把注释替换成实际的编解码调用，函数名以该文件既有的编解码入口为准。
+
+区块新增同级回归：v5 中一把非满耐久工具编码/解码后精确保留；旧 v4 多件工具堆仍能迁移并拆分；容量不足仍明确失败且原存档字节不变。
 
 ```bash
 rg -n 'testdata' internal/storage/*_test.go | head
