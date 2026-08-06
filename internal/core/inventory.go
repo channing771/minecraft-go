@@ -49,7 +49,7 @@ func (inventory *Inventory) setSlot(slot uint8, stack ItemStack) {
 // AddStack 把已注册且数量为 1..64 的来源堆按 ItemStackLimit 拆分，依次装入
 // 快捷栏同类、快捷栏空格、背包同类、背包空格；返回新状态和余量，非法来源原样返回。
 func (inventory Inventory) AddStack(stack ItemStack) (Inventory, ItemStack) {
-	if _, ok := ItemStackLimit(stack.Item); !ok || stack.Count == 0 || stack.Count > MaxStackCount {
+	if stack.Item == ItemNone || !stack.Valid() {
 		return inventory, stack
 	}
 	for _, phase := range [4]struct {
@@ -89,7 +89,8 @@ func (inventory *Inventory) fillPhase(stack ItemStack, backpack, merge bool) Ite
 			continue
 		}
 		if !merge {
-			current = ItemStack{Item: stack.Item}
+			current = stack
+			current.Count = 0
 		}
 		space := limit - current.Count
 		moved := min(space, stack.Count)

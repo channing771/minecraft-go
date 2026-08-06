@@ -43,12 +43,12 @@ func Recipe(id RecipeID) (CraftingRecipe, bool) {
 	case RecipeStonePickaxe:
 		return CraftingRecipe{
 			Input:  ItemStack{Item: ItemStone, Count: 3},
-			Output: ItemStack{Item: ItemStonePickaxe, Count: 1},
+			Output: ItemStack{Item: ItemStonePickaxe, Count: 1, Durability: 131},
 		}, true
 	case RecipeIronPickaxe:
 		return CraftingRecipe{
 			Input:  ItemStack{Item: ItemIronIngot, Count: 3},
-			Output: ItemStack{Item: ItemIronPickaxe, Count: 1},
+			Output: ItemStack{Item: ItemIronPickaxe, Count: 1, Durability: 250},
 		}, true
 	default:
 		return CraftingRecipe{}, false

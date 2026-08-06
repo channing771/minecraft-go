@@ -7,8 +7,8 @@ import (
 	"minecraft-go/internal/core"
 )
 
-// ProtocolVersion 是 M4H 唯一支持的协议版本。
-const ProtocolVersion uint32 = 10
+// ProtocolVersion 是 M4J 唯一支持的协议版本。
+const ProtocolVersion uint32 = 11
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8

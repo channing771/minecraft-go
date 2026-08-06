@@ -65,8 +65,8 @@
 ### 合并 M4J 当前起点
 
 - [x] 8.8 核对 `origin/main@34c9ba56ad213076c876ab5fffde791ed45ba6fb` 已归档 M4J，确认协议 v11、玩家 schema v4、区块 schema v5、metadata v2、scenario v12、工具耐久主规格与两份 baseline 字节不变；把 proposal、三份 delta specs、design 与 tasks 同步为 M4J 正式起点，并运行 `openspec validate --all --strict --no-interactive`。M4H 合并检查点 `6badbf4f35ad3e2f5d8047761857c5d39b6cc3ca` 只作不可提升证据。
-- [ ] 8.9 合并 `origin/main@34c9ba56ad213076c876ab5fffde791ed45ba6fb`，保留 M4J 的主动丢弃、工具耐久、协议 v11、玩家 schema v4、区块 schema v5、metadata v2、迁移、golden 与快捷栏呈现，同时保留 M4I 的权威天空、MemoryStore 编码保留、scenario v13 和唯一 `12:13` 迁移；不得修改默认 benchmark workload 或两份 baseline 字节。
-- [ ] 8.10 合并后运行受影响包 race、协议与存储 golden/fuzz、主动丢弃与工具耐久聚焦测试、archcheck 和 OpenSpec strict；再用 `rg` 核对 protocol v11、scenario v13、schema v4/v5、metadata v2、一次 sky draw、固定分辨率/阶段/样本和唯一 `12:13` 迁移。通过前不得冻结正式候选。
+- [x] 8.9 合并 `origin/main@34c9ba56ad213076c876ab5fffde791ed45ba6fb`，保留 M4J 的主动丢弃、工具耐久、协议 v11、玩家 schema v4、区块 schema v5、metadata v2、迁移、golden 与快捷栏呈现，同时保留 M4I 的权威天空、MemoryStore 编码保留、scenario v13 和唯一 `12:13` 迁移；不得修改默认 benchmark workload 或两份 baseline 字节。
+- [x] 8.10 合并后运行受影响包 race、协议与存储 golden/fuzz、主动丢弃与工具耐久聚焦测试、archcheck 和 OpenSpec strict；再用 `rg` 核对 protocol v11、scenario v13、schema v4/v5、metadata v2、一次 sky draw、固定分辨率/阶段/样本和唯一 `12:13` 迁移。通过前不得冻结正式候选。
 
 ## 9. 冻结并验收新候选
 

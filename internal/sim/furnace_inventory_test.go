@@ -277,7 +277,8 @@ func TestPlaceIronBlockDoesNotAllocateFurnaceSlot(t *testing.T) {
 
 func TestMiningFurnaceDropsBodyAndContents(t *testing.T) {
 	var inventory core.Inventory
-	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
 	engine, session := readyFlatPlayerWithInventory(t, inventory)
 	key := core.ChunkKey{Dimension: core.Overworld}
 	index := dropTargetIndex(t)
@@ -319,7 +320,8 @@ func TestMiningFurnaceDropsBodyAndContents(t *testing.T) {
 
 func TestMiningFurnaceRejectsWhenDropsAreFull(t *testing.T) {
 	var inventory core.Inventory
-	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
 	engine, session := readyFlatPlayerWithInventory(t, inventory)
 	key := core.ChunkKey{Dimension: core.Overworld}
 	index := dropTargetIndex(t)

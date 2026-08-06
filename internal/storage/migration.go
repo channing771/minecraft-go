@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"math"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/world"
@@ -32,6 +33,57 @@ var chunkMigrations = map[uint32]chunkMigration{
 		dto.Furnaces = [core.FurnacesPerChunk]world.FurnaceSlot{}
 		return dto, nil
 	},
+	// v4 的掉落物没有耐久字段，并可能含遗留的多件工具堆。
+	4: func(dto chunkDTO) (chunkDTO, error) {
+		for slot := range dto.Drops {
+			dto.Drops[slot].Stack = fillFullDurability(dto.Drops[slot].Stack)
+		}
+		return normalizeV4LegacyToolDropStacks(dto)
+	},
+}
+
+// fillFullDurability 把没有耐久的旧工具补为满耐久，非工具保持零值。
+func fillFullDurability(stack core.ItemStack) core.ItemStack {
+	full, ok := core.ItemMaxDurability(stack.Item)
+	if !ok || stack.Durability != 0 {
+		return stack
+	}
+	stack.Durability = full
+	return stack
+}
+
+func normalizeV4LegacyToolDropStacks(dto chunkDTO) (chunkDTO, error) {
+	sources := dto.Drops
+	for sourceSlot, source := range sources {
+		if !source.Active || source.Stack.Count <= 1 {
+			continue
+		}
+		if _, ok := core.ItemMaxDurability(source.Stack.Item); !ok {
+			continue
+		}
+
+		dto.Drops[sourceSlot].Stack.Count = 1
+		for extra := uint8(1); extra < source.Stack.Count; extra++ {
+			targetSlot := -1
+			for slot, candidate := range dto.Drops {
+				if !candidate.Active && candidate.Generation != math.MaxUint32 {
+					targetSlot = slot
+					break
+				}
+			}
+			if targetSlot < 0 {
+				return chunkDTO{}, fmt.Errorf(
+					"%w: legacy tool drop slot %d has insufficient reusable drop slots",
+					ErrCorrupt, sourceSlot,
+				)
+			}
+			target := source
+			target.Generation = dto.Drops[targetSlot].Generation + 1
+			target.Stack.Count = 1
+			dto.Drops[targetSlot] = target
+		}
+	}
+	return dto, nil
 }
 
 func migrateChunk(from uint32, dto chunkDTO) (chunkDTO, bool, error) {

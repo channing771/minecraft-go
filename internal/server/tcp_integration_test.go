@@ -456,7 +456,8 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	firstIdentity := integrationIdentity(0x81, "Crafter")
 	secondIdentity := integrationIdentity(0x82, "Observer")
 	spawn := integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil)
-	spawn.Inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	spawn.Inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
 	seedIntegrationPlayer(t, root, firstIdentity, spawn)
 	seedIntegrationPlayer(t, root, secondIdentity, integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil))
 
@@ -537,8 +538,8 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	}
 	firstHost.WaitPlayerReleased(t, secondIdentity.PlayerID)
 	firstHost.Shutdown(t)
-	if schema := integrationStoredChunkSchema(t, root, key); schema != 4 {
-		t.Fatalf("正常刷新后的区块 schema=%d，想要 4", schema)
+	if schema := integrationStoredChunkSchema(t, root, key); schema != 5 {
+		t.Fatalf("正常刷新后的区块 schema=%d，想要 5", schema)
 	}
 
 	secondHost := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})
@@ -569,7 +570,7 @@ func TestTCPPlayerAndWorldFailureMatrixProtocolVersionAndUnknownPacket(t *testin
 		_, err := loginIntegrationClient(host.Addr, integrationIdentity(0x22, "Second"))
 		assertRemoteCode(t, err, network.StateLogin, uint8(network.LoginServerFull))
 
-		for _, version := range []byte{7, 8, 9, byte(network.ProtocolVersion + 1)} {
+		for _, version := range []byte{7, 8, 9, 10, byte(network.ProtocolVersion + 1)} {
 			raw, err := net.Dial("tcp", host.Addr)
 			if err != nil {
 				t.Fatal(err)
@@ -978,16 +979,25 @@ func TestMiningCompletionOraclesRejectOrderDuplicatesAndMirrorDivergence(t *test
 		ID:         core.DropID{Dimension: core.Overworld, Chunk: target.Chunk(), Generation: 1},
 		BlockIndex: blockIndex, Item: core.ItemStone, Count: 1,
 	}}}
+	full, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
+	var hotbar core.Hotbar
+	hotbar.Selected = 1
+	hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: full - 1}
+	inventory := network.InventoryState{Inventory: core.Inventory{Hotbar: hotbar}}
+	wrongDurability := inventory
+	wrongDurability.Inventory.Hotbar.Slots[1].Durability--
 	inactive := network.PlayerState{ServerTick: 2}
-	valid := []network.ServerMessage{delta, upsert, inactive}
+	valid := []network.ServerMessage{delta, upsert, inventory, inactive}
 	tests := []struct {
 		name     string
 		messages []network.ServerMessage
 		wantErr  bool
 	}{
 		{name: "规范完成帧", messages: valid},
-		{name: "交换 BlockChanges 和 drop", messages: []network.ServerMessage{upsert, delta, inactive}, wantErr: true},
-		{name: "重复 drop upsert", messages: []network.ServerMessage{delta, upsert, upsert, inactive}, wantErr: true},
+		{name: "交换 BlockChanges 和 drop", messages: []network.ServerMessage{upsert, delta, inventory, inactive}, wantErr: true},
+		{name: "重复 drop upsert", messages: []network.ServerMessage{delta, upsert, upsert, inventory, inactive}, wantErr: true},
+		{name: "缺少 InventoryState", messages: []network.ServerMessage{delta, upsert, inactive}, wantErr: true},
+		{name: "工具耐久错误", messages: []network.ServerMessage{delta, upsert, wrongDurability, inactive}, wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1007,8 +1017,8 @@ func TestMiningCompletionOraclesRejectOrderDuplicatesAndMirrorDivergence(t *test
 }
 
 func validateMiningCompletionFrame(messages []network.ServerMessage, target core.BlockPos) error {
-	if len(messages) != 3 {
-		return fmt.Errorf("采掘完成帧消息数=%d，想要 3: %+v", len(messages), messages)
+	if len(messages) != 4 {
+		return fmt.Errorf("采掘完成帧消息数=%d，想要 4: %+v", len(messages), messages)
 	}
 	delta, ok := messages[0].(network.BlockChanges)
 	if !ok {
@@ -1033,9 +1043,23 @@ func validateMiningCompletionFrame(messages []network.ServerMessage, target core
 		upserts.Drops[0].Item != core.ItemStone || upserts.Drops[0].Count != 1 {
 		return fmt.Errorf("采掘掉落物不唯一或内容不匹配: %+v", upserts)
 	}
-	state, ok := messages[2].(network.PlayerState)
+	inventory, ok := messages[2].(network.InventoryState)
 	if !ok {
-		return fmt.Errorf("采掘完成帧第三条=%T，想要 PlayerState", messages[2])
+		return fmt.Errorf("采掘完成帧第三条=%T，想要 InventoryState", messages[2])
+	}
+	if err := inventory.Validate(); err != nil {
+		return fmt.Errorf("采掘 InventoryState 非法: %w", err)
+	}
+	full, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
+	hotbar := inventory.Inventory.Hotbar
+	if hotbar.Selected != 1 || hotbar.Slots[1] != (core.ItemStack{
+		Item: core.ItemIronPickaxe, Count: 1, Durability: full - 1,
+	}) {
+		return fmt.Errorf("采掘 InventoryState 未精确扣减选中铁镐耐久: %+v", inventory)
+	}
+	state, ok := messages[3].(network.PlayerState)
+	if !ok {
+		return fmt.Errorf("采掘完成帧第四条=%T，想要 PlayerState", messages[3])
 	}
 	if err := state.Validate(); err != nil {
 		return fmt.Errorf("采掘 PlayerState 非法: %w", err)
@@ -1081,9 +1105,11 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	store := storage.NewMemory(storage.Metadata{
 		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	})
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	ironFull, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
 	var inventory core.Inventory
-	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
-	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
+	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: ironFull}
 	inventory.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemDirt, Count: 1}
 	location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{0.5, 1.001, 0.5}}
 	if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{
@@ -1739,6 +1765,21 @@ func rewriteIntegrationChunkSchema(t *testing.T, root string, key core.ChunkKey,
 		t.Fatal(err)
 	}
 	binary.LittleEndian.PutUint32(logical[4:], schema)
+	// schema v4 及更早的掉落物槽没有 Durability；当前 v5 槽的 offset 8:10
+	// 是耐久字段，按固定槽顺序原地删除后才能交给旧 decoder。
+	if schema < 5 {
+		furnaceBytes := core.FurnacesPerChunk * world.FurnaceSlotBytes
+		dropBytes := core.DropsPerChunk * world.DropSlotBytes
+		dropStart := len(logical) - furnaceBytes - dropBytes
+		write := dropStart
+		for slot := range core.DropsPerChunk {
+			start := dropStart + slot*world.DropSlotBytes
+			write += copy(logical[write:], logical[start:start+8])
+			write += copy(logical[write:], logical[start+10:start+world.DropSlotBytes])
+		}
+		write += copy(logical[write:], logical[dropStart+dropBytes:])
+		logical = logical[:write]
+	}
 	// 逻辑负载末尾是固定长度的熔炉槽；标注为 v4 之前的 schema 时必须一并截掉，
 	// 否则旧版本解码会把它们当作尾随字节而拒绝整个区块。
 	if schema < 4 {

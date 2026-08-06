@@ -104,9 +104,11 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 	config.SnapshotChunks = 16
 	config.SnapshotBytes = 1 << 20
 	config.OutboxCapacity = 256
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	ironFull, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
 	var hotbar core.Hotbar
-	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
-	hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
+	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
+	hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: ironFull}
 	hotbar.Slots[2] = core.ItemStack{Item: core.ItemDirt, Count: 1}
 	running := newMemoryAttachedWorldWithHotbar(config, serverEndpoint, server.FlatTestGenerator{}, hotbar)
 	t.Cleanup(func() { shutdownExternalServerForTest(t, running) })

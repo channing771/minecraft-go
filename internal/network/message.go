@@ -202,10 +202,7 @@ func validFurnaceRef(ref core.FurnaceRef) error {
 
 // validFurnaceStack 报告某个熔炉格是否为空或恰好装着允许的物品。
 func validFurnaceStack(stack core.ItemStack, allowed core.ItemID) bool {
-	if stack.Item == core.ItemNone {
-		return stack.Count == 0
-	}
-	return stack.Item == allowed && stack.Count >= 1 && stack.Count <= core.MaxStackCount
+	return stack.Valid() && (stack.Item == core.ItemNone || stack.Item == allowed)
 }
 
 // InventoryState 是服务端发给所属玩家的完整权威物品状态。
@@ -447,6 +444,7 @@ type ItemDrop struct {
 	BlockIndex uint32
 	Item       core.ItemID
 	Count      uint8
+	Durability uint16
 }
 
 // DropSelectedItem 请求把权威选中快捷栏中的一个物品原地转移为掉落物。
@@ -467,11 +465,11 @@ func (drop ItemDrop) validate() error {
 	if drop.BlockIndex >= maxChunkBlockIndex {
 		return errors.New("network: item drop block index is outside the chunk")
 	}
-	if !core.RegisteredItem(drop.Item) {
-		return errors.New("network: unknown item drop item")
+	stack := core.ItemStack{
+		Item: drop.Item, Count: drop.Count, Durability: drop.Durability,
 	}
-	if drop.Count < 1 || drop.Count > core.MaxStackCount {
-		return errors.New("network: item drop count is outside 1..64")
+	if !stack.Valid() {
+		return errors.New("network: invalid item drop stack")
 	}
 	return nil
 }

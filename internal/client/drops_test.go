@@ -44,6 +44,20 @@ func TestItemDropsApplyAddsAndReplacesByID(t *testing.T) {
 	}
 }
 
+func TestItemDropsKeepsToolDurability(t *testing.T) {
+	mirror := client.NewItemDrops()
+	id := dropID(0, 1, 1)
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	if err := mirror.Apply(network.ItemDropUpserts{Drops: []network.ItemDrop{{
+		ID: id, BlockIndex: 7, Item: core.ItemStonePickaxe, Count: 1, Durability: full,
+	}}}); err != nil {
+		t.Fatalf("应用工具掉落物: %v", err)
+	}
+	if got := mirror.Presentations(); len(got) != 1 || got[0].Durability != full {
+		t.Fatalf("工具掉落物镜像 = %+v，想要耐久 %d", got, full)
+	}
+}
+
 func TestItemDropsPresentationsAreSortedByID(t *testing.T) {
 	mirror := client.NewItemDrops()
 	if err := mirror.Apply(network.ItemDropUpserts{Drops: []network.ItemDrop{

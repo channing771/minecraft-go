@@ -30,17 +30,19 @@ func fixturePlayerInventory() core.Inventory {
 	var inventory core.Inventory
 	inventory.Hotbar.Selected = 3
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
-	inventory.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	ironFull, _ := core.ItemMaxDurability(core.ItemIronPickaxe)
+	inventory.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}
 	inventory.Hotbar.Slots[6] = core.ItemStack{Item: core.ItemGrass, Count: 1}
 	inventory.Backpack[0] = core.ItemStack{Item: core.ItemDirt, Count: 12}
-	inventory.Backpack[7] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1}
+	inventory.Backpack[7] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: ironFull}
 	inventory.Backpack[core.BackpackSlots-1] = core.ItemStack{Item: core.ItemStone, Count: 5}
 	return inventory
 }
 
 func TestPlayerCodecRoundTrip(t *testing.T) {
-	if currentPlayerSchema != 3 {
-		t.Fatalf("玩家 schema=%d，工具没有改变栏位布局", currentPlayerSchema)
+	if currentPlayerSchema != 4 {
+		t.Fatalf("玩家 schema=%d，想要 4", currentPlayerSchema)
 	}
 	id := fixturePlayerID()
 	want := fixturePlayerSave(id, 7)
@@ -56,7 +58,7 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 	if got.NeedsRewrite {
-		t.Fatal("v3 player unexpectedly needs rewrite")
+		t.Fatal("v4 玩家意外需要重写")
 	}
 	got.Safe.Position[0] = 99
 	if want.Safe.Position[0] == 99 {
@@ -64,12 +66,30 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPlayerV3Fixture(t *testing.T) {
+func TestPlayerSchemaV4DecodeKeepsWornDurability(t *testing.T) {
+	save := fixturePlayerSave(fixturePlayerID(), 7)
+	save.Inventory.Hotbar.Slots[4].Durability = 73
+	save.Inventory.Backpack[7].Durability = 149
+
+	encoded, err := encodePlayer(save)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodePlayer(save.PlayerID, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Inventory != save.Inventory {
+		t.Fatalf("v4 磨损工具往返后 inventory=%+v，想要 %+v", got.Inventory, save.Inventory)
+	}
+}
+
+func TestPlayerV4Fixture(t *testing.T) {
 	encoded, err := encodePlayer(fixturePlayerSave(fixturePlayerID(), 19))
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "player-v3.bin")
+	path := filepath.Join("testdata", "player-v4.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -80,7 +100,24 @@ func TestPlayerV3Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, encoded) {
-		t.Fatal("v3 fixture drift; change schema version")
+		t.Fatal("v4 fixture drift; change schema version")
+	}
+}
+
+func TestPlayerV3FixtureMigratesLosslessly(t *testing.T) {
+	encoded, err := os.ReadFile(filepath.Join("testdata", "player-v3.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodePlayer(fixturePlayerID(), encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Inventory != fixturePlayerInventory() {
+		t.Fatalf("v3 迁移改变了物品状态: %+v", got.Inventory)
+	}
+	if !got.NeedsRewrite {
+		t.Fatal("v3 玩家必须标记为需要重写")
 	}
 }
 
@@ -125,6 +162,9 @@ func TestPlayerCodecRejectsInvalidHotbarPayload(t *testing.T) {
 		{"空物品非零数量", func(h *core.Hotbar) {
 			h.Slots[3] = core.ItemStack{Item: core.ItemNone, Count: 5}
 		}},
+		{"非工具携带耐久", func(h *core.Hotbar) {
+			h.Slots[5] = core.ItemStack{Item: core.ItemStone, Count: 1, Durability: 1}
+		}},
 	}
 	for _, tc := range invalid {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,13 +189,14 @@ func playerWireWithHotbar(t *testing.T, id core.PlayerID, hotbar core.Hotbar) []
 		t.Fatal(err)
 	}
 	wire := bytes.Clone(encoded)
-	offset := len(wire) - (1 + core.HotbarSlots*3)
+	offset := len(wire) - playerBackpackBytes - playerHotbarBytes
 	wire[offset] = hotbar.Selected
 	offset++
 	for _, stack := range hotbar.Slots {
 		binary.LittleEndian.PutUint16(wire[offset:], uint16(stack.Item))
 		wire[offset+2] = stack.Count
-		offset += 3
+		binary.LittleEndian.PutUint16(wire[offset+3:], stack.Durability)
+		offset += 5
 	}
 	hasher := crc32.New(playerCRCTable)
 	_, _ = hasher.Write(wire[8:40])

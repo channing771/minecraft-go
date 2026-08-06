@@ -393,18 +393,15 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 		case InventoryState:
 			e.u8(message.Inventory.Hotbar.Selected)
 			for _, stack := range message.Inventory.Hotbar.Slots {
-				e.u16(uint16(stack.Item))
-				e.u8(stack.Count)
+				encodeItemStack(&e, stack)
 			}
 			for _, stack := range message.Inventory.Backpack {
-				e.u16(uint16(stack.Item))
-				e.u8(stack.Count)
+				encodeItemStack(&e, stack)
 			}
 		case FurnaceState:
 			encodeFurnaceRef(&e, message.Furnace)
 			for _, stack := range [3]core.ItemStack{message.Input, message.Fuel, message.Output} {
-				e.u16(uint16(stack.Item))
-				e.u8(stack.Count)
+				encodeItemStack(&e, stack)
 			}
 			e.u8(message.ProgressTicks)
 			e.u16(message.BurnTicks)
@@ -416,8 +413,9 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 			for _, drop := range message.Drops {
 				encodeDropID(&e, drop.ID)
 				e.u32(drop.BlockIndex)
-				e.u16(uint16(drop.Item))
-				e.u8(drop.Count)
+				encodeItemStack(&e, core.ItemStack{
+					Item: drop.Item, Count: drop.Count, Durability: drop.Durability,
+				})
 			}
 		case ItemDropRemoves:
 			e.u64(message.ServerTick)
@@ -670,8 +668,15 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 
 const (
 	dropIDWireBytes   = 4 + 4 + 4 + 1 + 4
-	itemDropWireBytes = dropIDWireBytes + 4 + 2 + 1
+	itemDropWireBytes = dropIDWireBytes + 4 + 2 + 1 + 2
 )
+
+// encodeItemStack 是所有携带物品堆的消息共用的 5 字节固定编码。
+func encodeItemStack(e *byteEncoder, stack core.ItemStack) {
+	e.u16(uint16(stack.Item))
+	e.u8(stack.Count)
+	e.u16(stack.Durability)
+}
 
 // decodeItemStack 读取一格固定编码；沿用已有错误则原样返回。
 func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
@@ -686,7 +691,13 @@ func decodeItemStack(d *byteDecoder, err error) (core.ItemStack, error) {
 	if err != nil {
 		return core.ItemStack{}, err
 	}
-	return core.ItemStack{Item: core.ItemID(item), Count: count}, nil
+	durability, err := d.u16()
+	if err != nil {
+		return core.ItemStack{}, err
+	}
+	return core.ItemStack{
+		Item: core.ItemID(item), Count: count, Durability: durability,
+	}, nil
 }
 
 // furnaceRefWireBytes 是熔炉引用的固定编码长度。
@@ -787,14 +798,13 @@ func decodeItemDropUpserts(d *byteDecoder) (ServerPacket, error) {
 		if drop.BlockIndex, err = d.u32(); err != nil {
 			return nil, err
 		}
-		item, err := d.u16()
+		stack, err := decodeItemStack(d, nil)
 		if err != nil {
 			return nil, err
 		}
-		drop.Item = core.ItemID(item)
-		if drop.Count, err = d.u8(); err != nil {
-			return nil, err
-		}
+		drop.Item = stack.Item
+		drop.Count = stack.Count
+		drop.Durability = stack.Durability
 	}
 	return result, nil
 }

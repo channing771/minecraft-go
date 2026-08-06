@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	currentChunkSchema uint32 = 4
+	currentChunkSchema uint32 = 5
 	maxCompressedChunk        = 1 << 20
 	maxDecodedChunk           = 2 << 20
 
@@ -228,11 +228,8 @@ func validateDropSlot(drop world.DropSlot) error {
 	if drop.Generation == 0 {
 		return errors.New("active drop slot has zero generation")
 	}
-	if !core.RegisteredItem(drop.Stack.Item) {
-		return fmt.Errorf("unknown drop item %d", drop.Stack.Item)
-	}
-	if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount {
-		return fmt.Errorf("drop count %d is outside 1..64", drop.Stack.Count)
+	if !drop.Stack.Valid() {
+		return errors.New("drop stack is invalid")
 	}
 	if drop.BlockIndex >= core.SectionsPerChunk*core.BlocksPerSection {
 		return fmt.Errorf("drop block index %d is outside the chunk", drop.BlockIndex)
@@ -249,12 +246,53 @@ func appendLogicalDropSlot(dst []byte, drop world.DropSlot) []byte {
 	dst = append(dst, active)
 	dst = binary.LittleEndian.AppendUint16(dst, uint16(drop.Stack.Item))
 	dst = append(dst, drop.Stack.Count)
+	dst = binary.LittleEndian.AppendUint16(dst, drop.Stack.Durability)
 	dst = appendU32(dst, drop.BlockIndex)
 	dst = appendU32(dst, drop.AgeTicks)
 	return append(dst, drop.PickupDelayTicks)
 }
 
 func decodeLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
+	var drop world.DropSlot
+	var err error
+	if drop.Generation, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	active, err := d.u8()
+	if err != nil {
+		return world.DropSlot{}, err
+	}
+	if active > 1 {
+		return world.DropSlot{}, fmt.Errorf("invalid drop active flag %d", active)
+	}
+	drop.Active = active == 1
+	item, err := d.u16()
+	if err != nil {
+		return world.DropSlot{}, err
+	}
+	drop.Stack.Item = core.ItemID(item)
+	if drop.Stack.Count, err = d.u8(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.Stack.Durability, err = d.u16(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.BlockIndex, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.AgeTicks, err = d.u32(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if drop.PickupDelayTicks, err = d.u8(); err != nil {
+		return world.DropSlot{}, err
+	}
+	if err := validateDropSlot(drop); err != nil {
+		return world.DropSlot{}, err
+	}
+	return drop, nil
+}
+
+func decodeLegacyLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
 	var drop world.DropSlot
 	var err error
 	if drop.Generation, err = d.u32(); err != nil {
@@ -285,8 +323,23 @@ func decodeLogicalDropSlot(d *byteDecoder) (world.DropSlot, error) {
 	if drop.PickupDelayTicks, err = d.u8(); err != nil {
 		return world.DropSlot{}, err
 	}
-	if err := validateDropSlot(drop); err != nil {
-		return world.DropSlot{}, err
+	if !drop.Active {
+		return drop, nil
+	}
+	if drop.Generation == 0 {
+		return world.DropSlot{}, errors.New("active drop slot has zero generation")
+	}
+	if drop.BlockIndex >= core.SectionsPerChunk*core.BlocksPerSection {
+		return world.DropSlot{}, fmt.Errorf("drop block index %d is outside the chunk", drop.BlockIndex)
+	}
+	if _, ok := core.ItemMaxDurability(drop.Stack.Item); ok {
+		if drop.Stack.Count < 1 || drop.Stack.Count > core.MaxStackCount {
+			return world.DropSlot{}, errors.New("legacy tool drop stack is invalid")
+		}
+		return drop, nil
+	}
+	if !drop.Stack.Valid() {
+		return world.DropSlot{}, errors.New("drop stack is invalid")
 	}
 	return drop, nil
 }
@@ -470,7 +523,12 @@ func decodeLogicalChunk(
 	}
 	if schema >= 2 {
 		for slot := range core.DropsPerChunk {
-			drop, err := decodeLogicalDropSlot(&logical)
+			var drop world.DropSlot
+			if schema >= 5 {
+				drop, err = decodeLogicalDropSlot(&logical)
+			} else {
+				drop, err = decodeLegacyLogicalDropSlot(&logical)
+			}
 			if err != nil {
 				return chunkDTO{}, fmt.Errorf("%w: drop slot %d: %v", ErrCorrupt, slot, err)
 			}
