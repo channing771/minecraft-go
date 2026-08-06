@@ -193,6 +193,11 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 		}
 	}
 	assertWrongToolMiningCompletionFrame(t, completionMessages, target)
+	completionContext, cancelCompletion := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelCompletion()
+	if message, err := clientEndpoint.Recv(completionContext); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("采掘完成后意外 server message = %#v, err=%v", message, err)
+	}
 	if block, loaded := mirror.BlockAt(core.Overworld, target); !loaded || block != core.AirID {
 		t.Fatalf("错误工具完成后方块 = %d,%t", block, loaded)
 	}
