@@ -144,6 +144,73 @@ Modify:
 
 ---
 
+## Task 0: 建立 active OpenSpec change
+
+M4J 修改 `internal/network/codec.go`、`internal/network/packet.go`、`internal/storage/player_codec.go`、`internal/storage/chunk_codec.go`、`internal/storage/player_migration.go`，全部命中 `scripts/agent-hooks/guard.mjs` 的 `highRiskPatterns`。没有 active change 时，Stop hook 会从第一个 Go 提交起持续失败，且**不得**用 `MINECRAFT_GO_HOOKS_ALLOW_NO_SPEC=1` 绕过。因此这必须是第一个任务。
+
+**Files:**
+- Create: `openspec/changes/m4j-tool-durability/proposal.md`
+- Create: `openspec/changes/m4j-tool-durability/design.md`
+- Create: `openspec/changes/m4j-tool-durability/tasks.md`
+- Create: `openspec/changes/m4j-tool-durability/specs/tool-durability/spec.md`
+
+**Interfaces:**
+- Consumes: `openspec/config.yaml` 的 rules；`docs/superpowers/specs/2026-08-06-m4j-tool-durability-design.md`。
+- Produces: 一个通过 strict 校验的 active change，解除后续所有任务的 Stop hook 阻塞。
+
+- [ ] **Step 1: 参照已归档的 M4H 结构**
+
+```bash
+find openspec/changes/archive/2026-08-05-m4h-authoritative-item-dropping -type f
+sed -n '1,80p' openspec/changes/archive/2026-08-05-m4h-authoritative-item-dropping/proposal.md
+sed -n '1,60p' openspec/changes/archive/2026-08-05-m4h-authoritative-item-dropping/specs/authoritative-item-dropping/spec.md
+cat openspec/config.yaml
+```
+
+按 `openspec/config.yaml` 的 `rules` 撰写，全部使用中文，保留 OpenSpec 要求的英文结构标题与 SHALL/MUST。
+
+- [ ] **Step 2: 写 proposal.md**
+
+背景、目标、非目标直接取自设计文档的对应章节。必须明确写出兼容性影响：协议 v10→v11、玩家 schema v3→v4、区块 schema v4→v5、metadata 保持 v2、benchmark scenario 保持 v12 且不重建性能基线；旧存档单向无损升级（旧工具视为满耐久），回退到 v10 程序必须恢复升级前的备份。
+
+- [ ] **Step 3: 写 delta spec**
+
+`specs/tool-durability/spec.md` 只描述可观察行为，每条 Requirement 至少一个 Given/When/Then Scenario。至少覆盖：
+
+- 工具带耐久，成功破坏方块消耗一点
+- 三条拒绝路径（受保护方块、区块未就绪、掉落物容量已满）不消耗耐久
+- 耐久归零转为损坏物品，且最后一次破坏仍然生效
+- 损坏物品的采掘行为等同空手
+- 工具离手中断采掘进度
+- 耐久跨背包、掉落物、存档与 Memory/TCP 协议无损传递
+- 掉落物合并遵守单格上限（工具永不合并）
+- 旧存档迁移把旧工具视为满耐久
+
+实现选择（字段布局、查表函数、编码字节数）**不要**写进 spec.md，放 design.md。
+
+- [ ] **Step 4: 写 design.md 与 tasks.md**
+
+`design.md` 记录数据所有权、依赖方向、受影响文件、迁移与回退方案，以及设计文档里三个被否决的替代方案（并行耐久表、耐久只存背包、耐久编码进 `Count` 高位）及其理由。
+
+`tasks.md` 按本计划的 Task 1..9 逐条列出，每项写明目标包与验证命令。收尾任务必须包含 `gofmt`、`go vet ./...`、`go test ./... -race` 与 OpenSpec 严格校验。
+
+- [ ] **Step 5: 校验**
+
+```bash
+openspec validate --all --strict --no-interactive
+```
+
+期望：退出码为零，新 change 被识别为完整 active change。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add openspec/changes/m4j-tool-durability
+git commit -m "spec: 建立 M4J 工具耐久 change"
+```
+
+---
+
 ## Task 1: 冻结起点并核对契约
 
 **Files:**
@@ -530,26 +597,48 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core -race -count=1'
 
 期望：通过。若既有测试因为构造了 `ItemStack{Item: ItemStonePickaxe, Count: 1}`（耐久为 0）而失败，这是本次收紧的**预期结果**——把它们改为携带满耐久，不要放宽 `Valid`。
 
-- [ ] **Step 6: 全仓编译，登记待修的构造点**
+- [ ] **Step 6: 在本任务内修完全仓的工具构造点**
+
+`ItemStack` 加字段不破坏编译（字段有零值），但 `Valid()` 收紧后，**任何构造工具栈却不给耐久的地方都成了非法值**。这些点散落在四个包里，不能推迟到后续任务——本计划的全局约束要求每个任务独立通过验证。
 
 ```bash
-zsh -ic 'gvm use go1.26.0 >/dev/null && go build ./... && go vet ./... 2>&1 | head -40'
+zsh -ic 'gvm use go1.26.0 >/dev/null && go build ./... && go test ./... -count=1 2>&1 | rg -v '^ok' | head -40'
+rg -n 'ItemStonePickaxe|ItemIronPickaxe' --type go | rg -v 'internal/core/item(_test)?\.go'
 ```
 
-`ItemStack` 加字段不会破坏编译（字段有零值），但会让**构造工具栈却不给耐久**的地方产生非法值。用下面的命令列出所有需要在后续任务里补耐久的位置：
+已知需要补 `Durability` 的位置（数字是该文件的引用数，不是待改行数）：`internal/sim/mining_test.go`(17)、`internal/core/inventory_test.go`(10)、`internal/sim/drop_test.go`(4)、`internal/server/tcp_integration_test.go`(3)、`internal/storage/player_codec_test.go`(2)、`internal/sim/furnace_inventory_test.go`(2)、`internal/server/integration_test.go`(2)、`internal/network/drop_test.go`(2)、`internal/core/recipe_test.go`(2)。
 
-```bash
-rg -n 'ItemStonePickaxe|ItemIronPickaxe' --type go | rg -v '_test|item\.go'
+统一改法是给构造出的镐补满耐久：
+
+```go
+	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	stack := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: full}
 ```
 
-把结果抄进执行记录；Task 5、6 会逐一处理。
+**不要**为了让这些测试通过而放宽 `Valid()`——收紧本身就是本任务的交付物。若某个测试是**故意**构造非法栈来验证拒绝路径，保持它不变并确认它断言的是「被拒绝」。
 
-- [ ] **Step 7: 提交**
+`internal/sim/mining_test.go` 的 `setMiningHeldItem` 是集中构造点，改它一处即可覆盖该文件的大部分引用（具体见 Task 7 Step 1，两处任选其一先做，另一处届时确认已生效即可）。
+
+- [ ] **Step 7: 运行全仓验证**
 
 ```bash
-git add internal/core/item.go internal/core/item_test.go
+zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./... -race'
+zsh -ic 'gvm use go1.26.0 >/dev/null && go vet ./...'
+zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/archcheck -count=1'
+zsh -ic 'gvm use go1.26.0 >/dev/null && gofmt -l .'
+git diff --check
+```
+
+期望：全部通过。本任务是唯一一个需要全仓测试的中间任务——`Valid()` 的收紧影响面就是全仓。
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add -u
 git commit -m "feat: 定义工具耐久与损坏形态"
 ```
+
+只用 `git add -u` 暂存已跟踪文件的改动，避免带入用户的未跟踪文件。
 
 ---
 
