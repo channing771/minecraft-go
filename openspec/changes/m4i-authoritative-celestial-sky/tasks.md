@@ -45,7 +45,11 @@
   - [x] 8.1.3 临时只在 post-still、post-flying、post-GPU 三个既有边界接入 helper；保存不可追加的 pre-run sidecar 及其哈希，证明 full-stars、生产 `10s/60s/120s/30s`、Memory transport、精确 HEAD、受限 diff 和全新路径。只运行一次带 `GODEBUG=gctrace=1` 的完整诊断，另写 post-run sidecar 保存 exit code 与日志/JSON/profile 的 size、mtime、birthtime、SHA-256；不得运行 `perfcheck`、TCP 或复制基线。
   - [x] 8.1.4 分别用 `go tool pprof -top` 导出三个 profile 的 `inuse_space`、`inuse_objects`、`alloc_space`，结合 `HeapAlloc/HeapSys/Sys/non-Go` 记录跨阶段 delta、top 分配链及所有调用方；随后用 `apply_patch` 移除 helper、环境变量入口、调用点和临时测试，运行受影响包 race 测试并确认 production diff 为空。
   - [x] 8.1.5 只有 profile 把 post-flying live Go heap 的大额增长集中到单一实际分配链时，才在 `docs/notes/perf-baseline.md` 记录 8.2 的根因并勾选 8.1；若 Go profile 不能解释 RSS 增量，保持 8.1 未完成并先再次更新 OpenSpec，约束最小原生 WebGPU/Metal 资源生命周期诊断，禁止猜测修复。
-- [ ] 8.2 根据 8.1 的单一根因先写失败测试或可重复的最小性能检查，再最小修复 flying/GPU 采样期间的资源滞留；不得提高 `clientMemoryLimit`、`2GiB` RSS、消息/mesher/queue 上限或减少天空 workload。运行受影响包 race 测试、零分配测试与同一诊断检查，证明修复前后只有目标内存来源变化。
+- [ ] 8.2 根据 8.1 的单一根因把 benchmark 共用的 `MemoryStore` 从持有完整 chunk 深拷贝改为持有现有 chunk v4 编码 payload，读取时解码为独立 chunk；保持 Store/revision/hash、批次原子性、重载结果、scenario v13 workload 与全部门禁不变。不得增加 benchmark 专用丢弃/限容旁路、临时 DiskStore、新 codec、zstd pool，或提高 `clientMemoryLimit`、`2GiB` RSS、消息/mesher/queue 上限。
+  - [ ] 8.2.1 先在 `internal/storage` 写失败测试：保存确定性区块后 Store 的长期 owner 是非空且有界的编码 payload，调用方原 chunk 与两次 LoadChunk 继续互不别名；包含一个 codec 拒绝对象的批次必须整体失败且前面的合法 chunk 不可见。记录 RED 原始输出。
+  - [ ] 8.2.2 最小修改 `MemoryStore`：`memoryChunk` 保存 revision/hash/encoded bytes；先完成全批 revision/hash 归并与全部 pending 编码，全部成功后才替换 `chunks` map；`LoadChunk` 复用 `decodeChunkPayload`。不改 chunk codec、DiskStore、Store 接口、构造器或 server 调度。
+  - [ ] 8.2.3 运行 `gofmt`、`go test ./internal/storage -race -count=1`、服务端持久化聚焦 race 测试、codec/golden 测试、archcheck、`go vet ./...` 与 OpenSpec strict；重新运行 `BenchmarkChunkEncode`/`BenchmarkChunkDecode` 记录 CPU 与临时分配，但没有 full-run 证据时不增加 pool 或缓存。
+  - [ ] 8.2.4 在新实现提交上用全新路径执行一次不可提升的 full-stars、生产 `10s/60s/120s/30s` Memory 诊断，记录 pre/post provenance、阶段内存分解、RSS、p99 与失败点；不得传给 `perfcheck`、TCP 或基线。只有目标 live owner 消失且 RSS 相对 8.1 明显下降时才勾选 8.2；否则保留证据并先更新本 change，禁止猜测下一修复。
 - [ ] 8.3 在 RSS 闭合后，用 headless 像素测试锁定正午/午夜、太阳/月亮方向、固定星图和地形遮挡，再最小减少等价 shader 工作；不得减少每帧一次 sky draw、降低 2560x1440 或加入纹理。运行 `go test ./internal/render -run 'TestSky|TestRendererRenderDoesNotAllocate' -race -count=1`，并用不可提升的 v13 诊断确认 flying p99 `<12ms`。
 - [ ] 8.4 核对最终实现没有改变 draw 数量、固定分辨率、阶段时长、样本、场景运动或指标定义，保持 scenario v13 与唯一 `12:13` 迁移；若任一项必须改变，停止实现并先把 proposal、delta specs、design、tasks 和 producer 更新为 v14。
 
