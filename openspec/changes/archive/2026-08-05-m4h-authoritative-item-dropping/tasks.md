@@ -50,5 +50,5 @@
 
 ## 9. 主规格同步与归档
 
-- [ ] 9.1 把 `authoritative-item-dropping` 新 capability 和 `persistent-item-drops` 修改 delta 同步到 `openspec/specs/`，用 `openspec validate --all --strict --no-interactive` 核对协议 v10、玩家 schema v3、区块 schema v4、metadata v2、scenario v12、来源延迟及已注册物品语义一致，并更新 `AGENTS.md`、`openspec/config.yaml` 的当前基线为 M4H。
-- [ ] 9.2 在全部任务和验证通过后归档 `m4h-authoritative-item-dropping`，再次运行 `openspec validate --all --strict --no-interactive`、`git diff --check` 与最终 git 状态检查，再提交归档结果。
+- [x] 9.1 把 `authoritative-item-dropping` 新 capability 和 `persistent-item-drops` 修改 delta 同步到 `openspec/specs/`，用 `openspec validate --all --strict --no-interactive` 核对协议 v10、玩家 schema v3、区块 schema v4、metadata v2、scenario v12、来源延迟及已注册物品语义一致，并更新 `AGENTS.md`、`openspec/config.yaml` 的当前基线为 M4H。
+- [x] 9.2 在全部任务和验证通过后归档 `m4h-authoritative-item-dropping`，再次运行 `openspec validate --all --strict --no-interactive`、`git diff --check` 与最终 git 状态检查，再提交归档结果。
