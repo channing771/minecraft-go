@@ -2,6 +2,7 @@ package sim_test
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"minecraft-go/internal/core"
@@ -335,6 +336,46 @@ func readyWideViewPlayer(t *testing.T, viewRadius int) (*sim.Engine, sim.Session
 		t.Fatalf("玩家未 Ready: %+v", player)
 	}
 	return engine, session
+}
+
+func TestPlaceBeforeDropUsesGlobalSequenceOrder(t *testing.T) {
+	var hotbar core.Hotbar
+	hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+	target := core.BlockPos{X: 0, Y: 2, Z: 3}
+	want := core.BlockPos{X: 0, Y: 2, Z: 2}
+	engine, session := readyFlatPlayerRestored(t, map[core.BlockPos]core.BlockID{
+		target: core.StoneID,
+	}, hotbar)
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+		Yaw: float32(math.Pi), Slot: 0,
+	})
+	engine.Enqueue(sim.Command{
+		Session: session, Sequence: 3, Kind: sim.CommandDropSelectedItem,
+	})
+
+	result := engine.Step()
+	if len(result.Rejected) != 1 || result.Rejected[0] != (sim.Rejection{
+		Session: session, Sequence: 3, Reason: sim.RejectInvalidSlot,
+	}) {
+		t.Fatalf("拒绝 = %+v，想要丢弃以 invalid_slot 拒绝", result.Rejected)
+	}
+	if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 1 ||
+		result.Changes[0].Changes[0] != (sim.BlockChange{Position: want, Block: core.StoneID}) {
+		t.Fatalf("放置变更 = %+v", result.Changes)
+	}
+	if got := currentInventory(t, engine, session); got != (core.Inventory{}) {
+		t.Fatalf("背包 = %+v，想要清空", got)
+	}
+	chunk, _, ok := engine.CloneReadyChunk(core.ChunkKey{Dimension: core.Overworld})
+	if !ok {
+		t.Fatal("中心区块不可用")
+	}
+	for slot := range core.DropsPerChunk {
+		if drop := chunk.Drop(slot); drop.Active {
+			t.Fatalf("地面不应有掉落物：槽 %d = %+v", slot, drop)
+		}
+	}
 }
 
 func TestDropSelectedItemTransfersOneAuthoritativeItem(t *testing.T) {
