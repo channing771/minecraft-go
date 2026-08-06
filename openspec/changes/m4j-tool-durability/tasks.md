@@ -65,5 +65,5 @@
 
 ## 10. 主规格同步与归档
 
-- [ ] 10.1 把 `tool-durability` 新 capability 同步到 `openspec/specs/`，用 `openspec validate --all --strict --no-interactive` 核对协议 v11、玩家 schema v4、区块 schema v5、metadata v2、scenario v12 全文一致，更新 `AGENTS.md`/`openspec/config.yaml` 的当前基线为 M4J。
+- [x] 10.1 把 `tool-durability` 新 capability 同步到 `openspec/specs/`，用 `openspec validate --all --strict --no-interactive` 核对协议 v11、玩家 schema v4、区块 schema v5、metadata v2、scenario v12 全文一致，更新 `AGENTS.md`/`openspec/config.yaml` 的当前基线为 M4J。
 - [ ] 10.2 全部任务和验证通过后归档 `m4j-tool-durability`，再次运行 `openspec validate --all --strict --no-interactive`、`git diff --check` 与最终 `git status`。
