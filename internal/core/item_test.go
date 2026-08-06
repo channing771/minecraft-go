@@ -202,6 +202,21 @@ func TestHotbarAddRejectsUnknownItem(t *testing.T) {
 	}
 }
 
+func TestHotbarAddRejectsToolsWithoutDurability(t *testing.T) {
+	var hotbar core.Hotbar
+	for _, item := range []core.ItemID{core.ItemStonePickaxe, core.ItemIronPickaxe} {
+		got, ok := hotbar.Add(item)
+		if ok || got != hotbar {
+			t.Fatalf("Add(%d) = %+v, %v，没有耐久参数时必须拒绝工具", item, got, ok)
+		}
+	}
+
+	got, ok := hotbar.Add(core.ItemDirt)
+	if !ok || got.Slots[0] != (core.ItemStack{Item: core.ItemDirt, Count: 1}) {
+		t.Fatalf("普通物品 Add = %+v, %v", got, ok)
+	}
+}
+
 func TestHotbarConsumeNormalizesEmptySlot(t *testing.T) {
 	var h core.Hotbar
 	h.Slots[4] = core.ItemStack{Item: core.ItemDirt, Count: 1}

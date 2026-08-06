@@ -57,11 +57,11 @@ func (c *Chunk) PrepareDrop(item core.ItemID, blockIndex uint32) (int, bool) {
 // 启用空槽时 generation 加一。
 func (c *Chunk) CommitDrop(
 	slot int,
-	item core.ItemID,
+	stack core.ItemStack,
 	blockIndex uint32,
 	pickupDelay uint8,
 ) uint32 {
-	if slot < 0 || slot >= core.DropsPerChunk {
+	if slot < 0 || slot >= core.DropsPerChunk || stack.Count != 1 || !stack.Valid() {
 		return 0
 	}
 	drop := c.drops[slot]
@@ -75,7 +75,7 @@ func (c *Chunk) CommitDrop(
 	c.drops[slot] = DropSlot{
 		Generation:       drop.Generation + 1,
 		Active:           true,
-		Stack:            core.ItemStack{Item: item, Count: 1},
+		Stack:            stack,
 		BlockIndex:       blockIndex,
 		PickupDelayTicks: pickupDelay,
 	}
@@ -114,13 +114,13 @@ func (c *Chunk) PrepareDropBatch(
 ) ([core.DropsPerChunk]DropSlot, bool) {
 	next := c.drops
 	for _, stack := range stacks {
-		if stack.Item == core.ItemNone || stack.Count == 0 {
+		if stack == (core.ItemStack{}) {
 			continue
 		}
-		limit, ok := core.ItemStackLimit(stack.Item)
-		if !ok {
+		if !stack.Valid() {
 			return c.drops, false
 		}
+		limit, _ := core.ItemStackLimit(stack.Item)
 		remaining := stack.Count
 		for remaining > 0 {
 			slot, ok := prepareDropSlot(next, stack.Item, blockIndex)
@@ -139,10 +139,12 @@ func (c *Chunk) PrepareDropBatch(
 				continue
 			}
 			taken := min(limit, remaining)
+			incoming := stack
+			incoming.Count = taken
 			next[slot] = DropSlot{
 				Generation:       drop.Generation + 1,
 				Active:           true,
-				Stack:            core.ItemStack{Item: stack.Item, Count: taken},
+				Stack:            incoming,
 				BlockIndex:       blockIndex,
 				PickupDelayTicks: pickupDelay,
 			}

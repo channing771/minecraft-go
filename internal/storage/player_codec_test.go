@@ -66,6 +66,33 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPlayerV3EncodingRejectsWornTools(t *testing.T) {
+	full := fixturePlayerSave(fixturePlayerID(), 7)
+	if _, err := encodePlayer(full); err != nil {
+		t.Fatalf("满耐久工具应当可用玩家 schema v3 编码: %v", err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*core.Inventory)
+	}{
+		{"快捷栏磨损石镐", func(inventory *core.Inventory) {
+			inventory.Hotbar.Slots[4].Durability = 73
+		}},
+		{"背包磨损铁镐", func(inventory *core.Inventory) {
+			inventory.Backpack[7].Durability = 149
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			save := full
+			test.mutate(&save.Inventory)
+			if _, err := encodePlayer(save); !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("玩家 schema v3 编码磨损工具错误 = %v，想要 ErrCorrupt", err)
+			}
+		})
+	}
+}
+
 func TestPlayerV3Fixture(t *testing.T) {
 	encoded, err := encodePlayer(fixturePlayerSave(fixturePlayerID(), 19))
 	if err != nil {

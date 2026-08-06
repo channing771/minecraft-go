@@ -240,7 +240,12 @@ func (engine *Engine) completeMining(
 	if changed {
 		engine.recordChange(dimensionID, target, core.AirID, pending)
 		if harvestable {
-			record.Chunk.CommitDrop(dropSlot, item, blockIndex, DropPickupDelayTicks)
+			record.Chunk.CommitDrop(
+				dropSlot,
+				core.ItemStack{Item: item, Count: 1},
+				blockIndex,
+				DropPickupDelayTicks,
+			)
 		}
 	}
 	return 0, false

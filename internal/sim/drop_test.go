@@ -184,11 +184,18 @@ func TestDropPickupWaitsForDelayThenFillsHotbar(t *testing.T) {
 	}
 }
 
-func TestToolDropPileSplitsAcrossInventorySlots(t *testing.T) {
+func TestToolDropsKeepDurabilityAcrossInventorySlots(t *testing.T) {
 	engine, session := readyFlatPlayer(t)
+	first := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 73}
+	second := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 41}
 	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
 		Generation: 1, Active: true,
-		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 2},
+		Stack:      first,
+		BlockIndex: dropTargetIndex(t),
+	})
+	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 1, world.DropSlot{
+		Generation: 1, Active: true,
+		Stack:      second,
 		BlockIndex: dropTargetIndex(t),
 	})
 
@@ -197,12 +204,13 @@ func TestToolDropPileSplitsAcrossInventorySlots(t *testing.T) {
 	if !ok {
 		t.Fatal("中心区块不可用")
 	}
-	if drop := chunk.Drop(0); drop.Active {
-		t.Fatalf("拾取后掉落物仍活动: %+v", drop)
+	for slot := range 2 {
+		if drop := chunk.Drop(slot); drop.Active {
+			t.Fatalf("拾取后掉落物槽 %d 仍活动: %+v", slot, drop)
+		}
 	}
-	want := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1}
-	if got := currentInventory(t, engine, session).Hotbar; got.Slots[0] != want || got.Slots[1] != want {
-		t.Fatalf("拾取后快捷栏 = %+v，想要栏位 0 和 1 各有一把石镐", got)
+	if got := currentInventory(t, engine, session).Hotbar; got.Slots[0] != first || got.Slots[1] != second {
+		t.Fatalf("拾取后快捷栏 = %+v，想要分别保留耐久 %+v / %+v", got, first, second)
 	}
 	if len(result.Inventories) != 1 {
 		t.Fatalf("拾取应当只发布一次最终背包: %+v", result.Inventories)
@@ -386,9 +394,13 @@ func TestDropSelectedItemTransfersOneAuthoritativeItem(t *testing.T) {
 		core.ItemIronPickaxe,
 	} {
 		t.Run(fmt.Sprint(item), func(t *testing.T) {
-			full, _ := core.ItemMaxDurability(item)
+			durability, _ := core.ItemMaxDurability(item)
+			if durability > 0 {
+				durability--
+			}
+			stack := core.ItemStack{Item: item, Count: 1, Durability: durability}
 			inventory := core.Inventory{Hotbar: core.Hotbar{Selected: 2}}
-			inventory.Hotbar.Slots[2] = core.ItemStack{Item: item, Count: 1, Durability: full}
+			inventory.Hotbar.Slots[2] = stack
 			engine, session := readyFlatPlayerWithInventory(t, inventory)
 			engine.Enqueue(sim.Command{
 				Session: session, Sequence: 1, Kind: sim.CommandDropSelectedItem,
@@ -403,9 +415,7 @@ func TestDropSelectedItemTransfersOneAuthoritativeItem(t *testing.T) {
 			}
 			_, drop := onlyDrop(t, engine)
 			// 创建 tick 立即计入第一个活动 tick，因此 step 后剩余 39。
-			// 权威掉落目前只携带 Item/Count（world.DropSlot 尚未接线耐久，
-			// 属于后续 sim 扣减任务的范围），因此期望值仍是零耐久。
-			if drop.Stack != (core.ItemStack{Item: item, Count: 1}) ||
+			if drop.Stack != stack ||
 				drop.PickupDelayTicks != sim.PlayerDropPickupDelayTicks-1 {
 				t.Fatalf("主动掉落 = %+v", drop)
 			}

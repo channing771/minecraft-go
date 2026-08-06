@@ -452,6 +452,40 @@ func TestSmallPacketRejectsInvalidSemanticPackets(t *testing.T) {
 	}
 }
 
+func TestProtocolV10InventoryEncodingRejectsWornTools(t *testing.T) {
+	var full core.Inventory
+	full.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 131}
+	full.Backpack[0] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 250}
+	packetID, payload, err := encodeServerControlPayload(StatePlay, InventoryState{Inventory: full})
+	if err != nil {
+		t.Fatalf("满耐久工具应当可用协议 v10 编码: %v", err)
+	}
+	decoded, err := decodeServerControlPayload(StatePlay, packetID, payload)
+	if err != nil || decoded != (InventoryState{Inventory: full}) {
+		t.Fatalf("满耐久工具往返 = %+v, %v", decoded, err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*core.Inventory)
+	}{
+		{"快捷栏磨损石镐", func(inventory *core.Inventory) {
+			inventory.Hotbar.Slots[0].Durability = 73
+		}},
+		{"背包磨损铁镐", func(inventory *core.Inventory) {
+			inventory.Backpack[0].Durability = 149
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			inventory := full
+			test.mutate(&inventory)
+			if _, payload, err := encodeServerControlPayload(StatePlay, InventoryState{Inventory: inventory}); err == nil || payload != nil {
+				t.Fatalf("协议 v10 编码磨损工具: payload=%x err=%v", payload, err)
+			}
+		})
+	}
+}
+
 func TestSmallPacketRejectsInvalidBlockChangesWire(t *testing.T) {
 	tests := []struct {
 		name    string

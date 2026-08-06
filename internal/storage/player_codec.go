@@ -30,6 +30,11 @@ func encodePlayer(save PlayerSave) ([]byte, error) {
 	if err := validatePlayerSave(save); err != nil {
 		return nil, err
 	}
+	// schema v3 不能表示磨损值；过渡期只允许满耐久工具进入编码器，
+	// 避免解码 shim 把磨损值静默补满。Task 6 升级到 schema v4 时与该 shim 一并删除。
+	if !playerInventoryRepresentableV3(save.Inventory) {
+		return nil, fmt.Errorf("%w: player schema v3 cannot encode worn tool durability", ErrCorrupt)
+	}
 	payload, err := encodePlayerV3(save)
 	if err != nil {
 		return nil, err
@@ -190,13 +195,23 @@ func decodePlayerStack(decoder *byteDecoder) (core.ItemStack, error) {
 		return core.ItemStack{}, err
 	}
 	stack := core.ItemStack{Item: core.ItemID(item), Count: count}
-	// schema v3 的物品负载只有 Item/Count，没有耐久字节；本批次尚未实现耐久扣减，
-	// 所以现存存档里的每把工具事实上都仍是满耐久，解码时据此补上。等 schema v4
-	// 真正持久化耐久值后，这里应改为读取 wire 上的字段而不是重新计算满值。
+	// schema v3 的物品负载只有 Item/Count，没有耐久字节；编码器已拒绝磨损工具，
+	// 因此解码时只会恢复满耐久工具。Task 6 升级到 schema v4 读取真实字段时
+	// 必须把这个 shim 与编码可表示性门禁一并删除。
 	if max, ok := core.ItemMaxDurability(stack.Item); ok {
 		stack.Durability = max
 	}
 	return stack, nil
+}
+
+func playerInventoryRepresentableV3(inventory core.Inventory) bool {
+	for slot := uint8(0); slot < core.InventorySlots; slot++ {
+		stack, _ := inventory.Slot(slot)
+		if max, ok := core.ItemMaxDurability(stack.Item); ok && stack.Durability != max {
+			return false
+		}
+	}
+	return true
 }
 
 // decodePlayerPayload 按 schema 解析 payload；v1 没有快捷栏字段。

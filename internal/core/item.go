@@ -82,6 +82,9 @@ func (h Hotbar) Add(item ItemID) (Hotbar, bool) {
 	if !ok {
 		return h, false
 	}
+	if _, ok := ItemMaxDurability(item); ok {
+		return h, false
+	}
 	for i := range h.Slots {
 		if h.Slots[i].Item == item && h.Slots[i].Count < limit {
 			h.Slots[i].Count++

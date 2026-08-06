@@ -39,7 +39,7 @@ func TestChunkCommitDropUsesLowestEmptySlot(t *testing.T) {
 	if !ok || slot != 0 {
 		t.Fatalf("首个预检 = (%d, %v)，想要槽 0", slot, ok)
 	}
-	generation := chunk.CommitDrop(slot, core.ItemStone, index, 10)
+	generation := chunk.CommitDrop(slot, core.ItemStack{Item: core.ItemStone, Count: 1}, index, 10)
 	if generation != 1 {
 		t.Fatalf("首次 generation = %d，想要 1", generation)
 	}
@@ -60,6 +60,37 @@ func TestChunkCommitDropUsesLowestEmptySlot(t *testing.T) {
 	}
 }
 
+func TestChunkCommitDropPreservesToolDurability(t *testing.T) {
+	chunk := dropTestChunk(t)
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	worn := core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 73}
+	slot, ok := chunk.PrepareDrop(worn.Item, index)
+	if !ok {
+		t.Fatal("磨损工具没有可用掉落物槽")
+	}
+	chunk.CommitDrop(slot, worn, index, 10)
+	if got := chunk.Drop(slot).Stack; got != worn {
+		t.Fatalf("掉落物堆 = %+v，想要保留来源工具 %+v", got, worn)
+	}
+}
+
+func TestChunkCommitDropRejectsInvalidStacks(t *testing.T) {
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	for _, stack := range []core.ItemStack{
+		{},
+		{Item: core.ItemStone, Count: 2},
+		{Item: core.ItemStonePickaxe, Count: 1},
+		{Item: core.ItemStone, Count: 1, Durability: 1},
+		{Item: core.ItemID(4242), Count: 1},
+	} {
+		chunk := dropTestChunk(t)
+		before := chunk.DropsHash()
+		if generation := chunk.CommitDrop(0, stack, index, 10); generation != 0 || chunk.DropsHash() != before {
+			t.Fatalf("非法堆 %+v 被提交: generation=%d drop=%+v", stack, generation, chunk.Drop(0))
+		}
+	}
+}
+
 func TestChunkPrepareDropMergesSamePositionAndItem(t *testing.T) {
 	chunk := dropTestChunk(t)
 	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
@@ -73,7 +104,7 @@ func TestChunkPrepareDropMergesSamePositionAndItem(t *testing.T) {
 	if !ok || slot != 2 {
 		t.Fatalf("合并预检 = (%d, %v)，想要槽 2", slot, ok)
 	}
-	if generation := chunk.CommitDrop(slot, core.ItemDirt, index, 10); generation != 7 {
+	if generation := chunk.CommitDrop(slot, core.ItemStack{Item: core.ItemDirt, Count: 1}, index, 10); generation != 7 {
 		t.Fatalf("合并 generation = %d，想要保持 7", generation)
 	}
 	got := chunk.Drop(2)
@@ -132,14 +163,14 @@ func TestChunkDropGenerationIncrementsOnReuse(t *testing.T) {
 	chunk := dropTestChunk(t)
 	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
 
-	if got := chunk.CommitDrop(0, core.ItemStone, index, 10); got != 1 {
+	if got := chunk.CommitDrop(0, core.ItemStack{Item: core.ItemStone, Count: 1}, index, 10); got != 1 {
 		t.Fatalf("首次 generation = %d，想要 1", got)
 	}
 	chunk.ClearDrop(0)
 	if drop := chunk.Drop(0); drop.Active || drop.Generation != 1 {
 		t.Fatalf("清空后槽 0 = %+v，想要保留 generation 1 且非活动", drop)
 	}
-	if got := chunk.CommitDrop(0, core.ItemDirt, index, 10); got != 2 {
+	if got := chunk.CommitDrop(0, core.ItemStack{Item: core.ItemDirt, Count: 1}, index, 10); got != 2 {
 		t.Fatalf("复用 generation = %d，想要 2", got)
 	}
 }
@@ -168,7 +199,7 @@ func TestChunkPrepareDropRejectsUnknownItem(t *testing.T) {
 func TestChunkCloneCopiesDropsIndependently(t *testing.T) {
 	chunk := dropTestChunk(t)
 	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
-	chunk.CommitDrop(0, core.ItemStone, index, 10)
+	chunk.CommitDrop(0, core.ItemStack{Item: core.ItemStone, Count: 1}, index, 10)
 
 	clone := chunk.Clone()
 	if clone.Drop(0) != chunk.Drop(0) {
@@ -233,7 +264,7 @@ func TestChunkDropsHashIsSlotPositional(t *testing.T) {
 func TestChunkHashIgnoresDrops(t *testing.T) {
 	chunk := dropTestChunk(t)
 	before := chunk.Hash()
-	chunk.CommitDrop(0, core.ItemStone, dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32}), 10)
+	chunk.CommitDrop(0, core.ItemStack{Item: core.ItemStone, Count: 1}, dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32}), 10)
 	if chunk.Hash() != before {
 		t.Fatal("Chunk.Hash 必须保持只由逻辑方块决定")
 	}
@@ -269,7 +300,7 @@ func TestChunkCommitDropMergeUsesLongerPickupDelay(t *testing.T) {
 			if !ok || slot != 2 {
 				t.Fatalf("预检 = (%d,%v)，想要 (2,true)", slot, ok)
 			}
-			generation := chunk.CommitDrop(slot, core.ItemDirt, index, test.incoming)
+			generation := chunk.CommitDrop(slot, core.ItemStack{Item: core.ItemDirt, Count: 1}, index, test.incoming)
 			got := chunk.Drop(slot)
 			// 合并不得重置 ID、generation、年龄或物品，只延长拾取禁止窗口。
 			if generation != 7 || got.Generation != 7 || got.AgeTicks != 99 ||
@@ -301,13 +332,39 @@ func TestChunkPrepareDropBatchMergeUsesLongerPickupDelay(t *testing.T) {
 	}
 }
 
+func TestChunkPrepareDropBatchPreservesToolDurability(t *testing.T) {
+	chunk := dropTestChunk(t)
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	worn := core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 149}
+	stacks := [4]core.ItemStack{worn}
+	next, ok := chunk.PrepareDropBatch(stacks, index, 10)
+	if !ok || next[0].Stack != worn {
+		t.Fatalf("batch 掉落物 = %+v, %v，想要保留来源工具 %+v", next[0].Stack, ok, worn)
+	}
+}
+
+func TestChunkPrepareDropBatchRejectsInvalidStacks(t *testing.T) {
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	for _, stack := range []core.ItemStack{
+		{Item: core.ItemNone, Count: 1},
+		{Item: core.ItemStone, Count: 1, Durability: 1},
+		{Item: core.ItemStonePickaxe, Count: 1},
+	} {
+		chunk := dropTestChunk(t)
+		stacks := [4]core.ItemStack{stack}
+		if next, ok := chunk.PrepareDropBatch(stacks, index, 10); ok || next != [core.DropsPerChunk]world.DropSlot{} {
+			t.Fatalf("非法 batch 堆 %+v 被接受: ok=%v next=%+v", stack, ok, next)
+		}
+	}
+}
+
 func TestChunkPrepareDropRespectsPerItemStackLimit(t *testing.T) {
 	chunk := dropTestChunk(t)
 	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
 	// 镐的单格上限是 1，已有一把时不得再合并进同一槽。
 	chunk.SetDrop(0, world.DropSlot{
 		Generation: 5, Active: true,
-		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 1},
+		Stack:      core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 73},
 		BlockIndex: index,
 	})
 
@@ -319,7 +376,7 @@ func TestChunkPrepareDropRespectsPerItemStackLimit(t *testing.T) {
 		t.Fatal("第二把镐被合并进了已满的槽，违反单格上限 1")
 	}
 
-	chunk.CommitDrop(slot, core.ItemStonePickaxe, index, 10)
+	chunk.CommitDrop(slot, core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 41}, index, 10)
 	if got := chunk.Drop(0).Stack.Count; got != 1 {
 		t.Fatalf("原槽数量 = %d，想要保持 1", got)
 	}
@@ -342,7 +399,7 @@ func TestChunkPrepareDropStillMergesStackableItems(t *testing.T) {
 	if !ok || slot != 0 {
 		t.Fatalf("可堆叠物品预检 = (%d,%v)，想要 (0,true)", slot, ok)
 	}
-	chunk.CommitDrop(slot, core.ItemDirt, index, 10)
+	chunk.CommitDrop(slot, core.ItemStack{Item: core.ItemDirt, Count: 1}, index, 10)
 	if got := chunk.Drop(0).Stack.Count; got != core.MaxStackCount {
 		t.Fatalf("合并后数量 = %d，想要 64", got)
 	}

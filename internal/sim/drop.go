@@ -361,7 +361,9 @@ func (engine *Engine) dropSelectedItem(
 	if !ok {
 		return RejectDropCapacity, true
 	}
-	record.Chunk.CommitDrop(dropSlot, stack.Item, blockIndex, PlayerDropPickupDelayTicks)
+	dropped := stack
+	dropped.Count = 1
+	record.Chunk.CommitDrop(dropSlot, dropped, blockIndex, PlayerDropPickupDelayTicks)
 	player.inventory.Hotbar = nextHotbar
 	player.inventoryDirty = true
 	engine.touchChunk(key, pending)

@@ -299,18 +299,22 @@ func TestToolRecipesAreFixedAndAtomic(t *testing.T) {
 		id     core.RecipeID
 		input  core.ItemID
 		output core.ItemID
+		full   uint16
 	}{
-		{"石镐", core.RecipeStonePickaxe, core.ItemStone, core.ItemStonePickaxe},
-		{"铁镐", core.RecipeIronPickaxe, core.ItemIronIngot, core.ItemIronPickaxe},
+		{"石镐", core.RecipeStonePickaxe, core.ItemStone, core.ItemStonePickaxe, 131},
+		{"铁镐", core.RecipeIronPickaxe, core.ItemIronIngot, core.ItemIronPickaxe, 250},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			wantOutput := core.ItemStack{Item: tc.output, Count: 1, Durability: tc.full}
 			recipe, ok := core.Recipe(tc.id)
 			if !ok || recipe.Input != (core.ItemStack{Item: tc.input, Count: 3}) ||
-				recipe.Output != (core.ItemStack{Item: tc.output, Count: 1}) {
+				recipe.Output != wantOutput {
 				t.Fatalf("配方 = %+v, %v", recipe, ok)
 			}
 
 			var inventory core.Inventory
+			worn := core.ItemStack{Item: tc.output, Count: 1, Durability: tc.full - 1}
+			inventory.Hotbar.Slots[0] = worn
 			inventory.Hotbar.Slots[2] = core.ItemStack{Item: tc.input, Count: 1}
 			inventory.Backpack[0] = core.ItemStack{Item: tc.input, Count: 2}
 			next, ok := inventory.Craft(tc.id)
@@ -320,8 +324,11 @@ func TestToolRecipesAreFixedAndAtomic(t *testing.T) {
 			if next.Hotbar.Slots[2] != (core.ItemStack{}) || next.Backpack[0] != (core.ItemStack{}) {
 				t.Fatalf("原料未被跨栏位扣除: %+v / %+v", next.Hotbar.Slots[2], next.Backpack[0])
 			}
-			if next.Hotbar.Slots[0] != (core.ItemStack{Item: tc.output, Count: 1}) {
-				t.Fatalf("产物 = %+v，想要单个工具", next.Hotbar.Slots[0])
+			if next.Hotbar.Slots[0] != worn {
+				t.Fatalf("旧工具 = %+v，想要耐久保持 %+v", next.Hotbar.Slots[0], worn)
+			}
+			if next.Hotbar.Slots[1] != wantOutput {
+				t.Fatalf("新产物 = %+v，想要满耐久工具 %+v", next.Hotbar.Slots[1], wantOutput)
 			}
 		})
 	}
@@ -337,5 +344,33 @@ func TestToolRecipesAreFixedAndAtomic(t *testing.T) {
 	next, ok := full.Craft(core.RecipeStonePickaxe)
 	if ok || next != full {
 		t.Fatalf("36 格都被占用时合成必须原子失败: %+v, %v", next, ok)
+	}
+}
+
+func TestPickaxeRecipesOutputFullDurability(t *testing.T) {
+	for _, test := range []struct {
+		id   core.RecipeID
+		want core.ItemStack
+	}{
+		{core.RecipeStonePickaxe, core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 131}},
+		{core.RecipeIronPickaxe, core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 250}},
+	} {
+		recipe, ok := core.Recipe(test.id)
+		if !ok || recipe.Output != test.want || !recipe.Output.Valid() {
+			t.Fatalf("Recipe(%d) 产物 = %+v, %v，想要合法满耐久工具 %+v", test.id, recipe.Output, ok, test.want)
+		}
+	}
+}
+
+func TestNonToolRecipesOutputZeroDurability(t *testing.T) {
+	for _, id := range []core.RecipeID{
+		core.RecipeStoneBricks,
+		core.RecipeFurnace,
+		core.RecipeIronBlock,
+	} {
+		recipe, ok := core.Recipe(id)
+		if !ok || recipe.Output.Durability != 0 {
+			t.Fatalf("Recipe(%d) 产物 = %+v, %v，非工具耐久必须为 0", id, recipe.Output, ok)
+		}
 	}
 }
