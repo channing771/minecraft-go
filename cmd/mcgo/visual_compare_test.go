@@ -94,6 +94,26 @@ func TestCompareImagesSparseFaintShift(t *testing.T) {
 	}
 }
 
+// TestCompareImagesRecordsFirstDiffCoordinate 钉住 FirstDiffX/FirstDiffY：
+// 比对失败时不该逼人去开差异图才知道"差在哪"，坐标本身就该在量化结果里。
+func TestCompareImagesRecordsFirstDiffCoordinate(t *testing.T) {
+	a := solidNRGBA(10, 6, 0, 0, 0)
+	b := solidNRGBA(10, 6, 0, 0, 0)
+	// 按行扫描顺序，(3,2) 先于 (7,4)：第一个差异像素必须记为 (3,2)。
+	b.Pix[b.PixOffset(7, 4)+1] = 50
+	b.Pix[b.PixOffset(3, 2)+1] = 50
+	diff, _, err := compareImages(a, b)
+	if err != nil {
+		t.Fatalf("比对失败: %v", err)
+	}
+	if diff.DiffPixels != 2 {
+		t.Fatalf("DiffPixels = %d，想要 2", diff.DiffPixels)
+	}
+	if diff.FirstDiffX != 3 || diff.FirstDiffY != 2 {
+		t.Fatalf("FirstDiff = (%d,%d)，想要 (3,2)", diff.FirstDiffX, diff.FirstDiffY)
+	}
+}
+
 func TestCompareImagesRejectsSizeMismatch(t *testing.T) {
 	// 尺寸不匹配直接失败，不做缩放后比对——缩放会引入插值，
 	// 把"分辨率配错了"这个真问题伪装成"有一点点色差"。

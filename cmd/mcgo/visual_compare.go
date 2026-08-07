@@ -10,9 +10,10 @@ import (
 // 都会造成个位数 LSB 漂移，逐字节 golden 在共享 CI runner 上必然变成假失败源，
 // 而假失败的真实代价是训练所有人无视门禁。
 type diffThreshold struct {
-	// MaxChannelDelta 是单个像素任一通道被视为"超差"的差值下限（含）以下算通过。
+	// MaxChannelDelta 是全图内任一像素、任一通道差值允许达到的上限（含）；
+	// 只要有一个像素的最大通道差超过此值，比对就判定失败。
 	MaxChannelDelta int
-	// MaxDiffPixelRatio 是超差像素占全图的比例上限。
+	// MaxDiffPixelRatio 是差异像素（任一通道差值 ≥ 1）占全图的比例上限。
 	MaxDiffPixelRatio float64
 }
 
@@ -22,6 +23,10 @@ type imageDiff struct {
 	DiffPixels      int
 	TotalPixels     int
 	DiffPixelRatio  float64
+	// FirstDiffX/FirstDiffY 是扫描顺序（按行）第一个差异像素的坐标，
+	// 只在 DiffPixels > 0 时有效。免得每次超阈值都要打开差异图才知道
+	// "到底差在哪"。
+	FirstDiffX, FirstDiffY int
 }
 
 func (d imageDiff) withinThreshold(t diffThreshold) bool {
@@ -29,8 +34,12 @@ func (d imageDiff) withinThreshold(t diffThreshold) bool {
 }
 
 func (d imageDiff) String() string {
-	return fmt.Sprintf("最大通道差 %d，超差像素 %d/%d（%.4f%%）",
+	s := fmt.Sprintf("最大通道差 %d，差异像素 %d/%d（%.4f%%）",
 		d.MaxChannelDelta, d.DiffPixels, d.TotalPixels, d.DiffPixelRatio*100)
+	if d.DiffPixels > 0 {
+		s += fmt.Sprintf("，首个差异像素在 (%d,%d)", d.FirstDiffX, d.FirstDiffY)
+	}
+	return s
 }
 
 // compareImages 比对两张同尺寸图，返回量化差异与一张差异可视化图。
@@ -65,6 +74,9 @@ func compareImages(got, want *image.NRGBA) (imageDiff, *image.NRGBA, error) {
 			}
 			vi := vis.PixOffset(x, y)
 			if maxDelta > 0 {
+				if result.DiffPixels == 0 {
+					result.FirstDiffX, result.FirstDiffY = x, y
+				}
 				result.DiffPixels++
 				vis.Pix[vi+0], vis.Pix[vi+1], vis.Pix[vi+2] = 255, 0, 0
 			} else {
