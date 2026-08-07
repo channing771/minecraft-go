@@ -390,15 +390,20 @@ func newApplicationWithDependencies(
 		dev, err = dependencies.newHeadlessDevice()
 		colorFormat = gfx.FormatBGRA8UnormSrgb
 		if err == nil {
+			// CopySrc 是抓帧回读的前提；benchmark 不回读，只在抓帧模式下才加这个
+			// usage 位——spec 要求"不得因抓帧能力的存在产生任何额外的渲染或读回
+			// 开销"，按构造为真好过口头论证"反正零成本"。
+			usage := gfx.TextureUsageRenderTarget
+			if options.CaptureDir != "" {
+				usage |= gfx.TextureUsageCopySrc
+			}
 			color = dev.CreateTexture(gfx.TextureDesc{
 				Label:     "headless offscreen color",
 				Width:     uint32(width),
 				Height:    uint32(height),
 				Format:    colorFormat,
 				Dimension: gfx.TextureDimension2D,
-				// CopySrc 是抓帧回读的前提；benchmark 不回读，但共用一张纹理，
-				// 多带一个 usage 位没有代价。
-				Usage: gfx.TextureUsageRenderTarget | gfx.TextureUsageCopySrc,
+				Usage:     usage,
 			})
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}
