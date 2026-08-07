@@ -16,7 +16,8 @@ var wornPickaxe = core.ItemStack{
 }
 
 // TestDeathDropsInventoryIntoWorldAndClearsSlots 覆盖"死亡清空背包并掉在世界里"：
-// 36 个格全部清空，且原有物品作为掉落物出现在死亡所在区块。
+// 36 个格全部清空、原有物品作为掉落物出现在死亡所在区块，
+// 且被写入的区块在同一 tick 内发布零方块 revision barrier，镜像与持久化才看得见新掉落物。
 func TestDeathDropsInventoryIntoWorldAndClearsSlots(t *testing.T) {
 	inventory := core.Inventory{}
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 10}
@@ -24,8 +25,12 @@ func TestDeathDropsInventoryIntoWorldAndClearsSlots(t *testing.T) {
 	inventory.Backpack[core.BackpackSlots-1] = wornPickaxe
 	engine, session := readyFlatWorld(t, 0, inventory)
 
-	killByFall(t, engine, session)
+	died := killByFallResult(t, engine, session)
 
+	if len(died.Changes) != 1 || died.Changes[0].Chunk != (core.ChunkPos{}) ||
+		len(died.Changes[0].Changes) != 0 {
+		t.Fatalf("死亡掉落应当为死亡区块发布零方块 revision barrier: %+v", died.Changes)
+	}
 	drops := activeDrops(t, engine, core.ChunkKey{Dimension: core.Overworld})
 	want := map[core.ItemStack]bool{
 		{Item: core.ItemStone, Count: 10}: true,
@@ -70,11 +75,26 @@ func TestDeathDropsWornPickaxeWithoutLosingDurability(t *testing.T) {
 }
 
 // TestDeathReturnsToSpawnAnchorAtFullHealthWithZeroVelocity 覆盖
-// "死亡后回到出生锚点并满血"：速度归零、生命值回满、位置回到出生锚点。
+// "死亡后回到出生锚点并满血"：玩家在**远离出生点**的区块 (1,1) 摔死，
+// 掉落物必须留在死亡所在区块，而玩家速度归零、生命值回满、位置回到出生锚点。
+// 死亡点与出生锚点分处不同区块，环心是"死亡区块"而不是原点才可判别。
 func TestDeathReturnsToSpawnAnchorAtFullHealthWithZeroVelocity(t *testing.T) {
-	engine, session := readyFlatWorld(t, 0, core.Inventory{})
+	inventory := core.Inventory{}
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 3}
+	engine, session := readyFlatWorld(t, 1, inventory)
 
-	died := killByFall(t, engine, session)
+	died := killByFallAt(t, engine, session, 20.5, 20.5)
+
+	deathChunk := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 1, Z: 1}}
+	drops := activeDrops(t, engine, deathChunk)
+	if len(drops) != 1 ||
+		drops[0].Stack != (core.ItemStack{Item: core.ItemStone, Count: 3}) {
+		t.Fatalf("死亡区块 (1,1) 掉落物 = %+v，想要 3 个石头", drops)
+	}
+	if origin := activeDrops(t, engine, core.ChunkKey{Dimension: core.Overworld}); len(origin) != 0 {
+		t.Fatalf("出生区块 (0,0) 被写入 %+v，掉落应当留在死亡区块", origin)
+	}
+
 	if died.State.Velocity != (mgl32.Vec3{}) {
 		t.Fatalf("死亡当 tick 速度 = %+v，想要零", died.State.Velocity)
 	}
@@ -324,7 +344,7 @@ func activeDrops(
 	return drops
 }
 
-// killByFall 让玩家从致死高度摔落，返回死亡当 tick 的权威玩家状态。
+// killByFall 让玩家在出生列从致死高度摔落，返回死亡当 tick 的权威玩家状态。
 func killByFall(
 	t *testing.T,
 	engine *sim.Engine,
@@ -334,15 +354,38 @@ func killByFall(
 	return onlyPlayer(t, killByFallResult(t, engine, session))
 }
 
-// killByFallResult 让玩家从致死高度摔落，返回死亡当 tick 的完整 TickResult。
-// 死亡当 tick 玩家转入待重生，因此以 Ready 由真变假作为死亡已结算的判据。
+// killByFallAt 让玩家在指定水平位置从致死高度摔落，用于构造远离出生点的死亡。
+func killByFallAt(
+	t *testing.T,
+	engine *sim.Engine,
+	session sim.SessionID,
+	x, z float32,
+) sim.PlayerUpdate {
+	t.Helper()
+	return onlyPlayer(t, killByFallFrom(t, engine, session, x, z))
+}
+
+// killByFallResult 让玩家在出生列从致死高度摔落，返回死亡当 tick 的完整 TickResult。
 func killByFallResult(
 	t *testing.T,
 	engine *sim.Engine,
 	session sim.SessionID,
 ) sim.TickResult {
 	t.Helper()
-	engine.SetPlayerPositionForTest(session, mgl32.Vec3{0.5, 1 + lethalFallHeight, 0.5})
+	return killByFallFrom(t, engine, session, 0.5, 0.5)
+}
+
+// killByFallFrom 把玩家瞬移到 (x, z) 列的致死高度并推进到死亡结算完成，
+// 返回死亡当 tick 的完整 TickResult。死亡当 tick 玩家转入待重生，
+// 因此以 Ready 由真变假作为死亡已结算的判据。
+func killByFallFrom(
+	t *testing.T,
+	engine *sim.Engine,
+	session sim.SessionID,
+	x, z float32,
+) sim.TickResult {
+	t.Helper()
+	engine.SetPlayerPositionForTest(session, mgl32.Vec3{x, 1 + lethalFallHeight, z})
 	for range 400 {
 		result := engine.Step()
 		if !onlyPlayer(t, result).Ready {
