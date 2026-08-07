@@ -344,6 +344,9 @@ func (engine *Engine) Step() TickResult {
 	engine.applyGenerated(generated, currentWanted, &result)
 	engine.advancePendingPlayersPreservingInputSequence()
 	engine.advanceActivePlayers()
+	// 死亡结算必须紧跟伤害结算、并早于本 tick 末尾的状态发布，
+	// 外部才观察不到生命值为 0 的中间状态。
+	engine.settleDeaths(pending)
 	playerViewChanged := engine.derivePlayerCenters()
 	viewChanged = viewChanged || playerViewChanged || engine.subscriptionsDirty
 	engine.subscriptionsDirty = false

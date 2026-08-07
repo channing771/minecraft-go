@@ -1,5 +1,44 @@
 # 性能基线
 
+## M4L 任务组 5：探针玩家摔落伤害风险实测（非新基线）
+
+2026-08-07 在 `m4l-authoritative-health` 分支（提交前工作树，已包含死亡结算与背包掉落）上，
+在同一台 Apple M5 机器执行任务组 5 要求的风险实测：
+
+```text
+zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/m4l-fall.json'
+```
+
+这是**诊断性测量**，用来回答"权威摔落伤害与死亡结算上线后，八人探针玩家是否会在测量窗口内摔伤甚至摔死，
+从而扰动既有性能门禁"。它**不是新基线**：scenario 保持 v12，`docs/notes/perf-baseline.json` 与
+`docs/notes/perf-baseline-m5.json` 均未改动，也没有建立新的 scenario 版本。
+
+### 测量方法
+
+第一次按原样运行，报告写入 `/tmp/m4l-fall.json`（临时文件，未提交）。
+由于性能报告本身不携带生命值，第二次运行在 `internal/sim/player.go` 的 `applyFallDamage` 中
+临时插入一行 `println("PROBE_FALL_DAMAGE", ...)`（只在伤害为正、即真正扣血时打印），
+把整个进程输出重定向到日志后统计该标记的出现次数。测量结束后这行临时打印已被移除，
+`git diff internal/sim/player.go` 为空。
+
+### 结果
+
+| 运行 | 摔落伤害事件数 | still p99 / RSS | flying p99 / RSS | tick p99 | 多人探针 peak RSS | 进程退出码 |
+|---|---|---|---|---|---|---|
+| 运行 1（原样） | 未观测（无插桩） | 4.987ms / 1359.8MiB | 9.993ms / 1792.4MiB | 0.470ms | 1792.4MiB | 0 |
+| 运行 2（插桩） | **0** | 6.364ms / 1275.4MiB | 10.448ms / 1669.7MiB | 1.167ms | 1669.7MiB | 0 |
+
+两次运行都完整写出了 scenario v12 / memory 报告并以退出码 0 结束，
+即 `cmd/mcgo` 内置的全部绝对门禁通过。
+
+### 结论
+
+- 八人探针玩家在加载、预热与整个测量窗口内**一次摔落伤害都没有发生**，
+  因此探针生命值全程保持 20，既不会触发死亡结算，也不会因重生造成位置跳变或额外区块订阅。
+- **无需调整** `cmd/mcgo/multiplayer_benchmark.go` 的探针输入脚本：现有脚本的跳跃与移动
+  不会在固定场景中制造超过 3 格的落差。
+- 没有放宽任何门禁阈值，也没有覆盖任何基线 JSON。
+
 ## M4K 任务组 2：区块固定箱子负载诊断性测量（非新基线）
 
 2026-08-06 在 `m4k-authoritative-chests` 分支（提交前工作树，`internal/core`/`internal/world` 已加入 `core.ChestsPerChunk=16`、`core.ChestSlots=27`、`world.ChestSlot` 与对应的 `Chunk.PayloadBytes()` 增量）上，用现有 `--benchmark` 无窗口路径在同一台 Apple M5 机器上跑了三次 `go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output ...`。这是**诊断性测量**，用于回答"16 个箱子槽是否突破既有绝对门禁"，**不是新基线**：不覆盖 `docs/notes/perf-baseline-m5.json`，也不建立新的 scenario 版本。

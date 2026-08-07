@@ -24,11 +24,13 @@ func TestFallDamageFourBlocksDealsOne(t *testing.T) {
 }
 
 // TestFallDamageTwentyThreeBlocksFromFullHealthIsLethal 覆盖
-// "二十三格从满血致死"场景：伤害恰为 20，生命值归零。
+// "二十三格从满血致死"场景：伤害恰为 20 使生命值归零，随即在同一 tick 内
+// 由死亡结算送回出生锚点并回满，因此致死性只能从"玩家死过一次"观察到。
 func TestFallDamageTwentyThreeBlocksFromFullHealthIsLethal(t *testing.T) {
 	engine, session := readyFlatPlayer(t)
-	dropPlayer(t, engine, session, 23)
-	assertPlayerHealth(t, engine, session, 0)
+	killByFall(t, engine, session)
+	respawnPlayer(t, engine, session)
+	assertPlayerHealth(t, engine, session, core.MaxHealth)
 }
 
 // TestFallDamageNormalJumpNoDamage 覆盖"正常跳跃不扣血"场景：

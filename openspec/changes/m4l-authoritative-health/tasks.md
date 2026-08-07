@@ -28,13 +28,13 @@
 
 ## 5. 死亡结算与掉落
 
-- [ ] 5.1 在 `internal/world` 先写失败测试，覆盖 `PrepareDropBatch` 接受 36 个互不相同的堆而不因上限被拒绝，以及超过新上限时整体拒绝且掉落物字节不变。
-- [ ] 5.2 把 `PrepareDropBatch` 的堆数上限从 `1 + core.ChestSlots` 改为能同时覆盖容器破坏与 36 格死亡掉落的固定编译期常量，仍在函数入口一次性判定、超限立即返回失败且不修改区块。既有熔炉与箱子调用点行为不变。
-- [ ] 5.3 在 `internal/sim` 先写失败测试覆盖死亡结算：背包被清空且物品出现在世界中、玩家回到出生锚点且满血、速度归零、带耐久的镐无损掉落、外部观察不到生命值为 0 的中间状态、同一初始状态两次结算掉落分布完全相同。
-- [ ] 5.4 先写失败测试覆盖环形外扩：死亡区块有空位时全部落在死亡区块且同类合并；死亡区块满时溢出到邻近已加载区块且对应背包格被清空；未加载区块不被写入也不触发加载；扫完全部已加载区块仍装不下时该格保留在背包且不阻止死亡、不销毁物品。
-- [ ] 5.5 在 `internal/sim` 实现死亡结算：生命值降到 0 时于同一 tick 内逐格放置（放成功才清空该格）、传回出生锚点、回满血、速度归零、重置摔落峰值与受伤计时。环形外扩按半径 0、1、2… 逐圈，同圈用既有 `sortChunkKeys` 的稳定顺序，只写 `ChunkReady` 且 `Chunk != nil` 的区块，扫完已加载集合即终止。**不引入跨区块原子提交**：每个被写入的区块各自 `touchChunk`。
-- [ ] 5.6 **benchmark 风险实测**：执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/m4l-fall.json'`，确认八人探针玩家在整个测量窗口内不发生摔落伤害（探针玩家生命值始终为 20）。若发生，调整 `cmd/mcgo/multiplayer_benchmark.go` 的探针输入脚本使其不摔落，**不得放宽门禁、不得覆盖基线**；只有在无法避免时才停止并向用户报告需要升级 scenario 重建基线。
-- [ ] 5.7 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world -race -count=1 && go test ./internal/archcheck -count=1'`，把 5.6 的实测结论记入 `docs/notes/perf-baseline.md`（标明为诊断性测量、非新基线）；提交 `feat: 实现死亡结算与背包掉落`，然后自动进入第 6 组。
+- [x] 5.1 在 `internal/world` 先写失败测试，覆盖 `PrepareDropBatch` 接受 36 个互不相同的堆而不因上限被拒绝，以及超过新上限时整体拒绝且掉落物字节不变。
+- [x] 5.2 把 `PrepareDropBatch` 的堆数上限从 `1 + core.ChestSlots` 改为能同时覆盖容器破坏与 36 格死亡掉落的固定编译期常量，仍在函数入口一次性判定、超限立即返回失败且不修改区块。既有熔炉与箱子调用点行为不变。
+- [x] 5.3 在 `internal/sim` 先写失败测试覆盖死亡结算：背包被清空且物品出现在世界中、玩家回到出生锚点且满血、速度归零、带耐久的镐无损掉落、外部观察不到生命值为 0 的中间状态、同一初始状态两次结算掉落分布完全相同。
+- [x] 5.4 先写失败测试覆盖环形外扩：死亡区块有空位时全部落在死亡区块且同类合并；死亡区块满时溢出到邻近已加载区块且对应背包格被清空；未加载区块不被写入也不触发加载；扫完全部已加载区块仍装不下时该格保留在背包且不阻止死亡、不销毁物品。
+- [x] 5.5 在 `internal/sim` 实现死亡结算：生命值降到 0 时于同一 tick 内逐格放置（放成功才清空该格）、传回出生锚点、回满血、速度归零、重置摔落峰值与受伤计时。环形外扩按半径 0、1、2… 逐圈，同圈用既有 `sortChunkKeys` 的稳定顺序，只写 `ChunkReady` 且 `Chunk != nil` 的区块，扫完已加载集合即终止。**不引入跨区块原子提交**：每个被写入的区块各自 `touchChunk`。
+- [x] 5.6 **benchmark 风险实测**：执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/m4l-fall.json'`，确认八人探针玩家在整个测量窗口内不发生摔落伤害（探针玩家生命值始终为 20）。若发生，调整 `cmd/mcgo/multiplayer_benchmark.go` 的探针输入脚本使其不摔落，**不得放宽门禁、不得覆盖基线**；只有在无法避免时才停止并向用户报告需要升级 scenario 重建基线。
+- [x] 5.7 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim ./internal/world -race -count=1 && go test ./internal/archcheck -count=1'`，把 5.6 的实测结论记入 `docs/notes/perf-baseline.md`（标明为诊断性测量、非新基线）；提交 `feat: 实现死亡结算与背包掉落`，然后自动进入第 6 组。
 
 ## 6. 服务端接线与 Memory/TCP 闭环
 
