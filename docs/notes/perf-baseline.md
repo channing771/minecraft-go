@@ -83,11 +83,36 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmar
 
 **最终结论：`core.ChestsPerChunk` 保持 16**，`proposal.md`/`design.md`/`tasks.md` 无需改动。建议仍然是后续在系统空闲、负载低于 `2.61` 时补一次干净复测作为收尾验证，但不因此改变本次结论或容量取值。
 
-## 当前已接受的 M5 scenario v12 基线
+## 当前已接受的 M5 scenario v13 基线
+
+2026-08-07 在冻结提交 `659de4859b4b78024c9b3157c2ce484bae26383e` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
+
+- 当前 Memory 基线：`docs/notes/perf-baseline-m5.json`，SHA-256 `452a1916cafa36a6383c1c6e2a7b3c125eab4623f21636b46db1bfe9b315f6f6`
+- 正式 Memory 报告：`/private/tmp/mcgo-m4i-659de485.o6XDzK/memory-v13.json`，SHA-256 同上
+- 正式 TCP 报告：`/private/tmp/mcgo-m4i-659de485.o6XDzK/tcp-v13.json`，SHA-256 `f9d07c8ec0c629272c4d05ba81286366132c4b24620bdbdcdefa220309b9db17`
+- 被替代的 M5 scenario v12 基线：SHA-256 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`，提交 `a35be7f206dea52954716e6ca156b25b2622fb41`
+- 未改动的 M2 scenario v6 基线：SHA-256 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`
+
+完整门禁退出后从 `2026-08-07T08:20:23-0700` 自然冷却超过 5 分钟。正式授权绑定前的两次有效快照分别在 `08:30:23` 与 `08:31:19`：load 1m/5m/15m 为 `2.14/2.59/3.47` 与 `2.52/2.62/3.42`，均为 AC 供电、电量 `80%`、低功耗模式关闭、无遗留 `mcgo`/`perfcheck`、tracked 工作树干净且 HEAD 不变。两个正式输出路径在启动前均不存在；没有终止用户进程、清理缓存、调整供电状态或筛选结果。
+
+以下四条正式命令按顺序各执行一次且均为 exit 0，全程没有启动或聚焦前台窗口：
+
+```sh
+TERM=xterm-256color zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/private/tmp/mcgo-m4i-659de485.o6XDzK/memory-v13.json'"
+zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '/private/tmp/mcgo-m4i-659de485.o6XDzK/memory-v13.json' --max-regression 0.20 --allow-scenario-upgrade 12:13"
+TERM=xterm-256color zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '/private/tmp/mcgo-m4i-659de485.o6XDzK/tcp-v13.json'"
+zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline '/private/tmp/mcgo-m4i-659de485.o6XDzK/memory-v13.json' --current '/private/tmp/mcgo-m4i-659de485.o6XDzK/tcp-v13.json' --max-regression 0.20"
+```
+
+Memory 先通过 v12→v13 报告完整性、同硬件与全部绝对门禁；TCP 随后通过相对该 Memory 报告的同场景跨 transport 比较。Memory/TCP 的 still p99 为 `5.486/4.688ms`，flying p99 为 `8.445/8.498ms`，`remote_gpu_complete` p50 为 `0.092049/0.086326ms`，各含 `128` 个样本、每样本摊薄 `256` 次绘制；多人探针 peak RSS 为 `1856.4/1818.1MiB`，均低于既有 `2GiB` 上限。
+
+首个 v13 候选 `f7d8f261e910863e189666f6e2181e606996f42f` 的失败报告仍只作不可提升证据；本次没有复用旧 HEAD、授权或路径，也没有放宽门禁。
+
+## 被替代的 M5 scenario v12 基线
 
 2026-08-05 在冻结提交 `a35be7f206dea52954716e6ca156b25b2622fb41` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
 
-- 当前 Memory 基线：`docs/notes/perf-baseline-m5.json`，SHA-256 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`
+- 当时接受的 Memory 基线字节：SHA-256 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`
 - 正式 Memory 报告：`/tmp/mcgo-m5-v12-a35be7f-memory.json`，SHA-256 同上
 - Memory 日志：`/tmp/mcgo-m5-v12-a35be7f-memory.log`，SHA-256 `4da8b75123db58272d839e9d5cda28352c68da87ca3c47d15b9d6015e7112c69`
 - 正式 TCP 报告：`/tmp/mcgo-m5-v12-a35be7f-tcp.json`，SHA-256 `0e36342a81b0877b2fa6d247beff5cd76a457675610e52eeb251b8939da384b5`
@@ -125,13 +150,13 @@ scenario v12 起改为批量分摊：一个样本是一批 `256` 次远端角色
 
 benchmark 还在预热与 still、still 与 flying、flying 与 GPU 采样之间以及 GPU 采样之后各加入 `30` 秒冷却，降低持续满载与热节流；冷却写入报告的 `cooldown_seconds`，各阶段时长、样本数与统计口径完全不变。客户端另设 `1500MiB` 的 Go 堆软上限，避免高周转阶段把尚未回收的空闲堆累积进 RSS 峰值。
 
-固定 `2560x1440` 离屏目标、still/flying 阶段时长、RSS、200 个 tick 样本、既有绝对门禁与 `20%` 相对退化阈值均未改变。M4I 在每帧加入程序化天空 draw 后，producer 标记为 scenario v13；`remote_gpu_complete` 仍沿用 v12 的批量分摊定义（`128` 个样本、每样本摊薄 `256` 次绘制），天空成本由真实 still/flying 帧覆盖，不污染该指标。当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 12:13`。该参数反映真实的基线历史：scenario v11 的正式链因上述 GPU 计时缺陷失败，v11 从未成为任何硬件的基线；v12 是 M5 已接受基线，因此唯一迁移是从 v12 直接到 v13。默认跨场景比较、反向、跨更多级和 `11:13`、`10:13`、`10:12`、`11:12`、`10:11`、`9:10` 参数均被拒绝；v6–v12 历史报告仍可读取，同版本报告仍可比较。
+固定 `2560x1440` 离屏目标、still/flying 阶段时长、RSS、200 个 tick 样本、既有绝对门禁与 `20%` 相对退化阈值均未改变。M4I 在每帧加入程序化天空 draw 后，producer 标记为 scenario v13；`remote_gpu_complete` 仍沿用 v12 的批量分摊定义（`128` 个样本、每样本摊薄 `256` 次绘制），天空成本由真实 still/flying 帧覆盖，不污染该指标。当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 12:13`。该参数反映真实的基线历史：scenario v11 的正式链因上述 GPU 计时缺陷失败，v11 从未成为任何硬件的基线；v12 曾是 M5 已接受基线，本次正式链已从 v12 直接提升到 v13。默认跨场景比较、反向、跨更多级和 `11:13`、`10:13`、`10:12`、`11:12`、`10:11`、`9:10` 参数均被拒绝；v6–v12 历史报告仍可读取，同版本报告仍可比较。
 
 无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。
 
 ## scenario v13 回退说明
 
-回退到 M4J 时需要同时回退天空 draw、scenario v13 的 producer/比较器与 M5 基线文件（若已提升为 v13），恢复 M5 scenario v12 基线；协议 v11、玩家 schema v4、区块 schema v5 与全部世界/玩家数据无需回退或迁移。
+回退到 M4L 时需要同时回退天空 draw、scenario v13 的 producer/比较器与 M5 v13 基线，恢复 M5 scenario v12 基线；协议 v13、玩家 schema v5、区块 schema v6 与全部世界/玩家数据无需回退或迁移。
 
 ## M4I scenario v13 冻结失败候选与不可提升诊断
 

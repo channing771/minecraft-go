@@ -1,36 +1,36 @@
 {
-  "scenario_version": 12,
+  "scenario_version": 13,
   "transport": "memory",
   "hardware": "Apple M5 / 24GiB",
   "os": "macOS 26.5.1",
   "go_version": "go1.26.0 darwin/arm64",
-  "git_commit": "a35be7f206dea52954716e6ca156b25b2622fb41",
+  "git_commit": "659de4859b4b78024c9b3157c2ce484bae26383e",
   "framebuffer": "2560x1440",
-  "load_seconds": 20.415987625,
+  "load_seconds": 19.68837075,
   "cooldown_seconds": 30,
-  "snapshot_seconds": 16.672377375,
+  "snapshot_seconds": 16.694102334,
   "phases": {
     "flying": {
-      "frames": 63358,
-      "fps": 528.1682538418144,
-      "p50_ms": 1.381,
-      "p95_ms": 3.935,
-      "p99_ms": 9.488,
-      "max_ms": 65.863,
-      "peak_rss_bytes": 1754054656,
-      "mean_candidate_sections": 6.282726727485085,
-      "mean_candidate_bytes": 201.04725527952272,
-      "mean_candidate_faces": 883.6514568010354,
+      "frames": 75384,
+      "fps": 628.4543878619654,
+      "p50_ms": 1.157,
+      "p95_ms": 2.955,
+      "p99_ms": 8.445,
+      "max_ms": 78.054,
+      "peak_rss_bytes": 1682178048,
+      "mean_candidate_sections": 6.292794226891648,
+      "mean_candidate_bytes": 201.36941526053275,
+      "mean_candidate_faces": 880.0648148148148,
       "max_pending_uploads": 0
     },
     "still": {
-      "frames": 16592,
-      "fps": 276.58238982987666,
-      "p50_ms": 3.471,
-      "p95_ms": 4.227,
-      "p99_ms": 5.956,
-      "max_ms": 49.785,
-      "peak_rss_bytes": 1375469568,
+      "frames": 15271,
+      "fps": 254.54240514620076,
+      "p50_ms": 3.847,
+      "p95_ms": 4.178,
+      "p99_ms": 5.486,
+      "max_ms": 38.871,
+      "peak_rss_bytes": 1449345024,
       "mean_candidate_sections": 1667,
       "mean_candidate_bytes": 53344,
       "mean_candidate_faces": 206800,
@@ -40,10 +40,10 @@
   "ticks": {
     "frames": 200,
     "fps": 0,
-    "p50_ms": 0.218209,
-    "p95_ms": 0.424084,
-    "p99_ms": 0.517125,
-    "max_ms": 0.612625,
+    "p50_ms": 0.34475,
+    "p95_ms": 0.411291,
+    "p99_ms": 0.423625,
+    "max_ms": 2.205708,
     "peak_rss_bytes": 0,
     "mean_candidate_sections": 0,
     "mean_candidate_bytes": 0,
@@ -51,86 +51,86 @@
     "max_pending_uploads": 0
   },
   "persistence": {
-    "snapshots": 5269,
-    "p50_ms": 4.148875,
-    "p95_ms": 8.621625,
-    "p99_ms": 10.990125,
-    "max_ms": 48.951375
+    "snapshots": 5252,
+    "p50_ms": 4.810667,
+    "p95_ms": 13.506167,
+    "p99_ms": 14.938417,
+    "max_ms": 55.859709
   },
   "protocol": {
-    "encode_p99_ms": 0.000958,
-    "decode_p99_ms": 0.000084,
+    "encode_p99_ms": 0.0005,
+    "decode_p99_ms": 0.000167,
     "bytes": 40960
   },
   "player_persistence": {
     "snapshots": 256,
-    "p50_ms": 0.000917,
-    "p95_ms": 0.004834,
-    "p99_ms": 0.011708,
-    "max_ms": 0.013042
+    "p50_ms": 0.00125,
+    "p95_ms": 0.002084,
+    "p99_ms": 0.002916,
+    "max_ms": 0.011042
   },
   "multiplayer": {
     "remote_state_encode": {
-      "samples": 79950,
-      "p50_ms": 0.001208,
-      "p95_ms": 0.004,
-      "p99_ms": 0.008875,
-      "max_ms": 0.945459
+      "samples": 90655,
+      "p50_ms": 0.001042,
+      "p95_ms": 0.003625,
+      "p99_ms": 0.005375,
+      "max_ms": 10.988083
     },
     "remote_state_decode": {
-      "samples": 79950,
+      "samples": 90655,
       "p50_ms": 0.000292,
-      "p95_ms": 0.001334,
-      "p99_ms": 0.002875,
-      "max_ms": 0.47875
+      "p95_ms": 0.001333,
+      "p99_ms": 0.001833,
+      "max_ms": 0.662
     },
     "interest_diff": {
       "samples": 1600,
-      "p50_ms": 0.010292,
-      "p95_ms": 0.039625,
-      "p99_ms": 0.088625,
-      "max_ms": 0.288458
+      "p50_ms": 0.01825,
+      "p95_ms": 0.04325,
+      "p99_ms": 0.057333,
+      "max_ms": 1.862042
     },
     "roster_apply": {
-      "samples": 79950,
-      "p50_ms": 0.00225,
-      "p95_ms": 0.00725,
-      "p99_ms": 0.012584,
-      "max_ms": 0.820167
+      "samples": 90655,
+      "p50_ms": 0.002,
+      "p95_ms": 0.006958,
+      "p99_ms": 0.008917,
+      "max_ms": 0.408209
     },
     "interpolation": {
-      "samples": 79950,
-      "p50_ms": 0.000375,
-      "p95_ms": 0.001084,
+      "samples": 90655,
+      "p50_ms": 0.000333,
+      "p95_ms": 0.001125,
       "p99_ms": 0.001417,
-      "max_ms": 0.2015
+      "max_ms": 0.210083
     },
     "avatar_submit": {
-      "samples": 79951,
-      "p50_ms": 0.008625,
-      "p95_ms": 0.021125,
-      "p99_ms": 0.028541,
-      "max_ms": 2.620667
+      "samples": 90656,
+      "p50_ms": 0.007875,
+      "p95_ms": 0.012,
+      "p99_ms": 0.0225,
+      "max_ms": 0.721125
     },
     "name_tag_submit": {
-      "samples": 79951,
-      "p50_ms": 0.007375,
-      "p95_ms": 0.019708,
-      "p99_ms": 0.029708,
-      "max_ms": 2.132501
+      "samples": 90656,
+      "p50_ms": 0.006209,
+      "p95_ms": 0.014917,
+      "p99_ms": 0.0235,
+      "max_ms": 2.139292
     },
     "remote_gpu_complete": {
       "samples": 128,
-      "p50_ms": 0.105673,
-      "p95_ms": 0.130172,
-      "p99_ms": 0.149913,
-      "max_ms": 0.916033
+      "p50_ms": 0.092049,
+      "p95_ms": 0.174179,
+      "p99_ms": 0.187442,
+      "max_ms": 0.607237
     },
     "remote_gpu_complete_batch": 256,
-    "server_outbound_bytes": 610436,
+    "server_outbound_bytes": 612417,
     "outbox_high_water": 1,
     "player_jobs_high_water": 6,
     "player_done_high_water": 2,
-    "peak_rss_bytes": 1754054656
+    "peak_rss_bytes": 1946550272
   }
 }
