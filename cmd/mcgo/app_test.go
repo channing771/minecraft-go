@@ -494,9 +494,11 @@ func (d *integrationRenderDevice) releaseMarkers(labels []string) []string {
 }
 
 type integrationBuffer struct {
-	desc    gfx.BufferDesc
-	data    []byte
-	release func()
+	desc      gfx.BufferDesc
+	data      []byte
+	lastWrite []byte
+	writes    int
+	release   func()
 }
 
 func (b *integrationBuffer) Size() uint64 { return b.desc.Size }
@@ -506,6 +508,10 @@ func (b *integrationBuffer) Write(offset uint64, data []byte) {
 		b.data = make([]byte, end)
 	}
 	copy(b.data[int(offset):], data)
+	// lastWrite 只记录本次 Write 调用的确切字节数，用来分辨这一帧到底画了
+	// 多少内容；data 只增不减，无法区分帧与帧之间上传的字节数是否变少。
+	b.lastWrite = append(b.lastWrite[:0], data...)
+	b.writes++
 }
 func (b *integrationBuffer) ReadBack() []byte { return append([]byte(nil), b.data...) }
 func (b *integrationBuffer) Release() {

@@ -11,10 +11,11 @@ import (
 
 const (
 	// 固定容量按最坏布局：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块，
-	// 九格快捷栏耐久条，再加固定合成行、熔炉视图与箱子视图中最大的一个。
-	maxHotbarQuads = 2 + core.InventorySlots*2 + core.HotbarSlots*2 + maxOverlayQuads
-	// 数量最多两位数（1..64），每格最多两个数字。
-	maxHotbarGlyphs = core.InventorySlots*2 + maxOverlayGlyphs
+	// 九格快捷栏耐久条，再加固定合成行、熔炉视图与箱子视图中最大的一个，
+	// 最后加生命值 HUD 的背景块。
+	maxHotbarQuads = 2 + core.InventorySlots*2 + core.HotbarSlots*2 + maxOverlayQuads + healthQuads
+	// 数量最多两位数（1..64），每格最多两个数字；生命值同样最多两位数。
+	maxHotbarGlyphs = core.InventorySlots*2 + maxOverlayGlyphs + healthGlyphs
 
 	// 六条固定配方（含箱子），每条包含输入格、输出格、合成按钮和两个数量。
 	recipeQuads  = 6 * 3
@@ -30,6 +31,10 @@ const (
 
 	maxOverlayQuads  = max(recipeQuads, furnaceQuads, chestQuads)
 	maxOverlayGlyphs = max(recipeGlyphs, furnaceGlyphs, chestGlyphs)
+
+	// 生命值 HUD：左上角一个背景色块，加最多两位数字（0..core.MaxHealth=20）。
+	healthQuads  = 1
+	healthGlyphs = 2
 
 	hotbarInstanceBytes  = 48
 	hotbarViewportOffset = 0
@@ -189,6 +194,8 @@ func hotbarPipelineDesc(
 // open 为 false 时只布局底部 9 格 HUD；为 true 时布局 3×9 背包加 1×9 快捷栏。
 // source 是已选中的来源格（背包 0..35，容器打开时可以是统一栏位），-1 表示没有来源高亮。
 // overlay 与 chest 至多一个非 nil：分别画熔炉三格或箱子 27 格取代配方行。
+// health 是服务端已确认的生命值；它的显示与 inventory 无关——即便背包尚未确认，
+// 只要生命值本身已确认就会绘制，反之亦然。
 func (renderer *HotbarRenderer) Prepare(
 	inventory core.Inventory,
 	open bool,
@@ -196,6 +203,7 @@ func (renderer *HotbarRenderer) Prepare(
 	overlay *FurnaceOverlay,
 	chest *ChestOverlay,
 	mining MiningOverlay,
+	health HealthOverlay,
 	width, height uint32,
 	budget *UploadBudget,
 ) error {
@@ -207,6 +215,7 @@ func (renderer *HotbarRenderer) Prepare(
 		&renderer.layout, renderer.atlas, inventory, open, source, overlay, chest, mining,
 		float32(width), float32(height),
 	)
+	appendHealthBar(&renderer.layout, renderer.atlas, health, float32(width), float32(height))
 	encodeHotbarViewport(
 		renderer.upload[hotbarViewportOffset:hotbarViewportOffset+hotbarViewportBytes],
 		float32(width), float32(height),
@@ -428,6 +437,28 @@ func appendMiningBar(dst *hotbarLayout, overlay MiningOverlay, width, height flo
 		X: x, Y: y, Width: miningBarWidth * min(fraction, 1), Height: miningBarHeight,
 		Color: color,
 	})
+}
+
+// HealthOverlay 是服务端已确认的生命值。它是 render 本地值，由 app 从
+// Predictor 的已确认镜像转换；Confirmed 为 false 时表示尚未收到权威状态，
+// 渲染器不会画出任何生命值——绝不显示预测或陈旧的数值。
+type HealthOverlay struct {
+	Confirmed bool
+	Value     uint8
+}
+
+// appendHealthBar 在屏幕左上角绘制服务端确认的生命值，复用栏位数量数字的
+// 绘制逻辑与同一个背景色块 quad。未确认或 framebuffer 退化时不绘制任何实例。
+func appendHealthBar(dst *hotbarLayout, atlas GlyphSource, health HealthOverlay, width, height float32) {
+	if !health.Confirmed || width <= 0 || height <= 0 {
+		return
+	}
+	x, y := hotbarBottomMargin, hotbarBottomMargin
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: x, Y: y, Width: hotbarSlotSize, Height: hotbarSlotSize,
+		Color: [4]float32{0.55, 0.12, 0.12, 0.78},
+	})
+	appendHotbarCount(dst, atlas, health.Value, x, y)
 }
 
 // FurnaceOverlay 是熔炉界面需要显示的全部权威值。

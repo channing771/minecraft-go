@@ -925,9 +925,12 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		if chest, opened := a.chest.State(); opened {
 			chestOverlay = &render.ChestOverlay{Items: chest.Items}
 		}
+		// 生命值的确认状态独立于背包：Predictor 尚未收到权威状态时 ready 为
+		// false，HUD 绝不画出预测或陈旧的生命值。
+		health, healthReady := a.predictor.Health()
 		if err := a.hotbarRenderer.Prepare(
 			inventory, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
-			a.miningOverlay,
+			a.miningOverlay, render.HealthOverlay{Confirmed: healthReady, Value: health},
 			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
