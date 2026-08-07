@@ -67,18 +67,21 @@ grep -rn "context.DeadlineExceeded" internal/server/*_test.go
 
 ## 验证方法
 
-`GOMAXPROCS=1` 作为慢 runner 的确定性模拟。改动前基线：
+`GOMAXPROCS=1` 作为慢 runner 的模拟。改动前基线：
 
 ```
 GOMAXPROCS=1 go test ./internal/server -count=1
---- FAIL: TestDropSurvivesShutdownAndRestart               (5.21s)
---- FAIL: TestDroppedItemSurvivesShutdownAndRestart        (5.23s)
---- FAIL: TestAuthoritativeMiningMemoryLifecycle           (5.02s)
---- FAIL: TestOpenFurnaceSendsStateOnlyToViewer            (0.04s)
---- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade (0.17s)
+--- FAIL: TestCraftingSurvivesV2DiskRestartAndReconnectOrder (5.22s)
+--- FAIL: TestDropSurvivesShutdownAndRestart                 (5.21s)
+--- FAIL: TestDroppedItemSurvivesShutdownAndRestart          (5.23s)
+--- FAIL: TestAuthoritativeMiningMemoryLifecycle             (5.02s)
+--- FAIL: TestOpenFurnaceSendsStateOnlyToViewer              (0.04s)
+--- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade  (0.17s)
 ```
 
-前三个是活性超时，抬高期限直接命中；后两个是亚秒失败，由顺序假设修复处理。
+四个活性超时抬高期限直接命中；两个亚秒失败由顺序假设修复处理。
+
+**基线是分布而非定值。** 最初记录的是 5 个，`TestCraftingSurvivesV2DiskRestartAndReconnectOrder` 在后续运行里才稳定出现——`GOMAXPROCS=1` 只把边缘用例的失败概率推高，没有推到 1。把某次运行的失败集合当成确定性门禁是错的：正确的比对规则是「缺少表内测试可继续，多出的同类活性超时一并纳入，多出的非活性超时才停手」，而真正的验收标准是改动后全绿。
 
 **局限必须记录**：`GOMAXPROCS=1` 压的是并行度，CI 压的是绝对速度与 I/O，两者不同构。全绿是必要条件而非充分条件，落地后仍需观察 CI 连绿次数才能动分支保护。
 

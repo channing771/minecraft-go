@@ -1,11 +1,16 @@
 > 完整步骤级代码见 `docs/superpowers/plans/2026-08-07-ci-stability-merge-gate.md`。
 > 本文件是可勾选的执行顺序与验证命令。六个任务组与该计划的 Task 1–6 一一对应。
 
-> **改动前必须先复现 A/B 基线**：`GOMAXPROCS=1 go test ./internal/server -count=1`
-> 应得到 5 个失败（`TestDropSurvivesShutdownAndRestart`、
-> `TestDroppedItemSurvivesShutdownAndRestart`、`TestAuthoritativeMiningMemoryLifecycle`、
-> `TestOpenFurnaceSendsStateOnlyToViewer`、`TestWorldPersistsAcrossRestartAndGeneratorUpgrade`）。
-> 基线对不上就停手报告。
+> **改动前必须先复现 A/B 基线**：`GOMAXPROCS=1 go test ./internal/server -count=1`。
+> 四个活性超时（`TestCraftingSurvivesV2DiskRestartAndReconnectOrder`、
+> `TestDropSurvivesShutdownAndRestart`、`TestDroppedItemSurvivesShutdownAndRestart`、
+> `TestAuthoritativeMiningMemoryLifecycle`）由任务 1–2 处理；两个顺序假设
+> （`TestOpenFurnaceSendsStateOnlyToViewer`、`TestWorldPersistsAcrossRestartAndGeneratorUpgrade`）
+> 由任务 5 处理。
+>
+> **基线是分布不是定值**：`GOMAXPROCS=1` 只把失败概率推高，不推到 1。缺少表内测试可以继续；
+> 多出的表外测试若诊断为同类活性超时则一并纳入，不属活性超时才停手报告。真正的验收标准是
+> 改动后全绿（任务 6.3），不是改动前恰好复现某个特定集合。
 
 ## 1. 命名常量与三个活性超时
 

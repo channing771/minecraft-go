@@ -25,24 +25,34 @@
 
 ```
 GOMAXPROCS=1 go test ./internal/server -count=1
---- FAIL: TestDropSurvivesShutdownAndRestart               (5.21s)
---- FAIL: TestDroppedItemSurvivesShutdownAndRestart        (5.23s)
---- FAIL: TestAuthoritativeMiningMemoryLifecycle           (5.02s)
---- FAIL: TestOpenFurnaceSendsStateOnlyToViewer            (0.04s)
---- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade (0.17s)
+--- FAIL: TestCraftingSurvivesV2DiskRestartAndReconnectOrder (5.22s)  ← 活性超时
+--- FAIL: TestDropSurvivesShutdownAndRestart                 (5.21s)  ← 活性超时
+--- FAIL: TestDroppedItemSurvivesShutdownAndRestart          (5.23s)  ← 活性超时
+--- FAIL: TestAuthoritativeMiningMemoryLifecycle             (5.02s)  ← 活性超时
+--- FAIL: TestOpenFurnaceSendsStateOnlyToViewer              (0.04s)  ← 顺序假设
+--- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade  (0.17s)  ← 顺序假设
 ```
 
-前三个由 Task 1–2 处理，后两个由 Task 5 处理。
+四个活性超时由 Task 1–2 处理，两个顺序假设由 Task 5 处理。
+
+**基线是分布，不是定值。** `GOMAXPROCS=1` 只是把慢机器的失败概率推高，不是把它推到 1——边缘用例在不同运行里会时有时无（本清单最初记的是 5 个，`TestCraftingSurvivesV2DiskRestartAndReconnectOrder` 在后续运行里才稳定出现）。因此比对规则是：
+
+- 上表中的测试**没有全部出现** → 可以继续，说明这次运行运气好；已消失的那些仍按计划处理。
+- 出现**表外的测试**，且诊断为同类活性超时（耗时卡在某个秒档期限边缘、失败站点是轮询到条件的等待助手、不在禁改区）→ **一并纳入本任务**，在报告里说明。
+- 出现表外的测试，且**不属**活性超时（亚秒失败、断言内容与等待无关、或根因指向产品代码）→ **停手报告**。
+
+真正的验收标准是改动后 `GOMAXPROCS=1` 全绿（Task 6 Step 3），不是改动前恰好复现某个特定集合。
 
 ---
 
-### Task 1: 命名常量与三个活性超时的验证闭环
+### Task 1: 命名常量与活性超时的验证闭环
 
 **Files:**
 - Create: `internal/server/deadline_test.go`
 - Create: `internal/server/deadline_external_test.go`
 - Modify: `internal/server/persistence_integration_test.go:509`（`stepUntil` 的 5s）
-- Modify: 其余令 A/B 基线前三个测试变红的活性等待站点
+- Modify: `internal/server/tcp_integration_test.go:356`（`waitIntegrationState` 的 5s）
+- Modify: 其余令 A/B 基线中活性超时类测试变红的等待站点
 
 **Interfaces:**
 - Produces: 常量 `shortWaitDeadline`、`waitDeadline`、`longWaitDeadline`，`time.Duration` 类型，在 `package server` 与 `package server_test` 各定义一份，两份取值必须逐字相同。后续所有任务引用这三个名字。
@@ -51,7 +61,7 @@ GOMAXPROCS=1 go test ./internal/server -count=1
 
 Run: `zsh -ic 'gvm use go1.26.0 >/dev/null && GOMAXPROCS=1 go test ./internal/server -count=1' 2>&1 | grep -E "^--- FAIL|^ok|^FAIL"`
 
-Expected: 上面「A/B 基线」列出的 5 个 FAIL。若实际失败集合不同，**停止并报告**——基线对不上说明环境有别的变量，继续做下去无法判断改动是否有效。
+Expected: 「A/B 基线」一节列出的失败。按该节的比对规则判定——缺少表内测试可以继续；多出的表外测试若诊断为同类活性超时则纳入本任务；多出的表外测试若不属活性超时则**停止并报告**。
 
 - [ ] **Step 2: 写入 `package server` 的常量定义**
 
@@ -121,11 +131,11 @@ const (
 Run:
 ```
 zsh -ic 'gvm use go1.26.0 >/dev/null && GOMAXPROCS=1 go test ./internal/server \
-  -run "TestDropSurvivesShutdownAndRestart|TestDroppedItemSurvivesShutdownAndRestart|TestAuthoritativeMiningMemoryLifecycle" \
+  -run "TestCraftingSurvivesV2DiskRestartAndReconnectOrder|TestDropSurvivesShutdownAndRestart|TestDroppedItemSurvivesShutdownAndRestart|TestAuthoritativeMiningMemoryLifecycle" \
   -count=1' 2>&1 | grep -E "_test.go:[0-9]+"
 ```
 
-失败信息里的 `文件:行` 就是超时的等待站点。顺着它找到对应的 `context.WithTimeout` / `time.Now().Add` / `time.After`。
+失败信息里的 `文件:行` 就是超时的等待站点。顺着它找到对应的 `context.WithTimeout` / `time.Now().Add` / `time.After`。已知两处：`persistence_integration_test.go:509` 的 `stepUntil`、`tcp_integration_test.go:356` 的 `waitIntegrationState`。
 
 - [ ] **Step 5: 只替换这几处，验证三个测试转绿**
 
@@ -142,7 +152,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && GOMAXPROCS=1 go test ./internal/server \
 Run:
 ```
 zsh -ic 'gvm use go1.26.0 >/dev/null && GOMAXPROCS=1 go test ./internal/server \
-  -run "TestDropSurvivesShutdownAndRestart|TestDroppedItemSurvivesShutdownAndRestart|TestAuthoritativeMiningMemoryLifecycle" \
+  -run "TestCraftingSurvivesV2DiskRestartAndReconnectOrder|TestDropSurvivesShutdownAndRestart|TestDroppedItemSurvivesShutdownAndRestart|TestAuthoritativeMiningMemoryLifecycle" \
   -count=3' 2>&1 | tail -3
 ```
 
@@ -165,9 +175,9 @@ Expected: `ok`
 ```bash
 gofmt -l internal/server
 git add internal/server/deadline_test.go internal/server/deadline_external_test.go \
-        internal/server/persistence_integration_test.go
+        internal/server/persistence_integration_test.go internal/server/tcp_integration_test.go
 # 加上 Step 5 实际改动的其他文件
-git commit -m "test: 增加活性等待期限常量并修复三处磁盘重启超时"
+git commit -m "test: 增加活性等待期限常量并修复四处磁盘重启超时"
 ```
 
 ---
@@ -231,13 +241,15 @@ Expected: `10`
 
 Run: `zsh -ic 'gvm use go1.26.0 >/dev/null && GOMAXPROCS=1 go test ./internal/server -count=1' 2>&1 | grep -E "^--- FAIL|^ok|^FAIL"`
 
-Expected: 只剩
+Expected: 只剩两个亚秒失败
 ```
 --- FAIL: TestOpenFurnaceSendsStateOnlyToViewer            (0.0Xs)
 --- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade (0.1Xs)
 ```
 
-出现任何**新的**失败测试，或前三个测试重新变红，**停止并报告**。
+Task 1 修过的活性超时重新变红 → **停止并报告**。
+
+出现表外的新失败测试：按「A/B 基线」一节的比对规则判——同类活性超时就在本任务里一并修掉（秒档替换本就该覆盖它，出现说明有漏网站点），不属活性超时则停手报告。
 
 - [ ] **Step 7: 常规并行度全绿且耗时未显著变长**
 

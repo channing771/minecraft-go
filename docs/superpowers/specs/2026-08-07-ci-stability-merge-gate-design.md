@@ -197,12 +197,17 @@ GOMAXPROCS=1 go test ./internal/server -run TestCraftingSurvivesV2DiskRestartAnd
 
 ```
 GOMAXPROCS=1 go test ./internal/server -count=1
---- FAIL: TestDropSurvivesShutdownAndRestart               (5.21s)
---- FAIL: TestDroppedItemSurvivesShutdownAndRestart        (5.23s)
---- FAIL: TestAuthoritativeMiningMemoryLifecycle           (5.02s)
---- FAIL: TestOpenFurnaceSendsStateOnlyToViewer            (0.04s)
---- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade (0.17s)
+--- FAIL: TestCraftingSurvivesV2DiskRestartAndReconnectOrder (5.22s)
+--- FAIL: TestDropSurvivesShutdownAndRestart                 (5.21s)
+--- FAIL: TestDroppedItemSurvivesShutdownAndRestart          (5.23s)
+--- FAIL: TestAuthoritativeMiningMemoryLifecycle             (5.02s)
+--- FAIL: TestOpenFurnaceSendsStateOnlyToViewer              (0.04s)
+--- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade  (0.17s)
 ```
+
+**基线是分布而非定值。** 首次记录只有 5 个，`TestCraftingSurvivesV2DiskRestartAndReconnectOrder` 是在后续运行里才稳定出现的——`GOMAXPROCS=1` 只把边缘用例的失败概率推高，没有推到 1。
+
+把某次运行的失败集合写成确定性门禁是方法论错误：它会在边缘用例时有时无时制造假警报，也会诱使人把"复现出同样的集合"误当成验收标准。正确的规则是**缺少表内测试可继续、多出的同类活性超时一并纳入、多出的非活性超时才停手**，而真正的验收标准只有一条：改动后全绿。
 
 ### 这个基线暴露了两个群体
 
