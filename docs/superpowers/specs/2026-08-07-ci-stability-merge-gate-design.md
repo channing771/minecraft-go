@@ -144,13 +144,15 @@ func waitIntegrationState(t *testing.T, connected integrationClient, condition f
 
 映射到三个命名常量：
 
-| 常量 | 取值 | 覆盖的原字面量 | 用途 |
-| --- | --- | --- | --- |
-| `shortWaitDeadline` | `5s` | 原 100ms–1s 中的活性站点 | 单个 tick 推进、单次保存启动等本地快事件 |
-| `waitDeadline` | `30s` | 原 2s–5s | 登录 ready、收到某条消息、库存达到某状态 |
-| `longWaitDeadline` | `60s` | 原 10s–30s | 涉及关服屏障、磁盘重启、八人会话的复合等待 |
+| 常量 | 取值 | 覆盖的原字面量 | 余量 | 用途 |
+| --- | --- | --- | --- | --- |
+| `shortWaitDeadline` | `5s` | 原 100ms–500ms 中的活性站点 | 10×–50× | 单次保存启动等亚秒本机事件 |
+| `waitDeadline` | `30s` | 原 1s–5s | 6×–30× | 登录 ready、收到某条消息、库存达到某状态 |
+| `longWaitDeadline` | `60s` | 原 10s–30s | 2×–6× | 涉及关服屏障、磁盘重启、八人会话的复合等待 |
 
-对最常见的 `5s` 一档（75 处，占活性站点的多数），这正好是 6×。
+对最常见的 `5s` 一档（76 处），这正好是 6×。
+
+**1 秒档必须归 `waitDeadline` 而不是 `shortWaitDeadline`。** 它有 95 处（77 处 `time.After` + 18 处轮询），既最密集又最紧，是抖动的首要嫌疑；只抬到 5s 仅有 5× 余量，覆盖不住共享 runner 的减速。按名字直觉把"1 秒"归进"short"是本设计最容易踩的分类错误。
 
 毫秒档必须逐处核对：它同时混着活性等待与禁改区，是本变更唯一不能机械替换的一档。
 
