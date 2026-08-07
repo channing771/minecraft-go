@@ -15,16 +15,16 @@
 
 ## 3. 自动回复
 
-- [ ] 3.1 在 `internal/sim` 先写失败测试：受伤后第 99 tick 不回复、第 100 tick 起每 40 tick 回 1 点、回复中途再次受伤则计时清零且回复中断、满血时不计时不回复也不产生额外发布。
-- [ ] 3.2 在 `internal/sim` 增加不持久化的受伤计时字段，按 `RegenDelayTicks = 100` 与 `RegenIntervalTicks = 40` 推进回复；任何伤害清零计时。与熔炼推进同形，每玩家每 tick 固定整数运算，不新增分配。
-- [ ] 3.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 实现生命值自动回复`，然后自动进入第 4 组。
+- [x] 3.1 在 `internal/sim` 先写失败测试：受伤后第 99 tick 不回复、第 100 tick 起每 40 tick 回 1 点、回复中途再次受伤则计时清零且回复中断、满血时不计时不回复也不产生额外发布。
+- [x] 3.2 在 `internal/sim` 增加不持久化的受伤计时字段，按 `RegenDelayTicks = 100` 与 `RegenIntervalTicks = 40` 推进回复；任何伤害清零计时。与熔炼推进同形，每玩家每 tick 固定整数运算，不新增分配。
+- [x] 3.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 实现生命值自动回复`，然后自动进入第 4 组。
 
 ## 4. 协议 v13 与客户端镜像
 
-- [ ] 4.1 在 `internal/network` 先写失败的 packet/codec/golden/fuzz 测试：`PlayerState` 增加 `Health uint8` 后 payload 固定增加 1 字节、生命值 `21` 及以上被拒绝、截断与尾随字节拒绝、v12 登录拒绝、既有容器与采掘消息的 packet ID 与布局不变。
-- [ ] 4.2 把 `ProtocolVersion` 升为 13，在 `PlayerState` 消息与 codec 中追加生命值字段与范围校验；更新受影响的 golden hex 与长度断言，**只做机械跟随，不得放宽任何既有断言**。
-- [ ] 4.3 在 `internal/client` 让只读镜像承载生命值：只接受服务端确认值，`Reset` 清空，不做任何预测。先写失败测试覆盖应用、重置与非法值拒绝。
-- [ ] 4.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/client -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 升级协议 v13 携带生命值`，然后自动进入第 5 组。
+- [x] 4.1 在 `internal/network` 先写失败的 packet/codec/golden/fuzz 测试：`PlayerState` 增加 `Health uint8` 后 payload 固定增加 1 字节、生命值 `21` 及以上被拒绝、截断与尾随字节拒绝、v12 登录拒绝、既有容器与采掘消息的 packet ID 与布局不变。
+- [x] 4.2 把 `ProtocolVersion` 升为 13，在 `PlayerState` 消息与 codec 中追加生命值字段与范围校验；更新受影响的 golden hex 与长度断言，**只做机械跟随，不得放宽任何既有断言**。
+- [x] 4.3 在 `internal/client` 让只读镜像承载生命值：只接受服务端确认值，`Reset` 清空，不做任何预测。先写失败测试覆盖应用、重置与非法值拒绝。
+- [x] 4.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/network ./internal/client -race -count=1 && go test ./internal/network -run "^$" -fuzz FuzzSmallPacketCodec -fuzztime=10s && go test ./internal/network -run "^$" -bench SmallPacketCodec -benchmem -count=3 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 升级协议 v13 携带生命值`，然后自动进入第 5 组。
 
 ## 5. 死亡结算与掉落
 
@@ -38,21 +38,21 @@
 
 ## 6. 服务端接线与 Memory/TCP 闭环
 
-- [ ] 6.1 在 `internal/server` 先写失败测试：权威玩家状态携带生命值只发给本人；死亡产生的掉落物差分正常发布给相关订阅者；慢会话继续走既有有界 outbox 与断开策略。
-- [ ] 6.2 先写 Memory/TCP 纵向失败测试，使用同一脚本：玩家从高处摔落受伤 → 等待回复 → 再次致死摔落 → 背包掉在世界里 → 玩家回到出生点满血 → 另一名玩家能拾取这些掉落物。两种 transport 的最终区块、玩家状态与掉落物分布必须相同。参照 M4K 的 `runChestSharedByTwoPlayersScript` 写法，把断言写在共享脚本体内使两条链路自动共享。
-- [ ] 6.3 先写 DiskStore 重启失败测试：玩家在生命值为 7 时正常刷新、关闭、重开，确认生命值原值恢复；v4 存档迁移后为满血。
-- [ ] 6.4 在现有 switch 与发布顺序中最小接线；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -race -count=1 && go test ./internal/network ./internal/sim ./internal/storage -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 接通生命值服务端闭环`，然后自动进入第 7 组。
+- [x] 6.1 在 `internal/server` 先写失败测试：权威玩家状态携带生命值只发给本人；死亡产生的掉落物差分正常发布给相关订阅者；慢会话继续走既有有界 outbox 与断开策略。
+- [x] 6.2 先写 Memory/TCP 纵向失败测试，使用同一脚本：玩家从高处摔落受伤 → 等待回复 → 再次致死摔落 → 背包掉在世界里 → 玩家回到出生点满血 → 另一名玩家能拾取这些掉落物。两种 transport 的最终区块、玩家状态与掉落物分布必须相同。参照 M4K 的 `runChestSharedByTwoPlayersScript` 写法，把断言写在共享脚本体内使两条链路自动共享。
+- [x] 6.3 先写 DiskStore 重启失败测试：玩家在生命值为 7 时正常刷新、关闭、重开，确认生命值原值恢复；v4 存档迁移后为满血。
+- [x] 6.4 在现有 switch 与发布顺序中最小接线；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -race -count=1 && go test ./internal/network ./internal/sim ./internal/storage -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 接通生命值服务端闭环`，然后自动进入第 7 组。
 
 ## 7. HUD 接线
 
-- [ ] 7.1 在 `internal/render` 先写 headless 失败测试，覆盖生命值 0/1/20 三种取值的绘制、按最坏布局重算后的固定 quad/glyph 容量、buffer 区间不重叠，且既有背包、熔炉、箱子与配方行布局保持不变。
-- [ ] 7.2 在 `cmd/mcgo` 先写失败测试：HUD 显示最后确认的生命值；收到权威状态前不显示预测值；断线与玩家状态 reset 后清空。测试只用 fake window/gfx，不调用交互式 `run()`。
-- [ ] 7.3 扩展既有 `HotbarRenderer` 的固定容量与布局绘制生命值，复用同一 pipeline 与缓冲；生命值是 render-local 值，由 app 从已确认镜像转换，`internal/render` 不得导入 `internal/network`。
-- [ ] 7.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./internal/client ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，确认无窗口出现、`gofmt` 与 `git diff --check` 通过；提交 `feat: 接入生命值 HUD`，然后自动进入第 8 组。
+- [x] 7.1 在 `internal/render` 先写 headless 失败测试，覆盖生命值 0/1/20 三种取值的绘制、按最坏布局重算后的固定 quad/glyph 容量、buffer 区间不重叠，且既有背包、熔炉、箱子与配方行布局保持不变。
+- [x] 7.2 在 `cmd/mcgo` 先写失败测试：HUD 显示最后确认的生命值；收到权威状态前不显示预测值；断线与玩家状态 reset 后清空。测试只用 fake window/gfx，不调用交互式 `run()`。
+- [x] 7.3 扩展既有 `HotbarRenderer` 的固定容量与布局绘制生命值，复用同一 pipeline 与缓冲；生命值是 render-local 值，由 app 从已确认镜像转换，`internal/render` 不得导入 `internal/network`。
+- [x] 7.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./internal/client ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，确认无窗口出现、`gofmt` 与 `git diff --check` 通过；提交 `feat: 接入生命值 HUD`，然后自动进入第 8 组。
 
 ## 8. 文档与最终门禁
 
-- [ ] 8.1 更新 `README.md` 与 `docs/notes/lan-server.md`，说明生命值满值与显示、摔落安全高度与伤害曲线、自动回复的延迟与速率、死亡掉落与重生规则、协议 v13、玩家 schema v5 与 v1–v4 迁移、区块 schema v6 不变、备份与回退要求，以及未实现范围（战斗、怪物、食物、其他伤害源、床与重生点）；文档使用中文并与实现一致。
-- [ ] 8.2 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && gofmt -l . && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod'`；`gofmt -l .` 必须无输出，且不得启动或聚焦游戏窗口。
-- [ ] 8.3 执行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，核对 proposal、三份 delta specs、design 与实现一致；确认协议 v13、玩家 schema v5、区块 schema v6、scenario v12 与两份既有性能基线文件均未被放宽或静默覆盖。**特别核对 `authoritative-inventory` 的 REMOVED+ADDED 块逐字保留了主规格该 Requirement 下的全部 6 个既有场景**（M4K 曾在此漏带两条）。
-- [ ] 8.4 只暂存 M4L 实现、测试、中文文档和本文件勾选，排除 `midscene_run/`；提交 `chore: 关闭 M4L 权威生命值`，停止实现并等待主规格同步、归档与推送指令。
+- [x] 8.1 更新 `README.md` 与 `docs/notes/lan-server.md`，说明生命值满值与显示、摔落安全高度与伤害曲线、自动回复的延迟与速率、死亡掉落与重生规则、协议 v13、玩家 schema v5 与 v1–v4 迁移、区块 schema v6 不变、备份与回退要求，以及未实现范围（战斗、怪物、食物、其他伤害源、床与重生点）；文档使用中文并与实现一致。
+- [x] 8.2 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && gofmt -l . && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod'`；`gofmt -l .` 必须无输出，且不得启动或聚焦游戏窗口。
+- [x] 8.3 执行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，核对 proposal、三份 delta specs、design 与实现一致；确认协议 v13、玩家 schema v5、区块 schema v6、scenario v12 与两份既有性能基线文件均未被放宽或静默覆盖。**特别核对 `authoritative-inventory` 的 REMOVED+ADDED 块逐字保留了主规格该 Requirement 下的全部 6 个既有场景**（M4K 曾在此漏带两条）。
+- [x] 8.4 只暂存 M4L 实现、测试、中文文档和本文件勾选，排除 `midscene_run/`；提交 `chore: 关闭 M4L 权威生命值`，停止实现并等待主规格同步、归档与推送指令。
