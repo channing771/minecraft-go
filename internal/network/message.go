@@ -358,6 +358,8 @@ type PlayerState struct {
 	MiningProgressTicks uint16
 	MiningRequiredTicks uint16
 	MiningHarvestable   bool
+	// Health 是权威生命值，协议 v13 起随玩家状态同步；合法区间是 0..core.MaxHealth。
+	Health uint8
 	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间，协议 v9 起随玩家状态同步。
 	WorldTimeTicks uint64
 }
@@ -451,6 +453,9 @@ func (state PlayerState) Validate() error {
 	}
 	if !finite32(state.Yaw) || !finite32(state.Pitch) {
 		return errors.New("network: player state has non-finite rotation")
+	}
+	if !core.ValidHealth(state.Health) {
+		return errors.New("network: player state has out-of-range health")
 	}
 	if !state.MiningActive {
 		if state.MiningTarget != (core.BlockPos{}) || state.MiningProgressTicks != 0 ||
