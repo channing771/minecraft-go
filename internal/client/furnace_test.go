@@ -73,13 +73,13 @@ func TestFurnaceMirrorIgnoresStaleClose(t *testing.T) {
 	if err := mirror.Apply(current); err != nil {
 		t.Fatal(err)
 	}
-	if err := mirror.Close(network.FurnaceClosed{Furnace: testFurnaceRef(9)}); err != nil {
+	if err := mirror.Close(network.ContainerClosed{Container: testFurnaceRef(9)}); err != nil {
 		t.Fatal(err)
 	}
 	if got, ok := mirror.State(); !ok || got != current {
 		t.Fatalf("过期关闭通知影响了当前界面: %+v, %v", got, ok)
 	}
-	if err := mirror.Close(network.FurnaceClosed{Furnace: current.Furnace}); err != nil {
+	if err := mirror.Close(network.ContainerClosed{Container: current.Furnace}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := mirror.State(); ok {
@@ -101,7 +101,7 @@ func TestFurnaceMirrorRejectsInvalidState(t *testing.T) {
 	if got, _ := mirror.State(); got != valid {
 		t.Fatalf("非法状态部分应用: %+v", got)
 	}
-	if err := mirror.Close(network.FurnaceClosed{}); err == nil {
+	if err := mirror.Close(network.ContainerClosed{}); err == nil {
 		t.Fatal("非法关闭通知被接受")
 	}
 }

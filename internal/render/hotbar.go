@@ -11,21 +11,25 @@ import (
 
 const (
 	// 固定容量按最坏布局：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块，
-	// 九格快捷栏耐久条，再加固定合成行与熔炉视图中较大的一个。
+	// 九格快捷栏耐久条，再加固定合成行、熔炉视图与箱子视图中最大的一个。
 	maxHotbarQuads = 2 + core.InventorySlots*2 + core.HotbarSlots*2 + maxOverlayQuads
 	// 数量最多两位数（1..64），每格最多两个数字。
 	maxHotbarGlyphs = core.InventorySlots*2 + maxOverlayGlyphs
 
-	// 五条固定配方，每条包含输入格、输出格、合成按钮和两个数量。
-	recipeQuads  = 5 * 3
-	recipeGlyphs = 5 * 2
+	// 六条固定配方（含箱子），每条包含输入格、输出格、合成按钮和两个数量。
+	recipeQuads  = 6 * 3
+	recipeGlyphs = 6 * 2
 	// 熔炉视图：三个栏位背景、三个物品色块、两条进度条底与两条进度条填充。
 	furnaceQuads = 3 + 3 + 4
 	// 三个熔炉格各最多两位数量。
 	furnaceGlyphs = 6
+	// 箱子视图：27 格背景，加最多 27 个物品色块。
+	chestQuads = core.ChestSlots + core.ChestSlots
+	// 箱子每格最多两位数量。
+	chestGlyphs = core.ChestSlots * 2
 
-	maxOverlayQuads  = max(recipeQuads, furnaceQuads)
-	maxOverlayGlyphs = max(recipeGlyphs, furnaceGlyphs)
+	maxOverlayQuads  = max(recipeQuads, furnaceQuads, chestQuads)
+	maxOverlayGlyphs = max(recipeGlyphs, furnaceGlyphs, chestGlyphs)
 
 	hotbarInstanceBytes  = 48
 	hotbarViewportOffset = 0
@@ -57,13 +61,14 @@ const (
 	furnaceBarGap    = float32(6)
 )
 
-// ponytail: 当前只有五条固定配方；需要分页或分类时再引入共享目录。
+// ponytail: 当前只有六条固定配方；需要分页或分类时再引入共享目录。
 var inventoryRecipeIDs = [...]core.RecipeID{
 	core.RecipeStoneBricks,
 	core.RecipeFurnace,
 	core.RecipeIronBlock,
 	core.RecipeStonePickaxe,
 	core.RecipeIronPickaxe,
+	core.RecipeChest,
 }
 
 //go:embed shader/hotbar.wgsl
@@ -182,12 +187,14 @@ func hotbarPipelineDesc(
 
 // Prepare 按 framebuffer 尺寸与完整物品状态重建固定布局。
 // open 为 false 时只布局底部 9 格 HUD；为 true 时布局 3×9 背包加 1×9 快捷栏。
-// source 是已选中的来源格 0..35，-1 表示没有来源高亮。
+// source 是已选中的来源格（背包 0..35，容器打开时可以是统一栏位），-1 表示没有来源高亮。
+// overlay 与 chest 至多一个非 nil：分别画熔炉三格或箱子 27 格取代配方行。
 func (renderer *HotbarRenderer) Prepare(
 	inventory core.Inventory,
 	open bool,
 	source int,
 	overlay *FurnaceOverlay,
+	chest *ChestOverlay,
 	mining MiningOverlay,
 	width, height uint32,
 	budget *UploadBudget,
@@ -197,7 +204,7 @@ func (renderer *HotbarRenderer) Prepare(
 		return err
 	}
 	layoutInventory(
-		&renderer.layout, renderer.atlas, inventory, open, source, overlay, mining,
+		&renderer.layout, renderer.atlas, inventory, open, source, overlay, chest, mining,
 		float32(width), float32(height),
 	)
 	encodeHotbarViewport(
@@ -235,8 +242,10 @@ func (renderer *HotbarRenderer) Render(encoder gfx.CommandEncoder, target gfx.Te
 	pass.End()
 }
 
-// layoutInventory 只依赖 framebuffer 尺寸、完整物品状态、界面开关与熔炉叠加值，
-// 产出固定上限的实例；关闭时只有底部 9 格 HUD，overlay 非 nil 时画熔炉视图而不是合成行。
+// layoutInventory 只依赖 framebuffer 尺寸、完整物品状态、界面开关与容器叠加值，
+// 产出固定上限的实例；关闭时只有底部 9 格 HUD。overlay 与 chest 至多一个非 nil：
+// overlay 非 nil 时画熔炉三格与两条进度条，chest 非 nil 时画箱子 27 格，
+// 两者都为 nil 时画固定合成行。
 func layoutInventory(
 	dst *hotbarLayout,
 	atlas GlyphSource,
@@ -244,6 +253,7 @@ func layoutInventory(
 	open bool,
 	source int,
 	overlay *FurnaceOverlay,
+	chest *ChestOverlay,
 	mining MiningOverlay,
 	width, height float32,
 ) hotbarLayout {
@@ -272,19 +282,16 @@ func layoutInventory(
 		Height: hotbarSlotSize + 2*hotbarSelectBorder,
 		Color:  [4]float32{1, 1, 1, 0.92},
 	})
-	if open && source >= 0 &&
-		(source < core.InventorySlots || overlay != nil && source < core.FurnaceViewSlots) {
-		sourceX, sourceY := inventorySlotOrigin(source, open, width, height)
-		if source >= core.InventorySlots {
-			sourceX, sourceY = recipeSlotOrigin(source-core.InventorySlots, width, height)
+	if open && source >= 0 {
+		if sourceX, sourceY, ok := containerSourceOrigin(source, overlay, chest, width, height); ok {
+			dst.quads = append(dst.quads, hotbarInstance{
+				X:      sourceX - hotbarSelectBorder,
+				Y:      sourceY - hotbarSelectBorder,
+				Width:  hotbarSlotSize + 2*hotbarSelectBorder,
+				Height: hotbarSlotSize + 2*hotbarSelectBorder,
+				Color:  [4]float32{0.35, 0.75, 1, 0.95},
+			})
 		}
-		dst.quads = append(dst.quads, hotbarInstance{
-			X:      sourceX - hotbarSelectBorder,
-			Y:      sourceY - hotbarSelectBorder,
-			Width:  hotbarSlotSize + 2*hotbarSelectBorder,
-			Height: hotbarSlotSize + 2*hotbarSelectBorder,
-			Color:  [4]float32{0.35, 0.75, 1, 0.95},
-		})
 	}
 	for slot := range slots {
 		x, y := inventorySlotOrigin(slot, open, width, height)
@@ -320,15 +327,42 @@ func layoutInventory(
 		appendDurabilityBar(dst, slot, stack, width, height)
 	}
 	if open {
-		if overlay != nil {
+		switch {
+		case chest != nil:
+			appendChestGrid(dst, atlas, *chest, width, height)
+		case overlay != nil:
 			appendFurnaceRow(dst, atlas, *overlay, width, height)
-		} else {
+		default:
 			appendRecipeRows(dst, atlas, inventory, width, height)
 		}
 	} else {
 		appendMiningBar(dst, mining, width, height)
 	}
 	return *dst
+}
+
+// containerSourceOrigin 返回来源高亮格的左上角像素坐标；索引落在当前打开的容器视图之外
+// 时返回 false。overlay 与 chest 至多一个非 nil，分别把索引 36 之后解释为熔炉三格或
+// 箱子 27 格。
+func containerSourceOrigin(
+	source int,
+	overlay *FurnaceOverlay,
+	chest *ChestOverlay,
+	width, height float32,
+) (float32, float32, bool) {
+	switch {
+	case source < core.InventorySlots:
+		x, y := inventorySlotOrigin(source, true, width, height)
+		return x, y, true
+	case chest != nil && source < core.ChestViewSlots:
+		x, y := chestSlotOrigin(source-core.InventorySlots, width, height)
+		return x, y, true
+	case overlay != nil && source < core.FurnaceViewSlots:
+		x, y := recipeSlotOrigin(source-core.InventorySlots, width, height)
+		return x, y, true
+	default:
+		return 0, 0, false
+	}
 }
 
 // appendDurabilityBar 在快捷栏栏位下沿绘制背景和剩余耐久比例填充。
@@ -488,7 +522,72 @@ func FurnaceSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool)
 	return 0, false
 }
 
-// appendRecipeRows 绘制五条固定配方及各自的一次合成按钮。
+// ChestOverlay 是箱子界面需要显示的全部权威值：27 个格子的物品。
+// 它是 render 本地值，由 app 从已确认镜像转换，渲染层不依赖协议类型。
+type ChestOverlay struct {
+	Items [core.ChestSlots]core.ItemStack
+}
+
+// appendChestGrid 绘制箱子 27 格背景、物品色块与数量，按统一栏位 36..62 排布成 3 行 9 列。
+func appendChestGrid(
+	dst *hotbarLayout,
+	atlas GlyphSource,
+	overlay ChestOverlay,
+	width, height float32,
+) {
+	for index := range core.ChestSlots {
+		x, y := chestSlotOrigin(index, width, height)
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: x, Y: y,
+			Width: hotbarSlotSize, Height: hotbarSlotSize,
+			Color: [4]float32{0.05, 0.05, 0.06, 0.62},
+		})
+	}
+	for index, stack := range overlay.Items {
+		if stack.Item == core.ItemNone {
+			continue
+		}
+		x, y := chestSlotOrigin(index, width, height)
+		dst.quads = append(dst.quads, hotbarInstance{
+			X:      x + hotbarSwatchInset,
+			Y:      y + hotbarSwatchInset,
+			Width:  hotbarSlotSize - 2*hotbarSwatchInset,
+			Height: hotbarSlotSize - 2*hotbarSwatchInset,
+			Color:  hotbarItemColor(stack.Item),
+		})
+		appendHotbarCount(dst, atlas, stack.Count, x, y)
+	}
+}
+
+// chestSlotOrigin 返回箱子统一索引 0..26 对应格子的左上角像素坐标：3 行 9 列，
+// 紧贴在背包最上一行之上，index 0 在最下面一行、与熔炉/配方行共用同一起点。
+func chestSlotOrigin(index int, width, height float32) (float32, float32) {
+	row := index / core.HotbarSlots
+	column := index % core.HotbarSlots
+	x, y := recipeSlotOrigin(column, width, height)
+	return x, y - float32(row)*(hotbarSlotSize+hotbarSlotGap)
+}
+
+// ChestSlotAt 把光标像素坐标映射为箱子界面的统一索引 0..62。
+// 它与绘制共用同一套几何常量；界外返回 false。
+func ChestSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool) {
+	if slot, ok := InventorySlotAt(cursorX, cursorY, width, height); ok {
+		return slot, true
+	}
+	if width == 0 || height == 0 {
+		return 0, false
+	}
+	x, y := float32(cursorX), float32(cursorY)
+	for index := range core.ChestSlots {
+		left, top := chestSlotOrigin(index, float32(width), float32(height))
+		if x >= left && x < left+hotbarSlotSize && y >= top && y < top+hotbarSlotSize {
+			return core.InventorySlots + uint8(index), true
+		}
+	}
+	return 0, false
+}
+
+// appendRecipeRows 绘制六条固定配方及各自的一次合成按钮。
 func appendRecipeRows(
 	dst *hotbarLayout,
 	atlas GlyphSource,
@@ -655,6 +754,8 @@ func hotbarItemColor(item core.ItemID) [4]float32 {
 		return [4]float32{88.0 / 255, 86.0 / 255, 88.0 / 255, 1}
 	case core.ItemIronBlock:
 		return [4]float32{214.0 / 255, 214.0 / 255, 216.0 / 255, 1}
+	case core.ItemChest:
+		return [4]float32{156.0 / 255, 108.0 / 255, 58.0 / 255, 1}
 	case core.ItemStonePickaxe:
 		return [4]float32{104.0 / 255, 112.0 / 255, 120.0 / 255, 1}
 	case core.ItemIronPickaxe:

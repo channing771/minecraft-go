@@ -209,7 +209,7 @@ func TestItemDropRendererHeadlessDraw(t *testing.T) {
 func TestItemDropColorCoversRegisteredNonPlaceableItems(t *testing.T) {
 	for _, item := range []core.ItemID{
 		core.ItemCoal, core.ItemRawIron, core.ItemIronIngot,
-		core.ItemFurnace, core.ItemIronBlock,
+		core.ItemFurnace, core.ItemIronBlock, core.ItemChest,
 		core.ItemBrokenStonePickaxe, core.ItemBrokenIronPickaxe,
 	} {
 		color, ok := itemDropColor(item)

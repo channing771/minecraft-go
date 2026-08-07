@@ -183,7 +183,7 @@ func TestChunkV4ToolDropRestoresFullDurabilityAndCanBePickedUp(t *testing.T) {
 	}
 }
 
-func TestChunkSchemaV5DecodeKeepsWornDurability(t *testing.T) {
+func TestChunkSchemaDecodeKeepsWornDurability(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	chunk := codecFixtureChunk(key.Pos)
 	index, ok := world.ChunkBlockIndex(core.BlockPos{
@@ -205,8 +205,8 @@ func TestChunkSchemaV5DecodeKeepsWornDurability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != 5 || got.Migrated || got.Chunk.Drop(0).Stack != want {
-		t.Fatalf("v5 磨损工具往返结果 schema=%d migrated=%v stack=%+v",
+	if got.Schema != currentChunkSchema || got.Migrated || got.Chunk.Drop(0).Stack != want {
+		t.Fatalf("磨损工具往返结果 schema=%d migrated=%v stack=%+v",
 			got.Schema, got.Migrated, got.Chunk.Drop(0).Stack)
 	}
 }

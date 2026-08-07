@@ -17,11 +17,7 @@ const (
 	FurnaceViewSlots  = InventorySlots + 3
 )
 
-// FurnaceRef 在熔炉的生命周期内唯一且稳定地标识它。
-// 槽位复用时 Generation 递增，因此旧引用不会与新熔炉冲突。
-type FurnaceRef struct {
-	Dimension  DimensionID
-	Chunk      ChunkPos
-	Slot       uint8
-	Generation uint32
-}
+// FurnaceRef 是 ContainerRef 的类型别名：熔炉是容器种类的零值 ContainerKindFurnace，
+// 因此 M4E/M4J 遗留的既有构造、比较与存档路径都不需要因为容器收敛而改动，
+// 线上也只保留一份引用编解码 helper。
+type FurnaceRef = ContainerRef

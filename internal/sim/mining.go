@@ -54,7 +54,7 @@ func miningRule(block core.BlockID, held core.ItemID) (uint16, bool) {
 		default:
 			return 30, false
 		}
-	case core.StoneBrickID, core.FurnaceID, core.CoalOreID, core.IronOreID:
+	case core.StoneBrickID, core.FurnaceID, core.ChestID, core.CoalOreID, core.IronOreID:
 		switch held {
 		case core.ItemStonePickaxe:
 			return 15, true
@@ -102,7 +102,7 @@ func (engine *Engine) advanceMining(
 	for _, id := range sessions[:count] {
 		session := engine.sessions[id]
 		player := session.player
-		if !player.miningHeld || player.reset || !session.hasView || session.viewFurnace {
+		if !player.miningHeld || player.reset || !session.hasView || session.viewContainer {
 			player.mining = playerMiningState{}
 			continue
 		}
@@ -233,7 +233,7 @@ func (engine *Engine) completeMining(
 			stacks[0] = core.ItemStack{Item: core.ItemFurnace, Count: 1}
 		}
 		next, capacityOK := record.Chunk.PrepareDropBatch(
-			stacks, blockIndex, DropPickupDelayTicks,
+			stacks[:], blockIndex, DropPickupDelayTicks,
 		)
 		if !capacityOK {
 			return RejectDropCapacity, true
@@ -247,6 +247,36 @@ func (engine *Engine) completeMining(
 		}
 		engine.recordChange(dimensionID, target, core.AirID, pending)
 		record.Chunk.DeactivateFurnace(furnaceSlot)
+		record.Chunk.CommitDropBatch(next)
+		return 0, false
+	}
+
+	if block == core.ChestID {
+		chestSlot, found := record.Chunk.ChestAt(blockIndex)
+		if !found {
+			return RejectChunkNotReady, true
+		}
+		chest := record.Chunk.Chest(chestSlot)
+		var stacks [1 + core.ChestSlots]core.ItemStack
+		if harvestable {
+			stacks[0] = core.ItemStack{Item: core.ItemChest, Count: 1}
+		}
+		copy(stacks[1:], chest.Items[:])
+		next, capacityOK := record.Chunk.PrepareDropBatch(
+			stacks[:], blockIndex, DropPickupDelayTicks,
+		)
+		if !capacityOK {
+			return RejectDropCapacity, true
+		}
+		_, changed, err := dimension.SetBlock(target, core.AirID)
+		if err != nil {
+			return mapSetBlockError(err), true
+		}
+		if !changed {
+			return RejectNoTarget, true
+		}
+		engine.recordChange(dimensionID, target, core.AirID, pending)
+		record.Chunk.DeactivateChest(chestSlot)
 		record.Chunk.CommitDropBatch(next)
 		return 0, false
 	}

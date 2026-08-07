@@ -252,6 +252,54 @@ func TestTranslatePlayerMessage(t *testing.T) {
 				Slot:     7,
 			},
 		},
+		{
+			// Yaw 必须非零：sim.openContainer 用 LookDirection(Yaw, Pitch) 做权威射线，
+			// translateClientMessage 里漏掉 Yaw 字段不会被现有只给 Pitch 的测试暴露。
+			name: "open container carries yaw and pitch",
+			message: network.OpenContainer{
+				Sequence: 20,
+				Yaw:      2.25,
+				Pitch:    -0.4,
+			},
+			want: sim.Command{
+				Session:  testSessionID,
+				Sequence: 20,
+				Kind:     sim.CommandOpenFurnace,
+				Yaw:      2.25,
+				Pitch:    -0.4,
+			},
+		},
+		{
+			name: "move container stack carries the container ref and both slots",
+			message: network.MoveContainerStack{
+				Sequence: 21,
+				Container: core.ContainerRef{
+					Dimension: core.Overworld, Chunk: core.ChunkPos{X: 3, Z: -2},
+					Kind: core.ContainerKindChest, Slot: 5, Generation: 9,
+				},
+				From: 2, To: 40,
+			},
+			want: sim.Command{
+				Session:  testSessionID,
+				Sequence: 21,
+				Kind:     sim.CommandMoveFurnaceStack,
+				Furnace: core.ContainerRef{
+					Dimension: core.Overworld, Chunk: core.ChunkPos{X: 3, Z: -2},
+					Kind: core.ContainerKindChest, Slot: 5, Generation: 9,
+				},
+				Slot:   2,
+				ToSlot: 40,
+			},
+		},
+		{
+			name:    "close container carries only the sequence",
+			message: network.CloseContainer{Sequence: 22},
+			want: sim.Command{
+				Session:  testSessionID,
+				Sequence: 22,
+				Kind:     sim.CommandCloseFurnace,
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

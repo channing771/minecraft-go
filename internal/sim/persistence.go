@@ -99,6 +99,19 @@ func (engine *Engine) PersistenceSnapshots(
 	return snapshots
 }
 
+// TouchChunkForTest 直接递增一个已加载区块的 revision，仅供测试把经由
+// SetChunkChestForTest/SetChunkFurnaceForTest 等原始状态覆写标记为脏，
+// 从而不必驱动真实命令即可验证持久化的保存/重试路径。
+func (engine *Engine) TouchChunkForTest(key core.ChunkKey) {
+	dimension := engine.dimensions[key.Dimension]
+	if dimension == nil {
+		return
+	}
+	if record, ok := dimension.records[key.Pos]; ok {
+		record.Revision++
+	}
+}
+
 func (engine *Engine) ApplyPersisted(acks []PersistedChunk) {
 	for _, ack := range acks {
 		dimension := engine.dimensions[ack.Key.Dimension]

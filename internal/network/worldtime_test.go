@@ -7,15 +7,15 @@ import (
 	"minecraft-go/internal/core"
 )
 
-func TestProtocolVersionIsEleven(t *testing.T) {
-	if ProtocolVersion != 11 {
-		t.Fatalf("协议版本 = %d，想要 11", ProtocolVersion)
+func TestProtocolVersionIsTwelve(t *testing.T) {
+	if ProtocolVersion != 12 {
+		t.Fatalf("协议版本 = %d，想要 12", ProtocolVersion)
 	}
 }
 
-func TestProtocolV11RejectsVersionTenBeforePlay(t *testing.T) {
-	// v10 是上一版本，必须和更早版本一样在 Handshake 阶段稳定拒绝。
-	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
+func TestProtocolV12RejectsPriorVersionsBeforePlay(t *testing.T) {
+	// v11 是上一版本，必须和更早版本一样在 Handshake 阶段稳定拒绝。
+	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} {
 		stream := &staticClientHelloStream{version: version}
 		if _, err := BeginServerLogin(t.Context(), stream); err == nil {
 			t.Fatalf("v%d ClientHello 被接受", version)
@@ -23,7 +23,7 @@ func TestProtocolV11RejectsVersionTenBeforePlay(t *testing.T) {
 		reject, ok := stream.sent.(HandshakeReject)
 		if !ok || reject.ServerProtocolVersion != ProtocolVersion ||
 			reject.Code != HandshakeVersionMismatch {
-			t.Fatalf("v%d 拒绝结果 = %#v，想要 v11 HandshakeReject", version, stream.sent)
+			t.Fatalf("v%d 拒绝结果 = %#v，想要 v12 HandshakeReject", version, stream.sent)
 		}
 	}
 }

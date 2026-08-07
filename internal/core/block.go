@@ -37,6 +37,7 @@ const (
 	IronOreID
 	FurnaceID
 	IronBlockID
+	ChestID
 )
 
 const (

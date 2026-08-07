@@ -22,9 +22,9 @@ func TestProtocolV7FurnacePacketIDsAreFrozen(t *testing.T) {
 		packet ClientPacket
 		id     uint32
 	}{
-		{StatePlay, OpenFurnace{}, 8},
-		{StatePlay, MoveFurnaceStack{}, 9},
-		{StatePlay, CloseFurnace{}, 10},
+		{StatePlay, OpenContainer{}, 8},
+		{StatePlay, MoveContainerStack{}, 9},
+		{StatePlay, CloseContainer{}, 10},
 	})
 	assertServerRegistry(t, []struct {
 		state  State
@@ -32,7 +32,7 @@ func TestProtocolV7FurnacePacketIDsAreFrozen(t *testing.T) {
 		id     uint32
 	}{
 		{StatePlay, FurnaceState{}, 13},
-		{StatePlay, FurnaceClosed{}, 14},
+		{StatePlay, ContainerClosed{}, 14},
 	})
 	if _, ok := clientPacketForID(StatePlay, 12); ok {
 		t.Fatal("unknown play client packet ID accepted")
@@ -40,23 +40,23 @@ func TestProtocolV7FurnacePacketIDsAreFrozen(t *testing.T) {
 	if _, ok := clientPacketForID(StatePlay, 1); ok {
 		t.Fatal("Play client packet ID 1 必须保持未分配")
 	}
-	if _, ok := serverPacketForID(StatePlay, 15); ok {
+	if _, ok := serverPacketForID(StatePlay, 16); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 }
 
-func TestProtocolV7FurnacePayloadsAreFixedLength(t *testing.T) {
+func TestProtocolV12ContainerPayloadsAreFixedLength(t *testing.T) {
 	ref := testFurnaceRef()
 	clients := []struct {
 		name   string
 		packet ClientPacket
 		bytes  int
 	}{
-		{"open", OpenFurnace{Sequence: 3, Yaw: 1.5, Pitch: -0.5}, 16},
-		{"move", MoveFurnaceStack{
-			Sequence: 4, Furnace: ref, From: 0, To: core.FurnaceInputSlot,
-		}, 27},
-		{"close", CloseFurnace{Sequence: 5}, 8},
+		{"open", OpenContainer{Sequence: 3, Yaw: 1.5, Pitch: -0.5}, 16},
+		{"move", MoveContainerStack{
+			Sequence: 4, Container: ref, From: 0, To: core.FurnaceInputSlot,
+		}, 28},
+		{"close", CloseContainer{Sequence: 5}, 8},
 	}
 	for _, tc := range clients {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,8 +89,8 @@ func TestProtocolV7FurnacePayloadsAreFixedLength(t *testing.T) {
 			Fuel:          core.ItemStack{Item: core.ItemCoal, Count: 2},
 			Output:        core.ItemStack{Item: core.ItemIronIngot, Count: 5},
 			ProgressTicks: 137, BurnTicks: 1463,
-		}, 35},
-		{"closed", FurnaceClosed{Furnace: ref}, 17},
+		}, 36},
+		{"closed", ContainerClosed{Container: ref}, 18},
 	}
 	for _, tc := range servers {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,24 +114,31 @@ func TestProtocolV7FurnacePayloadsAreFixedLength(t *testing.T) {
 func TestFurnaceMessagesRejectInvalidValues(t *testing.T) {
 	ref := testFurnaceRef()
 	clients := []ClientPacket{
-		OpenFurnace{Yaw: float32(math.NaN())},
-		OpenFurnace{Pitch: float32(math.Inf(1))},
-		MoveFurnaceStack{Furnace: ref, From: core.FurnaceViewSlots, To: 0},
-		MoveFurnaceStack{Furnace: ref, From: 0, To: core.FurnaceViewSlots},
-		MoveFurnaceStack{Furnace: ref, From: 3, To: 3},
+		OpenContainer{Yaw: float32(math.NaN())},
+		OpenContainer{Pitch: float32(math.Inf(1))},
+		MoveContainerStack{Container: ref, From: core.FurnaceViewSlots, To: 0},
+		MoveContainerStack{Container: ref, From: 0, To: core.FurnaceViewSlots},
+		MoveContainerStack{Container: ref, From: 3, To: 3},
 		// 输出格只能作为来源。
-		MoveFurnaceStack{Furnace: ref, From: 0, To: core.FurnaceOutputSlot},
+		MoveContainerStack{Container: ref, From: 0, To: core.FurnaceOutputSlot},
 		// generation 为 0 的引用永远不可能有效。
-		MoveFurnaceStack{Furnace: core.FurnaceRef{Dimension: core.Overworld}, From: 0, To: 36},
+		MoveContainerStack{Container: core.FurnaceRef{Dimension: core.Overworld}, From: 0, To: 36},
 		// 非 Overworld 维度。
-		MoveFurnaceStack{
-			Furnace: core.FurnaceRef{Dimension: core.DimensionID(1), Generation: 1},
-			From:    0, To: 36,
+		MoveContainerStack{
+			Container: core.FurnaceRef{Dimension: core.DimensionID(1), Generation: 1},
+			From:      0, To: 36,
 		},
 		// 槽位越界。
-		MoveFurnaceStack{
-			Furnace: core.FurnaceRef{
+		MoveContainerStack{
+			Container: core.FurnaceRef{
 				Dimension: core.Overworld, Slot: core.FurnacesPerChunk, Generation: 1,
+			},
+			From: 0, To: 36,
+		},
+		// 未知容器种类。
+		MoveContainerStack{
+			Container: core.ContainerRef{
+				Dimension: core.Overworld, Kind: core.ContainerKind(2), Generation: 1,
 			},
 			From: 0, To: 36,
 		},
@@ -151,7 +158,14 @@ func TestFurnaceMessagesRejectInvalidValues(t *testing.T) {
 		FurnaceState{Furnace: ref, Fuel: core.ItemStack{Durability: 1}},
 		FurnaceState{Furnace: ref, ProgressTicks: core.FurnaceSmeltTicks},
 		FurnaceState{Furnace: ref, BurnTicks: core.FurnaceBurnTicks + 1},
-		FurnaceClosed{Furnace: core.FurnaceRef{Dimension: core.Overworld}},
+		// 熔炉专属消息必须拒绝箱子种类的引用。
+		FurnaceState{Furnace: core.ContainerRef{
+			Dimension: core.Overworld, Kind: core.ContainerKindChest, Slot: 1, Generation: 1,
+		}},
+		ContainerClosed{Container: core.FurnaceRef{Dimension: core.Overworld}},
+		ContainerClosed{Container: core.ContainerRef{
+			Dimension: core.Overworld, Kind: core.ContainerKind(2), Generation: 1,
+		}},
 	}
 	for _, packet := range servers {
 		if _, _, err := encodeServerControlPayload(StatePlay, packet); err == nil {
@@ -162,9 +176,9 @@ func TestFurnaceMessagesRejectInvalidValues(t *testing.T) {
 
 func TestFurnaceDecodeRejectsUnknownWireValues(t *testing.T) {
 	ref := testFurnaceRef()
-	moveID, _ := clientPacketID(StatePlay, MoveFurnaceStack{})
-	_, payload, err := encodeClientPacketPayload(StatePlay, MoveFurnaceStack{
-		Sequence: 1, Furnace: ref, From: 0, To: core.FurnaceInputSlot,
+	moveID, _ := clientPacketID(StatePlay, MoveContainerStack{})
+	_, payload, err := encodeClientPacketPayload(StatePlay, MoveContainerStack{
+		Sequence: 1, Container: ref, From: 0, To: core.FurnaceInputSlot,
 	})
 	if err != nil {
 		t.Fatal(err)

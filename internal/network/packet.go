@@ -7,8 +7,8 @@ import (
 	"minecraft-go/internal/core"
 )
 
-// ProtocolVersion 是 M4J 唯一支持的协议版本。
-const ProtocolVersion uint32 = 11
+// ProtocolVersion 是 M4K 唯一支持的协议版本。
+const ProtocolVersion uint32 = 12
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -155,11 +155,11 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 			return clientPacket.Validate()
 		case CraftRecipe:
 			return clientPacket.Validate()
-		case OpenFurnace:
+		case OpenContainer:
 			return clientPacket.Validate()
-		case MoveFurnaceStack:
+		case MoveContainerStack:
 			return clientPacket.Validate()
-		case CloseFurnace:
+		case CloseContainer:
 			return clientPacket.Validate()
 		case DropSelectedItem:
 			return clientPacket.Validate()
@@ -247,7 +247,9 @@ func ValidateServerPacket(state State, packet ServerPacket) error {
 			return serverPacket.Validate()
 		case FurnaceState:
 			return serverPacket.Validate()
-		case FurnaceClosed:
+		case ChestState:
+			return serverPacket.Validate()
+		case ContainerClosed:
 			return serverPacket.Validate()
 		default:
 			return invalidServerPacket(state, packet)

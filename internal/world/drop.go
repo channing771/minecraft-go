@@ -107,13 +107,17 @@ func (c *Chunk) DropsHash() [sha256.Size]byte {
 	return sum
 }
 
-// PrepareDropBatch 在掉落物数组副本上按顺序完整放入最多四个堆，
-// 任何一堆放不下都返回 false 且不修改区块，供破坏熔炉等原子操作预演。
+// PrepareDropBatch 在掉落物数组副本上按顺序完整放入调用方提供的堆，
+// 调用方必须传入自身固定数组的切片；堆数超过 1+core.ChestSlots（箱子本体加 27 格的最坏情形）
+// 或任何一堆放不下都返回 false 且不修改区块，供破坏熔炉、箱子等原子操作预演。
 func (c *Chunk) PrepareDropBatch(
-	stacks [4]core.ItemStack,
+	stacks []core.ItemStack,
 	blockIndex uint32,
 	pickupDelay uint8,
 ) ([core.DropsPerChunk]DropSlot, bool) {
+	if len(stacks) > 1+core.ChestSlots {
+		return c.drops, false
+	}
 	next := c.drops
 	for _, stack := range stacks {
 		if stack == (core.ItemStack{}) {

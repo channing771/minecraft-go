@@ -16,6 +16,7 @@ type chunkDTO struct {
 	Sections [core.SectionsPerChunk]world.ContainerSnapshot
 	Drops    [core.DropsPerChunk]world.DropSlot
 	Furnaces [core.FurnacesPerChunk]world.FurnaceSlot
+	Chests   [core.ChestsPerChunk]world.ChestSlot
 }
 
 type chunkMigration func(chunkDTO) (chunkDTO, error)
@@ -39,6 +40,11 @@ var chunkMigrations = map[uint32]chunkMigration{
 			dto.Drops[slot].Stack = fillFullDurability(dto.Drops[slot].Stack)
 		}
 		return normalizeV4LegacyToolDropStacks(dto)
+	},
+	// v5 没有箱子负载，确定性迁移为全部空槽。
+	5: func(dto chunkDTO) (chunkDTO, error) {
+		dto.Chests = [core.ChestsPerChunk]world.ChestSlot{}
+		return dto, nil
 	},
 }
 

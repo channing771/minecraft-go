@@ -172,7 +172,7 @@ func TestPrepareDropBatchCommitsAllOrNothing(t *testing.T) {
 		{Item: core.ItemIronIngot, Count: 1},
 	}
 
-	next, ok := chunk.PrepareDropBatch(stacks, index, 10)
+	next, ok := chunk.PrepareDropBatch(stacks[:], index, 10)
 	if !ok {
 		t.Fatal("空区块无法容纳四堆掉落物")
 	}
@@ -209,7 +209,7 @@ func TestPrepareDropBatchFailsWithoutMutating(t *testing.T) {
 
 	index := furnaceChunkIndex(t, chunk.Pos, 1, 2, 3)
 	stacks := [4]core.ItemStack{{Item: core.ItemFurnace, Count: 1}}
-	if _, ok := chunk.PrepareDropBatch(stacks, index, 10); ok {
+	if _, ok := chunk.PrepareDropBatch(stacks[:], index, 10); ok {
 		t.Fatal("满掉落物槽仍接受批量掉落")
 	}
 	if chunk.DropsHash() != before {
@@ -232,7 +232,7 @@ func TestPrepareDropBatchMergesAndIgnoresEmptyStacks(t *testing.T) {
 		{Item: core.ItemRawIron, Count: 1},
 		{},
 	}
-	next, ok := chunk.PrepareDropBatch(stacks, index, 0)
+	next, ok := chunk.PrepareDropBatch(stacks[:], index, 0)
 	if !ok {
 		t.Fatal("可合并的批量掉落被拒绝")
 	}

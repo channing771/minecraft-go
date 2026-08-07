@@ -14,6 +14,8 @@ const (
 	RecipeStonePickaxe
 	// RecipeIronPickaxe 用 3 个铁锭合成 1 个铁镐。
 	RecipeIronPickaxe
+	// RecipeChest 用 8 个石头合成 1 个箱子。
+	RecipeChest
 )
 
 // CraftingRecipe 是一条固定的单输入、单输出配方。
@@ -49,6 +51,11 @@ func Recipe(id RecipeID) (CraftingRecipe, bool) {
 		return CraftingRecipe{
 			Input:  ItemStack{Item: ItemIronIngot, Count: 3},
 			Output: ItemStack{Item: ItemIronPickaxe, Count: 1, Durability: 250},
+		}, true
+	case RecipeChest:
+		return CraftingRecipe{
+			Input:  ItemStack{Item: ItemStone, Count: 8},
+			Output: ItemStack{Item: ItemChest, Count: 1},
 		}, true
 	default:
 		return CraftingRecipe{}, false

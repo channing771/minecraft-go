@@ -21,6 +21,8 @@ const (
 	// 插入会平移后续物品 ID，破坏既有存档与线上字节。
 	ItemBrokenStonePickaxe
 	ItemBrokenIronPickaxe
+	// ItemChest 是可堆叠的存储方块物品，没有耐久。
+	ItemChest
 )
 
 const (
@@ -137,6 +139,8 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 		return ItemFurnace, true
 	case IronBlockID:
 		return ItemIronBlock, true
+	case ChestID:
+		return ItemChest, true
 	default:
 		return ItemNone, false
 	}
@@ -146,7 +150,7 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 func ItemStackLimit(item ItemID) (uint8, bool) {
 	switch item {
 	case ItemStone, ItemDirt, ItemGrass, ItemStoneBrick, ItemCoal,
-		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock:
+		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock, ItemChest:
 		return MaxStackCount, true
 	case ItemStonePickaxe, ItemIronPickaxe,
 		ItemBrokenStonePickaxe, ItemBrokenIronPickaxe:
@@ -202,6 +206,8 @@ func ItemPlacement(item ItemID) (BlockID, bool) {
 		return FurnaceID, true
 	case ItemIronBlock:
 		return IronBlockID, true
+	case ItemChest:
+		return ChestID, true
 	default:
 		return AirID, false
 	}

@@ -94,57 +94,67 @@ func (command CraftRecipe) Validate() error {
 	return nil
 }
 
-// OpenFurnace 请求打开视线内的熔炉；服务端用权威射线验证距离与目标方块。
-type OpenFurnace struct {
+// OpenContainer 请求打开视线内的容器；服务端用权威射线验证距离与目标方块，
+// 并自行判定命中的是熔炉还是箱子——客户端没有可信信息可以声明容器种类。
+type OpenContainer struct {
 	Sequence   uint64
 	Yaw, Pitch float32
 }
 
-func (OpenFurnace) clientMessage() {}
-func (OpenFurnace) clientPacket()  {}
+func (OpenContainer) clientMessage() {}
+func (OpenContainer) clientPacket()  {}
 
-func (command OpenFurnace) Validate() error {
+func (command OpenContainer) Validate() error {
 	if !finite32(command.Yaw) || !finite32(command.Pitch) {
-		return errors.New("network: open furnace has non-finite rotation")
+		return errors.New("network: open container has non-finite rotation")
 	}
 	return nil
 }
 
-// MoveFurnaceStack 请求在统一栏位 0..38 之间整堆移动；输出格只能作为来源。
-type MoveFurnaceStack struct {
-	Sequence uint64
-	Furnace  core.FurnaceRef
-	From, To uint8
+// MoveContainerStack 请求在容器的统一栏位之间整堆移动；统一栏位的上限与
+// 额外限制由 Container.Kind 决定：熔炉是 0..38 且输出格只能作为来源，
+// 箱子是 0..62 且没有额外限制。
+type MoveContainerStack struct {
+	Sequence  uint64
+	Container core.ContainerRef
+	From, To  uint8
 }
 
-func (MoveFurnaceStack) clientMessage() {}
-func (MoveFurnaceStack) clientPacket()  {}
+func (MoveContainerStack) clientMessage() {}
+func (MoveContainerStack) clientPacket()  {}
 
-func (command MoveFurnaceStack) Validate() error {
-	if err := validFurnaceRef(command.Furnace); err != nil {
+func (command MoveContainerStack) Validate() error {
+	if err := validAnyContainerRef(command.Container); err != nil {
 		return err
 	}
-	if command.From >= core.FurnaceViewSlots || command.To >= core.FurnaceViewSlots {
-		return errors.New("network: furnace move slot is outside 0..38")
-	}
 	if command.From == command.To {
-		return errors.New("network: furnace move source equals target")
+		return errors.New("network: container move source equals target")
 	}
-	if command.To == core.FurnaceOutputSlot {
-		return errors.New("network: furnace output slot cannot be a move target")
+	switch command.Container.Kind {
+	case core.ContainerKindFurnace:
+		if command.From >= core.FurnaceViewSlots || command.To >= core.FurnaceViewSlots {
+			return errors.New("network: furnace move slot is outside 0..38")
+		}
+		if command.To == core.FurnaceOutputSlot {
+			return errors.New("network: furnace output slot cannot be a move target")
+		}
+	case core.ContainerKindChest:
+		if command.From >= core.ChestViewSlots || command.To >= core.ChestViewSlots {
+			return errors.New("network: chest move slot is outside 0..62")
+		}
 	}
 	return nil
 }
 
-// CloseFurnace 结束当前会话的查看关系。
-type CloseFurnace struct {
+// CloseContainer 结束当前会话的容器查看关系。
+type CloseContainer struct {
 	Sequence uint64
 }
 
-func (CloseFurnace) clientMessage() {}
-func (CloseFurnace) clientPacket()  {}
+func (CloseContainer) clientMessage() {}
+func (CloseContainer) clientPacket()  {}
 
-func (CloseFurnace) Validate() error { return nil }
+func (CloseContainer) Validate() error { return nil }
 
 // FurnaceState 是服务端发给当前查看者的完整熔炉状态。
 type FurnaceState struct {
@@ -174,20 +184,45 @@ func (state FurnaceState) Validate() error {
 	return nil
 }
 
-// FurnaceClosed 通知客户端当前查看的熔炉已经失效。
-type FurnaceClosed struct {
-	Furnace core.FurnaceRef
+// ChestState 是服务端发给当前查看者的完整箱子状态：容器引用加 27 个固定格子。
+// 箱子格接受任何已注册物品，因此校验只需要 ItemStack.Valid。
+type ChestState struct {
+	Chest core.ContainerRef
+	Items [core.ChestSlots]core.ItemStack
 }
 
-func (FurnaceClosed) serverMessage() {}
-func (FurnaceClosed) serverPacket()  {}
+func (ChestState) serverMessage() {}
+func (ChestState) serverPacket()  {}
 
-func (closed FurnaceClosed) Validate() error {
-	return validFurnaceRef(closed.Furnace)
+func (state ChestState) Validate() error {
+	if err := validChestRef(state.Chest); err != nil {
+		return err
+	}
+	for _, stack := range state.Items {
+		if !stack.Valid() {
+			return errors.New("network: chest slot holds an invalid item stack")
+		}
+	}
+	return nil
 }
 
-// validFurnaceRef 检查熔炉引用的固定字段范围。
+// ContainerClosed 通知客户端当前查看的容器已经失效，熔炉与箱子共用同一失效通知。
+type ContainerClosed struct {
+	Container core.ContainerRef
+}
+
+func (ContainerClosed) serverMessage() {}
+func (ContainerClosed) serverPacket()  {}
+
+func (closed ContainerClosed) Validate() error {
+	return validAnyContainerRef(closed.Container)
+}
+
+// validFurnaceRef 检查熔炉引用的种类与固定字段范围。
 func validFurnaceRef(ref core.FurnaceRef) error {
+	if ref.Kind != core.ContainerKindFurnace {
+		return errors.New("network: furnace ref kind is not furnace")
+	}
 	if ref.Dimension != core.Overworld {
 		return errors.New("network: furnace dimension is not overworld")
 	}
@@ -198,6 +233,36 @@ func validFurnaceRef(ref core.FurnaceRef) error {
 		return errors.New("network: furnace generation is zero")
 	}
 	return nil
+}
+
+// validChestRef 检查箱子引用的种类与固定字段范围。
+func validChestRef(ref core.ContainerRef) error {
+	if ref.Kind != core.ContainerKindChest {
+		return errors.New("network: chest ref kind is not chest")
+	}
+	if ref.Dimension != core.Overworld {
+		return errors.New("network: chest dimension is not overworld")
+	}
+	if ref.Slot >= core.ChestsPerChunk {
+		return errors.New("network: chest slot is outside 0..15")
+	}
+	if ref.Generation == 0 {
+		return errors.New("network: chest generation is zero")
+	}
+	return nil
+}
+
+// validAnyContainerRef 校验容器中性消息携带的引用：Kind 必须是已知的熔炉或箱子之一，
+// 未知种类（包含既有协议之外伪造的枚举值）一律拒绝。
+func validAnyContainerRef(ref core.ContainerRef) error {
+	switch ref.Kind {
+	case core.ContainerKindFurnace:
+		return validFurnaceRef(ref)
+	case core.ContainerKindChest:
+		return validChestRef(ref)
+	default:
+		return errors.New("network: unknown container kind")
+	}
 }
 
 // validFurnaceStack 报告某个熔炉格是否为空或恰好装着允许的物品。
@@ -403,18 +468,18 @@ func (state PlayerState) Validate() error {
 type RejectReason string
 
 const (
-	RejectInvalidRay      RejectReason = "invalid_ray"
-	RejectNoTarget        RejectReason = "no_target"
-	RejectChunkNotReady   RejectReason = "chunk_not_ready"
-	RejectProtectedBlock  RejectReason = "protected_block"
-	RejectInvalidBlock    RejectReason = "invalid_block"
-	RejectOccupied        RejectReason = "occupied"
-	RejectInvalidInput    RejectReason = "invalid_input"
-	RejectPlayerNotReady  RejectReason = "player_not_ready"
-	RejectInvalidSlot     RejectReason = "invalid_slot"
-	RejectHotbarFull      RejectReason = "hotbar_full"
-	RejectDropCapacity    RejectReason = "drop_capacity"
-	RejectFurnaceCapacity RejectReason = "furnace_capacity"
+	RejectInvalidRay        RejectReason = "invalid_ray"
+	RejectNoTarget          RejectReason = "no_target"
+	RejectChunkNotReady     RejectReason = "chunk_not_ready"
+	RejectProtectedBlock    RejectReason = "protected_block"
+	RejectInvalidBlock      RejectReason = "invalid_block"
+	RejectOccupied          RejectReason = "occupied"
+	RejectInvalidInput      RejectReason = "invalid_input"
+	RejectPlayerNotReady    RejectReason = "player_not_ready"
+	RejectInvalidSlot       RejectReason = "invalid_slot"
+	RejectHotbarFull        RejectReason = "hotbar_full"
+	RejectDropCapacity      RejectReason = "drop_capacity"
+	RejectContainerCapacity RejectReason = "container_capacity"
 )
 
 type CommandRejected struct {

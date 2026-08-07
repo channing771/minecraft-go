@@ -538,8 +538,8 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	}
 	firstHost.WaitPlayerReleased(t, secondIdentity.PlayerID)
 	firstHost.Shutdown(t)
-	if schema := integrationStoredChunkSchema(t, root, key); schema != 5 {
-		t.Fatalf("正常刷新后的区块 schema=%d，想要 5", schema)
+	if schema := integrationStoredChunkSchema(t, root, key); schema != 6 {
+		t.Fatalf("正常刷新后的区块 schema=%d，想要 6", schema)
 	}
 
 	secondHost := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})
@@ -1765,6 +1765,11 @@ func rewriteIntegrationChunkSchema(t *testing.T, root string, key core.ChunkKey,
 		t.Fatal(err)
 	}
 	binary.LittleEndian.PutUint32(logical[4:], schema)
+	// 逻辑负载末尾是固定长度的箱子槽；标注为 v5 之前的 schema 时必须先截掉，
+	// 否则后续基于“末尾是熔炉+掉落物”的偏移计算会算错位置。
+	if schema < 6 {
+		logical = logical[:len(logical)-core.ChestsPerChunk*world.ChestSlotBytes]
+	}
 	// schema v4 及更早的掉落物槽没有 Durability；当前 v5 槽的 offset 8:10
 	// 是耐久字段，按固定槽顺序原地删除后才能交给旧 decoder。
 	if schema < 5 {
@@ -1883,10 +1888,10 @@ func TestFurnaceSharedByTwoPlayersOverTCP(t *testing.T) {
 	})
 
 	// 两名玩家同时打开同一个熔炉。
-	sendIntegration(t, firstClient.Endpoint, network.OpenFurnace{
+	sendIntegration(t, firstClient.Endpoint, network.OpenContainer{
 		Sequence: 10, Pitch: -float32(math.Pi)/2 + 0.01,
 	})
-	sendIntegration(t, secondClient.Endpoint, network.OpenFurnace{
+	sendIntegration(t, secondClient.Endpoint, network.OpenContainer{
 		Sequence: 10, Pitch: -float32(math.Pi)/2 + 0.01,
 	})
 	firstRef := waitFurnaceState(t, firstClient, func(network.FurnaceState) bool { return true })
@@ -1903,8 +1908,8 @@ func TestFurnaceSharedByTwoPlayersOverTCP(t *testing.T) {
 	waitFurnaceState(t, secondClient, produced)
 
 	// 第一名玩家取走输出后，另一名玩家必须看到输出为空。
-	sendIntegration(t, firstClient.Endpoint, network.MoveFurnaceStack{
-		Sequence: 11, Furnace: firstRef.Furnace,
+	sendIntegration(t, firstClient.Endpoint, network.MoveContainerStack{
+		Sequence: 11, Container: firstRef.Furnace,
 		From: core.FurnaceOutputSlot, To: 0,
 	})
 	emptied := func(state network.FurnaceState) bool {
@@ -1915,8 +1920,8 @@ func TestFurnaceSharedByTwoPlayersOverTCP(t *testing.T) {
 	// 旧 generation 的引用必须稳定拒绝。
 	stale := firstRef.Furnace
 	stale.Generation++
-	sendIntegration(t, secondClient.Endpoint, network.MoveFurnaceStack{
-		Sequence: 12, Furnace: stale, From: 0, To: core.FurnaceInputSlot,
+	sendIntegration(t, secondClient.Endpoint, network.MoveContainerStack{
+		Sequence: 12, Container: stale, From: 0, To: core.FurnaceInputSlot,
 	})
 	waitIntegrationRejection(t, secondClient, 12, network.RejectInvalidInput)
 
