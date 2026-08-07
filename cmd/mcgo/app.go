@@ -33,6 +33,8 @@ type applicationOptions struct {
 	WorldPath          string
 	Connect            string
 	Identity           *network.Identity
+	// CaptureDir 非空时进入视觉抓帧模式：走无头设备，按固定场景抓帧写 PNG。
+	CaptureDir string
 }
 
 type application struct {
@@ -260,7 +262,10 @@ func openApplicationStore(
 		SpawnDimension: core.Overworld,
 		SpawnAnchor:    core.ChunkPos{},
 	}
-	if options.Benchmark {
+	// benchmark 与 capture 都要求世界状态与本机磁盘上的真实存档隔离：
+	// benchmark 为了性能测量不被磁盘 I/O 干扰，capture 为了抓帧结果不随
+	// "这台机器碰巧玩到哪一步"漂移——两者都复用内存 store 达成确定性初始状态。
+	if options.Benchmark || options.CaptureDir != "" {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -377,17 +382,28 @@ func newApplicationWithDependencies(
 	var colorView gfx.TextureView
 	var colorFormat gfx.TextureFormat
 	width, height := 2560, 1440
-	if options.Benchmark {
+	headless := options.Benchmark || options.CaptureDir != ""
+	if options.CaptureDir != "" {
+		width, height = captureWidth, captureHeight
+	}
+	if headless {
 		dev, err = dependencies.newHeadlessDevice()
 		colorFormat = gfx.FormatBGRA8UnormSrgb
 		if err == nil {
+			// CopySrc 是抓帧回读的前提；benchmark 不回读，只在抓帧模式下才加这个
+			// usage 位——spec 要求"不得因抓帧能力的存在产生任何额外的渲染或读回
+			// 开销"，按构造为真好过口头论证"反正零成本"。
+			usage := gfx.TextureUsageRenderTarget
+			if options.CaptureDir != "" {
+				usage |= gfx.TextureUsageCopySrc
+			}
 			color = dev.CreateTexture(gfx.TextureDesc{
-				Label:     "benchmark offscreen color",
+				Label:     "headless offscreen color",
 				Width:     uint32(width),
 				Height:    uint32(height),
 				Format:    colorFormat,
 				Dimension: gfx.TextureDimension2D,
-				Usage:     gfx.TextureUsageRenderTarget,
+				Usage:     usage,
 			})
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}

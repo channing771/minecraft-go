@@ -120,6 +120,22 @@ go run ./cmd/mcgod --listen :25565 --world worlds/lan --seed 42 --max-players 8
 go run ./cmd/mcgo --connect 127.0.0.1:25565 --name 玩家甲
 ```
 
+## 视觉验证
+
+`--capture <目录>` 让 `mcgo` 走无头 offscreen 路径，依次跑完 `cmd/mcgo/capture.go` 里表驱动的固定场景（`terrain-noon`、`hud-hotbar-health`、`avatar-nametag`），把每张 640×360 PNG 与 `cmd/mcgo/testdata/golden/` 下的基线比对。比对用双阈值（单像素最大通道差、差异像素占比，定义见 `cmd/mcgo/visual_compare.go`），两项都在阈值内才算通过；具体数值与实测漂移分布见[视觉验证设计文档](docs/superpowers/specs/2026-08-07-visual-verification-design.md) §6。
+
+```bash
+make visual-check              # 抓帧并与基线比对，输出目录默认 build/visual
+VISUAL_OUT=/tmp/shots make visual-check   # 自定义输出目录
+make visual-update             # 重新生成基线，写入 cmd/mcgo/testdata/golden/
+```
+
+比对失败时，实拍图与差异图（差异像素涂红，其余像素按基线压暗）会写进输出目录的 `<场景>-actual.png` 与 `<场景>-diff.png`，供人眼定位问题区域。
+
+**什么时候该跑 `make visual-update`**：只在渲染行为**有意**改变、且已经人工打开新产出的 PNG 确认画面正确之后。golden 基线一旦冻错，后续所有比对都在维护一个错误的基线。
+
+**什么时候不该跑**：比对红了但看不出改动位置或原因、又或者只是想让门禁通过。红灯是要查的信号，不是要覆盖的噪声——`internal/render`、`internal/gfx` 或 shader 相关改动的评审必须实际打开差异图，不能只看比对器的数值结论。视觉验证暂不接入 `go test ./...` 或 CI（需要 GPU，且尚未在共享 runner 上积累稳定性数据），只作为本地 make target 与人工评审步骤存在。
+
 ## 项目结构
 
 ```text

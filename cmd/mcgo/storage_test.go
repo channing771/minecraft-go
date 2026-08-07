@@ -54,6 +54,27 @@ func TestApplicationStoreBenchmarkUsesMemoryWithoutTouchingWorldPath(t *testing.
 	}
 }
 
+func TestApplicationStoreCaptureUsesMemoryWithoutTouchingWorldPath(t *testing.T) {
+	worldPath := filepath.Join(t.TempDir(), "must-not-exist")
+	opened, err := openApplicationStore(context.Background(), applicationOptions{
+		Seed:       42,
+		CaptureDir: filepath.Join(t.TempDir(), "shots"),
+		WorldPath:  worldPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := opened.(*storage.MemoryStore); !ok {
+		t.Fatalf("capture store=%T，想要 *storage.MemoryStore", opened)
+	}
+	if err := opened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worldPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("capture 触碰了 WorldPath，Stat error=%v", err)
+	}
+}
+
 func TestApplicationConnectionRemoteNeverOpensLocalStore(t *testing.T) {
 	worldPath := filepath.Join(t.TempDir(), "must-not-exist")
 	opened, err := openApplicationStore(context.Background(), applicationOptions{

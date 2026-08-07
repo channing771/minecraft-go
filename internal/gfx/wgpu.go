@@ -85,6 +85,7 @@ func toTextureUsage(u TextureUsage) wgpu.TextureUsage {
 		TextureUsageRenderTarget: wgpu.TextureUsageRenderAttachment,
 		TextureUsageCopyDst:      wgpu.TextureUsageCopyDst,
 		TextureUsageStorage:      wgpu.TextureUsageStorageBinding,
+		TextureUsageCopySrc:      wgpu.TextureUsageCopySrc,
 	} {
 		if u&gfxBit != 0 {
 			out |= wgpuBit
@@ -1044,6 +1045,83 @@ func (t *wgpuTexture) WriteRegion(layer, mip, x, y, width, height uint32, pixels
 		},
 		&wgpu.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
 	))
+}
+
+// ReadLayer 按 WebGPU 的规矩绕一次 staging buffer，并把填充后的行距紧缩回
+// 宽 × 每像素字节。CopyTextureToBuffer 要求 BytesPerRow 按
+// wgpu.CopyBytesPerRowAlignment 对齐，因此除非行距恰好落在边界上，
+// 否则底层缓冲每行都带尾部填充，必须逐行拷出。
+func (t *wgpuTexture) ReadLayer(layer, mip uint32) []byte {
+	if layer >= t.layers {
+		panic(fmt.Errorf("gfx: layer %d 超出纹理层数 %d", layer, t.layers))
+	}
+	if mip >= t.mipLevels {
+		panic(fmt.Errorf("gfx: mip %d 超出纹理 mip 数 %d", mip, t.mipLevels))
+	}
+	bytesPerPixel := t.format.ByteSize()
+	if bytesPerPixel == 0 {
+		panic(fmt.Errorf("gfx: 格式 %v 的每像素字节数未知，无法回读", t.format))
+	}
+	width := mipSize(t.width, mip)
+	height := mipSize(t.height, mip)
+	tightRow := width * bytesPerPixel
+	const align = wgpu.CopyBytesPerRowAlignment
+	paddedRow := (tightRow + align - 1) / align * align
+	size := uint64(paddedRow) * uint64(height)
+
+	dev := t.device
+	staging := must(dev.device.TryCreateBuffer(&wgpu.BufferDescriptor{
+		Label: "gfx texture readback staging",
+		Size:  size,
+		Usage: wgpu.BufferUsageMapRead | wgpu.BufferUsageCopyDst,
+	}))
+	defer staging.Release()
+
+	encoder := must(dev.device.TryCreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
+		Label: "gfx texture readback encoder",
+	}))
+	defer encoder.Release()
+	check(encoder.TryCopyTextureToBuffer(
+		&wgpu.TexelCopyTextureInfo{
+			Texture:  t.texture,
+			MipLevel: mip,
+			Origin:   wgpu.Origin3D{Z: layer},
+			Aspect:   wgpu.TextureAspectAll,
+		},
+		&wgpu.TexelCopyBufferInfo{
+			Buffer: staging,
+			Layout: wgpu.TexelCopyBufferLayout{
+				BytesPerRow:  paddedRow,
+				RowsPerImage: height,
+			},
+		},
+		&wgpu.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
+	))
+
+	cmd := must(encoder.TryFinish(nil))
+	defer cmd.Release()
+	dev.queue.Submit(cmd)
+
+	// MapAsync 的回调由 Poll 驱动；Poll(true) 会一直转到队列清空。
+	status := wgpu.MapAsyncStatusError
+	check(staging.TryMapAsync(wgpu.MapModeRead, 0, size, func(s wgpu.MapAsyncStatus) {
+		status = s
+	}))
+	dev.device.Poll(true, nil)
+	if status != wgpu.MapAsyncStatusSuccess {
+		panic(fmt.Errorf("gfx: 映射纹理 staging buffer 失败: %v", status))
+	}
+
+	// GetMappedRange 返回的是映射内存上的视图，Unmap 之后就失效，必须拷出来。
+	mapped := staging.GetMappedRange(0, uint(size))
+	out := make([]byte, uint64(tightRow)*uint64(height))
+	for row := uint32(0); row < height; row++ {
+		src := uint64(row) * uint64(paddedRow)
+		dst := uint64(row) * uint64(tightRow)
+		copy(out[dst:dst+uint64(tightRow)], mapped[src:src+uint64(tightRow)])
+	}
+	check(staging.TryUnmap())
+	return out
 }
 
 func mipSize(size, mip uint32) uint32 {

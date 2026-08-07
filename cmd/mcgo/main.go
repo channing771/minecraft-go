@@ -36,6 +36,11 @@ type mainOptions struct {
 	Application   applicationOptions
 	PerfOutput    string
 	RequestedName *string
+	CaptureDir    string
+	// UpdateGolden 为真时，抓帧结果写入 golden 基线而不是与之比对。
+	// 与 applicationOptions 无关：它只影响 runCapture 的行为，从
+	// runWithDependencies 直接传给 dependencies.runCapture。
+	UpdateGolden bool
 }
 
 type runDependencies struct {
@@ -43,6 +48,7 @@ type runDependencies struct {
 	loadIdentity   func(*string) (network.Identity, error)
 	runInteractive func(*application) error
 	runBenchmark   func(*application, string) error
+	runCapture     func(*application, string, bool) error
 }
 
 func parseMainOptions(args []string) (mainOptions, error) {
@@ -54,6 +60,8 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	worldPath := flags.String("world", "worlds/default", "世界存档目录")
 	connect := flags.String("connect", "", "远程 TCP 服务器地址")
 	name := flags.String("name", "", "玩家显示名")
+	capture := flags.String("capture", "", "视觉抓帧输出目录；非空时走无头抓帧模式")
+	updateGolden := flags.Bool("update-golden", false, "把本次抓帧结果写入 golden 基线")
 	if err := flags.Parse(args); err != nil {
 		return mainOptions{}, err
 	}
@@ -62,6 +70,15 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	}
 	if *benchmark && *perfOutput == "" {
 		return mainOptions{}, errors.New("--benchmark 必须同时提供 --perf-output")
+	}
+	if *capture != "" && *benchmark {
+		return mainOptions{}, errors.New("--capture 不能与 --benchmark 同时使用")
+	}
+	if *capture != "" && *connect != "" {
+		return mainOptions{}, errors.New("--capture 不能与 --connect 同时使用")
+	}
+	if *updateGolden && *capture == "" {
+		return mainOptions{}, errors.New("--update-golden 只能与 --capture 同时使用")
 	}
 	var worldExplicit, nameExplicit, benchmarkTransportExplicit bool
 	flags.Visit(func(flag *flag.Flag) {
@@ -95,6 +112,7 @@ func parseMainOptions(args []string) (mainOptions, error) {
 			BenchmarkTransport: *benchmarkTransport,
 			WorldPath:          *worldPath,
 			Connect:            *connect,
+			CaptureDir:         *capture,
 		},
 		PerfOutput: *perfOutput,
 		RequestedName: func() *string {
@@ -103,6 +121,8 @@ func parseMainOptions(args []string) (mainOptions, error) {
 			}
 			return nil
 		}(),
+		CaptureDir:   *capture,
+		UpdateGolden: *updateGolden,
 	}, nil
 }
 
@@ -112,6 +132,7 @@ func run(args []string) error {
 		loadIdentity:   loadApplicationIdentity,
 		runInteractive: runInteractive,
 		runBenchmark:   runBenchmark,
+		runCapture:     runCapture,
 	})
 }
 
@@ -130,6 +151,13 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 	app, err := dependencies.newApplication(options.Application)
 	if err != nil {
 		return fmt.Errorf("启动失败: %w", err)
+	}
+
+	if options.CaptureDir != "" {
+		return errors.Join(
+			dependencies.runCapture(app, options.CaptureDir, options.UpdateGolden),
+			app.Close(),
+		)
 	}
 
 	var runErr error

@@ -536,7 +536,8 @@ func (t *glyphTestTexture) WriteRegion(layer, mip, x, y, width, height uint32, p
 	defer t.mu.Unlock()
 	t.writes = append(t.writes, glyphTestWrite{layer, mip, x, y, width, height, append([]byte(nil), pixels...)})
 }
-func (t *glyphTestTexture) Release() { t.releaseCalls.Add(1) }
+func (t *glyphTestTexture) ReadLayer(uint32, uint32) []byte { return nil }
+func (t *glyphTestTexture) Release()                        { t.releaseCalls.Add(1) }
 func (t *glyphTestTexture) snapshotWrites() []glyphTestWrite {
 	t.mu.Lock()
 	defer t.mu.Unlock()
