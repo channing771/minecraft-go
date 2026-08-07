@@ -379,17 +379,23 @@ func newApplicationWithDependencies(
 	var colorView gfx.TextureView
 	var colorFormat gfx.TextureFormat
 	width, height := 2560, 1440
-	if options.Benchmark {
+	headless := options.Benchmark || options.CaptureDir != ""
+	if options.CaptureDir != "" {
+		width, height = captureWidth, captureHeight
+	}
+	if headless {
 		dev, err = dependencies.newHeadlessDevice()
 		colorFormat = gfx.FormatBGRA8UnormSrgb
 		if err == nil {
 			color = dev.CreateTexture(gfx.TextureDesc{
-				Label:     "benchmark offscreen color",
+				Label:     "headless offscreen color",
 				Width:     uint32(width),
 				Height:    uint32(height),
 				Format:    colorFormat,
 				Dimension: gfx.TextureDimension2D,
-				Usage:     gfx.TextureUsageRenderTarget,
+				// CopySrc 是抓帧回读的前提；benchmark 不回读，但共用一张纹理，
+				// 多带一个 usage 位没有代价。
+				Usage: gfx.TextureUsageRenderTarget | gfx.TextureUsageCopySrc,
 			})
 			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 		}

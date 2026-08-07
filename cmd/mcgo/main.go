@@ -44,6 +44,7 @@ type runDependencies struct {
 	loadIdentity   func(*string) (network.Identity, error)
 	runInteractive func(*application) error
 	runBenchmark   func(*application, string) error
+	runCapture     func(*application, string) error
 }
 
 func parseMainOptions(args []string) (mainOptions, error) {
@@ -122,6 +123,7 @@ func run(args []string) error {
 		loadIdentity:   loadApplicationIdentity,
 		runInteractive: runInteractive,
 		runBenchmark:   runBenchmark,
+		runCapture:     runCapture,
 	})
 }
 
@@ -140,6 +142,10 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 	app, err := dependencies.newApplication(options.Application)
 	if err != nil {
 		return fmt.Errorf("启动失败: %w", err)
+	}
+
+	if options.CaptureDir != "" {
+		return errors.Join(dependencies.runCapture(app, options.CaptureDir), app.Close())
 	}
 
 	var runErr error
