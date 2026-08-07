@@ -69,7 +69,7 @@ func TestHealthRegenDelayNinetyNineTicksNoHeal(t *testing.T) {
 func TestHealthRegenTickOneHundredStillNoHeal(t *testing.T) {
 	const id = SessionID(2)
 	engine := readyRegenPlayer(t, id, 10)
-	stepRegen(t, engine, id, RegenDelayTicks)
+	stepRegen(t, engine, id, 100)
 	player := engine.sessions[id].player
 	if player.health != 10 {
 		t.Fatalf("第 100 tick health=%d，想要保持 10", player.health)
@@ -78,14 +78,20 @@ func TestHealthRegenTickOneHundredStillNoHeal(t *testing.T) {
 
 // TestHealthRegenDelaySatisfiedHealsAfterInterval 覆盖"延迟满足后按固定速率回复"
 // 场景：已连续 100 tick 未受伤后再推进 40 tick，生命值必须恰好 +1。
+// 边界严格钉在字面 139/140 tick 上（而不是只在 100+40 的和上检查）：
+// 如果 RegenDelayTicks 或 RegenIntervalTicks 被改小 1，回复会提前发生在第 139
+// tick，被下面第一个断言当场抓住；只在第 140 tick 检查末值会让这类变异悄悄漏网。
 func TestHealthRegenDelaySatisfiedHealsAfterInterval(t *testing.T) {
 	const id = SessionID(3)
 	engine := readyRegenPlayer(t, id, 10)
-	stepRegen(t, engine, id, RegenDelayTicks)
-	stepRegen(t, engine, id, RegenIntervalTicks)
+	stepRegen(t, engine, id, 139)
 	player := engine.sessions[id].player
+	if player.health != 10 {
+		t.Fatalf("第 139 tick health=%d，想要保持 10（回复不应提前发生）", player.health)
+	}
+	stepRegen(t, engine, id, 1)
 	if player.health != 11 {
-		t.Fatalf("100+40 tick 后 health=%d，想要 11", player.health)
+		t.Fatalf("第 140 tick health=%d，想要 11", player.health)
 	}
 }
 
@@ -94,17 +100,17 @@ func TestHealthRegenDelaySatisfiedHealsAfterInterval(t *testing.T) {
 func TestHealthRegenContinuesEveryIntervalUntilFull(t *testing.T) {
 	const id = SessionID(4)
 	engine := readyRegenPlayer(t, id, core.MaxHealth-2)
-	stepRegen(t, engine, id, RegenDelayTicks)
-	stepRegen(t, engine, id, RegenIntervalTicks)
+	stepRegen(t, engine, id, 100)
+	stepRegen(t, engine, id, 40)
 	player := engine.sessions[id].player
 	if player.health != core.MaxHealth-1 {
 		t.Fatalf("第一次回复后 health=%d，想要 %d", player.health, core.MaxHealth-1)
 	}
-	stepRegen(t, engine, id, RegenIntervalTicks)
+	stepRegen(t, engine, id, 40)
 	if player.health != core.MaxHealth {
 		t.Fatalf("第二次回复后 health=%d，想要 %d", player.health, core.MaxHealth)
 	}
-	stepRegen(t, engine, id, RegenIntervalTicks*3)
+	stepRegen(t, engine, id, 120)
 	if player.health != core.MaxHealth {
 		t.Fatalf("满血后继续推进 health=%d，想要保持 %d", player.health, core.MaxHealth)
 	}
@@ -115,8 +121,8 @@ func TestHealthRegenContinuesEveryIntervalUntilFull(t *testing.T) {
 func TestHealthRegenInterruptedByDamageResetsTimer(t *testing.T) {
 	const id = SessionID(5)
 	engine := readyRegenPlayer(t, id, 10)
-	stepRegen(t, engine, id, RegenDelayTicks)
-	stepRegen(t, engine, id, RegenIntervalTicks)
+	stepRegen(t, engine, id, 100)
+	stepRegen(t, engine, id, 40)
 	player := engine.sessions[id].player
 	if player.health != 11 {
 		t.Fatalf("回复中 health=%d，想要 11", player.health)
@@ -125,7 +131,7 @@ func TestHealthRegenInterruptedByDamageResetsTimer(t *testing.T) {
 	// 模拟一次受伤：直接调用伤害入口共用的计时重置。
 	player.resetRegenTimer()
 
-	stepRegen(t, engine, id, RegenDelayTicks-1)
+	stepRegen(t, engine, id, 99)
 	if player.health != 11 {
 		t.Fatalf("受伤后第 99 tick health=%d，想要保持 11", player.health)
 	}
@@ -133,9 +139,15 @@ func TestHealthRegenInterruptedByDamageResetsTimer(t *testing.T) {
 	if player.health != 11 {
 		t.Fatalf("受伤后第 100 tick health=%d，想要保持 11", player.health)
 	}
-	stepRegen(t, engine, id, RegenIntervalTicks)
+	// 同样把恢复后的第二次回复钉在字面 139/140 tick 边界上，而不是只在
+	// 100+40 的和上检查，防止常量变小 1 时提前回复被漏判。
+	stepRegen(t, engine, id, 39)
+	if player.health != 11 {
+		t.Fatalf("受伤后第 139 tick health=%d，想要保持 11（回复不应提前发生）", player.health)
+	}
+	stepRegen(t, engine, id, 1)
 	if player.health != 12 {
-		t.Fatalf("受伤后重新走完 100+40 tick health=%d，想要 12", player.health)
+		t.Fatalf("受伤后第 140 tick health=%d，想要 12", player.health)
 	}
 }
 
@@ -145,7 +157,7 @@ func TestHealthRegenInterruptedByDamageResetsTimer(t *testing.T) {
 func TestHealthRegenFullHealthIsNoOp(t *testing.T) {
 	const id = SessionID(6)
 	engine := readyRegenPlayer(t, id, core.MaxHealth)
-	stepRegen(t, engine, id, RegenDelayTicks+RegenIntervalTicks*3)
+	stepRegen(t, engine, id, 220)
 	player := engine.sessions[id].player
 	if player.health != core.MaxHealth {
 		t.Fatalf("满血推进后 health=%d，想要 %d", player.health, core.MaxHealth)
@@ -159,7 +171,7 @@ func TestHealthRegenFullHealthIsNoOp(t *testing.T) {
 func TestApplyFallDamageResetsRegenTimer(t *testing.T) {
 	const id = SessionID(7)
 	engine := readyRegenPlayer(t, id, core.MaxHealth)
-	stepRegen(t, engine, id, RegenDelayTicks/2)
+	stepRegen(t, engine, id, 50)
 	player := engine.sessions[id].player
 	if player.ticksSinceDamage != 0 {
 		t.Fatalf("满血推进后 ticksSinceDamage=%d，想要保持 0", player.ticksSinceDamage)
