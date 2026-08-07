@@ -80,8 +80,11 @@ type playerState struct {
 	miningHeld        bool
 	mining            playerMiningState
 	reset             bool
-	inventory         core.Inventory
-	inventoryDirty    bool
+	// spawned 记录这名玩家是否至少出生过一次。出生之前权威状态与登录时恢复的
+	// 状态完全一致；出生之后两者就可能分岔，快照因而必须可被观察。见 persistable。
+	spawned        bool
+	inventory      core.Inventory
+	inventoryDirty bool
 	// health 是服务端单写者拥有的权威生命值，0..core.MaxHealth。
 	health uint8
 	// peakY 是离地后到达过的最高高度，瞬态字段，不持久化、不进入快照/哈希。
@@ -181,11 +184,23 @@ func (engine *Engine) Player(id SessionID) (PlayerUpdate, bool) {
 
 func (engine *Engine) PlayerSnapshot(id SessionID) (PlayerSnapshot, bool) {
 	session := engine.sessions[id]
-	if session == nil || session.player == nil ||
-		session.player.lifecycle != PlayerActive {
+	if session == nil || session.player == nil || !session.player.persistable() {
 		return PlayerSnapshot{}, false
 	}
 	return session.player.snapshot(session.dimension), true
+}
+
+// persistable 报告这名玩家的权威状态是否可能已经与登录时恢复的状态分岔，
+// 因而必须能被外部观察并落盘。
+//
+// 从未出生过的待重生玩家没有分岔，跳过它可以避免用尚未校验的锚点列覆盖存档里
+// 的精确位置。出生过之后就不同了：死亡结算在同一 tick 内把背包掉进世界、清空
+// 权威背包并转入待重生，这段窗口若取不到快照，落盘的会是死亡前的满背包，
+// 而掉落物已经随区块持久化躺在地上，一份物品因此变成两份。待重生玩家的
+// Current 是 beginReset 置的锚点列（y = MaxY + 1），重连时会被
+// validateRestoreCandidate 拒绝并回落到安全点/出生候选，持久化它是无害的。
+func (player *playerState) persistable() bool {
+	return player.lifecycle == PlayerActive || player.spawned
 }
 
 // SetPlayerPositionForTest 直接写入某个会话玩家的权威位置，仅供测试构造固定场景，
@@ -204,8 +219,7 @@ func (engine *Engine) UnregisterSession(id SessionID) (PlayerSnapshot, bool) {
 		return PlayerSnapshot{}, false
 	}
 	var snapshot PlayerSnapshot
-	hasSnapshot := session.player != nil &&
-		session.player.lifecycle == PlayerActive
+	hasSnapshot := session.player != nil && session.player.persistable()
 	if hasSnapshot {
 		snapshot = session.player.snapshot(session.dimension)
 	}
@@ -365,6 +379,10 @@ func (engine *Engine) advanceActivePlayers() {
 	for _, id := range sessions {
 		session := engine.sessions[id]
 		player := session.player
+		// 自动回复只在 Active 期间推进，这是有意的：待重生玩家不在世界里，
+		// 计时冻结；重生本身回满生命值，冻结与否都观察不到差别。计时放在
+		// reset 短路之前同样是有意的：reset 只是位置跳变的当 tick 标记，
+		// 玩家仍在世界里，回复不应因此停摆。
 		player.advanceHealthRegen()
 		if player.reset {
 			continue

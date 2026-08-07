@@ -152,6 +152,7 @@ func (player *playerState) activate(
 	onGround bool,
 ) {
 	player.lifecycle = PlayerActive
+	player.spawned = true
 	player.state = physics.State{
 		Position: location.Position,
 		OnGround: onGround,
