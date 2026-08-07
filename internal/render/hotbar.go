@@ -587,7 +587,7 @@ func ChestSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool) {
 	return 0, false
 }
 
-// appendRecipeRows 绘制五条固定配方及各自的一次合成按钮。
+// appendRecipeRows 绘制六条固定配方及各自的一次合成按钮。
 func appendRecipeRows(
 	dst *hotbarLayout,
 	atlas GlyphSource,

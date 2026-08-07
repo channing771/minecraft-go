@@ -43,13 +43,18 @@
 
 `sessionState` 把 `furnace core.FurnaceRef` 与 `viewFurnace bool` 替换为 `container core.ContainerRef` 与 `viewContainer bool`。打开命令仍用权威射线在六格内命中方块，再按命中的方块类型决定查找熔炉数组还是箱子数组；命中箱子时结束原有的熔炉查看关系，反之亦然。失效判定（区块卸载、槽位停用、generation 不匹配、超距、维度 reset、断开连接）对两种容器完全一致，因此只保留一份实现。
 
-发布仍然只发给当前查看者：熔炉发 `FurnaceState`，箱子发 `ChestState`，失效统一发 `ContainerClosed`。仅订阅区块但未打开界面的玩家不会收到任何容器状态。
+发布仍然只发给当前查看者：熔炉发 `FurnaceState`，箱子发 `ChestState`，失效统一发 `ContainerClosed`。仅订阅区块但未打开界面的玩家不会收到任何容器状态。这里共用的只是打开、失效判定与发布骨架；具体的槽位读取（`furnaceView`/`chestView`）仍是各自独立的函数，见决策 4。
 
 否决允许同时查看多个容器：那要求 session 保存可变长度的查看集合，并让失效判定与发布顺序都变成集合运算，收益只有一个此批不需要的交互便利。
 
-### 4. 跨容器移动扩展既有纯函数，箱子格不限制物品
+### 4. 跨容器移动部分共用、部分各自保留，箱子格不限制物品
 
-现有 `moveFurnaceStack` 泛化为在玩家 `Inventory` 与一个容器视图的值副本上计算：读取两侧槽、按既有 `Inventory.MoveStack` 语义计算空目标/同类合并/异类交换、再验证最终槽位约束，只有全部成立才同时写回。熔炉保留输入只收粗铁、燃料只收煤炭、输出只能作为来源的约束；箱子的 27 格接受任何已注册物品且既可作为来源也可作为目标，因此箱子路径的最终校验只需要 `ItemStack.Valid`。
+实际实现不是把 `moveFurnaceStack` 泛化成一份通用函数，而是共用与独立并存：
+
+- **共用**：`mergeStacks` 这一份纯函数计算合并结果（空目标接收整堆、同类目标按堆叠上限合并并保留 `Durability`、异类目标交换），供 `moveFurnaceStack` 与 `moveChestStack` 共同调用；容器引用、区块解析（`containerChunk`）与距离判定（`withinContainerReach`）同样只有一份实现。
+- **各自保留**：`furnaceView`/`chestView`（视图解析）、`moveFurnaceStack`/`moveChestStack`（移动驱动，各自约 47 行）、`validateFurnaceSlots`/`validateChestSlots`（槽位校验）仍是两套独立函数。熔炉保留输入只收粗铁、燃料只收煤炭、输出只能作为来源的约束，且 `moveFurnaceStack` 保留自己那道 `to >= core.FurnaceViewSlots` 的独立边界检查，不依赖网络层校验（第 4 组审查留下的结转约束）；箱子的 27 格接受任何已注册物品且既可作为来源也可作为目标，因此箱子路径的最终校验只需要 `ItemStack.Valid`。
+
+这样拆分是因为熔炉的物品类型约束与自带边界检查不是可以安全泛化掉的重复代码，而是两种容器语义本就不同的部分；把它们也塞进一份通用函数只会把差异变成分支参数，不会减少真实复杂度。
 
 统一栏位为 `0..62`：`0..35` 是玩家物品栏，`36..62` 是箱子 27 格。熔炉界面继续使用 `0..38`。过期 sequence、旧容器引用、越界索引、空来源或容量不足都拒绝整条命令，不得部分修改任一侧；箱子不引入新的拒绝理由，容量与非法输入分别复用 `RejectInvalidInput` 与 `RejectInvalidSlot`。
 

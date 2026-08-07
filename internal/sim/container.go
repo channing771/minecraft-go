@@ -160,7 +160,8 @@ func (engine *Engine) publishContainers(result *TickResult) {
 			continue
 		}
 		eye := session.player.state.Position.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
-		if ref.Kind == core.ContainerKindChest {
+		switch ref.Kind {
+		case core.ContainerKindChest:
 			chunk, chest, ok := engine.chestView(ref)
 			if !ok || !withinContainerReach(eye, chunk.Pos, chest.BlockIndex) {
 				session.viewContainer = false
@@ -172,23 +173,27 @@ func (engine *Engine) publishContainers(result *TickResult) {
 				Chest:   ref,
 				Items:   chest.Items,
 			})
-			continue
-		}
-		chunk, furnace, ok := engine.furnaceView(ref)
-		if !ok || !withinContainerReach(eye, chunk.Pos, furnace.BlockIndex) {
+		case core.ContainerKindFurnace:
+			chunk, furnace, ok := engine.furnaceView(ref)
+			if !ok || !withinContainerReach(eye, chunk.Pos, furnace.BlockIndex) {
+				session.viewContainer = false
+				result.FurnaceEnds = append(result.FurnaceEnds, FurnaceEnd{Session: id, Furnace: ref})
+				continue
+			}
+			result.Furnaces = append(result.Furnaces, FurnaceUpdate{
+				Session:       id,
+				Furnace:       ref,
+				Input:         furnace.Input,
+				Fuel:          furnace.Fuel,
+				Output:        furnace.Output,
+				ProgressTicks: furnace.ProgressTicks,
+				BurnTicks:     furnace.BurnTicks,
+			})
+		default:
+			// 未知容器类型：按失效处理，结束查看关系并发一次精确关闭。
 			session.viewContainer = false
 			result.FurnaceEnds = append(result.FurnaceEnds, FurnaceEnd{Session: id, Furnace: ref})
-			continue
 		}
-		result.Furnaces = append(result.Furnaces, FurnaceUpdate{
-			Session:       id,
-			Furnace:       ref,
-			Input:         furnace.Input,
-			Fuel:          furnace.Fuel,
-			Output:        furnace.Output,
-			ProgressTicks: furnace.ProgressTicks,
-			BurnTicks:     furnace.BurnTicks,
-		})
 	}
 }
 
@@ -205,7 +210,8 @@ func mergeStacks(source, target core.ItemStack) (nextSource, nextTarget core.Ite
 			return core.ItemStack{}, core.ItemStack{}, false
 		}
 		moved := min(limit-target.Count, source.Count)
-		nextTarget = core.ItemStack{Item: target.Item, Count: target.Count + moved}
+		nextTarget = target
+		nextTarget.Count += moved
 		if source.Count > moved {
 			nextSource = core.ItemStack{Item: source.Item, Count: source.Count - moved}
 		}
@@ -318,7 +324,8 @@ func (engine *Engine) applyContainerMove(
 	ref := command.Furnace
 	key := core.ChunkKey{Dimension: ref.Dimension, Pos: ref.Chunk}
 
-	if ref.Kind == core.ContainerKindChest {
+	switch ref.Kind {
+	case core.ContainerKindChest:
 		chunk, chest, ok := engine.chestView(ref)
 		if !ok {
 			return RejectInvalidInput, true
@@ -334,23 +341,25 @@ func (engine *Engine) applyContainerMove(
 		session.player.inventory = nextInventory
 		session.player.inventoryDirty = true
 		return 0, false
-	}
-
-	chunk, furnace, ok := engine.furnaceView(ref)
-	if !ok {
+	case core.ContainerKindFurnace:
+		chunk, furnace, ok := engine.furnaceView(ref)
+		if !ok {
+			return RejectInvalidInput, true
+		}
+		nextInventory, nextFurnace, ok := moveFurnaceStack(
+			session.player.inventory, furnace, command.Slot, command.ToSlot,
+		)
+		if !ok {
+			return RejectInvalidInput, true
+		}
+		chunk.SetFurnace(int(ref.Slot), nextFurnace)
+		engine.touchChunk(key, pending)
+		session.player.inventory = nextInventory
+		session.player.inventoryDirty = true
+		return 0, false
+	default:
 		return RejectInvalidInput, true
 	}
-	nextInventory, nextFurnace, ok := moveFurnaceStack(
-		session.player.inventory, furnace, command.Slot, command.ToSlot,
-	)
-	if !ok {
-		return RejectInvalidInput, true
-	}
-	chunk.SetFurnace(int(ref.Slot), nextFurnace)
-	engine.touchChunk(key, pending)
-	session.player.inventory = nextInventory
-	session.player.inventoryDirty = true
-	return 0, false
 }
 
 // SetChunkChestForTest 直接写入一个已 Ready 区块的箱子槽，仅供测试构造固定场景。

@@ -139,7 +139,7 @@ func TestItemDropMessagesValidateBoundedBatches(t *testing.T) {
 	}
 }
 
-func TestProtocolV11ToolDropUsesFiveByteStackWire(t *testing.T) {
+func TestProtocolV12ToolDropUsesFiveByteStackWire(t *testing.T) {
 	if ProtocolVersion != 12 {
 		t.Fatalf("协议版本 = %d，想要 12", ProtocolVersion)
 	}
