@@ -51,10 +51,10 @@
 
 ## 8. 箱子界面接线
 
-- [ ] 8.1 在 `internal/render` 先写 headless 失败测试，覆盖 36 格物品加 27 格箱子的布局、来源 `0..62` 高亮、格内物品与数量、固定 quad/glyph 容量、命中边界、满布局 allocation 与 buffer 边界，且原有背包配方行与熔炉视图保持不变。
-- [ ] 8.2 在 `internal/client` 与 `cmd/mcgo` 先写失败测试：本地镜像射线命中箱子时只发一次打开请求、非容器仍发放置请求；收到权威状态后才显示；两次点击只发一次跨容器移动且不改镜像；`E`/`Escape` 立即清界面并发关闭；收到关闭通知、断线或玩家状态 reset 时清界面与来源；打开时抑制移动、视角、采掘、放置与快捷栏选择并发送非采掘状态；测试只用 fake window/gfx，不调用交互式 `run()`。
-- [ ] 8.3 按最坏布局重新计算固定 quad/glyph 容量，让同一 `layoutInventory` 在箱子叠加值非 nil 时画 27 格而不是配方行；新增与绘制共用几何的纯命中函数覆盖 `0..62`；箱子叠加值是 render-local 值，由 app 从已确认镜像转换，renderer 不导入 `network`。
-- [ ] 8.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./internal/client ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，确认无窗口出现、`gofmt` 与 `git diff --check` 通过；提交 `feat: 接入权威箱子界面`，然后自动进入第 9 组。
+- [x] 8.1 在 `internal/render` 先写 headless 失败测试，覆盖 36 格物品加 27 格箱子的布局、来源 `0..62` 高亮、格内物品与数量、固定 quad/glyph 容量、命中边界、满布局 allocation 与 buffer 边界，且原有背包配方行与熔炉视图保持不变。
+- [x] 8.2 在 `internal/client` 与 `cmd/mcgo` 先写失败测试：本地镜像射线命中箱子时只发一次打开请求、非容器仍发放置请求；收到权威状态后才显示；两次点击只发一次跨容器移动且不改镜像；`E`/`Escape` 立即清界面并发关闭；收到关闭通知、断线或玩家状态 reset 时清界面与来源；打开时抑制移动、视角、采掘、放置与快捷栏选择并发送非采掘状态；测试只用 fake window/gfx，不调用交互式 `run()`。
+- [x] 8.3 按最坏布局重新计算固定 quad/glyph 容量，让同一 `layoutInventory` 在箱子叠加值非 nil 时画 27 格而不是配方行；新增与绘制共用几何的纯命中函数覆盖 `0..62`；箱子叠加值是 render-local 值，由 app 从已确认镜像转换，renderer 不导入 `network`。
+- [x] 8.4 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render ./internal/client ./cmd/mcgo -race -count=1 && go test ./internal/archcheck -count=1'`，确认无窗口出现、`gofmt` 与 `git diff --check` 通过；提交 `feat: 接入权威箱子界面`，然后自动进入第 9 组。
 
 ## 9. 文档与最终门禁
 

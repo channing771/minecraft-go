@@ -53,6 +53,7 @@ type application struct {
 	hotbarRenderer      *render.HotbarRenderer
 	inventory           client.InventoryMirror
 	furnace             client.FurnaceMirror
+	chest               client.ChestMirror
 	miningOverlay       render.MiningOverlay
 	itemDropRenderer    *render.ItemDropRenderer
 	itemDrops           *client.ItemDrops
@@ -816,6 +817,7 @@ func (a *application) closeClientSession(cause error) {
 		}
 		a.inventory.Reset()
 		a.furnace.Reset()
+		a.chest.Reset()
 		a.miningOverlay = render.MiningOverlay{}
 		a.inventoryOpen = false
 		a.inventorySource = -1
@@ -919,8 +921,12 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 				BurnTicks:     furnace.BurnTicks,
 			}
 		}
+		var chestOverlay *render.ChestOverlay
+		if chest, opened := a.chest.State(); opened {
+			chestOverlay = &render.ChestOverlay{Items: chest.Items}
+		}
 		if err := a.hotbarRenderer.Prepare(
-			inventory, a.inventoryOpen, a.inventorySource, overlay,
+			inventory, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
 			a.miningOverlay,
 			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
@@ -1062,8 +1068,8 @@ func (a *application) drainServerMessages(maxMessages int) {
 				}
 			}
 			if state.Reset {
-				if _, opened := a.furnace.State(); opened {
-					a.clearFurnaceUI()
+				if a.containerOpen() {
+					a.clearContainerUI()
 				} else {
 					a.inventorySource = -1
 				}
@@ -1087,6 +1093,9 @@ func (a *application) drainServerMessages(maxMessages int) {
 				a.closeClientSession(err)
 				return
 			}
+			// 熔炉与箱子互斥：新熔炉状态到达时丢弃可能过期的箱子镜像，
+			// 否则两个镜像会同时报告 opened，点击分流会用错容器。
+			a.chest.Reset()
 			if !opened || previous != state.Furnace {
 				a.inventorySource = -1
 			}
@@ -1096,14 +1105,36 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 			continue
 		}
+		if state, ok := message.(network.ChestState); ok {
+			previous, opened := a.chest.Ref()
+			if err := a.chest.Apply(state); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			a.furnace.Reset()
+			if !opened || previous != state.Chest {
+				a.inventorySource = -1
+			}
+			a.inventoryOpen = true
+			if a.window != nil {
+				a.window.SetCursorCaptured(false)
+			}
+			continue
+		}
 		if closed, ok := message.(network.ContainerClosed); ok {
-			current, opened := a.furnace.Ref()
+			furnaceCurrent, furnaceOpened := a.furnace.Ref()
 			if err := a.furnace.Close(closed); err != nil {
 				a.closeClientSession(err)
 				return
 			}
-			if opened && current == closed.Container {
-				a.clearFurnaceUI()
+			chestCurrent, chestOpened := a.chest.Ref()
+			if err := a.chest.Close(closed); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			if (furnaceOpened && furnaceCurrent == closed.Container) ||
+				(chestOpened && chestCurrent == closed.Container) {
+				a.clearContainerUI()
 			}
 			continue
 		}
@@ -1190,14 +1221,16 @@ func (a *application) placeBlock() {
 		},
 	)
 	if err != nil {
-		log.Printf("本地熔炉射线失败: %v", err)
+		log.Printf("本地容器射线失败: %v", err)
 	} else if found {
 		block, loaded := a.mirror.BlockAt(core.Overworld, hit.Block)
-		if loaded && block == core.FurnaceID {
+		if loaded && (block == core.FurnaceID || block == core.ChestID) {
+			// 服务端才是权威射线：这里只按本地镜像的方块类型决定发哪种请求，
+			// 具体命中的是熔炉还是箱子由服务端重新判定。
 			if err := a.send(network.OpenContainer{
 				Sequence: a.nextSequence(), Yaw: a.camera.Yaw, Pitch: a.camera.Pitch,
 			}); err != nil {
-				log.Printf("发送打开熔炉请求失败: %v", err)
+				log.Printf("发送打开容器请求失败: %v", err)
 			}
 			return
 		}
@@ -1217,16 +1250,24 @@ func (a *application) placeBlock() {
 	}
 }
 
-// setInventoryOpen 切换容器界面：显式关闭熔炉时立即清理并通知服务端。
+// containerOpen 报告是否有已确认的容器镜像（熔炉或箱子）正在驱动当前界面。
+// 两个镜像互斥：Apply 一个的同时会 Reset 另一个，因此至多一个返回 true。
+func (a *application) containerOpen() bool {
+	if _, opened := a.furnace.State(); opened {
+		return true
+	}
+	_, opened := a.chest.State()
+	return opened
+}
+
+// setInventoryOpen 切换容器界面：显式关闭时立即清理并通知服务端。
 func (a *application) setInventoryOpen(open bool) {
-	if !open {
-		if _, opened := a.furnace.State(); opened {
-			a.clearFurnaceUI()
-			if err := a.send(network.CloseContainer{Sequence: a.nextSequence()}); err != nil {
-				log.Printf("发送关闭熔炉请求失败: %v", err)
-			}
-			return
+	if !open && a.containerOpen() {
+		a.clearContainerUI()
+		if err := a.send(network.CloseContainer{Sequence: a.nextSequence()}); err != nil {
+			log.Printf("发送关闭容器请求失败: %v", err)
 		}
+		return
 	}
 	a.inventoryOpen = open
 	a.inventorySource = -1
@@ -1239,9 +1280,10 @@ func (a *application) setInventoryOpen(open bool) {
 	}
 }
 
-// clearFurnaceUI 丢弃当前熔炉镜像并关闭容器界面，不发送协议消息。
-func (a *application) clearFurnaceUI() {
+// clearContainerUI 丢弃当前熔炉与箱子镜像并关闭容器界面，不发送协议消息。
+func (a *application) clearContainerUI() {
 	a.furnace.Reset()
+	a.chest.Reset()
 	a.inventoryOpen = false
 	a.inventorySource = -1
 	if a.window != nil {
@@ -1252,7 +1294,8 @@ func (a *application) clearFurnaceUI() {
 // clickInventorySlot 处理固定配方按钮，或用两次有效栏位点击组成一次整堆移动请求。
 func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height uint32) {
 	furnace, furnaceOpen := a.furnace.State()
-	if !furnaceOpen {
+	chest, chestOpen := a.chest.State()
+	if !furnaceOpen && !chestOpen {
 		if recipe, ok := render.RecipeButtonAt(cursorX, cursorY, width, height); ok {
 			inventory, confirmed := a.inventory.State()
 			if !confirmed {
@@ -1273,9 +1316,12 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 
 	var slot uint8
 	var ok bool
-	if furnaceOpen {
+	switch {
+	case chestOpen:
+		slot, ok = render.ChestSlotAt(cursorX, cursorY, width, height)
+	case furnaceOpen:
 		slot, ok = render.FurnaceSlotAt(cursorX, cursorY, width, height)
-	} else {
+	default:
 		slot, ok = render.InventorySlotAt(cursorX, cursorY, width, height)
 	}
 	if !ok {
@@ -1288,6 +1334,14 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 	from := uint8(a.inventorySource)
 	a.inventorySource = -1
 	if from == slot {
+		return
+	}
+	if chestOpen {
+		if err := a.send(network.MoveContainerStack{
+			Sequence: a.nextSequence(), Container: chest.Chest, From: from, To: slot,
+		}); err != nil {
+			log.Printf("发送箱子移动失败: %v", err)
+		}
 		return
 	}
 	if furnaceOpen {
