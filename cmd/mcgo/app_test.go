@@ -541,6 +541,7 @@ func (t *integrationTexture) View(gfx.TextureViewDesc) gfx.TextureView {
 }
 func (*integrationTexture) WriteLayer(uint32, uint32, []byte)                                  {}
 func (*integrationTexture) WriteRegion(uint32, uint32, uint32, uint32, uint32, uint32, []byte) {}
+func (*integrationTexture) ReadLayer(uint32, uint32) []byte                                    { return nil }
 func (t *integrationTexture) Release() {
 	if !t.released {
 		*t.releases = append(*t.releases, t.label+" texture")

@@ -296,6 +296,9 @@ const (
 	TextureUsageRenderTarget
 	TextureUsageCopyDst
 	TextureUsageStorage
+	// TextureUsageCopySrc 允许纹理作为 CopyTextureToBuffer 的源，供 ReadLayer 回读。
+	// 必须追加在已有枚举之后，以保持既有位值稳定。
+	TextureUsageCopySrc
 )
 
 // TextureDesc 描述一张待创建的纹理。
@@ -320,6 +323,11 @@ type Texture interface {
 	WriteLayer(layer, mip uint32, pixels []byte)
 	// WriteRegion 把像素数据写入指定 layer/mip 的矩形子区域。
 	WriteRegion(layer, mip, x, y, width, height uint32, pixels []byte)
+	// ReadLayer 回读指定 layer/mip 的全部像素。
+	// 返回切片的行距是紧凑的（宽 × 每像素字节），与 WriteLayer 的入参布局一致，
+	// 调用方不需要知道底层的对齐填充。
+	// 纹理必须带 TextureUsageCopySrc，否则底层校验会失败。
+	ReadLayer(layer, mip uint32) []byte
 	Release()
 }
 
