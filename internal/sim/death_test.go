@@ -245,6 +245,80 @@ func TestDeathKeepsUnplaceableStacksAndSkipsUnloadedChunks(t *testing.T) {
 	assertPlayerHealth(t, engine, session, core.MaxHealth)
 }
 
+// TestDeathDropsSurviveDeathChunkLeavingSubscriptionOnTheSameTick 覆盖
+// "死亡区块在死亡当 tick 脱离订阅"：玩家在远离出生锚点、且从磁盘干净读回
+// （Revision == PersistedRevision）的区块里摔死。死亡掉落写入该区块的同一 tick 里
+// 玩家被传回出生锚点，订阅并集随之收缩到锚点周围，干净区块会被立即删除而不是
+// 转入 Unloading。死亡结算必须与其余区块写者一样站在 reconcileSubscriptions 之后，
+// 否则 finishChanges 取不到 record，既崩服又丢掉落物。
+func TestDeathDropsSurviveDeathChunkLeavingSubscriptionOnTheSameTick(t *testing.T) {
+	inventory := core.Inventory{}
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 10}
+	engine, session := readyFlatWorld(t, 1, inventory)
+
+	// 视距 1 时出生锚点 (0,0) 的订阅只覆盖 (-1..1)²，因此死亡区块 (2,2)
+	// 在玩家被传回锚点的当 tick 必然离开订阅并集。
+	walkToCleanChunk(t, engine, session, core.ChunkPos{X: 1, Z: 1})
+	walkToCleanChunk(t, engine, session, core.ChunkPos{X: 2, Z: 2})
+
+	deathKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: 2}}
+	died := killByFallFrom(t, engine, session, 32.5, 32.5)
+
+	barrier := false
+	for _, batch := range died.Changes {
+		if batch.Chunk == deathKey.Pos && len(batch.Changes) == 0 {
+			barrier = true
+		}
+	}
+	if !barrier {
+		t.Fatalf(
+			"死亡当 tick 未为死亡区块 %+v 发布 revision barrier: %+v",
+			deathKey.Pos, died.Changes,
+		)
+	}
+	drops := activeDrops(t, engine, deathKey)
+	if len(drops) != 1 ||
+		drops[0].Stack != (core.ItemStack{Item: core.ItemStone, Count: 10}) {
+		t.Fatalf("死亡区块 %+v 掉落物 = %+v，想要 10 个石头", deathKey.Pos, drops)
+	}
+}
+
+// walkToCleanChunk 把玩家瞬移到目标区块的中心列并推进到订阅稳定。沿途新订阅的
+// 区块一律按"从磁盘干净读回"供给（Revision == PersistedRevision），它们离开订阅
+// 并集时会被 RequestUnload 立即删除，而不是像 SubmitGenerated 产出的脏区块那样
+// 转入 Unloading 后仍然留在 records 里。
+func walkToCleanChunk(
+	t *testing.T,
+	engine *sim.Engine,
+	session sim.SessionID,
+	pos core.ChunkPos,
+) {
+	t.Helper()
+	engine.SetPlayerPositionForTest(session, mgl32.Vec3{
+		float32(pos.X<<core.SectionShift) + 0.5,
+		1,
+		float32(pos.Z<<core.SectionShift) + 0.5,
+	})
+	for range 20 {
+		result := engine.Step()
+		for _, key := range result.Acquire {
+			engine.SubmitAcquired(sim.AcquiredChunk{
+				Key:               key,
+				Chunk:             generateFlatChunk(key.Pos),
+				Revision:          5,
+				PersistedRevision: 5,
+			})
+		}
+		if len(result.Generate) != 0 {
+			t.Fatalf("干净区块已供给，却仍要求生成 %+v", result.Generate)
+		}
+		if len(result.Acquire) == 0 && onlyPlayer(t, result).ViewCenter == pos {
+			return
+		}
+	}
+	t.Fatalf("玩家未在 20 tick 内稳定到区块 %+v", pos)
+}
+
 // lethalFallHeight 是从满血摔死所需的落差：伤害 = floor(落差) − 3 = 20。
 const lethalFallHeight = float32(23)
 

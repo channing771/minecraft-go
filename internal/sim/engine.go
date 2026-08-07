@@ -344,15 +344,23 @@ func (engine *Engine) Step() TickResult {
 	engine.applyGenerated(generated, currentWanted, &result)
 	engine.advancePendingPlayersPreservingInputSequence()
 	engine.advanceActivePlayers()
-	// 死亡结算必须紧跟伤害结算、并早于本 tick 末尾的状态发布，
-	// 外部才观察不到生命值为 0 的中间状态。
-	engine.settleDeaths(pending)
 	playerViewChanged := engine.derivePlayerCenters()
 	viewChanged = viewChanged || playerViewChanged || engine.subscriptionsDirty
 	engine.subscriptionsDirty = false
 	if viewChanged {
 		engine.reconcileSubscriptions(&result)
 	}
+
+	// 阶段顺序契约：所有区块写者必须位于 reconcileSubscriptions 之后。订阅收缩会把
+	// 干净区块（Revision == PersistedRevision）从 records 里立即删除，写在它之前的
+	// 写者留下的 revision barrier 会在 finishChanges 取到 nil record 而崩溃，
+	// 掉落物也随被删除的 record 一起消失。死亡结算是唯一会在写区块的同一 tick 里
+	// 让玩家跳回出生锚点、从而收缩订阅的写者，因此这条契约对它尤其关键：
+	// beginReset 置的 subscriptionsDirty 顺延到下一 tick 生效，而彼时 finishChanges
+	// 已经推高 revision，区块转脏，RequestUnload 只会走 Unloading 分支。
+	// settleDeaths 同时必须早于本 tick 末尾的状态发布，外部才观察不到生命值为 0 的
+	// 中间状态。
+	engine.settleDeaths(pending)
 
 	for _, command := range interactions {
 		switch command.Kind {
