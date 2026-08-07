@@ -44,6 +44,11 @@ var captureScenes = []captureScene{
 			// 6000 tick 是正午，日光与太阳高度都取到最大值，
 			// 是昼夜管线上最容易看出偏差的相位。
 			app.worldTimeTicks = 6000
+			// 登录首条权威 PlayerState 必然触发 ResetView，把 Yaw/Pitch 覆盖成
+			// 服务端下发的出生朝向——那不是本场景声明的常量。这里显式钉死，
+			// 避免相机姿态随出生朝向漂移；Pitch 取小幅度下俯以避免画面被天空占满。
+			app.camera.Yaw = 0
+			app.camera.Pitch = -0.25
 			return nil
 		},
 	},

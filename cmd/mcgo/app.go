@@ -262,7 +262,10 @@ func openApplicationStore(
 		SpawnDimension: core.Overworld,
 		SpawnAnchor:    core.ChunkPos{},
 	}
-	if options.Benchmark {
+	// benchmark 与 capture 都要求世界状态与本机磁盘上的真实存档隔离：
+	// benchmark 为了性能测量不被磁盘 I/O 干扰，capture 为了抓帧结果不随
+	// "这台机器碰巧玩到哪一步"漂移——两者都复用内存 store 达成确定性初始状态。
+	if options.Benchmark || options.CaptureDir != "" {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
