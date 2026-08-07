@@ -131,6 +131,9 @@ func clampBlockToChunk(block core.BlockPos, pos core.ChunkPos) core.BlockPos {
 // placeDeathDrops 在一个区块上逐格放置玩家仍持有的物品堆。单格用批量路径预演，
 // 成功才提交并清空该格，因此一格的拆分与合并保持原子。
 // 返回该区块是否被写入，以及仍留在背包里的非空格数。
+//
+// 它改写 player.inventory 但不置 inventoryDirty：死亡结算的调用方 settleDeath
+// 随后一定会调用 beginReset，由后者统一置脏。这条隐式依赖不要在别处复用。
 func placeDeathDrops(
 	player *playerState,
 	chunk *world.Chunk,
@@ -142,6 +145,9 @@ func placeDeathDrops(
 			continue
 		}
 		batch := [1]core.ItemStack{stack}
+		// ponytail: 逐格预演，最坏情况每个候选区块整份拷贝 [32]DropSlot 共 36 次。
+		// 死亡是罕见事件，不在每 tick 固定工作量契约内，因此这个天花板可以接受。
+		// 若将来它成为热点，升级路径是把整轮放置改成"一次拷贝 + 多格预演"。
 		next, ok := chunk.PrepareDropBatch(
 			batch[:], blockIndex, PlayerDropPickupDelayTicks,
 		)

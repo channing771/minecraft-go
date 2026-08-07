@@ -255,7 +255,7 @@ func TestChunkCodecRejectsFutureSchema(t *testing.T) {
 	_ = key
 }
 
-func TestPlayerSchemaV4KeepsM4EItems(t *testing.T) {
+func TestPlayerSchemaV5KeepsM4EItems(t *testing.T) {
 	if currentPlayerSchema != 5 {
 		t.Fatalf("玩家 schema = %d，想要 5", currentPlayerSchema)
 	}
