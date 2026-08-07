@@ -946,20 +946,26 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		}
 	}
 	encoder := a.dev.CreateCommandEncoder()
-	// 每帧只从最后确认的权威世界时间计算一次昼夜，三个世界空间 renderer 共用。
+	// 每帧只从最后确认的权威世界时间计算一次昼夜；ViewProj 及其逆矩阵同样只计算一次，
+	// terrain、avatar、item-drop 与天空共用同一正向矩阵和 daylight。
 	dayNight := render.DayNightAt(a.worldTimeTicks)
+	viewProj := a.camera.ViewProj()
+	viewProjInv := viewProj.Inv()
 	a.renderer.Render(encoder, target, a.depth.view, render.Camera{
-		ViewProj: a.camera.ViewProj(),
-		Pos:      a.camera.Pos,
-		Daylight: dayNight.Daylight,
-		SkyColor: dayNight.ClearColor,
+		ViewProj:       viewProj,
+		ViewProjInv:    viewProjInv,
+		Pos:            a.camera.Pos,
+		SunDirection:   dayNight.SunDirection,
+		Daylight:       dayNight.Daylight,
+		StarVisibility: dayNight.StarVisibility,
+		SkyColor:       dayNight.ClearColor,
 	})
 	var started time.Time
 	if renderTiming != nil {
 		started = renderNow()
 	}
 	a.avatarRenderer.Render(encoder, target, a.depth.view, render.Camera{
-		ViewProj: a.camera.ViewProj(),
+		ViewProj: viewProj,
 		Pos:      a.camera.Pos,
 		Daylight: dayNight.Daylight,
 		SkyColor: dayNight.ClearColor,
@@ -972,7 +978,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		a.itemDropInstances[:0], a.itemDrops.Presentations(),
 	)
 	a.itemDropRenderer.Render(encoder, target, a.depth.view, render.Camera{
-		ViewProj: a.camera.ViewProj(),
+		ViewProj: viewProj,
 		Pos:      a.camera.Pos,
 		Daylight: dayNight.Daylight,
 		SkyColor: dayNight.ClearColor,
@@ -983,7 +989,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		-float32(math.Sin(float64(a.camera.Yaw))),
 	}
 	a.nameTagRenderer.Render(encoder, target, a.depth.view, render.BillboardCamera{
-		ViewProj: a.camera.ViewProj(),
+		ViewProj: viewProj,
 		Right:    right,
 		Up:       right.Cross(a.camera.Forward()).Normalize(),
 	})

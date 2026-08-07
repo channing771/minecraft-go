@@ -5,7 +5,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -17,10 +19,15 @@ import (
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
+	"minecraft-go/internal/render"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
 	"minecraft-go/internal/worldgen"
 )
+
+func readFloat32(data []byte, offset int) float32 {
+	return math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+}
 
 type benchmarkBlockingServerStream struct {
 	entered chan struct{}
@@ -51,9 +58,9 @@ func (*benchmarkBlockingServerStream) Recv(
 func (*benchmarkBlockingServerStream) Peer() string { return "benchmark-blocking" }
 func (*benchmarkBlockingServerStream) Close() error { return nil }
 
-func TestScenarioV12ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 12 {
-		t.Fatalf("scenarioVersion=%d, want 12", scenarioVersion)
+func TestScenarioV13ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 13 {
+		t.Fatalf("scenarioVersion=%d, want 13", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {
@@ -633,6 +640,77 @@ func TestScenarioV8BenchmarkReportRequires2048GPUCompletionSamples(t *testing.T)
 	report.Multiplayer.RemoteGPUComplete.Samples = 256
 	if err := validateBenchmarkReport(report); err != nil {
 		t.Fatalf("v7 256 GPU samples rejected: %v", err)
+	}
+}
+
+func TestScenarioV13BenchmarkReportReusesV12GPUCompletionDefinition(t *testing.T) {
+	report := validBenchmarkReport()
+	report.ScenarioVersion = 13
+	report.Multiplayer = validMultiplayerSummary()
+	report.Multiplayer.RemoteGPUComplete.Samples = client.ScenarioV12GPUCompletionSamples - 1
+	if err := validateBenchmarkReport(report); err == nil ||
+		!strings.Contains(err.Error(), "remote_gpu_complete") {
+		t.Fatalf("v13 低于批量分摊样本数未被拒绝: %v", err)
+	}
+	report.Multiplayer.RemoteGPUComplete.Samples = client.ScenarioV12GPUCompletionSamples
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("v13 批量分摊样本数被拒绝: %v", err)
+	}
+}
+
+// Mutation killed: still/flying 阶段若不再经过真实 renderFrame，terrain pass
+// 中由 sky pipeline 发出的 fullscreen triangle draw 不会出现。
+func TestScenarioV13StillFlyingFrameIncludesCelestialSkyDraw(t *testing.T) {
+	for _, phase := range []struct {
+		name   string
+		flying bool
+	}{
+		{name: "still"},
+		{name: "flying", flying: true},
+	} {
+		t.Run(phase.name, func(t *testing.T) {
+			app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+			probe, err := newMultiplayerClientProbe(app)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(probe.Close)
+
+			updated := false
+			var update func(time.Duration)
+			if phase.flying {
+				update = func(time.Duration) { updated = true }
+			}
+			summary, err := measurePhase(app, probe, phase.name, 50*time.Millisecond, update)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if summary.Frames == 0 {
+				t.Fatal("measurePhase 未执行真实 renderFrame")
+			}
+			if phase.flying && !updated {
+				t.Fatal("flying measurePhase 未执行相机更新")
+			}
+
+			// sky fullscreen triangle 只由 terrain pass 发出；断言它先于地形 indirect draw。
+			skyIndex, indirectIndex := -1, -1
+			for i, draw := range dev.draws {
+				if draw == "sky triangle" && skyIndex < 0 {
+					skyIndex = i
+				}
+				if draw == "indirect" && indirectIndex < 0 {
+					indirectIndex = i
+				}
+			}
+			if skyIndex < 0 || indirectIndex < 0 || skyIndex > indirectIndex {
+				t.Fatalf("draws=%v，sky/terrain draw 顺序=%d/%d", dev.draws, skyIndex, indirectIndex)
+			}
+			sky := dev.bufferByLabel(t, "sky uniform")
+			dayNight := render.DayNightAt(app.worldTimeTicks)
+			if got := readFloat32(sky.data, 76); got != dayNight.Daylight {
+				t.Fatalf("sky Daylight=%v want=%v", got, dayNight.Daylight)
+			}
+		})
 	}
 }
 

@@ -83,11 +83,36 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmar
 
 **最终结论：`core.ChestsPerChunk` 保持 16**，`proposal.md`/`design.md`/`tasks.md` 无需改动。建议仍然是后续在系统空闲、负载低于 `2.61` 时补一次干净复测作为收尾验证，但不因此改变本次结论或容量取值。
 
-## 当前已接受的 M5 scenario v12 基线
+## 当前已接受的 M5 scenario v13 基线
+
+2026-08-07 在冻结提交 `659de4859b4b78024c9b3157c2ce484bae26383e` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
+
+- 当前 Memory 基线：`docs/notes/perf-baseline-m5.json`，SHA-256 `452a1916cafa36a6383c1c6e2a7b3c125eab4623f21636b46db1bfe9b315f6f6`
+- 正式 Memory 报告：`/private/tmp/mcgo-m4i-659de485.o6XDzK/memory-v13.json`，SHA-256 同上
+- 正式 TCP 报告：`/private/tmp/mcgo-m4i-659de485.o6XDzK/tcp-v13.json`，SHA-256 `f9d07c8ec0c629272c4d05ba81286366132c4b24620bdbdcdefa220309b9db17`
+- 被替代的 M5 scenario v12 基线：SHA-256 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`，提交 `a35be7f206dea52954716e6ca156b25b2622fb41`
+- 未改动的 M2 scenario v6 基线：SHA-256 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`
+
+完整门禁退出后从 `2026-08-07T08:20:23-0700` 自然冷却超过 5 分钟。正式授权绑定前的两次有效快照分别在 `08:30:23` 与 `08:31:19`：load 1m/5m/15m 为 `2.14/2.59/3.47` 与 `2.52/2.62/3.42`，均为 AC 供电、电量 `80%`、低功耗模式关闭、无遗留 `mcgo`/`perfcheck`、tracked 工作树干净且 HEAD 不变。两个正式输出路径在启动前均不存在；没有终止用户进程、清理缓存、调整供电状态或筛选结果。
+
+以下四条正式命令按顺序各执行一次且均为 exit 0，全程没有启动或聚焦前台窗口：
+
+```sh
+TERM=xterm-256color zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/private/tmp/mcgo-m4i-659de485.o6XDzK/memory-v13.json'"
+zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '/private/tmp/mcgo-m4i-659de485.o6XDzK/memory-v13.json' --max-regression 0.20 --allow-scenario-upgrade 12:13"
+TERM=xterm-256color zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '/private/tmp/mcgo-m4i-659de485.o6XDzK/tcp-v13.json'"
+zsh -ic "gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline '/private/tmp/mcgo-m4i-659de485.o6XDzK/memory-v13.json' --current '/private/tmp/mcgo-m4i-659de485.o6XDzK/tcp-v13.json' --max-regression 0.20"
+```
+
+Memory 先通过 v12→v13 报告完整性、同硬件与全部绝对门禁；TCP 随后通过相对该 Memory 报告的同场景跨 transport 比较。Memory/TCP 的 still p99 为 `5.486/4.688ms`，flying p99 为 `8.445/8.498ms`，`remote_gpu_complete` p50 为 `0.092049/0.086326ms`，各含 `128` 个样本、每样本摊薄 `256` 次绘制；多人探针 peak RSS 为 `1856.4/1818.1MiB`，均低于既有 `2GiB` 上限。
+
+首个 v13 候选 `f7d8f261e910863e189666f6e2181e606996f42f` 的失败报告仍只作不可提升证据；本次没有复用旧 HEAD、授权或路径，也没有放宽门禁。
+
+## 被替代的 M5 scenario v12 基线
 
 2026-08-05 在冻结提交 `a35be7f206dea52954716e6ca156b25b2622fb41` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
 
-- 当前 Memory 基线：`docs/notes/perf-baseline-m5.json`，SHA-256 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`
+- 当时接受的 Memory 基线字节：SHA-256 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`
 - 正式 Memory 报告：`/tmp/mcgo-m5-v12-a35be7f-memory.json`，SHA-256 同上
 - Memory 日志：`/tmp/mcgo-m5-v12-a35be7f-memory.log`，SHA-256 `4da8b75123db58272d839e9d5cda28352c68da87ca3c47d15b9d6015e7112c69`
 - 正式 TCP 报告：`/tmp/mcgo-m5-v12-a35be7f-tcp.json`，SHA-256 `0e36342a81b0877b2fa6d247beff5cd76a457675610e52eeb251b8939da384b5`
@@ -115,7 +140,7 @@ M4G 曾在冻结提交 `5eea1310be620f28d8894329086f27b4a12ec546` 上执行 v11 
 
 根因与 M4G 无关：该指标当时用「提交到阻塞轮询返回」的墙钟差逐次计时，实测提交空 command buffer 与提交一次 2560x1440 clear pass 的 p50 相同（`1.276ms` 与 `1.284ms`），取值被宿主轮询实现量化到约 `1.28ms` 的整数倍。按规则该正式链立即停止，两份报告只保留为诊断证据、未被提升；v11 从未成为任何硬件的基线，其 workload 变化并入本页上方的 scenario v12。用修复后的判据回放那对报告，比较通过，印证该次失败确实是门禁缺陷。
 
-## 当前 scenario v12 比较规则
+## scenario v12 批量计时与当前 v13 比较规则
 
 `remote_gpu_complete` 此前用「提交命令到阻塞轮询返回」的墙钟差逐次计时。实测该量几乎不含绘制信息：提交空 command buffer 与提交一次 2560x1440 clear pass 的 p50 相同（`1.276ms` 与 `1.284ms`），且所有取值都被量化到约 `1.28ms` 的整数倍，节拍位于 wgpu-native 内部无法调整。分位数因此在相邻整数倍之间跳变，`20%` 相对阈值套在量化步长为 `100%` 的指标上无法稳定。
 
@@ -125,9 +150,139 @@ scenario v12 起改为批量分摊：一个样本是一批 `256` 次远端角色
 
 benchmark 还在预热与 still、still 与 flying、flying 与 GPU 采样之间以及 GPU 采样之后各加入 `30` 秒冷却，降低持续满载与热节流；冷却写入报告的 `cooldown_seconds`，各阶段时长、样本数与统计口径完全不变。客户端另设 `1500MiB` 的 Go 堆软上限，避免高周转阶段把尚未回收的空闲堆累积进 RSS 峰值。
 
-固定 `2560x1440` 离屏目标、still/flying 阶段时长、RSS、200 个 tick 样本、既有绝对门禁与 `20%` 相对退化阈值均未改变。当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 10:12`。该参数反映真实的基线历史：scenario v11 的正式链因上述 GPU 计时缺陷失败，v11 从未成为任何硬件的基线，因此没有经过 v11 的迁移路径。默认跨场景比较、反向、跨更多级和 `11:12`、`10:11`、`9:10` 参数均被拒绝；v6–v11 历史报告仍可读取，同版本报告仍可比较。
+固定 `2560x1440` 离屏目标、still/flying 阶段时长、RSS、200 个 tick 样本、既有绝对门禁与 `20%` 相对退化阈值均未改变。M4I 在每帧加入程序化天空 draw 后，producer 标记为 scenario v13；`remote_gpu_complete` 仍沿用 v12 的批量分摊定义（`128` 个样本、每样本摊薄 `256` 次绘制），天空成本由真实 still/flying 帧覆盖，不污染该指标。当前 `perfcheck` 只接受唯一的显式迁移参数 `--allow-scenario-upgrade 12:13`。该参数反映真实的基线历史：scenario v11 的正式链因上述 GPU 计时缺陷失败，v11 从未成为任何硬件的基线；v12 曾是 M5 已接受基线，本次正式链已从 v12 直接提升到 v13。默认跨场景比较、反向、跨更多级和 `11:13`、`10:13`、`10:12`、`11:12`、`10:11`、`9:10` 参数均被拒绝；v6–v12 历史报告仍可读取，同版本报告仍可比较。
 
 无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。
+
+## scenario v13 回退说明
+
+回退到 M4L 时需要同时回退天空 draw、scenario v13 的 producer/比较器与 M5 v13 基线，恢复 M5 scenario v12 基线；协议 v13、玩家 schema v5、区块 schema v6 与全部世界/玩家数据无需回退或迁移。
+
+## M4I scenario v13 冻结失败候选与不可提升诊断
+
+以下全部是**不可提升**证据：不得传给 `perfcheck`、复制为基线、覆盖 `docs/notes/perf-baseline-m5.json` 或 `docs/notes/perf-baseline.json`，也不消耗新候选的正式运行机会。
+
+候选 `f7d8f261e910863e189666f6e2181e606996f42f` 完成既有完整门禁后，自然冷却从 `2026-08-05T23:51:51+0800` 至 `23:56:51+0800`，并在 `23:56:59`、`23:57:47` 完成两次只读静稳预检：均为 AC、100% 电量、低电量模式关闭且无遗留 `mcgo`/`perfcheck`；load 1m/5m 分别为 `2.81/2.78` 和 `2.25/2.63`。绑定两个全新 v13 路径后获得一次性正式授权。唯一的 Memory producer 以 exit `1` 停止：still 为 `196.4 FPS`、p99 `5.702ms`、RSS `1378.9MiB`；flying 为 `309.9 FPS`、p99 `12.175ms`、RSS `2280.9MiB`；GPU 采样后 RSS 峰值为 `2452.2MiB`。八会话服务端探针因 `rss=2571304960` 超过既有 `2GiB` 上限拒绝结果。正式 JSON 未生成，未运行迁移 `perfcheck` 或 TCP，且未重跑；M5/M2 baseline 哈希继续分别为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f` 与 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。
+
+### 不可提升的诊断运行
+
+诊断均在 HEAD `34a03b57e585b827bbd96ce5548501f9c6be899a`，仅使用 Memory transport、独立 `/tmp/mcgo-m4i-diag-34a03b5-*` 路径与 `GODEBUG=gctrace=1`；未运行 TCP 或 `perfcheck`，每次临时 mutation 后均恢复源码。短时三路命令（`warmup/still/flying/cooldown` 暂为 `2s/10s/20s/5s`）如下：
+
+```sh
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-diag-34a03b5-full.json > /tmp/mcgo-m4i-diag-34a03b5-full.log 2>&1
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-diag-34a03b5-nosky.json > /tmp/mcgo-m4i-diag-34a03b5-nosky.log 2>&1
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-diag-34a03b5-nostars.json > /tmp/mcgo-m4i-diag-34a03b5-nostars.log 2>&1
+```
+
+| 变体（均不可提升） | 单一临时差异 | exit | flying p99 | GPU 采样后 RSS | 输出 |
+| --- | --- | ---: | ---: | ---: | --- |
+| full | 无 sky 差异 | 1 | `12.092ms` | `1588.8MiB` | `/tmp/mcgo-m4i-diag-34a03b5-full.log`；JSON 缺失 |
+| nosky | 跳过一次 sky draw | 1 | `12.145ms` | `1634.0MiB` | `/tmp/mcgo-m4i-diag-34a03b5-nosky.log`；JSON 缺失 |
+| nostars | 保留 draw，仅把 `sky.wgsl::fs_main` 的星光表达式改为 `let stars = 0.0;` | 0 | `11.555ms` | `1664.1MiB` | `/tmp/mcgo-m4i-diag-34a03b5-nostars.log`、`/tmp/mcgo-m4i-diag-34a03b5-nostars.json` |
+
+为确认短时观察，保持生产 `10s/60s/120s/30s` 时长，只以 `let stars = 0.0;` 替换星光表达式，唯一 producer 为：
+
+```sh
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-diag-34a03b5-confirm.json > /tmp/mcgo-m4i-diag-34a03b5-confirm.log 2>&1
+```
+
+该运行同样**不可提升**，exit `1`，`/tmp/mcgo-m4i-diag-34a03b5-confirm.json` 缺失，`/tmp/mcgo-m4i-diag-34a03b5-confirm.log` 存在。still p99 为 `5.432ms`，flying p99 为 `12.024ms`，仍未低于 `12ms`；GPU 采样后 RSS 为 `2353.3MiB`，八会话服务端探针记录 `rss=2467577856` 并拒绝结果。该运行未进行 TCP、`perfcheck` 或基线写入。
+
+### 不可提升的结论与下一步
+
+A/B 只支持以下边界：短时 no-sky 未改善 flying p99（相对 full `+0.053ms`），因此“完整 sky draw 本身”不是已观察到的短时改善来源；短时 no-stars 的 flying p99 降至 `11.555ms`，但完整时长 no-stars 仍为 `12.024ms`，故**未确认** `star_light` 是 flying p99 根因，也不存在生产修复。RSS 同样不可归因：短时 no-sky/no-stars 的 GPU 采样后 RSS 分别为 `1634.0/1664.1MiB`，高于 full 的 `1588.8MiB`；完整时长 no-stars 虽显示 Go 堆与 runtime 增长及大额非 Go 部分，却没有同 HEAD、同完整时长的 full-stars 对照，不能隔离 Go 堆、Go runtime 或原生图形资源的 RSS 根因。
+
+因此否决把阈值放宽、重跑冻结正式 producer、把完整 sky draw 或 `star_light` 直接当作根因。该轮 A/B 本身没有支持生产修复；随后按 active OpenSpec 约束完成了以下唯一一次 benchmark-only heap profiling。
+
+### 完整时长 full-stars heap profile 隔离
+
+判定为 `GO_HEAP_ISOLATED`。诊断 HEAD 为 `b932d579d3e09fe5af7284baa72294606a9fbee1`，只含临时 heap instrumentation 提交 `b932d57`；相对 instrumentation 前的 `76adf10eafd939e6387d461705fdceb6fcef9e7a`，运行时代码差异只有标准库 helper、私有环境变量入口和 post-still/post-flying/post-GPU 三个既有边界调用。运行使用 Memory transport、scenario v13 full-stars、`2560x1440` 与生产 `10s/60s/120s/30s` 阶段，精确执行一次且没有重跑：
+
+```sh
+MCGO_BENCHMARK_HEAP_PROFILE_PREFIX=/tmp/mcgo-m4i-heapdiag-v13-20260806 GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-heapdiag-v13-20260806.json > /tmp/mcgo-m4i-heapdiag-v13-20260806.log 2>&1
+```
+
+运行日志从 `2026-08-06T08:18:46+0800` 持续到 `08:24:51+0800`。运行前只读 sidecar 的 SHA-256 为 `093e35ad3fbdea8300379c6152e226b8c0d9aa8b3af19daca690f3b12e622daf`，运行后 sidecar 为 `83557c3d3ca9b185d7421226c638f095f7ae02deaf7956c36f60b22b07178acc`。原始日志和三个 profile 的 SHA-256 分别为：
+
+```text
+8fce2aa98b8170b90df3132fc6730308eb0de03f15fbd2c071a3375326b13497  /tmp/mcgo-m4i-heapdiag-v13-20260806.log
+4b562b889eeb34e6a9a6d485fdd34487d96d71661d82627bc4bdee8b4a08eba7  /tmp/mcgo-m4i-heapdiag-v13-20260806-post-still.pprof
+50499ba288324ed3f696c3f0321662a73c8a27db4fbe101540088327bb56b69e  /tmp/mcgo-m4i-heapdiag-v13-20260806-post-flying.pprof
+8178c5fb54f351aa1b786906e925e37441dd426c07a3373af7c8d84af632ee26  /tmp/mcgo-m4i-heapdiag-v13-20260806-post-gpu.pprof
+```
+
+关键日志原文：
+
+```text
+固定场景加载完成，用时 27.59 秒；开始预热
+still: fps=200.3 p50=4.954ms p95=5.256ms p99=5.645ms max=19.534ms RSS=1336.6MiB
+still 后 内存：RSS 峰值 1336.6MiB｜Go 堆在用 360.3MiB｜Go 堆保留 515.2MiB｜Go 运行时合计 534.4MiB｜非 Go 802.2MiB
+flying: fps=305.3 p50=2.714ms p95=6.752ms p99=12.584ms max=30.174ms RSS=2056.9MiB
+flying 后 内存：RSS 峰值 2056.9MiB｜Go 堆在用 1048.1MiB｜Go 堆保留 1403.1MiB｜Go 运行时合计 1447.3MiB｜非 Go 609.6MiB
+GPU 采样后 内存：RSS 峰值 2295.0MiB｜Go 堆在用 779.1MiB｜Go 堆保留 1563.3MiB｜Go 运行时合计 1607.5MiB｜非 Go 687.5MiB
+2026/08/06 08:24:51 mcgo: 性能门禁失败: 测量八会话服务端: 多人服务端探针不完整: overflow=false outbound=610735 interest={Samples:1600 P50MS:0.027375 P95MS:0.079625 P99MS:0.112584 MaxMS:0.16675} ticks={Frames:200 FPS:0 P50MS:0.555167 P95MS:0.64675 P99MS:0.707875 MaxMS:0.901708 PeakRSSBytes:0 MeanCandidateSections:0 MeanCandidateBytes:0 MeanCandidateFaces:0 MaxPendingUploads:0 DroppedRingBufferSamples:0} queues=1/6/2 rss=2406432768
+exit status 1
+```
+
+阶段边界内存增量如下。`printMemoryBreakdown` 位于 profile 的两次强制 GC 之前，因此这里的 `HeapAlloc` 与强制 GC 后的 profile total 是相邻但不同的观测点。
+
+| 阶段增量 | RSS 峰值 | HeapAlloc | HeapSys | runtime Sys | 非 Go 估算 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| still → flying | `+720.3MiB` | `+687.8MiB` | `+887.9MiB` | `+912.9MiB` | `-192.6MiB` |
+| flying → GPU | `+238.1MiB` | `-269.0MiB` | `+160.2MiB` | `+160.2MiB` | `+77.9MiB` |
+| still → GPU | `+958.4MiB` | `+418.8MiB` | `+1048.1MiB` | `+1073.1MiB` | `-114.7MiB` |
+
+三个 profile 的 totals 与增量为：
+
+| profile | inuse_space total | inuse_objects total | alloc_space total |
+| --- | ---: | ---: | ---: |
+| post-still | `231.63MB` | `716,597` | `9,078.32MB` |
+| post-flying | `754.88MB` | `2,702,133` | `59,743.28MB` |
+| post-GPU | `776.40MB` | `2,529,736` | `60,840.27MB` |
+| still → flying | `+523.25MB` | `+1,985,536` | `+50,664.96MB` |
+| flying → GPU | `+21.52MB` | `-172,397` | `+1,096.99MB` |
+| still → GPU | `+544.77MB` | `+1,813,139` | `+51,761.95MB` |
+
+post-flying 的 live Go heap 增量已解释 RSS 增量的主要部分；profile 前 `HeapAlloc` 增量约为 RSS 增量的 `95.5%`，且非 Go 估算反而减少。唯一最大的实际保留链为：
+
+```text
+server.(*Server).saveWorker
+  → storage.(*MemoryStore).SaveBatch
+    → world.(*Chunk).Clone
+      → world.(*Section).Clone
+        → world.(*PalettedContainer).Clone
+```
+
+post-flying 时该链累计保留 `402.35MB`、`1,492,526` 个对象，占 profile live space 的 `53.30%`；post-GPU 时增加到 `622.23MB`、`2,179,047` 个对象，占 `80.14%`。调用方与所有权已经由源码闭合：benchmark 在 `cmd/mcgo/app.go` 创建 `storage.NewMemory`；flying 相机更新 trusted observer，使离开 wanted union 的 dirty chunk 进入持久化；权威 tick 的 `schedulePersistence` 经 `PersistenceSnapshots` 取得第一份快照并把 job 交给 `saveWorker`；`saveWorker` 调用 `SaveBatch`，后者为更新 revision 再深拷贝一次，并把结果放进进程生命周期的 `MemoryStore.chunks` map。该 map 是最终 owner，不随 sim 卸载确认、客户端 forget 或 renderer drop 删除；flying 持续访问新的 `ChunkKey`，所以保留集合持续增长。
+
+以下来源被排除为本次 flying RSS 的单一根因：
+
+- client mirror 在 post-flying/post-GPU 的 live cumulative 仅为 `75.64/77.14MB`，并由 `ForgetChunks` 删除视距外 chunk。
+- mesher 的 `cloneNeighborhood` 在 post-flying 累计分配 `43,534.94MB`，但 live 仅 `13.03MB`（post-GPU `23.05MB`），属于有界 jobs/results 通道中的 churn，不是持续 owner。
+- renderer upload live 从 post-still `7.09MB` 降到 post-flying `6.67MB`，且 `DropOutside` 会回收视距外 section；render cache 没有同量增长。
+- full-stars shader 在 GPU 执行，不产生这条 Go heap 保留链；此前 no-sky/no-stars A/B 未隔离 RSS，而本次 Go live delta 已解释 flying RSS 的主要变化，所以无需把 sky/WebGPU/Metal 猜作该阶段根因。
+
+这次 producer 因八会话服务端探针 `rss=2406432768` 超过既有 `2GiB` 门禁而 exit `1`；失败发生在报告写入前，所以 JSON 不存在。profile 前的强制 GC 与序列化改变后续时序，因此本次帧时、RSS、日志和 profile 全部只作不可提升的诊断证据，不能传给 `perfcheck`、复制为 baseline 或用于新候选验收。没有运行 TCP 或 `perfcheck`；M5/M2 baseline 哈希仍为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f` 与 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。Task 8.1 的诊断闭合；8.2 的修复仍保持 pending，本次不进入实现。
+
+### encoded MemoryStore 单次完整 RSS 诊断闭合
+
+判定为 `ENCODED_STORE_RSS_CLOSED`。在已评审的 Task 1 HEAD `5e08ad839cd9271ada6770a2cca9992c908acfc3`，先冻结只读 pre-run provenance（SHA-256 `f39ec8520d2b8405d53a98dffdd984451e5d59854aa7f0475bffda3ba388064f`），确认 scenario v13 的 full-stars `Draw(3, 1)` 和精确 `10s/60s/120s/30s` 未变、M5/M2 baseline 哈希仍为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`/`b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`，并通过 `TestMemoryStoreOwnsSavedAndLoadedChunks` 与 `TestMemoryStoreRetainedHeapIsBounded`。
+
+唯一一次不可提升的 producer 为：
+
+```sh
+GODEBUG=gctrace=1 go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /tmp/mcgo-m4i-encoded-store-diag-v13-20260806.json > /tmp/mcgo-m4i-encoded-store-diag-v13-20260806.log 2>&1
+```
+
+它 exit `0`，JSON 已在报告写入后生成；日志/JSON SHA-256 分别为 `d24c03778f737321d3711c486b93458353c51442938e089cd5fbe8060b27fd09`/`09755335ca08b59f408aefcc36a2b37a71b4813c52cb177d3613308d40b53e3e`。相对 8.1 的完整时长 full-stars 诊断，still 为 RSS `1347.6MiB`（`+11.0MiB`）、HeapAlloc `360.6MiB`（`+0.3MiB`）、p99 `5.337ms`；flying 为 RSS `1459.7MiB`（`-597.2MiB`）、HeapAlloc `562.5MiB`（`-485.6MiB`）、p99 `11.585ms`；GPU 采样后为 RSS `1652.0MiB`（`-643.0MiB`）、HeapAlloc `164.3MiB`（`-614.8MiB`）、`remote_gpu_complete` p99 `0.168247ms`。所有阶段的 HeapSys/runtime Sys/非 Go 估算分别为 still `515.2/534.4/813.2MiB`、flying `755.1/777.7/682.0MiB`、GPU `851.3/873.7/778.3MiB`。八会话 server probe RSS 为 `1732214784` bytes（`1652.0MiB`，相对 `2406432768` bytes 下降 `674217984` bytes），完整且未触发 RSS 失败；运行后无遗留 `mcgo` 或匹配 `go run` 进程。
+
+此输出只证明 encoded MemoryStore 移除了 8.1 的 retained-heap owner 并闭合 RSS 诊断；它不得传给 `perfcheck`、TCP、正式链或任何 baseline，未复制或改写 M5/M2 baseline，且不进入 8.3+。
+
+### 星空短路单次完整 p99 诊断闭合
+
+判定为 `STAR_SHORT_CIRCUIT_P99_CLOSED`。在干净的 detached HEAD `aa45a3032771dbf6d9f2b232ef4d1748482edc34`，pre-run provenance SHA-256 为 `001b4f9d232e916a36e830fd005f96a1d80c38d99858747928745c5f6fcc1ec0`；唯一一次不可提升的 full-stars、Memory、scenario v13 producer 使用生产 `10s/60s/120s/30s` 阶段与 `2560x1440` 目标，未启用 heap instrumentation，exit `0` 并写出完整 JSON。still 为 `275.9 FPS`、p99 `5.904ms`、RSS `1199.8MiB`；flying 为 `544.5 FPS`、p99 `9.312ms`、RSS `1274.9MiB`；GPU 采样后 RSS 为 `1562.6MiB`，`remote_gpu_complete` p99 为 `0.188827ms`，八会话 server probe RSS 为 `1638531072` bytes。日志/JSON SHA-256 分别为 `40223db1e4e0d6551f66e28ae01e34026b5d94646ec933fa5e2ad2944360ad88`/`7ebe3a160dc7395b40859c5044f4b8a8bcbe71fe078a4d043bb220145157ff67`。
+
+该运行没有执行 `perfcheck` 或 TCP，也没有生成 heap profile、复制或改写 baseline；运行后无遗留 `mcgo`/`perfcheck` 进程。M5/M2 baseline 哈希仍为 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`/`b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。此结果只闭合 Task 8.3，不得提升为正式报告或基线。
 
 ## M4F scenario v10 历史比较规则
 

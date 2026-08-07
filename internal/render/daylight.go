@@ -17,9 +17,12 @@ var (
 // DayNight 是某个显示相位下与世界空间明暗有关的全部固定值。
 // 它完全由绝对世界时间决定，不含任何可变状态。
 type DayNight struct {
-	Sun        float32
-	Daylight   float32
-	ClearColor [4]float32
+	Sun            float32
+	Daylight       float32
+	ClearColor     [4]float32
+	SunDirection   [3]float32
+	MoonDirection  [3]float32
+	StarVisibility float32
 }
 
 // DayNightAt 按固定曲线计算给定绝对世界时间的昼夜状态：
@@ -29,13 +32,21 @@ type DayNight struct {
 //	daylight = 0.15 + 0.85*sun
 func DayNightAt(worldTime uint64) DayNight {
 	phase := float64(worldTime%DayLengthTicks) / DayLengthTicks
-	sun := math.Sin(2 * math.Pi * phase)
+	theta := 2 * math.Pi * phase
+	sun := math.Sin(theta)
 	if sun < 0 {
 		sun = 0
 	}
+	starVisibility := 1 - (sun/0.25)*(sun/0.25)*(3-2*(sun/0.25))
+	if sun >= 0.25 {
+		starVisibility = 0
+	}
 	result := DayNight{
-		Sun:      float32(sun),
-		Daylight: float32(0.15 + 0.85*sun),
+		Sun:            float32(sun),
+		Daylight:       float32(0.15 + 0.85*sun),
+		SunDirection:   [3]float32{float32(math.Cos(theta)), float32(math.Sin(theta)), 0},
+		MoonDirection:  [3]float32{-float32(math.Cos(theta)), -float32(math.Sin(theta)), 0},
+		StarVisibility: float32(starVisibility),
 	}
 	for index := range result.ClearColor {
 		night, day := nightSkyColor[index], daySkyColor[index]

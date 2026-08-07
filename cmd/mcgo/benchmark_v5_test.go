@@ -15,9 +15,9 @@ import (
 	"minecraft-go/internal/client"
 )
 
-func TestBenchmarkScenarioVersionIncludesStableGPUTiming(t *testing.T) {
-	if scenarioVersion != 12 {
-		t.Fatalf("scenarioVersion=%d，想要 GPU 计时稳定化后的 v12", scenarioVersion)
+func TestBenchmarkScenarioVersionIncludesCelestialSkyWorkload(t *testing.T) {
+	if scenarioVersion != 13 {
+		t.Fatalf("scenarioVersion=%d，想要天空 workload 之后的 v13", scenarioVersion)
 	}
 }
 

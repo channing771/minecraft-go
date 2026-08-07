@@ -423,6 +423,7 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 type integrationRenderDevice struct {
 	releases, passes []string
 	events           []string
+	draws            []string
 	buffers          map[string]*integrationBuffer
 }
 
@@ -565,7 +566,7 @@ type integrationEncoder struct{ device *integrationRenderDevice }
 
 func (e *integrationEncoder) BeginRenderPass(desc gfx.RenderPassDesc) gfx.RenderPass {
 	e.device.passes = append(e.device.passes, desc.Label)
-	return &integrationPass{}
+	return &integrationPass{device: e.device}
 }
 func (*integrationEncoder) BeginComputePass(string) gfx.ComputePass                           { return &integrationComputePass{} }
 func (*integrationEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {}
@@ -574,15 +575,23 @@ func (e *integrationEncoder) Finish() gfx.CommandBuffer {
 	return &integrationResource{release: func() { e.device.events = append(e.device.events, "release") }}
 }
 
-type integrationPass struct{}
+type integrationPass struct{ device *integrationRenderDevice }
 
 func (*integrationPass) SetPipeline(gfx.RenderPipeline)             {}
 func (*integrationPass) SetBindGroup(uint32, gfx.BindGroup)         {}
 func (*integrationPass) SetVertexBuffer(uint32, gfx.Buffer, uint64) {}
 func (*integrationPass) SetIndexBuffer(gfx.Buffer, uint64)          {}
-func (*integrationPass) DrawIndexedIndirect(gfx.Buffer, uint64)     {}
-func (*integrationPass) Draw(uint32, uint32)                        {}
-func (*integrationPass) End()                                       {}
+func (p *integrationPass) DrawIndexedIndirect(gfx.Buffer, uint64) {
+	p.device.draws = append(p.device.draws, "indirect")
+}
+func (p *integrationPass) Draw(vertexCount uint32, _ uint32) {
+	if vertexCount == 3 {
+		p.device.draws = append(p.device.draws, "sky triangle")
+		return
+	}
+	p.device.draws = append(p.device.draws, "draw")
+}
+func (*integrationPass) End() {}
 
 type integrationComputePass struct{}
 
@@ -1553,6 +1562,144 @@ func newInteractiveTestApplication(
 	}, serverEndpoint
 }
 
+func TestApplicationCelestialParametersKeepLastAcceptedWorldTime(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	newest := network.PlayerState{
+		ServerTick: 2, WorldTimeTicks: 6000, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 0.5}, OnGround: true, Ready: true,
+	}
+	sendInteractiveServerMessage(t, serverEndpoint, newest)
+	app.drainServerMessages(1)
+	want := render.DayNightAt(newest.WorldTimeTicks)
+	if got := render.DayNightAt(app.worldTimeTicks); got != want {
+		t.Fatalf("接受新状态后的天体参数 = %+v，想要 %+v", got, want)
+	}
+	if got := want.SunDirection; math.Abs(float64(got[1]-1)) > 1e-5 || math.Abs(float64(got[0])) > 1e-5 || math.Abs(float64(got[2])) > 1e-5 {
+		t.Fatalf("接受新状态后的太阳方向 = %v，想要正午天顶", got)
+	}
+
+	for _, stale := range []network.PlayerState{
+		{ServerTick: 1, WorldTimeTicks: 18000, Dimension: core.Overworld, Position: newest.Position, OnGround: true, Ready: true},
+		{ServerTick: 2, WorldTimeTicks: 12000, Dimension: core.Overworld, Position: newest.Position, OnGround: true, Ready: true},
+	} {
+		sendInteractiveServerMessage(t, serverEndpoint, stale)
+		app.drainServerMessages(1)
+		if app.worldTimeTicks != newest.WorldTimeTicks {
+			t.Fatalf("旧或重复状态将世界时间改为 %d，想要 %d", app.worldTimeTicks, newest.WorldTimeTicks)
+		}
+		if got := render.DayNightAt(app.worldTimeTicks); got != want {
+			t.Fatalf("旧或重复状态改变天体参数 = %+v，想要 %+v", got, want)
+		}
+	}
+}
+
+func TestApplicationCelestialParametersMatchMemoryAndTCP(t *testing.T) {
+	state := network.PlayerState{
+		ServerTick: 1, WorldTimeTicks: 18000, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 0.5}, OnGround: true, Ready: true,
+	}
+	var memory render.DayNight
+	for _, transport := range []string{"memory", "tcp"} {
+		t.Run(transport, func(t *testing.T) {
+			clientEndpoint, serverEndpoint := celestialTestEndpoints(t, transport)
+			app := &application{
+				clientEndpoint: clientEndpoint,
+				receiver:       client.NewReceiver(clientEndpoint, 8),
+				mirror:         client.NewMirror(),
+				predictor:      client.NewPredictor(),
+				serverCancel:   func() {},
+			}
+			sendInteractiveServerMessage(t, serverEndpoint, state)
+			app.drainServerMessages(1)
+			got := render.DayNightAt(app.worldTimeTicks)
+			if math.Abs(float64(got.SunDirection[1]+1)) > 1e-5 || math.Abs(float64(got.SunDirection[0])) > 1e-5 || math.Abs(float64(got.SunDirection[2])) > 1e-5 {
+				t.Fatalf("午夜太阳方向 = %v，想要地平线下方", got.SunDirection)
+			}
+			if transport == "memory" {
+				memory = got
+				return
+			}
+			if got != memory {
+				t.Fatalf("TCP 天体参数 = %+v，想要与 Memory 相同的 %+v", got, memory)
+			}
+		})
+	}
+}
+
+func celestialTestEndpoints(t *testing.T, transport string) (network.ClientEndpoint, network.ServerEndpoint) {
+	t.Helper()
+	if transport == "memory" {
+		clientEndpoint, serverEndpoint := network.NewMemoryPair(8)
+		t.Cleanup(func() {
+			_ = clientEndpoint.Close()
+			_ = serverEndpoint.Close()
+		})
+		return clientEndpoint, serverEndpoint
+	}
+	listener, err := network.ListenTCP("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	dialed := make(chan struct {
+		stream network.ClientPacketStream
+		err    error
+	}, 1)
+	go func() {
+		stream, err := network.DialTCP(context.Background(), listener.Addr())
+		dialed <- struct {
+			stream network.ClientPacketStream
+			err    error
+		}{stream, err}
+	}()
+	serverStream, err := listener.Accept(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan struct {
+		endpoint network.ServerEndpoint
+		err      error
+	}, 1)
+	go func() {
+		pending, err := network.BeginServerLogin(context.Background(), serverStream)
+		if err != nil {
+			accepted <- struct {
+				endpoint network.ServerEndpoint
+				err      error
+			}{err: err}
+			return
+		}
+		var endpoint network.ServerEndpoint
+		err = pending.Accept(context.Background(), func(attached network.ServerEndpoint) error {
+			endpoint = attached
+			return nil
+		})
+		accepted <- struct {
+			endpoint network.ServerEndpoint
+			err      error
+		}{endpoint, err}
+	}()
+	clientStream := <-dialed
+	if clientStream.err != nil {
+		t.Fatal(clientStream.err)
+	}
+	clientEndpoint, err := network.LoginClient(context.Background(), clientStream.stream, network.Identity{
+		PlayerID: integrationPlayerID(9), DisplayName: "Celestial",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := <-accepted
+	if server.err != nil {
+		t.Fatal(server.err)
+	}
+	t.Cleanup(func() {
+		_ = clientEndpoint.Close()
+		_ = server.endpoint.Close()
+	})
+	return clientEndpoint, server.endpoint
+}
+
 func sendInteractiveServerMessage(
 	t *testing.T,
 	endpoint network.ServerEndpoint,
@@ -1827,6 +1974,82 @@ func TestApplicationDrawsItemDropsAfterAvatars(t *testing.T) {
 	got := app.itemDrops.Presentations()
 	if len(got) != 1 || got[0].BlockIndex != drop.BlockIndex || got[0].Count != drop.Count {
 		t.Fatalf("渲染修改了镜像: %+v", got)
+	}
+}
+
+// Mutation killed: 让 terrain/avatar/item-drop 使用不同矩阵或 daylight，
+// 或让 sky 使用错误的 inverse/天体参数，会改变捕获到的 uniform buffer 内容。
+func TestApplicationRenderFrameCameraAndSkyParameters(t *testing.T) {
+	glyphs := &integrationGlyphSource{}
+	app, dev := newRemoteRenderApplication(t, glyphs)
+	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{1, 2, 3})); err != nil {
+		t.Fatal(err)
+	}
+	drop := network.ItemDrop{
+		ID:   core.DropID{Dimension: core.Overworld, Slot: 0, Generation: 1},
+		Item: core.ItemStone, Count: 1, BlockIndex: 9,
+	}
+	if err := app.itemDrops.Apply(network.ItemDropUpserts{
+		ServerTick: 3, Drops: []network.ItemDrop{drop},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app.worldTimeTicks = 3000
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{
+		"terrain pass", "avatar pass", "item drop pass", "name-tag pass",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("passes=%v want=%v", got, want)
+	}
+
+	dayNight := render.DayNightAt(app.worldTimeTicks)
+	wantViewProj := app.camera.ViewProj()
+	wantViewProjInv := wantViewProj.Inv()
+	readFloat := func(data []byte, offset int) float32 {
+		return math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+	}
+	mat4From := func(data []byte, offset int) mgl32.Mat4 {
+		var out mgl32.Mat4
+		for i := range out {
+			out[i] = readFloat(data, offset+i*4)
+		}
+		return out
+	}
+
+	terrain := dev.bufferByLabel(t, "terrain camera")
+	sky := dev.bufferByLabel(t, "sky uniform")
+	if got := mat4From(terrain.data, 0); !got.ApproxEqualThreshold(wantViewProj, 1e-4) {
+		t.Fatalf("terrain ViewProj=%v want=%v", got, wantViewProj)
+	}
+	if got := mat4From(sky.data, 0); !got.ApproxEqualThreshold(wantViewProjInv, 1e-4) {
+		t.Fatalf("sky ViewProjInv=%v want=%v", got, wantViewProjInv)
+	}
+	// avatar 与 item-drop 继续与 terrain 共享同一正向矩阵和 daylight。
+	for _, label := range []string{"avatar dynamic upload", "item drop dynamic upload"} {
+		buffer := dev.bufferByLabel(t, label)
+		if got := mat4From(buffer.data, 0); !got.ApproxEqualThreshold(wantViewProj, 1e-4) {
+			t.Fatalf("%s ViewProj=%v want=%v", label, got, wantViewProj)
+		}
+		if got := readFloat(buffer.data, 64); got != dayNight.Daylight {
+			t.Fatalf("%s Daylight=%v want=%v", label, got, dayNight.Daylight)
+		}
+	}
+	// sky uniform 布局：ViewProjInv 64 字节 + SunDirection xyz + Daylight + StarVisibility。
+	for i, want := range dayNight.SunDirection {
+		if got := readFloat(sky.data, 64+i*4); got != want {
+			t.Fatalf("sky SunDirection[%d]=%v want=%v", i, got, want)
+		}
+	}
+	if got := readFloat(sky.data, 76); got != dayNight.Daylight {
+		t.Fatalf("sky Daylight=%v want=%v", got, dayNight.Daylight)
+	}
+	if got := readFloat(sky.data, 80); got != dayNight.StarVisibility {
+		t.Fatalf("sky StarVisibility=%v want=%v", got, dayNight.StarVisibility)
+	}
+	if got := readFloat(terrain.data, 76); got != dayNight.Daylight {
+		t.Fatalf("terrain Daylight=%v want=%v", got, dayNight.Daylight)
 	}
 }
 

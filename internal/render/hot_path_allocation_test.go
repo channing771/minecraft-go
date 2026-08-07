@@ -8,10 +8,39 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/go-gl/mathgl/mgl32"
+
+	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
 )
 
 var embeddedGlyphFontDataSink []byte
+
+// 删除 Renderer 的固定 uniform 编码数组会让稳定帧重新产生堆分配。
+func TestRendererRenderDoesNotAllocate(t *testing.T) {
+	buffer := &allocationRenderBuffer{}
+	renderer := &Renderer{
+		camera: buffer, skyCamera: buffer,
+		zeroArgs: buffer, indirect: buffer, index: buffer,
+		cull: &culler{uniforms: buffer, sections: buffer},
+		sections: map[core.SectionPos]sectionSlot{
+			{Y: 4}: {packed: []uint64{1}},
+		},
+	}
+	encoder := &allocationCommandEncoder{}
+	camera := Camera{ViewProj: mgl32.Ident4(), ViewProjInv: mgl32.Ident4()}
+
+	renderer.Render(encoder, nil, nil, camera)
+	if got := renderer.LastFrameStats().CandidateFaces; got != 1 {
+		t.Fatalf("warm candidate faces=%d want=1", got)
+	}
+	allocations := testing.AllocsPerRun(1000, func() {
+		renderer.Render(encoder, nil, nil, camera)
+	})
+	if allocations != 0 {
+		t.Fatalf("warmed terrain Render allocations=%v want=0", allocations)
+	}
+}
 
 // Mutation killed: copying the avatar slice for sorting or rebuilding part
 // storage makes the warmed CPU path allocate on every rendered frame.
@@ -180,12 +209,17 @@ func (*allocationRenderBuffer) Write(uint64, []byte) {}
 func (*allocationRenderBuffer) ReadBack() []byte     { return nil }
 func (*allocationRenderBuffer) Release()             {}
 
-type allocationCommandEncoder struct{ pass allocationRenderPass }
+type allocationCommandEncoder struct {
+	pass    allocationRenderPass
+	compute allocationComputePass
+}
 
 func (encoder *allocationCommandEncoder) BeginRenderPass(gfx.RenderPassDesc) gfx.RenderPass {
 	return &encoder.pass
 }
-func (*allocationCommandEncoder) BeginComputePass(string) gfx.ComputePass { return nil }
+func (encoder *allocationCommandEncoder) BeginComputePass(string) gfx.ComputePass {
+	return &encoder.compute
+}
 func (*allocationCommandEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {
 }
 func (*allocationCommandEncoder) Finish() gfx.CommandBuffer { return nil }
@@ -199,6 +233,13 @@ func (*allocationRenderPass) SetIndexBuffer(gfx.Buffer, uint64)          {}
 func (*allocationRenderPass) DrawIndexedIndirect(gfx.Buffer, uint64)     {}
 func (*allocationRenderPass) Draw(uint32, uint32)                        {}
 func (*allocationRenderPass) End()                                       {}
+
+type allocationComputePass struct{}
+
+func (*allocationComputePass) SetPipeline(gfx.ComputePipeline)    {}
+func (*allocationComputePass) SetBindGroup(uint32, gfx.BindGroup) {}
+func (*allocationComputePass) Dispatch(uint32, uint32, uint32)    {}
+func (*allocationComputePass) End()                               {}
 
 type allocationGlyphSource struct {
 	requests     [maxNameTags]string

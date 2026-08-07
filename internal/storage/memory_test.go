@@ -3,6 +3,7 @@ package storage_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 
 	"minecraft-go/internal/core"
@@ -123,6 +124,106 @@ func TestMemoryStoreValidatesEntireBatchBeforeApplying(t *testing.T) {
 	_, err = store.LoadChunk(context.Background(), validKey)
 	if !errors.Is(err, storage.ErrChunkNotFound) {
 		t.Fatalf("valid save applied despite invalid batch member: %v", err)
+	}
+}
+
+func TestMemoryStoreRejectsUnencodableBatchAtomically(t *testing.T) {
+	store := storage.NewMemory(storage.Metadata{})
+	validKey := core.ChunkKey{
+		Dimension: core.Overworld,
+		Pos:       core.ChunkPos{X: 1, Z: 2},
+	}
+	existingKey := core.ChunkKey{
+		Dimension: core.Overworld,
+		Pos:       core.ChunkPos{X: 5, Z: 6},
+	}
+	invalidKey := core.ChunkKey{
+		Dimension: core.Overworld,
+		Pos:       core.ChunkPos{X: 3, Z: 4},
+	}
+	saveChunk(t, store, existingKey, 1, chunkWithBlock(existingKey.Pos, core.StoneID))
+	invalid := world.NewChunk(invalidKey.Pos)
+	invalid.SetFurnace(0, world.FurnaceSlot{
+		Generation: 1,
+		Active:     true,
+		BlockIndex: 0,
+	})
+
+	_, err := store.SaveBatch(context.Background(), []storage.ChunkSave{
+		{
+			Key: validKey, Revision: 1,
+			Chunk: chunkWithBlock(validKey.Pos, core.StoneID),
+		},
+		{
+			Key: existingKey, Revision: 2,
+			Chunk: chunkWithBlock(existingKey.Pos, core.DirtID),
+		},
+		{Key: invalidKey, Revision: 1, Chunk: invalid},
+	})
+	if !errors.Is(err, storage.ErrCorrupt) {
+		t.Fatalf("SaveBatch error = %v，想要 ErrCorrupt", err)
+	}
+	if _, err := store.LoadChunk(context.Background(), validKey); !errors.Is(err, storage.ErrChunkNotFound) {
+		t.Fatalf("编码失败后合法 chunk 可见: %v", err)
+	}
+	loaded, err := store.LoadChunk(context.Background(), existingKey)
+	if err != nil || loaded.Revision != 1 || loaded.Chunk.BlockAt(0, 0, 0) != core.StoneID {
+		t.Fatalf("编码失败后已有 chunk = %+v, %v", loaded, err)
+	}
+}
+
+func TestMemoryStoreRetainedHeapIsBounded(t *testing.T) {
+	runtime.GC()
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	store := storage.NewMemory(storage.Metadata{})
+	for index := 0; index < 192; index++ {
+		key := core.ChunkKey{
+			Dimension: core.Overworld,
+			Pos:       core.ChunkPos{X: int32(index)},
+		}
+		chunk := world.NewChunk(key.Pos)
+		for section := 0; section < core.SectionsPerChunk; section++ {
+			y := int32(core.MinY + section*core.SectionSize)
+			chunk.SetBlock(section%core.SectionSize, y, section/core.SectionSize, core.StoneID)
+		}
+		if _, err := store.SaveBatch(context.Background(), []storage.ChunkSave{{
+			Key: key, Revision: 1, Chunk: chunk,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runtime.GC()
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(store)
+	if after.HeapAlloc < before.HeapAlloc {
+		t.Fatalf("HeapAlloc before=%d after=%d", before.HeapAlloc, after.HeapAlloc)
+	}
+	const limit = 8 << 20
+	if retained := after.HeapAlloc - before.HeapAlloc; retained >= limit {
+		t.Fatalf("retained HeapAlloc = %d，必须小于 %d", retained, limit)
+	}
+
+	for index := 0; index < 192; index++ {
+		key := core.ChunkKey{
+			Dimension: core.Overworld,
+			Pos:       core.ChunkPos{X: int32(index)},
+		}
+		loaded, err := store.LoadChunk(context.Background(), key)
+		if err != nil || loaded.Revision != 1 {
+			t.Fatalf("LoadChunk(%+v) = %+v, %v", key, loaded, err)
+		}
+		for section := 0; section < core.SectionsPerChunk; section++ {
+			y := int32(core.MinY + section*core.SectionSize)
+			if got := loaded.Chunk.BlockAt(section%core.SectionSize, y, section/core.SectionSize); got != core.StoneID {
+				t.Fatalf("LoadChunk(%+v) section %d block = %v，想要 Stone", key, section, got)
+			}
+		}
 	}
 }
 

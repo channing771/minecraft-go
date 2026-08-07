@@ -21,7 +21,7 @@ type MemoryStore struct {
 type memoryChunk struct {
 	revision uint64
 	hash     [32]byte
-	chunk    *world.Chunk
+	encoded  []byte
 }
 
 type pendingChunk struct {
@@ -82,11 +82,15 @@ func (store *MemoryStore) LoadChunk(
 	if !ok {
 		return StoredChunk{}, fmt.Errorf("%w: %v", ErrChunkNotFound, key)
 	}
+	decoded, err := decodeChunkPayload(key, stored.revision, stored.encoded)
+	if err != nil {
+		return StoredChunk{}, fmt.Errorf("decode memory chunk %v: %w", key, err)
+	}
 	return StoredChunk{
 		Key:               key,
 		Revision:          stored.revision,
 		PersistedRevision: stored.revision,
-		Chunk:             stored.chunk.Clone(),
+		Chunk:             decoded.Chunk,
 	}, nil
 }
 
@@ -146,11 +150,27 @@ func (store *MemoryStore) SaveBatch(
 		}
 	}
 
+	encoded := make(map[core.ChunkKey][]byte, len(pending))
+	for key, candidate := range pending {
+		if err := ctx.Err(); err != nil {
+			return SaveResult{}, err
+		}
+		payload, err := encodeChunkPayload(ChunkSave{
+			Key: key, Revision: candidate.revision, Chunk: candidate.chunk,
+		})
+		if err != nil {
+			return SaveResult{}, fmt.Errorf("encode memory chunk %v: %w", key, err)
+		}
+		encoded[key] = payload
+	}
+	if err := ctx.Err(); err != nil {
+		return SaveResult{}, err
+	}
 	for key, candidate := range pending {
 		store.chunks[key] = memoryChunk{
 			revision: candidate.revision,
 			hash:     candidate.hash,
-			chunk:    candidate.chunk.Clone(),
+			encoded:  encoded[key],
 		}
 		committed[key] = candidate.revision
 	}

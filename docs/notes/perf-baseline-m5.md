@@ -1,6 +1,30 @@
 # Apple M5 性能基线
 
-## 当前 scenario v10 基线
+## 当前 scenario v13 基线
+
+- 正式提交：`659de4859b4b78024c9b3157c2ce484bae26383e`
+- scenario：`13`
+- transport：`memory`
+- framebuffer：`2560x1440`
+- hardware：`Apple M5 / 24GiB`
+- OS：`macOS 26.5.1`
+- Go：`go1.26.0 darwin/arm64`，由 GVM 已安装工具链提供
+- Memory JSON SHA-256：`452a1916cafa36a6383c1c6e2a7b3c125eab4623f21636b46db1bfe9b315f6f6`
+- TCP JSON SHA-256：`f9d07c8ec0c629272c4d05ba81286366132c4b24620bdbdcdefa220309b9db17`
+- 被替代的 scenario v12 Memory SHA-256：`9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`
+
+`perf-baseline-m5.json` 是上述 Memory 报告的精确字节副本。完整门禁退出并自然冷却超过 5 分钟后，两次有效静稳快照间隔 56 秒，均为 AC 供电、低功耗模式关闭、无遗留 `mcgo`/`perfcheck`、tracked 工作树干净。用户对精确 HEAD 与两个全新路径授权后，Memory 与 TCP producer 各运行一次；Memory 通过唯一 `12:13` 迁移完整性和绝对门禁，TCP 通过同场景跨 transport 比较。命令、临时路径、阶段指标和旧候选失败证据见 `perf-baseline.md`。
+
+| transport / 阶段 | FPS | p50 | p95 | p99 | max | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Memory / still | 254.5 | 3.847ms | 4.178ms | 5.486ms | 38.871ms | 1382.2MiB |
+| Memory / flying | 628.5 | 1.157ms | 2.955ms | 8.445ms | 78.054ms | 1604.2MiB |
+| TCP / still | 254.6 | 3.866ms | 4.135ms | 4.688ms | 16.321ms | 1417.3MiB |
+| TCP / flying | 613.0 | 1.180ms | 3.067ms | 8.498ms | 45.478ms | 1544.2MiB |
+
+两份 `remote_gpu_complete` 都包含 `128` 个样本、每样本摊薄 `256` 次绘制；Memory/TCP p50 为 `0.092049/0.086326ms`。无后缀 M2 scenario v6 基线保持原路径，SHA-256 仍为 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。
+
+## 历史 scenario v10 基线
 
 - 正式提交：`8fa7c08f327286223fb812c2f0f65f2aa2dcba03`
 - scenario：`10`
@@ -15,7 +39,7 @@
 - TCP log SHA-256：`dccce299294701d4279b6ccde43a0e9ee9478445f8d87885d6876a46c9614074`
 - 被替代的 scenario v9 Memory SHA-256：`70488080e09eb9fa52ce16f162a15768fd8d2bef85511c5e629a663e76140283`
 
-`perf-baseline-m5.json` 是上述 Memory 报告的精确字节副本。无后缀 M2 scenario v6 基线保持原路径，SHA-256 仍为 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。
+上述 Memory 报告曾是 `perf-baseline-m5.json` 的精确字节副本，现已被 scenario v13 基线替代。无后缀 M2 scenario v6 基线保持原路径，SHA-256 仍为 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。
 
 ### 正式授权与静稳预检
 
@@ -157,7 +181,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/m
 
 ## 后续使用
 
-在同一 M5 硬件上生成 scenario v10 当前报告后，显式选择本基线：
+在同一 M5 硬件上生成 scenario v13 当前报告后，显式选择本基线：
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/<current-report>.json --max-regression 0.20'
