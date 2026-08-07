@@ -303,6 +303,7 @@ func TestPlayerHashCoversEveryAuthoritativeField(t *testing.T) {
 		{name: "on ground", mutate: func(_ *sessionState, p *playerState) { p.state.OnGround = false }},
 		{name: "yaw", mutate: func(_ *sessionState, p *playerState) { p.yaw = 1 }},
 		{name: "pitch", mutate: func(_ *sessionState, p *playerState) { p.pitch = 1 }},
+		{name: "health", mutate: func(_ *sessionState, p *playerState) { p.health = 1 }},
 		{name: "input x", mutate: func(_ *sessionState, p *playerState) { p.input.MoveX = 1 }},
 		{name: "input z", mutate: func(_ *sessionState, p *playerState) { p.input.MoveZ = 1 }},
 		{name: "input jump", mutate: func(_ *sessionState, p *playerState) { p.input.Jump = true }},
@@ -329,6 +330,7 @@ func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
 	fixture := []byte{
 		0x0f, 0x0e, 0x0d, 0x0c, // dimension: 0x0c0d0e0f
 		0x01,                   // lifecycle: PlayerActive
+		0x0a,                   // health: 10
 		0x00, 0x00, 0xa0, 0x3f, // position X: 1.25
 		0x00, 0x00, 0x20, 0xc0, // position Y: -2.5
 		0x00, 0x00, 0x70, 0x40, // position Z: 3.75
@@ -357,12 +359,12 @@ func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
 	// schema v3：27 格空背包直接追加在快捷栏之后。
 	fixture = append(fixture, make([]byte, core.BackpackSlots*3)...)
 	want := [32]byte{
-		0x52, 0x07, 0xe1, 0xf5, 0x9c, 0x93, 0x11, 0xca,
-		0x78, 0x92, 0xeb, 0xbe, 0x06, 0x18, 0xa0, 0xdd,
-		0xbb, 0x36, 0x4c, 0x69, 0x74, 0x2f, 0x8e, 0x2e,
-		0x69, 0xce, 0x32, 0x5f, 0x8e, 0xa3, 0x63, 0x08,
+		0x3c, 0xd7, 0xf2, 0xa1, 0xce, 0x58, 0x6b, 0x07,
+		0x0a, 0x7d, 0x18, 0x99, 0x7f, 0xa3, 0xee, 0x19,
+		0xd1, 0x76, 0x96, 0x8d, 0x4d, 0xaa, 0x87, 0x3b,
+		0x34, 0xab, 0xdd, 0x4a, 0x32, 0x15, 0x36, 0xb7,
 	}
-	if want := 81 + core.BackpackSlots*3; len(fixture) != want {
+	if want := 82 + core.BackpackSlots*3; len(fixture) != want {
 		t.Fatalf("fixture 长度=%d，想要 %d", len(fixture), want)
 	}
 	if digest := sha256.Sum256(fixture); digest != want {
@@ -375,6 +377,7 @@ func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
 		dimension: core.DimensionID(0x0c0d0e0f),
 		player: &playerState{
 			lifecycle: PlayerActive,
+			health:    10,
 			state: physics.State{
 				Position: mgl32.Vec3{1.25, -2.5, 3.75},
 				Velocity: mgl32.Vec3{-4.5, 5.25, -6.75},

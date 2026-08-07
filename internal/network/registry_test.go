@@ -36,8 +36,8 @@ func TestProtocolV1PacketIDsAreFrozen(t *testing.T) {
 	if id, ok := clientPacketID(StatePlay, PlaceBlock{}); !ok || id != 2 {
 		t.Fatalf("PlaceBlock ID = %d, ok=%v，想要 2, true", id, ok)
 	}
-	if id, ok := clientPacketID(StatePlay, CloseFurnace{}); !ok || id != 10 {
-		t.Fatalf("CloseFurnace ID = %d, ok=%v，想要 10, true", id, ok)
+	if id, ok := clientPacketID(StatePlay, CloseContainer{}); !ok || id != 10 {
+		t.Fatalf("CloseContainer ID = %d, ok=%v，想要 10, true", id, ok)
 	}
 }
 
@@ -59,7 +59,7 @@ func TestProtocolV2RemotePlayerPacketIDsAreFrozen(t *testing.T) {
 			t.Fatalf("server packet ID %d decoded=%T ok=%v, want %T true", test.id, decoded, ok, test.packet)
 		}
 	}
-	if _, ok := serverPacketForID(StatePlay, 15); ok {
+	if _, ok := serverPacketForID(StatePlay, 16); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 }
@@ -87,7 +87,7 @@ func TestProtocolV1RegistryRejectsUnknownIDsAndStates(t *testing.T) {
 	if _, ok := clientPacketForID(StateHandshake, 1); ok {
 		t.Fatal("unknown handshake client packet ID accepted")
 	}
-	if _, ok := serverPacketForID(StatePlay, 15); ok {
+	if _, ok := serverPacketForID(StatePlay, 16); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 	if _, ok := clientPacketID(StateLogin, ClientHello{}); ok {
@@ -107,7 +107,7 @@ func TestCommandRejectReasonIDsAreFrozen(t *testing.T) {
 		{RejectProtectedBlock, 4}, {RejectInvalidBlock, 5}, {RejectOccupied, 6},
 		{RejectInvalidInput, 7}, {RejectPlayerNotReady, 8},
 		{RejectInvalidSlot, 9}, {RejectHotbarFull, 10}, {RejectDropCapacity, 11},
-		{RejectFurnaceCapacity, 12},
+		{RejectContainerCapacity, 12},
 	}
 	for _, tc := range reasons {
 		got, ok := commandRejectReasonID(tc.reason)
@@ -195,14 +195,14 @@ func sameClientPacketType(left, right ClientPacket) bool {
 	case CraftRecipe:
 		_, ok := right.(CraftRecipe)
 		return ok
-	case OpenFurnace:
-		_, ok := right.(OpenFurnace)
+	case OpenContainer:
+		_, ok := right.(OpenContainer)
 		return ok
-	case MoveFurnaceStack:
-		_, ok := right.(MoveFurnaceStack)
+	case MoveContainerStack:
+		_, ok := right.(MoveContainerStack)
 		return ok
-	case CloseFurnace:
-		_, ok := right.(CloseFurnace)
+	case CloseContainer:
+		_, ok := right.(CloseContainer)
 		return ok
 	case DropSelectedItem:
 		_, ok := right.(DropSelectedItem)
@@ -258,8 +258,11 @@ func sameServerPacketType(left, right ServerPacket) bool {
 	case FurnaceState:
 		_, ok := right.(FurnaceState)
 		return ok
-	case FurnaceClosed:
-		_, ok := right.(FurnaceClosed)
+	case ChestState:
+		_, ok := right.(ChestState)
+		return ok
+	case ContainerClosed:
+		_, ok := right.(ContainerClosed)
 		return ok
 	}
 	return false

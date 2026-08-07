@@ -13,6 +13,7 @@ type Chunk struct {
 	sections [core.SectionsPerChunk]*Section
 	drops    [core.DropsPerChunk]DropSlot
 	furnaces [core.FurnacesPerChunk]FurnaceSlot
+	chests   [core.ChestsPerChunk]ChestSlot
 	// heights 是由方块派生的每列最高非空气 Y，不进入存档、payload 或 Hash。
 	heights HeightMap
 }
@@ -34,16 +35,17 @@ func (c *Chunk) Section(i int) *Section { return c.sections[i] }
 
 // Clone 返回区块及其全部区段的深拷贝。
 func (c *Chunk) Clone() *Chunk {
-	clone := &Chunk{Pos: c.Pos, drops: c.drops, furnaces: c.furnaces, heights: c.heights}
+	clone := &Chunk{Pos: c.Pos, drops: c.drops, furnaces: c.furnaces, chests: c.chests, heights: c.heights}
 	for index, section := range c.sections {
 		clone.sections[index] = section.Clone()
 	}
 	return clone
 }
 
-// PayloadBytes 返回 24 个区段的压缩 payload、固定掉落物槽、固定熔炉槽与区块信封的估算大小。
+// PayloadBytes 返回 24 个区段的压缩 payload、固定掉落物槽、固定熔炉槽、固定箱子槽与区块信封的估算大小。
 func (c *Chunk) PayloadBytes() int {
-	bytes := 512 + core.DropsPerChunk*DropSlotBytes + core.FurnacesPerChunk*FurnaceSlotBytes
+	bytes := 512 + core.DropsPerChunk*DropSlotBytes + core.FurnacesPerChunk*FurnaceSlotBytes +
+		core.ChestsPerChunk*ChestSlotBytes
 	for _, section := range c.sections {
 		bytes += section.Blocks.PayloadBytes()
 	}

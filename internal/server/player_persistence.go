@@ -345,6 +345,7 @@ func (player *cachedPlayer) restore(metadata storage.Metadata) sim.PlayerRestore
 	restore.Yaw = player.snapshot.Yaw
 	restore.Pitch = player.snapshot.Pitch
 	restore.Inventory = player.snapshot.Inventory
+	restore.Health = player.snapshot.Health
 	return restore
 }
 
@@ -357,6 +358,7 @@ func cachedPlayerFromStored(stored storage.StoredPlayer, pendingName string) *ca
 		Yaw:       stored.Yaw,
 		Pitch:     stored.Pitch,
 		Inventory: stored.Inventory,
+		Health:    stored.Health,
 	}
 	if stored.Safe != nil {
 		snapshot.Safe = &sim.PlayerLocation{
@@ -626,6 +628,7 @@ func (player *cachedPlayer) save(revision uint64) storage.PlayerSave {
 		Yaw:       player.snapshot.Yaw,
 		Pitch:     player.snapshot.Pitch,
 		Inventory: player.snapshot.Inventory,
+		Health:    player.snapshot.Health,
 	}
 	if player.snapshot.Safe != nil {
 		save.Safe = &storage.PlayerLocation{
@@ -641,7 +644,8 @@ func (player *cachedPlayer) matchesSave(save storage.PlayerSave) bool {
 		player.snapshot.Current.Dimension != save.Current.Dimension ||
 		[3]float32(player.snapshot.Current.Position) != save.Current.Position ||
 		player.snapshot.Yaw != save.Yaw || player.snapshot.Pitch != save.Pitch ||
-		player.snapshot.Inventory != save.Inventory {
+		player.snapshot.Inventory != save.Inventory ||
+		player.snapshot.Health != save.Health {
 		return false
 	}
 	if player.snapshot.Safe == nil || save.Safe == nil {
@@ -671,7 +675,8 @@ func clonePlayerSnapshot(snapshot sim.PlayerSnapshot) sim.PlayerSnapshot {
 
 func playerSnapshotsEqual(left, right sim.PlayerSnapshot) bool {
 	if left.Current != right.Current || left.Yaw != right.Yaw ||
-		left.Pitch != right.Pitch || left.Inventory != right.Inventory {
+		left.Pitch != right.Pitch || left.Inventory != right.Inventory ||
+		left.Health != right.Health {
 		return false
 	}
 	if left.Safe == nil || right.Safe == nil {

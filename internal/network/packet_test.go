@@ -79,8 +79,8 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 			t.Fatalf("%s state = %d, want %d", tc.name, tc.got, tc.want)
 		}
 	}
-	if ProtocolVersion != 11 {
-		t.Fatalf("protocol version = %d, want 11", ProtocolVersion)
+	if ProtocolVersion != 13 {
+		t.Fatalf("protocol version = %d, want 13", ProtocolVersion)
 	}
 
 	codes := []struct {
@@ -171,6 +171,7 @@ func TestValidateServerPacket(t *testing.T) {
 		{"active player state has zero progress", StatePlay, PlayerState{MiningActive: true, MiningRequiredTicks: 1}},
 		{"active player state completes", StatePlay, PlayerState{MiningActive: true, MiningProgressTicks: 1, MiningRequiredTicks: 1}},
 		{"active player state exceeds completion", StatePlay, PlayerState{MiningActive: true, MiningProgressTicks: 2, MiningRequiredTicks: 1}},
+		{"player state health out of range", StatePlay, PlayerState{Health: core.MaxHealth + 1}},
 		{"unknown command rejection", StatePlay, CommandRejected{Reason: RejectReason("other")}},
 		{"inventory state out of range", StatePlay, InventoryState{Inventory: core.Inventory{Hotbar: core.Hotbar{Selected: core.HotbarSlots}}}},
 		{"empty drop upserts", StatePlay, ItemDropUpserts{}},

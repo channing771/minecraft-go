@@ -245,7 +245,7 @@ func TestPlaceFurnaceRejectsWhenSlotsAreFull(t *testing.T) {
 		Yaw: placeYaw, Slot: 0,
 	})
 	result := engine.Step()
-	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectFurnaceCapacity {
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectContainerCapacity {
 		t.Fatalf("第 33 个熔炉 result=%+v", result)
 	}
 	if len(result.Changes) != 0 {
@@ -362,5 +362,26 @@ func TestMiningFurnaceRejectsWhenDropsAreFull(t *testing.T) {
 	}
 	if after.BlockAt(0, 0, 0) != core.FurnaceID {
 		t.Fatal("被拒绝的破坏清除了方块")
+	}
+}
+
+// TestMoveIntoFurnaceRejectsChestOnlySlot 是 sim 层熔炉越界的回归测试：
+// 箱子的统一栏位允许到 62（core.ChestViewSlots），但用熔炉引用发起移动时，
+// sim 必须仍然用熔炉自己的 0..38 边界拒绝，不能依赖网络层已经按 Kind 校验过。
+func TestMoveIntoFurnaceRejectsChestOnlySlot(t *testing.T) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemRawIron, Count: 4}
+	engine, session, ref := openedFurnace(t, inventory, world.FurnaceSlot{})
+
+	engine.Enqueue(moveFurnaceCommand(session, 3, ref, 0, core.ChestFirstSlot+5))
+	result := engine.Step()
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != sim.RejectInvalidInput {
+		t.Fatalf("熔炉越界（箱子专属栏位）result=%+v", result)
+	}
+	if got := currentFurnace(t, engine, 0); got.Input.Count != 0 {
+		t.Fatalf("越界移动修改了熔炉: %+v", got)
+	}
+	if currentInventory(t, engine, session).Hotbar.Slots[0].Count != 4 {
+		t.Fatal("越界移动修改了玩家物品")
 	}
 }

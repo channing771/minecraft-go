@@ -152,10 +152,14 @@ func (player *playerState) activate(
 	onGround bool,
 ) {
 	player.lifecycle = PlayerActive
+	player.spawned = true
 	player.state = physics.State{
 		Position: location.Position,
 		OnGround: onGround,
 	}
+	// 传送（重连恢复位置）与重生都经过这里；峰值 Y 必须随之重置为当前高度，
+	// 否则携带的旧峰值会在接下来的落地边沿被误结算成巨额伤害。
+	player.peakY = location.Position.Y()
 	player.input = physics.Input{Yaw: player.yaw}
 	player.lastInputSequence = 0
 	player.reset = true

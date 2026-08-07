@@ -39,9 +39,9 @@ type sessionState struct {
 	center                      core.ChunkPos
 	wanted                      map[core.ChunkKey]struct{}
 	player                      *playerState
-	// 每名玩家最多查看一个熔炉；引用失效时由权威 tick 统一清除。
-	furnace     core.FurnaceRef
-	viewFurnace bool
+	// 每名玩家同时最多查看一个容器（熔炉或箱子）；引用失效时由权威 tick 统一清除。
+	container     core.ContainerRef
+	viewContainer bool
 }
 
 type pendingChunkChanges struct {
@@ -59,10 +59,10 @@ type Engine struct {
 	subscriptionsDirty bool
 
 	// 掉落物 tick 的复用 scratch，避免每 tick 分配固定上限集合。
-	dropKeySeen          map[core.ChunkKey]struct{}
-	dropKeyScratch       []core.ChunkKey
-	furnaceViewerScratch []SessionID
-	dropSessionScratch   []SessionID
+	dropKeySeen            map[core.ChunkKey]struct{}
+	dropKeyScratch         []core.ChunkKey
+	containerViewerScratch []SessionID
+	dropSessionScratch     []SessionID
 
 	inboxMu   sync.Mutex
 	commands  []Command
@@ -130,7 +130,7 @@ func (engine *Engine) Step() TickResult {
 
 	result := TickResult{Forget: make(map[SessionID][]core.ChunkKey)}
 	interactions := make([]Command, 0, len(commands))
-	furnaceMoves := make([]Command, 0, len(commands))
+	containerMoves := make([]Command, 0, len(commands))
 	// 命令阶段与后续掉落物/熔炉推进共用同一份待提交区块变更。
 	pending := make(map[core.ChunkKey]*pendingChunkChanges)
 	viewChanged := false
@@ -267,7 +267,7 @@ func (engine *Engine) Step() TickResult {
 			player.inventory = next
 			player.inventoryDirty = true
 		case CommandOpenFurnace:
-			if reason, rejected := engine.openFurnace(command.Session, command); rejected {
+			if reason, rejected := engine.openContainer(command.Session, command); rejected {
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
 					Sequence: command.Sequence,
@@ -276,11 +276,11 @@ func (engine *Engine) Step() TickResult {
 			}
 		case CommandMoveFurnaceStack:
 			// 跨容器移动会改动区块，必须与其他交互共享同一批 pending 变化。
-			furnaceMoves = append(furnaceMoves, command)
+			containerMoves = append(containerMoves, command)
 		case CommandCloseFurnace:
 			// 关闭永远成功：客户端可以随时结束查看关系。
-			session.viewFurnace = false
-			session.furnace = core.FurnaceRef{}
+			session.viewContainer = false
+			session.container = core.ContainerRef{}
 		case CommandCraftRecipe:
 			if session.player == nil || session.player.lifecycle != PlayerActive {
 				result.Rejected = append(result.Rejected, Rejection{
@@ -351,6 +351,17 @@ func (engine *Engine) Step() TickResult {
 		engine.reconcileSubscriptions(&result)
 	}
 
+	// 阶段顺序契约：所有区块写者必须位于 reconcileSubscriptions 之后。订阅收缩会把
+	// 干净区块（Revision == PersistedRevision）从 records 里立即删除，写在它之前的
+	// 写者留下的 revision barrier 会在 finishChanges 取到 nil record 而崩溃，
+	// 掉落物也随被删除的 record 一起消失。死亡结算是唯一会在写区块的同一 tick 里
+	// 让玩家跳回出生锚点、从而收缩订阅的写者，因此这条契约对它尤其关键：
+	// beginReset 置的 subscriptionsDirty 顺延到下一 tick 生效，而彼时 finishChanges
+	// 已经推高 revision，区块转脏，RequestUnload 只会走 Unloading 分支。
+	// settleDeaths 同时必须早于本 tick 末尾的状态发布，外部才观察不到生命值为 0 的
+	// 中间状态。
+	engine.settleDeaths(pending)
+
 	for _, command := range interactions {
 		switch command.Kind {
 		case CommandPlaceBlock:
@@ -379,8 +390,8 @@ func (engine *Engine) Step() TickResult {
 	}
 	engine.advanceDrops(pending)
 	engine.advanceFurnaces(pending)
-	for _, command := range furnaceMoves {
-		if reason, rejected := engine.applyFurnaceMove(command.Session, command, pending); rejected {
+	for _, command := range containerMoves {
+		if reason, rejected := engine.applyContainerMove(command.Session, command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{
 				Session:  command.Session,
 				Sequence: command.Sequence,
@@ -395,7 +406,7 @@ func (engine *Engine) Step() TickResult {
 	result.Tick = engine.tick.Add(1)
 	result.WorldTimeTicks = engine.advanceWorldTime()
 	engine.publishInventories(&result)
-	engine.publishFurnaces(&result)
+	engine.publishContainers(&result)
 	engine.publishPlayers(&result)
 	return result
 }
@@ -798,19 +809,30 @@ func (engine *Engine) executePlacement(
 	if occupied {
 		return RejectOccupied, true
 	}
-	// 放置熔炉必须先预留槽位；槽位耗尽时不改方块也不扣物品。
+	// 放置熔炉或箱子必须先预留槽位；槽位耗尽时不改方块也不扣物品。
 	targetRecord, targetOK := dimension.records[target.Chunk()]
 	targetIndex, targetIndexed := world.ChunkBlockIndex(target)
 	furnaceSlot, reserveFurnace := -1, false
+	chestSlot, reserveChest := -1, false
 	if placement == core.FurnaceID {
 		if !targetOK || targetRecord.Chunk == nil || !targetIndexed {
 			return RejectChunkNotReady, true
 		}
 		slot, ok := targetRecord.Chunk.PrepareFurnace(targetIndex)
 		if !ok {
-			return RejectFurnaceCapacity, true
+			return RejectContainerCapacity, true
 		}
 		furnaceSlot, reserveFurnace = slot, true
+	}
+	if placement == core.ChestID {
+		if !targetOK || targetRecord.Chunk == nil || !targetIndexed {
+			return RejectChunkNotReady, true
+		}
+		slot, ok := targetRecord.Chunk.PrepareChest(targetIndex)
+		if !ok {
+			return RejectContainerCapacity, true
+		}
+		chestSlot, reserveChest = slot, true
 	}
 	_, changed, setErr := dimension.SetBlock(target, placement)
 	if setErr != nil {
@@ -825,6 +847,9 @@ func (engine *Engine) executePlacement(
 		)
 		if reserveFurnace {
 			targetRecord.Chunk.CommitFurnace(furnaceSlot, targetIndex)
+		}
+		if reserveChest {
+			targetRecord.Chunk.CommitChest(chestSlot, targetIndex)
 		}
 		player.inventory.Hotbar = consumed
 		player.inventoryDirty = true

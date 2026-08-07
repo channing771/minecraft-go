@@ -14,7 +14,7 @@ import (
 
 type furnaceMessages struct {
 	states []network.FurnaceState
-	closes []network.FurnaceClosed
+	closes []network.ContainerClosed
 }
 
 // furnaceDrainTick 读取一个会话在本 tick 的全部消息并分类熔炉状态。
@@ -39,7 +39,7 @@ func furnaceDrainTick(
 				t.Fatalf("非法熔炉状态: %v", err)
 			}
 			got.states = append(got.states, message)
-		case network.FurnaceClosed:
+		case network.ContainerClosed:
 			if err := message.Validate(); err != nil {
 				t.Fatalf("非法关闭通知: %v", err)
 			}
@@ -113,7 +113,7 @@ func TestOpenFurnaceSendsStateOnlyToViewer(t *testing.T) {
 		t.Fatalf("未打开界面就收到熔炉状态: %+v", before.states)
 	}
 
-	sendClientMessage(t, clientEndpoint, network.OpenFurnace{
+	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
 	deadline := time.Now().Add(5 * time.Second)
@@ -141,7 +141,7 @@ func TestCloseFurnaceStopsServerState(t *testing.T) {
 		Input: core.ItemStack{Item: core.ItemRawIron, Count: 4},
 		Fuel:  core.ItemStack{Item: core.ItemCoal, Count: 1},
 	})
-	sendClientMessage(t, clientEndpoint, network.OpenFurnace{
+	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
 	deadline := time.Now().Add(5 * time.Second)
@@ -154,7 +154,7 @@ func TestCloseFurnaceStopsServerState(t *testing.T) {
 		}
 	}
 
-	sendClientMessage(t, clientEndpoint, network.CloseFurnace{Sequence: 11})
+	sendClientMessage(t, clientEndpoint, network.CloseContainer{Sequence: 11})
 	// 关闭命令要先被接收并在下一个 tick 生效，随后必须彻底停止发送。
 	deadline = time.Now().Add(5 * time.Second)
 	stopped := false
@@ -179,7 +179,7 @@ func TestFurnaceMoveUpdatesBothSides(t *testing.T) {
 		return inventory
 	})
 
-	sendClientMessage(t, clientEndpoint, network.OpenFurnace{
+	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
 	deadline := time.Now().Add(5 * time.Second)
@@ -193,8 +193,8 @@ func TestFurnaceMoveUpdatesBothSides(t *testing.T) {
 		}
 	}
 
-	sendClientMessage(t, clientEndpoint, network.MoveFurnaceStack{
-		Sequence: 11, Furnace: ref, From: 0, To: core.FurnaceFuelSlot,
+	sendClientMessage(t, clientEndpoint, network.MoveContainerStack{
+		Sequence: 11, Container: ref, From: 0, To: core.FurnaceFuelSlot,
 	})
 	deadline = time.Now().Add(5 * time.Second)
 	for {

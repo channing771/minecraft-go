@@ -8,9 +8,10 @@ import (
 	"minecraft-go/internal/world"
 )
 
-// emptyChunkEstimateBytes 是全空区块的存档估算：512 信封 + 32 个固定掉落物槽。
+// emptyChunkEstimateBytes 是全空区块的存档估算：512 信封 + 32 个固定掉落物槽 +
+// 32 个固定熔炉槽 + 16 个固定箱子槽。
 const emptyChunkEstimateBytes = 512 + core.DropsPerChunk*world.DropSlotBytes +
-	core.FurnacesPerChunk*world.FurnaceSlotBytes
+	core.FurnacesPerChunk*world.FurnaceSlotBytes + core.ChestsPerChunk*world.ChestSlotBytes
 
 func TestPersistenceSnapshotBudgetAndStaleAck(t *testing.T) {
 	engine := dirtyPersistenceEngine(t, []core.ChunkKey{

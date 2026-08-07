@@ -1,6 +1,8 @@
 package server
 
 import (
+	"github.com/go-gl/mathgl/mgl32"
+
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/sim"
 	"minecraft-go/internal/world"
@@ -22,6 +24,37 @@ func (server *Server) SetChunkFurnaceForTest(
 	server.stepMu.Lock()
 	defer server.stepMu.Unlock()
 	server.engine.SetChunkFurnaceForTest(key, slot, value)
+}
+
+// SetChunkChestForTest 直接写入权威区块的箱子槽，仅供纵向测试构造固定场景。
+func (server *Server) SetChunkChestForTest(
+	key core.ChunkKey,
+	slot int,
+	value world.ChestSlot,
+) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	server.engine.SetChunkChestForTest(key, slot, value)
+}
+
+// TouchChunkForTest 直接递增一个已加载区块的 revision 并标记为脏，仅供测试
+// 把经由 SetChunkChestForTest/SetChunkFurnaceForTest 等原始状态覆写接入持久化的
+// 保存/重试路径，而不必驱动一次真实的容器或方块命令。
+func (server *Server) TouchChunkForTest(key core.ChunkKey) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	server.engine.TouchChunkForTest(key)
+}
+
+// SetPlayerPositionForTest 直接写入某个会话玩家的权威位置，仅供纵向测试构造固定场景，
+// 例如把玩家抬到致死高度触发一次真实的摔落。
+func (server *Server) SetPlayerPositionForTest(
+	session sim.SessionID,
+	position mgl32.Vec3,
+) {
+	server.stepMu.Lock()
+	defer server.stepMu.Unlock()
+	server.engine.SetPlayerPositionForTest(session, position)
 }
 
 // SetPlayerInventoryForTest 用给定函数改写某个会话的权威物品状态，仅供纵向测试使用。

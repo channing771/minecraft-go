@@ -34,7 +34,7 @@ func TestProtocolV4DropPacketIDsAreFrozen(t *testing.T) {
 		{StatePlay, ItemDropUpserts{}, 11},
 		{StatePlay, ItemDropRemoves{}, 12},
 	})
-	if _, ok := serverPacketForID(StatePlay, 15); ok {
+	if _, ok := serverPacketForID(StatePlay, 16); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 }
@@ -139,9 +139,9 @@ func TestItemDropMessagesValidateBoundedBatches(t *testing.T) {
 	}
 }
 
-func TestProtocolV11ToolDropUsesFiveByteStackWire(t *testing.T) {
-	if ProtocolVersion != 11 {
-		t.Fatalf("协议版本 = %d，想要 11", ProtocolVersion)
+func TestProtocolV13ToolDropUsesFiveByteStackWire(t *testing.T) {
+	if ProtocolVersion != 13 {
+		t.Fatalf("协议版本 = %d，想要 13", ProtocolVersion)
 	}
 	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
 	packet := ItemDropUpserts{ServerTick: 5, Drops: []ItemDrop{{

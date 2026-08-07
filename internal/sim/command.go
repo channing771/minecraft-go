@@ -51,8 +51,8 @@ const (
 	RejectInvalidSlot    RejectReason = 8
 	RejectHotbarFull     RejectReason = 9
 	RejectDropCapacity   RejectReason = 10
-	// RejectFurnaceCapacity 表示区块的 32 个熔炉槽已经用尽。
-	RejectFurnaceCapacity RejectReason = 11
+	// RejectContainerCapacity 表示区块某类容器（熔炉或箱子）的固定槽位已经用尽。
+	RejectContainerCapacity RejectReason = 11
 )
 
 type Command struct {
@@ -132,7 +132,10 @@ type TickResult struct {
 	Inventories []InventoryUpdate
 	Furnaces    []FurnaceUpdate
 	FurnaceEnds []FurnaceEnd
-	Tick        uint64
+	// Chests 是本 tick 发给箱子查看者的完整权威状态；关闭通知与熔炉共用 FurnaceEnds，
+	// 因为 ContainerRef 本身携带 Kind，一份关闭列表足以表达两种容器。
+	Chests []ChestUpdate
+	Tick   uint64
 	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。
 	WorldTimeTicks uint64
 }
@@ -148,8 +151,16 @@ type FurnaceUpdate struct {
 	BurnTicks     uint16
 }
 
-// FurnaceEnd 通知某个查看者其熔炉引用已经失效。
+// FurnaceEnd 通知某个查看者其容器引用已经失效；熔炉与箱子共用同一份关闭通知，
+// 因为 core.FurnaceRef 是 core.ContainerRef 的类型别名，本身携带 Kind。
 type FurnaceEnd struct {
 	Session SessionID
 	Furnace core.FurnaceRef
+}
+
+// ChestUpdate 是本 tick 发给某个查看者的完整权威箱子状态。
+type ChestUpdate struct {
+	Session SessionID
+	Chest   core.ContainerRef
+	Items   [core.ChestSlots]core.ItemStack
 }

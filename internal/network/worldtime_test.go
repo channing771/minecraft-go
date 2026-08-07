@@ -7,15 +7,15 @@ import (
 	"minecraft-go/internal/core"
 )
 
-func TestProtocolVersionIsEleven(t *testing.T) {
-	if ProtocolVersion != 11 {
-		t.Fatalf("协议版本 = %d，想要 11", ProtocolVersion)
+func TestProtocolVersionIsThirteen(t *testing.T) {
+	if ProtocolVersion != 13 {
+		t.Fatalf("协议版本 = %d，想要 13", ProtocolVersion)
 	}
 }
 
-func TestProtocolV11RejectsVersionTenBeforePlay(t *testing.T) {
-	// v10 是上一版本，必须和更早版本一样在 Handshake 阶段稳定拒绝。
-	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
+func TestProtocolV13RejectsPriorVersionsBeforePlay(t *testing.T) {
+	// v12 是上一版本，必须和更早版本一样在 Handshake 阶段稳定拒绝。
+	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12} {
 		stream := &staticClientHelloStream{version: version}
 		if _, err := BeginServerLogin(t.Context(), stream); err == nil {
 			t.Fatalf("v%d ClientHello 被接受", version)
@@ -23,7 +23,7 @@ func TestProtocolV11RejectsVersionTenBeforePlay(t *testing.T) {
 		reject, ok := stream.sent.(HandshakeReject)
 		if !ok || reject.ServerProtocolVersion != ProtocolVersion ||
 			reject.Code != HandshakeVersionMismatch {
-			t.Fatalf("v%d 拒绝结果 = %#v，想要 v11 HandshakeReject", version, stream.sent)
+			t.Fatalf("v%d 拒绝结果 = %#v，想要 v13 HandshakeReject", version, stream.sent)
 		}
 	}
 }
@@ -85,6 +85,51 @@ func TestProtocolV9PlayerStateWorldTimeAcceptsFullRange(t *testing.T) {
 		if round.(PlayerState).WorldTimeTicks != ticks {
 			t.Fatalf("往返时间 = %d，想要 %d", round.(PlayerState).WorldTimeTicks, ticks)
 		}
+	}
+}
+
+func TestProtocolV13PlayerStateCarriesHealth(t *testing.T) {
+	// 生命值恰好追加在既有采掘字段之后、世界时间之前的固定偏移。
+	for _, health := range []uint8{0, 1, core.MaxHealth} {
+		state := PlayerState{Dimension: core.Overworld, Health: health, WorldTimeTicks: 24000}
+		if err := state.Validate(); err != nil {
+			t.Fatalf("生命值 %d 被 Validate 拒绝：%v", health, err)
+		}
+		id, payload, err := encodeServerControlPayload(StatePlay, state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		round, err := decodeServerControlPayload(StatePlay, id, payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if round.(PlayerState).Health != health {
+			t.Fatalf("往返生命值 = %d，想要 %d", round.(PlayerState).Health, health)
+		}
+	}
+}
+
+func TestProtocolV13PlayerStateRejectsOutOfRangeHealth(t *testing.T) {
+	invalid := PlayerState{Dimension: core.Overworld, Health: core.MaxHealth + 1}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("越界生命值通过了 Validate")
+	}
+	if _, _, err := encodeServerControlPayload(StatePlay, invalid); err == nil {
+		t.Fatal("越界生命值被编码接受")
+	}
+
+	// 构造一份合法 wire 载荷，再把生命值字节改写为越界值，验证解码器单独拒绝它，
+	// 且不得输出部分 PlayerState。
+	valid := PlayerState{Dimension: core.Overworld, Health: core.MaxHealth, WorldTimeTicks: 24000}
+	id, payload, err := encodeServerControlPayload(StatePlay, valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthOffset := len(payload) - 8 - 1
+	corrupted := append([]byte(nil), payload...)
+	corrupted[healthOffset] = core.MaxHealth + 1
+	if packet, err := decodeServerControlPayload(StatePlay, id, corrupted); err == nil {
+		t.Fatalf("越界生命值 wire 载荷被解码接受: %#v", packet)
 	}
 }
 

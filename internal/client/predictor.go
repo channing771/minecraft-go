@@ -53,6 +53,7 @@ type Predictor struct {
 	suspendInputSent    bool
 	displayOffset       mgl32.Vec3
 	correctionRemaining time.Duration
+	health              uint8
 }
 
 // NewPredictor 创建具有固定历史容量的未就绪预测器。
@@ -76,6 +77,9 @@ func (p *Predictor) Begin(message network.PlayerState) error {
 		!finiteFloat32(message.Pitch) {
 		return errors.New("client: cannot begin prediction from non-finite state")
 	}
+	if !core.ValidHealth(message.Health) {
+		return errors.New("client: cannot begin prediction from invalid health")
+	}
 
 	p.ready = true
 	p.dimension = message.Dimension
@@ -90,6 +94,7 @@ func (p *Predictor) Begin(message network.PlayerState) error {
 	p.suspendInputSent = false
 	p.displayOffset = mgl32.Vec3{}
 	p.correctionRemaining = 0
+	p.health = message.Health
 	return nil
 }
 
@@ -234,6 +239,7 @@ func (p *Predictor) ApplyPlayerState(
 	oldCorrectionRemaining := p.correctionRemaining
 	p.current = authority
 	p.previous = authority
+	p.health = message.Health
 	if p.suspended {
 		p.history = p.history[:0]
 		p.accumulator = 0
@@ -330,6 +336,7 @@ func (p *Predictor) clearForNotReady(message network.PlayerState) {
 	p.suspendInputSent = false
 	p.displayOffset = mgl32.Vec3{}
 	p.correctionRemaining = 0
+	p.health = 0
 }
 
 func validatePlayerState(message network.PlayerState, maxSentInput uint64) (physics.State, error) {
@@ -344,6 +351,9 @@ func validatePlayerState(message network.PlayerState, maxSentInput uint64) (phys
 	if !physics.ValidState(state) || !finiteFloat32(message.Yaw) ||
 		!finiteFloat32(message.Pitch) {
 		return physics.State{}, errors.New("client: player state contains non-finite value")
+	}
+	if !core.ValidHealth(message.Health) {
+		return physics.State{}, errors.New("client: player state has out-of-range health")
 	}
 	const maxPitch = float32(math.Pi/2 - 0.01)
 	if message.Pitch < -maxPitch || message.Pitch > maxPitch {
@@ -361,6 +371,12 @@ func validatePlayerState(message network.PlayerState, maxSentInput uint64) (phys
 // State 返回当前预测物理状态以及预测器是否已就绪。
 func (p *Predictor) State() (physics.State, bool) {
 	return p.current, p.ready
+}
+
+// Health 返回只读镜像持有的权威生命值以及预测器是否已就绪。
+// 生命值只接受服务端确认值，客户端不对其做任何预测。
+func (p *Predictor) Health() (uint8, bool) {
+	return p.health, p.ready
 }
 
 // HistoryLen 返回尚未被权威状态确认的输入数量。

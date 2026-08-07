@@ -339,7 +339,7 @@ func TestChunkPrepareDropBatchMergeUsesLongerPickupDelay(t *testing.T) {
 	})
 	var stacks [4]core.ItemStack
 	stacks[0] = core.ItemStack{Item: core.ItemCoal, Count: 1}
-	next, ok := chunk.PrepareDropBatch(stacks, index, 10)
+	next, ok := chunk.PrepareDropBatch(stacks[:], index, 10)
 	if !ok {
 		t.Fatal("batch 预检被拒绝")
 	}
@@ -355,9 +355,42 @@ func TestChunkPrepareDropBatchPreservesToolDurability(t *testing.T) {
 	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
 	worn := core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 149}
 	stacks := [4]core.ItemStack{worn}
-	next, ok := chunk.PrepareDropBatch(stacks, index, 10)
+	next, ok := chunk.PrepareDropBatch(stacks[:], index, 10)
 	if !ok || next[0].Stack != worn {
 		t.Fatalf("batch 掉落物 = %+v, %v，想要保留来源工具 %+v", next[0].Stack, ok, worn)
+	}
+}
+
+// TestChunkPrepareDropBatchAcceptsInventorySlotBatch 覆盖玩家死亡掉落的堆数：
+// 36 个物品栏格必须整体被批量路径接受，不能因固定上限被拒绝。
+// 用例同时包含 28 个已满、彼此不能合并的堆与 8 个可合并的堆，
+// 因此既压到新上限的堆数，又落在 32 个掉落物槽的容量内。
+func TestChunkPrepareDropBatchAcceptsInventorySlotBatch(t *testing.T) {
+	chunk := dropTestChunk(t)
+	index := dropTestIndex(t, core.BlockPos{X: 16, Y: 3, Z: -32})
+	stacks := make([]core.ItemStack, 0, core.InventorySlots)
+	for range 28 {
+		stacks = append(
+			stacks,
+			core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount},
+		)
+	}
+	for range core.InventorySlots - 28 {
+		stacks = append(stacks, core.ItemStack{Item: core.ItemCoal, Count: 8})
+	}
+
+	next, ok := chunk.PrepareDropBatch(stacks, index, 10)
+	if !ok {
+		t.Fatalf("%d 个堆的死亡掉落批量被拒绝", len(stacks))
+	}
+	active := 0
+	for slot := range core.DropsPerChunk {
+		if next[slot].Active {
+			active++
+		}
+	}
+	if active != 29 {
+		t.Fatalf("活动掉落槽数 = %d，想要 29（28 个满堆 + 1 个合并堆）", active)
 	}
 }
 
@@ -370,7 +403,7 @@ func TestChunkPrepareDropBatchRejectsInvalidStacks(t *testing.T) {
 	} {
 		chunk := dropTestChunk(t)
 		stacks := [4]core.ItemStack{stack}
-		if next, ok := chunk.PrepareDropBatch(stacks, index, 10); ok || next != [core.DropsPerChunk]world.DropSlot{} {
+		if next, ok := chunk.PrepareDropBatch(stacks[:], index, 10); ok || next != [core.DropsPerChunk]world.DropSlot{} {
 			t.Fatalf("非法 batch 堆 %+v 被接受: ok=%v next=%+v", stack, ok, next)
 		}
 	}

@@ -29,14 +29,14 @@ func (mirror *FurnaceMirror) Apply(state network.FurnaceState) error {
 }
 
 // Close 处理服务端关闭通知；引用与当前界面不一致的通知被忽略。
-func (mirror *FurnaceMirror) Close(closed network.FurnaceClosed) error {
+func (mirror *FurnaceMirror) Close(closed network.ContainerClosed) error {
 	if mirror == nil {
 		return errors.New("client: nil furnace mirror")
 	}
 	if err := closed.Validate(); err != nil {
 		return err
 	}
-	if !mirror.opened || mirror.state.Furnace != closed.Furnace {
+	if !mirror.opened || mirror.state.Furnace != closed.Container {
 		return nil
 	}
 	*mirror = FurnaceMirror{}

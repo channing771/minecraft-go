@@ -17,6 +17,7 @@ const (
 	LayerIronOre
 	LayerFurnace
 	LayerIronBlock
+	LayerChest
 	layerCount
 )
 
@@ -38,6 +39,7 @@ func NewRegistry() *Registry {
 	r.layers[LayerIronOre] = noisyTexture(rgb{R: 156, G: 132, B: 110}, 30, 0x6A21)
 	r.layers[LayerFurnace] = noisyTexture(rgb{R: 88, G: 86, B: 88}, 16, 0x41D7)
 	r.layers[LayerIronBlock] = noisyTexture(rgb{R: 214, G: 214, B: 216}, 8, 0x2E95)
+	r.layers[LayerChest] = noisyTexture(rgb{R: 156, G: 108, B: 58}, 14, 0x9C4E)
 	return r
 }
 
@@ -65,6 +67,8 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 		return LayerFurnace
 	case core.IronBlockID:
 		return LayerIronBlock
+	case core.ChestID:
+		return LayerChest
 	case core.GrassID:
 		switch f {
 		case mesh.FacePosY:

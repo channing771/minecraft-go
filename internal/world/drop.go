@@ -107,13 +107,23 @@ func (c *Chunk) DropsHash() [sha256.Size]byte {
 	return sum
 }
 
-// PrepareDropBatch 在掉落物数组副本上按顺序完整放入最多四个堆，
-// 任何一堆放不下都返回 false 且不修改区块，供破坏熔炉等原子操作预演。
+// maxDropBatchStacks 是一次批量掉落预演可接受的固定编译期堆数上限。
+// 它取两类调用方最坏情形的较大者：破坏容器是容器本体加其全部格子
+// （箱子为 1+core.ChestSlots = 28），玩家死亡是 core.InventorySlots = 36 个物品栏格。
+// 用 max 表达而不是写死数字，任一侧的格数变化都会自动被覆盖。
+const maxDropBatchStacks = max(1+core.ChestSlots, core.InventorySlots)
+
+// PrepareDropBatch 在掉落物数组副本上按顺序完整放入调用方提供的堆，
+// 调用方必须传入自身固定数组的切片；堆数超过 maxDropBatchStacks
+// 或任何一堆放不下都返回 false 且不修改区块，供破坏熔炉、箱子与死亡掉落等原子操作预演。
 func (c *Chunk) PrepareDropBatch(
-	stacks [4]core.ItemStack,
+	stacks []core.ItemStack,
 	blockIndex uint32,
 	pickupDelay uint8,
 ) ([core.DropsPerChunk]DropSlot, bool) {
+	if len(stacks) > maxDropBatchStacks {
+		return c.drops, false
+	}
 	next := c.drops
 	for _, stack := range stacks {
 		if stack == (core.ItemStack{}) {
