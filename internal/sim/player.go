@@ -85,6 +85,9 @@ type playerState struct {
 	// peakY 是离地后到达过的最高高度，瞬态字段，不持久化、不进入快照/哈希。
 	// 落地、传送、重生、维度 reset 都会把它重置为当前高度。
 	peakY float32
+	// ticksSinceDamage 是自最后一次受伤以来连续未受伤的 tick 数，瞬态字段，
+	// 不持久化、不进入快照/哈希；满血时不推进。见 health_regen.go。
+	ticksSinceDamage uint32
 
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
@@ -359,6 +362,7 @@ func (engine *Engine) advanceActivePlayers() {
 	for _, id := range sessions {
 		session := engine.sessions[id]
 		player := session.player
+		player.advanceHealthRegen()
 		if player.reset {
 			continue
 		}
@@ -403,6 +407,7 @@ func (player *playerState) applyFallDamage() {
 	if damage <= 0 {
 		return
 	}
+	player.resetRegenTimer()
 	if damage >= int32(player.health) {
 		player.health = 0
 		return
