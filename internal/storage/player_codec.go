@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	currentPlayerSchema   uint32 = 4
+	currentPlayerSchema   uint32 = 5
 	playerEnvelopeVersion uint32 = 1
 	playerEnvelopeLength         = 44
 	maxPlayerPayload      uint32 = 1 << 20
@@ -34,7 +34,7 @@ func encodePlayer(save PlayerSave) ([]byte, error) {
 	if err := validatePlayerSave(save); err != nil {
 		return nil, err
 	}
-	payload, err := encodePlayerV4(save)
+	payload, err := encodePlayerV5(save)
 	if err != nil {
 		return nil, err
 	}
@@ -140,6 +140,7 @@ func decodePlayer(wantID core.PlayerID, data []byte) (StoredPlayer, error) {
 	stored := StoredPlayer{
 		PlayerID: dto.PlayerID, Revision: dto.Revision, DisplayName: dto.DisplayName,
 		Current: dto.Current, Yaw: dto.Yaw, Pitch: dto.Pitch, Inventory: dto.Inventory,
+		Health:       dto.Health,
 		NeedsRewrite: migrated,
 	}
 	if dto.Safe != nil {
@@ -147,6 +148,15 @@ func decodePlayer(wantID core.PlayerID, data []byte) (StoredPlayer, error) {
 		stored.Safe = &safe
 	}
 	return stored, nil
+}
+
+// encodePlayerV5 在 v4 负载末尾追加 1 字节生命值。
+func encodePlayerV5(save PlayerSave) ([]byte, error) {
+	payload, err := encodePlayerV4(save)
+	if err != nil {
+		return nil, err
+	}
+	return append(payload, save.Health), nil
 }
 
 // encodePlayerV4 把快捷栏与背包编码为包含耐久的固定负载。
@@ -230,9 +240,25 @@ func decodePlayerPayload(
 		return decodePlayerV3(playerID, revision, data)
 	case 4:
 		return decodePlayerV4(playerID, revision, data)
+	case 5:
+		return decodePlayerV5(playerID, revision, data)
 	default:
 		return playerDTO{}, fmt.Errorf("%w: unsupported player schema %d", ErrCorrupt, schema)
 	}
+}
+
+// decodePlayerV5 在 v4 解析结果之上追加 1 字节生命值。
+func decodePlayerV5(playerID core.PlayerID, revision uint64, data []byte) (playerDTO, error) {
+	if len(data) < 1 {
+		return playerDTO{}, fmt.Errorf("%w: player payload is shorter than health", ErrCorrupt)
+	}
+	split := len(data) - 1
+	dto, err := decodePlayerV4(playerID, revision, data[:split])
+	if err != nil {
+		return playerDTO{}, err
+	}
+	dto.Health = data[split]
+	return dto, nil
 }
 
 func decodePlayerV4(playerID core.PlayerID, revision uint64, data []byte) (playerDTO, error) {
@@ -400,7 +426,7 @@ func validatePlayerSave(save PlayerSave) error {
 	return validatePlayerDTO(playerDTO{
 		PlayerID: save.PlayerID, Revision: save.Revision, DisplayName: save.DisplayName,
 		Current: save.Current, Yaw: save.Yaw, Pitch: save.Pitch, Safe: save.Safe,
-		Inventory: save.Inventory,
+		Inventory: save.Inventory, Health: save.Health,
 	})
 }
 
@@ -431,6 +457,9 @@ func validatePlayerDTO(dto playerDTO) error {
 	}
 	if !dto.Inventory.Valid() {
 		return fmt.Errorf("%w: invalid player inventory", ErrCorrupt)
+	}
+	if !core.ValidHealth(dto.Health) {
+		return fmt.Errorf("%w: invalid player health", ErrCorrupt)
 	}
 	return nil
 }

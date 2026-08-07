@@ -23,6 +23,7 @@ func fixturePlayerSave(id core.PlayerID, revision uint64) PlayerSave {
 		PlayerID: id, Revision: revision, DisplayName: "Chen",
 		Current: PlayerLocation{Dimension: core.Overworld, Position: [3]float32{2.5, 70, -3.5}},
 		Yaw:     1.25, Pitch: -0.5, Safe: &safe, Inventory: fixturePlayerInventory(),
+		Health: 13,
 	}
 }
 
@@ -41,8 +42,8 @@ func fixturePlayerInventory() core.Inventory {
 }
 
 func TestPlayerCodecRoundTrip(t *testing.T) {
-	if currentPlayerSchema != 4 {
-		t.Fatalf("玩家 schema=%d，想要 4", currentPlayerSchema)
+	if currentPlayerSchema != 5 {
+		t.Fatalf("玩家 schema=%d，想要 5", currentPlayerSchema)
 	}
 	id := fixturePlayerID()
 	want := fixturePlayerSave(id, 7)
@@ -54,11 +55,11 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	if err != nil || got.PlayerID != want.PlayerID || got.Revision != want.Revision ||
 		got.DisplayName != want.DisplayName || got.Current != want.Current ||
 		got.Yaw != want.Yaw || got.Pitch != want.Pitch || got.Safe == nil || *got.Safe != *want.Safe ||
-		got.Inventory != want.Inventory {
+		got.Inventory != want.Inventory || got.Health != want.Health {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 	if got.NeedsRewrite {
-		t.Fatal("v4 玩家意外需要重写")
+		t.Fatal("v5 玩家意外需要重写")
 	}
 	got.Safe.Position[0] = 99
 	if want.Safe.Position[0] == 99 {
@@ -84,12 +85,35 @@ func TestPlayerSchemaV4DecodeKeepsWornDurability(t *testing.T) {
 	}
 }
 
-func TestPlayerV4Fixture(t *testing.T) {
+// TestPlayerV4FixtureMigratesToFullHealth 把冻结的 v4 存档（没有生命值字段）
+// 当作迁移输入：物品状态必须无损，生命值必须迁移为满血，且必须标记为需要重写。
+func TestPlayerV4FixtureMigratesToFullHealth(t *testing.T) {
+	encoded, err := os.ReadFile(filepath.Join("testdata", "player-v4.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodePlayer(fixturePlayerID(), encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Inventory != fixturePlayerInventory() {
+		t.Fatalf("v4 迁移改变了物品状态: %+v", got.Inventory)
+	}
+	if got.Health != core.MaxHealth {
+		t.Fatalf("v4 迁移生命值 = %d，想要满血 %d", got.Health, core.MaxHealth)
+	}
+	if !got.NeedsRewrite {
+		t.Fatal("v4 玩家必须标记为需要重写")
+	}
+}
+
+// TestPlayerV5Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
+func TestPlayerV5Fixture(t *testing.T) {
 	encoded, err := encodePlayer(fixturePlayerSave(fixturePlayerID(), 19))
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "player-v4.bin")
+	path := filepath.Join("testdata", "player-v5.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -100,7 +124,7 @@ func TestPlayerV4Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, encoded) {
-		t.Fatal("v4 fixture drift; change schema version")
+		t.Fatal("v5 fixture drift; change schema version")
 	}
 }
 
@@ -115,6 +139,9 @@ func TestPlayerV3FixtureMigratesLosslessly(t *testing.T) {
 	}
 	if got.Inventory != fixturePlayerInventory() {
 		t.Fatalf("v3 迁移改变了物品状态: %+v", got.Inventory)
+	}
+	if got.Health != core.MaxHealth {
+		t.Fatalf("v3 迁移生命值 = %d，想要满血 %d", got.Health, core.MaxHealth)
 	}
 	if !got.NeedsRewrite {
 		t.Fatal("v3 玩家必须标记为需要重写")
@@ -138,6 +165,9 @@ func TestPlayerV1FixtureMigratesToEmptyHotbar(t *testing.T) {
 	}
 	if got.Inventory != (core.Inventory{}) {
 		t.Fatalf("v1 迁移物品状态 = %+v，想要空快捷栏与空背包", got.Inventory)
+	}
+	if got.Health != core.MaxHealth {
+		t.Fatalf("v1 迁移生命值 = %d，想要满血 %d", got.Health, core.MaxHealth)
 	}
 	if !got.NeedsRewrite {
 		t.Fatal("v1 存档必须标记为需要重写")
@@ -189,7 +219,8 @@ func playerWireWithHotbar(t *testing.T, id core.PlayerID, hotbar core.Hotbar) []
 		t.Fatal(err)
 	}
 	wire := bytes.Clone(encoded)
-	offset := len(wire) - playerBackpackBytes - playerHotbarBytes
+	// v5 负载在快捷栏/背包之后还追加了 1 字节生命值，偏移量要跳过它。
+	offset := len(wire) - 1 - playerBackpackBytes - playerHotbarBytes
 	wire[offset] = hotbar.Selected
 	offset++
 	for _, stack := range hotbar.Slots {
@@ -220,6 +251,7 @@ func TestPlayerCodecRejectsInvalidSave(t *testing.T) {
 		{"nonfinite pitch", func(save *PlayerSave) { save.Pitch = float32(math.Inf(-1)) }},
 		{"pitch too high", func(save *PlayerSave) { save.Pitch = float32(math.Pi/2) + 0.01 }},
 		{"invalid safe dimension", func(save *PlayerSave) { save.Safe.Dimension = 1 }},
+		{"health above max", func(save *PlayerSave) { save.Health = core.MaxHealth + 1 }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -299,6 +331,12 @@ func TestPlayerCodecRejectsCorruptEnvelope(t *testing.T) {
 		{"safe x", func() []byte { return badFloat(81) }, ErrCorrupt},
 		{"safe y", func() []byte { return badFloat(85) }, ErrCorrupt},
 		{"safe z", func() []byte { return badFloat(89) }, ErrCorrupt},
+		{"invalid health", func() []byte {
+			p := bytes.Clone(encoded)
+			p[len(p)-1] = core.MaxHealth + 1
+			repairPlayerCRC(p)
+			return p
+		}, ErrCorrupt},
 		{"trailing byte", func() []byte { return append(bytes.Clone(encoded), 0) }, ErrCorrupt},
 	}
 	for _, tc := range tests {

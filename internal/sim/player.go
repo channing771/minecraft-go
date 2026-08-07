@@ -45,6 +45,8 @@ type PlayerRestore struct {
 	SpawnDimension core.DimensionID
 	SpawnAnchor    core.ChunkPos
 	Inventory      core.Inventory
+	// Health 是存档中的权威生命值；零值代表"缺失"，注册时会回落到 core.MaxHealth。
+	Health uint8
 }
 
 type PlayerSnapshot struct {
@@ -52,6 +54,7 @@ type PlayerSnapshot struct {
 	Yaw, Pitch float32
 	Safe       *PlayerLocation
 	Inventory  core.Inventory
+	Health     uint8
 }
 
 // InventoryUpdate 是一名玩家在本 tick 的最终权威物品状态，只发送给所属会话。
@@ -77,6 +80,8 @@ type playerState struct {
 	reset             bool
 	inventory         core.Inventory
 	inventoryDirty    bool
+	// health 是服务端单写者拥有的权威生命值，0..core.MaxHealth。
+	health uint8
 
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
@@ -101,6 +106,10 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		panic("sim: register session with invalid inventory")
 	}
 	candidates := spawnCandidates(restore.SpawnAnchor)
+	health := restore.Health
+	if health == 0 {
+		health = core.MaxHealth
+	}
 	player := &playerState{
 		lifecycle: PlayerPendingSpawn,
 		anchor:    restore.SpawnAnchor,
@@ -112,6 +121,7 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		yaw:             restore.Yaw,
 		pitch:           restore.Pitch,
 		inventory:       restore.Inventory,
+		health:          health,
 		inventoryDirty:  true,
 		restoreWanted:   make(map[core.ChunkKey]struct{}),
 		candidates:      candidates,
@@ -207,6 +217,7 @@ func (player *playerState) snapshot(
 		Yaw:       player.yaw,
 		Pitch:     player.pitch,
 		Inventory: player.inventory,
+		Health:    player.health,
 	}
 	if player.safe != nil {
 		safe := *player.safe
@@ -221,8 +232,8 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 		return [32]byte{}, false
 	}
 	player := session.player
-	// 53 字节玩家状态 + 1 字节选中栏位 + 每个物品栏位 3 字节。
-	var encoded [53 + 1 + core.InventorySlots*3]byte
+	// 54 字节玩家状态（含 1 字节生命值）+ 1 字节选中栏位 + 每个物品栏位 3 字节。
+	var encoded [54 + 1 + core.InventorySlots*3]byte
 	offset := 0
 	putUint32 := func(value uint32) {
 		binary.LittleEndian.PutUint32(encoded[offset:], value)
@@ -240,6 +251,8 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 
 	putUint32(uint32(session.dimension))
 	encoded[offset] = byte(player.lifecycle)
+	offset++
+	encoded[offset] = player.health
 	offset++
 	for _, value := range player.state.Position {
 		putFloat32(value)

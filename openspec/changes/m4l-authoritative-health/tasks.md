@@ -1,11 +1,11 @@
 ## 1. 生命值字段与玩家存档 schema v5
 
-- [ ] 1.1 在 `internal/core` 先写失败测试，覆盖 `MaxHealth = 20` 稳定不漂移，以及生命值有效性判断接受 `0..20`、拒绝 `21` 与更大值。
-- [ ] 1.2 在 `internal/core` 增加 `MaxHealth` 常量与 `ValidHealth(uint8) bool`，只做范围判断，不新增结构体、接口或注册表。
-- [ ] 1.3 在 `internal/sim` 的玩家状态增加 `Health uint8` 字段，并让 `PlayerRestore`/`PlayerSnapshot` 携带它；新玩家与缺失值一律初始化为 `core.MaxHealth`。先写失败测试覆盖新玩家满血、快照往返与 `PlayerHash` 覆盖生命值。
-- [ ] 1.4 在 `internal/storage` 先写失败测试，覆盖 v5 生命值 roundtrip、v4 存档迁移为满血且 `NeedsRewrite=true`、v1–v3 沿链迁移、v5 fixture 不迁移、未来版本拒绝、越界生命值整体拒绝。参照 `player_codec.go` 既有 v4 编解码与 `player_migration.go` 的迁移链写法。
-- [ ] 1.5 把 `currentPlayerSchema` 升为 5，在 v4 负载末尾追加 1 字节生命值，migration registry 只增加 `4: 满血`；冻结 `player-v4.bin` 为迁移输入（删除其自动重生成的 golden 测试、保留 .bin 供迁移测试读取），新增 `player-v5.bin` golden，并把两者加入 `FuzzDecodePlayer` 语料。参照 M4K 冻结 `chunk-v5.bin` 的做法。
-- [ ] 1.6 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/storage ./internal/sim -race -count=1 && go test ./internal/storage -run "^$" -fuzz FuzzDecodePlayer -fuzztime=10s && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/storage internal/sim` 与 `git diff --check` 无输出；只暂存本组与任务勾选，提交 `feat: 增加权威生命值与玩家 schema v5`，然后自动进入第 2 组。
+- [x] 1.1 在 `internal/core` 先写失败测试，覆盖 `MaxHealth = 20` 稳定不漂移，以及生命值有效性判断接受 `0..20`、拒绝 `21` 与更大值。
+- [x] 1.2 在 `internal/core` 增加 `MaxHealth` 常量与 `ValidHealth(uint8) bool`，只做范围判断，不新增结构体、接口或注册表。
+- [x] 1.3 在 `internal/sim` 的玩家状态增加 `Health uint8` 字段，并让 `PlayerRestore`/`PlayerSnapshot` 携带它；新玩家与缺失值一律初始化为 `core.MaxHealth`。先写失败测试覆盖新玩家满血、快照往返与 `PlayerHash` 覆盖生命值。
+- [x] 1.4 在 `internal/storage` 先写失败测试，覆盖 v5 生命值 roundtrip、v4 存档迁移为满血且 `NeedsRewrite=true`、v1–v3 沿链迁移、v5 fixture 不迁移、未来版本拒绝、越界生命值整体拒绝。参照 `player_codec.go` 既有 v4 编解码与 `player_migration.go` 的迁移链写法。
+- [x] 1.5 把 `currentPlayerSchema` 升为 5，在 v4 负载末尾追加 1 字节生命值，migration registry 只增加 `4: 满血`；冻结 `player-v4.bin` 为迁移输入（删除其自动重生成的 golden 测试、保留 .bin 供迁移测试读取），新增 `player-v5.bin` golden，并把两者加入 `FuzzDecodePlayer` 语料。参照 M4K 冻结 `chunk-v5.bin` 的做法。
+- [x] 1.6 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/core ./internal/storage ./internal/sim -race -count=1 && go test ./internal/storage -run "^$" -fuzz FuzzDecodePlayer -fuzztime=10s && go test ./internal/archcheck -count=1'`，确认 `gofmt -l internal/core internal/storage internal/sim` 与 `git diff --check` 无输出；只暂存本组与任务勾选，提交 `feat: 增加权威生命值与玩家 schema v5`，然后自动进入第 2 组。
 
 ## 2. 摔落伤害
 

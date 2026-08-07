@@ -666,7 +666,7 @@ func assertStoredPlayerMatchesSave(t *testing.T, got StoredPlayer, want PlayerSa
 	if got.PlayerID != want.PlayerID || got.Revision != want.Revision ||
 		got.DisplayName != want.DisplayName || got.Current != want.Current ||
 		got.Yaw != want.Yaw || got.Pitch != want.Pitch ||
-		!reflect.DeepEqual(got.Safe, want.Safe) {
+		!reflect.DeepEqual(got.Safe, want.Safe) || got.Health != want.Health {
 		t.Fatalf("stored player = %+v, want save %+v", got, want)
 	}
 	if got.NeedsRewrite {
