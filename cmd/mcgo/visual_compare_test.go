@@ -152,14 +152,14 @@ func TestVisualizationRedMarking(t *testing.T) {
 		t.Fatalf("差异像素 (1,1) 应该是红色 (255,0,0,255)，实际 (%d,%d,%d,%d)",
 			vis.Pix[vi+0], vis.Pix[vi+1], vis.Pix[vi+2], vis.Pix[vi+3])
 	}
-	// 验证其他像素被压暗（依赖原图数据 want/4）。
-	// 比如 (0, 0) 处应该是压暗的，不是红色，也不是常数。
-	vi00 := vis.PixOffset(0, 0)
-	wantR00 := b.Pix[b.PixOffset(0, 0)+0] / 4
-	wantG00 := b.Pix[b.PixOffset(0, 0)+1] / 4
-	wantB00 := b.Pix[b.PixOffset(0, 0)+2] / 4
-	if vis.Pix[vi00+0] != wantR00 || vis.Pix[vi00+1] != wantG00 || vis.Pix[vi00+2] != wantB00 || vis.Pix[vi00+3] != 255 {
-		t.Fatalf("无差异像素 (0,0) 应该是压暗 (%d,%d,%d,255)，实际 (%d,%d,%d,%d)",
-			wantR00, wantG00, wantB00, vis.Pix[vi00+0], vis.Pix[vi00+1], vis.Pix[vi00+2], vis.Pix[vi00+3])
+	// 验证其他像素被压暗（依赖原图数据 want.R/4，三通道同值）。
+	// I-2：用非退化像素 (1,0)（variedNRGBA 中 i=1，R=13, G=17, B=19 互不相等）
+	// 来钉住除数必须是 4，且必须取 R 通道而非其他。
+	vi10 := vis.PixOffset(1, 0)
+	wi10 := b.PixOffset(1, 0)
+	wantDim := b.Pix[wi10] / 4 // 取 R 通道，除以 4
+	if vis.Pix[vi10+0] != wantDim || vis.Pix[vi10+1] != wantDim || vis.Pix[vi10+2] != wantDim || vis.Pix[vi10+3] != 255 {
+		t.Fatalf("无差异像素 (1,0) 应该是压暗 (%d,%d,%d,255)，实际 (%d,%d,%d,%d)",
+			wantDim, wantDim, wantDim, vis.Pix[vi10+0], vis.Pix[vi10+1], vis.Pix[vi10+2], vis.Pix[vi10+3])
 	}
 }
