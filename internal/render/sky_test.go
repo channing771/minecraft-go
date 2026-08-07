@@ -551,7 +551,8 @@ func (*skyTestTexture) View(gfx.TextureViewDesc) gfx.TextureView { return &skyTe
 func (*skyTestTexture) WriteLayer(uint32, uint32, []byte)        {}
 func (*skyTestTexture) WriteRegion(uint32, uint32, uint32, uint32, uint32, uint32, []byte) {
 }
-func (texture *skyTestTexture) Release() { texture.releases++ }
+func (*skyTestTexture) ReadLayer(uint32, uint32) []byte { return nil }
+func (texture *skyTestTexture) Release()                { texture.releases++ }
 
 type skyTestView struct{ releases int }
 
