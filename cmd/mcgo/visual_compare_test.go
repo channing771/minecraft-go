@@ -16,6 +16,22 @@ func solidNRGBA(width, height int, r, g, b byte) *image.NRGBA {
 	return img
 }
 
+// variedNRGBA 创建非均匀像素值的图像，用于验证压暗逻辑依赖原图数据。
+func variedNRGBA(width, height int) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for i := 0; i < width*height; i++ {
+		// 使用不同的 RGB 值确保压暗逻辑不能用常数混混过去。
+		r := byte((i * 13) % 256)
+		g := byte((i * 17) % 256)
+		b := byte((i * 19) % 256)
+		img.Pix[i*4+0] = r
+		img.Pix[i*4+1] = g
+		img.Pix[i*4+2] = b
+		img.Pix[i*4+3] = 255
+	}
+	return img
+}
+
 func TestCompareImagesIdentical(t *testing.T) {
 	a := solidNRGBA(4, 4, 10, 20, 30)
 	b := solidNRGBA(4, 4, 10, 20, 30)
@@ -46,6 +62,11 @@ func TestCompareImagesSinglePixelSpike(t *testing.T) {
 	}
 	if diff.TotalPixels != 100 {
 		t.Fatalf("TotalPixels = %d，想要 100", diff.TotalPixels)
+	}
+	// C-2：验证 MaxChannelDelta 门能拦下单像素尖峰。
+	// 占比门 0.5（> 0.01）能放过，但 delta 门 50（< 200）应该拦住。
+	if diff.withinThreshold(diffThreshold{MaxChannelDelta: 50, MaxDiffPixelRatio: 0.5}) {
+		t.Fatalf("单像素通道差 200 应当超阈值，实际 %+v", diff)
 	}
 }
 
@@ -90,5 +111,55 @@ func TestDiffPixelRatioExceedsThreshold(t *testing.T) {
 	}
 	if diff.withinThreshold(diffThreshold{MaxChannelDelta: 2, MaxDiffPixelRatio: 0.01}) {
 		t.Fatalf("整图差 50 应当超阈值，实际 %+v", diff)
+	}
+}
+
+// TestDiffPixelRatioGate 隔离验证占比门的拦截能力。
+// I-1：delta 门宽松（255），只有占比门会失败。
+func TestDiffPixelRatioGate(t *testing.T) {
+	a := solidNRGBA(10, 10, 0, 0, 0)
+	b := solidNRGBA(10, 10, 50, 50, 50)
+	diff, _, err := compareImages(a, b)
+	if err != nil {
+		t.Fatalf("比对失败: %v", err)
+	}
+	// MaxChannelDelta=50, MaxDiffPixelRatio=0.001，只有占比（100% > 0.1%）超阈值。
+	if diff.withinThreshold(diffThreshold{MaxChannelDelta: 255, MaxDiffPixelRatio: 0.001}) {
+		t.Fatalf("占比 100%% 应当超阈值 0.1%%，实际 %+v", diff)
+	}
+}
+
+// TestVisualizationRedMarking 验证差异可视化图正确标记红色。
+// C-1：超差像素必须涂成红色 (255, 0, 0, 255)；无差异像素必须压暗成 (want/4, want/4, want/4, 255)。
+func TestVisualizationRedMarking(t *testing.T) {
+	a := variedNRGBA(4, 4)
+	b := variedNRGBA(4, 4)
+	// 在 (1, 1) 处制造单像素差异。
+	b.Pix[b.PixOffset(1, 1)+0] += 10
+	diff, vis, err := compareImages(a, b)
+	if err != nil {
+		t.Fatalf("比对失败: %v", err)
+	}
+	if diff.MaxChannelDelta != 10 {
+		t.Fatalf("MaxChannelDelta = %d，想要 10", diff.MaxChannelDelta)
+	}
+	if diff.DiffPixels != 1 {
+		t.Fatalf("DiffPixels = %d，想要 1", diff.DiffPixels)
+	}
+	// 验证 (1, 1) 处被涂成红色。
+	vi := vis.PixOffset(1, 1)
+	if vis.Pix[vi+0] != 255 || vis.Pix[vi+1] != 0 || vis.Pix[vi+2] != 0 || vis.Pix[vi+3] != 255 {
+		t.Fatalf("差异像素 (1,1) 应该是红色 (255,0,0,255)，实际 (%d,%d,%d,%d)",
+			vis.Pix[vi+0], vis.Pix[vi+1], vis.Pix[vi+2], vis.Pix[vi+3])
+	}
+	// 验证其他像素被压暗（依赖原图数据 want/4）。
+	// 比如 (0, 0) 处应该是压暗的，不是红色，也不是常数。
+	vi00 := vis.PixOffset(0, 0)
+	wantR00 := b.Pix[b.PixOffset(0, 0)+0] / 4
+	wantG00 := b.Pix[b.PixOffset(0, 0)+1] / 4
+	wantB00 := b.Pix[b.PixOffset(0, 0)+2] / 4
+	if vis.Pix[vi00+0] != wantR00 || vis.Pix[vi00+1] != wantG00 || vis.Pix[vi00+2] != wantB00 || vis.Pix[vi00+3] != 255 {
+		t.Fatalf("无差异像素 (0,0) 应该是压暗 (%d,%d,%d,255)，实际 (%d,%d,%d,%d)",
+			wantR00, wantG00, wantB00, vis.Pix[vi00+0], vis.Pix[vi00+1], vis.Pix[vi00+2], vis.Pix[vi00+3])
 	}
 }
