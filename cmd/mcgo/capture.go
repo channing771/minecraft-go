@@ -8,6 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/go-gl/mathgl/mgl32"
+
+	"minecraft-go/internal/core"
+	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
 )
 
@@ -21,6 +25,14 @@ const (
 
 // captureDrainMax 是抓帧期间每帧处理的服务端消息上限，取值与 benchmark 一致。
 const captureDrainMax = benchmarkMessageDrainMax
+
+// captureGlyphSettleFrames 是 Apply 之后、真正回读之前额外渲染的帧数，
+// 用来让字形图集的异步光栅化收敛。GlyphAtlas.Request 只把符文入队，
+// 光栅化在后台 worker 完成，FlushUploads 每帧最多把一个结果搬上 GPU；
+// 一个场景在 Apply 里第一次用到的文本（比如新出现的远端玩家昵称）如果
+// 立刻回读，会读到 tofu 占位符而不是真正的字形。这里只重复渲染、不再
+// drain——不会让服务端消息覆盖 Apply 设的常量——把收敛让给 worker。
+const captureGlyphSettleFrames = 32
 
 // captureScene 是一个视觉场景。三要素缺一不可：确定性的世界状态由固定种子与
 // waitUntilLoaded 保证，固定的相机位姿与其余呈现状态由 Apply 设置，
@@ -50,6 +62,61 @@ var captureScenes = []captureScene{
 			app.camera.Yaw = 0
 			app.camera.Pitch = -0.25
 			return nil
+		},
+	},
+	// ponytail: 生命值只覆盖满血 20。部分心形需要注入 PlayerState，
+	// 而 Predictor.ApplyPlayerState 带 ServerTick 单调校验与位置和解，
+	// 从抓帧钩子注入会牵动相机。要覆盖需要先给 Predictor 加一个
+	// 只改生命值的测试入口，或让抓帧场景能脚本化地驱动服务端造成伤害。
+	{
+		Name:         "hud-hotbar-health",
+		WarmupFrames: 8,
+		Apply: func(app *application) error {
+			app.worldTimeTicks = 6000
+			// 与 terrain-noon 一样显式钉死相机姿态：登录首条权威 PlayerState 的
+			// ResetView 会把 Yaw/Pitch 覆盖成出生朝向，不显式设置就不是常量。
+			app.camera.Yaw = 0
+			app.camera.Pitch = -0.25
+			// 走 InventoryMirror.Apply 而不是直接改内部字段：它会执行
+			// Inventory.Valid() 校验，因此这份构造数据同时也是一条格式自检。
+			inventory := core.Inventory{}
+			inventory.Hotbar.Selected = 2
+			inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 64}
+			inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStoneBrick, Count: 7}
+			// 耐久 40/131 让磨损条画在偏左位置——满耐久和空耐久都是端点，
+			// 端点画错了不容易看出来。
+			inventory.Hotbar.Slots[2] = core.ItemStack{
+				Item: core.ItemStonePickaxe, Count: 1, Durability: 40,
+			}
+			inventory.Hotbar.Slots[3] = core.ItemStack{
+				Item: core.ItemIronPickaxe, Count: 1, Durability: 250,
+			}
+			inventory.Backpack[0] = core.ItemStack{Item: core.ItemCoal, Count: 12}
+			return app.inventory.Apply(network.InventoryState{Inventory: inventory})
+		},
+	},
+	{
+		Name:         "avatar-nametag",
+		WarmupFrames: 8,
+		Apply: func(app *application) error {
+			app.worldTimeTicks = 6000
+			app.camera.Yaw = 0
+			app.camera.Pitch = -0.25
+			if app.remotePlayers == nil {
+				return fmt.Errorf("avatar-nametag 需要远端玩家追踪器，当前为 nil")
+			}
+			// 昵称刻意混用 ASCII 与非 ASCII：字形 atlas 的分支在这两类上不同，
+			// 只用 ASCII 会漏掉整条宽字符路径。
+			spawn := network.RemotePlayerSpawn{
+				// PlayerID{1} 不是合法 UUIDv4（第 6 字节高 4 位须为 4，第 8 字节
+				// 高 2 位须为 10），applySpawn 会拒绝；这里改用与仓库测试同款的
+				// 合法 UUIDv4 形状占位符。
+				PlayerID:    core.PlayerID{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1},
+				DisplayName: "测试Player",
+				ServerTick:  1,
+				Position:    app.camera.Pos.Add(mgl32.Vec3{0, 0, -6}),
+			}
+			return app.remotePlayers.Apply(spawn)
 		},
 	},
 }
@@ -91,6 +158,11 @@ func captureOne(app *application, dir string, scene captureScene) error {
 	app.drainServerMessages(captureDrainMax)
 	if err := scene.Apply(app); err != nil {
 		return fmt.Errorf("应用场景状态: %w", err)
+	}
+	for i := 0; i < captureGlyphSettleFrames; i++ {
+		if _, err := app.renderFrame(captureDrainMax); err != nil {
+			return fmt.Errorf("字形收敛第 %d 帧: %w", i, err)
+		}
 	}
 	if _, err := app.renderFrame(captureDrainMax); err != nil {
 		return fmt.Errorf("渲染抓帧: %w", err)
