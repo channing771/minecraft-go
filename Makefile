@@ -5,7 +5,7 @@ APP := ./cmd/mcgo
 BINARY := bin/mcgo
 ARGS ?=
 
-.PHONY: help run build test test-multiplayer bench-multiplayer archcheck fmt clean
+.PHONY: help run build test test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update
 
 help:
 	@printf '%s\n' \
@@ -17,6 +17,8 @@ help:
 		'  make bench-multiplayer 运行三组 M3C 多人微基准' \
 		'  make archcheck        验证依赖闭包与无图形服务端边界' \
 		'  make fmt              格式化全部 Go 源码' \
+		'  make visual-check     跑视觉场景并与 golden 基线比对' \
+		'  make visual-update    重新生成 golden 基线（VISUAL_OUT 覆盖输出目录）' \
 		'  make clean            删除 bin 目录' \
 		'  make help             显示此帮助'
 
@@ -47,6 +49,12 @@ fmt:
 		-not -path './vendor/*' \
 		-not -path './.worktrees/*' \
 		-exec gofmt -w {} +
+
+visual-check:
+	$(GO) run $(APP) --capture $(or $(VISUAL_OUT),build/visual)
+
+visual-update:
+	$(GO) run $(APP) --capture $(or $(VISUAL_OUT),build/visual) --update-golden
 
 clean:
 	rm -rf bin

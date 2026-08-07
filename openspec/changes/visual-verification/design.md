@@ -48,6 +48,8 @@
 
 被否决的替代方案：引入第三个参数 NoiseFloor（超差 = 差值 > NoiseFloor），保留"整图差 1 必须通过"。表达力更强，但多出一个当前没有任何实测依据可调的旋钮，而它要放行的那种形态真实硬件并不会产生。
 
+**阈值实测（Task 6，取代上面引用的 Task 3 两样本数据）**：同一台机器上用同一个已构建二进制连续跑 14 次 `--capture` 并与同一份基线比对，三个场景各自记录 `imageDiff`。完整的逐次数据表见 `docs/superpowers/specs/2026-08-07-visual-verification-design.md` §6。结论：42 个（14 次 × 3 场景）样本点的最大通道差恒为 `1`，从未观察到 `0` 或 `≥2`；超差像素占比在 `230400` 像素中的 `1..6` 个之间波动，最大占比 `0.0026%`（`6/230400`）。据此选定 `captureThresholds = {MaxChannelDelta: 2, MaxDiffPixelRatio: 0.0001}`：通道差留一个 LSB 余量，占比留约 4 倍余量，均高于全部 14 次实测的最大值而非预设整数。
+
 **5. 本变更不把视觉门禁接入 CI。**
 
 `.github/workflows/ci.yml` 只有一个 `test` job（`runs-on: macos-latest`），接入需要新增 job 并处理 runner 的 GPU 可用性。更关键的是：在拿到实测漂移数据之前，无法确定阈值，也就无法确定接入形态（阻塞还是只记录）。先在本地 make target 上跑，攒够数据再单独立变更接入。

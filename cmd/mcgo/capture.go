@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/draw"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -124,8 +125,22 @@ var captureScenes = []captureScene{
 	},
 }
 
-// runCapture 依次跑完全部视觉场景，把每张图写成 <dir>/<name>.png。
-func runCapture(app *application, dir string) error {
+// captureGoldenDir 是 golden 基线目录，相对仓库根目录。
+// mcgo 的其余相对路径默认值（例如 --world 的 worlds/default）同样假定从仓库根目录运行，
+// 这里延续同一约定，不额外引入 runtime.Caller 之类的自定位逻辑。
+const captureGoldenDir = "cmd/mcgo/testdata/golden"
+
+// captureThresholds 的数值来自同机重复抓帧 12 次的实测漂移分布，
+// 具体测量结果见 docs/superpowers/specs/2026-08-07-visual-verification-design.md §6。
+// 不要凭直觉调整——放宽阈值等于放弃门禁。
+var captureThresholds = diffThreshold{
+	MaxChannelDelta:   2,
+	MaxDiffPixelRatio: 0.0001,
+}
+
+// runCapture 依次跑完全部视觉场景。updateGolden 为真时把抓到的图写进 golden 基线；
+// 为假时与已有基线比对，超阈值的场景把实拍图与差异图写进 dir 并返回错误。
+func runCapture(app *application, dir string, updateGolden bool) error {
 	if width, height := app.framebufferSize(); width != captureWidth || height != captureHeight {
 		return fmt.Errorf("capture framebuffer=%dx%d，要求精确 %dx%d",
 			width, height, captureWidth, captureHeight)
@@ -142,15 +157,14 @@ func runCapture(app *application, dir string) error {
 		return fmt.Errorf("固定场景加载: %w", err)
 	}
 	for _, scene := range captureScenes {
-		if err := captureOne(app, dir, scene); err != nil {
+		if err := captureOne(app, dir, scene, updateGolden); err != nil {
 			return fmt.Errorf("场景 %s: %w", scene.Name, err)
 		}
-		fmt.Printf("已抓取场景 %s\n", scene.Name)
 	}
 	return nil
 }
 
-func captureOne(app *application, dir string, scene captureScene) error {
+func captureOne(app *application, dir string, scene captureScene, updateGolden bool) error {
 	for i := 0; i < scene.WarmupFrames; i++ {
 		if _, err := app.frame(captureDrainMax, captureDrainMax, physics.FixedDelta); err != nil {
 			return fmt.Errorf("预热第 %d 帧: %w", i, err)
@@ -172,7 +186,72 @@ func captureOne(app *application, dir string, scene captureScene) error {
 	}
 	pixels := app.color.ReadLayer(0, 0)
 	img := bgraToNRGBA(pixels, captureWidth, captureHeight)
-	return writePNG(filepath.Join(dir, scene.Name+".png"), img)
+	if updateGolden {
+		if err := os.MkdirAll(captureGoldenDir, 0o755); err != nil {
+			return fmt.Errorf("创建 golden 基线目录 %s: %w", captureGoldenDir, err)
+		}
+		if err := writePNG(filepath.Join(captureGoldenDir, scene.Name+".png"), img); err != nil {
+			return err
+		}
+		fmt.Printf("已抓取场景 %s（写入基线）\n", scene.Name)
+		return nil
+	}
+	diff, err := compareAgainstGolden(captureGoldenDir, dir, scene.Name, img, captureThresholds)
+	fmt.Printf("已抓取场景 %s: %s\n", scene.Name, diff)
+	return err
+}
+
+// compareAgainstGolden 把 img 与 <goldenDir>/<name>.png 比对。
+// 通过阈值时返回量化差异与 nil；超阈值或基线缺失时返回错误，
+// 前者还会把实拍图与差异图写进 outDir 供人查看——只报比例数字等于让人盲修。
+// goldenDir 作为参数而非直接用 captureGoldenDir 常量，是为了让单元测试
+// 可以指向临时目录，不必读写仓库里的真实基线。
+func compareAgainstGolden(
+	goldenDir, outDir, name string, img *image.NRGBA, threshold diffThreshold,
+) (imageDiff, error) {
+	goldenPath := filepath.Join(goldenDir, name+".png")
+	want, err := readPNG(goldenPath)
+	if err != nil {
+		return imageDiff{}, fmt.Errorf(
+			"读取 golden 基线 %s 失败（若是首次建立基线，先加 --update-golden）: %w",
+			goldenPath, err)
+	}
+	diff, vis, err := compareImages(img, want)
+	if err != nil {
+		return imageDiff{}, fmt.Errorf("比对场景 %s 与基线: %w", name, err)
+	}
+	if diff.withinThreshold(threshold) {
+		return diff, nil
+	}
+	if err := writePNG(filepath.Join(outDir, name+"-actual.png"), img); err != nil {
+		return diff, err
+	}
+	if err := writePNG(filepath.Join(outDir, name+"-diff.png"), vis); err != nil {
+		return diff, err
+	}
+	return diff, fmt.Errorf("超出阈值：%s（实拍与差异图见 %s）", diff, outDir)
+}
+
+// readPNG 读取一张 PNG 并转成 NRGBA，用于加载 golden 基线。
+func readPNG(path string) (*image.NRGBA, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	decoded, err := png.Decode(file)
+	if err != nil {
+		return nil, fmt.Errorf("解码 %s: %w", path, err)
+	}
+	if nrgba, ok := decoded.(*image.NRGBA); ok {
+		return nrgba, nil
+	}
+	// writePNG 写出的图像应始终解码回 *image.NRGBA；这条分支只是防御性兜底，
+	// 避免未来换编码器或手工替换 golden 文件时静默产出错位的比对结果。
+	bounds := decoded.Bounds()
+	converted := image.NewNRGBA(bounds)
+	draw.Draw(converted, bounds, decoded, bounds.Min, draw.Src)
+	return converted, nil
 }
 
 // bgraToNRGBA 把回读到的 BGRA8 像素转成 PNG 需要的 NRGBA。

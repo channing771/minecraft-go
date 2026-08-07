@@ -4,6 +4,9 @@
 *.test
 *.out
 
+# make visual-check / visual-update 默认输出目录（实拍图与差异图，仅调试用）
+/build/
+
 # 依赖缓存
 /vendor/
 

@@ -256,6 +256,32 @@ func TestParseMainOptionsCaptureRejectsConflicts(t *testing.T) {
 	}
 }
 
+func TestParseMainOptionsUpdateGoldenRequiresCapture(t *testing.T) {
+	if _, err := parseMainOptions([]string{"--update-golden"}); err == nil {
+		t.Fatal("--update-golden 缺少 --capture 时想要报错，实际通过")
+	}
+}
+
+func TestParseMainOptionsUpdateGoldenWithCapturePropagates(t *testing.T) {
+	opts, err := parseMainOptions([]string{"--capture", "/tmp/shots", "--update-golden"})
+	if err != nil {
+		t.Fatalf("解析 --capture --update-golden 失败: %v", err)
+	}
+	if !opts.UpdateGolden {
+		t.Fatal("UpdateGolden = false，想要 true")
+	}
+}
+
+func TestParseMainOptionsWithoutUpdateGoldenDefaultsFalse(t *testing.T) {
+	opts, err := parseMainOptions([]string{"--capture", "/tmp/shots"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.UpdateGolden {
+		t.Fatal("UpdateGolden = true，想要默认 false")
+	}
+}
+
 func TestParseMainOptionsWithoutCaptureLeavesDirEmpty(t *testing.T) {
 	opts, err := parseMainOptions(nil)
 	if err != nil {
