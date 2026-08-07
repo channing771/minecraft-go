@@ -43,7 +43,7 @@ func (d imageDiff) String() string {
 }
 
 // compareImages 比对两张同尺寸图，返回量化差异与一张差异可视化图。
-// 可视化图把相同像素压暗、把超差像素画成红色，供人眼直接定位问题区域——
+// 可视化图把相同像素压暗、把差异像素画成红色，供人眼直接定位问题区域——
 // 只报"差异 3.7% 超过阈值 1%"而不给图，等于让人盲修。
 func compareImages(got, want *image.NRGBA) (imageDiff, *image.NRGBA, error) {
 	if got.Bounds() != want.Bounds() {
