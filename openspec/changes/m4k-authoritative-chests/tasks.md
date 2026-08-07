@@ -58,7 +58,7 @@
 
 ## 9. 文档与最终门禁
 
-- [ ] 9.1 更新 `README.md` 与 `docs/notes/lan-server.md`，说明箱子合成与放置、统一 `0..62` 界面、同时只能查看一个容器、协议 v12、玩家 schema v4 不变、区块 schema v6 与 v1–v5 迁移、备份与回退要求以及未实现范围；文档使用中文并保持与实现一致。
-- [ ] 9.2 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && gofmt -l . && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod'`；`gofmt -l .` 必须无输出，且不得启动或聚焦游戏窗口。
-- [ ] 9.3 执行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，核对 proposal、三份 delta specs、design 与实现一致，确认协议 v12、区块 schema v6、玩家 schema v4、scenario v12 与两份既有基线均未被放宽或静默覆盖。
-- [ ] 9.4 只暂存 M4K 实现、测试、中文文档和本文件勾选，排除 `midscene_run/`；提交 `chore: 关闭 M4K 权威箱子`，停止实现并等待主规格同步、归档与推送指令。
+- [x] 9.1 更新 `README.md` 与 `docs/notes/lan-server.md`，说明箱子合成与放置、统一 `0..62` 界面、同时只能查看一个容器、协议 v12、玩家 schema v4 不变、区块 schema v6 与 v1–v5 迁移、备份与回退要求以及未实现范围；文档使用中文并保持与实现一致。
+- [x] 9.2 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && gofmt -l . && go test ./... -race -count=1 && go vet ./... && go test ./internal/archcheck -count=1 && CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod'`；`gofmt -l .` 必须无输出，且不得启动或聚焦游戏窗口。
+- [x] 9.3 执行 `openspec validate --all --strict --no-interactive` 与 `git diff --check`，核对 proposal、三份 delta specs、design 与实现一致，确认协议 v12、区块 schema v6、玩家 schema v4、scenario v12 与两份既有基线均未被放宽或静默覆盖。
+- [x] 9.4 只暂存 M4K 实现、测试、中文文档和本文件勾选，排除 `midscene_run/`；提交 `chore: 关闭 M4K 权威箱子`，停止实现并等待主规格同步、归档与推送指令。
