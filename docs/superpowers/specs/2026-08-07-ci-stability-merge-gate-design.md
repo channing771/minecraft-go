@@ -59,16 +59,22 @@ GitHub 的 `pull_request` 事件检查的是"PR 与**当时的** main"的合并�
 
 ### 期限普查
 
-| 包 | `time.Second`/`time.Millisecond` 字面量 |
-| --- | --- |
-| `internal/server` | 204 |
-| `internal/client` | 46 |
-| `internal/network` | 24 |
-| `cmd/mcgo` | 20 |
-| 其余 | 3 |
-| **合计** | **299** |
+期限有**三种语法形态**，必须一起数，只查其中一种会严重低估：
 
-`internal/server` 内另有 136 处 `context.WithTimeout`、75 个 `wait*`/`assert*` 助手。
+```bash
+grep -rhoE "context\.WithTimeout\([^,]*, [^)]*\)|time\.Now\(\)\.Add\([^)]*\)|time\.After\([^)]*\)" --include='*_test.go' <包>
+```
+
+| 包 | 期限站点 |
+| --- | --- |
+| `internal/server` | **302** |
+| `internal/network` | 36 |
+| `cmd/mcgo` | 18 |
+| `internal/client` | 8 |
+
+`internal/server` 内另有 75 个 `wait*`/`assert*` 助手。
+
+三种形态在 `internal/server` 的分布是 `context.WithTimeout` 98、`time.Now().Add` 73、`time.After` 101（另有 30 处嵌套/复合写法）。**`time.After` 是最大的一群且最容易被漏**：其中 77 处是 `time.After(time.Second)`——1 秒的活性等待，既最多又最紧，是抖动的首要嫌疑。
 
 ### 核心判据：三类期限，处置完全不同
 
@@ -77,10 +83,19 @@ GitHub 的 `pull_request` 事件检查的是"PR 与**当时的** main"的合并�
 | 类别 | 形态 | 例子 | 处置 |
 | --- | --- | --- | --- |
 | **活性等待** | 轮询到条件成立，到点 `t.Fatal` | `waitReady` 的 5s、`waitClientReadyFor` 的 10s、`waitIntegrationState` 的 5s | **抬高** |
-| **缺席断言** | 等一小段确认什么都没发生 | `TestOpenFurnaceSendsStateOnlyToViewer` | **不动**（抬高只是浪费时间） |
+| **缺席断言** | 等一小段确认什么都没发生 | `assertNoServerMessage` 的 20ms | **不动** |
+| **超时触发断言** | 故意给极短期限，断言超时确实发生 | `shutdown_test.go` 用 20ms 上下文验证 Shutdown 超时后冻结 Step | **不动** |
 | **性能门禁** | 测量耗时，断言小于上限 | `TestPerformanceThresholdsRejectTickP99AtTenMilliseconds` | **绝不动** |
 
-判据可机械执行：看断言的对象是"条件成立了没"还是"耗时超了没"。
+判据不靠人工判断，**可 grep 机械识别**：
+
+后两类的断言形态一律是 `errors.Is(err, context.DeadlineExceeded)`——它们要的就是超时发生。活性等待恰好相反，超时即 `t.Fatal`。
+
+```bash
+grep -rn "context.DeadlineExceeded" internal/server/*_test.go
+```
+
+`internal/server` 内命中 10 处，分布在 6 个文件。**这 10 处及其所属的期限字面量是禁改区**。抬高它们不会让断言失败（门永远不开，仍会超时），但会把 20ms 变成 30s，凭空给测试套件加上分钟级耗时——纯粹的浪费，且掩盖了这些站点的真实意图。
 
 ### 关键结论：抬高活性等待在快机器上是零成本的
 
@@ -110,13 +125,34 @@ func waitIntegrationState(t *testing.T, connected integrationClient, condition f
 
 活性等待**不逐处乘 6**，而是按角色归入一小组命名常量。逐处乘 6 会把 `10s` 变成 `60s`、`20ms` 变成 `120ms`，既保留了原有的随意取值，又谈不上统一。
 
+`internal/server` 测试内的期限实测分布：
+
+| 原值 | `WithTimeout` | 轮询 | `time.After` | 归属 |
+| --- | --- | --- | --- | --- |
+| `1s` | — | 18 | 77 | 活性 |
+| `5s` | 37 | 38 | 1 | 活性 |
+| `2s` | 20 | 7 | 10 | 活性 |
+| `10s` | 12 | 4 | — | 活性 |
+| `3s` | 7 | 2 | 1 | 活性 |
+| `15s` / `20s` / `12s` / `30s` | 12 | — | — | 活性 |
+| 毫秒档 | 9 | 3 | 11 | **混合，逐处核对** |
+| `10min` | 1 | — | — | 已足够长，不动 |
+
+**关键性质：10 处禁改区全部落在毫秒档，秒档零重叠。**（已逐处核对：20ms×7、25ms×2、1ms×1）
+
+这把工作切成了一刀两断的两半：秒档可机械替换，毫秒档必须人工逐处判。
+
+映射到三个命名常量：
+
 | 常量 | 取值 | 覆盖的原字面量 | 用途 |
 | --- | --- | --- | --- |
-| `shortWaitDeadline` | `5s` | 原 20ms–1s | 单个 tick 推进、单次保存启动等本地快事件 |
+| `shortWaitDeadline` | `5s` | 原 100ms–1s 中的活性站点 | 单个 tick 推进、单次保存启动等本地快事件 |
 | `waitDeadline` | `30s` | 原 2s–5s | 登录 ready、收到某条消息、库存达到某状态 |
 | `longWaitDeadline` | `60s` | 原 10s–30s | 涉及关服屏障、磁盘重启、八人会话的复合等待 |
 
-对最常见的 `5s` 一档，这正好是 6×。
+对最常见的 `5s` 一档（75 处，占活性站点的多数），这正好是 6×。
+
+毫秒档必须逐处核对：它同时混着活性等待与禁改区，是本变更唯一不能机械替换的一档。
 
 命名常量的价值不在于少打字，而在于后人读到的是"活性期限"而不是魔术数字 `5s`，新写的测试自然继承正确值。
 
@@ -170,9 +206,23 @@ GOMAXPROCS=1 go test ./internal/server -count=1
 
 前三个在 ~5.2s 失败，是活性超时，抬高期限直接命中。
 
-**后两个在亚秒内失败，抬高期限对它们毫无作用。** `TestOpenFurnaceSendsStateOnlyToViewer` 从名称看属于缺席断言（class 2）。这两个必须单独诊断，可能是调度顺序依赖，也可能是真 bug。
+**后两个在亚秒内失败，抬高期限对它们毫无作用。** 已单独诊断，两个都是真的测试 bug——测试假设了不被保证的顺序：
+
+**`TestWorldPersistsAcrossRestartAndGeneratorUpgrade`**（`persistence_integration_test.go:58`）
+
+三次运行的 `LastInputSequence` 分别是 175、404、0，而 `WorldTimeTicks` 是 671、694、709。tick 确实推进了 600+，但玩家输入只被消费了一部分甚至一条都没有。测试等的是 tick 数，然后假设 600 条输入都已生效、玩家已经移动到未探索区块——在争抢下这个假设不成立，玩家没动，generator B 自然没被调用。
+
+正解是等 `LastInputSequence` 达到目标值，而不是等 tick 数。
+
+**`TestOpenFurnaceSendsStateOnlyToViewer`**（`furnace_publication_test.go:134`）
+
+读到的状态输入槽是空的。等待循环的退出条件是 `opened.Furnace.Generation != 0`，取的是批次里的最后一条状态——但满足 `Generation != 0` 的第一条状态未必已经反映放料结果。
+
+正解是让退出条件直接表达真正要等的东西，而不是用 `Generation` 做代理。
 
 **明确纪律：不得用抬高期限的方式"修"这两个测试。** 亚秒失败被期限改动掩盖是本设计最需要防的失败模式。
+
+**范围阀门**：这两个测试从未在 CI 上红过，只在 `GOMAXPROCS=1` 下暴露。若诊断深入后发现根因在 `internal/server` 产品代码而非测试代码，**停手另开 change**，不在本变更内修——那是权威模拟的正确性问题，与 CI 稳定性不是一回事。
 
 ### 工具的局限
 
