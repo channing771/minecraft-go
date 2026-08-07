@@ -777,11 +777,15 @@ func TestCompareImagesSinglePixelSpike(t *testing.T) {
 	}
 }
 
-// TestCompareImagesWideFaintShift 覆盖"大面积微差"——LSB 噪声的形态。
-// 每个像素只差 1，必须能被阈值放过，否则 CI 上会变成第二个假失败源。
-func TestCompareImagesWideFaintShift(t *testing.T) {
-	a := solidNRGBA(10, 10, 100, 100, 100)
-	b := solidNRGBA(10, 10, 101, 101, 101)
+// TestCompareImagesSparseFaintShift 覆盖"稀疏微差"——真实 LSB 噪声的形态。
+// Task 3 实测：同机连续两次抓帧，230400 像素中仅 2 个相差 1，均在绿通道。
+// 这类漂移必须被阈值放过，否则 CI 上会变成第二个假失败源。
+func TestCompareImagesSparseFaintShift(t *testing.T) {
+	a := solidNRGBA(100, 100, 100, 100, 100)
+	b := solidNRGBA(100, 100, 100, 100, 100)
+	// 10000 个像素里改 2 个，占比 0.0002，与实测量级一致。
+	b.Pix[b.PixOffset(10, 10)+1] = 101
+	b.Pix[b.PixOffset(70, 40)+1] = 101
 	diff, _, err := compareImages(a, b)
 	if err != nil {
 		t.Fatalf("比对失败: %v", err)
@@ -789,8 +793,11 @@ func TestCompareImagesWideFaintShift(t *testing.T) {
 	if diff.MaxChannelDelta != 1 {
 		t.Fatalf("MaxChannelDelta = %d，想要 1", diff.MaxChannelDelta)
 	}
-	if !diff.withinThreshold(diffThreshold{MaxChannelDelta: 2, MaxDiffPixelRatio: 0.01}) {
-		t.Fatalf("每通道差 1 应当在阈值内，实际 %+v", diff)
+	if diff.DiffPixels != 2 {
+		t.Fatalf("DiffPixels = %d，想要 2", diff.DiffPixels)
+	}
+	if !diff.withinThreshold(diffThreshold{MaxChannelDelta: 2, MaxDiffPixelRatio: 0.001}) {
+		t.Fatalf("稀疏的每通道差 1 应当在阈值内，实际 %+v", diff)
 	}
 }
 
