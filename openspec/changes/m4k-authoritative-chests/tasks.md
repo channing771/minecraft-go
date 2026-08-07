@@ -44,10 +44,10 @@
 
 ## 7. 服务端接线与 Memory/TCP 闭环
 
-- [ ] 7.1 在 `internal/server` 先写失败测试：四个容器消息字段无损翻译为 sim 命令；箱子状态只发给当前查看者；两名查看者收到相同完整状态；未打开界面者不收；关闭通知精确一次；完整物品状态仍只发本人；outbox 满时继续关闭慢 session 且不阻塞其他玩家。
-- [ ] 7.2 先写 Memory/TCP 纵向失败测试，使用同一脚本：两玩家登录 → 放置箱子 → 同时打开 → 交错存取 → 两端同见最终内容 → 一人破坏箱子 → 另一人收到关闭通知 → 旧引用命令被拒绝；两种 transport 的最终区块、物品状态与拒绝序列必须相同。
-- [ ] 7.3 先写 DiskStore 重启失败测试：存入含耐久工具的箱子后正常刷新、关闭并重开，确认 27 格物品、数量与耐久原值恢复；注入保存失败时旧完整记录可恢复，重试后才整体更新。
-- [ ] 7.4 在现有 switch 与发布顺序中最小接线，`server.session` 不保存容器状态或查看者 map；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -race -count=1 && go test ./internal/network ./internal/sim ./internal/storage -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 接通多人权威箱子服务端`，然后自动进入第 8 组。
+- [x] 7.1 在 `internal/server` 先写失败测试：四个容器消息字段无损翻译为 sim 命令；箱子状态只发给当前查看者；两名查看者收到相同完整状态；未打开界面者不收；关闭通知精确一次；完整物品状态仍只发本人；outbox 满时继续关闭慢 session 且不阻塞其他玩家。
+- [x] 7.2 先写 Memory/TCP 纵向失败测试，使用同一脚本：两玩家登录 → 放置箱子 → 同时打开 → 交错存取 → 两端同见最终内容 → 一人破坏箱子 → 另一人收到关闭通知 → 旧引用命令被拒绝；两种 transport 的最终区块、物品状态与拒绝序列必须相同。
+- [x] 7.3 先写 DiskStore 重启失败测试：存入含耐久工具的箱子后正常刷新、关闭并重开，确认 27 格物品、数量与耐久原值恢复；注入保存失败时旧完整记录可恢复，重试后才整体更新。
+- [x] 7.4 在现有 switch 与发布顺序中最小接线，`server.session` 不保存容器状态或查看者 map；执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -race -count=1 && go test ./internal/network ./internal/sim ./internal/storage -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 接通多人权威箱子服务端`，然后自动进入第 8 组。
 
 ## 8. 箱子界面接线
 

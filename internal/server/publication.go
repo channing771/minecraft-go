@@ -176,6 +176,21 @@ func (server *Server) publishLocalResult(
 			return
 		}
 	}
+	// 箱子状态只发给当前查看者；仅订阅区块但未打开界面的玩家不会收到。
+	for _, update := range result.Chests {
+		if update.Session != current.id {
+			continue
+		}
+		if !current.enqueue(network.ChestState{
+			Chest: update.Chest,
+			Items: update.Items,
+		}) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
+			return
+		}
+	}
+	// FurnaceEnds 混装熔炉与箱子两种 Kind 的失效项：core.ContainerRef 本身携带
+	// Kind，ContainerClosed 不区分容器种类，因此这里不需要也不应该按 Kind 过滤。
 	for _, ended := range result.FurnaceEnds {
 		if ended.Session != current.id {
 			continue
