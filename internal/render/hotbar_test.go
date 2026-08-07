@@ -607,13 +607,15 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 	var layout hotbarLayout
 
 	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
-	if len(open.quads) != 52 {
-		t.Fatalf("空背包 quads=%d，想要选中框、36 格和 15 个配方实例共 52", len(open.quads))
+	// source=-1：只有选中框，没有来源高亮；空背包没有物品色块。
+	if len(open.quads) != 1+core.InventorySlots+recipeQuads {
+		t.Fatalf("空背包 quads=%d，想要选中框、36 格和 %d 个配方实例共 %d",
+			len(open.quads), recipeQuads, 1+core.InventorySlots+recipeQuads)
 	}
-	if len(open.glyphs) != 10 {
-		t.Fatalf("五条配方数字=%d，想要每条输入输出各一位共 10", len(open.glyphs))
+	if len(open.glyphs) != recipeGlyphs {
+		t.Fatalf("六条配方数字=%d，想要每条输入输出各一位共 %d", len(open.glyphs), recipeGlyphs)
 	}
-	overlay := open.quads[len(open.quads)-15:]
+	overlay := open.quads[len(open.quads)-recipeQuads:]
 	wantItems := [][4]float32{
 		{128.0 / 255, 128.0 / 255, 128.0 / 255, 1},
 		{122.0 / 255, 118.0 / 255, 112.0 / 255, 1},
@@ -625,8 +627,11 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		{104.0 / 255, 112.0 / 255, 120.0 / 255, 1},
 		{220.0 / 255, 220.0 / 255, 224.0 / 255, 1},
 		{190.0 / 255, 198.0 / 255, 210.0 / 255, 1},
+		// 第六行：箱子配方，8 个石头合成 1 个箱子。
+		{128.0 / 255, 128.0 / 255, 128.0 / 255, 1},
+		{156.0 / 255, 108.0 / 255, 58.0 / 255, 1},
 	}
-	for row, y := range []float32{420, 368, 316, 264, 212} {
+	for row, y := range []float32{420, 368, 316, 264, 212, 160} {
 		input, output := overlay[row*3], overlay[row*3+1]
 		if input.X != 408 || output.X != 460 || input.Y != y || output.Y != y {
 			t.Fatalf("配方行 %d 位置错误: input=%+v output=%+v", row, input, output)
@@ -636,8 +641,8 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		}
 	}
 	disabled := hotbarRecipeButtonQuads(open)
-	if len(disabled) != 5 {
-		t.Fatalf("配方按钮=%d，想要 5", len(disabled))
+	if len(disabled) != len(inventoryRecipeIDs) {
+		t.Fatalf("配方按钮=%d，想要 %d", len(disabled), len(inventoryRecipeIDs))
 	}
 
 	var stone core.Inventory
@@ -686,6 +691,7 @@ func TestRecipeButtonHitTestMatchesDrawnGeometry(t *testing.T) {
 		{"铁块", 317, core.RecipeIronBlock},
 		{"石镐", 265, core.RecipeStonePickaxe},
 		{"铁镐", 213, core.RecipeIronPickaxe},
+		{"箱子", 161, core.RecipeChest},
 	} {
 		got, ok := RecipeButtonAt(513, test.y, 1280, 720)
 		if !ok || got != test.recipe {
@@ -763,9 +769,9 @@ func TestFurnaceOverlayReplacesRecipeRow(t *testing.T) {
 	recipe := layoutInventory(&layout, atlas, stocked, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
 	recipeButtons := len(hotbarRecipeButtonQuads(recipe))
 	furnace := layoutInventory(&layout, atlas, stocked, true, -1, &FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 720)
-	if recipeButtons != 5 || len(hotbarRecipeButtonQuads(furnace)) != 0 {
-		t.Fatalf("配方视图按钮=%d，熔炉视图按钮=%d，想要 5 和 0",
-			recipeButtons, len(hotbarRecipeButtonQuads(furnace)))
+	if recipeButtons != len(inventoryRecipeIDs) || len(hotbarRecipeButtonQuads(furnace)) != 0 {
+		t.Fatalf("配方视图按钮=%d，熔炉视图按钮=%d，想要 %d 和 0",
+			recipeButtons, len(hotbarRecipeButtonQuads(furnace)), len(inventoryRecipeIDs))
 	}
 }
 
@@ -880,9 +886,9 @@ func TestChestOverlayReplacesRecipeRow(t *testing.T) {
 	recipe := layoutInventory(&layout, atlas, stocked, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
 	recipeButtons := len(hotbarRecipeButtonQuads(recipe))
 	chest := layoutInventory(&layout, atlas, stocked, true, -1, nil, &ChestOverlay{}, MiningOverlay{}, 1280, 720)
-	if recipeButtons != 5 || len(hotbarRecipeButtonQuads(chest)) != 0 {
-		t.Fatalf("配方视图按钮=%d，箱子视图按钮=%d，想要 5 和 0",
-			recipeButtons, len(hotbarRecipeButtonQuads(chest)))
+	if recipeButtons != len(inventoryRecipeIDs) || len(hotbarRecipeButtonQuads(chest)) != 0 {
+		t.Fatalf("配方视图按钮=%d，箱子视图按钮=%d，想要 %d 和 0",
+			recipeButtons, len(hotbarRecipeButtonQuads(chest)), len(inventoryRecipeIDs))
 	}
 }
 

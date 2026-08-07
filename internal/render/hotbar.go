@@ -16,9 +16,9 @@ const (
 	// 数量最多两位数（1..64），每格最多两个数字。
 	maxHotbarGlyphs = core.InventorySlots*2 + maxOverlayGlyphs
 
-	// 五条固定配方，每条包含输入格、输出格、合成按钮和两个数量。
-	recipeQuads  = 5 * 3
-	recipeGlyphs = 5 * 2
+	// 六条固定配方（含箱子），每条包含输入格、输出格、合成按钮和两个数量。
+	recipeQuads  = 6 * 3
+	recipeGlyphs = 6 * 2
 	// 熔炉视图：三个栏位背景、三个物品色块、两条进度条底与两条进度条填充。
 	furnaceQuads = 3 + 3 + 4
 	// 三个熔炉格各最多两位数量。
@@ -61,13 +61,14 @@ const (
 	furnaceBarGap    = float32(6)
 )
 
-// ponytail: 当前只有五条固定配方；需要分页或分类时再引入共享目录。
+// ponytail: 当前只有六条固定配方；需要分页或分类时再引入共享目录。
 var inventoryRecipeIDs = [...]core.RecipeID{
 	core.RecipeStoneBricks,
 	core.RecipeFurnace,
 	core.RecipeIronBlock,
 	core.RecipeStonePickaxe,
 	core.RecipeIronPickaxe,
+	core.RecipeChest,
 }
 
 //go:embed shader/hotbar.wgsl
