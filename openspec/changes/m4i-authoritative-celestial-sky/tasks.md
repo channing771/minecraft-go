@@ -72,7 +72,7 @@
 
 - [x] 8.11 核对 `origin/main@17807e580ca5675bc216d1e6b3d45adc1782de67` 已依次归档 M4K 与 M4L，确认协议 v13、玩家 schema v5、区块 schema v6、metadata v2、scenario v12、权威箱子和权威生命值主规格，以及两份 baseline 字节不变；把 proposal、三份 delta specs、design 与 tasks 同步为 M4L 正式起点，并运行 `openspec validate --all --strict --no-interactive`。完成 M4J 门禁的候选 `a859fcbc0abd63b4d39fc4321c2facf6fd57a63a` 只作不可提升证据。
 - [x] 8.12 合并 `origin/main@17807e580ca5675bc216d1e6b3d45adc1782de67`，保留 M4L 的权威箱子、生命值、摔落伤害、死亡结算、协议 v13、玩家 schema v5、区块 schema v6、metadata v2、迁移、golden 与 HUD 呈现，同时保留 M4I 的权威天空、MemoryStore 编码保留、scenario v13 和唯一 `12:13` 迁移；只解决 `README.md`、`cmd/mcgo/app.go`、`app_test.go` 与 `docs/notes/perf-baseline.md` 的真实冲突，不得修改默认 benchmark workload 或两份 baseline 字节。
-- [ ] 8.13 合并后运行受影响包 race、协议与玩家/区块存储 golden/fuzz、主动丢弃、工具耐久、权威箱子、生命值与死亡结算聚焦测试、archcheck 和 OpenSpec strict；再用 `rg` 核对 protocol v13、scenario v13、schema v5/v6、metadata v2、一次 sky draw、固定分辨率/阶段/样本和唯一 `12:13` 迁移。通过前不得冻结正式候选。
+- [x] 8.13 合并后运行受影响包 race、协议与玩家/区块存储 golden/fuzz、主动丢弃、工具耐久、权威箱子、生命值与死亡结算聚焦测试、archcheck 和 OpenSpec strict；再用 `rg` 核对 protocol v13、scenario v13、schema v5/v6、metadata v2、一次 sky draw、固定分辨率/阶段/样本和唯一 `12:13` 迁移。通过前不得冻结正式候选。
 
 ## 9. 冻结并验收新候选
 
