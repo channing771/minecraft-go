@@ -82,6 +82,9 @@ type playerState struct {
 	inventoryDirty    bool
 	// health 是服务端单写者拥有的权威生命值，0..core.MaxHealth。
 	health uint8
+	// peakY 是离地后到达过的最高高度，瞬态字段，不持久化、不进入快照/哈希。
+	// 落地、传送、重生、维度 reset 都会把它重置为当前高度。
+	peakY float32
 
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
@@ -369,14 +372,42 @@ func (engine *Engine) advanceActivePlayers() {
 			engine.subscriptionsDirty = true
 			continue
 		}
+		wasOnGround := player.state.OnGround
+		if wasOnGround {
+			player.peakY = player.state.Position.Y()
+		}
 		step := physics.Step(
 			player.state,
 			player.input,
 			dimensionCollisionSource{dimension: engine.dimensions[session.dimension]},
 		)
 		player.state = step.State
+		if player.state.OnGround {
+			if !wasOnGround {
+				player.applyFallDamage()
+			}
+			player.peakY = player.state.Position.Y()
+		} else if y := player.state.Position.Y(); y > player.peakY {
+			player.peakY = y
+		}
 		engine.updateSafeLocation(session)
 	}
+}
+
+// applyFallDamage 在"上一 tick 不在地面、这一 tick 在地面"的边沿按固定曲线结算
+// 一次摔落伤害：伤害 = floor(峰值Y − 落地Y) − 3，负值取 0。本组只负责扣血，生命值
+// 归零后的死亡/重生/掉落结算不在这里处理。
+func (player *playerState) applyFallDamage() {
+	fallHeight := float64(player.peakY - player.state.Position.Y())
+	damage := int32(math.Floor(fallHeight)) - 3
+	if damage <= 0 {
+		return
+	}
+	if damage >= int32(player.health) {
+		player.health = 0
+		return
+	}
+	player.health -= uint8(damage)
 }
 
 func (engine *Engine) updateSafeLocation(session *sessionState) {
@@ -478,6 +509,7 @@ func (player *playerState) beginReset() {
 		core.MaxY + 1,
 		float32(player.anchor.Z)*core.SectionSize + 0.5,
 	}}
+	player.peakY = player.state.Position.Y()
 	player.input = physics.Input{}
 	player.miningHeld = false
 	player.mining = playerMiningState{}

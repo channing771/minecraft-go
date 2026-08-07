@@ -9,9 +9,9 @@
 
 ## 2. 摔落伤害
 
-- [ ] 2.1 在 `internal/sim` 先写失败测试覆盖伤害曲线边界：3 格无伤、4 格扣 1、23 格从满血致死（伤害恰为 20）、跳跃无伤、落地后继续停留不重复扣血、传送与重生重置峰值。测试用现有 `readyFlatPlayer` 系列 helper 构造，直接设置玩家位置与速度来制造下落。
-- [ ] 2.2 在 `internal/sim` 的玩家状态增加不持久化的瞬态字段记录离地后的峰值 Y；在既有物理推进之后、按"上一 tick 不在地面且这一 tick 在地面"的边沿结算一次伤害，公式为 `floor(峰值Y − 落地Y) − 3`，负值取 0。落地、传送、重生、维度 reset 都把峰值重置为当前 Y。不新增分配。
-- [ ] 2.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 实现权威摔落伤害`，然后自动进入第 3 组。
+- [x] 2.1 在 `internal/sim` 先写失败测试覆盖伤害曲线边界：3 格无伤、4 格扣 1、23 格从满血致死（伤害恰为 20）、跳跃无伤、落地后继续停留不重复扣血、传送与重生重置峰值。测试用现有 `readyFlatPlayer` 系列 helper 构造，直接设置玩家位置与速度来制造下落。
+- [x] 2.2 在 `internal/sim` 的玩家状态增加不持久化的瞬态字段记录离地后的峰值 Y；在既有物理推进之后、按"上一 tick 不在地面且这一 tick 在地面"的边沿结算一次伤害，公式为 `floor(峰值Y − 落地Y) − 3`，负值取 0。落地、传送、重生、维度 reset 都把峰值重置为当前 Y。不新增分配。
+- [x] 2.3 执行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/sim -race -count=1 && go test ./internal/archcheck -count=1'`，确认 `gofmt` 与 `git diff --check` 通过；提交 `feat: 实现权威摔落伤害`，然后自动进入第 3 组。
 
 ## 3. 自动回复
 
