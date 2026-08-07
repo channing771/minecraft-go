@@ -130,7 +130,8 @@ var captureScenes = []captureScene{
 // 这里延续同一约定，不额外引入 runtime.Caller 之类的自定位逻辑。
 const captureGoldenDir = "cmd/mcgo/testdata/golden"
 
-// captureThresholds 的数值来自同机重复抓帧 12 次的实测漂移分布，
+// captureThresholds 的数值来自同机重复抓帧 14 次的实测漂移分布
+// （前 12 次用于收集数据并定稿阈值，第 13、14 次在阈值定稿后确认仍全绿），
 // 具体测量结果见 docs/superpowers/specs/2026-08-07-visual-verification-design.md §6。
 // 不要凭直觉调整——放宽阈值等于放弃门禁。
 var captureThresholds = diffThreshold{
