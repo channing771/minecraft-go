@@ -32,6 +32,9 @@ const captureDrainMax = benchmarkMessageDrainMax
 // 一个场景在 Apply 里第一次用到的文本（比如新出现的远端玩家昵称）如果
 // 立刻回读，会读到 tofu 占位符而不是真正的字形。这里只重复渲染、不再
 // drain——不会让服务端消息覆盖 Apply 设的常量——把收敛让给 worker。
+// ponytail: 32 帧是 4 倍余量（每帧搬一个字形，8 个字形需要 8 帧）。
+// 若后续昵称更长或多个名牌同时出现（参考 maxNameTagGlyphs），可能不够。
+// 升级路径：轮询 GlyphAtlas 直到收敛，需要给它加一个导出的自省方法。
 const captureGlyphSettleFrames = 32
 
 // captureScene 是一个视觉场景。三要素缺一不可：确定性的世界状态由固定种子与
@@ -111,7 +114,7 @@ var captureScenes = []captureScene{
 				// PlayerID{1} 不是合法 UUIDv4（第 6 字节高 4 位须为 4，第 8 字节
 				// 高 2 位须为 10），applySpawn 会拒绝；这里改用与仓库测试同款的
 				// 合法 UUIDv4 形状占位符。
-				PlayerID:    core.PlayerID{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1},
+				PlayerID:    core.PlayerID{6: 0x40, 8: 0x80, 15: 1},
 				DisplayName: "测试Player",
 				ServerTick:  1,
 				Position:    app.camera.Pos.Add(mgl32.Vec3{0, 0, -6}),
