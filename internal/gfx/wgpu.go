@@ -1047,12 +1047,10 @@ func (t *wgpuTexture) WriteRegion(layer, mip, x, y, width, height uint32, pixels
 	))
 }
 
-// copyBytesPerRowAlignment 是 WebGPU 对 CopyTextureToBuffer 行距的对齐要求。
-const copyBytesPerRowAlignment = 256
-
 // ReadLayer 按 WebGPU 的规矩绕一次 staging buffer，并把填充后的行距紧缩回
-// 宽 × 每像素字节。CopyTextureToBuffer 要求 BytesPerRow 按 256 对齐，因此除非
-// 行距恰好落在边界上，否则底层缓冲每行都带尾部填充，必须逐行拷出。
+// 宽 × 每像素字节。CopyTextureToBuffer 要求 BytesPerRow 按
+// wgpu.CopyBytesPerRowAlignment 对齐，因此除非行距恰好落在边界上，
+// 否则底层缓冲每行都带尾部填充，必须逐行拷出。
 func (t *wgpuTexture) ReadLayer(layer, mip uint32) []byte {
 	if layer >= t.layers {
 		panic(fmt.Errorf("gfx: layer %d 超出纹理层数 %d", layer, t.layers))
@@ -1067,8 +1065,8 @@ func (t *wgpuTexture) ReadLayer(layer, mip uint32) []byte {
 	width := mipSize(t.width, mip)
 	height := mipSize(t.height, mip)
 	tightRow := width * bytesPerPixel
-	paddedRow := (tightRow + copyBytesPerRowAlignment - 1) /
-		copyBytesPerRowAlignment * copyBytesPerRowAlignment
+	const align = wgpu.CopyBytesPerRowAlignment
+	paddedRow := (tightRow + align - 1) / align * align
 	size := uint64(paddedRow) * uint64(height)
 
 	dev := t.device

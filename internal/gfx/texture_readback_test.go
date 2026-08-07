@@ -5,6 +5,8 @@ package gfx
 import (
 	"bytes"
 	"testing"
+
+	"github.com/oliverbestmann/webgpu/wgpu"
 )
 
 // TestTextureReadLayerRoundTripsUnalignedWidth 用非 256 对齐的行距验证紧缩逻辑。
@@ -80,5 +82,34 @@ func TestTextureReadLayerRoundTripsAlignedWidth(t *testing.T) {
 
 	if got := tex.ReadLayer(0, 0); !bytes.Equal(got, want) {
 		t.Fatalf("对齐宽度回读不一致：len(got)=%d len(want)=%d", len(got), len(want))
+	}
+}
+
+// TestTextureReadLayerPanicsWithStableMessages 验证越界的 layer/mip 被拒绝、
+// 且不返回内容不确定的数据。越界检查发生在任何 GPU 调用之前，
+// 因此不需要真实 GPU 设备，也不应该 t.Skipf。
+func TestTextureReadLayerPanicsWithStableMessages(t *testing.T) {
+	tex := textureForRegionValidation(1024, 1024, 1, 1, wgpu.TextureFormatR8Unorm)
+
+	tests := []struct {
+		name string
+		call func()
+		want string
+	}{
+		{
+			name: "invalid layer",
+			call: func() { tex.ReadLayer(1, 0) },
+			want: "gfx: layer 1 超出纹理层数 1",
+		},
+		{
+			name: "invalid mip",
+			call: func() { tex.ReadLayer(0, 1) },
+			want: "gfx: mip 1 超出纹理 mip 数 1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertPanic(t, tt.want, tt.call)
+		})
 	}
 }
