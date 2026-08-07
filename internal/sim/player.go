@@ -29,6 +29,8 @@ type PlayerUpdate struct {
 	Ready             bool
 	Reset             bool
 	Mining            MiningUpdate
+	// Health 是本 tick 结束时的权威生命值，0..core.MaxHealth；只发布给玩家本人。
+	Health uint8
 	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。
 	WorldTimeTicks uint64
 }
@@ -45,6 +47,8 @@ type PlayerRestore struct {
 	SpawnDimension core.DimensionID
 	SpawnAnchor    core.ChunkPos
 	Inventory      core.Inventory
+	// Health 是存档中的权威生命值；零值代表"缺失"，注册时会回落到 core.MaxHealth。
+	Health uint8
 }
 
 type PlayerSnapshot struct {
@@ -52,6 +56,7 @@ type PlayerSnapshot struct {
 	Yaw, Pitch float32
 	Safe       *PlayerLocation
 	Inventory  core.Inventory
+	Health     uint8
 }
 
 // InventoryUpdate 是一名玩家在本 tick 的最终权威物品状态，只发送给所属会话。
@@ -75,8 +80,19 @@ type playerState struct {
 	miningHeld        bool
 	mining            playerMiningState
 	reset             bool
-	inventory         core.Inventory
-	inventoryDirty    bool
+	// spawned 记录这名玩家是否至少出生过一次。出生之前权威状态与登录时恢复的
+	// 状态完全一致；出生之后两者就可能分岔，快照因而必须可被观察。见 persistable。
+	spawned        bool
+	inventory      core.Inventory
+	inventoryDirty bool
+	// health 是服务端单写者拥有的权威生命值，0..core.MaxHealth。
+	health uint8
+	// peakY 是离地后到达过的最高高度，瞬态字段，不持久化、不进入快照/哈希。
+	// 落地、传送、重生、维度 reset 都会把它重置为当前高度。
+	peakY float32
+	// ticksSinceDamage 是自最后一次受伤以来连续未受伤的 tick 数，瞬态字段，
+	// 不持久化、不进入快照/哈希；满血时不推进。见 health_regen.go。
+	ticksSinceDamage uint32
 
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
@@ -101,6 +117,10 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		panic("sim: register session with invalid inventory")
 	}
 	candidates := spawnCandidates(restore.SpawnAnchor)
+	health := restore.Health
+	if health == 0 {
+		health = core.MaxHealth
+	}
 	player := &playerState{
 		lifecycle: PlayerPendingSpawn,
 		anchor:    restore.SpawnAnchor,
@@ -112,6 +132,7 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		yaw:             restore.Yaw,
 		pitch:           restore.Pitch,
 		inventory:       restore.Inventory,
+		health:          health,
 		inventoryDirty:  true,
 		restoreWanted:   make(map[core.ChunkKey]struct{}),
 		candidates:      candidates,
@@ -163,11 +184,23 @@ func (engine *Engine) Player(id SessionID) (PlayerUpdate, bool) {
 
 func (engine *Engine) PlayerSnapshot(id SessionID) (PlayerSnapshot, bool) {
 	session := engine.sessions[id]
-	if session == nil || session.player == nil ||
-		session.player.lifecycle != PlayerActive {
+	if session == nil || session.player == nil || !session.player.persistable() {
 		return PlayerSnapshot{}, false
 	}
 	return session.player.snapshot(session.dimension), true
+}
+
+// persistable 报告这名玩家的权威状态是否可能已经与登录时恢复的状态分岔，
+// 因而必须能被外部观察并落盘。
+//
+// 从未出生过的待重生玩家没有分岔，跳过它可以避免用尚未校验的锚点列覆盖存档里
+// 的精确位置。出生过之后就不同了：死亡结算在同一 tick 内把背包掉进世界、清空
+// 权威背包并转入待重生，这段窗口若取不到快照，落盘的会是死亡前的满背包，
+// 而掉落物已经随区块持久化躺在地上，一份物品因此变成两份。待重生玩家的
+// Current 是 beginReset 置的锚点列（y = MaxY + 1），重连时会被
+// validateRestoreCandidate 拒绝并回落到安全点/出生候选，持久化它是无害的。
+func (player *playerState) persistable() bool {
+	return player.lifecycle == PlayerActive || player.spawned
 }
 
 // SetPlayerPositionForTest 直接写入某个会话玩家的权威位置，仅供测试构造固定场景，
@@ -186,8 +219,7 @@ func (engine *Engine) UnregisterSession(id SessionID) (PlayerSnapshot, bool) {
 		return PlayerSnapshot{}, false
 	}
 	var snapshot PlayerSnapshot
-	hasSnapshot := session.player != nil &&
-		session.player.lifecycle == PlayerActive
+	hasSnapshot := session.player != nil && session.player.persistable()
 	if hasSnapshot {
 		snapshot = session.player.snapshot(session.dimension)
 	}
@@ -207,6 +239,7 @@ func (player *playerState) snapshot(
 		Yaw:       player.yaw,
 		Pitch:     player.pitch,
 		Inventory: player.inventory,
+		Health:    player.health,
 	}
 	if player.safe != nil {
 		safe := *player.safe
@@ -221,8 +254,8 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 		return [32]byte{}, false
 	}
 	player := session.player
-	// 53 字节玩家状态 + 1 字节选中栏位 + 每个物品栏位 3 字节。
-	var encoded [53 + 1 + core.InventorySlots*3]byte
+	// 54 字节玩家状态（含 1 字节生命值）+ 1 字节选中栏位 + 每个物品栏位 3 字节。
+	var encoded [54 + 1 + core.InventorySlots*3]byte
 	offset := 0
 	putUint32 := func(value uint32) {
 		binary.LittleEndian.PutUint32(encoded[offset:], value)
@@ -240,6 +273,8 @@ func (engine *Engine) PlayerHash(id SessionID) ([32]byte, bool) {
 
 	putUint32(uint32(session.dimension))
 	encoded[offset] = byte(player.lifecycle)
+	offset++
+	encoded[offset] = player.health
 	offset++
 	for _, value := range player.state.Position {
 		putFloat32(value)
@@ -292,6 +327,7 @@ func (player *playerState) update(
 		Ready:             player.lifecycle == PlayerActive,
 		Reset:             player.reset,
 		Mining:            player.mining.update(),
+		Health:            player.health,
 	}
 }
 
@@ -343,6 +379,11 @@ func (engine *Engine) advanceActivePlayers() {
 	for _, id := range sessions {
 		session := engine.sessions[id]
 		player := session.player
+		// 自动回复只在 Active 期间推进，这是有意的：待重生玩家不在世界里，
+		// 计时冻结；重生本身回满生命值，冻结与否都观察不到差别。计时放在
+		// reset 短路之前同样是有意的：reset 只是位置跳变的当 tick 标记，
+		// 玩家仍在世界里，回复不应因此停摆。
+		player.advanceHealthRegen()
 		if player.reset {
 			continue
 		}
@@ -356,14 +397,43 @@ func (engine *Engine) advanceActivePlayers() {
 			engine.subscriptionsDirty = true
 			continue
 		}
+		wasOnGround := player.state.OnGround
+		if wasOnGround {
+			player.peakY = player.state.Position.Y()
+		}
 		step := physics.Step(
 			player.state,
 			player.input,
 			dimensionCollisionSource{dimension: engine.dimensions[session.dimension]},
 		)
 		player.state = step.State
+		if player.state.OnGround {
+			if !wasOnGround {
+				player.applyFallDamage()
+			}
+			player.peakY = player.state.Position.Y()
+		} else if y := player.state.Position.Y(); y > player.peakY {
+			player.peakY = y
+		}
 		engine.updateSafeLocation(session)
 	}
+}
+
+// applyFallDamage 在"上一 tick 不在地面、这一 tick 在地面"的边沿按固定曲线结算
+// 一次摔落伤害：伤害 = floor(峰值Y − 落地Y) − 3，负值取 0。本组只负责扣血，生命值
+// 归零后的死亡/重生/掉落结算不在这里处理。
+func (player *playerState) applyFallDamage() {
+	fallHeight := float64(player.peakY - player.state.Position.Y())
+	damage := int32(math.Floor(fallHeight)) - 3
+	if damage <= 0 {
+		return
+	}
+	player.resetRegenTimer()
+	if damage >= int32(player.health) {
+		player.health = 0
+		return
+	}
+	player.health -= uint8(damage)
 }
 
 func (engine *Engine) updateSafeLocation(session *sessionState) {
@@ -465,6 +535,7 @@ func (player *playerState) beginReset() {
 		core.MaxY + 1,
 		float32(player.anchor.Z)*core.SectionSize + 0.5,
 	}}
+	player.peakY = player.state.Position.Y()
 	player.input = physics.Input{}
 	player.miningHeld = false
 	player.mining = playerMiningState{}

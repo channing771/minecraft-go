@@ -47,3 +47,14 @@ func TestPlayerV3MigrationFillsFullToolDurability(t *testing.T) {
 		t.Fatalf("已有耐久迁移后 = %d，想要 7", got)
 	}
 }
+
+func TestPlayerV4MigrationFillsFullHealth(t *testing.T) {
+	dto := playerDTO{Health: 0}
+	migrated, changed, err := migratePlayer(4, dto)
+	if err != nil || !changed {
+		t.Fatalf("migratePlayer(4) changed=%v err=%v", changed, err)
+	}
+	if migrated.Health != core.MaxHealth {
+		t.Fatalf("v4 迁移生命值 = %d，想要满血 %d", migrated.Health, core.MaxHealth)
+	}
+}

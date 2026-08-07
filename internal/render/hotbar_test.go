@@ -141,21 +141,24 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
-	// 箱子视图（27 格）比配方行与熔炉视图都大，因此固定容量的见证必须用满箱子叠加值。
-	quadWitness := layoutInventory(
+	// 箱子视图（27 格）比配方行与熔炉视图都大，因此固定容量的见证必须用满箱子叠加值，
+	// 再叠加已确认的满血生命值（两位数字）才是真正的最坏布局。
+	layoutInventory(
 		&layout, atlas, maxQuadTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720,
 	)
-	if len(quadWitness.quads) != maxHotbarQuads {
-		t.Fatalf("quad 上限见证 quads=%d，想要 %d", len(quadWitness.quads), maxHotbarQuads)
+	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720)
+	if len(layout.quads) != maxHotbarQuads {
+		t.Fatalf("quad 上限见证 quads=%d，想要 %d", len(layout.quads), maxHotbarQuads)
 	}
-	glyphWitness := layoutInventory(
+	layoutInventory(
 		&layout, atlas, fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720,
 	)
-	if len(glyphWitness.glyphs) != maxHotbarGlyphs {
-		t.Fatalf("glyph 上限见证数字=%d，想要 %d", len(glyphWitness.glyphs), maxHotbarGlyphs)
+	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720)
+	if len(layout.glyphs) != maxHotbarGlyphs {
+		t.Fatalf("glyph 上限见证数字=%d，想要 %d", len(layout.glyphs), maxHotbarGlyphs)
 	}
-	if len(glyphWitness.quads) > maxHotbarQuads {
-		t.Fatalf("glyph 上限见证 quads=%d，超过固定上限 %d", len(glyphWitness.quads), maxHotbarQuads)
+	if len(layout.quads) > maxHotbarQuads {
+		t.Fatalf("glyph 上限见证 quads=%d，超过固定上限 %d", len(layout.quads), maxHotbarQuads)
 	}
 	closed := layoutInventory(
 		&layout, atlas, fullTestInventory(), false, -1, nil, nil,
@@ -349,6 +352,57 @@ func TestMiningOverlayUsesOnlyConfirmedFixedGeometry(t *testing.T) {
 	}
 }
 
+// 杀死变异：忽略 Confirmed 标记、画出预测值，或者数字位数与生命值不匹配都会
+// 让 HUD 在收到权威状态之前显示猜测值。
+func TestAppendHealthBarDrawsOnlyConfirmedValues(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	for _, char := range hotbarDigits {
+		atlas.glyphs[char] = fakeNameTagGlyph(7)
+	}
+
+	var unconfirmed hotbarLayout
+	appendHealthBar(&unconfirmed, atlas, HealthOverlay{Confirmed: false, Value: 12}, 1280, 720)
+	if len(unconfirmed.quads) != 0 || len(unconfirmed.glyphs) != 0 {
+		t.Fatalf("未确认生命值 quads=%d glyphs=%d，想要都为 0", len(unconfirmed.quads), len(unconfirmed.glyphs))
+	}
+
+	for _, test := range []struct {
+		name       string
+		value      uint8
+		wantGlyphs int
+	}{
+		{"零血", 0, 1},
+		{"个位数血量", 1, 1},
+		{"满血两位数", core.MaxHealth, 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var layout hotbarLayout
+			appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: test.value}, 1280, 720)
+			if len(layout.quads) != 1 {
+				t.Fatalf("确认生命值 quads=%d，想要 1 个背景块", len(layout.quads))
+			}
+			background := layout.quads[0]
+			if background.X != hotbarBottomMargin || background.Y != hotbarBottomMargin ||
+				background.Width != hotbarSlotSize || background.Height != hotbarSlotSize {
+				t.Fatalf("生命值背景块=%+v", background)
+			}
+			if len(layout.glyphs) != test.wantGlyphs {
+				t.Fatalf("生命值=%d 数字位数=%d，想要 %d", test.value, len(layout.glyphs), test.wantGlyphs)
+			}
+		})
+	}
+}
+
+// 杀死变异：零尺寸 framebuffer 时仍绘制生命值会产生越界或退化几何。
+func TestAppendHealthBarRejectsDegenerateFramebuffer(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	var layout hotbarLayout
+	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: 12}, 0, 720)
+	if len(layout.quads) != 0 {
+		t.Fatalf("零宽 framebuffer quads=%d，想要 0", len(layout.quads))
+	}
+}
+
 func TestHotbarBufferRegionsDoNotOverlap(t *testing.T) {
 	if hotbarQuadOffset%256 != 0 || hotbarGlyphOffset%256 != 0 {
 		t.Fatalf("buffer offset 未按 256 字节对齐: quad=%d glyph=%d", hotbarQuadOffset, hotbarGlyphOffset)
@@ -400,10 +454,11 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 		}
 	}
 
-	// 传入满箱子叠加值，让本用例的数字数量真正达到 maxHotbarGlyphs，
-	// 从而让下面的“满 HUD 上传字节”断言有意义。
+	// 传入满箱子叠加值与已确认的满血生命值，让本用例的数字数量真正达到
+	// maxHotbarGlyphs，从而让下面的“满 HUD 上传字节”断言有意义。
 	if err := renderer.Prepare(
-		fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720, NewUploadBudget(1024),
+		fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{},
+		HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720, NewUploadBudget(1024),
 	); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -424,8 +479,8 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 		t.Fatalf("pipeline 顺序=%v want=%v", got, want)
 	}
 	// fullTestInventory 里的物品都没有耐久上限，因此没有耐久条 quad；
-	// 数字数量则因为满箱子叠加值恰好达到全局上限 maxHotbarGlyphs。
-	want := []uint32{2 + core.InventorySlots*2 + chestQuads, maxHotbarGlyphs}
+	// 数字数量则因为满箱子叠加值加已确认满血生命值恰好达到全局上限 maxHotbarGlyphs。
+	want := []uint32{2 + core.InventorySlots*2 + chestQuads + healthQuads, maxHotbarGlyphs}
 	if got := pass.drawInstances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("draw 实例数=%v want=%v", got, want)
 	}
@@ -447,7 +502,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 func TestHotbarRendererSkipsEmptyPreparedLayout(t *testing.T) {
 	renderer := NewHotbarRenderer(&nameTagTestDevice{}, gfx.FormatRGBA8Unorm, newFakeNameTagAtlas())
 	defer renderer.Release()
-	if err := renderer.Prepare(core.Inventory{}, false, -1, nil, nil, MiningOverlay{}, 0, 0, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare(core.Inventory{}, false, -1, nil, nil, MiningOverlay{}, HealthOverlay{}, 0, 0, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	encoder := &nameTagTestEncoder{}
@@ -498,13 +553,14 @@ func TestHotbarPrepareReusesLayoutAndUploadStorage(t *testing.T) {
 	}
 	inventory := fullTestInventory()
 	overlay := fullFurnaceOverlay()
+	health := HealthOverlay{Confirmed: true, Value: 7}
 	budget := NewUploadBudget(1024)
-	if err := renderer.Prepare(inventory, true, 3, overlay, nil, MiningOverlay{}, 1280, 720, budget); err != nil {
+	if err := renderer.Prepare(inventory, true, 3, overlay, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
 		t.Fatalf("warm Prepare: %v", err)
 	}
 	allocations := testing.AllocsPerRun(1000, func() {
 		source.requestCount = 0
-		if err := renderer.Prepare(inventory, true, 3, overlay, nil, MiningOverlay{}, 1280, 720, budget); err != nil {
+		if err := renderer.Prepare(inventory, true, 3, overlay, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
 			panic(err)
 		}
 	})
@@ -537,7 +593,10 @@ func TestHotbarRendererHeadlessBlendOverExistingColor(t *testing.T) {
 	defer atlas.Release()
 	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas)
 	defer renderer.Release()
-	if err := renderer.Prepare(fullTestInventory(), true, 0, nil, nil, MiningOverlay{}, 128, 128, NewUploadBudget(1<<20)); err != nil {
+	if err := renderer.Prepare(
+		fullTestInventory(), true, 0, nil, nil, MiningOverlay{},
+		HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 128, 128, NewUploadBudget(1<<20),
+	); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 

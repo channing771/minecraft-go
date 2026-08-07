@@ -234,13 +234,14 @@ func TestPrepareDropBatchWorstCaseFailureLeavesBytesUnchanged(t *testing.T) {
 	}
 }
 
-// TestPrepareDropBatchRejectsOversizedSlice 覆盖超过 1+core.ChestSlots 个堆时
-// 必须原子拒绝而不是 panic 或修改区块。
+// TestPrepareDropBatchRejectsOversizedSlice 覆盖超过固定上限的堆数必须原子拒绝，
+// 而不是 panic 或修改区块。上限同时覆盖破坏容器与 36 格死亡掉落，
+// 因此这里用比 core.InventorySlots 多一个的堆数越界。
 func TestPrepareDropBatchRejectsOversizedSlice(t *testing.T) {
 	chunk := world.NewChunk(core.ChunkPos{})
 	before := chunk.DropsHash()
 	index := furnaceChunkIndex(t, chunk.Pos, 1, 2, 3)
-	stacks := make([]core.ItemStack, 1+core.ChestSlots+1)
+	stacks := make([]core.ItemStack, core.InventorySlots+1)
 	for i := range stacks {
 		stacks[i] = core.ItemStack{Item: core.ItemStone, Count: 1}
 	}

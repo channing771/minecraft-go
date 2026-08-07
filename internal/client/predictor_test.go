@@ -60,6 +60,11 @@ func TestPredictorBeginRequiresReadyFiniteState(t *testing.T) {
 			state.Pitch = float32(math.Inf(-1))
 			return state
 		}()},
+		{name: "health", state: func() network.PlayerState {
+			state := base
+			state.Health = core.MaxHealth + 1
+			return state
+		}()},
 	}
 	for _, test := range invalid {
 		t.Run(test.name, func(t *testing.T) {
@@ -84,6 +89,7 @@ func TestPredictorBeginInitializesAndReusesHistory(t *testing.T) {
 	p.correctionRemaining = time.Second
 
 	message := readyPlayerState()
+	message.Health = 15
 	if err := p.Begin(message); err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -99,6 +105,9 @@ func TestPredictorBeginInitializesAndReusesHistory(t *testing.T) {
 	if p.dimension != message.Dimension || p.lastServerTick != message.ServerTick ||
 		p.maxSentInput != message.LastInputSequence {
 		t.Fatalf("Begin metadata dimension=%d tick=%d maxInput=%d", p.dimension, p.lastServerTick, p.maxSentInput)
+	}
+	if health, healthReady := p.Health(); !healthReady || health != message.Health {
+		t.Fatalf("Begin health=(%d,%v)，想要 (%d,true)", health, healthReady, message.Health)
 	}
 	if len(p.history) != 0 || cap(p.history) != 256 || p.accumulator != 0 ||
 		p.suspended || p.suspendSequence != 0 || p.suspendInputSent ||
@@ -543,6 +552,33 @@ func TestApplyPlayerStateReplaysOnlyUnacknowledgedInputs(t *testing.T) {
 	assertStateNear(t, got, want, 1e-6)
 }
 
+func TestApplyPlayerStateUpdatesHealthWithoutPrediction(t *testing.T) {
+	p := readyPredictor(t)
+	if health, ready := p.Health(); !ready || health != 0 {
+		t.Fatalf("readyPredictor 初始 health=(%d,%v)，想要 (0,true)", health, ready)
+	}
+
+	advanceSteps(t, p, 2, Control{MoveX: 1})
+	first := nextAuthority(p)
+	first.Health = 9
+	if _, err := p.ApplyPlayerState(first, flatClientWorld{}); err != nil {
+		t.Fatalf("ApplyPlayerState(health=9): %v", err)
+	}
+	if health, ready := p.Health(); !ready || health != 9 {
+		t.Fatalf("普通和解后 health=(%d,%v)，想要 (9,true)", health, ready)
+	}
+
+	advanceSteps(t, p, 2, Control{MoveX: 1})
+	second := nextAuthority(p)
+	second.Health = 3
+	if _, err := p.ApplyPlayerState(second, flatClientWorld{}); err != nil {
+		t.Fatalf("ApplyPlayerState(health=3): %v", err)
+	}
+	if health, ready := p.Health(); !ready || health != 3 {
+		t.Fatalf("第二次和解后 health=(%d,%v)，想要 (3,true)，生命值不得被预测/插值", health, ready)
+	}
+}
+
 func TestApplyPlayerStateIgnoresStaleAndEqualTicks(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -633,6 +669,9 @@ func TestInvalidPlayerStateIsRejectedAtomically(t *testing.T) {
 			state.Reset = true
 			state.Ready = false
 		}},
+		{name: "health above max", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Health = core.MaxHealth + 1
+		}},
 	}
 
 	for _, test := range invalid {
@@ -667,10 +706,12 @@ func TestApplyPlayerStateReadyFalseClearsPredictionAndRemembersTick(t *testing.T
 	p.suspendInputSent = true
 	p.displayOffset = mgl32.Vec3{0.2, 0, 0}
 	p.correctionRemaining = 50 * time.Millisecond
+	p.health = 12
 	state := nextAuthority(p)
 	state.ServerTick = 11
 	state.LastInputSequence = 1
 	state.Ready = false
+	state.Health = 7
 
 	result, err := p.ApplyPlayerState(state, flatClientWorld{})
 	if err != nil {
@@ -678,6 +719,9 @@ func TestApplyPlayerStateReadyFalseClearsPredictionAndRemembersTick(t *testing.T
 	}
 	if result != (ReconcileResult{}) {
 		t.Fatalf("Ready=false result=%+v", result)
+	}
+	if health, healthReady := p.Health(); healthReady || health != 0 {
+		t.Fatalf("Ready=false 未清空生命值: health=(%d,%v)，想要 (0,false)", health, healthReady)
 	}
 	got, ready := p.State()
 	if ready || got != (physics.State{}) || p.previous != (physics.State{}) ||

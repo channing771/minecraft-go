@@ -16,6 +16,8 @@ type playerDTO struct {
 	Yaw, Pitch  float32
 	Safe        *PlayerLocation
 	Inventory   core.Inventory
+	// Health 是权威生命值，0..core.MaxHealth。
+	Health uint8
 }
 
 type playerMigration func(playerDTO) (playerDTO, error)
@@ -39,6 +41,11 @@ var playerMigrations = map[uint32]playerMigration{
 		for slot, stack := range dto.Inventory.Backpack {
 			dto.Inventory.Backpack[slot] = fillFullDurability(stack)
 		}
+		return dto, nil
+	},
+	// v4 没有生命值字段，历史存档一律迁移为满血。
+	4: func(dto playerDTO) (playerDTO, error) {
+		dto.Health = core.MaxHealth
 		return dto, nil
 	},
 }

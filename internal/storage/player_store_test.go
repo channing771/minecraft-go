@@ -666,10 +666,39 @@ func assertStoredPlayerMatchesSave(t *testing.T, got StoredPlayer, want PlayerSa
 	if got.PlayerID != want.PlayerID || got.Revision != want.Revision ||
 		got.DisplayName != want.DisplayName || got.Current != want.Current ||
 		got.Yaw != want.Yaw || got.Pitch != want.Pitch ||
-		!reflect.DeepEqual(got.Safe, want.Safe) {
+		!reflect.DeepEqual(got.Safe, want.Safe) || got.Health != want.Health {
 		t.Fatalf("stored player = %+v, want save %+v", got, want)
 	}
 	if got.NeedsRewrite {
 		t.Fatal("canonical player unexpectedly needs rewrite")
+	}
+}
+
+// TestDiskStoreV4PlayerFileMigratesToFullHealth 覆盖 DiskStore 侧的 v4 迁移：
+// 磁盘上的旧格式玩家文件（没有生命值字段）读回后必须是满血并标记需要重写。
+func TestDiskStoreV4PlayerFileMigratesToFullHealth(t *testing.T) {
+	root := t.TempDir()
+	store := openPlayerDisk(t, root)
+	encoded, err := os.ReadFile(filepath.Join("testdata", "player-v4.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := fixturePlayerID()
+	if err := os.MkdirAll(filepath.Dir(store.playerPath(id)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.playerPath(id), encoded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.LoadPlayer(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Health != core.MaxHealth {
+		t.Fatalf("v4 玩家文件生命值 = %d，想要满血 %d", got.Health, core.MaxHealth)
+	}
+	if !got.NeedsRewrite {
+		t.Fatal("v4 玩家文件必须标记为需要重写")
 	}
 }

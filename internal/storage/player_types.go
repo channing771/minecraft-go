@@ -12,13 +12,15 @@ type PlayerLocation struct {
 }
 
 type StoredPlayer struct {
-	PlayerID     core.PlayerID
-	Revision     uint64
-	DisplayName  string
-	Current      PlayerLocation
-	Yaw, Pitch   float32
-	Safe         *PlayerLocation
-	Inventory    core.Inventory
+	PlayerID    core.PlayerID
+	Revision    uint64
+	DisplayName string
+	Current     PlayerLocation
+	Yaw, Pitch  float32
+	Safe        *PlayerLocation
+	Inventory   core.Inventory
+	// Health 是权威生命值，0..core.MaxHealth。
+	Health       uint8
 	NeedsRewrite bool
 }
 
@@ -30,6 +32,8 @@ type PlayerSave struct {
 	Yaw, Pitch  float32
 	Safe        *PlayerLocation
 	Inventory   core.Inventory
+	// Health 是权威生命值，0..core.MaxHealth。
+	Health uint8
 }
 
 type PlayerStore interface {
