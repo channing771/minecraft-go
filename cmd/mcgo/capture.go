@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -42,6 +43,12 @@ const captureGlyphSettleFrames = 32
 // waitUntilLoaded 保证，固定的相机位姿与其余呈现状态由 Apply 设置，
 // 抓帧时机由 WarmupFrames 固定——三者都必须是常量，任何一项随环境变化，
 // 产出的图就不可比对。
+//
+// 潜在陷阱：app.go 把 a.serverTick 传给 itemDropRenderer.Render 作掉落物动画相位，
+// 而 a.serverTick 的取值依赖 waitUntilLoaded 花了多少个权威 tick 才收敛，
+// 这本身取决于机器速度——不是本文件描述的三个常量之一。当前所有场景都不含
+// 掉落物，因此无害；但第一个引入掉落物的场景会让基线的动画相位依赖机器速度，
+// 到时需要额外想办法钉死或忽略这一相位。
 type captureScene struct {
 	Name string
 	// WarmupFrames 是 Apply 之前空跑的帧数，用来让上传预算与网格化收敛。
@@ -52,6 +59,14 @@ type captureScene struct {
 }
 
 // captureScenes 是表驱动的场景清单，新增场景即新增一行。
+//
+// 全部场景共用同一个 application，按本列表的顺序依次执行——两个场景之间不会
+// 重置任何呈现状态。因此每个 Apply 都必须显式设定自己渲染依赖的全部字段，
+// 不能依赖"没设置就是零值"，否则该场景的画面会悄悄继承前一个场景留下的状态，
+// 而这份继承关系不会出现在任何一个场景自己的代码里——重排本列表、删掉某个
+// 场景、或在两者之间插入新场景，都会静默改变后续场景的期望像素。新增场景应
+// 追加在列表末尾；若确实需要调整顺序或插入位置，须用 --update-golden 重新
+// 生成所有受影响场景的基线，并逐张人眼确认。
 var captureScenes = []captureScene{
 	{
 		Name:         "terrain-noon",
@@ -106,6 +121,13 @@ var captureScenes = []captureScene{
 			app.worldTimeTicks = 6000
 			app.camera.Yaw = 0
 			app.camera.Pitch = -0.25
+			// 本场景不关心物品栏，但前一个场景（hud-hotbar-health）会把石镐、
+			// 铁镐等物品状态留在 app.inventory 里——这些场景共用同一个
+			// application，不显式清空就会被悄悄继承。这里显式设成空物品栏，
+			// 让本场景的画面只由自己的 Apply 决定，不依赖场景表的执行顺序。
+			if err := app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{}}); err != nil {
+				return fmt.Errorf("重置物品栏: %w", err)
+			}
 			if app.remotePlayers == nil {
 				return fmt.Errorf("avatar-nametag 需要远端玩家追踪器，当前为 nil")
 			}
@@ -157,12 +179,16 @@ func runCapture(app *application, dir string, updateGolden bool) error {
 	if _, err := waitUntilLoaded(app, 5*time.Minute); err != nil {
 		return fmt.Errorf("固定场景加载: %w", err)
 	}
+	// 用 errors.Join 累积每个场景的错误并跑完全部场景，而不是遇错即停：
+	// 着色器或格式类改动通常会让多个场景同时变红，只看到第一个红的场景
+	// 会漏掉其余场景的信息，也漏跑它们各自的图像产出。
+	var errs []error
 	for _, scene := range captureScenes {
 		if err := captureOne(app, dir, scene, updateGolden); err != nil {
-			return fmt.Errorf("场景 %s: %w", scene.Name, err)
+			errs = append(errs, fmt.Errorf("场景 %s: %w", scene.Name, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func captureOne(app *application, dir string, scene captureScene, updateGolden bool) error {
@@ -187,6 +213,12 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 	}
 	pixels := app.color.ReadLayer(0, 0)
 	img := bgraToNRGBA(pixels, captureWidth, captureHeight)
+	// 无条件把场景图写进 dir——不管比对通不通过、要不要更新基线。
+	// spec 要求 dir 里必须为每个场景产出一份与场景名同名的图像文件；
+	// 之前只在比对失败或更新基线时才写，比对通过的正常路径反而拿不到图看。
+	if err := writePNG(filepath.Join(dir, scene.Name+".png"), img); err != nil {
+		return fmt.Errorf("写出场景图 %s: %w", scene.Name, err)
+	}
 	if updateGolden {
 		if err := os.MkdirAll(captureGoldenDir, 0o755); err != nil {
 			return fmt.Errorf("创建 golden 基线目录 %s: %w", captureGoldenDir, err)

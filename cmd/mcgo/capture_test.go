@@ -76,15 +76,21 @@ func TestCompareAgainstGoldenMissingGoldenErrors(t *testing.T) {
 	}
 }
 
-// TestCompareAgainstGoldenWithinThresholdPassesWithoutFiles 覆盖阈值内的通过路径：
-// 不写实拍图或差异图——那些文件只在失败时才有意义。
-func TestCompareAgainstGoldenWithinThresholdPassesWithoutFiles(t *testing.T) {
+// TestCompareAgainstGoldenWithinThresholdDoesNotWriteDiffFiles 覆盖阈值内的通过路径：
+// compareAgainstGolden 本身不写实拍图或差异图——那些文件只在失败时才有意义。
+// outDir 预先放好场景图，模拟 captureOne 在调用 compareAgainstGolden 之前
+// 已经无条件写出的 <scene>.png；本测试只断言 compareAgainstGolden 不会
+// 额外追加 -actual/-diff 文件，不再断言目录为空。
+func TestCompareAgainstGoldenWithinThresholdDoesNotWriteDiffFiles(t *testing.T) {
 	goldenDir, outDir := t.TempDir(), t.TempDir()
 	golden := solidColorImage(4, 4, 100, 100, 100)
 	if err := writePNG(filepath.Join(goldenDir, "scene.png"), golden); err != nil {
 		t.Fatal(err)
 	}
 	got := solidColorImage(4, 4, 100, 100, 100)
+	if err := writePNG(filepath.Join(outDir, "scene.png"), got); err != nil {
+		t.Fatal(err)
+	}
 	diff, err := compareAgainstGolden(goldenDir, outDir, "scene", got, captureThresholds)
 	if err != nil {
 		t.Fatalf("全等图像想要通过，实际报错: %v", err)
@@ -92,12 +98,10 @@ func TestCompareAgainstGoldenWithinThresholdPassesWithoutFiles(t *testing.T) {
 	if diff.DiffPixels != 0 {
 		t.Fatalf("diff.DiffPixels = %d，想要 0", diff.DiffPixels)
 	}
-	entries, err := os.ReadDir(outDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("通过阈值时不应写出任何文件，实际有 %v", entries)
+	for _, name := range []string{"scene-actual.png", "scene-diff.png"} {
+		if _, statErr := os.Stat(filepath.Join(outDir, name)); !os.IsNotExist(statErr) {
+			t.Fatalf("通过阈值时不应写出 %s，实际 statErr = %v", name, statErr)
+		}
 	}
 }
 
