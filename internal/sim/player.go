@@ -29,6 +29,8 @@ type PlayerUpdate struct {
 	Ready             bool
 	Reset             bool
 	Mining            MiningUpdate
+	// Health 是本 tick 结束时的权威生命值，0..core.MaxHealth；只发布给玩家本人。
+	Health uint8
 	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。
 	WorldTimeTicks uint64
 }
@@ -311,6 +313,7 @@ func (player *playerState) update(
 		Ready:             player.lifecycle == PlayerActive,
 		Reset:             player.reset,
 		Mining:            player.mining.update(),
+		Health:            player.health,
 	}
 }
 

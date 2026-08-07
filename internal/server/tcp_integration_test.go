@@ -244,6 +244,18 @@ func (h integrationHost) PlayerSnapshotFor(t *testing.T, id core.PlayerID) (sim.
 	return h.Host.world.PlayerSnapshotFor(session)
 }
 
+// SessionFor 返回某个身份当前占用的权威会话 ID，供纵向脚本直接构造权威场景。
+func (h integrationHost) SessionFor(t *testing.T, id core.PlayerID) sim.SessionID {
+	t.Helper()
+	h.Host.mu.Lock()
+	defer h.Host.mu.Unlock()
+	active := h.Host.activeByPlayer[id]
+	if active == nil || active.Session == 0 {
+		t.Fatalf("player %s has no active session", id)
+	}
+	return active.Session
+}
+
 func (h integrationHost) ChunkHash(t *testing.T, position core.ChunkPos) ([32]byte, uint64) {
 	t.Helper()
 	hash, revision, ok := h.Host.world.ChunkHash(core.Overworld, position)

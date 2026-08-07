@@ -217,7 +217,9 @@ func (server *Server) publishLocalResult(
 			MiningProgressTicks: playerUpdate.Mining.ProgressTicks,
 			MiningRequiredTicks: playerUpdate.Mining.RequiredTicks,
 			MiningHarvestable:   playerUpdate.Mining.Harvestable,
-			WorldTimeTicks:      playerUpdate.WorldTimeTicks,
+			// 生命值只随本人的权威玩家状态下发，不进入任何远端玩家消息。
+			Health:         playerUpdate.Health,
+			WorldTimeTicks: playerUpdate.WorldTimeTicks,
 		}) {
 			server.closePublicationSessionLocked(current, errSessionOutboxFull)
 		}
