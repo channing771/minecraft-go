@@ -36,6 +36,7 @@ type mainOptions struct {
 	Application   applicationOptions
 	PerfOutput    string
 	RequestedName *string
+	CaptureDir    string
 }
 
 type runDependencies struct {
@@ -54,6 +55,7 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	worldPath := flags.String("world", "worlds/default", "世界存档目录")
 	connect := flags.String("connect", "", "远程 TCP 服务器地址")
 	name := flags.String("name", "", "玩家显示名")
+	capture := flags.String("capture", "", "视觉抓帧输出目录；非空时走无头抓帧模式")
 	if err := flags.Parse(args); err != nil {
 		return mainOptions{}, err
 	}
@@ -62,6 +64,12 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	}
 	if *benchmark && *perfOutput == "" {
 		return mainOptions{}, errors.New("--benchmark 必须同时提供 --perf-output")
+	}
+	if *capture != "" && *benchmark {
+		return mainOptions{}, errors.New("--capture 不能与 --benchmark 同时使用")
+	}
+	if *capture != "" && *connect != "" {
+		return mainOptions{}, errors.New("--capture 不能与 --connect 同时使用")
 	}
 	var worldExplicit, nameExplicit, benchmarkTransportExplicit bool
 	flags.Visit(func(flag *flag.Flag) {
@@ -95,6 +103,7 @@ func parseMainOptions(args []string) (mainOptions, error) {
 			BenchmarkTransport: *benchmarkTransport,
 			WorldPath:          *worldPath,
 			Connect:            *connect,
+			CaptureDir:         *capture,
 		},
 		PerfOutput: *perfOutput,
 		RequestedName: func() *string {
@@ -103,6 +112,7 @@ func parseMainOptions(args []string) (mainOptions, error) {
 			}
 			return nil
 		}(),
+		CaptureDir: *capture,
 	}, nil
 }
 

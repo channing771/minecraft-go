@@ -33,6 +33,8 @@ type applicationOptions struct {
 	WorldPath          string
 	Connect            string
 	Identity           *network.Identity
+	// CaptureDir 非空时进入视觉抓帧模式：走无头设备，按固定场景抓帧写 PNG。
+	CaptureDir string
 }
 
 type application struct {

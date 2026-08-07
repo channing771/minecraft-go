@@ -224,4 +224,46 @@ func (window *oneFrameInteractiveWindow) Poll() {
 }
 func (*oneFrameInteractiveWindow) FramebufferSize() (int, int) { return 16, 16 }
 
+func TestParseMainOptionsCaptureDir(t *testing.T) {
+	opts, err := parseMainOptions([]string{"--capture", "/tmp/shots"})
+	if err != nil {
+		t.Fatalf("解析 --capture 失败: %v", err)
+	}
+	if opts.CaptureDir != "/tmp/shots" {
+		t.Fatalf("CaptureDir = %q，想要 %q", opts.CaptureDir, "/tmp/shots")
+	}
+	if opts.Application.CaptureDir != "/tmp/shots" {
+		t.Fatalf("Application.CaptureDir = %q，想要 %q", opts.Application.CaptureDir, "/tmp/shots")
+	}
+}
+
+func TestParseMainOptionsCaptureRejectsConflicts(t *testing.T) {
+	// --capture 与 --benchmark 都会独占无头渲染路径并各自驱动场景，
+	// 同时开启的语义无法定义，必须直接拒绝而不是让某一方静默胜出。
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"与 benchmark 互斥", []string{"--capture", "/tmp/shots", "--benchmark", "--perf-output", "/tmp/p.json"}},
+		{"与 connect 互斥", []string{"--capture", "/tmp/shots", "--connect", "127.0.0.1:25565"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseMainOptions(tc.args); err == nil {
+				t.Fatal("想要报错，实际通过")
+			}
+		})
+	}
+}
+
+func TestParseMainOptionsWithoutCaptureLeavesDirEmpty(t *testing.T) {
+	opts, err := parseMainOptions(nil)
+	if err != nil {
+		t.Fatalf("解析空参数失败: %v", err)
+	}
+	if opts.CaptureDir != "" {
+		t.Fatalf("CaptureDir = %q，想要空", opts.CaptureDir)
+	}
+}
+
 var _ = profile.Options{}
