@@ -60,13 +60,15 @@ func runChestSharedByTwoPlayersScript(
 		Sequence: 11, Container: otherRef, From: 0, To: core.ChestFirstSlot + 1,
 	})
 
-	// 两端最终必须同见完全一致的箱子内容。
+	// 两端最终必须同见完全一致的箱子内容；物品状态必须反映各自的来源格已清空。
+	// 两个信号可能落在同一 tick，分两次独立 Wait 会把先到的那条消息在另一次里丢掉，
+	// 因此在同一遍扫描里一起等。
 	final := func(state network.ChestState) bool {
 		return state.Items[0].Item == core.ItemStone && state.Items[0].Count == 5 &&
 			state.Items[1].Item == core.ItemDirt && state.Items[1].Count == 3
 	}
-	waitChestState(t, breaker, final)
-	waitChestState(t, other, final)
+	waitChestStateWithClearedSlot(t, breaker, final, 1)
+	waitChestStateWithClearedSlot(t, other, final, 0)
 
 	// 破坏者先关闭查看关系（查看容器时无法采掘），再切到石镐挖掉箱子。
 	// 三条命令来自同一条连接，传输层保证到达顺序，因此不需要在此处等待关闭生效的回执：
@@ -80,6 +82,30 @@ func runChestSharedByTwoPlayersScript(
 	// 两名查看者都必须精确收到一次关闭通知：破坏者是主动关闭后再破坏，
 	// 另一名玩家是箱子在其查看期间失效触发的被动关闭。
 	waitContainerClosed(t, other, otherRef)
+
+	// 物品状态：破坏成功后石镐耐久必须恰好 -1（consumeToolDurability 每次破坏扣一点）。
+	fullDurability, ok := core.ItemMaxDurability(core.ItemStonePickaxe)
+	if !ok {
+		t.Fatal("石镐没有最大耐久")
+	}
+	waitIntegrationState(t, breaker, func(message network.ServerMessage) bool {
+		state, ok := message.(network.InventoryState)
+		return ok && state.Inventory.Hotbar.Slots[0].Item == core.ItemStonePickaxe &&
+			state.Inventory.Hotbar.Slots[0].Durability == fullDurability-1
+	})
+
+	// 最终区块：方块变回空气，箱子槽停用、内容清零，但 Generation 保留。
+	finalChunk, _, ok := running.CloneReadyChunkForTest(key)
+	if !ok {
+		t.Fatal("破坏后区块不可用")
+	}
+	x, _, z := core.BlockPos{}.Local()
+	if got := finalChunk.BlockAt(x, 0, z); got != core.AirID {
+		t.Fatalf("破坏后方块 = %d，想要空气", got)
+	}
+	if got, want := finalChunk.Chest(0), (world.ChestSlot{Generation: 1}); got != want {
+		t.Fatalf("破坏后箱子槽 = %+v，想要 %+v", got, want)
+	}
 
 	// 旧引用命令必须被拒绝：箱子已经不存在，两名玩家都已经不再查看它。
 	sendIntegration(t, other.Endpoint, network.MoveContainerStack{
@@ -111,6 +137,40 @@ func waitChestState(
 			return state
 		}
 	}
+}
+
+// waitChestStateWithClearedSlot 在同一遍消息扫描里等待满足 accept 的箱子状态，
+// 并确认该客户端自己的完整物品状态里 hotbar slot 已清空；两个信号可能落在同一
+// tick，分成两次独立的 Recv 循环会把先到的那条消息在另一次里丢掉。
+func waitChestStateWithClearedSlot(
+	t *testing.T,
+	connected integrationClient,
+	accept func(network.ChestState) bool,
+	slot int,
+) network.ChestState {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var state network.ChestState
+	var chestSeen, slotCleared bool
+	for !chestSeen || !slotCleared {
+		message, err := connected.Endpoint.Recv(ctx)
+		if err != nil {
+			t.Fatalf("等待箱子状态与物品状态: %v", err)
+		}
+		applyIntegrationMessage(t, connected.Mirror, message)
+		switch typed := message.(type) {
+		case network.ChestState:
+			if accept(typed) {
+				state, chestSeen = typed, true
+			}
+		case network.InventoryState:
+			if typed.Inventory.Hotbar.Slots[slot] == (core.ItemStack{}) {
+				slotCleared = true
+			}
+		}
+	}
+	return state
 }
 
 // waitContainerClosed 等待某个客户端收到指定容器的关闭通知。
