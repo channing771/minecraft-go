@@ -18,6 +18,7 @@ import (
 
 	"minecraft-go/internal/assets"
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
@@ -1281,12 +1282,16 @@ func connectionTestWindowFactory(calls *int) func(int, int, string) (application
 
 func remoteConnectionOptions() applicationOptions {
 	identity := connectionTestIdentity()
-	return applicationOptions{Connect: "example.invalid:25565", Identity: &identity}
+	return applicationOptions{
+		Connect: "example.invalid:25565", Identity: &identity, Render: config.Defaults().Render,
+	}
 }
 
 func localConnectionOptions() applicationOptions {
 	identity := connectionTestIdentity()
-	return applicationOptions{Seed: 42, WorldPath: "unused", Identity: &identity}
+	return applicationOptions{
+		Seed: 42, WorldPath: "unused", Identity: &identity, Render: config.Defaults().Render,
+	}
 }
 
 func connectionTestIdentity() network.Identity {

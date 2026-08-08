@@ -18,6 +18,20 @@ import (
 	"minecraft-go/internal/profile"
 )
 
+// absentConfigArgs 返回指向本次测试临时目录下一个不存在文件的 --config 参数。
+//
+// runWithDependencies 接线后一路调用 resolveConfig -> config.DefaultPath，未加
+// 这层隔离的非 benchmark/capture 用例会读到开发者本机
+// ~/Library/Application Support/minecraft-go/config.json（若存在）并通过
+// effective.Apply() 改写进程级 physics/sim 全局可调值——这正是 benchmark 隔离
+// 规则要防的"结论取决于开发者本机"那类危害，只是下沉到了非 benchmark 路径。
+// 指向不存在的文件让 config.Load 落回 config.Defaults()（见
+// internal/config/config.go:88-91）。
+func absentConfigArgs(t *testing.T) []string {
+	t.Helper()
+	return []string{"--config", filepath.Join(t.TempDir(), "absent.json")}
+}
+
 func TestParseMainOptionsRejectsRemoteLocalConflicts(t *testing.T) {
 	for _, args := range [][]string{
 		{"--connect", "127.0.0.1:25565", "--world", "worlds/demo"},
@@ -45,7 +59,7 @@ func TestRunWithDependenciesLoadsProfileOnceForLocalAndRemote(t *testing.T) {
 		t.Run("mode", func(t *testing.T) {
 			loads := 0
 			identity := network.Identity{PlayerID: core.PlayerID{1}, DisplayName: "Chen"}
-			err := runWithDependencies(args, runDependencies{
+			err := runWithDependencies(append(append([]string{}, args...), absentConfigArgs(t)...), runDependencies{
 				loadIdentity: func(requested *string) (network.Identity, error) {
 					loads++
 					return identity, nil
@@ -86,7 +100,7 @@ func TestRunWithDependenciesBypassesProfileForBenchmark(t *testing.T) {
 func TestRunWithDependenciesPassesExplicitNameToProfile(t *testing.T) {
 	name := "Chen"
 	var got *string
-	err := runWithDependencies([]string{"--name", name}, runDependencies{
+	err := runWithDependencies(append([]string{"--name", name}, absentConfigArgs(t)...), runDependencies{
 		loadIdentity: func(requested *string) (network.Identity, error) {
 			got = requested
 			return network.Identity{}, nil

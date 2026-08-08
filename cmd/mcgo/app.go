@@ -291,6 +291,13 @@ func newApplicationWithDependencies(
 	options applicationOptions,
 	dependencies applicationDependencies,
 ) (*application, error) {
+	// options.Render 的零值是一个静默退化的配置：ViewDistance=0 会让
+	// DropOutside 在每帧把中心区块外的一切都丢弃。真实入口（cmd/mcgo/main.go）
+	// 总是先经 resolveConfig 填好这个字段，这里只防漏填 Render 的调用方
+	// （包括测试）静默跑在退化配置下而不报错。
+	if options.Render.ViewDistance == 0 {
+		options.Render = config.Defaults().Render
+	}
 	if dependencies.newGlyphAtlas == nil {
 		dependencies.newGlyphAtlas = render.NewGlyphAtlas
 	}

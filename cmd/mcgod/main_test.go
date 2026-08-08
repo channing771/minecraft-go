@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,18 @@ import (
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
 )
+
+// absentConfigArgs 返回指向本次测试临时目录下一个不存在文件的 --config 参数。
+//
+// run 接线后一路调用 resolveConfig -> config.DefaultPath，未加这层隔离会读到
+// 开发者本机 ~/Library/Application Support/minecraft-go/config.json（若存在）并
+// 通过 effective.Apply() 改写进程级 physics/sim 全局可调值——这正是 benchmark
+// 隔离规则要防的"结论取决于开发者本机"那类危害。指向不存在的文件让
+// config.Load 落回 config.Defaults()（internal/config/config.go:88-91）。
+func absentConfigArgs(t *testing.T) []string {
+	t.Helper()
+	return []string{"--config", filepath.Join(t.TempDir(), "absent.json")}
+}
 
 func TestDefaultOptions(t *testing.T) {
 	got, err := parseOptions(nil)
@@ -38,7 +51,7 @@ func TestOptionsMaxPlayers(t *testing.T) {
 func TestRunPassesMaxPlayersToHost(t *testing.T) {
 	want := errors.New("stop after config capture")
 	var got int
-	err := run(context.Background(), []string{"--max-players=3"}, dependencies{
+	err := run(context.Background(), append([]string{"--max-players=3"}, absentConfigArgs(t)...), dependencies{
 		openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
 			return storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: 42}), nil
 		},
@@ -75,7 +88,8 @@ func TestRunOpensWorldBeforeListeningAndUsesStoredSeed(t *testing.T) {
 	})
 	host := &mcgodTestHost{runErr: errors.New("stop after assembly")}
 	var logs bytes.Buffer
-	err := run(context.Background(), []string{"--listen", "127.0.0.1:25565", "--world", "worlds/./demo", "--seed", "7"}, dependencies{
+	args := append([]string{"--listen", "127.0.0.1:25565", "--world", "worlds/./demo", "--seed", "7"}, absentConfigArgs(t)...)
+	err := run(context.Background(), args, dependencies{
 		openDisk: func(_ context.Context, world string, options storage.OpenOptions) (storage.WorldStore, error) {
 			events = append(events, "open:"+world)
 			if options.Create.Seed != 7 || options.Create.SpawnDimension != core.Overworld {
@@ -111,7 +125,7 @@ func TestRunOpensWorldBeforeListeningAndUsesStoredSeed(t *testing.T) {
 func TestRunClosesWorldWhenListeningFails(t *testing.T) {
 	store := &mcgodClosingStore{WorldStore: storage.NewMemory(storage.Metadata{FormatVersion: 2})}
 	listenErr := errors.New("address already in use")
-	err := run(context.Background(), nil, dependencies{
+	err := run(context.Background(), absentConfigArgs(t), dependencies{
 		openDisk:  func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) { return store, nil },
 		listenTCP: func(string) (network.Listener, error) { return nil, listenErr },
 	})
@@ -123,9 +137,10 @@ func TestRunClosesWorldWhenListeningFails(t *testing.T) {
 func TestRunCancellationLetsHostPerformSafeShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	host := &mcgodTestHost{shutdownOnCancel: true, started: make(chan struct{})}
+	args := absentConfigArgs(t)
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, nil, dependencies{
+		done <- run(ctx, args, dependencies{
 			openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
 				return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 			},
@@ -146,7 +161,7 @@ func TestRunCancellationLetsHostPerformSafeShutdown(t *testing.T) {
 func TestRunPreservesFlushFailures(t *testing.T) {
 	for _, want := range []error{errors.New("player flush failed"), errors.New("chunk flush failed")} {
 		t.Run(want.Error(), func(t *testing.T) {
-			err := run(context.Background(), nil, dependencies{
+			err := run(context.Background(), absentConfigArgs(t), dependencies{
 				openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
 					return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 				},
@@ -171,9 +186,10 @@ func TestRunCancellationDoesNotMaskFlushFailure(t *testing.T) {
 		shutdownOnCancel: true,
 		started:          make(chan struct{}),
 	}
+	args := absentConfigArgs(t)
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, nil, dependencies{
+		done <- run(ctx, args, dependencies{
 			openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
 				return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 			},
