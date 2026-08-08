@@ -26,10 +26,14 @@ const CurrentVersion = 1
 // Render 是渲染相关的可调项。它是一个纯数据结构体，不依赖 internal/render，
 // 由 cmd/mcgo 自行读取并消费——这样 mcgod（无图形专用服务端）也能导入 config
 // 而不会传递性拖入图形依赖。
+//
+// json tag 与 Fields() 的 Name 逐字对应，保证配置文件写出的键名就是设计文档
+// 与 README 里写的小写驼峰；读取侧大小写不敏感，加 tag 之前写出的文件仍可
+// 正常读入。
 type Render struct {
-	ViewDistance     int
-	FovDegrees       float32
-	MouseSensitivity float32
+	ViewDistance     int     `json:"viewDistance"`
+	FovDegrees       float32 `json:"fovDegrees"`
+	MouseSensitivity float32 `json:"mouseSensitivity"`
 }
 
 // Config 是完整的调参配置文件内容。

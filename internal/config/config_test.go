@@ -2,9 +2,11 @@ package config_test
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -188,6 +190,82 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round-trip 不一致：%+v != %+v", got, want)
 	}
+}
+
+// TestSaveWritesDocumentedLowerCamelKeys 钉住磁盘格式与文档一致。
+//
+// 三个可调结构体与 logging.Config 原先都没有 json tag，Save 写出的是 Go 字段
+// 名（"Gravity"、"ViewDistance"、"Default"），而设计 §4.1、Fields() 与 README
+// 全用小写驼峰。加载侧大小写不敏感所以没人报错，但用户按 F5 存盘再打开文件，
+// 看到的格式与所有文档都对不上，两种大小写还会长期并存。
+func TestSaveWritesDocumentedLowerCamelKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Defaults().Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var written struct {
+		Version int                        `json:"version"`
+		Logging map[string]json.RawMessage `json:"logging"`
+		Physics map[string]json.RawMessage `json:"physics"`
+		Sim     map[string]json.RawMessage `json:"sim"`
+		Render  map[string]json.RawMessage `json:"render"`
+	}
+	if err := json.Unmarshal(body, &written); err != nil {
+		t.Fatalf("保存产物不是合法 JSON: %v", err)
+	}
+	groups := map[string]map[string]json.RawMessage{
+		"physics": written.Physics,
+		"sim":     written.Sim,
+		"render":  written.Render,
+	}
+	for _, field := range config.Fields() {
+		if _, ok := groups[field.Group][field.Name]; !ok {
+			t.Errorf("保存产物缺少文档约定的键 %s.%s，实际该组的键是 %v",
+				field.Group, field.Name, sortedKeys(groups[field.Group]))
+		}
+	}
+	for _, key := range []string{"default", "modules"} {
+		if _, ok := written.Logging[key]; !ok {
+			t.Errorf("保存产物缺少文档约定的键 logging.%s，实际该组的键是 %v",
+				key, sortedKeys(written.Logging))
+		}
+	}
+	if written.Version != config.CurrentVersion {
+		t.Errorf("保存产物 version = %d，want %d", written.Version, config.CurrentVersion)
+	}
+}
+
+// TestLoadAcceptsLegacyGoFieldNameKeys 证明加 json tag 是向后兼容的：本次修补
+// 之前 Save 写出的是 Go 字段名，那些已经落在用户磁盘上的文件必须照常读入。
+func TestLoadAcceptsLegacyGoFieldNameKeys(t *testing.T) {
+	path := writeConfig(t, `{"version":1,"Logging":{"Default":"warn"},`+
+		`"Physics":{"Gravity":24},"Render":{"ViewDistance":16}}`)
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Physics.Gravity != 24 {
+		t.Errorf("Physics.Gravity = %v，want 24", loaded.Physics.Gravity)
+	}
+	if loaded.Render.ViewDistance != 16 {
+		t.Errorf("Render.ViewDistance = %v，want 16", loaded.Render.ViewDistance)
+	}
+	if loaded.Logging.Default != slog.LevelWarn {
+		t.Errorf("Logging.Default = %v，want warn", loaded.Logging.Default)
+	}
+}
+
+func sortedKeys(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func TestSaveIsAtomic(t *testing.T) {

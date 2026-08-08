@@ -13,9 +13,13 @@ import (
 )
 
 // Config 是日志等级配置。Modules 的键是模块名，即包路径末段。
+//
+// json tag 让 Save 写出的键名与设计文档、README 一致的小写驼峰；读取侧由
+// internal/config 自行大小写不敏感地解析，因此本次加 tag 之前写出的文件仍
+// 可正常读入。
 type Config struct {
-	Default slog.Level
-	Modules map[string]slog.Level
+	Default slog.Level            `json:"default"`
+	Modules map[string]slog.Level `json:"modules"`
 }
 
 // ParseLevel 把配置文件中的等级文本解析为 slog.Level，大小写不敏感。
