@@ -36,6 +36,11 @@ type stalledWriter struct{}
 
 func (stalledWriter) Write([]byte) (int, error) { return 0, nil }
 
+var frameReadSink struct {
+	id      uint32
+	payload []byte
+}
+
 func TestFrameSplitAndCoalescedReads(t *testing.T) {
 	var wire bytes.Buffer
 	if err := WriteFrame(&wire, 3, []byte{1, 2, 3}); err != nil {
@@ -97,6 +102,47 @@ func TestFrameReadAcceptsPacketIDOnly(t *testing.T) {
 	id, payload, err := ReadFrame(bytes.NewReader([]byte{1, 7}))
 	if err != nil || id != 7 || payload == nil || len(payload) != 0 {
 		t.Fatalf("frame = id %d, payload %#v, err %v", id, payload, err)
+	}
+}
+
+func TestFrameReadOwnsSingleFrameAllocation(t *testing.T) {
+	packetOnly := []byte{1, 7}
+	var packetOnlyReader bytes.Reader
+	ownedFrameAllocs := testing.AllocsPerRun(100, func() {
+		packetOnlyReader.Reset(packetOnly)
+		id, got, err := ReadFrame(&packetOnlyReader)
+		if err != nil {
+			panic(err)
+		}
+		frameReadSink.id = id
+		frameReadSink.payload = got
+	})
+
+	payload := bytes.Repeat([]byte{0x5a}, 192<<10)
+	var wire bytes.Buffer
+	if err := WriteFrame(&wire, 128, payload); err != nil {
+		t.Fatal(err)
+	}
+	encoded := wire.Bytes()
+	var reader bytes.Reader
+	allocs := testing.AllocsPerRun(100, func() {
+		reader.Reset(encoded)
+		id, got, err := ReadFrame(&reader)
+		if err != nil {
+			panic(err)
+		}
+		frameReadSink.id = id
+		frameReadSink.payload = got
+	})
+	if allocs != ownedFrameAllocs {
+		t.Fatalf("large ReadFrame allocations = %.0f, packet-ID-only owned frame = %.0f", allocs, ownedFrameAllocs)
+	}
+	if frameReadSink.id != 128 || !bytes.Equal(frameReadSink.payload, payload) {
+		t.Fatalf("frame = id %d, payload length %d", frameReadSink.id, len(frameReadSink.payload))
+	}
+	clear(encoded)
+	if !bytes.Equal(frameReadSink.payload, payload) {
+		t.Fatal("returned payload aliases reader backing bytes")
 	}
 }
 

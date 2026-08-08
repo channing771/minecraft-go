@@ -50,7 +50,7 @@ func ReadFrame(r io.Reader) (packetID uint32, payload []byte, err error) {
 	if err != nil {
 		return 0, nil, fmt.Errorf("network: packet ID: %w", err)
 	}
-	return id, append([]byte{}, frame[used:]...), nil
+	return id, frame[used:], nil
 }
 
 func writeFull(w io.Writer, data []byte) error {
