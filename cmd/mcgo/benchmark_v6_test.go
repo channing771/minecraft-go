@@ -525,7 +525,7 @@ func TestBenchmarkServerInputDeadlineUsesScheduledTickTime(t *testing.T) {
 	scheduled := time.Now().Add(100 * time.Millisecond)
 	deadline, err := benchmarkServerInputDeadline(benchmarkServerTickSignal{
 		scheduled: scheduled,
-	})
+	}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestBenchmarkServerInputDeadlineUsesScheduledTickTime(t *testing.T) {
 func TestBenchmarkServerInputDeadlineRejectsDelayedStepStart(t *testing.T) {
 	_, err := benchmarkServerInputDeadline(benchmarkServerTickSignal{
 		scheduled: time.Now().Add(-fixedBenchmarkFrameDuration),
-	})
+	}, 0)
 	if err == nil || !strings.Contains(err.Error(), "50ms") {
 		t.Fatalf("delayed step deadline error=%v", err)
 	}

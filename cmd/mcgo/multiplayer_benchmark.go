@@ -401,13 +401,19 @@ func formatTickBoundaryOverrun(
 	)
 }
 
-func benchmarkServerInputDeadline(signal benchmarkServerTickSignal) (time.Time, error) {
+func benchmarkServerInputDeadline(
+	signal benchmarkServerTickSignal,
+	queueDepth int,
+) (time.Time, error) {
 	if signal.scheduled.IsZero() {
 		return time.Time{}, errors.New("server tick 缺少调度时间")
 	}
 	deadline := signal.scheduled.Add(fixedBenchmarkFrameDuration)
-	if !time.Now().Before(deadline) {
-		return time.Time{}, errors.New("server input boundary 已错过 50ms tick deadline")
+	now := time.Now()
+	if !now.Before(deadline) {
+		return time.Time{}, errors.New(
+			formatTickBoundaryOverrun(signal, now, queueDepth),
+		)
 	}
 	return deadline, nil
 }
@@ -443,7 +449,7 @@ func runBenchmarkServerMeasuredWindow(
 		var inputDeadline time.Time
 		if completed < benchmarkServerMeasuredTicks {
 			var err error
-			inputDeadline, err = benchmarkServerInputDeadline(signal)
+			inputDeadline, err = benchmarkServerInputDeadline(signal, len(epoch.signals))
 			if err != nil {
 				return result, fmt.Errorf("measured tick %d: %w", completed, err)
 			}
@@ -477,9 +483,10 @@ func runBenchmarkServerMeasuredWindow(
 				)
 			default:
 			}
-			if !time.Now().Before(inputDeadline) {
+			if now := time.Now(); !now.Before(inputDeadline) {
 				return result, fmt.Errorf(
-					"measured tick %d 的 input boundary 已错过 50ms deadline", completed,
+					"measured tick %d: %s", completed,
+					formatTickBoundaryOverrun(signal, now, len(epoch.signals)),
 				)
 			}
 			nextSequence := uint64(completed + 1)
@@ -502,9 +509,10 @@ func runBenchmarkServerMeasuredWindow(
 					completed, err,
 				)
 			}
-			if !time.Now().Before(inputDeadline) {
+			if now := time.Now(); !now.Before(inputDeadline) {
 				return result, fmt.Errorf(
-					"measured tick %d 的 input boundary 超过 50ms deadline", completed,
+					"measured tick %d（boundary 完成后）: %s", completed,
+					formatTickBoundaryOverrun(signal, now, len(epoch.signals)),
 				)
 			}
 		}
@@ -694,7 +702,7 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 	) error {
 		return host.RunAtInputBoundary(boundaryCtx, sequence, len(clients), action)
 	}
-	firstInputDeadline, err := benchmarkServerInputDeadline(lastWarmupSignal)
+	firstInputDeadline, err := benchmarkServerInputDeadline(lastWarmupSignal, len(epoch.signals))
 	if err != nil {
 		return client.MultiplayerSummary{}, client.PhaseSummary{}, fmt.Errorf(
 			"warm-up 后首组 input boundary: %w", err,
