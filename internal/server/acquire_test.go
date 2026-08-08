@@ -125,7 +125,7 @@ func TestAcquireCancelsForgottenPendingLoads(t *testing.T) {
 	}
 	select {
 	case <-store.started:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("load worker did not start")
 	}
 
@@ -163,7 +163,7 @@ func newAcquireServer(t *testing.T, store storage.Store, generator Generator) *S
 
 func stepUntilServer(t *testing.T, running *Server, condition func(sim.TickResult) bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		if condition(running.StepForTest()) {
 			return

@@ -97,7 +97,7 @@ func runEightPlayersSurviveDiskRestart(t *testing.T) {
 	})
 	clients = connectRestartClients(t, first.addr, identities, nil)
 	waitRestartClientsReady(t, clients)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	if err := clients[0].endpoint.Send(ctx, network.PlayerInput{Sequence: 1, Yaw: 0, Pitch: -0.2, Mining: true}); err != nil {
 		cancel()
 		t.Fatalf("break edited chunk: %v", err)
@@ -112,7 +112,7 @@ func runEightPlayersSurviveDiskRestart(t *testing.T) {
 		if index == 0 {
 			sequence = 2
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		err := connected.endpoint.Send(ctx, network.PlayerInput{
 			Sequence: sequence, MoveX: directions[index][0], MoveZ: directions[index][1], Yaw: 0, Pitch: -0.2,
 		})
@@ -127,7 +127,7 @@ func runEightPlayersSurviveDiskRestart(t *testing.T) {
 		if index == 0 {
 			sequence = 3
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		err := connected.endpoint.Send(ctx, network.PlayerInput{Sequence: sequence, Yaw: 0, Pitch: -0.2})
 		cancel()
 		if err != nil {
@@ -306,7 +306,7 @@ func connectRestartClients(t *testing.T, address string, identities []network.Id
 
 func waitRestartClientsReady(t *testing.T, clients []*multiplayerTCPClient) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	for !eightTCPClientsReady(clients) {
 		drainAllMultiplayerAvailable(t, clients)
@@ -319,7 +319,7 @@ func waitRestartClientsReady(t *testing.T, clients []*multiplayerTCPClient) {
 
 func waitRestartMirrorRevision(t *testing.T, clients []*multiplayerTCPClient, chunk core.ChunkPos, revision uint64) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	for {
 		drainAllMultiplayerAvailable(t, clients)
@@ -340,7 +340,7 @@ func waitRestartMirrorRevision(t *testing.T, clients []*multiplayerTCPClient, ch
 
 func waitRestartTick(t *testing.T, clients []*multiplayerTCPClient, tick uint64) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	for {
 		drainAllMultiplayerAvailable(t, clients)
@@ -360,7 +360,7 @@ func waitRestartTick(t *testing.T, clients []*multiplayerTCPClient, tick uint64)
 
 func waitRestartSequences(t *testing.T, clients []*multiplayerTCPClient, sequences []uint64) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	for {
 		drainAllMultiplayerAvailable(t, clients)
@@ -408,7 +408,7 @@ func waitRestartSnapshotsPersisted(
 	snapshots map[core.PlayerID]sim.PlayerSnapshot,
 ) map[core.PlayerID]storage.StoredPlayer {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	last := make(map[core.PlayerID]storage.StoredPlayer, len(identities))
 	lastErr := make(map[core.PlayerID]error, len(identities))

@@ -437,7 +437,7 @@ func TestServerRunReturnsNilOnlyAfterExternalShutdownSucceeds(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run after successful external Shutdown error=%v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not return after successful external Shutdown")
 	}
 }
@@ -452,7 +452,7 @@ func TestConcurrentShutdownRunsFinalTickAndStoreLifecycleOnce(t *testing.T) {
 	for range callers {
 		go func() { results <- shutdownWithDeadline(running, time.Second) }()
 	}
-	deadline := time.After(time.Second)
+	deadline := time.After(waitDeadline)
 	for range callers {
 		select {
 		case err := <-results:
@@ -495,7 +495,7 @@ func TestConcurrentShutdownCallerCanTimeoutWhileWaitingForSerializer(t *testing.
 	go func() { firstDone <- running.Shutdown(context.Background()) }()
 	select {
 	case <-store.saveStarted:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("first Shutdown did not reach gated save")
 	}
 
@@ -538,7 +538,7 @@ func TestShutdownWaitsForQueueCapacityWithoutReleasingSnapshots(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- shutdownWithDeadline(running, time.Second) }()
 
-	deadline := time.After(time.Second)
+	deadline := time.After(waitDeadline)
 	for range keys {
 		select {
 		case <-store.saveStarted:

@@ -88,7 +88,7 @@ func TestAuthoritativeInteractionRoundTrip(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("Server.Run 退出错误 = %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("取消后 Server.Run 未在 1 秒内退出")
 	}
 	if err := clientEndpoint.Close(); err != nil {
@@ -212,7 +212,7 @@ func TestAuthoritativeMiningMemoryLifecycle(t *testing.T) {
 	if err := clientEndpoint.Close(); err != nil {
 		t.Fatalf("关闭 Memory 客户端: %v", err)
 	}
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		running.StepForTest()
 		if _, ok := playerStateForExternalTest(running); !ok {
@@ -388,7 +388,7 @@ func sendClientMessage(
 	message network.ClientMessage,
 ) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := endpoint.Send(ctx, message); err != nil {
 		t.Fatalf("发送 %#v: %v", message, err)
@@ -415,7 +415,7 @@ func stepUntilCollect(
 	done func() bool,
 ) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for !done() {
 		result := running.StepForTest()
 		drainServerMessages(t, endpoint, mirror, collect, result.Tick)
@@ -433,7 +433,7 @@ func drainServerMessages(
 	throughTick uint64,
 ) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	for {
 		message, err := endpoint.Recv(ctx)

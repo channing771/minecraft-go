@@ -12,7 +12,7 @@ import (
 // waitMetadataSaves 等待 store 记录到至少 want 次 metadata 提交。
 func waitMetadataSaves(t *testing.T, store *persistenceTestStore, want int) []storage.Metadata {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		store.mu.Lock()
 		saves := append([]storage.Metadata(nil), store.metadataSaves...)
@@ -85,7 +85,7 @@ func TestMetadataAutosaveKeepsAtMostOneInFlightAndMergesLatest(t *testing.T) {
 	first := stepToAutosaveBoundary(t, running)
 	select {
 	case <-entered:
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("首个 metadata 保存没有开始")
 	}
 
@@ -100,7 +100,7 @@ func TestMetadataAutosaveKeepsAtMostOneInFlightAndMergesLatest(t *testing.T) {
 
 	// 完成结算发生在下一个 Step 开头，之后合并后的 pending 才会被投递。
 	close(release)
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for metadataSaveCount(store) < 2 {
 		if time.Now().After(deadline) {
 			t.Fatalf("合并后的 metadata 没有被提交，次数 = %d", metadataSaveCount(store))
@@ -136,7 +136,7 @@ func TestMetadataAutosaveFailureRetriesWithBoundedBackoff(t *testing.T) {
 	waitMetadataSaves(t, store, 1)
 
 	// 失败必须可观察，并按既有 tick 退避安排重试。
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		status := running.PersistenceStatus()
 		if status.MetadataLastError != "" {
@@ -156,7 +156,7 @@ func TestMetadataAutosaveFailureRetriesWithBoundedBackoff(t *testing.T) {
 	if len(saves) < 2 {
 		t.Fatalf("重试后 metadata 提交次数 = %d，想要至少 2", len(saves))
 	}
-	deadline = time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	for {
 		if running.PersistenceStatus().MetadataLastError == "" {
 			break
@@ -193,7 +193,7 @@ func TestMetadataAutosaveDoesNotBlockStepWhenQueueIsFull(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("save 队列满时 Step 被阻塞")
 	}
 	if !running.PersistenceStatus().MetadataPending {

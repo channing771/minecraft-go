@@ -118,7 +118,7 @@ func startDiskHost(t *testing.T, root, address string, generator Generator) inte
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := host.Shutdown(ctx); err != nil {
 			t.Errorf("cleanup Host.Shutdown: %v", err)
@@ -129,7 +129,7 @@ func startDiskHost(t *testing.T, root, address string, generator Generator) inte
 
 func dialIntegrationClient(t *testing.T, address string, identity network.Identity) integrationClient {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	stream, err := network.DialTCP(ctx, address)
 	if err != nil {
@@ -148,7 +148,7 @@ func (c integrationClient) Close() error {
 
 func waitClientReady(t *testing.T, host integrationHost, connected integrationClient) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	ready := false
 	loadedOrigin := false
@@ -293,14 +293,14 @@ func (h integrationHost) WaitPlayerReleased(t *testing.T, id core.PlayerID) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("host session lifecycle did not finish")
 	}
 }
 
 func (h integrationHost) Shutdown(t *testing.T) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := h.Host.Shutdown(ctx); err != nil {
 		t.Fatalf("Host.Shutdown: %v", err)
@@ -353,7 +353,7 @@ func waitIntegrationState(
 	condition func(network.ServerMessage) bool,
 ) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	seen := make([]string, 0, 16)
 	for {
@@ -388,7 +388,7 @@ func applyIntegrationMessage(t *testing.T, mirror *client.Mirror, message networ
 
 func sendIntegration(t *testing.T, endpoint network.ClientEndpoint, message network.ClientMessage) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := endpoint.Send(ctx, message); err != nil {
 		t.Fatalf("Send(%T): %v", message, err)
@@ -858,7 +858,7 @@ func startIntegrationHostWithStore(t *testing.T, store storage.WorldStore, gener
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := host.Shutdown(ctx); err != nil {
 			t.Errorf("cleanup Host.Shutdown: %v", err)
@@ -868,7 +868,7 @@ func startIntegrationHostWithStore(t *testing.T, store storage.WorldStore, gener
 }
 
 func loginIntegrationClient(address string, identity network.Identity) (network.ClientEndpoint, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	stream, err := network.DialTCP(ctx, address)
 	if err != nil {
@@ -887,7 +887,7 @@ func assertRemoteCode(t *testing.T, err error, state network.State, code uint8) 
 
 func waitClientReadyFor(t *testing.T, host integrationHost, connected integrationClient, id core.PlayerID) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	ready := false
 	for !ready {
@@ -1268,7 +1268,7 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	if err := endpoint.Close(); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	select {
 	case err := <-acceptDone:
@@ -1457,7 +1457,7 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	if err := endpoint.Close(); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	select {
 	case err := <-acceptDone:
@@ -1569,7 +1569,7 @@ func openParityTransport(
 				err    error
 			}{stream: stream, err: err}
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		clientStream, err = network.DialTCP(ctx, listener.Addr())
 		cancel()
 		if err != nil {
@@ -1589,7 +1589,7 @@ func openParityTransport(
 	}
 	acceptDone := make(chan error, 1)
 	go func() { acceptDone <- host.AcceptStream(context.Background(), serverStream) }()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	endpoint, err := network.LoginClient(ctx, clientStream, identity)
 	cancel()
 	if err != nil {
@@ -1607,7 +1607,7 @@ func parityStep(
 ) (sim.TickResult, []network.ServerMessage) {
 	t.Helper()
 	result := host.world.StepForTest()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	messages := make([]network.ServerMessage, 0, 16)
 	for {
@@ -1676,7 +1676,7 @@ func waitIntegrationInventory(
 	done func(core.Inventory) bool,
 ) core.Inventory {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	for {
 		message, err := connected.Endpoint.Recv(ctx)
@@ -1953,7 +1953,7 @@ func waitFurnaceState(
 	accept func(network.FurnaceState) bool,
 ) network.FurnaceState {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	for {
 		message, err := connected.Endpoint.Recv(ctx)
@@ -1975,7 +1975,7 @@ func waitIntegrationRejection(
 	reason network.RejectReason,
 ) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	for {
 		message, err := connected.Endpoint.Recv(ctx)

@@ -61,7 +61,7 @@ func BenchmarkEightPlayerInterest(b *testing.B) {
 		case <-deadline.C:
 			b.Error("receiver drains did not stop within 5s")
 		}
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer shutdownCancel()
 		if err := running.Shutdown(shutdownCtx); err != nil {
 			b.Errorf("Shutdown: %v", err)

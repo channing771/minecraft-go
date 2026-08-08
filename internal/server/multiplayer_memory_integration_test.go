@@ -319,7 +319,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 			}
 			endpoint = clientEndpoint
 		case "login-memory", "login-tcp":
-			loginCtx, loginCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			loginCtx, loginCancel := context.WithTimeout(context.Background(), waitDeadline)
 			clientStream, serverStream, closeTransport := multiplayerPacketStreams(t, loginCtx, transport)
 			transportClosers = append(transportClosers, closeTransport)
 			serverDone := make(chan error, 1)
@@ -369,7 +369,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		exits[index] = exit
 	}
 
-	warmCtx, warmCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	warmCtx, warmCancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer warmCancel()
 	for {
 		result := running.StepForTest()
@@ -417,7 +417,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 				message = *step.Place
 				pendingSequences = append(pendingSequences, fmt.Sprintf("p%d/place/%d", step.Player, step.Place.Sequence))
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 			err := clients[step.Player].endpoint.Send(ctx, message)
 			cancel()
 			if err != nil {
@@ -426,7 +426,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 			expected++
 			stepIndex++
 		}
-		barrierCtx, barrierCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		barrierCtx, barrierCancel := context.WithTimeout(context.Background(), waitDeadline)
 		for len(running.incoming) != expected && barrierCtx.Err() == nil {
 			runtime.Gosched()
 		}
@@ -440,7 +440,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		if want := measurementStartTick + tick; result.Tick != want {
 			t.Fatalf("%s measurement tick %d produced raw ServerTick=%d, want %d", transport, tick, result.Tick, want)
 		}
-		drainCtx, drainCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), waitDeadline)
 		drainMultiplayerClientsToTick(t, drainCtx, transport, clients, result.Tick)
 		drainCancel()
 		if tick == 49 {
@@ -624,7 +624,7 @@ func cleanupEightManualMultiplayer(
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close transport: %w", err))
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	if err := running.Shutdown(ctx); err != nil {
 		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("Server.Shutdown: %w", err))
@@ -739,7 +739,7 @@ func stopMultiplayerPacketAccept(
 ) error {
 	worker.cancel()
 	closeErr := listener.Close()
-	joinCtx, joinCancel := context.WithTimeout(context.Background(), time.Second)
+	joinCtx, joinCancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer joinCancel()
 	var result multiplayerPacketAcceptResult
 	select {
@@ -762,7 +762,7 @@ func stopMultiplayerPacketAccept(
 }
 
 func waitMultiplayerPacketAcceptWorker(done <-chan struct{}) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	select {
 	case <-done:

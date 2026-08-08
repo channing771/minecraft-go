@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"testing"
-	"time"
 
 	"minecraft-go/internal/network"
 )
@@ -23,7 +22,7 @@ func worldTimeByTick(connected *multiplayerTCPClient) map[uint64]uint64 {
 // TestMultiplayerTCPClientsObserveSameWorldTimePhase 证明同一权威 tick 下
 // 所有客户端观察到相同的绝对世界时间，且时间随 tick 单调推进。
 func TestMultiplayerTCPClientsObserveSameWorldTimePhase(t *testing.T) {
-	deadline, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	deadline, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 
 	host := startMultiplayerTCPHost(t)
@@ -91,7 +90,7 @@ func TestMultiplayerTCPClientsObserveSameWorldTimePhase(t *testing.T) {
 // TestReconnectContinuesWorldTimeWithoutRollback 证明重连的客户端从当前权威
 // 相位继续，而不是回到默认相位或回退已确认的时间。
 func TestReconnectContinuesWorldTimeWithoutRollback(t *testing.T) {
-	deadline, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	deadline, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 
 	host := startMultiplayerTCPHost(t)

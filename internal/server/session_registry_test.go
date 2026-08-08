@@ -216,7 +216,7 @@ func TestSessionRegistryShutdownDetachesInIDOrderAndExitsOnce(t *testing.T) {
 		exits[id] = exit
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := running.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestSessionRegistryLateFailureCannotDetachNewGeneration(t *testing.T) {
 		if detached {
 			t.Fatal("旧 generation 的迟到失败摘除了新 session")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("迟到失败路径没有调用 DetachSession")
 	}
 	if state, ok := running.PlayerStateFor(7); !ok || state.Session != 7 {
@@ -334,7 +334,7 @@ func TestSessionRegistrySlowSessionDoesNotCloseHealthySession(t *testing.T) {
 	publishRejection(1)
 	select {
 	case <-slowEndpoint.sendStarted:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("slow writer 没有阻塞")
 	}
 	if message := healthyEndpoint.nextSent(t); message.(network.CommandRejected).Sequence != 1 {
@@ -699,7 +699,7 @@ func detachAndWait(
 	select {
 	case got := <-exit:
 		return got
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("等待 session exit 超时")
 		return SessionExit{}
 	}

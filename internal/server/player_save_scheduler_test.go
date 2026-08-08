@@ -130,7 +130,7 @@ func TestPlayerSaveSchedulerSubmitAndCloseAreRaceSafe(t *testing.T) {
 	}()
 	select {
 	case <-waited:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Wait blocked with workers backpressured by full completions")
 	}
 }
@@ -214,7 +214,7 @@ func (store *concurrentPlayerSaveStore) receiveStarted(t *testing.T) storage.Pla
 	select {
 	case save := <-store.started:
 		return save
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("SavePlayer did not start")
 		return storage.PlayerSave{}
 	}
@@ -252,7 +252,7 @@ func receivePlayerSaveCompletion(
 	select {
 	case completion := <-completions:
 		return completion
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("player save completion was not emitted")
 		return playerSaveCompletion{}
 	}
@@ -264,7 +264,7 @@ func waitForPlayerSaveCompletionDepth(
 	want int,
 ) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for len(completions) != want {
 		if time.Now().After(deadline) {
 			t.Fatalf("completion depth=%d, want %d", len(completions), want)

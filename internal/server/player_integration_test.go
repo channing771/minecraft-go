@@ -74,7 +74,7 @@ func TestDelayedCloseCleanupDoesNotReenterStartedClose(t *testing.T) {
 	close(release)
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("测试 closer 未退出")
 	}
 }
@@ -252,7 +252,7 @@ func newDelayedPlayerHarness(t *testing.T, delayTicks uint64) *delayedPlayerHarn
 
 func (h *delayedPlayerHarness) waitReady() {
 	h.t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		nextTick := h.serverTick + 1
 		h.applyDueStates(nextTick)
@@ -404,7 +404,7 @@ func (h *delayedPlayerHarness) finishTick(sent int, wantInputAck uint64) {
 
 func (h *delayedPlayerHarness) waitForIncoming(want int) {
 	h.t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for len(h.running.incoming) < want {
 		if time.Now().After(deadline) {
 			h.t.Fatalf(
@@ -419,7 +419,7 @@ func (h *delayedPlayerHarness) waitForIncoming(want int) {
 
 func (h *delayedPlayerHarness) drainServerTick(throughTick uint64) {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	for {
 		message, err := h.clientEndpoint.Recv(ctx)
@@ -744,7 +744,7 @@ func (h *delayedPlayerHarness) send(message network.ClientMessage) {
 }
 
 func (h *delayedPlayerHarness) sendError(message network.ClientMessage) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	return h.clientEndpoint.Send(ctx, message)
 }

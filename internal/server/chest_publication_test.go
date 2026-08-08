@@ -28,7 +28,7 @@ func chestDrainTick(
 	ready *bool,
 ) chestMessages {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	var got chestMessages
 	for {
@@ -89,7 +89,7 @@ func stepUntilChestReady(
 ) func() (chestMessages, uint64) {
 	t.Helper()
 	ready := false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	step := func() (chestMessages, uint64) {
 		t.Helper()
 		result := running.StepForTest()
@@ -117,7 +117,7 @@ func TestOpenChestSendsStateOnlyToViewer(t *testing.T) {
 	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	var opened network.ChestState
 	for opened.Chest.Generation == 0 {
 		if time.Now().After(deadline) {
@@ -145,7 +145,7 @@ func TestCloseChestStopsServerState(t *testing.T) {
 	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待箱子状态超时")
@@ -157,7 +157,7 @@ func TestCloseChestStopsServerState(t *testing.T) {
 
 	sendClientMessage(t, clientEndpoint, network.CloseContainer{Sequence: 11})
 	// 关闭命令要先被接收并在下一个 tick 生效，随后必须彻底停止发送。
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	stopped := false
 	for !stopped {
 		if time.Now().After(deadline) {
@@ -183,7 +183,7 @@ func TestChestMoveUpdatesBothSides(t *testing.T) {
 	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	var ref core.ContainerRef
 	for ref.Generation == 0 {
 		if time.Now().After(deadline) {
@@ -197,7 +197,7 @@ func TestChestMoveUpdatesBothSides(t *testing.T) {
 	sendClientMessage(t, clientEndpoint, network.MoveContainerStack{
 		Sequence: 11, Container: ref, From: 0, To: core.ChestFirstSlot,
 	})
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待物品移入箱子超时")
@@ -250,7 +250,7 @@ func stepUntilTwoPlayerChestReady(
 ) func() (chestMessages, chestMessages, uint64) {
 	t.Helper()
 	firstReady, secondReady := false, false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	step := func() (chestMessages, chestMessages, uint64) {
 		t.Helper()
 		result := running.StepForTest()
@@ -285,7 +285,7 @@ func TestTwoViewersReceiveIdenticalChestStateAndNonViewerReceivesNone(t *testing
 	sendClientMessage(t, firstClient, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	var firstState network.ChestState
 	for firstState.Chest.Generation == 0 {
 		if time.Now().After(deadline) {
@@ -304,7 +304,7 @@ func TestTwoViewersReceiveIdenticalChestStateAndNonViewerReceivesNone(t *testing
 	sendClientMessage(t, secondClient, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	var secondState network.ChestState
 	for secondState.Chest.Generation == 0 {
 		if time.Now().After(deadline) {
@@ -328,7 +328,7 @@ func TestTwoViewersReceiveIdenticalChestStateAndNonViewerReceivesNone(t *testing
 	sendClientMessage(t, firstClient, network.MoveContainerStack{
 		Sequence: 11, Container: firstState.Chest, From: 1, To: core.ChestFirstSlot + 1,
 	})
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	updated := false
 	for !updated {
 		if time.Now().After(deadline) {

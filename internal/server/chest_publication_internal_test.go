@@ -41,7 +41,7 @@ func TestChestPublicationOutboxFullClosesOnlySlowSession(t *testing.T) {
 	publishChest()
 	select {
 	case <-slowEndpoint.sendStarted:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("slow writer 没有阻塞")
 	}
 	if message, ok := healthyEndpoint.nextSent(t).(network.ChestState); !ok || message.Chest != chestRef {

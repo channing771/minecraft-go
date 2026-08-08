@@ -77,7 +77,7 @@ func TestHotbarStateStaysWithOwningSession(t *testing.T) {
 	firstReady, secondReady := false, false
 	wantCollected := core.ItemStack{Item: core.ItemGrass, Count: 1}
 	// 挖掘产生地面掉落物，玩家需在拾取延迟后原地拾取才会更新快捷栏。
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	// 阶段 0 等待两人 Ready，阶段 1 验证玩家甲采集且玩家乙不受影响。
 	stage := 0
 	stopped := false
@@ -130,7 +130,7 @@ func shutdownHotbarServer(
 ) {
 	t.Helper()
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := running.Shutdown(ctx); err != nil {
 			t.Errorf("Server.Shutdown: %v", err)
@@ -161,7 +161,7 @@ func hotbarDrainTick(
 	ready *bool,
 ) []network.InventoryState {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	var states []network.InventoryState
 	for {
@@ -207,7 +207,7 @@ func TestFullHotbarStillBreaksBlockIntoGroundDrop(t *testing.T) {
 
 	mirror := &client.InventoryMirror{}
 	ready := false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	broken := false
 	for {
 		if time.Now().After(deadline) {
@@ -259,7 +259,7 @@ func hotbarDrainTickAllowingRejections(
 	ready *bool,
 ) ([]network.InventoryState, []network.CommandRejected) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	var states []network.InventoryState
 	var rejections []network.CommandRejected

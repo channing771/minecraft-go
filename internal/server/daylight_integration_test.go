@@ -3,7 +3,6 @@ package server_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"minecraft-go/internal/assets"
 	"minecraft-go/internal/client"
@@ -114,7 +113,7 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		config, serverEndpoint, roofTestGenerator{}, stockedTestHotbar(core.ItemStone),
 	)
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := running.Shutdown(ctx); err != nil {
 			t.Errorf("关服：%v", err)

@@ -24,7 +24,7 @@ func TestSessionOutboxPreservesFIFO(t *testing.T) {
 			t.Fatalf("enqueue %d 失败", sequence)
 		}
 	}
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		if got := endpoint.sequences(); len(got) == 3 {
 			if got[0] != 1 || got[1] != 2 || got[2] != 3 {
@@ -51,7 +51,7 @@ func TestSessionFullOutboxClosesWithoutBlocking(t *testing.T) {
 	}
 	select {
 	case <-endpoint.sendStarted:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("writer 没有进入阻塞 Send")
 	}
 	if !session.enqueue(network.CommandRejected{Sequence: 2}) {

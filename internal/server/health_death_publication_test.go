@@ -125,7 +125,7 @@ func stepUntilHealthReady(
 	endpoint network.ClientEndpoint,
 ) healthTick {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(longWaitDeadline)
 	for time.Now().Before(deadline) {
 		got := stepHealthTick(t, running, endpoint)
 		if got.state.Ready {
@@ -153,7 +153,7 @@ func drainHealthTick(
 	result sim.TickResult,
 ) healthTick {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	got := healthTick{tick: result.Tick}
 	for {
