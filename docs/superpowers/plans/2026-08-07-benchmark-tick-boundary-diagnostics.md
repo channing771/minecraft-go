@@ -292,9 +292,20 @@ Run: `git diff cmd/mcgo/multiplayer_benchmark.go`
 
 - [ ] **Step 6: 确认界限断言未被触碰**
 
+`benchmark_v6_test.go` 里有两处**直接调用** `benchmarkServerInputDeadline` 的单测，签名变更后必须同步补第二个参数，否则整包编译不过：
+
+- `TestBenchmarkServerInputDeadlineUsesScheduledTickTime`（约 526 行）
+- `TestBenchmarkServerInputDeadlineRejectsDelayedStepStart`（约 538 行）
+
+两处都传 `0`——队列深度对这两个用构造信号的单测没有意义，且它们的断言都不涉及消息体（前者断言返回的 deadline，后者断言 `strings.Contains(err.Error(), "50ms")`，新消息里"50ms tick deadline"仍然包含它）。
+
 Run: `git diff cmd/mcgo/benchmark_v6_test.go`
 
-Expected: **无输出**（本任务不该碰这个文件）。
+Expected: **只有这两处各多一个 `, 0` 实参**。
+
+**除此之外该文件不得有任何改动**——尤其是 `TestScenarioV7EightSessionServerProbeIsRealAndBounded` 里那段界限断言（`ServerOutboundBytes`、`InterestDiff.Samples`、`ticks.Frames`、`OutboxHighWater`、`PlayerJobsHighWater`、`PlayerDoneHighWater`、`PeakRSSBytes`）必须逐字不变。若 diff 里出现这些标识符，回退重做。
+
+顺带一提：`TestBenchmarkServerInputDeadlineRejectsDelayedStepStart` 的构造信号没有 `published`，因此它会真实走一遍"发布时刻缺失"分支——这是免费多出来的一层覆盖，不要因此改动它。
 
 - [ ] **Step 7: ScenarioV7 仍通过且耗时同量级**
 
@@ -327,7 +338,7 @@ git commit -m "feat: 四处 tick 边界失败改用时间分解消息"
 
 Run: `git diff --stat main...HEAD`
 
-Expected: 只有 `cmd/mcgo/multiplayer_benchmark.go`、`cmd/mcgo/multiplayer_probe_epoch.go`、`cmd/mcgo/multiplayer_benchmark_test.go`、以及 docs 与 openspec 文件。出现其他文件必须解释。
+Expected: 只有 `cmd/mcgo/multiplayer_benchmark.go`、`cmd/mcgo/multiplayer_probe_epoch.go`、`cmd/mcgo/multiplayer_benchmark_test.go`、`cmd/mcgo/benchmark_v6_test.go`（仅两处 `, 0` 实参，见 Task 2 Step 6）、以及 docs 与 openspec 文件。出现其他文件必须解释。
 
 - [ ] **Step 3: 收尾门禁**
 

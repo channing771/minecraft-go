@@ -21,13 +21,13 @@
 - [ ] 2.3 两处内联检查（约 446、471 行）同样改用该函数；第二处在消息里标注"boundary 完成后"，以便日志区分是哪一段超的。
 - [ ] 2.4 验证：`go build ./cmd/mcgo` 与 `go test ./cmd/mcgo -count=1` 为 `ok`。
 - [ ] 2.5 **确认判定逻辑零改动**：逐条核对 `git diff cmd/mcgo/multiplayer_benchmark.go`，每一处 `if` 的判定表达式必须与改动前语义等价；出现任何比较运算符、阈值或分支结构的改变即回退重做。确认 `fixedBenchmarkFrameDuration` 仍是 `50 * time.Millisecond`。
-- [ ] 2.6 **确认界限断言未被触碰**：`git diff cmd/mcgo/benchmark_v6_test.go` 无输出。
+- [ ] 2.6 **确认界限断言未被触碰**：`benchmark_v6_test.go` 里两处直接调用 `benchmarkServerInputDeadline` 的单测（`...UsesScheduledTickTime`、`...RejectsDelayedStepStart`）必须补第二个参数 `0`，否则整包编译不过；该文件的 diff **只应有这两处各多一个 `, 0`**。`TestScenarioV7...` 里那段界限断言必须逐字不变，diff 里出现那些标识符即回退重做。
 - [ ] 2.7 验证：`go test ./cmd/mcgo -run "^TestScenarioV7EightSessionServerProbeIsRealAndBounded$" -count=3` 为 `ok`，单次约 11 秒。**耗时显著变长说明新增字段的填充进入了热路径**，违反"成功路径零额外开销"。实测耗时写进报告。提交 `feat: 四处 tick 边界失败改用时间分解消息`。
 
 ## 3. 收尾门禁与文档
 
 - [ ] 3.1 回填设计文档 §8：变异验证结论、ScenarioV7 三次实测耗时。任何与实测不符的表述一并订正。
-- [ ] 3.2 确认改动范围：`git diff --stat main...HEAD` 只应含 `multiplayer_benchmark.go`、`multiplayer_probe_epoch.go`、`multiplayer_benchmark_test.go` 与 docs/openspec 文件。
+- [ ] 3.2 确认改动范围：`git diff --stat main...HEAD` 只应含 `multiplayer_benchmark.go`、`multiplayer_probe_epoch.go`、`multiplayer_benchmark_test.go`、`benchmark_v6_test.go`（仅两处 `, 0` 实参）与 docs/openspec 文件。
 - [ ] 3.3 收尾门禁：`go test ./... -race`、`go test ./internal/archcheck -count=1`、`go vet ./...`、`gofmt -l .` 无输出、`git diff --check` 无输出、`openspec validate --all --strict --no-interactive`。若 `go test ./... -race` 失败先看是不是 `TestDropSurvivesShutdownAndRestart`——那是已知的既有偶发挂起，不是本变更引入的。
 - [ ] 3.4 提交 `docs: 回填 tick 边界分解的实测结果`。
 - [ ] 3.5 **明确报告本变更不会让 CI 变绿**，并说明下一步：等 CI 上 ScenarioV7 再次变红、读取分解数据、再按设计文档 §6 的判定表决定做哪一种修复。
