@@ -42,45 +42,63 @@ GitHub 的 `pull_request` 事件检查的是"PR 与**当时的** main"的合并�
 
 ## 3. P2：CI 假失败的真实构成
 
-最近 25 次 CI 运行中 6 次红。**必须看断言而不是只看测试名**——本设计的第一版就栽在这上面（见 §7）。
+> **本节已按实测断言重写（2026-08-08）。** 原版把三次 `TestScenarioV7` 失败归为"样本收集不足"，
+> 那是**从代码推出来的猜测，从未与真实失败核对过**。逐条读断言后发现无一如此。订正经过见 §7 错误四。
+
+最近 25 次 CI 运行中 6 次红，另加本变更 PR 检查的 1 次红，合计 **8 条失败**。
 
 | 运行 | 测试 | 耗时 | 实际断言 | 类别 |
 | --- | --- | --- | --- | --- |
-| 31108168593 | `TestScenarioV7...ProbeIsRealAndBounded` | — | 样本收集不足 | **采样预算** |
-| 31143784278 | 同上 | — | 同上 | **采样预算** |
-| 31144256852 | 同上 | — | 同上 | **采样预算** |
+| 31108168593 | `TestScenarioV7...ProbeIsRealAndBounded` | 7.75s | `measured tick 134: server input boundary 已错过 50ms tick deadline` | **50ms tick 边界** |
+| 31143784278 | 同上 | 2.43s | `measured tick 27: ...同上` | **50ms tick 边界** |
+| 31144256852 | 同上 | 3.26s | `measured tick 44: ...同上` | **50ms tick 边界** |
+| 31234686146 | 同上（本变更 PR 检查） | 4.82s | `measured tick 74: ...同上` | **50ms tick 边界** |
 | 31169485835 | `TestTCPPlayerAndWorldFailureMatrix...` | 0.02s | `wait ready Recv: network: transport closed` | **连接被关闭** |
 | 31197146703 | `TestHealthSevenSurvivesDiskRestart` | 1.46s | `wait ready Recv: network: transport closed` | **连接被关闭** |
 | 31197146703 | `TestHostRejectsDuplicatePlayerBeforeLoad` | 5.51s | `player did not become ready` | **期限耗尽** |
 | 31197258080 | `TestCraftingSurvivesV2DiskRestart...` | 0.12s | `wait ready Recv: network: transport closed` | **连接被关闭** |
 
-三次 ScenarioV7 行的耗时为「—」不是遗漏：CI 日志只保留了断言输出（样本收集不足），没有记录这三次单测各自的耗时，因此不可得。
-
 三类，不是一类：
 
-- **采样预算**（3 次）：`TestScenarioV7` 的收集预算跑在被调用方允许的下限上。诊断确凿，见 §4。
-- **连接被关闭**（3 次）：登录/ready 期间连接断开，耗时 0.02s–1.46s。**抬高期限对它们零作用**。根因未知，见 §6。
-- **期限耗尽**（1 次）：`waitReady` 的 5s 轮询期限在慢 runner 上不够。见 §5。
+- **50ms tick 边界**（4 条）：测量循环要求"从服务端调度该 tick 起 50ms 内走到输入边界"，在共享 runner 上错过。断言在 `cmd/mcgo/multiplayer_benchmark.go:376`/`:448`，属**产品代码**。见 §4。
+- **连接被关闭**（3 条）：登录/ready 期间连接断开，耗时 0.02s–1.46s。**抬高期限对它们零作用**。根因未知，见 §6。
+- **期限耗尽**（1 条）：`waitReady` 的 5s 轮询期限在慢 runner 上不够。见 §5。
 
-**主导形态是"连接被关闭"，不是期限不足。** 本变更只能处理另外两类。
+**本变更只解决第三类，1 条。** 前两类各自需要独立变更。
 
-## 4. 采样预算：ScenarioV7
+注意"失败条数"不等于"红灯次数"：运行 `31197146703` 一次红里含两条失败（一条在范围内、一条不在），修完仍是红。
+
+## 4. ScenarioV7 的真实失败：50ms tick 边界
+
+> **本节整节推翻重写（2026-08-08）。** 原版把这四次失败归为"采样预算不足"，据此把预算从 `10s` 放宽到 `30s`。
+> 实测四次失败的断言全是 50ms tick 边界，且全部发生在 2.43–7.75 秒——**远在原预算之内，预算从来不是绑定约束，放宽它什么都没修**。
+
+### 真实断言
 
 ```go
-// cmd/mcgo/multiplayer_benchmark.go
-func measureMultiplayerServerProbe(duration time.Duration) (...) {
-	if duration < 10*time.Second {
-		return ..., fmt.Errorf("多人服务端探针时长 %s < 10s", duration)
+// cmd/mcgo/multiplayer_benchmark.go:371
+func benchmarkServerInputDeadline(signal benchmarkServerTickSignal) (time.Time, error) {
+	deadline := signal.scheduled.Add(fixedBenchmarkFrameDuration)  // +50ms
+	if !time.Now().Before(deadline) {
+		return time.Time{}, errors.New("server input boundary 已错过 50ms tick deadline")
 	}
 ```
 
-而测试传入的正是 `10 * time.Second`——**跑在函数允许的下限上，按构造零余量**。这解释了它为什么是历史上最常红的一个。
+测量循环走 `benchmarkServerMeasuredTicks = 200` 个 tick，每个 tick 都要求：**从服务端调度该 tick 的时刻起，50 毫秒内测试侧必须走到输入边界**。四次失败分别停在第 27、44、74、134 个 tick。
 
-该 `duration` 是采样收集预算，被喂进 `context.WithTimeout(ctx, duration + warmup + 15s)`。真正的界限断言是 `OutboxHighWater > benchmarkOutboxLimit`、`InterestDiff.Samples`、`ticks.Frames`、`PeakRSSBytes` 上限——**加宽预算一个都不动**。
+在满载的共享 runner 上，测试 goroutine 被调度器晾超过 50 毫秒毫不稀奇。这**确实是期限余量问题**——只不过期限在 `multiplayer_benchmark.go` 这个**非测试文件**里，落在本变更"产品代码零改动"自设边界之外。
 
-因此把 `10s` 改成 `30s` 不是放宽阈值，符合"不得放宽既有正确性、资源上限或性能门禁"的约束。
+### 那次预算放宽为什么无效
 
-**实测订正原始诊断的措辞。** 改后 `go test ./cmd/mcgo -run "^TestScenarioV7EightSessionServerProbeIsRealAndBounded$" -count=3` 三次全部通过，单次耗时约 **11 秒**。这说明采样收集本身就需要约 11 秒，而此前的预算恰好是 10 秒——**不是"余量薄"，是结构性不够**：预算比实际所需还短，不存在能让它稳定通过的余量区间，只要机器稍慢就必然跑到下限之下。把预算改到 30s 后仍只用到约 11 秒，新余量约 19 秒（约 2.7×），且界限断言（`ServerOutboundBytes`、`InterestDiff.Samples`、`ticks.Frames`、`OutboxHighWater`、`PlayerJobsHighWater`、`PlayerDoneHighWater`、`PeakRSSBytes`）逐字未动。
+`duration` 只喂进 `context.WithTimeout(ctx, duration + warmup*50ms + 15s)`，是整个探针运行的上限。测量 200 个 50ms tick 至少需要 10 秒墙钟，而原来的运行上限已是 `10 + warmup + 15 ≈ 25s`——**本就有约 15 秒余量**。四次失败都在 7.75 秒以内触发，两种预算下结果完全一样。
+
+原版据"函数下限是 10s、测试恰好传 10s"推断出"按构造零余量"，逻辑本身成立，但它描述的是一个**从未发生过的失败模式**。
+
+### 现状
+
+`10s → 30s` 的改动已随本变更合入，**保留但不计入收益**：预算等于被调用方下限确实是不健康的构造（`spec.md` 的「采样收集预算必须留有余量」作为通用规则仍然成立），只是它不是这四次红的成因。相关代码注释已随本次订正改为如实表述。
+
+**ScenarioV7 会继续红**，直到 50ms tick 边界被单独处理。
 
 ## 5. 期限耗尽：活性等待的余量
 
@@ -213,9 +231,13 @@ grep -rn "context.DeadlineExceeded" internal/server/*_test.go
 
 ### 收益的诚实估计
 
-本节讨论的期限治理**最多**只能消除 §3 表格里 7 条失败中的 1 条（`TestHostRejectsDuplicatePlayerBeforeLoad` 那一条期限耗尽），而且连这一条都不确定——见下。注意这是失败条数不是运行次数：这条失败所在的那次运行（`31197146703`）里还有另一条独立失败（`TestHealthSevenSurvivesDiskRestart`，transport closed），即使期限耗尽这条被消除，那次运行仍会因 transport closed 保持红。它的正当性在于零成本与零风险，不在于它能解决假失败问题。
+本节讨论的期限治理**最多**只能消除 §3 表格里 **8 条失败中的 1 条**（`TestHostRejectsDuplicatePlayerBeforeLoad` 那一条期限耗尽），而且连这一条都不确定——见下。
 
-**不得把本变更描述为"修好了 CI"。** 主导形态是 §6 的连接被关闭，未解决。
+注意这是失败条数不是运行次数：这条失败所在的那次运行（`31197146703`）里还有另一条独立失败（`TestHealthSevenSurvivesDiskRestart`，transport closed），即使期限耗尽这条被消除，**那次运行仍会因 transport closed 保持红**。也就是说，本变更**不能让任何一次已观察到的红灯变绿**。
+
+它的正当性在于零成本、零风险，以及把"慢"与"挂"这个此前无法区分的信号变成决定性的（见下），不在于它能解决假失败问题。
+
+**不得把本变更描述为"修好了 CI"。** 8 条失败里 4 条是 §4 的 50ms tick 边界、3 条是 §6 的连接被关闭，两类都未解决。
 
 ### 期限耗尽的失败无法区分"慢"与"挂"
 
@@ -285,7 +307,24 @@ default:
 
 第一版据 `GOMAXPROCS=1` 的结果诊断出两个"测试顺序假设 bug"（`TestWorldPersistsAcrossRestartAndGeneratorUpgrade` 与 `TestOpenFurnaceSendsStateOnlyToViewer`），并写进了计划。实测两者在 `GOMAXPROCS=2` 下 `-count=3` 全绿（1.26s）——它们也是同一个饿死缺陷的伪装。
 
-三个错误同一根源：**采信了一个未经校验的模拟器**。
+前三个错误同一根源：**采信了一个未经校验的模拟器**。
+
+### 错误四：把自己刚立的规矩犯了一遍（2026-08-08 发现）
+
+前三个错误的修正，产出了本变更的第一条 Requirement——**「失败归因必须依据断言而非测试名」**，其 Scenario 明写「每条 MUST 附带断言原文与耗时」。
+
+而 §3 表格里三次 `TestScenarioV7` 的断言与耗时，原版填的是「样本收集不足」与「—」。
+
+**那个「样本收集不足」不是读来的，是推来的。** 我读了 `measureMultiplayerServerProbe` 的 `duration < 10s` 下限，看到测试恰好传 `10s`，构造出一个自洽的故事（"按构造零余量"），然后再没和真实失败核对过。耗时那一栏更被写成"CI 日志未记录，不可得"——**它离一条 `gh run view` 只有一步**，终审还专门追问过这一栏。
+
+实测四次失败（含本变更 PR 检查那次）的断言全是 `server input boundary 已错过 50ms tick deadline`，耗时 2.43s–7.75s。据此做的 Task 4 整个是无效功。
+
+这个错误和前三个不同源，也更难防：
+
+- 前三个是**工具没校验**——可以靠"复现手段必须先自证同构"这类规则拦住。
+- 这一个是**规则写了但自己没执行**。我对 `transport closed` 那组回头读了断言，对 ScenarioV7 这组没有，因为我"已经有一个说得通的解释了"。
+
+**一个自洽的因果故事，是停止求证的最强诱因。** 规则拦不住这个——`transport closed` 那组我遵守了规则，ScenarioV7 这组我以为不需要。真正的防线是：**凡是写进产物的断言原文，必须能指出它是从哪条日志读来的**；写不出来源的，就标成"未核实"，而不是填一个听起来合理的。
 
 ### 修正后的验证方法
 
@@ -309,14 +348,17 @@ default:
 
 | 观察到的现象 | 结论 |
 | --- | --- |
-| `transport closed` 仍然出现 | **预期之内**，不是本变更的失败——它从一开始就不在范围内（§6） |
+| `transport closed` 仍然出现 | **预期之内**，不在本变更范围内（§6） |
 | `transport closed` 消失了 | **不得归功于本变更**，它没碰任何相关代码 |
-| ScenarioV7 采样不足消失 | 本变更生效 |
-| 期限类失败消失 | 本变更生效 |
+| **ScenarioV7 报 `50ms tick deadline` 仍然出现** | **预期之内**，不在本变更范围内（§4）。已实测该形态在本变更 PR 检查中再次出现 |
+| ScenarioV7 报 `50ms tick deadline` 消失了 | **不得归功于本变更**，预算放宽对它无效 |
+| 期限类失败（`player did not become ready` 等）消失 | 本变更生效 |
 | **期限类失败仍出现，但耗时变成 30s/60s** | **确定是挂起而非余量问题**（§5），必须开独立调查，不得再抬期限 |
-| **ScenarioV7 改为在界限断言上失败**（如 `OutboxHighWater`、`PeakRSSBytes` 等超出上限，而非样本收集不足） | **真回归，与本变更放宽的采样预算无关**，必须查根因，不得归因为采样预算 |
+| ScenarioV7 改为在界限断言上失败（`OutboxHighWater`、`PeakRSSBytes` 等超上限） | **真回归**，与预算无关，必须查根因 |
 
-最后一行是本变更为后续调查提供的新能力：在此之前，一次 5.51s 的期限失败无法判断是慢还是挂；在此之后，30s 上的失败就是确凿的挂起证据。
+倒数第二行是本变更为后续调查提供的新能力：在此之前，一次 5.51s 的期限失败无法判断是慢还是挂；在此之后，30s 上的失败就是确凿的挂起证据。
+
+**统计观察的第一份数据（本变更自己的 PR 检查，运行 `31234686146`）已经到了：ScenarioV7 在 4.82s 报 `measured tick 74: server input boundary 已错过 50ms tick deadline`。** 按上表第三行，这是预期之内、不算本变更失败——但它同时证实了 §4 的订正结论：预算放宽对这一形态无效。
 
 ## 10. 范围
 
