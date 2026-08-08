@@ -124,42 +124,69 @@ func TestTruncatePanelTextTruncatesByRuneNotByte(t *testing.T) {
 	}
 }
 
+// 评审 Finding：原断言是 hasDimmedGlyph()（布尔），而顶部 7 行读数
+// 恒为 ReadOnly:true，因此哪怕 appendPanelRow 完全无视 row.ReadOnly、
+// 把参数行全画成亮色，这个布尔也照样为真。改成与"只含读数区"的基线做差，
+// 并同时钉住两个方向：可编辑行不得贡献暗色字形，只读行必须贡献恰好
+// 标签+数值的字形数。
 func TestDebugPanelReadOnlyRowUsesDimColor(t *testing.T) {
-	renderer, _ := newTestPanelRenderer(t)
-	rows := []PanelRow{{Label: "重力", Value: "32", ReadOnly: true}}
-	if err := renderer.Prepare(true, PanelReadout{}, rows, 1280, 720, nil); err != nil {
-		t.Fatalf("Prepare: %v", err)
+	const label, value = "重力", "32"
+	rowGlyphs := utf8.RuneCountInString(label) + utf8.RuneCountInString(value)
+
+	readoutOnly, _ := newTestPanelRenderer(t)
+	if err := readoutOnly.Prepare(true, PanelReadout{}, nil, 1280, 720, nil); err != nil {
+		t.Fatalf("Prepare(无参数行): %v", err)
 	}
-	if !renderer.hasDimmedGlyph() {
-		t.Fatal("只读行必须以暗色绘制，以便一眼区分不可编辑的参数")
+	baseline := readoutOnly.dimmedGlyphCount()
+
+	editable, _ := newTestPanelRenderer(t)
+	if err := editable.Prepare(true, PanelReadout{},
+		[]PanelRow{{Label: label, Value: value}}, 1280, 720, nil); err != nil {
+		t.Fatalf("Prepare(可编辑行): %v", err)
+	}
+	if got := editable.dimmedGlyphCount(); got != baseline {
+		t.Fatalf("可编辑行的暗色字形数=%d，想要 %d（只读读数区的基线）；"+
+			"可编辑参数必须以亮色绘制", got, baseline)
+	}
+
+	readOnly, _ := newTestPanelRenderer(t)
+	if err := readOnly.Prepare(true, PanelReadout{},
+		[]PanelRow{{Label: label, Value: value, ReadOnly: true}}, 1280, 720, nil); err != nil {
+		t.Fatalf("Prepare(只读行): %v", err)
+	}
+	if got := readOnly.dimmedGlyphCount(); got != baseline+rowGlyphs {
+		t.Fatalf("只读行的暗色字形数=%d，想要 %d（基线 %d + 该行 %d 个字形）；"+
+			"只读行必须以暗色绘制，以便一眼区分不可编辑的参数",
+			got, baseline+rowGlyphs, baseline, rowGlyphs)
 	}
 }
 
-// Mutation killed: 选中行如果不追加高亮矩形，选中前后的矩形数会相等。
-// 断言用 before（不含高亮）而不是 brief 草稿里的 before+1：容量常量
-// maxPanelQuads = 1 + maxPanelRows 明确按“每行至多一个选中高亮”预算，
-// 因此正确实现下选中一行只应新增恰好 1 个矩形，用 before+1 判定会让
-// 正确实现也被判失败。
+// 评审 Finding：原版比较的是"1 行且未选中"与"2 行且其中 1 行选中"，把行数
+// 与选中态搅在了一起——一个给**每一行**都追加高亮矩形的错误实现会得到 2 与 3，
+// 照样满足 after > before。改成两次都用同一条行，只翻转 Selected，并断言差值
+// 恰好为 1（容量常量 maxPanelQuads = 1 + maxPanelRows 就是按"每行至多一个选中
+// 高亮"预算的）。这样"每行都高亮"给出 2 与 2，"完全不高亮"给出 1 与 1，两种
+// 退化都会被判失败。
 //
-// before/after 分别用独立的 renderer 准备：newFakeNameTagAtlas 的
-// FlushUploads 按设计只允许调用一次（同名 name-tag 测试里 Prepare 也只
-// 调一次），同一个 renderer 上连续两次 Prepare 会触发它的“调用超过一次”
-// 保护，因此这里不复用 renderer 状态，只比较两次独立布局的矩形数。
+// 两次 Prepare 用独立的 renderer：newFakeNameTagAtlas 的 FlushUploads 按设计
+// 只允许调用一次，同一个 renderer 上连续两次 Prepare 会触发它的保护。
 func TestDebugPanelSelectedRowHasHighlight(t *testing.T) {
-	rows := []PanelRow{{Label: "重力", Value: "32"}, {Label: "跳跃", Value: "8.4", Selected: true}}
+	row := PanelRow{Label: "重力", Value: "32"}
 
 	unselected, _ := newTestPanelRenderer(t)
-	if err := unselected.Prepare(true, PanelReadout{}, rows[:1], 1280, 720, nil); err != nil {
-		t.Fatalf("Prepare: %v", err)
+	if err := unselected.Prepare(true, PanelReadout{}, []PanelRow{row}, 1280, 720, nil); err != nil {
+		t.Fatalf("Prepare(未选中): %v", err)
 	}
 	before := unselected.QuadCount()
 
+	row.Selected = true
 	selected, _ := newTestPanelRenderer(t)
-	if err := selected.Prepare(true, PanelReadout{}, rows, 1280, 720, nil); err != nil {
-		t.Fatalf("Prepare: %v", err)
+	if err := selected.Prepare(true, PanelReadout{}, []PanelRow{row}, 1280, 720, nil); err != nil {
+		t.Fatalf("Prepare(已选中): %v", err)
 	}
-	if selected.QuadCount() <= before {
-		t.Fatal("选中行必须额外产出高亮矩形")
+	if got := selected.QuadCount(); got != before+1 {
+		t.Fatalf("同一条行翻转 Selected 后矩形数=%d，想要 %d（未选中 %d + 恰好一个高亮）",
+			got, before+1, before)
 	}
 }
 

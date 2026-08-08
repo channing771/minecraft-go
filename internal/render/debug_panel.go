@@ -396,16 +396,21 @@ func (renderer *DebugPanelRenderer) QuadCount() int { return len(renderer.layout
 // GlyphCount 返回当前布局中的字形实例数；仅供测试断言布局用。
 func (renderer *DebugPanelRenderer) GlyphCount() int { return len(renderer.layout.glyphs) }
 
-// hasDimmedGlyph 报告布局中是否存在暗色字形（只读行使用的绘制颜色）；
+// dimmedGlyphCount 返回布局中暗色字形（只读行使用的绘制颜色）的数量；
 // 仅供测试断言用。
-func (renderer *DebugPanelRenderer) hasDimmedGlyph() bool {
+//
+// 返回计数而不是布尔："有没有暗色字形"这个问题永远是"有"——顶部 7 行读数
+// 恒为只读，无论参数行怎么着色都会贡献暗色字形。要判定参数行的着色，只能
+// 拿计数与只含读数区的基线做差。
+func (renderer *DebugPanelRenderer) dimmedGlyphCount() int {
 	dim := panelTextColor(true)
+	count := 0
 	for _, glyph := range renderer.layout.glyphs {
 		if glyph.Color == dim {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 // Release 只释放渲染器自有句柄；字形 atlas 与其视图由应用持有。

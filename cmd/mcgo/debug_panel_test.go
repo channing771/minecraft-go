@@ -141,6 +141,27 @@ func TestPanelRowsInsertSectionHeadersWithoutGroupPrefix(t *testing.T) {
 	}
 }
 
+// TestPanelSelectedRowTracksSelectedField 钉住"高亮行就是 Fields()[selected]
+// 那一行"。
+//
+// rows() 会插入三个段头行，因此 s.selected（Fields() 下标）与 rows 切片下标
+// 不再一一对应。既有测试只断言"存在一行被标记 Selected"或"被选中的行不是
+// 只读行"，用 rows 自身的下标去标记 Selected 的实现（高亮行随段头逐组下移）
+// 一样能通过——面板上高亮的是一个字段，方向键改的却是另一个。
+func TestPanelSelectedRowTracksSelectedField(t *testing.T) {
+	state := newPanelState(config.Defaults())
+	for _, name := range []string{"physics.gravity", "sim.spawnRadius", "render.fovDegrees"} {
+		t.Run(name, func(t *testing.T) {
+			state.selectFieldForTest(t, name)
+			want := name[strings.Index(name, ".")+1:]
+			if got := selectedRowForTest(t, state.rows(false)).Label; got != want {
+				t.Fatalf("高亮行 Label = %q，want %q（高亮必须落在 config.Fields()[selected] 上，"+
+					"不能被段头行挤偏）", got, want)
+			}
+		})
+	}
+}
+
 func TestPanelArrowAdjustsSelectedValue(t *testing.T) {
 	state := newPanelState(config.Defaults())
 	state.visible = true
