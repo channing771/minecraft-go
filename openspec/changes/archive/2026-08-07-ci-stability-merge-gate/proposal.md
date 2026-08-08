@@ -14,7 +14,7 @@
 | **连接被关闭** | 3 | `wait ready Recv: network: transport closed` | 0.02s–1.46s |
 | 期限耗尽 | 1 | `player did not become ready` | 5.51s |
 
-> **订正记录（2026-08-08）**：本表原写「采样预算不足 3 次」，那是从 `measureMultiplayerServerProbe`
+> **订正记录（2026-08-07）**：本表原写「采样预算不足 3 次」，那是从 `measureMultiplayerServerProbe`
 > 的 `duration < 10s` 下限**推出来的猜测，从未与真实失败核对**。实测四次 ScenarioV7 失败的断言全是
 > 50ms tick 边界，且全部发生在原预算之内——把预算从 `10s` 放宽到 `30s` 对它们无效。
 > 详见设计文档 §4 与 §7 错误四。
