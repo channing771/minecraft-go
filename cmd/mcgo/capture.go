@@ -256,9 +256,15 @@ var captureScenes = []captureScene{
 			if app.remotePlayers == nil {
 				return fmt.Errorf("skylight-tunnel 需要远端玩家追踪器，当前为 nil")
 			}
-			return app.remotePlayers.Apply(network.RemotePlayerDespawn{
-				PlayerID: core.PlayerID{6: 0x40, 8: 0x80, 15: 1},
-			})
+			// 用快照逐一走合法 despawn，空列表自然成功，也不会遗漏其他玩家。
+			for _, player := range app.remotePlayers.Presentations() {
+				if err := app.remotePlayers.Apply(network.RemotePlayerDespawn{
+					PlayerID: player.PlayerID,
+				}); err != nil {
+					return fmt.Errorf("清除远端玩家 %s: %w", player.PlayerID, err)
+				}
+			}
+			return nil
 		},
 	},
 }

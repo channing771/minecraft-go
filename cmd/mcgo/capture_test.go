@@ -87,13 +87,24 @@ func TestCaptureSkylightTunnelSceneFixesPresentationState(t *testing.T) {
 	if scene.Prepare == nil {
 		t.Fatal("skylight-tunnel 缺少 Prepare")
 	}
+	t.Run("空远端玩家列表", func(t *testing.T) {
+		app := &application{remotePlayers: client.NewRemotePlayers()}
+		if err := scene.Apply(app); err != nil {
+			t.Fatalf("空列表应用场景: %v", err)
+		}
+	})
+
 	remotePlayers := client.NewRemotePlayers()
-	playerID := core.PlayerID{6: 0x40, 8: 0x80, 15: 1}
-	if err := remotePlayers.Apply(network.RemotePlayerSpawn{
-		PlayerID: playerID, DisplayName: "测试Player", ServerTick: 1,
-		Position: mgl32.Vec3{0.5, 2, 0.5},
-	}); err != nil {
-		t.Fatal(err)
+	for index, playerID := range []core.PlayerID{
+		{6: 0x40, 8: 0x80, 15: 1},
+		{0: 0x12, 6: 0x40, 8: 0x80, 15: 2},
+	} {
+		if err := remotePlayers.Apply(network.RemotePlayerSpawn{
+			PlayerID: playerID, DisplayName: "测试Player", ServerTick: uint64(index + 1),
+			Position: mgl32.Vec3{0.5, 2, 0.5},
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	app := &application{remotePlayers: remotePlayers}
 	inventory := core.Inventory{}
