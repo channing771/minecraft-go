@@ -479,6 +479,26 @@ func drainServerMessages(
 	}
 }
 
+// waitForMesherStats 等待异步 Mesher 到达可观察状态，不额外推进权威 tick。
+func waitForMesherStats(
+	t *testing.T,
+	mesher *client.Mesher,
+	ready func(client.MesherStats) bool,
+) {
+	t.Helper()
+	deadline := time.Now().Add(waitDeadline)
+	for {
+		stats := mesher.Stats()
+		if ready(stats) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等待 Mesher 状态超时: %+v", stats)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func mirrorChunkSummary(mirror *client.Mirror) any {
 	chunk, ok := mirror.Chunk(core.Overworld, core.ChunkPos{})
 	if !ok {

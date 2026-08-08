@@ -86,14 +86,7 @@ func awaitMeshedSection(
 	revision uint64,
 ) client.MeshedSection {
 	t.Helper()
-	key := core.SectionKey{
-		Dimension: core.Overworld,
-		Pos: core.SectionPos{
-			X: position.Chunk().X,
-			Y: int32(position.SectionIndex()),
-			Z: position.Chunk().Z,
-		},
-	}
+	key := meshedSectionKey(position)
 	deadline := time.Now().Add(waitDeadline)
 	for {
 		mesher.Schedule(mirror, 1)
@@ -113,6 +106,36 @@ func awaitMeshedSection(
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("等待区段 %+v 的 revision %d 网格超时；stats=%+v", key, revision, mesher.Stats())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func meshedSectionKey(position core.BlockPos) core.SectionKey {
+	return core.SectionKey{
+		Dimension: core.Overworld,
+		Pos: core.SectionPos{
+			X: position.Chunk().X,
+			Y: int32(position.SectionIndex()),
+			Z: position.Chunk().Z,
+		},
+	}
+}
+
+// drainMesher 消费当前 dirty backlog，确保下一次冻结的只有指定区段任务。
+func drainMesher(t *testing.T, mesher *client.Mesher, mirror *client.Mirror) {
+	t.Helper()
+	deadline := time.Now().Add(waitDeadline)
+	for {
+		mesher.Schedule(mirror, 1)
+		mesher.Drain(mirror, 1)
+		stats := mesher.Stats()
+		if stats.DirtySections == 0 && stats.QueuedJobs == 0 &&
+			stats.InFlightJobs == 0 && stats.ReadyResults == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等待 Mesher 收敛超时: %+v", stats)
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -168,6 +191,7 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		return chunkOK && chunk.Revision == 1 && playerOK && player.Ready
 	}, mesher)
 	initial := awaitMeshedSection(t, mesher, mirror, underHole, 1)
+	drainMesher(t, mesher, mirror)
 
 	// 权威快照本身就形成屋内/露天的可观察差异。
 	if got := mirrorColumnTop(t, mirror, underHole); got != groundTop {
@@ -192,6 +216,13 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	}
 
 	// 权威放置补上屋顶洞：下方必须变暗。
+	sectionKey := meshedSectionKey(underHole)
+	releaseRevision1 := mesher.BlockForTest(sectionKey)
+	mesher.MarkDirty(sectionKey)
+	mesher.Schedule(mirror, 1)
+	waitForMesherStats(t, mesher, func(stats client.MesherStats) bool {
+		return stats.InFlightJobs == 1
+	})
 	sendClientMessage(t, clientEndpoint, network.PlaceBlock{
 		Sequence: 1, Yaw: 0, Pitch: 1.0, Slot: 0,
 	})
@@ -201,7 +232,15 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	if placed.Block != core.StoneID || placed.Position != holeBlock {
 		t.Fatalf("放置结果 = %+v，想要在 %+v 处补上屋顶", placed, holeBlock)
 	}
+	releaseRevision1()
+	waitForMesherStats(t, mesher, func(stats client.MesherStats) bool {
+		return stats.ReadyResults == 1
+	})
+	if stale := mesher.Drain(mirror, 1); len(stale) != 0 {
+		t.Fatalf("封洞后接受了 revision 1 的旧网格: %+v", stale)
+	}
 	sealed := awaitMeshedSection(t, mesher, mirror, underHole, 2)
+	drainMesher(t, mesher, mirror)
 	if got := mirrorColumnTop(t, mirror, underHole); got != roofY {
 		t.Fatalf("补洞后列顶 = %d，想要 %d", got, roofY)
 	}
@@ -220,6 +259,12 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	}
 
 	// 权威移除同一方块：下方必须恢复满天空光。
+	releaseRevision2 := mesher.BlockForTest(sectionKey)
+	mesher.MarkDirty(sectionKey)
+	mesher.Schedule(mirror, 1)
+	waitForMesherStats(t, mesher, func(stats client.MesherStats) bool {
+		return stats.InFlightJobs == 1
+	})
 	sendClientMessage(t, clientEndpoint, network.PlayerInput{
 		Sequence: 2, Yaw: 0, Pitch: 1.0, Mining: true,
 	})
@@ -228,6 +273,13 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	)
 	if broken.Block != core.AirID || broken.Position != holeBlock {
 		t.Fatalf("挖掘结果 = %+v，想要移除 %+v", broken, holeBlock)
+	}
+	releaseRevision2()
+	waitForMesherStats(t, mesher, func(stats client.MesherStats) bool {
+		return stats.ReadyResults == 1
+	})
+	if stale := mesher.Drain(mirror, 1); len(stale) != 0 {
+		t.Fatalf("重开后接受了 revision 2 的旧网格: %+v", stale)
 	}
 	reopened := awaitMeshedSection(t, mesher, mirror, underHole, 3)
 	if got := mirrorColumnTop(t, mirror, underHole); got != groundTop {
