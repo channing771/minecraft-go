@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -48,6 +49,39 @@ func (a *application) applyPanelChange() {
 	sim.SetTunables(a.panel.effective.Sim)
 	a.render = a.panel.effective.Render
 	a.camera.FovY = mgl32.DegToRad(a.render.FovDegrees)
+}
+
+// panelFrameInput 构造本帧调试面板的输入：只读读数与参数行。
+//
+// 面板关闭时直接返回零值，一行都不构造。这不是微优化：rows() 每次调用都会
+// 分配一个 20 余行的切片、三处段头字符串拼接与十余次 strconv.FormatFloat，
+// 而 Prepare 的 visible 提前返回拦不住实参求值——把 rows() 写成 Prepare 的
+// 实参，等于在 --dev 开着但面板关着时每帧都往渲染热路径上倒一堆垃圾。
+// 设计 §6.1 要求的是"关闭状态下整个 pass 跳过，不产出任何实例"，输入构造
+// 同样在这条要求之内。
+//
+// now 由调用方传入而不是在函数内取，便于测试固定时间基准。
+func (a *application) panelFrameInput(now time.Time) (render.PanelReadout, []render.PanelRow) {
+	if !a.panel.visible {
+		// 清零采样时刻，避免面板重新打开的第一帧把整段关闭时长当成帧时显示。
+		a.panelLastFrameAt = time.Time{}
+		return render.PanelReadout{}, nil
+	}
+	var frameMillis float64
+	if !a.panelLastFrameAt.IsZero() {
+		frameMillis = float64(now.Sub(a.panelLastFrameAt).Microseconds()) / 1000
+	}
+	a.panelLastFrameAt = now
+	return render.PanelReadout{
+		FrameMillis:  frameMillis,
+		Position:     a.camera.Pos,
+		Yaw:          a.camera.Yaw,
+		Pitch:        a.camera.Pitch,
+		Tick:         a.serverTick,
+		WorldTime:    a.worldTimeTicks,
+		LoadedChunks: len(a.loadedChunks),
+		Mode:         a.panelModeLabel(),
+	}, a.panel.rows(a.remote())
 }
 
 // panelKeys 是本帧的面板按键边沿状态。以结构体注入而非直接查询窗口，

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -309,6 +310,33 @@ func TestPanelClampsHitsUpperBoundExactly(t *testing.T) {
 	}
 	if state.effective.Sim.SpawnRadius != 64 {
 		t.Fatalf("SpawnRadius = %v，want 恰好命中上界 64", state.effective.Sim.SpawnRadius)
+	}
+}
+
+// TestPanelFrameInputIsAllocationFreeWhenHidden 锁住"面板关闭时渲染热路径零
+// 分配"这条性质。
+//
+// 原实现把 a.panel.rows(a.remote()) 直接写成 Prepare 的实参，Prepare 内部
+// 的 visible 提前返回拦不住实参求值：只要开了 --dev，即使面板关着，每帧也会
+// 分配一个 20 余行的切片、三处段头字符串与十余个格式化后的数值字符串。
+// internal/render 的 BenchmarkDebugPanelHidden 只测 Prepare 自身，看不到调用
+// 方这一侧的构造开销，因此这条断言必须留在 cmd/mcgo。
+func TestPanelFrameInputIsAllocationFreeWhenHidden(t *testing.T) {
+	app := &application{panel: newPanelState(config.Defaults())}
+	now := time.Now()
+	if allocations := testing.AllocsPerRun(100, func() {
+		app.panelFrameInput(now)
+	}); allocations != 0 {
+		t.Fatalf("面板关闭时每帧分配 %v 次；读数与参数行必须在 visible 判定之后才构造", allocations)
+	}
+
+	app.panel.visible = true
+	readout, rows := app.panelFrameInput(now)
+	if len(rows) != len(config.Fields())+3 {
+		t.Fatalf("面板打开时参数行 = %d，want %d（含三个段头行）", len(rows), len(config.Fields())+3)
+	}
+	if readout.Mode == "" {
+		t.Fatal("面板打开时必须填出运行模式读数")
 	}
 }
 

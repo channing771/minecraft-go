@@ -1006,25 +1006,9 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		}
 	}
 	if a.debugPanelRenderer != nil {
-		now := time.Now()
-		var frameMillis float64
-		if !a.panelLastFrameAt.IsZero() {
-			frameMillis = float64(now.Sub(a.panelLastFrameAt).Microseconds()) / 1000
-		}
-		a.panelLastFrameAt = now
+		readout, rows := a.panelFrameInput(time.Now())
 		if err := a.debugPanelRenderer.Prepare(
-			a.panel.visible,
-			render.PanelReadout{
-				FrameMillis:  frameMillis,
-				Position:     a.camera.Pos,
-				Yaw:          a.camera.Yaw,
-				Pitch:        a.camera.Pitch,
-				Tick:         a.serverTick,
-				WorldTime:    a.worldTimeTicks,
-				LoadedChunks: len(a.loadedChunks),
-				Mode:         a.panelModeLabel(),
-			},
-			a.panel.rows(a.remote()),
+			a.panel.visible, readout, rows,
 			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备调试面板: %w", err)
