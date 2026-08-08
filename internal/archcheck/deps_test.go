@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 // TestTunableConstantsAreNotExported 守住"可调参数只能经快照读取"这条不变量。
@@ -36,6 +37,11 @@ func TestTunableConstantsAreNotExported(t *testing.T) {
 		files, err := filepath.Glob(filepath.Join(root, packageDirectory, "*.go"))
 		if err != nil {
 			t.Fatalf("枚举 %s: %v", packageDirectory, err)
+		}
+		// filepath.Glob 对不存在的目录返回 (nil, nil)：包一旦改名或移动，
+		// 这条守卫就会静默变成空循环并永远通过，因此必须显式要求扫到文件。
+		if len(files) == 0 {
+			t.Fatalf("%s 下没有 Go 源文件：包被改名或移动后本守卫会静默失效", packageDirectory)
 		}
 		banned := make(map[string]bool, len(names))
 		for _, name := range names {
@@ -71,6 +77,80 @@ func TestTunableConstantsAreNotExported(t *testing.T) {
 	}
 }
 
+// TestTunableDefaultsAreOnlyReadInTunablesFile 守住"可调参数的唯一读取入口是
+// Tunables 快照"这条不变量的另一半。
+//
+// TestTunableConstantsAreNotExported 只看声明是否导出，对"某个生产读取点直接
+// 读了未导出的 defaultXxx"完全失明——评审实测过：把 internal/sim 的
+// InteractionReach、DropLifetimeTicks、SpawnRadius、RegenDelay/IntervalTicks
+// 与 internal/physics 的 StepHeight 读取点逐一改回 defaultXxx，既有测试全绿。
+// 那种状态下配置文件与调试面板改不动这些参数，而且不会有任何报错，正是设计
+// §3.4 要防的静默错位。
+//
+// 因此这里额外要求：除去常量声明本身与各包的 tunables.go（DefaultTunables 在
+// 那里组装默认快照），任何非测试文件都不得再出现 defaultXxx 标识符。
+func TestTunableDefaultsAreOnlyReadInTunablesFile(t *testing.T) {
+	root := moduleRoot(t)
+	for _, packageDirectory := range []string{
+		filepath.Join("internal", "physics"),
+		filepath.Join("internal", "sim"),
+	} {
+		files, err := filepath.Glob(filepath.Join(root, packageDirectory, "*.go"))
+		if err != nil {
+			t.Fatalf("枚举 %s: %v", packageDirectory, err)
+		}
+		if len(files) == 0 {
+			t.Fatalf("%s 下没有 Go 源文件：包被改名或移动后本守卫会静默失效", packageDirectory)
+		}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "tunables.go" {
+				continue
+			}
+			fileSet := token.NewFileSet()
+			parsed, err := parser.ParseFile(fileSet, path, nil, 0)
+			if err != nil {
+				t.Fatalf("解析 %s: %v", path, err)
+			}
+			declarationNames := make(map[*ast.Ident]bool)
+			for _, declaration := range parsed.Decls {
+				general, ok := declaration.(*ast.GenDecl)
+				if !ok {
+					continue
+				}
+				for _, specification := range general.Specs {
+					if value, ok := specification.(*ast.ValueSpec); ok {
+						for _, name := range value.Names {
+							declarationNames[name] = true
+						}
+					}
+				}
+			}
+			ast.Inspect(parsed, func(node ast.Node) bool {
+				identifier, ok := node.(*ast.Ident)
+				if !ok || declarationNames[identifier] || !isTunableDefaultName(identifier.Name) {
+					return true
+				}
+				t.Errorf("%s: 读取了编译期默认值 %s。可调参数的唯一读取入口必须是 Tunables 快照"+
+					"（physics 用 Step 入口的快照，sim 用 engine.tunables）；直接读 default* 会让"+
+					"该处永远停在编译期默认值，配置文件与调试面板改不动它，而且不会有任何报错。"+
+					"default* 只允许出现在自己的声明处与 tunables.go 的 DefaultTunables 中。",
+					fileSet.Position(identifier.Pos()), identifier.Name)
+				return true
+			})
+		}
+	}
+}
+
+// isTunableDefaultName 判断标识符是否形如 defaultXxx（default 后紧跟大写字母）。
+func isTunableDefaultName(name string) bool {
+	const prefix = "default"
+	rest, ok := strings.CutPrefix(name, prefix)
+	if !ok || rest == "" {
+		return false
+	}
+	return unicode.IsUpper(rune(rest[0]))
+}
+
 // TestOnlyCommandsImportConfig 守住"自动化验证不读用户配置"这条不变量。
 func TestOnlyCommandsImportConfig(t *testing.T) {
 	cmd := exec.Command("go", "list", "-f",
@@ -102,6 +182,10 @@ func TestOnlyTCPImplementationImportsNet(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join(root, "*.go"))
 	if err != nil {
 		t.Fatalf("枚举 network Go 文件: %v", err)
+	}
+	// 同 TestTunableConstantsAreNotExported：Glob 对不存在的目录静默返回空。
+	if len(files) == 0 {
+		t.Fatalf("%s 下没有 Go 源文件：包被改名或移动后本守卫会静默失效", root)
 	}
 	for _, path := range files {
 		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)

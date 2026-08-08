@@ -60,8 +60,36 @@ func TestSetTunablesAffectsStep(t *testing.T) {
 	}
 }
 
-// TestStepUsesOneSnapshotPerCall 证明单次固定步内参数不中途变化。
-func TestStepUsesOneSnapshotPerCall(t *testing.T) {
+// TestStepHeightTunableGatesStepUp 证明 StepHeight 确实经快照送达跨步判定。
+//
+// StepHeight 是唯一一个通过新增函数参数（resolveStepMove 的 stepHeight）而不是
+// 直接读快照字段送下去的可调项，因此也是最容易被接错的一个：把该实参写回
+// defaultStepHeight，其余物理测试无一会变红。这里直接钉住可观察行为——
+// StepHeight 归零后半格台阶必须跨不上去。
+func TestStepHeightTunableGatesStepUp(t *testing.T) {
+	t.Cleanup(func() { physics.SetTunables(physics.DefaultTunables()) })
+
+	world := floorWithObstacle(0.5, true)
+	physics.SetTunables(physics.DefaultTunables())
+	if got := physics.Step(groundedTowardObstacle(), physics.Input{MoveX: 1}, world); !got.UsedStep {
+		t.Fatalf("默认 StepHeight=0.6 时应能跨上半格: %+v", got)
+	}
+
+	flat := physics.DefaultTunables()
+	flat.StepHeight = 0
+	physics.SetTunables(flat)
+	got := physics.Step(groundedTowardObstacle(), physics.Input{MoveX: 1}, world)
+	if got.UsedStep || got.State.Position.X() > 0.7+1e-5 {
+		t.Fatalf("StepHeight=0 时不得跨上半格，快照未送达跨步判定: %+v", got)
+	}
+}
+
+// TestStepIsDeterministicForFixedTunables 证明参数固定时同样的输入逐位复现。
+//
+// 原名 TestStepUsesOneSnapshotPerCall 承诺的是"单次固定步内只取一次快照"，
+// 但函数体全程没有并发写入，证不到原子性，只证得到确定性——按它实际验证的
+// 性质改名。快照的并发安全由 TestConcurrentStepAndSetTunables 覆盖。
+func TestStepIsDeterministicForFixedTunables(t *testing.T) {
 	t.Cleanup(func() { physics.SetTunables(physics.DefaultTunables()) })
 
 	source := emptySource{}

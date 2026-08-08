@@ -186,6 +186,34 @@ func TestPlayerIntentDoesNotModifyReadyChunkWhenRayEntersUnknownChunk(t *testing
 }
 
 // stockedHotbar 返回栏位 0 装满该物品的快捷栏。
+// TestInteractionReachTunableGatesPlacement 证明 InteractionReach 确实经快照送达
+// 权威射线判定，而不是停在编译期默认值上。
+//
+// readyFlatEngineStocked 摆的石块在射线方向约 5 格外：默认交互距离 6 能够到，
+// 收到 2 格就必须变成"没有目标"。把 engine.tunables.InteractionReach 改回
+// defaultInteractionReach 时，其余 sim 测试无一会变红，只有这一条会。
+func TestInteractionReachTunableGatesPlacement(t *testing.T) {
+	t.Cleanup(func() { sim.SetTunables(sim.DefaultTunables()) })
+
+	place := func(t *testing.T, reach float32) sim.TickResult {
+		t.Helper()
+		tunables := sim.DefaultTunables()
+		tunables.InteractionReach = reach
+		sim.SetTunables(tunables)
+		engine, session, _ := readyFlatEngineStocked(t, stockedHotbar(core.ItemStone))
+		engine.Enqueue(sim.Command{
+			Session: session, Sequence: 2, Kind: sim.CommandPlaceBlock,
+			Yaw: float32(math.Pi), Slot: 0,
+		})
+		return engine.Step()
+	}
+
+	if result := place(t, sim.DefaultTunables().InteractionReach); len(result.Rejected) != 0 {
+		t.Fatalf("默认交互距离下的合法放置被拒绝: %+v", result.Rejected)
+	}
+	assertRejected(t, place(t, 2), sim.RejectNoTarget)
+}
+
 func stockedHotbar(item core.ItemID) core.Hotbar {
 	var hotbar core.Hotbar
 	hotbar.Slots[0] = core.ItemStack{Item: item, Count: core.MaxStackCount}
