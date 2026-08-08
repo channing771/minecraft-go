@@ -3,6 +3,7 @@ package render
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"minecraft-go/internal/gfx"
 )
@@ -48,31 +49,78 @@ func TestDebugPanelInvisibleProducesNoInstances(t *testing.T) {
 	}
 }
 
+// 评审 Finding 1：原断言是 GlyphCount() > maxPanelGlyphs 才失败，但样本行
+// 用的是 "参数"/"1.0" 这种 5 个字形的短文本——192 行不截断也只有
+// 57(读数区)+192*5=1017 个字形，远够不到 3408 的上限，删掉行数截断整个测试
+// 也会通过。改成标签与数值都占满 maxPanelRunesPerSide 的长文本，并断言
+// 确切的字形数（读数区字形数 + 恰好 maxPanelRows 行的字形数），而不是一个
+// 永远为真的上界，这样行数截断被删掉时数字会对不上。
 func TestDebugPanelRespectsRowCap(t *testing.T) {
-	renderer, _ := newTestPanelRenderer(t)
 	rows := make([]PanelRow, maxPanelRows*3)
 	for i := range rows {
-		rows[i] = PanelRow{Label: "参数", Value: "1.0"}
+		rows[i] = PanelRow{
+			Label: strings.Repeat("参", maxPanelRunesPerSide),
+			Value: strings.Repeat("9", maxPanelRunesPerSide),
+		}
 	}
+
+	readoutOnly, _ := newTestPanelRenderer(t)
+	if err := readoutOnly.Prepare(true, PanelReadout{}, nil, 1280, 720, nil); err != nil {
+		t.Fatalf("Prepare(无参数行): %v", err)
+	}
+	readoutGlyphs := readoutOnly.GlyphCount()
+
+	renderer, _ := newTestPanelRenderer(t)
 	if err := renderer.Prepare(true, PanelReadout{}, rows, 1280, 720, nil); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if got := renderer.QuadCount(); got > maxPanelQuads {
-		t.Fatalf("矩形数 %d 超过上限 %d", got, maxPanelQuads)
+	wantGlyphs := readoutGlyphs + maxPanelRows*maxPanelRunesPerSide*2
+	if got := renderer.GlyphCount(); got != wantGlyphs {
+		t.Fatalf("字形数=%d，想要 %d（%d 行超额输入必须被恰好截到 %d 行）",
+			got, wantGlyphs, len(rows), maxPanelRows)
 	}
-	if got := renderer.GlyphCount(); got > maxPanelGlyphs {
-		t.Fatalf("字形数 %d 超过上限 %d", got, maxPanelGlyphs)
+	if got := renderer.QuadCount(); got != 1 {
+		t.Fatalf("未选中任何行时矩形数=%d，想要 1（只有面板背景）", got)
 	}
 }
 
+// 评审 Finding 2：原断言同样是永远为真的上界——一行 400+100 rune 的输入
+// 就算完全不截断也只有 57+500=557 个字形，够不到 3408。改成断言确切数量
+// （读数区字形数 + 恰好 maxPanelRunesPerSide*2），truncatePanelText 被
+// 破坏（比如改成按字节截或者完全不截）时这个数字会对不上。
+// 另见 TestTruncatePanelTextTruncatesByRuneNotByte：直接钉住“按 rune 不按
+// 字节”这条性质，不依赖整条 Prepare 流水线。
 func TestDebugPanelTruncatesLongText(t *testing.T) {
+	readoutOnly, _ := newTestPanelRenderer(t)
+	if err := readoutOnly.Prepare(true, PanelReadout{}, nil, 1280, 720, nil); err != nil {
+		t.Fatalf("Prepare(无参数行): %v", err)
+	}
+	readoutGlyphs := readoutOnly.GlyphCount()
+
 	renderer, _ := newTestPanelRenderer(t)
 	rows := []PanelRow{{Label: strings.Repeat("超长标签", 100), Value: strings.Repeat("9", 100)}}
 	if err := renderer.Prepare(true, PanelReadout{}, rows, 1280, 720, nil); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if got := renderer.GlyphCount(); got > maxPanelGlyphs {
-		t.Fatalf("超长文本必须截断，字形数 %d 超过上限 %d", got, maxPanelGlyphs)
+	wantGlyphs := readoutGlyphs + maxPanelRunesPerSide*2
+	if got := renderer.GlyphCount(); got != wantGlyphs {
+		t.Fatalf("超长文本必须截断到标签+数值各 %d 个字形，字形数=%d，想要 %d",
+			maxPanelRunesPerSide, got, wantGlyphs)
+	}
+}
+
+// 直接钉住 truncatePanelText 的核心性质：按 rune 计数截断，不是按字节。
+// 中文标签是多字节 UTF-8，按字节截断会切出非法字符串；这条测试不经过
+// Prepare/GlyphCount 这层间接断言，直接检查截断函数本身。
+func TestTruncatePanelTextTruncatesByRuneNotByte(t *testing.T) {
+	long := strings.Repeat("超长标签", 100) // 400 个多字节 rune
+	got := truncatePanelText(long)
+	if !utf8.ValidString(got) {
+		t.Fatalf("截断结果不是合法 UTF-8: %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n != maxPanelRunesPerSide {
+		t.Fatalf("rune 数=%d，想要 %d（必须按 rune 截断，不能按字节截断切坏多字节字符）",
+			n, maxPanelRunesPerSide)
 	}
 }
 
