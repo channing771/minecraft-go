@@ -212,6 +212,7 @@ func topLevelDeclarationNames(t *testing.T, path string) map[string]bool {
 var allowed = map[string][]string{
 	"internal/archcheck":  {},
 	"internal/core":       {},
+	"internal/config":     {"internal/core", "internal/physics", "internal/sim", "internal/logging"},
 	"internal/physics":    {"internal/core"},
 	"internal/gfx":        {},
 	"internal/logging":    {},
