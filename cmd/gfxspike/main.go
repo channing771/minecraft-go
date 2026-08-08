@@ -8,6 +8,7 @@ package main
 
 import (
 	"log"
+	"log/slog"
 	"runtime"
 	"unsafe"
 
@@ -55,7 +56,7 @@ func main() {
 
 	chunks := generateTerrain()
 	queueMeshes(renderer, reg, chunks)
-	log.Printf("terrain: 已生成 %d 个区块，排队 %d 个区段网格", len(chunks), renderer.PendingUploads())
+	slog.Info("terrain 就绪", "chunks", len(chunks), "pendingMeshes", renderer.PendingUploads())
 
 	depth := newDepthTarget(dev, uint32(fbWidth), uint32(fbHeight))
 	defer depth.Release()

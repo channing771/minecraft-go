@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"runtime"
 	"slices"
@@ -821,7 +821,7 @@ func (a *application) releaseOwnedResources() {
 func (a *application) closeClientSession(cause error) {
 	a.clientCloseOnce.Do(func() {
 		if cause != nil {
-			log.Printf("关闭客户端会话: %v", cause)
+			slog.Info("关闭客户端会话", "cause", cause)
 		}
 		if a.receiver != nil {
 			a.clientCloseErr = a.receiver.Close()
@@ -848,7 +848,7 @@ func (a *application) updateCenter() {
 	}
 	a.center = center
 	if err := a.requestTrustedObserverCenter(center); err != nil {
-		log.Printf("更新视距中心失败: %v", err)
+		slog.Warn("更新视距中心失败", "error", err)
 	}
 }
 
@@ -1201,12 +1201,12 @@ func (a *application) drainServerMessages(maxMessages int) {
 		if update.Resync != nil {
 			update.Resync.Sequence = a.nextSequence()
 			if err := a.send(update.Resync); err != nil {
-				log.Printf("发送区块 resync 失败: %v", err)
+				slog.Warn("发送区块 resync 失败", "error", err)
 			}
 		}
 		if update.Rejected != nil {
-			log.Printf("权威命令被拒绝: sequence=%d reason=%s",
-				update.Rejected.Sequence, update.Rejected.Reason)
+			slog.Warn("权威命令被拒绝",
+				"sequence", update.Rejected.Sequence, "reason", update.Rejected.Reason)
 		}
 		a.mesher.MarkDirty(update.Dirty...)
 		for _, key := range update.Forgotten {
@@ -1228,7 +1228,7 @@ func (a *application) dropSelectedItem() {
 		return
 	}
 	if err := a.send(network.DropSelectedItem{Sequence: a.nextSequence()}); err != nil {
-		log.Printf("发送主动丢弃请求失败: %v", err)
+		slog.Warn("发送主动丢弃请求失败", "error", err)
 	}
 }
 
@@ -1246,7 +1246,7 @@ func (a *application) placeBlock() {
 		},
 	)
 	if err != nil {
-		log.Printf("本地容器射线失败: %v", err)
+		slog.Warn("本地容器射线失败", "error", err)
 	} else if found {
 		block, loaded := a.mirror.BlockAt(core.Overworld, hit.Block)
 		if loaded && (block == core.FurnaceID || block == core.ChestID) {
@@ -1255,7 +1255,7 @@ func (a *application) placeBlock() {
 			if err := a.send(network.OpenContainer{
 				Sequence: a.nextSequence(), Yaw: a.camera.Yaw, Pitch: a.camera.Pitch,
 			}); err != nil {
-				log.Printf("发送打开容器请求失败: %v", err)
+				slog.Warn("发送打开容器请求失败", "error", err)
 			}
 			return
 		}
@@ -1271,7 +1271,7 @@ func (a *application) placeBlock() {
 		Pitch:    a.camera.Pitch,
 		Slot:     hotbar.Selected,
 	}); err != nil {
-		log.Printf("发送放置命令失败: %v", err)
+		slog.Warn("发送放置命令失败", "error", err)
 	}
 }
 
@@ -1290,7 +1290,7 @@ func (a *application) setInventoryOpen(open bool) {
 	if !open && a.containerOpen() {
 		a.clearContainerUI()
 		if err := a.send(network.CloseContainer{Sequence: a.nextSequence()}); err != nil {
-			log.Printf("发送关闭容器请求失败: %v", err)
+			slog.Warn("发送关闭容器请求失败", "error", err)
 		}
 		return
 	}
@@ -1333,7 +1333,7 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 			if err := a.send(network.CraftRecipe{
 				Sequence: a.nextSequence(), Recipe: recipe,
 			}); err != nil {
-				log.Printf("发送合成请求失败: %v", err)
+				slog.Warn("发送合成请求失败", "error", err)
 			}
 			return
 		}
@@ -1365,7 +1365,7 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 		if err := a.send(network.MoveContainerStack{
 			Sequence: a.nextSequence(), Container: chest.Chest, From: from, To: slot,
 		}); err != nil {
-			log.Printf("发送箱子移动失败: %v", err)
+			slog.Warn("发送箱子移动失败", "error", err)
 		}
 		return
 	}
@@ -1376,14 +1376,14 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 		if err := a.send(network.MoveContainerStack{
 			Sequence: a.nextSequence(), Container: furnace.Furnace, From: from, To: slot,
 		}); err != nil {
-			log.Printf("发送熔炉移动失败: %v", err)
+			slog.Warn("发送熔炉移动失败", "error", err)
 		}
 		return
 	}
 	if err := a.send(network.MoveInventoryStack{
 		Sequence: a.nextSequence(), From: from, To: slot,
 	}); err != nil {
-		log.Printf("发送背包移动失败: %v", err)
+		slog.Warn("发送背包移动失败", "error", err)
 	}
 }
 
@@ -1396,7 +1396,7 @@ func (a *application) selectHotbarSlot(slot uint8) {
 		Sequence: a.nextSequence(),
 		Slot:     slot,
 	}); err != nil {
-		log.Printf("发送快捷栏选择失败: %v", err)
+		slog.Warn("发送快捷栏选择失败", "error", err)
 	}
 }
 

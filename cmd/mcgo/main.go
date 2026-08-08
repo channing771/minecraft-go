@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -196,7 +196,7 @@ const clientMemoryLimit = 1500 << 20
 func main() {
 	debug.SetMemoryLimit(clientMemoryLimit)
 	if err := run(os.Args[1:]); err != nil {
-		log.Printf("mcgo: %v", err)
+		slog.Error("mcgo 退出失败", "error", err)
 		os.Exit(1)
 	}
 }
@@ -348,7 +348,7 @@ func (a *application) applyInteractiveInput(
 		a.nextSequence,
 		func(input network.PlayerInput) error { return a.send(input) },
 	); err != nil {
-		log.Printf("推进玩家预测失败: %v", err)
+		slog.Warn("推进玩家预测失败", "error", err)
 	}
 	if feet, ok := a.predictor.PresentationPosition(elapsed); ok {
 		a.camera.Pos = feet.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
