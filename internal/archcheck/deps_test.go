@@ -28,6 +28,7 @@ func TestTunableConstantsAreNotExported(t *testing.T) {
 		filepath.Join("internal", "sim"): {
 			"RegenDelayTicks", "RegenIntervalTicks", "DropPickupDelayTicks",
 			"PlayerDropPickupDelayTicks", "DropLifetimeTicks",
+			"InteractionReach", "DropPickupRange", "SpawnRadius",
 		},
 	}
 	root := moduleRoot(t)
@@ -73,7 +74,8 @@ func TestTunableConstantsAreNotExported(t *testing.T) {
 // TestOnlyCommandsImportConfig 守住"自动化验证不读用户配置"这条不变量。
 func TestOnlyCommandsImportConfig(t *testing.T) {
 	cmd := exec.Command("go", "list", "-f",
-		"{{.ImportPath}}|{{join .Imports \" \"}}", "./internal/...")
+		"{{.ImportPath}}|{{join .Imports \" \"}} {{join .TestImports \" \"}} {{join .XTestImports \" \"}}",
+		"./internal/...")
 	cmd.Dir = moduleRoot(t)
 	out, err := cmd.Output()
 	if err != nil {
@@ -81,6 +83,8 @@ func TestOnlyCommandsImportConfig(t *testing.T) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		parts := strings.SplitN(line, "|", 2)
+		// internal/config 的外部测试包（package config_test）导入自身，需要整体跳过，
+		// 否则会自触发；这条豁免只对 config 包本身生效。
 		if len(parts) != 2 || parts[0] == "minecraft-go/internal/config" {
 			continue
 		}
