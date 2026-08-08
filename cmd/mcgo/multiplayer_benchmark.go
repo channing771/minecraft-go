@@ -367,6 +367,40 @@ type benchmarkServerWindowSummary struct {
 	peakRSS    uint64
 }
 
+// formatTickBoundaryOverrun 把一次 input boundary 超时拆成可判读的时间分解。
+//
+// 抽成纯函数是因为这段代码在本地永远不会执行：CI 上的失败形态本地复现不出来
+// （见 docs/superpowers/specs/2026-08-07-ci-stability-merge-gate-design.md §7），
+// 若把格式化埋在探针运行路径里，它就没有任何验证手段——一个从不执行的诊断
+// 分支等于没写。
+//
+// 队列深度是这几项里判别力最强的一项：大于 0 说明缓冲里还压着别的信号、
+// 测试 goroutine 确实落后了；等于 0 则说明时间花在服务端侧。
+func formatTickBoundaryOverrun(
+	signal benchmarkServerTickSignal,
+	now time.Time,
+	queueDepth int,
+) string {
+	total := now.Sub(signal.scheduled)
+	overrun := total - fixedBenchmarkFrameDuration
+	if signal.published.IsZero() {
+		return fmt.Sprintf(
+			"server input boundary 已错过 50ms tick deadline："+
+				"总耗时 %v（超出 %v）；tick 自身 %v；发布时刻缺失；收到时队列深度 %d",
+			total, overrun, signal.duration, queueDepth,
+		)
+	}
+	return fmt.Sprintf(
+		"server input boundary 已错过 50ms tick deadline："+
+			"总耗时 %v（超出 %v）；tick 自身 %v；调度→发布 %v；发布→收到 %v；"+
+			"收到时队列深度 %d",
+		total, overrun, signal.duration,
+		signal.published.Sub(signal.scheduled),
+		now.Sub(signal.published),
+		queueDepth,
+	)
+}
+
 func benchmarkServerInputDeadline(signal benchmarkServerTickSignal) (time.Time, error) {
 	if signal.scheduled.IsZero() {
 		return time.Time{}, errors.New("server tick 缺少调度时间")
