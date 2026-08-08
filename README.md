@@ -120,6 +120,27 @@ go run ./cmd/mcgod --listen :25565 --world worlds/lan --seed 42 --max-players 8
 go run ./cmd/mcgo --connect 127.0.0.1:25565 --name 玩家甲
 ```
 
+## 配置文件与调试面板
+
+`mcgo`/`mcgod` 启动时读取同一份 JSON 配置文件，默认路径 `os.UserConfigDir()/minecraft-go/config.json`（与 `profile.json` 同目录），可用 `--config <path>` 覆盖。文件不存在时全部使用编译默认值，**不会自动创建文件**；字段缺失取默认值，越界值被钳制并 `slog.Warn`，未知字段被忽略，JSON 语法错误或不认识的 `version` 会导致启动失败。
+
+配置分四组：
+
+| 分组 | 内容 |
+| --- | --- |
+| `logging` | 全局日志等级 `default` 与按模块覆盖的 `modules`（键为包路径末段，如 `gfx`、`storage`），等级为 `debug`/`info`/`warn`/`error` |
+| `physics` | 重力、行走/跳跃速度、加减速度、终端下落速度、视线高度等运动常量 |
+| `sim` | 交互距离、掉落物寿命与拾取延迟、生命回复间隔、出生半径、熔炉冶炼/燃烧 tick 等权威模拟常量 |
+| `render` | `viewDistance`（重启生效，仅配置文件可改）、`fovDegrees`、`mouseSensitivity` |
+
+**`mouseSensitivity` 是无量纲倍率**，默认 `1`，区间 `[0.1, 5]`；实际弧度/像素系数是代码内基线常量 `baseMouseSensitivity = 0.002`（`cmd/mcgo/main.go`），运行时灵敏度 = 该基线 × 配置里的倍率。
+
+`--dev` 只控制游戏内调试面板是否可用，**不控制配置文件是否生效**：配置文件里调过的值无论是否加 `--dev` 都会生效；不加 `--dev` 时只是看不到、也改不了面板。
+
+加 `--dev` 后按 `F3` 切换面板显隐，面板按分组显示段头（如 `── physics ──`）加裸字段名（如 `gravity`，而非 `physics.gravity`）；方向键选行/步进，`Shift` 粗调 ×10，`Alt` 细调 ×0.1，`Enter` 重置当前行，`F5` 保存到配置文件，`F6` 全部重置。联机（`--connect`）时 `physics`/`sim` 两组灰显只读并标注服务端控制，`render` 组仍可写；`viewDistance` 无论是否联机都只读，只能通过配置文件调整并重启生效。
+
+`mcgod` 复用同一份配置文件的 `physics`/`sim`/`logging` 三组（不含 `render`，专用服务端没有图形）。
+
 ## 视觉验证
 
 `--capture <目录>` 让 `mcgo` 走无头 offscreen 路径，依次跑完 `cmd/mcgo/capture.go` 里表驱动的固定场景（`terrain-noon`、`hud-hotbar-health`、`avatar-nametag`），把每张 640×360 PNG 与 `cmd/mcgo/testdata/golden/` 下的基线比对。比对用双阈值（单像素最大通道差、差异像素占比，定义见 `cmd/mcgo/visual_compare.go`），两项都在阈值内才算通过；具体数值与实测漂移分布见[视觉验证设计文档](docs/superpowers/specs/2026-08-07-visual-verification-design.md) §6。

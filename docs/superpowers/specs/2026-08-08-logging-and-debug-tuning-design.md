@@ -121,12 +121,12 @@
   "render": {
     "viewDistance": 32,
     "fovDegrees": 70,
-    "mouseSensitivity": 0.002
+    "mouseSensitivity": 1
   }
 }
 ```
 
-三个渲染组默认值取自现有代码：`viewDistance` 见 `cmd/mcgo/main.go:27`，`fovDegrees` 见 `cmd/mcgo/app.go:453` 的 `mgl32.DegToRad(70)`，`mouseSensitivity` 是 `cmd/mcgo/main.go:248` 的内联字面量 `0.002`（弧度/像素），本次将其提为具名可调项。
+三个渲染组默认值取自现有代码：`viewDistance` 见 `cmd/mcgo/main.go:27`，`fovDegrees` 见 `cmd/mcgo/app.go:453` 的 `mgl32.DegToRad(70)`。`mouseSensitivity` 不是弧度/像素系数，而是**无量纲倍率**：默认值 `1`，区间 `[0.1, 5]`（见 `internal/config` 的 `Fields()`）。原 `cmd/mcgo/main.go:248` 的内联字面量 `0.002`（弧度/像素）保留为基线系数 `baseMouseSensitivity`，运行时实际灵敏度为 `baseMouseSensitivity × Render.MouseSensitivity`；把 `0.002` 直接当默认值会低于区间下限 `0.1` 被钳制，直接跳 50 倍。
 
 注意这三项当前都不住在 `internal/render` 里，而是 `cmd/mcgo` 层的常量与字面量。这与 §8 的依赖方向一致：`internal/config` 只返回纯数据，由 `cmd/mcgo` 消费。
 
@@ -203,7 +203,9 @@ func ActiveTunables() Tunables     // 内部 atomic.Pointer 快照
 
 ### 6.4 `viewDistance` 是配置文件项，不是实时项
 
-`fovDegrees` 与 `mouseSensitivity` 只影响相机矩阵与输入换算，都在主 goroutine 上、每帧重新读取，实时调整安全。
+`mouseSensitivity` 只影响输入换算：每帧从 `a.render.MouseSensitivity` 重新读取，实时调整安全。
+
+`fovDegrees` 不是每帧重新读取的实时项：`a.camera.FovY` 只在构造相机时由 `FovDegrees` 一次性烘焙算出（`cmd/mcgo/app.go:485`），此后面板改动只写 `a.render.FovDegrees` 这份配置快照，并不会自动影响已烘焙的相机矩阵。面板调整 FOV 需要 `applyPanelChange`（`cmd/mcgo/debug_panel.go`）显式把新值写回 `a.camera.FovY` 才会生效——这是运行时特例处理，不是"每帧重新读取"。
 
 `viewDistance` 不同。它在 `cmd/mcgo/app.go:318` 通过 `config.ViewRadius = viewDistance + 1` 决定客户端向服务端申请的订阅半径，运行中修改需要重新协商订阅、增删区块与重建网格，还会牵动 `cmd/mcgo/main.go` 的堆软上限（该 1500MiB 取值是按视距 32 实测标定的）。
 
