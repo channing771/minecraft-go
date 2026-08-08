@@ -332,8 +332,10 @@ const sessionDisconnectSendTimeout = 200 * time.Millisecond
 // 之后就发不出任何东西了。也正因如此，这里不能用 current.ctx——它即将被取消——
 // 而要用一个独立的短期限上下文。
 //
-// 直接调 endpoint.Send 而不走 outbox：errSessionOutboxFull 本身就意味着
-// outbox 已满，enqueue 必然失败。
+// 直接调 endpoint.Send 而不走 outbox：fail 本身就是会话的终态路径，此刻把
+// 消息塞进 outbox 没有意义——shutdown() 马上要 cancel 会话上下文，writer
+// 未必还能消费到它；而且 outbox 已满时 enqueue 会再次调用 fail，从终态路径
+// 绕回终态路径没有必要。直接 Send 是这条路径上唯一确定能把包送出去的方式。
 func (current *session) sendDisconnect(err error) {
 	code, ok := disconnectCodeFor(err)
 	if !ok {
