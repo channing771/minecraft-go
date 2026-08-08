@@ -63,7 +63,7 @@
 
 凡是进入 `Tunables` 的常量，其原有导出常量降级为未导出默认值（`physics.Gravity` → `physics.defaultGravity`），唯一读取入口是快照。
 
-这条不是洁癖。`internal/client` 目前在 5 处直接读 `physics.EyeHeight`。若该常量变成可调项而导出常量仍在，客户端会读到编译期值、服务端读到快照值，两边视线高度不一致，射线判定与相机会静默错位。用 archcheck 测试守住，防止后续回退。
+这条不是洁癖。`physics.EyeHeight` 目前有 5 个读取点：权威侧 4 处（`internal/sim/mining.go:114`、`engine.go:739`、`container.go:68`、`container.go:162`，全部用于构造交互射线原点）与客户端相机 1 处（`cmd/mcgo/main.go:354`）。若该常量变成可调项而导出常量仍在，只要有一处漏改，相机视线高度与服务端射线原点就会静默错位——玩家瞄准的方块和服务端判定的方块不是同一个。用 archcheck 测试守住，防止后续回退。
 
 ### 3.5 自动化验证不得读用户配置
 
@@ -267,9 +267,8 @@ openspec validate --all --strict --no-interactive
 
 - `internal/physics/types.go`、`internal/physics/motion.go`
 - `internal/sim/`：`engine.go`、`drop.go`、`health_regen.go`、`spawn.go`、`furnace.go` 等常量读取点
-- `internal/render/renderer.go`
-- `internal/client/`：读 `physics.EyeHeight` 的 5 处
-- `cmd/mcgo/main.go`、`cmd/mcgo/app.go`
+- `internal/client/window.go`：`Key` 枚举新增面板所需按键（F3/F5/F6、方向键、Enter、LeftAlt）
+- `cmd/mcgo/main.go`（含 `physics.EyeHeight` 相机读取点与面板输入接线）、`cmd/mcgo/app.go`
 - `cmd/mcgod/main.go`
 - `cmd/gfxspike/main.go`
 - `internal/gfx/wgpu.go`
