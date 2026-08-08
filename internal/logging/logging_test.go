@@ -66,7 +66,7 @@ func TestModuleOverrideDoesNotLeakToOtherModules(t *testing.T) {
 	}
 }
 
-func TestModuleOverrideTighttensSingleModule(t *testing.T) {
+func TestModuleOverrideTightensSingleModule(t *testing.T) {
 	handler, buffer := newTestHandler(Config{
 		Default: slog.LevelInfo,
 		Modules: map[string]slog.Level{"logging": slog.LevelError},
