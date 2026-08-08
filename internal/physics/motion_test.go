@@ -37,11 +37,11 @@ func TestDiagonalInputAcceleratesWithoutDiagonalBoost(t *testing.T) {
 
 func TestJumpAndGravityUseFixedConstants(t *testing.T) {
 	jump := physics.Step(physics.State{OnGround: true}, physics.Input{Jump: true}, emptySource{}).State
-	if jump.Velocity.Y() != physics.JumpSpeed || jump.OnGround {
+	if jump.Velocity.Y() != physics.DefaultTunables().JumpSpeed || jump.OnGround {
 		t.Fatalf("jump=%+v", jump)
 	}
 	fall := physics.Step(physics.State{Velocity: mgl32.Vec3{0, -78, 0}}, physics.Input{}, emptySource{}).State
-	if fall.Velocity.Y() != -physics.TerminalFallSpeed {
+	if fall.Velocity.Y() != -physics.DefaultTunables().TerminalFallSpeed {
 		t.Fatalf("terminal velocity=%f", fall.Velocity.Y())
 	}
 }

@@ -11,21 +11,24 @@ import (
 )
 
 const (
-	FixedDelta         = 50 * time.Millisecond
-	FixedDeltaSeconds  = float32(0.05)
-	PlayerWidth        = float32(0.6)
-	PlayerHeight       = float32(1.8)
-	EyeHeight          = float32(1.62)
-	StepHeight         = float32(0.6)
-	WalkSpeed          = float32(4.3)
-	GroundAcceleration = float32(40)
-	GroundDeceleration = float32(50)
-	AirAcceleration    = float32(8)
-	JumpSpeed          = float32(8.4)
-	Gravity            = float32(32)
-	TerminalFallSpeed  = float32(78.4)
-	CollisionEpsilon   = float32(1e-5)
-	GroundProbe        = float32(1e-4)
+	FixedDelta        = 50 * time.Millisecond
+	FixedDeltaSeconds = float32(0.05)
+	PlayerWidth       = float32(0.6)
+	PlayerHeight      = float32(1.8)
+	CollisionEpsilon  = float32(1e-5)
+	GroundProbe       = float32(1e-4)
+
+	// 以下是可调参数的编译期默认值。唯一读取入口是 Tunables 快照，
+	// 不得再以导出常量暴露——见 internal/archcheck 的 TestTunableConstantsAreNotExported。
+	defaultEyeHeight          = float32(1.62)
+	defaultStepHeight         = float32(0.6)
+	defaultWalkSpeed          = float32(4.3)
+	defaultGroundAcceleration = float32(40)
+	defaultGroundDeceleration = float32(50)
+	defaultAirAcceleration    = float32(8)
+	defaultJumpSpeed          = float32(8.4)
+	defaultGravity            = float32(32)
+	defaultTerminalFallSpeed  = float32(78.4)
 )
 
 // State 是玩家在固定步开始时的物理状态；位置表示脚底中心。

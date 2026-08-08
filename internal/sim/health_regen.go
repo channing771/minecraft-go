@@ -2,11 +2,14 @@ package sim
 
 import "minecraft-go/internal/core"
 
-// RegenDelayTicks 是最后一次受伤后必须连续经过的 tick 数才进入回复阶段。
-const RegenDelayTicks = 100
+// defaultRegenDelayTicks 是最后一次受伤后必须连续经过的 tick 数才进入回复阶段。
+// 唯一读取入口是 Tunables 快照，不得再以导出常量暴露——见 internal/archcheck
+// 的 TestTunableConstantsAreNotExported。
+const defaultRegenDelayTicks = 100
 
-// RegenIntervalTicks 是进入回复阶段后，每回复 1 点生命值需要经过的 tick 数。
-const RegenIntervalTicks = 40
+// defaultRegenIntervalTicks 是进入回复阶段后，每回复 1 点生命值需要经过的 tick 数。
+// 唯一读取入口同上。
+const defaultRegenIntervalTicks = 40
 
 // advanceHealthRegen 推进玩家一个 tick 的自动回复计时，与熔炉推进（advanceFurnace）
 // 同形：固定整数运算、不分配、返回是否发生了可观察变化（本 tick 是否回复了 1 点）。

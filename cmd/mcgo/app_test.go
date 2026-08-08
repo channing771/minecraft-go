@@ -697,7 +697,7 @@ func TestInteractiveInputUsesDrainedReadyResetInSameFrame(t *testing.T) {
 	app.drainServerMessages(1)
 	app.applyInteractiveInput(physics.FixedDelta, client.Movement{}, client.Actions{Mining: true}, true)
 
-	wantPosition := mgl32.Vec3{4.5, 20 + physics.EyeHeight, -2.5}
+	wantPosition := mgl32.Vec3{4.5, 20 + physics.DefaultTunables().EyeHeight, -2.5}
 	if app.camera.Pos != wantPosition || app.camera.Yaw != 0.75 || app.camera.Pitch != -0.2 {
 		t.Fatalf("Ready Reset 同帧相机=%+v yaw=%v pitch=%v，想要 pos=%+v yaw=0.75 pitch=-0.2",
 			app.camera.Pos, app.camera.Yaw, app.camera.Pitch, wantPosition)
@@ -732,7 +732,7 @@ func TestInteractiveInputPresentsDrainedLargeCorrectionInSameFrame(t *testing.T)
 	app.drainServerMessages(1)
 	app.applyInteractiveInput(0, client.Movement{}, client.Actions{}, false)
 
-	want := mgl32.Vec3{8.5, 30 + physics.EyeHeight, -4.5}
+	want := mgl32.Vec3{8.5, 30 + physics.DefaultTunables().EyeHeight, -4.5}
 	if app.camera.Pos != want {
 		t.Fatalf("大纠正同帧相机=%+v，想要 %+v", app.camera.Pos, want)
 	}

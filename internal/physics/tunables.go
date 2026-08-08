@@ -24,15 +24,15 @@ type Tunables struct {
 // 也是调试面板“重置”的目标值。
 func DefaultTunables() Tunables {
 	return Tunables{
-		EyeHeight:          EyeHeight,
-		StepHeight:         StepHeight,
-		WalkSpeed:          WalkSpeed,
-		GroundAcceleration: GroundAcceleration,
-		GroundDeceleration: GroundDeceleration,
-		AirAcceleration:    AirAcceleration,
-		JumpSpeed:          JumpSpeed,
-		Gravity:            Gravity,
-		TerminalFallSpeed:  TerminalFallSpeed,
+		EyeHeight:          defaultEyeHeight,
+		StepHeight:         defaultStepHeight,
+		WalkSpeed:          defaultWalkSpeed,
+		GroundAcceleration: defaultGroundAcceleration,
+		GroundDeceleration: defaultGroundDeceleration,
+		AirAcceleration:    defaultAirAcceleration,
+		JumpSpeed:          defaultJumpSpeed,
+		Gravity:            defaultGravity,
+		TerminalFallSpeed:  defaultTerminalFallSpeed,
 	}
 }
 

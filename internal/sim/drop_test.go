@@ -73,8 +73,8 @@ func TestMiningCreatesDropWithoutTouchingHotbar(t *testing.T) {
 		drop.BlockIndex != dropTargetIndex(t) || drop.Generation != 1 {
 		t.Fatalf("掉落物槽 %d = %+v", slot, drop)
 	}
-	if drop.PickupDelayTicks != sim.DropPickupDelayTicks {
-		t.Fatalf("拾取延迟 = %d，想要 %d", drop.PickupDelayTicks, sim.DropPickupDelayTicks)
+	if drop.PickupDelayTicks != sim.DefaultTunables().DropPickupDelayTicks {
+		t.Fatalf("拾取延迟 = %d，想要 %d", drop.PickupDelayTicks, sim.DefaultTunables().DropPickupDelayTicks)
 	}
 	if got := currentInventory(t, engine, session).Hotbar; got != (core.Hotbar{}) {
 		t.Fatalf("快捷栏 = %+v，想要保持为空", got)
@@ -89,7 +89,7 @@ func TestMiningMergesIntoExistingDropAtSamePosition(t *testing.T) {
 	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
 		Generation: 1, Active: true,
 		Stack:      core.ItemStack{Item: core.ItemDirt, Count: 63},
-		BlockIndex: dropTargetIndex(t), PickupDelayTicks: sim.DropPickupDelayTicks,
+		BlockIndex: dropTargetIndex(t), PickupDelayTicks: sim.DefaultTunables().DropPickupDelayTicks,
 	})
 	engine.SetBlockForTest(core.BlockPos{}, core.DirtID)
 
@@ -158,7 +158,7 @@ func TestDropPickupWaitsForDelayThenFillsHotbar(t *testing.T) {
 		Pitch: lookDown, Mining: false,
 	})
 
-	for tick := range sim.DropPickupDelayTicks - 1 {
+	for tick := range sim.DefaultTunables().DropPickupDelayTicks - 1 {
 		engine.Step()
 		if _, drop := onlyDrop(t, engine); !drop.Active {
 			t.Fatalf("第 %d 个延迟 tick 掉落物被提前拾取", tick)
@@ -285,11 +285,11 @@ func TestDropExpiresAfterLifetime(t *testing.T) {
 	engine.SetChunkDropForTest(core.ChunkKey{Dimension: core.Overworld}, 0, world.DropSlot{
 		Generation: 1, Active: true,
 		Stack:      core.ItemStack{Item: core.ItemGrass, Count: 1},
-		BlockIndex: far, AgeTicks: sim.DropLifetimeTicks - 2,
+		BlockIndex: far, AgeTicks: sim.DefaultTunables().DropLifetimeTicks - 2,
 	})
 
 	engine.Step()
-	if _, drop := onlyDrop(t, engine); drop.AgeTicks != sim.DropLifetimeTicks-1 {
+	if _, drop := onlyDrop(t, engine); drop.AgeTicks != sim.DefaultTunables().DropLifetimeTicks-1 {
 		t.Fatalf("寿命推进错误: %+v", drop)
 	}
 	result := engine.Step()
@@ -433,7 +433,7 @@ func TestDropSelectedItemTransfersOneAuthoritativeItem(t *testing.T) {
 			_, drop := onlyDrop(t, engine)
 			// 创建 tick 立即计入第一个活动 tick，因此 step 后剩余 39。
 			if drop.Stack != stack ||
-				drop.PickupDelayTicks != sim.PlayerDropPickupDelayTicks-1 {
+				drop.PickupDelayTicks != sim.DefaultTunables().PlayerDropPickupDelayTicks-1 {
 				t.Fatalf("主动掉落 = %+v", drop)
 			}
 		})

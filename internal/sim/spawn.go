@@ -11,7 +11,9 @@ import (
 	"minecraft-go/internal/physics"
 )
 
-const spawnRadius = int32(16)
+// defaultSpawnRadius 是出生扫描的编译期默认半径。唯一读取入口是 Tunables 快照，
+// 不得再以导出常量暴露——见 internal/archcheck 的 TestTunableConstantsAreNotExported。
+const defaultSpawnRadius = int32(16)
 
 type spawnColumn struct {
 	X, Z int32

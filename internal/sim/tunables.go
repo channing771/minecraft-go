@@ -52,14 +52,14 @@ type Tunables struct {
 // 也是调试面板“重置”的目标值。
 func DefaultTunables() Tunables {
 	return Tunables{
-		InteractionReach:           interactionReach,
-		RegenDelayTicks:            RegenDelayTicks,
-		RegenIntervalTicks:         RegenIntervalTicks,
-		DropPickupDelayTicks:       DropPickupDelayTicks,
-		PlayerDropPickupDelayTicks: PlayerDropPickupDelayTicks,
-		DropLifetimeTicks:          DropLifetimeTicks,
-		DropPickupRange:            dropPickupRange,
-		SpawnRadius:                spawnRadius,
+		InteractionReach:           defaultInteractionReach,
+		RegenDelayTicks:            defaultRegenDelayTicks,
+		RegenIntervalTicks:         defaultRegenIntervalTicks,
+		DropPickupDelayTicks:       defaultDropPickupDelayTicks,
+		PlayerDropPickupDelayTicks: defaultPlayerDropPickupDelayTicks,
+		DropLifetimeTicks:          defaultDropLifetimeTicks,
+		DropPickupRange:            defaultDropPickupRange,
+		SpawnRadius:                defaultSpawnRadius,
 		FurnaceSmeltTicks:          core.FurnaceSmeltTicks,
 		FurnaceBurnTicks:           core.FurnaceBurnTicks,
 	}

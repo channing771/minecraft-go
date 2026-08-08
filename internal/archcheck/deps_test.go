@@ -13,6 +13,86 @@ import (
 	"testing"
 )
 
+// TestTunableConstantsAreNotExported 守住"可调参数只能经快照读取"这条不变量。
+//
+// 若某个可调参数同时以导出常量存在，任何一处漏改都会让编译期值与快照值并存：
+// 例如相机读到编译期 EyeHeight、服务端射线读到快照值，玩家瞄准的方块与服务端
+// 判定的方块就不是同一个，而且不会有任何报错。
+func TestTunableConstantsAreNotExported(t *testing.T) {
+	forbidden := map[string][]string{
+		filepath.Join("internal", "physics"): {
+			"EyeHeight", "StepHeight", "WalkSpeed", "GroundAcceleration",
+			"GroundDeceleration", "AirAcceleration", "JumpSpeed", "Gravity",
+			"TerminalFallSpeed",
+		},
+		filepath.Join("internal", "sim"): {
+			"RegenDelayTicks", "RegenIntervalTicks", "DropPickupDelayTicks",
+			"PlayerDropPickupDelayTicks", "DropLifetimeTicks",
+		},
+	}
+	root := moduleRoot(t)
+	for packageDirectory, names := range forbidden {
+		files, err := filepath.Glob(filepath.Join(root, packageDirectory, "*.go"))
+		if err != nil {
+			t.Fatalf("枚举 %s: %v", packageDirectory, err)
+		}
+		banned := make(map[string]bool, len(names))
+		for _, name := range names {
+			banned[name] = true
+		}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				t.Fatalf("解析 %s: %v", path, err)
+			}
+			for _, declaration := range parsed.Decls {
+				general, ok := declaration.(*ast.GenDecl)
+				if !ok || (general.Tok != token.CONST && general.Tok != token.VAR) {
+					continue
+				}
+				for _, specification := range general.Specs {
+					value, ok := specification.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for _, name := range value.Names {
+						if banned[name.Name] {
+							t.Errorf("%s: 可调参数 %s 仍以导出常量暴露，唯一入口必须是 Tunables 快照",
+								path, name.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestOnlyCommandsImportConfig 守住"自动化验证不读用户配置"这条不变量。
+func TestOnlyCommandsImportConfig(t *testing.T) {
+	cmd := exec.Command("go", "list", "-f",
+		"{{.ImportPath}}|{{join .Imports \" \"}}", "./internal/...")
+	cmd.Dir = moduleRoot(t)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go list: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 || parts[0] == "minecraft-go/internal/config" {
+			continue
+		}
+		for _, imported := range strings.Fields(parts[1]) {
+			if imported == "minecraft-go/internal/config" {
+				t.Errorf("%s 导入了 internal/config；只有 cmd 可以导入它，"+
+					"否则本机配置会污染性能基线与抓帧 golden", parts[0])
+			}
+		}
+	}
+}
+
 func TestOnlyTCPImplementationImportsNet(t *testing.T) {
 	root := filepath.Join(moduleRoot(t), "internal", "network")
 	files, err := filepath.Glob(filepath.Join(root, "*.go"))

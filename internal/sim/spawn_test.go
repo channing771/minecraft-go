@@ -11,7 +11,7 @@ import (
 )
 
 func TestSpawnCandidatesOrderByDistanceThenXZ(t *testing.T) {
-	got := spawnCandidates(core.ChunkPos{}, spawnRadius)
+	got := spawnCandidates(core.ChunkPos{}, defaultSpawnRadius)
 	wantFirst := []spawnColumn{
 		{X: 0, Z: 0},
 		{X: -1, Z: 0},
@@ -34,7 +34,7 @@ func TestSpawnCandidatesOrderByDistanceThenXZ(t *testing.T) {
 		t.Fatalf("候选顺序或半径错误: len=%d first=%+v last=%+v", len(got), got[:len(wantFirst)], got[len(got)-len(wantLast):])
 	}
 
-	offset := spawnCandidates(core.ChunkPos{X: 2, Z: -3}, spawnRadius)
+	offset := spawnCandidates(core.ChunkPos{X: 2, Z: -3}, defaultSpawnRadius)
 	if offset[0] != (spawnColumn{X: 32, Z: -48}) {
 		t.Fatalf("anchor 偏移后的首候选=%+v", offset[0])
 	}

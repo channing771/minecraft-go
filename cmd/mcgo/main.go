@@ -351,7 +351,9 @@ func (a *application) applyInteractiveInput(
 		slog.Warn("推进玩家预测失败", "error", err)
 	}
 	if feet, ok := a.predictor.PresentationPosition(elapsed); ok {
-		a.camera.Pos = feet.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+		// 相机视线高度必须与服务端交互射线原点使用同一份参数，否则玩家瞄准的方块
+		// 与服务端判定的方块不是同一个。
+		a.camera.Pos = feet.Add(mgl32.Vec3{0, physics.ActiveTunables().EyeHeight, 0})
 		a.center = cameraChunk(a.camera.Pos)
 	}
 }

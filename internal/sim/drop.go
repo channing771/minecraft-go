@@ -13,15 +13,19 @@ import (
 const (
 	// DropInterestRadius 是掉落物 tick 与同步的固定区块半径。
 	DropInterestRadius = core.DropInterestRadius
-	// DropPickupDelayTicks 是采掘与方块破坏产生的掉落物可被拾取前的活动 tick 数。
-	DropPickupDelayTicks = 10
-	// PlayerDropPickupDelayTicks 是玩家主动丢弃的掉落物可被拾取前的活动 tick 数。
+
+	// 以下是可调参数的编译期默认值。唯一读取入口是 Tunables 快照，
+	// 不得再以导出常量暴露——见 internal/archcheck 的 TestTunableConstantsAreNotExported。
+
+	// defaultDropPickupDelayTicks 是采掘与方块破坏产生的掉落物可被拾取前的活动 tick 数。
+	defaultDropPickupDelayTicks = 10
+	// defaultPlayerDropPickupDelayTicks 是玩家主动丢弃的掉落物可被拾取前的活动 tick 数。
 	// 它比方块破坏更长，避免刚丢出的物品被自己立刻拾回。
-	PlayerDropPickupDelayTicks = 40
-	// DropLifetimeTicks 是掉落物累计活动 tick 的寿命上限。
-	DropLifetimeTicks = 6000
-	// dropPickupRange 是玩家到方块中心的最大拾取距离。
-	dropPickupRange = 1.25
+	defaultPlayerDropPickupDelayTicks = 40
+	// defaultDropLifetimeTicks 是掉落物累计活动 tick 的寿命上限。
+	defaultDropLifetimeTicks = 6000
+	// defaultDropPickupRange 是玩家到方块中心的最大拾取距离。
+	defaultDropPickupRange = 1.25
 )
 
 // sessionDropWantedSnapshot 返回该会话的固定半径掉落物兴趣区块。

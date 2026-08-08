@@ -22,7 +22,11 @@ import (
 const (
 	productionTickInterval = 50 * time.Millisecond
 	maxCatchUpSteps        = 5
-	interactionReach       = 6
+
+	// defaultInteractionReach 是放置、挖掘与开启容器共用的最大交互距离的编译期默认值。
+	// 唯一读取入口是 Tunables 快照，不得再以导出常量暴露——见 internal/archcheck
+	// 的 TestTunableConstantsAreNotExported。
+	defaultInteractionReach = 6
 )
 
 type Clock interface {
