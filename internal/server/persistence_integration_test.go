@@ -348,7 +348,6 @@ func newPersistentHarness(
 	config.AutosaveTicks = 1 << 60
 	config.RetryBaseTicks = 1
 	config.RetryMaxTicks = 4
-	config.ShutdownTimeout = 2 * time.Second
 	harness := &persistentHarness{
 		t:              t,
 		root:           root,

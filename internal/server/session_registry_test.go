@@ -665,7 +665,6 @@ func registryTestConfig() Config {
 	config.SaveWorkers = 1
 	config.AutosaveTicks = 1000
 	config.OutboxCapacity = 32
-	config.ShutdownTimeout = time.Second
 	return config
 }
 

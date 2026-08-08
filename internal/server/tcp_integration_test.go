@@ -113,7 +113,6 @@ func startDiskHost(t *testing.T, root, address string, generator Generator) inte
 	config.AutosaveTicks = 20
 	config.RetryBaseTicks = 1
 	config.RetryMaxTicks = 4
-	config.ShutdownTimeout = 5 * time.Second
 	host := NewHost(config, generator, store)
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
@@ -853,7 +852,6 @@ func startIntegrationHostWithStore(t *testing.T, store storage.WorldStore, gener
 	config.AutosaveTicks = 20
 	config.RetryBaseTicks = 1
 	config.RetryMaxTicks = 2
-	config.ShutdownTimeout = 5 * time.Second
 	host := NewHost(config, generator, store)
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()

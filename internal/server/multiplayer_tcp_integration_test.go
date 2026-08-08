@@ -474,7 +474,6 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 	config.ViewRadius = 0
 	config.OutboxCapacity = 512
 	config.AutosaveTicks = 6000
-	config.ShutdownTimeout = 5 * time.Second
 	host := NewHost(config, multiplayerManualGenerator{}, newHostTestStore())
 	hostDone := make(chan error, 1)
 	go func() { hostDone <- host.Run(context.Background(), listener) }()
@@ -949,7 +948,6 @@ func startMultiplayerTCPHost(t *testing.T) multiplayerTCPHost {
 	config.MaxPlayers = 2
 	config.ViewRadius = 1
 	config.OutboxCapacity = 512
-	config.ShutdownTimeout = 5 * time.Second
 	host := NewHost(config, flatTestGenerator{}, newHostTestStore())
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()

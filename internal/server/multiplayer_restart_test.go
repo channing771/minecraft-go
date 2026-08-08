@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -275,7 +274,6 @@ func startMultiplayerRestartHost(t *testing.T, root string, seed int64) multipla
 	config.ViewRadius = 0
 	config.OutboxCapacity = 512
 	config.AutosaveTicks = 20
-	config.ShutdownTimeout = 5 * time.Second
 	host := NewHost(config, multiplayerRestartGenerator{}, store)
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
