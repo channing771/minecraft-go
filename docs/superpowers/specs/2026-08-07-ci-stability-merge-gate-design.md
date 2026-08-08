@@ -82,11 +82,20 @@ func measureMultiplayerServerProbe(duration time.Duration) (...) {
 
 ### 期限普查
 
-期限有**三种语法形态**，必须一起数，只查其中一种会严重低估：
+期限有**五种语法形态**，必须一起数。本设计的普查最初只覆盖了前三种，漏掉了 30 处站点——其中 28 处是给关服操作只留 1 秒的活性等待，恰恰是全包最紧的一档。
 
 ```bash
+# 前三种：直接构造期限
 grep -rhoE "context\.WithTimeout\([^,]*, [^)]*\)|time\.Now\(\)\.Add\([^)]*\)|time\.After\([^)]*\)" --include='*_test.go' <包>
+
+# 第四种：期限作为参数传给测试助手（最易漏）
+grep -rnoE "[a-zA-Z][a-zA-Z0-9_]*\([^()]*, *[0-9]* ?\*? ?time\.(Second|Millisecond|Minute)\)" --include='*_test.go' <包> \
+  | grep -vE "context\.With(Timeout|Deadline)|time\.(After|Now|Sleep|NewTimer|NewTicker)"
 ```
+
+第四种在 `internal/server` 命中 31 处：`shutdownWithDeadline` 28、`nextTimer` 3（另有 `connectTask16ConcurrentClients` 2 处在别处形态）。
+
+**第五种：对时长数值本身的断言，不是期限。** `heartbeat_test.go` 使用假时钟，`clock.nextTimer(t, 5*time.Second).fire()` 断言的是"被测代码调度了一个 5 秒的定时器"。它在语法上与第四种无法区分，**只能靠读断言意图分辨**；盲替换会让测试静默失去意义而不报错——这是本变更最危险的一类误改，且 `context.DeadlineExceeded` 判据抓不到它。
 
 | 包 | 期限站点 |
 | --- | --- |
@@ -107,8 +116,11 @@ grep -rhoE "context\.WithTimeout\([^,]*, [^)]*\)|time\.Now\(\)\.Add\([^)]*\)|tim
 | **缺席断言** | 等一小段确认什么都没发生 | `assertNoServerMessage` 的 20ms | **不动** |
 | **超时触发断言** | 故意给极短期限，断言超时确实发生 | `shutdown_test.go` 用 20ms 验证 Shutdown 超时后冻结 Step | **不动** |
 | **性能门禁** | 测量耗时，断言小于上限 | `TestPerformanceThresholdsRejectTickP99AtTenMilliseconds` | **绝不动** |
+| **时长值断言** | 断言被测代码使用了某个时长 | `clock.nextTimer(t, 5*time.Second)` | **绝不动** |
 
-判据不靠人工判断，**可 grep 机械识别**：后两类的断言形态一律是 `errors.Is(err, context.DeadlineExceeded)`——它们要的就是超时发生；活性等待恰好相反，超时即 `t.Fatal`。
+前四类的判据**可 grep 机械识别**：第二、三类的断言形态一律是 `errors.Is(err, context.DeadlineExceeded)`——它们要的就是超时发生；活性等待恰好相反，超时即 `t.Fatal`。
+
+**第五类抓不到。** 时长值断言在语法上与普通的助手参数完全一致，且不涉及 `context.DeadlineExceeded`。它只能靠读断言意图分辨，是本变更唯一没有机械判据的类别，也是误改后最隐蔽的一类——测试仍然通过，只是不再测它本来要测的东西。凡遇到"把时长传给测试助手"的形态，**必须读该助手的实现**确认它是拿去做期限还是拿去做比较。
 
 ```bash
 grep -rn "context.DeadlineExceeded" internal/server/*_test.go

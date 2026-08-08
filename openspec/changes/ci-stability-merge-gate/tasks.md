@@ -23,10 +23,13 @@
 - [ ] 2.3 三种语法形态（`context.WithTimeout` / `time.Now().Add` / `time.After`）全部覆盖。`time.Second` 裸写法 77 处最容易漏，且归 `waitDeadline` 而非 `shortWaitDeadline`。`10 * time.Minute` 不动。
 - [ ] 2.4 验证：秒档字面量归零；禁改区断言仍为 10 处；`go test ./internal/server -race -count=1` 为 `ok` 且耗时与改前同量级。**耗时显著变长即说明有站点被误分类**，正在白等。提交 `test: 秒档活性等待收敛到命名常量`。
 
-## 3. 毫秒档逐处核对
+## 3. 毫秒档与助手参数形态逐处核对
 
-- [ ] 3.1 列出约 23 处毫秒档站点。**本档不得机械替换**——它混着活性等待与禁改区，是唯一必须人工逐处判的部分。
-- [ ] 3.2 逐处按断言形态分类：期望 `errors.Is(err, context.DeadlineExceeded)` → 超时触发断言，不动；断言没收到消息 → 缺席断言，不动；超时即 `t.Fatal` → 活性等待，换 `shortWaitDeadline`；断言耗时小于上限 → 性能门禁，不动。
+- [ ] 3.1a 列出约 23 处毫秒档站点。
+- [ ] 3.1b 列出"期限作参数传给助手"形态（Task 2 的正则漏掉了这一种，命中 31 处）：`shutdownWithDeadline` 28 处（多数是活性等待，给关服只留 1 秒，是全包最紧的一档）、`clock.nextTimer` 3 处（**时长值断言，绝不动**），另有 2 处 `connectTask16ConcurrentClients` 需一并判定。
+- [ ] 3.2 逐处按断言形态分类：期望 `errors.Is(err, context.DeadlineExceeded)` → 超时触发断言，不动；断言没收到消息 → 缺席断言，不动；超时即 `t.Fatal` → 活性等待，毫秒档换 `shortWaitDeadline`、1 秒档换 `waitDeadline`；断言耗时小于上限 → 性能门禁，不动；**时长被助手拿去做比较而非做期限 → 时长值断言，绝不动**。
+- [ ] 3.2b 时长值断言没有机械判据：`clock.nextTimer(t, 5*time.Second)` 在语法上与传期限完全一致，但假时钟里它断言的是"被测代码调度了一个 5 秒定时器"，替换后测试**仍然通过**、只是不再测原本的行为。因此 3.1b 的每一处**必须先读该助手的实现**，确认时长是被拿去 `context.WithTimeout` 还是被拿去比较。
+- [ ] 3.2c `shutdownWithDeadline` 的 7 处 `!errors.Is(err, wantErr)` 与 `recoverShutdownAfterExpectedFailure` 的三次循环期望关服返回**注入的错误**。若注入失败会让关服卡住，抬高期限会让每处多等 30 秒、循环处多等 90 秒——判定前读该助手实现确认。
 - [ ] 3.3 把每一处的 `文件:行`、判定类别与依据写成一张表放进**报告文件**（评审者读得到；`git log --oneline` 读不到完整提交信息）。提交信息放一句摘要。**这张表是本任务的主要产出。**
 - [ ] 3.4 只替换判定为活性等待的站点。
 - [ ] 3.5 验证：`go test ./internal/server -race -count=1` 为 `ok` 且耗时未显著变长。提交 `test: 逐处核对毫秒档期限并只抬高其中的活性等待`。

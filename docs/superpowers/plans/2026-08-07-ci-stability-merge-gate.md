@@ -213,12 +213,14 @@ git commit -m "test: 秒档活性等待收敛到命名常量"
 
 ---
 
-### Task 3: 毫秒档逐处核对
+### Task 3: 毫秒档与助手参数形态逐处核对
 
 **Files:**
-- Modify: `internal/server/*_test.go` 中毫秒档站点里**确属活性等待**的少数几处
+- Modify: `internal/server/*_test.go` 中毫秒档站点、以及"期限作参数传给助手"形态里**确属活性等待**的站点
 
-- [ ] **Step 1: 列出全部毫秒档站点**
+本任务是本变更唯一必须**人工逐处读断言**的部分。两组站点都不得机械替换。
+
+- [ ] **Step 1a: 列出全部毫秒档站点**
 
 Run:
 ```
@@ -226,7 +228,29 @@ grep -rnE "context\.WithTimeout\([^,]*, [0-9]* ?\*? ?time\.Millisecond\)|time\.N
   internal/server/*_test.go
 ```
 
-约 23 处。**这一档不得机械替换**——它同时混着活性等待与禁改区，是本变更唯一必须人工逐处判的部分。
+约 23 处。这一档混着活性等待与禁改区。
+
+- [ ] **Step 1b: 列出"期限作参数传给助手"形态**
+
+Task 2 的正则只覆盖直接构造期限的三种写法，漏掉了这一种：
+
+```
+grep -rnoE "[a-zA-Z][a-zA-Z0-9_]*\([^()]*, *[0-9]* ?\*? ?time\.(Second|Millisecond|Minute)\)" internal/server/*_test.go \
+  | grep -vE "context\.With(Timeout|Deadline)|time\.(After|Now|Sleep|NewTimer|NewTicker)"
+```
+
+命中 31 处，分三组：
+
+| 助手 | 处数 | 已知性质 |
+| --- | --- | --- |
+| `shutdownWithDeadline(running, time.Second)` | 28 | **多数是活性等待**：给关服操作只留 1 秒，是全包最紧的一档 |
+| `clock.nextTimer(t, N*time.Second)` | 3 | **时长值断言，绝不动**（见 Step 2 的警告） |
+
+另有 2 处 `connectTask16ConcurrentClients(t, addr, requests, 10*time.Second)` 需一并判定。
+
+`shutdownWithDeadline` 的 28 处断言形态分布：16 处 `err != nil`、7 处 `!errors.Is(err, wantErr)`（wantErr 是注入的错误，不是超时）、2 处丢进 goroutine、1 处在 `recoverShutdownAfterExpectedFailure` 的三次循环里。
+
+**注意 7 处 `!errors.Is(err, wantErr)` 与循环里那处**：它们期望关服**返回注入的错误**。若注入的失败会让关服卡住，抬高期限会让每处多等 30 秒、循环处多等 90 秒。判定时要读 `recoverShutdownAfterExpectedFailure` 的实现，确认注入失败下关服是快速返回错误还是会卡住。
 
 - [ ] **Step 2: 逐处分类**
 
@@ -236,8 +260,13 @@ grep -rnE "context\.WithTimeout\([^,]*, [0-9]* ?\*? ?time\.Millisecond\)|time\.N
 | --- | --- | --- |
 | 期望 `errors.Is(err, context.DeadlineExceeded)` | 超时触发断言 | 不动 |
 | 超时后什么都不做 / 断言没收到消息 | 缺席断言 | 不动 |
-| 超时即 `t.Fatal` | 活性等待 | 换 `shortWaitDeadline` |
+| 超时即 `t.Fatal` | 活性等待 | 毫秒档换 `shortWaitDeadline`；1 秒档换 `waitDeadline` |
 | 断言耗时小于某上限 | 性能门禁 | 不动 |
+| 该时长被助手拿去做比较而非做期限 | **时长值断言** | **绝不动** |
+
+**最后一类是本任务最危险的一处，且没有机械判据。** `clock.nextTimer(t, 5*time.Second)` 在语法上与"把期限传给助手"完全一致，但 `heartbeat_test.go` 用的是假时钟，这个 `5*time.Second` 断言的是"被测代码调度了一个 5 秒的定时器"。替换它测试**仍会通过**，只是不再测它本来要测的东西——静默失效，不报错。
+
+因此对 Step 1b 的每一处，**必须先读该助手的实现**，确认时长参数是被拿去 `context.WithTimeout` 还是被拿去比较，再决定动不动。
 
 把判定结果写成一张表放进你的**报告文件**，每行一处：`文件:行` | 判定类别 | 依据（引用它服务的那条断言）。提交信息里放一句话摘要即可。
 
