@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 
@@ -495,7 +496,7 @@ func waitForMesherStats(
 		if time.Now().After(deadline) {
 			t.Fatalf("等待 Mesher 状态超时: %+v", stats)
 		}
-		time.Sleep(time.Millisecond)
+		runtime.Gosched()
 	}
 }
 

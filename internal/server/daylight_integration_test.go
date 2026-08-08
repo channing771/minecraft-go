@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -107,7 +108,7 @@ func awaitMeshedSection(
 		if time.Now().After(deadline) {
 			t.Fatalf("等待区段 %+v 的 revision %d 网格超时；stats=%+v", key, revision, mesher.Stats())
 		}
-		time.Sleep(time.Millisecond)
+		runtime.Gosched()
 	}
 }
 
@@ -137,7 +138,7 @@ func drainMesher(t *testing.T, mesher *client.Mesher, mirror *client.Mirror) {
 		if time.Now().After(deadline) {
 			t.Fatalf("等待 Mesher 收敛超时: %+v", stats)
 		}
-		time.Sleep(time.Millisecond)
+		runtime.Gosched()
 	}
 }
 
@@ -221,7 +222,8 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	mesher.MarkDirty(sectionKey)
 	mesher.Schedule(mirror, 1)
 	waitForMesherStats(t, mesher, func(stats client.MesherStats) bool {
-		return stats.InFlightJobs == 1
+		return stats.DirtySections == 1 && stats.QueuedJobs == 0 &&
+			stats.InFlightJobs == 1 && stats.ReadyResults == 0
 	})
 	sendClientMessage(t, clientEndpoint, network.PlaceBlock{
 		Sequence: 1, Yaw: 0, Pitch: 1.0, Slot: 0,
@@ -234,10 +236,13 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	}
 	releaseRevision1()
 	waitForMesherStats(t, mesher, func(stats client.MesherStats) bool {
-		return stats.ReadyResults == 1
+		return stats.QueuedJobs == 0 && stats.InFlightJobs == 0 && stats.ReadyResults == 1
 	})
 	if stale := mesher.Drain(mirror, 1); len(stale) != 0 {
 		t.Fatalf("封洞后接受了 revision 1 的旧网格: %+v", stale)
+	}
+	if stats := mesher.Stats(); stats.ReadyResults != 0 {
+		t.Fatalf("封洞后旧网格未被 Drain 消费: %+v", stats)
 	}
 	sealed := awaitMeshedSection(t, mesher, mirror, underHole, 2)
 	drainMesher(t, mesher, mirror)
@@ -263,7 +268,8 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	mesher.MarkDirty(sectionKey)
 	mesher.Schedule(mirror, 1)
 	waitForMesherStats(t, mesher, func(stats client.MesherStats) bool {
-		return stats.InFlightJobs == 1
+		return stats.DirtySections == 1 && stats.QueuedJobs == 0 &&
+			stats.InFlightJobs == 1 && stats.ReadyResults == 0
 	})
 	sendClientMessage(t, clientEndpoint, network.PlayerInput{
 		Sequence: 2, Yaw: 0, Pitch: 1.0, Mining: true,
@@ -276,10 +282,13 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	}
 	releaseRevision2()
 	waitForMesherStats(t, mesher, func(stats client.MesherStats) bool {
-		return stats.ReadyResults == 1
+		return stats.QueuedJobs == 0 && stats.InFlightJobs == 0 && stats.ReadyResults == 1
 	})
 	if stale := mesher.Drain(mirror, 1); len(stale) != 0 {
 		t.Fatalf("重开后接受了 revision 2 的旧网格: %+v", stale)
+	}
+	if stats := mesher.Stats(); stats.ReadyResults != 0 {
+		t.Fatalf("重开后旧网格未被 Drain 消费: %+v", stats)
 	}
 	reopened := awaitMeshedSection(t, mesher, mirror, underHole, 3)
 	if got := mirrorColumnTop(t, mirror, underHole); got != groundTop {
