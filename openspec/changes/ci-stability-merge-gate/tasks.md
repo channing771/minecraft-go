@@ -48,4 +48,5 @@
 - [ ] 5.3 回填设计文档的实测数据；任何与实测不符的表述一并订正。
 - [ ] 5.4 确认产品代码零改动：`git diff --stat main...HEAD -- ':!*_test.go' ':!docs' ':!openspec'` 无输出。
 - [ ] 5.5 收尾门禁：`go test ./... -race`、`go test ./internal/archcheck -count=1`、`go vet ./...`、`gofmt -l .` 无输出、`git diff --check` 无输出、`openspec validate --all --strict --no-interactive`。
-- [ ] 5.6 推分支后观察 CI。**本变更预期只消除采样预算与期限耗尽两类失败，`transport closed` 仍会出现**——观察时必须按断言分类统计，不得把仍然出现的 `transport closed` 当作本变更失败，也不得因为它消失了就归功于本变更。
+- [ ] 5.6 推分支后观察 CI，**必须按断言分类统计**（规程见设计文档 §9）：`transport closed` 仍出现是预期之内、不算本变更失败；它消失了也不得归功于本变更。
+- [ ] 5.7 观察时特别留意一条：**期限类失败若仍出现、但耗时变成 30s/60s，那就确定是挂起而非余量问题**，必须开独立调查，**不得再抬期限**。抬高期限本身不修复挂起，但它把"慢"与"挂"这个此前无法区分的信号变成了决定性的——这是本变更除消除假失败之外的第二项价值。实测已见一例：`TestDropSurvivesShutdownAndRestart` 偶发失败耗时 30.09s，正好跑满 waitDeadline，说明它是挂不是慢。
