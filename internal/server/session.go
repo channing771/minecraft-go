@@ -334,8 +334,9 @@ const sessionDisconnectSendTimeout = 200 * time.Millisecond
 //
 // 直接调 endpoint.Send 而不走 outbox：fail 本身就是会话的终态路径，此刻把
 // 消息塞进 outbox 没有意义——shutdown() 马上要 cancel 会话上下文，writer
-// 未必还能消费到它；而且 outbox 已满时 enqueue 会再次调用 fail，从终态路径
-// 绕回终态路径没有必要。直接 Send 是这条路径上唯一确定能把包送出去的方式。
+// 未必还能消费到它；而且若走 enqueue，outbox 满时 enqueue 会同步再次调用
+// fail，落进同一个 failOnce.Do 内部重入，是死锁而非单纯冗余。直接 Send 是
+// 这条路径上唯一确定能把包送出去、且不会重入 failOnce 的方式。
 func (current *session) sendDisconnect(err error) {
 	code, ok := disconnectCodeFor(err)
 	if !ok {

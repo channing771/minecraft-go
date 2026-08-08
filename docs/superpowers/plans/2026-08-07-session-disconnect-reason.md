@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让服务端在因四个具名原因关闭已建立的会话前，尽力发出协议已定义但从未被使用的 `Disconnect{Code, Message}`，使客户端的失败信息直接携带断开原因。
+**Goal:** 让服务端在因三个具名原因关闭已建立的会话前，尽力发出协议已定义但从未被使用的 `Disconnect{Code, Message}`，使客户端的失败信息直接携带断开原因。
 
 **Architecture:** 把"原因 → `DisconnectCode`"的映射抽成纯函数（白名单形态，可单测）；`session.fail` 在 `shutdown()` 之前用一个独立的 200ms 上下文直接调 `endpoint.Send` 发出该包，失败即放弃。客户端与协议零改动——两者早已完整实现。
 

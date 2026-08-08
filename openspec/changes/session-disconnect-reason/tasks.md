@@ -8,19 +8,21 @@
 
 ## 1. 原因到断开码的白名单映射
 
-- [x] 1.1 先写失败测试：四个具名原因各自映射到正确的 `DisconnectCode`；`nil`/`ErrClosed`/`Canceled`/包装了 `ErrClosed` 的错误/writer 写失败/writer panic 一律不映射；包装后的具名原因仍被识别。
+- [x] 1.1 先写失败测试：三个具名原因各自映射到正确的 `DisconnectCode`；`nil`/`ErrClosed`/`Canceled`/包装了 `ErrClosed` 的错误/writer 写失败/writer panic 一律不映射；包装后的具名原因仍被识别。
 - [x] 1.2 确认失败原因是断言而非编译错误——先加最小桩再跑。
-- [x] 1.3 实现 `disconnectCodeFor(err error) (network.DisconnectCode, bool)`，用 `errors.Is` 逐个匹配四个具名原因，`default` 返回不发送。注释写明为什么是白名单而非黑名单。
+- [x] 1.3 实现 `disconnectCodeFor(err error) (network.DisconnectCode, bool)`，用 `errors.Is` 逐个匹配三个具名原因，`default` 返回不发送。注释写明为什么是白名单而非黑名单。
 - [x] 1.4 验证转绿。
 - [x] 1.5 **变异验证**：把 `default` 改成"允许发送"，确认拒绝用例变红——**仍然通过说明白名单边界没被守住，必须加强断言**。这条测试是本变更防重入的唯一自动化保障。恢复后 `git diff` 干净。提交 `feat: 增加会话关闭原因到断开码的白名单映射`。
 
 ## 2. 在 session.fail 中尽力发出断开原因
 
+- [x] 2.0 移出 `errSessionOutboxFull`：从 `disconnectCodeFor` 的映射分支删除，加进拒绝用例表，GoDoc 说明为何不在表内——它由 `enqueue` 在 outbox 满时同步调用 `fail` 触发，而 `enqueue` 声明「永不等待 writer」并位于每 tick、每会话、每消息的发布路径上。
 - [x] 2.1 先写失败测试：具名原因关闭时 `recordingServerEndpoint` 收到带正确 code 与 message 的 `Disconnect`；`ErrClosed`/`Canceled`/writer 写失败关闭时**不得**收到；`failOnce` 只生效一次、`detach` 携带首个原因、`closed()` 为真。
 - [x] 2.2 确认失败原因是断言而非编译错误。
 - [x] 2.3 实现 `(*session).sendDisconnect(err error)`：白名单判定、独立的 200ms 上下文、直接调 `endpoint.Send`、错误忽略。常量注释写明 200ms 是上界而非等待，且覆盖等 `writeOwner` 的时间。
 - [x] 2.4 接进 `fail`——**除新增的一行外，`failOnce`/`shutdown()`/`detach` 的顺序与形态一个字不改**。
 - [x] 2.5 验证转绿。
+- [x] 2.5b `TestSessionFullOutboxClosesWithoutBlocking` 必须 `-count=3` 通过——**不得通过放宽它的期望来让它通过**，它是「`enqueue` 永不等待 writer」这条不变量的守护者。
 - [x] 2.6 **`-race` 全包回归**：`sendDisconnect` 从心跳/reader goroutine 调 Send，与 `writeLoop` 并发；报出任何 endpoint 相关竞态即停手报告。记录改前改后耗时（改前基线约 115 秒）——**显著变长说明有非预期路径在等满 200ms**。
 - [x] 2.7 确认 `git diff --stat internal/network/` **无输出**。提交 `feat: 会话因具名原因关闭时告知客户端断开原因`。
 

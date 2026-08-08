@@ -189,7 +189,7 @@ default:
 1. 服务端对三种具名原因确实发出对应的 `DisconnectCode`，客户端 `Recv` 返回的 `RemoteError` 携带该 code 与 message。
 2. 白名单之外的原因（`ErrClosed`、`Canceled`、writer 写失败、panic）**不发送**，且关闭路径行为与改动前一致。
 3. 关闭路径不因此变慢；`session.fail` 的既有语义（`failOnce`、`shutdown`、`detach`）不变。
-4. 下一次 CI 上出现该类失败时，测试的失败信息直接给出断开原因。
+4. 下一次 CI 上出现该类失败时，测试的失败信息**可能**给出断开原因——不保证一定给出。三个白名单原因里 `errHeartbeatTimeout` 已被 §2 的证据排除（15s 超时 vs 已观测到的 0.02–1.46s 失败），实际能命中的只剩两个 reader goroutine 的协议违规（`errInvalidHeartbeatReply`、`errUnknownClientMessage`）；而登录后服务端主动关闭连接最可能走的那条路——`endpointReader` 把 `Recv` 返回的错误原样传给 `fail`（见 `internal/server/session.go` 的 `endpointReader`）——本身不在白名单内，届时仍会呈现为裸的 `transport closed`。**若下一次失败仍是裸的 `transport closed`，说明关闭走的是白名单之外的路径，这本身就是有价值的信息**，应据此定位具体路径并显式列举，不得把白名单改为默认允许。
 
 第 4 条只能等。前三条必须有自动化测试——**尤其是第 2 条**：一个"该不发时发了"的缺陷会在写失败路径上造成重入，而那条路径在本地几乎不会走到。
 
