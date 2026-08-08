@@ -4,12 +4,14 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
@@ -293,3 +295,66 @@ func TestParseMainOptionsWithoutCaptureLeavesDirEmpty(t *testing.T) {
 }
 
 var _ = profile.Options{}
+
+func TestParseOptionsDefaultsDevOff(t *testing.T) {
+	options, err := parseMainOptions([]string{})
+	if err != nil {
+		t.Fatalf("parseMainOptions: %v", err)
+	}
+	if options.Dev {
+		t.Fatal("--dev 默认必须关闭")
+	}
+}
+
+func TestParseOptionsAcceptsDevAndConfig(t *testing.T) {
+	options, err := parseMainOptions([]string{"--dev", "--config", "/tmp/x.json"})
+	if err != nil {
+		t.Fatalf("parseMainOptions: %v", err)
+	}
+	if !options.Dev {
+		t.Fatal("--dev 必须被解析")
+	}
+	if options.ConfigPath != "/tmp/x.json" {
+		t.Fatalf("ConfigPath = %q", options.ConfigPath)
+	}
+}
+
+// TestBenchmarkIgnoresUserConfig 守住"性能门禁不读本机配置"这条不变量。
+func TestBenchmarkIgnoresUserConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	custom := config.Defaults()
+	custom.Physics.Gravity = 1
+	if err := custom.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	t.Cleanup(func() { config.Defaults().Apply() })
+
+	effective, err := resolveConfig(mainOptions{
+		ConfigPath:  path,
+		Application: applicationOptions{Benchmark: true},
+	})
+	if err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if effective.Physics.Gravity != config.Defaults().Physics.Gravity {
+		t.Fatal("benchmark 路径必须使用编译默认值，不得读用户配置")
+	}
+}
+
+func TestCaptureIgnoresUserConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	custom := config.Defaults()
+	custom.Physics.Gravity = 1
+	if err := custom.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	t.Cleanup(func() { config.Defaults().Apply() })
+
+	effective, err := resolveConfig(mainOptions{ConfigPath: path, CaptureDir: "out"})
+	if err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if effective.Physics.Gravity != config.Defaults().Physics.Gravity {
+		t.Fatal("抓帧路径必须使用编译默认值，不得读用户配置")
+	}
+}

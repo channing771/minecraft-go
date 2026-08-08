@@ -548,6 +548,7 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 	deadline := time.Now().Add(timeout)
 	started := time.Now()
 	var snapshotDuration time.Duration
+	viewDistance := app.render.ViewDistance
 	wantedChunks := (2*(viewDistance+1) + 1) * (2*(viewDistance+1) + 1)
 	lastLog := time.Time{}
 	for {

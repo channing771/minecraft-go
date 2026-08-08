@@ -17,16 +17,15 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
+	"minecraft-go/internal/logging"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
 	"minecraft-go/internal/profile"
 )
 
-const (
-	viewDistance           = 32
-	steadyFrameMeshWorkMax = 64
-)
+const steadyFrameMeshWorkMax = 64
 
 func init() {
 	runtime.LockOSThread()
@@ -41,6 +40,11 @@ type mainOptions struct {
 	// 与 applicationOptions 无关：它只影响 runCapture 的行为，从
 	// runWithDependencies 直接传给 dependencies.runCapture。
 	UpdateGolden bool
+	// ConfigPath 是调参配置文件路径；留空表示使用 config.DefaultPath()。
+	ConfigPath string
+	// Dev 为真时启用调试面板（F3 切换）。它只门控面板可用性，不门控配置文件
+	// 是否生效——配置文件里调过的值无论 Dev 是否为真都同样生效。
+	Dev bool
 }
 
 type runDependencies struct {
@@ -62,6 +66,8 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	name := flags.String("name", "", "玩家显示名")
 	capture := flags.String("capture", "", "视觉抓帧输出目录；非空时走无头抓帧模式")
 	updateGolden := flags.Bool("update-golden", false, "把本次抓帧结果写入 golden 基线")
+	dev := flags.Bool("dev", false, "启用调试面板（F3 切换）")
+	configPath := flags.String("config", "", "配置文件路径，留空使用默认路径")
 	if err := flags.Parse(args); err != nil {
 		return mainOptions{}, err
 	}
@@ -123,7 +129,27 @@ func parseMainOptions(args []string) (mainOptions, error) {
 		}(),
 		CaptureDir:   *capture,
 		UpdateGolden: *updateGolden,
+		ConfigPath:   *configPath,
+		Dev:          *dev,
 	}, nil
+}
+
+// resolveConfig 决定本次运行的生效配置。
+//
+// benchmark 与抓帧路径强制使用编译默认值：这两条路径的产出会与基线比对，
+// 若读入本机配置，结论就取决于开发者本机的配置文件内容而非代码。
+func resolveConfig(options mainOptions) (config.Config, error) {
+	if options.Application.Benchmark || options.CaptureDir != "" {
+		return config.Defaults(), nil
+	}
+	path := options.ConfigPath
+	if path == "" {
+		var err error
+		if path, err = config.DefaultPath(); err != nil {
+			return config.Config{}, err
+		}
+	}
+	return config.Load(path)
 }
 
 func run(args []string) error {
@@ -148,6 +174,20 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 		}
 		options.Application.Identity = &identity
 	}
+
+	effective, err := resolveConfig(options)
+	if err != nil {
+		return fmt.Errorf("加载配置: %w", err)
+	}
+	// 内层 handler 的 Level 固定为 LevelDebug：过滤全部交给 logging 包的包装器，
+	// 内层不得二次过滤，否则模块放宽会失效。
+	logging.Install(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}), effective.Logging)
+	effective.Apply()
+	options.Application.Dev = options.Dev
+	options.Application.Render = effective.Render
+
 	app, err := dependencies.newApplication(options.Application)
 	if err != nil {
 		return fmt.Errorf("启动失败: %w", err)
@@ -244,9 +284,13 @@ func runInteractive(app *application) error {
 		captured := app.window.CursorCaptured()
 		if captured && !justCaptured && !app.inventoryOpen {
 			mouseX, mouseY := app.window.CursorPos()
+			// baseMouseSensitivity 是键鼠灵敏度默认为 1 时对应的原始弧度/像素系数；
+			// Render.MouseSensitivity 是相对该基线的倍率，默认值 1 保持行为不变。
+			const baseMouseSensitivity = 0.002
+			sensitivity := baseMouseSensitivity * app.render.MouseSensitivity
 			app.camera.Rotate(
-				float32(mouseX-lastMouseX)*0.002,
-				float32(lastMouseY-mouseY)*0.002,
+				float32(mouseX-lastMouseX)*sensitivity,
+				float32(lastMouseY-mouseY)*sensitivity,
 			)
 			lastMouseX, lastMouseY = mouseX, mouseY
 		}

@@ -15,7 +15,9 @@ import (
 	"strings"
 	"syscall"
 
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
+	"minecraft-go/internal/logging"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
@@ -27,6 +29,8 @@ type options struct {
 	World      string
 	Seed       int64
 	MaxPlayers int
+	// Config 是调参配置文件路径；留空表示使用 config.DefaultPath()。
+	Config string
 }
 
 type mcgodHost interface {
@@ -47,6 +51,7 @@ func parseOptions(args []string) (options, error) {
 	world := flags.String("world", "worlds/default", "世界存档目录")
 	seed := flags.Int64("seed", 42, "新世界种子")
 	maxPlayers := flags.Int("max-players", 8, "最大玩家数（1..8，默认 8）")
+	configPath := flags.String("config", "", "配置文件路径，留空使用默认路径")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -68,7 +73,21 @@ func parseOptions(args []string) (options, error) {
 	}
 	return options{
 		Listen: listenAddress, World: filepath.Clean(*world), Seed: *seed, MaxPlayers: *maxPlayers,
+		Config: *configPath,
 	}, nil
+}
+
+// resolveConfig 决定 mcgod 本次运行的生效配置：Config 非空时从该路径加载，
+// 否则用默认路径。mcgod 不消费渲染组，调用方应只取 Logging/Physics/Sim。
+func resolveConfig(opts options) (config.Config, error) {
+	path := opts.Config
+	if path == "" {
+		var err error
+		if path, err = config.DefaultPath(); err != nil {
+			return config.Config{}, err
+		}
+	}
+	return config.Load(path)
 }
 
 func defaultDependencies() dependencies {
@@ -92,6 +111,17 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 	if err != nil {
 		return err
 	}
+	effective, err := resolveConfig(options)
+	if err != nil {
+		return fmt.Errorf("加载配置: %w", err)
+	}
+	// 内层 handler 的 Level 固定为 LevelDebug：过滤全部交给 logging 包的包装器，
+	// 内层不得二次过滤，否则模块放宽会失效。
+	logging.Install(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}), effective.Logging)
+	// mcgod 不消费渲染组：effective.Render 就地丢弃，只 Apply physics 与 sim。
+	effective.Apply()
 	dependencies := mergeDependencies(injected)
 	store, err := dependencies.openDisk(ctx, options.World, storage.OpenOptions{Create: storage.Metadata{
 		FormatVersion:  2,
@@ -134,7 +164,9 @@ func mergeDependencies(injected dependencies) dependencies {
 func runSignal(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return run(ctx, args, defaultDependencies())
+	// 传空 dependencies：run 内部在 logging.Install 之后才调用 mergeDependencies，
+	// 这样默认 logger 取到的是刚装配的 slog.Default()，而不是 Install 之前的旧默认值。
+	return run(ctx, args, dependencies{})
 }
 
 func main() {

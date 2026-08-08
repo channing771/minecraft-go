@@ -234,3 +234,23 @@ func (store *mcgodClosingStore) Close() error {
 	store.closes++
 	return store.WorldStore.Close()
 }
+
+func TestParseOptionsAcceptsConfig(t *testing.T) {
+	options, err := parseOptions([]string{"--config", "/tmp/x.json"})
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if options.Config != "/tmp/x.json" {
+		t.Fatalf("Config = %q", options.Config)
+	}
+}
+
+func TestParseOptionsConfigDefaultsEmpty(t *testing.T) {
+	options, err := parseOptions([]string{})
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if options.Config != "" {
+		t.Fatalf("Config 默认应为空（表示使用默认路径），实际 %q", options.Config)
+	}
+}

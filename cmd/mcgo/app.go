@@ -17,6 +17,7 @@ import (
 
 	"minecraft-go/internal/assets"
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
@@ -35,6 +36,11 @@ type applicationOptions struct {
 	Identity           *network.Identity
 	// CaptureDir 非空时进入视觉抓帧模式：走无头设备，按固定场景抓帧写 PNG。
 	CaptureDir string
+	// Dev 为真时启用调试面板（F3 切换）；不影响配置文件是否生效。
+	Dev bool
+	// Render 是渲染相关的生效配置（视距、FOV、鼠标灵敏度），由 cmd/mcgo 从
+	// 加载后的 config.Config 下传并自行消费——config.Config.Apply 不处理它。
+	Render config.Render
 }
 
 type application struct {
@@ -91,6 +97,9 @@ type application struct {
 	clientCloseOnce         sync.Once
 	clientCloseErr          error
 	releaseResources        func()
+	// render 是渲染相关的生效配置快照，在构造时从 applicationOptions.Render 复制，
+	// 供渲染热路径（DropOutside 视距、鼠标灵敏度等）读取，不随配置文件热更新。
+	render config.Render
 }
 
 type applicationWindow interface {
@@ -315,7 +324,7 @@ func newApplicationWithDependencies(
 	var err error
 	ticks, saves := newPerformanceRecorders(options.Benchmark)
 	config := server.DefaultConfig(options.Seed)
-	config.ViewRadius = viewDistance + 1
+	config.ViewRadius = options.Render.ViewDistance + 1
 	config.TrustedObserver = options.Benchmark
 	config.TickObserver = ticks.add
 	if saves != nil {
@@ -450,7 +459,7 @@ func newApplicationWithDependencies(
 	camera := client.Camera{
 		Pos:    mgl32.Vec3{0, 110, 0},
 		Pitch:  -0.25,
-		FovY:   mgl32.DegToRad(70),
+		FovY:   mgl32.DegToRad(options.Render.FovDegrees),
 		Aspect: float32(width) / float32(height),
 		Near:   0.1,
 		Far:    2000,
@@ -479,6 +488,7 @@ func newApplicationWithDependencies(
 		loadedChunks:    make(map[core.ChunkPos]struct{}),
 		ticks:           ticks,
 		saves:           saves,
+		render:          options.Render,
 		benchmarkTransport: func() string {
 			if options.BenchmarkTransport == "" {
 				return "memory"
@@ -952,7 +962,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
 		}
 	}
-	a.renderer.DropOutside(a.center, viewDistance)
+	a.renderer.DropOutside(a.center, a.render.ViewDistance)
 
 	target := a.colorView
 	if a.surface != nil {
