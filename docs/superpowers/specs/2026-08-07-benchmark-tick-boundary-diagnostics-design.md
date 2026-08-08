@@ -39,6 +39,8 @@ for completed := 1; completed <= benchmarkServerMeasuredTicks; completed++ {
     stats := readStats()                // ← 采样在报错之后
 ```
 
+> 以上摘录是 CI 四次失败发生时的代码状态；`benchmarkServerInputDeadline` 的签名已在本变更中增加第二个参数 `queueDepth int`，摘录本身不改。
+
 因此**这 50 毫秒不是被测试侧的采样工作吃掉的**。CI 上那四条报错走的正是这一条路径（`fmt.Errorf("measured tick %d: %w", ...)` 包裹 `benchmarkServerInputDeadline` 的错误）。
 
 预算覆盖的完整链条：
@@ -96,13 +98,19 @@ measured tick 74: server input boundary 已错过 50ms tick deadline
 
 其余四项负责在"深度 = 0"时进一步区分"tick 自身慢"与"回调链路被晾"。
 
+**这套判别力仅在站点 A 成立**——即信号刚从 channel 取出、测试侧还没做任何工作的那一档（消息格式 `measured tick %d: ...`，不带站点标记）。四处失败站点里另外两处（站点 B/D 的内联检查）不满足这个前提，见下节。
+
 ## 6. 拿到数据后怎么判
+
+**下表只适用于站点 A**（`benchmarkServerInputDeadline` 内部及其两个调用点，消息里不带站点标记）：
 
 | 数据形态 | 结论 | 下一步 |
 | --- | --- | --- |
 | 队列深度 > 0 | 测量无效，测试侧落后 | 做"测量无效 vs 越界"分离：探针区分两种返回，界限断言仍是硬失败，测量无效则有限重试后跳过并大声记录 |
 | 深度 = 0，`duration` 接近或超过 50ms | **服务端真的慢** | 真性能问题，独立调查，**不得**用跳过掩盖 |
 | 深度 = 0，`duration` 小，调度→发布大 | 服务端回调链路被晾 | 同样走"测量无效"分离 |
+
+**带站点标记的两处失败（站点 B/D）不适用本表。** 站点 B（消息标注"（采样后、boundary 前）"）位于一段非阻塞 drain 之后——能走到那里就意味着刚才 `len(epoch.signals)` 为 0，所以站点 B 报出的队列深度结构上几乎恒为 0，即使耗时其实是被测试侧 `readStats()`/`readRSS()` 吃掉的，也会被本表误读成"测试侧是及时的，时间花在服务端侧"。站点 D（消息标注"（boundary 完成后）"）同理：此时已过 `scheduled+50ms`，下一 tick 的合法发布会让深度变成 1，容易被误读成"测试 goroutine 落后"。站点 B/D 的深度数字仍然如实输出，只是不能直接套用上表的结论——需要结合"该处位于 `readStats`/`readRSS` 之后"或"位于 boundary 完成之后"这个位置信息单独判读。
 
 **"测量无效则重试"必须与"断言失败则重试"在代码里泾渭分明。** 前者是承认这次没测成，后者是掩盖回归。二者混淆会让门禁退化成"红了就再跑一次"。这条在实施时是硬约束，不是建议。
 

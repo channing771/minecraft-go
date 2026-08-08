@@ -20,6 +20,8 @@ stats := readStats()                    // ← 采样在报错之后
 
 CI 上那四条报错的文本正是 `benchmarkServerInputDeadline` 的返回值被 `fmt.Errorf("measured tick %d: %w", ...)` 包裹后的形态。
 
+> 以上摘录是 CI 四次失败发生时的代码状态；`benchmarkServerInputDeadline` 的签名已在本变更中增加第二个参数 `queueDepth int`，摘录本身不改。
+
 因此 50 毫秒消耗在「服务端调度 tick」到「测试 goroutine 得以从 channel 取出该信号」之间，测试侧此时还没做任何采样工作。这把候选机制从"任何环节"收窄到三个。
 
 ## 为什么队列深度是最有判别力的一项
@@ -32,6 +34,8 @@ CI 上那四条报错的文本正是 `benchmarkServerInputDeadline` 的返回值
 - **深度 = 0** ⇒ 测试侧是及时的 ⇒ 时间花在服务端侧 ⇒ 由 `duration` 与"调度→发布"区分是 tick 自身慢还是回调链路被晾。
 
 **已知的不精确**：取的是取出信号**之后**的 `len(epoch.signals)`，与"取出那一刻缓冲里有多少"差一个。方向与判别力不受影响——大于 0 仍然坐实测试侧落后。该说明写进 `formatTickBoundaryOverrun` 的注释，避免日后误读为精确队列长度。
+
+**判别力的适用范围**：上面这套推理只在信号刚从 channel 取出、测试侧还没做任何工作时成立——也就是站点 A（`benchmarkServerInputDeadline` 内部及其两个调用点，消息格式 `measured tick %d: ...`，不带站点标记）。站点 B（内联检查，在 `readStats()`/`readRSS()` 之后、boundary 执行之前）前面刚做完一次非阻塞 drain，能走到那里就意味着 `len(epoch.signals)` 刚被读成 0，深度因此结构性地几乎恒为 0，即使耗时确实是被测试侧的 `readStats`/`readRSS` 吃掉的。站点 D（内联检查，boundary 完成之后）同理：此时已过 `scheduled+50ms`，下一 tick 的合法发布会让深度变成 1，容易被误读成"测试 goroutine 落后"。因此站点 B 与站点 D 的消息分别标注"（采样后、boundary 前）"与"（boundary 完成后）"，且**不适用** `docs/superpowers/specs/2026-08-07-benchmark-tick-boundary-diagnostics-design.md` §6 的判定表——判定表只对站点 A 成立。
 
 ## 为什么把格式化抽成纯函数
 

@@ -375,7 +375,15 @@ type benchmarkServerWindowSummary struct {
 // 分支等于没写。
 //
 // 队列深度是这几项里判别力最强的一项：大于 0 说明缓冲里还压着别的信号、
-// 测试 goroutine 确实落后了；等于 0 则说明时间花在服务端侧。
+// 测试 goroutine 确实落后了；等于 0 则说明时间花在服务端侧。取的是取出信号
+// 之后的 len(epoch.signals)，与"取出那一刻"差一个，但方向与判别力不变。
+//
+// 这套判别力只在信号刚取出、测试侧还没做任何工作时成立——即消息里不带站点
+// 标记的那一档（`measured tick %d: ...`）。带"（采样后、boundary 前）"标记的
+// 调用点前面刚做完一次非阻塞 drain，深度结构性地几乎恒为 0；带"（boundary
+// 完成后）"标记的调用点里，下一 tick 的合法发布会让深度变成 1。这两处不能
+// 直接套用 docs/superpowers/specs/2026-08-07-benchmark-tick-boundary-diagnostics-design.md
+// §6 的判定表。
 func formatTickBoundaryOverrun(
 	signal benchmarkServerTickSignal,
 	now time.Time,
@@ -485,7 +493,7 @@ func runBenchmarkServerMeasuredWindow(
 			}
 			if now := time.Now(); !now.Before(inputDeadline) {
 				return result, fmt.Errorf(
-					"measured tick %d: %s", completed,
+					"measured tick %d（采样后、boundary 前）: %s", completed,
 					formatTickBoundaryOverrun(signal, now, len(epoch.signals)),
 				)
 			}
