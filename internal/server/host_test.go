@@ -763,7 +763,7 @@ func playerIdentity(number byte) network.Identity {
 
 func waitReady(t *testing.T, host *Host, login testLogin) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		host.mu.Lock()
 		active := host.activeByPlayer[login.Identity.PlayerID]
