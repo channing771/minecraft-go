@@ -595,7 +595,10 @@ func TestCanonicalCountingServerStreamFreezesMeasurementAtSendStart(t *testing.T
 }
 
 func TestScenarioV7EightSessionServerProbeIsRealAndBounded(t *testing.T) {
-	multiplayer, ticks, err := measureMultiplayerServerProbe(10 * time.Second)
+	// 收集预算而非阈值：measureMultiplayerServerProbe 要求 >= 10s，
+	// 此前恰好传 10s，按构造零余量——这是该测试成为 CI 首要假失败源
+	// 的成因（六次红里占三次）。放宽预算不动下面任何一条界限断言。
+	multiplayer, ticks, err := measureMultiplayerServerProbe(30 * time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
