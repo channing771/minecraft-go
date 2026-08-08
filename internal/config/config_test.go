@@ -297,6 +297,7 @@ func TestFieldsCoverEveryTunable(t *testing.T) {
 	if len(fields) == 0 {
 		t.Fatal("Fields 不得为空")
 	}
+	defaults := config.Defaults()
 	seen := make(map[string]bool, len(fields))
 	byGroup := map[string]map[string]bool{"physics": {}, "sim": {}, "render": {}}
 	for _, field := range fields {
@@ -310,6 +311,11 @@ func TestFieldsCoverEveryTunable(t *testing.T) {
 		}
 		if field.Step <= 0 {
 			t.Fatalf("%s 的步长必须为正，实际 %v", key, field.Step)
+		}
+		// 默认值必须落在自己的区间内：否则面板上第一次按方向键就会把值
+		// 弹回区间边界，Load 也会在用户什么都没改的情况下报"越界已钳制"。
+		if value := defaultFieldFloat(t, defaults, field); value < field.Min || value > field.Max {
+			t.Errorf("%s 的默认值 %v 落在区间 [%v, %v] 之外", key, value, field.Min, field.Max)
 		}
 		names, ok := byGroup[field.Group]
 		if !ok {
@@ -334,6 +340,38 @@ func TestFieldsCoverEveryTunable(t *testing.T) {
 	assertFieldsMatchStruct(t, "physics", reflect.TypeOf(physics.Tunables{}), byGroup["physics"])
 	assertFieldsMatchStruct(t, "sim", reflect.TypeOf(sim.Tunables{}), byGroup["sim"])
 	assertFieldsMatchStruct(t, "render", reflect.TypeOf(config.Render{}), byGroup["render"])
+}
+
+// defaultFieldFloat 读出 field 在 defaults 里的取值并统一成 float64，
+// 命名规则同 config.Fields()：小写驼峰的 Name 对应首字母大写的结构体字段。
+func defaultFieldFloat(t *testing.T, defaults config.Config, field config.Field) float64 {
+	t.Helper()
+	var group reflect.Value
+	switch field.Group {
+	case "physics":
+		group = reflect.ValueOf(defaults.Physics)
+	case "sim":
+		group = reflect.ValueOf(defaults.Sim)
+	case "render":
+		group = reflect.ValueOf(defaults.Render)
+	default:
+		t.Fatalf("未知分组 %s", field.Group)
+	}
+	value := group.FieldByName(strings.ToUpper(field.Name[:1]) + field.Name[1:])
+	if !value.IsValid() {
+		t.Fatalf("%s.%s 在结构体中不存在", field.Group, field.Name)
+	}
+	switch value.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return value.Float()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(value.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(value.Uint())
+	default:
+		t.Fatalf("%s.%s 的类型 %s 不是数值", field.Group, field.Name, value.Kind())
+		return 0
+	}
 }
 
 // assertFieldsMatchStruct 双向校验：structType 的每个字段都在 fieldNames 中

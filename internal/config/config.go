@@ -110,7 +110,10 @@ func Load(path string) (Config, error) {
 		}
 	}
 	if version != CurrentVersion {
-		return Config{}, fmt.Errorf("config: 不支持的配置文件版本 %d，期望 %d", version, CurrentVersion)
+		return Config{}, fmt.Errorf(
+			"config: 不支持的配置文件版本 %d，期望 %d；请升级到能识别该版本的程序，"+
+				"或删除 %s 让程序按编译默认值重新开始",
+			version, CurrentVersion, path)
 	}
 	cfg.Version = CurrentVersion
 

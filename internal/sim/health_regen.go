@@ -18,9 +18,10 @@ const defaultRegenIntervalTicks = 40
 // regenDelayTicks、regenIntervalTicks 由调用方传入本 tick 的快照值；playerState 没有
 // 引擎引用，这个方法本身绝不读取 ActiveTunables。
 //
-// 除零安全依赖调用方已把 regenIntervalTicks 钳制在 >= 1（Task 6 的
-// sim.RegenIntervalTicks 区间钳制）：下面的取模运算以它为除数，
-// 未钳制的 0 会在此处触发权威 tick 内 panic。
+// 除零安全依赖 regenIntervalTicks 已被钳制在 >= 1：下面的取模运算以它为除数，
+// 未钳制的 0 会在此处触发权威 tick 内 panic。该钳制由本包的 SetTunables 兜底
+// （internal/config 加载配置时也会钳一遍，但 sim 按架构约束不得导入 config，
+// 不能把不变量托付给隔壁包）。
 func (player *playerState) advanceHealthRegen(regenDelayTicks, regenIntervalTicks uint32) bool {
 	if player.health >= core.MaxHealth {
 		return false

@@ -40,15 +40,18 @@ func DefaultTunables() Tunables {
 	}
 }
 
-var active atomic.Pointer[Tunables]
+// activeTunables 持有当前生效参数。名字带 Tunables 后缀是因为包内还有
+// activeXxx 之外的诸多短名局部变量，裸 active 在调用点读不出它指的是什么。
+var activeTunables atomic.Pointer[Tunables]
 
 func init() {
 	defaults := DefaultTunables()
-	active.Store(&defaults)
+	activeTunables.Store(&defaults)
 }
 
-// SetTunables 整体替换生效参数。
-func SetTunables(tunables Tunables) { active.Store(&tunables) }
+// SetTunables 整体替换生效参数。新参数从下一次 Step 起生效（Step 在函数入口取
+// 一次快照，进行中的那一步不受影响），可以从任意 goroutine 调用。
+func SetTunables(tunables Tunables) { activeTunables.Store(&tunables) }
 
 // ActiveTunables 返回当前生效参数的快照。
-func ActiveTunables() Tunables { return *active.Load() }
+func ActiveTunables() Tunables { return *activeTunables.Load() }

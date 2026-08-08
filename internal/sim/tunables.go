@@ -76,8 +76,24 @@ func init() {
 	active.Store(&defaults)
 }
 
-// SetTunables 整体替换生效参数。
-func SetTunables(tunables Tunables) { active.Store(&tunables) }
+// SetTunables 整体替换生效参数。新参数从下一次 Engine.Step 起生效（引擎在
+// tick 入口取一次快照），可以从任意 goroutine 调用。
+//
+// 后置条件：写入的快照一定满足 RegenIntervalTicks >= 1 且
+// SpawnRadius ∈ [minSpawnRadius, maxSpawnRadius]，越界入参被钳制而不是被拒绝。
+//
+// 这两条不是重复劳动。advanceHealthRegen 拿 RegenIntervalTicks 当取模除数，
+// 0 会在权威 tick 内 panic；spawnCandidates 按 (SpawnRadius*2+1)² 分配切片，
+// 不钳制会触发巨额分配。internal/config 在加载时按同一区间钳制过一遍，但
+// archcheck 禁止 sim 导入 config，那道钳制是隔着一个包、靠约定维持的——
+// 拥有这两条不变量的是本包，兜底就必须落在本包。
+func SetTunables(tunables Tunables) {
+	if tunables.RegenIntervalTicks < 1 {
+		tunables.RegenIntervalTicks = 1
+	}
+	tunables.SpawnRadius = min(max(tunables.SpawnRadius, minSpawnRadius), maxSpawnRadius)
+	active.Store(&tunables)
+}
 
 // ActiveTunables 返回当前生效参数的快照。
 func ActiveTunables() Tunables { return *active.Load() }

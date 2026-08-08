@@ -15,6 +15,14 @@ import (
 // 不得再以导出常量暴露——见 internal/archcheck 的 TestTunableConstantsAreNotExported。
 const defaultSpawnRadius = int32(16)
 
+// minSpawnRadius 与 maxSpawnRadius 是出生扫描半径的硬区间，与
+// internal/config 的 Fields() 里 sim.spawnRadius 的 Min/Max 一致。
+// SetTunables 按这两个界兜底，见那里的说明。
+const (
+	minSpawnRadius = int32(1)
+	maxSpawnRadius = int32(64)
+)
+
 type spawnColumn struct {
 	X, Z int32
 }
@@ -22,8 +30,10 @@ type spawnColumn struct {
 // spawnCandidates 按到 anchor 的距离升序枚举半径 radius 内的候选出生列。
 // radius 由调用方传入本 tick 的快照值，这个自由函数本身绝不读取 ActiveTunables。
 //
-// 容量安全依赖调用方已把 radius 钳制在 1..64（Task 6 的 sim.SpawnRadius 区间钳制）：
-// 下面的容量计算随 radius 平方增长，未钳制的大数会在此处触发一次巨额分配。
+// 容量安全依赖 radius 已被钳制在 [minSpawnRadius, maxSpawnRadius]：下面的容量
+// 计算随 radius 平方增长，未钳制的大数会在此处触发一次巨额分配。该钳制由本包的
+// SetTunables 兜底（internal/config 加载配置时也会按同一区间钳一遍，但 sim 按
+// 架构约束不得导入 config，不能把不变量托付给隔壁包）。
 func spawnCandidates(anchor core.ChunkPos, radius int32) []spawnColumn {
 	anchorX := anchor.X << core.SectionShift
 	anchorZ := anchor.Z << core.SectionShift

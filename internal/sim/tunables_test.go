@@ -35,6 +35,33 @@ func TestActiveTunablesDefaultsToDefaultTunables(t *testing.T) {
 	}
 }
 
+// TestSetTunablesClampsAuthorityTickInvariants 证明 SetTunables 兜住了两条
+// 直接决定权威 tick 安全的不变量：RegenIntervalTicks 是取模除数（0 会 panic），
+// SpawnRadius 决定一次平方级分配（不钳制会触发巨额分配）。
+//
+// 这两条区间在 internal/config 里也有一份，但 archcheck 禁止 sim 导入 config，
+// 靠约定隔着一个包维持不变量是不够的。
+func TestSetTunablesClampsAuthorityTickInvariants(t *testing.T) {
+	t.Cleanup(func() { SetTunables(DefaultTunables()) })
+
+	unsafe := DefaultTunables()
+	unsafe.RegenIntervalTicks = 0
+	unsafe.SpawnRadius = 100000
+	SetTunables(unsafe)
+	if got := ActiveTunables().RegenIntervalTicks; got < 1 {
+		t.Errorf("RegenIntervalTicks = %d，必须钳到 >= 1（否则取模除零 panic）", got)
+	}
+	if got := ActiveTunables().SpawnRadius; got != maxSpawnRadius {
+		t.Errorf("SpawnRadius = %d，必须钳到上界 %d", got, maxSpawnRadius)
+	}
+
+	unsafe.SpawnRadius = -5
+	SetTunables(unsafe)
+	if got := ActiveTunables().SpawnRadius; got != minSpawnRadius {
+		t.Errorf("SpawnRadius = %d，必须钳到下界 %d", got, minSpawnRadius)
+	}
+}
+
 // TestEngineRefreshesSnapshotAtTickStart 证明快照在 tick 入口刷新，
 // 且同一 tick 内不再变化。
 func TestEngineRefreshesSnapshotAtTickStart(t *testing.T) {
