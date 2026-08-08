@@ -78,6 +78,8 @@ func measureMultiplayerServerProbe(duration time.Duration) (...) {
 
 因此把 `10s` 改成 `30s` 不是放宽阈值，符合"不得放宽既有正确性、资源上限或性能门禁"的约束。
 
+**实测订正原始诊断的措辞。** 改后 `go test ./cmd/mcgo -run "^TestScenarioV7EightSessionServerProbeIsRealAndBounded$" -count=3` 三次全部通过，单次耗时约 **11 秒**。这说明采样收集本身就需要约 11 秒，而此前的预算恰好是 10 秒——**不是"余量薄"，是结构性不够**：预算比实际所需还短，不存在能让它稳定通过的余量区间，只要机器稍慢就必然跑到下限之下。把预算改到 30s 后仍只用到约 11 秒，新余量约 19 秒（约 2.7×），且界限断言（`ServerOutboundBytes`、`InterestDiff.Samples`、`ticks.Frames`、`OutboxHighWater`、`PlayerJobsHighWater`、`PlayerDoneHighWater`、`PeakRSSBytes`）逐字未动。
+
 ## 5. 期限耗尽：活性等待的余量
 
 ### 期限普查：不要用正则枚举，用超集
@@ -112,7 +114,7 @@ grep -rnoE "[a-zA-Z][a-zA-Z0-9_]*\([^()]*, *[0-9]* ?\*? ?time\.(Second|Milliseco
   | grep -vE "context\.With(Timeout|Deadline)|time\.(After|Now|Sleep|NewTimer|NewTicker)"
 ```
 
-第四种在 `internal/server` 命中 31 处：`shutdownWithDeadline` 28、`nextTimer` 3（另有 `connectTask16ConcurrentClients` 2 处在别处形态）。
+第四种在 `internal/server` 命中 32 处（实测订正：brief 原估 31 处，正则里 `[^()]*` 排除了实参含括号的调用，漏掉 `connectTask16ConcurrentClients(t, listener.Addr(), requests, 10*time.Second)` 一处）：`shutdownWithDeadline` 27（brief 原估 28，逐处核对后订正）、`nextTimer` 3、`connectTask16ConcurrentClients` 2。
 
 **第五种：对时长数值本身的断言，不是期限。** `heartbeat_test.go` 使用假时钟，`clock.nextTimer(t, 5*time.Second).fire()` 断言的是"被测代码调度了一个 5 秒的定时器"。它在语法上与第四种无法区分，**只能靠读断言意图分辨**；盲替换会让测试静默失去意义而不报错——这是本变更最危险的一类误改，且 `context.DeadlineExceeded` 判据抓不到它。
 
@@ -181,6 +183,31 @@ grep -rn "context.DeadlineExceeded" internal/server/*_test.go
 **1 秒档必须归 `waitDeadline` 而不是 `shortWaitDeadline`。** 它有 95 处（77 处 `time.After` + 18 处轮询），既最密集又最紧；只抬到 5s 仅有 5× 余量。按名字直觉把"1 秒"归进"short"是本设计最容易踩的分类错误。
 
 **常量定义两份，不建共享包。** `internal/server` 的测试跨两个 Go 包——41 个文件是 `package server`，15 个是 `package server_test`——未导出标识符无法跨包共享。为三个常量新建 `internal/` 包再去 `internal/archcheck/deps_test.go` 登记依赖，机械成本高于它解决的问题。
+
+### 实测结果：套件耗时、逐处判定与反向验证
+
+**套件耗时改前/改后对比**（`go test ./internal/server -race -count=1`）：
+
+| 阶段 | 耗时 |
+| --- | --- |
+| Task 1 基线（引入常量后，尚未替换站点） | 115.256s |
+| Task 2 后（秒档 272 处机械替换完成） | 115.624s |
+| Task 3 期间五次跑 | 落在 114.2s–115.9s 区间 |
+
+耗时全程无系统性变化，"耗时显著变长"这一误分类哨兵从未响过——没有站点因为被误判为活性等待而白等。
+
+**Task 3 超集审计与分类结论。** `grep -rn "time\.\(Second\|Millisecond\|Minute\)" internal/server/*_test.go` 命中 79 处，减去 6 处常量定义本身，得到 **73 处真实待审站点**，逐处判定：
+
+| 组 | 站点数 | 判定为活性等待并抬高 | 保持原值 |
+| --- | --- | --- | --- |
+| 毫秒档 | 24 | 6 | 18 |
+| 助手参数形态 | 32 | 29 | 3（时长值断言与被测配置，绝不动） |
+| 超集审计新增 | 6 | 6 | 0 |
+| 小计（活性等待抬高） | — | **41** | — |
+
+另有 **7 处 `config.ShutdownTimeout` 死配置被删除**——这 7 行不是活性等待，抬高与否都不影响任何计时行为（`ShutdownTimeout` 在这些测试路径上从未被消费），删除是清理死代码，**不修复任何抖动**，不计入"抬高"也不计入假失败修复。
+
+**Task 5 Step 1 反向验证。** 把两份 `deadline_test.go` / `deadline_external_test.go` 中的 `waitDeadline` 临时改成 `1 * time.Millisecond` 后，`go test ./internal/server -count=1` 出现 **99 处 `--- FAIL`**，证明该常量确实被大量测试引用、不是死代码；恢复后 `git diff --stat` 两份文件均无输出。
 
 ### 收益的诚实估计
 
@@ -263,7 +290,7 @@ default:
 没有本地复现手段，因此：
 
 1. **推理**：活性等待是放弃期限，抬高在快机器上零成本、零风险。
-2. **反向验证**：把常量临时改成 `1ms`，确认对应测试变红——证明期限确实在生效，不是死代码。
+2. **反向验证**：把常量临时改成 `1ms`，确认对应测试变红——证明期限确实在生效，不是死代码。实测（Task 5 Step 1）：`waitDeadline` 改成 `1 * time.Millisecond` 后 `go test ./internal/server -count=1` 出现 99 处 `--- FAIL`，恢复后两份文件 `git diff` 均干净。
 3. **统计观察**：落地后连续观察 CI 运行。这是唯一能证明收益的手段，且它只能证伪不能证实。
 
 **不再声称拥有 A/B 手段。** 承认"无法本地复现"比伪造一个错误的复现要有价值得多。
