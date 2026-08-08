@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -140,3 +142,54 @@ func (endpoint *blockingServerEndpoint) Close() error {
 
 var _ network.ServerEndpoint = (*recordingServerEndpoint)(nil)
 var _ network.ServerEndpoint = (*blockingServerEndpoint)(nil)
+
+func TestDisconnectCodeForMapsNamedCauses(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want network.DisconnectCode
+	}{
+		{"心跳超时", errHeartbeatTimeout, network.DisconnectTimeout},
+		{"心跳回复无效", errInvalidHeartbeatReply, network.DisconnectProtocolViolation},
+		{"未知客户端消息", errUnknownClientMessage, network.DisconnectProtocolViolation},
+		{"outbox 已满", errSessionOutboxFull, network.DisconnectSlowClient},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			code, ok := disconnectCodeFor(test.err)
+			if !ok {
+				t.Fatalf("具名原因 %v 未被映射", test.err)
+			}
+			if code != test.want {
+				t.Fatalf("code = %d, want %d", code, test.want)
+			}
+		})
+	}
+}
+
+func TestDisconnectCodeForRejectsEverythingElse(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{"nil", nil},
+		{"客户端已关闭", network.ErrClosed},
+		{"上下文取消", context.Canceled},
+		{"包装了 ErrClosed 的错误", fmt.Errorf("writer: %w", network.ErrClosed)},
+		{"writer 写失败", errors.New("server: write failed")},
+		{"writer panic", errors.New("server: session writer panic")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if code, ok := disconnectCodeFor(test.err); ok {
+				t.Fatalf("非白名单原因 %v 被映射成 code=%d", test.err, code)
+			}
+		})
+	}
+}
+
+func TestDisconnectCodeForUnwrapsNamedCauses(t *testing.T) {
+	wrapped := fmt.Errorf("session %d: %w", testSessionID, errHeartbeatTimeout)
+	code, ok := disconnectCodeFor(wrapped)
+	if !ok || code != network.DisconnectTimeout {
+		t.Fatalf("包装后的具名原因未被识别: code=%d ok=%v", code, ok)
+	}
+}

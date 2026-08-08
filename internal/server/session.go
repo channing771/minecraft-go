@@ -280,6 +280,38 @@ func (current *session) shutdown() {
 	})
 }
 
+// disconnectCodeFor 把会话关闭原因映射成协议的 DisconnectCode。
+// 第二个返回值为 false 表示不应向客户端发送断开原因。
+//
+// 这里刻意用白名单而不是黑名单：只有四个具名原因会发送。黑名单会在将来
+// 新增关闭原因时默认放行，而"默认发送"恰恰是风险所在——writeLoop 自身
+// Send 失败或 panic 时也会调用 fail，此时 socket 已不可信，再发一次不仅
+// 徒劳，还会在 writeLoop 的调用栈内构成重入。白名单让这两种情况自然落在
+// 不发送的一侧，无需额外判断。
+//
+// network.ErrClosed 与 context.Canceled 同样不发送：客户端已经走了，
+// 发了没人收。
+//
+// DisconnectServerShutdown 与 DisconnectInternalError 不在此表内：
+// 关服走 detachSessionLocked(id, generation, nil)，cause 为 nil，
+// 根本不经过带具名错误的 fail；而没有任何具名原因映射到 InternalError。
+func disconnectCodeFor(err error) (network.DisconnectCode, bool) {
+	switch {
+	case err == nil:
+		return 0, false
+	case errors.Is(err, errHeartbeatTimeout):
+		return network.DisconnectTimeout, true
+	case errors.Is(err, errInvalidHeartbeatReply):
+		return network.DisconnectProtocolViolation, true
+	case errors.Is(err, errUnknownClientMessage):
+		return network.DisconnectProtocolViolation, true
+	case errors.Is(err, errSessionOutboxFull):
+		return network.DisconnectSlowClient, true
+	default:
+		return 0, false
+	}
+}
+
 func (current *session) fail(err error) {
 	current.failOnce.Do(func() {
 		current.shutdown()
