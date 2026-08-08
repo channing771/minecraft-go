@@ -7,9 +7,11 @@ func horizontalDistanceSquared(from, to mgl32.Vec3) float32 {
 	return dx*dx + dz*dz
 }
 
-func resolveStepMove(state State, displacement mgl32.Vec3, source CollisionSource) (moveResult, bool) {
+func resolveStepMove(
+	state State, displacement mgl32.Vec3, source CollisionSource, stepHeight float32,
+) (moveResult, bool) {
 	result := moveResult{position: state.Position}
-	rise, riseClipped, riseUnknown := clipAxis(result.position, 1, StepHeight, source)
+	rise, riseClipped, riseUnknown := clipAxis(result.position, 1, stepHeight, source)
 	result.position[1] += rise
 	result.clipped[1] = riseClipped
 	result.hitUnknown = riseUnknown
