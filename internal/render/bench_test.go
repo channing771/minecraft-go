@@ -32,10 +32,11 @@ func BenchmarkMeshChunk(b *testing.B) {
 		}
 	}
 	get := func(p core.ChunkPos) *world.Chunk { return chunks[p] }
+	light := mesh.NewSkyLightScratch()
 	b.ResetTimer()
 	for range b.N {
 		for si := 0; si < core.SectionsPerChunk; si++ {
-			_ = mesh.MeshSection(world.NeighborhoodAt(get, core.ChunkPos{}, si), reg)
+			_ = mesh.MeshSection(world.NeighborhoodAt(get, core.ChunkPos{}, si), reg, light)
 		}
 	}
 }

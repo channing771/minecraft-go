@@ -75,7 +75,7 @@ func topFaceSkyLight(
 	}
 
 	lx, ly, lz := position.Local()
-	for _, quad := range mesh.MeshSection(neighborhood, assets.NewRegistry()) {
+	for _, quad := range mesh.MeshSection(neighborhood, assets.NewRegistry(), mesh.NewSkyLightScratch()) {
 		if quad.Face != mesh.FacePosY || int(quad.Y) != ly {
 			continue
 		}
@@ -99,8 +99,8 @@ func mirrorColumnTop(t *testing.T, mirror *client.Mirror, position core.BlockPos
 }
 
 // TestAuthoritativeRoofChangeDrivesMirrorSkyLight 证明权威方块变更经由
-// 协议、Mirror 和网格化改变直射天空光：移除屋顶后下方恢复满天空光，
-// 重新放置后再次变暗，且最终镜像与权威区块 hash 一致。
+// 协议、Mirror 和网格化改变天空光：移除屋顶后下方恢复满天空光，
+// 重新放置后只保留相邻开口传播的天空光，且最终镜像与权威区块 hash 一致。
 func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(256)
 	config := server.DefaultConfig(42)
@@ -144,8 +144,8 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	if got := topFaceSkyLight(t, mirror, underHole); got != 15 {
 		t.Fatalf("洞下地面初始天空光 = %d，想要 15", got)
 	}
-	if got := topFaceSkyLight(t, mirror, underRoof); got != 0 {
-		t.Fatalf("屋顶下地面初始天空光 = %d，想要 0", got)
+	if got := topFaceSkyLight(t, mirror, underRoof); got != 14 {
+		t.Fatalf("屋顶下地面初始天空光 = %d，想要 14", got)
 	}
 
 	// 权威放置补上屋顶洞：下方必须变暗。
@@ -181,9 +181,9 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	if got := topFaceSkyLight(t, mirror, underHole); got != 15 {
 		t.Fatalf("移除后地面天空光 = %d，想要 15", got)
 	}
-	// 相邻仍被遮蔽的列不得被误标亮。
-	if got := topFaceSkyLight(t, mirror, underRoof); got != 0 {
-		t.Fatalf("相邻遮蔽列天空光 = %d，想要保持 0", got)
+	// 相邻遮蔽列只接收洞口传播的一步衰减天空光。
+	if got := topFaceSkyLight(t, mirror, underRoof); got != 14 {
+		t.Fatalf("相邻遮蔽列天空光 = %d，想要 14", got)
 	}
 
 	// 派生光照不改变权威内容：最终 hash 与 revision 必须一致。

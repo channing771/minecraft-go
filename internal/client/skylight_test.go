@@ -224,8 +224,8 @@ func TestMesherDiscardsStaleSkyLightAfterRoofChange(t *testing.T) {
 
 	mesher.Schedule(mirror, 1)
 	fresh := waitForMesherResults(t, mesher, mirror, 1, 5*time.Second)
-	if lights := meshedSkyLight(fresh); !lights[0x00] {
-		t.Fatalf("屋顶下顶面天空光集合 = %v，想要含 0x00", lights)
+	if lights := meshedSkyLight(fresh); !lights[0xE0] {
+		t.Fatalf("屋顶下顶面天空光集合 = %v，想要含相邻露天传播的 0xE0", lights)
 	}
 }
 

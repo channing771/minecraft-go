@@ -304,6 +304,7 @@ func (mesher *Mesher) Close() {
 
 func (mesher *Mesher) work() {
 	defer mesher.wg.Done()
+	light := mesh.NewSkyLightScratch()
 	for {
 		select {
 		case <-mesher.closed:
@@ -314,12 +315,12 @@ func (mesher *Mesher) work() {
 		case <-mesher.closed:
 			return
 		case job := <-mesher.jobs:
-			mesher.handle(job)
+			mesher.handle(job, light)
 		}
 	}
 }
 
-func (mesher *Mesher) handle(job mesherJob) {
+func (mesher *Mesher) handle(job mesherJob, light *mesh.SkyLightScratch) {
 	claimed := false
 	defer func() {
 		recovered := recover()
@@ -369,7 +370,7 @@ func (mesher *Mesher) handle(job mesherJob) {
 		MeshedSection: MeshedSection{
 			Dimension:  job.key.Dimension,
 			Pos:        job.key.Pos,
-			Quads:      mesh.MeshSection(job.neighborhood, mesher.registry),
+			Quads:      mesh.MeshSection(job.neighborhood, mesher.registry, light),
 			Conn:       mesh.ComputeConnectivity(job.neighborhood.Center, mesher.registry),
 			Stamps:     job.stamps,
 			Generation: job.generation,
