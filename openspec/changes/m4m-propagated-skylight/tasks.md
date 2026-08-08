@@ -1,6 +1,6 @@
 ## 1. 邻域与传播内核
 
-- [ ] 1.1 在 `internal/world` 先写 `Neighborhood` 的 `[-16,31]`、缺失和越界失败测试，再最小实现采样并重构；运行 `go test ./internal/world -race -count=1`，通过后只提交本任务文件。
+- [x] 1.1 在 `internal/world` 先写 `Neighborhood` 的 `[-16,31]`、缺失和越界失败测试，再最小实现采样并重构；运行 `go test ./internal/world -race -count=1`，通过后只提交本任务文件。
 - [ ] 1.2 在 `internal/mesh` 先写固定 `48³` scratch、多源 BFS、直射/侧向/跨边界/遮挡/未知邻区/队列边界失败测试，再最小实现并重构；运行 `go test ./internal/mesh -race -count=1` 与相关 benchmark，通过后只提交本任务文件。
 - [ ] 1.3 先为 `Quad.Light` 高四位、低四位 `0` 和稳定任务无传播 scratch 分配写失败测试，再最小接入并重构；运行 `go test ./internal/mesh -race -count=1`，通过后只提交本任务文件。
 
