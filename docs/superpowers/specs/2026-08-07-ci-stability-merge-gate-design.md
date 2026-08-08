@@ -38,7 +38,7 @@ GitHub 的 `pull_request` 事件检查的是"PR 与**当时的** main"的合并�
 
 ### 前置约束
 
-**P2 不先解决，这条门禁立不住。** 在约 25% 假失败率下要求"必须绿才能合"，实际效果是训练所有人反复点 re-run，最终以"已知抖动"为由申请豁免——门禁一旦被例行绕过就等于不存在。
+**P2 不先解决，这条门禁立不住。** 仓库当前红灯率约 24%（最近 25 次运行 6 次红），其中假失败的比例略低于此——6 次红里至少有一次（`31197258080`）包含真实的编译失败，那是真回归，不应计入假失败率的分子。在这个红灯率下要求"必须绿才能合"，实际效果是训练所有人反复点 re-run，最终以"已知抖动"为由申请豁免——门禁一旦被例行绕过就等于不存在。
 
 ## 3. P2：CI 假失败的真实构成
 
@@ -53,6 +53,8 @@ GitHub 的 `pull_request` 事件检查的是"PR 与**当时的** main"的合并�
 | 31197146703 | `TestHealthSevenSurvivesDiskRestart` | 1.46s | `wait ready Recv: network: transport closed` | **连接被关闭** |
 | 31197146703 | `TestHostRejectsDuplicatePlayerBeforeLoad` | 5.51s | `player did not become ready` | **期限耗尽** |
 | 31197258080 | `TestCraftingSurvivesV2DiskRestart...` | 0.12s | `wait ready Recv: network: transport closed` | **连接被关闭** |
+
+三次 ScenarioV7 行的耗时为「—」不是遗漏：CI 日志只保留了断言输出（样本收集不足），没有记录这三次单测各自的耗时，因此不可得。
 
 三类，不是一类：
 
@@ -127,7 +129,7 @@ grep -rnoE "[a-zA-Z][a-zA-Z0-9_]*\([^()]*, *[0-9]* ?\*? ?time\.(Second|Milliseco
 
 三种形态在 `internal/server` 的分布是 `context.WithTimeout` 98、`time.Now().Add` 73、`time.After` 101（另有 30 处嵌套/复合写法）。**`time.After` 是最大的一群且最容易被漏**：其中 77 处是 `time.After(time.Second)`。
 
-### 四类期限，处置完全不同
+### 五类期限，处置完全不同
 
 混为一谈、统一抬高，就会在治理假失败的同时悄悄阉割真门禁。
 
@@ -211,7 +213,7 @@ grep -rn "context.DeadlineExceeded" internal/server/*_test.go
 
 ### 收益的诚实估计
 
-本项**最多**只能消除 CI 上六分之一的观察到的失败（`TestHostRejectsDuplicatePlayerBeforeLoad` 那一次），而且连这一次都不确定——见下。它的正当性在于零成本与零风险，不在于它能解决假失败问题。
+本节讨论的期限治理**最多**只能消除 §3 表格里 7 条失败中的 1 条（`TestHostRejectsDuplicatePlayerBeforeLoad` 那一条期限耗尽），而且连这一条都不确定——见下。注意这是失败条数不是运行次数：这条失败所在的那次运行（`31197146703`）里还有另一条独立失败（`TestHealthSevenSurvivesDiskRestart`，transport closed），即使期限耗尽这条被消除，那次运行仍会因 transport closed 保持红。它的正当性在于零成本与零风险，不在于它能解决假失败问题。
 
 **不得把本变更描述为"修好了 CI"。** 主导形态是 §6 的连接被关闭，未解决。
 
@@ -312,6 +314,7 @@ default:
 | ScenarioV7 采样不足消失 | 本变更生效 |
 | 期限类失败消失 | 本变更生效 |
 | **期限类失败仍出现，但耗时变成 30s/60s** | **确定是挂起而非余量问题**（§5），必须开独立调查，不得再抬期限 |
+| **ScenarioV7 改为在界限断言上失败**（如 `OutboxHighWater`、`PeakRSSBytes` 等超出上限，而非样本收集不足） | **真回归，与本变更放宽的采样预算无关**，必须查根因，不得归因为采样预算 |
 
 最后一行是本变更为后续调查提供的新能力：在此之前，一次 5.51s 的期限失败无法判断是慢还是挂；在此之后，30s 上的失败就是确凿的挂起证据。
 
@@ -319,7 +322,7 @@ default:
 
 **范围内**
 
-- `internal/server` 的期限四分类与活性类修正
+- `internal/server` 的期限五分类与活性类修正
 - `cmd/mcgo` 的 ScenarioV7 收集预算
 - 反向验证与实测数据回填
 

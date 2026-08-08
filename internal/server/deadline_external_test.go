@@ -9,7 +9,8 @@ import "time"
 // internal/archcheck/deps_test.go 登记依赖，机械成本高于它解决的问题，
 // 因此选择重复定义。两份必须同步改动。
 //
-// 完整的分类说明与禁改区定义见 deadline_test.go。
+// 完整的五类分类说明与禁改区定义见 deadline_test.go（含没有机械
+// 判据、必须读助手实现才能判定的"时长值断言"一类）。
 const (
 	// shortWaitDeadline 用于单次保存启动等亚秒本机事件（原 100ms–500ms）。
 	shortWaitDeadline = 5 * time.Second

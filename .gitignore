@@ -4,6 +4,9 @@
 *.test
 *.out
 
+# go build ./cmd/mcgo 的本地产物
+/mcgo
+
 # make visual-check / visual-update 默认输出目录（实拍图与差异图，仅调试用）
 /build/
 

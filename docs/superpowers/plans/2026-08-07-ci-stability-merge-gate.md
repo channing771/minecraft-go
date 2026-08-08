@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 `internal/server` 测试的活性等待期限收敛到三个命名常量并留足余量，并修正 `cmd/mcgo` ScenarioV7 跑在采样预算下限上的问题，消除 CI 六次红中的四次。
+**Goal:** 把 `internal/server` 测试的活性等待期限收敛到三个命名常量并留足余量，并修正 `cmd/mcgo` ScenarioV7 跑在采样预算下限上的问题，处理 CI 六次红里 7 条失败中的 4 条（3 条 ScenarioV7 + 1 条期限耗尽）；这不等于让四次红变绿——期限耗尽那条失败所在的运行还有另一条独立的 transport closed 失败，修完仍是红，实际能完全变绿的只有 3 次纯 ScenarioV7 的红。
 
-**Architecture:** 期限按断言意图分四类，只抬高"活性等待"一类。禁改区（缺席断言、超时触发断言）的判据是断言 `errors.Is(err, context.DeadlineExceeded)`，可 grep 机械识别，且已核实全部落在毫秒档，与秒档零重叠——秒档因此可机械替换，毫秒档人工逐处判。产品代码零改动。
+**Architecture:** 期限按断言意图分五类，只抬高"活性等待"一类。禁改区（缺席断言、超时触发断言）的判据是断言 `errors.Is(err, context.DeadlineExceeded)`，可 grep 机械识别，且已核实全部落在毫秒档，与秒档零重叠——秒档因此可机械替换，毫秒档人工逐处判。产品代码零改动。
 
 **Tech Stack:** Go 1.26，标准库 `testing` / `context` / `time`。不新增任何依赖。
 
@@ -178,7 +178,7 @@ Expected: **无输出**。有输出说明某处禁改区确实由秒档期限守
 
 - [ ] **Step 3: 按档替换**
 
-三种语法形态都要覆盖。逐文件执行，每改一个文件立即 `zsh -ic 'gvm use go1.26.0 >/dev/null && go build ./internal/server'` 确认编译通过。
+三种直接构造期限的语法形态都要覆盖，但这只是秒档的机械替换范围，不是整个包的完整普查——完整普查见 Task 3 的超集审计。逐文件执行，每改一个文件立即 `zsh -ic 'gvm use go1.26.0 >/dev/null && go build ./internal/server'` 确认编译通过。
 
 | 原值 | 替换为 |
 | --- | --- |
@@ -239,16 +239,15 @@ grep -rnoE "[a-zA-Z][a-zA-Z0-9_]*\([^()]*, *[0-9]* ?\*? ?time\.(Second|Milliseco
   | grep -vE "context\.With(Timeout|Deadline)|time\.(After|Now|Sleep|NewTimer|NewTicker)"
 ```
 
-命中 31 处，分三组：
+命中 32 处，分三组：
 
 | 助手 | 处数 | 已知性质 |
 | --- | --- | --- |
-| `shutdownWithDeadline(running, time.Second)` | 28 | **多数是活性等待**：给关服操作只留 1 秒，是全包最紧的一档 |
+| `shutdownWithDeadline(running, time.Second)` | 27 | **多数是活性等待**：给关服操作只留 1 秒，是全包最紧的一档 |
 | `clock.nextTimer(t, N*time.Second)` | 3 | **时长值断言，绝不动**（见 Step 2 的警告） |
+| `connectTask16ConcurrentClients(t, addr, requests, 10*time.Second)` | 2 | 需一并判定 |
 
-另有 2 处 `connectTask16ConcurrentClients(t, addr, requests, 10*time.Second)` 需一并判定。
-
-`shutdownWithDeadline` 的 28 处断言形态分布：16 处 `err != nil`、7 处 `!errors.Is(err, wantErr)`（wantErr 是注入的错误，不是超时）、2 处丢进 goroutine、1 处在 `recoverShutdownAfterExpectedFailure` 的三次循环里。
+`shutdownWithDeadline` 的 27 处断言形态分布：16 处 `err != nil`、7 处 `!errors.Is(err, wantErr)`（wantErr 是注入的错误，不是超时）、2 处丢进 goroutine、1 处在 `recoverShutdownAfterExpectedFailure` 的三次循环里。
 
 **注意 7 处 `!errors.Is(err, wantErr)` 与循环里那处**：它们期望关服**返回注入的错误**。若注入的失败会让关服卡住，抬高期限会让每处多等 30 秒、循环处多等 90 秒。判定时要读 `recoverShutdownAfterExpectedFailure` 的实现，确认注入失败下关服是快速返回错误还是会卡住。
 

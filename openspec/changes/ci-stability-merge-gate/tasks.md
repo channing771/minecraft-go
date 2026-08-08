@@ -5,13 +5,17 @@
 > （1 处永不收敛、2 处秒过，是悬崖不是梯度；满载多核复现不出任何失败），**不得使用**。
 > 详见设计文档 §7。验证靠推理、反向验证（常量改 1ms 必须变红）与 CI 统计观察。
 
-> **本变更只处理 CI 六次红中的四次**（3 次采样预算 + 1 次期限耗尽）。
-> 另外三次是登录期 `transport closed`，根因未知，需独立的 systematic-debugging 变更。
+> **本变更处理的是 CI 六次红里的四条失败**（7 条失败中的 4 条：3 条 ScenarioV7 采样预算 + 1 条期限耗尽），
+> 不是"六次红里的四次"——运行 `31197146703` 一次红里有两条失败：`TestHealthSevenSurvivesDiskRestart`
+> （transport closed，范围外）与 `TestHostRejectsDuplicatePlayerBeforeLoad`（期限耗尽，本变更修）。
+> 那次红修完仍然是红。实际能完全变绿的只有 3 次纯 ScenarioV7 的红；第 4 次红本变更只修其中一条失败，
+> 该次运行仍会因 transport closed 保持红；其余 2 次红是纯 transport closed，不受影响。
+> 三次纯 transport closed 之外，根因未知，需独立的 systematic-debugging 变更。
 > **不得把本变更描述为"修好了 CI"。**
 
 ## 1. 命名常量与已知的活性超时站点
 
-- [x] 1.1 新建 `internal/server/deadline_test.go`（`package server`）定义 `shortWaitDeadline = 5s`、`waitDeadline = 30s`、`longWaitDeadline = 60s`，GoDoc 说明四类期限的分类与禁改区。
+- [x] 1.1 新建 `internal/server/deadline_test.go`（`package server`）定义 `shortWaitDeadline = 5s`、`waitDeadline = 30s`、`longWaitDeadline = 60s`，GoDoc 说明五类期限的分类与禁改区。
 - [x] 1.2 新建 `internal/server/deadline_external_test.go`（`package server_test`）定义逐字相同的一份。跨包无法共享未导出标识符，两份必须同步。
 - [x] 1.3 把 CI 上确实因期限耗尽而失败的站点换成常量：`host_test.go` 的 `waitReady`（5s 轮询，对应 `TestHostRejectsDuplicatePlayerBeforeLoad` 的 `player did not become ready`）。
 - [x] 1.4 验证：`go test ./internal/server -race -count=1` 为 `ok`；`grep -rn "context.DeadlineExceeded" internal/server/*_test.go` 的**断言**站点仍为 10 处（常量 GoDoc 里的引用不算）。提交 `test: 增加活性等待期限常量`。
@@ -26,7 +30,7 @@
 ## 3. 毫秒档与助手参数形态逐处核对
 
 - [x] 3.1a 列出约 23 处毫秒档站点。
-- [x] 3.1b 列出"期限作参数传给助手"形态（Task 2 的正则漏掉了这一种，命中 31 处）：`shutdownWithDeadline` 28 处（多数是活性等待，给关服只留 1 秒，是全包最紧的一档）、`clock.nextTimer` 3 处（**时长值断言，绝不动**），另有 2 处 `connectTask16ConcurrentClients` 需一并判定。
+- [x] 3.1b 列出"期限作参数传给助手"形态（Task 2 的正则漏掉了这一种，命中 32 处）：`shutdownWithDeadline` 27 处（多数是活性等待，给关服只留 1 秒，是全包最紧的一档）、`clock.nextTimer` 3 处（**时长值断言，绝不动**）、`connectTask16ConcurrentClients` 2 处需一并判定。
 - [x] 3.2 逐处按断言形态分类：期望 `errors.Is(err, context.DeadlineExceeded)` → 超时触发断言，不动；断言没收到消息 → 缺席断言，不动；超时即 `t.Fatal` → 活性等待，毫秒档换 `shortWaitDeadline`、1 秒档换 `waitDeadline`；断言耗时小于上限 → 性能门禁，不动；**时长被助手拿去做比较而非做期限 → 时长值断言，绝不动**。
 - [x] 3.2b 时长值断言没有机械判据：`clock.nextTimer(t, 5*time.Second)` 在语法上与传期限完全一致，但假时钟里它断言的是"被测代码调度了一个 5 秒定时器"，替换后测试**仍然通过**、只是不再测原本的行为。因此 3.1b 的每一处**必须先读该助手的实现**，确认时长是被拿去 `context.WithTimeout` 还是被拿去比较。
 - [x] 3.2c `shutdownWithDeadline` 的 7 处 `!errors.Is(err, wantErr)` 与 `recoverShutdownAfterExpectedFailure` 的三次循环期望关服返回**注入的错误**。若注入失败会让关服卡住，抬高期限会让每处多等 30 秒、循环处多等 90 秒——判定前读该助手实现确认。
