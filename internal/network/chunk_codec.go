@@ -193,7 +193,11 @@ func encodeLogicalSnapshot(snapshot ChunkSnapshot) ([]byte, error) {
 	if err := snapshot.Validate(); err != nil {
 		return nil, err
 	}
-	var e byteEncoder
+	size := logicalSnapshotSize(snapshot)
+	if size > MaxDecodedSnapshot {
+		return nil, fmt.Errorf("decoded snapshot length %d exceeds limit %d", size, MaxDecodedSnapshot)
+	}
+	e := byteEncoder{data: make([]byte, 0, size)}
 	e.i32(int32(snapshot.Dimension))
 	e.i32(snapshot.Chunk.X)
 	e.i32(snapshot.Chunk.Z)
@@ -226,10 +230,22 @@ func encodeLogicalSnapshot(snapshot ChunkSnapshot) ([]byte, error) {
 	if e.err != nil {
 		return nil, e.err
 	}
-	if len(e.data) > MaxDecodedSnapshot {
-		return nil, fmt.Errorf("decoded snapshot length %d exceeds limit %d", len(e.data), MaxDecodedSnapshot)
-	}
 	return e.data, nil
+}
+
+func logicalSnapshotSize(snapshot ChunkSnapshot) int {
+	size := 20 + canonicalUvarintLength(uint32(len(snapshot.Sections)))
+	for _, section := range snapshot.Sections {
+		size += 2 + section.PayloadBytes()
+		switch section.Storage {
+		case SectionIndexed:
+			size += 1 + canonicalUvarintLength(uint32(len(section.Palette))) +
+				canonicalUvarintLength(uint32(len(section.Packed)))
+		case SectionDirect:
+			size += 1 + canonicalUvarintLength(uint32(len(section.Packed)))
+		}
+	}
+	return size
 }
 
 func decodeLogicalSnapshot(data []byte) (ChunkSnapshot, error) {
