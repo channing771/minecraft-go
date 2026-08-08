@@ -32,8 +32,19 @@ type Tunables struct {
 	// SpawnRadius 是出生扫描以出生锚点所在列为中心的方形半径（方块）。
 	SpawnRadius int32
 	// FurnaceSmeltTicks 是熔炼一格输入所需的进度 tick 数。
+	//
+	// 只能向下调（让熔炼变快），不能超过 core.FurnaceSmeltTicks：
+	// world.FurnaceSlot.Valid() 用编译期常量 core.FurnaceSmeltTicks（而非本字段）
+	// 校验 ProgressTicks，区块存盘（internal/storage 的读写）都经过这道校验。
+	// 调高本字段会让模拟持久化出 Valid() 拒绝的 ProgressTicks，导致区块存盘失败，
+	// 这不是普通的钳制越界，是近数据丢失的故障。上限调整需要先改
+	// world.FurnaceSlot.Valid() 的存档契约，不在本字段的调参范围内。
 	FurnaceSmeltTicks uint8
 	// FurnaceBurnTicks 是单份煤炭燃料提供的燃烧 tick 数。
+	//
+	// 同 FurnaceSmeltTicks，只能向下调，不能超过 core.FurnaceBurnTicks：
+	// world.FurnaceSlot.Valid() 用编译期常量 core.FurnaceBurnTicks 校验 BurnTicks，
+	// 超过会导致该熔炉槽存盘失败。
 	FurnaceBurnTicks uint16
 }
 
