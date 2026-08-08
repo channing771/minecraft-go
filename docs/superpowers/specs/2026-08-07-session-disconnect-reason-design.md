@@ -84,7 +84,7 @@ case Disconnect:
 | --- | --- |
 | `DisconnectTimeout` | `errHeartbeatTimeout` |
 | `DisconnectProtocolViolation` | `errInvalidHeartbeatReply`、`errUnknownClientMessage` |
-| `DisconnectSlowClient` | `errSessionOutboxFull` |
+| `DisconnectSlowClient` | （实施中移出，见 §5.5） |
 | `DisconnectServerShutdown` | （本变更不使用，见 §5.2） |
 | `DisconnectInternalError` | （本变更不使用，见 §5.2） |
 
@@ -118,7 +118,9 @@ func (current *session) fail(err error) {
 
 ### 5.2 用白名单而不是黑名单
 
-只对**四个具名原因**发送：`errHeartbeatTimeout`、`errInvalidHeartbeatReply`、`errUnknownClientMessage`、`errSessionOutboxFull`。
+只对**三个具名原因**发送：`errHeartbeatTimeout`、`errInvalidHeartbeatReply`、`errUnknownClientMessage`。
+
+（原设计含第四个 `errSessionOutboxFull`，实施中被证伪并移出，见 §5.5。）
 
 其余一律不发，包括：
 
@@ -135,7 +137,31 @@ func (current *session) fail(err error) {
 
 ### 5.3 绕开 outbox 直接发
 
-`errSessionOutboxFull` 本身就意味着 outbox 满了，走 `enqueue` 必然失败。必须直接调 `endpoint.Send`。
+必须直接调 `endpoint.Send` 而不是 `enqueue`：`enqueue` 只是把消息放进 outbox，关闭在即时 writer 未必还能消费它。
+
+### 5.5 `errSessionOutboxFull` 必须移出白名单（实施中发现）
+
+原设计把它列为第四个具名原因。**实施时证伪：它会阻塞发布热路径。**
+
+`enqueue` 在 outbox 满时**同步**调用 `fail`：
+
+```go
+// enqueue 永不等待 writer；满队列会关闭慢 session。
+default:
+    current.mu.Unlock()
+    slog.Warn("慢客户端 outbox 已满，关闭 session", "session", current.id)
+    current.fail(errSessionOutboxFull)
+```
+
+若 `fail` 里的 `sendDisconnect` 同步等 200ms，`enqueue` 就被间接阻塞 200ms——**直接打破它写在注释里的不变量「永不等待 writer」**，而 `TestSessionFullOutboxClosesWithoutBlocking` 正是守这条不变量的既有测试，会确定性失败。`enqueue` 位于每 tick、每会话、每消息的发布路径上，阻塞它的代价远大于一条诊断信息。
+
+移出它有三条独立理由，方向一致：
+
+1. **它在热路径上**，而另外三个原因分别来自心跳 goroutine 与 reader goroutine，都不在。
+2. **发送按构造是徒劳的**：outbox 满恰恰意味着客户端没在消费，`Disconnect` 送不到。
+3. **它是四个原因里唯一已有服务端日志的**（`slog.Warn("慢客户端 outbox 已满，关闭 session")`），可诊断性本来就不缺。
+
+这也印证了白名单原则本身：**连接不可用时不发送**。outbox 满正是连接不可用的一种表现，与"writer 自身 Send 失败"同类。原设计把它列入白名单，是没有把这条原则贯彻到底。
 
 ### 5.4 失败即放弃，绝不阻塞关闭
 

@@ -14,7 +14,15 @@
 
 白名单让这两种情况自然落在不发送的一侧，**无需任何额外的"是否来自 writer"判断**。这是它相对黑名单的关键优势：黑名单需要显式识别写失败路径，而写失败的错误形态是开放的（来自底层 `net` 包），列不全。
 
-四个具名原因分别由心跳 goroutine（`errHeartbeatTimeout`）、reader goroutine（`errInvalidHeartbeatReply`、`errUnknownClientMessage`）与发布路径（`errSessionOutboxFull`）触发，**没有一个来自 `writeLoop`**。
+三个具名原因分别由心跳 goroutine（`errHeartbeatTimeout`）与 reader goroutine（`errInvalidHeartbeatReply`、`errUnknownClientMessage`）触发，**没有一个来自 `writeLoop`，也没有一个在热路径上**。
+
+## 为什么 errSessionOutboxFull 被移出白名单
+
+原设计把它列为第四个具名原因，实施时证伪。`enqueue` 在 outbox 满时**同步**调用 `fail`，而它的注释写着「enqueue 永不等待 writer」——若发送同步等 200ms 就打破了这条不变量，既有测试 `TestSessionFullOutboxClosesWithoutBlocking` 会确定性失败。`enqueue` 位于每 tick、每会话、每消息的发布路径上，阻塞它的代价远大于一条诊断信息。
+
+三条独立理由方向一致：它在热路径上（另外三个都不在）；outbox 满恰恰意味着客户端没在消费、发送按构造送不到；它是四个原因里唯一已有服务端日志的，可诊断性本来就不缺。
+
+这印证了白名单原则本身——**连接不可用时不发送**。outbox 满与"writer 自身 Send 失败"同类，原设计没把这条原则贯彻到底。
 
 ## 两个不使用的码
 
@@ -40,3 +48,5 @@
 **新增一个专用的断开原因协议包**：协议里已经有 `Disconnect{Code, Message}`，codec 与客户端处理都已完备。新增等于重复造轮子并触发协议版本变更。
 
 **在 `shutdown()` 内部发送**：`shutdown` 已经 `cancel` 了上下文并关闭 endpoint，发不出去；且 `shutdown` 也被非失败路径调用，会把发送扩散到不该发的地方。
+
+**为 `errSessionOutboxFull` 改成异步发送以避开阻塞**：异步会与 `shutdown()` 关闭 endpoint 竞争，要保证顺序就得延后 `shutdown`，等于把阻塞换个位置。而该原因本就徒劳且已有日志，直接移出白名单更省。

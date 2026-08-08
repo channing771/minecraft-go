@@ -17,7 +17,8 @@
 - Go 命令一律经 `zsh -ic 'gvm use go1.26.0 >/dev/null && <cmd>'` 执行。
 - **测试一律前台跑**，用 Bash 工具的 `timeout` 参数给足时间（`internal/server` 全包 `-race` 约 115 秒，给 `timeout: 600000`）。不要用 `run_in_background`，不要用 monitor。
 - **协议零改动。** `internal/network/` 下一个字都不改：`Disconnect`、`DisconnectCode`、codec、客户端 `clientPlayEndpoint.Recv` 全都已实现，本变更只是接上服务端这一端。
-- **白名单，不是黑名单。** 只对四个具名原因发送：`errHeartbeatTimeout`、`errInvalidHeartbeatReply`、`errUnknownClientMessage`、`errSessionOutboxFull`。其余一律不发。
+- **白名单，不是黑名单。** 只对三个具名原因发送：`errHeartbeatTimeout`、`errInvalidHeartbeatReply`、`errUnknownClientMessage`。其余一律不发。
+- **`errSessionOutboxFull` 不在白名单内。** 它由 `enqueue` 在 outbox 满时**同步**调用 `fail` 触发，而 `enqueue` 的注释声明「永不等待 writer」、位于每 tick 每会话每消息的发布热路径，并有既有测试 `TestSessionFullOutboxClosesWithoutBlocking` 守护。加入它会让该测试确定性失败。详见设计文档 §5.5。
 - **`DisconnectServerShutdown` 与 `DisconnectInternalError` 本变更不使用**，理由见设计文档 §5.2。
 - **`session.fail` 的既有语义不得改变**：`failOnce` 只执行一次、`shutdown()` 仍被调用、`detach` 仍以同一个 err 异步触发。
 - **不得阻塞关闭路径。** 发送用独立上下文、200ms 期限、错误一律忽略。
@@ -115,6 +116,12 @@ Expected: `TestDisconnectCodeForMapsNamedCauses` 与 `TestDisconnectCodeForUnwra
 
 - [ ] **Step 3: 实现映射**
 
+> **后续订正（Task 2 Step 0）**：下面的映射含第四条 `errSessionOutboxFull`，Task 1 已按此提交。
+> 实施 Task 2 时证伪并移出——它由 `enqueue` 在 outbox 满时**同步**调用 `fail` 触发，而 `enqueue`
+> 声明「永不等待 writer」且位于发布热路径，加入它会让既有测试
+> `TestSessionFullOutboxClosesWithoutBlocking` 确定性失败。详见设计文档 §5.5。
+> 本节保留原样作为历史记录。
+
 放在 `session.go` 的 `fail` 之前：
 
 ```go
@@ -185,6 +192,38 @@ git commit -m "feat: 增加会话关闭原因到断开码的白名单映射"
 **Interfaces:**
 - Consumes: Task 1 的 `disconnectCodeFor(err error) (network.DisconnectCode, bool)`。
 - Produces: `(*session).sendDisconnect(err error)`——尽力而为，无返回值。
+
+- [ ] **Step 0: 先把 `errSessionOutboxFull` 移出白名单**
+
+Task 1 已提交的 `disconnectCodeFor` 含第四条 `errSessionOutboxFull` → `DisconnectSlowClient`。**必须先删掉它**，否则本任务接入 `fail` 后会打破 `enqueue` 的非阻塞不变量。
+
+删两处：
+
+1. `disconnectCodeFor` 中的 `case errors.Is(err, errSessionOutboxFull): return network.DisconnectSlowClient, true` 分支。
+2. `TestDisconnectCodeForMapsNamedCauses` 表里的 `{"outbox 已满", errSessionOutboxFull, network.DisconnectSlowClient}` 一行。
+
+并把它加进 `TestDisconnectCodeForRejectsEverythingElse` 的表：
+
+```go
+		{"outbox 已满（在发布热路径上，见 GoDoc）", errSessionOutboxFull},
+```
+
+同时更新 `disconnectCodeFor` 的 GoDoc，把"四个具名原因"改为"三个"，并补一段：
+
+```go
+// errSessionOutboxFull 刻意不在表内：它由 enqueue 在 outbox 满时同步调用 fail
+// 触发，而 enqueue 声明「永不等待 writer」并位于每 tick、每会话、每消息的发布
+// 路径上。让它进入白名单会使发送的期限变成 enqueue 的阻塞，直接打破该不变量
+// （既有测试 TestSessionFullOutboxClosesWithoutBlocking 守着它）。
+//
+// 另外两条理由方向一致：outbox 满恰恰意味着客户端没在消费，Disconnect 送不到；
+// 且它是这几个原因里唯一已有服务端日志的（"慢客户端 outbox 已满，关闭 session"），
+// 可诊断性本来就不缺。
+```
+
+Run: `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -run "^TestDisconnectCodeFor" -count=1' 2>&1 | tail -3`
+
+Expected: `ok`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -350,6 +389,12 @@ func (current *session) fail(err error) {
 Run: `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -run "^TestSessionFail|^TestDisconnectCodeFor" -count=1' 2>&1 | tail -3`
 
 Expected: `ok`
+
+- [ ] **Step 5b: 确认 `enqueue` 的非阻塞不变量仍然成立**
+
+Run: `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/server -run "^TestSessionFullOutboxClosesWithoutBlocking$" -count=3' 2>&1 | tail -3`
+
+Expected: `ok`。**这条既有测试是 Step 0 那条约束的守护者**——它失败意味着白名单里仍有原因落在发布热路径上。**不得通过放宽该测试的期望来让它通过。**
 
 - [ ] **Step 6: 全包回归与竞态检查**
 

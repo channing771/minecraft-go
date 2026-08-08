@@ -14,14 +14,16 @@ CI 上有一类红灯 `wait ready Recv: network: transport closed`，在已观�
 
 ## What Changes
 
-- 新增纯函数 `disconnectCodeFor`，把四个具名关闭原因映射成 `DisconnectCode`：`errHeartbeatTimeout` → `DisconnectTimeout`、`errInvalidHeartbeatReply` 与 `errUnknownClientMessage` → `DisconnectProtocolViolation`、`errSessionOutboxFull` → `DisconnectSlowClient`。
+- 新增纯函数 `disconnectCodeFor`，把三个具名关闭原因映射成 `DisconnectCode`：`errHeartbeatTimeout` → `DisconnectTimeout`、`errInvalidHeartbeatReply` 与 `errUnknownClientMessage` → `DisconnectProtocolViolation`。
 - `session.fail` 在 `shutdown()` 之前尽力发出该包，用独立的 200ms 上下文直接调 `endpoint.Send`，错误一律忽略。
 
 **协议零改动，客户端零改动**——两者早已完整实现。无版本变更，无迁移。
 
 **明确不做**：白名单之外的任何原因都不发送。`network.ErrClosed` 与 `context.Canceled` 表示客户端已经走了；writer 自身 `Send` 失败或 panic 时 socket 已不可信，且 `writeLoop` 正在其调用栈内，发送会构成重入。黑名单形态会在将来新增关闭原因时默认放行，恰好放行到风险最大的地方。
 
-**明确不做**：`DisconnectServerShutdown` 与 `DisconnectInternalError` 不使用。关服走 `detachSessionLocked(id, generation, nil)`、`cause` 为 `nil`，根本不经过带具名错误的 `fail`；而没有任何具名原因映射到 `InternalError`。
+**明确不做**：`errSessionOutboxFull` 不在白名单内（实施中证伪后移出）。`enqueue` 在 outbox 满时**同步**调用 `fail`，若发送同步等 200ms 会打破它写在注释里的不变量「永不等待 writer」，而它位于每 tick、每会话、每消息的发布热路径上。三条理由方向一致：它在热路径上；outbox 满意味着客户端没在消费、发送按构造徒劳；它是唯一已有服务端日志（`slog.Warn("慢客户端 outbox 已满，关闭 session")`）的原因。这也印证了白名单原则本身——连接不可用时不发送。
+
+**明确不做**：`DisconnectSlowClient`、`DisconnectServerShutdown` 与 `DisconnectInternalError` 不使用。关服走 `detachSessionLocked(id, generation, nil)`、`cause` 为 `nil`，根本不经过带具名错误的 `fail`；而没有任何具名原因映射到 `InternalError`。
 
 **明确不做**：不修任何 `transport closed` 失败。本变更让下一次失败自己说出原因，三条 CI 红灯会继续红。
 
