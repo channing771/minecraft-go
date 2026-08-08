@@ -23,6 +23,7 @@ import (
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
 	"minecraft-go/internal/profile"
+	"minecraft-go/internal/sim"
 )
 
 const steadyFrameMeshWorkMax = 64
@@ -158,6 +159,24 @@ func resolveConfig(options mainOptions) (config.Config, error) {
 	return config.Load(path)
 }
 
+// remoteTuningDiverges 报告本次运行是否"连远端服务端 + 本机 physics/sim 偏离
+// 编译默认值"。
+//
+// 设计 §3.2：physics/sim 同时被客户端预测与服务端权威模拟消费，两侧参数不同
+// 会让位置持续回弹。调试面板已经用 fieldReadOnly 挡住了联机时的改写，但
+// 配置文件是始终生效的（§3.1），它绕过面板那道锁。
+//
+// 这里只告警不回落默认值：README 明确把这份配置文件描述为 mcgo 与 mcgod 共用，
+// 局域网下两端读同一份调过的文件恰恰是正确且一致的用法，强制客户端回落默认值
+// 反而会在那个本来能用的场景里制造分歧。
+func remoteTuningDiverges(options mainOptions, effective config.Config) bool {
+	if options.Application.Connect == "" {
+		return false
+	}
+	return effective.Physics != physics.DefaultTunables() ||
+		effective.Sim != sim.DefaultTunables()
+}
+
 func run(args []string) error {
 	return runWithDependencies(args, runDependencies{
 		newApplication: newApplication,
@@ -191,9 +210,15 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 		Level: slog.LevelDebug,
 	}), effective.Logging)
 	effective.Apply()
-	// benchmark 产出不应受 --dev 影响：即便同时传了 --dev，也不给 benchmark
-	// 进程构造面板渲染器或占用它的 GPU 资源。
-	options.Application.Dev = options.Dev && !options.Application.Benchmark
+	if remoteTuningDiverges(options, effective) {
+		slog.Warn("联机时本机配置改动了 physics/sim：这两组必须与服务端一致，"+
+			"否则客户端预测会与权威模拟持续分歧（面板在联机时已锁这两组，配置文件不受该锁约束）",
+			"connect", options.Application.Connect)
+	}
+	// benchmark 与抓帧产出都不应受 --dev 影响：这两条路径的结果要与基线比对，
+	// 不给它们构造面板渲染器，也不占用面板的 GPU 资源。
+	options.Application.Dev = options.Dev &&
+		!options.Application.Benchmark && options.CaptureDir == ""
 	options.Application.Render = effective.Render
 	// 面板 F5 保存需要落盘路径；benchmark 与抓帧路径不进交互循环，不需要它。
 	if !options.Application.Benchmark && options.CaptureDir == "" {

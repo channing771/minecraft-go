@@ -120,6 +120,29 @@ func TestRunWithDependenciesDisablesDevForBenchmark(t *testing.T) {
 	}
 }
 
+// TestRunWithDependenciesDisablesDevForCapture 与 benchmark 那条同理：抓帧产出
+// 同样要与 golden 基线比对，--dev 原先只在 --benchmark 下被排除，--capture
+// 下却仍然生效，两条基线路径的待遇不一致。
+func TestRunWithDependenciesDisablesDevForCapture(t *testing.T) {
+	sawCall := false
+	var gotDev bool
+	args := append([]string{"--capture", t.TempDir(), "--dev"}, absentConfigArgs(t)...)
+	err := runWithDependencies(args, runDependencies{
+		loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+		newApplication: func(options applicationOptions) (*application, error) {
+			sawCall = true
+			gotDev = options.Dev
+			return nil, errors.New("stop before window")
+		},
+	})
+	if err == nil || !sawCall {
+		t.Fatalf("run error=%v sawCall=%v，想要构造期错误且确实调用了 newApplication", err, sawCall)
+	}
+	if gotDev {
+		t.Fatal("--capture 必须让 --dev 失效：options.Dev = true")
+	}
+}
+
 func TestRunWithDependenciesPassesExplicitNameToProfile(t *testing.T) {
 	name := "Chen"
 	var got *string
@@ -375,6 +398,41 @@ func TestBenchmarkIgnoresUserConfig(t *testing.T) {
 	}
 	if effective.Physics.Gravity != config.Defaults().Physics.Gravity {
 		t.Fatal("benchmark 路径必须使用编译默认值，不得读用户配置")
+	}
+}
+
+// TestRemoteTuningDivergenceWarnCondition 覆盖设计 §3.2 在配置文件这条路径上的
+// 缺口：面板用 fieldReadOnly 挡住了联机时改写 physics/sim，但配置文件是始终
+// 生效的（§3.1），它绕过那道锁。这里钉住告警条件——只有"连远端 + 这两组偏离
+// 默认值"才告警，单机或联机但全默认都不该打扰用户。
+//
+// 只告警不强制回落默认值：README 把这份配置文件描述为 mcgo 与 mcgod 共用，
+// 局域网下两端读同一份调过的文件恰恰是正确用法。
+func TestRemoteTuningDivergenceWarnCondition(t *testing.T) {
+	tuned := config.Defaults()
+	tuned.Physics.Gravity = 12
+	tunedSim := config.Defaults()
+	tunedSim.Sim.InteractionReach = 3
+
+	cases := []struct {
+		name      string
+		connect   string
+		effective config.Config
+		want      bool
+	}{
+		{name: "联机且物理组偏离默认值", connect: "127.0.0.1:7777", effective: tuned, want: true},
+		{name: "联机且模拟组偏离默认值", connect: "127.0.0.1:7777", effective: tunedSim, want: true},
+		{name: "联机但全部为默认值", connect: "127.0.0.1:7777", effective: config.Defaults()},
+		{name: "单机且物理组偏离默认值", effective: tuned},
+		{name: "单机且全部为默认值", effective: config.Defaults()},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			options := mainOptions{Application: applicationOptions{Connect: testCase.connect}}
+			if got := remoteTuningDiverges(options, testCase.effective); got != testCase.want {
+				t.Fatalf("remoteTuningDiverges = %v，want %v", got, testCase.want)
+			}
+		})
 	}
 }
 

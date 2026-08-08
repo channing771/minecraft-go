@@ -141,6 +141,8 @@ go run ./cmd/mcgo --connect 127.0.0.1:25565 --name 玩家甲
 
 `mcgod` 复用同一份配置文件的 `physics`/`sim`/`logging` 三组（不含 `render`，专用服务端没有图形）。
 
+**联机时本机配置文件里的 `physics`/`sim` 必须与服务端所用的一致**，否则客户端预测会与权威模拟持续分歧（位置回弹）。面板在联机时锁住这两组，但配置文件不受该锁约束——它始终生效。局域网下让 `mcgo` 与 `mcgod` 读同一份配置文件即可满足这条要求；`mcgo` 检测到"`--connect` + 这两组偏离默认值"时会打印一条 `slog.Warn` 提醒。
+
 ## 视觉验证
 
 `--capture <目录>` 让 `mcgo` 走无头 offscreen 路径，依次跑完 `cmd/mcgo/capture.go` 里表驱动的固定场景（`terrain-noon`、`hud-hotbar-health`、`avatar-nametag`），把每张 640×360 PNG 与 `cmd/mcgo/testdata/golden/` 下的基线比对。比对用双阈值（单像素最大通道差、差异像素占比，定义见 `cmd/mcgo/visual_compare.go`），两项都在阈值内才算通过；具体数值与实测漂移分布见[视觉验证设计文档](docs/superpowers/specs/2026-08-07-visual-verification-design.md) §6。
