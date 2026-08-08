@@ -297,7 +297,7 @@ func connectRestartClients(t *testing.T, address string, identities []network.Id
 	for position, index := range order {
 		requests[position] = task16ConcurrentLoginRequest{index: index, identity: identities[index]}
 	}
-	clients, err := connectTask16ConcurrentClients(t, address, requests, 10*time.Second)
+	clients, err := connectTask16ConcurrentClients(t, address, requests, longWaitDeadline)
 	if err != nil {
 		t.Fatalf("restart concurrent login: %v", err)
 	}

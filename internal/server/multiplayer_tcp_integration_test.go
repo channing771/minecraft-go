@@ -498,7 +498,7 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 			index: index, identity: multiplayerIdentity(byte(0x80+index), multiplayerNames[index]),
 		}
 	}
-	clients, err = connectTask16ConcurrentClients(t, listener.Addr(), requests, 10*time.Second)
+	clients, err = connectTask16ConcurrentClients(t, listener.Addr(), requests, longWaitDeadline)
 	if err != nil {
 		t.Fatalf("concurrent login: %v", err)
 	}

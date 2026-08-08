@@ -254,7 +254,7 @@ func TestHostClosesSeventeenthPreLoginImmediately(t *testing.T) {
 	seventeenth, server := network.NewMemoryStreamPair(1)
 	result := make(chan error, 1)
 	go func() { result <- host.AcceptStream(context.Background(), server) }()
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), shortWaitDeadline)
 	defer cancel()
 	if _, err := seventeenth.Recv(ctx, network.StateHandshake); !errors.Is(err, network.ErrClosed) {
 		_ = seventeenth.Close()
@@ -265,7 +265,7 @@ func TestHostClosesSeventeenthPreLoginImmediately(t *testing.T) {
 		if !errors.Is(err, network.ErrClosed) {
 			t.Fatalf("seventeenth AcceptStream error = %v", err)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(shortWaitDeadline):
 		t.Fatal("seventeenth AcceptStream did not return immediately")
 	}
 }
@@ -591,7 +591,7 @@ func TestHostAutosavesActivePlayer(t *testing.T) {
 	login := startMemoryLogin(t, host, playerIdentity(6))
 	waitReady(t, host, login)
 
-	deadline := time.Now().Add(500 * time.Millisecond)
+	deadline := time.Now().Add(shortWaitDeadline)
 	for store.saveCount() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
@@ -1066,7 +1066,7 @@ func waitForPlayerSave(t *testing.T, store *hostTestStore) {
 
 func waitForTickAfter(t *testing.T, host *Host, tick uint64) {
 	t.Helper()
-	deadline := time.Now().Add(200 * time.Millisecond)
+	deadline := time.Now().Add(shortWaitDeadline)
 	for host.world.TickCount() <= tick && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}

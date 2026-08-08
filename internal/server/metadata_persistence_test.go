@@ -220,7 +220,7 @@ func TestShutdownFlushesFinalWorldTimeBeforeSync(t *testing.T) {
 		running.StepForTest()
 	}
 
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("Shutdown 错误 = %v", err)
 	}
 	// 冻结会再走一个最终 tick，屏障必须保存冻结后的精确时间。
@@ -244,7 +244,7 @@ func TestShutdownMetadataFailureIsRetryableAndKeepsOwnership(t *testing.T) {
 	running, _ := newShutdownTestServer(t, store)
 	running.StepForTest()
 
-	if err := shutdownWithDeadline(running, time.Second); !errors.Is(err, injected) {
+	if err := shutdownWithDeadline(running, waitDeadline); !errors.Is(err, injected) {
 		t.Fatalf("首次 Shutdown 错误 = %v，想要注入的 metadata 失败", err)
 	}
 	if syncCalls, closeCalls := store.lifecycleCalls(); syncCalls != 0 || closeCalls != 0 {
@@ -255,7 +255,7 @@ func TestShutdownMetadataFailureIsRetryableAndKeepsOwnership(t *testing.T) {
 	}
 
 	setMetadataRespond(store, nil)
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("重试 Shutdown 错误 = %v", err)
 	}
 	want := running.engine.WorldTime()

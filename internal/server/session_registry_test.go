@@ -303,7 +303,7 @@ func TestSessionRegistryDetachReleasesReaderBlockedOnFullIncoming(t *testing.T) 
 		if call != 2 {
 			t.Fatalf("second Recv call = %d", call)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(shortWaitDeadline):
 		t.Fatal("detach 后 reader 仍阻塞在满 incoming")
 	}
 }
