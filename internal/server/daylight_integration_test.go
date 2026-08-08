@@ -75,7 +75,8 @@ func topFaceSkyLight(
 	}
 
 	lx, ly, lz := position.Local()
-	for _, quad := range mesh.MeshSection(neighborhood, assets.NewRegistry(), mesh.NewSkyLightScratch()) {
+	scratch := mesh.NewSkyLightScratch()
+	for _, quad := range mesh.MeshSection(neighborhood, assets.NewRegistry(), scratch) {
 		if quad.Face != mesh.FacePosY || int(quad.Y) != ly {
 			continue
 		}
@@ -124,7 +125,9 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 
 	// 洞下方的地面露天，其余地面被屋顶遮蔽。
 	underHole := core.BlockPos{X: roofHole.X, Y: groundTop, Z: roofHole.Z}
-	underRoof := core.BlockPos{X: 1, Y: groundTop, Z: 0}
+	oneStep := core.BlockPos{X: 1, Y: groundTop, Z: 0}
+	lastLit := core.BlockPos{X: 14, Y: groundTop, Z: 0}
+	firstDark := core.BlockPos{X: 15, Y: groundTop, Z: 0}
 	holeBlock := core.BlockPos{X: roofHole.X, Y: roofY, Z: roofHole.Z}
 	interactionChunk := underHole.Chunk()
 
@@ -138,14 +141,22 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	if got := mirrorColumnTop(t, mirror, underHole); got != groundTop {
 		t.Fatalf("洞下列顶 = %d，想要 %d", got, groundTop)
 	}
-	if got := mirrorColumnTop(t, mirror, underRoof); got != roofY {
+	if got := mirrorColumnTop(t, mirror, oneStep); got != roofY {
 		t.Fatalf("屋顶下列顶 = %d，想要 %d", got, roofY)
 	}
-	if got := topFaceSkyLight(t, mirror, underHole); got != 15 {
-		t.Fatalf("洞下地面初始天空光 = %d，想要 15", got)
-	}
-	if got := topFaceSkyLight(t, mirror, underRoof); got != 14 {
-		t.Fatalf("屋顶下地面初始天空光 = %d，想要 14", got)
+	for _, check := range []struct {
+		name     string
+		position core.BlockPos
+		want     int
+	}{
+		{"洞下", underHole, 15},
+		{"一格传播", oneStep, 14},
+		{"最后亮格", lastLit, 1},
+		{"首个暗格", firstDark, 0},
+	} {
+		if got := topFaceSkyLight(t, mirror, check.position); got != check.want {
+			t.Fatalf("%s地面初始天空光 = %d，想要 %d", check.name, got, check.want)
+		}
 	}
 
 	// 权威放置补上屋顶洞：下方必须变暗。
@@ -161,8 +172,18 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	if got := mirrorColumnTop(t, mirror, underHole); got != roofY {
 		t.Fatalf("补洞后列顶 = %d，想要 %d", got, roofY)
 	}
-	if got := topFaceSkyLight(t, mirror, underHole); got != 0 {
-		t.Fatalf("补洞后地面天空光 = %d，想要 0", got)
+	for _, check := range []struct {
+		name     string
+		position core.BlockPos
+	}{
+		{"洞下", underHole},
+		{"一格传播", oneStep},
+		{"最后亮格", lastLit},
+		{"首个暗格", firstDark},
+	} {
+		if got := topFaceSkyLight(t, mirror, check.position); got != 0 {
+			t.Fatalf("补洞后%s地面天空光 = %d，想要 0", check.name, got)
+		}
 	}
 
 	// 权威移除同一方块：下方必须恢复满天空光。
@@ -178,12 +199,19 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 	if got := mirrorColumnTop(t, mirror, underHole); got != groundTop {
 		t.Fatalf("移除后列顶 = %d，想要 %d", got, groundTop)
 	}
-	if got := topFaceSkyLight(t, mirror, underHole); got != 15 {
-		t.Fatalf("移除后地面天空光 = %d，想要 15", got)
-	}
-	// 相邻遮蔽列只接收洞口传播的一步衰减天空光。
-	if got := topFaceSkyLight(t, mirror, underRoof); got != 14 {
-		t.Fatalf("相邻遮蔽列天空光 = %d，想要 14", got)
+	for _, check := range []struct {
+		name     string
+		position core.BlockPos
+		want     int
+	}{
+		{"洞下", underHole, 15},
+		{"一格传播", oneStep, 14},
+		{"最后亮格", lastLit, 1},
+		{"首个暗格", firstDark, 0},
+	} {
+		if got := topFaceSkyLight(t, mirror, check.position); got != check.want {
+			t.Fatalf("重开后%s地面天空光 = %d，想要 %d", check.name, got, check.want)
+		}
 	}
 
 	// 派生光照不改变权威内容：最终 hash 与 revision 必须一致。

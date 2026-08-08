@@ -8,7 +8,7 @@
 
 - [x] 2.1 在 `internal/client` 先写普通方块变化 dirty `27` 上限和重复合并失败测试，再最小扩展范围并重构；运行 `go test ./internal/client -race -count=1`，通过后只提交本任务文件。
 - [x] 2.2 在 `internal/client` 先写列顶变化 dirty `216`、加载、遗忘、revision 变化和 worker panic 重排失败测试，再最小扩展范围并重构；运行 `go test ./internal/client -race -count=1`，通过后只提交本任务文件。
-- [ ] 2.3 先写封闭洞口后光消失、重开恢复及派生光不改变区块 hash/revision 的失败集成测试，再最小接通权威变化并重构；运行 `go test ./internal/client ./internal/server -race -count=1`，通过后只提交本任务文件。
+- [x] 2.3 先写封闭洞口后光消失、重开恢复及派生光不改变区块 hash/revision 的失败集成测试，再最小接通权威变化并重构；运行 `go test ./internal/client ./internal/server -race -count=1`，通过后只提交本任务文件。
 
 ## 3. 无窗口视觉验证
 
