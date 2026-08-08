@@ -110,7 +110,7 @@ func (current *session) fail(err error) {
 
 **协议零改动**——包已在协议内，无版本变更，无迁移。
 
-## 5. 四个必须定死的实现约束
+## 5. 五个必须定死的实现约束
 
 ### 5.1 必须在 `shutdown()` 之前发，且不能用 `current.ctx`
 
@@ -186,14 +186,43 @@ default:
 
 **不能用"CI 变绿"验证**——本变更不修任何东西。
 
-1. 服务端对四种具名原因确实发出对应的 `DisconnectCode`，客户端 `Recv` 返回的 `RemoteError` 携带该 code 与 message。
+1. 服务端对三种具名原因确实发出对应的 `DisconnectCode`，客户端 `Recv` 返回的 `RemoteError` 携带该 code 与 message。
 2. 白名单之外的原因（`ErrClosed`、`Canceled`、writer 写失败、panic）**不发送**，且关闭路径行为与改动前一致。
 3. 关闭路径不因此变慢；`session.fail` 的既有语义（`failOnce`、`shutdown`、`detach`）不变。
 4. 下一次 CI 上出现该类失败时，测试的失败信息直接给出断开原因。
 
 第 4 条只能等。前三条必须有自动化测试——**尤其是第 2 条**：一个"该不发时发了"的缺陷会在写失败路径上造成重入，而那条路径在本地几乎不会走到。
 
-## 9. 已知的独立缺口（记录，不在本变更内修）
+## 9. 实测结果
+
+本节记录实施与收尾阶段的实测数据；判据本身见 §8，这里只写"测到了什么"。
+
+### Task 1 Step 5：变异验证
+
+把 `disconnectCodeFor` 的 `default` 分支从 `return 0, false` 临时改成 `return network.DisconnectInternalError, true` 后重跑 `TestDisconnectCodeForRejectsEverythingElse`，6 个拒绝用例中有 5 个变红：`ErrClosed`（客户端已关闭）、`context.Canceled`（上下文取消）、包装了 `ErrClosed` 的错误、writer 写失败、writer panic。唯一没有变红的是 `nil` 用例——它由独立的 `err == nil` 分支在 `default` 之前拦下，天然不受这条变异影响，不构成断言盲区。变异已恢复，恢复后 `git diff --stat internal/server/session.go` 无输出。
+
+结论：`TestDisconnectCodeForRejectsEverythingElse` 确实在守住"`default` 不允许发送"这条边界，无需加强断言。
+
+### Task 2 Step 6：`-race` 全包回归与耗时对比
+
+- 改前基线（`git stash` 到本变更前，独立跑两次确认）：约 115 秒（`1:55.17`）。
+- 改后（`errSessionOutboxFull` 移出白名单后，独立跑两次）：
+  - 第一次：`ok  minecraft-go/internal/server  114.783s`（wall `1:59.47`）
+  - 第二次：`ok  minecraft-go/internal/server  116.270s`（wall `1:57.74`）
+- 两次均干净通过，无 `DATA RACE`、无 `--- FAIL`，耗时与改前基线基本持平，未出现"显著变长"。
+
+同一批验证还为 §5.5 的结论提供了实测依据：保留 `errSessionOutboxFull` 在白名单中的首轮实现下，`TestSessionFullOutboxClosesWithoutBlocking` 在三次独立重跑中均于 200–202ms 区间确定性失败；移出该原因后，该测试在 `-count=3` 下稳定通过（`ok  minecraft-go/internal/server  0.302s`），期望未被放宽。§5.5 的文字表述与这组实测一致，未发现需要改写之处。
+
+### Task 2 Step 7：`internal/network` 零改动确认
+
+Task 1、Task 2 两轮改动中 `git diff --stat internal/network/` 均无输出，`internal/network/` 全程未被触碰，与"协议零改动"的前提一致。
+
+### 订正的表述
+
+- §8 判据 1 原文写"服务端对四种具名原因……"，与实测不符——白名单最终只有三个具名原因（`errHeartbeatTimeout`、`errInvalidHeartbeatReply`、`errUnknownClientMessage`），`errSessionOutboxFull` 已被移出（见 §5.5）。已订正为"三种"。
+- §5 标题原文"四个必须定死的实现约束"，与实际列出的 5.1–5.5 共五条约束（含实施中新增的 §5.5）不符。已订正为"五个"。
+
+## 10. 已知的独立缺口（记录，不在本变更内修）
 
 `internal/server/host.go` 的 accept 循环：
 
