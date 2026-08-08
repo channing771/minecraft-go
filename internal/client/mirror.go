@@ -170,10 +170,18 @@ func (mirror *Mirror) applyBlockChanges(
 		x, _, z := change.Position.Local()
 		before := chunk.Chunk.HighestOpaque(x, z)
 		chunk.Chunk.SetBlock(x, change.Position.Y, z, change.Block)
-		mirror.addDirtyAround(dirty, changes.Dimension, change.Position)
-		// 只有最高遮挡变化才会改变直射天空光，此时补上精确的垂直跨度。
+		mirror.addSkyDirtyVolume(
+			dirty, changes.Dimension, change.Position,
+			change.Position.Y-propagatedSkyDirtyRadius,
+			change.Position.Y+propagatedSkyDirtyRadius,
+		)
+		// 最高遮挡变化会影响新旧列顶之间的传播天空光。
 		if after := chunk.Chunk.HighestOpaque(x, z); after != before {
-			mirror.addSkyDirtySpan(dirty, changes.Dimension, change.Position, before, after)
+			mirror.addSkyDirtyVolume(
+				dirty, changes.Dimension, change.Position,
+				min(before, after)-propagatedSkyDirtyRadius,
+				max(before, after)+propagatedSkyDirtyRadius,
+			)
 		}
 	}
 	chunk.Revision = changes.NewRevision
@@ -245,52 +253,29 @@ func (mirror *Mirror) requestResync(
 	}}
 }
 
-func (mirror *Mirror) addDirtyAround(
-	dirty map[core.SectionKey]struct{},
-	dimension core.DimensionID,
-	position core.BlockPos,
-) {
-	for dy := int32(-1); dy <= 1; dy++ {
-		y := position.Y + dy
-		if y < core.MinY || y >= core.MaxY {
-			continue
-		}
-		for dz := int32(-1); dz <= 1; dz++ {
-			for dx := int32(-1); dx <= 1; dx++ {
-				neighbor := core.BlockPos{X: position.X + dx, Y: y, Z: position.Z + dz}
-				if _, loaded := mirror.Chunk(dimension, neighbor.Chunk()); loaded {
-					dirty[core.SectionKey{Dimension: dimension, Pos: neighbor.Section()}] = struct{}{}
-				}
-			}
-		}
-	}
-}
+const propagatedSkyDirtyRadius int32 = 16
 
-// addSkyDirtySpan 在最高遮挡变化后标脏新旧高度之间的区段。
-//
-// 采样该列天空光的面和 AO 位于 ±1 方块邻域内，因此水平范围最多跨四个区块；
-// 24 个区段高度下单次变化最多产生 96 个唯一 key，重复项由 dirty map 合并。
-func (mirror *Mirror) addSkyDirtySpan(
+func (mirror *Mirror) addSkyDirtyVolume(
 	dirty map[core.SectionKey]struct{},
 	dimension core.DimensionID,
 	position core.BlockPos,
-	before, after int32,
+	lowY, highY int32,
 ) {
-	low, high := min(before, after), max(before, after)
-	low = max(low, core.MinY)
-	high = min(high, core.MaxY-1)
-	if low > high {
+	lowY = max(lowY, core.MinY)
+	highY = min(highY, core.MaxY-1)
+	if lowY > highY {
 		return
 	}
-	lowSection := (low - core.MinY) >> core.SectionShift
-	highSection := (high - core.MinY) >> core.SectionShift
+	minChunkX := (position.X - propagatedSkyDirtyRadius) >> core.SectionShift
+	maxChunkX := (position.X + propagatedSkyDirtyRadius) >> core.SectionShift
+	minChunkZ := (position.Z - propagatedSkyDirtyRadius) >> core.SectionShift
+	maxChunkZ := (position.Z + propagatedSkyDirtyRadius) >> core.SectionShift
+	lowSection := (lowY - core.MinY) >> core.SectionShift
+	highSection := (highY - core.MinY) >> core.SectionShift
 
-	for dz := int32(-1); dz <= 1; dz++ {
-		for dx := int32(-1); dx <= 1; dx++ {
-			neighbor := core.ChunkPos{
-				X: (position.X + dx) >> core.SectionShift,
-				Z: (position.Z + dz) >> core.SectionShift,
-			}
+	for chunkZ := minChunkZ; chunkZ <= maxChunkZ; chunkZ++ {
+		for chunkX := minChunkX; chunkX <= maxChunkX; chunkX++ {
+			neighbor := core.ChunkPos{X: chunkX, Z: chunkZ}
 			if _, loaded := mirror.Chunk(dimension, neighbor); !loaded {
 				continue
 			}

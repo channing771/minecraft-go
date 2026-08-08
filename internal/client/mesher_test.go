@@ -38,8 +38,9 @@ func TestMesherBuildsInitialChunkAndBoundaryRemeshes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("应用角落方块增量: %v", err)
 	}
-	if len(update.Dirty) != 8 {
-		t.Fatalf("角落 dirty = %+v，想要 8 个", update.Dirty)
+	// 区块角的传播半径相交 3×3 个区块和 2 个高度区段。
+	if len(update.Dirty) != 18 {
+		t.Fatalf("角落 dirty = %+v，想要 18 个", update.Dirty)
 	}
 	mesher.MarkDirty(update.Dirty...)
 	mesher.Schedule(mirror, len(update.Dirty))
