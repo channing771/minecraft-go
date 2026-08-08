@@ -97,6 +97,29 @@ func TestRunWithDependenciesBypassesProfileForBenchmark(t *testing.T) {
 	}
 }
 
+// TestRunWithDependenciesDisablesDevForBenchmark 守住"benchmark 产出不应受
+// --dev 影响"：同时传 --benchmark 与 --dev 时，传给 newApplication 的
+// options.Dev 必须被强制为 false，不能给 benchmark 进程构造面板渲染器、
+// 占用它的 GPU 资源。
+func TestRunWithDependenciesDisablesDevForBenchmark(t *testing.T) {
+	sawCall := false
+	var gotDev bool
+	err := runWithDependencies([]string{"--benchmark", "--perf-output", "x.json", "--dev"}, runDependencies{
+		loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+		newApplication: func(options applicationOptions) (*application, error) {
+			sawCall = true
+			gotDev = options.Dev
+			return nil, errors.New("stop before window")
+		},
+	})
+	if err == nil || !sawCall {
+		t.Fatalf("run error=%v sawCall=%v，想要构造期错误且确实调用了 newApplication", err, sawCall)
+	}
+	if gotDev {
+		t.Fatal("--benchmark 必须让 --dev 失效：options.Dev = true")
+	}
+}
+
 func TestRunWithDependenciesPassesExplicitNameToProfile(t *testing.T) {
 	name := "Chen"
 	var got *string

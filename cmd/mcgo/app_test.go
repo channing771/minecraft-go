@@ -1165,6 +1165,39 @@ func TestApplicationConstructionCreatesDebugPanelRendererWhenDevOn(t *testing.T)
 	}
 }
 
+// stubApplicationHost 是 TestApplicationRemoteReflectsHostAndServerPresence
+// 用的最小 applicationHost 实现：三个方法都不会被调用，只用来在测试里制造
+// 一个非 nil 的 host 值。
+type stubApplicationHost struct{}
+
+func (stubApplicationHost) Run(context.Context, network.Listener) error { return nil }
+func (stubApplicationHost) AcceptStream(context.Context, network.ServerPacketStream) error {
+	return nil
+}
+func (stubApplicationHost) Shutdown(context.Context) error { return nil }
+
+// TestApplicationRemoteReflectsHostAndServerPresence 锁住 a.remote() 的判定：
+// 它决定面板 physics/sim 组能不能写，取反会让单机变只读、真联机反而能写权威
+// 参数，这条谓词必须有测试守着，不能只靠代码走查。
+func TestApplicationRemoteReflectsHostAndServerPresence(t *testing.T) {
+	tests := []struct {
+		name string
+		app  *application
+		want bool
+	}{
+		{name: "本地内嵌 Host（单机）", app: &application{host: stubApplicationHost{}}, want: false},
+		{name: "benchmark 内嵌可信 server", app: &application{server: &server.Server{}}, want: false},
+		{name: "host 与 server 均为 nil（真远程联机）", app: &application{}, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.app.remote(); got != test.want {
+				t.Fatalf("remote() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestApplicationConnectionLocalHostFailureClosesStoreBeforeWindow(t *testing.T) {
 	hostErr := errors.New("construct host failed")
 	store := newConnectionTestStore(42)

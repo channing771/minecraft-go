@@ -3,7 +3,7 @@
 package main
 
 import (
-	"os"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +12,7 @@ import (
 
 	"minecraft-go/internal/config"
 	"minecraft-go/internal/physics"
+	"minecraft-go/internal/render"
 	"minecraft-go/internal/sim"
 )
 
@@ -29,12 +30,51 @@ func (s *panelState) selectFieldForTest(t *testing.T, name string) {
 	t.Fatalf("未找到字段 %s", name)
 }
 
+// dataRowsForTest 从 rows() 输出里过滤掉段头行（panelSectionHeaderRow：
+// ReadOnly 且 Value 为空），返回与 config.Fields() 顺序一一对应的数据行。
+// rows() 现在按 Group+"."+Name 与 config.Fields() 下标是一一对应的关系
+// 不再成立——rows() 里插入了分组段头，标签也从 "Group.Name" 改成裸
+// field.Name（见 Finding 4：列宽/rune 数不匹配导致标签在 180px 列宽下
+// 越界，改成"段头 + 裸字段名"而不是继续拉长每行标签）——测试要按
+// field.Group/Name 断言，只能先把段头过滤掉，再按下标对齐 config.Fields()。
+func dataRowsForTest(t *testing.T, rows []render.PanelRow) []render.PanelRow {
+	t.Helper()
+	data := make([]render.PanelRow, 0, len(rows))
+	for _, row := range rows {
+		if row.ReadOnly && row.Value == "" {
+			continue // 段头行
+		}
+		data = append(data, row)
+	}
+	fields := config.Fields()
+	if len(data) != len(fields) {
+		t.Fatalf("data rows = %d, want %d(=len(config.Fields()))", len(data), len(fields))
+	}
+	return data
+}
+
+// selectedRowForTest 返回 rows 中被标记 Selected 的那一行，找不到时 Fatal。
+// rows() 插入段头后，state.selected（config.Fields() 下标）不再等于
+// rows() 切片自身的下标，不能再直接 rows[state.selected]。
+func selectedRowForTest(t *testing.T, rows []render.PanelRow) render.PanelRow {
+	t.Helper()
+	for _, row := range rows {
+		if row.Selected {
+			return row
+		}
+	}
+	t.Fatal("没有任何一行被标记为 Selected")
+	return render.PanelRow{}
+}
+
 func TestPanelRowsMarkAuthoritativeGroupsReadOnlyWhenRemote(t *testing.T) {
 	state := newPanelState(config.Defaults())
-	for _, row := range state.rows(true) {
-		if strings.HasPrefix(row.Label, "physics.") || strings.HasPrefix(row.Label, "sim.") {
-			if !row.ReadOnly {
-				t.Fatalf("联机时 %s 必须只读", row.Label)
+	fields := config.Fields()
+	rows := dataRowsForTest(t, state.rows(true))
+	for i, field := range fields {
+		if field.Group == "physics" || field.Group == "sim" {
+			if !rows[i].ReadOnly {
+				t.Fatalf("联机时 %s.%s 必须只读", field.Group, field.Name)
 			}
 		}
 	}
@@ -42,9 +82,11 @@ func TestPanelRowsMarkAuthoritativeGroupsReadOnlyWhenRemote(t *testing.T) {
 
 func TestPanelRowsAllowAuthoritativeGroupsWhenLocal(t *testing.T) {
 	state := newPanelState(config.Defaults())
+	fields := config.Fields()
+	rows := dataRowsForTest(t, state.rows(false))
 	editable := 0
-	for _, row := range state.rows(false) {
-		if strings.HasPrefix(row.Label, "physics.") && !row.ReadOnly {
+	for i, field := range fields {
+		if field.Group == "physics" && !rows[i].ReadOnly {
 			editable++
 		}
 	}
@@ -55,12 +97,46 @@ func TestPanelRowsAllowAuthoritativeGroupsWhenLocal(t *testing.T) {
 
 func TestPanelViewDistanceIsAlwaysReadOnly(t *testing.T) {
 	state := newPanelState(config.Defaults())
-	for _, remote := range []bool{false, true} {
-		for _, row := range state.rows(remote) {
-			if row.Label == "render.viewDistance" && !row.ReadOnly {
-				t.Fatalf("viewDistance 在 remote=%v 下也必须只读（重启生效）", remote)
-			}
+	fields := config.Fields()
+	viewDistanceIndex := -1
+	for i, field := range fields {
+		if field.Group == "render" && field.Name == "viewDistance" {
+			viewDistanceIndex = i
 		}
+	}
+	if viewDistanceIndex < 0 {
+		t.Fatal("config.Fields() 缺少 render.viewDistance")
+	}
+	for _, remote := range []bool{false, true} {
+		rows := dataRowsForTest(t, state.rows(remote))
+		if !rows[viewDistanceIndex].ReadOnly {
+			t.Fatalf("viewDistance 在 remote=%v 下也必须只读（重启生效）", remote)
+		}
+	}
+}
+
+// TestPanelRowsInsertSectionHeadersWithoutGroupPrefix 锁住 Finding 4 的修法：
+// 标签列宽 170px 装不下"分组前缀+字段名"（最长的 sim.playerDropPickupDelayTicks
+// 有 30 个 ASCII 字符），改成每组一个段头行 + 裸字段名（最长
+// playerDropPickupDelayTicks 仍有 26 个字符，但至少不再需要在每一行里
+// 重复分组名）。
+func TestPanelRowsInsertSectionHeadersWithoutGroupPrefix(t *testing.T) {
+	state := newPanelState(config.Defaults())
+	rows := state.rows(false)
+	headers := 0
+	for _, row := range rows {
+		if strings.Contains(row.Label, ".") {
+			t.Fatalf("裸标签不应再带分组前缀: %q", row.Label)
+		}
+		if row.ReadOnly && row.Value == "" {
+			headers++
+		}
+	}
+	if headers != 3 {
+		t.Fatalf("段头行数 = %d, want 3（physics/sim/render 各一个）", headers)
+	}
+	if len(rows) != len(config.Fields())+3 {
+		t.Fatalf("rows 总数 = %d, want %d", len(rows), len(config.Fields())+3)
 	}
 }
 
@@ -94,6 +170,30 @@ func TestPanelShiftCoarseAndAltFine(t *testing.T) {
 	coarse := state.effective.Physics.Gravity - base
 	if coarse <= fine {
 		t.Fatalf("Shift 必须是粗调：coarse=%v fine=%v", coarse, fine)
+	}
+}
+
+// TestPanelAltIsFineAdjustment 单独覆盖 Alt（×0.1 细调）：
+// TestPanelShiftCoarseAndAltFine 的名字承诺了 Alt，但函数体从未设置过
+// Alt:true，删掉 handleKeys 里 `if keys.Alt { step *= 0.1 }` 那一行，
+// 原有测试套件照样全绿。这里直接断言 Alt 增量严格小于不带修饰键的普通增量。
+func TestPanelAltIsFineAdjustment(t *testing.T) {
+	state := newPanelState(config.Defaults())
+	state.visible = true
+	state.selectFieldForTest(t, "physics.gravity")
+	base := state.effective.Physics.Gravity
+
+	state.handleKeys(panelKeys{Right: true}, false)
+	normal := state.effective.Physics.Gravity - base
+	state.effective.Physics.Gravity = base
+
+	state.handleKeys(panelKeys{Right: true, Alt: true}, false)
+	fine := state.effective.Physics.Gravity - base
+	if fine <= 0 {
+		t.Fatalf("Alt 细调仍必须增大取值：fine=%v", fine)
+	}
+	if fine >= normal {
+		t.Fatalf("Alt 必须是细调：fine=%v normal=%v", fine, normal)
 	}
 }
 
@@ -137,20 +237,63 @@ func TestPanelNavigationSkipsReadOnlyRows(t *testing.T) {
 	state.selected = 0
 	for i := 0; i < 200; i++ {
 		state.handleKeys(panelKeys{Down: true}, true)
-		if state.rows(true)[state.selected].ReadOnly {
+		if selectedRowForTest(t, state.rows(true)).ReadOnly {
 			t.Fatal("导航必须跳过只读行")
 		}
 	}
 }
 
+// TestPanelSaveWritesFile 证明 save 真的把 effective 里的值落了盘，而不是
+// 例如写 config.Defaults().Save(path) 那种完全丢弃 s.effective 却也能让
+// os.Stat 成功的实现——原来的版本只断言文件存在，测不出这种退化。
 func TestPanelSaveWritesFile(t *testing.T) {
 	state := newPanelState(config.Defaults())
+	state.effective.Physics.Gravity = 55
+	state.effective.Sim.SpawnRadius = 9
+	state.effective.Render.FovDegrees = 88
+
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := state.save(path); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("保存后文件必须存在: %v", err)
+
+	saved, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("重新读取保存的配置: %v", err)
+	}
+	if saved.Physics.Gravity != 55 {
+		t.Fatalf("Physics.Gravity 未落盘: %v，want 55", saved.Physics.Gravity)
+	}
+	if saved.Sim.SpawnRadius != 9 {
+		t.Fatalf("Sim.SpawnRadius 未落盘: %v，want 9", saved.Sim.SpawnRadius)
+	}
+	if saved.Render.FovDegrees != 88 {
+		t.Fatalf("Render.FovDegrees 未落盘: %v，want 88", saved.Render.FovDegrees)
+	}
+}
+
+// TestPanelSavePreservesExistingLoggingSection 证明 save 不会把磁盘上已有的
+// logging 段清空——例如把实现换成 config.Defaults().Save(path) 或者丢掉
+// save() 里 config.Load 那一步直接整体覆盖，都会让这里的模块级日志等级消失。
+func TestPanelSavePreservesExistingLoggingSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	preexisting := config.Defaults()
+	preexisting.Logging.Modules = map[string]slog.Level{"render": slog.LevelDebug}
+	if err := preexisting.Save(path); err != nil {
+		t.Fatalf("准备已有配置文件: %v", err)
+	}
+
+	state := newPanelState(config.Defaults())
+	if err := state.save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	saved, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("重新读取保存的配置: %v", err)
+	}
+	if got := saved.Logging.Modules["render"]; got != slog.LevelDebug {
+		t.Fatalf("logging.modules.render = %v, want LevelDebug（save 不得清空已有 logging 段）", got)
 	}
 }
 

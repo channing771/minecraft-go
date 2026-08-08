@@ -191,7 +191,9 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 		Level: slog.LevelDebug,
 	}), effective.Logging)
 	effective.Apply()
-	options.Application.Dev = options.Dev
+	// benchmark 产出不应受 --dev 影响：即便同时传了 --dev，也不给 benchmark
+	// 进程构造面板渲染器或占用它的 GPU 资源。
+	options.Application.Dev = options.Dev && !options.Application.Benchmark
 	options.Application.Render = effective.Render
 	// 面板 F5 保存需要落盘路径；benchmark 与抓帧路径不进交互循环，不需要它。
 	if !options.Application.Benchmark && options.CaptureDir == "" {
@@ -332,7 +334,9 @@ func runInteractive(app *application) error {
 			if app.panel.handleKeys(keys, app.remote()) {
 				app.applyPanelChange()
 			}
-			if keys.Save {
+			// 面板隐藏时 F5 不落盘：设计文档要求配置文件"不自动创建"，
+			// 面板关着时误触 F5 不该在 config.DefaultPath() 悄悄创建/覆盖它。
+			if keys.Save && app.panel.visible {
 				if err := app.panel.save(app.configPath); err != nil {
 					slog.Warn("保存调试面板配置失败", "error", err)
 				}

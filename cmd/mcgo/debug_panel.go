@@ -92,18 +92,41 @@ func newPanelStateFromActive(renderConfig config.Render) *panelState {
 // rows 把当前生效配置渲染成面板可绘制的行；remote 为真时 physics/sim 两组连同
 // render.viewDistance 一起标记为只读——服务端是唯一权威，联机时客户端不得写
 // physics/sim，viewDistance 则无论是否联机都需要重启才能生效。
+//
+// 每换一个分组就插入一个段头行（ReadOnly 且 Value 为空，见
+// panelSectionHeaderRow），标签本身只用裸 field.Name，不再拼
+// "Group.Name"——渲染器的标签列宽是按最长字段名（27 个 ASCII 字符左右）
+// 而不是按"分组名+字段名"的组合长度定的，把分组塞进每一行只会把标签
+// 继续拉长，挤占数值列。分组信息改成一次性的段头，符合设计文档"按
+// physics/sim/render 分组展示"的原意。
+//
+// s.selected 是 config.Fields() 里的下标，与本函数返回的 rows 下标不是
+// 一一对应（rows 里多出了段头行），因此 Selected 必须在遍历 fields 时按
+// fields 的下标 i 判定，不能用 rows 切片自身的下标。
 func (s *panelState) rows(remote bool) []render.PanelRow {
 	fields := config.Fields()
-	rows := make([]render.PanelRow, len(fields))
+	rows := make([]render.PanelRow, 0, len(fields)+3)
+	lastGroup := ""
 	for i, field := range fields {
-		rows[i] = render.PanelRow{
-			Label:    field.Group + "." + field.Name,
+		if field.Group != lastGroup {
+			rows = append(rows, panelSectionHeaderRow(field.Group))
+			lastGroup = field.Group
+		}
+		rows = append(rows, render.PanelRow{
+			Label:    field.Name,
 			Value:    formatFieldValue(fieldValue(&s.effective, field)),
 			ReadOnly: s.fieldReadOnly(field, remote),
 			Selected: i == s.selected,
-		}
+		})
 	}
 	return rows
+}
+
+// panelSectionHeaderRow 构造一个分组段头行。它恒为 ReadOnly 且 Value 为空——
+// 导航（moveSelection）天然跳过只读行，因此段头不需要任何额外特判就不会被
+// 选中或编辑；Value 为空同时是测试用来把段头行与数据行区分开的标志。
+func panelSectionHeaderRow(group string) render.PanelRow {
+	return render.PanelRow{Label: "── " + group + " ──", ReadOnly: true}
 }
 
 // fieldReadOnly 判断字段在给定连接模式下是否只读：字段自身声明只读，
