@@ -1,5 +1,17 @@
 # CI 稳定性与合并门禁 Implementation Plan
 
+> **订正（2026-08-07，`benchmark-tick-boundary-diagnostics` 变更）**：下面的 Goal 与
+> 第 17 行表格把四次 ScenarioV7 失败归为"采样预算不足"，并声称 Task 4 已解决——**错误**。
+> 逐条读断言后确认四次失败的断言全是 `server input boundary 已错过 50ms tick deadline`，
+> 耗时 2.43s–7.75s，远在原采样预算之内，Task 4 的预算放宽（`10s → 30s`）对它们无效。
+> CI 六次红的真实构成是：50ms tick 边界 4 条、`transport closed` 3 条、期限耗尽 1 条
+>（一次红灯可能撞上不止一条独立失败，因此加总大于六）。本变更（`ci-stability-merge-gate`）
+> 只解决了最后一条"期限耗尽"，**不能让任何一次已观察到的红灯变绿**——期限耗尽那条失败
+> 所在的运行还有另一条独立的 `transport closed` 失败。详见
+> `docs/superpowers/specs/2026-08-07-ci-stability-merge-gate-design.md` §4 与 §7 错误四。
+> 本文件正文（Goal、下方表格）保留原始表述作为历史记录，不重写，请以本订正引言与上述设计
+> 文档为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 `internal/server` 测试的活性等待期限收敛到三个命名常量并留足余量，并修正 `cmd/mcgo` ScenarioV7 跑在采样预算下限上的问题，处理 CI 六次红里 7 条失败中的 4 条（3 条 ScenarioV7 + 1 条期限耗尽）；这不等于让四次红变绿——期限耗尽那条失败所在的运行还有另一条独立的 transport closed 失败，修完仍是红，实际能完全变绿的只有 3 次纯 ScenarioV7 的红。
@@ -14,7 +26,7 @@ CI 六次红的构成（依据**断言**而非测试名）：
 
 | 类别 | 次数 | 断言 | 本变更 |
 | --- | --- | --- | --- |
-| 采样预算不足 | 3 | ScenarioV7 样本收集不足 | ✅ Task 4 |
+| 采样预算不足 | 3 | ScenarioV7 样本收集不足 | ❌ 订正：真实断言是 50ms tick 边界，Task 4 的预算放宽无效，见文件顶部订正引言 |
 | **连接被关闭** | 3 | `wait ready Recv: network: transport closed`，0.02s–1.46s | ❌ 根因未知，另开变更 |
 | 期限耗尽 | 1 | `player did not become ready`，5.51s | ✅ Task 1–3 |
 

@@ -6,22 +6,27 @@
 
 所以必须先降假失败率，门禁才立得住。
 
-逐条核对六次红灯的**断言**（而非只看测试名）后，假失败分三类：
+逐条核对每次红灯的**断言原文**（而非只看测试名）后，8 条失败分三类：
 
-| 类别 | 次数 | 断言 |
-| --- | --- | --- |
-| 采样预算不足 | 3 | `TestScenarioV7` 样本收集不足 |
-| **连接被关闭** | 3 | `wait ready Recv: network: transport closed`，耗时 0.02s–1.46s |
-| 期限耗尽 | 1 | `player did not become ready`，5.51s |
+| 类别 | 条数 | 断言 | 耗时 |
+| --- | --- | --- | --- |
+| **50ms tick 边界** | 4 | `server input boundary 已错过 50ms tick deadline`（`multiplayer_benchmark.go:376/448`，产品代码） | 2.43s–7.75s |
+| **连接被关闭** | 3 | `wait ready Recv: network: transport closed` | 0.02s–1.46s |
+| 期限耗尽 | 1 | `player did not become ready` | 5.51s |
 
-**主导形态是"连接被关闭"，其根因未知，本变更不处理**——它需要独立的 systematic-debugging 变更，那才是合并门禁的真正前置条件。
+> **订正记录（2026-08-07）**：本表原写「采样预算不足 3 次」，那是从 `measureMultiplayerServerProbe`
+> 的 `duration < 10s` 下限**推出来的猜测，从未与真实失败核对**。实测四次 ScenarioV7 失败的断言全是
+> 50ms tick 边界，且全部发生在原预算之内——把预算从 `10s` 放宽到 `30s` 对它们无效。
+> 详见设计文档 §4 与 §7 错误四。
 
-本变更只处理另外两类：采样预算与期限耗尽。**不得把本变更描述为"修好了 CI"。**
+**本变更只解决"期限耗尽"这 1 条。** 另两类各需独立变更，其中 50ms tick 边界证据最硬（4 条，断言、耗时、代码位置全明确）。
+
+**不得把本变更描述为"修好了 CI"。** 事实上它**不能让任何一次已观察到的红灯变绿**——那唯一一条期限耗尽失败所在的运行里还有另一条 transport closed 失败，修完仍是红。
 
 ## What Changes
 
 - 把 `internal/server` 测试中的期限按五类归类，只抬高"活性等待"一类，替换为三个命名常量。
-- `cmd/mcgo` 的 `TestScenarioV7EightSessionServerProbeIsRealAndBounded` 把采样收集预算从 `10s` 放宽到 `30s`。该预算目前正好等于 `measureMultiplayerServerProbe` 允许的下限，按构造零余量。
+- `cmd/mcgo` 的 `TestScenarioV7EightSessionServerProbeIsRealAndBounded` 把采样收集预算从 `10s` 放宽到 `30s`。该预算正好等于 `measureMultiplayerServerProbe` 允许的下限，是不健康的构造。**但这不修复该测试在 CI 上的红灯**——实测四次红全是 50ms tick 边界，与预算无关（见上方订正记录）。此项保留但不计入收益。
 
 不改产品代码、不改协议、不改存档格式、不改任何性能阈值或资源上限，因此无迁移。
 
@@ -48,5 +53,5 @@
 - `cmd/mcgo/benchmark_v6_test.go`：ScenarioV7 的收集预算。
 - 依赖：不新增任何依赖。
 - 产品代码：零改动。若诊断发现根因在产品代码，停手另开 change。
-- **已知未解决**：登录期 `transport closed`（CI 六次红中占三次）根因未查明，需独立变更；`GOMAXPROCS=1` 下客户端输入投递饿死是已验证的真实产品并发缺陷，记录不修（`cmd/mcgod` 面向 Linux 容器，1 vCPU 是真实部署场景，专用服务端上线前应查清）；`TestDropSurvivesShutdownAndRestart` 存在既有的偶发挂起，实测失败耗时 30.09s，正好跑满抬高后的 `waitDeadline`，说明是挂起而非余量不足，本变更不修复它，只是让它从"看起来像超时"变成"确凿是挂起"。
+- **已知未解决**：ScenarioV7 的 **50ms tick 边界**（8 条失败中占 4 条，证据最硬，断言在产品代码 `multiplayer_benchmark.go:376/448`）需独立变更；登录期 `transport closed`（占 3 条）根因未查明，需独立变更；`GOMAXPROCS=1` 下客户端输入投递饿死是已验证的真实产品并发缺陷，记录不修（`cmd/mcgod` 面向 Linux 容器，1 vCPU 是真实部署场景，专用服务端上线前应查清）；`TestDropSurvivesShutdownAndRestart` 存在既有的偶发挂起，实测失败耗时 30.09s，正好跑满抬高后的 `waitDeadline`，说明是挂起而非余量不足，本变更不修复它，只是让它从"看起来像超时"变成"确凿是挂起"。
 - 分支保护：`Require branches to be up to date before merging` 是 GitHub 仓库设置，不在代码仓库内，需要仓库管理员在假失败率降下来后手动开启。本变更不包含该操作，只把它记为前置条件已满足后的下一步。

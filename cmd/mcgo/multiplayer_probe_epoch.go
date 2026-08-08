@@ -30,6 +30,12 @@ const (
 type benchmarkServerTickSignal struct {
 	measured  bool
 	scheduled time.Time
+	// published 是 observeScheduledTick 回调内打的时间戳，用于把
+	// "服务端侧耗时"与"信号在缓冲里排队的耗时"分开。只在失败信息里读取。
+	published time.Time
+	// duration 是该 tick 自身的执行耗时，服务端已作为回调参数给出，
+	// 此前未向下传递。只在失败信息里读取。
+	duration time.Duration
 }
 
 type benchmarkServerInputBoundary func(context.Context, uint64, func() error) error
@@ -144,7 +150,10 @@ func (epoch *benchmarkServerEpoch) observeScheduledTick(
 	}
 	select {
 	case epoch.signals <- benchmarkServerTickSignal{
-		measured: measured, scheduled: scheduled,
+		measured:  measured,
+		scheduled: scheduled,
+		published: time.Now(),
+		duration:  duration,
 	}:
 	default:
 		epoch.overflow.Store(true)

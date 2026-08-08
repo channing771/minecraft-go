@@ -5,13 +5,16 @@
 > （1 处永不收敛、2 处秒过，是悬崖不是梯度；满载多核复现不出任何失败），**不得使用**。
 > 详见设计文档 §7。验证靠推理、反向验证（常量改 1ms 必须变红）与 CI 统计观察。
 
-> **本变更处理的是 CI 六次红里的四条失败**（7 条失败中的 4 条：3 条 ScenarioV7 采样预算 + 1 条期限耗尽），
-> 不是"六次红里的四次"——运行 `31197146703` 一次红里有两条失败：`TestHealthSevenSurvivesDiskRestart`
-> （transport closed，范围外）与 `TestHostRejectsDuplicatePlayerBeforeLoad`（期限耗尽，本变更修）。
-> 那次红修完仍然是红。实际能完全变绿的只有 3 次纯 ScenarioV7 的红；第 4 次红本变更只修其中一条失败，
-> 该次运行仍会因 transport closed 保持红；其余 2 次红是纯 transport closed，不受影响。
-> 三次纯 transport closed 之外，根因未知，需独立的 systematic-debugging 变更。
-> **不得把本变更描述为"修好了 CI"。**
+> **订正（2026-08-07）：本变更实际只解决 8 条失败中的 1 条，且不能让任何一次已观察到的红灯变绿。**
+>
+> 原表述称"处理 7 条失败中的 4 条（3 条 ScenarioV7 采样预算 + 1 条期限耗尽）"。实测四次
+> ScenarioV7 失败的断言全是 `server input boundary 已错过 50ms tick deadline`（耗时 2.43s–7.75s，
+> 远在原预算之内），不是采样预算不足——**Task 4 的预算放宽对它们无效**。
+>
+> 真实构成：50ms tick 边界 4 条、`transport closed` 3 条、期限耗尽 1 条。本变更只解决最后一条，
+> 而那条失败所在的运行里还有一条独立的 transport closed 失败，修完仍是红。
+>
+> 详见设计文档 §4（真实成因）与 §7 错误四（为什么会归因错）。
 
 ## 1. 命名常量与已知的活性超时站点
 

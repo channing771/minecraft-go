@@ -525,7 +525,7 @@ func TestBenchmarkServerInputDeadlineUsesScheduledTickTime(t *testing.T) {
 	scheduled := time.Now().Add(100 * time.Millisecond)
 	deadline, err := benchmarkServerInputDeadline(benchmarkServerTickSignal{
 		scheduled: scheduled,
-	})
+	}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestBenchmarkServerInputDeadlineUsesScheduledTickTime(t *testing.T) {
 func TestBenchmarkServerInputDeadlineRejectsDelayedStepStart(t *testing.T) {
 	_, err := benchmarkServerInputDeadline(benchmarkServerTickSignal{
 		scheduled: time.Now().Add(-fixedBenchmarkFrameDuration),
-	})
+	}, 0)
 	if err == nil || !strings.Contains(err.Error(), "50ms") {
 		t.Fatalf("delayed step deadline error=%v", err)
 	}
@@ -595,9 +595,16 @@ func TestCanonicalCountingServerStreamFreezesMeasurementAtSendStart(t *testing.T
 }
 
 func TestScenarioV7EightSessionServerProbeIsRealAndBounded(t *testing.T) {
-	// 收集预算而非阈值：measureMultiplayerServerProbe 要求 >= 10s，
-	// 此前恰好传 10s，按构造零余量——这是该测试成为 CI 首要假失败源
-	// 的成因（六次红里占三次）。放宽预算不动下面任何一条界限断言。
+	// 收集预算而非阈值。measureMultiplayerServerProbe 要求 >= 10s，此前恰好
+	// 传 10s，预算等于被调用方下限是不健康的构造，因此放宽到 30s；放宽不动
+	// 下面任何一条界限断言。
+	//
+	// 但要说清楚：**这不是本测试在 CI 上变红的成因**。实测四次红的断言都是
+	// multiplayer_benchmark.go 的 "server input boundary 已错过 50ms tick
+	// deadline"，耗时 2.43s–7.75s，远在原预算之内——预算从来不是绑定约束，
+	// 放宽它对那一形态无效。真正的成因见
+	// docs/superpowers/specs/2026-08-07-ci-stability-merge-gate-design.md §4，
+	// 需要单独处理。
 	multiplayer, ticks, err := measureMultiplayerServerProbe(30 * time.Second)
 	if err != nil {
 		t.Fatal(err)

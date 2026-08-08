@@ -367,13 +367,61 @@ type benchmarkServerWindowSummary struct {
 	peakRSS    uint64
 }
 
-func benchmarkServerInputDeadline(signal benchmarkServerTickSignal) (time.Time, error) {
+// formatTickBoundaryOverrun 把一次 input boundary 超时拆成可判读的时间分解。
+//
+// 抽成纯函数是因为这段代码在本地永远不会执行：CI 上的失败形态本地复现不出来
+// （见 docs/superpowers/specs/2026-08-07-ci-stability-merge-gate-design.md §7），
+// 若把格式化埋在探针运行路径里，它就没有任何验证手段——一个从不执行的诊断
+// 分支等于没写。
+//
+// 队列深度是这几项里判别力最强的一项：大于 0 说明缓冲里还压着别的信号、
+// 测试 goroutine 确实落后了；等于 0 则说明时间花在服务端侧。取的是取出信号
+// 之后的 len(epoch.signals)，与"取出那一刻"差一个，但方向与判别力不变。
+//
+// 这套判别力只在信号刚取出、测试侧还没做任何工作时成立——即消息里不带站点
+// 标记的那一档（`measured tick %d: ...`）。带"（采样后、boundary 前）"标记的
+// 调用点前面刚做完一次非阻塞 drain，深度结构性地几乎恒为 0；带"（boundary
+// 完成后）"标记的调用点里，下一 tick 的合法发布会让深度变成 1。这两处不能
+// 直接套用 docs/superpowers/specs/2026-08-07-benchmark-tick-boundary-diagnostics-design.md
+// §6 的判定表。
+func formatTickBoundaryOverrun(
+	signal benchmarkServerTickSignal,
+	now time.Time,
+	queueDepth int,
+) string {
+	total := now.Sub(signal.scheduled)
+	overrun := total - fixedBenchmarkFrameDuration
+	if signal.published.IsZero() {
+		return fmt.Sprintf(
+			"server input boundary 已错过 50ms tick deadline："+
+				"总耗时 %v（超出 %v）；tick 自身 %v；发布时刻缺失；收到时队列深度 %d",
+			total, overrun, signal.duration, queueDepth,
+		)
+	}
+	return fmt.Sprintf(
+		"server input boundary 已错过 50ms tick deadline："+
+			"总耗时 %v（超出 %v）；tick 自身 %v；调度→发布 %v；发布→收到 %v；"+
+			"收到时队列深度 %d",
+		total, overrun, signal.duration,
+		signal.published.Sub(signal.scheduled),
+		now.Sub(signal.published),
+		queueDepth,
+	)
+}
+
+func benchmarkServerInputDeadline(
+	signal benchmarkServerTickSignal,
+	queueDepth int,
+) (time.Time, error) {
 	if signal.scheduled.IsZero() {
 		return time.Time{}, errors.New("server tick 缺少调度时间")
 	}
 	deadline := signal.scheduled.Add(fixedBenchmarkFrameDuration)
-	if !time.Now().Before(deadline) {
-		return time.Time{}, errors.New("server input boundary 已错过 50ms tick deadline")
+	now := time.Now()
+	if !now.Before(deadline) {
+		return time.Time{}, errors.New(
+			formatTickBoundaryOverrun(signal, now, queueDepth),
+		)
 	}
 	return deadline, nil
 }
@@ -409,7 +457,7 @@ func runBenchmarkServerMeasuredWindow(
 		var inputDeadline time.Time
 		if completed < benchmarkServerMeasuredTicks {
 			var err error
-			inputDeadline, err = benchmarkServerInputDeadline(signal)
+			inputDeadline, err = benchmarkServerInputDeadline(signal, len(epoch.signals))
 			if err != nil {
 				return result, fmt.Errorf("measured tick %d: %w", completed, err)
 			}
@@ -443,9 +491,10 @@ func runBenchmarkServerMeasuredWindow(
 				)
 			default:
 			}
-			if !time.Now().Before(inputDeadline) {
+			if now := time.Now(); !now.Before(inputDeadline) {
 				return result, fmt.Errorf(
-					"measured tick %d 的 input boundary 已错过 50ms deadline", completed,
+					"measured tick %d（采样后、boundary 前）: %s", completed,
+					formatTickBoundaryOverrun(signal, now, len(epoch.signals)),
 				)
 			}
 			nextSequence := uint64(completed + 1)
@@ -468,9 +517,10 @@ func runBenchmarkServerMeasuredWindow(
 					completed, err,
 				)
 			}
-			if !time.Now().Before(inputDeadline) {
+			if now := time.Now(); !now.Before(inputDeadline) {
 				return result, fmt.Errorf(
-					"measured tick %d 的 input boundary 超过 50ms deadline", completed,
+					"measured tick %d（boundary 完成后）: %s", completed,
+					formatTickBoundaryOverrun(signal, now, len(epoch.signals)),
 				)
 			}
 		}
@@ -660,7 +710,7 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 	) error {
 		return host.RunAtInputBoundary(boundaryCtx, sequence, len(clients), action)
 	}
-	firstInputDeadline, err := benchmarkServerInputDeadline(lastWarmupSignal)
+	firstInputDeadline, err := benchmarkServerInputDeadline(lastWarmupSignal, len(epoch.signals))
 	if err != nil {
 		return client.MultiplayerSummary{}, client.PhaseSummary{}, fmt.Errorf(
 			"warm-up 后首组 input boundary: %w", err,
