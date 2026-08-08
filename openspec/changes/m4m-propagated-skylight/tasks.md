@@ -17,7 +17,7 @@
 
 ## 4. Benchmark 与 M5 基线
 
-- [ ] 4.1 先写 scenario v14、唯一 `13:14`、旧迁移拒绝、Memory/TCP parity 和基线选择的失败测试，再最小升级 producer 与 `cmd/perfcheck` 并重构；运行相关 `go test ./cmd/perfcheck ./internal/... -race -count=1`，通过后只提交本任务文件。
+- [x] 4.1 先写 scenario v14、唯一 `13:14`、旧迁移拒绝、Memory/TCP parity 和基线选择的失败测试，再最小升级 producer 与 `cmd/perfcheck` 并重构；运行相关 `go test ./cmd/perfcheck ./internal/... -race -count=1`，通过后只提交本任务文件。
 - [ ] 4.2 先写完整 `48³` 传播、跨边界输入和稳定 Mesher 无逐任务 scratch 分配的失败测试，再最小加入无猜测阈值的微基准并重构；运行相关 `go test -bench`，通过后只提交本任务文件。
 - [ ] 4.3 先验证未通过静稳预检或缺少绑定精确 HEAD 的一次性授权时正式链被拒绝；在冻结候选全量验证通过后，以全新路径各执行一次 M5 Memory/TCP v14 producer，并在 `13:14` 完整性/绝对门禁和跨 transport 比较通过后替换 M5 基线、记录证据；通过后只提交本任务文件，M2 不变。
 
