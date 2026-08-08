@@ -7,7 +7,6 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/core"
-	"minecraft-go/internal/physics"
 	"minecraft-go/internal/world"
 )
 
@@ -39,9 +38,15 @@ func (engine *Engine) chestView(ref core.ContainerRef) (*world.Chunk, world.Ches
 	return chunk, chest, true
 }
 
-// withinContainerReach 报告玩家是否仍在某个容器的六格交互范围内；
-// 熔炉与箱子共用同一份服务端权威距离判定。
-func withinContainerReach(eye mgl32.Vec3, chunk core.ChunkPos, blockIndex uint32) bool {
+// withinContainerReach 报告玩家是否仍在某个容器的交互范围内；
+// 熔炉与箱子共用同一份服务端权威距离判定。reach 由调用方传入本 tick 的快照值，
+// 这个自由函数本身绝不读取 ActiveTunables。
+func withinContainerReach(
+	eye mgl32.Vec3,
+	chunk core.ChunkPos,
+	blockIndex uint32,
+	reach float32,
+) bool {
 	position, ok := world.BlockPosFromChunkIndex(chunk, blockIndex)
 	if !ok {
 		return false
@@ -51,7 +56,7 @@ func withinContainerReach(eye mgl32.Vec3, chunk core.ChunkPos, blockIndex uint32
 		float32(position.Y) + 0.5,
 		float32(position.Z) + 0.5,
 	}
-	return center.Sub(eye).Len() <= interactionReach
+	return center.Sub(eye).Len() <= reach
 }
 
 // openContainer 处理打开请求：用权威射线在六格内命中活动熔炉或箱子才建立查看关系；
@@ -65,12 +70,12 @@ func (engine *Engine) openContainer(id SessionID, command Command) (RejectReason
 	if dimension == nil {
 		return RejectChunkNotReady, true
 	}
-	origin := session.player.state.Position.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+	origin := session.player.state.Position.Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
 	direction := LookDirection(command.Yaw, command.Pitch)
 	hit, ok, err := core.RaycastBlocks(
 		origin,
 		direction,
-		interactionReach,
+		engine.tunables.InteractionReach,
 		func(position core.BlockPos) (bool, error) {
 			block, ready := dimension.BlockAt(position)
 			if !ready {
@@ -159,11 +164,11 @@ func (engine *Engine) publishContainers(result *TickResult) {
 			result.FurnaceEnds = append(result.FurnaceEnds, FurnaceEnd{Session: id, Furnace: ref})
 			continue
 		}
-		eye := session.player.state.Position.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+		eye := session.player.state.Position.Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
 		switch ref.Kind {
 		case core.ContainerKindChest:
 			chunk, chest, ok := engine.chestView(ref)
-			if !ok || !withinContainerReach(eye, chunk.Pos, chest.BlockIndex) {
+			if !ok || !withinContainerReach(eye, chunk.Pos, chest.BlockIndex, engine.tunables.InteractionReach) {
 				session.viewContainer = false
 				result.FurnaceEnds = append(result.FurnaceEnds, FurnaceEnd{Session: id, Furnace: ref})
 				continue
@@ -175,7 +180,7 @@ func (engine *Engine) publishContainers(result *TickResult) {
 			})
 		case core.ContainerKindFurnace:
 			chunk, furnace, ok := engine.furnaceView(ref)
-			if !ok || !withinContainerReach(eye, chunk.Pos, furnace.BlockIndex) {
+			if !ok || !withinContainerReach(eye, chunk.Pos, furnace.BlockIndex, engine.tunables.InteractionReach) {
 				session.viewContainer = false
 				result.FurnaceEnds = append(result.FurnaceEnds, FurnaceEnd{Session: id, Furnace: ref})
 				continue

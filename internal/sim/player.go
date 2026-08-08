@@ -116,7 +116,7 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 	if !restore.Inventory.Valid() {
 		panic("sim: register session with invalid inventory")
 	}
-	candidates := spawnCandidates(restore.SpawnAnchor)
+	candidates := spawnCandidates(restore.SpawnAnchor, engine.tunables.SpawnRadius)
 	health := restore.Health
 	if health == 0 {
 		health = core.MaxHealth
@@ -383,7 +383,7 @@ func (engine *Engine) advanceActivePlayers() {
 		// 计时冻结；重生本身回满生命值，冻结与否都观察不到差别。计时放在
 		// reset 短路之前同样是有意的：reset 只是位置跳变的当 tick 标记，
 		// 玩家仍在世界里，回复不应因此停摆。
-		player.advanceHealthRegen()
+		player.advanceHealthRegen(engine.tunables.RegenDelayTicks, engine.tunables.RegenIntervalTicks)
 		if player.reset {
 			continue
 		}

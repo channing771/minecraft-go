@@ -17,12 +17,17 @@ type spawnColumn struct {
 	X, Z int32
 }
 
-func spawnCandidates(anchor core.ChunkPos) []spawnColumn {
+// spawnCandidates 按到 anchor 的距离升序枚举半径 radius 内的候选出生列。
+// radius 由调用方传入本 tick 的快照值，这个自由函数本身绝不读取 ActiveTunables。
+//
+// 容量安全依赖调用方已把 radius 钳制在 1..64（Task 6 的 sim.SpawnRadius 区间钳制）：
+// 下面的容量计算随 radius 平方增长，未钳制的大数会在此处触发一次巨额分配。
+func spawnCandidates(anchor core.ChunkPos, radius int32) []spawnColumn {
 	anchorX := anchor.X << core.SectionShift
 	anchorZ := anchor.Z << core.SectionShift
-	candidates := make([]spawnColumn, 0, (spawnRadius*2+1)*(spawnRadius*2+1))
-	for x := anchorX - spawnRadius; x <= anchorX+spawnRadius; x++ {
-		for z := anchorZ - spawnRadius; z <= anchorZ+spawnRadius; z++ {
+	candidates := make([]spawnColumn, 0, (radius*2+1)*(radius*2+1))
+	for x := anchorX - radius; x <= anchorX+radius; x++ {
+		for z := anchorZ - radius; z <= anchorZ+radius; z++ {
 			candidates = append(candidates, spawnColumn{X: x, Z: z})
 		}
 	}

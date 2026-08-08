@@ -11,15 +11,18 @@ const RegenIntervalTicks = 40
 // advanceHealthRegen 推进玩家一个 tick 的自动回复计时，与熔炉推进（advanceFurnace）
 // 同形：固定整数运算、不分配、返回是否发生了可观察变化（本 tick 是否回复了 1 点）。
 // 满血玩家直接短路，不计时也不回复，确保满血 tick 是彻底的 no-op。
-func (player *playerState) advanceHealthRegen() bool {
+//
+// regenDelayTicks、regenIntervalTicks 由调用方传入本 tick 的快照值；playerState 没有
+// 引擎引用，这个方法本身绝不读取 ActiveTunables。
+func (player *playerState) advanceHealthRegen(regenDelayTicks, regenIntervalTicks uint32) bool {
 	if player.health >= core.MaxHealth {
 		return false
 	}
 	player.ticksSinceDamage++
-	if player.ticksSinceDamage <= RegenDelayTicks {
+	if player.ticksSinceDamage <= regenDelayTicks {
 		return false
 	}
-	if (player.ticksSinceDamage-RegenDelayTicks)%RegenIntervalTicks != 0 {
+	if (player.ticksSinceDamage-regenDelayTicks)%regenIntervalTicks != 0 {
 		return false
 	}
 	player.health++

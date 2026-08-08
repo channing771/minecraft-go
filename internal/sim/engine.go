@@ -71,6 +71,11 @@ type Engine struct {
 	tick      atomic.Uint64
 	// worldTime 是权威绝对世界时间，只由 simulation owner 在 Step 中推进。
 	worldTime atomic.Uint64
+
+	// tunables 与 physicsTunables 在每次 Step 入口刷新一次，同一 tick 内全程使用，
+	// 保证单个 tick 的所有判定基于同一份参数。
+	tunables        Tunables
+	physicsTunables physics.Tunables
 }
 
 // NewEngine 创建权威引擎。worldTime 是从 metadata 恢复的绝对世界时间。
@@ -88,6 +93,10 @@ func NewEngine(viewRadius int, worldTime uint64) *Engine {
 		inFlightSaves: make(map[core.ChunkKey]persistenceInFlight),
 	}
 	engine.worldTime.Store(worldTime)
+	// 初始化快照，使未经 Step 就被调用的方法（例如 RegisterPlayer 的出生扫描）
+	// 也有可用的参数快照。
+	engine.tunables = ActiveTunables()
+	engine.physicsTunables = physics.ActiveTunables()
 	return engine
 }
 
@@ -120,6 +129,8 @@ func (engine *Engine) SubmitAcquired(result AcquiredChunk) {
 
 // Step 严格串行执行一个权威 tick。
 func (engine *Engine) Step() TickResult {
+	engine.tunables = ActiveTunables()
+	engine.physicsTunables = physics.ActiveTunables()
 	commands, acquired, generated := engine.takeInbox()
 	sort.SliceStable(commands, func(i, j int) bool {
 		if commands[i].Session != commands[j].Session {
@@ -736,7 +747,7 @@ func (engine *Engine) executePlacement(
 		return RejectPlayerNotReady, true
 	}
 	dimensionID := session.dimension
-	origin := session.player.state.Position.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+	origin := session.player.state.Position.Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
 	direction := LookDirection(command.Yaw, command.Pitch)
 	dimension := engine.dimensions[dimensionID]
 	originBlock := core.BlockPos{
@@ -771,7 +782,7 @@ func (engine *Engine) executePlacement(
 	hit, ok, err := core.RaycastBlocks(
 		origin,
 		direction,
-		interactionReach,
+		engine.tunables.InteractionReach,
 		func(position core.BlockPos) (bool, error) {
 			block, ready := dimension.BlockAt(position)
 			if !ready {

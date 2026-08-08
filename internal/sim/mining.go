@@ -4,7 +4,6 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/core"
-	"minecraft-go/internal/physics"
 	"minecraft-go/internal/world"
 )
 
@@ -111,11 +110,11 @@ func (engine *Engine) advanceMining(
 			player.mining = playerMiningState{}
 			continue
 		}
-		origin := player.state.Position.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+		origin := player.state.Position.Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
 		hit, ok, err := core.RaycastBlocks(
 			origin,
 			LookDirection(player.yaw, player.pitch),
-			interactionReach,
+			engine.tunables.InteractionReach,
 			func(position core.BlockPos) (bool, error) {
 				block, ready := dimension.BlockAt(position)
 				if !ready {
@@ -233,7 +232,7 @@ func (engine *Engine) completeMining(
 			stacks[0] = core.ItemStack{Item: core.ItemFurnace, Count: 1}
 		}
 		next, capacityOK := record.Chunk.PrepareDropBatch(
-			stacks[:], blockIndex, DropPickupDelayTicks,
+			stacks[:], blockIndex, engine.tunables.DropPickupDelayTicks,
 		)
 		if !capacityOK {
 			return RejectDropCapacity, true
@@ -263,7 +262,7 @@ func (engine *Engine) completeMining(
 		}
 		copy(stacks[1:], chest.Items[:])
 		next, capacityOK := record.Chunk.PrepareDropBatch(
-			stacks[:], blockIndex, DropPickupDelayTicks,
+			stacks[:], blockIndex, engine.tunables.DropPickupDelayTicks,
 		)
 		if !capacityOK {
 			return RejectDropCapacity, true
@@ -302,7 +301,7 @@ func (engine *Engine) completeMining(
 			dropSlot,
 			core.ItemStack{Item: item, Count: 1},
 			blockIndex,
-			DropPickupDelayTicks,
+			engine.tunables.DropPickupDelayTicks,
 		)
 	}
 	return 0, false
