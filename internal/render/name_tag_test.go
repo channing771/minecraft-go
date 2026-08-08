@@ -433,6 +433,7 @@ type nameTagTestDevice struct {
 	buffers       []*nameTagTestBuffer
 	pipelineDescs []gfx.RenderPipelineDesc
 	pipelines     []*nameTagTestPipeline
+	textures      []*nameTagTestTexture
 	bind          *nameTagTestBindGroup
 	sampler       *nameTagTestSampler
 }
@@ -456,7 +457,11 @@ func (d *nameTagTestDevice) CreateBindGroup(gfx.BindGroupDesc) gfx.BindGroup {
 	d.bind = &nameTagTestBindGroup{}
 	return d.bind
 }
-func (*nameTagTestDevice) CreateTexture(gfx.TextureDesc) gfx.Texture { panic("unexpected texture") }
+func (d *nameTagTestDevice) CreateTexture(desc gfx.TextureDesc) gfx.Texture {
+	texture := &nameTagTestTexture{desc: desc, view: &nameTagTestView{}}
+	d.textures = append(d.textures, texture)
+	return texture
+}
 func (d *nameTagTestDevice) CreateSampler(gfx.SamplerDesc) gfx.Sampler {
 	d.sampler = &nameTagTestSampler{}
 	return d.sampler
@@ -510,6 +515,23 @@ func (group *nameTagTestBindGroup) Release() { group.releases++ }
 type nameTagTestSampler struct{ releases int }
 
 func (sampler *nameTagTestSampler) Release() { sampler.releases++ }
+
+type nameTagTestTexture struct {
+	desc     gfx.TextureDesc
+	view     *nameTagTestView
+	pixels   []byte
+	releases int
+}
+
+func (texture *nameTagTestTexture) View(gfx.TextureViewDesc) gfx.TextureView { return texture.view }
+func (texture *nameTagTestTexture) WriteLayer(_ uint32, _ uint32, pixels []byte) {
+	texture.pixels = append(texture.pixels[:0], pixels...)
+}
+func (*nameTagTestTexture) WriteRegion(uint32, uint32, uint32, uint32, uint32, uint32, []byte) {
+	panic("unexpected texture region")
+}
+func (*nameTagTestTexture) ReadLayer(uint32, uint32) []byte { panic("unexpected texture read") }
+func (texture *nameTagTestTexture) Release()                { texture.releases++ }
 
 type nameTagTestEncoder struct{ passes []*nameTagTestPass }
 

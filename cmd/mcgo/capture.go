@@ -145,6 +145,35 @@ var captureScenes = []captureScene{
 			return app.remotePlayers.Apply(spawn)
 		},
 	},
+	{
+		Name:         "inventory-crafting",
+		WarmupFrames: 8,
+		Apply: func(app *application) error {
+			app.worldTimeTicks = 6000
+			app.camera.Yaw = 0
+			app.camera.Pitch = -0.25
+			app.remotePlayers.Reset()
+			app.furnace.Reset()
+			app.chest.Reset()
+			app.inventoryOpen = true
+			app.inventorySource = 12
+
+			inventory := core.Inventory{}
+			inventory.Hotbar.Selected = 1
+			inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 64}
+			inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemGrass, Count: 32}
+			inventory.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 40}
+			inventory.Hotbar.Slots[3] = core.ItemStack{Item: core.ItemFurnace, Count: 2}
+			inventory.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemChest, Count: 1}
+			inventory.Backpack[0] = core.ItemStack{Item: core.ItemDirt, Count: 48}
+			inventory.Backpack[1] = core.ItemStack{Item: core.ItemStoneBrick, Count: 16}
+			inventory.Backpack[2] = core.ItemStack{Item: core.ItemCoal, Count: 12}
+			inventory.Backpack[3] = core.ItemStack{Item: core.ItemRawIron, Count: 8}
+			inventory.Backpack[4] = core.ItemStack{Item: core.ItemIronIngot, Count: 9}
+			inventory.Backpack[9] = core.ItemStack{Item: core.ItemIronBlock, Count: 1}
+			return app.inventory.Apply(network.InventoryState{Inventory: inventory})
+		},
+	},
 }
 
 // captureGoldenDir 是 golden 基线目录，相对仓库根目录。
