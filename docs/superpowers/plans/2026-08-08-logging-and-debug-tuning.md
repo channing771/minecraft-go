@@ -1663,7 +1663,7 @@ git commit -m "feat: cmd 接入配置文件加载、日志分级装配与 --dev 
 
 `internal/render/shader/debug_panel.wgsl` 与 `hotbar.wgsl` 结构完全一致（同样的 `Viewport`、`Instance`、`quads`/`glyphs` 两个 storage 数组、`quad_vs`/`quad_fs`/`glyph_vs`/`glyph_fs` 四个入口）。直接复制 `hotbar.wgsl` 并把首行注释改为"调试面板：屏幕空间实例化矩形与字形"。
 
-> 不共用 `hotbar.wgsl`：两个渲染器各自持有独立的 buffer 与 bind group，容量常量也不同，共用会把两者的布局耦合起来。
+> **不共用 `hotbar.wgsl`（已经用户裁定，评审若标为重复请引用本条）**：`hotbar.wgsl` 本身不含容量常量，技术上可以共用；这里选择各持一份，是为了让 HUD 与调试面板的呈现方式可以各自演进——改其中一个的混合模式、加一条描边或换 UV 语义时，不会波及另一个。代价是两份约 67 行的重复，这是明确接受的取舍。
 
 - [ ] **Step 2: 写失败测试**
 
