@@ -73,3 +73,15 @@ func TestSkyLightScratchDoesNotSampleSettledNeighbors(t *testing.T) {
 		t.Fatalf("稳定全直射输入的不透明查询=%d，想要仅种子扫描的 %d", got, want)
 	}
 }
+
+func TestMeshSectionSkipsSingleAirWork(t *testing.T) {
+	n := fullyLoadedAirNeighborhood()
+	reg := new(countingOpaqueRegistry)
+
+	if quads := MeshSection(n, reg, NewSkyLightScratch()); len(quads) != 0 {
+		t.Fatalf("single-air 区段产生了 %d 个面，想要 0", len(quads))
+	}
+	if reg.queries != 0 {
+		t.Fatalf("single-air 区段执行了 %d 次不透明查询，想要 0", reg.queries)
+	}
+}

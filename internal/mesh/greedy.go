@@ -21,6 +21,9 @@ func MeshSection(n *world.Neighborhood, reg Registry, light *SkyLightScratch) []
 	if light == nil {
 		panic("mesh: nil sky light scratch")
 	}
+	if id, single := n.Center.Blocks.IsUniform(); single && id == world.AirID {
+		return nil
+	}
 	light.build(n, reg)
 	out := make([]Quad, 0, 256)
 
