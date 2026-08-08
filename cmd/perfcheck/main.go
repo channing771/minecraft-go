@@ -17,7 +17,7 @@ func main() {
 	baselinePath := flag.String("baseline", "", "基线 JSON")
 	currentPath := flag.String("current", "", "当前 JSON")
 	maxRegression := flag.Float64("max-regression", 0.20, "允许的最大相对退化")
-	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 12:13 场景迁移")
+	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 13:14 场景迁移")
 	flag.Parse()
 
 	if *baselinePath == "" || *currentPath == "" {
@@ -62,13 +62,11 @@ func compareReportsWithScenarioUpgrade(
 	allowScenarioUpgrade string,
 ) ([]string, error) {
 	scenarioUpgrade := baseline.ScenarioVersion != current.ScenarioVersion
-	// 迁移参数反映真实的基线历史而非版本号连续性：v11 从未成为基线
-	// （其正式链因 GPU 计时缺陷失败），v12 已是 M5 接受的基线，
-	// 因此当前唯一迁移是 v12 直接到 v13（天空 workload）。
-	allowedScenarioUpgrade := baseline.ScenarioVersion == 12 && current.ScenarioVersion == 13 &&
-		allowScenarioUpgrade == "12:13"
+	// 横向天空光传播改变 workload，因此当前唯一迁移是 v13 到 v14。
+	allowedScenarioUpgrade := baseline.ScenarioVersion == 13 && current.ScenarioVersion == 14 &&
+		allowScenarioUpgrade == "13:14"
 	if allowScenarioUpgrade != "" && !allowedScenarioUpgrade {
-		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v12 到 v13 使用 12:13", allowScenarioUpgrade)
+		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v13 到 v14 使用 13:14", allowScenarioUpgrade)
 	}
 	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(

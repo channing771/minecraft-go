@@ -30,7 +30,7 @@ import (
 const (
 	benchmarkSeed            = 20260726
 	benchmarkMessageDrainMax = 4096
-	scenarioVersion          = 13
+	scenarioVersion          = 14
 )
 
 var (
@@ -92,7 +92,7 @@ func benchmarkReportSkeleton() client.PerfReport {
 }
 
 // gpuCompletionMinSamples 返回该场景下 remote_gpu_complete 的最小样本数。
-// v8–v11 逐次计时取 2048；v12 起改为批量分摊，样本数相应减少；v13 沿用 v12 定义。
+// v8–v11 逐次计时取 2048；v12–v14 改为批量分摊，样本数相应减少。
 func gpuCompletionMinSamples(scenario int) int {
 	switch {
 	case scenario >= 12:

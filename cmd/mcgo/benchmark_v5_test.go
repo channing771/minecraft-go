@@ -15,9 +15,9 @@ import (
 	"minecraft-go/internal/client"
 )
 
-func TestBenchmarkScenarioVersionIncludesCelestialSkyWorkload(t *testing.T) {
-	if scenarioVersion != 13 {
-		t.Fatalf("scenarioVersion=%d，想要天空 workload 之后的 v13", scenarioVersion)
+func TestBenchmarkScenarioVersionIncludesPropagatedSkylightWorkload(t *testing.T) {
+	if scenarioVersion != 14 {
+		t.Fatalf("scenarioVersion=%d，想要传播天空光 workload 之后的 v14", scenarioVersion)
 	}
 }
 
