@@ -138,3 +138,37 @@ measured tick 74: server input boundary 已错过 50ms tick deadline
 **不得**用"临时把 `fixedBenchmarkFrameDuration` 改小"来触发失败：该常量不是孤立旋钮，还被 `probe.roster.Advance`（`multiplayer_benchmark.go:199`）与客户端帧预算（`benchmark.go:681`）使用，改它会连带改变无关行为，验证结果不可信。这是设计自审时发现并否决的方案。
 
 抽成纯函数还有个附带好处：分解逻辑与探针运行解耦，未来"测量无效 vs 越界"分离时可以直接复用同一份判据。
+
+### 实测结果（Task 1–2 完成后回填）
+
+**变异验证（判据 3：纯函数单测确实在测东西）**
+
+把 `formatTickBoundaryOverrun` 里 `signal.published.Sub(signal.scheduled)`
+与 `now.Sub(signal.published)` 两个实参对调后重跑
+`TestFormatTickBoundaryOverrunReportsEachSegment`，测试在"调度→发布 30ms"
+这一条具体断言上变红（`分解缺少 "调度→发布 30ms"`），不是笼统的整体失败；
+另一条覆盖"发布时刻缺失"分支的测试不受影响，仍然通过——符合预期，它走的
+是另一个分支。说明单测确实独立区分了"调度→发布"与"发布→收到"两段数值，
+不是靠总耗时或宽松匹配蒙混过关。恢复对调后 `git diff` 干净，重跑转绿。
+
+**判据 1（成功路径零开销）**
+
+```
+go test ./cmd/mcgo -count=1        → ok  14.777s
+```
+
+**判据 2（本地仍通过，耗时同量级）**
+
+```
+go test ./cmd/mcgo -run "^TestScenarioV7EightSessionServerProbeIsRealAndBounded$" -count=3
+→ ok  33.721s
+```
+
+单次约 11 秒，与改动前本地基线（§1："本地连跑 5 次全过，每次约 11 秒"）
+同量级，耗时哨兵未响，未见新增字段填充进入热路径。
+
+**订正**：本节回填前，§8 判据 2、3 均为待验证的计划表述；以上为 Task 1–2
+实施后的实测确认，均与设计预期一致，无需推翻已写内容。判据 3（"下一次 CI
+上该测试变红时，报错能直接回答……"）仍待 CI 侧下一次红灯验证，不因本次回填
+而改变——**本变更不修任何红灯，ScenarioV7 会继续红，直到拿到分解数据后再
+决定按 §6 判定表做哪一种修复。**
