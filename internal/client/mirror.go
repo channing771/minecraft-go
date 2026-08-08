@@ -266,10 +266,10 @@ func (mirror *Mirror) addSkyDirtyVolume(
 	if lowY > highY {
 		return
 	}
-	minChunkX := (position.X - propagatedSkyDirtyRadius) >> core.SectionShift
-	maxChunkX := (position.X + propagatedSkyDirtyRadius) >> core.SectionShift
-	minChunkZ := (position.Z - propagatedSkyDirtyRadius) >> core.SectionShift
-	maxChunkZ := (position.Z + propagatedSkyDirtyRadius) >> core.SectionShift
+	minChunkX := int32((int64(position.X) - int64(propagatedSkyDirtyRadius)) >> core.SectionShift)
+	maxChunkX := int32((int64(position.X) + int64(propagatedSkyDirtyRadius)) >> core.SectionShift)
+	minChunkZ := int32((int64(position.Z) - int64(propagatedSkyDirtyRadius)) >> core.SectionShift)
+	maxChunkZ := int32((int64(position.Z) + int64(propagatedSkyDirtyRadius)) >> core.SectionShift)
 	lowSection := (lowY - core.MinY) >> core.SectionShift
 	highSection := (highY - core.MinY) >> core.SectionShift
 

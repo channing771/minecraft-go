@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -86,6 +87,52 @@ func TestMirrorNonTopChangeDirtiesPropagatedSkyVolume(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestMirrorSkyDirtyHandlesHorizontalInt32Extremes(t *testing.T) {
+	for _, coordinate := range []int32{math.MinInt32, math.MaxInt32} {
+		name := "MaxInt32"
+		if coordinate == math.MinInt32 {
+			name = "MinInt32"
+		}
+		t.Run(name, func(t *testing.T) {
+			mirror := client.NewMirror()
+			position := core.BlockPos{X: coordinate, Y: core.MinY + 40, Z: coordinate}
+			chunk := world.NewChunk(position.Chunk())
+			x, _, z := position.Local()
+			chunk.SetBlock(x, 64, z, core.StoneID)
+			if _, err := mirror.Apply(snapshotFromChunk(t, core.Overworld, chunk, 1)); err != nil {
+				t.Fatalf("导入极值区块: %v", err)
+			}
+
+			update, err := mirror.Apply(blockChanges(
+				core.Overworld, position.Chunk(), 1, position, core.StoneID,
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(update.Dirty) != 3 {
+				t.Fatalf("水平坐标 %d 的 dirty 数量 = %d，想要 3", coordinate, len(update.Dirty))
+			}
+			seen := make(map[core.SectionKey]bool, len(update.Dirty))
+			for _, key := range update.Dirty {
+				seen[key] = true
+			}
+			for y := int32(1); y <= 3; y++ {
+				key := core.SectionKey{
+					Dimension: core.Overworld,
+					Pos: core.SectionPos{
+						X: position.Chunk().X,
+						Y: y,
+						Z: position.Chunk().Z,
+					},
+				}
+				if !seen[key] {
+					t.Fatalf("水平坐标 %d 缺少所属区段 %+v", coordinate, key)
+				}
+			}
+		})
 	}
 }
 
