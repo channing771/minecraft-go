@@ -25,7 +25,7 @@ func TestShutdownFailureFreezesAndCanRetry(t *testing.T) {
 	running.engine = dirtyReadyEngine(t, []core.ChunkKey{key})
 	tickBefore := running.engine.TickCount()
 
-	err := shutdownWithDeadline(running, time.Second)
+	err := shutdownWithDeadline(running, waitDeadline)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("first Shutdown error=%v, want disk full", err)
 	}
@@ -44,10 +44,10 @@ func TestShutdownFailureFreezesAndCanRetry(t *testing.T) {
 	}
 
 	store.setSaveError(nil)
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("retry Shutdown error=%v", err)
 	}
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("idempotent Shutdown error=%v", err)
 	}
 	if got := running.engine.TickCount(); got != tickBefore+1 {
@@ -87,7 +87,7 @@ func TestShutdownAppliesFinalBufferedCommandExactlyOnceWithoutPublishing(t *test
 		},
 	}
 
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("Shutdown error=%v", err)
 	}
 	if got := running.engine.TickCount(); got != tickBefore+1 {
@@ -134,7 +134,7 @@ func TestShutdownCallerTimeoutPreservesFrozenAuthorityForRetry(t *testing.T) {
 	}
 
 	gate <- struct{}{}
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("retry after timeout error=%v", err)
 	}
 	if got := store.savedRevisions(); !reflect.DeepEqual(got, [][]uint64{{1}}) {
@@ -179,7 +179,7 @@ func TestShutdownTimeoutIncludesUnresolvedRetryFailure(t *testing.T) {
 	store.setSaveError(wantErr)
 	running, _ := newShutdownTestServer(t, store)
 	running.engine = dirtyReadyEngine(t, []core.ChunkKey{chunkKey(0, 0)})
-	if err := shutdownWithDeadline(running, time.Second); !errors.Is(err, wantErr) {
+	if err := shutdownWithDeadline(running, waitDeadline); !errors.Is(err, wantErr) {
 		t.Fatalf("first Shutdown error=%v, want retryable disk error", err)
 	}
 
@@ -194,7 +194,7 @@ func TestShutdownTimeoutIncludesUnresolvedRetryFailure(t *testing.T) {
 	}
 
 	gate <- struct{}{}
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("recovered retry Shutdown error=%v", err)
 	}
 }
@@ -212,7 +212,7 @@ func TestShutdownTimeoutDoesNotIncludeResolvedHistoricalSaveFailure(t *testing.T
 	running.config.SaveChunks = 1
 	keys := []core.ChunkKey{chunkKey(0, 0), chunkKey(32, 0)}
 	running.engine = dirtyReadyEngine(t, keys)
-	if err := shutdownWithDeadline(running, time.Second); !errors.Is(err, historicalErr) {
+	if err := shutdownWithDeadline(running, waitDeadline); !errors.Is(err, historicalErr) {
 		t.Fatalf("first Shutdown error=%v, want historical A failure", err)
 	}
 
@@ -235,7 +235,7 @@ func TestShutdownTimeoutDoesNotIncludeResolvedHistoricalSaveFailure(t *testing.T
 	}
 
 	gateB <- struct{}{}
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("B recovery Shutdown error=%v", err)
 	}
 	if got, want := store.savedKeys(), [][]core.ChunkKey{{keys[0]}, {keys[0]}, {keys[1]}}; !reflect.DeepEqual(got, want) {
@@ -259,7 +259,7 @@ func TestShutdownJoinsBufferedPersistenceFailureWithCanceledCaller(t *testing.T)
 	if !errors.Is(err, wantErr) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("Shutdown error=%v, want buffered persistence root joined with canceled caller", err)
 	}
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("buffered failure retry Shutdown error=%v", err)
 	}
 }
@@ -279,14 +279,14 @@ func TestShutdownPartialSaveAcknowledgesCommittedAndRetriesOnlyRemainder(t *test
 	keys := []core.ChunkKey{chunkKey(0, 0), chunkKey(1, 0)}
 	running.engine = dirtyReadyEngine(t, keys)
 
-	if err := shutdownWithDeadline(running, time.Second); !errors.Is(err, wantErr) {
+	if err := shutdownWithDeadline(running, waitDeadline); !errors.Is(err, wantErr) {
 		t.Fatalf("first Shutdown error=%v, want partial write", err)
 	}
 	if status := running.PersistenceStatus(); status.DirtyChunks != 1 ||
 		status.InFlightChunks != 1 || status.AutosaveDrained {
 		t.Fatalf("partial completion status=%+v, want one retained remainder", status)
 	}
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("partial retry Shutdown error=%v", err)
 	}
 	if got, want := store.savedKeys(), [][]core.ChunkKey{keys, keys[1:]}; !reflect.DeepEqual(got, want) {
@@ -301,7 +301,7 @@ func TestShutdownSavesThenSyncsThenClosesAndRetainsLockOnSyncFailure(t *testing.
 	running, _ := newShutdownTestServer(t, store)
 	running.engine = dirtyReadyEngine(t, []core.ChunkKey{chunkKey(0, 0)})
 
-	if err := shutdownWithDeadline(running, time.Second); !errors.Is(err, wantErr) {
+	if err := shutdownWithDeadline(running, waitDeadline); !errors.Is(err, wantErr) {
 		t.Fatalf("first Shutdown error=%v, want sync failed", err)
 	}
 	if got := store.eventLog(); !reflect.DeepEqual(got, []string{"save", "sync"}) {
@@ -312,7 +312,7 @@ func TestShutdownSavesThenSyncsThenClosesAndRetainsLockOnSyncFailure(t *testing.
 	}
 
 	store.setSyncError(nil)
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("Sync retry Shutdown error=%v", err)
 	}
 	if got := store.eventLog(); !reflect.DeepEqual(got, []string{"save", "sync", "sync", "close"}) {
@@ -338,7 +338,7 @@ func TestShutdownCancellationAfterSyncDefersCloseToRetry(t *testing.T) {
 	}
 
 	store.setSyncHook(nil)
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("Close-phase retry Shutdown error=%v", err)
 	}
 	if syncCalls, closeCalls := store.lifecycleCalls(); syncCalls != 1 || closeCalls != 1 {
@@ -353,14 +353,14 @@ func TestShutdownCloseFailureIsSerializedAndRetryable(t *testing.T) {
 	store.setCloseError(wantErr)
 	running, _ := newShutdownTestServer(t, store)
 
-	if err := shutdownWithDeadline(running, time.Second); !errors.Is(err, wantErr) {
+	if err := shutdownWithDeadline(running, waitDeadline); !errors.Is(err, wantErr) {
 		t.Fatalf("first Shutdown error=%v, want close failed", err)
 	}
 	if !store.worldOwned() {
 		t.Fatal("failed Close released fake world ownership")
 	}
 	store.setCloseError(nil)
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("Close retry Shutdown error=%v", err)
 	}
 	if syncCalls, closeCalls := store.lifecycleCalls(); syncCalls != 1 || closeCalls != 2 {
@@ -405,7 +405,7 @@ func TestServerRunUsesFreshShutdownTimeoutAndReturnsPersistenceError(t *testing.
 	}
 
 	store.setSyncError(nil)
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("cleanup Shutdown error=%v", err)
 	}
 }
@@ -419,7 +419,7 @@ func TestServerRunReturnsNilOnlyAfterExternalShutdownSucceeds(t *testing.T) {
 	runDone := make(chan error, 1)
 	go func() { runDone <- running.Run(context.Background()) }()
 
-	if err := shutdownWithDeadline(running, time.Second); !errors.Is(err, wantErr) {
+	if err := shutdownWithDeadline(running, waitDeadline); !errors.Is(err, wantErr) {
 		t.Fatalf("external Shutdown error=%v, want save failure", err)
 	}
 	select {
@@ -429,7 +429,7 @@ func TestServerRunReturnsNilOnlyAfterExternalShutdownSucceeds(t *testing.T) {
 	}
 
 	store.setSaveError(nil)
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("external retry Shutdown error=%v", err)
 	}
 	select {
@@ -437,7 +437,7 @@ func TestServerRunReturnsNilOnlyAfterExternalShutdownSucceeds(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run after successful external Shutdown error=%v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not return after successful external Shutdown")
 	}
 }
@@ -450,9 +450,9 @@ func TestConcurrentShutdownRunsFinalTickAndStoreLifecycleOnce(t *testing.T) {
 	const callers = 8
 	results := make(chan error, callers)
 	for range callers {
-		go func() { results <- shutdownWithDeadline(running, time.Second) }()
+		go func() { results <- shutdownWithDeadline(running, waitDeadline) }()
 	}
-	deadline := time.After(time.Second)
+	deadline := time.After(waitDeadline)
 	for range callers {
 		select {
 		case err := <-results:
@@ -495,7 +495,7 @@ func TestConcurrentShutdownCallerCanTimeoutWhileWaitingForSerializer(t *testing.
 	go func() { firstDone <- running.Shutdown(context.Background()) }()
 	select {
 	case <-store.saveStarted:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("first Shutdown did not reach gated save")
 	}
 
@@ -507,7 +507,7 @@ func TestConcurrentShutdownCallerCanTimeoutWhileWaitingForSerializer(t *testing.
 	select {
 	case err := <-secondDone:
 		timedOutWhileWaiting = errors.Is(err, context.DeadlineExceeded)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(shortWaitDeadline):
 	}
 
 	gate <- struct{}{}
@@ -536,9 +536,9 @@ func TestShutdownWaitsForQueueCapacityWithoutReleasingSnapshots(t *testing.T) {
 	}
 	running.engine = dirtyReadyEngine(t, keys)
 	done := make(chan error, 1)
-	go func() { done <- shutdownWithDeadline(running, time.Second) }()
+	go func() { done <- shutdownWithDeadline(running, waitDeadline) }()
 
-	deadline := time.After(time.Second)
+	deadline := time.After(waitDeadline)
 	for range keys {
 		select {
 		case <-store.saveStarted:
@@ -577,7 +577,7 @@ func shutdownWithDeadline(running *Server, timeout time.Duration) error {
 func recoverShutdownAfterExpectedFailure(t *testing.T, running *Server, wantErr error) {
 	t.Helper()
 	for range 3 {
-		err := shutdownWithDeadline(running, time.Second)
+		err := shutdownWithDeadline(running, waitDeadline)
 		if err == nil {
 			return
 		}
@@ -590,7 +590,7 @@ func recoverShutdownAfterExpectedFailure(t *testing.T, running *Server, wantErr 
 
 func shutdownServerForTest(t *testing.T, running *Server) {
 	t.Helper()
-	if err := shutdownWithDeadline(running, time.Second); err != nil {
+	if err := shutdownWithDeadline(running, waitDeadline); err != nil {
 		t.Fatalf("Shutdown cleanup error=%v", err)
 	}
 }

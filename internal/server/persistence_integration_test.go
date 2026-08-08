@@ -278,7 +278,7 @@ func TestPersistentShutdownReturnsAllGoroutinesWithinSharedDeadline(t *testing.T
 	harness.setTrustedCenter(core.ChunkPos{})
 	harness.waitTrustedReady(core.ChunkPos{})
 
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	done := make(chan error, 1)
 	go func() {
 		ctx, cancel := context.WithDeadline(context.Background(), deadline)
@@ -348,7 +348,6 @@ func newPersistentHarness(
 	config.AutosaveTicks = 1 << 60
 	config.RetryBaseTicks = 1
 	config.RetryMaxTicks = 4
-	config.ShutdownTimeout = 2 * time.Second
 	harness := &persistentHarness{
 		t:              t,
 		root:           root,
@@ -362,7 +361,7 @@ func newPersistentHarness(
 		if harness.closed {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		_ = harness.running.Shutdown(ctx)
 		cancel()
 		_ = harness.clientEndpoint.Close()
@@ -506,7 +505,7 @@ func (h *persistentHarness) waitTrustedReady(position core.ChunkPos) {
 
 func (h *persistentHarness) stepUntil(done func() bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for !done() {
 		h.step()
 		if time.Now().After(deadline) {
@@ -561,7 +560,7 @@ func (h *persistentHarness) shutdown() error {
 	if h.closed {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	err := h.running.Shutdown(ctx)
 	cancel()
 	if err != nil {

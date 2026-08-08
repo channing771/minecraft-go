@@ -25,7 +25,7 @@ func furnaceDrainTick(
 	ready *bool,
 ) furnaceMessages {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	var got furnaceMessages
 	for {
@@ -84,7 +84,7 @@ func stepUntilFurnaceReady(
 ) func() (furnaceMessages, uint64) {
 	t.Helper()
 	ready := false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	step := func() (furnaceMessages, uint64) {
 		t.Helper()
 		result := running.StepForTest()
@@ -116,7 +116,7 @@ func TestOpenFurnaceSendsStateOnlyToViewer(t *testing.T) {
 	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	var opened network.FurnaceState
 	for opened.Furnace.Generation == 0 {
 		if time.Now().After(deadline) {
@@ -144,7 +144,7 @@ func TestCloseFurnaceStopsServerState(t *testing.T) {
 	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待熔炉状态超时")
@@ -156,7 +156,7 @@ func TestCloseFurnaceStopsServerState(t *testing.T) {
 
 	sendClientMessage(t, clientEndpoint, network.CloseContainer{Sequence: 11})
 	// 关闭命令要先被接收并在下一个 tick 生效，随后必须彻底停止发送。
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	stopped := false
 	for !stopped {
 		if time.Now().After(deadline) {
@@ -182,7 +182,7 @@ func TestFurnaceMoveUpdatesBothSides(t *testing.T) {
 	sendClientMessage(t, clientEndpoint, network.OpenContainer{
 		Sequence: 10, Pitch: lookDownAtFurnace,
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	var ref core.FurnaceRef
 	for ref.Generation == 0 {
 		if time.Now().After(deadline) {
@@ -196,7 +196,7 @@ func TestFurnaceMoveUpdatesBothSides(t *testing.T) {
 	sendClientMessage(t, clientEndpoint, network.MoveContainerStack{
 		Sequence: 11, Container: ref, From: 0, To: core.FurnaceFuelSlot,
 	})
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待燃料移入超时")
@@ -248,7 +248,7 @@ func TestFurnaceRestartRestoresTimersWithoutCatchUp(t *testing.T) {
 
 	second, secondStore, secondClient := newDropDiskWorld(t, root)
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := second.Shutdown(ctx); err != nil {
 			t.Errorf("second Shutdown: %v", err)
@@ -259,7 +259,7 @@ func TestFurnaceRestartRestoresTimersWithoutCatchUp(t *testing.T) {
 	}()
 	restart := stepUntilDropReady(t, second, secondClient)
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	var restored world.FurnaceSlot
 	for !restored.Active {
 		if time.Now().After(deadline) {

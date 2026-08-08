@@ -81,7 +81,7 @@ func TestRunTicksReportsTickerScheduledTime(t *testing.T) {
 	var sample tickSample
 	select {
 	case sample = <-samples:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		cancel()
 		t.Fatal("RunTicks did not report a scheduled tick")
 	}
@@ -130,7 +130,7 @@ func TestTrustedObserverIsSeparateAndHasNoHeartbeat(t *testing.T) {
 	if result := running.StepForTest(); !containsChunk(result.Acquire, core.ChunkPos{X: 4}) {
 		t.Fatalf("trusted observer Acquire = %+v", result.Acquire)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := running.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -210,11 +210,11 @@ func TestTrustedObserverWriterFailureDetachesAndAllowsReattach(t *testing.T) {
 	}
 	select {
 	case <-failed.started:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("writer 没有尝试发送")
 	}
 
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		running.stepMu.Lock()
 		detached := running.trustedObserver == nil
@@ -267,7 +267,7 @@ func TestTrustedObserverFullOutboxDetachesAndAllowsReattach(t *testing.T) {
 	}
 	select {
 	case <-blocked.sendStarted:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("writer 没有进入阻塞 Send")
 	}
 

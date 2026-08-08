@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -163,7 +162,7 @@ func waitHealth(
 ) (network.PlayerState, []network.ItemDrop) {
 	t.Helper()
 	var drops []network.ItemDrop
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	for {
 		message, err := connected.Endpoint.Recv(ctx)

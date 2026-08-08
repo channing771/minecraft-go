@@ -498,7 +498,7 @@ func waitForReadyPlayer(
 	client network.ClientEndpoint,
 ) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		result := running.StepForTest()
 		state := receivePlayerStateForTick(t, client, result.Tick)
@@ -511,7 +511,7 @@ func waitForReadyPlayer(
 
 func waitForQueuedPlayerCommand(t *testing.T, running *Server) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for len(running.incoming) == 0 && time.Now().Before(deadline) {
 		runtime.Gosched()
 	}
@@ -526,7 +526,7 @@ func receivePlayerStateForTick(
 	tick uint64,
 ) network.PlayerState {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	for {
 		message, err := client.Recv(ctx)
@@ -550,7 +550,7 @@ func sendPlayerClientMessage(
 	message network.ClientMessage,
 ) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := client.Send(ctx, message); err != nil {
 		t.Fatalf("发送 %#v: %v", message, err)

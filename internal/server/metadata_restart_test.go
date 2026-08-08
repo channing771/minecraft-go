@@ -42,7 +42,7 @@ func TestDiskWorldTimeContinuesAcrossRestart(t *testing.T) {
 		first.StepForTest()
 	}
 	want := first.engine.WorldTime() + 1 // 关服屏障会再走一个最终 tick
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := first.Shutdown(ctx); err != nil {
 		t.Fatalf("首次关服：%v", err)
@@ -50,7 +50,7 @@ func TestDiskWorldTimeContinuesAcrossRestart(t *testing.T) {
 
 	second, store := openRestartWorld(t, root, seed)
 	t.Cleanup(func() {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer shutdownCancel()
 		if err := second.Shutdown(shutdownCtx); err != nil {
 			t.Errorf("清理关服：%v", err)
@@ -107,7 +107,7 @@ func TestDiskLegacyMetadataStartsAtZeroAndUpgradesOnShutdown(t *testing.T) {
 		running.StepForTest()
 	}
 	want := running.engine.WorldTime() + 1
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := running.Shutdown(ctx); err != nil {
 		t.Fatalf("关服：%v", err)
@@ -123,7 +123,7 @@ func TestDiskLegacyMetadataStartsAtZeroAndUpgradesOnShutdown(t *testing.T) {
 
 	reopened, reopenedStore := openRestartWorld(t, root, seed)
 	t.Cleanup(func() {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer shutdownCancel()
 		if err := reopened.Shutdown(shutdownCtx); err != nil {
 			t.Errorf("清理关服：%v", err)
@@ -170,7 +170,7 @@ func TestDiskAutosaveMigratesLegacyMetadataToV2(t *testing.T) {
 
 	running, store := openRestartWorld(t, root, seed)
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := running.Shutdown(ctx); err != nil {
 			t.Errorf("清理关服：%v", err)
@@ -179,7 +179,7 @@ func TestDiskAutosaveMigratesLegacyMetadataToV2(t *testing.T) {
 	running.config.AutosaveTicks = 4
 
 	// 不经关服，仅靠自动保存边界就必须把 v1 升级为 v2。
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		running.StepForTest()
 		onDisk, err := os.ReadFile(path)
@@ -231,7 +231,7 @@ func TestDiskMetadataSaveFailureKeepsOldFileAndFailsShutdown(t *testing.T) {
 		running.StepForTest()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := running.Shutdown(ctx); !errors.Is(err, injected) {
 		t.Fatalf("关服错误 = %v，想要注入的 metadata 失败", err)
@@ -261,7 +261,7 @@ func TestDiskMetadataSaveFailureKeepsOldFileAndFailsShutdown(t *testing.T) {
 	}
 	reopened, reopenedStore := openRestartWorld(t, root, seed)
 	t.Cleanup(func() {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer shutdownCancel()
 		if err := reopened.Shutdown(shutdownCtx); err != nil {
 			t.Errorf("清理关服：%v", err)

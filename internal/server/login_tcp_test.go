@@ -28,7 +28,7 @@ func TestLoginTCPMultiplayer(t *testing.T) {
 			if err != nil {
 				t.Errorf("Host Run cleanup: %v", err)
 			}
-		case <-time.After(2 * time.Second):
+		case <-time.After(waitDeadline):
 			t.Error("Host Run cleanup timed out")
 		}
 	})
@@ -69,7 +69,7 @@ func TestLoginTCPMultiplayer(t *testing.T) {
 }
 
 func dialAndLoginTCP(address string, identity network.Identity) (network.ClientEndpoint, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	stream, err := network.DialTCP(ctx, address)
 	if err != nil {

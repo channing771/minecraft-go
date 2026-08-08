@@ -207,7 +207,7 @@ func TestPlayerPersistenceMissingPlayerDoesNotPersistBeforeConfirm(t *testing.T)
 			}
 		case save := <-store.saveStarted:
 			t.Fatalf("Flush persisted unconfirmed missing player: %+v", save)
-		case <-time.After(time.Second):
+		case <-time.After(waitDeadline):
 			t.Fatal("Flush did not return for clean unconfirmed missing player")
 		}
 	})
@@ -889,7 +889,7 @@ func TestPlayerFlushRetriesPendingJobWithoutWaitingForBackoff(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Flush did not return after retry success")
 	}
 }
@@ -921,7 +921,7 @@ func TestPlayerFlushFailureRetainsFrozenJobForLaterRetry(t *testing.T) {
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("first Flush error=%v, want disk full", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("failed Flush did not return")
 	}
 
@@ -942,7 +942,7 @@ func TestPlayerFlushFailureRetainsFrozenJobForLaterRetry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("retrying Flush did not return")
 	}
 }
@@ -984,7 +984,7 @@ func TestPlayerFlushCanceledContextLeavesRetryUndispatchedAndRetryable(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("retrying Flush did not return")
 	}
 }
@@ -1026,7 +1026,7 @@ func TestPlayerFlushDoesNotLeaveConcurrentFailureForNextFlush(t *testing.T) {
 			"save player 00000000-0000-4000-8000-000000000001 revision 8: disk unavailable" {
 			t.Fatalf("first Flush error=%v, want %v", err, wantErr)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("first failed Flush did not return")
 	}
 
@@ -1042,7 +1042,7 @@ func TestPlayerFlushDoesNotLeaveConcurrentFailureForNextFlush(t *testing.T) {
 		if err != nil {
 			t.Fatalf("healed second Flush error=%v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("healed second Flush did not return")
 	}
 }
@@ -1087,7 +1087,7 @@ func TestPlayerFlushDrainsInheritedInflightBatchBeforeReturning(t *testing.T) {
 		if !errors.Is(err, oneErr) || !errors.Is(err, twoErr) || err.Error() != want {
 			t.Fatalf("inherited batch error=%q, want deterministic %q", err, want)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Flush did not return after inherited in-flight barrier completed")
 	}
 
@@ -1105,7 +1105,7 @@ func TestPlayerFlushDrainsInheritedInflightBatchBeforeReturning(t *testing.T) {
 		if err != nil {
 			t.Fatalf("healed Flush observed stale completion: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("healed Flush did not finish")
 	}
 }
@@ -1135,7 +1135,7 @@ func TestPlayerFlushInheritedFailureDoesNotDispatchForcedFollowup(t *testing.T) 
 		if !errors.Is(err, wantErr) || err.Error() != want {
 			t.Fatalf("inherited Flush error=%q, want %q", err, want)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("inherited Flush did not return after complete batch")
 	}
 	store.assertNoStart(t)
@@ -1152,7 +1152,7 @@ func TestPlayerFlushInheritedFailureDoesNotDispatchForcedFollowup(t *testing.T) 
 		if err != nil {
 			t.Fatalf("healed Flush error=%v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("healed Flush did not finish")
 	}
 }
@@ -1176,7 +1176,7 @@ func TestPlayerFlushCanceledInheritedBatchDoesNotDispatchFollowup(t *testing.T) 
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("canceled inherited Flush error=%v, want context.Canceled", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("canceled inherited Flush did not return")
 	}
 	store.assertNoStart(t)
@@ -1211,7 +1211,7 @@ func TestPlayerFlushInheritedBarrierRejectsForeignRevision(t *testing.T) {
 		if !errors.Is(err, wantErr) || errors.Is(err, context.Canceled) || err.Error() != want {
 			t.Fatalf("exact inherited batch error=%q, want %q", err, want)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Flush did not return after exact inherited completion")
 	}
 }
@@ -1261,7 +1261,7 @@ func TestPlayerPersistenceWorkerDoesNotHoldCacheMutexDuringStoreSave(t *testing.
 		if !free {
 			t.Fatal("worker held cache mutex during Store.SavePlayer")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Store callback did not run")
 	}
 	store.complete(nil)
@@ -1397,7 +1397,7 @@ func TestPlayerPersistenceAbortWaitsForPrepareLoadAndClearsStage(t *testing.T) {
 	}
 	select {
 	case <-aborted:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Abort did not finish after Prepare completed")
 	}
 	if returnedBeforeLoadCompleted {
@@ -1600,7 +1600,7 @@ func receivePlayerSave(t *testing.T, store *controllablePlayerStore) storage.Pla
 	select {
 	case save := <-store.saveStarted:
 		return save
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("SavePlayer was not started")
 		return storage.PlayerSave{}
 	}
@@ -1692,7 +1692,7 @@ func assertQueuedPlayerSaveJobIDs(
 			if job.Save.PlayerID != id {
 				t.Fatalf("queued job %d PlayerID=%s, want %s", index, job.Save.PlayerID, id)
 			}
-		case <-time.After(time.Second):
+		case <-time.After(waitDeadline):
 			t.Fatalf("queued jobs ended at %d, want %d in PlayerID order", index, len(want))
 		}
 	}
@@ -1703,7 +1703,7 @@ func receivePlayerLoadStarted(t *testing.T, store *controllablePlayerStore) core
 	select {
 	case id := <-store.loadStarted:
 		return id
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("LoadPlayer was not started")
 		return core.PlayerID{}
 	}
@@ -1717,7 +1717,7 @@ func receivePlayerPrepareResult(
 	select {
 	case result := <-prepared:
 		return result
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Prepare did not return after LoadPlayer was released")
 		return playerPrepareResult{}
 	}
@@ -1725,7 +1725,7 @@ func receivePlayerPrepareResult(
 
 func pollPlayerPersistenceUntilIdle(t *testing.T, p *playerPersistence, tick uint64) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		if err := p.Poll(tick); err != nil {
 			t.Fatal(err)
@@ -1756,7 +1756,7 @@ func pollPlayerPersistenceUntilSaveStarts(
 	tick uint64,
 ) storage.PlayerSave {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		if err := p.Poll(tick); err != nil {
 			t.Fatal(err)
@@ -1775,7 +1775,7 @@ func pollPlayerPersistenceUntilSaveStarts(
 
 func pollPlayerPersistenceUntilError(t *testing.T, p *playerPersistence, tick uint64) error {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		if err := p.Poll(tick); err != nil {
 			return err
@@ -1789,7 +1789,7 @@ func pollPlayerPersistenceUntilError(t *testing.T, p *playerPersistence, tick ui
 
 func waitForPlayerFlushToWait(t *testing.T, p *playerPersistence) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for {
 		if p.completionMu.TryLock() {
 			p.completionMu.Unlock()

@@ -70,7 +70,7 @@ func TestPlayerFlushWaitsForInheritedRevisionAndAttemptsOnlyLatestFollowup(t *te
 		if err != nil {
 			t.Fatalf("Flush error=%v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Flush did not return")
 	}
 	assertNoPlayerSaveStarted(t, store)

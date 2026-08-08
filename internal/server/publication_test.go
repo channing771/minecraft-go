@@ -375,7 +375,7 @@ func recvServerMessage(
 	client network.ClientEndpoint,
 ) network.ServerMessage {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	message, err := client.Recv(ctx)
 	if err != nil {

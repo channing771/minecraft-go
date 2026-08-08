@@ -26,7 +26,7 @@ func TestHostShutdownPendingLoginClosesUnreadHandshakeAndWaitsAcceptLoop(t *test
 	listener.streams <- server
 	waitForPreLoginCount(t, host, 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := host.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown error=%v", err)
@@ -36,7 +36,7 @@ func TestHostShutdownPendingLoginClosesUnreadHandshakeAndWaitsAcceptLoop(t *test
 		if err != nil {
 			t.Fatalf("Run error=%v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not wait for accept-loop shutdown")
 	}
 	host.mu.Lock()
@@ -45,7 +45,7 @@ func TestHostShutdownPendingLoginClosesUnreadHandshakeAndWaitsAcceptLoop(t *test
 	if pending != 0 || len(host.preLogin) != 0 {
 		t.Fatalf("pending lifecycle: streams=%d tokens=%d, want 0/0", pending, len(host.preLogin))
 	}
-	recvCtx, recvCancel := context.WithTimeout(context.Background(), time.Second)
+	recvCtx, recvCancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer recvCancel()
 	if _, err := client.Recv(recvCtx, network.StateHandshake); !errors.Is(err, network.ErrClosed) {
 		t.Fatalf("unread handshake Recv error=%v, want network.ErrClosed", err)
@@ -73,7 +73,7 @@ func TestHostShutdownPendingLoginCancelsBlockedReservationLoad(t *testing.T) {
 	cleanup := func() {
 		store.releaseLoads()
 		store.setSaveError(nil)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		_ = host.Shutdown(ctx)
 		cancel()
 		cancelRun()
@@ -82,7 +82,7 @@ func TestHostShutdownPendingLoginCancelsBlockedReservationLoad(t *testing.T) {
 
 	shutdownDone := make(chan error, 1)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		shutdownDone <- host.Shutdown(ctx)
 	}()
@@ -96,17 +96,17 @@ func TestHostShutdownPendingLoginCancelsBlockedReservationLoad(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Shutdown error=%v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Shutdown did not cancel blocked reservation LoadPlayer")
 	}
 	select {
 	case <-serverDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("pending server handler did not exit")
 	}
 	select {
 	case <-clientDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("pending client login did not exit")
 	}
 	select {
@@ -114,7 +114,7 @@ func TestHostShutdownPendingLoginCancelsBlockedReservationLoad(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run error=%v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not exit")
 	}
 	assertHostIndexesEmpty(t, host)
@@ -159,13 +159,13 @@ func TestHostShutdownMultiplayerFlushFailurePreservesRuntimeAndRetries(t *testin
 	}
 	t.Cleanup(func() {
 		store.setFailures(nil)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		_ = host.Shutdown(ctx)
 		cancel()
 		cancelRun()
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	err := host.Shutdown(ctx)
 	cancel()
 	if !errors.Is(err, oneErr) || !errors.Is(err, threeErr) {
@@ -188,7 +188,7 @@ func TestHostShutdownMultiplayerFlushFailurePreservesRuntimeAndRetries(t *testin
 	waitForTickAfter(t, host, tick)
 
 	store.setFailures(nil)
-	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), waitDeadline)
 	if err := host.Shutdown(ctx); err != nil {
 		cancel()
 		t.Fatalf("retry Shutdown error=%v", err)
@@ -213,7 +213,7 @@ func TestHostShutdownMultiplayerFlushFailurePreservesRuntimeAndRetries(t *testin
 		if err != nil {
 			t.Fatalf("Run error=%v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not exit after successful Shutdown")
 	}
 	assertHostIndexesEmpty(t, host)
@@ -280,13 +280,13 @@ func TestHostShutdownWorldFailureKeepsPlayerWorkersRetryable(t *testing.T) {
 			t.Cleanup(func() {
 				store.setSyncError(nil)
 				store.setCloseError(nil)
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 				_ = host.Shutdown(ctx)
 				cancel()
 				cancelRun()
 			})
 
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 			err := host.Shutdown(ctx)
 			cancel()
 			if !errors.Is(err, wantErr) {
@@ -316,7 +316,7 @@ func TestHostShutdownWorldFailureKeepsPlayerWorkersRetryable(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Run error=%v", err)
 				}
-			case <-time.After(time.Second):
+			case <-time.After(waitDeadline):
 				t.Fatal("Run did not stop after world entered retryable closing state")
 			}
 			assertHostLifecycleEmpty(t, host)
@@ -330,7 +330,7 @@ func TestHostShutdownWorldFailureKeepsPlayerWorkersRetryable(t *testing.T) {
 			); err != nil {
 				t.Fatalf("Observe after world failure: %v", err)
 			}
-			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+			ctx, cancel = context.WithTimeout(context.Background(), waitDeadline)
 			if err := host.players.Flush(ctx); err != nil {
 				cancel()
 				t.Fatalf("player workers unusable after world failure: %v", err)
@@ -342,7 +342,7 @@ func TestHostShutdownWorldFailureKeepsPlayerWorkersRetryable(t *testing.T) {
 			}
 
 			test.clear(store)
-			ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel = context.WithTimeout(context.Background(), waitDeadline)
 			if err := host.Shutdown(ctx); err != nil {
 				cancel()
 				t.Fatalf("retry Shutdown error=%v", err)
@@ -376,7 +376,7 @@ func TestHostShutdownWorldFailureKeepsPlayerWorkersRetryable(t *testing.T) {
 
 func waitForHostClosing(t *testing.T, host *Host) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		host.mu.Lock()
 		closing := host.closing
@@ -412,7 +412,7 @@ func assertHostLifecycleEmpty(t *testing.T, host *Host) {
 
 func waitForGoroutineCeiling(t *testing.T, ceiling int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		runtime.GC()
 		if runtime.NumGoroutine() <= ceiling {
@@ -432,7 +432,7 @@ func setShutdownPlayerRotation(
 	pitch float32,
 ) storage.PlayerSave {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := login.Client.Send(ctx, network.PlayerInput{
 		Sequence: sequence,

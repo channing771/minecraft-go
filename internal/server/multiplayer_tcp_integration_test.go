@@ -46,7 +46,7 @@ type multiplayerTCPClient struct {
 }
 
 func TestMultiplayerTCPClientsSeeMoveEditAndDespawn(t *testing.T) {
-	deadline, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	deadline, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 
 	host := startMultiplayerTCPHost(t)
@@ -131,7 +131,7 @@ func TestMultiplayerTCPClientsSeeMoveEditAndDespawn(t *testing.T) {
 }
 
 func TestDropSelectedItemOverTCPConvergesAndCapacityFailureIsIsolated(t *testing.T) {
-	deadline, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	deadline, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 
 	host := startMultiplayerTCPHost(t)
@@ -230,7 +230,7 @@ func TestDropSelectedItemOverTCPConvergesAndCapacityFailureIsIsolated(t *testing
 	firstStart, secondStart := len(first.transcript), len(second.transcript)
 	mustSendMultiplayer(t, deadline, first, network.DropSelectedItem{Sequence: 2})
 
-	rejectCtx, rejectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	rejectCtx, rejectCancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer rejectCancel()
 	for {
 		rejected := false
@@ -335,7 +335,7 @@ func TestConcurrentLoginFailureDrainsAndClosesEverySuccessfulClient(t *testing.T
 	workersDone := make(chan struct{})
 	close(workersDone)
 	ctx, cancel := context.WithCancel(context.Background())
-	collectCtx, collectCancel := context.WithTimeout(context.Background(), time.Second)
+	collectCtx, collectCancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer collectCancel()
 
 	clients, err := collectTask16ConcurrentLoginResults(t, ctx, cancel, collectCtx, results, workersDone, 3, 3)
@@ -368,7 +368,7 @@ func TestCollectorAbortClosesLateSuccessfulClientAndJoinsWorker(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("collector abort error=%v, want context.Canceled", err)
 	}
-	joined, stop := context.WithTimeout(context.Background(), time.Second)
+	joined, stop := context.WithTimeout(context.Background(), waitDeadline)
 	defer stop()
 	select {
 	case <-workersDone:
@@ -407,7 +407,7 @@ func TestClaimBeforeCancelKeepsConcurrentLoginClientTransferredAndJoinsWorker(t 
 		})
 	}()
 
-	deadline, stop := context.WithTimeout(context.Background(), time.Second)
+	deadline, stop := context.WithTimeout(context.Background(), waitDeadline)
 	defer stop()
 	var result task16ConcurrentLoginResult
 	select {
@@ -474,7 +474,6 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 	config.ViewRadius = 0
 	config.OutboxCapacity = 512
 	config.AutosaveTicks = 6000
-	config.ShutdownTimeout = 5 * time.Second
 	host := NewHost(config, multiplayerManualGenerator{}, newHostTestStore())
 	hostDone := make(chan error, 1)
 	go func() { hostDone <- host.Run(context.Background(), listener) }()
@@ -498,12 +497,12 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 			index: index, identity: multiplayerIdentity(byte(0x80+index), multiplayerNames[index]),
 		}
 	}
-	clients, err = connectTask16ConcurrentClients(t, listener.Addr(), requests, 10*time.Second)
+	clients, err = connectTask16ConcurrentClients(t, listener.Addr(), requests, longWaitDeadline)
 	if err != nil {
 		t.Fatalf("concurrent login: %v", err)
 	}
 
-	readyCtx, readyCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	for !eightTCPClientsReady(clients) {
 		drainAllMultiplayerAvailable(t, clients)
 		if err := readyCtx.Err(); err != nil {
@@ -536,7 +535,7 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 				case step.Place != nil:
 					message = *step.Place
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 				err := clients[step.Player].endpoint.Send(ctx, message)
 				cancel()
 				if err != nil {
@@ -572,7 +571,7 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 		t.Fatalf("queue high-water exceeded capacity: %+v", highWater)
 	}
 
-	fallCtx, fallCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	fallCtx, fallCancel := context.WithTimeout(context.Background(), waitDeadline)
 	for {
 		drainAllMultiplayerAvailable(t, clients)
 		sample := sampleMultiplayerQueues(host)
@@ -598,7 +597,7 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 	if err := cleanup(); err != nil {
 		t.Fatalf("cleanup eight-player TCP soak: %v", err)
 	}
-	goroutineCtx, goroutineCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	goroutineCtx, goroutineCancel := context.WithTimeout(context.Background(), waitDeadline)
 	for runtime.NumGoroutine() > baseline+4 && goroutineCtx.Err() == nil {
 		runtime.Gosched()
 	}
@@ -660,7 +659,7 @@ func connectTask16ConcurrentClients(
 		workers.Wait()
 		close(workersDone)
 	}()
-	collectCtx, collectCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	collectCtx, collectCancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer collectCancel()
 	return collectTask16ConcurrentLoginResults(t, ctx, cancel, collectCtx, results, workersDone, len(requests), len(requests))
 }
@@ -769,7 +768,7 @@ func collectTask16ConcurrentLoginResults(
 			collecting = false
 		}
 	}
-	workerJoinCtx, stopWorkerJoin := context.WithTimeout(context.Background(), 5*time.Second)
+	workerJoinCtx, stopWorkerJoin := context.WithTimeout(context.Background(), waitDeadline)
 	defer stopWorkerJoin()
 	select {
 	case <-workersDone:
@@ -796,7 +795,7 @@ func cleanupTask16TCPHost(
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close listener: %w", err))
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	if err := host.Shutdown(ctx); err != nil {
 		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("Host.Shutdown: %w", err))
@@ -949,7 +948,6 @@ func startMultiplayerTCPHost(t *testing.T) multiplayerTCPHost {
 	config.MaxPlayers = 2
 	config.ViewRadius = 1
 	config.OutboxCapacity = 512
-	config.ShutdownTimeout = 5 * time.Second
 	host := NewHost(config, flatTestGenerator{}, newHostTestStore())
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
@@ -1141,7 +1139,7 @@ func cleanupMultiplayerTCPTest(
 			}
 		}
 
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdown, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := host.Host.Shutdown(shutdown); err != nil {
 			t.Errorf("cleanup Host.Shutdown: %v", err)

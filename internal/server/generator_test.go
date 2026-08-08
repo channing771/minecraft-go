@@ -22,7 +22,7 @@ func TestGeneratorWorkerPanicIsolated(t *testing.T) {
 	t.Cleanup(func() { shutdownExternalServerForTest(t, running) })
 
 	ready := make(map[core.ChunkPos]struct{})
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		result := running.Step()
 		for _, key := range result.Ready {

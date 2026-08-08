@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -125,7 +124,7 @@ func waitChestState(
 	accept func(network.ChestState) bool,
 ) network.ChestState {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	for {
 		message, err := connected.Endpoint.Recv(ctx)
@@ -149,7 +148,7 @@ func waitChestStateWithClearedSlot(
 	slot int,
 ) network.ChestState {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	var state network.ChestState
 	var chestSeen, slotCleared bool
@@ -180,7 +179,7 @@ func waitContainerClosed(
 	want core.ContainerRef,
 ) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	for {
 		message, err := connected.Endpoint.Recv(ctx)
@@ -276,7 +275,7 @@ func TestChestSharedByTwoPlayersOverTCP(t *testing.T) {
 // 存档快照校验（Memory 变体没有磁盘身份可核对）。
 func waitScriptClientReady(t *testing.T, connected integrationClient) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	for {
 		message, err := connected.Endpoint.Recv(ctx)

@@ -132,7 +132,7 @@ func TestHostCleanupUsesEntryIdentity(t *testing.T) {
 	config.MaxPlayers = 8
 	host := NewHost(config, flatTestGenerator{}, newHostTestStore())
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := host.Shutdown(ctx); err != nil {
 			t.Errorf("Host cleanup Shutdown: %v", err)
@@ -244,7 +244,7 @@ func TestHostClosesSeventeenthPreLoginImmediately(t *testing.T) {
 		for _, result := range done {
 			select {
 			case <-result:
-			case <-time.After(time.Second):
+			case <-time.After(waitDeadline):
 				t.Error("pre-login worker did not exit")
 			}
 		}
@@ -254,7 +254,7 @@ func TestHostClosesSeventeenthPreLoginImmediately(t *testing.T) {
 	seventeenth, server := network.NewMemoryStreamPair(1)
 	result := make(chan error, 1)
 	go func() { result <- host.AcceptStream(context.Background(), server) }()
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), shortWaitDeadline)
 	defer cancel()
 	if _, err := seventeenth.Recv(ctx, network.StateHandshake); !errors.Is(err, network.ErrClosed) {
 		_ = seventeenth.Close()
@@ -265,7 +265,7 @@ func TestHostClosesSeventeenthPreLoginImmediately(t *testing.T) {
 		if !errors.Is(err, network.ErrClosed) {
 			t.Fatalf("seventeenth AcceptStream error = %v", err)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(shortWaitDeadline):
 		t.Fatal("seventeenth AcceptStream did not return immediately")
 	}
 }
@@ -296,7 +296,7 @@ func TestHostListenerBoundsPreLoginGoroutines(t *testing.T) {
 	go func() { runDone <- host.Run(runCtx, listener) }()
 	select {
 	case <-listener.acceptedAll:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("listener did not accept burst")
 	}
 	if got, limit := listener.maxGoroutines-baseline, hostPreLoginCapacity+12; got > limit {
@@ -310,7 +310,7 @@ func TestHostListenerBoundsPreLoginGoroutines(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run cleanup: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run cleanup timed out")
 	}
 }
@@ -321,7 +321,7 @@ func TestLoginDeadlineCancelsBlockedHostPlayerLoad(t *testing.T) {
 	defer store.releaseLoads()
 	host := newTestHostWithStore(t, store)
 	client, server := network.NewMemoryStreamPair(8)
-	outer, cancelOuter := context.WithTimeout(context.Background(), 12*time.Second)
+	outer, cancelOuter := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancelOuter()
 	serverDone := make(chan error, 1)
 	started := time.Now()
@@ -329,7 +329,7 @@ func TestLoginDeadlineCancelsBlockedHostPlayerLoad(t *testing.T) {
 	_, _ = network.LoginClient(outer, client, playerIdentity(14))
 	select {
 	case <-serverDone:
-	case <-time.After(3 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("AcceptStream outlived outer deadline")
 	}
 	elapsed := time.Since(started)
@@ -427,7 +427,7 @@ func TestHostReservesSlotBeforeSinglePlayerLoad(t *testing.T) {
 	_ = firstClient.Close()
 	select {
 	case <-firstDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("first login worker did not exit")
 	}
 }
@@ -462,7 +462,7 @@ func TestHostDisconnectPersistsReleasesSlotAndKeepsTicking(t *testing.T) {
 	}
 	select {
 	case <-first.Done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("AcceptStream did not return after disconnect")
 	}
 	waitForNoActiveLogin(t, host)
@@ -478,13 +478,13 @@ func TestHostDisconnectPersistsReleasesSlotAndKeepsTicking(t *testing.T) {
 	_ = second.Client.Close()
 	select {
 	case <-second.Done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("second AcceptStream did not return")
 	}
 	cancelRun()
 	select {
 	case <-runDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not return after cancellation")
 	}
 	shutdownHostComponentsForTest(t, host)
@@ -506,7 +506,7 @@ func TestHostDisconnectDeactivatesCachedPlayer(t *testing.T) {
 	}
 	select {
 	case <-login.Done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("AcceptStream did not return after disconnect")
 	}
 
@@ -521,7 +521,7 @@ func TestHostDisconnectDeactivatesCachedPlayer(t *testing.T) {
 	cancelRun()
 	select {
 	case <-runDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not return after cancellation")
 	}
 }
@@ -541,7 +541,7 @@ func TestHostFailedDisconnectSaveAllowsSameIdentityOnly(t *testing.T) {
 	_ = first.Client.Close()
 	select {
 	case <-first.Done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("first disconnect did not finish")
 	}
 	waitForPlayerSave(t, store)
@@ -551,7 +551,7 @@ func TestHostFailedDisconnectSaveAllowsSameIdentityOnly(t *testing.T) {
 	_ = second.Client.Close()
 	select {
 	case <-second.Done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("same-identity reconnect did not finish")
 	}
 	different := startMemoryLogin(t, host, playerIdentity(13))
@@ -559,7 +559,7 @@ func TestHostFailedDisconnectSaveAllowsSameIdentityOnly(t *testing.T) {
 	_ = different.Client.Close()
 	select {
 	case <-different.Done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("different-identity login was blocked by another player's retry")
 	}
 
@@ -569,11 +569,11 @@ func TestHostFailedDisconnectSaveAllowsSameIdentityOnly(t *testing.T) {
 		if !errors.Is(err, saveErr) {
 			t.Fatalf("first Run cleanup error = %v, want retryable save error", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run cleanup timed out")
 	}
 	store.setSaveError(nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := host.Shutdown(ctx); err != nil {
 		t.Fatalf("retry Shutdown after healed store: %v", err)
@@ -591,7 +591,7 @@ func TestHostAutosavesActivePlayer(t *testing.T) {
 	login := startMemoryLogin(t, host, playerIdentity(6))
 	waitReady(t, host, login)
 
-	deadline := time.Now().Add(500 * time.Millisecond)
+	deadline := time.Now().Add(shortWaitDeadline)
 	for store.saveCount() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
@@ -602,7 +602,7 @@ func TestHostAutosavesActivePlayer(t *testing.T) {
 	_ = login.Client.Close()
 	select {
 	case <-login.Done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("AcceptStream did not return")
 	}
 	cancelRun()
@@ -623,7 +623,7 @@ func TestHostListenerContinuesAfterBadConnection(t *testing.T) {
 	listener.streams <- badServer
 	client, server := network.NewMemoryStreamPair(256)
 	listener.streams <- server
-	loginCtx, cancelLogin := context.WithTimeout(context.Background(), 2*time.Second)
+	loginCtx, cancelLogin := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancelLogin()
 	endpoint, err := network.LoginClient(loginCtx, client, playerIdentity(7))
 	if err != nil {
@@ -636,7 +636,7 @@ func TestHostListenerContinuesAfterBadConnection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run after cancellation = %v, want nil", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not shut down")
 	}
 }
@@ -653,7 +653,7 @@ func TestHostRunCancellationCompletesOwnedShutdown(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run cancellation error = %v, want nil after complete shutdown", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not return")
 	}
 	if store.syncCount() != 1 || store.closeCount() != 1 {
@@ -673,7 +673,7 @@ func TestHostShutdownRetriesPlayerFlushBeforeWorldClose(t *testing.T) {
 	login := startMemoryLogin(t, host, playerIdentity(8))
 	waitReady(t, host, login)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := host.Shutdown(ctx); !errors.Is(err, saveErr) {
 		t.Fatalf("first Shutdown error = %v, want %v", err, saveErr)
@@ -702,12 +702,12 @@ func TestHostShutdownRetriesPlayerFlushBeforeWorldClose(t *testing.T) {
 	}
 	select {
 	case <-login.Done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("login worker did not exit during shutdown")
 	}
 	select {
 	case <-runDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not exit during shutdown")
 	}
 }
@@ -721,7 +721,7 @@ func newTestHostWithStore(t *testing.T, store storage.WorldStore) *Host {
 	t.Helper()
 	host := NewHost(hostTestConfig(), flatTestGenerator{}, store)
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := host.Shutdown(ctx); err != nil {
 			t.Errorf("Host cleanup Shutdown: %v", err)
@@ -763,7 +763,7 @@ func playerIdentity(number byte) network.Identity {
 
 func waitReady(t *testing.T, host *Host, login testLogin) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		host.mu.Lock()
 		active := host.activeByPlayer[login.Identity.PlayerID]
@@ -780,7 +780,7 @@ func waitReady(t *testing.T, host *Host, login testLogin) {
 
 func waitForPreLoginCount(t *testing.T, host *Host, want int) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		if len(host.preLogin) == want {
 			return
@@ -792,7 +792,7 @@ func waitForPreLoginCount(t *testing.T, host *Host, want int) {
 
 func waitForNoActiveLogin(t *testing.T, host *Host) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		host.mu.Lock()
 		active := len(host.activeByPlayer)
@@ -827,7 +827,7 @@ func startHostWithConfig(t *testing.T, config Config, store storage.WorldStore) 
 				if err != nil {
 					t.Errorf("Host Run cleanup: %v", err)
 				}
-			case <-time.After(2 * time.Second):
+			case <-time.After(waitDeadline):
 				t.Error("Host Run cleanup timed out")
 			}
 		})
@@ -910,7 +910,7 @@ func assertHealthyHostProgress(t *testing.T, host *Host, healthy []endpointProgr
 	for index := range healthy {
 		progress := &healthy[index]
 		sequence := progress.nextSequence
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		if err := progress.login.Client.Send(ctx, network.PlayerInput{
 			Sequence: sequence,
 			MoveX:    progress.nextMovement[0],
@@ -997,7 +997,7 @@ func activeLoginForPlayer(t *testing.T, host *Host, id core.PlayerID) activeLogi
 
 func waitForPlayerReleased(t *testing.T, host *Host, id core.PlayerID) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		host.mu.Lock()
 		byPlayer := host.activeByPlayer[id]
@@ -1021,7 +1021,7 @@ func waitLoginDone(t *testing.T, done <-chan error) {
 	t.Helper()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("login worker did not exit")
 	}
 }
@@ -1037,7 +1037,7 @@ func assertLoginRejectCode(t *testing.T, err error, want network.LoginRejectCode
 
 func assertLoginCanAdvance(t *testing.T, login testLogin, sequence uint64) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := login.Client.Send(ctx, network.PlayerInput{Sequence: sequence}); err != nil {
 		t.Fatalf("send on existing login: %v", err)
@@ -1055,7 +1055,7 @@ func assertLoginCanAdvance(t *testing.T, login testLogin, sequence uint64) {
 
 func waitForPlayerSave(t *testing.T, store *hostTestStore) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for store.saveCount() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
@@ -1066,7 +1066,7 @@ func waitForPlayerSave(t *testing.T, store *hostTestStore) {
 
 func waitForTickAfter(t *testing.T, host *Host, tick uint64) {
 	t.Helper()
-	deadline := time.Now().Add(200 * time.Millisecond)
+	deadline := time.Now().Add(shortWaitDeadline)
 	for host.world.TickCount() <= tick && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
@@ -1077,7 +1077,7 @@ func waitForTickAfter(t *testing.T, host *Host, tick uint64) {
 
 func shutdownHostComponentsForTest(t *testing.T, host *Host) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := host.players.Flush(ctx); err != nil {
 		t.Errorf("player Flush: %v", err)
@@ -1186,7 +1186,7 @@ func (store *hostTestStore) waitLoadStarted(t *testing.T) {
 	store.mu.Unlock()
 	select {
 	case <-started:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("LoadPlayer did not start")
 	}
 }

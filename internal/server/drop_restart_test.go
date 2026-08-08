@@ -48,7 +48,7 @@ func TestTCPDropSelectedItemSurvivesRestart(t *testing.T) {
 	clients = connectRestartClients(t, first.addr, []network.Identity{identity}, nil)
 	waitSingleRestartClientReady(t, clients[0])
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	if err := clients[0].endpoint.Send(ctx, network.DropSelectedItem{Sequence: 1}); err != nil {
 		cancel()
 		t.Fatalf("发送主动丢弃: %v", err)
@@ -56,7 +56,7 @@ func TestTCPDropSelectedItemSurvivesRestart(t *testing.T) {
 	cancel()
 
 	// 等待权威把扣减后的背包、掉落物与承载区块 revision 发布回发起者。
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(longWaitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待主动丢弃后的 TCP 镜像收敛超时")
@@ -96,7 +96,7 @@ func TestTCPDropSelectedItemSurvivesRestart(t *testing.T) {
 	reconnected = connectRestartClients(t, second.addr, []network.Identity{identity}, nil)
 	waitSingleRestartClientReady(t, reconnected[0])
 
-	deadline = time.Now().Add(10 * time.Second)
+	deadline = time.Now().Add(longWaitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatalf("重启后 TCP 镜像未恢复: coal=%d drops=%+v",
@@ -178,7 +178,7 @@ func TestTCPToolDurabilitySurvivesRestart(t *testing.T) {
 // 既有的 waitRestartClientsReady 额外要求看到 7 个远端玩家，只适用于八客户端场景。
 func waitSingleRestartClientReady(t *testing.T, connected *multiplayerTCPClient) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(longWaitDeadline)
 	for !connected.readyWithFootSnapshot() {
 		if time.Now().After(deadline) {
 			t.Fatalf("客户端未在期限内就绪\n%s", multiplayerDiagnostics(connected, nil))
@@ -192,7 +192,7 @@ func waitSingleRestartClientReady(t *testing.T, connected *multiplayerTCPClient)
 // waitRestartInventoryStack 先检查 transcript 中已有的最新背包，找不到目标物品时才继续接收。
 func waitRestartInventoryStack(t *testing.T, connected *multiplayerTCPClient, item core.ItemID) core.ItemStack {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	var got core.ItemStack
 	if err := connected.drainUntil(ctx, func() bool {

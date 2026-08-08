@@ -19,14 +19,14 @@ func TestHostTCPLoginDisconnectAndShutdown(t *testing.T) {
 	runDone := make(chan error, 1)
 	go func() { runDone <- host.Run(runCtx, listener) }()
 
-	dialCtx, cancelDial := context.WithTimeout(context.Background(), 2*time.Second)
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), waitDeadline)
 	stream, err := network.DialTCP(dialCtx, listener.Addr())
 	cancelDial()
 	if err != nil {
 		t.Fatal(err)
 	}
 	identity := playerIdentity(11)
-	loginCtx, cancelLogin := context.WithTimeout(context.Background(), 2*time.Second)
+	loginCtx, cancelLogin := context.WithTimeout(context.Background(), waitDeadline)
 	client, err := network.LoginClient(loginCtx, stream, identity)
 	cancelLogin()
 	if err != nil {
@@ -44,7 +44,7 @@ func TestHostTCPLoginDisconnectAndShutdown(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run shutdown error = %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Run did not complete TCP shutdown")
 	}
 	if store.syncCount() != 1 || store.closeCount() != 1 {

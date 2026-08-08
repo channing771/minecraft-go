@@ -155,7 +155,7 @@ func TestHostRunAtInputBoundaryWaitsForDistinctIngressAndExcludesWorldStep(t *te
 	}
 	select {
 	case <-stepDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("world step did not resume after step boundary action")
 	}
 }
@@ -181,7 +181,7 @@ func TestHostRunAtInputBoundaryDeadlineClearsWaiterAndReleasesWorldStep(t *testi
 	}()
 	select {
 	case <-stepDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("world step remained blocked after input boundary deadline")
 	}
 }

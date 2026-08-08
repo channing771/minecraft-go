@@ -76,7 +76,7 @@ func dropDrainTick(
 	mirrors ...*dropClientMirrors,
 ) dropMessages {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	var got dropMessages
 	for {
@@ -133,7 +133,7 @@ func stepUntilDropReady(
 ) func() (dropMessages, uint64) {
 	t.Helper()
 	ready := false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	step := func() (dropMessages, uint64) {
 		t.Helper()
 		result := running.StepForTest()
@@ -214,7 +214,7 @@ func TestDropPickupSendsUpsertThenRemove(t *testing.T) {
 		t.Fatalf("拾取前的 upsert = %+v", messages.upserts)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	removed := false
 	for !removed {
 		if time.Now().After(deadline) {
@@ -302,7 +302,7 @@ func TestDropDiffStaysWithSessionOwner(t *testing.T) {
 	shutdownHotbarServer(t, running, firstClient, secondClient)
 
 	firstReady, secondReady := false, false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for !firstReady || !secondReady {
 		if time.Now().After(deadline) {
 			t.Fatal("等待两名玩家 Ready 超时")
@@ -338,7 +338,7 @@ func TestDropSurvivesShutdownAndRestart(t *testing.T) {
 		Sequence: 1, Yaw: 0, Pitch: -float32(math.Pi)/2 + 0.01, Mining: true,
 	})
 	var created network.ItemDrop
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for created.Count == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("等待挖掘产生掉落物超时")
@@ -354,7 +354,7 @@ func TestDropSurvivesShutdownAndRestart(t *testing.T) {
 
 	second, secondStore, _ := newDropDiskWorld(t, root)
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := second.Shutdown(ctx); err != nil {
 			t.Errorf("second Shutdown: %v", err)
@@ -365,7 +365,7 @@ func TestDropSurvivesShutdownAndRestart(t *testing.T) {
 	}()
 
 	key := core.ChunkKey{Dimension: created.ID.Dimension, Pos: created.ID.Chunk}
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待重启后区块 Ready 超时")
@@ -402,7 +402,7 @@ func newDropDiskWorld(
 // flushDropWorld 正常关服并刷写全部待持久区块。
 func flushDropWorld(t *testing.T, running *server.Server, store *storage.DiskStore) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
 	defer cancel()
 	if err := running.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
@@ -433,7 +433,7 @@ func TestDropSelectedItemPublishesInventoryAndDrop(t *testing.T) {
 
 	sendClientMessage(t, clientEndpoint, network.DropSelectedItem{Sequence: 1})
 	var messages dropMessages
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for len(messages.upserts) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("主动丢弃没有产生掉落物 upsert")
@@ -475,7 +475,7 @@ func TestDropSelectedItemTwoMemorySessionsConverge(t *testing.T) {
 	shutdownHotbarServer(t, running, firstClient, secondClient)
 	firstMirrors, secondMirrors := newDropClientMirrors(), newDropClientMirrors()
 	firstReady, secondReady := false, false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for !firstReady || !secondReady {
 		if time.Now().After(deadline) {
 			t.Fatal("等待两名 Memory 玩家 Ready 超时")
@@ -497,7 +497,7 @@ func TestDropSelectedItemTwoMemorySessionsConverge(t *testing.T) {
 
 	sendClientMessage(t, firstClient, network.DropSelectedItem{Sequence: 1})
 	firstInventories, secondInventories := 0, 0
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待双会话 Memory 主动丢弃收敛超时")
@@ -557,7 +557,7 @@ func TestDropSelectedItemCapacityFailureIsolatedBetweenMemorySessions(t *testing
 	shutdownHotbarServer(t, running, firstClient, secondClient)
 	firstMirrors, secondMirrors := newDropClientMirrors(), newDropClientMirrors()
 	firstReady, secondReady := false, false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for !firstReady || !secondReady {
 		if time.Now().After(deadline) {
 			t.Fatal("等待两名 Memory 玩家 Ready 超时")
@@ -590,7 +590,7 @@ func TestDropSelectedItemCapacityFailureIsolatedBetweenMemorySessions(t *testing
 
 	sendClientMessage(t, firstClient, network.DropSelectedItem{Sequence: 7})
 	var firstAfter, secondAfter dropMessages
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	for len(firstAfter.rejected) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("等待双会话 Memory 容量拒绝超时")
@@ -641,7 +641,7 @@ func TestDropSelectedItemCapacityFailureIsolatedBetweenMemorySessions(t *testing
 	// 两个会话在隔离拒绝后都必须继续处理合法命令。
 	sendClientMessage(t, firstClient, network.PlayerInput{Sequence: 8})
 	sendClientMessage(t, secondClient, network.PlayerInput{Sequence: 1})
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	for firstMirrors.player.LastInputSequence < 8 || secondMirrors.player.LastInputSequence < 1 {
 		if time.Now().After(deadline) {
 			t.Fatalf("容量拒绝后会话未继续推进: first=%d second=%d",
@@ -671,7 +671,7 @@ func TestDropSelectedItemCapacityFailureOnlyRejectsRequester(t *testing.T) {
 
 	sendClientMessage(t, clientEndpoint, network.DropSelectedItem{Sequence: 7})
 	var messages dropMessages
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for len(messages.rejected) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("容量已满没有返回拒绝")
@@ -719,7 +719,7 @@ func TestDroppedItemSurvivesShutdownAndRestart(t *testing.T) {
 
 	sendClientMessage(t, firstClient, network.DropSelectedItem{Sequence: 1})
 	var created network.ItemDrop
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for created.Count == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("等待主动丢弃产生掉落物超时")
@@ -754,7 +754,7 @@ func TestDroppedItemSurvivesShutdownAndRestart(t *testing.T) {
 
 	second, secondStore, _ := newDropDiskWorld(t, root)
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := second.Shutdown(ctx); err != nil {
 			t.Errorf("second Shutdown: %v", err)
@@ -764,7 +764,7 @@ func TestDroppedItemSurvivesShutdownAndRestart(t *testing.T) {
 		}
 	}()
 
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(waitDeadline)
 	for {
 		if time.Now().After(deadline) {
 			t.Fatal("等待重启后区块 Ready 超时")

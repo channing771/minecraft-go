@@ -32,7 +32,7 @@ func TestHeartbeatDetachStopsEveryTimer(t *testing.T) {
 		t.Fatal("DetachSession = false")
 	}
 	<-exit
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	defer cancel()
 	if err := running.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func TestHeartbeatTimeoutDetachesOnlyThatSession(t *testing.T) {
 
 func waitHeartbeatReplyConsumed(t *testing.T, current *session) {
 	t.Helper()
-	deadline := time.NewTimer(time.Second)
+	deadline := time.NewTimer(waitDeadline)
 	defer deadline.Stop()
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
@@ -239,7 +239,7 @@ func waitHeartbeatReplyConsumed(t *testing.T, current *session) {
 
 func waitHeartbeatOutstanding(t *testing.T, current *session, want uint64) {
 	t.Helper()
-	deadline := time.NewTimer(time.Second)
+	deadline := time.NewTimer(waitDeadline)
 	defer deadline.Stop()
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
@@ -263,7 +263,7 @@ func waitSessionExit(t *testing.T, exit <-chan SessionExit) SessionExit {
 	select {
 	case got := <-exit:
 		return got
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("等待 session exit 超时")
 		return SessionExit{}
 	}
@@ -314,7 +314,7 @@ func (clock *manualHeartbeatClock) nextTimer(
 			t.Fatalf("new timer duration = %v，想要 %v", timer.duration, want)
 		}
 		return timer
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatalf("等待 %v timer 超时", want)
 		return nil
 	}
@@ -426,7 +426,7 @@ func (endpoint *heartbeatEndpoint) nextSent(t *testing.T) network.ServerMessage 
 	select {
 	case message := <-endpoint.sent:
 		return message
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("等待 heartbeat 发送超时")
 		return nil
 	}

@@ -113,7 +113,7 @@ func TestPlayerPersistenceRejectsDifferentNameInLoadingGeneration(t *testing.T) 
 			close(release)
 			t.Fatalf("different-name waiter error=%v, want backpressure", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		close(release)
 		t.Fatal("different-name waiter waited on a generation owned by another nickname")
 	}
@@ -157,7 +157,7 @@ func TestPlayerPersistenceOldAbortDoesNotTouchSuccessor(t *testing.T) {
 	persistence.mu.Unlock()
 	select {
 	case <-aborted:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("old Abort waited on the successor generation")
 	}
 
@@ -212,7 +212,7 @@ func TestPlayerPersistenceCapacityAllowsParallelLoadsAndBackpressures(t *testing
 		if !errors.Is(err, ErrPlayerPersistenceBackpressure) {
 			t.Fatalf("17th Prepare error=%v, want backpressure", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("17th Prepare blocked behind another identity's LoadPlayer")
 	}
 	store.assertLoadCount(t, overflowID, 0)
@@ -323,7 +323,7 @@ func TestPlayerPersistenceFailedLoadCleansPlaceholderAndWakesWaiters(t *testing.
 			if !errors.Is(err, wantErr) {
 				t.Fatalf("failed Prepare error=%v, want %v", err, wantErr)
 			}
-		case <-time.After(time.Second):
+		case <-time.After(waitDeadline):
 			t.Fatal("same-ID waiter was not woken after failed LoadPlayer")
 		}
 	}
@@ -465,7 +465,7 @@ func (store *cachePlayerStore) waitForLoadsStarted(t *testing.T, want int) {
 	for index := 0; index < want; index++ {
 		select {
 		case <-store.loadStarted:
-		case <-time.After(time.Second):
+		case <-time.After(waitDeadline):
 			t.Fatalf("LoadPlayer starts=%d, want %d concurrent starts", index, want)
 		}
 	}
@@ -492,7 +492,7 @@ func (store *cachePlayerStore) receiveSave(t *testing.T) storage.PlayerSave {
 	select {
 	case save := <-store.saveStarted:
 		return save
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("SavePlayer did not start")
 		return storage.PlayerSave{}
 	}
@@ -535,14 +535,14 @@ func (ctx *observedDoneContext) waitDoneObserved(t *testing.T) {
 	t.Helper()
 	select {
 	case <-ctx.observed:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("same-ID Prepare did not begin waiting for the shared load")
 	}
 }
 
 func waitForAbortLoadWait(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
 		buffer := make([]byte, 1<<16)
 		buffer = buffer[:runtime.Stack(buffer, true)]

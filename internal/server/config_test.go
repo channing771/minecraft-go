@@ -4,7 +4,6 @@ import (
 	"context"
 	"strconv"
 	"testing"
-	"time"
 )
 
 func TestDefaultConfigUsesEightMaxPlayers(t *testing.T) {
@@ -18,7 +17,7 @@ func TestNewHostNormalizesZeroMaxPlayers(t *testing.T) {
 	config.MaxPlayers = 0
 	host := NewHost(config, flatTestGenerator{}, newHostTestStore())
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
 		if err := host.Shutdown(ctx); err != nil {
 			t.Errorf("Host cleanup Shutdown: %v", err)

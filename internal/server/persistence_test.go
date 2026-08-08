@@ -39,7 +39,7 @@ func TestAutosaveBeginsAtConfiguredTickWithoutBlockingStep(t *testing.T) {
 	}()
 	select {
 	case <-stepDone:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Step blocked on gated Store.SaveBatch")
 	}
 	call := receiveSaveCall(t, store)
@@ -110,7 +110,7 @@ func TestSaveCompletionIsAcknowledgedOnlyAtNextStepStart(t *testing.T) {
 		if elapsed < 0 {
 			t.Fatalf("SaveObserver duration=%v", elapsed)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("SaveObserver was not called")
 	}
 	if got := running.engine.PersistenceStats(); got.DirtyChunks != 1 || got.InFlightChunks != 1 {
@@ -998,7 +998,7 @@ func TestPersistenceBackpressureQueuesAcquireUntilMemoryRecovers(t *testing.T) {
 		if started != wantAcquire {
 			t.Fatalf("resumed load=%+v, want %+v", started, wantAcquire)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("acquisition did not resume below hysteresis threshold")
 	}
 	if resumed := running.PersistenceStatus(); resumed.Backpressured || !resumed.AutosaveDrained {
@@ -1253,7 +1253,7 @@ func receiveSaveCall(t *testing.T, store *persistenceTestStore) []storage.ChunkS
 	select {
 	case call := <-store.started:
 		return call
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Store.SaveBatch did not start")
 		return nil
 	}
@@ -1272,14 +1272,14 @@ func waitSaveReturned(t *testing.T, store *persistenceTestStore) {
 	t.Helper()
 	select {
 	case <-store.returned:
-	case <-time.After(time.Second):
+	case <-time.After(waitDeadline):
 		t.Fatal("Store.SaveBatch did not return")
 	}
 }
 
 func waitCompletionQueued(t *testing.T, running *Server) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(waitDeadline)
 	for len(running.saveCompletions) == 0 && time.Now().Before(deadline) {
 		runtime.Gosched()
 	}
