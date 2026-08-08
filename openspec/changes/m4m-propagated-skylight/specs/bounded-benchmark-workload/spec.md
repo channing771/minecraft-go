@@ -8,6 +8,34 @@
 - **WHEN** baseline 与 current 都是完整的 scenario v14 报告
 - **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
 
+#### Scenario: v13 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v13 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v12 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v12 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v11 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v11 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v10 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v10 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v9 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v9 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v8 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v8 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
+#### Scenario: v7 同场景比较
+- **WHEN** baseline 与 current 都是完整的 scenario v7 报告
+- **THEN** 比较器 MUST 使用既有绝对门禁和回归门禁完成比较
+
 #### Scenario: v13 与 v14 不静默混比
 - **WHEN** baseline 为 scenario v13、current 为 scenario v14 且没有显式迁移授权
 - **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致
