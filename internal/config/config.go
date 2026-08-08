@@ -115,27 +115,11 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("config: 解析 logging 字段: %w", err)
 		}
 	}
-	if raw, ok := lookupCaseInsensitive(top, "physics"); ok {
-		warnUnknownFields("physics", raw, reflect.TypeOf(cfg.Physics))
-		if err := json.Unmarshal(raw, &cfg.Physics); err != nil {
-			return Config{}, fmt.Errorf("config: 解析 physics 字段: %w", err)
-		}
-	}
-	if raw, ok := lookupCaseInsensitive(top, "sim"); ok {
-		warnUnknownFields("sim", raw, reflect.TypeOf(cfg.Sim))
-		if err := json.Unmarshal(raw, &cfg.Sim); err != nil {
-			return Config{}, fmt.Errorf("config: 解析 sim 字段: %w", err)
-		}
-	}
-	if raw, ok := lookupCaseInsensitive(top, "render"); ok {
-		warnUnknownFields("render", raw, reflect.TypeOf(cfg.Render))
-		if err := json.Unmarshal(raw, &cfg.Render); err != nil {
-			return Config{}, fmt.Errorf("config: 解析 render 字段: %w", err)
-		}
+	if err := applyGroups(&cfg, top); err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
 	}
 	warnUnknownTopLevel(top)
 
-	clampFields(&cfg)
 	return cfg, nil
 }
 
@@ -168,22 +152,77 @@ func applyLogging(cfg *Config, raw json.RawMessage) error {
 	return nil
 }
 
-// warnUnknownFields 对 raw 对象中不属于 fieldType 的键逐个 slog.Warn，
-// 便于用户发现拼写错误的配置项；这些键本身会在随后的正式反序列化中被忽略。
-func warnUnknownFields(group string, raw json.RawMessage, fieldType reflect.Type) {
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return // 结构不是对象，交由后续正式反序列化报错。
+// applyGroups 把 physics/sim/render 三个分组的原始 JSON 应用到 cfg。
+//
+// Fields() 是这三个分组已知字段与钳制区间的唯一权威来源，这里同时拿它做“未知
+// 字段识别”与“越界钳制”，不为同一件事各写一份判断。
+//
+// 之所以不直接 json.Unmarshal 进 physics.Tunables/sim.Tunables/Render，是因为
+// encoding/json 自身的整数范围检查发生在钳制之前：越界或负值会让 Unmarshal 直
+// 接返回错误，越界值根本走不到钳制逻辑（例如 uint8 字段收到 300 或 -5）。这里
+// 改为先把逐字段的原始 JSON 值解码成 float64（float64 不做范围收窄，不会因为
+// 数值偏大或为负而报错），在 float64 空间里完成钳制，再用 setFloat 写回真实字
+// 段——这样越界值永远不会在钳制之前就被写进窄整数字段。
+func applyGroups(cfg *Config, top map[string]json.RawMessage) error {
+	rawGroups := make(map[string]map[string]json.RawMessage, 3)
+	for _, group := range []string{"physics", "sim", "render"} {
+		raw, ok := lookupCaseInsensitive(top, group)
+		if !ok {
+			continue
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return fmt.Errorf("解析 %s 字段: %w", group, err)
+		}
+		rawGroups[group] = fields
 	}
-	known := make(map[string]bool, fieldType.NumField())
-	for i := 0; i < fieldType.NumField(); i++ {
-		known[strings.ToLower(fieldType.Field(i).Name)] = true
+
+	known := make(map[string]bool, len(Fields()))
+	for _, field := range Fields() {
+		known[field.Group+"."+strings.ToLower(field.Name)] = true
+
+		fields, ok := rawGroups[field.Group]
+		if !ok {
+			continue // 该分组整体未出现在 JSON 中，保留默认值。
+		}
+		raw, ok := lookupCaseInsensitive(fields, field.Name)
+		if !ok {
+			continue // 该字段未出现在 JSON 中，保留默认值。
+		}
+
+		var value float64
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return fmt.Errorf("字段 %s.%s 不是合法数值: %w", field.Group, field.Name, err)
+		}
+		clamped := value
+		if clamped < field.Min {
+			clamped = field.Min
+		}
+		if clamped > field.Max {
+			clamped = field.Max
+		}
+		if clamped != value {
+			slog.Warn("配置项越界已钳制", "field", field.Group+"."+field.Name, "value", value, "clamped", clamped)
+		}
+
+		target := groupValue(cfg, field.Group).FieldByName(exportedFieldName(field.Name))
+		if !target.IsValid() {
+			// 不应该发生：Fields() 与对应结构体字段必须保持同步，
+			// 出现这种情况说明 Fields() 里的 Name 拼错了，直接 panic 暴露问题，
+			// 而不是悄悄让这个字段永远不被钳制。
+			panic("config: Fields() 声明的字段在结构体中不存在: " + field.Group + "." + field.Name)
+		}
+		setFloat(target, clamped)
 	}
-	for key := range probe {
-		if !known[strings.ToLower(key)] {
-			slog.Warn("配置项未知字段已忽略", "field", group+"."+key)
+
+	for group, fields := range rawGroups {
+		for key := range fields {
+			if !known[group+"."+strings.ToLower(key)] {
+				slog.Warn("配置项未知字段已忽略", "field", group+"."+key)
+			}
 		}
 	}
+	return nil
 }
 
 // warnUnknownTopLevel 对不认识的顶层分组名 slog.Warn。
@@ -308,30 +347,6 @@ func Fields() []Field {
 	}
 }
 
-// clampFields 依次把 cfg 中每个 Fields() 覆盖的字段钳制进 [Min, Max]，
-// 越界时 slog.Warn 并写回钳制后的值。
-func clampFields(cfg *Config) {
-	for _, field := range Fields() {
-		group := groupValue(cfg, field.Group)
-		target := group.FieldByName(exportedFieldName(field.Name))
-		if !target.IsValid() {
-			continue // 不应该发生；Fields() 与对应结构体字段应保持同步。
-		}
-		current := floatOf(target)
-		clamped := current
-		if clamped < field.Min {
-			clamped = field.Min
-		}
-		if clamped > field.Max {
-			clamped = field.Max
-		}
-		if clamped != current {
-			setFloat(target, clamped)
-			slog.Warn("配置项越界已钳制", "field", field.Group+"."+field.Name, "value", current, "clamped", clamped)
-		}
-	}
-}
-
 // groupValue 返回 cfg 中某个分组结构体的可寻址反射值。
 func groupValue(cfg *Config, group string) reflect.Value {
 	switch group {
@@ -352,20 +367,6 @@ func exportedFieldName(name string) string {
 		return name
 	}
 	return strings.ToUpper(name[:1]) + name[1:]
-}
-
-// floatOf 把数值类型的反射值统一读成 float64，供区间比较使用。
-func floatOf(v reflect.Value) float64 {
-	switch v.Kind() {
-	case reflect.Float32, reflect.Float64:
-		return v.Float()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return float64(v.Int())
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return float64(v.Uint())
-	default:
-		panic("config: 不支持的字段类型 " + v.Kind().String())
-	}
 }
 
 // setFloat 把钳制后的 float64 写回原字段的实际数值类型。
