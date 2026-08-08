@@ -283,7 +283,7 @@ func (current *session) shutdown() {
 // disconnectCodeFor 把会话关闭原因映射成协议的 DisconnectCode。
 // 第二个返回值为 false 表示不应向客户端发送断开原因。
 //
-// 这里刻意用白名单而不是黑名单：只有四个具名原因会发送。黑名单会在将来
+// 这里刻意用白名单而不是黑名单：只有三个具名原因会发送。黑名单会在将来
 // 新增关闭原因时默认放行，而"默认发送"恰恰是风险所在——writeLoop 自身
 // Send 失败或 panic 时也会调用 fail，此时 socket 已不可信，再发一次不仅
 // 徒劳，还会在 writeLoop 的调用栈内构成重入。白名单让这两种情况自然落在
@@ -295,6 +295,15 @@ func (current *session) shutdown() {
 // DisconnectServerShutdown 与 DisconnectInternalError 不在此表内：
 // 关服走 detachSessionLocked(id, generation, nil)，cause 为 nil，
 // 根本不经过带具名错误的 fail；而没有任何具名原因映射到 InternalError。
+//
+// errSessionOutboxFull 刻意不在表内：它由 enqueue 在 outbox 满时同步调用 fail
+// 触发，而 enqueue 声明「永不等待 writer」并位于每 tick、每会话、每消息的发布
+// 路径上。让它进入白名单会使发送的期限变成 enqueue 的阻塞，直接打破该不变量
+// （既有测试 TestSessionFullOutboxClosesWithoutBlocking 守着它）。
+//
+// 另外两条理由方向一致：outbox 满恰恰意味着客户端没在消费，Disconnect 送不到；
+// 且它是这几个原因里唯一已有服务端日志的（"慢客户端 outbox 已满，关闭 session"），
+// 可诊断性本来就不缺。
 func disconnectCodeFor(err error) (network.DisconnectCode, bool) {
 	switch {
 	case err == nil:
@@ -305,15 +314,44 @@ func disconnectCodeFor(err error) (network.DisconnectCode, bool) {
 		return network.DisconnectProtocolViolation, true
 	case errors.Is(err, errUnknownClientMessage):
 		return network.DisconnectProtocolViolation, true
-	case errors.Is(err, errSessionOutboxFull):
-		return network.DisconnectSlowClient, true
 	default:
 		return 0, false
 	}
 }
 
+// sessionDisconnectSendTimeout 是发送断开原因的上界。
+//
+// 它是上界而非等待：socket 正常时写入立即返回，只有对端已死、缓冲区满、
+// 或 writeLoop 正持有 tcpStream 的 writeOwner 时才会走到期限。session.fail
+// 处在慢客户端清理与关服的公共路径上，因此这个值必须小到不产生可感知的停顿。
+const sessionDisconnectSendTimeout = 200 * time.Millisecond
+
+// sendDisconnect 在关闭前尽力告知客户端断开原因，失败一律忽略。
+//
+// 必须在 shutdown() 之前调用：shutdown 会 cancel 会话上下文并关闭 endpoint，
+// 之后就发不出任何东西了。也正因如此，这里不能用 current.ctx——它即将被取消——
+// 而要用一个独立的短期限上下文。
+//
+// 直接调 endpoint.Send 而不走 outbox：errSessionOutboxFull 本身就意味着
+// outbox 已满，enqueue 必然失败。
+func (current *session) sendDisconnect(err error) {
+	code, ok := disconnectCodeFor(err)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(
+		context.Background(), sessionDisconnectSendTimeout,
+	)
+	defer cancel()
+	_ = current.endpoint.Send(ctx, network.Disconnect{
+		Code:    code,
+		Message: err.Error(),
+	})
+}
+
 func (current *session) fail(err error) {
 	current.failOnce.Do(func() {
+		current.sendDisconnect(err)
 		current.shutdown()
 		if current.detach != nil {
 			go current.detach(current.id, current.generation, err)
