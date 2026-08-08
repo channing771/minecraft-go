@@ -80,12 +80,11 @@ func (s *SkyLightScratch) build(n *world.Neighborhood, reg Registry) {
 			nx, ny, nz := x+direction.x, y+direction.y, z+direction.z
 			if nx < skyLightMin || nx >= skyLightMin+skyLightSide ||
 				ny < skyLightMin || ny >= skyLightMin+skyLightSide ||
-				nz < skyLightMin || nz >= skyLightMin+skyLightSide ||
-				reg.Opaque(n.At(nx, ny, nz)) {
+				nz < skyLightMin || nz >= skyLightMin+skyLightSide {
 				continue
 			}
 			next := skyLightIndex(nx, ny, nz)
-			if s.levels[next] >= candidate {
+			if s.levels[next] >= candidate || reg.Opaque(n.At(nx, ny, nz)) {
 				continue
 			}
 			s.levels[next] = candidate

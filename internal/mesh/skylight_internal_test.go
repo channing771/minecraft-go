@@ -14,6 +14,17 @@ func (internalTestRegistry) Material(world.BlockID, Face) uint16 {
 	return 0
 }
 
+type countingOpaqueRegistry struct {
+	queries int
+}
+
+func (r *countingOpaqueRegistry) Opaque(world.BlockID) bool {
+	r.queries++
+	return false
+}
+
+func (*countingOpaqueRegistry) Material(world.BlockID, Face) uint16 { return 0 }
+
 func fullyLoadedAirNeighborhood() *world.Neighborhood {
 	n := &world.Neighborhood{
 		Center:   world.NewSection(),
@@ -49,5 +60,16 @@ func TestSkyLightScratchExactCapacityAndStableBuildDoesNotAllocate(t *testing.T)
 	}
 	if got := testing.AllocsPerRun(100, func() { scratch.build(n, internalTestRegistry{}) }); got != 0 {
 		t.Fatalf("稳定传播分配=%v，想要 0", got)
+	}
+}
+
+func TestSkyLightScratchDoesNotSampleSettledNeighbors(t *testing.T) {
+	n := fullyLoadedAirNeighborhood()
+	reg := new(countingOpaqueRegistry)
+
+	NewSkyLightScratch().build(n, reg)
+
+	if got, want := reg.queries, skyLightVolume; got != want {
+		t.Fatalf("稳定全直射输入的不透明查询=%d，想要仅种子扫描的 %d", got, want)
 	}
 }
