@@ -1112,6 +1112,59 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	}
 }
 
+// TestApplicationConstructionSkipsDebugPanelRendererWhenDevOff 与
+// TestApplicationConstructionCreatesDebugPanelRendererWhenDevOn 一起守住
+// --dev 只门控调试面板这条约束：字段是否非 nil 必须严格跟随 options.Dev，
+// 不能悄悄在两条路径上都创建或都不创建 GPU 资源。
+func TestApplicationConstructionSkipsDebugPanelRendererWhenDevOff(t *testing.T) {
+	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	if app.debugPanelRenderer != nil {
+		t.Fatal("Dev 为假时 debugPanelRenderer 必须是 nil")
+	}
+	if app.panel != nil {
+		t.Fatal("Dev 为假时 panel 必须是 nil")
+	}
+}
+
+func TestApplicationConstructionCreatesDebugPanelRendererWhenDevOn(t *testing.T) {
+	rawEndpoint, _ := network.NewMemoryPair(1)
+	endpoint := &connectionTestEndpoint{ClientEndpoint: rawEndpoint}
+	t.Cleanup(func() { _ = rawEndpoint.Close() })
+	stream := &connectionTestClientStream{}
+	window := &connectionTestWindow{}
+	surface := &connectionTestSurface{}
+	dependencies := connectionTestDependencies(t)
+	dependencies.dialTCP = func(context.Context, string) (network.ClientPacketStream, error) {
+		return stream, nil
+	}
+	dependencies.loginClient = func(
+		context.Context, network.ClientPacketStream, network.Identity,
+	) (network.ClientEndpoint, error) {
+		return endpoint, nil
+	}
+	dependencies.newWindow = func(int, int, string) (applicationWindow, error) { return window, nil }
+	dependencies.newDevice = func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error) {
+		device, err := gfx.NewHeadlessDevice()
+		return device, surface, err
+	}
+
+	options := remoteConnectionOptions()
+	options.Dev = true
+	app, err := newApplicationWithDependencies(options, dependencies)
+	if err != nil {
+		t.Fatalf("newApplication dev=true: %v", err)
+	}
+	if app.debugPanelRenderer == nil {
+		t.Fatal("Dev 为真时 debugPanelRenderer 不能是 nil")
+	}
+	if app.panel == nil {
+		t.Fatal("Dev 为真时 panel 不能是 nil")
+	}
+	if err := app.Close(); err != nil {
+		t.Fatalf("dev=true application Close: %v", err)
+	}
+}
+
 func TestApplicationConnectionLocalHostFailureClosesStoreBeforeWindow(t *testing.T) {
 	hostErr := errors.New("construct host failed")
 	store := newConnectionTestStore(42)

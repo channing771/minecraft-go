@@ -134,6 +134,15 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	}, nil
 }
 
+// resolveConfigPath 决定调参配置文件的实际路径：显式 --config 优先，
+// 否则落回用户配置目录下的默认路径。
+func resolveConfigPath(options mainOptions) (string, error) {
+	if options.ConfigPath != "" {
+		return options.ConfigPath, nil
+	}
+	return config.DefaultPath()
+}
+
 // resolveConfig 决定本次运行的生效配置。
 //
 // benchmark 与抓帧路径强制使用编译默认值：这两条路径的产出会与基线比对，
@@ -142,12 +151,9 @@ func resolveConfig(options mainOptions) (config.Config, error) {
 	if options.Application.Benchmark || options.CaptureDir != "" {
 		return config.Defaults(), nil
 	}
-	path := options.ConfigPath
-	if path == "" {
-		var err error
-		if path, err = config.DefaultPath(); err != nil {
-			return config.Config{}, err
-		}
+	path, err := resolveConfigPath(options)
+	if err != nil {
+		return config.Config{}, err
 	}
 	return config.Load(path)
 }
@@ -187,6 +193,14 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 	effective.Apply()
 	options.Application.Dev = options.Dev
 	options.Application.Render = effective.Render
+	// 面板 F5 保存需要落盘路径；benchmark 与抓帧路径不进交互循环，不需要它。
+	if !options.Application.Benchmark && options.CaptureDir == "" {
+		configPath, err := resolveConfigPath(options)
+		if err != nil {
+			return fmt.Errorf("解析配置文件路径: %w", err)
+		}
+		options.Application.ConfigPath = configPath
+	}
 
 	app, err := dependencies.newApplication(options.Application)
 	if err != nil {
@@ -247,6 +261,14 @@ func runInteractive(app *application) error {
 	lastFrame := time.Now()
 	escapeWasDown := false
 	clickWasDown := false
+	panelToggleWasDown := false
+	panelUpWasDown := false
+	panelDownWasDown := false
+	panelLeftWasDown := false
+	panelRightWasDown := false
+	panelEnterWasDown := false
+	panelSaveWasDown := false
+	panelResetAllWasDown := false
 	var input client.InputState
 
 	for !app.window.ShouldClose() {
@@ -272,6 +294,50 @@ func runInteractive(app *application) error {
 			}
 		}
 		escapeWasDown = escapeDown
+
+		// 调试面板按键：F3/F5/F6、方向键与 Enter 都是边沿触发（按一下走一步），
+		// Shift/Alt 是电平读取的修饰键。面板不存在时（未开 --dev）整段直接跳过，
+		// 方向键既不驱动面板、也从不驱动玩家移动（移动只读 WASD）。
+		if app.panel != nil {
+			toggleDown := app.window.KeyDown(client.KeyF3)
+			upDown := app.window.KeyDown(client.KeyUp)
+			downDown := app.window.KeyDown(client.KeyDown)
+			leftDown := app.window.KeyDown(client.KeyLeft)
+			rightDown := app.window.KeyDown(client.KeyRight)
+			enterDown := app.window.KeyDown(client.KeyEnter)
+			saveDown := app.window.KeyDown(client.KeyF5)
+			resetAllDown := app.window.KeyDown(client.KeyF6)
+
+			keys := panelKeys{
+				Toggle:   toggleDown && !panelToggleWasDown,
+				Up:       upDown && !panelUpWasDown,
+				Down:     downDown && !panelDownWasDown,
+				Left:     leftDown && !panelLeftWasDown,
+				Right:    rightDown && !panelRightWasDown,
+				Enter:    enterDown && !panelEnterWasDown,
+				Save:     saveDown && !panelSaveWasDown,
+				ResetAll: resetAllDown && !panelResetAllWasDown,
+				Shift:    app.window.KeyDown(client.KeyLeftShift),
+				Alt:      app.window.KeyDown(client.KeyLeftAlt),
+			}
+			panelToggleWasDown = toggleDown
+			panelUpWasDown = upDown
+			panelDownWasDown = downDown
+			panelLeftWasDown = leftDown
+			panelRightWasDown = rightDown
+			panelEnterWasDown = enterDown
+			panelSaveWasDown = saveDown
+			panelResetAllWasDown = resetAllDown
+
+			if app.panel.handleKeys(keys, app.remote()) {
+				app.applyPanelChange()
+			}
+			if keys.Save {
+				if err := app.panel.save(app.configPath); err != nil {
+					slog.Warn("保存调试面板配置失败", "error", err)
+				}
+			}
+		}
 
 		clickDown := app.window.PrimaryButtonDown()
 		justCaptured := false

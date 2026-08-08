@@ -41,6 +41,8 @@ type applicationOptions struct {
 	// Render 是渲染相关的生效配置（视距、FOV、鼠标灵敏度），由 cmd/mcgo 从
 	// 加载后的 config.Config 下传并自行消费——config.Config.Apply 不处理它。
 	Render config.Render
+	// ConfigPath 是调试面板 F5 保存时的目标路径；只在 Dev 为真时使用。
+	ConfigPath string
 }
 
 type application struct {
@@ -59,16 +61,24 @@ type application struct {
 	avatarRenderer      *render.AvatarRenderer
 	nameTagRenderer     *render.NameTagRenderer
 	hotbarRenderer      *render.HotbarRenderer
-	inventory           client.InventoryMirror
-	furnace             client.FurnaceMirror
-	chest               client.ChestMirror
-	miningOverlay       render.MiningOverlay
-	itemDropRenderer    *render.ItemDropRenderer
-	itemDrops           *client.ItemDrops
-	itemDropInstances   []render.ItemDrop
-	inventoryOpen       bool
-	inventorySource     int
-	serverTick          uint64
+	debugPanelRenderer  *render.DebugPanelRenderer
+	// panel 是调试面板的交互状态；只在 applicationOptions.Dev 为真时创建，
+	// 与 debugPanelRenderer 一同保持 nil/非 nil 同步。
+	panel *panelState
+	// configPath 是调试面板 F5 保存时的目标路径，来自 applicationOptions.ConfigPath。
+	configPath string
+	// panelLastFrameAt 是上一帧调试面板读数的采样时刻，用于计算 PanelReadout.FrameMillis。
+	panelLastFrameAt  time.Time
+	inventory         client.InventoryMirror
+	furnace           client.FurnaceMirror
+	chest             client.ChestMirror
+	miningOverlay     render.MiningOverlay
+	itemDropRenderer  *render.ItemDropRenderer
+	itemDrops         *client.ItemDrops
+	itemDropInstances []render.ItemDrop
+	inventoryOpen     bool
+	inventorySource   int
+	serverTick        uint64
 	// worldTimeTicks 是最后确认的权威绝对世界时间，只在接受更新状态时前进。
 	worldTimeTicks          uint64
 	glyphAtlas              *render.GlyphAtlas
@@ -126,19 +136,20 @@ type applicationHost interface {
 }
 
 type applicationDependencies struct {
-	openStore           func(context.Context, applicationOptions) (storage.WorldStore, error)
-	dialTCP             func(context.Context, string) (network.ClientPacketStream, error)
-	loginClient         func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
-	newHost             func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
-	newMemoryStreamPair func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
-	newWindow           func(int, int, string) (applicationWindow, error)
-	newDevice           func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
-	newHeadlessDevice   func() (gfx.Device, error)
-	newGlyphAtlas       func(gfx.Device) (*render.GlyphAtlas, error)
-	newAvatarRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
-	newNameTagRenderer  func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
-	newHotbarRenderer   func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.HotbarRenderer, error)
-	newItemDropRenderer func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
+	openStore             func(context.Context, applicationOptions) (storage.WorldStore, error)
+	dialTCP               func(context.Context, string) (network.ClientPacketStream, error)
+	loginClient           func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
+	newHost               func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
+	newMemoryStreamPair   func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
+	newWindow             func(int, int, string) (applicationWindow, error)
+	newDevice             func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
+	newHeadlessDevice     func() (gfx.Device, error)
+	newGlyphAtlas         func(gfx.Device) (*render.GlyphAtlas, error)
+	newAvatarRenderer     func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
+	newNameTagRenderer    func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
+	newHotbarRenderer     func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.HotbarRenderer, error)
+	newItemDropRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
+	newDebugPanelRenderer func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.DebugPanelRenderer, error)
 }
 
 func defaultApplicationDependencies() applicationDependencies {
@@ -319,6 +330,11 @@ func newApplicationWithDependencies(
 	if dependencies.newItemDropRenderer == nil {
 		dependencies.newItemDropRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.ItemDropRenderer, error) {
 			return render.NewItemDropRenderer(dev, color, depth), nil
+		}
+	}
+	if dependencies.newDebugPanelRenderer == nil {
+		dependencies.newDebugPanelRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource) (*render.DebugPanelRenderer, error) {
+			return render.NewDebugPanelRenderer(dev, color, atlas), nil
 		}
 	}
 	ctx := context.Background()
@@ -537,6 +553,19 @@ func newApplicationWithDependencies(
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建掉落物渲染器: %w", err), app.Close())
 	}
+	app.configPath = options.ConfigPath
+	if options.Dev {
+		app.debugPanelRenderer, err = dependencies.newDebugPanelRenderer(dev, colorFormat, app.glyphAtlas)
+		if err != nil {
+			app.releaseRemoteConstructionResources()
+			return nil, errors.Join(fmt.Errorf("创建调试面板渲染器: %w", err), app.Close())
+		}
+		// 面板的初始生效值取当前已生效的 physics/sim 快照（main.go 在构造
+		// application 之前已经调用过 config.Config.Apply）与调用方传入的
+		// Render，三组合起来与启动时真正生效的参数保持一致，不需要额外
+		// 传一份完整 config.Config 进 applicationOptions。
+		app.panel = newPanelStateFromActive(options.Render)
+	}
 	app.mesher = client.NewMesher(reg, max(1, runtime.NumCPU()-2))
 	if options.Benchmark {
 		if err := app.requestTrustedObserverCenter(app.center); err != nil {
@@ -551,6 +580,10 @@ func newApplicationWithDependencies(
 }
 
 func (a *application) releaseRemoteConstructionResources() {
+	if a.debugPanelRenderer != nil {
+		a.debugPanelRenderer.Release()
+		a.debugPanelRenderer = nil
+	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
 		a.itemDropRenderer = nil
@@ -792,6 +825,9 @@ func (a *application) Close() error {
 }
 
 func (a *application) releaseOwnedResources() {
+	if a.debugPanelRenderer != nil {
+		a.debugPanelRenderer.Release()
+	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
 	}
@@ -969,6 +1005,31 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
 		}
 	}
+	if a.debugPanelRenderer != nil {
+		now := time.Now()
+		var frameMillis float64
+		if !a.panelLastFrameAt.IsZero() {
+			frameMillis = float64(now.Sub(a.panelLastFrameAt).Microseconds()) / 1000
+		}
+		a.panelLastFrameAt = now
+		if err := a.debugPanelRenderer.Prepare(
+			a.panel.visible,
+			render.PanelReadout{
+				FrameMillis:  frameMillis,
+				Position:     a.camera.Pos,
+				Yaw:          a.camera.Yaw,
+				Pitch:        a.camera.Pitch,
+				Tick:         a.serverTick,
+				WorldTime:    a.worldTimeTicks,
+				LoadedChunks: len(a.loadedChunks),
+				Mode:         a.panelModeLabel(),
+			},
+			a.panel.rows(a.remote()),
+			uint32(width), uint32(height), a.renderer.UploadBudget(),
+		); err != nil {
+			return false, fmt.Errorf("准备调试面板: %w", err)
+		}
+	}
 	a.renderer.DropOutside(a.center, a.render.ViewDistance)
 
 	target := a.colorView
@@ -1032,6 +1093,10 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	// HUD 在 terrain、avatar 与 name tag 之后绘制。
 	if inventoryConfirmed {
 		a.hotbarRenderer.Render(encoder, target)
+	}
+	// 调试面板是最上层：必须在 HUD 之后绘制，否则会被背包/容器界面盖住。
+	if a.debugPanelRenderer != nil {
+		a.debugPanelRenderer.Render(encoder, target)
 	}
 	command := encoder.Finish()
 	a.dev.Submit(command)
