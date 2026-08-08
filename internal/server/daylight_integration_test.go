@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"minecraft-go/internal/assets"
 	"minecraft-go/internal/client"
@@ -54,29 +55,16 @@ func (roofTestGenerator) GenerateChunk(position core.ChunkPos) *world.Chunk {
 	return chunk
 }
 
-// topFaceSkyLight 对镜像中包含 position 的区段网格化，
-// 返回覆盖该方块 +Y 面的 quad 天空光。找不到该面时返回 -1。
+// topFaceSkyLight 返回已由 Mesher 收敛的区段中覆盖 position 的 +Y 面天空光。
+// 找不到该面时返回 -1。
 func topFaceSkyLight(
 	t *testing.T,
-	mirror *client.Mirror,
+	section client.MeshedSection,
 	position core.BlockPos,
 ) int {
 	t.Helper()
-	get := func(pos core.ChunkPos) *world.Chunk {
-		chunk, loaded := mirror.Chunk(core.Overworld, pos)
-		if !loaded {
-			return nil
-		}
-		return chunk.Chunk
-	}
-	neighborhood := world.NeighborhoodAt(get, position.Chunk(), position.SectionIndex())
-	if neighborhood == nil {
-		t.Fatalf("区块 %+v 未加载", position.Chunk())
-	}
-
 	lx, ly, lz := position.Local()
-	scratch := mesh.NewSkyLightScratch()
-	for _, quad := range mesh.MeshSection(neighborhood, assets.NewRegistry(), scratch) {
+	for _, quad := range section.Quads {
 		if quad.Face != mesh.FacePosY || int(quad.Y) != ly {
 			continue
 		}
@@ -87,6 +75,47 @@ func topFaceSkyLight(
 		}
 	}
 	return -1
+}
+
+// awaitMeshedSection 驱动既有调度器，等待目标区段的最新权威 revision 网格结果。
+func awaitMeshedSection(
+	t *testing.T,
+	mesher *client.Mesher,
+	mirror *client.Mirror,
+	position core.BlockPos,
+	revision uint64,
+) client.MeshedSection {
+	t.Helper()
+	key := core.SectionKey{
+		Dimension: core.Overworld,
+		Pos: core.SectionPos{
+			X: position.Chunk().X,
+			Y: int32(position.SectionIndex()),
+			Z: position.Chunk().Z,
+		},
+	}
+	deadline := time.Now().Add(waitDeadline)
+	for {
+		mesher.Schedule(mirror, 1)
+		for _, section := range mesher.Drain(mirror, 1) {
+			if section.Dimension != key.Dimension || section.Pos != key.Pos {
+				continue
+			}
+			for _, stamp := range section.Stamps {
+				if stamp.Dimension == key.Dimension && stamp.Chunk == position.Chunk() {
+					if !stamp.Present || stamp.Revision != revision {
+						t.Fatalf("网格 revision = %+v，想要 %d", stamp, revision)
+					}
+					return section
+				}
+			}
+			t.Fatalf("网格结果缺少中心区块 stamp: %+v", section.Stamps)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等待区段 %+v 的 revision %d 网格超时；stats=%+v", key, revision, mesher.Stats())
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func mirrorColumnTop(t *testing.T, mirror *client.Mirror, position core.BlockPos) int32 {
@@ -122,6 +151,8 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		_ = clientEndpoint.Close()
 	})
 	mirror := client.NewMirror()
+	mesher := client.NewMesher(assets.NewRegistry(), 1)
+	t.Cleanup(mesher.Close)
 
 	// 洞下方的地面露天，其余地面被屋顶遮蔽。
 	underHole := core.BlockPos{X: roofHole.X, Y: groundTop, Z: roofHole.Z}
@@ -135,7 +166,8 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		chunk, chunkOK := mirror.Chunk(core.Overworld, interactionChunk)
 		player, playerOK := playerStateForExternalTest(running)
 		return chunkOK && chunk.Revision == 1 && playerOK && player.Ready
-	})
+	}, mesher)
+	initial := awaitMeshedSection(t, mesher, mirror, underHole, 1)
 
 	// 权威快照本身就形成屋内/露天的可观察差异。
 	if got := mirrorColumnTop(t, mirror, underHole); got != groundTop {
@@ -154,7 +186,7 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		{"最后亮格", lastLit, 1},
 		{"首个暗格", firstDark, 0},
 	} {
-		if got := topFaceSkyLight(t, mirror, check.position); got != check.want {
+		if got := topFaceSkyLight(t, initial, check.position); got != check.want {
 			t.Fatalf("%s地面初始天空光 = %d，想要 %d", check.name, got, check.want)
 		}
 	}
@@ -164,11 +196,12 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		Sequence: 1, Yaw: 0, Pitch: 1.0, Slot: 0,
 	})
 	placed := awaitInteractionChange(
-		t, running, clientEndpoint, mirror, interactionChunk, 1, 2,
+		t, running, clientEndpoint, mirror, interactionChunk, 1, 2, mesher,
 	)
 	if placed.Block != core.StoneID || placed.Position != holeBlock {
 		t.Fatalf("放置结果 = %+v，想要在 %+v 处补上屋顶", placed, holeBlock)
 	}
+	sealed := awaitMeshedSection(t, mesher, mirror, underHole, 2)
 	if got := mirrorColumnTop(t, mirror, underHole); got != roofY {
 		t.Fatalf("补洞后列顶 = %d，想要 %d", got, roofY)
 	}
@@ -181,7 +214,7 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		{"最后亮格", lastLit},
 		{"首个暗格", firstDark},
 	} {
-		if got := topFaceSkyLight(t, mirror, check.position); got != 0 {
+		if got := topFaceSkyLight(t, sealed, check.position); got != 0 {
 			t.Fatalf("补洞后%s地面天空光 = %d，想要 0", check.name, got)
 		}
 	}
@@ -191,11 +224,12 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		Sequence: 2, Yaw: 0, Pitch: 1.0, Mining: true,
 	})
 	broken := awaitInteractionChange(
-		t, running, clientEndpoint, mirror, interactionChunk, 2, 3,
+		t, running, clientEndpoint, mirror, interactionChunk, 2, 3, mesher,
 	)
 	if broken.Block != core.AirID || broken.Position != holeBlock {
 		t.Fatalf("挖掘结果 = %+v，想要移除 %+v", broken, holeBlock)
 	}
+	reopened := awaitMeshedSection(t, mesher, mirror, underHole, 3)
 	if got := mirrorColumnTop(t, mirror, underHole); got != groundTop {
 		t.Fatalf("移除后列顶 = %d，想要 %d", got, groundTop)
 	}
@@ -209,7 +243,7 @@ func TestAuthoritativeRoofChangeDrivesMirrorSkyLight(t *testing.T) {
 		{"最后亮格", lastLit, 1},
 		{"首个暗格", firstDark, 0},
 	} {
-		if got := topFaceSkyLight(t, mirror, check.position); got != check.want {
+		if got := topFaceSkyLight(t, reopened, check.position); got != check.want {
 			t.Fatalf("重开后%s地面天空光 = %d，想要 %d", check.name, got, check.want)
 		}
 	}

@@ -311,6 +311,7 @@ func awaitInteractionChange(
 	chunk core.ChunkPos,
 	baseRevision uint64,
 	newRevision uint64,
+	mesher ...*client.Mesher,
 ) network.BlockChange {
 	t.Helper()
 	var matching []network.BlockChanges
@@ -321,7 +322,7 @@ func awaitInteractionChange(
 	}, func() bool {
 		_, revision, ok := mirror.Hash(core.Overworld, chunk)
 		return ok && revision == newRevision
-	})
+	}, mesher...)
 	if len(matching) != 1 || matching[0].BaseRevision != baseRevision ||
 		matching[0].NewRevision != newRevision || len(matching[0].Changes) != 1 {
 		t.Fatalf(
@@ -401,9 +402,10 @@ func stepUntil(
 	endpoint network.ClientEndpoint,
 	mirror *client.Mirror,
 	done func() bool,
+	mesher ...*client.Mesher,
 ) {
 	t.Helper()
-	stepUntilCollect(t, running, endpoint, mirror, nil, done)
+	stepUntilCollect(t, running, endpoint, mirror, nil, done, mesher...)
 }
 
 func stepUntilCollect(
@@ -413,12 +415,13 @@ func stepUntilCollect(
 	mirror *client.Mirror,
 	collect func(network.ServerMessage),
 	done func() bool,
+	mesher ...*client.Mesher,
 ) {
 	t.Helper()
 	deadline := time.Now().Add(waitDeadline)
 	for !done() {
 		result := running.StepForTest()
-		drainServerMessages(t, endpoint, mirror, collect, result.Tick)
+		drainServerMessages(t, endpoint, mirror, collect, result.Tick, mesher...)
 		if time.Now().After(deadline) {
 			t.Fatalf("等待权威状态超时；mirror center=%+v", mirrorChunkSummary(mirror))
 		}
@@ -431,6 +434,7 @@ func drainServerMessages(
 	mirror *client.Mirror,
 	collect func(network.ServerMessage),
 	throughTick uint64,
+	mesher ...*client.Mesher,
 ) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
@@ -466,6 +470,11 @@ func drainServerMessages(
 		}
 		if update.Rejected != nil {
 			t.Fatalf("权威命令被拒绝: %+v", update.Rejected)
+		}
+		for _, current := range mesher {
+			if current != nil {
+				current.MarkDirty(update.Dirty...)
+			}
 		}
 	}
 }
