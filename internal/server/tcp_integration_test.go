@@ -397,7 +397,7 @@ func sendIntegration(t *testing.T, endpoint network.ClientEndpoint, message netw
 
 func waitIntegrationCondition(t *testing.T, label string, condition func() bool) {
 	t.Helper()
-	deadline := time.NewTimer(10 * time.Second)
+	deadline := time.NewTimer(longWaitDeadline)
 	defer deadline.Stop()
 	stop := make(chan struct{})
 	defer close(stop)

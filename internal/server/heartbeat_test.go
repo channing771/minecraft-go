@@ -221,7 +221,7 @@ func TestHeartbeatTimeoutDetachesOnlyThatSession(t *testing.T) {
 
 func waitHeartbeatReplyConsumed(t *testing.T, current *session) {
 	t.Helper()
-	deadline := time.NewTimer(time.Second)
+	deadline := time.NewTimer(waitDeadline)
 	defer deadline.Stop()
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
@@ -239,7 +239,7 @@ func waitHeartbeatReplyConsumed(t *testing.T, current *session) {
 
 func waitHeartbeatOutstanding(t *testing.T, current *session, want uint64) {
 	t.Helper()
-	deadline := time.NewTimer(time.Second)
+	deadline := time.NewTimer(waitDeadline)
 	defer deadline.Stop()
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()

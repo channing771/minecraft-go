@@ -31,7 +31,7 @@ func TestAuthoritativePlayerConvergesAfterThreeTickStateDelay(t *testing.T) {
 	h.flushAllStates()
 	h.assertConverged(1e-5)
 	h.assertWorldHashesEqual()
-	h.closeAndAssertNoGoroutineLeak(time.Second)
+	h.closeAndAssertNoGoroutineLeak(waitDeadline)
 }
 
 func TestAuthoritativePlayerReplayIsDeterministic(t *testing.T) {
@@ -727,7 +727,7 @@ func runDelayedPlayerScript(t *testing.T) delayedReplayResult {
 	h.assertConverged(1e-5)
 	h.assertWorldHashesEqual()
 	result := h.replayResult()
-	h.closeAndAssertNoGoroutineLeak(time.Second)
+	h.closeAndAssertNoGoroutineLeak(waitDeadline)
 	return result
 }
 

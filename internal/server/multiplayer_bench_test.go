@@ -54,12 +54,12 @@ func BenchmarkEightPlayerInterest(b *testing.B) {
 			drains.Wait()
 			close(done)
 		}()
-		deadline := time.NewTimer(5 * time.Second)
+		deadline := time.NewTimer(waitDeadline)
 		defer deadline.Stop()
 		select {
 		case <-done:
 		case <-deadline.C:
-			b.Error("receiver drains did not stop within 5s")
+			b.Errorf("receiver drains did not stop within %v", waitDeadline)
 		}
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer shutdownCancel()
