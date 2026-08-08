@@ -57,31 +57,29 @@ grep -rn "context.DeadlineExceeded" internal/server/*_test.go
 
 **不引入环境变量倍率**：活性等待是放弃期限而非 `sleep`，条件成立即返回，抬高它在快机器上零成本。旋钮买来的"本地更快"不存在，代价是本地与 CI 行为分叉。
 
-## 两处顺序假设修复
+## 验证方法：没有本地复现手段
 
-**`persistence_integration_test.go`**：`moveViewToUnvisitedChunk` 发送输入后按 tick 数等待，然后假设输入都已生效。实测 `LastInputSequence` 为 175/404/0 而 `WorldTimeTicks` 为 671/694/709——tick 推进了，输入没跟上。改为等待 `LastInputSequence` 达到目标值。
+**`GOMAXPROCS=1` 曾被选作慢 runner 的 A/B 模拟器，已实测证伪，不得使用。**
 
-**`furnace_publication_test.go`**：等待循环以 `opened.Furnace.Generation != 0` 退出并取批次最后一条状态，但满足该条件的第一条状态未必已反映放料结果。改为让退出条件直接表达真正要等的东西。
+| 条件 | 结果 |
+| --- | --- |
+| `GOMAXPROCS=1`，期限 5s | 失败在 5.2s |
+| `GOMAXPROCS=1`，期限抬到 30s | **仍失败在 30.23s** |
+| `GOMAXPROCS=2` | `ok` 2.6s |
+| `GOMAXPROCS=4` | `ok` 2.4s |
+| 默认并行度 + 24 个 spinner，load average 82.9（10 核 8 倍超售） | **全包 `ok` 89s** |
 
-两者都只改测试。**若深入后发现根因在产品代码，停手另开 change**——这两个测试从未在 CI 上红过，只在 `GOMAXPROCS=1` 下暴露，不值得为它们扩大本变更的范围。
+失败输出里 `LastInputSequence` 恒为 `0` 而 `WorldTimeTicks` 正常推进 592→603——服务端在 tick，客户端输入一条都没被消费。这是 goroutine 饿死，不是变慢。
 
-## 验证方法
+它是**悬崖而非梯度**：1 处永不收敛，2 处秒过。触发的是单核调度饿死，与 CI 的多核慢不同构。而满载多核连一个失败都复现不出。
 
-`GOMAXPROCS=1` 作为慢 runner 的模拟。改动前基线：
+**结论：本变更不具备本地复现手段。** 验证改为：
 
-```
-GOMAXPROCS=1 go test ./internal/server -count=1
---- FAIL: TestCraftingSurvivesV2DiskRestartAndReconnectOrder (5.22s)
---- FAIL: TestDropSurvivesShutdownAndRestart                 (5.21s)
---- FAIL: TestDroppedItemSurvivesShutdownAndRestart          (5.23s)
---- FAIL: TestAuthoritativeMiningMemoryLifecycle             (5.02s)
---- FAIL: TestOpenFurnaceSendsStateOnlyToViewer              (0.04s)
---- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade  (0.17s)
-```
+1. **推理**：活性等待是放弃期限，抬高在快机器上零成本、零风险。
+2. **反向验证**：把常量临时改成 `1ms`，确认对应测试变红——证明期限确实在生效，不是死代码。
+3. **统计观察**：落地后连续观察 CI。这是唯一能证明收益的手段，且只能证伪不能证实。
 
-四个活性超时抬高期限直接命中；两个亚秒失败由顺序假设修复处理。
-
-**基线是分布而非定值。** 最初记录的是 5 个，`TestCraftingSurvivesV2DiskRestartAndReconnectOrder` 在后续运行里才稳定出现——`GOMAXPROCS=1` 只把边缘用例的失败概率推高，没有推到 1。把某次运行的失败集合当成确定性门禁是错的：正确的比对规则是「缺少表内测试可继续，多出的同类活性超时一并纳入，多出的非活性超时才停手」，而真正的验收标准是改动后全绿。
+承认"无法本地复现"比伪造一个错误的复现有价值得多。
 
 **局限必须记录**：`GOMAXPROCS=1` 压的是并行度，CI 压的是绝对速度与 I/O，两者不同构。全绿是必要条件而非充分条件，落地后仍需观察 CI 连绿次数才能动分支保护。
 
@@ -89,7 +87,9 @@ GOMAXPROCS=1 go test ./internal/server -count=1
 
 **环境变量倍率旋钮**（`MCGO_TEST_DEADLINE_SCALE`，本地 1×、CI 4×）：最初的设计，在论证"抬高放弃期限零成本"后否决。它买来的收益不存在，却让本地与 CI 跑两套行为。
 
-**只改历史上实际红过的那几处**：diff 最小，但剩下的秒档站点仍是按 M5 调的字面量，下一个慢 runner 日会换一批测试红。历史数据支持这个判断——六次红里失败测试几乎次次不同。
+**只改历史上实际红过的那一处**：CI 上只有 `TestHostRejectsDuplicatePlayerBeforeLoad` 一次是期限耗尽。但剩下的秒档站点仍是按 M5 调的字面量，抬高零成本零风险，没有理由留着。
+
+**用 `GOMAXPROCS=1` 做 A/B**：已实测证伪，见上。它是本变更最初的验证支柱，连续导致三个错误结论（把 `transport closed` 误判为期限问题、把饿死误判为变慢、把饿死的伪装误判为两个独立的测试顺序 bug）。
 
 **给 tick 循环注入假时钟**：唯一的正解，但需要重写整套 `internal/server` 集成测试，改动本身的回归风险超过收益。记录为后续里程碑。
 

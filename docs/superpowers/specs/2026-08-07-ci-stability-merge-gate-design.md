@@ -1,7 +1,7 @@
 # CI 稳定性与合并门禁设计
 
 日期：2026-08-07
-状态：设计已批准，待实施
+状态：设计已按实测证据重写；原始诊断被证伪的过程见 §7
 
 ## 1. 起因
 
@@ -40,22 +40,45 @@ GitHub 的 `pull_request` 事件检查的是"PR 与**当时的** main"的合并�
 
 **P2 不先解决，这条门禁立不住。** 在约 25% 假失败率下要求"必须绿才能合"，实际效果是训练所有人反复点 re-run，最终以"已知抖动"为由申请豁免——门禁一旦被例行绕过就等于不存在。
 
-## 3. P2：CI 假失败
+## 3. P2：CI 假失败的真实构成
 
-### 现象
+最近 25 次 CI 运行中 6 次红。**必须看断言而不是只看测试名**——本设计的第一版就栽在这上面（见 §7）。
 
-最近 25 次 CI 运行中 6 次红，失败测试几乎次次不同：
+| 运行 | 测试 | 耗时 | 实际断言 | 类别 |
+| --- | --- | --- | --- | --- |
+| 31108168593 | `TestScenarioV7...ProbeIsRealAndBounded` | — | 样本收集不足 | **采样预算** |
+| 31143784278 | 同上 | — | 同上 | **采样预算** |
+| 31144256852 | 同上 | — | 同上 | **采样预算** |
+| 31169485835 | `TestTCPPlayerAndWorldFailureMatrix...` | 0.02s | `wait ready Recv: network: transport closed` | **连接被关闭** |
+| 31197146703 | `TestHealthSevenSurvivesDiskRestart` | 1.46s | `wait ready Recv: network: transport closed` | **连接被关闭** |
+| 31197146703 | `TestHostRejectsDuplicatePlayerBeforeLoad` | 5.51s | `player did not become ready` | **期限耗尽** |
+| 31197258080 | `TestCraftingSurvivesV2DiskRestart...` | 0.12s | `wait ready Recv: network: transport closed` | **连接被关闭** |
 
-| 运行 | 失败测试 |
-| --- | --- |
-| 31108168593 | `TestScenarioV7EightSessionServerProbeIsRealAndBounded` |
-| 31143784278 | 同上 |
-| 31144256852 | 同上 |
-| 31169485835 | `TestTCPPlayerAndWorldFailureMatrixProtocolVersionAndUnknownPacket` |
-| 31197146703 | `TestHealthSevenSurvivesDiskRestart`、`TestHostRejectsDuplicatePlayerBeforeLoad` |
-| 31197258080 | `TestCraftingSurvivesV2DiskRestartAndReconnectOrder` |
+三类，不是一类：
 
-失败集合每次不同，是期限抖动的特征而非回归的特征。全部落在 `internal/server` 与 `cmd/mcgo`。
+- **采样预算**（3 次）：`TestScenarioV7` 的收集预算跑在被调用方允许的下限上。诊断确凿，见 §4。
+- **连接被关闭**（3 次）：登录/ready 期间连接断开，耗时 0.02s–1.46s。**抬高期限对它们零作用**。根因未知，见 §6。
+- **期限耗尽**（1 次）：`waitReady` 的 5s 轮询期限在慢 runner 上不够。见 §5。
+
+**主导形态是"连接被关闭"，不是期限不足。** 本变更只能处理另外两类。
+
+## 4. 采样预算：ScenarioV7
+
+```go
+// cmd/mcgo/multiplayer_benchmark.go
+func measureMultiplayerServerProbe(duration time.Duration) (...) {
+	if duration < 10*time.Second {
+		return ..., fmt.Errorf("多人服务端探针时长 %s < 10s", duration)
+	}
+```
+
+而测试传入的正是 `10 * time.Second`——**跑在函数允许的下限上，按构造零余量**。这解释了它为什么是历史上最常红的一个。
+
+该 `duration` 是采样收集预算，被喂进 `context.WithTimeout(ctx, duration + warmup + 15s)`。真正的界限断言是 `OutboxHighWater > benchmarkOutboxLimit`、`InterestDiff.Samples`、`ticks.Frames`、`PeakRSSBytes` 上限——**加宽预算一个都不动**。
+
+因此把 `10s` 改成 `30s` 不是放宽阈值，符合"不得放宽既有正确性、资源上限或性能门禁"的约束。
+
+## 5. 期限耗尽：活性等待的余量
 
 ### 期限普查
 
@@ -72,192 +95,147 @@ grep -rhoE "context\.WithTimeout\([^,]*, [^)]*\)|time\.Now\(\)\.Add\([^)]*\)|tim
 | `cmd/mcgo` | 18 |
 | `internal/client` | 8 |
 
-`internal/server` 内另有 75 个 `wait*`/`assert*` 助手。
+三种形态在 `internal/server` 的分布是 `context.WithTimeout` 98、`time.Now().Add` 73、`time.After` 101（另有 30 处嵌套/复合写法）。**`time.After` 是最大的一群且最容易被漏**：其中 77 处是 `time.After(time.Second)`。
 
-三种形态在 `internal/server` 的分布是 `context.WithTimeout` 98、`time.Now().Add` 73、`time.After` 101（另有 30 处嵌套/复合写法）。**`time.After` 是最大的一群且最容易被漏**：其中 77 处是 `time.After(time.Second)`——1 秒的活性等待，既最多又最紧，是抖动的首要嫌疑。
+### 四类期限，处置完全不同
 
-### 核心判据：三类期限，处置完全不同
-
-这 299 处**不是一类东西**。混为一谈、统一抬高，就会在治理抖动的同时悄悄阉割真门禁。
+混为一谈、统一抬高，就会在治理假失败的同时悄悄阉割真门禁。
 
 | 类别 | 形态 | 例子 | 处置 |
 | --- | --- | --- | --- |
-| **活性等待** | 轮询到条件成立，到点 `t.Fatal` | `waitReady` 的 5s、`waitClientReadyFor` 的 10s、`waitIntegrationState` 的 5s | **抬高** |
+| **活性等待** | 轮询到条件成立，到点 `t.Fatal` | `waitReady` 的 5s、`waitIntegrationState` 的 5s | **抬高** |
 | **缺席断言** | 等一小段确认什么都没发生 | `assertNoServerMessage` 的 20ms | **不动** |
-| **超时触发断言** | 故意给极短期限，断言超时确实发生 | `shutdown_test.go` 用 20ms 上下文验证 Shutdown 超时后冻结 Step | **不动** |
+| **超时触发断言** | 故意给极短期限，断言超时确实发生 | `shutdown_test.go` 用 20ms 验证 Shutdown 超时后冻结 Step | **不动** |
 | **性能门禁** | 测量耗时，断言小于上限 | `TestPerformanceThresholdsRejectTickP99AtTenMilliseconds` | **绝不动** |
 
-判据不靠人工判断，**可 grep 机械识别**：
-
-后两类的断言形态一律是 `errors.Is(err, context.DeadlineExceeded)`——它们要的就是超时发生。活性等待恰好相反，超时即 `t.Fatal`。
+判据不靠人工判断，**可 grep 机械识别**：后两类的断言形态一律是 `errors.Is(err, context.DeadlineExceeded)`——它们要的就是超时发生；活性等待恰好相反，超时即 `t.Fatal`。
 
 ```bash
 grep -rn "context.DeadlineExceeded" internal/server/*_test.go
 ```
 
-`internal/server` 内命中 10 处，分布在 6 个文件。**这 10 处及其所属的期限字面量是禁改区**。抬高它们不会让断言失败（门永远不开，仍会超时），但会把 20ms 变成 30s，凭空给测试套件加上分钟级耗时——纯粹的浪费，且掩盖了这些站点的真实意图。
+`internal/server` 内命中 10 处，分布在 6 个文件。**这 10 处及其所属的期限字面量是禁改区**，且已逐处核对——全部落在毫秒档，与秒档零重叠。秒档因此可机械替换。
 
-### 关键结论：抬高活性等待在快机器上是零成本的
+> 注意：引入常量后这条 grep 会返回 11，多出的一行是常量 GoDoc 里解释禁改区时引用的 `context.DeadlineExceeded` 字样，不是断言。做门禁时应排除注释行。
 
-活性等待是**放弃期限**（give-up deadline），不是 `sleep`。条件一成立循环立刻返回：
+### 抬高活性等待在快机器上是零成本的
 
-```go
-func waitIntegrationState(t *testing.T, connected integrationClient, condition func(network.ServerMessage) bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for {
-		message, err := connected.Endpoint.Recv(ctx)
-		if err != nil {
-			t.Fatalf("Recv after %v: %v", seen, err)
-		}
-		if condition(message) {
-			return   // ← 条件成立即返回，从不等满 5s
-		}
-	}
-}
-```
+活性等待是**放弃期限**（give-up deadline），不是 `sleep`。条件一成立循环立刻返回，因此把 5s 改成 30s，**通过的测试耗时一秒不变**；唯一代价是真挂死时报错慢 25 秒。
 
-把 5s 改成 30s，**通过的测试耗时一秒不变**；唯一代价是真挂死时报错慢 25 秒。
-
-这个结论砍掉了整套复杂度：**不需要 `MCGO_TEST_DEADLINE_SCALE` 之类的环境变量倍率，不需要新包，不需要 CI 专用配置。** 倍率旋钮的实际作用只是让本地和 CI 跑两套行为——那本身就是 bug 温床，而它买来的"本地更快"是不存在的收益。
+这个结论砍掉了整套复杂度：**不需要环境变量倍率旋钮，不需要新包，不需要 CI 专用配置。** 旋钮的实际作用只是让本地和 CI 跑两套行为——那本身就是 bug 温床，而它买来的"本地更快"是不存在的收益。
 
 ### 取值
 
-活性等待**不逐处乘 6**，而是按角色归入一小组命名常量。逐处乘 6 会把 `10s` 变成 `60s`、`20ms` 变成 `120ms`，既保留了原有的随意取值，又谈不上统一。
-
 `internal/server` 测试内的期限实测分布：
 
-| 原值 | `WithTimeout` | 轮询 | `time.After` | 归属 |
-| --- | --- | --- | --- | --- |
-| `1s` | — | 18 | 77 | 活性 |
-| `5s` | 37 | 38 | 1 | 活性 |
-| `2s` | 20 | 7 | 10 | 活性 |
-| `10s` | 12 | 4 | — | 活性 |
-| `3s` | 7 | 2 | 1 | 活性 |
-| `15s` / `20s` / `12s` / `30s` | 12 | — | — | 活性 |
-| 毫秒档 | 9 | 3 | 11 | **混合，逐处核对** |
-| `10min` | 1 | — | — | 已足够长，不动 |
-
-**关键性质：10 处禁改区全部落在毫秒档，秒档零重叠。**（已逐处核对：20ms×7、25ms×2、1ms×1）
-
-这把工作切成了一刀两断的两半：秒档可机械替换，毫秒档必须人工逐处判。
+| 原值 | `WithTimeout` | 轮询 | `time.After` |
+| --- | --- | --- | --- |
+| `1s` | — | 18 | 77 |
+| `5s` | 37 | 38 | 1 |
+| `2s` | 20 | 7 | 10 |
+| `10s` | 12 | 4 | — |
+| `3s` | 7 | 2 | 1 |
+| `15s`/`20s`/`12s`/`30s` | 12 | — | — |
+| 毫秒档 | 9 | 3 | 11 |
+| `10min` | 1 | — | — |
 
 映射到三个命名常量：
 
-| 常量 | 取值 | 覆盖的原字面量 | 余量 | 用途 |
-| --- | --- | --- | --- | --- |
-| `shortWaitDeadline` | `5s` | 原 100ms–500ms 中的活性站点 | 10×–50× | 单次保存启动等亚秒本机事件 |
-| `waitDeadline` | `30s` | 原 1s–5s | 6×–30× | 登录 ready、收到某条消息、库存达到某状态 |
-| `longWaitDeadline` | `60s` | 原 10s–30s | 2×–6× | 涉及关服屏障、磁盘重启、八人会话的复合等待 |
+| 常量 | 取值 | 覆盖的原字面量 | 余量 |
+| --- | --- | --- | --- |
+| `shortWaitDeadline` | `5s` | 原 100ms–500ms 中的活性站点 | 10×–50× |
+| `waitDeadline` | `30s` | 原 1s–5s | 6×–30× |
+| `longWaitDeadline` | `60s` | 原 10s–30s | 2×–6× |
 
-对最常见的 `5s` 一档（76 处），这正好是 6×。
+**1 秒档必须归 `waitDeadline` 而不是 `shortWaitDeadline`。** 它有 95 处（77 处 `time.After` + 18 处轮询），既最密集又最紧；只抬到 5s 仅有 5× 余量。按名字直觉把"1 秒"归进"short"是本设计最容易踩的分类错误。
 
-**1 秒档必须归 `waitDeadline` 而不是 `shortWaitDeadline`。** 它有 95 处（77 处 `time.After` + 18 处轮询），既最密集又最紧，是抖动的首要嫌疑；只抬到 5s 仅有 5× 余量，覆盖不住共享 runner 的减速。按名字直觉把"1 秒"归进"short"是本设计最容易踩的分类错误。
+**常量定义两份，不建共享包。** `internal/server` 的测试跨两个 Go 包——41 个文件是 `package server`，15 个是 `package server_test`——未导出标识符无法跨包共享。为三个常量新建 `internal/` 包再去 `internal/archcheck/deps_test.go` 登记依赖，机械成本高于它解决的问题。
 
-毫秒档必须逐处核对：它同时混着活性等待与禁改区，是本变更唯一不能机械替换的一档。
+### 收益的诚实估计
 
-命名常量的价值不在于少打字，而在于后人读到的是"活性期限"而不是魔术数字 `5s`，新写的测试自然继承正确值。
+本项只能消除 CI 上**六分之一**的观察到的失败（`TestHostRejectsDuplicatePlayerBeforeLoad` 那一次）。它的正当性在于零成本与零风险，不在于它能解决假失败问题。
 
-三个常量之间保持数量级区分，是为了让"哪一类等待挂了"从报错耗时上就能看出来。
+**不得把本变更描述为"修好了 CI"。** 主导形态是 §6 的连接被关闭，未解决。
 
-### ScenarioV7 单独处置
+## 6. 连接被关闭：根因未知，另开变更
 
-`TestScenarioV7EightSessionServerProbeIsRealAndBounded` 是历史上最常红的一个，成因是构造性的：
+三次 CI 失败的断言都是 `wait ready Recv: network: transport closed`，发生在登录/ready 期间，耗时 0.02s–1.46s。
+
+已确认存在一个能关闭 session 的机制：
 
 ```go
-// cmd/mcgo/multiplayer_benchmark.go
-func measureMultiplayerServerProbe(duration time.Duration) (...) {
-	if duration < 10*time.Second {
-		return ..., fmt.Errorf("多人服务端探针时长 %s < 10s", duration)
-	}
+// internal/server/session.go:251 —— enqueue 永不等待 writer；满队列会关闭慢 session。
+default:
+	slog.Warn("慢客户端 outbox 已满，关闭 session", "session", current.id)
+	current.fail(errSessionOutboxFull)
 ```
 
-而测试传入的正是 `10 * time.Second`——**跑在函数允许的下限上，按构造零余量**。
+`OutboxCapacity` 默认 512。**但这个机制解释不了亚秒失败**：512 槽位按每 tick 两条消息计需要十几秒才填满，而失败发生在 0.02s 与 0.12s。
 
-该 `duration` 是采样收集预算，被喂进 `context.WithTimeout(ctx, duration + warmup + 15s)`。真正的界限断言是 `OutboxHighWater > benchmarkOutboxLimit`、`InterestDiff.Samples`、`ticks.Frames`、`PeakRSSBytes` 上限——**加宽预算一个都不动**。
+因此 outbox 满**不是**已确认的根因，只是一个已确认存在的机制。真实根因需要独立调查，作为单独的 systematic-debugging 变更处理。在根因查清前，任何针对它的改动都是猜。
 
-因此把 `10s` 改成 `30s` 不是放宽阈值，符合"不得放宽既有正确性、资源上限或性能门禁"的约束。
+**这才是合并门禁的真正前置条件。**
 
-## 4. 验证方法：A/B，不靠运气
+## 7. 被证伪的原始诊断（保留作为方法论记录）
 
-抖动是统计现象，"跑一次绿了"证明不了任何事。本设计采用可复现的 A/B。
+本设计的第一版把 CI 假失败**整体**归因为"期限余量不足"，并以 `GOMAXPROCS=1` 作为慢 runner 的确定性 A/B 模拟器。两条都是错的。
 
-### 慢 runner 模拟器
+### 错误一：只看测试名，不看断言
 
-`GOMAXPROCS=1` 是确定性的慢机器模拟。已实测：
+第一版从 CI 日志里提取了失败的测试名就下了结论。补看断言后才发现四分之三是 `transport closed`，与期限无关。
 
-```
-GOMAXPROCS=1 go test ./internal/server -run TestCraftingSurvivesV2DiskRestartAndReconnectOrder -count=5
-→ 5/5 全红
-```
+**教训：失败测试的名字不携带失败的原因。**
 
-正是 CI 上失败的那个测试，且本机默认并行度下 `-count=10` 全绿。
+### 错误二：`GOMAXPROCS=1` 建模了错误的对象
 
-### 全包基线（改动前）
+实测三组数据：
 
-```
-GOMAXPROCS=1 go test ./internal/server -count=1
---- FAIL: TestCraftingSurvivesV2DiskRestartAndReconnectOrder (5.22s)
---- FAIL: TestDropSurvivesShutdownAndRestart                 (5.21s)
---- FAIL: TestDroppedItemSurvivesShutdownAndRestart          (5.23s)
---- FAIL: TestAuthoritativeMiningMemoryLifecycle             (5.02s)
---- FAIL: TestOpenFurnaceSendsStateOnlyToViewer              (0.04s)
---- FAIL: TestWorldPersistsAcrossRestartAndGeneratorUpgrade  (0.17s)
-```
+| 条件 | 结果 |
+| --- | --- |
+| `GOMAXPROCS=1`，期限 5s | 失败在 5.2s |
+| `GOMAXPROCS=1`，期限抬到 30s | **仍失败在 30.23s** |
+| `GOMAXPROCS=2` | `ok` 2.6s |
+| `GOMAXPROCS=4` | `ok` 2.4s |
+| 默认并行度 + 24 个 spinner，load average 82.9（10 核 8 倍超售） | **全包 `ok` 89s** |
 
-**基线是分布而非定值。** 首次记录只有 5 个，`TestCraftingSurvivesV2DiskRestartAndReconnectOrder` 是在后续运行里才稳定出现的——`GOMAXPROCS=1` 只把边缘用例的失败概率推高，没有推到 1。
+关键证据在失败输出里：`LastInputSequence` 恒为 `0`，而 `WorldTimeTicks` 正常推进 592→603。**服务端在 tick，客户端输入一条都没被消费**——这是 goroutine 饿死，不是变慢，等多久都没用。
 
-把某次运行的失败集合写成确定性门禁是方法论错误：它会在边缘用例时有时无时制造假警报，也会诱使人把"复现出同样的集合"误当成验收标准。正确的规则是**缺少表内测试可继续、多出的同类活性超时一并纳入、多出的非活性超时才停手**，而真正的验收标准只有一条：改动后全绿。
+`GOMAXPROCS=1` 是**悬崖而不是梯度**：1 处永不收敛，2 处秒过。它触发的是单核调度饿死，与 CI（多核但慢）不同构。而满载多核连一个失败都复现不出——**本地根本没有 CI 失败形态的复现手段**。
 
-### 这个基线暴露了两个群体
+### 错误三：把饿死的伪装当成独立的测试缺陷
 
-前三个在 ~5.2s 失败，是活性超时，抬高期限直接命中。
+第一版据 `GOMAXPROCS=1` 的结果诊断出两个"测试顺序假设 bug"（`TestWorldPersistsAcrossRestartAndGeneratorUpgrade` 与 `TestOpenFurnaceSendsStateOnlyToViewer`），并写进了计划。实测两者在 `GOMAXPROCS=2` 下 `-count=3` 全绿（1.26s）——它们也是同一个饿死缺陷的伪装。
 
-**后两个在亚秒内失败，抬高期限对它们毫无作用。** 已单独诊断，两个都是真的测试 bug——测试假设了不被保证的顺序：
+三个错误同一根源：**采信了一个未经校验的模拟器**。
 
-**`TestWorldPersistsAcrossRestartAndGeneratorUpgrade`**（`persistence_integration_test.go:58`）
+### 修正后的验证方法
 
-三次运行的 `LastInputSequence` 分别是 175、404、0，而 `WorldTimeTicks` 是 671、694、709。tick 确实推进了 600+，但玩家输入只被消费了一部分甚至一条都没有。测试等的是 tick 数，然后假设 600 条输入都已生效、玩家已经移动到未探索区块——在争抢下这个假设不成立，玩家没动，generator B 自然没被调用。
+没有本地复现手段，因此：
 
-正解是等 `LastInputSequence` 达到目标值，而不是等 tick 数。
+1. **推理**：活性等待是放弃期限，抬高在快机器上零成本、零风险。
+2. **反向验证**：把常量临时改成 `1ms`，确认对应测试变红——证明期限确实在生效，不是死代码。
+3. **统计观察**：落地后连续观察 CI 运行。这是唯一能证明收益的手段，且它只能证伪不能证实。
 
-**`TestOpenFurnaceSendsStateOnlyToViewer`**（`furnace_publication_test.go:134`）
+**不再声称拥有 A/B 手段。** 承认"无法本地复现"比伪造一个错误的复现要有价值得多。
 
-读到的状态输入槽是空的。等待循环的退出条件是 `opened.Furnace.Generation != 0`，取的是批次里的最后一条状态——但满足 `Generation != 0` 的第一条状态未必已经反映放料结果。
+## 8. 副产物：单核输入饿死
 
-正解是让退出条件直接表达真正要等的东西，而不是用 `Generation` 做代理。
+`GOMAXPROCS=1` 下 `internal/server` 的客户端输入投递会完全停滞（`LastInputSequence` 恒为 0），tick 循环照常推进。这是一个**已验证的真实产品并发缺陷**，与 CI 假失败无关（runner 是多核）。
 
-**明确纪律：不得用抬高期限的方式"修"这两个测试。** 亚秒失败被期限改动掩盖是本设计最需要防的失败模式。
+`cmd/mcgod` 面向 Linux 容器构建，1 vCPU 是真实部署场景。**记录为已知问题，暂不修**；专用服务端正式上线前应当查清。
 
-**范围阀门**：这两个测试从未在 CI 上红过，只在 `GOMAXPROCS=1` 下暴露。若诊断深入后发现根因在 `internal/server` 产品代码而非测试代码，**停手另开 change**，不在本变更内修——那是权威模拟的正确性问题，与 CI 稳定性不是一回事。
-
-### 工具的局限
-
-`GOMAXPROCS=1` 与 CI runner 的慢法不完全同构：它压的是并行度，CI 压的是绝对速度与 I/O。所以：
-
-- A/B 全绿是**必要条件**，不是充分条件。
-- 落地后仍需连续观察 CI，达到 10 次连绿才动分支保护（该次数见 §6，是拍的）。
-
-### 反向验证
-
-把某个活性等待改成 `1ms`，确认对应测试变红，再恢复。证明期限确实在生效，不是改了一段死代码。
-
-## 5. 范围
+## 9. 范围
 
 **范围内**
 
-- `internal/server` 的期限三分类与活性类修正
+- `internal/server` 的期限四分类与活性类修正
 - `cmd/mcgo` 的 ScenarioV7 收集预算
-- 两个亚秒失败的独立诊断
-- A/B 基线的记录与复跑方式
+- 反向验证与实测数据回填
 
 **范围外**
 
-- `internal/client`(46)、`internal/network`(24)、`cmd/mcgo` 其余(20) 的期限——见红再改，没有证据支撑的预防性改动只是扩大 diff。
-- **消除墙钟依赖**（给 tick 循环注入假时钟、测试显式步进）。这是唯一的正解，但需要重写整套 `internal/server` 集成测试，改动量本身的回归风险超过收益。记录为后续里程碑。
+- **连接被关闭的根因调查**（§6）——独立的 systematic-debugging 变更，是合并门禁的真正前置条件。
+- **单核输入饿死**（§8）——记录不修。
+- `internal/client`、`internal/network`、`cmd/mcgo` 其余包的期限——见红再改。
+- 消除墙钟依赖（假时钟注入）——需重写整套集成测试，回归风险超过收益。
 - 分支保护开关本身（GitHub 设置，非代码）。
-
-## 6. 未决问题
-
-- 两个亚秒失败的性质未定，诊断结论出来前不能假设它们属于抖动。
-- 分支保护开启前需要多少次连续绿？建议 10 次，但这是拍的，没有数据支撑；可在观察中调整。
