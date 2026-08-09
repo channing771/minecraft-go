@@ -2,9 +2,9 @@
 
 ## 1. 确认生命值反馈状态机
 
-- [ ] 1.1 在 `cmd/mcgo/damage_feedback_test.go` 覆盖首次基线、确认下降、回复、不变、连续下降、elapsed 边界与 reset。
-- [ ] 1.2 在 `cmd/mcgo/damage_feedback.go` 实现固定 180ms 的最小值类型状态机。
-- [ ] 1.3 运行 `go test ./cmd/mcgo -run '^TestDamageFeedback' -race -count=1`。
+- [x] 1.1 在 `cmd/mcgo/damage_feedback_test.go` 覆盖首次基线、确认下降、回复、不变、连续下降、elapsed 边界与 reset。
+- [x] 1.2 在 `cmd/mcgo/damage_feedback.go` 实现固定 180ms 的最小值类型状态机。
+- [x] 1.3 运行 `go test ./cmd/mcgo -run '^TestDamageFeedback' -race -count=1`。
 
 ## 2. overlay renderer 与 application 接线
 
