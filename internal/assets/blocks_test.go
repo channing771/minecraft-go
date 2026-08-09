@@ -73,6 +73,11 @@ func TestLightBlockUsesIndependentLayerAndFixedEmission(t *testing.T) {
 	if len(pixels) != 16*16*4 {
 		t.Fatalf("发光块材质长度=%d，想要 %d", len(pixels), 16*16*4)
 	}
+	for i := 3; i < len(pixels); i += 4 {
+		if pixels[i] != 255 {
+			t.Fatalf("像素 %d alpha=%d，想要 255", i/4, pixels[i])
+		}
+	}
 	if got := [4]byte{pixels[0], pixels[1], pixels[2], pixels[3]}; got != [4]byte{164, 106, 30, 255} {
 		t.Fatalf("发光块边框 RGBA=%v，想要 [164 106 30 255]", got)
 	}
