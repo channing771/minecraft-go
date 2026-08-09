@@ -73,23 +73,8 @@ type captureScene struct {
 }
 
 func prepareSkylightTunnel(app *application) error {
-	for z := int32(-1); z <= 1; z++ {
-		for x := int32(-1); x <= 1; x++ {
-			sections := make([]network.SectionData, core.SectionsPerChunk)
-			for y := range sections {
-				sections[y] = network.SectionData{
-					Y: int32(y), Storage: network.SectionSingle, Single: core.AirID,
-				}
-			}
-			if err := applyCaptureMirror(app, network.ChunkSnapshot{
-				Dimension: core.Overworld,
-				Chunk:     core.ChunkPos{X: x, Z: z},
-				Revision:  1,
-				Sections:  sections,
-			}); err != nil {
-				return fmt.Errorf("装入空气快照 (%d,%d): %w", x, z, err)
-			}
-		}
+	if err := prepareCaptureAirNeighborhood(app); err != nil {
+		return err
 	}
 
 	stones := make(map[core.ChunkPos]map[core.BlockPos]struct{})
@@ -141,6 +126,88 @@ func prepareSkylightTunnel(app *application) error {
 				Changes:      changes,
 			}); err != nil {
 				return fmt.Errorf("装入通道变化 (%d,%d): %w", x, z, err)
+			}
+		}
+	}
+	return nil
+}
+
+func prepareCaptureAirNeighborhood(app *application) error {
+	for z := int32(-1); z <= 1; z++ {
+		for x := int32(-1); x <= 1; x++ {
+			sections := make([]network.SectionData, core.SectionsPerChunk)
+			for y := range sections {
+				sections[y] = network.SectionData{
+					Y: int32(y), Storage: network.SectionSingle, Single: core.AirID,
+				}
+			}
+			if err := applyCaptureMirror(app, network.ChunkSnapshot{
+				Dimension: core.Overworld,
+				Chunk:     core.ChunkPos{X: x, Z: z},
+				Revision:  1,
+				Sections:  sections,
+			}); err != nil {
+				return fmt.Errorf("装入空气快照 (%d,%d): %w", x, z, err)
+			}
+		}
+	}
+	return nil
+}
+
+func prepareBlockLightRoom(app *application) error {
+	if err := prepareCaptureAirNeighborhood(app); err != nil {
+		return err
+	}
+
+	blocks := make(map[core.ChunkPos]map[core.BlockPos]core.BlockID)
+	setBlock := func(position core.BlockPos, block core.BlockID) {
+		chunk := position.Chunk()
+		if blocks[chunk] == nil {
+			blocks[chunk] = make(map[core.BlockPos]core.BlockID)
+		}
+		blocks[chunk][position] = block
+	}
+	for z := int32(-10); z <= 2; z++ {
+		for x := int32(-6); x <= 6; x++ {
+			setBlock(core.BlockPos{X: x, Y: 0, Z: z}, core.StoneID)
+			setBlock(core.BlockPos{X: x, Y: 6, Z: z}, core.StoneID)
+		}
+		for y := int32(1); y <= 5; y++ {
+			setBlock(core.BlockPos{X: -6, Y: y, Z: z}, core.StoneID)
+			setBlock(core.BlockPos{X: 6, Y: y, Z: z}, core.StoneID)
+		}
+	}
+	for y := int32(1); y <= 5; y++ {
+		for x := int32(-6); x <= 6; x++ {
+			setBlock(core.BlockPos{X: x, Y: y, Z: -10}, core.StoneID)
+			setBlock(core.BlockPos{X: x, Y: y, Z: 2}, core.StoneID)
+		}
+	}
+	setBlock(core.BlockPos{X: 0, Y: 3, Z: -4}, core.LightBlockID)
+
+	for z := int32(-1); z <= 1; z++ {
+		for x := int32(-1); x <= 1; x++ {
+			chunk := core.ChunkPos{X: x, Z: z}
+			changes := make([]network.BlockChange, 0, len(blocks[chunk]))
+			for position, block := range blocks[chunk] {
+				changes = append(changes, network.BlockChange{
+					Position: position,
+					Block:    block,
+				})
+			}
+			sort.Slice(changes, func(i, j int) bool {
+				left, _ := world.ChunkBlockIndex(changes[i].Position)
+				right, _ := world.ChunkBlockIndex(changes[j].Position)
+				return left < right
+			})
+			if err := applyCaptureMirror(app, network.BlockChanges{
+				Dimension:    core.Overworld,
+				Chunk:        chunk,
+				BaseRevision: 1,
+				NewRevision:  2,
+				Changes:      changes,
+			}); err != nil {
+				return fmt.Errorf("装入发光房间变化 (%d,%d): %w", x, z, err)
 			}
 		}
 	}
@@ -343,6 +410,28 @@ var captureScenes = []captureScene{
 					return fmt.Errorf("清除远端玩家 %s: %w", player.PlayerID, err)
 				}
 			}
+			return nil
+		},
+	},
+	{
+		Name:         "block-light-room",
+		WarmupFrames: 8,
+		Prepare:      prepareBlockLightRoom,
+		Apply: func(app *application) error {
+			app.worldTimeTicks = 18000
+			app.camera.Pos = mgl32.Vec3{0.5, 2.8, 0.5}
+			app.camera.Yaw = 0
+			app.camera.Pitch = 0
+			app.inventoryOpen = false
+			if app.panel != nil {
+				app.panel.visible = false
+			}
+			if err := app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{}}); err != nil {
+				return fmt.Errorf("重置物品栏: %w", err)
+			}
+			app.remotePlayers.Reset()
+			app.furnace.Reset()
+			app.chest.Reset()
 			return nil
 		},
 	},

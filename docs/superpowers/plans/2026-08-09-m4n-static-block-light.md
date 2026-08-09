@@ -822,7 +822,7 @@ zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-capture --update-gold
 zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-capture-verify'
 ```
 
-Expected: 两次无窗口运行成功；第二次所有场景均在既有阈值内。
+Expected: `--update-golden` 成功后，若既有六张 golden 的重抓结果仅在冻结双阈值内漂移，则把它们恢复为 HEAD 字节并只保留新增 `block-light-room.png`；随后普通 capture verify MUST 在同一冻结阈值内通过。任一既有场景超阈值、不得恢复或语义不成立时停止；不得修改阈值或 capture 比较实现。
 
 - [ ] **Step 5: 人工检查唯一新增图像语义**
 
