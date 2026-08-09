@@ -210,8 +210,9 @@ func TestPredictorSamplesControlAfterFixedDelta(t *testing.T) {
 		t.Fatalf("history[0]=%+v，想要 %+v", p.history[0], wantHistory)
 	}
 	after, _ := p.State()
-	if after == before || after.Velocity.Y() != physics.JumpSpeed ||
-		math.Abs(float64(after.Position.Y()-(before.Position.Y()+physics.JumpSpeed*physics.FixedDeltaSeconds))) > 1e-5 {
+	jumpSpeed := physics.DefaultTunables().JumpSpeed
+	if after == before || after.Velocity.Y() != jumpSpeed ||
+		math.Abs(float64(after.Position.Y()-(before.Position.Y()+jumpSpeed*physics.FixedDeltaSeconds))) > 1e-5 {
 		t.Fatalf("成功发送后未执行共享固定步: before=%+v after=%+v", before, after)
 	}
 }
@@ -1304,7 +1305,7 @@ func predictorNearMissingChunk(t *testing.T) (*Predictor, MirrorCollisionSource)
 		ServerTick: 1,
 		Dimension:  core.Overworld,
 		Position:   mgl32.Vec3{15.5, 1, 0.5},
-		Velocity:   mgl32.Vec3{physics.WalkSpeed, 0, 0},
+		Velocity:   mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0},
 		OnGround:   true,
 		Ready:      true,
 	}); err != nil {

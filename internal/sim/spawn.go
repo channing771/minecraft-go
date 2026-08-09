@@ -11,18 +11,35 @@ import (
 	"minecraft-go/internal/physics"
 )
 
-const spawnRadius = int32(16)
+// defaultSpawnRadius 是出生扫描的编译期默认半径。唯一读取入口是 Tunables 快照，
+// 不得再以导出常量暴露——见 internal/archcheck 的 TestTunableConstantsAreNotExported。
+const defaultSpawnRadius = int32(16)
+
+// minSpawnRadius 与 maxSpawnRadius 是出生扫描半径的硬区间，与
+// internal/config 的 Fields() 里 sim.spawnRadius 的 Min/Max 一致。
+// SetTunables 按这两个界兜底，见那里的说明。
+const (
+	minSpawnRadius = int32(1)
+	maxSpawnRadius = int32(64)
+)
 
 type spawnColumn struct {
 	X, Z int32
 }
 
-func spawnCandidates(anchor core.ChunkPos) []spawnColumn {
+// spawnCandidates 按到 anchor 的距离升序枚举半径 radius 内的候选出生列。
+// radius 由调用方传入本 tick 的快照值，这个自由函数本身绝不读取 ActiveTunables。
+//
+// 容量安全依赖 radius 已被钳制在 [minSpawnRadius, maxSpawnRadius]：下面的容量
+// 计算随 radius 平方增长，未钳制的大数会在此处触发一次巨额分配。该钳制由本包的
+// SetTunables 兜底（internal/config 加载配置时也会按同一区间钳一遍，但 sim 按
+// 架构约束不得导入 config，不能把不变量托付给隔壁包）。
+func spawnCandidates(anchor core.ChunkPos, radius int32) []spawnColumn {
 	anchorX := anchor.X << core.SectionShift
 	anchorZ := anchor.Z << core.SectionShift
-	candidates := make([]spawnColumn, 0, (spawnRadius*2+1)*(spawnRadius*2+1))
-	for x := anchorX - spawnRadius; x <= anchorX+spawnRadius; x++ {
-		for z := anchorZ - spawnRadius; z <= anchorZ+spawnRadius; z++ {
+	candidates := make([]spawnColumn, 0, (radius*2+1)*(radius*2+1))
+	for x := anchorX - radius; x <= anchorX+radius; x++ {
+		for z := anchorZ - radius; z <= anchorZ+radius; z++ {
 			candidates = append(candidates, spawnColumn{X: x, Z: z})
 		}
 	}

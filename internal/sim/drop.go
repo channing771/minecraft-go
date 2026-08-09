@@ -13,15 +13,19 @@ import (
 const (
 	// DropInterestRadius 是掉落物 tick 与同步的固定区块半径。
 	DropInterestRadius = core.DropInterestRadius
-	// DropPickupDelayTicks 是采掘与方块破坏产生的掉落物可被拾取前的活动 tick 数。
-	DropPickupDelayTicks = 10
-	// PlayerDropPickupDelayTicks 是玩家主动丢弃的掉落物可被拾取前的活动 tick 数。
+
+	// 以下是可调参数的编译期默认值。唯一读取入口是 Tunables 快照，
+	// 不得再以导出常量暴露——见 internal/archcheck 的 TestTunableConstantsAreNotExported。
+
+	// defaultDropPickupDelayTicks 是采掘与方块破坏产生的掉落物可被拾取前的活动 tick 数。
+	defaultDropPickupDelayTicks = 10
+	// defaultPlayerDropPickupDelayTicks 是玩家主动丢弃的掉落物可被拾取前的活动 tick 数。
 	// 它比方块破坏更长，避免刚丢出的物品被自己立刻拾回。
-	PlayerDropPickupDelayTicks = 40
-	// DropLifetimeTicks 是掉落物累计活动 tick 的寿命上限。
-	DropLifetimeTicks = 6000
-	// dropPickupRange 是玩家到方块中心的最大拾取距离。
-	dropPickupRange = 1.25
+	defaultPlayerDropPickupDelayTicks = 40
+	// defaultDropLifetimeTicks 是掉落物累计活动 tick 的寿命上限。
+	defaultDropLifetimeTicks = 6000
+	// defaultDropPickupRange 是玩家到方块中心的最大拾取距离。
+	defaultDropPickupRange = 1.25
 )
 
 // sessionDropWantedSnapshot 返回该会话的固定半径掉落物兴趣区块。
@@ -56,6 +60,8 @@ func (engine *Engine) advanceDrops(pending map[core.ChunkKey]*pendingChunkChange
 		return
 	}
 	sessions := engine.sortedActiveSessions()
+	lifetimeTicks := engine.tunables.DropLifetimeTicks
+	pickupRange := engine.tunables.DropPickupRange
 	for _, key := range keys {
 		dimension := engine.dimensions[key.Dimension]
 		if dimension == nil {
@@ -65,17 +71,21 @@ func (engine *Engine) advanceDrops(pending map[core.ChunkKey]*pendingChunkChange
 		if !ok || record.State != ChunkReady || record.Chunk == nil {
 			continue
 		}
-		if engine.advanceChunkDrops(key, record.Chunk, sessions) {
+		if engine.advanceChunkDrops(key, record.Chunk, sessions, lifetimeTicks, pickupRange) {
 			engine.touchChunk(key, pending)
 		}
 	}
 }
 
 // advanceChunkDrops 推进一个区块的全部槽，返回该区块是否发生变化。
+// lifetimeTicks、pickupRange 是调用方在本 tick 入口取的快照值，本函数全程只用它们，
+// 不再重新读取生效参数。
 func (engine *Engine) advanceChunkDrops(
 	key core.ChunkKey,
 	chunk *world.Chunk,
 	sessions []SessionID,
+	lifetimeTicks uint32,
+	pickupRange float32,
 ) bool {
 	// 只有可观察的变化（过期、拾取）推进区块 revision；
 	// 年龄与拾取延迟是权威内部计数，不产生每 tick 的发布。
@@ -89,7 +99,7 @@ func (engine *Engine) advanceChunkDrops(
 			drop.PickupDelayTicks--
 		}
 		drop.AgeTicks++
-		if drop.AgeTicks >= DropLifetimeTicks {
+		if drop.AgeTicks >= lifetimeTicks {
 			chunk.ClearDrop(slot)
 			changed = true
 			continue
@@ -98,7 +108,7 @@ func (engine *Engine) advanceChunkDrops(
 		if drop.PickupDelayTicks > 0 {
 			continue
 		}
-		if engine.pickUpDrop(key, chunk, slot, sessions) {
+		if engine.pickUpDrop(key, chunk, slot, sessions, pickupRange) {
 			changed = true
 		}
 	}
@@ -111,6 +121,7 @@ func (engine *Engine) pickUpDrop(
 	chunk *world.Chunk,
 	slot int,
 	sessions []SessionID,
+	pickupRange float32,
 ) bool {
 	center, ok := dropCenter(key.Pos, chunk.Drop(slot).BlockIndex)
 	if !ok {
@@ -126,7 +137,7 @@ func (engine *Engine) pickUpDrop(
 		if !drop.Active || drop.Stack.Count == 0 {
 			return true
 		}
-		if !withinPickupRange(session.player.state.Position, center) {
+		if !withinPickupRange(session.player.state.Position, center, pickupRange) {
 			continue
 		}
 		player := session.player
@@ -162,8 +173,10 @@ func dropCenter(chunk core.ChunkPos, blockIndex uint32) (mgl32.Vec3, bool) {
 	}, true
 }
 
-func withinPickupRange(player, center mgl32.Vec3) bool {
-	return center.Sub(player).Len() <= dropPickupRange
+// withinPickupRange 报告玩家是否在拾取距离内。pickupRange 由调用方传入本 tick 的
+// 快照值，这个自由函数本身绝不读取 ActiveTunables。
+func withinPickupRange(player, center mgl32.Vec3, pickupRange float32) bool {
+	return center.Sub(player).Len() <= pickupRange
 }
 
 // activeInterestKeys 返回本 tick 需要推进的区块，按稳定顺序排列且不重复。
@@ -365,7 +378,7 @@ func (engine *Engine) dropSelectedItem(
 	}
 	dropped := stack
 	dropped.Count = 1
-	record.Chunk.CommitDrop(dropSlot, dropped, blockIndex, PlayerDropPickupDelayTicks)
+	record.Chunk.CommitDrop(dropSlot, dropped, blockIndex, engine.tunables.PlayerDropPickupDelayTicks)
 	player.inventory.Hotbar = nextHotbar
 	player.inventoryDirty = true
 	engine.touchChunk(key, pending)

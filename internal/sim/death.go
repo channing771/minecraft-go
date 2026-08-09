@@ -72,7 +72,9 @@ func (engine *Engine) dropInventoryOnDeath(
 		if !indexed {
 			continue
 		}
-		changed, remaining := placeDeathDrops(player, record.Chunk, blockIndex)
+		changed, remaining := placeDeathDrops(
+			player, record.Chunk, blockIndex, engine.tunables.PlayerDropPickupDelayTicks,
+		)
 		if changed {
 			// 每个被写入的区块各自登记 revision barrier；死亡掉落不做跨区块原子提交。
 			engine.touchChunk(key, pending)
@@ -134,10 +136,14 @@ func clampBlockToChunk(block core.BlockPos, pos core.ChunkPos) core.BlockPos {
 //
 // 它改写 player.inventory 但不置 inventoryDirty：死亡结算的调用方 settleDeath
 // 随后一定会调用 beginReset，由后者统一置脏。这条隐式依赖不要在别处复用。
+//
+// pickupDelayTicks 由调用方传入本 tick 的快照值，这个自由函数本身绝不读取
+// ActiveTunables。
 func placeDeathDrops(
 	player *playerState,
 	chunk *world.Chunk,
 	blockIndex uint32,
+	pickupDelayTicks uint8,
 ) (changed bool, remaining int) {
 	for slot := uint8(0); slot < core.InventorySlots; slot++ {
 		stack, _ := player.inventory.Slot(slot)
@@ -149,7 +155,7 @@ func placeDeathDrops(
 		// 死亡是罕见事件，不在每 tick 固定工作量契约内，因此这个天花板可以接受。
 		// 若将来它成为热点，升级路径是把整轮放置改成"一次拷贝 + 多格预演"。
 		next, ok := chunk.PrepareDropBatch(
-			batch[:], blockIndex, PlayerDropPickupDelayTicks,
+			batch[:], blockIndex, pickupDelayTicks,
 		)
 		if !ok {
 			remaining++

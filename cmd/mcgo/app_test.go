@@ -18,6 +18,7 @@ import (
 
 	"minecraft-go/internal/assets"
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
@@ -705,7 +706,7 @@ func TestInteractiveInputUsesDrainedReadyResetInSameFrame(t *testing.T) {
 	app.drainServerMessages(1)
 	app.applyInteractiveInput(physics.FixedDelta, client.Movement{}, client.Actions{Mining: true}, true)
 
-	wantPosition := mgl32.Vec3{4.5, 20 + physics.EyeHeight, -2.5}
+	wantPosition := mgl32.Vec3{4.5, 20 + physics.DefaultTunables().EyeHeight, -2.5}
 	if app.camera.Pos != wantPosition || app.camera.Yaw != 0.75 || app.camera.Pitch != -0.2 {
 		t.Fatalf("Ready Reset 同帧相机=%+v yaw=%v pitch=%v，想要 pos=%+v yaw=0.75 pitch=-0.2",
 			app.camera.Pos, app.camera.Yaw, app.camera.Pitch, wantPosition)
@@ -740,7 +741,7 @@ func TestInteractiveInputPresentsDrainedLargeCorrectionInSameFrame(t *testing.T)
 	app.drainServerMessages(1)
 	app.applyInteractiveInput(0, client.Movement{}, client.Actions{}, false)
 
-	want := mgl32.Vec3{8.5, 30 + physics.EyeHeight, -4.5}
+	want := mgl32.Vec3{8.5, 30 + physics.DefaultTunables().EyeHeight, -4.5}
 	if app.camera.Pos != want {
 		t.Fatalf("大纠正同帧相机=%+v，想要 %+v", app.camera.Pos, want)
 	}
@@ -1119,6 +1120,92 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	}
 }
 
+// TestApplicationConstructionSkipsDebugPanelRendererWhenDevOff 与
+// TestApplicationConstructionCreatesDebugPanelRendererWhenDevOn 一起守住
+// --dev 只门控调试面板这条约束：字段是否非 nil 必须严格跟随 options.Dev，
+// 不能悄悄在两条路径上都创建或都不创建 GPU 资源。
+func TestApplicationConstructionSkipsDebugPanelRendererWhenDevOff(t *testing.T) {
+	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	if app.debugPanelRenderer != nil {
+		t.Fatal("Dev 为假时 debugPanelRenderer 必须是 nil")
+	}
+	if app.panel != nil {
+		t.Fatal("Dev 为假时 panel 必须是 nil")
+	}
+}
+
+func TestApplicationConstructionCreatesDebugPanelRendererWhenDevOn(t *testing.T) {
+	rawEndpoint, _ := network.NewMemoryPair(1)
+	endpoint := &connectionTestEndpoint{ClientEndpoint: rawEndpoint}
+	t.Cleanup(func() { _ = rawEndpoint.Close() })
+	stream := &connectionTestClientStream{}
+	window := &connectionTestWindow{}
+	surface := &connectionTestSurface{}
+	dependencies := connectionTestDependencies(t)
+	dependencies.dialTCP = func(context.Context, string) (network.ClientPacketStream, error) {
+		return stream, nil
+	}
+	dependencies.loginClient = func(
+		context.Context, network.ClientPacketStream, network.Identity,
+	) (network.ClientEndpoint, error) {
+		return endpoint, nil
+	}
+	dependencies.newWindow = func(int, int, string) (applicationWindow, error) { return window, nil }
+	dependencies.newDevice = func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error) {
+		device, err := gfx.NewHeadlessDevice()
+		return device, surface, err
+	}
+
+	options := remoteConnectionOptions()
+	options.Dev = true
+	app, err := newApplicationWithDependencies(options, dependencies)
+	if err != nil {
+		t.Fatalf("newApplication dev=true: %v", err)
+	}
+	if app.debugPanelRenderer == nil {
+		t.Fatal("Dev 为真时 debugPanelRenderer 不能是 nil")
+	}
+	if app.panel == nil {
+		t.Fatal("Dev 为真时 panel 不能是 nil")
+	}
+	if err := app.Close(); err != nil {
+		t.Fatalf("dev=true application Close: %v", err)
+	}
+}
+
+// stubApplicationHost 是 TestApplicationRemoteReflectsHostAndServerPresence
+// 用的最小 applicationHost 实现：三个方法都不会被调用，只用来在测试里制造
+// 一个非 nil 的 host 值。
+type stubApplicationHost struct{}
+
+func (stubApplicationHost) Run(context.Context, network.Listener) error { return nil }
+func (stubApplicationHost) AcceptStream(context.Context, network.ServerPacketStream) error {
+	return nil
+}
+func (stubApplicationHost) Shutdown(context.Context) error { return nil }
+
+// TestApplicationRemoteReflectsHostAndServerPresence 锁住 a.remote() 的判定：
+// 它决定面板 physics/sim 组能不能写，取反会让单机变只读、真联机反而能写权威
+// 参数，这条谓词必须有测试守着，不能只靠代码走查。
+func TestApplicationRemoteReflectsHostAndServerPresence(t *testing.T) {
+	tests := []struct {
+		name string
+		app  *application
+		want bool
+	}{
+		{name: "本地内嵌 Host（单机）", app: &application{host: stubApplicationHost{}}, want: false},
+		{name: "benchmark 内嵌可信 server", app: &application{server: &server.Server{}}, want: false},
+		{name: "host 与 server 均为 nil（真远程联机）", app: &application{}, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.app.remote(); got != test.want {
+				t.Fatalf("remote() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestApplicationConnectionLocalHostFailureClosesStoreBeforeWindow(t *testing.T) {
 	hostErr := errors.New("construct host failed")
 	store := newConnectionTestStore(42)
@@ -1289,12 +1376,16 @@ func connectionTestWindowFactory(calls *int) func(int, int, string) (application
 
 func remoteConnectionOptions() applicationOptions {
 	identity := connectionTestIdentity()
-	return applicationOptions{Connect: "example.invalid:25565", Identity: &identity}
+	return applicationOptions{
+		Connect: "example.invalid:25565", Identity: &identity, Render: config.Defaults().Render,
+	}
 }
 
 func localConnectionOptions() applicationOptions {
 	identity := connectionTestIdentity()
-	return applicationOptions{Seed: 42, WorldPath: "unused", Identity: &identity}
+	return applicationOptions{
+		Seed: 42, WorldPath: "unused", Identity: &identity, Render: config.Defaults().Render,
+	}
 }
 
 func connectionTestIdentity() network.Identity {

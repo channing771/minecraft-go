@@ -10,6 +10,8 @@ import (
 // 因此多名玩家的重叠观察在同一 tick 内只推进一次。
 func (engine *Engine) advanceFurnaces(pending map[core.ChunkKey]*pendingChunkChanges) {
 	keys := engine.activeInterestKeys()
+	burnTicks := engine.tunables.FurnaceBurnTicks
+	smeltTicks := engine.tunables.FurnaceSmeltTicks
 	for _, key := range keys {
 		dimension := engine.dimensions[key.Dimension]
 		if dimension == nil {
@@ -19,21 +21,23 @@ func (engine *Engine) advanceFurnaces(pending map[core.ChunkKey]*pendingChunkCha
 		if !ok || record.State != ChunkReady || record.Chunk == nil {
 			continue
 		}
-		if advanceChunkFurnaces(record.Chunk) {
+		if advanceChunkFurnaces(record.Chunk, burnTicks, smeltTicks) {
 			engine.touchChunk(key, pending)
 		}
 	}
 }
 
 // advanceChunkFurnaces 推进一个区块的全部熔炉槽，返回该区块是否发生变化。
-func advanceChunkFurnaces(chunk *world.Chunk) bool {
+// burnTicks、smeltTicks 由调用方传入本 tick 的快照值，本函数本身绝不读取
+// ActiveTunables。
+func advanceChunkFurnaces(chunk *world.Chunk, burnTicks uint16, smeltTicks uint8) bool {
 	changed := false
 	for slot := range core.FurnacesPerChunk {
 		furnace := chunk.Furnace(slot)
 		if !furnace.Active {
 			continue
 		}
-		next, updated := advanceFurnace(furnace)
+		next, updated := advanceFurnace(furnace, burnTicks, smeltTicks)
 		if !updated {
 			continue
 		}
@@ -45,8 +49,9 @@ func advanceChunkFurnaces(chunk *world.Chunk) bool {
 
 // advanceFurnace 推进一个熔炉一个 tick，返回新值与是否发生变化。
 // 输入无效或输出无容量时状态完全暂停：进度与剩余燃烧 tick 都不减少，
-// 因此燃料不会在空转中静默损失。
-func advanceFurnace(furnace world.FurnaceSlot) (world.FurnaceSlot, bool) {
+// 因此燃料不会在空转中静默损失。burnTicks、smeltTicks 由调用方传入本 tick 的
+// 快照值，本函数本身绝不读取 ActiveTunables。
+func advanceFurnace(furnace world.FurnaceSlot, burnTicks uint16, smeltTicks uint8) (world.FurnaceSlot, bool) {
 	if !canSmelt(furnace) {
 		return furnace, false
 	}
@@ -58,11 +63,11 @@ func advanceFurnace(furnace world.FurnaceSlot) (world.FurnaceSlot, bool) {
 		if furnace.Fuel.Count == 0 {
 			furnace.Fuel = core.ItemStack{}
 		}
-		furnace.BurnTicks = core.FurnaceBurnTicks
+		furnace.BurnTicks = burnTicks
 	}
 	furnace.BurnTicks--
 	furnace.ProgressTicks++
-	if furnace.ProgressTicks < core.FurnaceSmeltTicks {
+	if furnace.ProgressTicks < smeltTicks {
 		return furnace, true
 	}
 	furnace.ProgressTicks = 0
@@ -105,6 +110,8 @@ func (engine *Engine) SetChunkFurnaceForTest(
 // AdvanceFurnacesForBenchmark 只在活动区块上推进熔炉本身，
 // 不做 revision 记账，供固定工作量基准与热路径分配门禁使用。
 func (engine *Engine) AdvanceFurnacesForBenchmark() {
+	burnTicks := engine.tunables.FurnaceBurnTicks
+	smeltTicks := engine.tunables.FurnaceSmeltTicks
 	for _, key := range engine.activeInterestKeys() {
 		dimension := engine.dimensions[key.Dimension]
 		if dimension == nil {
@@ -114,7 +121,7 @@ func (engine *Engine) AdvanceFurnacesForBenchmark() {
 		if !ok || record.State != ChunkReady || record.Chunk == nil {
 			continue
 		}
-		advanceChunkFurnaces(record.Chunk)
+		advanceChunkFurnaces(record.Chunk, burnTicks, smeltTicks)
 	}
 }
 

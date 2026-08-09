@@ -4,17 +4,33 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
 	"minecraft-go/internal/profile"
 )
+
+// absentConfigArgs 返回指向本次测试临时目录下一个不存在文件的 --config 参数。
+//
+// runWithDependencies 接线后一路调用 resolveConfig -> config.DefaultPath，未加
+// 这层隔离的非 benchmark/capture 用例会读到开发者本机
+// ~/Library/Application Support/minecraft-go/config.json（若存在）并通过
+// effective.Apply() 改写进程级 physics/sim 全局可调值——这正是 benchmark 隔离
+// 规则要防的"结论取决于开发者本机"那类危害，只是下沉到了非 benchmark 路径。
+// 指向不存在的文件让 config.Load 落回 config.Defaults()（见
+// internal/config/config.go:88-91）。
+func absentConfigArgs(t *testing.T) []string {
+	t.Helper()
+	return []string{"--config", filepath.Join(t.TempDir(), "absent.json")}
+}
 
 func TestParseMainOptionsRejectsRemoteLocalConflicts(t *testing.T) {
 	for _, args := range [][]string{
@@ -43,7 +59,7 @@ func TestRunWithDependenciesLoadsProfileOnceForLocalAndRemote(t *testing.T) {
 		t.Run("mode", func(t *testing.T) {
 			loads := 0
 			identity := network.Identity{PlayerID: core.PlayerID{1}, DisplayName: "Chen"}
-			err := runWithDependencies(args, runDependencies{
+			err := runWithDependencies(append(append([]string{}, args...), absentConfigArgs(t)...), runDependencies{
 				loadIdentity: func(requested *string) (network.Identity, error) {
 					loads++
 					return identity, nil
@@ -81,10 +97,56 @@ func TestRunWithDependenciesBypassesProfileForBenchmark(t *testing.T) {
 	}
 }
 
+// TestRunWithDependenciesDisablesDevForBenchmark 守住"benchmark 产出不应受
+// --dev 影响"：同时传 --benchmark 与 --dev 时，传给 newApplication 的
+// options.Dev 必须被强制为 false，不能给 benchmark 进程构造面板渲染器、
+// 占用它的 GPU 资源。
+func TestRunWithDependenciesDisablesDevForBenchmark(t *testing.T) {
+	sawCall := false
+	var gotDev bool
+	err := runWithDependencies([]string{"--benchmark", "--perf-output", "x.json", "--dev"}, runDependencies{
+		loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+		newApplication: func(options applicationOptions) (*application, error) {
+			sawCall = true
+			gotDev = options.Dev
+			return nil, errors.New("stop before window")
+		},
+	})
+	if err == nil || !sawCall {
+		t.Fatalf("run error=%v sawCall=%v，想要构造期错误且确实调用了 newApplication", err, sawCall)
+	}
+	if gotDev {
+		t.Fatal("--benchmark 必须让 --dev 失效：options.Dev = true")
+	}
+}
+
+// TestRunWithDependenciesDisablesDevForCapture 与 benchmark 那条同理：抓帧产出
+// 同样要与 golden 基线比对，--dev 原先只在 --benchmark 下被排除，--capture
+// 下却仍然生效，两条基线路径的待遇不一致。
+func TestRunWithDependenciesDisablesDevForCapture(t *testing.T) {
+	sawCall := false
+	var gotDev bool
+	args := append([]string{"--capture", t.TempDir(), "--dev"}, absentConfigArgs(t)...)
+	err := runWithDependencies(args, runDependencies{
+		loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+		newApplication: func(options applicationOptions) (*application, error) {
+			sawCall = true
+			gotDev = options.Dev
+			return nil, errors.New("stop before window")
+		},
+	})
+	if err == nil || !sawCall {
+		t.Fatalf("run error=%v sawCall=%v，想要构造期错误且确实调用了 newApplication", err, sawCall)
+	}
+	if gotDev {
+		t.Fatal("--capture 必须让 --dev 失效：options.Dev = true")
+	}
+}
+
 func TestRunWithDependenciesPassesExplicitNameToProfile(t *testing.T) {
 	name := "Chen"
 	var got *string
-	err := runWithDependencies([]string{"--name", name}, runDependencies{
+	err := runWithDependencies(append([]string{"--name", name}, absentConfigArgs(t)...), runDependencies{
 		loadIdentity: func(requested *string) (network.Identity, error) {
 			got = requested
 			return network.Identity{}, nil
@@ -293,3 +355,101 @@ func TestParseMainOptionsWithoutCaptureLeavesDirEmpty(t *testing.T) {
 }
 
 var _ = profile.Options{}
+
+func TestParseOptionsDefaultsDevOff(t *testing.T) {
+	options, err := parseMainOptions([]string{})
+	if err != nil {
+		t.Fatalf("parseMainOptions: %v", err)
+	}
+	if options.Dev {
+		t.Fatal("--dev 默认必须关闭")
+	}
+}
+
+func TestParseOptionsAcceptsDevAndConfig(t *testing.T) {
+	options, err := parseMainOptions([]string{"--dev", "--config", "/tmp/x.json"})
+	if err != nil {
+		t.Fatalf("parseMainOptions: %v", err)
+	}
+	if !options.Dev {
+		t.Fatal("--dev 必须被解析")
+	}
+	if options.ConfigPath != "/tmp/x.json" {
+		t.Fatalf("ConfigPath = %q", options.ConfigPath)
+	}
+}
+
+// TestBenchmarkIgnoresUserConfig 守住"性能门禁不读本机配置"这条不变量。
+func TestBenchmarkIgnoresUserConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	custom := config.Defaults()
+	custom.Physics.Gravity = 1
+	if err := custom.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	t.Cleanup(func() { config.Defaults().Apply() })
+
+	effective, err := resolveConfig(mainOptions{
+		ConfigPath:  path,
+		Application: applicationOptions{Benchmark: true},
+	})
+	if err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if effective.Physics.Gravity != config.Defaults().Physics.Gravity {
+		t.Fatal("benchmark 路径必须使用编译默认值，不得读用户配置")
+	}
+}
+
+// TestRemoteTuningDivergenceWarnCondition 覆盖设计 §3.2 在配置文件这条路径上的
+// 缺口：面板用 fieldReadOnly 挡住了联机时改写 physics/sim，但配置文件是始终
+// 生效的（§3.1），它绕过那道锁。这里钉住告警条件——只有"连远端 + 这两组偏离
+// 默认值"才告警，单机或联机但全默认都不该打扰用户。
+//
+// 只告警不强制回落默认值：README 把这份配置文件描述为 mcgo 与 mcgod 共用，
+// 局域网下两端读同一份调过的文件恰恰是正确用法。
+func TestRemoteTuningDivergenceWarnCondition(t *testing.T) {
+	tuned := config.Defaults()
+	tuned.Physics.Gravity = 12
+	tunedSim := config.Defaults()
+	tunedSim.Sim.InteractionReach = 3
+
+	cases := []struct {
+		name      string
+		connect   string
+		effective config.Config
+		want      bool
+	}{
+		{name: "联机且物理组偏离默认值", connect: "127.0.0.1:7777", effective: tuned, want: true},
+		{name: "联机且模拟组偏离默认值", connect: "127.0.0.1:7777", effective: tunedSim, want: true},
+		{name: "联机但全部为默认值", connect: "127.0.0.1:7777", effective: config.Defaults()},
+		{name: "单机且物理组偏离默认值", effective: tuned},
+		{name: "单机且全部为默认值", effective: config.Defaults()},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			options := mainOptions{Application: applicationOptions{Connect: testCase.connect}}
+			if got := remoteTuningDiverges(options, testCase.effective); got != testCase.want {
+				t.Fatalf("remoteTuningDiverges = %v，want %v", got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestCaptureIgnoresUserConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	custom := config.Defaults()
+	custom.Physics.Gravity = 1
+	if err := custom.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	t.Cleanup(func() { config.Defaults().Apply() })
+
+	effective, err := resolveConfig(mainOptions{ConfigPath: path, CaptureDir: "out"})
+	if err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if effective.Physics.Gravity != config.Defaults().Physics.Gravity {
+		t.Fatal("抓帧路径必须使用编译默认值，不得读用户配置")
+	}
+}

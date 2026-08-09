@@ -33,7 +33,7 @@ import "C"
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/oliverbestmann/webgpu/wgpu"
 )
@@ -309,7 +309,8 @@ func newDevice(handle NativeWindowHandle, width, height uint32) (_ Device, _ Sur
 	d.queue = d.device.GetQueue()
 
 	info := d.adapter.GetInfo()
-	log.Printf("gfx: 后端=%v 适配器=%q 类型=%v", info.BackendType, info.Device, info.AdapterType)
+	slog.Info("gfx 设备就绪",
+		"backend", info.BackendType, "adapter", info.Device, "type", info.AdapterType)
 
 	if s == nil {
 		return d, nil, nil
@@ -341,7 +342,7 @@ func newDevice(handle NativeWindowHandle, width, height uint32) (_ Device, _ Sur
 	s.surface.Configure(d.device, s.config)
 
 	// 把实测到的 surface 能力打出来——这是 M0 的验证证据，也是选 present mode 的依据。
-	log.Printf("gfx: surface 格式=%v present 模式=%v", caps.Formats, caps.PresentModes)
+	slog.Info("gfx surface 能力", "formats", caps.Formats, "presentModes", caps.PresentModes)
 
 	return d, s, nil
 }
@@ -745,7 +746,7 @@ func (s *wgpuSurface) Acquire() TextureView {
 	st, err := s.surface.TryGetCurrentTexture()
 	if err != nil {
 		// 取纹理失败是瞬时状况（超时、surface 过期），跳过这一帧即可。
-		log.Printf("gfx: 获取 surface 纹理失败，跳过本帧: %v", err)
+		slog.Warn("获取 surface 纹理失败，跳过本帧", "error", err)
 		return nil
 	}
 	texture, ok := st.Get()
@@ -757,7 +758,7 @@ func (s *wgpuSurface) Acquire() TextureView {
 	view, err := texture.TryCreateView(nil)
 	if err != nil {
 		texture.Release()
-		log.Printf("gfx: 创建 surface 纹理视图失败，跳过本帧: %v", err)
+		slog.Warn("创建 surface 纹理视图失败，跳过本帧", "error", err)
 		return nil
 	}
 

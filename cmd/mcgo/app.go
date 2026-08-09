@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"runtime"
 	"slices"
@@ -17,6 +17,7 @@ import (
 
 	"minecraft-go/internal/assets"
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
@@ -35,6 +36,13 @@ type applicationOptions struct {
 	Identity           *network.Identity
 	// CaptureDir 非空时进入视觉抓帧模式：走无头设备，按固定场景抓帧写 PNG。
 	CaptureDir string
+	// Dev 为真时启用调试面板（F3 切换）；不影响配置文件是否生效。
+	Dev bool
+	// Render 是渲染相关的生效配置（视距、FOV、鼠标灵敏度），由 cmd/mcgo 从
+	// 加载后的 config.Config 下传并自行消费——config.Config.Apply 不处理它。
+	Render config.Render
+	// ConfigPath 是调试面板 F5 保存时的目标路径；只在 Dev 为真时使用。
+	ConfigPath string
 }
 
 type application struct {
@@ -53,16 +61,24 @@ type application struct {
 	avatarRenderer      *render.AvatarRenderer
 	nameTagRenderer     *render.NameTagRenderer
 	hotbarRenderer      *render.HotbarRenderer
-	inventory           client.InventoryMirror
-	furnace             client.FurnaceMirror
-	chest               client.ChestMirror
-	miningOverlay       render.MiningOverlay
-	itemDropRenderer    *render.ItemDropRenderer
-	itemDrops           *client.ItemDrops
-	itemDropInstances   []render.ItemDrop
-	inventoryOpen       bool
-	inventorySource     int
-	serverTick          uint64
+	debugPanelRenderer  *render.DebugPanelRenderer
+	// panel 是调试面板的交互状态；只在 applicationOptions.Dev 为真时创建，
+	// 与 debugPanelRenderer 一同保持 nil/非 nil 同步。
+	panel *panelState
+	// configPath 是调试面板 F5 保存时的目标路径，来自 applicationOptions.ConfigPath。
+	configPath string
+	// panelLastFrameAt 是上一帧调试面板读数的采样时刻，用于计算 PanelReadout.FrameMillis。
+	panelLastFrameAt  time.Time
+	inventory         client.InventoryMirror
+	furnace           client.FurnaceMirror
+	chest             client.ChestMirror
+	miningOverlay     render.MiningOverlay
+	itemDropRenderer  *render.ItemDropRenderer
+	itemDrops         *client.ItemDrops
+	itemDropInstances []render.ItemDrop
+	inventoryOpen     bool
+	inventorySource   int
+	serverTick        uint64
 	// worldTimeTicks 是最后确认的权威绝对世界时间，只在接受更新状态时前进。
 	worldTimeTicks          uint64
 	glyphAtlas              *render.GlyphAtlas
@@ -91,6 +107,9 @@ type application struct {
 	clientCloseOnce         sync.Once
 	clientCloseErr          error
 	releaseResources        func()
+	// render 是渲染相关的生效配置快照，在构造时从 applicationOptions.Render 复制，
+	// 供渲染热路径（DropOutside 视距、鼠标灵敏度等）读取，不随配置文件热更新。
+	render config.Render
 }
 
 type applicationWindow interface {
@@ -117,19 +136,20 @@ type applicationHost interface {
 }
 
 type applicationDependencies struct {
-	openStore           func(context.Context, applicationOptions) (storage.WorldStore, error)
-	dialTCP             func(context.Context, string) (network.ClientPacketStream, error)
-	loginClient         func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
-	newHost             func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
-	newMemoryStreamPair func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
-	newWindow           func(int, int, string) (applicationWindow, error)
-	newDevice           func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
-	newHeadlessDevice   func() (gfx.Device, error)
-	newGlyphAtlas       func(gfx.Device) (*render.GlyphAtlas, error)
-	newAvatarRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
-	newNameTagRenderer  func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
-	newHotbarRenderer   func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*render.HotbarRenderer, error)
-	newItemDropRenderer func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
+	openStore             func(context.Context, applicationOptions) (storage.WorldStore, error)
+	dialTCP               func(context.Context, string) (network.ClientPacketStream, error)
+	loginClient           func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
+	newHost               func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
+	newMemoryStreamPair   func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
+	newWindow             func(int, int, string) (applicationWindow, error)
+	newDevice             func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
+	newHeadlessDevice     func() (gfx.Device, error)
+	newGlyphAtlas         func(gfx.Device) (*render.GlyphAtlas, error)
+	newAvatarRenderer     func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
+	newNameTagRenderer    func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
+	newHotbarRenderer     func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*render.HotbarRenderer, error)
+	newItemDropRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
+	newDebugPanelRenderer func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.DebugPanelRenderer, error)
 }
 
 func defaultApplicationDependencies() applicationDependencies {
@@ -282,6 +302,13 @@ func newApplicationWithDependencies(
 	options applicationOptions,
 	dependencies applicationDependencies,
 ) (*application, error) {
+	// options.Render 的零值是一个静默退化的配置：ViewDistance=0 会让
+	// DropOutside 在每帧把中心区块外的一切都丢弃。真实入口（cmd/mcgo/main.go）
+	// 总是先经 resolveConfig 填好这个字段，这里只防漏填 Render 的调用方
+	// （包括测试）静默跑在退化配置下而不报错。
+	if options.Render.ViewDistance == 0 {
+		options.Render = config.Defaults().Render
+	}
 	if dependencies.newGlyphAtlas == nil {
 		dependencies.newGlyphAtlas = render.NewGlyphAtlas
 	}
@@ -305,6 +332,11 @@ func newApplicationWithDependencies(
 			return render.NewItemDropRenderer(dev, color, depth), nil
 		}
 	}
+	if dependencies.newDebugPanelRenderer == nil {
+		dependencies.newDebugPanelRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource) (*render.DebugPanelRenderer, error) {
+			return render.NewDebugPanelRenderer(dev, color, atlas), nil
+		}
+	}
 	ctx := context.Background()
 	var store storage.WorldStore
 	var clientEndpoint network.ClientEndpoint
@@ -315,7 +347,7 @@ func newApplicationWithDependencies(
 	var err error
 	ticks, saves := newPerformanceRecorders(options.Benchmark)
 	config := server.DefaultConfig(options.Seed)
-	config.ViewRadius = viewDistance + 1
+	config.ViewRadius = options.Render.ViewDistance + 1
 	config.TrustedObserver = options.Benchmark
 	config.TickObserver = ticks.add
 	if saves != nil {
@@ -450,7 +482,7 @@ func newApplicationWithDependencies(
 	camera := client.Camera{
 		Pos:    mgl32.Vec3{0, 110, 0},
 		Pitch:  -0.25,
-		FovY:   mgl32.DegToRad(70),
+		FovY:   mgl32.DegToRad(options.Render.FovDegrees),
 		Aspect: float32(width) / float32(height),
 		Near:   0.1,
 		Far:    2000,
@@ -479,6 +511,7 @@ func newApplicationWithDependencies(
 		loadedChunks:    make(map[core.ChunkPos]struct{}),
 		ticks:           ticks,
 		saves:           saves,
+		render:          options.Render,
 		benchmarkTransport: func() string {
 			if options.BenchmarkTransport == "" {
 				return "memory"
@@ -520,6 +553,19 @@ func newApplicationWithDependencies(
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建掉落物渲染器: %w", err), app.Close())
 	}
+	app.configPath = options.ConfigPath
+	if options.Dev {
+		app.debugPanelRenderer, err = dependencies.newDebugPanelRenderer(dev, colorFormat, app.glyphAtlas)
+		if err != nil {
+			app.releaseRemoteConstructionResources()
+			return nil, errors.Join(fmt.Errorf("创建调试面板渲染器: %w", err), app.Close())
+		}
+		// 面板的初始生效值取当前已生效的 physics/sim 快照（main.go 在构造
+		// application 之前已经调用过 config.Config.Apply）与调用方传入的
+		// Render，三组合起来与启动时真正生效的参数保持一致，不需要额外
+		// 传一份完整 config.Config 进 applicationOptions。
+		app.panel = newPanelStateFromActive(options.Render)
+	}
 	app.mesher = client.NewMesher(reg, max(1, runtime.NumCPU()-2))
 	if options.Benchmark {
 		if err := app.requestTrustedObserverCenter(app.center); err != nil {
@@ -534,6 +580,10 @@ func newApplicationWithDependencies(
 }
 
 func (a *application) releaseRemoteConstructionResources() {
+	if a.debugPanelRenderer != nil {
+		a.debugPanelRenderer.Release()
+		a.debugPanelRenderer = nil
+	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
 		a.itemDropRenderer = nil
@@ -775,6 +825,9 @@ func (a *application) Close() error {
 }
 
 func (a *application) releaseOwnedResources() {
+	if a.debugPanelRenderer != nil {
+		a.debugPanelRenderer.Release()
+	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
 	}
@@ -821,7 +874,7 @@ func (a *application) releaseOwnedResources() {
 func (a *application) closeClientSession(cause error) {
 	a.clientCloseOnce.Do(func() {
 		if cause != nil {
-			log.Printf("关闭客户端会话: %v", cause)
+			slog.Info("关闭客户端会话", "cause", cause)
 		}
 		if a.receiver != nil {
 			a.clientCloseErr = a.receiver.Close()
@@ -848,7 +901,7 @@ func (a *application) updateCenter() {
 	}
 	a.center = center
 	if err := a.requestTrustedObserverCenter(center); err != nil {
-		log.Printf("更新视距中心失败: %v", err)
+		slog.Warn("更新视距中心失败", "error", err)
 	}
 }
 
@@ -952,7 +1005,16 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
 		}
 	}
-	a.renderer.DropOutside(a.center, viewDistance)
+	if a.debugPanelRenderer != nil {
+		readout, rows := a.panelFrameInput(time.Now())
+		if err := a.debugPanelRenderer.Prepare(
+			a.panel.visible, readout, rows,
+			uint32(width), uint32(height), a.renderer.UploadBudget(),
+		); err != nil {
+			return false, fmt.Errorf("准备调试面板: %w", err)
+		}
+	}
+	a.renderer.DropOutside(a.center, a.render.ViewDistance)
 
 	target := a.colorView
 	if a.surface != nil {
@@ -1015,6 +1077,10 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	// HUD 在 terrain、avatar 与 name tag 之后绘制。
 	if inventoryConfirmed {
 		a.hotbarRenderer.Render(encoder, target)
+	}
+	// 调试面板是最上层：必须在 HUD 之后绘制，否则会被背包/容器界面盖住。
+	if a.debugPanelRenderer != nil {
+		a.debugPanelRenderer.Render(encoder, target)
 	}
 	command := encoder.Finish()
 	a.dev.Submit(command)
@@ -1201,12 +1267,12 @@ func (a *application) drainServerMessages(maxMessages int) {
 		if update.Resync != nil {
 			update.Resync.Sequence = a.nextSequence()
 			if err := a.send(update.Resync); err != nil {
-				log.Printf("发送区块 resync 失败: %v", err)
+				slog.Warn("发送区块 resync 失败", "error", err)
 			}
 		}
 		if update.Rejected != nil {
-			log.Printf("权威命令被拒绝: sequence=%d reason=%s",
-				update.Rejected.Sequence, update.Rejected.Reason)
+			slog.Warn("权威命令被拒绝",
+				"sequence", update.Rejected.Sequence, "reason", update.Rejected.Reason)
 		}
 		a.mesher.MarkDirty(update.Dirty...)
 		for _, key := range update.Forgotten {
@@ -1228,7 +1294,7 @@ func (a *application) dropSelectedItem() {
 		return
 	}
 	if err := a.send(network.DropSelectedItem{Sequence: a.nextSequence()}); err != nil {
-		log.Printf("发送主动丢弃请求失败: %v", err)
+		slog.Warn("发送主动丢弃请求失败", "error", err)
 	}
 }
 
@@ -1246,7 +1312,7 @@ func (a *application) placeBlock() {
 		},
 	)
 	if err != nil {
-		log.Printf("本地容器射线失败: %v", err)
+		slog.Warn("本地容器射线失败", "error", err)
 	} else if found {
 		block, loaded := a.mirror.BlockAt(core.Overworld, hit.Block)
 		if loaded && (block == core.FurnaceID || block == core.ChestID) {
@@ -1255,7 +1321,7 @@ func (a *application) placeBlock() {
 			if err := a.send(network.OpenContainer{
 				Sequence: a.nextSequence(), Yaw: a.camera.Yaw, Pitch: a.camera.Pitch,
 			}); err != nil {
-				log.Printf("发送打开容器请求失败: %v", err)
+				slog.Warn("发送打开容器请求失败", "error", err)
 			}
 			return
 		}
@@ -1271,7 +1337,7 @@ func (a *application) placeBlock() {
 		Pitch:    a.camera.Pitch,
 		Slot:     hotbar.Selected,
 	}); err != nil {
-		log.Printf("发送放置命令失败: %v", err)
+		slog.Warn("发送放置命令失败", "error", err)
 	}
 }
 
@@ -1290,7 +1356,7 @@ func (a *application) setInventoryOpen(open bool) {
 	if !open && a.containerOpen() {
 		a.clearContainerUI()
 		if err := a.send(network.CloseContainer{Sequence: a.nextSequence()}); err != nil {
-			log.Printf("发送关闭容器请求失败: %v", err)
+			slog.Warn("发送关闭容器请求失败", "error", err)
 		}
 		return
 	}
@@ -1333,7 +1399,7 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 			if err := a.send(network.CraftRecipe{
 				Sequence: a.nextSequence(), Recipe: recipe,
 			}); err != nil {
-				log.Printf("发送合成请求失败: %v", err)
+				slog.Warn("发送合成请求失败", "error", err)
 			}
 			return
 		}
@@ -1365,7 +1431,7 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 		if err := a.send(network.MoveContainerStack{
 			Sequence: a.nextSequence(), Container: chest.Chest, From: from, To: slot,
 		}); err != nil {
-			log.Printf("发送箱子移动失败: %v", err)
+			slog.Warn("发送箱子移动失败", "error", err)
 		}
 		return
 	}
@@ -1376,14 +1442,14 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 		if err := a.send(network.MoveContainerStack{
 			Sequence: a.nextSequence(), Container: furnace.Furnace, From: from, To: slot,
 		}); err != nil {
-			log.Printf("发送熔炉移动失败: %v", err)
+			slog.Warn("发送熔炉移动失败", "error", err)
 		}
 		return
 	}
 	if err := a.send(network.MoveInventoryStack{
 		Sequence: a.nextSequence(), From: from, To: slot,
 	}); err != nil {
-		log.Printf("发送背包移动失败: %v", err)
+		slog.Warn("发送背包移动失败", "error", err)
 	}
 }
 
@@ -1396,7 +1462,7 @@ func (a *application) selectHotbarSlot(slot uint8) {
 		Sequence: a.nextSequence(),
 		Slot:     slot,
 	}); err != nil {
-		log.Printf("发送快捷栏选择失败: %v", err)
+		slog.Warn("发送快捷栏选择失败", "error", err)
 	}
 }
 
