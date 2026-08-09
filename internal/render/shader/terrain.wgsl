@@ -69,9 +69,10 @@ fn vs_main(
     let ao_level = f32((ao >> (vi * 2u)) & 0x3u);
     let ao_factor = 0.55 + 0.45 * (ao_level / 3.0);
     let sky = f32((light >> 4u) & 0xFu) / 15.0;
-    // 直射天空光为 0 的面保留 8% 室内亮度，露天面随昼夜在 15%..100% 之间变化。
-    let daylight = camera.cam_pos.w;
-    let base = 0.08 + sky * (daylight - 0.08);
+    let block = f32(light & 0xFu) / 15.0;
+    let daylight = clamp(camera.cam_pos.w, 0.0, 1.0);
+    let sky_base = 0.08 + sky * (daylight - 0.08);
+    let base = max(sky_base, block);
 
     var out: VsOut;
     out.clip  = camera.view_proj * vec4f(world, 1.0);

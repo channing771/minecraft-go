@@ -17,7 +17,7 @@ func main() {
 	baselinePath := flag.String("baseline", "", "基线 JSON")
 	currentPath := flag.String("current", "", "当前 JSON")
 	maxRegression := flag.Float64("max-regression", 0.20, "允许的最大相对退化")
-	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 13:14 场景迁移")
+	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 14:15 场景迁移")
 	flag.Parse()
 
 	if *baselinePath == "" || *currentPath == "" {
@@ -59,11 +59,11 @@ func compareReportsWithScenarioUpgrade(
 	allowScenarioUpgrade string,
 ) ([]string, error) {
 	scenarioUpgrade := baseline.ScenarioVersion != current.ScenarioVersion
-	// 横向天空光传播改变 workload，因此当前唯一迁移是 v13 到 v14。
-	allowedScenarioUpgrade := baseline.ScenarioVersion == 13 && current.ScenarioVersion == 14 &&
-		allowScenarioUpgrade == "13:14"
+	// 静态方块光改变 workload，因此当前唯一迁移是 v14 到 v15。
+	allowedScenarioUpgrade := baseline.ScenarioVersion == 14 && current.ScenarioVersion == 15 &&
+		allowScenarioUpgrade == "14:15"
 	if allowScenarioUpgrade != "" && !allowedScenarioUpgrade {
-		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v13 到 v14 使用 13:14", allowScenarioUpgrade)
+		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v14 到 v15 使用 14:15", allowScenarioUpgrade)
 	}
 	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(

@@ -18,6 +18,7 @@ const (
 	LayerFurnace
 	LayerIronBlock
 	LayerChest
+	LayerLightBlock
 	layerCount
 )
 
@@ -40,6 +41,7 @@ func NewRegistry() *Registry {
 	r.layers[LayerFurnace] = furnaceTexture()
 	r.layers[LayerIronBlock] = ironBlockTexture()
 	r.layers[LayerChest] = chestTexture()
+	r.layers[LayerLightBlock] = lightBlockTexture()
 	return r
 }
 
@@ -69,6 +71,8 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 		return LayerIronBlock
 	case core.ChestID:
 		return LayerChest
+	case core.LightBlockID:
+		return LayerLightBlock
 	case core.GrassID:
 		switch f {
 		case mesh.FacePosY:
@@ -81,6 +85,14 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 	default:
 		return LayerStone
 	}
+}
+
+// Emission 返回方块固定发出的方块光等级。实现 mesh.Registry。
+func (r *Registry) Emission(id world.BlockID) uint8 {
+	if id == core.LightBlockID {
+		return 15
+	}
+	return 0
 }
 
 func (r *Registry) LayerCount() int { return int(layerCount) }

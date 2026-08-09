@@ -46,6 +46,10 @@ var chunkMigrations = map[uint32]chunkMigration{
 		dto.Chests = [core.ChestsPerChunk]world.ChestSlot{}
 		return dto, nil
 	},
+	6: func(dto chunkDTO) (chunkDTO, error) {
+		// v7 只扩展稳定方块与物品语义，payload 布局不变。
+		return dto, nil
+	},
 }
 
 // fillFullDurability 把没有耐久的旧工具补为满耐久，非工具保持零值。

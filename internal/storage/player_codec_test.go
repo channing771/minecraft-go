@@ -67,6 +67,26 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPlayerSchemaV5RoundTripsLightBlockItem(t *testing.T) {
+	if currentPlayerSchema != 5 {
+		t.Fatalf("玩家 schema=%d，想要 5", currentPlayerSchema)
+	}
+	want := fixturePlayerSave(fixturePlayerID(), 7)
+	want.Inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemLightBlock, Count: 17}
+
+	encoded, err := encodePlayer(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodePlayer(want.PlayerID, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Inventory != want.Inventory || got.NeedsRewrite {
+		t.Fatalf("发光块物品 v5 往返 inventory=%+v needsRewrite=%v", got.Inventory, got.NeedsRewrite)
+	}
+}
+
 func TestPlayerSchemaV4DecodeKeepsWornDurability(t *testing.T) {
 	save := fixturePlayerSave(fixturePlayerID(), 7)
 	save.Inventory.Hotbar.Slots[4].Durability = 73

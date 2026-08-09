@@ -3,11 +3,40 @@ package storage
 import (
 	"errors"
 	"math"
+	"reflect"
 	"testing"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/world"
 )
+
+func TestChunkV6MigrationIsNoOp(t *testing.T) {
+	var dto chunkDTO
+	dto.Key = core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	dto.Revision = 19
+	dto.Sections[0] = world.ContainerSnapshot{
+		Kind: world.StorageIndexed,
+		Bits: 4,
+		Palette: []core.BlockID{
+			core.AirID,
+			core.LightBlockID,
+		},
+		Packed: []uint64{1},
+	}
+	dto.Drops[0] = world.DropSlot{
+		Generation: 1,
+		Active:     true,
+		Stack:      core.ItemStack{Item: core.ItemLightBlock, Count: 1},
+	}
+
+	got, changed, err := migrateChunk(6, dto)
+	if err != nil || !changed {
+		t.Fatalf("migrateChunk(6) changed=%v err=%v", changed, err)
+	}
+	if !reflect.DeepEqual(got, dto) {
+		t.Fatalf("v6→v7 no-op 改变 DTO：got=%+v want=%+v", got, dto)
+	}
+}
 
 func TestMigrationRegistryIsContinuous(t *testing.T) {
 	for schema := oldestChunkSchema; schema < currentChunkSchema; schema++ {

@@ -1,5 +1,35 @@
 # 性能基线
 
+## 当前已接受的 M2 scenario v15 基线
+
+2026-08-09 在 clean HEAD `59754fc06f96da413184169589d090c85935bd82` 上完成 M4N 无窗口 record-only 链；该提交中的 producer 已是 scenario v15。报告身份为 `Apple M2 / 16GiB`、`macOS 26.5.1`（build `25F80`）、`go1.26.0 darwin/arm64`、`2560x1440`。
+
+- 当前 Memory 基线：`docs/notes/perf-baseline.json`，SHA-256 `9691d9752f309795e77176c6f959c357c4c97f1f7daaa4a5a6fddff8bf164d78`
+- Memory 报告：`/private/tmp/mcgo-m4n-v15/memory-v15.json`，SHA-256 同上
+- TCP 报告：`/private/tmp/mcgo-m4n-v15/tcp-v15.json`，SHA-256 `131de104f8cedac5f8dbd3a56cbfcbdd0a1da5268b774ce07b10c9167d2371ca`
+- 被替代的 M2 scenario v6：提交 `38c90a93cc1f03f0a1adb00b4bf97b0131e7d0ef`，SHA-256 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`
+- 未改动的 M5 scenario v14：`docs/notes/perf-baseline-m5.json`，SHA-256 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`
+
+M2 v15 是独立基线，不使用 `6:15` 或跨硬件迁移。完整 Memory 报告先以自身作为 baseline/current 通过同场景完整性、硬件身份和数据门禁，再精确复制到 M2 基线路径；TCP 随后独立生成并自比较。两次自比较均只记录 flying p99 超过 `12ms`，返回“同场景性能记录完成”。没有自动执行 Memory↔TCP 比较。M5 仍停留 v14，未来只能在相同 M5 硬件上使用唯一 `14:15` 迁移。
+
+此前从含未提交 scenario v15 改动的 `86ae0cc160732e597ad1ace7497feed091d324e4` 工作树生成的两份报告只保存在 `/private/tmp/mcgo-m4n-v15-dirty-86ae0cc/` 作为不可提升的 dirty provenance 历史；它们不是当前正式基线。
+
+```sh
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/private/tmp/mcgo-m4n-v15/memory-v15.json'"
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline '/private/tmp/mcgo-m4n-v15/memory-v15.json' --current '/private/tmp/mcgo-m4n-v15/memory-v15.json' --max-regression 0.20"
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '/private/tmp/mcgo-m4n-v15/tcp-v15.json'"
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline '/private/tmp/mcgo-m4n-v15/tcp-v15.json' --current '/private/tmp/mcgo-m4n-v15/tcp-v15.json' --max-regression 0.20"
+```
+
+| transport / 阶段 | frames | FPS | p50 | p95 | p99 | max | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Memory / still | 11366 | 189.4 | 5.158ms | 5.781ms | 6.479ms | 83.249ms | 1397.1MiB |
+| Memory / flying | 46794 | 390.1 | 1.698ms | 8.005ms | 18.790ms | 109.113ms | 1446.8MiB |
+| TCP / still | 11383 | 189.7 | 5.145ms | 5.799ms | 6.459ms | 80.071ms | 1406.5MiB |
+| TCP / flying | 47350 | 394.7 | 1.687ms | 8.466ms | 17.605ms | 132.344ms | 1464.4MiB |
+
+Memory/TCP load 为 `40.230770167/39.616086208s`，snapshot 为 `22.475446666/22.710151750s`，cooldown 均为 `30s`。tick p99 为 `0.372917/0.445458ms`；persistence p99 为 `25.085750/23.187833ms`；`remote_gpu_complete` 均为 `128` 样本、每样本 `256` 次绘制，p99 为 `0.193331/0.188559ms`；多人探针 peak RSS 为 `1517.1/1500.2MiB`。完整字段保存在两份 JSON，Task 8 报告逐项列出。
+
 ## M4L 任务组 5：探针玩家摔落伤害风险实测（非新基线）
 
 2026-08-07 在 `m4l-authoritative-health` 分支（提交前工作树，已包含死亡结算与背包掉落）上，
