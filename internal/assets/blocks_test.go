@@ -87,6 +87,43 @@ func TestCutoutBlocksHaveOwnMaterialLayers(t *testing.T) {
 	}
 }
 
+func TestCommonMaterialFaceMappings(t *testing.T) {
+	r := assets.NewRegistry()
+	if r.Material(core.OakLogID, mesh.FacePosY) != assets.LayerOakLogTop ||
+		r.Material(core.OakLogID, mesh.FaceNegY) != assets.LayerOakLogTop ||
+		r.Material(core.OakLogID, mesh.FacePosX) != assets.LayerOakLogSide {
+		t.Fatal("竖向原木顶底/侧面映射错误")
+	}
+	for _, tt := range []struct {
+		block core.BlockID
+		layer uint16
+	}{
+		{core.CobblestoneID, assets.LayerCobblestone},
+		{core.SmoothStoneID, assets.LayerSmoothStone},
+		{core.SandID, assets.LayerSand},
+		{core.GravelID, assets.LayerGravel},
+		{core.OakPlanksID, assets.LayerOakPlanks},
+		{core.LeavesID, assets.LayerLeaves},
+		{core.GlassID, assets.LayerGlass},
+		{core.BrickID, assets.LayerBrick},
+		{core.WhiteWoolID, assets.LayerWhiteWool},
+		{core.RoofTileID, assets.LayerRoofTile},
+		{core.ClayID, assets.LayerClay},
+		{core.MossyCobblestoneID, assets.LayerMossyCobblestone},
+	} {
+		if got := r.Material(tt.block, mesh.FacePosX); got != tt.layer {
+			t.Fatalf("方块 %d 材质层=%d，想要 %d", tt.block, got, tt.layer)
+		}
+		if r.Material(tt.block, mesh.FacePosY) != tt.layer {
+			t.Fatalf("方块 %d 不应按面变化", tt.block)
+		}
+	}
+	if r.Material(core.SnowBlockID, mesh.FacePosY) != assets.LayerSnowTop ||
+		r.Material(core.SnowBlockID, mesh.FacePosX) != assets.LayerSnowSide {
+		t.Fatal("雪块顶面与侧面应使用不同材质")
+	}
+}
+
 // TestChestHasOwnMaterialLayer 覆盖箱子拥有独立于木质褐色相邻方块的材质层。
 func TestChestHasOwnMaterialLayer(t *testing.T) {
 	registry := assets.NewRegistry()

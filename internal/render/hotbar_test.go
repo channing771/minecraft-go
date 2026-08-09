@@ -195,6 +195,10 @@ func TestHotbarTextureAtlasCopiesRegisteredBlockTopFaces(t *testing.T) {
 	for _, item := range []core.ItemID{
 		core.ItemStone, core.ItemDirt, core.ItemGrass, core.ItemStoneBrick,
 		core.ItemFurnace, core.ItemIronBlock, core.ItemChest,
+		core.ItemCobblestone, core.ItemSmoothStone, core.ItemSand, core.ItemGravel,
+		core.ItemOakLog, core.ItemOakPlanks, core.ItemLeaves, core.ItemGlass,
+		core.ItemBrick, core.ItemWhiteWool, core.ItemRoofTile, core.ItemClay,
+		core.ItemSnowBlock, core.ItemMossyCobblestone,
 	} {
 		block, ok := core.ItemPlacement(item)
 		if !ok {

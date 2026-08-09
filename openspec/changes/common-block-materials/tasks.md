@@ -25,7 +25,7 @@
 
 ## 6. 14 种程序化材质与草地闭合
 
-- [ ] 6.1 目标：`internal/assets`、`internal/render`。生成固定 16×16 材质、原木/雪分面和 grass wrap，验证确定性、结构、alpha 与周期边界。
+- [x] 6.1 目标：`internal/assets`、`internal/render`。生成固定 16×16 材质、原木/雪分面和 grass wrap，验证确定性、结构、alpha 与周期边界。
   验证：`go test ./internal/assets ./internal/render -race -count=1`
 
 ## 7. 无窗口材料展示与性能记录

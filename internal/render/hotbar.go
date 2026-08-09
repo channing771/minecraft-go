@@ -80,7 +80,7 @@ const (
 	hotbarEmptyHeartColumn  = 0
 	hotbarFullHeartColumn   = 1
 	hotbarBlockColumnOffset = 2
-	hotbarTextureColumns    = hotbarBlockColumnOffset + int(core.ItemChest) + 1
+	hotbarTextureColumns    = hotbarBlockColumnOffset + int(core.ItemMossyCobblestone) + 1
 	hotbarTextureWidth      = hotbarTextureColumns * hotbarTextureSize
 
 	hudEdgeMargin = float32(8)
@@ -1033,7 +1033,7 @@ func buildHotbarTextureAtlas(registry *assets.Registry) []byte {
 	pixels := make([]byte, hotbarTextureWidth*hotbarTextureSize*4)
 	paintHotbarHeart(pixels, hotbarEmptyHeartColumn, false)
 	paintHotbarHeart(pixels, hotbarFullHeartColumn, true)
-	for item := core.ItemStone; item <= core.ItemChest; item++ {
+	for item := core.ItemStone; item <= core.ItemMossyCobblestone; item++ {
 		block, ok := core.ItemPlacement(item)
 		if !ok {
 			continue
