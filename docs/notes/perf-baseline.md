@@ -83,7 +83,29 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmar
 
 **最终结论：`core.ChestsPerChunk` 保持 16**，`proposal.md`/`design.md`/`tasks.md` 无需改动。建议仍然是后续在系统空闲、负载低于 `2.61` 时补一次干净复测作为收尾验证，但不因此改变本次结论或容量取值。
 
-## 当前已接受的 M5 scenario v13 基线
+## 当前已接受的 M5 scenario v14 基线
+
+2026-08-08 在提交 `eb1a07a196ff948adde08e37d9af24ceb1988a14` 上完成无窗口 record-only 链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
+
+- 当前 Memory 基线：`docs/notes/perf-baseline-m5.json`，SHA-256 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`
+- Memory 报告：`/private/tmp/mcgo-m4m-v14-eb1a07a196ff/memory-v14.json`，SHA-256 同上
+- TCP 报告：`/private/tmp/mcgo-m4m-v14-eb1a07a196ff/tcp-v14.json`，SHA-256 `ed222025d8bcd0b7cdc6aa608155439695ea56a7e9703a8b10c93d7cc2f40f9e`
+- 被替代的 M5 scenario v13 基线：SHA-256 `452a1916cafa36a6383c1c6e2a7b3c125eab4623f21636b46db1bfe9b315f6f6`
+- 未改动的 M2 scenario v6 基线：SHA-256 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`
+
+Memory producer 后运行 `--allow-scenario-upgrade 13:14`，输出“场景迁移性能记录完成：报告完整、硬件一致，当前 v14”，随即把 Memory JSON 精确复制为 M5 基线；该提升发生在 TCP producer 之前。TCP 只独立记录，未运行 Memory↔TCP perfcheck。record-only 只放行性能数值：报告结构、样本、迁移、身份、真实 overflow、数据丢失和 I/O 仍会失败；无需静稳预检、绑定路径、一次性授权、失败即停或禁止重跑。
+
+以下命令均使用无窗口离屏 benchmark：
+
+```sh
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/private/tmp/mcgo-m4m-v14-eb1a07a196ff/memory-v14.json'"
+zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '/private/tmp/mcgo-m4m-v14-eb1a07a196ff/memory-v14.json' --max-regression 0.20 --allow-scenario-upgrade 13:14"
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '/private/tmp/mcgo-m4m-v14-eb1a07a196ff/tcp-v14.json'"
+```
+
+Memory/TCP still p99 为 `3.860/3.896ms`，flying p99 为 `8.879/9.017ms`，`remote_gpu_complete` p50 为 `0.089216/0.090346ms`，各含 `128` 个样本、每样本摊薄 `256` 次绘制；峰值 RSS 为 `1643.7/1673.7MiB`。回退时恢复 scenario v13 的 producer、比较器和 M5 JSON；协议 v13、玩家 schema v5、区块 schema v6、metadata v2 和 M2 文件均不迁移。
+
+## 历史 scenario v13 基线
 
 2026-08-07 在冻结提交 `659de4859b4b78024c9b3157c2ce484bae26383e` 上完成一次性无窗口正式链。报告身份为 `Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`。
 
@@ -93,7 +115,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/mcgo --benchmark --benchmar
 - 被替代的 M5 scenario v12 基线：SHA-256 `9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`，提交 `a35be7f206dea52954716e6ca156b25b2622fb41`
 - 未改动的 M2 scenario v6 基线：SHA-256 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`
 
-完整门禁退出后从 `2026-08-07T08:20:23-0700` 自然冷却超过 5 分钟。正式授权绑定前的两次有效快照分别在 `08:30:23` 与 `08:31:19`：load 1m/5m/15m 为 `2.14/2.59/3.47` 与 `2.52/2.62/3.42`，均为 AC 供电、电量 `80%`、低功耗模式关闭、无遗留 `mcgo`/`perfcheck`、tracked 工作树干净且 HEAD 不变。两个正式输出路径在启动前均不存在；没有终止用户进程、清理缓存、调整供电状态或筛选结果。
+下列静稳预检、正式授权绑定、一次性路径、失败即停和禁止重跑均为 v13 历史流程，不是 v14 当前要求。完整门禁退出后从 `2026-08-07T08:20:23-0700` 自然冷却超过 5 分钟。正式授权绑定前的两次有效快照分别在 `08:30:23` 与 `08:31:19`：load 1m/5m/15m 为 `2.14/2.59/3.47` 与 `2.52/2.62/3.42`，均为 AC 供电、电量 `80%`、低功耗模式关闭、无遗留 `mcgo`/`perfcheck`、tracked 工作树干净且 HEAD 不变。两个正式输出路径在启动前均不存在；没有终止用户进程、清理缓存、调整供电状态或筛选结果。
 
 以下四条正式命令按顺序各执行一次且均为 exit 0，全程没有启动或聚焦前台窗口：
 
@@ -140,7 +162,7 @@ M4G 曾在冻结提交 `5eea1310be620f28d8894329086f27b4a12ec546` 上执行 v11 
 
 根因与 M4G 无关：该指标当时用「提交到阻塞轮询返回」的墙钟差逐次计时，实测提交空 command buffer 与提交一次 2560x1440 clear pass 的 p50 相同（`1.276ms` 与 `1.284ms`），取值被宿主轮询实现量化到约 `1.28ms` 的整数倍。按规则该正式链立即停止，两份报告只保留为诊断证据、未被提升；v11 从未成为任何硬件的基线，其 workload 变化并入本页上方的 scenario v12。用修复后的判据回放那对报告，比较通过，印证该次失败确实是门禁缺陷。
 
-## scenario v12 批量计时与当前 v13 比较规则
+## 历史 scenario v12 批量计时与 v13 比较规则
 
 `remote_gpu_complete` 此前用「提交命令到阻塞轮询返回」的墙钟差逐次计时。实测该量几乎不含绘制信息：提交空 command buffer 与提交一次 2560x1440 clear pass 的 p50 相同（`1.276ms` 与 `1.284ms`），且所有取值都被量化到约 `1.28ms` 的整数倍，节拍位于 wgpu-native 内部无法调整。分位数因此在相邻整数倍之间跳变，`20%` 相对阈值套在量化步长为 `100%` 的指标上无法稳定。
 
@@ -154,7 +176,7 @@ benchmark 还在预热与 still、still 与 flying、flying 与 GPU 采样之间
 
 无后缀的 M2 baseline `docs/notes/perf-baseline.json` 内容与路径保持不变。
 
-## scenario v13 回退说明
+## 历史 scenario v13 回退说明
 
 回退到 M4L 时需要同时回退天空 draw、scenario v13 的 producer/比较器与 M5 v13 基线，恢复 M5 scenario v12 基线；协议 v13、玩家 schema v5、区块 schema v6 与全部世界/玩家数据无需回退或迁移。
 
