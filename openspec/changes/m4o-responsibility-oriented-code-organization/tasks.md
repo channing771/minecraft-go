@@ -16,7 +16,7 @@
 
 ## 5. 区块 codec 按 envelope 与逻辑载荷拆分
 
-- [ ] 5.1 拆分 `internal/storage/chunk_codec.go` 与测试，保持 schema v7、envelope、Zstd、CRC、字段顺序、fixture 和错误文本；focused：`zsh -ic 'go test ./internal/storage -race -count=1'`、`zsh -ic 'go test ./internal/storage -run "ChunkPayload|FutureSchema|Migration" -count=1'`、`zsh -ic 'go test ./internal/storage -run=^$ -fuzz=FuzzDecodeChunkPayload -fuzztime=10s'`。
+- [x] 5.1 拆分 `internal/storage/chunk_codec.go` 与测试，保持 schema v7、envelope、Zstd、CRC、字段顺序、fixture 和错误文本；focused：`zsh -ic 'go test ./internal/storage -race -count=1'`、`zsh -ic 'go test ./internal/storage -run "ChunkPayload|FutureSchema|Migration" -count=1'`、`zsh -ic 'go test ./internal/storage -run=^$ -fuzz=FuzzDecodeChunkPayload -fuzztime=10s'`。
 
 ## 6. 模拟引擎按 tick 阶段拆分
 
