@@ -57,6 +57,8 @@ terrain shader 精确使用 `max(0.08 + sky*(daylight-0.08), block)`，其中 `s
 
 无窗口场景列表末尾追加 `block-light-room`：午夜封闭房间内只有一个发光块，经镜像、dirty、mesher 和 upload 收敛后抓取；房外漏光、未收敛或既有双阈值超限均失败。
 
+Apple M2 与 M5 对上述视觉语义验收等价：设备型号不是视觉门禁，冻结的既有双阈值用于吸收允许的 Metal 微差，且不得放宽。该等价性不适用于性能报告或性能基线；M2/M5 的硬件身份校验与前述性能迁移规则完全不变。
+
 ## Risks / Trade-offs
 
 - 固定扫描增加每次网格构建 CPU 工作 → scenario 升为 v15 并在当前 M2 记录 Memory/TCP，M5 v14 等待未来同硬件迁移；稳定构建仍须证明零分配。

@@ -29,7 +29,7 @@
 
 - [x] 6.1 在 `cmd/mcgo/capture_test.go` 先锁定 `block-light-room` 位于场景末尾、通过 mirror/mesher 构建封闭房间、唯一光源和 Apply 完整重置状态；以 `zsh -ic 'go test ./cmd/mcgo -run "BlockLightRoom|CaptureScene" -count=1'` 确认红灯。
 - [x] 6.2 在 `cmd/mcgo/capture.go` 复用现有空气邻域 helper，按批准坐标构造午夜封闭房间并追加末场景，不创建场景 DSL；执行 `gofmt -w cmd/mcgo/capture.go cmd/mcgo/capture_test.go` 与 `zsh -ic 'go test ./cmd/mcgo -run "Capture|BlockLightRoom|Visual" -count=1'`。
-- [x] 6.3 运行 `zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-capture --update-golden'` 生成唯一新增 `cmd/mcgo/testdata/golden/block-light-room.png`，再运行 `zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-capture-verify'`；人工确认中央暖色光源、近远衰减、午夜无天空伪亮且房外无边界漏光，不调整既有阈值。
+- [x] 6.3 运行 `zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-capture --update-golden'` 生成唯一新增 `cmd/mcgo/testdata/golden/block-light-room.png`，再运行 `zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-capture-verify'`；人工确认中央暖色光源、近远衰减、午夜无天空伪亮且房外无边界漏光，不调整既有阈值。该次 Apple M2 更新与复核证据按用户裁决满足视觉验收，设备型号不构成额外门禁；报告仍如实记录 Apple M2，性能基线硬件身份规则不变。
 
 ## 7. 完成 Memory/TCP 放置、照明、挖回纵向闭环
 
