@@ -4,8 +4,10 @@ import (
 	"reflect"
 	"testing"
 
+	"minecraft-go/internal/assets"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
+	"minecraft-go/internal/mesh"
 )
 
 // fullFurnaceOverlay 是熔炉视图的最坏布局：三格都有物品且两条进度条都非空。
@@ -71,8 +73,8 @@ func TestHotbarLayoutIsFixedNineSlotsWithSelection(t *testing.T) {
 	var layout hotbarLayout
 	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, nil, MiningOverlay{}, 800, 600)
 
-	if len(got.quads) != 1+core.HotbarSlots {
-		t.Fatalf("空物品状态 quads=%d，想要选中框加 9 个栏位", len(got.quads))
+	if len(got.quads) != 2+core.HotbarSlots {
+		t.Fatalf("空物品状态 quads=%d，想要面板、选中框加 9 个栏位", len(got.quads))
 	}
 	if len(got.glyphs) != 0 {
 		t.Fatalf("空快捷栏数字=%d，想要 0", len(got.glyphs))
@@ -82,7 +84,7 @@ func TestHotbarLayoutIsFixedNineSlotsWithSelection(t *testing.T) {
 	originX := (800 - total) * 0.5
 	originY := 600 - hotbarBottomMargin - hotbarSlotSize
 	for slot := range core.HotbarSlots {
-		quad := got.quads[1+slot]
+		quad := got.quads[2+slot]
 		wantX := originX + float32(slot)*(hotbarSlotSize+hotbarSlotGap)
 		if quad.X != wantX || quad.Y != originY ||
 			quad.Width != hotbarSlotSize || quad.Height != hotbarSlotSize {
@@ -90,7 +92,7 @@ func TestHotbarLayoutIsFixedNineSlotsWithSelection(t *testing.T) {
 				slot, quad, wantX, originY, hotbarSlotSize, hotbarSlotSize)
 		}
 	}
-	selection := got.quads[0]
+	selection := got.quads[1]
 	wantSelectionX := originX + 2*(hotbarSlotSize+hotbarSlotGap) - hotbarSelectBorder
 	if selection.X != wantSelectionX || selection.Y != originY-hotbarSelectBorder ||
 		selection.Width != hotbarSlotSize+2*hotbarSelectBorder {
@@ -112,25 +114,129 @@ func TestHotbarLayoutDrawsItemSwatchesAndCounts(t *testing.T) {
 
 	var layout hotbarLayout
 	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, nil, MiningOverlay{}, 1280, 720)
-	if len(got.quads) != 1+core.HotbarSlots+3 {
-		t.Fatalf("quads=%d，想要选中框、9 个栏位和 3 个色块", len(got.quads))
+	if len(got.quads) != 2+core.HotbarSlots+3*2 {
+		t.Fatalf("quads=%d，想要面板、选中框、9 个栏位和 3 个双层色块", len(got.quads))
 	}
-	swatches := got.quads[1+core.HotbarSlots:]
-	wantColors := [][4]float32{
-		hotbarItemColor(core.ItemStone),
-		hotbarItemColor(core.ItemDirt),
-		hotbarItemColor(core.ItemGrass),
-	}
-	for index, swatch := range swatches {
-		if swatch.Color != wantColors[index] {
-			t.Fatalf("色块 %d 颜色 = %v，想要 %v", index, swatch.Color, wantColors[index])
-		}
-		if swatch.Width != hotbarSlotSize-2*hotbarSwatchInset {
-			t.Fatalf("色块 %d 尺寸 = %f", index, swatch.Width)
+	tiles := got.quads[2+core.HotbarSlots:]
+	wantItems := []core.ItemID{core.ItemStone, core.ItemDirt, core.ItemGrass}
+	for index, item := range wantItems {
+		border, face := tiles[index*2], tiles[index*2+1]
+		assertHotbarItemFace(t, face, item)
+		if border.Width != hotbarSlotSize-2*hotbarSwatchInset ||
+			face.Width != border.Width-2*hotbarSwatchBorder {
+			t.Fatalf("色块 %d 尺寸 = %f/%f", index, border.Width, face.Width)
 		}
 	}
-	if len(got.glyphs) != 4 {
-		t.Fatalf("数字数量 = %d，想要 64/9/1 共 4 位", len(got.glyphs))
+	if len(got.glyphs) != 6 {
+		t.Fatalf("数字数量 = %d，想要 64/9 各含阴影且隐藏 1，共 6 个实例", len(got.glyphs))
+	}
+}
+
+// 杀死变异：继续显示单件数量、漏掉阴影、错序或失去右下对齐都会改变这些实例。
+func TestHotbarCountsHideOneAndUseShadowedBottomRightDigits(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	for _, char := range hotbarDigits {
+		atlas.glyphs[char] = fakeNameTagGlyph(7)
+	}
+	var layout hotbarLayout
+	appendHotbarCount(&layout, atlas, 1, 100, 200)
+	if len(layout.glyphs) != 0 {
+		t.Fatalf("单件数量 glyphs=%d，想要隐藏冗余数字 1", len(layout.glyphs))
+	}
+
+	appendHotbarCount(&layout, atlas, 64, 100, 200)
+	if len(layout.glyphs) != 4 {
+		t.Fatalf("数量 64 glyphs=%d，想要两个阴影加两个前景", len(layout.glyphs))
+	}
+	want := []hotbarInstance{
+		{X: 134, Y: 236, Width: 8, Height: 12, U0: 0.1, V0: 0.2, U1: 0.3, V1: 0.4, Color: [4]float32{0.02, 0.025, 0.03, 0.95}},
+		{X: 139, Y: 236, Width: 8, Height: 12, U0: 0.1, V0: 0.2, U1: 0.3, V1: 0.4, Color: [4]float32{0.02, 0.025, 0.03, 0.95}},
+		{X: 133, Y: 235, Width: 8, Height: 12, U0: 0.1, V0: 0.2, U1: 0.3, V1: 0.4, Color: [4]float32{1, 0.94, 0.78, 1}},
+		{X: 138, Y: 235, Width: 8, Height: 12, U0: 0.1, V0: 0.2, U1: 0.3, V1: 0.4, Color: [4]float32{1, 0.94, 0.78, 1}},
+	}
+	if !reflect.DeepEqual(layout.glyphs, want) {
+		t.Fatalf("数量 64 glyphs=%+v，想要右下阴影/前景 %+v", layout.glyphs, want)
+	}
+
+	layout.glyphs = layout.glyphs[:0]
+	appendHotbarCountScaled(&layout, atlas, 64, 100, 200, 0.5)
+	if first, second := layout.glyphs[2], layout.glyphs[3]; first.X != 116.5 || second.X != 119 {
+		t.Fatalf("0.5x 两位前景 X=%v/%v，想要 tracking 同步缩放且右边缘不动", first.X, second.X)
+	}
+}
+
+// 杀死变异：移除区域面板、物品暗边或退回平面色块会破坏 HUD 的统一层级。
+func TestHotbarLayoutUsesPanelAndInsetItemTiles(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemGrass, Count: 1}
+
+	var layout hotbarLayout
+	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, nil, MiningOverlay{}, 1280, 720)
+	if len(got.quads) != 13 {
+		t.Fatalf("快捷栏 quads=%d，想要面板、选中框、9 个栏位和双层物品色块共 13", len(got.quads))
+	}
+	panel := got.quads[0]
+	if panel.Color != ([4]float32{0.025, 0.03, 0.035, 0.88}) ||
+		panel.Width <= core.HotbarSlots*hotbarSlotSize || panel.Height <= hotbarSlotSize {
+		t.Fatalf("快捷栏面板=%+v", panel)
+	}
+	border, face := got.quads[len(got.quads)-2], got.quads[len(got.quads)-1]
+	if border.Width <= face.Width || border.Height <= face.Height || border.Color == face.Color {
+		t.Fatalf("物品双层色块 border=%+v face=%+v", border, face)
+	}
+	assertHotbarItemFace(t, face, core.ItemGrass)
+}
+
+// 杀死变异：重新用近似色块或复制错误方块面的像素，都无法通过逐像素来源核对。
+func TestHotbarTextureAtlasCopiesRegisteredBlockTopFaces(t *testing.T) {
+	registry := assets.NewRegistry()
+	pixels := buildHotbarTextureAtlas(registry)
+	for _, item := range []core.ItemID{
+		core.ItemStone, core.ItemDirt, core.ItemGrass, core.ItemStoneBrick,
+		core.ItemFurnace, core.ItemIronBlock, core.ItemChest,
+	} {
+		block, ok := core.ItemPlacement(item)
+		if !ok {
+			t.Fatalf("测试物品 %d 不可放置", item)
+		}
+		source := registry.LayerRGBA(int(registry.Material(block, mesh.FacePosY)))
+		column := hotbarBlockColumnOffset + int(item)
+		for _, point := range [][2]int{{0, 0}, {5, 7}, {15, 15}} {
+			x, y := point[0], point[1]
+			src := (y*hotbarTextureSize + x) * 4
+			dst := (y*hotbarTextureWidth + column*hotbarTextureSize + x) * 4
+			if got, want := [4]byte(pixels[dst:dst+4]), [4]byte(source[src:src+4]); got != want {
+				t.Fatalf("物品 %d 像素 (%d,%d)=%v，想要注册表材质 %v", item, x, y, got, want)
+			}
+		}
+	}
+}
+
+// 杀死变异：不可放置物品误采样空白图集会让工具和材料消失。
+func TestNonBlockItemsKeepProgrammaticTiles(t *testing.T) {
+	for _, item := range []core.ItemID{core.ItemCoal, core.ItemIronIngot, core.ItemStonePickaxe} {
+		var layout hotbarLayout
+		appendItemTile(&layout, item, 0, 0, 1)
+		if len(layout.quads) != 2 {
+			t.Fatalf("物品 %d quads=%d，想要暗边和内层色块", item, len(layout.quads))
+		}
+		assertHotbarItemFace(t, layout.quads[1], item)
+	}
+}
+
+func assertHotbarItemFace(t *testing.T, face hotbarInstance, item core.ItemID) {
+	t.Helper()
+	uv, textured := hotbarItemUV(item)
+	gotUV := [4]float32{face.U0, face.V0, face.U1, face.V1}
+	if textured {
+		if gotUV != uv || face.Color != ([4]float32{1, 1, 1, 1}) {
+			t.Fatalf("方块物品 %d face=%+v，想要真实材质 UV=%v", item, face, uv)
+		}
+		return
+	}
+	if gotUV != ([4]float32{}) || face.Color != hotbarItemColor(item) {
+		t.Fatalf("非方块物品 %d face=%+v，想要程序化色块 %v", item, face, hotbarItemColor(item))
 	}
 }
 
@@ -142,7 +248,7 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 	}
 	var layout hotbarLayout
 	// 箱子视图（27 格）比配方行与熔炉视图都大，因此固定容量的见证必须用满箱子叠加值，
-	// 再叠加已确认的满血生命值（两位数字）才是真正的最坏布局。
+	// 再叠加已确认的满血十段生命条才是真正的最坏布局。
 	layoutInventory(
 		&layout, atlas, maxQuadTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720,
 	)
@@ -154,8 +260,8 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		&layout, atlas, fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720,
 	)
 	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720)
-	if len(layout.glyphs) != maxHotbarGlyphs {
-		t.Fatalf("glyph 上限见证数字=%d，想要 %d", len(layout.glyphs), maxHotbarGlyphs)
+	if len(layout.glyphs) != 252 {
+		t.Fatalf("glyph 上限见证数字=%d，想要背包与箱子两位数阴影共 252", len(layout.glyphs))
 	}
 	if len(layout.quads) > maxHotbarQuads {
 		t.Fatalf("glyph 上限见证 quads=%d，超过固定上限 %d", len(layout.quads), maxHotbarQuads)
@@ -165,7 +271,7 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		MiningOverlay{Active: true, ProgressTicks: 6, RequiredTicks: 15, Harvestable: true},
 		1280, 720,
 	)
-	if len(closed.quads) != 1+core.HotbarSlots*2+2 || len(closed.quads) > maxHotbarQuads {
+	if len(closed.quads) != 2+core.HotbarSlots*3+2 || len(closed.quads) > maxHotbarQuads {
 		t.Fatalf("关闭界面加采掘条 quads=%d，固定上限=%d", len(closed.quads), maxHotbarQuads)
 	}
 }
@@ -300,8 +406,8 @@ func TestMiningOverlayUsesOnlyConfirmedFixedGeometry(t *testing.T) {
 	baseQuads := len(layoutInventory(
 		&layout, atlas, core.Inventory{}, false, -1, nil, nil, MiningOverlay{}, 1280, 720,
 	).quads)
-	if baseQuads != 1+core.HotbarSlots {
-		t.Fatalf("inactive quads=%d，想要仅选中框和快捷栏", baseQuads)
+	if baseQuads != 2+core.HotbarSlots {
+		t.Fatalf("inactive quads=%d，想要仅面板、选中框和快捷栏", baseQuads)
 	}
 	requiredZero := layoutInventory(
 		&layout, atlas, core.Inventory{}, false, -1, nil, nil,
@@ -352,13 +458,9 @@ func TestMiningOverlayUsesOnlyConfirmedFixedGeometry(t *testing.T) {
 	}
 }
 
-// 杀死变异：忽略 Confirmed 标记、画出预测值，或者数字位数与生命值不匹配都会
-// 让 HUD 在收到权威状态之前显示猜测值。
+// 杀死变异：忽略 Confirmed 标记或画出预测值，会让 HUD 在收到权威状态前显示猜测值。
 func TestAppendHealthBarDrawsOnlyConfirmedValues(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
-	for _, char := range hotbarDigits {
-		atlas.glyphs[char] = fakeNameTagGlyph(7)
-	}
 
 	var unconfirmed hotbarLayout
 	appendHealthBar(&unconfirmed, atlas, HealthOverlay{Confirmed: false, Value: 12}, 1280, 720)
@@ -367,27 +469,24 @@ func TestAppendHealthBarDrawsOnlyConfirmedValues(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name       string
-		value      uint8
-		wantGlyphs int
+		name      string
+		value     uint8
+		wantQuads int
 	}{
-		{"零血", 0, 1},
-		{"个位数血量", 1, 1},
-		{"满血两位数", core.MaxHealth, 2},
+		{"零血", 0, 10},
+		{"一点生命", 1, 11},
+		{"满血", core.MaxHealth, 20},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var layout hotbarLayout
 			appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: test.value}, 1280, 720)
-			if len(layout.quads) != 1 {
-				t.Fatalf("确认生命值 quads=%d，想要 1 个背景块", len(layout.quads))
+			if len(layout.quads) != test.wantQuads || len(layout.glyphs) != 0 {
+				t.Fatalf("确认生命值 quads/glyphs=%d/%d，想要 %d/0",
+					len(layout.quads), len(layout.glyphs), test.wantQuads)
 			}
-			background := layout.quads[0]
-			if background.X != hotbarBottomMargin || background.Y != hotbarBottomMargin ||
-				background.Width != hotbarSlotSize || background.Height != hotbarSlotSize {
-				t.Fatalf("生命值背景块=%+v", background)
-			}
-			if len(layout.glyphs) != test.wantGlyphs {
-				t.Fatalf("生命值=%d 数字位数=%d，想要 %d", test.value, len(layout.glyphs), test.wantGlyphs)
+			first := layout.quads[0]
+			if first.X != 8 || first.Y != 696 || first.Width != 16 || first.Height != 16 {
+				t.Fatalf("左下第一颗爱心=%+v，想要锚定 (8,696) 且无前置背景", first)
 			}
 		})
 	}
@@ -400,6 +499,82 @@ func TestAppendHealthBarRejectsDegenerateFramebuffer(t *testing.T) {
 	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: 12}, 0, 720)
 	if len(layout.quads) != 0 {
 		t.Fatalf("零宽 framebuffer quads=%d，想要 0", len(layout.quads))
+	}
+}
+
+// 杀死变异：继续依附快捷栏、保留面板或沿用打开背包 scale 都会让两组实例不同。
+func TestHealthHeartsStayBottomLeftWithoutBackgroundAt640x360(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	var closed, open hotbarLayout
+	layoutInventory(&closed, atlas, core.Inventory{}, false, -1, nil, nil, MiningOverlay{}, 640, 360)
+	closedStart := len(closed.quads)
+	appendHealthBar(&closed, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 640, 360)
+	layoutInventory(&open, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 640, 360)
+	openStart := len(open.quads)
+	appendHealthBar(&open, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 640, 360)
+	closedHearts, openHearts := closed.quads[closedStart:], open.quads[openStart:]
+	if len(closedHearts) != 20 || len(openHearts) != 20 {
+		t.Fatalf("关闭/打开背包爱心=%d/%d，想要无背景的 10 空心加 10 满心", len(closedHearts), len(openHearts))
+	}
+	if !reflect.DeepEqual(closedHearts, openHearts) {
+		t.Fatalf("打开背包移动或缩放了生命栏: closed=%+v open=%+v", closedHearts, openHearts)
+	}
+	for index, heart := range closedHearts {
+		if heart.X < 8 || heart.Y < 0 || heart.X+heart.Width > 640 || heart.Y+heart.Height > 352 {
+			t.Fatalf("爱心 %d 未保持左/下 8px 安全边距: %+v", index, heart)
+		}
+	}
+	if first := closedHearts[0]; first.X != 8 || first.Y != 336 || first.Width != 16 || first.Height != 16 {
+		t.Fatalf("第一颗爱心=%+v，想要 (8,336,16,16)", first)
+	}
+}
+
+// 杀死变异：退回矩形段、漏掉空心爱心或把奇数生命画成整颗都会改变 UV 与宽度。
+func TestHealthBarUsesTenTwoPointHearts(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	for _, test := range []struct {
+		name      string
+		health    uint8
+		wantQuads int
+		lastHalf  bool
+	}{
+		{"零血", 0, 10, false},
+		{"九点生命", 9, 15, true},
+		{"满血", core.MaxHealth, 20, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var layout hotbarLayout
+			appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: test.health}, 1280, 720)
+			if len(layout.quads) != test.wantQuads || len(layout.glyphs) != 0 {
+				t.Fatalf("quads/glyphs=%d/%d，想要 %d/0", len(layout.quads), len(layout.glyphs), test.wantQuads)
+			}
+			emptyUV := hotbarTextureUV(hotbarEmptyHeartColumn)
+			for index, heart := range layout.quads[:10] {
+				if got := [4]float32{heart.U0, heart.V0, heart.U1, heart.V1}; got != emptyUV {
+					t.Fatalf("空心爱心 %d UV=%v，想要 %v", index, got, emptyUV)
+				}
+				if heart.Width != healthHeartSize || heart.Height != healthHeartSize {
+					t.Fatalf("空心爱心 %d 尺寸=%v×%v", index, heart.Width, heart.Height)
+				}
+			}
+			if test.health > 0 {
+				last := layout.quads[len(layout.quads)-1]
+				fullUV := hotbarTextureUV(hotbarFullHeartColumn)
+				wantU1 := fullUV[2]
+				if test.lastHalf {
+					wantU1 = (fullUV[0] + fullUV[2]) * 0.5
+				}
+				if got := [4]float32{last.U0, last.V0, last.U1, last.V1}; got != ([4]float32{fullUV[0], fullUV[1], wantU1, fullUV[3]}) {
+					t.Fatalf("最后填充爱心 UV=%v，想要完整/半颗材质", got)
+				}
+			}
+			if test.lastHalf {
+				last := layout.quads[len(layout.quads)-1]
+				if last.Width != healthHeartSize/2 || last.Height != healthHeartSize {
+					t.Fatalf("奇数生命末颗=%+v，想要半颗爱心", last)
+				}
+			}
+		})
 	}
 }
 
@@ -435,7 +610,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	dev := &nameTagTestDevice{}
-	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas)
+	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, assets.NewRegistry())
 	defer renderer.Release()
 
 	upload := dev.bufferByLabel(t, "hotbar dynamic upload")
@@ -454,8 +629,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 		}
 	}
 
-	// 传入满箱子叠加值与已确认的满血生命值，让本用例的数字数量真正达到
-	// maxHotbarGlyphs，从而让下面的“满 HUD 上传字节”断言有意义。
+	// 传入满箱子叠加值与已确认的满血生命值，让实例数量达到最坏布局。
 	if err := renderer.Prepare(
 		fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{},
 		HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720, NewUploadBudget(1024),
@@ -478,9 +652,9 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 	if got, want := pass.pipelineLabels, []string{"hotbar quad", "hotbar glyph"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("pipeline 顺序=%v want=%v", got, want)
 	}
-	// fullTestInventory 里的物品都没有耐久上限，因此没有耐久条 quad；
-	// 数字数量则因为满箱子叠加值加已确认满血生命值恰好达到全局上限 maxHotbarGlyphs。
-	want := []uint32{2 + core.InventorySlots*2 + chestQuads + healthQuads, maxHotbarGlyphs}
+	// fullTestInventory 里的物品都没有耐久上限；分组面板、两种高亮、栏位与双层物品
+	// 加满箱子和满生命条形成当前实例数，数字数量由背包与箱子共同达到上限。
+	want := []uint32{openInventoryPanelQuads + 2 + core.InventorySlots*3 + chestQuads + healthQuads, maxHotbarGlyphs}
 	if got := pass.drawInstances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("draw 实例数=%v want=%v", got, want)
 	}
@@ -500,7 +674,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 
 // Mutation killed: rendering an empty prepared layout emits an observable pass.
 func TestHotbarRendererSkipsEmptyPreparedLayout(t *testing.T) {
-	renderer := NewHotbarRenderer(&nameTagTestDevice{}, gfx.FormatRGBA8Unorm, newFakeNameTagAtlas())
+	renderer := NewHotbarRenderer(&nameTagTestDevice{}, gfx.FormatRGBA8Unorm, newFakeNameTagAtlas(), assets.NewRegistry())
 	defer renderer.Release()
 	if err := renderer.Prepare(core.Inventory{}, false, -1, nil, nil, MiningOverlay{}, HealthOverlay{}, 0, 0, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -517,7 +691,7 @@ func TestHotbarRendererSkipsEmptyPreparedLayout(t *testing.T) {
 func TestHotbarRendererReleaseOwnsOnlyItsHandles(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
 	dev := &nameTagTestDevice{}
-	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas)
+	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, assets.NewRegistry())
 	renderer.Release()
 	renderer.Release()
 
@@ -533,6 +707,12 @@ func TestHotbarRendererReleaseOwnsOnlyItsHandles(t *testing.T) {
 	}
 	if dev.bind.releases != 1 || dev.sampler.releases != 1 {
 		t.Errorf("bind/sampler releases=%d/%d want=1/1", dev.bind.releases, dev.sampler.releases)
+	}
+	for _, texture := range dev.textures {
+		if texture.releases != 1 || texture.view.releases != 1 {
+			t.Errorf("texture/view %q releases=%d/%d want=1/1",
+				texture.desc.Label, texture.releases, texture.view.releases)
+		}
 	}
 	if atlas.view.releases != 0 || atlas.releases != 0 {
 		t.Fatalf("借用的 atlas/view releases=%d/%d want=0/0", atlas.releases, atlas.view.releases)
@@ -591,7 +771,7 @@ func TestHotbarRendererHeadlessBlendOverExistingColor(t *testing.T) {
 		t.Fatalf("NewGlyphAtlas: %v", err)
 	}
 	defer atlas.Release()
-	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas)
+	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, assets.NewRegistry())
 	defer renderer.Release()
 	if err := renderer.Prepare(
 		fullTestInventory(), true, 0, nil, nil, MiningOverlay{},
@@ -623,9 +803,13 @@ func TestInventoryLayoutOpensThreeBackpackRows(t *testing.T) {
 	var inventory core.Inventory
 	got := layoutInventory(&layout, atlas, inventory, true, 12, nil, nil, MiningOverlay{}, 1280, 720)
 
-	// 选中框 + 来源高亮 + 36 个栏位背景 + 固定配方行。
-	if len(got.quads) != 2+core.InventorySlots+recipeQuads {
-		t.Fatalf("打开时 quads=%d，想要 %d", len(got.quads), 2+core.InventorySlots+recipeQuads)
+	// 外框、背包区、快捷栏区与分隔线 + 选中框 + 来源高亮 + 36 格 + 固定配方行。
+	if len(got.quads) != openInventoryPanelQuads+2+core.InventorySlots+recipeQuads {
+		t.Fatalf("打开时 quads=%d，想要 %d", len(got.quads), openInventoryPanelQuads+2+core.InventorySlots+recipeQuads)
+	}
+	panels := got.quads[:openInventoryPanelQuads]
+	if panels[1].Y >= panels[2].Y || panels[1].Color == panels[2].Color || panels[3].Height <= 0 {
+		t.Fatalf("背包分组面板不清晰: %+v", panels)
 	}
 	hotbarY := float32(720) - hotbarBottomMargin - hotbarSlotSize
 	for slot := range core.InventorySlots {
@@ -666,38 +850,32 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 	var layout hotbarLayout
 
 	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
-	// source=-1：只有选中框，没有来源高亮；空背包没有物品色块。
-	if len(open.quads) != 1+core.InventorySlots+recipeQuads {
-		t.Fatalf("空背包 quads=%d，想要选中框、36 格和 %d 个配方实例共 %d",
-			len(open.quads), recipeQuads, 1+core.InventorySlots+recipeQuads)
+	// source=-1：四层背包分组面板加选中框，没有来源高亮；空背包没有物品色块。
+	if len(open.quads) != openInventoryPanelQuads+1+core.InventorySlots+recipeQuads {
+		t.Fatalf("空背包 quads=%d，想要分组面板、选中框、36 格和 %d 个配方实例共 %d",
+			len(open.quads), recipeQuads, openInventoryPanelQuads+1+core.InventorySlots+recipeQuads)
 	}
-	if len(open.glyphs) != recipeGlyphs {
-		t.Fatalf("六条配方数字=%d，想要每条输入输出各一位共 %d", len(open.glyphs), recipeGlyphs)
+	if len(open.glyphs) != 14 {
+		t.Fatalf("六条配方数字=%d，想要隐藏单件输出并为其余数字绘制阴影共 14", len(open.glyphs))
 	}
 	overlay := open.quads[len(open.quads)-recipeQuads:]
-	wantItems := [][4]float32{
-		{128.0 / 255, 128.0 / 255, 128.0 / 255, 1},
-		{122.0 / 255, 118.0 / 255, 112.0 / 255, 1},
-		{128.0 / 255, 128.0 / 255, 128.0 / 255, 1},
-		{88.0 / 255, 86.0 / 255, 88.0 / 255, 1},
-		{220.0 / 255, 220.0 / 255, 224.0 / 255, 1},
-		{214.0 / 255, 214.0 / 255, 216.0 / 255, 1},
-		{128.0 / 255, 128.0 / 255, 128.0 / 255, 1},
-		{104.0 / 255, 112.0 / 255, 120.0 / 255, 1},
-		{220.0 / 255, 220.0 / 255, 224.0 / 255, 1},
-		{190.0 / 255, 198.0 / 255, 210.0 / 255, 1},
-		// 第六行：箱子配方，8 个石头合成 1 个箱子。
-		{128.0 / 255, 128.0 / 255, 128.0 / 255, 1},
-		{156.0 / 255, 108.0 / 255, 58.0 / 255, 1},
+	wantItems := [][2]core.ItemID{
+		{core.ItemStone, core.ItemStoneBrick},
+		{core.ItemStone, core.ItemFurnace},
+		{core.ItemIronIngot, core.ItemIronBlock},
+		{core.ItemStone, core.ItemStonePickaxe},
+		{core.ItemIronIngot, core.ItemIronPickaxe},
+		{core.ItemStone, core.ItemChest},
 	}
 	for row, y := range []float32{420, 368, 316, 264, 212, 160} {
-		input, output := overlay[row*3], overlay[row*3+1]
+		start := 1 + row*9
+		input, output := overlay[start], overlay[start+3]
+		inputFace, outputFace := overlay[start+2], overlay[start+5]
 		if input.X != 408 || output.X != 460 || input.Y != y || output.Y != y {
 			t.Fatalf("配方行 %d 位置错误: input=%+v output=%+v", row, input, output)
 		}
-		if input.Color != wantItems[row*2] || output.Color != wantItems[row*2+1] {
-			t.Fatalf("配方行 %d 物品错误: input=%v output=%v", row, input.Color, output.Color)
-		}
+		assertHotbarItemFace(t, inputFace, wantItems[row][0])
+		assertHotbarItemFace(t, outputFace, wantItems[row][1])
 	}
 	disabled := hotbarRecipeButtonQuads(open)
 	if len(disabled) != len(inventoryRecipeIDs) {
@@ -736,6 +914,45 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 	ironPickaxeButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, iron, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
 	if disabled[4].Color == ironPickaxeButtons[4].Color || disabled[3].Color != ironPickaxeButtons[3].Color {
 		t.Fatal("铁镐配方可用颜色不独立")
+	}
+}
+
+// 杀死变异：小窗口保持固定 48px 会让上方配方行落出 framebuffer；独立缩放命中则会漂移。
+func TestOpenInventoryFitsAndHitsAt640x360(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	for _, char := range hotbarDigits {
+		atlas.glyphs[char] = fakeNameTagGlyph(7)
+	}
+	var layout hotbarLayout
+	got := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 640, 360)
+	for index, quad := range got.quads {
+		if quad.X < 0 || quad.Y < 0 || quad.X+quad.Width > 640 || quad.Y+quad.Height > 360 {
+			t.Fatalf("quad %d 越界: %+v", index, quad)
+		}
+	}
+	for index, glyph := range got.glyphs {
+		if glyph.X < 0 || glyph.Y < 0 || glyph.X+glyph.Width > 640 || glyph.Y+glyph.Height > 360 {
+			t.Fatalf("glyph %d 越界: %+v", index, glyph)
+		}
+	}
+
+	var firstButton hotbarInstance
+	for _, quad := range got.quads {
+		if quad.Height > 0 && quad.Width/quad.Height > 1.9 && quad.Width/quad.Height < 2.1 {
+			firstButton = quad
+			break
+		}
+	}
+	if firstButton.Width == 0 {
+		t.Fatal("未找到缩放后的合成按钮")
+	}
+	recipe, ok := RecipeButtonAt(
+		float64(firstButton.X+firstButton.Width/2),
+		float64(firstButton.Y+firstButton.Height/2),
+		640, 360,
+	)
+	if !ok || recipe != core.RecipeStoneBricks {
+		t.Fatalf("缩放按钮命中=%d,%v，想要石砖配方", recipe, ok)
 	}
 }
 
@@ -787,7 +1004,7 @@ func TestFurnaceOverlayDrawsThreeSlotsAndTwoBars(t *testing.T) {
 	var layout hotbarLayout
 
 	empty := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, &FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 720)
-	// 空熔炉：3 个栏位背景 + 2 条进度条底，没有色块也没有填充。
+	// 空熔炉：面板、3 个栏位背景与 2 条进度条底，没有物品色块或填充。
 	emptyQuads := len(empty.quads)
 	if len(empty.glyphs) != 0 {
 		t.Fatalf("空熔炉数字 = %d，想要 0", len(empty.glyphs))
@@ -796,11 +1013,11 @@ func TestFurnaceOverlayDrawsThreeSlotsAndTwoBars(t *testing.T) {
 	full := layoutInventory(
 		&layout, atlas, core.Inventory{}, true, -1, fullFurnaceOverlay(), nil, MiningOverlay{}, 1280, 720,
 	)
-	if len(full.quads) != emptyQuads+3+2 {
-		t.Fatalf("满熔炉 quads = %d，想要比空熔炉多 3 个色块和 2 条填充", len(full.quads))
+	if len(full.quads) != emptyQuads+3*2+2 {
+		t.Fatalf("满熔炉 quads = %d，想要比空熔炉多 3 个双层色块和 2 条填充", len(full.quads))
 	}
-	if len(full.glyphs) != furnaceGlyphs {
-		t.Fatalf("满熔炉数字 = %d，想要 %d", len(full.glyphs), furnaceGlyphs)
+	if len(full.glyphs) != 12 {
+		t.Fatalf("满熔炉数字 = %d，想要三组两位数含阴影共 12", len(full.glyphs))
 	}
 
 	// 进度条宽度必须随权威计时按比例变化。
@@ -873,8 +1090,8 @@ func TestFurnaceSourceHighlightCoversFurnaceSlots(t *testing.T) {
 			&layout, atlas, core.Inventory{}, true, source,
 			&FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 720,
 		)
-		// 第二个 quad 是来源高亮。
-		highlight := got.quads[1]
+		// 面板和当前选中框之后是来源高亮。
+		highlight := got.quads[openInventoryPanelQuads+1]
 		wantX, wantY := inventorySlotOrigin(source, true, 1280, 720)
 		if source >= core.InventorySlots {
 			wantX, wantY = recipeSlotOrigin(source-core.InventorySlots, 1280, 720)
@@ -906,30 +1123,25 @@ func TestChestOverlayDraws27SlotsWithItemsAndCounts(t *testing.T) {
 	sparse.Items[13] = core.ItemStack{Item: core.ItemCoal, Count: 5}
 	sparse.Items[26] = core.ItemStack{Item: core.ItemIronIngot, Count: 1}
 	got := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, &sparse, MiningOverlay{}, 1280, 720)
-	if len(got.quads) != emptyQuads+3 {
-		t.Fatalf("三格占用 quads=%d，想要比空箱子多 3 个色块", len(got.quads))
+	if len(got.quads) != emptyQuads+3*2 {
+		t.Fatalf("三格占用 quads=%d，想要比空箱子多 3 个双层色块", len(got.quads))
 	}
-	if len(got.glyphs) != 4 {
-		t.Fatalf("数字数量 = %d，想要 64/5/1 共 4 位", len(got.glyphs))
+	if len(got.glyphs) != 6 {
+		t.Fatalf("数字数量 = %d，想要 64/5 含阴影且隐藏 1，共 6 个实例", len(got.glyphs))
 	}
-	swatches := got.quads[emptyQuads:]
-	wantColors := [][4]float32{
-		hotbarItemColor(core.ItemStone),
-		hotbarItemColor(core.ItemCoal),
-		hotbarItemColor(core.ItemIronIngot),
-	}
-	for index, swatch := range swatches {
-		if swatch.Color != wantColors[index] {
-			t.Fatalf("色块 %d 颜色 = %v，想要 %v", index, swatch.Color, wantColors[index])
-		}
+	tiles := got.quads[emptyQuads:]
+	wantItems := []core.ItemID{core.ItemStone, core.ItemCoal, core.ItemIronIngot}
+	for index, item := range wantItems {
+		face := tiles[index*2+1]
+		assertHotbarItemFace(t, face, item)
 	}
 
 	full := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720)
-	if len(full.quads) != emptyQuads+core.ChestSlots {
-		t.Fatalf("满箱子 quads = %d，想要比空箱子多 %d 个色块", len(full.quads), core.ChestSlots)
+	if len(full.quads) != emptyQuads+core.ChestSlots*2 {
+		t.Fatalf("满箱子 quads = %d，想要比空箱子多 %d 个双层色块", len(full.quads), core.ChestSlots)
 	}
-	if len(full.glyphs) != chestGlyphs {
-		t.Fatalf("满箱子数字 = %d，想要 %d", len(full.glyphs), chestGlyphs)
+	if len(full.glyphs) != 108 {
+		t.Fatalf("满箱子数字 = %d，想要 27 组两位数含阴影共 108", len(full.glyphs))
 	}
 }
 
@@ -1005,8 +1217,8 @@ func TestChestSourceHighlightCoversChestSlots(t *testing.T) {
 			&layout, atlas, core.Inventory{}, true, source,
 			nil, &ChestOverlay{}, MiningOverlay{}, 1280, 720,
 		)
-		// 第二个 quad 是来源高亮。
-		highlight := got.quads[1]
+		// 面板和当前选中框之后是来源高亮。
+		highlight := got.quads[openInventoryPanelQuads+1]
 		wantX, wantY := inventorySlotOrigin(source, true, 1280, 720)
 		if source >= core.InventorySlots {
 			wantX, wantY = chestSlotOrigin(source-core.InventorySlots, 1280, 720)

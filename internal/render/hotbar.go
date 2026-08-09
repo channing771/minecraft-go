@@ -5,36 +5,39 @@ import (
 	"encoding/binary"
 	"math"
 
+	"minecraft-go/internal/assets"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
+	"minecraft-go/internal/mesh"
 )
 
 const (
-	// 固定容量按最坏布局：选中框 + 来源高亮 + 36 个栏位背景 + 36 个色块，
-	// 九格快捷栏耐久条，再加固定合成行、熔炉视图与箱子视图中最大的一个，
-	// 最后加生命值 HUD 的背景块。
-	maxHotbarQuads = 2 + core.InventorySlots*2 + core.HotbarSlots*2 + maxOverlayQuads + healthQuads
-	// 数量最多两位数（1..64），每格最多两个数字；生命值同样最多两位数。
-	maxHotbarGlyphs = core.InventorySlots*2 + maxOverlayGlyphs + healthGlyphs
+	// 固定容量按最坏布局：背包分组面板、两种高亮、36 个栏位、双层物品内容、
+	// 九格快捷栏耐久条，再加最大的容器叠加层与十段生命条。
+	maxHotbarQuads = openInventoryPanelQuads + 2 + core.InventorySlots + core.InventorySlots*2 +
+		core.HotbarSlots*2 + maxOverlayQuads + healthQuads
+	// 数量最多两位数（2..64），每个数字包含阴影与前景两个实例。
+	maxHotbarGlyphs = core.InventorySlots*4 + maxOverlayGlyphs
 
-	// 六条固定配方（含箱子），每条包含输入格、输出格、合成按钮和两个数量。
-	recipeQuads  = 6 * 3
-	recipeGlyphs = 6 * 2
-	// 熔炉视图：三个栏位背景、三个物品色块、两条进度条底与两条进度条填充。
-	furnaceQuads = 3 + 3 + 4
+	// 六条固定配方（含箱子）：面板 + 每行两个栏位与双层物品色块、按钮和加号。
+	recipeQuads  = 1 + 6*9
+	recipeGlyphs = 14
+	// 熔炉视图：面板、三个栏位、双层物品色块、两条进度条底与填充。
+	furnaceQuads = 1 + 3 + 3*2 + 4
 	// 三个熔炉格各最多两位数量。
-	furnaceGlyphs = 6
-	// 箱子视图：27 格背景，加最多 27 个物品色块。
-	chestQuads = core.ChestSlots + core.ChestSlots
+	furnaceGlyphs = 12
+	// 箱子视图：面板、27 格背景，加最多 27 个双层物品色块。
+	chestQuads = 1 + core.ChestSlots + core.ChestSlots*2
 	// 箱子每格最多两位数量。
-	chestGlyphs = core.ChestSlots * 2
+	chestGlyphs = core.ChestSlots * 4
 
 	maxOverlayQuads  = max(recipeQuads, furnaceQuads, chestQuads)
 	maxOverlayGlyphs = max(recipeGlyphs, furnaceGlyphs, chestGlyphs)
 
-	// 生命值 HUD：左上角一个背景色块，加最多两位数字（0..core.MaxHealth=20）。
-	healthQuads  = 1
-	healthGlyphs = 2
+	// 生命值 HUD：十颗空心和最多十颗填充爱心，不绘制背景面板。
+	healthQuads = healthSegmentCount * 2
+	// 打开背包时依次绘制外框、背包区、快捷栏区和分隔线。
+	openInventoryPanelQuads = 4
 
 	hotbarInstanceBytes  = 48
 	hotbarViewportOffset = 0
@@ -49,8 +52,11 @@ const (
 	hotbarSlotGap       = float32(4)
 	hotbarBottomMargin  = float32(24)
 	hotbarSelectBorder  = float32(3)
+	hotbarPanelPadding  = float32(6)
 	hotbarSwatchInset   = float32(10)
+	hotbarSwatchBorder  = float32(2)
 	hotbarDigitMargin   = float32(3)
+	hotbarDigitTracking = float32(-2)
 	durabilityBarHeight = float32(3)
 	durabilityBarInset  = float32(4)
 	miningBarWidth      = float32(240)
@@ -64,6 +70,22 @@ const (
 	// 熔炉三格与两条进度条排在背包最上一行之上。
 	furnaceBarHeight = float32(10)
 	furnaceBarGap    = float32(6)
+
+	healthSegmentCount = 10
+	healthHeartSize    = float32(16)
+	healthHeartGap     = float32(1)
+
+	// HUD 图集前两格是代码生成的空心/实心爱心，后续格按 ItemID 放置真实方块顶面。
+	hotbarTextureSize       = 16
+	hotbarEmptyHeartColumn  = 0
+	hotbarFullHeartColumn   = 1
+	hotbarBlockColumnOffset = 2
+	hotbarTextureColumns    = hotbarBlockColumnOffset + int(core.ItemChest) + 1
+	hotbarTextureWidth      = hotbarTextureColumns * hotbarTextureSize
+
+	hudEdgeMargin = float32(8)
+	// 固定合成最上沿到快捷栏下沿（含面板边距）的设计高度。
+	openHUDHeight = float32(566)
 )
 
 // ponytail: 当前只有六条固定配方；需要分页或分类时再引入共享目录。
@@ -91,6 +113,8 @@ type hotbarInstance struct {
 type hotbarLayout struct {
 	quads  []hotbarInstance
 	glyphs []hotbarInstance
+	scale  float32
+	open   bool
 }
 
 // HotbarRenderer 以固定容量绘制 9 格快捷栏 HUD。
@@ -103,6 +127,8 @@ type HotbarRenderer struct {
 	glyphPipeline gfx.RenderPipeline
 	bind          gfx.BindGroup
 	sampler       gfx.Sampler
+	hudTexture    gfx.Texture
+	hudView       gfx.TextureView
 
 	layout hotbarLayout
 	upload []byte
@@ -112,6 +138,7 @@ func NewHotbarRenderer(
 	dev gfx.Device,
 	colorFormat gfx.TextureFormat,
 	atlas GlyphSource,
+	blocks *assets.Registry,
 ) *HotbarRenderer {
 	renderer := &HotbarRenderer{
 		atlas:  atlas,
@@ -137,6 +164,10 @@ func NewHotbarRenderer(
 				VisibleIn: gfx.StageFragment, ViewDimension: gfx.TextureViewDimension2D,
 			},
 			{Binding: 4, Type: gfx.BindingSampler, VisibleIn: gfx.StageFragment},
+			{
+				Binding: 5, Type: gfx.BindingSampledTextureFloat,
+				VisibleIn: gfx.StageFragment, ViewDimension: gfx.TextureViewDimension2D,
+			},
 		},
 	}
 	module := dev.CreateShaderModule(hotbarShader)
@@ -148,9 +179,15 @@ func NewHotbarRenderer(
 	))
 	module.Release()
 	renderer.sampler = dev.CreateSampler(gfx.SamplerDesc{
-		Label: "hotbar glyph sampler", MagFilter: gfx.FilterLinear, MinFilter: gfx.FilterLinear,
+		Label: "hotbar atlas sampler", MagFilter: gfx.FilterNearest, MinFilter: gfx.FilterNearest,
 		MipFilter: gfx.FilterNearest, Address: gfx.AddressClampToEdge,
 	})
+	renderer.hudTexture = dev.CreateTexture(gfx.TextureDesc{
+		Label: "hotbar texture atlas", Width: uint32(hotbarTextureWidth), Height: hotbarTextureSize,
+		Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageBinding | gfx.TextureUsageCopyDst,
+	})
+	renderer.hudTexture.WriteLayer(0, 0, buildHotbarTextureAtlas(blocks))
+	renderer.hudView = renderer.hudTexture.View(gfx.TextureViewDesc{})
 	renderer.bind = dev.CreateBindGroup(gfx.BindGroupDesc{
 		Label:  "hotbar resources",
 		Layout: layout,
@@ -169,6 +206,7 @@ func NewHotbarRenderer(
 			},
 			{Binding: 3, Texture: atlas.TextureView()},
 			{Binding: 4, Sampler: renderer.sampler},
+			{Binding: 5, Texture: renderer.hudView},
 		},
 	})
 	return renderer
@@ -274,31 +312,37 @@ func layoutInventory(
 	}
 	dst.quads = dst.quads[:0]
 	dst.glyphs = dst.glyphs[:0]
+	dst.scale = hudScale(open, width, height)
+	dst.open = open
 	if width <= 0 || height <= 0 || !inventory.Valid() {
 		return *dst
 	}
 
+	scale := dst.scale
+	slotSize := hotbarSlotSize * scale
+	selectBorder := hotbarSelectBorder * scale
 	slots := core.HotbarSlots
 	if open {
 		slots = core.InventorySlots
 	}
-	// 选中框先绘制，随后的栏位背景只覆盖内部，留下可见边框。
+	appendInventoryPanel(dst, open, width, height, scale)
+	// 高亮先于栏位表面绘制，栏位只覆盖内部并留下像素边框。
 	selectedX, selectedY := inventorySlotOrigin(int(inventory.Hotbar.Selected), open, width, height)
 	dst.quads = append(dst.quads, hotbarInstance{
-		X:      selectedX - hotbarSelectBorder,
-		Y:      selectedY - hotbarSelectBorder,
-		Width:  hotbarSlotSize + 2*hotbarSelectBorder,
-		Height: hotbarSlotSize + 2*hotbarSelectBorder,
-		Color:  [4]float32{1, 1, 1, 0.92},
+		X:      selectedX - selectBorder,
+		Y:      selectedY - selectBorder,
+		Width:  slotSize + 2*selectBorder,
+		Height: slotSize + 2*selectBorder,
+		Color:  [4]float32{1, 0.72, 0.24, 0.98},
 	})
 	if open && source >= 0 {
 		if sourceX, sourceY, ok := containerSourceOrigin(source, overlay, chest, width, height); ok {
 			dst.quads = append(dst.quads, hotbarInstance{
-				X:      sourceX - hotbarSelectBorder,
-				Y:      sourceY - hotbarSelectBorder,
-				Width:  hotbarSlotSize + 2*hotbarSelectBorder,
-				Height: hotbarSlotSize + 2*hotbarSelectBorder,
-				Color:  [4]float32{0.35, 0.75, 1, 0.95},
+				X:      sourceX - selectBorder,
+				Y:      sourceY - selectBorder,
+				Width:  slotSize + 2*selectBorder,
+				Height: slotSize + 2*selectBorder,
+				Color:  [4]float32{0.25, 0.72, 1, 0.98},
 			})
 		}
 	}
@@ -306,8 +350,8 @@ func layoutInventory(
 		x, y := inventorySlotOrigin(slot, open, width, height)
 		dst.quads = append(dst.quads, hotbarInstance{
 			X: x, Y: y,
-			Width: hotbarSlotSize, Height: hotbarSlotSize,
-			Color: [4]float32{0.05, 0.05, 0.06, 0.62},
+			Width: slotSize, Height: slotSize,
+			Color: [4]float32{0.12, 0.13, 0.14, 0.90},
 		})
 	}
 	for slot := range slots {
@@ -316,13 +360,7 @@ func layoutInventory(
 			continue
 		}
 		x, y := inventorySlotOrigin(slot, open, width, height)
-		dst.quads = append(dst.quads, hotbarInstance{
-			X:      x + hotbarSwatchInset,
-			Y:      y + hotbarSwatchInset,
-			Width:  hotbarSlotSize - 2*hotbarSwatchInset,
-			Height: hotbarSlotSize - 2*hotbarSwatchInset,
-			Color:  hotbarItemColor(stack.Item),
-		})
+		appendItemTile(dst, stack.Item, x, y, scale)
 	}
 	for slot := range slots {
 		stack, _ := inventory.Slot(uint8(slot))
@@ -330,10 +368,10 @@ func layoutInventory(
 			continue
 		}
 		x, y := inventorySlotOrigin(slot, open, width, height)
-		appendHotbarCount(dst, atlas, stack.Count, x, y)
+		appendHotbarCountScaled(dst, atlas, stack.Count, x, y, scale)
 	}
 	for slot, stack := range inventory.Hotbar.Slots {
-		appendDurabilityBar(dst, slot, stack, width, height)
+		appendDurabilityBarScaled(dst, slot, stack, open, width, height, scale)
 	}
 	if open {
 		switch {
@@ -348,6 +386,66 @@ func layoutInventory(
 		appendMiningBar(dst, mining, width, height)
 	}
 	return *dst
+}
+
+func appendInventoryPanel(dst *hotbarLayout, open bool, width, height, scale float32) {
+	left, hotbarY := inventorySlotOrigin(0, open, width, height)
+	top := hotbarY
+	if open {
+		_, top = inventorySlotOrigin(core.HotbarSlots, true, width, height)
+	}
+	padding := hotbarPanelPadding * scale
+	totalWidth := (core.HotbarSlots*hotbarSlotSize + (core.HotbarSlots-1)*hotbarSlotGap) * scale
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: left - padding, Y: top - padding,
+		Width: totalWidth + 2*padding, Height: hotbarY + hotbarSlotSize*scale - top + 2*padding,
+		Color: [4]float32{0.025, 0.03, 0.035, 0.88},
+	})
+	if !open {
+		return
+	}
+	_, backpackBottomY := inventorySlotOrigin(core.InventorySlots-1, true, width, height)
+	innerPadding := padding * 0.5
+	dst.quads = append(dst.quads,
+		hotbarInstance{
+			X: left - innerPadding, Y: top - innerPadding,
+			Width:  totalWidth + 2*innerPadding,
+			Height: backpackBottomY + hotbarSlotSize*scale - top + 2*innerPadding,
+			Color:  [4]float32{0.045, 0.052, 0.06, 0.94},
+		},
+		hotbarInstance{
+			X: left - innerPadding, Y: hotbarY - innerPadding,
+			Width: totalWidth + 2*innerPadding, Height: hotbarSlotSize*scale + 2*innerPadding,
+			Color: [4]float32{0.06, 0.052, 0.04, 0.94},
+		},
+		hotbarInstance{
+			X: left, Y: (backpackBottomY + hotbarSlotSize*scale + hotbarY) * 0.5,
+			Width: totalWidth, Height: max(scale*2, 1),
+			Color: [4]float32{0.25, 0.30, 0.34, 0.92},
+		},
+	)
+}
+
+// appendItemTile 用已有矩形画出带暗边的物品；可放置方块采样真实注册表材质，
+// 其他物品继续使用程序化色块。
+func appendItemTile(dst *hotbarLayout, item core.ItemID, x, y, scale float32) {
+	color := hotbarItemColor(item)
+	inset := hotbarSwatchInset * scale
+	border := hotbarSwatchBorder * scale
+	size := (hotbarSlotSize - 2*hotbarSwatchInset) * scale
+	face := hotbarInstance{
+		X: x + inset + border, Y: y + inset + border,
+		Width: size - 2*border, Height: size - 2*border,
+		Color: color,
+	}
+	if uv, ok := hotbarItemUV(item); ok {
+		face.U0, face.V0, face.U1, face.V1 = uv[0], uv[1], uv[2], uv[3]
+		face.Color = [4]float32{1, 1, 1, 1}
+	}
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: x + inset, Y: y + inset, Width: size, Height: size,
+		Color: [4]float32{color[0] * 0.35, color[1] * 0.35, color[2] * 0.35, color[3]},
+	}, face)
 }
 
 // containerSourceOrigin 返回来源高亮格的左上角像素坐标；索引落在当前打开的容器视图之外
@@ -382,16 +480,26 @@ func appendDurabilityBar(
 	stack core.ItemStack,
 	width, height float32,
 ) {
+	appendDurabilityBarScaled(dst, slot, stack, false, width, height, hudScale(false, width, height))
+}
+
+func appendDurabilityBarScaled(
+	dst *hotbarLayout,
+	slot int,
+	stack core.ItemStack,
+	open bool,
+	width, height, scale float32,
+) {
 	maxDurability, ok := core.ItemMaxDurability(stack.Item)
 	if !ok || maxDurability == 0 || stack.Durability == 0 || stack.Durability >= maxDurability {
 		return
 	}
-	slotX, slotY := inventorySlotOrigin(slot, false, width, height)
-	barWidth := hotbarSlotSize - durabilityBarInset*2
-	x := slotX + durabilityBarInset
-	y := slotY + hotbarSlotSize - durabilityBarInset - durabilityBarHeight
+	slotX, slotY := inventorySlotOrigin(slot, open, width, height)
+	barWidth := (hotbarSlotSize - durabilityBarInset*2) * scale
+	x := slotX + durabilityBarInset*scale
+	y := slotY + (hotbarSlotSize-durabilityBarInset-durabilityBarHeight)*scale
 	dst.quads = append(dst.quads, hotbarInstance{
-		X: x, Y: y, Width: barWidth, Height: durabilityBarHeight,
+		X: x, Y: y, Width: barWidth, Height: durabilityBarHeight * scale,
 		Color: [4]float32{0.05, 0.05, 0.06, 0.85},
 	})
 	fraction := float32(stack.Durability) / float32(maxDurability)
@@ -400,7 +508,7 @@ func appendDurabilityBar(
 		color = [4]float32{0.90, 0.35, 0.25, 0.95}
 	}
 	dst.quads = append(dst.quads, hotbarInstance{
-		X: x, Y: y, Width: barWidth * fraction, Height: durabilityBarHeight,
+		X: x, Y: y, Width: barWidth * fraction, Height: durabilityBarHeight * scale,
 		Color: color,
 	})
 }
@@ -418,11 +526,14 @@ func appendMiningBar(dst *hotbarLayout, overlay MiningOverlay, width, height flo
 	if !overlay.Active || overlay.RequiredTicks == 0 {
 		return
 	}
-	x := (width - miningBarWidth) * 0.5
+	scale := hudScale(false, width, height)
+	barWidth := miningBarWidth * scale
+	barHeight := miningBarHeight * scale
+	x := (width - barWidth) * 0.5
 	_, hotbarY := inventorySlotOrigin(0, false, width, height)
-	y := hotbarY - miningBarGap - miningBarHeight
+	y := hotbarY - (miningBarGap+miningBarHeight)*scale
 	dst.quads = append(dst.quads, hotbarInstance{
-		X: x, Y: y, Width: miningBarWidth, Height: miningBarHeight,
+		X: x, Y: y, Width: barWidth, Height: barHeight,
 		Color: [4]float32{0.05, 0.05, 0.06, 0.78},
 	})
 	fraction := float32(overlay.ProgressTicks) / float32(overlay.RequiredTicks)
@@ -434,7 +545,7 @@ func appendMiningBar(dst *hotbarLayout, overlay MiningOverlay, width, height flo
 		color = [4]float32{0.30, 0.78, 0.36, 0.95}
 	}
 	dst.quads = append(dst.quads, hotbarInstance{
-		X: x, Y: y, Width: miningBarWidth * min(fraction, 1), Height: miningBarHeight,
+		X: x, Y: y, Width: barWidth * min(fraction, 1), Height: barHeight,
 		Color: color,
 	})
 }
@@ -447,18 +558,44 @@ type HealthOverlay struct {
 	Value     uint8
 }
 
-// appendHealthBar 在屏幕左上角绘制服务端确认的生命值，复用栏位数量数字的
-// 绘制逻辑与同一个背景色块 quad。未确认或 framebuffer 退化时不绘制任何实例。
+// appendHealthBar 在 framebuffer 左下角绘制一排无背景的服务端确认爱心；
+// 每颗两点，奇数值画半颗，打开背包不会改变其尺度或位置。
 func appendHealthBar(dst *hotbarLayout, atlas GlyphSource, health HealthOverlay, width, height float32) {
 	if !health.Confirmed || width <= 0 || height <= 0 {
 		return
 	}
-	x, y := hotbarBottomMargin, hotbarBottomMargin
-	dst.quads = append(dst.quads, hotbarInstance{
-		X: x, Y: y, Width: hotbarSlotSize, Height: hotbarSlotSize,
-		Color: [4]float32{0.55, 0.12, 0.12, 0.78},
-	})
-	appendHotbarCount(dst, atlas, health.Value, x, y)
+	_ = atlas
+	scale := hudScale(false, width, height)
+	x := hudEdgeMargin * scale
+	heartSize := healthHeartSize * scale
+	heartGap := healthHeartGap * scale
+	y := height - (hudEdgeMargin+healthHeartSize)*scale
+	emptyUV := hotbarTextureUV(hotbarEmptyHeartColumn)
+	for segment := range healthSegmentCount {
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: x + float32(segment)*(heartSize+heartGap), Y: y,
+			Width: heartSize, Height: heartSize,
+			U0: emptyUV[0], V0: emptyUV[1], U1: emptyUV[2], V1: emptyUV[3],
+			Color: [4]float32{1, 1, 1, 1},
+		})
+	}
+	value := min(health.Value, uint8(core.MaxHealth))
+	filled := (int(value) + 1) / 2
+	fullUV := hotbarTextureUV(hotbarFullHeartColumn)
+	for segment := range filled {
+		fillWidth := heartSize
+		fillU1 := fullUV[2]
+		if segment == filled-1 && value%2 != 0 {
+			fillWidth *= 0.5
+			fillU1 = (fullUV[0] + fullUV[2]) * 0.5
+		}
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: x + float32(segment)*(heartSize+heartGap), Y: y,
+			Width: fillWidth, Height: heartSize,
+			U0: fullUV[0], V0: fullUV[1], U1: fillU1, V1: fullUV[3],
+			Color: [4]float32{1, 1, 1, 1},
+		})
+	}
 }
 
 // FurnaceOverlay 是熔炉界面需要显示的全部权威值。
@@ -478,25 +615,29 @@ func appendFurnaceRow(
 	overlay FurnaceOverlay,
 	width, height float32,
 ) {
+	scale := hudScale(true, width, height)
+	padding := hotbarPanelPadding * scale
+	panelX, slotY := recipeSlotOrigin(0, width, height)
+	_, barTop := furnaceBarOrigin(width, height)
+	panelWidth := (3*hotbarSlotSize+2*hotbarSlotGap)*scale + 2*padding
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: panelX - padding, Y: barTop - padding,
+		Width: panelWidth, Height: slotY + hotbarSlotSize*scale - barTop + 2*padding,
+		Color: [4]float32{0.025, 0.03, 0.035, 0.88},
+	})
 	stacks := [3]core.ItemStack{overlay.Input, overlay.Fuel, overlay.Output}
 	for index, stack := range stacks {
 		x, y := recipeSlotOrigin(index, width, height)
 		dst.quads = append(dst.quads, hotbarInstance{
 			X: x, Y: y,
-			Width: hotbarSlotSize, Height: hotbarSlotSize,
-			Color: [4]float32{0.05, 0.05, 0.06, 0.62},
+			Width: hotbarSlotSize * scale, Height: hotbarSlotSize * scale,
+			Color: [4]float32{0.12, 0.13, 0.14, 0.90},
 		})
 		if stack.Item == core.ItemNone {
 			continue
 		}
-		dst.quads = append(dst.quads, hotbarInstance{
-			X:      x + hotbarSwatchInset,
-			Y:      y + hotbarSwatchInset,
-			Width:  hotbarSlotSize - 2*hotbarSwatchInset,
-			Height: hotbarSlotSize - 2*hotbarSwatchInset,
-			Color:  hotbarItemColor(stack.Item),
-		})
-		appendHotbarCount(dst, atlas, stack.Count, x, y)
+		appendItemTile(dst, stack.Item, x, y, scale)
+		appendHotbarCountScaled(dst, atlas, stack.Count, x, y, scale)
 	}
 
 	// 两条进度条分别显示剩余燃烧量与当前熔炼进度。
@@ -510,11 +651,11 @@ func appendFurnaceRow(
 			[4]float32{0.35, 0.75, 1, 0.95}},
 	}
 	barX, barTop := furnaceBarOrigin(width, height)
-	barWidth := 3*hotbarSlotSize + 2*hotbarSlotGap
+	barWidth := (3*hotbarSlotSize + 2*hotbarSlotGap) * scale
 	for index, bar := range bars {
-		y := barTop + float32(index)*(furnaceBarHeight+furnaceBarGap)
+		y := barTop + float32(index)*(furnaceBarHeight+furnaceBarGap)*scale
 		dst.quads = append(dst.quads, hotbarInstance{
-			X: barX, Y: y, Width: barWidth, Height: furnaceBarHeight,
+			X: barX, Y: y, Width: barWidth, Height: furnaceBarHeight * scale,
 			Color: [4]float32{0.05, 0.05, 0.06, 0.62},
 		})
 		if bar.fraction <= 0 {
@@ -522,7 +663,7 @@ func appendFurnaceRow(
 		}
 		dst.quads = append(dst.quads, hotbarInstance{
 			X: barX, Y: y,
-			Width: barWidth * min(bar.fraction, 1), Height: furnaceBarHeight,
+			Width: barWidth * min(bar.fraction, 1), Height: furnaceBarHeight * scale,
 			Color: bar.color,
 		})
 	}
@@ -531,7 +672,8 @@ func appendFurnaceRow(
 // furnaceBarOrigin 返回两条进度条的左上角像素坐标。
 func furnaceBarOrigin(width, height float32) (float32, float32) {
 	x, y := recipeSlotOrigin(0, width, height)
-	return x, y - furnaceBarGap - 2*furnaceBarHeight - furnaceBarGap
+	scale := hudScale(true, width, height)
+	return x, y - (2*furnaceBarGap+2*furnaceBarHeight)*scale
 }
 
 // FurnaceSlotAt 把光标像素坐标映射为熔炉界面的统一索引 0..38。
@@ -544,9 +686,10 @@ func FurnaceSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool)
 		return 0, false
 	}
 	x, y := float32(cursorX), float32(cursorY)
+	slotSize := hotbarSlotSize * hudScale(true, float32(width), float32(height))
 	for index := range 3 {
 		left, top := recipeSlotOrigin(index, float32(width), float32(height))
-		if x >= left && x < left+hotbarSlotSize && y >= top && y < top+hotbarSlotSize {
+		if x >= left && x < left+slotSize && y >= top && y < top+slotSize {
 			return core.InventorySlots + uint8(index), true
 		}
 	}
@@ -566,12 +709,22 @@ func appendChestGrid(
 	overlay ChestOverlay,
 	width, height float32,
 ) {
+	scale := hudScale(true, width, height)
+	padding := hotbarPanelPadding * scale
+	left, bottomY := chestSlotOrigin(0, width, height)
+	_, top := chestSlotOrigin(core.ChestSlots-core.HotbarSlots, width, height)
+	totalWidth := (core.HotbarSlots*hotbarSlotSize + (core.HotbarSlots-1)*hotbarSlotGap) * scale
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: left - padding, Y: top - padding,
+		Width: totalWidth + 2*padding, Height: bottomY + hotbarSlotSize*scale - top + 2*padding,
+		Color: [4]float32{0.025, 0.03, 0.035, 0.88},
+	})
 	for index := range core.ChestSlots {
 		x, y := chestSlotOrigin(index, width, height)
 		dst.quads = append(dst.quads, hotbarInstance{
 			X: x, Y: y,
-			Width: hotbarSlotSize, Height: hotbarSlotSize,
-			Color: [4]float32{0.05, 0.05, 0.06, 0.62},
+			Width: hotbarSlotSize * scale, Height: hotbarSlotSize * scale,
+			Color: [4]float32{0.12, 0.13, 0.14, 0.90},
 		})
 	}
 	for index, stack := range overlay.Items {
@@ -579,14 +732,8 @@ func appendChestGrid(
 			continue
 		}
 		x, y := chestSlotOrigin(index, width, height)
-		dst.quads = append(dst.quads, hotbarInstance{
-			X:      x + hotbarSwatchInset,
-			Y:      y + hotbarSwatchInset,
-			Width:  hotbarSlotSize - 2*hotbarSwatchInset,
-			Height: hotbarSlotSize - 2*hotbarSwatchInset,
-			Color:  hotbarItemColor(stack.Item),
-		})
-		appendHotbarCount(dst, atlas, stack.Count, x, y)
+		appendItemTile(dst, stack.Item, x, y, scale)
+		appendHotbarCountScaled(dst, atlas, stack.Count, x, y, scale)
 	}
 }
 
@@ -596,7 +743,7 @@ func chestSlotOrigin(index int, width, height float32) (float32, float32) {
 	row := index / core.HotbarSlots
 	column := index % core.HotbarSlots
 	x, y := recipeSlotOrigin(column, width, height)
-	return x, y - float32(row)*(hotbarSlotSize+hotbarSlotGap)
+	return x, y - float32(row)*(hotbarSlotSize+hotbarSlotGap)*hudScale(true, width, height)
 }
 
 // ChestSlotAt 把光标像素坐标映射为箱子界面的统一索引 0..62。
@@ -609,9 +756,10 @@ func ChestSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool) {
 		return 0, false
 	}
 	x, y := float32(cursorX), float32(cursorY)
+	slotSize := hotbarSlotSize * hudScale(true, float32(width), float32(height))
 	for index := range core.ChestSlots {
 		left, top := chestSlotOrigin(index, float32(width), float32(height))
-		if x >= left && x < left+hotbarSlotSize && y >= top && y < top+hotbarSlotSize {
+		if x >= left && x < left+slotSize && y >= top && y < top+slotSize {
 			return core.InventorySlots + uint8(index), true
 		}
 	}
@@ -625,6 +773,17 @@ func appendRecipeRows(
 	inventory core.Inventory,
 	width, height float32,
 ) {
+	scale := hudScale(true, width, height)
+	padding := hotbarPanelPadding * scale
+	left, bottomY := craftingRecipeSlotOrigin(0, 0, width, height)
+	_, top := craftingRecipeSlotOrigin(len(inventoryRecipeIDs)-1, 0, width, height)
+	buttonX, _ := craftingRecipeButtonOrigin(0, width, height)
+	dst.quads = append(dst.quads, hotbarInstance{
+		X: left - padding, Y: top - padding,
+		Width:  buttonX + recipeButtonWidth*scale - left + 2*padding,
+		Height: bottomY + hotbarSlotSize*scale - top + 2*padding,
+		Color:  [4]float32{0.025, 0.03, 0.035, 0.88},
+	})
 	for row, recipeID := range inventoryRecipeIDs {
 		recipe, ok := core.Recipe(recipeID)
 		if !ok {
@@ -641,22 +800,34 @@ func appendRecipeRows(
 		} {
 			dst.quads = append(dst.quads, hotbarInstance{
 				X: entry.x, Y: entry.y,
-				Width: hotbarSlotSize, Height: hotbarSlotSize,
-				Color: hotbarItemColor(entry.stack.Item),
+				Width: hotbarSlotSize * scale, Height: hotbarSlotSize * scale,
+				Color: [4]float32{0.12, 0.13, 0.14, 0.90},
 			})
-			appendHotbarCount(dst, atlas, entry.stack.Count, entry.x, entry.y)
+			appendItemTile(dst, entry.stack.Item, entry.x, entry.y, scale)
+			appendHotbarCountScaled(dst, atlas, entry.stack.Count, entry.x, entry.y, scale)
 		}
 
 		// 按钮颜色只表示是否可合成；服务端每次仍重新验证。
-		color := [4]float32{0.28, 0.28, 0.30, 0.85}
+		color := [4]float32{0.18, 0.19, 0.20, 0.94}
+		markColor := [4]float32{0.55, 0.57, 0.60, 0.96}
 		if _, craftable := inventory.Craft(recipeID); craftable {
-			color = [4]float32{0.30, 0.68, 0.36, 0.95}
+			color = [4]float32{0.22, 0.64, 0.32, 0.98}
+			markColor = [4]float32{0.90, 1, 0.90, 1}
 		}
 		buttonX, buttonY := craftingRecipeButtonOrigin(row, width, height)
 		dst.quads = append(dst.quads, hotbarInstance{
 			X: buttonX, Y: buttonY,
-			Width: recipeButtonWidth, Height: hotbarSlotSize,
+			Width: recipeButtonWidth * scale, Height: hotbarSlotSize * scale,
 			Color: color,
+		})
+		centerX := buttonX + recipeButtonWidth*scale*0.5
+		centerY := buttonY + hotbarSlotSize*scale*0.5
+		dst.quads = append(dst.quads, hotbarInstance{
+			X: centerX - 7*scale, Y: centerY - 2*scale,
+			Width: 14 * scale, Height: 4 * scale, Color: markColor,
+		}, hotbarInstance{
+			X: centerX - 2*scale, Y: centerY - 7*scale,
+			Width: 4 * scale, Height: 14 * scale, Color: markColor,
 		})
 	}
 }
@@ -665,13 +836,14 @@ func appendRecipeRows(
 func recipeSlotOrigin(index int, width, height float32) (float32, float32) {
 	x, _ := inventorySlotOrigin(index, true, width, height)
 	_, topRowY := inventorySlotOrigin(core.HotbarSlots, true, width, height)
-	return x, topRowY - recipeRowGap - hotbarSlotSize
+	scale := hudScale(true, width, height)
+	return x, topRowY - (recipeRowGap+hotbarSlotSize)*scale
 }
 
 // craftingRecipeSlotOrigin 返回第 row 条配方中第 index 个格子的左上角像素坐标。
 func craftingRecipeSlotOrigin(row, index int, width, height float32) (float32, float32) {
 	x, y := recipeSlotOrigin(index, width, height)
-	return x, y - float32(row)*(hotbarSlotSize+hotbarSlotGap)
+	return x, y - float32(row)*(hotbarSlotSize+hotbarSlotGap)*hudScale(true, width, height)
 }
 
 // craftingRecipeButtonOrigin 返回第 row 条配方按钮的左上角像素坐标。
@@ -686,9 +858,10 @@ func RecipeButtonAt(cursorX, cursorY float64, width, height uint32) (core.Recipe
 		return 0, false
 	}
 	x, y := float32(cursorX), float32(cursorY)
+	scale := hudScale(true, float32(width), float32(height))
 	for row, recipe := range inventoryRecipeIDs {
 		left, top := craftingRecipeButtonOrigin(row, float32(width), float32(height))
-		if x >= left && x < left+recipeButtonWidth && y >= top && y < top+hotbarSlotSize {
+		if x >= left && x < left+recipeButtonWidth*scale && y >= top && y < top+hotbarSlotSize*scale {
 			return recipe, true
 		}
 	}
@@ -698,18 +871,37 @@ func RecipeButtonAt(cursorX, cursorY float64, width, height uint32) (core.Recipe
 // inventorySlotOrigin 返回统一索引对应格子的左上角像素坐标。
 // 索引 0..8 是底部快捷栏行，9..35 是其上方自上而下的三行背包。
 func inventorySlotOrigin(slot int, open bool, width, height float32) (float32, float32) {
+	scale := hudScale(open, width, height)
 	column := slot % core.HotbarSlots
-	total := core.HotbarSlots*hotbarSlotSize + (core.HotbarSlots-1)*hotbarSlotGap
-	x := (width-total)*0.5 + float32(column)*(hotbarSlotSize+hotbarSlotGap)
-	hotbarY := height - hotbarBottomMargin - hotbarSlotSize
+	total := (core.HotbarSlots*hotbarSlotSize + (core.HotbarSlots-1)*hotbarSlotGap) * scale
+	x := (width-total)*0.5 + float32(column)*(hotbarSlotSize+hotbarSlotGap)*scale
+	hotbarY := height - (hotbarBottomMargin+hotbarSlotSize)*scale
 	if !open || slot < core.HotbarSlots {
 		return x, hotbarY
 	}
 	// 背包第 0 行在最上方，第 2 行紧邻快捷栏。
 	row := (slot - core.HotbarSlots) / core.HotbarSlots
 	rowsAbove := float32(2 - row)
-	y := hotbarY - inventoryRowGap - (rowsAbove+1)*hotbarSlotSize - rowsAbove*hotbarSlotGap
+	y := hotbarY - (inventoryRowGap+(rowsAbove+1)*hotbarSlotSize+rowsAbove*hotbarSlotGap)*scale
 	return x, y
+}
+
+func hudScale(open bool, width, height float32) float32 {
+	if width <= 0 || height <= 0 {
+		return 1
+	}
+	scale := float32(1)
+	contentWidth := core.HotbarSlots*hotbarSlotSize +
+		(core.HotbarSlots-1)*hotbarSlotGap + 2*hotbarPanelPadding
+	if available := width - 2*hudEdgeMargin; available < contentWidth {
+		scale = max(available/contentWidth, 0)
+	}
+	if open {
+		if available := height - 2*hudEdgeMargin; available < openHUDHeight {
+			scale = min(scale, max(available/openHUDHeight, 0))
+		}
+	}
+	return scale
 }
 
 // InventorySlotAt 把光标像素坐标映射为背包界面中的统一索引 0..35。
@@ -719,9 +911,10 @@ func InventorySlotAt(cursorX, cursorY float64, width, height uint32) (uint8, boo
 		return 0, false
 	}
 	x, y := float32(cursorX), float32(cursorY)
+	slotSize := hotbarSlotSize * hudScale(true, float32(width), float32(height))
 	for slot := range core.InventorySlots {
 		left, top := inventorySlotOrigin(slot, true, float32(width), float32(height))
-		if x >= left && x < left+hotbarSlotSize && y >= top && y < top+hotbarSlotSize {
+		if x >= left && x < left+slotSize && y >= top && y < top+slotSize {
 			return uint8(slot), true
 		}
 	}
@@ -735,6 +928,18 @@ func appendHotbarCount(
 	count uint8,
 	slotX, slotY float32,
 ) {
+	appendHotbarCountScaled(dst, atlas, count, slotX, slotY, 1)
+}
+
+func appendHotbarCountScaled(
+	dst *hotbarLayout,
+	atlas GlyphSource,
+	count uint8,
+	slotX, slotY, scale float32,
+) {
+	if count <= 1 {
+		return
+	}
 	var digits [2]rune
 	length := 0
 	if count >= 10 {
@@ -746,21 +951,45 @@ func appendHotbarCount(
 
 	advance := float32(0)
 	for index := range length {
-		advance += atlas.Glyph(digits[index]).Advance
+		advance += atlas.Glyph(digits[index]).Advance * scale
 	}
-	penX := slotX + hotbarSlotSize - hotbarDigitMargin - advance
-	baseline := slotY + hotbarSlotSize - hotbarDigitMargin
+	tracking := float32(0)
+	if length == 2 {
+		tracking = hotbarDigitTracking * scale
+		advance += tracking
+	}
+	penX := slotX + (hotbarSlotSize-hotbarDigitMargin)*scale - advance
+	baseline := slotY + (hotbarSlotSize-hotbarDigitMargin)*scale
 	for index := range length {
 		glyph := atlas.Glyph(digits[index])
 		dst.glyphs = append(dst.glyphs, hotbarInstance{
-			X:      penX + glyph.BearingX,
-			Y:      baseline - glyph.BearingY,
-			Width:  glyph.Width,
-			Height: glyph.Height,
+			X:      penX + glyph.BearingX*scale + scale,
+			Y:      baseline - glyph.BearingY*scale + scale,
+			Width:  glyph.Width * scale,
+			Height: glyph.Height * scale,
 			U0:     glyph.U0, V0: glyph.V0, U1: glyph.U1, V1: glyph.V1,
-			Color: [4]float32{1, 1, 1, 1},
+			Color: [4]float32{0.02, 0.025, 0.03, 0.95},
 		})
-		penX += glyph.Advance
+		penX += glyph.Advance * scale
+		if index+1 < length {
+			penX += tracking
+		}
+	}
+	penX = slotX + (hotbarSlotSize-hotbarDigitMargin)*scale - advance
+	for index := range length {
+		glyph := atlas.Glyph(digits[index])
+		dst.glyphs = append(dst.glyphs, hotbarInstance{
+			X:      penX + glyph.BearingX*scale,
+			Y:      baseline - glyph.BearingY*scale,
+			Width:  glyph.Width * scale,
+			Height: glyph.Height * scale,
+			U0:     glyph.U0, V0: glyph.V0, U1: glyph.U1, V1: glyph.V1,
+			Color: [4]float32{1, 0.94, 0.78, 1},
+		})
+		penX += glyph.Advance * scale
+		if index+1 < length {
+			penX += tracking
+		}
 	}
 }
 
@@ -800,6 +1029,93 @@ func hotbarItemColor(item core.ItemID) [4]float32 {
 	}
 }
 
+func buildHotbarTextureAtlas(registry *assets.Registry) []byte {
+	pixels := make([]byte, hotbarTextureWidth*hotbarTextureSize*4)
+	paintHotbarHeart(pixels, hotbarEmptyHeartColumn, false)
+	paintHotbarHeart(pixels, hotbarFullHeartColumn, true)
+	for item := core.ItemStone; item <= core.ItemChest; item++ {
+		block, ok := core.ItemPlacement(item)
+		if !ok {
+			continue
+		}
+		layer := registry.Material(block, mesh.FacePosY)
+		copyHotbarTextureCell(pixels, hotbarBlockColumnOffset+int(item), registry.LayerRGBA(int(layer)))
+	}
+	return pixels
+}
+
+func copyHotbarTextureCell(dst []byte, column int, src []byte) {
+	for y := range hotbarTextureSize {
+		dstStart := (y*hotbarTextureWidth + column*hotbarTextureSize) * 4
+		srcStart := y * hotbarTextureSize * 4
+		copy(dst[dstStart:dstStart+hotbarTextureSize*4], src[srcStart:srcStart+hotbarTextureSize*4])
+	}
+}
+
+func paintHotbarHeart(dst []byte, column int, full bool) {
+	for y := range hotbarTextureSize {
+		for x := range hotbarTextureSize {
+			if !hotbarHeartPixel(x, y) {
+				continue
+			}
+			border := !hotbarHeartPixel(x-1, y) || !hotbarHeartPixel(x+1, y) ||
+				!hotbarHeartPixel(x, y-1) || !hotbarHeartPixel(x, y+1)
+			color := [4]byte{44, 20, 24, 255}
+			if border {
+				color = [4]byte{96, 28, 36, 255}
+			} else if full {
+				color = [4]byte{226, 42, 52, 255}
+				if x <= 5 && y >= 4 && y <= 6 {
+					color = [4]byte{255, 105, 112, 255}
+				}
+			}
+			if full && border {
+				color = [4]byte{128, 22, 30, 255}
+			}
+			offset := (y*hotbarTextureWidth + column*hotbarTextureSize + x) * 4
+			copy(dst[offset:offset+4], color[:])
+		}
+	}
+}
+
+func hotbarHeartPixel(x, y int) bool {
+	switch y {
+	case 2:
+		return x >= 2 && x <= 6 || x >= 9 && x <= 13
+	case 3:
+		return x >= 1 && x <= 14
+	case 4, 5, 6, 7:
+		return x >= 0 && x <= 15
+	case 8:
+		return x >= 1 && x <= 14
+	case 9:
+		return x >= 2 && x <= 13
+	case 10:
+		return x >= 3 && x <= 12
+	case 11:
+		return x >= 4 && x <= 11
+	case 12:
+		return x >= 5 && x <= 10
+	case 13:
+		return x >= 6 && x <= 9
+	default:
+		return false
+	}
+}
+
+func hotbarTextureUV(column int) [4]float32 {
+	left := float32(column*hotbarTextureSize) / float32(hotbarTextureWidth)
+	right := float32((column+1)*hotbarTextureSize) / float32(hotbarTextureWidth)
+	return [4]float32{left, 0, right, 1}
+}
+
+func hotbarItemUV(item core.ItemID) ([4]float32, bool) {
+	if _, ok := core.ItemPlacement(item); !ok {
+		return [4]float32{}, false
+	}
+	return hotbarTextureUV(hotbarBlockColumnOffset + int(item)), true
+}
+
 func encodeHotbarViewport(dst []byte, width, height float32) []byte {
 	out := dst[:hotbarViewportBytes]
 	for index, value := range [4]float32{width, height, 0, 0} {
@@ -837,6 +1153,14 @@ func (renderer *HotbarRenderer) Release() {
 	if renderer.quadPipeline != nil {
 		renderer.quadPipeline.Release()
 		renderer.quadPipeline = nil
+	}
+	if renderer.hudView != nil {
+		renderer.hudView.Release()
+		renderer.hudView = nil
+	}
+	if renderer.hudTexture != nil {
+		renderer.hudTexture.Release()
+		renderer.hudTexture = nil
 	}
 	if renderer.sampler != nil {
 		renderer.sampler.Release()

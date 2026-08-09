@@ -13,11 +13,8 @@ import (
 	"minecraft-go/internal/network"
 )
 
-// hotbarGlyphInstanceBytesForHealthHUDTest 与 internal/render 的
-// hotbarInstanceBytes 保持一致：每个 quad/glyph 实例在动态上传区中占 48 字节
-// （X/Y/Width/Height、UV 四个分量、RGBA 颜色，均为 float32）。cmd/mcgo 只做黑盒
-// 集成测试，不导入 render 包的未导出常量，因此把这个字节数在此显式钉住。
-const hotbarGlyphInstanceBytesForHealthHUDTest = 48
+// 12 点生命新增十颗空心爱心和六颗填充爱心，不包含背景面板。
+const healthQuadInstancesForHUDTest = 16
 
 // Mutation killed: forwarding a predicted/stale health value, swapping the
 // Confirmed flag computed from Predictor.Health(), or failing to clear health
@@ -34,10 +31,9 @@ func TestHUDHealthReflectsOnlyConfirmedPredictorState(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("未确认生命值 renderFrame=(%v,%v)", rendered, err)
 	}
-	baseline := len(dev.bufferByLabel(t, "hotbar dynamic upload").lastWrite)
+	baseline := dev.lastDrawInstanceCount()
 
-	// 收到生命值为 12 的权威状态：HUD 必须显示该确认值——两位数字，
-	// 因此上传字节应恰好增加两个实例的字节数。
+	// 收到生命值为 12 的权威状态：HUD 必须显示十颗空心和六颗填充爱心。
 	if err := app.predictor.Begin(network.PlayerState{
 		ServerTick: 1, Dimension: core.Overworld,
 		Position: mgl32.Vec3{0.5, 10, 0.5}, OnGround: true,
@@ -48,9 +44,9 @@ func TestHUDHealthReflectsOnlyConfirmedPredictorState(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("已确认生命值 renderFrame=(%v,%v)", rendered, err)
 	}
-	confirmed := len(dev.bufferByLabel(t, "hotbar dynamic upload").lastWrite)
-	if got, want := confirmed-baseline, 2*hotbarGlyphInstanceBytesForHealthHUDTest; got != want {
-		t.Fatalf("确认生命值 12 后上传字节增量=%d，想要 %d（两位数字）", got, want)
+	confirmed := dev.lastDrawInstanceCount()
+	if got, want := confirmed-baseline, uint32(healthQuadInstancesForHUDTest); got != want {
+		t.Fatalf("确认生命值 12 后 quad 增量=%d，想要 %d（无背景的空心与填充爱心）", got, want)
 	}
 
 	// 权威玩家状态 reset（Ready=false）：即使背包镜像仍然确认，生命值也必须
@@ -63,9 +59,9 @@ func TestHUDHealthReflectsOnlyConfirmedPredictorState(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("玩家状态 reset 后 renderFrame=(%v,%v)", rendered, err)
 	}
-	afterReset := len(dev.bufferByLabel(t, "hotbar dynamic upload").lastWrite)
+	afterReset := dev.lastDrawInstanceCount()
 	if afterReset != baseline {
-		t.Fatalf("玩家状态 reset 后上传字节=%d，想要回到未确认基线 %d", afterReset, baseline)
+		t.Fatalf("玩家状态 reset 后 quad=%d，想要回到未确认基线 %d", afterReset, baseline)
 	}
 }
 
