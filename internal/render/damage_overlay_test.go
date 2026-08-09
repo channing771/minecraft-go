@@ -111,6 +111,16 @@ func TestDamageOverlayHeadlessPixels(t *testing.T) {
 	gotMiddle := damageOverlayPixel(got, 11, 32)
 	middleRed := int(gotMiddle[0]) - int(baseMiddle[0])
 	centerRed := int(gotCenter[0]) - int(baseCenter[0])
+	// 手算期望：clear 的 0.1 在 RGBA8Unorm 中存为 26；像素中心的 edgeDistance
+	// 分别为 0.5/64 与 11.5/64。代入固定 smoothstep、alpha 与 SrcAlpha
+	// 混合公式后，红通道四舍五入为 68 与 46；容差 1 只覆盖 backend 舍入。
+	const redTolerance = 1
+	if red := int(gotEdge[0]); red < 68-redTolerance || red > 68+redTolerance {
+		t.Fatalf("边缘红通道=%d，想要 68±%d", red, redTolerance)
+	}
+	if red := int(gotMiddle[0]); red < 46-redTolerance || red > 46+redTolerance {
+		t.Fatalf("渐变中点红通道=%d，想要 46±%d", red, redTolerance)
+	}
 	if !(edgeRed > middleRed && middleRed > centerRed) {
 		t.Fatalf(
 			"红色增量边缘/渐变中点/中心=%d/%d/%d，想要严格递减",

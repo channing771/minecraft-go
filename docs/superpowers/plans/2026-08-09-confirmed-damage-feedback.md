@@ -179,7 +179,7 @@ M4M 已有服务端权威生命值与确认生命 HUD，但确认生命值下降
 
 ## renderer
 
-`DamageOverlayRenderer` 持有一个 16 字节 uniform、一个 bind group 与一个 alpha-blend pipeline。WGSL 用全屏三角形和固定 `vec3f(0.65,0,0)`；alpha 为 `0.30 * strength * (1-smoothstep(0,0.35,edgeDistance))`。强度<=0 或 NaN 时直接返回；活动时一次 uniform 写、一个 pass、一次三顶点 draw。Release 幂等。
+`DamageOverlayRenderer` 持有一个 16 字节 uniform、一个 bind group 与一个 alpha-blend pipeline。uniform padding 使用三个独立 `f32`，避免 `vec3<f32>` 的自然对齐把 binding 扩大为 32 字节。WGSL 用全屏三角形和固定 `vec3f(0.65,0,0)`；alpha 为 `0.30 * strength * (1-smoothstep(0,0.35,edgeDistance))`。强度<=0 或 NaN 时直接返回；活动时一次 uniform 写、一个 pass、一次三顶点 draw。Release 幂等。
 
 ## 生命周期与绘制顺序
 
@@ -803,7 +803,9 @@ Expected: 第一条因 `DamageOverlayRenderer` 未定义而编译失败；第二
 
 struct DamageOverlay {
     strength: f32,
-    _pad: vec3<f32>,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 
 @group(0) @binding(0) var<uniform> overlay: DamageOverlay;
