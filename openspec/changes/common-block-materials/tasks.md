@@ -1,6 +1,6 @@
 ## 1. 稳定 ID、物品映射与采掘规则
 
-- [ ] 1.1 目标：`internal/core`、`internal/sim`、`internal/physics`。追加 14 组稳定 BlockID/ItemID，增加 RegisteredBlock，并完成 stack/place/drop/mining/完整碰撞测试。
+- [x] 1.1 目标：`internal/core`、`internal/sim`、`internal/physics`。追加 14 组稳定 BlockID/ItemID，增加 RegisteredBlock，并完成 stack/place/drop/mining/完整碰撞测试。
   验证：`go test ./internal/core ./internal/sim ./internal/physics -race -count=1`
 
 ## 2. 协议与存档语义版本

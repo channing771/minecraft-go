@@ -81,6 +81,15 @@ func TestUnknownBlockIsClosedBoundary(t *testing.T) {
 	}
 }
 
+func TestCutoutBlocksUseFullCollision(t *testing.T) {
+	for _, id := range []core.BlockID{core.GlassID, core.LeavesID} {
+		boxes := physics.BlockCollisionBoxes(id, true)
+		if !boxes.Loaded || boxes.Count != 1 || boxes.Boxes[0] != fullCube {
+			t.Fatalf("BlockCollisionBoxes(%d, true) = %+v，想要完整方块碰撞", id, boxes)
+		}
+	}
+}
+
 func TestWalkingOffLedgeClearsGroundInSameStep(t *testing.T) {
 	world := boxes(block(0, 0, 0, fullCube))
 	got := physics.Step(physics.State{
