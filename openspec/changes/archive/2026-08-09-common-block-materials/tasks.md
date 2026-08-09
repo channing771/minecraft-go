@@ -35,5 +35,5 @@
 
 ## 8. 全仓验证、主规格同步与归档
 
-- [ ] 8.1 目标：全仓、`openspec/specs/common-block-materials`、`openspec/specs/voxel-visual-presentation`、`openspec/specs/visual-verification` 与归档 change。完成全仓 race/vet/gofmt/archcheck/diff/OpenSpec strict，智能同步三份主规格，更新 M4N 基线说明并归档 change。
+- [x] 8.1 目标：全仓、`openspec/specs/common-block-materials`、`openspec/specs/voxel-visual-presentation`、`openspec/specs/visual-verification` 与归档 change。完成全仓 race/vet/gofmt/archcheck/diff/OpenSpec strict，智能同步三份主规格，更新 M4N 基线说明并归档 change。
   验证：`go test ./... -race`；`go vet ./...`；`gofmt -l .`；`git diff --check`；`openspec validate --all --strict --no-interactive`
