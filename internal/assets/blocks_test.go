@@ -19,6 +19,7 @@ func TestRegistryFaceVisible(t *testing.T) {
 		{"空气不出面", core.AirID, core.AirID, false},
 		{"未知当前方块不出面", core.MossyCobblestoneID + 1, core.AirID, false},
 		{"石头面向空气", core.StoneID, core.AirID, true},
+		{"石头面向未知方块关闭", core.StoneID, core.MossyCobblestoneID + 1, false},
 		{"石头被石头遮住", core.StoneID, core.StoneID, false},
 		{"石头面向玻璃保留", core.StoneID, core.GlassID, true},
 		{"玻璃被石头遮住", core.GlassID, core.StoneID, false},

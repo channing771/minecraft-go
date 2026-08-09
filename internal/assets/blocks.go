@@ -50,10 +50,10 @@ func (r *Registry) Opaque(id world.BlockID) bool {
 
 // FaceVisible 返回当前方块朝向相邻方块的面是否可绘制。实现 mesh.Registry。
 func (r *Registry) FaceVisible(id, adjacent world.BlockID) bool {
-	if !core.RegisteredBlock(id) || id == core.AirID || r.Opaque(adjacent) {
+	if !core.RegisteredBlock(id) || id == core.AirID || !core.RegisteredBlock(adjacent) || r.Opaque(adjacent) {
 		return false
 	}
-	if !core.RegisteredBlock(adjacent) || adjacent == core.AirID {
+	if adjacent == core.AirID {
 		return true
 	}
 	return r.Opaque(id)
