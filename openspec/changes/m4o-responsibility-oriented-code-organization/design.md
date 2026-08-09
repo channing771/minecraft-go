@@ -62,7 +62,7 @@
 | 9 | 玩家持久化 | `player_persistence.go`、`player_persistence_test.go`、`player_flush_test.go` → snapshot/completion/dispatch 与 lifecycle/retry/concurrency/flush barrier 测试文件 |
 | 10 | 服务端集成测试 | `tcp_integration_test.go`、`host_test.go`、`multiplayer_tcp_integration_test.go`、`multiplayer_memory_integration_test.go` → TCP restart/parity/furnace、Host capacity/lifecycle、多人 gameplay/capacity/mining/cancel 场景文件及 helper |
 | 11 | client mesher/predictor | `mesher.go`、`predictor.go`、`predictor_test.go` → mesher worker/queue、predictor advance/reconcile/presentation 及对应测试/helper |
-| 12 | Renderer | `renderer.go` → `renderer_upload.go`、`renderer_draw.go` |
+| 12 | Renderer | 核心 lifecycle 保留在 `renderer.go`；仅将 upload、draw 拆到 `renderer_upload.go`、`renderer_draw.go` |
 | 13 | 完整 HUD | `internal/render/hotbar.go`、测试和 shader → `internal/render/hud/{renderer,layout,container,health,atlas,encode}.go`、对应测试与 shader；迁移 `cmd/mcgo` 调用方并更新依赖白名单 |
 | 14 | mcgo 应用装配 | `cmd/mcgo/app.go` → `app_{dependencies,metrics,startup,lifecycle,frame,messages,input,render}.go` |
 | 15 | mcgo 应用测试 | `app_test.go` → `app_{protocol,render,connection,input,celestial,test_helpers}_test.go` |

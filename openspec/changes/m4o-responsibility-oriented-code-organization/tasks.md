@@ -1,3 +1,7 @@
+## Task 2–19 通用执行协议
+
+开始每项任务前 MUST 运行 `git status --short --branch`、`git merge-base --is-ancestor 96c4aae HEAD` 和 `openspec list --json`，确认分支为 `codex/m4o-code-organization`、工作树干净、HEAD 包含 `96c4aae`、M4O 是唯一实施中的 active change，且 `m4n-static-block-light` 仍为 complete。每项声明搬迁 MUST 遵循 baseline green → move → green；只有 focused 门禁通过后才能勾选该任务，并单独提交该任务列出的文件与对应 `tasks.md` checkbox。不得新增第三方依赖，不得关闭、改写 Hook 或设置豁免变量绕过失败。
+
 ## 2. 架构守卫支持职责文件族
 
 - [ ] 2.1 将 `internal/archcheck/deps_test.go` 按 source/dependency/platform/helper 拆分，让 mcgo、server 与 session 守卫扫描完整生产文件集合并保持原断言；focused：`zsh -ic 'go test ./internal/archcheck -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo ./internal/server -run "LoginStreams|Session" -count=1'`。
@@ -40,7 +44,7 @@
 
 ## 12. Renderer 上传与绘制职责拆分
 
-- [ ] 12.1 将 `internal/render/renderer.go` 原样拆为 lifecycle、upload 和 draw 文件，保持 upload budget、slot origin、render pass 与 release 顺序；focused：`zsh -ic 'go test ./internal/render -race -count=1'`、`zsh -ic 'go test ./internal/render -run "Renderer|Upload|Render|Allocation" -count=1'`。
+- [ ] 12.1 在 `internal/render/renderer.go` 保留核心 lifecycle，只将 upload 和 draw 职责原样拆到 `renderer_upload.go`、`renderer_draw.go`，保持 upload budget、slot origin、render pass 与 release 顺序；focused：`zsh -ic 'go test ./internal/render -race -count=1'`、`zsh -ic 'go test ./internal/render -run "Renderer|Upload|Render|Allocation" -count=1'`。
 
 ## 13. 完整 HUD 提取为唯一新包
 
