@@ -1,5 +1,9 @@
 # Apple M5 性能基线
 
+## M4N scenario v15 状态
+
+M4N 当前基线在 Apple M2 上独立建立为 scenario v15；本文件对应的 M5 当前基线仍是下方 scenario v14，`docs/notes/perf-baseline-m5.json` 字节未改，SHA-256 仍为 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`。未来只有在相同 M5 硬件生成完整 v15 报告后，才可使用唯一显式 `14:15` 迁移；不得使用 M2 报告、`6:15` 或跨硬件例外替代。
+
 ## 当前 scenario v14 基线
 
 - 正式提交：`eb1a07a196ff948adde08e37d9af24ceb1988a14`

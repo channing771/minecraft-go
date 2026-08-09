@@ -53,13 +53,13 @@ terrain shader 精确使用 `max(0.08 + sky*(daylight-0.08), block)`，其中 `s
 
 ### 6. workload 与证据升级为 scenario v15
 
-固定 `48³` 光源扫描与有光源时的 BFS 改变生产 mesher workload，因此 benchmark 使用 scenario v15。M5 当前基线必须来自完整 Memory v15 报告，经唯一迁移 `14:15` 的完整性与硬件身份校验后精确提升；TCP v15 独立记录，仅显式请求时跨 transport 比较。M2 v6 内容与路径不变，v14 只保留为历史同版本证据。性能数值继续 record-only，报告结构、身份、真实 overflow、数据丢失和 I/O 错误仍是门禁。
+固定 `48³` 光源扫描与有光源时的 BFS 改变生产 mesher workload，因此 benchmark 使用 scenario v15。当前 Apple M2 上生成完整 Memory v15 报告后，先以报告自比较完成同场景完整性、硬件身份和绝对数据门禁，再把精确字节提升到既有 M2 基线路径；原 M2 v6 只保留提交与哈希历史证据。TCP v15 独立记录，仅显式请求时跨 transport 比较。M5 v14 基线字节不变并等待未来在相同 M5 硬件上使用唯一迁移 `14:15`；不得增加 `6:15` 或跨硬件例外。性能数值继续 record-only，报告结构、身份、真实 overflow、数据丢失和 I/O 错误仍是门禁。
 
 无窗口场景列表末尾追加 `block-light-room`：午夜封闭房间内只有一个发光块，经镜像、dirty、mesher 和 upload 收敛后抓取；房外漏光、未收敛或既有双阈值超限均失败。
 
 ## Risks / Trade-offs
 
-- 固定扫描增加每次网格构建 CPU 工作 → scenario 升为 v15 并记录新 M5 Memory/TCP 报告；稳定构建仍须证明零分配。
+- 固定扫描增加每次网格构建 CPU 工作 → scenario 升为 v15 并在当前 M2 记录 Memory/TCP，M5 v14 等待未来同硬件迁移；稳定构建仍须证明零分配。
 - 多源传播若重复提升可能超过单队列容量 → 所有满亮源先统一入队，以 exact-capacity、最坏多源与 panic 边界测试证明容量不变式，不放宽 overflow 门禁。
 - 客户端 v14 与旧世界程序不兼容 → 握手在 Play 前拒绝，区块使用显式 v6→v7 迁移，升级前要求正常停服并备份完整世界。
 - 玩家 schema v5 未升版会让旧程序无法识别新物品 → 旧程序必须整体拒绝且不得覆盖；回退只允许恢复备份，不提供降级写回。
@@ -70,7 +70,7 @@ terrain shader 精确使用 `max(0.08 + sky*(daylight-0.08), block)`，其中 `s
 
 1. 在实现前冻结新增 ID、协议 v14、区块 v7、玩家 v5、metadata v2 和 scenario v15 的测试。
 2. 先交付资源与 v6→v7 迁移，再接入 packed 双通道、客户端收敛、shader、纵向和视觉验证。
-3. 生成完整 M5 Memory v15 报告，以 `14:15` 校验后精确提升；再独立生成 TCP v15，保留 M5 v14 与 M2 v6 历史证据。
+3. 在当前 M2 生成完整 Memory v15 报告，自比较通过后精确提升既有 M2 基线路径；再独立生成并自比较 TCP v15，保留 M2 v6 历史身份与未改动的 M5 v14 基线。
 4. 发布前正常关服并备份完整世界目录；客户端与服务端同时升级到协议 v14。
 5. 回退时先停服，恢复升级前完整备份，再运行协议 v13、区块 v6 程序；不得让旧程序打开已写成 v7 或含新物品的世界后继续写入。
 
@@ -79,7 +79,7 @@ terrain shader 精确使用 `max(0.08 + sky*(daylight-0.08), block)`，其中 `s
 - 资源与玩法：稳定 ID、无第七配方、放置/掉落、三档采掘、掉落容量和 Memory/TCP 最终状态一致。
 - 光照与并发：`15/14/1/0`、仅 `AirID` 传播、任一非空气方块阻断、多源最大值、跨区段/区块、缺失邻区、一个 `48³` levels/queue、零分配、普通 dirty `<=27` 且完整覆盖、列顶 `<=216`、过期结果拒绝。
 - 兼容与存档：v14 握手与 v13 拒绝、packet layout、v6→v7 no-op、v6/v7 golden/fuzz、玩家 v5、metadata v2、CRC/future/truncation。
-- 渲染与证据：headless shader 合光、`block-light-room`、scenario v15 producer、`14:15` 唯一迁移、M5 Memory 精确基线、TCP 独立记录及全仓 race/vet/archcheck/OpenSpec strict 门禁。
+- 渲染与证据：headless shader 合光、`block-light-room`、scenario v15 producer、`14:15` 唯一迁移、M2 Memory v15 精确基线、M5 v14 字节保真、TCP 独立记录及全仓 race/vet/archcheck/OpenSpec strict 门禁。
 
 ## Affected Files
 

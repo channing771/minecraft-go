@@ -37,17 +37,17 @@
 - [x] 7.2 测试只注入初始发光块物品与石镐，所有方块、物品、耐久、掉落和持久化变化走真实权威路径，方块光只通过生产 assets/mirror/mesher 读取；执行 `gofmt -w internal/server/block_light_integration_test.go`、`zsh -ic 'go test ./internal/server -run "StaticBlockLight|MiningMemoryTCPParity" -race -count=1'`、`zsh -ic 'go test ./internal/server -race -count=1'`、`zsh -ic 'go test ./internal/archcheck -count=1'` 与 `gofmt -l internal/server`。
 - [x] 7.3 临时让 `Emission(LightBlockID)` 返回 `0`，确认 `TestStaticBlockLightMemoryTCPParity` 的 `PlacedLight` 断言失败；恢复生产实现并重跑 `zsh -ic 'go test ./internal/server -run TestStaticBlockLightMemoryTCPParity -race -count=1'` 为绿。
 
-## 8. 升级 scenario v15 并生成 M5 记录
+## 8. 升级 scenario v15 并生成 M2 当前记录
 
-- [ ] 8.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先锁定 producer v15、默认拒绝 v14/v15、唯一 `14:15`、拒绝 `13:14` 和跨 transport 迁移、同 commit v15 显式跨 transport；以 `zsh -ic 'go test ./cmd/mcgo ./cmd/perfcheck -run "ScenarioVersion|ScenarioUpgrade|StaticBlockLight" -count=1'` 确认红灯。
-- [ ] 8.2 只把 `scenarioVersion` 改为 `15`、唯一授权字符串改为 `14:15` 并删除 active `13:14` 接受分支；对相关 Go 文件执行 `gofmt -w` 后运行 `zsh -ic 'go test ./cmd/mcgo ./cmd/perfcheck -race -count=1'`、`zsh -ic 'go test ./internal/client ./internal/mesh ./internal/render -race -count=1'` 与 `git diff --check`。
-- [ ] 8.3 冻结 `/private/tmp/mcgo-m4n-v15` 与当前 HEAD，运行完整 Memory v15 producer，并以 `zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '/private/tmp/mcgo-m4n-v15/memory-v15.json' --max-regression 0.20 --allow-scenario-upgrade 14:15"` 校验完整性和硬件身份。
-- [ ] 8.4 将已验证 Memory 报告精确复制为 `docs/notes/perf-baseline-m5.json` 并用 `cmp -s` 证明字节相同；独立生成 `/private/tmp/mcgo-m4n-v15/tcp-v15.json`，只用它自身运行同版本 perfcheck，不自动执行 Memory/TCP 比较。
-- [ ] 8.5 在 `docs/notes/perf-baseline.md` 与 `perf-baseline-m5.md` 记录 HEAD、硬件/OS/Go、正式命令、路径和 SHA-256，并以 `shasum -a 256 docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json /private/tmp/mcgo-m4n-v15/memory-v15.json /private/tmp/mcgo-m4n-v15/tcp-v15.json`、M5 baseline 自比较和 `git diff --check` 验证 M2 v6 未变及 M5 v15 可读取。
+- [x] 8.1 在 `cmd/mcgo` 与 `cmd/perfcheck` 先锁定 producer v15、默认拒绝 v14/v15、唯一 `14:15`、拒绝 `13:14` 和跨 transport 迁移、同 commit v15 显式跨 transport；以 `zsh -ic 'go test ./cmd/mcgo ./cmd/perfcheck -run "ScenarioVersion|ScenarioUpgrade|StaticBlockLight" -count=1'` 确认红灯。
+- [x] 8.2 只把 `scenarioVersion` 改为 `15`、唯一授权字符串改为 `14:15` 并删除 active `13:14` 接受分支；对相关 Go 文件执行 `gofmt -w` 后运行 `zsh -ic 'go test ./cmd/mcgo ./cmd/perfcheck -race -count=1'`、`zsh -ic 'go test ./internal/client ./internal/mesh ./internal/render -race -count=1'` 与 `git diff --check`。
+- [x] 8.3 冻结 `/private/tmp/mcgo-m4n-v15`、当前 HEAD/status、原 M2 v6 SHA 与 M5 v14 SHA，运行完整 M2 Memory v15 producer，并以该报告同时作为 baseline/current、无迁移参数运行 perfcheck，校验完整性、硬件身份和绝对数据门禁。
+- [x] 8.4 将已验证 Memory 报告精确复制为 `docs/notes/perf-baseline.json` 并用 `cmp -s` 证明字节相同；独立生成 `/private/tmp/mcgo-m4n-v15/tcp-v15.json` 并只用它自身运行同版本 perfcheck，不自动执行 Memory/TCP 比较；`docs/notes/perf-baseline-m5.json` 必须保持原字节。
+- [x] 8.5 在 `docs/notes/perf-baseline.md` 顶部记录 M2 v15 HEAD、硬件/OS/Go、正式命令、路径、SHA-256 与原 v6 历史身份；在 `perf-baseline-m5.md` 最小注明 M4N 在 M2 建基线且 M5 仍停留 v14。运行四文件 `shasum`、M2 baseline 自比较、Memory `cmp -s`、M5 v14 hash 保真和 `git diff --check`。
 
 ## 9. 更新现状文档并运行全部门禁
 
 - [ ] 9.1 更新 `README.md`、`docs/notes/lan-server.md`、`AGENTS.md`、`CLAUDE.md` 与 `openspec/config.yaml` 的当前现状为 M4N/v14/chunk v7/player v5/metadata v2/scenario v15，并明确无正常获取入口、可信 LAN 和回退恢复备份；用 `rg -n "当前.*M4M|协议 v13|Protocol v13|区块 schema v6|scenario v14|13:14|skylight-tunnel.*末|低四位.*0" README.md docs/notes/lan-server.md AGENTS.md CLAUDE.md openspec/config.yaml` 审计仅剩历史语境。
 - [ ] 9.2 根据实际证据逐项更新本 `tasks.md` checkbox；运行 focused race、`zsh -ic 'go test ./internal/archcheck -count=1'`、`zsh -ic 'go test ./... -race'`、`zsh -ic 'go vet ./...'`、`gofmt -l .`、`openspec validate --all --strict --no-interactive` 与 `git diff --check`，所有命令 MUST 成功且 gofmt MUST 无输出。
-- [ ] 9.3 重跑 `zsh -ic 'go test ./internal/storage -count=1'`、10 秒 `FuzzDecodeChunkPayload`、`zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-final-capture'`、M5 baseline 自比较与 `cmp -s /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline-m5.json`，证明 golden/fuzz/capture/perf artifact 未漂移。
-- [ ] 9.4 用 `git status --short`、`git diff --stat main...HEAD`、`git diff --check main...HEAD` 和计划 Task 9 Step 6 的两组交付面/非目标 `rg` 做范围审计；请求独立代码评审并修复范围内问题后保持 change active，只有用户明确要求时才 sync/archive、推送或创建 PR。
+- [ ] 9.3 重跑 `zsh -ic 'go test ./internal/storage -count=1'`、10 秒 `FuzzDecodeChunkPayload`、`zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-final-capture'`、M2 v15 baseline 自比较与 `cmp -s /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline.json`，并复核 M5 v14 SHA 不变，证明 golden/fuzz/capture/perf artifact 未漂移。
+- [ ] 9.4 用 `git status --short`、`git diff --stat main...HEAD`、`git diff --check main...HEAD`、M5 v14 hash 保真和计划 Task 9 Step 6 的两组交付面/非目标 `rg` 做范围审计；请求独立代码评审并修复范围内问题后保持 change active，只有用户明确要求时才 sync/archive、推送或创建 PR。

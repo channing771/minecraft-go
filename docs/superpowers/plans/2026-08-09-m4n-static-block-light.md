@@ -18,7 +18,7 @@
 - 普通非列顶变化 dirty 集合 MUST 不超过 `27` 个区段且 MUST 完整覆盖所有实际受影响区段；列顶变化 MUST 继续不超过 `216` 个区段；不得新增专用 dirty 图或放宽队列上限。
 - 每个 mesher worker MUST 复用一个精确 `48³` 的 levels 与一个同容量 FIFO；稳定构建 MUST 零分配，最坏输入 MUST 不溢出。
 - 协议 MUST 唯一支持 v14；packet ID、payload 长度与字段布局不变。玩家 schema MUST 保持 v5，区块 schema MUST 升到 v7，metadata MUST 保持 v2。
-- benchmark MUST 升到 scenario v15；唯一可授权的 workload 迁移是 `14:15`。M2 v6 基线保持字节不变；M5 v14 报告只保留为历史证据。
+- benchmark MUST 升到 scenario v15；唯一可授权的 workload 迁移是 `14:15`。当前 M2 基线路径精确提升到完整 Memory v15，原 M2 v6 保留历史身份；M5 v14 基线字节保持不变并等待未来同硬件迁移。
 - 自动验证 MUST 无窗口；只允许本计划中的 offscreen capture 和 benchmark，不得启动交互式客户端。
 - 代码注释、GoDoc、测试说明和文档 MUST 使用中文；Go 标识符、协议名与 wire 字段保留英文。
 - 每个代码任务 MUST 按 red → green → refactor 执行，完成 focused race 验证后只提交该任务范围；不得改写 Hook 或使用豁免变量绕过门禁。
@@ -48,7 +48,7 @@
 - Create: `internal/server/block_light_integration_test.go` — Memory/TCP 共用纵向脚本。
 - Modify: `cmd/mcgo/{benchmark.go,benchmark_v5_test.go,benchmark_v6_test.go}` — scenario v15。
 - Modify: `cmd/perfcheck/{main.go,main_test.go}` — 唯一 `14:15` 迁移。
-- Modify: `docs/notes/{perf-baseline-m5.json,perf-baseline.md,perf-baseline-m5.md}` — v15 记录与当前 M5 Memory 基线。
+- Modify: `docs/notes/{perf-baseline.json,perf-baseline.md,perf-baseline-m5.md}` — M2 v15 当前基线与 M5 v14 等待迁移说明。
 - Modify: `README.md`, `docs/notes/lan-server.md`, `AGENTS.md`, `CLAUDE.md`, `openspec/config.yaml` — 已交付能力和版本边界。
 
 ---
@@ -125,7 +125,7 @@ benchmark scenario v15；唯一迁移 14:15
 - `authoritative-inventory`: “协议 v13 严格有界”改为 v14；把 `ItemLightBlock` 纳入有效完整物品和普通整格放置，但六条固定配方仍精确为六条。
 - `authoritative-mining`: 在石砖/熔炉/箱子同档加入发光块：无正确镐 `30` tick 无掉落、石镐 `15`、铁镐 `8`，正确镐掉落一个发光块物品。
 - `bounded-benchmark-workload`: 当前 workload 改为 v15；同版本 v15 可比；默认拒绝 v14/v15；唯一显式迁移改为 `14:15`；`13:14` 只保留历史同版本报告，不再可授权。
-- `hardware-performance-baselines`: 当前 M5 基线必须来自完整 Memory v15；用 `14:15` 完整性和硬件身份校验后精确提升；TCP v15 独立记录；M2 v6 不变。
+- `hardware-performance-baselines`: 当前 M2 基线必须来自完整 Memory v15 的同场景自校验并精确提升；TCP v15 独立记录；M2 v6 保留历史身份，M5 v14 字节不变，未来同硬件仍只接受 `14:15`。
 - `visual-verification`: 新增末尾场景 `block-light-room`；封闭房间午夜只由一个发光块照亮，房外无边界漏光，未收敛或 golden 超阈值失败。
 
 - [ ] **Step 4: 严格校验并做范围审计**
@@ -940,7 +940,7 @@ git add internal/server/block_light_integration_test.go
 git commit -m "test: 覆盖静态方块光纵向闭环"
 ```
 
-### Task 8: 升级 scenario v15 并生成 M5 记录
+### Task 8: 升级 scenario v15 并生成 M2 当前记录
 
 **Files:**
 - Modify: `cmd/mcgo/benchmark.go`
@@ -948,14 +948,14 @@ git commit -m "test: 覆盖静态方块光纵向闭环"
 - Modify: `cmd/mcgo/benchmark_v6_test.go`
 - Modify: `cmd/perfcheck/main.go`
 - Modify: `cmd/perfcheck/main_test.go`
-- Modify: `docs/notes/perf-baseline-m5.json`
+- Modify: `docs/notes/perf-baseline.json`
 - Modify: `docs/notes/perf-baseline.md`
 - Modify: `docs/notes/perf-baseline-m5.md`
 
 **Interfaces:**
 - Produces: benchmark `scenario_version=15`。
 - Produces: 唯一 `--allow-scenario-upgrade 14:15`。
-- Preserves: 分辨率、阶段时长、样本、指标、20% 记录阈值、错误门禁、M2 v6 baseline。
+- Preserves: 分辨率、阶段时长、样本、指标、20% 记录阈值、错误门禁、M2 v6 历史身份和 M5 v14 baseline 字节。
 
 - [ ] **Step 1: 写 scenario 和迁移矩阵红灯**
 
@@ -1017,7 +1017,7 @@ zsh -ic 'go test ./internal/client ./internal/mesh ./internal/render -race -coun
 git diff --check
 ```
 
-- [ ] **Step 4: 冻结运行目录并生成 Memory v15**
+- [ ] **Step 4: 冻结运行目录并生成 M2 Memory v15**
 
 Run:
 
@@ -1025,18 +1025,18 @@ Run:
 mkdir -p /private/tmp/mcgo-m4n-v15
 git rev-parse HEAD
 TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/private/tmp/mcgo-m4n-v15/memory-v15.json'"
-zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '/private/tmp/mcgo-m4n-v15/memory-v15.json' --max-regression 0.20 --allow-scenario-upgrade 14:15"
+zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline '/private/tmp/mcgo-m4n-v15/memory-v15.json' --current '/private/tmp/mcgo-m4n-v15/memory-v15.json' --max-regression 0.20"
 ```
 
-Expected: producer 写出完整有效 JSON；perfcheck 输出迁移记录成功。性能数值只记录，但缺字段、身份、overflow、数据丢失或 I/O 错误必须失败。
+Expected: producer 写出完整有效 M2 JSON；perfcheck 输出同场景记录成功。性能数值只记录，但缺字段、身份、overflow、数据丢失或 I/O 错误必须失败；不得使用 `6:15` 或跨硬件迁移。
 
 - [ ] **Step 5: 精确提升 Memory 基线并独立生成 TCP v15**
 
-在迁移验证成功后，精确复制 Memory 报告到 `docs/notes/perf-baseline-m5.json`，并验证字节一致；随后独立运行 TCP：
+在同场景自校验成功后，精确复制 Memory 报告到既有 M2 路径 `docs/notes/perf-baseline.json`，并验证字节一致；随后独立运行 TCP。原 M2 v6 只保留历史提交与哈希，`docs/notes/perf-baseline-m5.json` 必须保持原 M5 v14 字节：
 
 ```bash
-cp /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline-m5.json
-cmp -s /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline-m5.json
+cp /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline.json
+cmp -s /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline.json
 TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '/private/tmp/mcgo-m4n-v15/tcp-v15.json'"
 zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline '/private/tmp/mcgo-m4n-v15/tcp-v15.json' --current '/private/tmp/mcgo-m4n-v15/tcp-v15.json' --max-regression 0.20"
 ```
@@ -1045,20 +1045,21 @@ zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline '/privat
 
 - [ ] **Step 6: 记录命令、身份、hash 与历史边界**
 
-在 `perf-baseline.md` 和 `perf-baseline-m5.md` 顶部新增 M4N/v15 节：记录 HEAD、硬件/OS/Go、三条正式命令、Memory/TCP 报告路径、Memory 基线 SHA-256、M2 基线 hash 未变、v14 为历史证据、性能数值 record-only。不得删除旧记录。
+在 `perf-baseline.md` 顶部新增 M4N/M2 v15 节：记录 HEAD、硬件/OS/Go、正式命令、Memory/TCP 报告路径、Memory 基线 SHA-256、被替代的 M2 v6 历史提交/hash、M5 v14 hash 未变和性能数值 record-only。`perf-baseline-m5.md` 只最小注明 M4N 本次在 M2 建基线，M5 仍停留 v14 并等待未来同硬件 `14:15`。不得删除旧记录。
 
 Run:
 
 ```bash
 shasum -a 256 docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json /private/tmp/mcgo-m4n-v15/memory-v15.json /private/tmp/mcgo-m4n-v15/tcp-v15.json
-zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current docs/notes/perf-baseline-m5.json --max-regression 0.20'
+zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current docs/notes/perf-baseline.json --max-regression 0.20'
+cmp -s /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline.json
 git diff --check
 ```
 
 - [ ] **Step 7: 提交**
 
 ```bash
-git add cmd/mcgo/benchmark.go cmd/mcgo/benchmark_v5_test.go cmd/mcgo/benchmark_v6_test.go cmd/perfcheck/main.go cmd/perfcheck/main_test.go docs/notes/perf-baseline-m5.json docs/notes/perf-baseline.md docs/notes/perf-baseline-m5.md
+git add cmd/mcgo/benchmark.go cmd/mcgo/benchmark_v5_test.go cmd/mcgo/benchmark_v6_test.go cmd/perfcheck/main.go cmd/perfcheck/main_test.go docs/notes/perf-baseline.json docs/notes/perf-baseline.md docs/notes/perf-baseline-m5.md openspec/changes/m4n-static-block-light docs/superpowers/plans/2026-08-09-m4n-static-block-light.md
 git commit -m "perf: 升级静态方块光场景基线"
 ```
 
@@ -1094,7 +1095,7 @@ Expected: 命中当前现状段落，证明必须更新；历史记录中的 v13
 M4N：协议 v14；玩家 schema v5；区块 schema v7；metadata v2；
 客户端从权威方块镜像派生传播天空光和静态方块光；
 发光块可放置、可用石/铁镐挖回，但没有配方、初始发放、世界生成或管理命令；
-benchmark scenario v15；M5 当前基线为 Memory v15，TCP v15 独立记录；M2 v6 不变。
+benchmark scenario v15；M2 当前基线为 Memory v15，TCP v15 独立记录；M2 v6 保留历史身份，M5 当前基线仍为 v14 并等待未来同硬件迁移。
 ```
 
 README 的 capture 场景清单在末尾追加 `block-light-room`。LAN 文档写清 v13 客户端在 Play 前拒绝、升级前停服备份、回退需恢复备份，不承诺降级写回。不要把真实火把、透明光照或动态熔炉写成已实现。
@@ -1127,11 +1128,12 @@ Run:
 zsh -ic 'go test ./internal/storage -count=1'
 zsh -ic 'go test ./internal/storage -run=^$ -fuzz=FuzzDecodeChunkPayload -fuzztime=10s'
 zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/mcgo-m4n-final-capture'
-zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current docs/notes/perf-baseline-m5.json --max-regression 0.20'
-cmp -s /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline-m5.json
+zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current docs/notes/perf-baseline.json --max-regression 0.20'
+cmp -s /private/tmp/mcgo-m4n-v15/memory-v15.json docs/notes/perf-baseline.json
+test "$(shasum -a 256 docs/notes/perf-baseline-m5.json | awk '{print $1}')" = 5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483
 ```
 
-Expected: storage/fuzz/capture/perfcheck 全通过，M5 基线仍是已验证 Memory v15 的精确字节。
+Expected: storage/fuzz/capture/perfcheck 全通过，M2 基线仍是已验证 Memory v15 的精确字节，M5 v14 基线 hash 不变。
 
 - [ ] **Step 6: 做变更范围和规格一致性审计**
 
@@ -1165,6 +1167,6 @@ git commit -m "docs: 更新 M4N 静态方块光现状"
 - [ ] 每项批准行为都至少落在一个 OpenSpec Scenario、一个生产改动和一个会杀死回归的测试中。
 - [ ] 没有占位代码、未命名 helper、未来预留接口或新增依赖。
 - [ ] `core.BlockID`/`ItemID`、`world.BlockID`、`mesh.Registry` 和测试 registry 的类型一致。
-- [ ] 玩家 schema v5、metadata v2、packet 布局、M2 v6 baseline 和六条 recipe 均保持不变。
+- [ ] 玩家 schema v5、metadata v2、packet 布局、M2 v6 历史身份、M5 v14 baseline 字节和六条 recipe 均保持不变。
 - [ ] 所有二进制新增物只有项目生成的 storage golden 与 PNG golden，没有版权材质。
 - [ ] 每个任务可单独 review、验证和提交；Task 9 前不声称 M4N 完成。

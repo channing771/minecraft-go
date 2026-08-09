@@ -8,7 +8,7 @@ M4M 只派生天空光，`Quad.Light` 低四位仍固定为零，导致午夜与
 - 客户端从已接受的权威方块镜像确定性派生静态方块光；与天空光共用固定 scratch，高四位保存天空光、低四位保存方块光，并在既有有界 mesher 路径内收敛。
 - terrain shader 按天空光与方块光的最大值合光，使方块光不受昼夜变化影响。
 - **BREAKING**：线上协议从 v13 升为 v14，区块 schema 从 v6 升为 v7；packet 布局不变，v6→v7 为 no-op 迁移，玩家 schema 保持 v5，世界 metadata 保持 v2。
-- benchmark workload 升为 scenario v15；当前 M5 基线使用完整 Memory v15 报告，TCP v15 独立记录，唯一显式迁移为 `14:15`，M2 v6 基线不变。
+- benchmark workload 升为 scenario v15；当前 M2 基线使用完整 Memory v15 报告，原 M2 v6 作为历史证据，TCP v15 独立记录；M5 基线保持 v14 字节不变，未来同硬件升级仍只允许显式 `14:15`。
 - 无窗口视觉基线末尾新增 `block-light-room`，验证午夜封闭房间内的衰减与边界不漏光。
 - 非目标：真实火把模型；透明、半透明、彩色、可调或动态光；燃烧熔炉发光；新增正常获取入口；服务端计算、存储或传输光照状态；任何新 packet。
 
@@ -24,7 +24,7 @@ M4M 只派生天空光，`Quad.Light` 低四位仍固定为零，导致午夜与
 - `authoritative-inventory`: 升级背包协议版本，并把发光块物品纳入有效完整物品与普通整格放置，同时保持六条固定配方。
 - `authoritative-mining`: 为发光块固定无正确镐、石镐和铁镐的时长与掉落规则。
 - `bounded-benchmark-workload`: 把当前 workload 升为 v15，并把唯一显式迁移改为 `14:15`。
-- `hardware-performance-baselines`: 用完整 M5 Memory v15 报告提升当前基线，并独立记录 TCP v15。
+- `hardware-performance-baselines`: 用完整 M2 Memory v15 报告独立提升当前基线，保留 M2 v6 历史证据与 M5 v14 字节，并独立记录 TCP v15。
 - `visual-verification`: 在末尾新增无窗口 `block-light-room` 场景及其收敛和漏光门禁。
 
 ## Impact
