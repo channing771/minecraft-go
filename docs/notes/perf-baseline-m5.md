@@ -13,7 +13,7 @@
 - TCP JSON：`/private/tmp/mcgo-m4m-v14-eb1a07a196ff/tcp-v14.json`，SHA-256 `ed222025d8bcd0b7cdc6aa608155439695ea56a7e9703a8b10c93d7cc2f40f9e`
 - 被替代的 scenario v13 Memory SHA-256：`452a1916cafa36a6383c1c6e2a7b3c125eab4623f21636b46db1bfe9b315f6f6`
 
-这是 record-only 流程：完整 v14 Memory 报告先通过显式 `13:14` 的完整性与硬件身份校验，再立即精确复制到 `perf-baseline-m5.json`；TCP 随后独立生成。没有运行 Memory↔TCP 比较，也不要求静稳预检、绑定路径、一次性授权、失败即停或禁止重跑。两项 producer 均为无窗口离屏运行。
+这是 record-only 流程：性能数值只记录；完整 v14 Memory 报告先通过显式 `13:14` 的完整性与硬件身份校验，再立即精确复制到 `perf-baseline-m5.json`；TCP 随后独立生成。两项 producer 均为无窗口离屏运行，可独立重复生成；跨 transport 比较只在调用方显式请求时运行。
 
 ```bash
 TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/private/tmp/mcgo-m4m-v14-eb1a07a196ff/memory-v14.json'"

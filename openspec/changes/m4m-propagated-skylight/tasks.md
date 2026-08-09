@@ -23,5 +23,5 @@
 
 ## 5. 收尾验证与归档准备
 
-- [ ] 5.1 先为兼容性说明缺失写文档检查，再最小更新受影响中文开发文档并复核协议 v13、玩家 schema v5、区块 schema v6、metadata v2 不变及回退策略；运行 `git diff --check`，通过后只提交本任务文件。
+- [x] 5.1 先为兼容性说明缺失写文档检查，再最小更新受影响中文开发文档并复核协议 v13、玩家 schema v5、区块 schema v6、metadata v2 不变及回退策略；运行 `git diff --check`，通过后只提交本任务文件。
 - [ ] 5.2 先运行全量正确性门禁以暴露剩余失败，再最小修复并重构；运行 `gofmt -l .`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`make visual-check` 和 `openspec validate --all --strict --no-interactive` 并要求全部通过，同时运行相关 benchmark/`perfcheck` 保存性能记录证据但不要求性能数值通过，完成后只提交收尾任务文件。
