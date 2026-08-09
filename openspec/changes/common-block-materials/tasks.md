@@ -10,7 +10,7 @@
 
 ## 3. 缺失玩家材料包
 
-- [ ] 3.1 目标：`internal/server`。仅为 ErrPlayerNotFound 玩家生成背包前 14 格各 64 个材料，验证已有玩家、确认前中断和确认后重载。
+- [x] 3.1 目标：`internal/server`。仅为 ErrPlayerNotFound 玩家生成背包前 14 格各 64 个材料，验证已有玩家、确认前中断和确认后重载。
   验证：`go test ./internal/server -race -count=1`
 
 ## 4. 面可见性与遮挡语义

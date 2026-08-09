@@ -334,6 +334,7 @@ func (player *cachedPlayer) restore(metadata storage.Metadata) sim.PlayerRestore
 		SpawnAnchor:    metadata.SpawnAnchor,
 	}
 	if !player.hasSnapshot || player.missing && !player.hasObservedSnapshot {
+		restore.Inventory = player.snapshot.Inventory
 		return restore
 	}
 	current := player.snapshot.Current
@@ -394,10 +395,27 @@ func newMissingCachedPlayer(
 				core.MaxY + 1,
 				float32(anchor.Z)*core.SectionSize + 0.5,
 			},
-		}},
+		}, Inventory: starterMaterialInventory()},
 		hasSnapshot: true,
 		missing:     true,
 	}
+}
+
+func starterMaterialInventory() core.Inventory {
+	items := [...]core.ItemID{
+		core.ItemCobblestone, core.ItemSmoothStone, core.ItemSand, core.ItemGravel,
+		core.ItemOakLog, core.ItemOakPlanks, core.ItemLeaves, core.ItemGlass,
+		core.ItemBrick, core.ItemWhiteWool, core.ItemRoofTile, core.ItemClay,
+		core.ItemSnowBlock, core.ItemMossyCobblestone,
+	}
+	var inventory core.Inventory
+	for slot, item := range items {
+		inventory.Backpack[slot] = core.ItemStack{Item: item, Count: core.MaxStackCount}
+	}
+	if !inventory.Valid() {
+		panic("server: invalid starter material inventory")
+	}
+	return inventory
 }
 
 func (p *playerPersistence) drainCompletionsLocked(tick uint64) error {
