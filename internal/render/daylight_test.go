@@ -187,12 +187,14 @@ func TestTerrainDaylightHeadlessDraw(t *testing.T) {
 		{X: 4, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x88},
 		{X: 6, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0x00, Light: 0x0f},
 		{X: 8, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosZ, AO: 0xff, Light: 0x0f},
+		{X: 10, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x80},
+		{X: 12, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x08},
 	})
 	renderer.BeginFrame()
 	renderer.FlushUploads(core.ChunkPos{})
 
-	position := mgl32.Vec3{4.5, 7, 9}
-	direction := mgl32.Vec3{4.5, 0.5, 0.5}.Sub(position)
+	position := mgl32.Vec3{6.5, 8, 12}
+	direction := mgl32.Vec3{6.5, 0.5, 0.5}.Sub(position)
 	noonCamera := skyCameraAt(position, direction, 6000)
 	midnightCamera := skyCameraAt(position, direction, 18000)
 	noon := renderSkyHeadless(t, dev, renderer, noonCamera)
@@ -210,6 +212,8 @@ func TestTerrainDaylightHeadlessDraw(t *testing.T) {
 		{4.5, 1, 0.5},
 		{6.5, 1, 0.5},
 		{8.5, 0.5, 1},
+		{10.5, 1, 0.5},
+		{12.5, 1, 0.5},
 	}
 	var noonPixels, midnightPixels [len(centers)][4]byte
 	for i, center := range centers {
@@ -232,6 +236,20 @@ func TestTerrainDaylightHeadlessDraw(t *testing.T) {
 		skyBrightness(noonPixels[2]) <= skyBrightness(midnightPixels[2]) {
 		t.Fatalf("0x88 未按最大值竞争：noon=%v midnight=%v midnight-sky=%v",
 			noonPixels[2], midnightPixels[2], midnightPixels[0])
+	}
+	for _, comparison := range []struct {
+		name        string
+		mixed, only [4]byte
+	}{
+		{name: "正午天空光胜出", mixed: noonPixels[2], only: noonPixels[5]},
+		{name: "午夜方块光胜出", mixed: midnightPixels[2], only: midnightPixels[6]},
+	} {
+		for channel := 0; channel < 3; channel++ {
+			if delta := int(comparison.mixed[channel]) - int(comparison.only[channel]); delta < -2 || delta > 2 {
+				t.Fatalf("%s未按 max 合成：0x88=%v control=%v channel=%d delta=%d",
+					comparison.name, comparison.mixed, comparison.only, channel, delta)
+			}
+		}
 	}
 	if skyBrightness(midnightPixels[3])*10 >= skyBrightness(midnightPixels[1])*7 {
 		t.Fatalf("AO 未继续降低方块光：full=%v occluded=%v", midnightPixels[1], midnightPixels[3])
