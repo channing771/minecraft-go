@@ -33,9 +33,9 @@
 
 ## 7. 完成 Memory/TCP 放置、照明、挖回纵向闭环
 
-- [ ] 7.1 在 `internal/server/block_light_integration_test.go` 使用同一脚本和既有 parity transport，先断言放置前低四位为 `0`、放置后非零、挖回后为 `0`，并比较 Memory/TCP 的区块、revision、背包与掉落 hash；以 `zsh -ic 'go test ./internal/server -run TestStaticBlockLightMemoryTCPParity -count=1'` 确认红灯。
-- [ ] 7.2 测试只注入初始发光块物品与石镐，所有方块、物品、耐久、掉落和持久化变化走真实权威路径，方块光只通过生产 assets/mirror/mesher 读取；执行 `gofmt -w internal/server/block_light_integration_test.go`、`zsh -ic 'go test ./internal/server -run "StaticBlockLight|MiningMemoryTCPParity" -race -count=1'`、`zsh -ic 'go test ./internal/server -race -count=1'`、`zsh -ic 'go test ./internal/archcheck -count=1'` 与 `gofmt -l internal/server`。
-- [ ] 7.3 临时让 `Emission(LightBlockID)` 返回 `0`，确认 `TestStaticBlockLightMemoryTCPParity` 的 `PlacedLight` 断言失败；恢复生产实现并重跑 `zsh -ic 'go test ./internal/server -run TestStaticBlockLightMemoryTCPParity -race -count=1'` 为绿。
+- [x] 7.1 在 `internal/server/block_light_integration_test.go` 使用同一脚本和既有 parity transport，先断言放置前低四位为 `0`、放置后非零、挖回后为 `0`，并比较 Memory/TCP 的区块、revision、背包与掉落 hash；以 `zsh -ic 'go test ./internal/server -run TestStaticBlockLightMemoryTCPParity -count=1'` 确认红灯。
+- [x] 7.2 测试只注入初始发光块物品与石镐，所有方块、物品、耐久、掉落和持久化变化走真实权威路径，方块光只通过生产 assets/mirror/mesher 读取；执行 `gofmt -w internal/server/block_light_integration_test.go`、`zsh -ic 'go test ./internal/server -run "StaticBlockLight|MiningMemoryTCPParity" -race -count=1'`、`zsh -ic 'go test ./internal/server -race -count=1'`、`zsh -ic 'go test ./internal/archcheck -count=1'` 与 `gofmt -l internal/server`。
+- [x] 7.3 临时让 `Emission(LightBlockID)` 返回 `0`，确认 `TestStaticBlockLightMemoryTCPParity` 的 `PlacedLight` 断言失败；恢复生产实现并重跑 `zsh -ic 'go test ./internal/server -run TestStaticBlockLightMemoryTCPParity -race -count=1'` 为绿。
 
 ## 8. 升级 scenario v15 并生成 M5 记录
 
