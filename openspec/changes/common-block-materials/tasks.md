@@ -30,7 +30,7 @@
 
 ## 7. 无窗口材料展示与性能记录
 
-- [ ] 7.1 目标：`cmd/mcgo`、`internal/mesh`、`internal/render`、视觉 golden 与本地性能记录。追加 materials-showcase，更新并逐张复核实际变化的 golden，记录 mesh/render benchmark、quad 和上传量。
+- [x] 7.1 目标：`cmd/mcgo`、`internal/mesh`、`internal/render`、视觉 golden 与本地性能记录。追加 materials-showcase，更新并逐张复核实际变化的 golden，记录 mesh/render benchmark、quad 和上传量。
   验证：`go test ./cmd/mcgo -race -count=1`；`make visual-update VISUAL_OUT=/private/tmp/common-block-materials-visual`；`make visual-check VISUAL_OUT=/private/tmp/common-block-materials-visual-check`
 
 ## 8. 全仓验证、主规格同步与归档

@@ -254,8 +254,11 @@ func BenchmarkMeshTerrainSection(b *testing.B) {
 	n := solidNeighbors(center)
 	reg := testRegistry{}
 	light := mesh.NewSkyLightScratch()
+	var quads []mesh.Quad
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = mesh.MeshSection(n, reg, light)
+		quads = mesh.MeshSection(n, reg, light)
 	}
+	b.ReportMetric(float64(len(quads)), "quads/op")
+	b.ReportMetric(float64(len(quads)*8), "upload_bytes/op")
 }

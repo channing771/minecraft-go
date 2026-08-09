@@ -56,6 +56,127 @@ func TestCaptureSkylightTunnelFixtureUsesMirrorAndMesher(t *testing.T) {
 	}
 }
 
+func TestCaptureMaterialsShowcaseFixtureUsesMirrorAndMesher(t *testing.T) {
+	if got := captureScenes[len(captureScenes)-1].Name; got != "materials-showcase" {
+		t.Fatalf("末场景 = %q，想要 materials-showcase", got)
+	}
+	scene := captureScenes[len(captureScenes)-1]
+	if scene.Prepare == nil {
+		t.Fatal("materials-showcase 缺少 Prepare")
+	}
+
+	mesher := client.NewMesher(assets.NewRegistry(), 1)
+	t.Cleanup(mesher.Close)
+	app := &application{mirror: client.NewMirror(), mesher: mesher}
+	if err := scene.Prepare(app); err != nil {
+		t.Fatal(err)
+	}
+	for z := int32(-1); z <= 1; z++ {
+		for x := int32(-1); x <= 1; x++ {
+			chunk, ok := app.mirror.Chunk(core.Overworld, core.ChunkPos{X: x, Z: z})
+			if !ok || chunk.Revision != 2 {
+				t.Fatalf("chunk (%d,%d) = (%v,%v)，想要 revision 2", x, z, chunk, ok)
+			}
+		}
+	}
+
+	assertBlock := func(position core.BlockPos, want core.BlockID) {
+		t.Helper()
+		got, loaded := app.mirror.BlockAt(core.Overworld, position)
+		if !loaded || got != want {
+			t.Fatalf("BlockAt(%+v) = (%d,%v)，想要 (%d,true)", position, got, loaded, want)
+		}
+	}
+	materials := [...]core.BlockID{
+		core.CobblestoneID, core.SmoothStoneID, core.SandID, core.GravelID,
+		core.OakLogID, core.OakPlanksID, core.LeavesID, core.GlassID,
+		core.BrickID, core.WhiteWoolID, core.RoofTileID, core.ClayID,
+		core.SnowBlockID, core.MossyCobblestoneID,
+	}
+	columnStarts := [...]int32{-10, -7, -4, -1, 2, 5, 8}
+	for index, block := range materials {
+		startY := int32(1)
+		if index >= len(columnStarts) {
+			startY = 4
+		}
+		startX := columnStarts[index%len(columnStarts)]
+		for y := startY; y <= startY+1; y++ {
+			for x := startX; x <= startX+1; x++ {
+				assertBlock(core.BlockPos{X: x, Y: y, Z: -8}, block)
+			}
+		}
+	}
+	for x := int32(-4); x <= 3; x++ {
+		assertBlock(core.BlockPos{X: x, Y: 0, Z: -1}, core.GrassID)
+	}
+	for z := int32(-2); z <= 0; z++ {
+		for x := int32(0); x <= 3; x++ {
+			assertBlock(core.BlockPos{X: x, Y: 4, Z: z}, core.StoneID)
+		}
+	}
+	for y := int32(1); y <= 3; y++ {
+		assertBlock(core.BlockPos{X: 7, Y: y, Z: -1}, core.OakLogID)
+	}
+	if got := app.mesher.Stats().DirtySections; got == 0 {
+		t.Fatal("材料展示装入后 mesher 没有 dirty section")
+	}
+
+	remotePlayers := client.NewRemotePlayers()
+	if err := remotePlayers.Apply(network.RemotePlayerSpawn{
+		PlayerID: core.PlayerID{6: 0x40, 8: 0x80, 15: 1}, DisplayName: "测试Player",
+		ServerTick: 1, Position: mgl32.Vec3{0, 2, 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stateApp := &application{
+		remotePlayers: remotePlayers,
+		panel:         &panelState{visible: true},
+		inventoryOpen: true,
+	}
+	if err := stateApp.furnace.Apply(network.FurnaceState{
+		Furnace: core.FurnaceRef{Dimension: core.Overworld, Generation: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := stateApp.chest.Apply(network.ChestState{
+		Chest: core.ContainerRef{
+			Dimension: core.Overworld, Kind: core.ContainerKindChest, Generation: 1,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	inventory := core.Inventory{}
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+	if err := stateApp.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+	if err := scene.Apply(stateApp); err != nil {
+		t.Fatal(err)
+	}
+	if stateApp.worldTimeTicks != 6000 ||
+		stateApp.camera.Pos != (mgl32.Vec3{0.5, 5.8, 13.5}) ||
+		stateApp.camera.Yaw != 0 || stateApp.camera.Pitch != -0.12 {
+		t.Fatalf("场景状态错误: time=%d camera=%+v yaw=%v pitch=%v",
+			stateApp.worldTimeTicks, stateApp.camera.Pos, stateApp.camera.Yaw, stateApp.camera.Pitch)
+	}
+	if stateApp.inventoryOpen || stateApp.panel.visible {
+		t.Fatalf("界面状态未重置: inventoryOpen=%v panelVisible=%v",
+			stateApp.inventoryOpen, stateApp.panel.visible)
+	}
+	if len(remotePlayers.Presentations()) != 0 {
+		t.Fatal("远端玩家未重置")
+	}
+	if _, ok := stateApp.furnace.State(); ok {
+		t.Fatal("熔炉镜像未重置")
+	}
+	if _, ok := stateApp.chest.State(); ok {
+		t.Fatal("箱子镜像未重置")
+	}
+	if got, confirmed := stateApp.inventory.State(); !confirmed || got != (core.Inventory{}) {
+		t.Fatalf("inventory = %+v confirmed=%v，想要已确认空物品栏", got, confirmed)
+	}
+}
+
 func TestCaptureSettled(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -80,10 +201,10 @@ func TestCaptureSettled(t *testing.T) {
 }
 
 func TestCaptureSkylightTunnelSceneFixesPresentationState(t *testing.T) {
-	if got := captureScenes[len(captureScenes)-1].Name; got != "skylight-tunnel" {
-		t.Fatalf("末场景 = %q，想要 skylight-tunnel", got)
+	if got := captureScenes[len(captureScenes)-2].Name; got != "skylight-tunnel" {
+		t.Fatalf("倒数第二场景 = %q，想要 skylight-tunnel", got)
 	}
-	scene := captureScenes[len(captureScenes)-1]
+	scene := captureScenes[len(captureScenes)-2]
 	if scene.Prepare == nil {
 		t.Fatal("skylight-tunnel 缺少 Prepare")
 	}
