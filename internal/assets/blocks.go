@@ -29,17 +29,17 @@ type Registry struct {
 // NewRegistry 构造注册表并生成全部占位材质。
 func NewRegistry() *Registry {
 	r := &Registry{}
-	r.layers[LayerStone] = noisyTexture(rgb{R: 128, G: 128, B: 128}, 18, 0x2545)
-	r.layers[LayerDirt] = noisyTexture(rgb{R: 134, G: 96, B: 67}, 12, 0x1B87)
+	r.layers[LayerStone] = stoneTexture()
+	r.layers[LayerDirt] = dirtTexture()
 	r.layers[LayerGrassTop] = grassTopTexture()
 	r.layers[LayerGrassSide] = grassSideTexture()
 	r.layers[LayerBedrock] = noisyTexture(rgb{R: 60, G: 60, B: 64}, 28, 0x3F19)
-	r.layers[LayerStoneBrick] = noisyTexture(rgb{R: 122, G: 118, B: 112}, 10, 0x77B1)
-	r.layers[LayerCoalOre] = noisyTexture(rgb{R: 96, G: 94, B: 94}, 34, 0x5C3D)
-	r.layers[LayerIronOre] = noisyTexture(rgb{R: 156, G: 132, B: 110}, 30, 0x6A21)
-	r.layers[LayerFurnace] = noisyTexture(rgb{R: 88, G: 86, B: 88}, 16, 0x41D7)
-	r.layers[LayerIronBlock] = noisyTexture(rgb{R: 214, G: 214, B: 216}, 8, 0x2E95)
-	r.layers[LayerChest] = noisyTexture(rgb{R: 156, G: 108, B: 58}, 14, 0x9C4E)
+	r.layers[LayerStoneBrick] = stoneBrickTexture()
+	r.layers[LayerCoalOre] = oreTexture(rgb{R: 38, G: 40, B: 44})
+	r.layers[LayerIronOre] = oreTexture(rgb{R: 194, G: 140, B: 104})
+	r.layers[LayerFurnace] = furnaceTexture()
+	r.layers[LayerIronBlock] = ironBlockTexture()
+	r.layers[LayerChest] = chestTexture()
 	return r
 }
 

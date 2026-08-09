@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -17,16 +17,16 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"minecraft-go/internal/client"
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
+	"minecraft-go/internal/logging"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
 	"minecraft-go/internal/profile"
+	"minecraft-go/internal/sim"
 )
 
-const (
-	viewDistance           = 32
-	steadyFrameMeshWorkMax = 64
-)
+const steadyFrameMeshWorkMax = 64
 
 func init() {
 	runtime.LockOSThread()
@@ -41,6 +41,11 @@ type mainOptions struct {
 	// 与 applicationOptions 无关：它只影响 runCapture 的行为，从
 	// runWithDependencies 直接传给 dependencies.runCapture。
 	UpdateGolden bool
+	// ConfigPath 是调参配置文件路径；留空表示使用 config.DefaultPath()。
+	ConfigPath string
+	// Dev 为真时启用调试面板（F3 切换）。它只门控面板可用性，不门控配置文件
+	// 是否生效——配置文件里调过的值无论 Dev 是否为真都同样生效。
+	Dev bool
 }
 
 type runDependencies struct {
@@ -62,6 +67,8 @@ func parseMainOptions(args []string) (mainOptions, error) {
 	name := flags.String("name", "", "玩家显示名")
 	capture := flags.String("capture", "", "视觉抓帧输出目录；非空时走无头抓帧模式")
 	updateGolden := flags.Bool("update-golden", false, "把本次抓帧结果写入 golden 基线")
+	dev := flags.Bool("dev", false, "启用调试面板（F3 切换）")
+	configPath := flags.String("config", "", "配置文件路径，留空使用默认路径")
 	if err := flags.Parse(args); err != nil {
 		return mainOptions{}, err
 	}
@@ -123,7 +130,51 @@ func parseMainOptions(args []string) (mainOptions, error) {
 		}(),
 		CaptureDir:   *capture,
 		UpdateGolden: *updateGolden,
+		ConfigPath:   *configPath,
+		Dev:          *dev,
 	}, nil
+}
+
+// resolveConfigPath 决定调参配置文件的实际路径：显式 --config 优先，
+// 否则落回用户配置目录下的默认路径。
+func resolveConfigPath(options mainOptions) (string, error) {
+	if options.ConfigPath != "" {
+		return options.ConfigPath, nil
+	}
+	return config.DefaultPath()
+}
+
+// resolveConfig 决定本次运行的生效配置。
+//
+// benchmark 与抓帧路径强制使用编译默认值：这两条路径的产出会与基线比对，
+// 若读入本机配置，结论就取决于开发者本机的配置文件内容而非代码。
+func resolveConfig(options mainOptions) (config.Config, error) {
+	if options.Application.Benchmark || options.CaptureDir != "" {
+		return config.Defaults(), nil
+	}
+	path, err := resolveConfigPath(options)
+	if err != nil {
+		return config.Config{}, err
+	}
+	return config.Load(path)
+}
+
+// remoteTuningDiverges 报告本次运行是否"连远端服务端 + 本机 physics/sim 偏离
+// 编译默认值"。
+//
+// 设计 §3.2：physics/sim 同时被客户端预测与服务端权威模拟消费，两侧参数不同
+// 会让位置持续回弹。调试面板已经用 fieldReadOnly 挡住了联机时的改写，但
+// 配置文件是始终生效的（§3.1），它绕过面板那道锁。
+//
+// 这里只告警不回落默认值：README 明确把这份配置文件描述为 mcgo 与 mcgod 共用，
+// 局域网下两端读同一份调过的文件恰恰是正确且一致的用法，强制客户端回落默认值
+// 反而会在那个本来能用的场景里制造分歧。
+func remoteTuningDiverges(options mainOptions, effective config.Config) bool {
+	if options.Application.Connect == "" {
+		return false
+	}
+	return effective.Physics != physics.DefaultTunables() ||
+		effective.Sim != sim.DefaultTunables()
 }
 
 func run(args []string) error {
@@ -148,6 +199,40 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 		}
 		options.Application.Identity = &identity
 	}
+
+	effective, err := resolveConfig(options)
+	if err != nil {
+		return fmt.Errorf("加载配置: %w", err)
+	}
+	// 内层 handler 的 Level 固定为 LevelDebug：过滤全部交给 logging 包的包装器，
+	// 内层不得二次过滤，否则模块放宽会失效。
+	logging.Install(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}), effective.Logging)
+	effective.Apply()
+	if remoteTuningDiverges(options, effective) {
+		slog.Warn("联机时本机配置改动了 physics/sim：这两组必须与服务端一致，"+
+			"否则客户端预测会与权威模拟持续分歧（面板在联机时已锁这两组，配置文件不受该锁约束）",
+			"connect", options.Application.Connect)
+	}
+	// benchmark 不构造面板渲染器：它的产出要与性能基线比对，面板既不该占用
+	// GPU 资源，也不该让结果随 --dev 变化。
+	//
+	// 抓帧相反，必须无条件构造：debug-panel 场景要拍的就是面板本身，而基线
+	// 重生成与 CI 调用 capture 时都不会带 --dev。面板默认隐藏，只有该场景的
+	// Apply 会把它打开，因此其余场景的画面不受影响。
+	options.Application.Dev = (options.Dev || options.CaptureDir != "") &&
+		!options.Application.Benchmark
+	options.Application.Render = effective.Render
+	// 面板 F5 保存需要落盘路径；benchmark 与抓帧路径不进交互循环，不需要它。
+	if !options.Application.Benchmark && options.CaptureDir == "" {
+		configPath, err := resolveConfigPath(options)
+		if err != nil {
+			return fmt.Errorf("解析配置文件路径: %w", err)
+		}
+		options.Application.ConfigPath = configPath
+	}
+
 	app, err := dependencies.newApplication(options.Application)
 	if err != nil {
 		return fmt.Errorf("启动失败: %w", err)
@@ -196,7 +281,7 @@ const clientMemoryLimit = 1500 << 20
 func main() {
 	debug.SetMemoryLimit(clientMemoryLimit)
 	if err := run(os.Args[1:]); err != nil {
-		log.Printf("mcgo: %v", err)
+		slog.Error("mcgo 退出失败", "error", err)
 		os.Exit(1)
 	}
 }
@@ -207,6 +292,14 @@ func runInteractive(app *application) error {
 	lastFrame := time.Now()
 	escapeWasDown := false
 	clickWasDown := false
+	panelToggleWasDown := false
+	panelUpWasDown := false
+	panelDownWasDown := false
+	panelLeftWasDown := false
+	panelRightWasDown := false
+	panelEnterWasDown := false
+	panelSaveWasDown := false
+	panelResetAllWasDown := false
 	var input client.InputState
 
 	for !app.window.ShouldClose() {
@@ -233,6 +326,52 @@ func runInteractive(app *application) error {
 		}
 		escapeWasDown = escapeDown
 
+		// 调试面板按键：F3/F5/F6、方向键与 Enter 都是边沿触发（按一下走一步），
+		// Shift/Alt 是电平读取的修饰键。面板不存在时（未开 --dev）整段直接跳过，
+		// 方向键既不驱动面板、也从不驱动玩家移动（移动只读 WASD）。
+		if app.panel != nil {
+			toggleDown := app.window.KeyDown(client.KeyF3)
+			upDown := app.window.KeyDown(client.KeyUp)
+			downDown := app.window.KeyDown(client.KeyDown)
+			leftDown := app.window.KeyDown(client.KeyLeft)
+			rightDown := app.window.KeyDown(client.KeyRight)
+			enterDown := app.window.KeyDown(client.KeyEnter)
+			saveDown := app.window.KeyDown(client.KeyF5)
+			resetAllDown := app.window.KeyDown(client.KeyF6)
+
+			keys := panelKeys{
+				Toggle:   toggleDown && !panelToggleWasDown,
+				Up:       upDown && !panelUpWasDown,
+				Down:     downDown && !panelDownWasDown,
+				Left:     leftDown && !panelLeftWasDown,
+				Right:    rightDown && !panelRightWasDown,
+				Enter:    enterDown && !panelEnterWasDown,
+				Save:     saveDown && !panelSaveWasDown,
+				ResetAll: resetAllDown && !panelResetAllWasDown,
+				Shift:    app.window.KeyDown(client.KeyLeftShift),
+				Alt:      app.window.KeyDown(client.KeyLeftAlt),
+			}
+			panelToggleWasDown = toggleDown
+			panelUpWasDown = upDown
+			panelDownWasDown = downDown
+			panelLeftWasDown = leftDown
+			panelRightWasDown = rightDown
+			panelEnterWasDown = enterDown
+			panelSaveWasDown = saveDown
+			panelResetAllWasDown = resetAllDown
+
+			if app.panel.handleKeys(keys, app.remote()) {
+				app.applyPanelChange()
+			}
+			// 面板隐藏时 F5 不落盘：设计文档要求配置文件"不自动创建"，
+			// 面板关着时误触 F5 不该在 config.DefaultPath() 悄悄创建/覆盖它。
+			if keys.Save && app.panel.visible {
+				if err := app.panel.save(app.configPath); err != nil {
+					slog.Warn("保存调试面板配置失败", "error", err)
+				}
+			}
+		}
+
 		clickDown := app.window.PrimaryButtonDown()
 		justCaptured := false
 		if clickDown && !clickWasDown && !app.window.CursorCaptured() && !app.inventoryOpen {
@@ -244,9 +383,13 @@ func runInteractive(app *application) error {
 		captured := app.window.CursorCaptured()
 		if captured && !justCaptured && !app.inventoryOpen {
 			mouseX, mouseY := app.window.CursorPos()
+			// baseMouseSensitivity 是键鼠灵敏度默认为 1 时对应的原始弧度/像素系数；
+			// Render.MouseSensitivity 是相对该基线的倍率，默认值 1 保持行为不变。
+			const baseMouseSensitivity = 0.002
+			sensitivity := baseMouseSensitivity * app.render.MouseSensitivity
 			app.camera.Rotate(
-				float32(mouseX-lastMouseX)*0.002,
-				float32(lastMouseY-mouseY)*0.002,
+				float32(mouseX-lastMouseX)*sensitivity,
+				float32(lastMouseY-mouseY)*sensitivity,
 			)
 			lastMouseX, lastMouseY = mouseX, mouseY
 		}
@@ -348,10 +491,12 @@ func (a *application) applyInteractiveInput(
 		a.nextSequence,
 		func(input network.PlayerInput) error { return a.send(input) },
 	); err != nil {
-		log.Printf("推进玩家预测失败: %v", err)
+		slog.Warn("推进玩家预测失败", "error", err)
 	}
 	if feet, ok := a.predictor.PresentationPosition(elapsed); ok {
-		a.camera.Pos = feet.Add(mgl32.Vec3{0, physics.EyeHeight, 0})
+		// 相机视线高度必须与服务端交互射线原点使用同一份参数，否则玩家瞄准的方块
+		// 与服务端判定的方块不是同一个。
+		a.camera.Pos = feet.Add(mgl32.Vec3{0, physics.ActiveTunables().EyeHeight, 0})
 		a.center = cameraChunk(a.camera.Pos)
 	}
 }

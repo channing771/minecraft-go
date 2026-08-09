@@ -223,7 +223,7 @@ func TestRunWithDependenciesPropagatesLifecycleErrorsAndAlwaysCloses(t *testing.
 			interactiveCalls := 0
 			benchmarkCalls := 0
 			closeCalls := 0
-			gotErr := runWithDependencies(test.args, runDependencies{
+			gotErr := runWithDependencies(append(append([]string{}, test.args...), absentConfigArgs(t)...), runDependencies{
 				loadIdentity: testIdentityLoader,
 				newApplication: func(applicationOptions) (*application, error) {
 					constructionCalls++

@@ -103,7 +103,14 @@ func TestMCGodProcessSaveFailureExitsNonzero(t *testing.T) {
 
 func mcgodProcessCommand(t *testing.T, world string) *exec.Cmd {
 	t.Helper()
-	command := exec.Command(os.Args[0], "-test.run=^TestMCGodProcess$", "--", "--listen", "127.0.0.1:0", "--world", world)
+	// 子进程复用父进程 args（TestMCGodProcess 里的直接 run() 调用与 runSignal
+	// 都读同一份 args），所以只要在这里给 --config 指向一个不存在的路径，两条
+	// 路径都不会去读开发者本机的 config.json——理由同 absentConfigArgs。
+	args := append(
+		[]string{"-test.run=^TestMCGodProcess$", "--", "--listen", "127.0.0.1:0", "--world", world},
+		absentConfigArgs(t)...,
+	)
+	command := exec.Command(os.Args[0], args...)
 	command.Env = append(os.Environ(), "MCGOD_PROCESS=1")
 	command.Stderr = os.Stderr
 	command.Stdout = os.Stdout

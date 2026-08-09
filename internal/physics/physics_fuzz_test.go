@@ -52,12 +52,12 @@ func TestStepDeterministic(t *testing.T) {
 		},
 		{
 			name:  "wall collision",
-			state: physics.State{Position: mgl32.Vec3{0.5, 1, 0.5}, Velocity: mgl32.Vec3{physics.WalkSpeed, 0, 0}, OnGround: true},
+			state: physics.State{Position: mgl32.Vec3{0.5, 1, 0.5}, Velocity: mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0}, OnGround: true},
 			input: physics.Input{MoveX: 1},
 		},
 		{
 			name:  "half block step",
-			state: physics.State{Position: mgl32.Vec3{-2.5, 1, 0.5}, Velocity: mgl32.Vec3{physics.WalkSpeed, 0, 0}, OnGround: true},
+			state: physics.State{Position: mgl32.Vec3{-2.5, 1, 0.5}, Velocity: mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0}, OnGround: true},
 			input: physics.Input{MoveX: 1},
 		},
 	}
@@ -187,7 +187,7 @@ func FuzzStepKeepsFiniteNonOverlappingState(f *testing.F) {
 			Velocity: mgl32.Vec3{float32(velocityX) / 10, float32(velocityY) / 10, float32(velocityZ) / 10},
 			OnGround: positionY == 10,
 		}
-		if horizontalSpeed(state.Velocity) > float64(physics.WalkSpeed) || overlapsLoadedCollider(state.Position, world) {
+		if horizontalSpeed(state.Velocity) > float64(physics.DefaultTunables().WalkSpeed) || overlapsLoadedCollider(state.Position, world) {
 			t.Skip()
 		}
 		input := physics.Input{MoveX: moveX, MoveZ: moveZ, Jump: jump, Yaw: float32(yawHundredths) / 100}
@@ -206,10 +206,10 @@ func assertStepInvariants(t *testing.T, state physics.State, world invariantWorl
 	if !finiteState(state) {
 		t.Fatalf("step returned non-finite state: %+v", state)
 	}
-	if speed := horizontalSpeed(state.Velocity); speed > float64(physics.WalkSpeed)+1e-5 {
+	if speed := horizontalSpeed(state.Velocity); speed > float64(physics.DefaultTunables().WalkSpeed)+1e-5 {
 		t.Fatalf("horizontal speed=%f exceeds walk speed", speed)
 	}
-	if state.Velocity.Y() < -physics.TerminalFallSpeed {
+	if state.Velocity.Y() < -physics.DefaultTunables().TerminalFallSpeed {
 		t.Fatalf("vertical speed=%f is below terminal fall speed", state.Velocity.Y())
 	}
 	if overlapsLoadedCollider(state.Position, world) {

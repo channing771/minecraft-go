@@ -7,31 +7,37 @@ import (
 )
 
 // Step 推进一个固定步，并解析方块碰撞。
+//
+// 参数在函数入口取一次快照，全程使用该快照，因此单次固定步内参数不会中途变化。
 func Step(state State, input Input, source CollisionSource) StepResult {
+	tunables := ActiveTunables()
 	validate(state, input)
 	beganGrounded := state.OnGround
 
-	target := movementTarget(input)
+	target := movementTarget(input, tunables.WalkSpeed)
 	horizontal := mgl32.Vec3{state.Velocity.X(), 0, state.Velocity.Z()}
 	if state.OnGround {
 		if target.Len() == 0 {
-			horizontal = moveToward(horizontal, mgl32.Vec3{}, GroundDeceleration*FixedDeltaSeconds)
+			horizontal = moveToward(horizontal, mgl32.Vec3{}, tunables.GroundDeceleration*FixedDeltaSeconds)
 		} else {
-			horizontal = moveToward(horizontal, target, GroundAcceleration*FixedDeltaSeconds)
+			horizontal = moveToward(horizontal, target, tunables.GroundAcceleration*FixedDeltaSeconds)
 		}
 	} else {
-		horizontal = moveToward(horizontal, target, AirAcceleration*FixedDeltaSeconds)
-		if horizontal.Len() > WalkSpeed {
-			horizontal = horizontal.Normalize().Mul(WalkSpeed)
+		horizontal = moveToward(horizontal, target, tunables.AirAcceleration*FixedDeltaSeconds)
+		if horizontal.Len() > tunables.WalkSpeed {
+			horizontal = horizontal.Normalize().Mul(tunables.WalkSpeed)
 		}
 	}
 	state.Velocity[0], state.Velocity[2] = horizontal.X(), horizontal.Z()
 
 	if state.OnGround && input.Jump {
-		state.Velocity[1] = JumpSpeed
+		state.Velocity[1] = tunables.JumpSpeed
 		state.OnGround = false
 	} else {
-		state.Velocity[1] = max(state.Velocity.Y()-Gravity*FixedDeltaSeconds, -TerminalFallSpeed)
+		state.Velocity[1] = max(
+			state.Velocity.Y()-tunables.Gravity*FixedDeltaSeconds,
+			-tunables.TerminalFallSpeed,
+		)
 	}
 	displacement := state.Velocity.Mul(FixedDeltaSeconds)
 	move := resolveMove(state, displacement, source)
@@ -39,7 +45,7 @@ func Step(state State, input Input, source CollisionSource) StepResult {
 	if (move.clipped[0] || move.clipped[2]) &&
 		(beganGrounded || move.onGround) &&
 		(displacement.X() != 0 || displacement.Z() != 0) {
-		if stepped, ok := resolveStepMove(state, displacement, source); ok &&
+		if stepped, ok := resolveStepMove(state, displacement, source, tunables.StepHeight); ok &&
 			horizontalDistanceSquared(state.Position, stepped.position) >
 				horizontalDistanceSquared(state.Position, move.position) {
 			move = stepped
@@ -57,7 +63,7 @@ func Step(state State, input Input, source CollisionSource) StepResult {
 	return StepResult{State: state, UsedStep: usedStep, HitUnknown: move.hitUnknown}
 }
 
-func movementTarget(input Input) mgl32.Vec3 {
+func movementTarget(input Input, walkSpeed float32) mgl32.Vec3 {
 	yawSin := float32(math.Sin(float64(input.Yaw)))
 	yawCos := float32(math.Cos(float64(input.Yaw)))
 	forward := mgl32.Vec3{-yawSin, 0, -yawCos}
@@ -66,7 +72,7 @@ func movementTarget(input Input) mgl32.Vec3 {
 	if intent.Len() == 0 {
 		return mgl32.Vec3{}
 	}
-	return intent.Normalize().Mul(WalkSpeed)
+	return intent.Normalize().Mul(walkSpeed)
 }
 
 func moveToward(current, target mgl32.Vec3, maximumDelta float32) mgl32.Vec3 {

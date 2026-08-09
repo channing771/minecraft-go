@@ -34,6 +34,16 @@ const (
 	Key9
 	KeyE
 	KeyQ
+	// 以下按键为调试面板交互追加，必须保持在末尾以免改变既有常量的 iota 取值。
+	KeyF3
+	KeyF5
+	KeyF6
+	KeyUp
+	KeyDown
+	KeyLeft
+	KeyRight
+	KeyEnter
+	KeyLeftAlt
 )
 
 var glfwKeys = [...]glfw.Key{
@@ -56,6 +66,15 @@ var glfwKeys = [...]glfw.Key{
 	Key9:           glfw.Key9,
 	KeyE:           glfw.KeyE,
 	KeyQ:           glfw.KeyQ,
+	KeyF3:          glfw.KeyF3,
+	KeyF5:          glfw.KeyF5,
+	KeyF6:          glfw.KeyF6,
+	KeyUp:          glfw.KeyUp,
+	KeyDown:        glfw.KeyDown,
+	KeyLeft:        glfw.KeyLeft,
+	KeyRight:       glfw.KeyRight,
+	KeyEnter:       glfw.KeyEnter,
+	KeyLeftAlt:     glfw.KeyLeftAlt,
 }
 
 // Window 封装 GLFW 窗口、输入和原生句柄。

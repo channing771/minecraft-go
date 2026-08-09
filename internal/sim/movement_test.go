@@ -416,7 +416,7 @@ func TestEngineMovesBeforeReconcilingAndExecutingInteractions(t *testing.T) {
 	player := engine.sessions[sessionID].player
 	player.state = physics.State{
 		Position: mgl32.Vec3{15.9, 1, 0.5},
-		Velocity: mgl32.Vec3{physics.WalkSpeed, 0, 0},
+		Velocity: mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0},
 		OnGround: true,
 	}
 	engine.Enqueue(Command{
@@ -448,7 +448,7 @@ func TestPlayerCenterDerivationAlsoRunsWhenTrustedObserverChanges(t *testing.T) 
 	player := engine.sessions[sessionID].player
 	player.state = physics.State{
 		Position: mgl32.Vec3{15.9, 1, 0.5},
-		Velocity: mgl32.Vec3{physics.WalkSpeed, 0, 0},
+		Velocity: mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0},
 		OnGround: true,
 	}
 	engine.Enqueue(Command{

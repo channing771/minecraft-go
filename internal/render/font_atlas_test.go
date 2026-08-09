@@ -547,3 +547,55 @@ func (t *glyphTestTexture) snapshotWrites() []glyphTestWrite {
 type glyphTestView struct{ releaseCalls atomic.Int32 }
 
 func (v *glyphTestView) Release() { v.releaseCalls.Add(1) }
+
+// TestGlyphUVCoversInkNotWholeCell 守住字形 UV 与四边形的尺度一致性。
+//
+// 全部消费方（hotbar、name tag、调试面板）统一按 Glyph.Width × Glyph.Height 画
+// 四边形，并直接用 Glyph 的 UV 采样图集。因此 UV 覆盖的图集区域必须与四边形
+// 等尺寸——只覆盖 ink 本身，而不是整个 glyphCellSize×glyphCellSize 的格子。
+//
+// 若 UV 覆盖整格，整格（绝大部分是空白）会被压进 ink 大小的四边形，压缩比为
+// Width/glyphCellSize。实测 'w' 约 0.56 只是变细，而 'i' 约 0.09 会把 2.9px 的
+// 墨迹缩成 0.26px 而彻底消失——表现为窄字符成片丢失、宽字符偏细，名牌与 HUD
+// 数字同样受影响。
+func TestGlyphUVCoversInkNotWholeCell(t *testing.T) {
+	dev := &glyphTestDevice{}
+	atlas, err := NewGlyphAtlas(dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer atlas.Release()
+
+	// 刻意混合最窄（i r t .）与较宽（w S 6）的字形：缺陷的严重度与字宽成反比，
+	// 只取宽字形会让偏差落在容差内而漏掉。
+	const probe = "irt.wS6"
+	atlas.Request(probe)
+	for _, char := range probe {
+		waitUntil(t, func() bool {
+			budget := NewUploadBudget(1024)
+			if err := atlas.FlushUploads(budget); err != nil {
+				t.Fatalf("FlushUploads: %v", err)
+			}
+			return atlas.Glyph(char).Slot != 0
+		})
+	}
+
+	for _, char := range probe {
+		glyph := atlas.Glyph(char)
+		if glyph.Slot == 0 {
+			t.Fatalf("%q 落到了 tofu，无法校验 UV", char)
+		}
+		uvWidth := float64(glyph.U1-glyph.U0) * float64(glyphAtlasSize)
+		uvHeight := float64(glyph.V1-glyph.V0) * float64(glyphAtlasSize)
+		// 容差 1px：UV 落在图集的整数像素边界上，而 Width/Height 是分数 ink 尺寸。
+		if math.Abs(uvWidth-float64(glyph.Width)) > 1 {
+			t.Errorf("%q: UV 宽 %.2fpx 与四边形宽 %.2fpx 不符（差 %.2fpx）——"+
+				"整格宽为 %d，UV 很可能覆盖了整格而非 ink",
+				char, uvWidth, glyph.Width, uvWidth-float64(glyph.Width), glyphCellSize)
+		}
+		if math.Abs(uvHeight-float64(glyph.Height)) > 1 {
+			t.Errorf("%q: UV 高 %.2fpx 与四边形高 %.2fpx 不符（差 %.2fpx）",
+				char, uvHeight, glyph.Height, uvHeight-float64(glyph.Height))
+		}
+	}
+}

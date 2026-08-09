@@ -26,7 +26,7 @@ func TestStepPlayerDoesNotAllocate(t *testing.T) {
 func TestStepPlayerCollidingDoesNotAllocate(t *testing.T) {
 	state := physics.State{
 		Position: mgl32.Vec3{0.5, 1, 0.5},
-		Velocity: mgl32.Vec3{physics.WalkSpeed, 0, 0},
+		Velocity: mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0},
 		OnGround: true,
 	}
 	input := physics.Input{MoveX: 1}
@@ -42,7 +42,7 @@ func TestStepPlayerCollidingDoesNotAllocate(t *testing.T) {
 func TestStepPlayerSteppingDoesNotAllocate(t *testing.T) {
 	state := physics.State{
 		Position: mgl32.Vec3{0.5, 1, 0.5},
-		Velocity: mgl32.Vec3{physics.WalkSpeed, 0, 0},
+		Velocity: mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0},
 		OnGround: true,
 	}
 	input := physics.Input{MoveX: 1}
@@ -69,7 +69,7 @@ func BenchmarkStepPlayerFlat(b *testing.B) {
 func BenchmarkStepPlayerColliding(b *testing.B) {
 	state := physics.State{
 		Position: mgl32.Vec3{0.5, 1, 0.5},
-		Velocity: mgl32.Vec3{physics.WalkSpeed, 0, 0},
+		Velocity: mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0},
 		OnGround: true,
 	}
 	input := physics.Input{MoveX: 1}
@@ -84,7 +84,7 @@ func BenchmarkStepPlayerColliding(b *testing.B) {
 func BenchmarkStepPlayerStepping(b *testing.B) {
 	state := physics.State{
 		Position: mgl32.Vec3{0.5, 1, 0.5},
-		Velocity: mgl32.Vec3{physics.WalkSpeed, 0, 0},
+		Velocity: mgl32.Vec3{physics.DefaultTunables().WalkSpeed, 0, 0},
 		OnGround: true,
 	}
 	input := physics.Input{MoveX: 1}

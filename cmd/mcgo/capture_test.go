@@ -106,7 +106,11 @@ func TestCaptureSkylightTunnelSceneFixesPresentationState(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	app := &application{remotePlayers: remotePlayers}
+	app := &application{
+		remotePlayers: remotePlayers,
+		panel:         &panelState{visible: true},
+		inventoryOpen: true,
+	}
 	inventory := core.Inventory{}
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
 	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
@@ -127,6 +131,10 @@ func TestCaptureSkylightTunnelSceneFixesPresentationState(t *testing.T) {
 	}
 	if got := remotePlayers.Presentations(); len(got) != 0 {
 		t.Fatalf("远端玩家未清空: %+v", got)
+	}
+	if app.inventoryOpen || app.panel.visible {
+		t.Fatalf("上个场景的界面状态未清空: inventoryOpen=%v panelVisible=%v",
+			app.inventoryOpen, app.panel.visible)
 	}
 }
 
