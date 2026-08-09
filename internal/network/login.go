@@ -354,7 +354,12 @@ func (endpoint *gatedServerPlayEndpoint) wait(ctx context.Context) error {
 	default:
 	}
 	if err := endpoint.login.Err(); err != nil {
-		return err
+		select {
+		case <-endpoint.open:
+			return nil
+		default:
+			return err
+		}
 	}
 	select {
 	case <-endpoint.open:

@@ -376,6 +376,24 @@ func TestGatedServerPlayEndpointCommittedHandoffWinsLoginCancellation(t *testing
 	}
 }
 
+func TestGatedServerPlayEndpointCommittedHandoffWinsEarlyLoginCancellation(t *testing.T) {
+	loginContext, cancel := context.WithCancel(context.Background())
+	login := &handoffDuringErrContext{
+		Context:  loginContext,
+		observed: make(chan struct{}),
+	}
+	endpoint := newGatedServerPlayEndpoint(nil, login)
+	result := make(chan error, 1)
+	go func() { result <- endpoint.wait(context.Background()) }()
+
+	<-login.observed
+	endpoint.commit()
+	cancel()
+	if err := <-result; err != nil {
+		t.Fatalf("committed handoff selected canceled login: %v", err)
+	}
+}
+
 func TestPendingLoginCancellationAtSuccessHandoffDoesNotReturnDeadEndpoint(t *testing.T) {
 	client, server := NewMemoryStreamPair(8)
 	t.Cleanup(func() { _ = client.Close() })
@@ -631,6 +649,17 @@ func (ctx *simultaneousHandoffContext) Err() error {
 }
 
 func (*simultaneousHandoffContext) Value(any) any { return nil }
+
+type handoffDuringErrContext struct {
+	context.Context
+	observed chan struct{}
+}
+
+func (ctx *handoffDuringErrContext) Err() error {
+	close(ctx.observed)
+	<-ctx.Done()
+	return ctx.Context.Err()
+}
 
 func testIdentity(last byte) Identity {
 	return Identity{
