@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"hash/crc32"
 	"math"
 	"os"
@@ -11,6 +12,10 @@ import (
 	"testing"
 
 	"minecraft-go/internal/core"
+)
+
+var updateStorageFixtures = flag.Bool(
+	"update-storage-fixtures", false, "rewrite committed storage fixtures",
 )
 
 func fixturePlayerID() core.PlayerID {
@@ -143,6 +148,27 @@ func TestPlayerV5FixtureMigratesLosslessly(t *testing.T) {
 		got.Yaw != want.Yaw || got.Pitch != want.Pitch || got.Safe == nil || *got.Safe != *want.Safe ||
 		got.Inventory != want.Inventory || got.Health != want.Health || !got.NeedsRewrite {
 		t.Fatalf("v5 identity migration = %+v", got)
+	}
+}
+
+// TestPlayerV6Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
+func TestPlayerV6Fixture(t *testing.T) {
+	encoded, err := encodePlayer(fixturePlayerSave(fixturePlayerID(), 19))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("testdata", "player-v6.bin")
+	if *updateStorageFixtures {
+		if err := os.WriteFile(path, encoded, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(want, encoded) {
+		t.Fatal("v6 fixture drift; change schema version")
 	}
 }
 

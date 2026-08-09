@@ -155,6 +155,30 @@ func TestChunkV6FixtureMigratesLosslessly(t *testing.T) {
 	}
 }
 
+// TestChunkV7Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
+func TestChunkV7Fixture(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	encoded, err := encodeChunkPayload(ChunkSave{
+		Key: key, Revision: 19, Chunk: chestFixtureChunk(t, key.Pos),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("testdata", "chunk-v7.bin")
+	if *updateStorageFixtures {
+		if err := os.WriteFile(path, encoded, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(want, encoded) {
+		t.Fatal("v7 fixture drift; change schema version")
+	}
+}
+
 func TestChunkCodecRejectsInvalidChestSlots(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	index := furnaceBlockIndex(t, key.Pos, 1, 2, 3)

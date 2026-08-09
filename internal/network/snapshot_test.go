@@ -205,9 +205,9 @@ func TestBlockChangesValidateRevisionPositionAndOrder(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid block ID",
+			name: "unregistered block ID",
 			mutate: func(changes *network.BlockChanges) {
-				changes.Changes[0].Block = core.BlockID(1 << 15)
+				changes.Changes[0].Block = core.MossyCobblestoneID + 1
 			},
 		},
 		{
