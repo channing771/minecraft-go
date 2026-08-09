@@ -4,7 +4,7 @@
 
 ## 2. 架构守卫支持职责文件族
 
-- [ ] 2.1 将 `internal/archcheck/deps_test.go` 按 source/dependency/platform/helper 拆分，让 mcgo、server 与 session 守卫扫描完整生产文件集合并保持原断言；focused：`zsh -ic 'go test ./internal/archcheck -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo ./internal/server -run "LoginStreams|Session" -count=1'`。
+- [x] 2.1 将 `internal/archcheck/deps_test.go` 按 source/dependency/platform/helper 拆分，让 mcgo、server 与 session 守卫扫描完整生产文件集合并保持原断言；focused：`zsh -ic 'go test ./internal/archcheck -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo ./internal/server -run "LoginStreams|Session" -count=1'`。
 
 ## 3. WebGPU 后端按资源职责拆分
 
