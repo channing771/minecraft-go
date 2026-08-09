@@ -17,6 +17,12 @@ func TestRegistryAirIsTransparent(t *testing.T) {
 	if !r.Opaque(core.StoneID) {
 		t.Fatal("石头应是不透明的")
 	}
+	if r.Opaque(core.GlassID) {
+		t.Fatal("玻璃不应完全遮挡 AO 或天空光")
+	}
+	if r.Opaque(core.LeavesID) {
+		t.Fatal("树叶不应完全遮挡 AO 或天空光")
+	}
 }
 
 func TestGrassHasDistinctTopAndSide(t *testing.T) {

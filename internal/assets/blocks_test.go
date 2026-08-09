@@ -6,7 +6,35 @@ import (
 	"minecraft-go/internal/assets"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/mesh"
+	"minecraft-go/internal/world"
 )
+
+func TestRegistryFaceVisible(t *testing.T) {
+	r := assets.NewRegistry()
+	tests := []struct {
+		name         string
+		id, adjacent core.BlockID
+		want         bool
+	}{
+		{"空气不出面", core.AirID, core.AirID, false},
+		{"未知当前方块不出面", core.MossyCobblestoneID + 1, core.AirID, false},
+		{"石头面向空气", core.StoneID, core.AirID, true},
+		{"石头被石头遮住", core.StoneID, core.StoneID, false},
+		{"石头面向玻璃保留", core.StoneID, core.GlassID, true},
+		{"玻璃被石头遮住", core.GlassID, core.StoneID, false},
+		{"玻璃同类内部面剔除", core.GlassID, core.GlassID, false},
+		{"树叶同类内部面剔除", core.LeavesID, core.LeavesID, false},
+		{"不同 cutout 内部面剔除", core.GlassID, core.LeavesID, false},
+		{"玻璃面向空气", core.GlassID, core.AirID, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := r.FaceVisible(world.BlockID(tt.id), world.BlockID(tt.adjacent)); got != tt.want {
+				t.Fatalf("FaceVisible(%d, %d) = %v，想要 %v", tt.id, tt.adjacent, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestStoneBrickHasOwnMaterialLayer(t *testing.T) {
 	registry := assets.NewRegistry()

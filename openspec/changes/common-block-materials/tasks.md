@@ -15,7 +15,7 @@
 
 ## 4. 面可见性与遮挡语义
 
-- [ ] 4.1 目标：`internal/assets`、`internal/mesh`、`internal/client`、`internal/render`。为 mesh.Registry 增加 FaceVisible，分离 cutout 可绘制面与 Opaque 的 AO/天空光语义。
+- [x] 4.1 目标：`internal/assets`、`internal/mesh`、`internal/client`、`internal/render`。为 mesh.Registry 增加 FaceVisible，分离 cutout 可绘制面与 Opaque 的 AO/天空光语义。
   验证：`go test ./internal/assets ./internal/mesh ./internal/client ./internal/render -race -count=1`
 
 ## 5. 世界 UV 与单 pass cutout

@@ -45,7 +45,18 @@ func NewRegistry() *Registry {
 
 // Opaque 返回方块是否完全不透明。实现 mesh.Registry。
 func (r *Registry) Opaque(id world.BlockID) bool {
-	return id != world.AirID
+	return core.RegisteredBlock(id) && id != core.AirID && id != core.GlassID && id != core.LeavesID
+}
+
+// FaceVisible 返回当前方块朝向相邻方块的面是否可绘制。实现 mesh.Registry。
+func (r *Registry) FaceVisible(id, adjacent world.BlockID) bool {
+	if !core.RegisteredBlock(id) || id == core.AirID || r.Opaque(adjacent) {
+		return false
+	}
+	if !core.RegisteredBlock(adjacent) || adjacent == core.AirID {
+		return true
+	}
+	return r.Opaque(id)
 }
 
 // Material 返回方块某个面的材质层号。实现 mesh.Registry。
