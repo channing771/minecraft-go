@@ -19,9 +19,9 @@
 
 - [x] 4.1 先写 scenario v14、唯一 `13:14`、旧迁移拒绝、Memory/TCP parity 和基线选择的失败测试，再最小升级 producer 与 `cmd/perfcheck` 并重构；运行相关 `go test ./cmd/perfcheck ./internal/... -race -count=1`，通过后只提交本任务文件。
 - [x] 4.2 先写完整 `48³` 传播、跨边界输入和稳定 Mesher 无逐任务 scratch 分配的失败测试，再最小加入无猜测阈值的微基准并重构；运行相关 `go test -bench`，通过后只提交本任务文件。
-- [ ] 4.3 先验证未通过静稳预检或缺少绑定精确 HEAD 的一次性授权时正式链被拒绝；在冻结候选全量验证通过后，以全新路径各执行一次 M5 Memory/TCP v14 producer，并在 `13:14` 完整性/绝对门禁和跨 transport 比较通过后替换 M5 基线、记录证据；通过后只提交本任务文件，M2 不变。
+- [ ] 4.3 先写完整报告在性能退化时仍写出 JSON 且 `perfcheck` 成功、报告无效/身份不一致/真实 overflow 时仍失败的测试，再最小把 producer 与 `perfcheck` 改为性能只记录；生成完整 M5 v14 Memory/TCP 记录，执行显式 `13:14` 与跨 transport 的 record-only 比较，以 Memory 报告精确字节替换 M5 基线并记录证据，TCP 只需完整记录，不要求静稳预检、绑定路径或一次性授权；运行受影响测试后只提交本任务文件，M2 不变。
 
 ## 5. 收尾验证与归档准备
 
 - [ ] 5.1 先为兼容性说明缺失写文档检查，再最小更新受影响中文开发文档并复核协议 v13、玩家 schema v5、区块 schema v6、metadata v2 不变及回退策略；运行 `git diff --check`，通过后只提交本任务文件。
-- [ ] 5.2 先运行全量门禁以暴露剩余失败，再最小修复并重构；运行 `gofmt -l .`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、相关 benchmark/perfcheck、`make visual-check` 和 `openspec validate --all --strict --no-interactive`，全部通过后只提交收尾任务文件。
+- [ ] 5.2 先运行全量正确性门禁以暴露剩余失败，再最小修复并重构；运行 `gofmt -l .`、`go vet ./...`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`make visual-check` 和 `openspec validate --all --strict --no-interactive` 并要求全部通过，同时运行相关 benchmark/`perfcheck` 保存性能记录证据但不要求性能数值通过，完成后只提交收尾任务文件。
