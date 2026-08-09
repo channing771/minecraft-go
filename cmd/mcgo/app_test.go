@@ -273,7 +273,7 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	}
 	avatar := render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 	nameTag := render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
-	hotbar := render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas)
+	hotbar := render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, reg)
 	color := dev.CreateTexture(gfx.TextureDesc{Label: "main color", Width: 4, Height: 4, Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget})
 	app := &application{
 		dev: dev, color: color, colorView: color.View(gfx.TextureViewDesc{}),
@@ -407,7 +407,7 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 		depth: newDepthTarget(dev, 16, 16), renderer: render.New(dev, reg, gfx.FormatRGBA8Unorm),
 		avatarRenderer:  render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float),
 		nameTagRenderer: render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, glyphs),
-		hotbarRenderer:  render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, glyphs),
+		hotbarRenderer:  render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, glyphs, reg),
 		itemDropRenderer: render.NewItemDropRenderer(
 			dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float,
 		),
@@ -425,6 +425,7 @@ type integrationRenderDevice struct {
 	releases, passes []string
 	events           []string
 	draws            []string
+	drawInstances    []uint32
 	buffers          map[string]*integrationBuffer
 }
 
@@ -464,6 +465,12 @@ func (d *integrationRenderDevice) Poll(bool)            { d.events = append(d.ev
 func (d *integrationRenderDevice) Release()             { d.releases = append(d.releases, "device") }
 func (d *integrationRenderDevice) lastPasses() []string { return append([]string(nil), d.passes...) }
 func (d *integrationRenderDevice) resetPasses()         { d.passes = nil }
+func (d *integrationRenderDevice) lastDrawInstanceCount() uint32 {
+	if len(d.drawInstances) == 0 {
+		return 0
+	}
+	return d.drawInstances[len(d.drawInstances)-1]
+}
 func (d *integrationRenderDevice) bufferByLabel(t *testing.T, label string) *integrationBuffer {
 	t.Helper()
 	buffer := d.buffers[label]
@@ -586,12 +593,13 @@ func (*integrationPass) SetIndexBuffer(gfx.Buffer, uint64)          {}
 func (p *integrationPass) DrawIndexedIndirect(gfx.Buffer, uint64) {
 	p.device.draws = append(p.device.draws, "indirect")
 }
-func (p *integrationPass) Draw(vertexCount uint32, _ uint32) {
+func (p *integrationPass) Draw(vertexCount, instanceCount uint32) {
 	if vertexCount == 3 {
 		p.device.draws = append(p.device.draws, "sky triangle")
 		return
 	}
 	p.device.draws = append(p.device.draws, "draw")
+	p.device.drawInstances = append(p.device.drawInstances, instanceCount)
 }
 func (*integrationPass) End() {}
 

@@ -147,7 +147,7 @@ type applicationDependencies struct {
 	newGlyphAtlas         func(gfx.Device) (*render.GlyphAtlas, error)
 	newAvatarRenderer     func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
 	newNameTagRenderer    func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
-	newHotbarRenderer     func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.HotbarRenderer, error)
+	newHotbarRenderer     func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*render.HotbarRenderer, error)
 	newItemDropRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
 	newDebugPanelRenderer func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.DebugPanelRenderer, error)
 }
@@ -323,8 +323,8 @@ func newApplicationWithDependencies(
 		}
 	}
 	if dependencies.newHotbarRenderer == nil {
-		dependencies.newHotbarRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource) (*render.HotbarRenderer, error) {
-			return render.NewHotbarRenderer(dev, color, atlas), nil
+		dependencies.newHotbarRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource, blocks *assets.Registry) (*render.HotbarRenderer, error) {
+			return render.NewHotbarRenderer(dev, color, atlas, blocks), nil
 		}
 	}
 	if dependencies.newItemDropRenderer == nil {
@@ -541,7 +541,7 @@ func newApplicationWithDependencies(
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建昵称渲染器: %w", err), app.Close())
 	}
-	app.hotbarRenderer, err = dependencies.newHotbarRenderer(dev, colorFormat, app.glyphAtlas)
+	app.hotbarRenderer, err = dependencies.newHotbarRenderer(dev, colorFormat, app.glyphAtlas, reg)
 	if err != nil {
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建快捷栏渲染器: %w", err), app.Close())
