@@ -15,7 +15,7 @@
 - `LightBlockID` 与 `ItemLightBlock` MUST 只追加在既有稳定枚举末尾；不得重排旧 ID，也不得新增 `RecipeID`。
 - 发光块 MUST 是完整不透明立方体，固定 `Emission=15`；方块光只穿过空气，六向每格减 `1`，距离 `14` 为 `1`，距离 `15` 为 `0`，多源取最大。
 - `Quad.Light` 高四位 MUST 保持天空光，低四位 MUST 表示方块光；shader MUST 用 `max(sky_base, block)` 合光，方块光不得受昼夜影响。
-- 普通非列顶变化 dirty 集合 MUST 不超过 `27` 个区段；列顶变化 MUST 继续不超过 `216` 个区段；不得新增专用 dirty 图或放宽队列上限。
+- 普通非列顶变化 dirty 集合 MUST 不超过 `27` 个区段且 MUST 完整覆盖所有实际受影响区段；列顶变化 MUST 继续不超过 `216` 个区段；不得新增专用 dirty 图或放宽队列上限。
 - 每个 mesher worker MUST 复用一个精确 `48³` 的 levels 与一个同容量 FIFO；稳定构建 MUST 零分配，最坏输入 MUST 不溢出。
 - 协议 MUST 唯一支持 v14；packet ID、payload 长度与字段布局不变。玩家 schema MUST 保持 v5，区块 schema MUST 升到 v7，metadata MUST 保持 v2。
 - benchmark MUST 升到 scenario v15；唯一可授权的 workload 迁移是 `14:15`。M2 v6 基线保持字节不变；M5 v14 报告只保留为历史证据。
@@ -499,7 +499,7 @@ func blockLight(light uint8) uint8 { return light & 0x0f }
 ```text
 TestBlockLightSourceFaceSamplesAdjacentFourteen
 TestBlockLightFallsToOneAtDistanceFourteenAndZeroAtFifteen
-TestBlockLightStopsAtOpaqueBlock
+TestBlockLightStopsAtNonAirBlockEvenWhenMarkedNonOpaque
 TestBlockLightMultipleSourcesTakeMaximum
 TestBlockLightCrossesSectionBoundary
 TestBlockLightCrossesChunkBoundary
@@ -507,7 +507,7 @@ TestBlockLightMissingNeighborStaysDark
 TestPackedSkyAndBlockLightBuildIsDeterministic
 ```
 
-固定夹具 MUST 包含非空气地面，避免 uniform-air center 触发 `MeshSection` 快速返回；光源格为 `15`，其可见面采样相邻空气应得到低四位 `14`。
+固定夹具 MUST 包含非空气地面，避免 uniform-air center 触发 `MeshSection` 快速返回；光源格为 `15`，其可见面采样相邻空气应得到低四位 `14`。阻断用例 MUST 让一个非 `AirID` 测试方块在 registry 中返回 `Opaque=false`，证明方块光仍不穿过它。
 
 Run:
 
@@ -585,7 +585,7 @@ for x := lightMin; x < lightMin+lightSide; x++ {
 }
 ```
 
-BFS 对六个轴向邻格执行：域外跳过；当前低四位 `<=1` 停止；目标不透明跳过；只有 `next > existing` 才写入并入队。多源可能让空气格被更亮路径更新，因此队列容量证明必须以算法实际入队上限为准；若测试证明单数组 FIFO 会因重复提升超限，最小修复是让全等级 15 源同时入队并以 FIFO 首次到达即最短路径，不增加第二个队列或动态容器。
+BFS 对六个轴向邻格执行：域外跳过；当前低四位 `<=1` 停止；目标不是 `AirID` 时跳过，不以 `Registry.Opaque` 决定方块光传播；只有 `next > existing` 才写入并入队。多源可能让空气格被更亮路径更新，因此队列容量证明必须以算法实际入队上限为准；若测试证明单数组 FIFO 会因重复提升超限，最小修复是让全等级 15 源同时入队并以 FIFO 首次到达即最短路径，不增加第二个队列或动态容器。
 
 - [ ] **Step 5: 让 `MeshSection` 原样写 packed byte**
 
@@ -648,13 +648,13 @@ git commit -m "feat: 派生静态方块光"
 在现有 `internal/client/skylight_test.go` 追加：
 
 ```text
-TestMirrorLightBlockPlacementDirtiesExactTwentySevenSections
-TestMirrorLightBlockRemovalDirtiesExactTwentySevenSections
+TestMirrorLightBlockPlacementDirtiesWithinTwentySevenAndCoversAffectedSections
+TestMirrorLightBlockRemovalDirtiesWithinTwentySevenAndCoversAffectedSections
 TestMirrorLightBlockColumnTopChangeStaysWithinTwoHundredSixteenSections
 TestMesherDiscardsStaleBlockLightAfterRemoval
 ```
 
-前两项在非列顶位置分别把 `AirID↔LightBlockID`，断言 dirty 去重后精确 `27`；第三项把发光块置于/移出列顶并断言 `<=216` 且无重复；最后一项按既有 roof stale 测试步骤执行：排队含光源任务、移除光源并提高 revision、先提交旧结果、断言旧 packed 低四位未发布且新区段最终为 `0`。
+前两项在非列顶位置分别把 `AirID↔LightBlockID`，断言 dirty 去重后 `<=27`，并逐个断言所有实际受影响区段都包含在 dirty 集合中；不得锁死恰好 `27`。第三项把发光块置于/移出列顶并断言 `<=216` 且无重复；最后一项按既有 roof stale 测试步骤执行：排队含光源任务、移除光源并提高 revision、先提交旧结果、断言旧 packed 低四位未发布且新区段最终为 `0`。
 
 Run:
 

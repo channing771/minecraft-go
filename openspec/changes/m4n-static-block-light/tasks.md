@@ -8,20 +8,20 @@
 
 ## 3. 升级协议 v14 与区块 schema v7
 
-- [ ] 3.1 在 `internal/network` 与 `internal/storage` 先锁定 v14 握手、v13 拒绝、packet golden、v6→v7 no-op、v7 发光块/掉落 roundtrip、玩家 v5 与 v6 fixture hash；以 `zsh -ic 'go test ./internal/network ./internal/storage -run "Protocol|CodecGolden|ChunkV6|ChunkV7|LightBlock" -count=1'` 确认红灯。
+- [ ] 3.1 在 `internal/network` 与 `internal/storage` 先锁定 v14 握手、v13 拒绝、v13→v14 所有 packet payload 长度不变且保留既有生命值字节、packet golden、v6→v7 no-op、v7 发光块/掉落 roundtrip、玩家 v5 与 v6 fixture hash；以 `zsh -ic 'go test ./internal/network ./internal/storage -run "Protocol|CodecGolden|ChunkV6|ChunkV7|LightBlock" -count=1'` 确认红灯。
 - [ ] 3.2 只把 `network.ProtocolVersion` 升为 `14`、`currentChunkSchema` 升为 `7` 并注册 `6→7` no-op；生成 `internal/storage/testdata/chunk-v7.bin`、保留 v6 fixture 字节并追加 fuzz seed，以 `zsh -ic 'go test ./internal/storage -run "ChunkV6|ChunkV7|PlayerSchemaV5" -count=1'` 验证。
 - [ ] 3.3 对 Task 3 Go 文件执行 `gofmt -w`，运行 `zsh -ic 'go test ./internal/network ./internal/storage -race -count=1'`、`zsh -ic 'go test ./internal/storage -run "Future|CRC|Trunc|Trailing|Migration" -count=1'`、`zsh -ic 'go test ./internal/storage -run=^$ -fuzz=FuzzDecodeChunkPayload -fuzztime=10s'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/network internal/storage` 与 `git diff --check`。
 
 ## 4. 在固定 scratch 中实现 packed 双通道传播
 
 - [ ] 4.1 将 `internal/mesh/skylight*.go` 机械更名为 `light*.go`，同步 `LightScratch`/`NewLightScratch` 调用点并保持天空光算法不变；以 `zsh -ic 'go test ./internal/mesh ./internal/client ./internal/render ./cmd/gfxspike -run "SkyLight|Mesh|Mesher" -count=1'` 验证纯重命名。
-- [ ] 4.2 在 `internal/mesh/light_test.go` 与 `light_internal_test.go` 先覆盖 `15/14/1/0`、阻光边界、多源最大值、跨区段/区块、缺失邻区、确定性、精确 `48³` 容量、一次 emission 扫描、队列复用和零分配；以 `zsh -ic 'go test ./internal/mesh -run "BlockLight|PackedSky|LightScratch" -count=1'` 确认方块光红灯。
-- [ ] 4.3 在 `internal/mesh` 实现一个 packed levels/queue、先天空光后所有光源统一入队的方块光 BFS，并让 `MeshSection` 原样写 packed byte；只同步 `internal/client/mesher.go`、`cmd/gfxspike/main.go` 与 `internal/render/bench_test.go` 的必要调用点。
+- [ ] 4.2 在 `internal/mesh/light_test.go` 与 `light_internal_test.go` 先覆盖 `15/14/1/0`、仅 `AirID` 传播、未来被标记为透明的非空气方块仍阻断、多源最大值、跨区段/区块、缺失邻区、确定性、精确 `48³` 容量、一次 emission 扫描、队列复用和零分配；以 `zsh -ic 'go test ./internal/mesh -run "BlockLight|PackedSky|LightScratch" -count=1'` 确认方块光红灯。
+- [ ] 4.3 在 `internal/mesh` 实现一个 packed levels/queue、先天空光后所有光源统一入队且只进入 `AirID` 邻格的方块光 BFS，并让 `MeshSection` 原样写 packed byte；只同步 `internal/client/mesher.go`、`cmd/gfxspike/main.go` 与 `internal/render/bench_test.go` 的必要调用点。
 - [ ] 4.4 对 Task 4 Go 文件执行 `gofmt -w`，运行 `zsh -ic 'go test ./internal/mesh -race -count=1'`、`zsh -ic 'go test ./internal/client ./internal/render ./cmd/gfxspike -race -count=1'`、`zsh -ic 'go test ./internal/mesh -run ^$ -bench BenchmarkMeshTerrainSection -benchmem -count=5'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/mesh internal/client cmd/gfxspike internal/render`，并以 `rg -n "SkyLightScratch|NewSkyLightScratch|skylight.go" . --glob '!docs/superpowers/**'` 确认无代码命中。
 
 ## 5. 验证 mesher 收敛并接入 shader 合光
 
-- [ ] 5.1 在 `internal/client/skylight_test.go` 先锁定发光块普通 dirty 精确 `27`、列顶 dirty `<=216` 与移除后的 stale result 拒绝；运行 `zsh -ic 'go test ./internal/client -run "LightBlock|StaleBlockLight" -count=1'`，若既有 dirty 用例已绿则不修改 `mirror.go`。
+- [ ] 5.1 在 `internal/client/skylight_test.go` 先锁定发光块普通 dirty `<=27` 且所有实际受影响区段完整覆盖、列顶 dirty `<=216` 与移除后的 stale result 拒绝；运行 `zsh -ic 'go test ./internal/client -run "LightBlock|StaleBlockLight" -count=1'`，若既有 dirty 用例已绿则不修改 `mirror.go`。
 - [ ] 5.2 在 `internal/render/daylight_test.go` 先用 `0xf0`、`0x0f`、`0x88` 锁定正午/午夜、天空与方块光竞争及 AO/朝向；以 `zsh -ic 'go test ./internal/render -run TestTerrainDaylightHeadlessDraw -count=1'` 确认旧 shader 红灯。
 - [ ] 5.3 只修改 `internal/render/shader/terrain.wgsl` 为 `max(0.08 + sky*(daylight-0.08), block)`，不增加渲染资源；对测试执行 `gofmt -w` 后运行 `zsh -ic 'go test ./internal/client ./internal/render -race -count=1'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/client internal/render` 与 `git diff --check`。
 
