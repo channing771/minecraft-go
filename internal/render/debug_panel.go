@@ -33,11 +33,19 @@ const (
 	panelGlyphSize      = maxPanelGlyphs * panelInstanceBytes
 	panelUploadBytes    = panelGlyphOffset + panelGlyphSize
 
-	panelMarginX        = float32(16)
-	panelMarginY        = float32(16)
-	panelPaddingX       = float32(10)
-	panelPaddingY       = float32(8)
-	panelRowHeight      = float32(18)
+	panelMarginX  = float32(16)
+	panelMarginY  = float32(16)
+	panelPaddingX = float32(10)
+	panelPaddingY = float32(8)
+	// panelRowHeight 是行距。原值 18 是照着字形 UV 缺陷下被压扁的字调的——
+	// 那时整格被压进 ink 大小的四边形，字看起来比实际小得多。UV 修正后字形
+	// 按 24pt 原生尺寸绘制，18px 会让上一行的下伸部压住下一行的升部。
+	//
+	// 取值依据：字体标称行距为 35px（Ascent 28 + Descent 7），那是保证任何字形
+	// 都不重叠的上界，但 32 行会让面板高到约 1150px，1080p 屏放不下。实测本面板
+	// 实际用到的字形 ink 跨度不超过 25px（CJK 约 24，拉丁升部到降部合计约 25），
+	// 因此取 28px：留 3px 行间隙，总高约 920px，仍可容于 1080p。
+	panelRowHeight      = float32(28)
 	panelLabelWidth     = float32(260)
 	panelWidth          = float32(460)
 	panelSectionGap     = float32(6)

@@ -120,26 +120,47 @@ func TestRunWithDependenciesDisablesDevForBenchmark(t *testing.T) {
 	}
 }
 
-// TestRunWithDependenciesDisablesDevForCapture 与 benchmark 那条同理：抓帧产出
-// 同样要与 golden 基线比对，--dev 原先只在 --benchmark 下被排除，--capture
-// 下却仍然生效，两条基线路径的待遇不一致。
-func TestRunWithDependenciesDisablesDevForCapture(t *testing.T) {
-	sawCall := false
-	var gotDev bool
-	args := append([]string{"--capture", t.TempDir(), "--dev"}, absentConfigArgs(t)...)
-	err := runWithDependencies(args, runDependencies{
-		loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
-		newApplication: func(options applicationOptions) (*application, error) {
-			sawCall = true
-			gotDev = options.Dev
-			return nil, errors.New("stop before window")
-		},
-	})
-	if err == nil || !sawCall {
-		t.Fatalf("run error=%v sawCall=%v，想要构造期错误且确实调用了 newApplication", err, sawCall)
-	}
-	if gotDev {
-		t.Fatal("--capture 必须让 --dev 失效：options.Dev = true")
+// TestRunWithDependenciesAlwaysEnablesDevForCapture 守住抓帧路径必须构造面板
+// 渲染器这条契约。
+//
+// 该断言与它的前身相反，是有意的：早先抓帧被当作"与 benchmark 同类的基线路径"
+// 而排除了 --dev。但 debug-panel 场景要拍的就是面板本身，而基线重生成与 CI
+// 调用 capture 时都不会带 --dev——沿用旧规则会让那个场景永远拍到空画面。
+//
+// 两条基线路径的待遇本就不该一致：benchmark measures 性能，面板不该占用 GPU；
+// capture 记录画面，面板是被记录的对象之一。面板默认隐藏，只有该场景的 Apply
+// 打开它，因此其余场景的基线不受影响。
+func TestRunWithDependenciesAlwaysEnablesDevForCapture(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		dev  bool
+	}{
+		{"带 --dev", true},
+		{"不带 --dev", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sawCall := false
+			var gotDev bool
+			args := []string{"--capture", t.TempDir()}
+			if test.dev {
+				args = append(args, "--dev")
+			}
+			args = append(args, absentConfigArgs(t)...)
+			err := runWithDependencies(args, runDependencies{
+				loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+				newApplication: func(options applicationOptions) (*application, error) {
+					sawCall = true
+					gotDev = options.Dev
+					return nil, errors.New("stop before window")
+				},
+			})
+			if err == nil || !sawCall {
+				t.Fatalf("run error=%v sawCall=%v，想要构造期错误且确实调用了 newApplication", err, sawCall)
+			}
+			if !gotDev {
+				t.Fatal("--capture 必须构造面板渲染器：options.Dev = false，debug-panel 场景会拍到空画面")
+			}
+		})
 	}
 }
 

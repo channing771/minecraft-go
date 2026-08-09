@@ -215,10 +215,14 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 			"否则客户端预测会与权威模拟持续分歧（面板在联机时已锁这两组，配置文件不受该锁约束）",
 			"connect", options.Application.Connect)
 	}
-	// benchmark 与抓帧产出都不应受 --dev 影响：这两条路径的结果要与基线比对，
-	// 不给它们构造面板渲染器，也不占用面板的 GPU 资源。
-	options.Application.Dev = options.Dev &&
-		!options.Application.Benchmark && options.CaptureDir == ""
+	// benchmark 不构造面板渲染器：它的产出要与性能基线比对，面板既不该占用
+	// GPU 资源，也不该让结果随 --dev 变化。
+	//
+	// 抓帧相反，必须无条件构造：debug-panel 场景要拍的就是面板本身，而基线
+	// 重生成与 CI 调用 capture 时都不会带 --dev。面板默认隐藏，只有该场景的
+	// Apply 会把它打开，因此其余场景的画面不受影响。
+	options.Application.Dev = (options.Dev || options.CaptureDir != "") &&
+		!options.Application.Benchmark
 	options.Application.Render = effective.Render
 	// 面板 F5 保存需要落盘路径；benchmark 与抓帧路径不进交互循环，不需要它。
 	if !options.Application.Benchmark && options.CaptureDir == "" {

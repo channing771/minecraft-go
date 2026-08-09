@@ -56,6 +56,13 @@ type captureScene struct {
 	// Apply 在最后一帧渲染前执行，是场景对呈现状态的全部干预。
 	// 它跑在 drainServerMessages 之后，因此设置的值不会被当帧的服务端消息覆盖。
 	Apply func(*application) error
+	// PinVolatile 可选，在字形收敛帧之后、最后一帧渲染之前执行，用来钉住那些
+	// 随机器速度变化、因而不属于场景三要素的量。
+	//
+	// 存在的理由：Apply 跑在收敛帧之前，而收敛帧会推进帧间隔与权威 tick，
+	// 在 Apply 里设的值到最后一帧已经被覆盖。目前只有调试面板需要它——它的
+	// 读数区直接显示帧时与 tick，这两者在同一台机器上重复抓帧也会变。
+	PinVolatile func(*application) error
 }
 
 // captureScenes 是表驱动的场景清单，新增场景即新增一行。
@@ -174,7 +181,50 @@ var captureScenes = []captureScene{
 			return app.inventory.Apply(network.InventoryState{Inventory: inventory})
 		},
 	},
+	{
+		// 调试面板的视觉布局（行距、标签列宽、段头分组、只读行暗色）此前没有
+		// 任何自动化覆盖，只能靠人眼。字形 UV 缺陷正是在这里被发现的——面板是
+		// 全项目唯一大量绘制拉丁文本的界面，窄字符丢失在它身上最明显。
+		Name:         "debug-panel",
+		WarmupFrames: 8,
+		Apply: func(app *application) error {
+			app.worldTimeTicks = 6000
+			app.camera.Yaw = 0
+			app.camera.Pitch = -0.25
+			// 与其余场景一样显式清空上一个场景留下的呈现状态：本列表共用同一个
+			// application，不显式设置就会静默继承 inventory-crafting 的背包与容器。
+			app.remotePlayers.Reset()
+			app.furnace.Reset()
+			app.chest.Reset()
+			app.inventoryOpen = false
+			if err := app.inventory.Apply(
+				network.InventoryState{Inventory: core.Inventory{}},
+			); err != nil {
+				return fmt.Errorf("重置物品栏: %w", err)
+			}
+			if app.panel == nil {
+				return fmt.Errorf("debug-panel 需要面板状态，当前为 nil")
+			}
+			app.panel.visible = true
+			return nil
+		},
+		PinVolatile: func(app *application) error {
+			// 面板读数区直接显示帧时与权威 tick，两者都随机器速度变化：
+			// 同机重复抓帧实测 tick 在 412..416 之间、帧时在 3.3..4.3ms 之间，
+			// 足以让基线比对超出阈值。
+			//
+			// panelLastFrameAt 清零后，下一帧的帧时按 panelFrameInput 的定义
+			// 保持 0，显示为固定的 "0.00 ms"；serverTick 钉成常量。
+			app.panelLastFrameAt = time.Time{}
+			app.serverTick = capturePinnedServerTick
+			return nil
+		},
+	},
 }
+
+// capturePinnedServerTick 是 debug-panel 场景钉死的权威 tick 值。
+// 取一个与真实加载时长无关的常量即可，数值本身没有语义。
+const capturePinnedServerTick = 400
 
 // captureGoldenDir 是 golden 基线目录，相对仓库根目录。
 // mcgo 的其余相对路径默认值（例如 --world 的 worlds/default）同样假定从仓库根目录运行，
@@ -235,6 +285,13 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 	for i := 0; i < captureGlyphSettleFrames; i++ {
 		if _, err := app.renderFrame(captureDrainMax); err != nil {
 			return fmt.Errorf("字形收敛第 %d 帧: %w", i, err)
+		}
+	}
+	// PinVolatile 必须在收敛帧之后、最后一帧之前：收敛帧本身会推进那些随机器
+	// 速度变化的量（帧间隔、权威 tick），在 Apply 里钉死会被它们重新覆盖。
+	if scene.PinVolatile != nil {
+		if err := scene.PinVolatile(app); err != nil {
+			return fmt.Errorf("钉住易变读数: %w", err)
 		}
 	}
 	if _, err := app.renderFrame(captureDrainMax); err != nil {
