@@ -391,7 +391,7 @@ func decodeIndexedSection(d *byteDecoder, section *SectionData) error {
 		}
 		id := core.BlockID(block)
 		if !validBlockID(id) {
-			return fmt.Errorf("palette block ID %d exceeds 15 bits", id)
+			return fmt.Errorf("palette block ID %d is unregistered", id)
 		}
 		if _, duplicate := seen[id]; duplicate {
 			return fmt.Errorf("duplicate palette block ID %d", id)

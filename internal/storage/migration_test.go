@@ -3,11 +3,43 @@ package storage
 import (
 	"errors"
 	"math"
+	"reflect"
 	"testing"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/world"
 )
+
+func TestChunkV6MigrationPreservesState(t *testing.T) {
+	want := chunkDTO{
+		Key:      core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -3}},
+		Revision: 17,
+	}
+	want.Sections[0] = world.ContainerSnapshot{
+		Kind: world.StorageIndexed, Bits: 4,
+		Palette: []core.BlockID{core.AirID, core.ChestID}, Packed: make([]uint64, 256),
+	}
+	want.Drops[0] = world.DropSlot{
+		Generation: 1, Active: true,
+		Stack: core.ItemStack{Item: core.ItemStone, Count: 2}, BlockIndex: 4,
+	}
+	want.Furnaces[0] = world.FurnaceSlot{Generation: 2}
+	want.Chests[0] = world.ChestSlot{Generation: 3}
+
+	got, migrated, err := migrateChunk(6, want)
+	if err != nil || !migrated {
+		t.Fatalf("v6 identity migration migrated=%v err=%v", migrated, err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("v6 identity migration\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
+func TestChunkFutureSchemaIsRejected(t *testing.T) {
+	if _, migrated, err := migrateChunk(8, chunkDTO{}); !errors.Is(err, ErrFutureVersion) || migrated {
+		t.Fatalf("未来区块 schema migrated=%v err=%v，想要 ErrFutureVersion", migrated, err)
+	}
+}
 
 func TestMigrationRegistryIsContinuous(t *testing.T) {
 	for schema := oldestChunkSchema; schema < currentChunkSchema; schema++ {

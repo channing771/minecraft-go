@@ -46,6 +46,8 @@ var chunkMigrations = map[uint32]chunkMigration{
 		dto.Chests = [core.ChestsPerChunk]world.ChestSlot{}
 		return dto, nil
 	},
+	// v7 与 v6 的 payload 布局相同，只扩展合法方块注册表。
+	6: func(dto chunkDTO) (chunkDTO, error) { return dto, nil },
 }
 
 // fillFullDurability 把没有耐久的旧工具补为满耐久，非工具保持零值。

@@ -5,7 +5,7 @@
 
 ## 2. 协议与存档语义版本
 
-- [ ] 2.1 目标：`internal/network`、`internal/world`、`internal/storage`。升级协议 v14、玩家 schema v6、区块 schema v7，增加 identity migration、未知方块拒绝和 Memory/TCP round-trip。
+- [x] 2.1 目标：`internal/network`、`internal/world`、`internal/storage`。升级协议 v14、玩家 schema v6、区块 schema v7，增加 identity migration、未知方块拒绝和 Memory/TCP round-trip。
   验证：`go test ./internal/network ./internal/world ./internal/storage -race -count=1`
 
 ## 3. 缺失玩家材料包

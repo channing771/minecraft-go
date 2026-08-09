@@ -48,6 +48,8 @@ var playerMigrations = map[uint32]playerMigration{
 		dto.Health = core.MaxHealth
 		return dto, nil
 	},
+	// v6 与 v5 的 payload 布局相同，只扩展合法物品注册表。
+	5: func(dto playerDTO) (playerDTO, error) { return dto, nil },
 }
 
 func migratePlayer(from uint32, dto playerDTO) (playerDTO, bool, error) {

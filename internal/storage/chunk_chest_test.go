@@ -48,8 +48,8 @@ func TestChunkCodecRoundTripsChests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 6 {
-		t.Fatalf("schema = %d，想要 6", got.Schema)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 7 {
+		t.Fatalf("schema = %d，想要 7", got.Schema)
 	}
 	for slot := range core.ChestsPerChunk {
 		if got.Chunk.Chest(slot) != want.Chest(slot) {
@@ -125,33 +125,28 @@ func TestChunkV1ThroughV4FixturesChainMigrateToEmptyChests(t *testing.T) {
 	}
 }
 
-func TestChunkV6Fixture(t *testing.T) {
+func TestChunkV6FixtureMigratesLosslessly(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	want := chestFixtureChunk(t, key.Pos)
-	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 19, Chunk: want})
-	if err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join("testdata", "chunk-v6.bin")
-	if *updateStorageFixtures {
-		if err := os.WriteFile(path, encoded, 0o644); err != nil {
-			t.Fatal(err)
+	encoded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeChunkPayload(key, 19, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Migrated || decoded.Schema != 7 || decoded.Revision != 19 {
+		t.Fatalf("v6 fixture schema=%d revision=%d migrated=%v", decoded.Schema, decoded.Revision, decoded.Migrated)
+	}
+	if decoded.Chunk.Hash() != want.Hash() || decoded.Chunk.DropsHash() != want.DropsHash() {
+		t.Fatal("v6 identity migration 改变了 palette 或掉落物")
+	}
+	for slot := range core.FurnacesPerChunk {
+		if decoded.Chunk.Furnace(slot) != want.Furnace(slot) {
+			t.Fatalf("v6 fixture 熔炉槽 %d = %+v，想要 %+v", slot, decoded.Chunk.Furnace(slot), want.Furnace(slot))
 		}
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, encoded) {
-		t.Fatal("v6 fixture drift; change schema version")
-	}
-
-	decoded, err := decodeChunkPayload(key, 19, got)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decoded.Migrated {
-		t.Fatal("v6 fixture 不应标记为已迁移")
 	}
 	for slot := range core.ChestsPerChunk {
 		if decoded.Chunk.Chest(slot) != want.Chest(slot) {

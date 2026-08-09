@@ -42,8 +42,8 @@ func fixturePlayerInventory() core.Inventory {
 }
 
 func TestPlayerCodecRoundTrip(t *testing.T) {
-	if currentPlayerSchema != 5 {
-		t.Fatalf("玩家 schema=%d，想要 5", currentPlayerSchema)
+	if currentPlayerSchema != 6 {
+		t.Fatalf("玩家 schema=%d，想要 6", currentPlayerSchema)
 	}
 	id := fixturePlayerID()
 	want := fixturePlayerSave(id, 7)
@@ -59,11 +59,30 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 	if got.NeedsRewrite {
-		t.Fatal("v5 玩家意外需要重写")
+		t.Fatal("v6 玩家意外需要重写")
 	}
 	got.Safe.Position[0] = 99
 	if want.Safe.Position[0] == 99 {
 		t.Fatal("decoded safe location aliases save")
+	}
+}
+
+func TestPlayerSchemaV6RoundTripsCommonBlockMaterial(t *testing.T) {
+	id := fixturePlayerID()
+	want := fixturePlayerSave(id, 8)
+	want.Inventory.Backpack[3] = core.ItemStack{
+		Item: core.ItemMossyCobblestone, Count: core.MaxStackCount,
+	}
+	encoded, err := encodePlayer(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodePlayer(id, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Inventory != want.Inventory || got.NeedsRewrite {
+		t.Fatalf("新材料玩家往返 inventory=%+v migrated=%v", got.Inventory, got.NeedsRewrite)
 	}
 }
 
@@ -107,24 +126,23 @@ func TestPlayerV4FixtureMigratesToFullHealth(t *testing.T) {
 	}
 }
 
-// TestPlayerV5Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
-func TestPlayerV5Fixture(t *testing.T) {
-	encoded, err := encodePlayer(fixturePlayerSave(fixturePlayerID(), 19))
-	if err != nil {
-		t.Fatal(err)
-	}
+// TestPlayerV5FixtureMigratesLosslessly 冻结 v5 负载布局，并验证 v6 identity migration。
+func TestPlayerV5FixtureMigratesLosslessly(t *testing.T) {
 	path := filepath.Join("testdata", "player-v5.bin")
-	if *updateStorageFixtures {
-		if err := os.WriteFile(path, encoded, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got, err := os.ReadFile(path)
+	encoded, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, encoded) {
-		t.Fatal("v5 fixture drift; change schema version")
+	want := fixturePlayerSave(fixturePlayerID(), 19)
+	got, err := decodePlayer(want.PlayerID, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PlayerID != want.PlayerID || got.Revision != want.Revision ||
+		got.DisplayName != want.DisplayName || got.Current != want.Current ||
+		got.Yaw != want.Yaw || got.Pitch != want.Pitch || got.Safe == nil || *got.Safe != *want.Safe ||
+		got.Inventory != want.Inventory || got.Health != want.Health || !got.NeedsRewrite {
+		t.Fatalf("v5 identity migration = %+v", got)
 	}
 }
 

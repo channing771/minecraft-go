@@ -57,7 +57,7 @@ func NewPalettedContainerFromSnapshot(
 			return nil, errors.New("world: single snapshot has compressed payload")
 		}
 		if !validSnapshotBlockID(snapshot.Single) {
-			return nil, fmt.Errorf("world: single block ID %d exceeds 15 bits", snapshot.Single)
+			return nil, fmt.Errorf("world: single block ID %d is unregistered", snapshot.Single)
 		}
 		return &PalettedContainer{
 			kind:   kindSingle,
@@ -89,7 +89,7 @@ func NewPalettedContainerFromSnapshot(
 		lookup := make(map[BlockID]uint32, len(snapshot.Palette))
 		for index, id := range snapshot.Palette {
 			if !validSnapshotBlockID(id) {
-				return nil, fmt.Errorf("world: palette block ID %d exceeds 15 bits", id)
+				return nil, fmt.Errorf("world: palette block ID %d is unregistered", id)
 			}
 			if _, duplicate := lookup[id]; duplicate {
 				return nil, fmt.Errorf("world: duplicate palette block ID %d", id)
@@ -135,6 +135,12 @@ func NewPalettedContainerFromSnapshot(
 				return nil, fmt.Errorf("world: direct packed word %d has unused high bits", index)
 			}
 		}
+		for index := 0; index < core.BlocksPerSection; index++ {
+			id := core.BlockID(readPacked(snapshot.Packed, snapshot.Bits, index))
+			if !core.RegisteredBlock(id) {
+				return nil, fmt.Errorf("world: direct block ID %d at block %d is unregistered", id, index)
+			}
+		}
 		return &PalettedContainer{
 			kind: kindDirect,
 			bits: directBits,
@@ -147,7 +153,7 @@ func NewPalettedContainerFromSnapshot(
 }
 
 func validSnapshotBlockID(id core.BlockID) bool {
-	return id < 1<<directBits
+	return core.RegisteredBlock(id)
 }
 
 func readPacked(data []uint64, bits uint8, index int) uint32 {

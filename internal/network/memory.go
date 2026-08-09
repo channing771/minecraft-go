@@ -80,7 +80,7 @@ func (stream *memoryServerStream) Recv(ctx context.Context, state State) (Client
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateClientPacket(state, packet); err != nil {
+	if err := validateDecodedClientWirePacket(state, packet); err != nil {
 		stream.pair.close()
 		return nil, protocolViolation(err)
 	}
