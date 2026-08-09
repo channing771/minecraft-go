@@ -48,8 +48,8 @@ func TestChunkCodecRoundTripsChests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 6 {
-		t.Fatalf("schema = %d，想要 6", got.Schema)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 7 {
+		t.Fatalf("schema = %d，想要 7", got.Schema)
 	}
 	for slot := range core.ChestsPerChunk {
 		if got.Chunk.Chest(slot) != want.Chest(slot) {
@@ -128,35 +128,26 @@ func TestChunkV1ThroughV4FixturesChainMigrateToEmptyChests(t *testing.T) {
 func TestChunkV6Fixture(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	want := chestFixtureChunk(t, key.Pos)
-	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 19, Chunk: want})
-	if err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join("testdata", "chunk-v6.bin")
-	if *updateStorageFixtures {
-		if err := os.WriteFile(path, encoded, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(got, encoded) {
-		t.Fatal("v6 fixture drift; change schema version")
 	}
 
 	decoded, err := decodeChunkPayload(key, 19, got)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Migrated {
-		t.Fatal("v6 fixture 不应标记为已迁移")
+	if !decoded.Migrated || decoded.Schema != 7 {
+		t.Fatalf("v6 fixture 迁移结果 schema=%d migrated=%v", decoded.Schema, decoded.Migrated)
 	}
 	for slot := range core.ChestsPerChunk {
 		if decoded.Chunk.Chest(slot) != want.Chest(slot) {
 			t.Fatalf("v6 fixture 箱子槽 %d = %+v，想要 %+v", slot, decoded.Chunk.Chest(slot), want.Chest(slot))
 		}
+	}
+	if decoded.Chunk.Hash() != want.Hash() || decoded.Chunk.DropsHash() != want.DropsHash() {
+		t.Fatal("v6 fixture 迁移改变了方块或掉落物状态")
 	}
 }
 

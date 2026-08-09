@@ -8,9 +8,9 @@
 
 ## 3. 升级协议 v14 与区块 schema v7
 
-- [ ] 3.1 在 `internal/network` 与 `internal/storage` 先锁定 v14 握手、v13 拒绝、v13→v14 所有 packet payload 长度不变且保留既有生命值字节、packet golden、v6→v7 no-op、v7 发光块/掉落 roundtrip、玩家 v5 与 v6 fixture hash；以 `zsh -ic 'go test ./internal/network ./internal/storage -run "Protocol|CodecGolden|ChunkV6|ChunkV7|LightBlock" -count=1'` 确认红灯。
-- [ ] 3.2 只把 `network.ProtocolVersion` 升为 `14`、`currentChunkSchema` 升为 `7` 并注册 `6→7` no-op；生成 `internal/storage/testdata/chunk-v7.bin`、保留 v6 fixture 字节并追加 fuzz seed，以 `zsh -ic 'go test ./internal/storage -run "ChunkV6|ChunkV7|PlayerSchemaV5" -count=1'` 验证。
-- [ ] 3.3 对 Task 3 Go 文件执行 `gofmt -w`，运行 `zsh -ic 'go test ./internal/network ./internal/storage -race -count=1'`、`zsh -ic 'go test ./internal/storage -run "Future|CRC|Trunc|Trailing|Migration" -count=1'`、`zsh -ic 'go test ./internal/storage -run=^$ -fuzz=FuzzDecodeChunkPayload -fuzztime=10s'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/network internal/storage` 与 `git diff --check`。
+- [x] 3.1 在 `internal/network` 与 `internal/storage` 先锁定 v14 握手、v13 拒绝、v13→v14 所有 packet payload 长度不变且保留既有生命值字节、packet golden、v6→v7 no-op、v7 发光块/掉落 roundtrip、玩家 v5 与 v6 fixture hash；以 `zsh -ic 'go test ./internal/network ./internal/storage -run "Protocol|CodecGolden|ChunkV6|ChunkV7|LightBlock" -count=1'` 确认红灯。
+- [x] 3.2 只把 `network.ProtocolVersion` 升为 `14`、`currentChunkSchema` 升为 `7` 并注册 `6→7` no-op；生成 `internal/storage/testdata/chunk-v7.bin`、保留 v6 fixture 字节并追加 fuzz seed，以 `zsh -ic 'go test ./internal/storage -run "ChunkV6|ChunkV7|PlayerSchemaV5" -count=1'` 验证。
+- [x] 3.3 对 Task 3 Go 文件执行 `gofmt -w`，运行 `zsh -ic 'go test ./internal/network ./internal/storage -race -count=1'`、`zsh -ic 'go test ./internal/storage -run "Future|CRC|Trunc|Trailing|Migration" -count=1'`、`zsh -ic 'go test ./internal/storage -run=^$ -fuzz=FuzzDecodeChunkPayload -fuzztime=10s'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/network internal/storage` 与 `git diff --check`。
 
 ## 4. 在固定 scratch 中实现 packed 双通道传播
 
