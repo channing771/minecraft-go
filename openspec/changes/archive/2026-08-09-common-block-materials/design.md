@@ -29,7 +29,7 @@
 
 `BlockID` 在 `ChestID` 后、`ItemID` 在 `ItemChest` 后，依次追加圆石、平滑石、沙子、砾石、竖向橡木原木、橡木木板、树叶、玻璃、砖块、白色羊毛、红色瓦块、黏土、完整雪块和苔藓圆石。`core` 增加 `RegisteredBlock` 作为方块编号合法性的基础判断，现有 `RegisteredItem`、`ItemPlacement`、`BlockDrop` 与 `ItemStackLimit` 继续用固定 switch 表达一一对应关系。
 
-`network` 与 `storage` 在各自信任边界调用注册判断，未知编号立即返回带上下文的错误；`assets.Registry.Material` 不再承担未知编号降级。编号一经提交不得重排或复用。
+`network`、`storage` 与物品入口在各自信任边界调用注册判断，未知编号立即返回带上下文的错误。`assets.Registry.Material` 只是已验证方块的内部材质选择器；terrain 网格必须先由 `FaceVisible` 对未注册当前方块 fail-closed，只有可见面才调用 `Material`。其 defensive fallback 不承担信任边界职责，也不得让未知方块实际渲染成石头。编号一经提交不得重排或复用。
 
 否决通用 `BlockDefinition` 或跨包描述表：当前只有固定材料、没有方块状态、脚本行为或运行时扩展消费者，新增框架只会扩大依赖和迁移面。
 

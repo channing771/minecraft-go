@@ -19,6 +19,16 @@ func (testRegistry) Material(id world.BlockID, _ mesh.Face) uint16 {
 	return uint16(id)
 }
 
+type materialCallRegistry struct {
+	*assets.Registry
+	calls int
+}
+
+func (r *materialCallRegistry) Material(id world.BlockID, face mesh.Face) uint16 {
+	r.calls++
+	return r.Registry.Material(id, face)
+}
+
 func solidNeighbors(center *world.Section) *world.Neighborhood {
 	solid := world.NewSection()
 	for y := 0; y < 16; y++ {
@@ -82,6 +92,18 @@ func TestMeshEmptySectionProducesNothing(t *testing.T) {
 	n := solidNeighbors(world.NewSection())
 	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewSkyLightScratch()); len(q) != 0 {
 		t.Fatalf("全空气区段产生了 %d 个面，应为 0", len(q))
+	}
+}
+
+func TestMeshUnknownBlockDoesNotSelectMaterial(t *testing.T) {
+	center := world.NewSection()
+	center.Blocks.Set(8, 8, 8, core.MossyCobblestoneID+1)
+	registry := &materialCallRegistry{Registry: assets.NewRegistry()}
+	if quads := mesh.MeshSection(solidNeighbors(center), registry, mesh.NewSkyLightScratch()); len(quads) != 0 {
+		t.Fatalf("未知方块产生了 %d 个面，想要 0", len(quads))
+	}
+	if registry.calls != 0 {
+		t.Fatalf("未知方块调用了 Material %d 次，想要 0", registry.calls)
 	}
 }
 

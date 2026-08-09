@@ -8,7 +8,7 @@
 
 ### Requirement: 稳定材料注册表
 
-系统 SHALL 在 `ChestID` / `ItemChest` 之后按以下顺序只追加稳定方块与物品编号：`CobblestoneID` / `ItemCobblestone`、`SmoothStoneID` / `ItemSmoothStone`、`SandID` / `ItemSand`、`GravelID` / `ItemGravel`、`OakLogID` / `ItemOakLog`、`OakPlanksID` / `ItemOakPlanks`、`LeavesID` / `ItemLeaves`、`GlassID` / `ItemGlass`、`BrickID` / `ItemBrick`、`WhiteWoolID` / `ItemWhiteWool`、`RoofTileID` / `ItemRoofTile`、`ClayID` / `ItemClay`、`SnowBlockID` / `ItemSnowBlock`、`MossyCobblestoneID` / `ItemMossyCobblestone`。这些编号 MUST NOT 重排或复用；每种物品的堆叠上限 MUST 为 `64`。
+系统 SHALL 在 `ChestID` / `ItemChest` 之后按以下顺序只追加稳定方块与物品编号：`CobblestoneID` / `ItemCobblestone`、`SmoothStoneID` / `ItemSmoothStone`、`SandID` / `ItemSand`、`GravelID` / `ItemGravel`、`OakLogID` / `ItemOakLog`、`OakPlanksID` / `ItemOakPlanks`、`LeavesID` / `ItemLeaves`、`GlassID` / `ItemGlass`、`BrickID` / `ItemBrick`、`WhiteWoolID` / `ItemWhiteWool`、`RoofTileID` / `ItemRoofTile`、`ClayID` / `ItemClay`、`SnowBlockID` / `ItemSnowBlock`、`MossyCobblestoneID` / `ItemMossyCobblestone`。这些编号 MUST NOT 重排或复用；每种物品的堆叠上限 MUST 为 `64`。协议、存档和物品入口 SHALL 作为信任边界拒绝未知编号；terrain 的 `Material` 只作为已通过 `RegisteredBlock` 与 `FaceVisible` 校验后的内部材质选择器。
 
 #### Scenario: 追加固定材料清单
 - **GIVEN** 当前稳定编号止于 `ChestID` / `ItemChest`
@@ -16,8 +16,14 @@
 - **THEN** 编号 MUST 只按批准清单追加，`RegisteredBlock`、`RegisteredItem`、`ItemPlacement`、`BlockDrop` MUST 一一对应，未知编号 MUST 被拒绝
 
 #### Scenario: 未知编号不能降级为既有材料
-- **WHEN** 协议、存档、物品或材质边界收到未注册的方块或物品编号
+- **WHEN** 协议、存档或物品信任边界收到未注册的方块或物品编号
 - **THEN** 系统 MUST 返回可读错误，且 MUST NOT 把未知编号解释为石头、空气或其他已注册材料
+
+#### Scenario: 未知方块不进入材质选择
+- **GIVEN** terrain 网格读取到未注册的当前方块编号
+- **WHEN** 判断该方块是否产生可绘制面
+- **THEN** `RegisteredBlock` 与 `FaceVisible` MUST 在调用 `Material` 前拒绝该面
+- **AND** 未知方块 MUST NOT 产生 terrain quad，也 MUST NOT 因 defensive fallback 实际渲染成石头
 
 ### Requirement: 权威放置采掘与掉落
 

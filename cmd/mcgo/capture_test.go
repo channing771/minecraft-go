@@ -106,6 +106,11 @@ func TestCaptureMaterialsShowcaseFixtureUsesMirrorAndMesher(t *testing.T) {
 			}
 		}
 	}
+	for y := int32(4); y <= 5; y++ {
+		for x := int32(-10); x <= -9; x++ {
+			assertBlock(core.BlockPos{X: x, Y: y, Z: -9}, core.BrickID)
+		}
+	}
 	for x := int32(-4); x <= 3; x++ {
 		assertBlock(core.BlockPos{X: x, Y: 0, Z: -1}, core.GrassID)
 	}
