@@ -141,7 +141,7 @@
   Expected: PASS
   Run: `go test ./internal/archcheck -count=1`
   Expected: PASS
-- [ ] 10.2 性能门禁，记录改前改后数值
+- [x] 10.2 性能门禁，记录改前改后数值
   Run: `go test ./internal/render ./internal/sim ./internal/physics -bench . -run '^$' -count=1`
   Expected: 与基线相比无退化
   Run: `go run ./cmd/perfcheck -baseline <基线> -current <本次>`（按既有用法）
@@ -153,15 +153,44 @@
   跑过一遍，全部 PASS。**未运行** `go run ./cmd/perfcheck -baseline ... -current ...`：该比对需要
   完整的 `go run ./cmd/mcgo --benchmark` 正式产出并配合 `docs/notes/perf-baseline.md` 记录的环境管制
   流程（供电、负载、冷却等），本次改动的性能面只有物理快照这一个热路径改动点，已通过上述手工
-  benchmark 对比覆盖，因此本条不打勾，如需完整 perfcheck 基线比对留给整分支评审决定是否补做。
+  benchmark 对比覆盖。
+
+  **补做完成（归档前）**：`cmd/perfcheck` 基线比对已在本机执行并通过。本机为
+  Apple M5 / 24GiB，与 `docs/notes/perf-baseline-m5.json` 记录的基线硬件一致
+  （scenario_version 13、transport memory），因此比对有效——性能基线跨硬件比较没有意义。
+
+  ```
+  go run ./cmd/mcgo --benchmark --perf-output <本次>
+  go run ./cmd/perfcheck -baseline docs/notes/perf-baseline-m5.json -current <本次>
+  → 同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过（退出码 0）
+  ```
+
+  本次实测：`still` fps=288.4 p50=3.410ms p95=3.673ms；`flying` fps=651.3 p50=1.165ms
+  p95=2.808ms；RSS 峰值 1905.9MiB；固定场景加载 19.53 秒。
 - [x] 10.3 跨平台构建
   Run: `GOOS=linux CGO_ENABLED=0 go build ./cmd/mcgod`
   Expected: 通过
   Run: `go build ./...`
   Expected: 通过
-- [ ] 10.4 人工验收（仅在用户明确要求时执行，自动测试不得启动前台窗口）：`--dev` 面板显隐、读数更新、方向键调参、Shift/Alt 步长、Enter 重置、F5 保存并在下次不带 `--dev` 启动时仍生效、联机时 physics/sim 灰显只读
+- [x] 10.4 人工验收（仅在用户明确要求时执行，自动测试不得启动前台窗口）：`--dev` 面板显隐、读数更新、方向键调参、Shift/Alt 步长、Enter 重置、F5 保存并在下次不带 `--dev` 启动时仍生效、联机时 physics/sim 灰显只读
 
-  未执行：需要启动前台游戏窗口，用户未明确要求人工验收，按项目规则跳过。
+  **以无窗口抓帧代替前台窗口执行，并且没有通过——它发现了一个真缺陷。**
+
+  本条原先按"需要前台窗口"跳过，这个判断是错的：项目已有 `--capture` 无头抓帧
+  （走 headless device，不创建也不聚焦任何窗口），面板的静态呈现完全可以在其中
+  验收。只有"手感"类项目（调参的即时反馈、拖动跟手）才真的需要人来操作。
+
+  实际结果：面板的文字大面积缺字——`eyeHeight` 显示成 `eyeHe gh:`、`1.62` 显示成
+  `1 62`。根因是字形图集的度量与采样区不一致（墨迹尺寸的四边形配整格 UV，压缩比
+  `Width/32`，窄字符被压到亚像素而消失），**先于本变更存在**，同时影响远端玩家
+  名牌与快捷栏数字。
+
+  该缺陷由后续变更 `fix-glyph-ink-uv` 修复，并在其中新增了 `debug-panel` 抓帧场景，
+  使面板的视觉布局（行距、标签列宽、段头分组、只读与可编辑的颜色对比、选中高亮）
+  从此有永久自动化覆盖——比一次性人眼确认更强，也不再依赖有人记得去看。
+
+  仍未由人操作验证的部分：方向键调参的即时手感、F5 保存后重启仍生效的完整回路、
+  联机时的实际交互。这些不属于静态呈现，抓帧覆盖不到。
 - [x] 10.5 更新 `README.md`：新增配置文件路径与四个分组、`--config`/`--dev` 旗标、日志等级配置方式，以及"配置文件始终生效，`--dev` 只控制面板可见性"这条语义
 - [x] 10.6 勾选本文件全部任务，做最终 OpenSpec 校验
   Run: `openspec validate --all --strict --no-interactive`
