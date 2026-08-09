@@ -8,7 +8,7 @@
 
 ## 3. WebGPU 后端按资源职责拆分
 
-- [ ] 3.1 将 `internal/gfx/wgpu.go` 原样拆为 convert/pipeline/resource/surface/encoder 文件，保留 Darwin build tag、CGO bridge 与 release 顺序；focused：`zsh -ic 'go test ./internal/gfx -race -count=1'`、`zsh -ic 'go test ./cmd/gfxspike ./cmd/mcgo -run "Headless|GPU|Render" -count=1'`。
+- [x] 3.1 将 `internal/gfx/wgpu.go` 原样拆为 convert/pipeline/resource/surface/encoder 文件，保留 Darwin build tag、CGO bridge 与 release 顺序；focused：`zsh -ic 'go test ./internal/gfx -race -count=1'`、`zsh -ic 'go test ./cmd/gfxspike ./cmd/mcgo -run "Headless|GPU|Render" -count=1'`。
 
 ## 4. network 按消息领域和方向拆分
 
