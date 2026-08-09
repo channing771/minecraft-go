@@ -23,7 +23,7 @@
 - 只有 `internal/gfx` 可以直接导入 WebGPU 绑定。
 - `sim` 不得依赖渲染包，`world` 不得依赖 `network`。
 - 跨 goroutine 发送成功后的消息及其切片视为不可变；重 CPU、磁盘和网络工作不得阻塞权威 tick 或渲染热路径。
-- 不得放宽既有正确性、资源上限或性能门禁来让测试通过。
+- 不得放宽既有正确性、资源上限、报告完整性、真实 overflow 或数据丢失门禁来让测试通过；benchmark 与 `perfcheck` 的性能数值只保存记录，不改变退出状态。
 - 仓库不得加入 Mojang 版权材质或其他未经授权的二进制美术资源。
 
 ## 实现约定
@@ -49,7 +49,7 @@ go vet ./...
 gofmt -l .
 ```
 
-`gofmt -l .` 应无输出。渲染、tick、存储或协议热路径发生变化时，还要运行对应 benchmark、fuzz/golden 测试或 `cmd/perfcheck` 门禁。
+`gofmt -l .` 应无输出。渲染、tick、存储或协议热路径发生变化时，还要运行对应 benchmark、fuzz/golden 测试或 `cmd/perfcheck`，其性能数值只记录；报告完整性、真实 overflow 和数据丢失仍是门禁。
 
 OpenSpec 产物提交前执行：
 

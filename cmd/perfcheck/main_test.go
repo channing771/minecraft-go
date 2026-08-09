@@ -560,12 +560,55 @@ func TestPerfcheckScenarioUpgradeRejectsIncompleteV14Report(t *testing.T) {
 
 func TestComparisonSuccessMessageDescribesComparisonMode(t *testing.T) {
 	if got := comparisonSuccessMessage(13, 14); got !=
-		"场景迁移验证通过：报告完整、硬件一致且当前 v14 绝对门禁通过" {
+		"场景迁移性能记录完成：报告完整、硬件一致，当前 v14" {
 		t.Fatalf("migration message=%q", got)
 	}
 	if got := comparisonSuccessMessage(6, 6); got !=
-		"同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过" {
+		"同场景性能记录完成" {
 		t.Fatalf("same-scenario message=%q", got)
+	}
+}
+
+func TestPerformanceChangesProduceRecordsWithoutFailure(t *testing.T) {
+	baseline := completeV14ComparableReport("memory")
+	current := completeV14ComparableReport("memory")
+	phase := current.Phases["still"]
+	phase.FPS = 1
+	phase.P99MS = 99
+	phase.MaxMS = 99
+	phase.PeakRSSBytes = 3 << 30
+	current.Phases["still"] = phase
+	current.Ticks.P99MS = 99
+	current.Ticks.MaxMS = 99
+	current.Multiplayer.OutboxHighWater = 999
+	if records, err := compareReports(baseline, current, 0.20); err != nil || len(records) == 0 {
+		t.Fatalf("性能退化应只产生记录: records=%v err=%v", records, err)
+	}
+}
+
+func TestScenarioUpgradeStillRejectsIncompleteReport(t *testing.T) {
+	baseline := completeV13ComparableReport("memory")
+	current := completeV14ComparableReport("memory")
+	current.Phases["still"] = client.PhaseSummary{}
+	if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "13:14"); err == nil {
+		t.Fatal("不完整场景升级报告未被拒绝")
+	}
+}
+
+func TestCrossTransportComparisonRequiresMatchingCommit(t *testing.T) {
+	baseline := completeV14ComparableReport("memory")
+	current := completeV14ComparableReport("tcp")
+	current.GitCommit = "other-commit"
+	if _, err := compareReports(baseline, current, 0.20); err == nil || !strings.Contains(err.Error(), "git_commit") {
+		t.Fatalf("跨 transport commit 不一致 error=%v", err)
+	}
+}
+
+func TestPerfcheckRejectsDroppedSamples(t *testing.T) {
+	report := completeV14ComparableReport("memory")
+	report.Ticks.DroppedRingBufferSamples = 1
+	if err := validateV6Report("current", report); err == nil || !strings.Contains(err.Error(), "dropped") {
+		t.Fatalf("丢失环形缓冲样本 error=%v", err)
 	}
 }
 

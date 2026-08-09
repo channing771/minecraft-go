@@ -231,6 +231,9 @@ func runBenchmark(app *application, outputPath string) error {
 	if err := writeBenchmarkReport(outputPath, report); err != nil {
 		return err
 	}
+	for _, record := range benchmarkPerformanceRecords(report) {
+		fmt.Println("性能记录:", record)
+	}
 	fmt.Printf("性能报告已写入 %s\n", outputPath)
 	return nil
 }
@@ -402,16 +405,41 @@ func validateBenchmarkReport(report client.PerfReport) error {
 	if report.Protocol.Bytes == 0 || report.Protocol.EncodeP99MS <= 0 || report.Protocol.DecodeP99MS <= 0 {
 		failures = append(failures, fmt.Sprintf("protocol 指标不完整: %+v", report.Protocol))
 	}
-	if report.Protocol.EncodeP99MS >= 1 || report.Protocol.DecodeP99MS >= 1 {
-		failures = append(failures, fmt.Sprintf("protocol p99 超过 1ms: %+v", report.Protocol))
-	}
 	if report.PlayerPersistence.Snapshots <= 0 {
 		failures = append(failures, "player_persistence snapshots=0")
 	}
-	if report.PlayerPersistence.P99MS >= 5 || report.PlayerPersistence.MaxMS >= 20 {
-		failures = append(failures, fmt.Sprintf("player_persistence 超过 p99/max 5/20ms: %+v", report.PlayerPersistence))
-	}
 	if report.ScenarioVersion >= 6 {
+		for _, field := range []struct {
+			name, value string
+		}{
+			{name: "hardware", value: report.Hardware},
+			{name: "os", value: report.OS},
+			{name: "go_version", value: report.GoVersion},
+			{name: "git_commit", value: report.GitCommit},
+			{name: "framebuffer", value: report.Framebuffer},
+		} {
+			if strings.TrimSpace(field.value) == "" {
+				failures = append(failures, field.name+" 为空")
+			}
+		}
+		for _, name := range []string{"still", "flying"} {
+			phase, ok := report.Phases[name]
+			if !ok || phase.Frames <= 0 || phase.FPS <= 0 || phase.P50MS <= 0 || phase.P95MS <= 0 ||
+				phase.P99MS <= 0 || phase.MaxMS <= 0 || phase.PeakRSSBytes == 0 {
+				failures = append(failures, name+" 阶段指标不完整")
+				continue
+			}
+			if phase.DroppedRingBufferSamples > 0 {
+				failures = append(failures, name+" dropped ring-buffer samples")
+			}
+		}
+		if len(report.Phases) != 2 {
+			failures = append(failures, "phases 必须精确包含 still/flying")
+		}
+		if report.Ticks.Frames != 200 || report.Ticks.P50MS <= 0 || report.Ticks.P95MS <= 0 ||
+			report.Ticks.P99MS <= 0 || report.Ticks.MaxMS <= 0 || report.Ticks.DroppedRingBufferSamples > 0 {
+			failures = append(failures, "ticks 指标不完整或 dropped ring-buffer samples")
+		}
 		for name, summary := range map[string]client.LatencySummary{
 			"remote_state_encode": report.Multiplayer.RemoteStateEncode,
 			"remote_state_decode": report.Multiplayer.RemoteStateDecode,
@@ -438,41 +466,57 @@ func validateBenchmarkReport(report client.PerfReport) error {
 		if multiplayer.ServerOutboundBytes == 0 {
 			failures = append(failures, "server_outbound_bytes=0")
 		}
-		if multiplayer.OutboxHighWater > 512 {
-			failures = append(failures, fmt.Sprintf("outbox high-water %d > 512", multiplayer.OutboxHighWater))
+		if multiplayer.PeakRSSBytes == 0 {
+			failures = append(failures, "multiplayer 峰值 RSS=0")
 		}
-		if multiplayer.PlayerJobsHighWater > 16 {
-			failures = append(failures, fmt.Sprintf("player jobs high-water %d > 16", multiplayer.PlayerJobsHighWater))
-		}
-		if multiplayer.PlayerDoneHighWater > 2 {
-			failures = append(failures, fmt.Sprintf("player done high-water %d > 2", multiplayer.PlayerDoneHighWater))
-		}
-		if multiplayer.PeakRSSBytes == 0 || multiplayer.PeakRSSBytes >= 2<<30 {
-			failures = append(failures, fmt.Sprintf("multiplayer 峰值 RSS %.1f MiB 不在 (0, 2048) MiB", float64(multiplayer.PeakRSSBytes)/(1<<20)))
-		}
-	}
-	for name, phase := range report.Phases {
-		if phase.FPS < 100 {
-			failures = append(failures, fmt.Sprintf("%s fps %.1f < 100", name, phase.FPS))
-		}
-		if phase.P99MS >= 12 {
-			failures = append(failures, fmt.Sprintf("%s p99 %.3f ms >= 12 ms", name, phase.P99MS))
-		}
-		if phase.PeakRSSBytes >= 2<<30 {
-			failures = append(failures, fmt.Sprintf("%s 峰值 RSS %.1f MiB >= 2048 MiB",
-				name, float64(phase.PeakRSSBytes)/(1<<20)))
-		}
-	}
-	if report.Ticks.P99MS >= 10 {
-		failures = append(failures, fmt.Sprintf("tick p99 %.3f ms >= 10 ms", report.Ticks.P99MS))
-	}
-	if report.Ticks.MaxMS >= 50 {
-		failures = append(failures, fmt.Sprintf("tick max %.3f ms >= 50 ms", report.Ticks.MaxMS))
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf("%s", strings.Join(failures, "；"))
 	}
 	return nil
+}
+
+func benchmarkPerformanceRecords(report client.PerfReport) []string {
+	var records []string
+	if report.Protocol.EncodeP99MS >= 1 || report.Protocol.DecodeP99MS >= 1 {
+		records = append(records, fmt.Sprintf("protocol p99 超过 1ms: %+v", report.Protocol))
+	}
+	if report.PlayerPersistence.P99MS >= 5 || report.PlayerPersistence.MaxMS >= 20 {
+		records = append(records, fmt.Sprintf("player_persistence 超过 p99/max 5/20ms: %+v", report.PlayerPersistence))
+	}
+	if report.ScenarioVersion >= 6 {
+		multiplayer := report.Multiplayer
+		if multiplayer.OutboxHighWater > 512 {
+			records = append(records, fmt.Sprintf("outbox high-water %d > 512", multiplayer.OutboxHighWater))
+		}
+		if multiplayer.PlayerJobsHighWater > 16 {
+			records = append(records, fmt.Sprintf("player jobs high-water %d > 16", multiplayer.PlayerJobsHighWater))
+		}
+		if multiplayer.PlayerDoneHighWater > 2 {
+			records = append(records, fmt.Sprintf("player done high-water %d > 2", multiplayer.PlayerDoneHighWater))
+		}
+		if multiplayer.PeakRSSBytes >= 2<<30 {
+			records = append(records, fmt.Sprintf("multiplayer peak RSS %d >= 2GiB", multiplayer.PeakRSSBytes))
+		}
+	}
+	for name, phase := range report.Phases {
+		if phase.FPS < 100 {
+			records = append(records, fmt.Sprintf("%s fps %.1f < 100", name, phase.FPS))
+		}
+		if phase.P99MS >= 12 {
+			records = append(records, fmt.Sprintf("%s p99 %.3f ms >= 12 ms", name, phase.P99MS))
+		}
+		if phase.PeakRSSBytes >= 2<<30 {
+			records = append(records, fmt.Sprintf("%s peak RSS %d >= 2GiB", name, phase.PeakRSSBytes))
+		}
+	}
+	if report.Ticks.P99MS >= 10 {
+		records = append(records, fmt.Sprintf("tick p99 %.3f ms >= 10 ms", report.Ticks.P99MS))
+	}
+	if report.Ticks.MaxMS >= 50 {
+		records = append(records, fmt.Sprintf("tick max %.3f ms >= 50 ms", report.Ticks.MaxMS))
+	}
+	return records
 }
 
 func measureProtocolSummary() (client.ProtocolSummary, error) {

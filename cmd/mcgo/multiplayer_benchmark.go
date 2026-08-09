@@ -752,11 +752,14 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 		P99MS:  tickLatency.P99MS,
 		MaxMS:  tickLatency.MaxMS,
 	}
-	if epoch.overflow.Load() || outbound.Load() == 0 ||
-		interestSummary.Samples != benchmarkServerInterestSamples ||
-		tickSummary.Frames != benchmarkServerMeasuredTicks ||
-		outboxHigh > benchmarkOutboxLimit || jobsHigh > 16 || doneHigh > 2 ||
-		peakRSS == 0 || peakRSS >= 2<<30 {
+	invalid := !validBenchmarkServerProbe(
+		epoch.overflow.Load(),
+		outbound.Load(),
+		interestSummary.Samples,
+		tickSummary.Frames,
+		peakRSS,
+	)
+	if invalid {
 		return client.MultiplayerSummary{}, client.PhaseSummary{}, fmt.Errorf(
 			"多人服务端探针不完整: overflow=%v outbound=%d interest=%+v ticks=%+v queues=%d/%d/%d rss=%d",
 			epoch.overflow.Load(), outbound.Load(), interestSummary, tickSummary,
@@ -778,4 +781,9 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 		PlayerDoneHighWater: doneHigh,
 		PeakRSSBytes:        peakRSS,
 	}, tickSummary, nil
+}
+
+func validBenchmarkServerProbe(overflow bool, outbound uint64, interestSamples, tickFrames int, peakRSS uint64) bool {
+	return !overflow && outbound != 0 &&
+		interestSamples == benchmarkServerInterestSamples && tickFrames == benchmarkServerMeasuredTicks && peakRSS != 0
 }

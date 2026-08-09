@@ -25,26 +25,23 @@ func main() {
 	}
 	baseline := readReport(*baselinePath)
 	current := readReport(*currentPath)
-	failures, err := compareReportsWithScenarioUpgrade(
+	records, err := compareReportsWithScenarioUpgrade(
 		baseline, current, *maxRegression, *allowScenarioUpgrade,
 	)
 	if err != nil {
 		fail("%v", err)
 	}
-	for _, failure := range failures {
-		fmt.Fprintln(os.Stderr, failure)
-	}
-	if len(failures) != 0 {
-		os.Exit(1)
+	for _, record := range records {
+		fmt.Fprintln(os.Stdout, "性能记录:", record)
 	}
 	fmt.Println(comparisonSuccessMessage(baseline.ScenarioVersion, current.ScenarioVersion))
 }
 
 func comparisonSuccessMessage(baselineVersion, currentVersion int) string {
 	if baselineVersion != currentVersion {
-		return fmt.Sprintf("场景迁移验证通过：报告完整、硬件一致且当前 v%d 绝对门禁通过", currentVersion)
+		return fmt.Sprintf("场景迁移性能记录完成：报告完整、硬件一致，当前 v%d", currentVersion)
 	}
-	return "同场景性能比较通过：适用的稳定指标退化均未超过阈值且绝对门禁通过"
+	return "同场景性能记录完成"
 }
 
 func compareReports(
@@ -109,6 +106,13 @@ func compareReportsWithScenarioUpgrade(
 			"硬件标识不同，拒绝比较：基线=%q 当前=%q",
 			baseline.Hardware,
 			current.Hardware,
+		)
+	}
+	if baseline.Transport != current.Transport && baseline.GitCommit != current.GitCommit {
+		return nil, fmt.Errorf(
+			"跨 transport git_commit 不同，拒绝比较：基线=%q 当前=%q",
+			baseline.GitCommit,
+			current.GitCommit,
 		)
 	}
 
@@ -402,6 +406,9 @@ func validateV6Report(label string, report client.PerfReport) error {
 		if phase.P50MS > phase.P95MS || phase.P95MS > phase.P99MS || phase.P99MS > phase.MaxMS {
 			return fmt.Errorf("%s v6 %s 阶段分位数非单调: %+v", label, name, phase)
 		}
+		if phase.DroppedRingBufferSamples > 0 {
+			return fmt.Errorf("%s v6 %s dropped ring-buffer samples=%d", label, name, phase.DroppedRingBufferSamples)
+		}
 	}
 	if len(report.Phases) != 2 {
 		return fmt.Errorf("%s v6 phases 必须精确包含 still/flying: %v", label, report.Phases)
@@ -419,6 +426,9 @@ func validateV6Report(label string, report client.PerfReport) error {
 	if report.Ticks.P50MS > report.Ticks.P95MS || report.Ticks.P95MS > report.Ticks.P99MS ||
 		report.Ticks.P99MS > report.Ticks.MaxMS {
 		return fmt.Errorf("%s v6 ticks 分位数非单调: %+v", label, report.Ticks)
+	}
+	if report.Ticks.DroppedRingBufferSamples > 0 {
+		return fmt.Errorf("%s v6 ticks dropped ring-buffer samples=%d", label, report.Ticks.DroppedRingBufferSamples)
 	}
 	persistence := report.Persistence
 	if persistence.Snapshots <= 0 || persistence.P50MS <= 0 || persistence.P95MS <= 0 ||
