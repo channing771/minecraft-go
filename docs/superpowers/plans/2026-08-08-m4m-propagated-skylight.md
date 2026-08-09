@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在不修改服务端、协议或存档的前提下，让客户端从权威区块镜像派生 `0..15` 的有界横向天空光，并用无窗口视觉场景和 scenario v14 正式性能链完成验收。
+**Goal:** 在不修改服务端、协议或存档的前提下，让客户端从权威区块镜像派生 `0..15` 的有界横向天空光，并用无窗口视觉场景和 scenario v14 性能记录完成验收。
 
 **Architecture:** `client.Mesher` 继续克隆现有 `3×3×3` 不可变区段邻域；`mesh` 在每个 worker 复用的固定 `48³` scratch 中执行多源 BFS，再把相邻空气位置的亮度写入 `Quad.Light` 高四位。Mirror 只扩大有界 dirty 体积，现有 revision stamp、任务队列、过期淘汰和 terrain shader 均复用。
 
@@ -19,8 +19,9 @@
 - 直射起点计为第 1 格时亮度为 `15`，第 15 格 MUST 为 `1`，下一格 MUST 为 `0`；未知邻区 MUST 按实心且黑暗处理。
 - 传播 scratch MUST 固定为 `48³` 单元并由每个现有 Mesher worker 复用；不得因亮度数组或 BFS 队列产生逐任务堆分配。
 - 普通方块变化 dirty 集合 MUST 不超过 27 个区段；列顶最坏变化 MUST 不超过 216 个区段；既有队列和每帧工作上限不得放宽。
-- benchmark MUST 升为 scenario v14，只允许显式 `13:14` 迁移；分辨率、阶段时长、样本、指标、绝对门禁和 `20%` 相对阈值不得改变。
-- M5 Memory/TCP 正式 producer 各只能执行一次，必须在冻结 HEAD、静稳预检和用户明确授权后进行；失败立即停止。M2 基线 MUST 保持字节不变。
+- benchmark MUST 升为 scenario v14，只允许显式 `13:14` 迁移；分辨率、阶段时长、样本、指标、绝对阈值和 `20%` 相对阈值不得改变，但所有性能数值只记录、不得改变退出状态。
+- 报告损坏、字段或样本不完整、身份不兼容、真实 overflow 或数据丢失及 I/O 错误 MUST 继续失败；队列高水位和 RSS 数值不是 overflow。
+- M5 v14 Memory 报告完整有效后 MUST 立即精确提升，不等待 TCP；TCP 独立生成，只有调用方显式请求时才执行跨 transport 比较。M2 基线 MUST 保持字节不变。
 - 每个任务按 red → green → refactor 执行，验证通过后只提交该任务文件；不得改 Hook 或门禁规避失败。
 
 ## File Structure
@@ -38,9 +39,9 @@
 - Modify: `cmd/gfxspike/main.go`, `internal/render/bench_test.go`, `internal/server/daylight_integration_test.go` — 更新 `MeshSection` 调用并补动态闭环。
 - Modify: `cmd/mcgo/{capture.go,capture_test.go}` — 固定 tunnel 夹具、收敛检查与第四个视觉场景。
 - Create: `cmd/mcgo/testdata/golden/skylight-tunnel.png` — 人工确认后的第四张基线。
-- Modify: `cmd/mcgo/benchmark.go`, `cmd/mcgo/{benchmark_v5_test.go,benchmark_v6_test.go}` — producer scenario v14。
-- Modify: `cmd/perfcheck/{main.go,main_test.go}` — 唯一 `13:14` 迁移与 v14 校验。
-- Modify: `docs/notes/perf-baseline-m5.json`, `docs/notes/perf-baseline.md` — 通过正式链后的 M5 v14 字节与证据。
+- Modify: `cmd/mcgo/{main.go,benchmark.go,multiplayer_benchmark.go,benchmark_v5_test.go,benchmark_v6_test.go}` — producer scenario v14 与报告只记录语义。
+- Modify: `cmd/perfcheck/{main.go,main_test.go}` — 唯一 `13:14` 迁移、结构校验与 record-only 输出。
+- Modify: `docs/notes/perf-baseline-m5.json`, `docs/notes/perf-baseline.md`, `docs/notes/perf-baseline-m5.md` — M5 v14 精确字节、当前规则与历史证据。
 - Modify: `README.md`, `AGENTS.md`, `CLAUDE.md`, `openspec/config.yaml` — M4M 能力、限制、版本和当前基线。
 - Modify: `openspec/specs/{authoritative-daylight,visual-verification,bounded-benchmark-workload,hardware-performance-baselines}/spec.md` — 归档前同步稳定契约。
 
@@ -82,13 +83,13 @@ Expected: `f72fa71` 是 `origin/main` 祖先；OpenSpec active change 列表为�
 
 ```text
 change: m4m-propagated-skylight
-目标：客户端从权威方块镜像派生 0..15 横向天空光；直射起点为 15，每传播一格减 1；未知邻区为暗；异步有界重算；新增 skylight-tunnel 无窗口视觉场景；benchmark 升到 scenario v14 并只允许 13:14；通过一次性 M5 Memory/TCP 链后更新基线。
+目标：客户端从权威方块镜像派生 0..15 横向天空光；直射起点为 15，每传播一格减 1；未知邻区为暗；异步有界重算；新增 skylight-tunnel 无窗口视觉场景；benchmark 升到 scenario v14 并只允许 13:14；性能数值只记录，完整 Memory 报告立即更新 M5 基线，TCP 独立记录。
 修改能力：authoritative-daylight、visual-verification、bounded-benchmark-workload、hardware-performance-baselines。
-非目标：协议/存档/metadata 变更、方块光、火把、透明方块、服务端光照、长期缓存、新 worker pool、门禁放宽。
+非目标：协议/存档/metadata 变更、方块光、火把、透明方块、服务端光照、长期缓存、新 worker pool、正确性与数据完整性门禁放宽。
 实现约束：3×3×3 不可变快照、48³ 固定 scratch、普通 dirty<=27、列顶 dirty<=216、每 worker 复用、现有 revision stamp、中文产物。
 ```
 
-`authoritative-daylight` delta MUST 修改既有“直射天空光”要求，使总天空光允许侧向传播，并把 dirty 上限 `96` 改为 `216`；`visual-verification` MUST 增加 tunnel 场景和收敛失败；`bounded-benchmark-workload` MUST 把 v13→v14 与唯一 `13:14` 写清；`hardware-performance-baselines` MUST 要求 M5 v14 正式 Memory/TCP 链且 M2 不变。
+`authoritative-daylight` delta MUST 修改既有“直射天空光”要求，使总天空光允许侧向传播，并把 dirty 上限 `96` 改为 `216`；`visual-verification` MUST 增加 tunnel 场景和收敛失败；`bounded-benchmark-workload` MUST 把 v13→v14、唯一 `13:14` 与 record-only 行为写清；`hardware-performance-baselines` MUST 要求完整 M5 v14 Memory 报告立即提升、TCP 独立记录且 M2 不变。
 
 - [ ] **Step 3: 严格校验且逐条对照设计**
 
@@ -556,7 +557,7 @@ func completeV14ComparableReport(transport string) client.PerfReport {
 }
 ```
 
-矩阵 MUST 接受 `{13,14,"13:14"}`，拒绝无授权、反向、`12:13`、`12:14`、`11:14` 和同场景附带授权；历史自比较列表扩到 v14。新增 v14 同场景/cross transport/绝对门禁测试，结构与现有 v13 测试相同但不删除历史 v13 覆盖。
+矩阵 MUST 接受 `{13,14,"13:14"}`，拒绝无授权、反向、`12:13`、`12:14`、`11:14` 和同场景附带授权；历史自比较列表扩到 v14。新增 v14 同场景/cross transport/绝对阈值记录测试，结构与现有 v13 测试相同但不删除历史 v13 覆盖。
 
 - [ ] **Step 2: 运行红灯**
 
@@ -586,102 +587,202 @@ git add cmd/mcgo/benchmark.go cmd/mcgo/benchmark_v5_test.go cmd/mcgo/benchmark_v
 git commit -m "perf: 升级天空光场景到 v14"
 ```
 
-### Task 8: 冻结候选并建立一次性 M5 v14 基线
+### Task 8: 把性能判断改为只记录
 
 **Files:**
-- Modify: `docs/notes/perf-baseline-m5.json` only after both formal runs pass
+- Modify: `cmd/mcgo/main.go`
+- Modify: `cmd/mcgo/benchmark.go`
+- Modify: `cmd/mcgo/multiplayer_benchmark.go`
+- Modify: `cmd/mcgo/benchmark_v5_test.go`
+- Modify: `cmd/mcgo/benchmark_v6_test.go`
+- Modify: `cmd/perfcheck/main.go`
+- Modify: `cmd/perfcheck/main_test.go`
+- Modify: `AGENTS.md`
+- Modify: `CLAUDE.md`
+
+**Interfaces:**
+- Consumes: 现有 producer、报告 JSON、`compareReportsWithScenarioUpgrade` 与全部指标/阈值计算。
+- Produces: 性能退化仍被打印和写入报告，但不再令 producer 或 `perfcheck` 失败；数据正确性失败边界保持不变。
+
+- [ ] **Step 1: 为 producer 写 RED 测试**
+
+在 `benchmark_v5_test.go`/`benchmark_v6_test.go` 增加或改写测试，至少锁定：
+
+```go
+func TestWriteBenchmarkReportRecordsPerformanceOutsideThresholds(t *testing.T)
+func TestValidateBenchmarkReportStillRejectsIncompleteSamples(t *testing.T)
+func TestBenchmarkServerProbeValidityIgnoresHighWaterButRejectsOverflow(t *testing.T)
+func TestValidateBenchmarkReportRejectsDroppedSamples(t *testing.T)
+```
+
+完整报告把 FPS 设低、p99/tick/RSS/队列高水位设高时，`writeBenchmarkReport` MUST 成功并写出 JSON；缺少阶段、样本、provenance、RSS=0、`DroppedRingBufferSamples > 0`、真实 `overflow=true` 或 outbound=0 时 MUST 失败。先运行：
+
+```bash
+zsh -ic 'go test ./cmd/mcgo -run "WriteBenchmarkReportRecordsPerformance|ValidateBenchmarkReportStillRejects|BenchmarkServerProbeValidity|RejectsDroppedSamples" -count=1'
+```
+
+Expected: 测试因现有绝对性能失败分支仍存在而 RED；不得先改断言迁就现状。
+
+- [ ] **Step 2: 最小修改 producer 有效性边界**
+
+保留报告字段、阈值常量和 stdout 指标；只从 `validateBenchmarkReport` 与多人探针完整性判断中删除性能数值失败条件。多人探针的最小判断形态为：
+
+```go
+invalid := overflow || outbound == 0 ||
+	interestSamples != benchmarkServerInterestSamples ||
+	tickFrames != benchmarkServerMeasuredTicks || peakRSS == 0
+```
+
+队列高水位与任意非零 RSS 只进入 `PerfReport`。`validateBenchmarkReport` MUST 对 still/flying/ticks 的 `DroppedRingBufferSamples > 0` 返回数据丢失错误，并复用 `strings.TrimSpace` 校验 `Hardware`、`OS`、`GoVersion`、`GitCommit`、`Framebuffer` 非空；同步补齐 `validBenchmarkReport()` 夹具。`cmd/mcgo/main.go` 的错误前缀改为“性能记录失败”，避免把结构/I/O 错误伪装成性能阈值失败。不要新增配置、依赖或第二套报告类型。
+
+- [ ] **Step 3: 为 perfcheck 写 RED 测试**
+
+在 `cmd/perfcheck/main_test.go` 增加或改写：
+
+```go
+func TestPerformanceChangesProduceRecordsWithoutFailure(t *testing.T)
+func TestScenarioUpgradeStillRejectsIncompleteReport(t *testing.T)
+func TestCrossTransportComparisonRequiresMatchingCommit(t *testing.T)
+func TestPerfcheckRejectsDroppedSamples(t *testing.T)
+```
+
+同场景、`13:14` 和 v6 历史报告中的性能退化 MUST 产生可读记录；主命令 MUST exit 0。缺字段、未授权迁移、`DroppedRingBufferSamples > 0`、硬件不一致，以及显式跨 transport 比较时 transport/scenario/commit 不一致 MUST 仍返回错误。先运行聚焦测试并取得 RED。
+
+- [ ] **Step 4: 最小修改 perfcheck 退出语义**
+
+复用现有 `compareReportsWithScenarioUpgrade` 和回归计算，不重写指标树；把其 `[]string` 视为性能记录，逐行输出到 stdout，删除仅因该切片非空而 `os.Exit(1)` 的分支：
+
+```go
+records, err := compareReportsWithScenarioUpgrade(...)
+if err != nil {
+	fail("%v", err)
+}
+for _, record := range records {
+	fmt.Fprintln(os.Stdout, "性能记录:", record)
+}
+fmt.Println(comparisonSuccessMessage(...))
+```
+
+`comparisonSuccessMessage` 改为“性能记录完成”；`validateV6Report` 对 still/flying/ticks 的 `DroppedRingBufferSamples > 0` 保持数据丢失失败；显式跨 transport 比较在两个 transport 不同时补同 commit 校验。`--max-regression` 和绝对阈值继续用于标注记录，不再用于退出码。
+
+- [ ] **Step 5: 同步仓库规则**
+
+逐字同步 `AGENTS.md`/`CLAUDE.md`：正确性、容量、报告完整性、真实 overflow 和数据丢失仍是门禁；benchmark/`perfcheck` 性能数值只保存记录。先用 `rg` 证明旧“性能门禁”规则仍命中，再修改并验证：
+
+```bash
+cmp AGENTS.md CLAUDE.md
+rg -n "性能数值只记录|overflow|数据丢失" AGENTS.md CLAUDE.md
+! rg -n "不得放宽.*性能门禁|perfcheck.*门禁" AGENTS.md CLAUDE.md
+```
+
+- [ ] **Step 6: 验证并提交行为修改**
+
+```bash
+zsh -ic 'go test ./cmd/mcgo ./cmd/perfcheck -race -count=1'
+zsh -ic 'go test ./internal/archcheck -count=1'
+zsh -ic 'go vet ./cmd/mcgo ./cmd/perfcheck'
+gofmt -l cmd/mcgo cmd/perfcheck
+cmp AGENTS.md CLAUDE.md
+git diff --check
+openspec validate --all --strict --no-interactive
+git add cmd/mcgo cmd/perfcheck AGENTS.md CLAUDE.md
+git commit -m "perf: 将性能阈值改为只记录"
+```
+
+### Task 9: 建立 M5 v14 Memory 基线并独立记录 TCP
+
+**Files:**
+- Modify: `docs/notes/perf-baseline-m5.json`
 - Modify: `docs/notes/perf-baseline.md`
+- Modify: `docs/notes/perf-baseline-m5.md`
 - Modify: `openspec/changes/m4m-propagated-skylight/tasks.md`
 
 **Interfaces:**
-- Consumes: Tasks 1–7 的干净精确 HEAD。
-- Produces: 通过 `13:14` 迁移和 Memory→TCP parity 的 M5 v14 Memory 精确字节；M2 不变。
+- Consumes: Task 8 的 record-only producer/checker 和 Tasks 1–7 的 scenario v14 workload。
+- Produces: 完整有效的 M5 v14 Memory 精确基线、独立 TCP 记录证据；M2 字节不变。
 
-- [ ] **Step 1: 完整冻结门禁**
-
-Run:
+- [ ] **Step 1: 运行正确性门禁并记录身份**
 
 ```bash
 zsh -ic 'go test ./internal/world ./internal/mesh ./internal/client ./internal/server ./internal/render ./cmd/mcgo ./cmd/perfcheck -race -count=1'
 zsh -ic 'go test ./internal/archcheck -count=1'
-zsh -ic 'go test ./... -race'
-zsh -ic 'go vet ./...'
+zsh -ic 'go vet ./cmd/mcgo ./cmd/perfcheck ./internal/world ./internal/mesh ./internal/client ./internal/server ./internal/render'
 gofmt -l .
 git diff --check
 openspec validate --all --strict --no-interactive
-zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/m4m-final-visual-check'
-```
-
-Expected: 全部 exit 0；`gofmt -l .` 无输出；无前台窗口。任何失败先修根因并形成新提交，原候选不得进入正式链。
-
-- [ ] **Step 2: 记录不可变身份与基线哈希**
-
-```bash
-git status --short --branch
 git rev-parse HEAD
 shasum -a 256 docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json
-zsh -ic 'go version'
-sw_vers
-system_profiler SPHardwareDataType
-pmset -g batt
-uptime
-pgrep -fl 'mcgo|perfcheck'
 ```
 
-Expected: tracked 工作树干净；M2 哈希为当前接受值 `b2d04877004c...520cb7f93`；M5 为 v13；无遗留 producer。
+Expected: 正确性检查全绿；M2 SHA-256 仍为 `b2d04877004cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`，M5 仍为 v13。这里不要求静稳快照、绑定路径或一次性授权。
 
-- [ ] **Step 3: 建立全新正式路径并请求授权**
-
-在一个保持到 Step 5 结束的专用终端会话中执行：
+- [ ] **Step 2: 生成并验证 Memory 记录**
 
 ```bash
-export M4M_FORMAL_DIR="$(mktemp -d /private/tmp/mcgo-m4m-v14.XXXXXX)"
-export M4M_MEMORY_PATH="$M4M_FORMAL_DIR/memory-v14.json"
-export M4M_TCP_PATH="$M4M_FORMAL_DIR/tcp-v14.json"
-printf 'formal_dir=%s\nmemory=%s\ntcp=%s\n' "$M4M_FORMAL_DIR" "$M4M_MEMORY_PATH" "$M4M_TCP_PATH"
-test ! -e "$M4M_MEMORY_PATH"
-test ! -e "$M4M_TCP_PATH"
+M4M_RECORD_KEY="$(git rev-parse --short=12 HEAD)"
+M4M_RECORD_DIR="/private/tmp/mcgo-m4m-v14-$M4M_RECORD_KEY"
+M4M_MEMORY_PATH="$M4M_RECORD_DIR/memory-v14.json"
+M4M_TCP_PATH="$M4M_RECORD_DIR/tcp-v14.json"
+mkdir -p "$M4M_RECORD_DIR"
+TERM=xterm-256color zsh -ic "go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '$M4M_MEMORY_PATH'"
+zsh -ic "go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '$M4M_MEMORY_PATH' --max-regression 0.20 --allow-scenario-upgrade 13:14"
 ```
 
-记录打印出的完整路径；连续两次只读静稳快照满足既有规则后，向用户报告精确 HEAD、M2/M5 哈希、硬件/OS/Go、供电、负载、进程和两个路径，并请求一次性 Memory→迁移→TCP→同场景比较授权。未获授权不得继续。
+Expected: 完整 `scenario_version=14`、`transport=memory` JSON 写出；性能越过阈值时命令仍 exit 0，并打印记录。结构、样本、迁移、身份或 I/O 错误仍必须修复后再生成。
 
-- [ ] **Step 4: 只执行一次 Memory producer 与迁移门禁**
+- [ ] **Step 3: 立即提升 Memory 精确字节**
 
-授权后在同一终端会话执行：
+核对 JSON 的 commit/hardware/OS/Go/framebuffer 和完整性，计算 SHA-256，然后精确复制：
 
 ```bash
-TERM=xterm-256color zsh -ic 'go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output "$M4M_MEMORY_PATH"'
-zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current "$M4M_MEMORY_PATH" --max-regression 0.20 --allow-scenario-upgrade 13:14'
+M4M_RECORD_KEY="$(git rev-parse --short=12 HEAD)"
+M4M_MEMORY_PATH="/private/tmp/mcgo-m4m-v14-$M4M_RECORD_KEY/memory-v14.json"
+cp "$M4M_MEMORY_PATH" docs/notes/perf-baseline-m5.json
+shasum -a 256 "$M4M_MEMORY_PATH" docs/notes/perf-baseline-m5.json docs/notes/perf-baseline.json
 ```
 
-任一步失败立即停止，不执行 TCP、不重跑 Memory。
+Expected: 前两个哈希一致；M2 哈希不变。不得等待 TCP 结果再决定是否提升 Memory。
 
-- [ ] **Step 5: Memory 通过后只执行一次 TCP 与 parity**
+- [ ] **Step 4: 独立生成 TCP 记录**
 
 ```bash
-TERM=xterm-256color zsh -ic 'go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output "$M4M_TCP_PATH"'
-zsh -ic 'go run ./cmd/perfcheck --baseline "$M4M_MEMORY_PATH" --current "$M4M_TCP_PATH" --max-regression 0.20'
+M4M_RECORD_KEY="$(git rev-parse --short=12 HEAD)"
+M4M_TCP_PATH="/private/tmp/mcgo-m4m-v14-$M4M_RECORD_KEY/tcp-v14.json"
+TERM=xterm-256color zsh -ic "go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '$M4M_TCP_PATH'"
+shasum -a 256 "$M4M_TCP_PATH"
 ```
 
-失败立即停止；不得重跑或筛选。
-
-- [ ] **Step 6: 两步都通过后提升 Memory 精确字节**
-
-核对两份 JSON 的 `scenario_version=14`、transport、同一 git commit/hardware/OS/Go/framebuffer，计算 SHA-256。然后把 Memory JSON 精确复制到 `docs/notes/perf-baseline-m5.json`，更新 `docs/notes/perf-baseline.md`：HEAD、命令、正式路径、哈希、静稳证据、v13→v14、指标摘要、失败即停规则与回退说明。再次验证 M2 哈希未变。
-
-- [ ] **Step 7: 提交正式基线**
+Expected: 完整 `scenario_version=14`、`transport=tcp` JSON 独立写出。默认不自动运行 Memory↔TCP 比较；只有用户显式请求时才运行：
 
 ```bash
-git add docs/notes/perf-baseline-m5.json docs/notes/perf-baseline.md openspec/changes/m4m-propagated-skylight/tasks.md
-git commit -m "perf: 接受 M5 scenario v14 基线"
+M4M_RECORD_KEY="$(git rev-parse --short=12 HEAD)"
+M4M_MEMORY_PATH="/private/tmp/mcgo-m4m-v14-$M4M_RECORD_KEY/memory-v14.json"
+M4M_TCP_PATH="/private/tmp/mcgo-m4m-v14-$M4M_RECORD_KEY/tcp-v14.json"
+zsh -ic "go run ./cmd/perfcheck --baseline '$M4M_MEMORY_PATH' --current '$M4M_TCP_PATH' --max-regression 0.20"
 ```
 
-### Task 9: 更新用户文档并同步主规格
+该比较无论记录出何种性能差异都不得改写两份记录或撤销 Memory 基线；结构或身份错误只拒绝本次比较。
+
+- [ ] **Step 5: 记录证据并提交基线**
+
+更新 `docs/notes/perf-baseline.md` 与 `docs/notes/perf-baseline-m5.md` 的当前段落：record-only 规则、Memory/TCP 命令、HEAD、两个输出哈希、指标摘要、v13→v14、Memory 立即提升、TCP 独立记录、M2 不变与回退说明。旧 scenario 段落可保留静稳、授权、一次性和门禁证据，但 MUST 明确为历史流程，不得写成现行要求。勾选 OpenSpec 4.3，再验证并提交：
+
+```bash
+zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current docs/notes/perf-baseline-m5.json --max-regression 0.20'
+shasum -a 256 docs/notes/perf-baseline.json
+git diff --check
+openspec validate --all --strict --no-interactive
+git add docs/notes/perf-baseline-m5.json docs/notes/perf-baseline.md docs/notes/perf-baseline-m5.md openspec/changes/m4m-propagated-skylight/tasks.md
+git commit -m "perf: 记录 M5 scenario v14 基线"
+```
+
+### Task 10: 更新用户文档并同步主规格
 
 **Files:**
 - Modify: `README.md`
 - Modify: `AGENTS.md`
 - Modify: `CLAUDE.md`
+- Modify: `docs/notes/perf-baseline-m5.md`
 - Modify: `openspec/config.yaml`
 - Modify: `openspec/specs/authoritative-daylight/spec.md`
 - Modify: `openspec/specs/visual-verification/spec.md`
@@ -690,12 +791,12 @@ git commit -m "perf: 接受 M5 scenario v14 基线"
 - Modify: `openspec/changes/m4m-propagated-skylight/tasks.md`
 
 **Interfaces:**
-- Consumes: 已通过 v14 正式链的稳定行为。
+- Consumes: 已生成的 v14 record-only Memory 基线和独立 TCP 记录。
 - Produces: 当前基线 M4M 的中文说明和与 delta 一致的主规格。
 
 - [ ] **Step 1: 更新 README 与项目上下文**
 
-README MUST 把“仅直射天空光”改为“直射 15、横向逐格衰减到 1、下一格为 0、未知邻区暗”；视觉场景列表加 `skylight-tunnel`；benchmark 改 v14、唯一 `13:14`、M5 v14/M2 v6 和回退到 v13 的要求。协议/存档版本保持原值。
+README MUST 把“仅直射天空光”改为“直射 15、横向逐格衰减到 1、下一格为 0、未知邻区暗”；视觉场景列表加 `skylight-tunnel`；benchmark 改 v14、唯一 `13:14`、性能只记录、Memory 立即提升、TCP 独立记录、M5 v14/M2 v6 和回退到 v13 的要求。协议/存档版本保持原值。
 
 AGENTS/CLAUDE 第一段和 `openspec/config.yaml` 当前基线改为 M4M，加入客户端派生天空光传播与 scenario v14；两个指南文件最终必须逐字一致。
 
@@ -707,8 +808,10 @@ AGENTS/CLAUDE 第一段和 `openspec/config.yaml` 当前基线改为 M4M，加�
 
 ```bash
 cmp AGENTS.md CLAUDE.md
-rg -n "M4M|scenario v14|13:14|skylight-tunnel|216|协议 v13|schema v5|schema v6" AGENTS.md CLAUDE.md README.md openspec/config.yaml openspec/specs
-rg -n "只实现直射天空光|dirty.*96|只允许.*12:13" AGENTS.md CLAUDE.md README.md openspec/config.yaml openspec/specs
+rg -n "M4M|scenario v14|13:14|skylight-tunnel|216|性能数值只记录|协议 v13|schema v5|schema v6" AGENTS.md CLAUDE.md README.md docs/notes/perf-baseline-m5.md openspec/config.yaml openspec/specs
+rg -n "只实现直射天空光|dirty.*96|只允许.*12:13|性能门禁" AGENTS.md CLAUDE.md README.md openspec/config.yaml openspec/specs
+sed -n '1,45p' docs/notes/perf-baseline-m5.md | rg -n "性能数值只记录|Memory.*立即|TCP.*独立"
+! sed -n '1,45p' docs/notes/perf-baseline-m5.md | rg -n "一次性授权|静稳预检|失败即停|不得重跑|TCP.*前置"
 openspec validate --all --strict --no-interactive
 git diff --check
 ```
@@ -718,17 +821,17 @@ Expected: `cmp` exit 0；第二个 `rg` 对当前契约无命中（历史归档�
 - [ ] **Step 4: 提交同步结果**
 
 ```bash
-git add README.md AGENTS.md CLAUDE.md openspec/config.yaml openspec/specs openspec/changes/m4m-propagated-skylight/tasks.md
+git add README.md AGENTS.md CLAUDE.md docs/notes/perf-baseline-m5.md openspec/config.yaml openspec/specs openspec/changes/m4m-propagated-skylight/tasks.md
 git commit -m "docs: 同步 M4M 天空光传播规格"
 ```
 
-### Task 10: 最终审查、归档与交付
+### Task 11: 最终审查、归档与交付
 
 **Files:**
 - Move: `openspec/changes/m4m-propagated-skylight/` → `openspec/changes/archive/2026-08-08-m4m-propagated-skylight/`
 
 **Interfaces:**
-- Consumes: 任务 1–9 的全部提交与主规格同步结果。
+- Consumes: 任务 1–10 的全部提交与主规格同步结果。
 - Produces: 无 active M4M change、可评审的完整分支和任务报告。
 
 - [ ] **Step 1: 逐条覆盖审查**
@@ -745,9 +848,10 @@ gofmt -l .
 git diff --check
 openspec validate --all --strict --no-interactive
 zsh -ic 'go run ./cmd/mcgo --capture /private/tmp/m4m-archive-visual-check'
+zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current docs/notes/perf-baseline-m5.json --max-regression 0.20'
 ```
 
-Expected: 全部通过，无前台窗口；M2 baseline 哈希仍为冻结值。
+Expected: 正确性、结构和视觉检查全部通过，无前台窗口；`perfcheck` 保存/打印性能记录但不以性能数值失败；M2 baseline 哈希仍为冻结值。
 
 - [ ] **Step 3: 使用 openspec-archive-change skill 归档**
 
@@ -772,4 +876,4 @@ git commit -m "docs: 归档 M4M 天空光传播"
 
 - [ ] **Step 5: 最终状态报告**
 
-报告分支、完整提交列表、全仓 race/vet/archcheck/gofmt/OpenSpec/visual 结果、M5 v14 与 M2 哈希、协议/存档未变、未实现的方块光/透明方块，并确认共享工作树的用户日志未被触碰。随后再决定推送和 PR，不在本任务中自动合并。
+报告分支、完整提交列表、全仓 race/vet/archcheck/gofmt/OpenSpec/visual 结果、record-only perfcheck 结果、M5 v14 与 M2 哈希、TCP 独立记录哈希、协议/存档未变、未实现的方块光/透明方块，并确认共享工作树的用户日志未被触碰。随后再决定推送和 PR，不在本任务中自动合并。
