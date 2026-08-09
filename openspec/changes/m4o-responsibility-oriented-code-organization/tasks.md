@@ -12,7 +12,7 @@
 
 ## 4. network 按消息领域和方向拆分
 
-- [ ] 4.1 拆分 `internal/network/message.go`、`codec.go` 与 `codec_test.go`，保持 packet ID、payload bytes、校验顺序和错误文本；focused：`zsh -ic 'go test ./internal/network -race -count=1'`、`zsh -ic 'go test ./internal/network -run "Golden|ProtocolV14|Malformed|Semantic" -count=1'`、`zsh -ic 'go test ./internal/network -run=^$ -fuzz=FuzzSmallPacketCodec -fuzztime=10s'`。
+- [x] 4.1 拆分 `internal/network/message.go`、`codec.go` 与 `codec_test.go`，保持 packet ID、payload bytes、校验顺序和错误文本；focused：`zsh -ic 'go test ./internal/network -race -count=1'`、`zsh -ic 'go test ./internal/network -run "Golden|ProtocolV14|Malformed|Semantic" -count=1'`、`zsh -ic 'go test ./internal/network -run=^$ -fuzz=FuzzSmallPacketCodec -fuzztime=10s'`。
 
 ## 5. 区块 codec 按 envelope 与逻辑载荷拆分
 
