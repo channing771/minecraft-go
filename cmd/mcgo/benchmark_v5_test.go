@@ -15,9 +15,9 @@ import (
 	"minecraft-go/internal/client"
 )
 
-func TestBenchmarkScenarioVersionIncludesCelestialSkyWorkload(t *testing.T) {
-	if scenarioVersion != 13 {
-		t.Fatalf("scenarioVersion=%d，想要天空 workload 之后的 v13", scenarioVersion)
+func TestBenchmarkScenarioVersionIncludesPropagatedSkylightWorkload(t *testing.T) {
+	if scenarioVersion != 14 {
+		t.Fatalf("scenarioVersion=%d，想要传播天空光 workload 之后的 v14", scenarioVersion)
 	}
 }
 
@@ -59,9 +59,8 @@ func TestValidateBenchmarkReportTickP99UserOverrideBoundary(t *testing.T) {
 	}
 
 	report.Ticks.P99MS = 10
-	err := validateBenchmarkReport(report)
-	if err == nil || !strings.Contains(err.Error(), "tick p99 10.000 ms >= 10 ms") {
-		t.Fatalf("10ms tick p99 boundary error=%v", err)
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("10ms tick p99 should only be recorded: %v", err)
 	}
 }
 
@@ -96,11 +95,11 @@ func TestWriteBenchmarkReportDoesNotOverwriteAcceptedOutputOnFailure(t *testing.
 		Transport: "memory",
 		Phases: map[string]client.PhaseSummary{
 			"still":  {FPS: 100, P99MS: 11, PeakRSSBytes: 1},
-			"flying": {FPS: 100, P99MS: 12, PeakRSSBytes: 1},
+			"flying": {FPS: 100, P99MS: 11, PeakRSSBytes: 1},
 		},
 		Ticks:             client.PhaseSummary{P99MS: 9, MaxMS: 49},
 		Persistence:       client.PersistenceSummary{Snapshots: 1},
-		Protocol:          client.ProtocolSummary{EncodeP99MS: 0.01, DecodeP99MS: 0.01, Bytes: 19},
+		Protocol:          client.ProtocolSummary{EncodeP99MS: 0.01, DecodeP99MS: 0.01, Bytes: 0},
 		PlayerPersistence: client.PersistenceSummary{Snapshots: 1, P99MS: 0.1, MaxMS: 0.1},
 	}
 	if err := writeBenchmarkReport(path, report); err == nil {
@@ -241,6 +240,11 @@ func validBenchmarkReport() client.PerfReport {
 	return client.PerfReport{
 		ScenarioVersion: 5,
 		Transport:       "memory",
+		Hardware:        "test-hardware",
+		OS:              "test-os",
+		GoVersion:       "test-go",
+		GitCommit:       "test-commit",
+		Framebuffer:     "2560x1440",
 		Phases: map[string]client.PhaseSummary{
 			"still":  {FPS: 100, P99MS: 11, PeakRSSBytes: 1},
 			"flying": {FPS: 100, P99MS: 11, PeakRSSBytes: 1},

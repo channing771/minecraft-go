@@ -1,19 +1,4 @@
-# hardware-performance-baselines Specification
-
-## Purpose
-
-为不同 Apple Silicon 硬件保存彼此独立、来源可审计的性能比较起点，避免把芯片和内存差异误判为代码性能变化。
-## Requirements
-### Requirement: 不同硬件使用独立基线
-项目 SHALL 为硬件标识不同的正式报告保存独立基线，并 MUST 保留已经接受的其他硬件基线不变。
-
-#### Scenario: 为 M5 建立基线
-- **WHEN** 当前报告的硬件标识为 `Apple M5 / 24GiB`，而现有基线标识为 `Apple M2 / 16GiB`
-- **THEN** 项目新增 M5 专用基线文件，并保持 M2 基线内容和路径不变
-
-#### Scenario: 拒绝跨硬件比较
-- **WHEN** 使用 M2 基线比较 M5 当前报告
-- **THEN** 性能比较 MUST 拒绝该组合，且任何基线文件均不得被覆盖
+## MODIFIED Requirements
 
 ### Requirement: 新硬件基线只能由通过门禁的无窗口报告建立
 
@@ -121,6 +106,15 @@
 - **GIVEN** 两份同硬件、同 scenario、同 transport 的完整报告中，server tick 的适用分位数相对退化严格超过配置阈值
 - **WHEN** 性能比较器执行同场景比较
 - **THEN** 比较 MUST 输出对应 server tick 退化记录并返回成功
+
+## REMOVED Requirements
+
+### Requirement: 比较契约修正不得通过重新采样获利
+
+**Reason**: record-only 决策取消一次性正式链、失败即停、禁止重跑和 TCP 前置，旧要求不再适用。
+**Migration**: 历史报告继续按原始字节和 provenance 可读、可重判；调用方也可重新生成独立 Memory 或 TCP 记录，性能数值不得影响退出或 Memory 基线提升。
+
+## ADDED Requirements
 
 ### Requirement: 历史报告重判与重新采样互不限制
 项目 SHALL 保持历史报告原始字节、provenance 和统计口径可读取，并 MAY 对其重新执行 record-only 比较。调用方也 MAY 重新生成 Memory 或 TCP 报告；重新采样、步骤顺序或 TCP 缺失 MUST NOT 阻止完整有效的 Memory 报告提升基线。报告结构、样本、provenance、身份、迁移、真实 overflow、数据丢失和 I/O 错误仍 MUST 校验。

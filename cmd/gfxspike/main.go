@@ -107,12 +107,13 @@ func generateTerrain() map[core.ChunkPos]*world.Chunk {
 
 func queueMeshes(r *render.Renderer, reg *assets.Registry, chunks map[core.ChunkPos]*world.Chunk) {
 	get := func(p core.ChunkPos) *world.Chunk { return chunks[p] }
+	light := mesh.NewSkyLightScratch()
 	for pos := range chunks {
 		for si := 0; si < core.SectionsPerChunk; si++ {
 			n := world.NeighborhoodAt(get, pos, si)
 			sectionPos := core.SectionPos{X: pos.X, Y: int32(si), Z: pos.Z}
 			r.SetConnectivity(sectionPos, mesh.ComputeConnectivity(n.Center, reg))
-			quads := mesh.MeshSection(n, reg)
+			quads := mesh.MeshSection(n, reg, light)
 			if len(quads) == 0 {
 				continue
 			}

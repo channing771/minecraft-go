@@ -17,7 +17,14 @@ type maskCell struct {
 }
 
 // MeshSection 把一个区段转换成贪心合并后的四边形集合。
-func MeshSection(n *world.Neighborhood, reg Registry) []Quad {
+func MeshSection(n *world.Neighborhood, reg Registry, light *SkyLightScratch) []Quad {
+	if light == nil {
+		panic("mesh: nil sky light scratch")
+	}
+	if id, single := n.Center.Blocks.IsUniform(); single && id == world.AirID {
+		return nil
+	}
+	light.build(n, reg)
 	out := make([]Quad, 0, 256)
 
 	for face := Face(0); face < 6; face++ {
@@ -52,8 +59,8 @@ func MeshSection(n *world.Neighborhood, reg Registry) []Quad {
 						used: true,
 						mat:  reg.Material(id, face),
 						ao:   computeAO(n, reg, p, axis, u, v, step),
-						// 高四位是相邻空气位置的直射天空光，低四位方块光尚未实现。
-						light: n.SkyLight(q[0], q[1], q[2]) << 4,
+						// 高四位是相邻空气位置的天空光，低四位方块光尚未实现。
+						light: light.at(q[0], q[1], q[2]) << 4,
 					}
 					any = true
 				}

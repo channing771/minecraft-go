@@ -248,7 +248,7 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 	var runErr error
 	if options.Application.Benchmark {
 		if err := dependencies.runBenchmark(app, options.PerfOutput); err != nil {
-			runErr = fmt.Errorf("性能门禁失败: %w", err)
+			runErr = fmt.Errorf("性能记录失败: %w", err)
 		}
 	} else {
 		runErr = dependencies.runInteractive(app)

@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/mesh"
+	"minecraft-go/internal/network"
 	"minecraft-go/internal/world"
 )
 
@@ -46,21 +48,91 @@ func TestMirrorSnapshotRebuildsColumnHeights(t *testing.T) {
 	}
 }
 
-func TestMirrorNonTopChangeKeepsExistingDirtyRange(t *testing.T) {
+func TestMirrorNonTopChangeDirtiesPropagatedSkyVolume(t *testing.T) {
 	mirror := skyMirror(t, 64)
-	// 在列顶之下放置方块不改变遮挡高度，只走既有 ±1 dirty。
-	position := core.BlockPos{X: 3, Y: 20, Z: 5}
-	update, err := mirror.Apply(blockChanges(core.Overworld, core.ChunkPos{}, 1, position, core.StoneID))
+	// 两个变化的传播体积完全重叠，dirty map 必须合并重复项。
+	position := core.BlockPos{X: 8, Y: core.MinY + 40, Z: 8}
+	update, err := mirror.Apply(network.BlockChanges{
+		Dimension:    core.Overworld,
+		Chunk:        core.ChunkPos{},
+		BaseRevision: 1,
+		NewRevision:  2,
+		Changes: []network.BlockChange{
+			{Position: core.BlockPos{X: 7, Y: position.Y, Z: position.Z}, Block: core.StoneID},
+			{Position: position, Block: core.StoneID},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(update.Dirty) > 9 {
-		t.Fatalf("非列顶变化 dirty 数量 = %d，想要不超过既有 ±1 邻域的 9 个", len(update.Dirty))
+	if len(update.Dirty) != 27 {
+		t.Fatalf("非列顶变化 dirty 数量 = %d，想要 27", len(update.Dirty))
 	}
+	seen := make(map[core.SectionKey]bool, len(update.Dirty))
 	for _, key := range update.Dirty {
-		if key.Pos.Y != sectionIndexOfY(position.Y) {
-			t.Fatalf("非列顶变化标脏了其他高度的区段：%+v", key)
+		if seen[key] {
+			t.Fatalf("dirty 集合含重复项：%+v", key)
 		}
+		seen[key] = true
+	}
+	for z := int32(-1); z <= 1; z++ {
+		for y := int32(1); y <= 3; y++ {
+			for x := int32(-1); x <= 1; x++ {
+				key := core.SectionKey{
+					Dimension: core.Overworld,
+					Pos:       core.SectionPos{X: x, Y: y, Z: z},
+				}
+				if !seen[key] {
+					t.Fatalf("传播天空光体积缺少区段：%+v", key)
+				}
+			}
+		}
+	}
+}
+
+func TestMirrorSkyDirtyHandlesHorizontalInt32Extremes(t *testing.T) {
+	for _, coordinate := range []int32{math.MinInt32, math.MaxInt32} {
+		name := "MaxInt32"
+		if coordinate == math.MinInt32 {
+			name = "MinInt32"
+		}
+		t.Run(name, func(t *testing.T) {
+			mirror := client.NewMirror()
+			position := core.BlockPos{X: coordinate, Y: core.MinY + 40, Z: coordinate}
+			chunk := world.NewChunk(position.Chunk())
+			x, _, z := position.Local()
+			chunk.SetBlock(x, 64, z, core.StoneID)
+			if _, err := mirror.Apply(snapshotFromChunk(t, core.Overworld, chunk, 1)); err != nil {
+				t.Fatalf("导入极值区块: %v", err)
+			}
+
+			update, err := mirror.Apply(blockChanges(
+				core.Overworld, position.Chunk(), 1, position, core.StoneID,
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(update.Dirty) != 3 {
+				t.Fatalf("水平坐标 %d 的 dirty 数量 = %d，想要 3", coordinate, len(update.Dirty))
+			}
+			seen := make(map[core.SectionKey]bool, len(update.Dirty))
+			for _, key := range update.Dirty {
+				seen[key] = true
+			}
+			for y := int32(1); y <= 3; y++ {
+				key := core.SectionKey{
+					Dimension: core.Overworld,
+					Pos: core.SectionPos{
+						X: position.Chunk().X,
+						Y: y,
+						Z: position.Chunk().Z,
+					},
+				}
+				if !seen[key] {
+					t.Fatalf("水平坐标 %d 缺少所属区段 %+v", coordinate, key)
+				}
+			}
+		})
 	}
 }
 
@@ -72,7 +144,7 @@ func TestMirrorRoofPlacementDirtiesExactVerticalSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lowSection, highSection := sectionIndexOfY(64), sectionIndexOfY(200)
+	lowSection, highSection := sectionIndexOfY(64-16), sectionIndexOfY(200+16)
 	seen := make(map[int32]bool)
 	for _, key := range update.Dirty {
 		if key.Pos.Y < lowSection || key.Pos.Y > highSection {
@@ -103,7 +175,7 @@ func TestMirrorRoofRemovalDirtiesExactVerticalSpan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lowSection, highSection := sectionIndexOfY(64), sectionIndexOfY(200)
+	lowSection, highSection := sectionIndexOfY(64-16), sectionIndexOfY(200+16)
 	seen := make(map[int32]bool)
 	for _, key := range update.Dirty {
 		if key.Pos.Y < lowSection || key.Pos.Y > highSection {
@@ -121,28 +193,36 @@ func TestMirrorRoofRemovalDirtiesExactVerticalSpan(t *testing.T) {
 	}
 }
 
-func TestMirrorSkyDirtyStaysWithinFourChunksAndNinetySixSections(t *testing.T) {
+func TestMirrorSkyDirtyStaysWithinNineChunksAndTwoHundredSixteenSections(t *testing.T) {
 	mirror := skyMirror(t, core.MinY)
-	// 区块角上的列顶从世界底部升到世界顶部：最坏跨度加最坏水平邻域。
-	position := core.BlockPos{X: 0, Y: core.MaxY - 1, Z: 0}
+	// 列顶从世界底部升到世界顶部，局部 x/z=8 使半径 16 精确相交 3×3 区块。
+	position := core.BlockPos{X: 8, Y: core.MaxY - 1, Z: 8}
 	update, err := mirror.Apply(blockChanges(core.Overworld, core.ChunkPos{}, 1, position, core.StoneID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(update.Dirty) > 96 {
-		t.Fatalf("单次变化 dirty 区段数 = %d，想要不超过 96", len(update.Dirty))
+	if len(update.Dirty) != 216 {
+		t.Fatalf("列顶变化 dirty 区段数 = %d，想要 216", len(update.Dirty))
 	}
-	chunks := make(map[core.ChunkPos]bool)
-	unique := make(map[core.SectionKey]bool)
+	seen := make(map[core.SectionKey]bool, len(update.Dirty))
 	for _, key := range update.Dirty {
-		if unique[key] {
+		if seen[key] {
 			t.Fatalf("dirty 集合含重复项：%+v", key)
 		}
-		unique[key] = true
-		chunks[core.ChunkPos{X: key.Pos.X, Z: key.Pos.Z}] = true
+		seen[key] = true
 	}
-	if len(chunks) > 4 {
-		t.Fatalf("dirty 跨越 %d 个区块，想要不超过 4", len(chunks))
+	for z := int32(-1); z <= 1; z++ {
+		for y := int32(0); y < core.SectionsPerChunk; y++ {
+			for x := int32(-1); x <= 1; x++ {
+				key := core.SectionKey{
+					Dimension: core.Overworld,
+					Pos:       core.SectionPos{X: x, Y: y, Z: z},
+				}
+				if !seen[key] {
+					t.Fatalf("列顶天空光体积缺少区段：%+v", key)
+				}
+			}
+		}
 	}
 }
 
@@ -224,8 +304,8 @@ func TestMesherDiscardsStaleSkyLightAfterRoofChange(t *testing.T) {
 
 	mesher.Schedule(mirror, 1)
 	fresh := waitForMesherResults(t, mesher, mirror, 1, 5*time.Second)
-	if lights := meshedSkyLight(fresh); !lights[0x00] {
-		t.Fatalf("屋顶下顶面天空光集合 = %v，想要含 0x00", lights)
+	if lights := meshedSkyLight(fresh); !lights[0xE0] {
+		t.Fatalf("屋顶下顶面天空光集合 = %v，想要含相邻露天传播的 0xE0", lights)
 	}
 }
 

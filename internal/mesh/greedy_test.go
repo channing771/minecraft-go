@@ -75,7 +75,7 @@ func slabNeighbors(center *world.Section, topY int) *world.Neighborhood {
 
 func TestMeshEmptySectionProducesNothing(t *testing.T) {
 	n := solidNeighbors(world.NewSection())
-	if q := mesh.MeshSection(n, testRegistry{}); len(q) != 0 {
+	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewSkyLightScratch()); len(q) != 0 {
 		t.Fatalf("全空气区段产生了 %d 个面，应为 0", len(q))
 	}
 }
@@ -90,7 +90,7 @@ func TestMeshFullSectionProducesNothing(t *testing.T) {
 		}
 	}
 	n := solidNeighbors(center)
-	if q := mesh.MeshSection(n, testRegistry{}); len(q) != 0 {
+	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewSkyLightScratch()); len(q) != 0 {
 		t.Fatalf("被实心邻居包围的实心区段产生了 %d 个面，应为 0", len(q))
 	}
 }
@@ -98,7 +98,7 @@ func TestMeshFullSectionProducesNothing(t *testing.T) {
 func TestMeshSingleBlockProducesSixUnitQuads(t *testing.T) {
 	center := world.NewSection()
 	center.Blocks.Set(8, 8, 8, world.BlockID(2))
-	quads := mesh.MeshSection(solidNeighbors(center), testRegistry{})
+	quads := mesh.MeshSection(solidNeighbors(center), testRegistry{}, mesh.NewSkyLightScratch())
 	if len(quads) != 6 {
 		t.Fatalf("孤立方块产生了 %d 个面，应为 6", len(quads))
 	}
@@ -126,7 +126,7 @@ func TestMeshGreedyMergesFlatSurface(t *testing.T) {
 			}
 		}
 	}
-	quads := mesh.MeshSection(slabNeighbors(center, 7), testRegistry{})
+	quads := mesh.MeshSection(slabNeighbors(center, 7), testRegistry{}, mesh.NewSkyLightScratch())
 	if len(quads) != 1 {
 		t.Fatalf("平坦顶面产生了 %d 个面，贪心合并后应为 1", len(quads))
 	}
@@ -147,7 +147,7 @@ func TestMeshDoesNotMergeAcrossMaterials(t *testing.T) {
 			center.Blocks.Set(x, 0, z, id)
 		}
 	}
-	quads := mesh.MeshSection(slabNeighbors(center, 0), testRegistry{})
+	quads := mesh.MeshSection(slabNeighbors(center, 0), testRegistry{}, mesh.NewSkyLightScratch())
 	if len(quads) != 2 {
 		t.Fatalf("两种材质的平面产生了 %d 个面，应为 2", len(quads))
 	}
@@ -171,8 +171,9 @@ func BenchmarkMeshTerrainSection(b *testing.B) {
 	}
 	n := solidNeighbors(center)
 	reg := testRegistry{}
+	light := mesh.NewSkyLightScratch()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = mesh.MeshSection(n, reg)
+		_ = mesh.MeshSection(n, reg, light)
 	}
 }

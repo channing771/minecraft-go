@@ -45,6 +45,40 @@ func TestNeighborhoodSkyLightAboveAndBelowColumnTop(t *testing.T) {
 	}
 }
 
+func TestNeighborhoodSamplesWholeThreeByThreeByThreeHalo(t *testing.T) {
+	center := world.NewChunk(core.ChunkPos{})
+	west := world.NewChunk(core.ChunkPos{X: -1})
+	east := world.NewChunk(core.ChunkPos{X: 1})
+	west.SetBlock(0, 64, 3, core.StoneID)
+	east.SetBlock(15, 64, 4, core.DirtID)
+	n := world.NeighborhoodAt(chunkGetter(center, west, east), center.Pos, sectionIndexFor(64))
+	localY := int(64-core.MinY) & core.SectionMask
+	if got := n.At(-16, localY, 3); got != core.StoneID {
+		t.Fatalf("西侧 halo 方块=%d，想要 stone", got)
+	}
+	if got := n.At(31, localY, 4); got != core.DirtID {
+		t.Fatalf("东侧 halo 方块=%d，想要 dirt", got)
+	}
+	if got := n.At(-17, localY, 3); got != world.BarrierID {
+		t.Fatalf("halo 外方块=%d，想要 barrier", got)
+	}
+	if got := n.SkyLight(-16, localY, 4); got != 15 {
+		t.Fatalf("西侧 halo 天空光=%d，想要 15", got)
+	}
+	if got := n.SkyLight(31, localY, 3); got != 15 {
+		t.Fatalf("东侧 halo 天空光=%d，想要 15", got)
+	}
+	if got := n.SkyLight(-16, localY, 16); got != 0 {
+		t.Fatalf("缺失邻区天空光=%d，想要 0", got)
+	}
+	if got := n.SkyLight(-16, -17, 4); got != 0 {
+		t.Fatalf("halo 外 y=-17 天空光=%d，想要 0", got)
+	}
+	if got := n.SkyLight(31, 32, 3); got != 0 {
+		t.Fatalf("halo 外 y=32 天空光=%d，想要 0", got)
+	}
+}
+
 func TestNeighborhoodSkyLightCrossesChunkBoundary(t *testing.T) {
 	center := world.NewChunk(core.ChunkPos{X: 0, Z: 0})
 	east := world.NewChunk(core.ChunkPos{X: 1, Z: 0})

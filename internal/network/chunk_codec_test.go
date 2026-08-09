@@ -66,6 +66,72 @@ func TestChunkSnapshotLogicalWireCoversAllStorages(t *testing.T) {
 	}
 }
 
+func TestLogicalSnapshotSizeMatchesWire(t *testing.T) {
+	indexed := func(bits uint8, paletteSize int) ChunkSnapshot {
+		palette := make([]core.BlockID, paletteSize)
+		for index := range palette {
+			palette[index] = core.BlockID(index)
+		}
+		return repeatedSnapshot(SectionData{
+			Storage: SectionIndexed,
+			Bits:    bits,
+			Palette: palette,
+			Packed:  testPacked(bits, paletteSize, 0),
+		})
+	}
+	direct := repeatedSnapshot(SectionData{Storage: SectionSingle})
+	direct.Sections[0] = SectionData{
+		Y:       0,
+		Storage: SectionDirect,
+		Bits:    15,
+		Packed:  testPacked(15, 1<<15, 0),
+	}
+
+	tests := []struct {
+		name     string
+		snapshot ChunkSnapshot
+		want     int
+	}{
+		{"all single", repeatedSnapshot(SectionData{Storage: SectionSingle}), 117},
+		{"all 4-bit indexed", indexed(4, 16), 50085},
+		{"all 8-bit indexed palette 127", indexed(8, 127), 104565},
+		{"all 8-bit indexed palette 128", indexed(8, 128), 104637},
+		{"all 8-bit indexed palette 256", indexed(8, 256), 110781},
+		{"direct", direct, 8310},
+		{"all storages", fixtureSnapshot(core.ChunkPos{X: -3, Z: 7}, 19), 86271},
+		{"worst legal", worstLegalBenchmarkSnapshot(), 196749},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logical, err := encodeLogicalSnapshot(tc.snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := logicalSnapshotSize(tc.snapshot); got != tc.want || got != len(logical) {
+				t.Fatalf("logicalSnapshotSize = %d，wire = %d，想要 %d", got, len(logical), tc.want)
+			}
+		})
+	}
+}
+
+func TestWorstLegalLogicalSnapshotHasOneExactAllocation(t *testing.T) {
+	snapshot := worstLegalBenchmarkSnapshot()
+	want := 196749
+	allocs := testing.AllocsPerRun(100, func() {
+		logical, err := encodeLogicalSnapshot(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(logical) != want || cap(logical) != want {
+			t.Fatalf("logical len/cap = %d/%d，想要 %d/%d", len(logical), cap(logical), want, want)
+		}
+		benchmarkPayload = logical
+	})
+	if allocs != 1 {
+		t.Fatalf("encodeLogicalSnapshot allocations = %.0f，想要 1", allocs)
+	}
+}
+
 func TestChunkSnapshotEncodeRejectsNonOverworldDimension(t *testing.T) {
 	codec := mustNewCodec(t)
 	defer codec.Close()
@@ -338,6 +404,15 @@ func fixtureSnapshot(pos core.ChunkPos, revision uint64) ChunkSnapshot {
 		}
 	}
 	return ChunkSnapshot{Dimension: core.Overworld, Chunk: pos, Revision: revision, Sections: sections}
+}
+
+func repeatedSnapshot(section SectionData) ChunkSnapshot {
+	sections := make([]SectionData, core.SectionsPerChunk)
+	for index := range sections {
+		section.Y = int32(index)
+		sections[index] = section
+	}
+	return ChunkSnapshot{Dimension: core.Overworld, Revision: 1, Sections: sections}
 }
 
 func testPacked(bits uint8, modulus, seed int) []uint64 {

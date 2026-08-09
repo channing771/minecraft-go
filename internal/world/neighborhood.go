@@ -20,12 +20,15 @@ type Neighborhood struct {
 	HeightsPresent [3][3]bool
 }
 
-// SkyLight 返回局部坐标处的直射天空光，x/z 允许 -1..16，y 允许 -1..16。
+// SkyLight 返回局部坐标处的直射天空光，每轴允许 -16..31。
 // 采样位置严格高于所在列的最高非空气方块时为 15，否则为 0；
 // 邻区未加载时按遮挡返回 0。
 func (n *Neighborhood) SkyLight(x, y, z int) uint8 {
-	cx, lx := neighborColumn(x)
-	cz, lz := neighborColumn(z)
+	if cy, _ := neighborCell(y); cy < 0 {
+		return 0
+	}
+	cx, lx := neighborCell(x)
+	cz, lz := neighborCell(z)
 	if cx < 0 || cz < 0 || !n.HeightsPresent[cx][cz] {
 		return 0
 	}
@@ -36,36 +39,32 @@ func (n *Neighborhood) SkyLight(x, y, z int) uint8 {
 	return 0
 }
 
-// neighborColumn 把 -1..16 的局部分量拆成邻区下标与区块内局部坐标。
+const neighborhoodHaloMin = -core.SectionSize
+const neighborhoodHaloMax = 2*core.SectionSize - 1
+
+// neighborCell 把 -16..31 的局部分量拆成邻区下标与区块内局部坐标。
 // 超出该范围时返回 -1。
-func neighborColumn(v int) (cell, local int) {
-	switch {
-	case v == -1:
-		return 0, core.SectionSize - 1
-	case v >= 0 && v < core.SectionSize:
-		return 1, v
-	case v == core.SectionSize:
-		return 2, 0
-	default:
+func neighborCell(v int) (cell, local int) {
+	if v < neighborhoodHaloMin || v > neighborhoodHaloMax {
 		return -1, 0
 	}
+	shifted := v + core.SectionSize
+	return shifted >> core.SectionShift, shifted & core.SectionMask
 }
 
-// At 读取局部坐标处的方块，三个分量各自允许 -1..16。
+// At 读取局部坐标处的方块，三个分量各自允许 -16..31。
 // 越界分量会映射到 Around 中对应的面、棱或角邻居。
 func (n *Neighborhood) At(x, y, z int) BlockID {
 	c := [3]int{x, y, z}
-	cell := [3]int{1, 1, 1}
+	var cell [3]int
 	outside := false
 	for i, v := range c {
-		if v < -1 || v > 16 {
+		cell[i], c[i] = neighborCell(v)
+		if cell[i] < 0 {
 			return BarrierID
 		}
-		switch v {
-		case -1:
-			cell[i], c[i], outside = 0, 15, true
-		case 16:
-			cell[i], c[i], outside = 2, 0, true
+		if cell[i] != 1 {
+			outside = true
 		}
 	}
 

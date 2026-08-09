@@ -58,9 +58,9 @@ func (*benchmarkBlockingServerStream) Recv(
 func (*benchmarkBlockingServerStream) Peer() string { return "benchmark-blocking" }
 func (*benchmarkBlockingServerStream) Close() error { return nil }
 
-func TestScenarioV13ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 13 {
-		t.Fatalf("scenarioVersion=%d, want 13", scenarioVersion)
+func TestScenarioV14ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 14 {
+		t.Fatalf("scenarioVersion=%d, want 14", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {
@@ -612,31 +612,117 @@ func TestScenarioV7EightSessionServerProbeIsRealAndBounded(t *testing.T) {
 	if multiplayer.ServerOutboundBytes == 0 ||
 		multiplayer.InterestDiff.Samples != benchmarkServerInterestSamples ||
 		ticks.Frames != benchmarkServerMeasuredTicks ||
-		multiplayer.OutboxHighWater > benchmarkOutboxLimit ||
-		multiplayer.PlayerJobsHighWater > 16 || multiplayer.PlayerDoneHighWater > 2 ||
-		multiplayer.PeakRSSBytes == 0 || multiplayer.PeakRSSBytes >= 2<<30 {
+		multiplayer.PeakRSSBytes == 0 {
 		t.Fatalf("incomplete bounded server probe: multiplayer=%+v ticks=%+v", multiplayer, ticks)
 	}
 }
 
 func TestPerformanceThresholdsRejectTickP99AtTenMilliseconds(t *testing.T) {
-	report := validBenchmarkReport()
-	report.ScenarioVersion = 6
+	report := completeBenchmarkReport()
 	report.Ticks.P99MS = 9.999
-	report.Multiplayer = validMultiplayerSummary()
 	if err := validateBenchmarkReport(report); err != nil {
 		t.Fatalf("9.999ms tick p99 rejected: %v", err)
 	}
 	report.Ticks.P99MS = 10
-	if err := validateBenchmarkReport(report); err == nil || !strings.Contains(err.Error(), ">= 10 ms") {
-		t.Fatalf("10ms tick p99 boundary error=%v", err)
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("10ms tick p99 should only be recorded: %v", err)
+	}
+}
+
+func TestWriteBenchmarkReportRecordsPerformanceOutsideThresholds(t *testing.T) {
+	report := completeBenchmarkReport()
+	for _, name := range []string{"still", "flying"} {
+		phase := report.Phases[name]
+		phase.FPS = 1
+		phase.P99MS = 99
+		phase.MaxMS = 99
+		phase.PeakRSSBytes = 3 << 30
+		report.Phases[name] = phase
+	}
+	report.Ticks.P99MS = 99
+	report.Ticks.MaxMS = 99
+	report.Protocol.EncodeP99MS = 9
+	report.Protocol.DecodeP99MS = 9
+	report.PlayerPersistence.P99MS = 99
+	report.PlayerPersistence.MaxMS = 99
+	report.Multiplayer.OutboxHighWater = 999
+	report.Multiplayer.PlayerJobsHighWater = 999
+	report.Multiplayer.PlayerDoneHighWater = 999
+	report.Multiplayer.PeakRSSBytes = 3 << 30
+	path := t.TempDir() + "/report.json"
+	if err := writeBenchmarkReport(path, report); err != nil {
+		t.Fatalf("性能数值越界的完整报告未写出: %v", err)
+	}
+	if records := benchmarkPerformanceRecords(report); len(records) == 0 {
+		t.Fatal("越界性能数值未留下记录")
+	}
+}
+
+func TestValidateBenchmarkReportStillRejectsIncompleteSamples(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*client.PerfReport)
+	}{
+		{name: "missing phase", mutate: func(report *client.PerfReport) { delete(report.Phases, "still") }},
+		{name: "phase samples", mutate: func(report *client.PerfReport) {
+			phase := report.Phases["flying"]
+			phase.Frames = 0
+			report.Phases["flying"] = phase
+		}},
+		{name: "provenance", mutate: func(report *client.PerfReport) { report.Hardware = "  " }},
+		{name: "rss", mutate: func(report *client.PerfReport) { report.Phases["still"] = client.PhaseSummary{} }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			report := completeBenchmarkReport()
+			test.mutate(&report)
+			if err := validateBenchmarkReport(report); err == nil {
+				t.Fatal("不完整报告未被拒绝")
+			}
+		})
+	}
+}
+
+func TestBenchmarkServerProbeValidityIgnoresHighWaterButRejectsOverflow(t *testing.T) {
+	report := completeBenchmarkReport()
+	report.Multiplayer.OutboxHighWater = 999
+	report.Multiplayer.PlayerJobsHighWater = 999
+	report.Multiplayer.PlayerDoneHighWater = 999
+	if err := validateBenchmarkReport(report); err != nil {
+		t.Fatalf("队列高水位不应使完整报告失败: %v", err)
+	}
+	if !validBenchmarkServerProbe(false, 1, benchmarkServerInterestSamples, benchmarkServerMeasuredTicks, 1) {
+		t.Fatal("完整服务端探针被拒绝")
+	}
+	if validBenchmarkServerProbe(true, 1, benchmarkServerInterestSamples, benchmarkServerMeasuredTicks, 1) {
+		t.Fatal("真实 overflow 未被拒绝")
+	}
+	report.Multiplayer.ServerOutboundBytes = 0
+	if err := validateBenchmarkReport(report); err == nil {
+		t.Fatal("真实探针数据缺失未被拒绝")
+	}
+}
+
+func TestValidateBenchmarkReportRejectsDroppedSamples(t *testing.T) {
+	for _, name := range []string{"still", "flying", "ticks"} {
+		t.Run(name, func(t *testing.T) {
+			report := completeBenchmarkReport()
+			if name == "ticks" {
+				report.Ticks.DroppedRingBufferSamples = 1
+			} else {
+				phase := report.Phases[name]
+				phase.DroppedRingBufferSamples = 1
+				report.Phases[name] = phase
+			}
+			if err := validateBenchmarkReport(report); err == nil {
+				t.Fatal("丢失环形缓冲样本未被拒绝")
+			}
+		})
 	}
 }
 
 func TestScenarioV8BenchmarkReportRequires2048GPUCompletionSamples(t *testing.T) {
-	report := validBenchmarkReport()
+	report := completeBenchmarkReport()
 	report.ScenarioVersion = 8
-	report.Multiplayer = validMultiplayerSummary()
 	report.Multiplayer.RemoteGPUComplete.Samples = 2047
 	if err := validateBenchmarkReport(report); err == nil ||
 		!strings.Contains(err.Error(), "remote_gpu_complete") {
@@ -654,9 +740,8 @@ func TestScenarioV8BenchmarkReportRequires2048GPUCompletionSamples(t *testing.T)
 }
 
 func TestScenarioV13BenchmarkReportReusesV12GPUCompletionDefinition(t *testing.T) {
-	report := validBenchmarkReport()
+	report := completeBenchmarkReport()
 	report.ScenarioVersion = 13
-	report.Multiplayer = validMultiplayerSummary()
 	report.Multiplayer.RemoteGPUComplete.Samples = client.ScenarioV12GPUCompletionSamples - 1
 	if err := validateBenchmarkReport(report); err == nil ||
 		!strings.Contains(err.Error(), "remote_gpu_complete") {
@@ -734,4 +819,22 @@ func validMultiplayerSummary() client.MultiplayerSummary {
 		ServerOutboundBytes: 1, OutboxHighWater: 1, PlayerJobsHighWater: 1,
 		PlayerDoneHighWater: 1, PeakRSSBytes: 1,
 	}
+}
+
+func completeBenchmarkReport() client.PerfReport {
+	report := validBenchmarkReport()
+	report.ScenarioVersion = 14
+	report.Hardware = "test-hardware"
+	report.OS = "test-os"
+	report.GoVersion = "test-go"
+	report.GitCommit = "test-commit"
+	report.Framebuffer = "2560x1440"
+	report.Phases = map[string]client.PhaseSummary{
+		"still":  {Frames: 1000, FPS: 100, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4, PeakRSSBytes: 1},
+		"flying": {Frames: 1000, FPS: 100, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4, PeakRSSBytes: 1},
+	}
+	report.Ticks = client.PhaseSummary{Frames: 200, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4}
+	report.Persistence = client.PersistenceSummary{Snapshots: 1, P50MS: 1, P95MS: 2, P99MS: 3, MaxMS: 4}
+	report.Multiplayer = validMultiplayerSummary()
+	return report
 }

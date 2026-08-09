@@ -8,13 +8,16 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
+	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
+	"minecraft-go/internal/world"
 )
 
 // captureWidth/captureHeight 是视觉场景的固定分辨率。
@@ -39,10 +42,12 @@ const captureDrainMax = benchmarkMessageDrainMax
 // 升级路径：轮询 GlyphAtlas 直到收敛，需要给它加一个导出的自省方法。
 const captureGlyphSettleFrames = 32
 
-// captureScene 是一个视觉场景。三要素缺一不可：确定性的世界状态由固定种子与
-// waitUntilLoaded 保证，固定的相机位姿与其余呈现状态由 Apply 设置，
-// 抓帧时机由 WarmupFrames 固定——三者都必须是常量，任何一项随环境变化，
-// 产出的图就不可比对。
+var captureSettleTimeout = 5 * time.Minute
+
+// captureScene 是一个视觉场景。三要素缺一不可：确定性的世界状态由固定种子、
+// waitUntilLoaded 与可选 Prepare 保证，固定的相机位姿与其余呈现状态由 Apply
+// 设置，抓帧时机由 WarmupFrames 和收敛判据固定。任何一项随环境变化，产出的图
+// 就不可比对。
 //
 // 潜在陷阱：app.go 把 a.serverTick 传给 itemDropRenderer.Render 作掉落物动画相位，
 // 而 a.serverTick 的取值依赖 waitUntilLoaded 花了多少个权威 tick 才收敛，
@@ -53,6 +58,8 @@ type captureScene struct {
 	Name string
 	// WarmupFrames 是 Apply 之前空跑的帧数，用来让上传预算与网格化收敛。
 	WarmupFrames int
+	// Prepare 在权威消息完成最后一次 drain 后装入固定镜像夹具。
+	Prepare func(*application) error
 	// Apply 在最后一帧渲染前执行，是场景对呈现状态的全部干预。
 	// 它跑在 drainServerMessages 之后，因此设置的值不会被当帧的服务端消息覆盖。
 	Apply func(*application) error
@@ -63,6 +70,95 @@ type captureScene struct {
 	// 在 Apply 里设的值到最后一帧已经被覆盖。目前只有调试面板需要它——它的
 	// 读数区直接显示帧时与 tick，这两者在同一台机器上重复抓帧也会变。
 	PinVolatile func(*application) error
+}
+
+func prepareSkylightTunnel(app *application) error {
+	for z := int32(-1); z <= 1; z++ {
+		for x := int32(-1); x <= 1; x++ {
+			sections := make([]network.SectionData, core.SectionsPerChunk)
+			for y := range sections {
+				sections[y] = network.SectionData{
+					Y: int32(y), Storage: network.SectionSingle, Single: core.AirID,
+				}
+			}
+			if err := applyCaptureMirror(app, network.ChunkSnapshot{
+				Dimension: core.Overworld,
+				Chunk:     core.ChunkPos{X: x, Z: z},
+				Revision:  1,
+				Sections:  sections,
+			}); err != nil {
+				return fmt.Errorf("装入空气快照 (%d,%d): %w", x, z, err)
+			}
+		}
+	}
+
+	stones := make(map[core.ChunkPos]map[core.BlockPos]struct{})
+	addStone := func(position core.BlockPos) {
+		chunk := position.Chunk()
+		if stones[chunk] == nil {
+			stones[chunk] = make(map[core.BlockPos]struct{})
+		}
+		stones[chunk][position] = struct{}{}
+	}
+	// 内部宽 5、高 4、长 20；入口 z=4 露天，z=-16 的后墙阻止背面漏光。
+	for z := int32(-15); z <= 4; z++ {
+		for x := int32(-3); x <= 3; x++ {
+			addStone(core.BlockPos{X: x, Y: 0, Z: z})
+			if z < 4 {
+				addStone(core.BlockPos{X: x, Y: 5, Z: z})
+			}
+		}
+		for y := int32(1); y <= 4; y++ {
+			addStone(core.BlockPos{X: -3, Y: y, Z: z})
+			addStone(core.BlockPos{X: 3, Y: y, Z: z})
+		}
+	}
+	for y := int32(0); y <= 5; y++ {
+		for x := int32(-3); x <= 3; x++ {
+			addStone(core.BlockPos{X: x, Y: y, Z: -16})
+		}
+	}
+	for z := int32(-1); z <= 1; z++ {
+		for x := int32(-1); x <= 1; x++ {
+			chunk := core.ChunkPos{X: x, Z: z}
+			changes := make([]network.BlockChange, 0, len(stones[chunk]))
+			for position := range stones[chunk] {
+				changes = append(changes, network.BlockChange{
+					Position: position,
+					Block:    core.StoneID,
+				})
+			}
+			sort.Slice(changes, func(i, j int) bool {
+				left, _ := world.ChunkBlockIndex(changes[i].Position)
+				right, _ := world.ChunkBlockIndex(changes[j].Position)
+				return left < right
+			})
+			if err := applyCaptureMirror(app, network.BlockChanges{
+				Dimension:    core.Overworld,
+				Chunk:        chunk,
+				BaseRevision: 1,
+				NewRevision:  2,
+				Changes:      changes,
+			}); err != nil {
+				return fmt.Errorf("装入通道变化 (%d,%d): %w", x, z, err)
+			}
+		}
+	}
+	return nil
+}
+
+func applyCaptureMirror(app *application, message network.ServerMessage) error {
+	update, err := app.mirror.Apply(message)
+	if err != nil {
+		return err
+	}
+	app.mesher.MarkDirty(update.Dirty...)
+	return nil
+}
+
+func captureSettled(stats client.MesherStats, pending int) bool {
+	return stats.DirtySections == 0 && stats.QueuedJobs == 0 &&
+		stats.InFlightJobs == 0 && stats.ReadyResults == 0 && pending == 0
 }
 
 // captureScenes 是表驱动的场景清单，新增场景即新增一行。
@@ -220,6 +316,36 @@ var captureScenes = []captureScene{
 			return nil
 		},
 	},
+	{
+		Name:         "skylight-tunnel",
+		WarmupFrames: 8,
+		Prepare:      prepareSkylightTunnel,
+		Apply: func(app *application) error {
+			app.worldTimeTicks = 6000
+			app.camera.Pos = mgl32.Vec3{0.5, 2.8, 8.5}
+			app.camera.Yaw = 0
+			app.camera.Pitch = -0.04
+			app.inventoryOpen = false
+			if app.panel != nil {
+				app.panel.visible = false
+			}
+			if err := app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{}}); err != nil {
+				return fmt.Errorf("重置物品栏: %w", err)
+			}
+			if app.remotePlayers == nil {
+				return fmt.Errorf("skylight-tunnel 需要远端玩家追踪器，当前为 nil")
+			}
+			// 用快照逐一走合法 despawn，空列表自然成功，也不会遗漏其他玩家。
+			for _, player := range app.remotePlayers.Presentations() {
+				if err := app.remotePlayers.Apply(network.RemotePlayerDespawn{
+					PlayerID: player.PlayerID,
+				}); err != nil {
+					return fmt.Errorf("清除远端玩家 %s: %w", player.PlayerID, err)
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // capturePinnedServerTick 是 debug-panel 场景钉死的权威 tick 值。
@@ -276,15 +402,29 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 			return fmt.Errorf("预热第 %d 帧: %w", i, err)
 		}
 	}
-	// 最后一帧手工拆开 frame()：先收消息，再让场景覆盖呈现状态，最后渲染。
-	// 顺序不能变——Apply 若跑在 drain 之前，设置的值会被当帧的服务端消息覆盖。
+	// 最后一帧手工拆开 frame()：先收消息，再装入夹具并覆盖呈现状态，最后渲染。
+	// 顺序不能变；从 Prepare 开始不再 drain，固定夹具不会被权威消息覆盖。
 	app.drainServerMessages(captureDrainMax)
+	if scene.Prepare != nil {
+		if err := scene.Prepare(app); err != nil {
+			return fmt.Errorf("准备场景夹具: %w", err)
+		}
+	}
 	if err := scene.Apply(app); err != nil {
 		return fmt.Errorf("应用场景状态: %w", err)
 	}
-	for i := 0; i < captureGlyphSettleFrames; i++ {
+	settleDeadline := time.Now().Add(captureSettleTimeout)
+	for i := 0; ; i++ {
 		if _, err := app.renderFrame(captureDrainMax); err != nil {
-			return fmt.Errorf("字形收敛第 %d 帧: %w", i, err)
+			return fmt.Errorf("场景收敛第 %d 帧: %w", i, err)
+		}
+		stats, pending := app.mesher.Stats(), app.renderer.PendingUploads()
+		if i+1 >= captureGlyphSettleFrames && captureSettled(stats, pending) {
+			break
+		}
+		if time.Now().After(settleDeadline) {
+			return fmt.Errorf("场景 %s 在 %s 内未收敛：mesher=%+v pending=%d",
+				scene.Name, captureSettleTimeout, stats, pending)
 		}
 	}
 	// PinVolatile 必须在收敛帧之后、最后一帧之前：收敛帧本身会推进那些随机器

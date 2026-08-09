@@ -1,21 +1,7 @@
-# bounded-benchmark-workload Specification
-
-## Purpose
-
-保证性能报告记录的是有界且接近交互客户端的逐帧工作负载，并在工作负载语义变化时通过场景版本阻止静默混比。
-## Requirements
-### Requirement: 计时帧分别限制消息与网格工作
-性能 benchmark 的预热和正式计时帧 MUST 分别应用消息排空上限与网格工作上限；网格工作上限 MUST 与交互客户端一致，消息积压不得隐式扩大单帧网格调度或回收量。
-
-#### Scenario: 消息排空上限大于网格上限
-- **WHEN** benchmark 的一帧允许排空至多 `4096` 条服务端消息
-- **THEN** 该帧的网格调度和完成结果回收仍分别不得超过 `64`
-
-#### Scenario: 载入阶段快速收敛
-- **WHEN** benchmark 尚未进入预热或正式计时阶段
-- **THEN** 系统 MAY 使用更高的网格工作上限完成初始载入，且这些帧不得进入延迟样本
+## MODIFIED Requirements
 
 ### Requirement: 工作负载变化使用新场景版本
+
 横向天空光传播改变固定 benchmark 的网格 CPU/GPU workload 后，benchmark 报告 MUST 标记为 scenario v14。v14 MUST 保持 `2560×1440` 离屏目标、阶段时长、运动、样本、指标、绝对阈值和 `20%` 相对回归阈值不变；交互客户端和无窗口 benchmark 的 still/flying 帧 MUST 执行相同传播后的网格工作。p99、FPS、RSS、GPU、tick、队列高水位、绝对阈值和相对回归结果 MUST 只记录和报告，不得导致 producer、比较器或 CI 失败；只要报告结构、字段和样本完整且数据有效，producer MUST 写出 JSON。既有 scenario v6 至 v13 报告与基线 MUST 保持可读取，比较器不得把不同 scenario 静默作相对比较。scenario v13 与 v14 之间 MUST 只通过唯一显式 `13:14` 迁移；该迁移 MUST 校验报告完整性和硬件身份，并跳过跨 workload 的相对回归判定。任何其他迁移参数、损坏或缺字段报告、样本不完整、硬件身份不兼容、transport 或 commit 身份不一致、真实 overflow 或数据丢失以及 I/O 错误 MUST 继续失败；队列高水位数值本身 MUST 只记录。
 
 #### Scenario: v14 同场景比较只记录性能
@@ -67,7 +53,7 @@
 - **THEN** 比较器 MUST 拒绝比较并说明迁移方向不兼容
 
 #### Scenario: 历史报告保持可读取
-- **WHEN** 调用方单独读取一份完整 scenario v6 至 v13 报告
+- **WHEN** 调用方单独读取一份完整 scenario v6、v7、v8、v9、v10、v11、v12 或 v13 报告
 - **THEN** 比较器 MUST 按该历史场景原有完整性规则校验，不得要求其满足 v14 的场景版本
 
 #### Scenario: 跨硬件迁移被拒绝
@@ -126,17 +112,6 @@ scenario v8 及后续场景（包括 v12）MUST 继续保存现有 still、flyin
 - **WHEN** scenario v10 的服务端 tick p99 达到既有绝对阈值
 - **THEN** 比较器 MUST 保留该阈值与结果并返回成功
 
-### Requirement: 宿主静稳信息只作 provenance 记录
-项目 MAY 记录自然冷却时长、load average、供电、电量、低电量模式和遗留进程作为性能报告 provenance，但这些状态及旧阈值 MUST NOT 成为 producer、比较器、CI 或 Memory 基线提升的前置条件。执行 MUST NOT 依赖绑定临时路径、一次性授权、失败即停或禁止重跑。
-
-#### Scenario: 静稳状态不满足旧阈值仍可记录
-- **WHEN** 任一宿主状态不满足旧静稳阈值
-- **THEN** producer MUST 继续生成结构与样本完整的报告，且该状态 MUST NOT 阻止 Memory 基线提升
-
-#### Scenario: 性能记录允许重新生成
-- **WHEN** 调用方再次请求生成 Memory 或 TCP 性能记录
-- **THEN** producer MUST 在输入与输出有效时执行，不得要求新的绑定路径或一次性授权
-
 ### Requirement: 远端 GPU 完成探针边界稳定
 scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `remote_gpu_complete`。一个样本 MUST 是一批固定数量远端角色与昵称绘制在同一个 command buffer 中提交、只等待一次完成的总耗时除以该批次数量；样本 MUST NOT 是单次提交到阻塞轮询返回的墙钟差，也不得包含标签准备、命令编码或资源释放。批次数量与样本数 MUST 固定且记录在报告中。自动执行 MUST 保持无窗口，不得启动或聚焦交互式客户端。GPU 数值及其比率只作性能记录，不得改变退出状态或 Memory 基线提升。
 
@@ -185,24 +160,6 @@ scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `re
 - **WHEN** 开发者或 CI 运行 scenario v12 benchmark
 - **THEN** 系统 MUST 使用 headless device 和离屏纹理，不得创建、启动或聚焦游戏窗口
 
-### Requirement: 相对回归记录区分测量噪声
-性能比较 SHALL 保留每个指标及分位数的最小有意义增量，使输出能区分测量噪声与超过噪声的变化。无论绝对增量或相对变化多大，结果 MUST 只作性能记录并返回成功；该分类 MUST NOT 削弱报告结构、样本、provenance、身份、迁移、真实 overflow、数据丢失或 I/O 错误校验。
-
-#### Scenario: 噪声级变化保持可读
-- **GIVEN** 某个微秒级墙钟指标在两次运行之间的绝对增量落在实测噪声之内
-- **WHEN** 比较器比较两份同场景报告
-- **THEN** 输出 MUST 标记该变化位于噪声范围并返回成功
-
-#### Scenario: 超过噪声的退化只记录
-- **GIVEN** 某个指标的绝对增量超过其最小有意义增量
-- **WHEN** 同硬件、同场景的该指标退化超过 `20%`
-- **THEN** 输出 MUST 标记该退化超过噪声与相对阈值并返回成功
-
-#### Scenario: 分位数各自保留噪声下限
-- **GIVEN** 某个指标的中位数跨运行稳定而尾分位数固有波动接近两倍
-- **WHEN** 比较器记录该指标
-- **THEN** 中位数与尾分位数 MUST 分别使用各自的最小有意义增量，不得共用同一下限
-
 ### Requirement: 客户端进程使用固定 Go 堆软上限
 客户端进程 SHALL 设置一个固定的 Go 堆软上限，使高周转阶段不会把尚未回收的空闲堆累积进进程 RSS 峰值。该上限 MUST 高于实测活跃堆峰值并保持固定，不得改变任何被采集指标的定义、样本数或阶段时长。RSS 与帧时间相对既有阈值的结果 MUST 只记录，不得改变退出状态或 Memory 基线提升。
 
@@ -238,6 +195,54 @@ benchmark SHALL 在预热与 still、still 与 flying、flying 与 GPU 采样之
 - **WHEN** benchmark 成功生成一份 scenario v12 报告
 - **THEN** 报告 MUST 包含所用的冷却时长，使该运行可被精确复现
 
+## REMOVED Requirements
+
+### Requirement: 正式工作负载只在宿主静稳预检通过后启动
+
+**Reason**: record-only 决策取消静稳预检、绑定路径和一次性授权作为 producer 或基线提升前置条件。
+**Migration**: 需要时把宿主状态作为 provenance 记录；无论状态是否满足旧阈值，都不得影响执行或 Memory 基线提升。
+
+### Requirement: 相对回归门禁只作用于超过测量噪声的变化
+
+**Reason**: 相对回归与噪声阈值不再改变退出状态，旧门禁语义与 record-only 契约冲突。
+**Migration**: 保留分位数各自的最小有意义增量和噪声分类，只输出性能记录。
+
+### Requirement: 错过 tick 输入边界的失败必须报出时间分解
+
+**Reason**: tick 时间边界改为 record-only，不能再作为 producer、比较器、CI 或基线提升的失败条件。
+**Migration**: 继续记录原有时间分解与积压量，但不得因越界停止或禁止重跑。
+
+## ADDED Requirements
+
+### Requirement: 宿主静稳信息只作 provenance 记录
+项目 MAY 记录自然冷却时长、load average、供电、电量、低电量模式和遗留进程作为性能报告 provenance，但这些状态及旧阈值 MUST NOT 成为 producer、比较器、CI 或 Memory 基线提升的前置条件。执行 MUST NOT 依赖绑定临时路径、一次性授权、失败即停或禁止重跑。
+
+#### Scenario: 静稳状态不满足旧阈值仍可记录
+- **WHEN** 任一宿主状态不满足旧静稳阈值
+- **THEN** producer MUST 继续生成结构与样本完整的报告，且该状态 MUST NOT 阻止 Memory 基线提升
+
+#### Scenario: 性能记录允许重新生成
+- **WHEN** 调用方再次请求生成 Memory 或 TCP 性能记录
+- **THEN** producer MUST 在输入与输出有效时执行，不得要求新的绑定路径或一次性授权
+
+### Requirement: 相对回归记录区分测量噪声
+性能比较 SHALL 保留每个指标及分位数的最小有意义增量，使输出能区分测量噪声与超过噪声的变化。无论绝对增量或相对变化多大，结果 MUST 只作性能记录并返回成功；该分类 MUST NOT 削弱报告结构、样本、provenance、身份、迁移、真实 overflow、数据丢失或 I/O 错误校验。
+
+#### Scenario: 噪声级变化保持可读
+- **GIVEN** 某个微秒级墙钟指标在两次运行之间的绝对增量落在实测噪声之内
+- **WHEN** 比较器比较两份同场景报告
+- **THEN** 输出 MUST 标记该变化位于噪声范围并返回成功
+
+#### Scenario: 超过噪声的退化只记录
+- **GIVEN** 某个指标的绝对增量超过其最小有意义增量
+- **WHEN** 同硬件、同场景的该指标退化超过 `20%`
+- **THEN** 输出 MUST 标记该退化超过噪声与相对阈值并返回成功
+
+#### Scenario: 分位数各自保留噪声下限
+- **GIVEN** 某个指标的中位数跨运行稳定而尾分位数固有波动接近两倍
+- **WHEN** 比较器记录该指标
+- **THEN** 中位数与尾分位数 MUST 分别使用各自的最小有意义增量，不得共用同一下限
+
 ### Requirement: 错过 tick 输入边界时记录时间分解
 服务端探针错过 tick 输入边界时 SHALL 记录总耗时、超出量、tick 自身耗时和取出信号时的积压量；发布时刻可得时还 SHALL 记录调度到发布、发布到取出两段耗时。缺少发布时刻时 MUST 明确标注缺失，不得输出依赖该时刻的无意义分段。该越界及其数值 MUST NOT 改变退出状态、停止后续记录或阻止 Memory 基线提升。
 
@@ -250,23 +255,3 @@ benchmark SHALL 在预热与 still、still 与 flying、flying 与 GPU 采样之
 - **GIVEN** 某个信号缺少发布时刻
 - **WHEN** benchmark 记录该信号的 tick 越界
 - **THEN** 输出 MUST 标注发布时刻缺失，且 MUST NOT 报出依赖发布时刻计算的分段
-
-### Requirement: 诊断代码必须可在不依赖失败环境的前提下验证
-
-只在失败路径执行的诊断代码 MUST 具备不依赖复现该失败的验证手段。一段从不执行的诊断分支等同于未实现——它会在真正需要时才暴露缺陷，而那时已经没有第二次机会。
-
-当目标失败形态无法在开发环境复现时，诊断信息的组装 MUST 可被独立于其触发条件地测试。
-
-诊断代码 MUST NOT 依赖临时调整共享配置常量来触发验证，除非已确认该常量不被其他行为使用。
-
-#### Scenario: 诊断组装可被独立测试
-
-- **GIVEN** 一段只在失败时执行的诊断信息组装逻辑
-- **WHEN** 为其编写验证
-- **THEN** MUST 能在不制造真实失败的前提下，以构造的输入直接验证其输出
-
-#### Scenario: 共享常量不得被临时改动用于验证
-
-- **GIVEN** 某个配置常量同时被诊断路径与其他行为使用
-- **WHEN** 需要验证诊断路径
-- **THEN** MUST NOT 通过临时改动该常量来触发，因为那会连带改变其他行为，使验证结果不可信

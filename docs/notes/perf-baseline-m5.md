@@ -1,6 +1,36 @@
 # Apple M5 性能基线
 
-## 当前 scenario v13 基线
+## 当前 scenario v14 基线
+
+- 正式提交：`eb1a07a196ff948adde08e37d9af24ceb1988a14`
+- scenario：`14`
+- transport：`memory`
+- framebuffer：`2560x1440`
+- hardware：`Apple M5 / 24GiB`
+- OS：`macOS 26.5.1`
+- Go：`go1.26.0 darwin/arm64`，由 GVM 已安装工具链提供
+- Memory JSON：`/private/tmp/mcgo-m4m-v14-eb1a07a196ff/memory-v14.json`，SHA-256 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`
+- TCP JSON：`/private/tmp/mcgo-m4m-v14-eb1a07a196ff/tcp-v14.json`，SHA-256 `ed222025d8bcd0b7cdc6aa608155439695ea56a7e9703a8b10c93d7cc2f40f9e`
+- 被替代的 scenario v13 Memory SHA-256：`452a1916cafa36a6383c1c6e2a7b3c125eab4623f21636b46db1bfe9b315f6f6`
+
+这是 record-only 流程：性能数值只记录；完整 v14 Memory 报告先通过显式 `13:14` 的完整性与硬件身份校验，再立即精确复制到 `perf-baseline-m5.json`；TCP 随后独立生成。两项 producer 均为无窗口离屏运行，可独立重复生成；跨 transport 比较只在调用方显式请求时运行。
+
+```bash
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output '/private/tmp/mcgo-m4m-v14-eb1a07a196ff/memory-v14.json'"
+zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current '/private/tmp/mcgo-m4m-v14-eb1a07a196ff/memory-v14.json' --max-regression 0.20 --allow-scenario-upgrade 13:14"
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport tcp --perf-output '/private/tmp/mcgo-m4m-v14-eb1a07a196ff/tcp-v14.json'"
+```
+
+| transport / 阶段 | FPS | p50 | p95 | p99 | max | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Memory / still | 293.1 | 3.372ms | 3.570ms | 3.860ms | 27.553ms | 1393.1MiB |
+| Memory / flying | 474.1 | 1.621ms | 3.864ms | 8.879ms | 22.856ms | 1643.7MiB |
+| TCP / still | 293.3 | 3.371ms | 3.560ms | 3.896ms | 10.610ms | 1433.0MiB |
+| TCP / flying | 467.9 | 1.632ms | 4.208ms | 9.017ms | 22.536ms | 1673.7MiB |
+
+两份 `remote_gpu_complete` 都包含 `128` 个样本、每样本摊薄 `256` 次绘制；Memory/TCP p50 为 `0.089216/0.090346ms`。无后缀 M2 scenario v6 基线内容与路径不变，SHA-256 仍为 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`。回退 M4M 时同时恢复 scenario v13 producer/比较器与其 M5 基线；协议 v13、玩家 schema v5、区块 schema v6 和 metadata v2 无需迁移。
+
+## 历史 scenario v13 基线
 
 - 正式提交：`659de4859b4b78024c9b3157c2ce484bae26383e`
 - scenario：`13`
@@ -13,7 +43,7 @@
 - TCP JSON SHA-256：`f9d07c8ec0c629272c4d05ba81286366132c4b24620bdbdcdefa220309b9db17`
 - 被替代的 scenario v12 Memory SHA-256：`9eef96e0f4b9000d74ccc34214203f8256f11b36dca1361aa7b0b36da6e5313f`
 
-`perf-baseline-m5.json` 是上述 Memory 报告的精确字节副本。完整门禁退出并自然冷却超过 5 分钟后，两次有效静稳快照间隔 56 秒，均为 AC 供电、低功耗模式关闭、无遗留 `mcgo`/`perfcheck`、tracked 工作树干净。用户对精确 HEAD 与两个全新路径授权后，Memory 与 TCP producer 各运行一次；Memory 通过唯一 `12:13` 迁移完整性和绝对门禁，TCP 通过同场景跨 transport 比较。命令、临时路径、阶段指标和旧候选失败证据见 `perf-baseline.md`。
+`perf-baseline-m5.json` 曾是上述 Memory 报告的精确字节副本，现已被 scenario v14 基线替代。以下静稳预检、绑定路径、一次性授权、失败即停和禁止重跑均仅为 v13 历史流程，不是 v14 当前要求。命令、临时路径、阶段指标和旧候选失败证据见 `perf-baseline.md`。
 
 | transport / 阶段 | FPS | p50 | p95 | p99 | max | Peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -181,7 +211,7 @@ zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline /tmp/m
 
 ## 后续使用
 
-在同一 M5 硬件上生成 scenario v13 当前报告后，显式选择本基线：
+在同一 M5 硬件上生成 scenario v14 当前报告后，显式选择本基线：
 
 ```bash
 zsh -ic 'gvm use go1.26.0 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current /tmp/<current-report>.json --max-regression 0.20'
