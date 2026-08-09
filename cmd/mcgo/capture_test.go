@@ -149,11 +149,20 @@ func TestBlockLightRoomIsLastCaptureScene(t *testing.T) {
 }
 
 func TestPrepareBlockLightRoomUsesMirrorAndMesher(t *testing.T) {
-	mesher := client.NewMesher(assets.NewRegistry(), 1)
-	t.Cleanup(mesher.Close)
-	app := &application{mirror: client.NewMirror(), mesher: mesher}
+	airMesher := client.NewMesher(assets.NewRegistry(), 1)
+	t.Cleanup(airMesher.Close)
+	app := &application{mirror: client.NewMirror(), mesher: airMesher}
 
-	if err := prepareBlockLightRoom(app); err != nil {
+	if err := prepareCaptureAirNeighborhood(app); err != nil {
+		t.Fatal(err)
+	}
+	roomMesher := client.NewMesher(assets.NewRegistry(), 1)
+	t.Cleanup(roomMesher.Close)
+	app.mesher = roomMesher
+	if got := roomMesher.Stats().DirtySections; got != 0 {
+		t.Fatalf("施加房间变化前 dirty sections = %d，想要 0", got)
+	}
+	if err := applyCaptureBlockLightRoomChanges(app); err != nil {
 		t.Fatal(err)
 	}
 	for z := int32(-1); z <= 1; z++ {
@@ -192,8 +201,11 @@ func TestPrepareBlockLightRoomUsesMirrorAndMesher(t *testing.T) {
 			t.Fatalf("房外 BlockAt(%+v) = (%d,%v)，想要 (AirID,true)", position, got, loaded)
 		}
 	}
-	if got := app.mesher.Stats().DirtySections; got != 9*core.SectionsPerChunk {
-		t.Fatalf("dirty sections = %d，想要 %d", got, 9*core.SectionsPerChunk)
+	// 空列顶 -65 到地板 y=0 的变化加传播半径 16，覆盖 Y=-64..16，
+	// 即每个已加载邻区 6 个 section；房间后续方块不会扩大这个范围。
+	const wantDirtySections = 9 * 6
+	if got := roomMesher.Stats().DirtySections; got != wantDirtySections {
+		t.Fatalf("dirty sections = %d，想要 %d", got, wantDirtySections)
 	}
 }
 

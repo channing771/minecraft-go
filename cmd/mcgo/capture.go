@@ -158,7 +158,10 @@ func prepareBlockLightRoom(app *application) error {
 	if err := prepareCaptureAirNeighborhood(app); err != nil {
 		return err
 	}
+	return applyCaptureBlockLightRoomChanges(app)
+}
 
+func applyCaptureBlockLightRoomChanges(app *application) error {
 	blocks := make(map[core.ChunkPos]map[core.BlockPos]core.BlockID)
 	setBlock := func(position core.BlockPos, block core.BlockID) {
 		chunk := position.Chunk()
