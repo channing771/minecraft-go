@@ -15,6 +15,8 @@ import (
 	"minecraft-go/internal/storage"
 )
 
+const mcgodProcessStartupDeadline = 30 * time.Second
+
 func TestMCGodProcess(t *testing.T) {
 	if os.Getenv("MCGOD_PROCESS") != "1" {
 		return
@@ -61,17 +63,26 @@ func TestMCGodProcessReleasesWorldLockAfterSIGTERM(t *testing.T) {
 			_, _ = command.Process.Wait()
 		}
 	}()
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		store, err := storage.OpenDisk(context.Background(), world, storage.OpenOptions{})
-		if errors.Is(err, storage.ErrWorldLocked) {
+	metadataPath := filepath.Join(world, "world.meta")
+	for deadline := time.Now().Add(mcgodProcessStartupDeadline); ; time.Sleep(20 * time.Millisecond) {
+		_, err := os.Stat(metadataPath)
+		if err == nil {
 			break
 		}
-		if err == nil {
-			_ = store.Close()
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("inspect world metadata: %v", err)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server never acquired world lock: %v", err)
+			t.Fatalf("server never created world metadata: %v", err)
 		}
+	}
+	store, err := storage.OpenDisk(context.Background(), world, storage.OpenOptions{})
+	if err == nil {
+		_ = store.Close()
+		t.Fatal("server did not hold world lock after creating metadata")
+	}
+	if !errors.Is(err, storage.ErrWorldLocked) {
+		t.Fatalf("open running world: %v", err)
 	}
 	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
@@ -79,7 +90,7 @@ func TestMCGodProcessReleasesWorldLockAfterSIGTERM(t *testing.T) {
 	if err := command.Wait(); err != nil {
 		t.Fatalf("SIGTERM process exit=%v, want zero", err)
 	}
-	store, err := storage.OpenDisk(context.Background(), world, storage.OpenOptions{})
+	store, err = storage.OpenDisk(context.Background(), world, storage.OpenOptions{})
 	if err != nil {
 		t.Fatalf("world lock remained after SIGTERM: %v", err)
 	}
