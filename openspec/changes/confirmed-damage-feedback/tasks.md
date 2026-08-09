@@ -8,11 +8,11 @@
 
 ## 2. overlay renderer 与 application 接线
 
-- [ ] 2.1 为固定资源、零强度路径、钳制、三顶点 draw、幂等释放和 headless 像素写失败测试。
-- [ ] 2.2 实现 `DamageOverlayRenderer` 与固定 WGSL，不引入通用特效框架。
-- [ ] 2.3 接入 application 构造、逆序释放、会话 reset、frame 更新和 name tag/HUD 间的绘制顺序。
-- [ ] 2.4 更新共享 test fixture、生命周期断言与 README 当前能力。
-- [ ] 2.5 运行 `go test ./cmd/mcgo ./internal/render -race -count=1` 与 hidden benchmark。
+- [x] 2.1 为固定资源、零强度路径、钳制、三顶点 draw、幂等释放和 headless 像素写失败测试。
+- [x] 2.2 实现 `DamageOverlayRenderer` 与固定 WGSL，不引入通用特效框架。
+- [x] 2.3 接入 application 构造、逆序释放、会话 reset、frame 更新和 name tag/HUD 间的绘制顺序。
+- [x] 2.4 更新共享 test fixture、生命周期断言与 README 当前能力。
+- [x] 2.5 运行 `go test ./cmd/mcgo ./internal/render -race -count=1` 与 hidden benchmark。
 
 ## 3. 验证与归档
 

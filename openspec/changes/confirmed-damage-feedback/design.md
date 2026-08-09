@@ -10,7 +10,7 @@
 
 ## renderer
 
-`DamageOverlayRenderer` 持有一个 16 字节 uniform、一个 bind group 与一个 alpha-blend pipeline。WGSL 用全屏三角形和固定 `vec3f(0.65,0,0)`；alpha 为 `0.30 * strength * (1-smoothstep(0,0.35,edgeDistance))`。强度<=0 或 NaN 时直接返回；活动时一次 uniform 写、一个 pass、一次三顶点 draw。Release 幂等。
+`DamageOverlayRenderer` 持有一个 16 字节 uniform、一个 bind group 与一个 alpha-blend pipeline。WGSL uniform padding 使用三个独立 `f32`，避免 `vec3<f32>` 的自然对齐把 binding 扩大为 32 字节。WGSL 用全屏三角形和固定 `vec3f(0.65,0,0)`；alpha 为 `0.30 * strength * (1-smoothstep(0,0.35,edgeDistance))`。强度<=0 或 NaN 时直接返回；活动时一次 uniform 写、一个 pass、一次三顶点 draw。Release 幂等。
 
 ## 生命周期与绘制顺序
 
