@@ -157,6 +157,19 @@ func chestTexture() []byte {
 	return px
 }
 
+func lightBlockTexture() []byte {
+	px := noisyTexture(rgb{R: 238, G: 196, B: 76}, 8, 0x4C17)
+	frame := rgb{R: 164, G: 106, B: 30}
+	for i := 0; i < texSize; i++ {
+		paint(px, i, 0, frame)
+		paint(px, i, texSize-1, frame)
+		paint(px, 0, i, frame)
+		paint(px, texSize-1, i, frame)
+	}
+	fill(px, 4, 4, 12, 12, rgb{R: 255, G: 226, B: 112})
+	return px
+}
+
 func fill(px []byte, left, top, right, bottom int, color rgb) {
 	for y := top; y < bottom; y++ {
 		for x := left; x < right; x++ {

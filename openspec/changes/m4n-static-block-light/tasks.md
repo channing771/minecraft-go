@@ -2,9 +2,9 @@
 
 ## 2. 追加发光块资源、物品与采掘规则
 
-- [ ] 2.1 在 `internal/core/light_block_test.go`、`internal/assets/blocks_test.go` 与 `internal/sim/mining_test.go` 先锁定稳定 ID、`64` 堆叠、放置/掉落、无第七配方、独立材质、`Emission=15` 与 `30/15/8` tick，并以 `zsh -ic 'go test ./internal/core ./internal/assets ./internal/sim -run "LightBlock|MiningRule" -count=1'` 确认红灯。
-- [ ] 2.2 最小修改 `internal/core/{block.go,item.go}`、`internal/assets/{blocks.go,procedural.go}` 与 `internal/sim/mining.go`，复用既有 switch 和石砖采掘分支；以 `zsh -ic 'go test ./internal/core ./internal/assets ./internal/sim -race -count=1'` 验证资源、错误工具无掉落和容量不足原子性。
-- [ ] 2.3 对 Task 2 文件执行 `gofmt -w`，再运行 `zsh -ic 'go test ./internal/archcheck -count=1'` 与 `gofmt -l internal/core internal/assets internal/sim`；后者 MUST 无输出。
+- [x] 2.1 在 `internal/core/light_block_test.go`、`internal/assets/blocks_test.go` 与 `internal/sim/mining_test.go` 先锁定稳定 ID、`64` 堆叠、放置/掉落、无第七配方、独立材质、`Emission=15` 与 `30/15/8` tick，并以 `zsh -ic 'go test ./internal/core ./internal/assets ./internal/sim -run "LightBlock|MiningRule" -count=1'` 确认红灯。
+- [x] 2.2 最小修改 `internal/core/{block.go,item.go}`、`internal/assets/{blocks.go,procedural.go}` 与 `internal/sim/mining.go`，复用既有 switch 和石砖采掘分支；以 `zsh -ic 'go test ./internal/core ./internal/assets ./internal/sim -race -count=1'` 验证资源、错误工具无掉落和容量不足原子性。
+- [x] 2.3 对 Task 2 文件执行 `gofmt -w`，再运行 `zsh -ic 'go test ./internal/archcheck -count=1'` 与 `gofmt -l internal/core internal/assets internal/sim`；后者 MUST 无输出。
 
 ## 3. 升级协议 v14 与区块 schema v7
 

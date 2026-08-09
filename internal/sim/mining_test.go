@@ -14,10 +14,10 @@ const miningTestPitch = float32(-0.4)
 
 func TestMiningRule(t *testing.T) {
 	tests := []struct {
-		block core.BlockID
-		held  core.ItemID
-		ticks uint16
-		drop  bool
+		block       core.BlockID
+		held        core.ItemID
+		ticks       uint16
+		harvestable bool
 	}{
 		{core.DirtID, core.ItemNone, 5, true},
 		{core.GrassID, core.ItemDirt, 5, true},
@@ -35,15 +35,19 @@ func TestMiningRule(t *testing.T) {
 		{core.IronBlockID, core.ItemNone, 40, false},
 		{core.IronBlockID, core.ItemStonePickaxe, 20, false},
 		{core.IronBlockID, core.ItemIronPickaxe, 10, true},
+		{core.LightBlockID, core.ItemNone, 30, false},
+		{core.LightBlockID, core.ItemStonePickaxe, 15, true},
+		{core.LightBlockID, core.ItemIronPickaxe, 8, true},
+		{core.LightBlockID, core.ItemStone, 30, false},
 		{core.BedrockID, core.ItemIronPickaxe, 0, false},
 		{core.AirID, core.ItemNone, 0, false},
 		{core.BarrierID, core.ItemIronPickaxe, 0, false},
 	}
 	for _, test := range tests {
-		ticks, drop := miningRule(test.block, test.held)
-		if ticks != test.ticks || drop != test.drop {
+		ticks, harvestable := miningRule(test.block, test.held)
+		if ticks != test.ticks || harvestable != test.harvestable {
 			t.Fatalf("miningRule(%d, %d) = %d, %v，想要 %d, %v",
-				test.block, test.held, ticks, drop, test.ticks, test.drop)
+				test.block, test.held, ticks, harvestable, test.ticks, test.harvestable)
 		}
 	}
 }
@@ -278,6 +282,9 @@ func TestMiningCompletionUsesFixedToolAndDropRules(t *testing.T) {
 		{"错误工具采铁矿", core.IronOreID, core.ItemDirt, 30, core.ItemNone},
 		{"石镐采铁块不掉落", core.IronBlockID, core.ItemStonePickaxe, 20, core.ItemNone},
 		{"铁镐采铁块", core.IronBlockID, core.ItemIronPickaxe, 10, core.ItemIronBlock},
+		{"错误工具采发光块不掉落", core.LightBlockID, core.ItemStone, 30, core.ItemNone},
+		{"石镐采发光块", core.LightBlockID, core.ItemStonePickaxe, 15, core.ItemLightBlock},
+		{"铁镐采发光块", core.LightBlockID, core.ItemIronPickaxe, 8, core.ItemLightBlock},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -637,6 +644,7 @@ func TestMiningHarvestableCapacityFailureIsAtomicRejectsOnceAndPreservesDurabili
 	engine, sessions, targets := readyMiningPlayers(t, 1)
 	session, target := sessions[0], targets[0]
 	player := engine.sessions[session].player
+	engine.SetBlockForTest(target, core.LightBlockID)
 	setMiningHeldItem(player, core.ItemStonePickaxe)
 	beforeTool := player.inventory.Hotbar.Slots[0]
 	fillMiningDrops(engine, target)
@@ -677,6 +685,7 @@ func TestMiningHarvestableCapacityFailureIsAtomicRejectsOnceAndPreservesDurabili
 func TestMiningWrongToolCompletesWithFullDropCapacity(t *testing.T) {
 	engine, sessions, targets := readyMiningPlayers(t, 1)
 	target := targets[0]
+	engine.SetBlockForTest(target, core.LightBlockID)
 	setMiningHeldItem(engine.sessions[sessions[0]].player, core.ItemDirt)
 	fillMiningDrops(engine, target)
 	record := miningTargetRecord(t, engine, target)

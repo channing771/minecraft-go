@@ -6,6 +6,7 @@ import (
 	"minecraft-go/internal/assets"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/mesh"
+	"minecraft-go/internal/world"
 )
 
 func TestStoneBrickHasOwnMaterialLayer(t *testing.T) {
@@ -57,5 +58,32 @@ func TestChestHasOwnMaterialLayer(t *testing.T) {
 	}
 	if string(pixels) == string(dirt) {
 		t.Fatal("箱子材质与泥土完全相同")
+	}
+}
+
+// TestLightBlockUsesIndependentLayerAndFixedEmission 杀死复用石头或箱子层、
+// 纹理尺寸或 alpha 损坏，以及发光等级或非光源默认值错误的变异。
+func TestLightBlockUsesIndependentLayerAndFixedEmission(t *testing.T) {
+	registry := assets.NewRegistry()
+	layer := registry.Material(core.LightBlockID, mesh.FacePosY)
+	if layer == assets.LayerStone || layer == assets.LayerChest {
+		t.Fatalf("发光块复用了既有材质层 %d", layer)
+	}
+	pixels := registry.LayerRGBA(int(layer))
+	if len(pixels) != 16*16*4 {
+		t.Fatalf("发光块材质长度=%d，想要 %d", len(pixels), 16*16*4)
+	}
+	for i := 3; i < len(pixels); i += 4 {
+		if pixels[i] != 255 {
+			t.Fatalf("像素 %d alpha=%d，想要 255", i/4, pixels[i])
+		}
+	}
+	if got := registry.Emission(core.LightBlockID); got != 15 {
+		t.Fatalf("发光块 Emission=%d，想要 15", got)
+	}
+	for _, id := range []world.BlockID{core.StoneID, core.ChestID, world.BlockID(999)} {
+		if got := registry.Emission(id); got != 0 {
+			t.Fatalf("非光源 %d Emission=%d，想要 0", id, got)
+		}
 	}
 }
