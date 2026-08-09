@@ -33,6 +33,29 @@ func TestProductionGoSourceScansSplitFiles(t *testing.T) {
 	}
 }
 
+func TestTopLevelDeclarationNamesInScansSplitFiles(t *testing.T) {
+	dir := t.TempDir()
+	for name, source := range map[string]string{
+		"session.go":              "package sample\nconst sessionMarker = 1\n",
+		"session_reader.go":       "package sample\ntype sessionReaderMarker struct{}\n",
+		"session_ignored_test.go": "package sample\nfunc sessionIgnoredMarker() {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	names := topLevelDeclarationNamesIn(t, dir, "session*.go")
+	for _, name := range []string{"sessionMarker", "sessionReaderMarker"} {
+		if !names[name] {
+			t.Errorf("split production files missed declaration %s", name)
+		}
+	}
+	if names["sessionIgnoredMarker"] {
+		t.Errorf("test file declaration must be ignored")
+	}
+}
+
 func productionGoSource(t *testing.T, directory string) string {
 	t.Helper()
 	entries, err := os.ReadDir(directory)
