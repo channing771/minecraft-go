@@ -650,6 +650,7 @@ func TestMiningHarvestableCapacityFailureIsAtomicRejectsOnceAndPreservesDurabili
 	fillMiningDrops(engine, target)
 	record := miningTargetRecord(t, engine, target)
 	beforeHash := record.Chunk.Hash()
+	beforeDropsHash := record.Chunk.DropsHash()
 	beforeRevision := record.Revision
 
 	var result TickResult
@@ -664,6 +665,9 @@ func TestMiningHarvestableCapacityFailureIsAtomicRejectsOnceAndPreservesDurabili
 	if got := record.Chunk.Hash(); got != beforeHash || record.Revision != beforeRevision {
 		t.Fatalf("容量失败修改了区块或 revision: hash=%x/%x revision=%d/%d",
 			got, beforeHash, record.Revision, beforeRevision)
+	}
+	if got := record.Chunk.DropsHash(); got != beforeDropsHash {
+		t.Fatalf("容量失败修改了掉落槽: drops=%x/%x", got, beforeDropsHash)
 	}
 	if engine.sessions[session].player.mining != (playerMiningState{}) {
 		t.Fatalf("容量失败后 mining=%+v，想要清零", engine.sessions[session].player.mining)

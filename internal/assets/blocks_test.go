@@ -61,22 +61,24 @@ func TestChestHasOwnMaterialLayer(t *testing.T) {
 	}
 }
 
-// TestLightBlockUsesIndependentLayerAndFixedEmission 杀死复用石头或箱子层、
-// 纹理尺寸或 alpha 损坏，以及发光等级或非光源默认值错误的变异。
+// TestLightBlockUsesIndependentLayerAndFixedEmission 杀死复用任一既有层、
+// 发光块边框或中心颜色错误，以及发光等级或非光源默认值错误的变异。
 func TestLightBlockUsesIndependentLayerAndFixedEmission(t *testing.T) {
 	registry := assets.NewRegistry()
 	layer := registry.Material(core.LightBlockID, mesh.FacePosY)
-	if layer == assets.LayerStone || layer == assets.LayerChest {
-		t.Fatalf("发光块复用了既有材质层 %d", layer)
+	if layer != assets.LayerLightBlock {
+		t.Fatalf("发光块材质层=%d，想要 %d", layer, assets.LayerLightBlock)
 	}
 	pixels := registry.LayerRGBA(int(layer))
 	if len(pixels) != 16*16*4 {
 		t.Fatalf("发光块材质长度=%d，想要 %d", len(pixels), 16*16*4)
 	}
-	for i := 3; i < len(pixels); i += 4 {
-		if pixels[i] != 255 {
-			t.Fatalf("像素 %d alpha=%d，想要 255", i/4, pixels[i])
-		}
+	if got := [4]byte{pixels[0], pixels[1], pixels[2], pixels[3]}; got != [4]byte{164, 106, 30, 255} {
+		t.Fatalf("发光块边框 RGBA=%v，想要 [164 106 30 255]", got)
+	}
+	center := (7*16 + 7) * 4
+	if got := [4]byte{pixels[center], pixels[center+1], pixels[center+2], pixels[center+3]}; got != [4]byte{255, 226, 112, 255} {
+		t.Fatalf("发光块中心 RGBA=%v，想要 [255 226 112 255]", got)
 	}
 	if got := registry.Emission(core.LightBlockID); got != 15 {
 		t.Fatalf("发光块 Emission=%d，想要 15", got)

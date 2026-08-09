@@ -15,6 +15,11 @@ func TestLightBlockIDsMappingsAndNoRecipeStayStable(t *testing.T) {
 	if core.ItemLightBlock != core.ItemChest+1 {
 		t.Fatalf("ItemLightBlock=%d，必须追加在 ItemChest 之后", core.ItemLightBlock)
 	}
+	if core.ItemBrokenStonePickaxe != 12 || core.ItemBrokenIronPickaxe != 13 ||
+		core.ItemChest != 14 || core.ItemLightBlock != 15 {
+		t.Fatalf("物品 wire ID 漂移: brokenStone=%d brokenIron=%d chest=%d light=%d",
+			core.ItemBrokenStonePickaxe, core.ItemBrokenIronPickaxe, core.ItemChest, core.ItemLightBlock)
+	}
 	if limit, ok := core.ItemStackLimit(core.ItemLightBlock); !ok || limit != 64 {
 		t.Fatalf("发光块堆叠上限=(%d,%v)，想要 (64,true)", limit, ok)
 	}
