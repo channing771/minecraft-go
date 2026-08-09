@@ -18,6 +18,8 @@ const (
 	LayerFurnace
 	LayerIronBlock
 	LayerChest
+	LayerLeaves
+	LayerGlass
 	layerCount
 )
 
@@ -40,6 +42,8 @@ func NewRegistry() *Registry {
 	r.layers[LayerFurnace] = furnaceTexture()
 	r.layers[LayerIronBlock] = ironBlockTexture()
 	r.layers[LayerChest] = chestTexture()
+	r.layers[LayerLeaves] = leavesTexture()
+	r.layers[LayerGlass] = glassTexture()
 	return r
 }
 
@@ -80,6 +84,10 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 		return LayerIronBlock
 	case core.ChestID:
 		return LayerChest
+	case core.LeavesID:
+		return LayerLeaves
+	case core.GlassID:
+		return LayerGlass
 	case core.GrassID:
 		switch f {
 		case mesh.FacePosY:

@@ -157,6 +157,36 @@ func chestTexture() []byte {
 	return px
 }
 
+func leavesTexture() []byte {
+	px := noisyTexture(rgb{R: 62, G: 126, B: 54}, 18, 0x1EA5)
+	for y := 0; y < texSize; y++ {
+		for x := 0; x < texSize; x++ {
+			if hash2(uint32(x), uint32(y), 0x1EA5)%10 < 3 {
+				px[(y*texSize+x)*4+3] = 0
+			}
+		}
+	}
+	return px
+}
+
+func glassTexture() []byte {
+	px := make([]byte, texSize*texSize*4)
+	frame := rgb{R: 188, G: 222, B: 226}
+	for i := 0; i < texSize; i++ {
+		paint(px, i, 0, frame)
+		paint(px, i, texSize-1, frame)
+		paint(px, 0, i, frame)
+		paint(px, texSize-1, i, frame)
+	}
+	for _, p := range [][2]int{{0, 0}, {15, 0}, {0, 15}, {15, 15}} {
+		paint(px, p[0], p[1], rgb{R: 142, G: 184, B: 190})
+	}
+	for i := 3; i < 7; i++ {
+		paint(px, i, i, rgb{R: 224, G: 244, B: 246})
+	}
+	return px
+}
+
 func fill(px []byte, left, top, right, bottom int, color rgb) {
 	for y := top; y < bottom; y++ {
 		for x := left; x < right; x++ {

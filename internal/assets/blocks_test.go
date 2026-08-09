@@ -72,6 +72,21 @@ func TestM4EBlocksHaveDistinctMaterialLayers(t *testing.T) {
 	}
 }
 
+func TestCutoutBlocksHaveOwnMaterialLayers(t *testing.T) {
+	registry := assets.NewRegistry()
+	for _, tt := range []struct {
+		block core.BlockID
+		want  uint16
+	}{
+		{core.LeavesID, assets.LayerLeaves},
+		{core.GlassID, assets.LayerGlass},
+	} {
+		if got := registry.Material(tt.block, mesh.FacePosY); got != tt.want {
+			t.Fatalf("方块 %d 材质层 = %d，想要 %d", tt.block, got, tt.want)
+		}
+	}
+}
+
 // TestChestHasOwnMaterialLayer 覆盖箱子拥有独立于木质褐色相邻方块的材质层。
 func TestChestHasOwnMaterialLayer(t *testing.T) {
 	registry := assets.NewRegistry()

@@ -79,6 +79,27 @@ func TestTexturesAreNotFlat(t *testing.T) {
 	}
 }
 
+func TestCutoutLayersUseBinaryAlpha(t *testing.T) {
+	r := assets.NewRegistry()
+	for _, layer := range []uint16{assets.LayerLeaves, assets.LayerGlass} {
+		px := r.LayerRGBA(int(layer))
+		opaque, transparent := 0, 0
+		for i := 3; i < len(px); i += 4 {
+			switch px[i] {
+			case 0:
+				transparent++
+			case 255:
+				opaque++
+			default:
+				t.Fatalf("cutout 层 %d 含非二值 alpha %d", layer, px[i])
+			}
+		}
+		if opaque == 0 || transparent == 0 {
+			t.Fatalf("cutout 层 %d 不同时包含透明与不透明像素", layer)
+		}
+	}
+}
+
 // 杀死变异：把功能方块退回仅有基色差异的随机噪声，会丢失这些可辨识结构。
 func TestFunctionalBlocksHavePixelStructures(t *testing.T) {
 	r := assets.NewRegistry()

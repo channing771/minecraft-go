@@ -3,9 +3,16 @@ package mesh_test
 import (
 	"math/rand"
 	"testing"
+	"unsafe"
 
 	"minecraft-go/internal/mesh"
 )
+
+func TestQuadPackRemainsEightBytes(t *testing.T) {
+	if got := unsafe.Sizeof(mesh.Quad{}.Pack()); got != 8 {
+		t.Fatalf("Quad.Pack 大小 = %d，想要 8", got)
+	}
+}
 
 func TestQuadPackRoundTrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))

@@ -20,7 +20,7 @@
 
 ## 5. 世界 UV 与单 pass cutout
 
-- [ ] 5.1 目标：`internal/render`、`internal/assets`、`internal/mesh`。增加 Leaves/Glass layers、世界坐标 UV、fragment discard 和覆盖保持 mip，并锁定 8 字节实例格式。
+- [x] 5.1 目标：`internal/render`、`internal/assets`、`internal/mesh`。增加 Leaves/Glass layers、世界坐标 UV、fragment discard 和覆盖保持 mip，并锁定 8 字节实例格式。
   验证：`go test ./internal/render ./internal/assets ./internal/mesh -race -count=1`
 
 ## 6. 14 种程序化材质与草地闭合
