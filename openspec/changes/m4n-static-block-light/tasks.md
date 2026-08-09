@@ -14,10 +14,10 @@
 
 ## 4. 在固定 scratch 中实现 packed 双通道传播
 
-- [ ] 4.1 将 `internal/mesh/skylight*.go` 机械更名为 `light*.go`，同步 `LightScratch`/`NewLightScratch` 调用点并保持天空光算法不变；以 `zsh -ic 'go test ./internal/mesh ./internal/client ./internal/render ./cmd/gfxspike -run "SkyLight|Mesh|Mesher" -count=1'` 验证纯重命名。
-- [ ] 4.2 在 `internal/mesh/light_test.go` 与 `light_internal_test.go` 先覆盖 `15/14/1/0`、仅 `AirID` 传播、未来被标记为透明的非空气方块仍阻断、多源最大值、跨区段/区块、缺失邻区、确定性、精确 `48³` 容量、一次 emission 扫描、队列复用和零分配；以 `zsh -ic 'go test ./internal/mesh -run "BlockLight|PackedSky|LightScratch" -count=1'` 确认方块光红灯。
-- [ ] 4.3 在 `internal/mesh` 实现一个 packed levels/queue、先天空光后所有光源统一入队且只进入 `AirID` 邻格的方块光 BFS，并让 `MeshSection` 原样写 packed byte；只同步 `internal/client/mesher.go`、`cmd/gfxspike/main.go` 与 `internal/render/bench_test.go` 的必要调用点。
-- [ ] 4.4 对 Task 4 Go 文件执行 `gofmt -w`，运行 `zsh -ic 'go test ./internal/mesh -race -count=1'`、`zsh -ic 'go test ./internal/client ./internal/render ./cmd/gfxspike -race -count=1'`、`zsh -ic 'go test ./internal/mesh -run ^$ -bench BenchmarkMeshTerrainSection -benchmem -count=5'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/mesh internal/client cmd/gfxspike internal/render`，并以 `rg -n "SkyLightScratch|NewSkyLightScratch|skylight.go" . --glob '!docs/superpowers/**'` 确认无代码命中。
+- [x] 4.1 将 `internal/mesh/skylight*.go` 机械更名为 `light*.go`，同步 `LightScratch`/`NewLightScratch` 调用点并保持天空光算法不变；以 `zsh -ic 'go test ./internal/mesh ./internal/client ./internal/render ./cmd/gfxspike -run "SkyLight|Mesh|Mesher" -count=1'` 验证纯重命名。
+- [x] 4.2 在 `internal/mesh/light_test.go` 与 `light_internal_test.go` 先覆盖 `15/14/1/0`、仅 `AirID` 传播、未来被标记为透明的非空气方块仍阻断、多源最大值、跨区段/区块、缺失邻区、确定性、精确 `48³` 容量、一次 emission 扫描、队列复用和零分配；以 `zsh -ic 'go test ./internal/mesh -run "BlockLight|PackedSky|LightScratch" -count=1'` 确认方块光红灯。
+- [x] 4.3 在 `internal/mesh` 实现一个 packed levels/queue、先天空光后所有光源统一入队且只进入 `AirID` 邻格的方块光 BFS，并让 `MeshSection` 原样写 packed byte；只同步 `internal/client/mesher.go`、`cmd/gfxspike/main.go` 与 `internal/render/bench_test.go` 的必要调用点。
+- [x] 4.4 对 Task 4 Go 文件执行 `gofmt -w`，运行 `zsh -ic 'go test ./internal/mesh -race -count=1'`、`zsh -ic 'go test ./internal/client ./internal/render ./cmd/gfxspike -race -count=1'`、`zsh -ic 'go test ./internal/mesh -run ^$ -bench BenchmarkMeshTerrainSection -benchmem -count=5'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/mesh internal/client cmd/gfxspike internal/render`，并以 `rg -n "SkyLightScratch|NewSkyLightScratch|skylight.go" . --glob '!docs/superpowers/**'` 确认无代码命中。
 
 ## 5. 验证 mesher 收敛并接入 shader 合光
 

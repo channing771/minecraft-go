@@ -3,6 +3,7 @@ package mesh_test
 import (
 	"testing"
 
+	"minecraft-go/internal/core"
 	"minecraft-go/internal/mesh"
 	"minecraft-go/internal/world"
 )
@@ -12,6 +13,12 @@ type testRegistry struct{}
 func (testRegistry) Opaque(id world.BlockID) bool { return id != world.AirID }
 func (testRegistry) Material(id world.BlockID, _ mesh.Face) uint16 {
 	return uint16(id)
+}
+func (testRegistry) Emission(id world.BlockID) uint8 {
+	if id == core.LightBlockID {
+		return 15
+	}
+	return 0
 }
 
 func solidNeighbors(center *world.Section) *world.Neighborhood {
@@ -75,7 +82,7 @@ func slabNeighbors(center *world.Section, topY int) *world.Neighborhood {
 
 func TestMeshEmptySectionProducesNothing(t *testing.T) {
 	n := solidNeighbors(world.NewSection())
-	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewSkyLightScratch()); len(q) != 0 {
+	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewLightScratch()); len(q) != 0 {
 		t.Fatalf("全空气区段产生了 %d 个面，应为 0", len(q))
 	}
 }
@@ -90,7 +97,7 @@ func TestMeshFullSectionProducesNothing(t *testing.T) {
 		}
 	}
 	n := solidNeighbors(center)
-	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewSkyLightScratch()); len(q) != 0 {
+	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewLightScratch()); len(q) != 0 {
 		t.Fatalf("被实心邻居包围的实心区段产生了 %d 个面，应为 0", len(q))
 	}
 }
@@ -98,7 +105,7 @@ func TestMeshFullSectionProducesNothing(t *testing.T) {
 func TestMeshSingleBlockProducesSixUnitQuads(t *testing.T) {
 	center := world.NewSection()
 	center.Blocks.Set(8, 8, 8, world.BlockID(2))
-	quads := mesh.MeshSection(solidNeighbors(center), testRegistry{}, mesh.NewSkyLightScratch())
+	quads := mesh.MeshSection(solidNeighbors(center), testRegistry{}, mesh.NewLightScratch())
 	if len(quads) != 6 {
 		t.Fatalf("孤立方块产生了 %d 个面，应为 6", len(quads))
 	}
@@ -126,7 +133,7 @@ func TestMeshGreedyMergesFlatSurface(t *testing.T) {
 			}
 		}
 	}
-	quads := mesh.MeshSection(slabNeighbors(center, 7), testRegistry{}, mesh.NewSkyLightScratch())
+	quads := mesh.MeshSection(slabNeighbors(center, 7), testRegistry{}, mesh.NewLightScratch())
 	if len(quads) != 1 {
 		t.Fatalf("平坦顶面产生了 %d 个面，贪心合并后应为 1", len(quads))
 	}
@@ -147,7 +154,7 @@ func TestMeshDoesNotMergeAcrossMaterials(t *testing.T) {
 			center.Blocks.Set(x, 0, z, id)
 		}
 	}
-	quads := mesh.MeshSection(slabNeighbors(center, 0), testRegistry{}, mesh.NewSkyLightScratch())
+	quads := mesh.MeshSection(slabNeighbors(center, 0), testRegistry{}, mesh.NewLightScratch())
 	if len(quads) != 2 {
 		t.Fatalf("两种材质的平面产生了 %d 个面，应为 2", len(quads))
 	}
@@ -171,7 +178,7 @@ func BenchmarkMeshTerrainSection(b *testing.B) {
 	}
 	n := solidNeighbors(center)
 	reg := testRegistry{}
-	light := mesh.NewSkyLightScratch()
+	light := mesh.NewLightScratch()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = mesh.MeshSection(n, reg, light)

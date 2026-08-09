@@ -622,7 +622,7 @@ gofmt -l internal/mesh internal/client cmd/gfxspike internal/render
 rg -n "SkyLightScratch|NewSkyLightScratch|skylight.go" . --glob '!docs/superpowers/**'
 ```
 
-Expected: 全通过；benchmark 报告 `0 allocs/op`；最后 `rg` 无生产或测试代码命中。
+Expected: 全通过；`LightScratch` 稳定构建的 `AllocsPerRun` 为 `0`，`BenchmarkMeshTerrainSection` 正常完成且 `allocs/op` 不高于既有基线 `5`；最后 `rg` 无生产或测试代码命中。
 
 - [ ] **Step 7: 提交**
 
