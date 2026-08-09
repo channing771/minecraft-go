@@ -20,7 +20,7 @@
 
 ## 6. 模拟引擎按 tick 阶段拆分
 
-- [ ] 6.1 将 `internal/sim/engine.go` 原样拆为 step/run/subscription/placement/changes 文件，保持 tick 调用顺序与权威状态；focused：`zsh -ic 'go test ./internal/sim -race -count=1'`、`zsh -ic 'go test ./internal/server ./internal/client -run "Tick|Placement|Subscription|Predictor" -count=1'`。
+- [x] 6.1 将 `internal/sim/engine.go` 原样拆为 step/run/subscription/placement/changes 文件，保持 tick 调用顺序与权威状态；focused：`zsh -ic 'go test ./internal/sim -race -count=1'`、`zsh -ic 'go test ./internal/server ./internal/client -run "Tick|Placement|Subscription|Predictor" -count=1'`。
 
 ## 7. session、Host 与发布职责拆分
 
