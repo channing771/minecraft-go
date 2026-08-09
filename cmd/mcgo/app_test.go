@@ -274,13 +274,14 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	avatar := render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 	nameTag := render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
 	hotbar := render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, reg)
+	itemDrop := render.NewItemDropRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 	damage := render.NewDamageOverlayRenderer(dev, gfx.FormatRGBA8Unorm)
 	color := dev.CreateTexture(gfx.TextureDesc{Label: "main color", Width: 4, Height: 4, Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget})
 	app := &application{
 		dev: dev, color: color, colorView: color.View(gfx.TextureViewDesc{}),
 		depth: newDepthTarget(dev, 4, 4), renderer: terrain,
 		glyphAtlas: atlas, avatarRenderer: avatar, nameTagRenderer: nameTag,
-		hotbarRenderer: hotbar, damageOverlayRenderer: damage,
+		hotbarRenderer: hotbar, itemDropRenderer: itemDrop, damageOverlayRenderer: damage,
 		remotePlayers: client.NewRemotePlayers(),
 	}
 	app.releaseResources = app.releaseOwnedResources
@@ -294,10 +295,10 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 		t.Fatalf("roster after Close=%d", got)
 	}
 	markers := dev.releaseMarkers([]string{
-		"damage overlay resources", "hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
+		"damage overlay resources", "item drop resources", "hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
 		"main depth texture", "main color view", "main color texture", "device",
 	})
-	want := []string{"damage overlay resources", "hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
+	want := []string{"damage overlay resources", "item drop resources", "hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
 	if !reflect.DeepEqual(markers, want) {
 		t.Fatalf("release markers=%v want=%v; all=%v", markers, want, dev.releases)
 	}
@@ -308,8 +309,8 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	}
 }
 
-// Mutation killed: constructing remote renderers out of order, or cleaning a
-// failed damage-overlay construction in forward order, moves release markers.
+// Mutation 已验证：远端 renderer 构造乱序或受伤遮罩构造失败后正序清理，
+// 都会改变资源释放标记。
 func TestApplicationConstructionFailureReleasesRemoteResourcesInReverse(t *testing.T) {
 	wantErr := errors.New("injected damage-overlay construction failure")
 	rawEndpoint, serverEndpoint := network.NewMemoryPair(4)

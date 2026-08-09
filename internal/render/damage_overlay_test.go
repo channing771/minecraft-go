@@ -21,12 +21,14 @@ func (encoder *damageOverlayTestEncoder) BeginRenderPass(desc gfx.RenderPassDesc
 	return &encoder.pass
 }
 func (*damageOverlayTestEncoder) BeginComputePass(string) gfx.ComputePass {
-	panic("unexpected compute pass")
+	panic("受伤遮罩不应创建 compute pass")
 }
 func (*damageOverlayTestEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {
-	panic("unexpected buffer copy")
+	panic("受伤遮罩不应复制 buffer")
 }
-func (*damageOverlayTestEncoder) Finish() gfx.CommandBuffer { panic("unexpected finish") }
+func (*damageOverlayTestEncoder) Finish() gfx.CommandBuffer {
+	panic("受伤遮罩测试不应结束 encoder")
+}
 
 func TestDamageOverlayUsesFixedResourcesAndOneTriangle(t *testing.T) {
 	device := &skyTestDevice{}
@@ -101,8 +103,19 @@ func TestDamageOverlayHeadlessPixels(t *testing.T) {
 	}
 	baseEdge := damageOverlayPixel(base, 0, 32)
 	gotEdge := damageOverlayPixel(got, 0, 32)
-	if int(gotEdge[0])-int(baseEdge[0]) < 35 || gotEdge[0] <= gotEdge[1]+35 {
+	edgeRed := int(gotEdge[0]) - int(baseEdge[0])
+	if edgeRed < 35 || gotEdge[0] <= gotEdge[1]+35 {
 		t.Fatalf("边缘像素 base=%v got=%v，想要明显红色增量", baseEdge, gotEdge)
+	}
+	baseMiddle := damageOverlayPixel(base, 11, 32)
+	gotMiddle := damageOverlayPixel(got, 11, 32)
+	middleRed := int(gotMiddle[0]) - int(baseMiddle[0])
+	centerRed := int(gotCenter[0]) - int(baseCenter[0])
+	if !(edgeRed > middleRed && middleRed > centerRed) {
+		t.Fatalf(
+			"红色增量边缘/渐变中点/中心=%d/%d/%d，想要严格递减",
+			edgeRed, middleRed, centerRed,
+		)
 	}
 }
 
