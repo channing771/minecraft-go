@@ -24,6 +24,9 @@ const (
 	glyphRequestCapacity = 1024
 	glyphResultCapacity  = 32
 	glyphUploadBytes     = glyphCellSize * glyphCellSize
+	// glyphInkPadding 是 ink 在格内的左上留边（像素）。光栅化按它定位 ink，
+	// slot 赋 UV 时也按它定位采样区——两处必须用同一个值，否则采样会整体偏移。
+	glyphInkPadding = 2
 )
 
 //go:embed assets/NotoSansCJKsc-Regular.otf
@@ -269,10 +272,21 @@ func (atlas *GlyphAtlas) FlushUploads(budget *UploadBudget) error {
 	y := uint32(slot/32) * glyphCellSize
 	atlas.texture.WriteRegion(0, 0, x, y, glyphCellSize, glyphCellSize, pending.pixels)
 	pending.glyph.Slot = slot
-	pending.glyph.U0 = float32(x) / float32(glyphAtlasSize)
-	pending.glyph.V0 = float32(y) / float32(glyphAtlasSize)
-	pending.glyph.U1 = float32(x+glyphCellSize) / float32(glyphAtlasSize)
-	pending.glyph.V1 = float32(y+glyphCellSize) / float32(glyphAtlasSize)
+	// UV 只覆盖 ink 本身，不覆盖整格。
+	//
+	// 光栅化把 ink 画在格内 (glyphInkPadding, glyphInkPadding) 处，尺寸为
+	// Glyph.Width × Glyph.Height；而全部消费方（hotbar、name tag、调试面板）
+	// 都按 Width × Height 画四边形并直接用这里的 UV 采样。若 UV 覆盖整格，
+	// 整格（绝大部分是空白）就会被压进 ink 大小的四边形，压缩比为
+	// Width/glyphCellSize——'w' 约 0.56 只是变形，'i' 约 0.09 会让 3px 墨迹
+	// 缩成 0.26px 而彻底消失，表现为窄字符成片丢失、宽字符偏细。
+	// 只覆盖 ink 才能让四边形与图集像素 1:1 对应。
+	inkX := float32(x) + glyphInkPadding
+	inkY := float32(y) + glyphInkPadding
+	pending.glyph.U0 = inkX / float32(glyphAtlasSize)
+	pending.glyph.V0 = inkY / float32(glyphAtlasSize)
+	pending.glyph.U1 = (inkX + pending.glyph.Width) / float32(glyphAtlasSize)
+	pending.glyph.V1 = (inkY + pending.glyph.Height) / float32(glyphAtlasSize)
 	atlas.glyphs[pending.char] = pending.glyph
 	atlas.pendingUpload = nil
 	atlas.nextSlot++
@@ -350,10 +364,9 @@ func (opentypeGlyphRasterizer) Rasterize(face font.Face, char rune) (Glyph, []by
 	if !ok {
 		return Glyph{}, nil, true, nil
 	}
-	const padding = 2
 	dot := fixed.Point26_6{
-		X: fixed.I(padding) - bounds.Min.X,
-		Y: fixed.I(padding) - bounds.Min.Y,
+		X: fixed.I(glyphInkPadding) - bounds.Min.X,
+		Y: fixed.I(glyphInkPadding) - bounds.Min.Y,
 	}
 	drawRect, mask, maskPoint, _, ok := face.Glyph(dot, char)
 	if !ok {
