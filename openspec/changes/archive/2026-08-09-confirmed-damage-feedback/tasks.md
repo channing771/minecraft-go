@@ -16,6 +16,6 @@
 
 ## 3. 验证与归档
 
-- [ ] 3.1 运行架构、全仓 race、vet、gofmt 与 OpenSpec strict 门禁。
-- [ ] 3.2 确认协议、存档、scenario、capture 与 golden 均未变化，工作区只剩用户日志。
-- [ ] 3.3 归档 `confirmed-damage-feedback` 并再次严格验证主规格。
+- [x] 3.1 运行架构、全仓 race、vet、gofmt 与 OpenSpec strict 门禁。
+- [x] 3.2 确认协议、存档、scenario、capture 与 golden 均未变化，工作区只剩用户日志。
+- [x] 3.3 归档 `confirmed-damage-feedback` 并再次严格验证主规格。
