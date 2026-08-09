@@ -19,7 +19,7 @@
 
 - [x] 4.1 先写 scenario v14、唯一 `13:14`、旧迁移拒绝、Memory/TCP parity 和基线选择的失败测试，再最小升级 producer 与 `cmd/perfcheck` 并重构；运行相关 `go test ./cmd/perfcheck ./internal/... -race -count=1`，通过后只提交本任务文件。
 - [x] 4.2 先写完整 `48³` 传播、跨边界输入和稳定 Mesher 无逐任务 scratch 分配的失败测试，再最小加入无猜测阈值的微基准并重构；运行相关 `go test -bench`，通过后只提交本任务文件。
-- [ ] 4.3 先写完整报告在性能退化时仍写出 JSON 且 `perfcheck` 成功、报告无效/身份不一致/真实 overflow 时仍失败的测试，再最小把 producer 与 `perfcheck` 改为性能只记录；先生成完整 M5 v14 Memory 记录、执行显式 `13:14` record-only 比较并以其精确字节替换 M5 基线，再独立生成完整 TCP 记录和不改变基线状态的跨 transport 比较，不要求 TCP 先于 Memory 提升，也不要求静稳预检、绑定路径或一次性授权；运行受影响测试后只提交本任务文件，M2 不变。
+- [ ] 4.3 先写完整报告在性能退化时仍写出 JSON 且 `perfcheck` 成功、报告无效/身份不一致/真实 overflow 时仍失败的测试，再最小把 producer 与 `perfcheck` 改为性能只记录；先生成完整 M5 v14 Memory 记录、执行显式 `13:14` record-only 比较并以其精确字节替换 M5 基线，再独立生成完整 TCP 记录，只有调用方显式请求时才执行不改变记录或基线状态的跨 transport 比较；不要求 TCP 先于 Memory 提升，也不要求静稳预检、绑定路径或一次性授权；运行受影响测试后只提交本任务文件，M2 不变。
 
 ## 5. 收尾验证与归档准备
 
