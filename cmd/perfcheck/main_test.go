@@ -641,6 +641,15 @@ func TestCrossTransportComparisonRequiresMatchingCommit(t *testing.T) {
 	}
 }
 
+func TestCrossTransportComparisonRequiresMatchingScenario(t *testing.T) {
+	baseline := completeV13ComparableReport("memory")
+	current := completeV14ComparableReport("tcp")
+	if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "13:14"); err == nil ||
+		!strings.Contains(err.Error(), "scenario_version") {
+		t.Fatalf("跨 transport scenario 不一致 error=%v", err)
+	}
+}
+
 func TestPerfcheckRejectsDroppedSamples(t *testing.T) {
 	report := completeV14ComparableReport("memory")
 	report.Ticks.DroppedRingBufferSamples = 1

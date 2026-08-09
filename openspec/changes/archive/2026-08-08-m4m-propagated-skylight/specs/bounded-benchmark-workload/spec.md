@@ -60,6 +60,10 @@
 - **WHEN** 两份 scenario 不同且硬件身份不同的报告请求迁移比较
 - **THEN** 比较器 MUST 拒绝比较，且不得以场景升级为由执行跨硬件归一化
 
+#### Scenario: 跨 transport 不接受场景迁移
+- **WHEN** 同一 commit 的 Memory scenario v13 与 TCP scenario v14 报告带 `13:14` 授权请求跨 transport 比较
+- **THEN** 比较器 MUST 先拒绝 scenario 身份不一致；`13:14` 授权 MUST 只适用于同 transport 的 workload 迁移
+
 #### Scenario: 完整报告不因性能数值中止写入
 - **WHEN** producer 已取得完整有效的 v14 样本，但一个或多个性能指标超过绝对阈值或相对记录值
 - **THEN** producer MUST 写出完整 JSON，且不得因这些性能数值返回失败
@@ -84,3 +88,170 @@
 #### Scenario: workload 或测量口径变化不能藏在 v14
 - **WHEN** 性能修复改变传播语义、固定分辨率、阶段时长、样本数、场景运动、指标定义或其他 benchmark workload
 - **THEN** 项目 MUST 在再次生成报告前升级场景版本并修订迁移规则，不得把变化后的报告标记为 scenario v14
+
+### Requirement: 性能阈值保持不变
+scenario v8 及后续场景（包括 v12）MUST 继续保存现有 still、flying、RSS、服务端 tick、GPU 和 Memory/TCP 比较阈值以及 `20%` 相对回归阈值，作为历史可比的性能记录口径。任何 p99、FPS、RSS、GPU、tick、队列高水位、绝对阈值或相对阈值结果 MUST 只写入记录并返回成功，不得影响 producer、比较器、CI 或 Memory 基线提升。
+
+#### Scenario: v12 飞行尾延迟超限只记录
+- **WHEN** scenario v12 的 flying p99 大于或等于 `12ms`
+- **THEN** 比较器 MUST 记录该结果并返回成功
+
+#### Scenario: v12 权威 tick 达到绝对阈值只记录
+- **WHEN** scenario v12 的服务端 tick p99 达到既有绝对阈值
+- **THEN** 比较器 MUST 保留该阈值与结果并返回成功
+
+#### Scenario: v10 飞行尾延迟超限只记录
+- **WHEN** scenario v10 的 flying p99 大于或等于 `12ms`
+- **THEN** 比较器 MUST 记录该结果并返回成功
+
+#### Scenario: v10 GPU 稳定分位数退化超限只记录
+- **WHEN** 同硬件、同 scenario v10 的 `remote_gpu_complete` 受检分位数退化超过 `20%` 且绝对增量超过该指标的最小有意义增量
+- **THEN** 比较器 MUST 保留阈值与退化记录并返回成功
+
+#### Scenario: v10 权威 tick 达到绝对阈值只记录
+- **WHEN** scenario v10 的服务端 tick p99 达到既有绝对阈值
+- **THEN** 比较器 MUST 保留该阈值与结果并返回成功
+
+### Requirement: 远端 GPU 完成探针边界稳定
+scenario v12 及后续场景 SHALL 在固定 2560x1440 离屏目标上采集 `remote_gpu_complete`。一个样本 MUST 是一批固定数量远端角色与昵称绘制在同一个 command buffer 中提交、只等待一次完成的总耗时除以该批次数量；样本 MUST NOT 是单次提交到阻塞轮询返回的墙钟差，也不得包含标签准备、命令编码或资源释放。批次数量与样本数 MUST 固定且记录在报告中。自动执行 MUST 保持无窗口，不得启动或聚焦交互式客户端。GPU 数值及其比率只作性能记录，不得改变退出状态或 Memory 基线提升。
+
+#### Scenario: 样本反映绘制成本而非轮询节拍
+- **GIVEN** 宿主的完成等待实现存在固定节拍开销
+- **WHEN** benchmark 记录一次 `remote_gpu_complete` 样本
+- **THEN** 该节拍在一个样本内 MUST 最多出现一次并被批次数量摊薄，样本值 MUST 表示每次绘制的平均成本
+
+#### Scenario: 分位数比率只记录
+- **GIVEN** 一次完整的 scenario v12 运行
+- **WHEN** 比较 `remote_gpu_complete` 的 p50 与 p95
+- **THEN** 项目 MUST 记录两者比率，且比率数值 MUST NOT 导致 producer、比较器或基线提升失败
+
+#### Scenario: 样本只覆盖提交与完成轮询
+- **GIVEN** 一批远端绘制命令已经完成编码
+- **WHEN** benchmark 记录一次 `remote_gpu_complete` 样本
+- **THEN** 计时 MUST 紧邻该批命令提交开始并在阻塞轮询返回时结束，准备、编码和释放事件均位于计时区间之外
+
+#### Scenario: 空绘制与真实绘制差异只记录
+- **GIVEN** 同一台设备上分别以相同批次数量提交空绘制与完整远端角色绘制
+- **WHEN** 两者都按 `remote_gpu_complete` 的方式取样
+- **THEN** 项目 MUST 记录两者的中位数差异，且差异数值 MUST NOT 改变退出状态
+
+#### Scenario: 首个样本等待传输收尾完成
+- **GIVEN** benchmark 的 still/flying 阶段已经结束
+- **WHEN** 系统关闭客户端会话并准备采集 `remote_gpu_complete`
+- **THEN** 服务端 MUST 显式卸载 trusted observer 并同步关闭其 endpoint，且首个样本 MUST 在该操作返回后才开始
+
+#### Scenario: 不依赖异步 writer 失败形成屏障
+- **WHEN** Memory 或 TCP 对端关闭尚未触发 trusted observer writer 失败
+- **THEN** benchmark MUST 仍能主动完成 observer 卸载，不得通过休眠、轮询超时或等待下一次发送来开始 GPU 采样
+
+#### Scenario: 传输关闭失败时停止采样
+- **WHEN** 服务端 trusted observer endpoint 或客户端 endpoint 的显式关闭返回错误
+- **THEN** benchmark MUST 在首个 GPU 样本前返回 I/O 错误，不得写出样本不完整的性能报告
+
+#### Scenario: v12 报告样本完整
+- **WHEN** benchmark 成功生成一份 scenario v12 报告
+- **THEN** `remote_gpu_complete.samples` MUST 等于配置的固定样本数，且 p50、p95、p99 和 max MUST 完整、为正并保持单调
+
+#### Scenario: v10 报告样本完整
+- **WHEN** 比较器读取一份历史 scenario v10 报告
+- **THEN** `remote_gpu_complete.samples` MUST 等于 `2048`，且 p50、p95、p99 和 max MUST 完整、为正并保持单调
+
+#### Scenario: 自动性能验证不创建窗口
+- **WHEN** 开发者或 CI 运行 scenario v12 benchmark
+- **THEN** 系统 MUST 使用 headless device 和离屏纹理，不得创建、启动或聚焦游戏窗口
+
+### Requirement: 客户端进程使用固定 Go 堆软上限
+客户端进程 SHALL 设置一个固定的 Go 堆软上限，使高周转阶段不会把尚未回收的空闲堆累积进进程 RSS 峰值。该上限 MUST 高于实测活跃堆峰值并保持固定，不得改变任何被采集指标的定义、样本数或阶段时长。RSS 与帧时间相对既有阈值的结果 MUST 只记录，不得改变退出状态或 Memory 基线提升。
+
+#### Scenario: 空闲堆影响只记录
+- **GIVEN** flying 阶段的密集区块周转产生大量短命分配
+- **WHEN** 系统记录进程 RSS 峰值
+- **THEN** 项目 MUST 保存峰值及其与历史记录的差异，且该数值 MUST NOT 改变退出状态
+
+#### Scenario: 上限保留活跃堆余量
+- **GIVEN** 实测的活跃堆峰值
+- **WHEN** 选定 Go 堆软上限
+- **THEN** 上限 MUST 高于活跃堆峰值；still、flying 与 RSS 相对既有阈值的结果 MUST 只记录
+
+### Requirement: benchmark 阶段之间执行固定冷却
+benchmark SHALL 在预热与 still、still 与 flying、flying 与 GPU 采样之间，以及 GPU 采样之后各执行一段固定时长的冷却；冷却期间 MUST NOT 提交渲染工作或推进相机脚本，并 SHALL 回收上一阶段产生的对象，避免其把后续阶段的 RSS 峰值推高。冷却时长 MUST 记录在报告中，且 MUST NOT 改变任何被采集指标的定义、样本数或阶段时长。冷却前后的性能数值及其阈值比较只作记录。
+
+#### Scenario: 冷却不改变被测量
+- **GIVEN** 一次完整的 scenario v12 运行
+- **WHEN** 系统采集 still、flying 与 GPU 指标
+- **THEN** 各阶段的时长、样本数与统计口径 MUST 与冷却引入前完全一致
+
+#### Scenario: GPU 采样不紧接满载阶段
+- **GIVEN** flying 阶段刚刚结束
+- **WHEN** 系统准备采集 `remote_gpu_complete`
+- **THEN** 采样 MUST 在冷却窗口结束之后才开始
+
+#### Scenario: 采样后的 RSS 只记录
+- **GIVEN** GPU 采样阶段分配了大量一次性图形对象
+- **WHEN** 系统进入后续阶段并记录 RSS 峰值
+- **THEN** 冷却 MUST 先回收这些对象，且 RSS 数值及其阈值比较 MUST 只记录
+
+#### Scenario: 报告记录冷却时长
+- **WHEN** benchmark 成功生成一份 scenario v12 报告
+- **THEN** 报告 MUST 包含所用的冷却时长，使该运行可被精确复现
+
+## REMOVED Requirements
+
+### Requirement: 正式工作负载只在宿主静稳预检通过后启动
+
+**Reason**: record-only 决策取消静稳预检、绑定路径和一次性授权作为 producer 或基线提升前置条件。
+**Migration**: 需要时把宿主状态作为 provenance 记录；无论状态是否满足旧阈值，都不得影响执行或 Memory 基线提升。
+
+### Requirement: 相对回归门禁只作用于超过测量噪声的变化
+
+**Reason**: 相对回归与噪声阈值不再改变退出状态，旧门禁语义与 record-only 契约冲突。
+**Migration**: 保留分位数各自的最小有意义增量和噪声分类，只输出性能记录。
+
+### Requirement: 错过 tick 输入边界的失败必须报出时间分解
+
+**Reason**: tick 时间边界改为 record-only，不能再作为 producer、比较器、CI 或基线提升的失败条件。
+**Migration**: 继续记录原有时间分解与积压量，但不得因越界停止或禁止重跑。
+
+## ADDED Requirements
+
+### Requirement: 宿主静稳信息只作 provenance 记录
+项目 MAY 记录自然冷却时长、load average、供电、电量、低电量模式和遗留进程作为性能报告 provenance，但这些状态及旧阈值 MUST NOT 成为 producer、比较器、CI 或 Memory 基线提升的前置条件。执行 MUST NOT 依赖绑定临时路径、一次性授权、失败即停或禁止重跑。
+
+#### Scenario: 静稳状态不满足旧阈值仍可记录
+- **WHEN** 任一宿主状态不满足旧静稳阈值
+- **THEN** producer MUST 继续生成结构与样本完整的报告，且该状态 MUST NOT 阻止 Memory 基线提升
+
+#### Scenario: 性能记录允许重新生成
+- **WHEN** 调用方再次请求生成 Memory 或 TCP 性能记录
+- **THEN** producer MUST 在输入与输出有效时执行，不得要求新的绑定路径或一次性授权
+
+### Requirement: 相对回归记录区分测量噪声
+性能比较 SHALL 保留每个指标及分位数的最小有意义增量，使输出能区分测量噪声与超过噪声的变化。无论绝对增量或相对变化多大，结果 MUST 只作性能记录并返回成功；该分类 MUST NOT 削弱报告结构、样本、provenance、身份、迁移、真实 overflow、数据丢失或 I/O 错误校验。
+
+#### Scenario: 噪声级变化保持可读
+- **GIVEN** 某个微秒级墙钟指标在两次运行之间的绝对增量落在实测噪声之内
+- **WHEN** 比较器比较两份同场景报告
+- **THEN** 输出 MUST 标记该变化位于噪声范围并返回成功
+
+#### Scenario: 超过噪声的退化只记录
+- **GIVEN** 某个指标的绝对增量超过其最小有意义增量
+- **WHEN** 同硬件、同场景的该指标退化超过 `20%`
+- **THEN** 输出 MUST 标记该退化超过噪声与相对阈值并返回成功
+
+#### Scenario: 分位数各自保留噪声下限
+- **GIVEN** 某个指标的中位数跨运行稳定而尾分位数固有波动接近两倍
+- **WHEN** 比较器记录该指标
+- **THEN** 中位数与尾分位数 MUST 分别使用各自的最小有意义增量，不得共用同一下限
+
+### Requirement: 错过 tick 输入边界时记录时间分解
+服务端探针错过 tick 输入边界时 SHALL 记录总耗时、超出量、tick 自身耗时和取出信号时的积压量；发布时刻可得时还 SHALL 记录调度到发布、发布到取出两段耗时。缺少发布时刻时 MUST 明确标注缺失，不得输出依赖该时刻的无意义分段。该越界及其数值 MUST NOT 改变退出状态、停止后续记录或阻止 Memory 基线提升。
+
+#### Scenario: 越界记录各分段后继续
+- **GIVEN** 一次探针运行错过了 tick 输入边界
+- **WHEN** benchmark 记录该事件
+- **THEN** 输出 MUST 包含可得的时间分解与积压量，并继续完成结构与样本完整的报告
+
+#### Scenario: 发布时刻不可得时不伪造分段
+- **GIVEN** 某个信号缺少发布时刻
+- **WHEN** benchmark 记录该信号的 tick 越界
+- **THEN** 输出 MUST 标注发布时刻缺失，且 MUST NOT 报出依赖发布时刻计算的分段

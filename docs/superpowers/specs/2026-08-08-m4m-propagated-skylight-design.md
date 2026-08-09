@@ -1,3 +1,5 @@
+> **历史文档（已被取代）**：本文件保留 M4M 当时的设计背景；权威契约以[归档 OpenSpec](../../../openspec/changes/archive/2026-08-08-m4m-propagated-skylight/)及主规格 [bounded-benchmark-workload](../../../openspec/specs/bounded-benchmark-workload/spec.md) / [hardware-performance-baselines](../../../openspec/specs/hardware-performance-baselines/spec.md) 为准。下文旧性能门禁、TCP 前置和一次性正式流程已被 record-only 契约取代。
+
 # M4M 客户端派生天空光传播设计
 
 ## 1. 背景

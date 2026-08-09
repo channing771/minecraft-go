@@ -105,32 +105,36 @@
 - **THEN** 比较工具 MUST NOT 根据本机硬件自动选择、改写或归一化任何基线
 
 ### Requirement: 同硬件回归只比较统计稳定指标
-对于 scenario v6 及后续版本的同硬件、同 transport 报告，性能比较器 MUST 只对具有稳定语义和可重复证据的字段执行相对回归比较。历史 `interest_diff` 字段 MUST 继续接受报告完整性校验，但其 p50、p95、p99 和 max 不得作为相对回归失败依据；该字段表示单会话完整发布时间，不得解释为纯兴趣差分耗时。
+对于 scenario v6 及后续版本的同硬件、同 transport 报告，性能比较器 MUST 继续为具有稳定语义和可重复证据的字段输出相对回归记录。历史 `interest_diff` 字段 MUST 继续接受报告完整性校验，但其 p50、p95、p99 和 max 不得作为相对回归记录；该字段表示单会话完整发布时间，不得解释为纯兴趣差分耗时。任何稳定指标的退化数值 MUST 只记录并返回成功。
 
-#### Scenario: 单会话发布时间尾部波动不阻断回归
+#### Scenario: 单会话发布时间尾部波动不进入回归记录
 - **GIVEN** 两份同硬件、同 scenario、同 transport 的完整报告仅有 `interest_diff` 分位数相对变化超过配置阈值
-- **WHEN** 性能比较器执行同场景回归比较
-- **THEN** 比较 MUST 不因 `interest_diff` 的 p50、p95、p99 或 max 失败
+- **WHEN** 性能比较器执行同场景比较
+- **THEN** 比较 MUST 不把 `interest_diff` 的 p50、p95、p99 或 max 输出为相对回归，并 MUST 返回成功
 
 #### Scenario: 单会话发布时间仍须完整有效
 - **GIVEN** current 报告的 `interest_diff` 样本不足、数值非正或分位数不单调
 - **WHEN** 性能比较器校验该报告
 - **THEN** 比较 MUST 拒绝该报告并说明完整性错误
 
-#### Scenario: 其他稳定服务端指标仍然判退化
+#### Scenario: 其他稳定服务端指标退化只记录
 - **GIVEN** 两份同硬件、同 scenario、同 transport 的完整报告中，server tick 的适用分位数相对退化严格超过配置阈值
-- **WHEN** 性能比较器执行同场景回归比较
-- **THEN** 比较 MUST 失败且指出对应 server tick 指标
+- **WHEN** 性能比较器执行同场景比较
+- **THEN** 比较 MUST 输出对应 server tick 退化记录并返回成功
 
-### Requirement: 比较契约修正不得通过重新采样获利
-当一份不可变正式报告只因已证实不稳定的相对指标失败，而 benchmark producer、工作负载、报告 schema 和绝对门禁均未变化时，项目 SHALL 在修正比较契约后重新判定该报告的原始字节，不得重新运行同一步采样、改写报告或覆盖基线。后续尚未执行的正式步骤 MAY 在原始精确生产提交上按既有一次性规则继续。
+### Requirement: 历史报告重判与重新采样互不限制
+项目 SHALL 保持历史报告原始字节、provenance 和统计口径可读取，并 MAY 对其重新执行 record-only 比较。调用方也 MAY 重新生成 Memory 或 TCP 报告；重新采样、步骤顺序或 TCP 缺失 MUST NOT 阻止完整有效的 Memory 报告提升基线。报告结构、样本、provenance、身份、迁移、真实 overflow、数据丢失和 I/O 错误仍 MUST 校验。
 
-#### Scenario: 重新判定既有 Memory 报告
-- **GIVEN** M4D scenario v8 Memory 报告的哈希和原始字节保持不变，且旧比较只因 `interest_diff` 相对波动失败
-- **WHEN** 修正后的比较器重新判定该报告
-- **THEN** 系统 MUST 复用原始报告并执行全部仍适用的完整性、绝对和相对门禁，不得启动新的 Memory benchmark
+#### Scenario: 既有 Memory 报告可重新判定
+- **GIVEN** 一份原始字节和 provenance 完整的历史 Memory 报告
+- **WHEN** 当前比较器重新判定该报告
+- **THEN** 比较器 MUST 保留其历史统计口径并输出 record-only 结果
 
-#### Scenario: 继续唯一一次 TCP 步骤
-- **GIVEN** 重新判定的 Memory 报告通过，原计划中的 TCP 报告尚未生成
-- **WHEN** 正式链继续
-- **THEN** 项目 MAY 从与 Memory 相同的原始精确生产提交生成一次无窗口 TCP 报告；任一步失败 MUST 立即停止且不得重跑或覆盖基线
+#### Scenario: 重新生成记录不消耗唯一机会
+- **WHEN** 调用方再次生成 Memory 或 TCP 报告
+- **THEN** producer MUST 在输入和输出有效时执行，且不得因已经运行过同一步而拒绝
+
+#### Scenario: TCP 步骤不阻止 Memory 提升
+- **GIVEN** 一份完整有效且身份匹配的 Memory 报告
+- **WHEN** TCP 尚未生成、生成失败或重复生成
+- **THEN** 这些 TCP 状态 MUST NOT 阻止或撤销 Memory 基线提升

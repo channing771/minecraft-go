@@ -39,7 +39,7 @@
 
 传播改变 workload，故 producer 升至 scenario v14。`perfcheck` 唯一接受 `13:14`，该跨 workload 迁移只校验完整性和硬件身份、输出绝对性能记录并跳过相对回归；同 v14 输出绝对与相对性能记录。p99、FPS、RSS、GPU、tick、队列高水位、绝对阈值和相对回归结果均不改变退出状态，producer 在报告结构与样本完整时总是先写出 JSON。
 
-失败边界只保留数据正确性：报告损坏、缺字段或样本不完整，scenario 迁移未授权或方向不兼容，硬件身份不兼容，跨 transport 比较中的 transport、scenario 或 commit 身份不一致，真实 overflow 或数据丢失，以及 I/O 错误。Memory 的这些错误阻止基线提升；TCP 的对应错误只拒绝 TCP 记录或比较，不影响有效 Memory 基线。队列高水位是观测数值，不等同于 overflow。绑定临时路径、静稳快照、一次性正式授权、失败即停和禁止重跑不再属于执行前提；复现环境、命令和输出哈希仍可随报告记录。
+失败边界只保留数据正确性：报告损坏、缺字段或样本不完整，scenario 迁移未授权或方向不兼容，硬件身份不兼容，跨 transport 比较中的 transport、scenario 或 commit 身份不一致，真实 overflow 或数据丢失，以及 I/O 错误。`13:14` 只授权同 transport 的 workload 迁移；跨 transport 比较必须先要求 scenario 相同，再要求 commit 相同。Memory 的这些错误阻止基线提升；TCP 的对应错误只拒绝 TCP 记录或比较，不影响有效 Memory 基线。队列高水位是观测数值，不等同于 overflow。绑定临时路径、静稳快照、一次性正式授权、失败即停和禁止重跑不再属于执行前提；复现环境、命令和输出哈希仍可随报告记录。
 
 M5 v14 基线由完整有效的 Memory 报告精确字节立即提升，不等待 TCP。TCP 报告独立生成和写入，不绑定 Memory 身份，也不自动比较；只有调用方显式请求跨 transport 比较时，才校验两份报告的完整性、transport、硬件、scenario 和 commit 身份，比较无论好坏都不改变两份记录或基线状态。M2 内容和路径保持不变，显式基线路径选择、硬件一致性和唯一 `13:14` 结构迁移继续防止无意义混比。
 

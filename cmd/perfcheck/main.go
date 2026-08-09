@@ -108,6 +108,13 @@ func compareReportsWithScenarioUpgrade(
 			current.Hardware,
 		)
 	}
+	if baseline.Transport != current.Transport && baseline.ScenarioVersion != current.ScenarioVersion {
+		return nil, fmt.Errorf(
+			"跨 transport scenario_version 不同，拒绝比较：基线=%d 当前=%d",
+			baseline.ScenarioVersion,
+			current.ScenarioVersion,
+		)
+	}
 	if baseline.Transport != current.Transport && baseline.GitCommit != current.GitCommit {
 		return nil, fmt.Errorf(
 			"跨 transport git_commit 不同，拒绝比较：基线=%q 当前=%q",
