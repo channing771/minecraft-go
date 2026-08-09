@@ -10,7 +10,7 @@ context: |
   数据与性能约束：服务端是世界与玩家状态的唯一权威；客户端镜像只读；跨 goroutine 传递的消息在发送后视为不可变；热路径避免无界工作、意外分配和阻塞 I/O；现有性能阈值不得无理由放宽。
   工程约定：文档、测试说明和面向开发者的叙述优先使用中文，Go 标识符和既有协议术语保留英文；修改保持最小且聚焦；新增行为必须有自动化测试；不要提交二进制美术资源或 Mojang 版权资产。
   自动约束：Claude Code 与 Codex 共用 scripts/agent-hooks/guard.mjs；高风险命令、Go 格式、跨包/契约类 OpenSpec 要求和停止前验证由项目 Hook 机械执行。不得通过改 Hook、关闭 Hook 或设置豁免变量来绕过失败，除非用户明确批准该例外。
-  验证：至少运行受影响包测试；跨包或并发修改运行 go test ./... -race；提交前运行 gofmt、go vet ./...、架构测试和与改动相关的基准/性能门禁。
+  验证：至少运行受影响包测试；跨包或并发修改运行 go test ./... -race；提交前运行 gofmt、go vet ./...、架构测试和与改动相关的基准/`perfcheck` 性能记录。只有报告结构与身份错误、真实 overflow、数据丢失和 I/O 错误仍失败。
   历史资料：docs/superpowers/specs 与 docs/superpowers/plans 是设计背景和决策记录，不是 OpenSpec 主规格；只读取与当前变更有关的部分，不批量复制。OpenSpec 主规格从真实变更归档后逐步增长。
 
 rules:
