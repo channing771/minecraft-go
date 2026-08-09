@@ -90,6 +90,106 @@ func TestMirrorNonTopChangeDirtiesPropagatedSkyVolume(t *testing.T) {
 	}
 }
 
+func assertLightBlockDirtyCoverage(
+	t *testing.T,
+	dirty []core.SectionKey,
+	position core.BlockPos,
+) {
+	t.Helper()
+	if len(dirty) > 27 {
+		t.Fatalf("普通发光块变化 dirty 区段数 = %d，想要不超过 27", len(dirty))
+	}
+	seen := make(map[core.SectionKey]bool, len(dirty))
+	for _, key := range dirty {
+		if seen[key] {
+			t.Fatalf("dirty 集合含重复项：%+v", key)
+		}
+		seen[key] = true
+	}
+
+	center := core.SectionKey{
+		Dimension: core.Overworld,
+		Pos:       position.Section(),
+	}
+	// 光源位于区段中心，半径 14 的方块光实际只会进入中心和六个轴向相邻区段。
+	for _, offset := range [...]core.SectionPos{
+		{},
+		{X: -1}, {X: 1},
+		{Y: -1}, {Y: 1},
+		{Z: -1}, {Z: 1},
+	} {
+		key := center
+		key.Pos.X += offset.X
+		key.Pos.Y += offset.Y
+		key.Pos.Z += offset.Z
+		if !seen[key] {
+			t.Fatalf("dirty 集合缺少实际受方块光影响的区段：%+v", key)
+		}
+	}
+}
+
+func TestMirrorLightBlockPlacementDirtiesWithinTwentySevenAndCoversAffectedSections(t *testing.T) {
+	mirror := skyMirror(t, 64)
+	position := core.BlockPos{X: 8, Y: core.MinY + 40, Z: 8}
+	update, err := mirror.Apply(blockChanges(
+		core.Overworld, core.ChunkPos{}, 1, position, core.LightBlockID,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLightBlockDirtyCoverage(t, update.Dirty, position)
+}
+
+func TestMirrorLightBlockRemovalDirtiesWithinTwentySevenAndCoversAffectedSections(t *testing.T) {
+	mirror := skyMirror(t, 64)
+	position := core.BlockPos{X: 8, Y: core.MinY + 40, Z: 8}
+	if _, err := mirror.Apply(blockChanges(
+		core.Overworld, core.ChunkPos{}, 1, position, core.LightBlockID,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	update, err := mirror.Apply(blockChanges(
+		core.Overworld, core.ChunkPos{}, 2, position, core.AirID,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLightBlockDirtyCoverage(t, update.Dirty, position)
+}
+
+func TestMirrorLightBlockColumnTopChangeStaysWithinTwoHundredSixteenSections(t *testing.T) {
+	mirror := skyMirror(t, core.MinY)
+	position := core.BlockPos{X: 8, Y: core.MaxY - 1, Z: 8}
+
+	for _, change := range []struct {
+		name  string
+		base  uint64
+		block core.BlockID
+	}{
+		{name: "放置", base: 1, block: core.LightBlockID},
+		{name: "移除", base: 2, block: core.AirID},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			update, err := mirror.Apply(blockChanges(
+				core.Overworld, core.ChunkPos{}, change.base, position, change.block,
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(update.Dirty) > 216 {
+				t.Fatalf("列顶发光块变化 dirty 区段数 = %d，想要不超过 216", len(update.Dirty))
+			}
+			seen := make(map[core.SectionKey]bool, len(update.Dirty))
+			for _, key := range update.Dirty {
+				if seen[key] {
+					t.Fatalf("dirty 集合含重复项：%+v", key)
+				}
+				seen[key] = true
+			}
+		})
+	}
+}
+
 func TestMirrorSkyDirtyHandlesHorizontalInt32Extremes(t *testing.T) {
 	for _, coordinate := range []int32{math.MinInt32, math.MaxInt32} {
 		name := "MaxInt32"
@@ -306,6 +406,57 @@ func TestMesherDiscardsStaleSkyLightAfterRoofChange(t *testing.T) {
 	fresh := waitForMesherResults(t, mesher, mirror, 1, 5*time.Second)
 	if lights := meshedSkyLight(fresh); !lights[0xE0] {
 		t.Fatalf("屋顶下顶面天空光集合 = %v，想要含相邻露天传播的 0xE0", lights)
+	}
+}
+
+func TestMesherDiscardsStaleBlockLightAfterRemoval(t *testing.T) {
+	mirror := skyMirror(t, core.MinY+8)
+	position := core.BlockPos{X: 3, Y: core.MinY + 9, Z: 5}
+	if _, err := mirror.Apply(blockChanges(
+		core.Overworld, core.ChunkPos{}, 1, position, core.LightBlockID,
+	)); err != nil {
+		t.Fatal(err)
+	}
+
+	mesher := client.NewMesher(assets.NewRegistry(), 1)
+	defer mesher.Close()
+	key := core.SectionKey{Dimension: core.Overworld, Pos: core.SectionPos{}}
+	release := mesher.BlockForTest(key)
+	mesher.MarkDirty(key)
+	mesher.Schedule(mirror, 1)
+	waitForMesherStats(t, mesher, 5*time.Second, func(stats client.MesherStats) bool {
+		return stats.InFlightJobs == 1
+	})
+
+	// 任务已经克隆含光源的 revision 2 邻域；先移除光源，再允许旧 generation 完成。
+	if _, err := mirror.Apply(blockChanges(
+		core.Overworld, core.ChunkPos{}, 2, position, core.AirID,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	waitForMesherStats(t, mesher, 5*time.Second, func(stats client.MesherStats) bool {
+		return stats.ReadyResults == 1
+	})
+	if stale := mesher.Drain(mirror, 1); len(stale) != 0 {
+		for _, result := range stale {
+			for _, quad := range result.Quads {
+				if block := quad.Light & 0x0f; block != 0 {
+					t.Fatalf("发布了移除光源前的过期 packed 低四位：Light=%#02x block=%d", quad.Light, block)
+				}
+			}
+		}
+		t.Fatalf("发布了移除光源前的过期结果：%d 个区段", len(stale))
+	}
+
+	mesher.Schedule(mirror, 1)
+	fresh := waitForMesherResults(t, mesher, mirror, 1, 5*time.Second)
+	for _, result := range fresh {
+		for _, quad := range result.Quads {
+			if block := quad.Light & 0x0f; block != 0 {
+				t.Fatalf("移除光源后的新结果仍发布方块光：Light=%#02x block=%d", quad.Light, block)
+			}
+		}
 	}
 }
 

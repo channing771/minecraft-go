@@ -21,9 +21,9 @@
 
 ## 5. 验证 mesher 收敛并接入 shader 合光
 
-- [ ] 5.1 在 `internal/client/skylight_test.go` 先锁定发光块普通 dirty `<=27` 且所有实际受影响区段完整覆盖、列顶 dirty `<=216` 与移除后的 stale result 拒绝；运行 `zsh -ic 'go test ./internal/client -run "LightBlock|StaleBlockLight" -count=1'`，若既有 dirty 用例已绿则不修改 `mirror.go`。
-- [ ] 5.2 在 `internal/render/daylight_test.go` 先用 `0xf0`、`0x0f`、`0x88` 锁定正午/午夜、天空与方块光竞争及 AO/朝向；以 `zsh -ic 'go test ./internal/render -run TestTerrainDaylightHeadlessDraw -count=1'` 确认旧 shader 红灯。
-- [ ] 5.3 只修改 `internal/render/shader/terrain.wgsl` 为 `max(0.08 + sky*(daylight-0.08), block)`，不增加渲染资源；对测试执行 `gofmt -w` 后运行 `zsh -ic 'go test ./internal/client ./internal/render -race -count=1'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/client internal/render` 与 `git diff --check`。
+- [x] 5.1 在 `internal/client/skylight_test.go` 先锁定发光块普通 dirty `<=27` 且所有实际受影响区段完整覆盖、列顶 dirty `<=216` 与移除后的 stale result 拒绝；运行 `zsh -ic 'go test ./internal/client -run "LightBlock|StaleBlockLight" -count=1'`，若既有 dirty 用例已绿则不修改 `mirror.go`。
+- [x] 5.2 在 `internal/render/daylight_test.go` 先用 `0xf0`、`0x0f`、`0x88` 锁定正午/午夜、天空与方块光竞争及 AO/朝向；以 `zsh -ic 'go test ./internal/render -run TestTerrainDaylightHeadlessDraw -count=1'` 确认旧 shader 红灯。
+- [x] 5.3 只修改 `internal/render/shader/terrain.wgsl` 为 `max(0.08 + sky*(daylight-0.08), block)`，不增加渲染资源；对测试执行 `gofmt -w` 后运行 `zsh -ic 'go test ./internal/client ./internal/render -race -count=1'`、`zsh -ic 'go test ./internal/archcheck -count=1'`、`gofmt -l internal/client internal/render` 与 `git diff --check`。
 
 ## 6. 增加 block-light-room 无窗口视觉场景
 
