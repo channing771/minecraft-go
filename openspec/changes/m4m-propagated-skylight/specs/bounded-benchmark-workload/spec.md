@@ -36,6 +36,10 @@
 - **WHEN** baseline 与 current 都是完整有效、身份兼容的 scenario v7 报告
 - **THEN** 比较器 MUST 输出该场景既有性能比较记录，且任何性能数值变差都 MUST 返回成功
 
+#### Scenario: v6 同场景比较只记录性能
+- **WHEN** baseline 与 current 都是完整有效、身份兼容的 scenario v6 报告
+- **THEN** 比较器 MUST 输出该场景既有性能比较记录，且任何性能数值变差都 MUST 返回成功
+
 #### Scenario: v13 与 v14 不静默混比
 - **WHEN** baseline 为 scenario v13、current 为 scenario v14 且没有显式迁移授权
 - **THEN** 比较器 MUST 拒绝相对比较并说明场景版本不一致

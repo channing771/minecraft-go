@@ -2,28 +2,38 @@
 
 ### Requirement: 新硬件基线只能由通过门禁的无窗口报告建立
 
-本要求中的门禁 SHALL 只校验报告和数据的正确性，不校验性能数值。新建或升级硬件基线 MUST 来自当前冻结的 scenario v14、Memory transport、`2560x1440` 无窗口完整报告。M5 Memory 报告 MUST 通过显式 `13:14` 迁移的完整性和硬件身份校验，并 MUST 具有同一硬件、同一 scenario、同一 commit 的完整 TCP 报告记录；Memory 与 TCP 的性能比较 MUST 输出为记录，但任何性能退化 MUST NOT 阻止接受 Memory 报告的精确字节。报告损坏、缺字段、样本不完整、scenario 迁移未授权或方向不兼容、硬件身份不兼容、transport 或 commit 身份不一致、真实 overflow 或数据丢失以及 I/O 错误 MUST 阻止基线提升。生成记录和提升基线 MUST NOT 依赖绑定路径、宿主静稳快照、一次性正式授权、失败即停或禁止重跑；M2 基线内容和路径 MUST 保持不变。
+本要求中的门禁 SHALL 只校验报告和数据的正确性，不校验性能数值。新建或升级硬件基线 MUST 来自当前冻结的 scenario v14、Memory transport、`2560x1440` 无窗口完整报告。M5 Memory 报告通过显式 `13:14` 迁移的完整性和硬件身份校验后，项目 MUST 立即接受其精确字节；TCP 报告缺失或延迟 MUST NOT 阻止该提升。后续生成或请求比较 TCP 报告时，项目 MUST 单独校验其完整性、transport 以及与 Memory 报告的硬件、scenario 和 commit 身份，并输出不影响基线的性能记录。Memory 报告损坏、缺字段、样本不完整、scenario 迁移未授权或方向不兼容、硬件身份不兼容、真实 overflow 或数据丢失以及 I/O 错误 MUST 阻止基线提升；TCP 报告的对应错误 MUST 只使 TCP 记录或比较失败，不得撤销或阻止有效 Memory 报告的提升。生成记录和提升基线 MUST NOT 依赖绑定路径、宿主静稳快照、一次性正式授权、失败即停或禁止重跑；M2 基线内容和路径 MUST 保持不变。
 
-#### Scenario: 完整 M5 v14 记录提升 Memory 基线
-- **GIVEN** 同一硬件、scenario v14 和 commit 的完整有效 Memory 与 TCP 无窗口报告
-- **WHEN** Memory 报告完成显式 `13:14` 完整性和硬件身份校验，且 Memory 与 TCP 比较记录已输出
+#### Scenario: 完整 M5 v14 Memory 报告立即提升基线
+- **GIVEN** 一份完整有效的 scenario v14 Memory 无窗口报告
+- **WHEN** Memory 报告完成显式 `13:14` 完整性和硬件身份校验
 - **THEN** 项目 MUST 接受 Memory 报告的精确字节作为 M5 当前基线，并记录硬件、提交、命令、报告哈希和被替代的 scenario v13
+
+#### Scenario: TCP 记录可在 Memory 提升后独立完成
+- **GIVEN** 一份已满足提升条件的 M5 v14 Memory 报告
+- **WHEN** TCP 报告尚未生成、延迟到达，或随后以相同硬件、scenario 和 commit 完整生成
+- **THEN** TCP 缺失或延迟 MUST NOT 阻止 Memory 提升；TCP 完整到达后比较器 MUST 输出跨 transport 性能记录，且比较结果 MUST NOT 改变基线状态
 
 #### Scenario: 性能退化不阻止基线提升
 - **WHEN** 完整有效的 M5 v14 Memory 或 TCP 报告超过绝对阈值，或跨 transport 比较显示性能变差
 - **THEN** 比较 MUST 输出这些性能记录并返回成功，且项目 MUST NOT 仅因性能数值拒绝 Memory 基线提升
 
-#### Scenario: 报告或身份无效阻止提升
-- **WHEN** Memory 或 TCP 报告损坏、缺少必需字段、样本不完整，或两份报告的硬件、scenario、commit 或 transport 身份不符合请求
+#### Scenario: Memory 报告或身份无效阻止提升
+- **WHEN** Memory 报告损坏、缺少必需字段、样本不完整，或其 scenario、硬件或 transport 身份不符合提升请求
 - **THEN** 项目 MUST 返回可读错误，且不得把该 Memory 报告提升为当前基线
 
-#### Scenario: 真实溢出或数据丢失阻止提升
-- **WHEN** 报告声明真实 overflow 或数据丢失
-- **THEN** 项目 MUST 拒绝提升；若只有队列高水位升高，则 MUST 只记录该数值且不得据此拒绝提升
+#### Scenario: TCP 报告或身份无效不影响 Memory 基线
+- **GIVEN** 一份已满足提升条件的 M5 v14 Memory 报告
+- **WHEN** TCP 报告损坏、缺少必需字段、样本不完整，或其 transport、hardware、scenario、commit 身份与比较请求不一致
+- **THEN** 项目 MUST 拒绝该 TCP 记录或比较并返回可读错误，但 MUST NOT 阻止或撤销 Memory 基线提升
+
+#### Scenario: 真实溢出或数据丢失保持正确性失败
+- **WHEN** Memory 报告声明真实 overflow 或数据丢失
+- **THEN** 项目 MUST 拒绝提升；若 TCP 报告声明这些错误则 MUST 只拒绝 TCP 记录或比较；若任一报告只有队列高水位升高，则 MUST 只记录该数值
 
 #### Scenario: 报告与基线 I/O 错误仍失败
-- **WHEN** producer 无法写出完整报告，或项目无法精确写入请求的基线位置
-- **THEN** 项目 MUST 返回包含 I/O 上下文的错误，且不得声称基线已提升
+- **WHEN** producer 无法写出请求的报告，或项目无法精确写入请求的基线位置
+- **THEN** 项目 MUST 返回包含 I/O 上下文的错误；TCP 写入错误 MUST NOT 影响已有效提升的 Memory 基线
 
 #### Scenario: 性能记录允许重新生成
 - **WHEN** 调用方再次请求生成 Memory 或 TCP 性能记录
