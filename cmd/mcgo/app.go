@@ -46,22 +46,25 @@ type applicationOptions struct {
 }
 
 type application struct {
-	window              applicationWindow
-	dev                 gfx.Device
-	surface             gfx.Surface
-	color               gfx.Texture
-	colorView           gfx.TextureView
-	frameWidth          int
-	frameHeight         int
-	renderer            *render.Renderer
-	remotePlayers       *client.RemotePlayers
-	remotePresentations []client.RemotePresentation
-	remoteAvatars       []render.Avatar
-	remoteNameTags      []render.NameTag
-	avatarRenderer      *render.AvatarRenderer
-	nameTagRenderer     *render.NameTagRenderer
-	hotbarRenderer      *render.HotbarRenderer
-	debugPanelRenderer  *render.DebugPanelRenderer
+	window                applicationWindow
+	dev                   gfx.Device
+	surface               gfx.Surface
+	color                 gfx.Texture
+	colorView             gfx.TextureView
+	frameWidth            int
+	frameHeight           int
+	renderer              *render.Renderer
+	remotePlayers         *client.RemotePlayers
+	remotePresentations   []client.RemotePresentation
+	remoteAvatars         []render.Avatar
+	remoteNameTags        []render.NameTag
+	avatarRenderer        *render.AvatarRenderer
+	nameTagRenderer       *render.NameTagRenderer
+	hotbarRenderer        *render.HotbarRenderer
+	damageOverlayRenderer *render.DamageOverlayRenderer
+	damageFeedback        damageFeedback
+	damageStrength        float32
+	debugPanelRenderer    *render.DebugPanelRenderer
 	// panel 是调试面板的交互状态；只在 applicationOptions.Dev 为真时创建，
 	// 与 debugPanelRenderer 一同保持 nil/非 nil 同步。
 	panel *panelState
@@ -136,20 +139,21 @@ type applicationHost interface {
 }
 
 type applicationDependencies struct {
-	openStore             func(context.Context, applicationOptions) (storage.WorldStore, error)
-	dialTCP               func(context.Context, string) (network.ClientPacketStream, error)
-	loginClient           func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
-	newHost               func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
-	newMemoryStreamPair   func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
-	newWindow             func(int, int, string) (applicationWindow, error)
-	newDevice             func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
-	newHeadlessDevice     func() (gfx.Device, error)
-	newGlyphAtlas         func(gfx.Device) (*render.GlyphAtlas, error)
-	newAvatarRenderer     func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
-	newNameTagRenderer    func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
-	newHotbarRenderer     func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*render.HotbarRenderer, error)
-	newItemDropRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
-	newDebugPanelRenderer func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.DebugPanelRenderer, error)
+	openStore                func(context.Context, applicationOptions) (storage.WorldStore, error)
+	dialTCP                  func(context.Context, string) (network.ClientPacketStream, error)
+	loginClient              func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
+	newHost                  func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
+	newMemoryStreamPair      func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
+	newWindow                func(int, int, string) (applicationWindow, error)
+	newDevice                func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
+	newHeadlessDevice        func() (gfx.Device, error)
+	newGlyphAtlas            func(gfx.Device) (*render.GlyphAtlas, error)
+	newAvatarRenderer        func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
+	newNameTagRenderer       func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
+	newHotbarRenderer        func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*render.HotbarRenderer, error)
+	newItemDropRenderer      func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
+	newDamageOverlayRenderer func(gfx.Device, gfx.TextureFormat) (*render.DamageOverlayRenderer, error)
+	newDebugPanelRenderer    func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.DebugPanelRenderer, error)
 }
 
 func defaultApplicationDependencies() applicationDependencies {
@@ -330,6 +334,14 @@ func newApplicationWithDependencies(
 	if dependencies.newItemDropRenderer == nil {
 		dependencies.newItemDropRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.ItemDropRenderer, error) {
 			return render.NewItemDropRenderer(dev, color, depth), nil
+		}
+	}
+	if dependencies.newDamageOverlayRenderer == nil {
+		dependencies.newDamageOverlayRenderer = func(
+			device gfx.Device,
+			color gfx.TextureFormat,
+		) (*render.DamageOverlayRenderer, error) {
+			return render.NewDamageOverlayRenderer(device, color), nil
 		}
 	}
 	if dependencies.newDebugPanelRenderer == nil {
@@ -553,6 +565,11 @@ func newApplicationWithDependencies(
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建掉落物渲染器: %w", err), app.Close())
 	}
+	app.damageOverlayRenderer, err = dependencies.newDamageOverlayRenderer(dev, colorFormat)
+	if err != nil {
+		app.releaseRemoteConstructionResources()
+		return nil, errors.Join(fmt.Errorf("创建受伤反馈渲染器: %w", err), app.Close())
+	}
 	app.configPath = options.ConfigPath
 	if options.Dev {
 		app.debugPanelRenderer, err = dependencies.newDebugPanelRenderer(dev, colorFormat, app.glyphAtlas)
@@ -583,6 +600,10 @@ func (a *application) releaseRemoteConstructionResources() {
 	if a.debugPanelRenderer != nil {
 		a.debugPanelRenderer.Release()
 		a.debugPanelRenderer = nil
+	}
+	if a.damageOverlayRenderer != nil {
+		a.damageOverlayRenderer.Release()
+		a.damageOverlayRenderer = nil
 	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
@@ -828,6 +849,9 @@ func (a *application) releaseOwnedResources() {
 	if a.debugPanelRenderer != nil {
 		a.debugPanelRenderer.Release()
 	}
+	if a.damageOverlayRenderer != nil {
+		a.damageOverlayRenderer.Release()
+	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
 	}
@@ -888,6 +912,8 @@ func (a *application) closeClientSession(cause error) {
 		a.furnace.Reset()
 		a.chest.Reset()
 		a.miningOverlay = render.MiningOverlay{}
+		a.damageFeedback.Reset()
+		a.damageStrength = 0
 		a.inventoryOpen = false
 		a.inventorySource = -1
 		a.itemDrops.Reset()
@@ -925,6 +951,8 @@ func (a *application) frame(drainMax, meshWorkMax int, elapsed time.Duration) (b
 			return false, err
 		}
 	}
+	health, ready := a.predictor.Health()
+	a.damageStrength = a.damageFeedback.Update(health, ready, elapsed)
 	if a.remotePlayers != nil {
 		a.remotePlayers.Advance(elapsed)
 	}
@@ -1074,6 +1102,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	if renderTiming != nil {
 		renderTiming.recordNameTag(nameTagDuration + renderNow().Sub(started))
 	}
+	a.damageOverlayRenderer.Render(encoder, target, a.damageStrength)
 	// HUD 在 terrain、avatar 与 name tag 之后绘制。
 	if inventoryConfirmed {
 		a.hotbarRenderer.Render(encoder, target)
