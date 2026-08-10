@@ -12,8 +12,8 @@
 
 ## 4. Storage/full gates
 
-- [ ] 4.1 对 `internal/storage` 与全仓执行门禁：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage -race -count=1 && go test ./internal/archcheck -count=1 && go test ./... -race && go vet ./...'`，随后运行 `gofmt -l .`、`openspec validate fix-container-world-y --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 与 `git diff --check`；所有命令必须成功且 `gofmt -l .` 无输出。
+- [x] 4.1 对 `internal/storage` 与全仓执行门禁：`zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage -race -count=1 && go test ./internal/archcheck -count=1 && go test ./... -race && go vet ./...'`，随后运行 `gofmt -l .`、`openspec validate fix-container-world-y --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 与 `git diff --check`；所有命令必须成功且 `gofmt -l .` 无输出。
 
 ## 5. 同步归档
 
-- [ ] 5.1 在全部任务完成和门禁通过后，将 `authoritative-furnaces` 与 `authoritative-chests` delta 同步至主规格并以 `openspec archive fix-container-world-y --yes` 归档；再次运行 `openspec validate --all --strict --no-interactive`、`git diff --check` 与 `git status --short`，仅提交归档结果。
+- [x] 5.1 在全部任务完成和门禁通过后，将 `authoritative-furnaces` 与 `authoritative-chests` delta 同步至主规格并以 `openspec archive fix-container-world-y --yes` 归档；再次运行 `openspec validate --all --strict --no-interactive`、`git diff --check` 与 `git status --short`，仅提交归档结果。
