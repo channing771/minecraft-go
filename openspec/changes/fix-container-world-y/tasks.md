@@ -8,7 +8,7 @@
 
 ## 3. Mutation
 
-- [ ] 3.1 在 `internal/storage/chunk_furnace_test.go` 与 `internal/storage/chunk_chest_test.go` mutation 覆盖越界、重复和错误 Furnace/Chest 方块索引，断言 codec 返回 `ErrCorrupt` 且不接受或改写记录；运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage -run "TestChunkCodecRejects.*(Furnace|Chest)" -race -count=1 && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s'`。
+- [ ] 3.1 在 `internal/storage/chunk_furnace_test.go` 与 `internal/storage/chunk_chest_test.go` mutation 覆盖越界、重复和错误 Furnace/Chest 方块索引，以及非法 Furnace/Chest 固定槽（包括非法 active 标志或不符合 `Valid()` 的停用槽），断言 codec 返回 `ErrCorrupt` 且不接受或改写记录；运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/storage -run "TestChunkCodecRejects.*(Furnace|Chest)" -race -count=1 && go test ./internal/storage -run "^$" -fuzz FuzzDecodeChunkPayload -fuzztime=10s'`。
 
 ## 4. Storage/full gates
 
