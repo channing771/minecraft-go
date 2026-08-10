@@ -28,7 +28,7 @@
 
 ## 8. 世界持久化调度拆分
 
-- [ ] 8.1 拆分 `internal/server/persistence.go` 与 `persistence_test.go` 为 worker/metadata/schedule/retry/status 及场景测试，保持 autosave/retry/backpressure 和 snapshot 所有权；focused：`zsh -ic 'go test ./internal/server -run "Persistence|Save|Autosave|Retry" -race -count=1'`、`zsh -ic 'go test ./internal/server -race -count=1'`。
+- [x] 8.1 拆分 `internal/server/persistence.go` 与 `persistence_test.go` 为 worker/metadata/schedule/retry/status 及场景测试，保持 autosave/retry/backpressure 和 snapshot 所有权；focused：`zsh -ic 'go test ./internal/server -run "Persistence|Save|Autosave|Retry" -race -count=1'`、`zsh -ic 'go test ./internal/server -race -count=1'`。
 
 ## 9. 玩家持久化生命周期拆分
 
