@@ -2901,6 +2901,7 @@ func TestCraftRecipeClickUsesConfirmedInventory(t *testing.T) {
 		{"熔炉", core.RecipeFurnace, core.ItemStack{Item: core.ItemStone, Count: 8}},
 		{"铁块", core.RecipeIronBlock, core.ItemStack{Item: core.ItemIronIngot, Count: 9}},
 		{"箱子", core.RecipeChest, core.ItemStack{Item: core.ItemStone, Count: 8}},
+		{"橡木木板", core.RecipeOakPlanks, core.ItemStack{Item: core.ItemOakLog, Count: 1}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			app, serverEndpoint := newInteractiveTestApplication(t)

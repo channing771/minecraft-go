@@ -54,7 +54,7 @@ func openedFurnace(
 	return engine, session, result.Furnaces[0].Furnace
 }
 
-func TestMoveIntoFurnaceAcceptsOnlyAllowedItems(t *testing.T) {
+func TestMoveIntoFurnaceMaterialsAcceptOnlyAllowedItems(t *testing.T) {
 	cases := []struct {
 		name   string
 		item   core.ItemID
@@ -62,6 +62,8 @@ func TestMoveIntoFurnaceAcceptsOnlyAllowedItems(t *testing.T) {
 		ok     bool
 	}{
 		{"粗铁进输入", core.ItemRawIron, core.FurnaceInputSlot, true},
+		{"沙子进输入", core.ItemSand, core.FurnaceInputSlot, true},
+		{"黏土块进输入", core.ItemClay, core.FurnaceInputSlot, true},
 		{"煤炭进燃料", core.ItemCoal, core.FurnaceFuelSlot, true},
 		{"煤炭进输入", core.ItemCoal, core.FurnaceInputSlot, false},
 		{"粗铁进燃料", core.ItemRawIron, core.FurnaceFuelSlot, false},
@@ -124,6 +126,106 @@ func TestMoveOutOfFurnaceOutput(t *testing.T) {
 	}
 	if len(result.Inventories) != 1 {
 		t.Fatalf("跨容器移动应当发布一次完整物品状态: %+v", result.Inventories)
+	}
+}
+
+func TestMoveOutOfFurnaceMaterialOutputKeepsRemainder(t *testing.T) {
+	for _, material := range furnaceMaterials {
+		t.Run(material.name, func(t *testing.T) {
+			output := material.output
+			var inventory core.Inventory
+			inventory.Hotbar.Slots[0] = core.ItemStack{Item: output, Count: core.MaxStackCount - 1}
+			engine, session, ref := openedFurnace(t, inventory, world.FurnaceSlot{
+				Output: core.ItemStack{Item: output, Count: 5},
+			})
+
+			engine.Enqueue(moveFurnaceCommand(session, 3, ref, core.FurnaceOutputSlot, 0))
+			result := engine.Step()
+			if len(result.Rejected) != 0 {
+				t.Fatalf("取出产物 %d 被拒绝: %+v", output, result.Rejected)
+			}
+			if got := currentFurnace(t, engine, 0).Output; got != (core.ItemStack{Item: output, Count: 4}) {
+				t.Fatalf("输出余量 = %+v，想要 4", got)
+			}
+			if got := currentInventory(t, engine, session).Hotbar.Slots[0].Count; got != core.MaxStackCount {
+				t.Fatalf("玩家栏位数量 = %d，想要 %d", got, core.MaxStackCount)
+			}
+		})
+	}
+}
+
+func TestFurnaceInputKindSwitchResetsProgress(t *testing.T) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemSand, Count: 3}
+	engine, session, ref := openedFurnace(t, inventory, world.FurnaceSlot{
+		Input:         core.ItemStack{Item: core.ItemRawIron, Count: 2},
+		Output:        core.ItemStack{Item: core.ItemGlass, Count: 1},
+		ProgressTicks: 137,
+		BurnTicks:     1463,
+	})
+
+	engine.Enqueue(moveFurnaceCommand(session, 3, ref, 0, core.FurnaceInputSlot))
+	result := engine.Step()
+	if len(result.Rejected) != 0 {
+		t.Fatalf("切换输入被拒绝: %+v", result.Rejected)
+	}
+	got := currentFurnace(t, engine, 0)
+	if got.Input != (core.ItemStack{Item: core.ItemSand, Count: 3}) ||
+		got.ProgressTicks != 0 || got.BurnTicks != 1463 {
+		t.Fatalf("切换输入后熔炉 = %+v", got)
+	}
+	if stack := currentInventory(t, engine, session).Hotbar.Slots[0]; stack != (core.ItemStack{Item: core.ItemRawIron, Count: 2}) {
+		t.Fatalf("换出的输入 = %+v，想要 2 个粗铁", stack)
+	}
+}
+
+func TestFurnaceInputKindRemovalAndReinsertResetsProgress(t *testing.T) {
+	engine, session, ref := openedFurnace(t, core.Inventory{}, world.FurnaceSlot{
+		Input:         core.ItemStack{Item: core.ItemSand, Count: 2},
+		Output:        core.ItemStack{Item: core.ItemIronIngot, Count: 1},
+		ProgressTicks: 137,
+		BurnTicks:     1463,
+	})
+
+	engine.Enqueue(moveFurnaceCommand(session, 3, ref, core.FurnaceInputSlot, 0))
+	if result := engine.Step(); len(result.Rejected) != 0 {
+		t.Fatalf("移除输入被拒绝: %+v", result.Rejected)
+	}
+	removed := currentFurnace(t, engine, 0)
+	if removed.Input != (core.ItemStack{}) || removed.ProgressTicks != 0 || removed.BurnTicks != 1463 {
+		t.Fatalf("移除输入后熔炉 = %+v", removed)
+	}
+
+	engine.Enqueue(moveFurnaceCommand(session, 4, ref, 0, core.FurnaceInputSlot))
+	if result := engine.Step(); len(result.Rejected) != 0 {
+		t.Fatalf("放回输入被拒绝: %+v", result.Rejected)
+	}
+	reinserted := currentFurnace(t, engine, 0)
+	if reinserted.Input != (core.ItemStack{Item: core.ItemSand, Count: 2}) ||
+		reinserted.ProgressTicks != 0 || reinserted.BurnTicks != 1463 {
+		t.Fatalf("放回输入后熔炉 = %+v", reinserted)
+	}
+}
+
+func TestFurnaceInputKindSameMaterialKeepsProgress(t *testing.T) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemRawIron, Count: 3}
+	engine, session, ref := openedFurnace(t, inventory, world.FurnaceSlot{
+		Input:         core.ItemStack{Item: core.ItemRawIron, Count: 2},
+		Output:        core.ItemStack{Item: core.ItemGlass, Count: 1},
+		ProgressTicks: 137,
+		BurnTicks:     1463,
+	})
+
+	engine.Enqueue(moveFurnaceCommand(session, 3, ref, 0, core.FurnaceInputSlot))
+	result := engine.Step()
+	if len(result.Rejected) != 0 {
+		t.Fatalf("合并同种输入被拒绝: %+v", result.Rejected)
+	}
+	got := currentFurnace(t, engine, 0)
+	if got.Input != (core.ItemStack{Item: core.ItemRawIron, Count: 5}) ||
+		got.ProgressTicks != 137 || got.BurnTicks != 1463 {
+		t.Fatalf("合并同种输入后熔炉 = %+v", got)
 	}
 }
 

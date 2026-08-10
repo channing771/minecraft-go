@@ -8,13 +8,35 @@ import (
 	"minecraft-go/internal/world"
 )
 
-// smeltingFurnace 返回一个输入、燃料充足且可以立即推进的熔炉槽。
-func smeltingFurnace(index uint32) world.FurnaceSlot {
-	return world.FurnaceSlot{
-		Generation: 1, Active: true, BlockIndex: index,
-		Input: core.ItemStack{Item: core.ItemRawIron, Count: 4},
-		Fuel:  core.ItemStack{Item: core.ItemCoal, Count: 1},
+var furnaceMaterials = []struct {
+	name          string
+	input, output core.ItemID
+}{
+	{"粗铁", core.ItemRawIron, core.ItemIronIngot},
+	{"沙子", core.ItemSand, core.ItemGlass},
+	{"黏土块", core.ItemClay, core.ItemBrick},
+}
+
+// smeltingFurnace 返回一个燃料充足且可以立即推进指定材料的熔炉槽。
+func smeltingFurnace(index uint32, materials ...core.ItemID) world.FurnaceSlot {
+	input, output := core.ItemRawIron, core.ItemNone
+	if len(materials) > 0 {
+		input = materials[0]
 	}
+	if len(materials) > 1 {
+		output = materials[1]
+	}
+	slot := world.FurnaceSlot{
+		Generation: 1, Active: true, BlockIndex: index,
+		Fuel: core.ItemStack{Item: core.ItemCoal, Count: 1},
+	}
+	if input != core.ItemNone {
+		slot.Input = core.ItemStack{Item: input, Count: 4}
+	}
+	if output != core.ItemNone {
+		slot.Output = core.ItemStack{Item: output, Count: 1}
+	}
+	return slot
 }
 
 // readyFurnacePlayer 构造一个已 Ready 的玩家，并在中心区块放置一个熔炉。
@@ -38,46 +60,54 @@ func currentFurnace(t *testing.T, engine *sim.Engine, slot int) world.FurnaceSlo
 	return chunk.Furnace(slot)
 }
 
-func TestFurnaceLightsFuelAndAdvancesSameTick(t *testing.T) {
-	engine, _, index := readyFurnacePlayer(t, smeltingFurnace(0))
-	_ = index
+func TestFurnaceMaterialsLightFuelAndAdvanceSameTick(t *testing.T) {
+	for _, material := range furnaceMaterials {
+		t.Run(material.name, func(t *testing.T) {
+			engine, _, _ := readyFurnacePlayer(t, smeltingFurnace(0, material.input, core.ItemNone))
 
-	engine.Step()
-	got := currentFurnace(t, engine, 0)
-	if got.Fuel.Count != 0 {
-		t.Fatalf("燃料未被消耗: %+v", got.Fuel)
-	}
-	if got.BurnTicks != core.FurnaceBurnTicks-1 {
-		t.Fatalf("剩余燃烧 tick = %d，想要 %d", got.BurnTicks, core.FurnaceBurnTicks-1)
-	}
-	if got.ProgressTicks != 1 {
-		t.Fatalf("熔炼进度 = %d，想要 1", got.ProgressTicks)
-	}
-	if got.Input.Count != 4 {
-		t.Fatalf("点燃时消耗了输入: %+v", got.Input)
+			engine.Step()
+			got := currentFurnace(t, engine, 0)
+			if got.Fuel.Count != 0 {
+				t.Fatalf("燃料未被消耗: %+v", got.Fuel)
+			}
+			if got.BurnTicks != core.FurnaceBurnTicks-1 {
+				t.Fatalf("剩余燃烧 tick = %d，想要 %d", got.BurnTicks, core.FurnaceBurnTicks-1)
+			}
+			if got.ProgressTicks != 1 {
+				t.Fatalf("熔炼进度 = %d，想要 1", got.ProgressTicks)
+			}
+			if got.Input != (core.ItemStack{Item: material.input, Count: 4}) {
+				t.Fatalf("点燃时修改了输入: %+v", got.Input)
+			}
+		})
 	}
 }
 
-func TestFurnaceProducesIngotAtTwoHundredTicks(t *testing.T) {
-	engine, _, _ := readyFurnacePlayer(t, smeltingFurnace(0))
-	for range core.FurnaceSmeltTicks - 1 {
-		engine.Step()
-	}
-	before := currentFurnace(t, engine, 0)
-	if before.ProgressTicks != core.FurnaceSmeltTicks-1 || before.Output.Count != 0 {
-		t.Fatalf("第 199 tick 状态 = %+v", before)
-	}
+func TestFurnaceProducesMaterialsAtTwoHundredTicks(t *testing.T) {
+	for _, material := range furnaceMaterials {
+		for _, outputCount := range []uint8{0, 2} {
+			name := material.name + "/空输出"
+			if outputCount != 0 {
+				name = material.name + "/累加同产物"
+			}
+			t.Run(name, func(t *testing.T) {
+				slot := smeltingFurnace(0, material.input, core.ItemNone)
+				slot.Fuel = core.ItemStack{}
+				slot.ProgressTicks = core.FurnaceSmeltTicks - 1
+				slot.BurnTicks = 10
+				if outputCount != 0 {
+					slot.Output = core.ItemStack{Item: material.output, Count: outputCount}
+				}
+				engine, _, _ := readyFurnacePlayer(t, slot)
 
-	engine.Step()
-	got := currentFurnace(t, engine, 0)
-	if got.ProgressTicks != 0 {
-		t.Fatalf("产出后进度 = %d，想要 0", got.ProgressTicks)
-	}
-	if got.Output != (core.ItemStack{Item: core.ItemIronIngot, Count: 1}) {
-		t.Fatalf("产出 = %+v，想要 1 个铁锭", got.Output)
-	}
-	if got.Input.Count != 3 {
-		t.Fatalf("产出后输入 = %+v，想要剩 3", got.Input)
+				engine.Step()
+				got := currentFurnace(t, engine, 0)
+				want := core.ItemStack{Item: material.output, Count: outputCount + 1}
+				if got.Output != want || got.Input.Count != 3 || got.ProgressTicks != 0 || got.BurnTicks != 9 {
+					t.Fatalf("完成熔炼 = %+v，想要 output=%+v input=3 progress=0 burn=9", got, want)
+				}
+			})
+		}
 	}
 }
 
@@ -105,60 +135,61 @@ func TestOneCoalYieldsExactlyEightIngots(t *testing.T) {
 	}
 }
 
-func TestFurnacePausesWithoutWastingFuel(t *testing.T) {
+func TestFurnaceMaterialsPauseWithoutWastingFuel(t *testing.T) {
 	cases := []struct {
-		name  string
-		mutar func(world.FurnaceSlot) world.FurnaceSlot
+		name          string
+		input, output core.ItemID
+		outputCount   uint8
 	}{
-		{"输入为空", func(slot world.FurnaceSlot) world.FurnaceSlot {
-			slot.Input = core.ItemStack{}
-			return slot
-		}},
-		{"输出已满", func(slot world.FurnaceSlot) world.FurnaceSlot {
-			slot.Output = core.ItemStack{Item: core.ItemIronIngot, Count: core.MaxStackCount}
-			return slot
-		}},
+		{"输入为空", core.ItemNone, core.ItemNone, 0},
+		{"粗铁输出已满", core.ItemRawIron, core.ItemIronIngot, core.MaxStackCount},
+		{"沙子输出已满", core.ItemSand, core.ItemGlass, core.MaxStackCount},
+		{"黏土块输出已满", core.ItemClay, core.ItemBrick, core.MaxStackCount},
+		{"粗铁输出冲突", core.ItemRawIron, core.ItemGlass, 1},
+		{"沙子输出冲突", core.ItemSand, core.ItemBrick, 1},
+		{"黏土块输出冲突", core.ItemClay, core.ItemIronIngot, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			slot := tc.mutar(world.FurnaceSlot{
-				Generation: 1, Active: true,
-				Input:         core.ItemStack{Item: core.ItemRawIron, Count: 2},
-				ProgressTicks: 137, BurnTicks: 1463,
-			})
+			slot := smeltingFurnace(0, tc.input, core.ItemNone)
+			slot.Output = core.ItemStack{Item: tc.output, Count: tc.outputCount}
+			slot.ProgressTicks, slot.BurnTicks = 137, 1463
 			engine, _, _ := readyFurnacePlayer(t, slot)
 
 			engine.Step()
 			got := currentFurnace(t, engine, 0)
-			if got.ProgressTicks != 137 || got.BurnTicks != 1463 {
-				t.Fatalf("暂停时状态变化: progress=%d burn=%d", got.ProgressTicks, got.BurnTicks)
+			if got.Input != slot.Input || got.Fuel != slot.Fuel || got.Output != slot.Output ||
+				got.ProgressTicks != 137 || got.BurnTicks != 1463 {
+				t.Fatalf("暂停时状态变化: %+v", got)
 			}
 		})
 	}
 }
 
-func TestFurnaceResumesFromStoredValues(t *testing.T) {
-	engine, _, _ := readyFurnacePlayer(t, world.FurnaceSlot{
-		Generation: 1, Active: true,
-		Input:         core.ItemStack{Item: core.ItemRawIron, Count: 2},
-		Output:        core.ItemStack{Item: core.ItemIronIngot, Count: core.MaxStackCount},
-		ProgressTicks: 137, BurnTicks: 1463,
-	})
-	engine.Step()
-	if got := currentFurnace(t, engine, 0); got.ProgressTicks != 137 {
-		t.Fatalf("输出满时未暂停: %+v", got)
-	}
+func TestFurnaceMaterialsResumeFromStoredValues(t *testing.T) {
+	for _, material := range furnaceMaterials {
+		t.Run(material.name, func(t *testing.T) {
+			slot := smeltingFurnace(0, material.input, material.output)
+			slot.Output.Count = core.MaxStackCount
+			slot.ProgressTicks, slot.BurnTicks = 137, 1463
+			engine, _, _ := readyFurnacePlayer(t, slot)
+			engine.Step()
+			if got := currentFurnace(t, engine, 0); got.ProgressTicks != 137 {
+				t.Fatalf("输出满时未暂停: %+v", got)
+			}
 
-	// 取走输出后必须从原值继续，而不是重新开始。
-	key := core.ChunkKey{Dimension: core.Overworld}
-	resumed := currentFurnace(t, engine, 0)
-	resumed.Output = core.ItemStack{}
-	engine.SetChunkFurnaceForTest(key, 0, resumed)
+			// 取走输出后必须从原值继续，而不是重新开始。
+			key := core.ChunkKey{Dimension: core.Overworld}
+			resumed := currentFurnace(t, engine, 0)
+			resumed.Output = core.ItemStack{}
+			engine.SetChunkFurnaceForTest(key, 0, resumed)
 
-	engine.Step()
-	got := currentFurnace(t, engine, 0)
-	if got.ProgressTicks != 138 || got.BurnTicks != 1462 {
-		t.Fatalf("恢复后 progress=%d burn=%d，想要 138/1462", got.ProgressTicks, got.BurnTicks)
+			engine.Step()
+			got := currentFurnace(t, engine, 0)
+			if got.ProgressTicks != 138 || got.BurnTicks != 1462 {
+				t.Fatalf("恢复后 progress=%d burn=%d，想要 138/1462", got.ProgressTicks, got.BurnTicks)
+			}
+		})
 	}
 }
 

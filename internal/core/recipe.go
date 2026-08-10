@@ -16,6 +16,8 @@ const (
 	RecipeIronPickaxe
 	// RecipeChest 用 8 个石头合成 1 个箱子。
 	RecipeChest
+	// RecipeOakPlanks 用 1 个橡木原木合成 4 个橡木木板。
+	RecipeOakPlanks
 )
 
 // CraftingRecipe 是一条固定的单输入、单输出配方。
@@ -56,6 +58,11 @@ func Recipe(id RecipeID) (CraftingRecipe, bool) {
 		return CraftingRecipe{
 			Input:  ItemStack{Item: ItemStone, Count: 8},
 			Output: ItemStack{Item: ItemChest, Count: 1},
+		}, true
+	case RecipeOakPlanks:
+		return CraftingRecipe{
+			Input:  ItemStack{Item: ItemOakLog, Count: 1},
+			Output: ItemStack{Item: ItemOakPlanks, Count: 4},
 		}, true
 	default:
 		return CraftingRecipe{}, false

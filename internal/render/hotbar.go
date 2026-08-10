@@ -19,9 +19,9 @@ const (
 	// 数量最多两位数（2..64），每个数字包含阴影与前景两个实例。
 	maxHotbarGlyphs = core.InventorySlots*4 + maxOverlayGlyphs
 
-	// 六条固定配方（含箱子）：面板 + 每行两个栏位与双层物品色块、按钮和加号。
-	recipeQuads  = 1 + 6*9
-	recipeGlyphs = 14
+	// 七条固定配方（含橡木木板）：面板 + 每行两个栏位与双层物品色块、按钮和加号。
+	recipeQuads  = 1 + 7*9
+	recipeGlyphs = 16
 	// 熔炉视图：面板、三个栏位、双层物品色块、两条进度条底与填充。
 	furnaceQuads = 1 + 3 + 3*2 + 4
 	// 三个熔炉格各最多两位数量。
@@ -85,10 +85,10 @@ const (
 
 	hudEdgeMargin = float32(8)
 	// 固定合成最上沿到快捷栏下沿（含面板边距）的设计高度。
-	openHUDHeight = float32(566)
+	openHUDHeight = float32(618)
 )
 
-// ponytail: 当前只有六条固定配方；需要分页或分类时再引入共享目录。
+// ponytail: 当前只有七条固定配方；需要分页或分类时再引入共享目录。
 var inventoryRecipeIDs = [...]core.RecipeID{
 	core.RecipeStoneBricks,
 	core.RecipeFurnace,
@@ -96,6 +96,7 @@ var inventoryRecipeIDs = [...]core.RecipeID{
 	core.RecipeStonePickaxe,
 	core.RecipeIronPickaxe,
 	core.RecipeChest,
+	core.RecipeOakPlanks,
 }
 
 //go:embed shader/hotbar.wgsl
@@ -766,7 +767,7 @@ func ChestSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool) {
 	return 0, false
 }
 
-// appendRecipeRows 绘制六条固定配方及各自的一次合成按钮。
+// appendRecipeRows 绘制七条固定配方及各自的一次合成按钮。
 func appendRecipeRows(
 	dst *hotbarLayout,
 	atlas GlyphSource,

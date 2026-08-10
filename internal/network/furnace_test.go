@@ -111,6 +111,28 @@ func TestProtocolV12ContainerPayloadsAreFixedLength(t *testing.T) {
 	}
 }
 
+func TestFurnaceMessagesRoundTripMaterials(t *testing.T) {
+	ref := testFurnaceRef()
+	states := []FurnaceState{
+		{Furnace: ref, Input: core.ItemStack{Item: core.ItemRawIron, Count: 3}, Output: core.ItemStack{Item: core.ItemIronIngot, Count: 2}},
+		{Furnace: ref, Input: core.ItemStack{Item: core.ItemSand, Count: 4}, Fuel: core.ItemStack{Item: core.ItemCoal, Count: 1}, Output: core.ItemStack{Item: core.ItemGlass, Count: 2}},
+		{Furnace: ref, Input: core.ItemStack{Item: core.ItemClay, Count: 5}, Output: core.ItemStack{Item: core.ItemBrick, Count: 2}},
+		// 输入耗尽或切换后，已注册产物仍可留在输出格。
+		{Furnace: ref, Output: core.ItemStack{Item: core.ItemBrick, Count: 1}},
+		{Furnace: ref, Input: core.ItemStack{Item: core.ItemSand, Count: 1}, Output: core.ItemStack{Item: core.ItemIronIngot, Count: 1}},
+	}
+	for _, state := range states {
+		id, payload, err := encodeServerControlPayload(StatePlay, state)
+		if err != nil {
+			t.Fatalf("编码 FurnaceState %+v: %v", state, err)
+		}
+		round, err := decodeServerControlPayload(StatePlay, id, payload)
+		if err != nil || round != state {
+			t.Fatalf("FurnaceState round-trip = %#v, %v，想要 %#v", round, err, state)
+		}
+	}
+}
+
 func TestFurnaceMessagesRejectInvalidValues(t *testing.T) {
 	ref := testFurnaceRef()
 	clients := []ClientPacket{
@@ -153,9 +175,16 @@ func TestFurnaceMessagesRejectInvalidValues(t *testing.T) {
 		FurnaceState{Furnace: core.FurnaceRef{Dimension: core.Overworld}},
 		FurnaceState{Furnace: ref, Input: core.ItemStack{Item: core.ItemCoal, Count: 1}},
 		FurnaceState{Furnace: ref, Fuel: core.ItemStack{Item: core.ItemRawIron, Count: 1}},
-		FurnaceState{Furnace: ref, Output: core.ItemStack{Item: core.ItemStone, Count: 1}},
+		FurnaceState{Furnace: ref, Output: core.ItemStack{Item: core.ItemSand, Count: 1}},
 		FurnaceState{Furnace: ref, Input: core.ItemStack{Item: core.ItemRawIron, Count: 1, Durability: 1}},
+		FurnaceState{Furnace: ref, Output: core.ItemStack{Item: core.ItemGlass, Count: 1, Durability: 1}},
 		FurnaceState{Furnace: ref, Fuel: core.ItemStack{Durability: 1}},
+		FurnaceState{Furnace: ref, Input: core.ItemStack{Item: core.ItemID(math.MaxUint16), Count: 1}},
+		FurnaceState{Furnace: ref, Output: core.ItemStack{Item: core.ItemID(math.MaxUint16), Count: 1}},
+		FurnaceState{Furnace: ref, Input: core.ItemStack{Item: core.ItemSand}},
+		FurnaceState{Furnace: ref, Output: core.ItemStack{Item: core.ItemBrick, Count: core.MaxStackCount + 1}},
+		FurnaceState{Furnace: ref, Input: core.ItemStack{Count: 1}},
+		FurnaceState{Furnace: ref, Output: core.ItemStack{Durability: 1}},
 		FurnaceState{Furnace: ref, ProgressTicks: core.FurnaceSmeltTicks},
 		FurnaceState{Furnace: ref, BurnTicks: core.FurnaceBurnTicks + 1},
 		// 熔炉专属消息必须拒绝箱子种类的引用。

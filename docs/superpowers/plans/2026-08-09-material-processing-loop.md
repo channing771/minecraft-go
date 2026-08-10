@@ -21,7 +21,7 @@ test "$(git rev-parse HEAD)" = "$BASE_SHA"
 ```
 
 - [ ] 本分支不得修改 `AGENTS.md`、`CLAUDE.md`、`README.md`、`openspec/config.yaml`、世界生成/迁移代码、目标轮廓代码或非 `inventory-crafting` 的视觉 golden。
-- [ ] Task 2 独占 `cmd/mcgo/testdata/golden/inventory-crafting.png`；其他 golden 若发生漂移，停止并定位，不纳入提交。
+- [ ] Task 6 独占 `cmd/mcgo/testdata/golden/inventory-crafting.png`；其他 golden 若发生漂移，停止并定位，不纳入提交。
 - [ ] 不下载 Go；使用现有 gvm。不得启动前台窗口；视觉验证只走 `--capture`/Makefile 无窗口链路。
 - [ ] 不升级 `network.ProtocolVersion=15`、player schema v6、chunk schema v8 或 metadata v2；不重排任何 ItemID/BlockID/RecipeID。
 - [ ] 每完成一个任务组即验证、勾选、提交并自动继续。

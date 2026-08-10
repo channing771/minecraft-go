@@ -374,3 +374,55 @@ func TestNonToolRecipesOutputZeroDurability(t *testing.T) {
 		}
 	}
 }
+
+func TestRecipeOakPlanksIsFixed(t *testing.T) {
+	if core.RecipeOakPlanks != core.RecipeChest+1 {
+		t.Fatalf("RecipeOakPlanks = %d，必须紧随 RecipeChest(%d)",
+			core.RecipeOakPlanks, core.RecipeChest)
+	}
+	if core.RecipeOakPlanks != 7 {
+		t.Fatalf("RecipeOakPlanks = %d，必须稳定为 7", core.RecipeOakPlanks)
+	}
+	recipe, ok := core.Recipe(core.RecipeOakPlanks)
+	if !ok || recipe.Input != (core.ItemStack{Item: core.ItemOakLog, Count: 1}) ||
+		recipe.Output != (core.ItemStack{Item: core.ItemOakPlanks, Count: 4}) {
+		t.Fatalf("橡木木板配方 = %+v, %v", recipe, ok)
+	}
+	if _, ok := core.Recipe(core.RecipeID(8)); ok {
+		t.Fatal("未知 recipe ID 8 被接受")
+	}
+}
+
+func TestCraftOakPlanksIsAtomic(t *testing.T) {
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemOakLog, Count: 1}
+
+	next, ok := inventory.Craft(core.RecipeOakPlanks)
+	if !ok {
+		t.Fatal("原木充足时木板合成失败")
+	}
+	if next.Hotbar.Slots[2] != (core.ItemStack{}) ||
+		next.Hotbar.Slots[0] != (core.ItemStack{Item: core.ItemOakPlanks, Count: 4}) {
+		t.Fatalf("木板合成结果 = %+v", next)
+	}
+	if inventory.Hotbar.Slots[2].Count != 1 {
+		t.Fatal("Craft 修改了原物品状态")
+	}
+
+	insufficient := core.Inventory{}
+	if got, ok := insufficient.Craft(core.RecipeOakPlanks); ok || got != insufficient {
+		t.Fatalf("原料不足时木板合成未原子拒绝: %+v, %v", got, ok)
+	}
+
+	full := core.Inventory{}
+	for slot := range full.Hotbar.Slots {
+		full.Hotbar.Slots[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+	}
+	for slot := range full.Backpack {
+		full.Backpack[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
+	}
+	full.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemOakLog, Count: 2}
+	if got, ok := full.Craft(core.RecipeOakPlanks); ok || got != full {
+		t.Fatalf("产物无容量时木板合成未原子拒绝: %+v, %v", got, ok)
+	}
+}

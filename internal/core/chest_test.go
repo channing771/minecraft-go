@@ -18,6 +18,9 @@ func TestChestIDsAppendAtEnd(t *testing.T) {
 	if core.RecipeChest != core.RecipeIronPickaxe+1 {
 		t.Fatalf("RecipeChest = %d，必须紧随 RecipeIronPickaxe(%d) 之后", core.RecipeChest, core.RecipeIronPickaxe)
 	}
+	if core.RecipeOakPlanks != core.RecipeChest+1 {
+		t.Fatalf("RecipeOakPlanks = %d，必须追加在 RecipeChest(%d) 之后", core.RecipeOakPlanks, core.RecipeChest)
+	}
 }
 
 // TestChestIsPlaceableAndDrops 覆盖箱子物品放置后写入 ChestID，

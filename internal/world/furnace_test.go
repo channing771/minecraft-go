@@ -120,6 +120,66 @@ func TestFurnaceAtFindsActiveSlotByBlockIndex(t *testing.T) {
 	}
 }
 
+func TestFurnaceSlotAcceptsMaterialStacks(t *testing.T) {
+	base := world.FurnaceSlot{
+		Generation: 1,
+		Active:     true,
+		Fuel:       core.ItemStack{Item: core.ItemCoal, Count: 1},
+	}
+	for _, input := range []core.ItemID{core.ItemRawIron, core.ItemSand, core.ItemClay} {
+		slot := base
+		slot.Input = core.ItemStack{Item: input, Count: core.MaxStackCount}
+		if !slot.Valid() {
+			t.Errorf("输入格拒绝材料 %d", input)
+		}
+	}
+	for _, output := range []core.ItemID{core.ItemIronIngot, core.ItemGlass, core.ItemBrick} {
+		slot := base
+		slot.Output = core.ItemStack{Item: output, Count: core.MaxStackCount}
+		if !slot.Valid() {
+			t.Errorf("输出格拒绝产物 %d", output)
+		}
+	}
+
+	base.Input = core.ItemStack{Item: core.ItemSand, Count: 1}
+	base.Output = core.ItemStack{Item: core.ItemIronIngot, Count: 1}
+	if !base.Valid() {
+		t.Fatal("输出格被错误要求匹配当前输入")
+	}
+}
+
+func TestFurnaceSlotRejectsInvalidMaterialStacks(t *testing.T) {
+	valid := world.FurnaceSlot{Generation: 1, Active: true}
+	tests := []struct {
+		name   string
+		input  core.ItemStack
+		fuel   core.ItemStack
+		output core.ItemStack
+	}{
+		{"煤炭放入输入格", core.ItemStack{Item: core.ItemCoal, Count: 1}, core.ItemStack{}, core.ItemStack{}},
+		{"原料放入燃料格", core.ItemStack{}, core.ItemStack{Item: core.ItemRawIron, Count: 1}, core.ItemStack{}},
+		{"原料放入输出格", core.ItemStack{}, core.ItemStack{}, core.ItemStack{Item: core.ItemClay, Count: 1}},
+		{"输入格耐久污染", core.ItemStack{Item: core.ItemRawIron, Count: 1, Durability: 1}, core.ItemStack{}, core.ItemStack{}},
+		{"输出格耐久污染", core.ItemStack{}, core.ItemStack{}, core.ItemStack{Item: core.ItemGlass, Count: 1, Durability: 1}},
+		{"燃料格耐久污染", core.ItemStack{}, core.ItemStack{Item: core.ItemCoal, Count: 1, Durability: 1}, core.ItemStack{}},
+		{"未知输入物品", core.ItemStack{Item: core.ItemID(math.MaxUint16), Count: 1}, core.ItemStack{}, core.ItemStack{}},
+		{"未知输出物品", core.ItemStack{}, core.ItemStack{}, core.ItemStack{Item: core.ItemID(math.MaxUint16), Count: 1}},
+		{"输入数量为零", core.ItemStack{Item: core.ItemSand}, core.ItemStack{}, core.ItemStack{}},
+		{"输出数量越界", core.ItemStack{}, core.ItemStack{}, core.ItemStack{Item: core.ItemBrick, Count: core.MaxStackCount + 1}},
+		{"空输入格数量非零", core.ItemStack{Count: 1}, core.ItemStack{}, core.ItemStack{}},
+		{"空输出格耐久非零", core.ItemStack{}, core.ItemStack{}, core.ItemStack{Durability: 1}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			slot := valid
+			slot.Input, slot.Fuel, slot.Output = test.input, test.fuel, test.output
+			if slot.Valid() {
+				t.Fatalf("非法熔炉状态被接受: %+v", slot)
+			}
+		})
+	}
+}
+
 func TestChunkCloneAndPayloadIncludeFurnaces(t *testing.T) {
 	chunk := world.NewChunk(core.ChunkPos{})
 	index := furnaceChunkIndex(t, chunk.Pos, 1, 2, 3)
