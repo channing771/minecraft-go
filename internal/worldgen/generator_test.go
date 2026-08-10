@@ -76,20 +76,14 @@ func TestGenerateChunkIsDeterministic(t *testing.T) {
 func TestBaseBlockAtMatchesGeneratedChunk(t *testing.T) {
 	generator := worldgen.New(42)
 	for _, horizontal := range []core.BlockPos{
-		{X: 3, Z: 7},
+		{X: 15, Z: -17},
+		{X: 16, Z: -16},
 		{X: -19, Z: -33},
 	} {
-		height := generator.HeightAt(horizontal.X, horizontal.Z)
-		for _, y := range []int32{
-			height + 1,
-			height,
-			height - 1,
-			height - 4,
-			core.MinY,
-		} {
+		chunk := generator.GenerateChunk(horizontal.Chunk())
+		x, _, z := horizontal.Local()
+		for y := int32(core.MinY); y < core.MaxY; y++ {
 			position := core.BlockPos{X: horizontal.X, Y: y, Z: horizontal.Z}
-			chunk := generator.GenerateChunk(position.Chunk())
-			x, _, z := position.Local()
 			got := generator.BaseBlockAt(position)
 			want := chunk.BlockAt(x, position.Y, z)
 			if got != want {

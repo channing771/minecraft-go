@@ -24,6 +24,20 @@ const (
 	soilDepth    = 4
 )
 
+const (
+	snowLine             int32 = 88
+	sandLine             int32 = 62
+	clayNoiseScale             = 1.0 / 96.0
+	clayNoiseOffsetX     int32 = 417
+	clayNoiseOffsetZ     int32 = -193
+	clayNoiseThreshold         = 0.18
+	gravelNoiseScale           = 1.0 / 72.0
+	gravelNoiseOffsetX   int32 = -271
+	gravelNoiseOffsetZ   int32 = 613
+	gravelNoiseThreshold       = 0.22
+	gravelMaxDepth       int32 = 10
+)
+
 // Generator 按种子生成地形。无内部可变状态，可并发调用。
 type Generator struct {
 	noise *perlin
@@ -57,7 +71,7 @@ func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
 // generatedBlockAt 是单点查询与整区块生成共用的纯判断，
 // 矿石只替换本应为石头的方块，铁矿判断优先于煤矿。
 func (g *Generator) generatedBlockAt(pos core.BlockPos, height int32) core.BlockID {
-	base := terrainBlockAt(pos.Y, height)
+	base := g.naturalBlockAt(pos, height)
 	if base != IDStone {
 		return base
 	}
@@ -66,6 +80,34 @@ func (g *Generator) generatedBlockAt(pos core.BlockPos, height int32) core.Block
 	}
 	if pos.Y < coalMaxY && oreHash(g.seed, pos, coalSalt)%coalOdds == 0 {
 		return core.CoalOreID
+	}
+	return base
+}
+
+func (g *Generator) naturalBlockAt(pos core.BlockPos, height int32) core.BlockID {
+	base := terrainBlockAt(pos.Y, height)
+	if base == core.AirID || base == IDBedrock {
+		return base
+	}
+
+	depth := height - pos.Y
+	if depth == 0 && height >= snowLine {
+		return core.SnowBlockID
+	}
+	if height <= sandLine && depth >= 0 && depth < soilDepth {
+		if depth >= 2 && g.noise.at(
+			float64(pos.X+clayNoiseOffsetX)*clayNoiseScale,
+			float64(pos.Z+clayNoiseOffsetZ)*clayNoiseScale,
+		) > clayNoiseThreshold {
+			return core.ClayID
+		}
+		return core.SandID
+	}
+	if base == IDStone && depth <= gravelMaxDepth && g.noise.at(
+		float64(pos.X+gravelNoiseOffsetX)*gravelNoiseScale,
+		float64(pos.Z+gravelNoiseOffsetZ)*gravelNoiseScale,
+	) > gravelNoiseThreshold {
+		return core.GravelID
 	}
 	return base
 }

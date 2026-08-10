@@ -1,8 +1,8 @@
 ## 2. 用同一纯判断生成四种自然材料
 
-- [ ] 2.1 在 `internal/worldgen` 增加 RED 测试，固定 `seed=42` 覆盖沙子、砾石、黏土、雪块的出现与相邻区域、负坐标、区块边界、全 Y 单点/整区块一致性和矿石不覆盖自然材料；运行 `go test ./internal/worldgen -run "NaturalMaterial|BaseBlockAtMatches|Ore" -count=1` 确认失败。
-- [ ] 2.2 修改 `internal/worldgen/generator.go`，按 design.md 的固定常量和优先级实现共享自然材料纯判断，并仅对最终石头保留原有矿石判断；运行 `go test ./internal/worldgen -race -count=1`。
-- [ ] 2.3 更新 `internal/worldgen/testdata/golden_seed42.txt` 与相关 worldgen 测试，仅接受批准的生成变化；运行 `go test ./internal/worldgen -run TestGenerateChunkGolden -update -count=1`、`go test ./internal/worldgen -race -count=1`、`gofmt -w internal/worldgen`、`gofmt -l internal/worldgen` 和 `git diff --check`。
+- [x] 2.1 在 `internal/worldgen` 增加 RED 测试，固定 `seed=42` 覆盖沙子、砾石、黏土、雪块的出现与相邻区域、负坐标、区块边界、全 Y 单点/整区块一致性和矿石不覆盖自然材料；运行 `go test ./internal/worldgen -run "NaturalMaterial|BaseBlockAtMatches|Ore" -count=1` 确认失败。
+- [x] 2.2 修改 `internal/worldgen/generator.go`，按 design.md 的固定常量和优先级实现共享自然材料纯判断，并仅对最终石头保留原有矿石判断；运行 `go test ./internal/worldgen -race -count=1`。
+- [x] 2.3 更新 `internal/worldgen/testdata/golden_seed42.txt` 与相关 worldgen 测试，仅接受批准的生成变化；运行 `go test ./internal/worldgen -run TestGenerateChunkGolden -update -count=1`、`go test ./internal/worldgen -race -count=1`、`gofmt -w internal/worldgen`、`gofmt -l internal/worldgen` 和 `git diff --check`。
 
 ## 3. 为 DiskStore 增加确定性只读区块键枚举
 
