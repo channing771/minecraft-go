@@ -174,6 +174,13 @@ func toBlendState(mode BlendMode) wgpu.BlendState {
 	panic(fmt.Errorf("gfx: 未知的混合模式 %d", mode))
 }
 
+func toDepthCompare(lessEqual bool) wgpu.CompareFunction {
+	if lessEqual {
+		return wgpu.CompareFunctionLessEqual
+	}
+	return wgpu.CompareFunctionLess
+}
+
 func toViewDimension(d TextureViewDimension) wgpu.TextureViewDimension {
 	switch d {
 	case TextureViewDimensionAuto:
@@ -503,7 +510,7 @@ func (d *wgpuDevice) CreateRenderPipeline(desc RenderPipelineDesc) RenderPipelin
 		depthStencil = &wgpu.DepthStencilState{
 			Format:            toFormat(desc.DepthFormat),
 			DepthWriteEnabled: depthWrite,
-			DepthCompare:      wgpu.CompareFunctionLess,
+			DepthCompare:      toDepthCompare(desc.DepthCompareLessEqual),
 			StencilFront:      keep,
 			StencilBack:       keep,
 			StencilReadMask:   0xFFFFFFFF,

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	maxNameTags      = 7
+	maxNameTags      = 8
 	maxNameTagRunes  = 32
 	maxNameTagGlyphs = maxNameTags * maxNameTagRunes
 

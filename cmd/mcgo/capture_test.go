@@ -14,6 +14,7 @@ import (
 	"minecraft-go/internal/client"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
+	"minecraft-go/internal/world"
 )
 
 func TestCaptureSkylightTunnelFixtureUsesMirrorAndMesher(t *testing.T) {
@@ -57,10 +58,13 @@ func TestCaptureSkylightTunnelFixtureUsesMirrorAndMesher(t *testing.T) {
 }
 
 func TestCaptureMaterialsShowcaseFixtureUsesMirrorAndMesher(t *testing.T) {
-	if got := captureScenes[len(captureScenes)-1].Name; got != "materials-showcase" {
-		t.Fatalf("末场景 = %q，想要 materials-showcase", got)
+	var scene captureScene
+	for _, candidate := range captureScenes {
+		if candidate.Name == "materials-showcase" {
+			scene = candidate
+			break
+		}
 	}
-	scene := captureScenes[len(captureScenes)-1]
 	if scene.Prepare == nil {
 		t.Fatal("materials-showcase 缺少 Prepare")
 	}
@@ -179,6 +183,111 @@ func TestCaptureMaterialsShowcaseFixtureUsesMirrorAndMesher(t *testing.T) {
 	}
 	if got, confirmed := stateApp.inventory.State(); !confirmed || got != (core.Inventory{}) {
 		t.Fatalf("inventory = %+v confirmed=%v，想要已确认空物品栏", got, confirmed)
+	}
+}
+
+// 杀死变异：遗漏末尾场景、未装入唯一砖块、绕过 Mirror/Mesher、未固定相机，
+// 或继承上个场景的 UI 与远端玩家状态都会改变这些可观察结果。
+func TestCaptureTargetBlockFeedbackUsesNormalTargetPath(t *testing.T) {
+	scene := captureScenes[len(captureScenes)-1]
+	if scene.Name != "target-block-feedback" || scene.WarmupFrames != 8 ||
+		scene.Prepare == nil || scene.Apply == nil {
+		t.Fatalf("末场景=%+v，想要完整 target-block-feedback", scene)
+	}
+
+	mesher := client.NewMesher(assets.NewRegistry(), 1)
+	t.Cleanup(mesher.Close)
+	remotePlayers := client.NewRemotePlayers()
+	if err := remotePlayers.Apply(network.RemotePlayerSpawn{
+		PlayerID: core.PlayerID{6: 0x40, 8: 0x80, 15: 1}, DisplayName: "测试Player",
+		ServerTick: 1, Position: mgl32.Vec3{0.5, 3.5, 1.5},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app := &application{
+		mirror:          client.NewMirror(),
+		mesher:          mesher,
+		predictor:       client.NewPredictor(),
+		remotePlayers:   remotePlayers,
+		panel:           &panelState{visible: true},
+		inventoryOpen:   true,
+		inventorySource: 12,
+	}
+	if err := app.predictor.Begin(network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld, Ready: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.furnace.Apply(network.FurnaceState{
+		Furnace: core.FurnaceRef{Dimension: core.Overworld, Generation: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.chest.Apply(network.ChestState{Chest: core.ContainerRef{
+		Dimension: core.Overworld, Kind: core.ContainerKindChest, Generation: 1,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	inventory := core.Inventory{}
+	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 1}
+	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := scene.Prepare(app); err != nil {
+		t.Fatal(err)
+	}
+	targetPosition := core.BlockPos{X: 0, Y: 3, Z: -3}
+	for chunkZ := int32(-1); chunkZ <= 1; chunkZ++ {
+		for chunkX := int32(-1); chunkX <= 1; chunkX++ {
+			position := core.ChunkPos{X: chunkX, Z: chunkZ}
+			want := world.NewChunk(position)
+			wantRevision := uint64(1)
+			if position == targetPosition.Chunk() {
+				x, _, z := targetPosition.Local()
+				want.SetBlock(x, targetPosition.Y, z, core.BrickID)
+				wantRevision = 2
+			}
+			gotHash, gotRevision, loaded := app.mirror.Hash(core.Overworld, position)
+			if !loaded || gotRevision != wantRevision || gotHash != want.Hash() {
+				t.Fatalf("chunk %+v hash/revision/loaded=(%x,%d,%v)，想要 (%x,%d,true)",
+					position, gotHash, gotRevision, loaded, want.Hash(), wantRevision)
+			}
+		}
+	}
+	if got := app.mesher.Stats().DirtySections; got == 0 {
+		t.Fatal("目标夹具装入后 mesher 没有 dirty section")
+	}
+
+	if err := scene.Apply(app); err != nil {
+		t.Fatal(err)
+	}
+	if app.worldTimeTicks != 6000 || app.camera.Pos != (mgl32.Vec3{0.5, 3.5, 2.5}) ||
+		app.camera.Yaw != 0 || app.camera.Pitch != 0 {
+		t.Fatalf("场景状态错误: time=%d camera=%+v yaw=%v pitch=%v",
+			app.worldTimeTicks, app.camera.Pos, app.camera.Yaw, app.camera.Pitch)
+	}
+	if app.inventoryOpen || app.inventorySource != -1 || app.panel.visible ||
+		len(app.remotePlayers.Presentations()) != 0 {
+		t.Fatalf("共享状态未清空: inventory=%v/%d panel=%v remotes=%d",
+			app.inventoryOpen, app.inventorySource, app.panel.visible,
+			len(app.remotePlayers.Presentations()))
+	}
+	if _, opened := app.furnace.State(); opened {
+		t.Fatal("熔炉状态未清空")
+	}
+	if _, opened := app.chest.State(); opened {
+		t.Fatal("箱子状态未清空")
+	}
+	if got, confirmed := app.inventory.State(); !confirmed || got != (core.Inventory{}) {
+		t.Fatalf("inventory=%+v confirmed=%v，想要已确认空物品栏", got, confirmed)
+	}
+	if got, ok := app.currentBlockTarget(); !ok || got != (blockTarget{
+		Position: targetPosition,
+		Name:     "砖块",
+	}) {
+		t.Fatalf("currentBlockTarget()=%+v, %v，想要 %+v, true",
+			got, ok, blockTarget{Position: targetPosition, Name: "砖块"})
 	}
 }
 
