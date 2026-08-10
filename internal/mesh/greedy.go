@@ -5,6 +5,7 @@ import "minecraft-go/internal/world"
 // Registry 提供网格化需要的方块属性。
 type Registry interface {
 	Opaque(world.BlockID) bool
+	FaceVisible(id world.BlockID, adjacent world.BlockID) bool
 	Material(id world.BlockID, f Face) uint16
 	Emission(world.BlockID) uint8
 }
@@ -48,12 +49,9 @@ func MeshSection(n *world.Neighborhood, reg Registry, light *LightScratch) []Qua
 					p[axis], p[u], p[v] = slice, ui, vi
 
 					id := n.Center.Blocks.Get(p[0], p[1], p[2])
-					if !reg.Opaque(id) {
-						continue
-					}
 					q := p
 					q[axis] += step
-					if reg.Opaque(n.At(q[0], q[1], q[2])) {
+					if !reg.FaceVisible(id, n.At(q[0], q[1], q[2])) {
 						continue
 					}
 					mask[vi][ui] = maskCell{

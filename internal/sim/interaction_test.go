@@ -92,8 +92,14 @@ func TestEnginePlaceValidationAndWhitelist(t *testing.T) {
 		assertRejected(t, engine.Step(), sim.RejectOccupied)
 	})
 
-	t.Run("stone dirt grass succeed", func(t *testing.T) {
-		items := []core.ItemID{core.ItemStone, core.ItemDirt, core.ItemGrass}
+	t.Run("placeable blocks succeed", func(t *testing.T) {
+		items := []core.ItemID{
+			core.ItemStone, core.ItemDirt, core.ItemGrass,
+			core.ItemCobblestone, core.ItemSmoothStone, core.ItemSand, core.ItemGravel,
+			core.ItemOakLog, core.ItemOakPlanks, core.ItemLeaves, core.ItemGlass,
+			core.ItemBrick, core.ItemWhiteWool, core.ItemRoofTile, core.ItemClay,
+			core.ItemSnowBlock, core.ItemMossyCobblestone,
+		}
 		for index, item := range items {
 			block, _ := core.ItemPlacement(item)
 			engine, session, chunkPos := readyFlatEngineStocked(t, stockedHotbar(item))
@@ -111,6 +117,9 @@ func TestEnginePlaceValidationAndWhitelist(t *testing.T) {
 			})
 			if got := chunk.BlockAt(0, 2, 4); got != block {
 				t.Fatalf("block[%d] 放置结果 = %d，想要 %d", index, got, block)
+			}
+			if got := currentInventory(t, engine, session).Hotbar.Slots[0].Count; got != core.MaxStackCount-1 {
+				t.Fatalf("item[%d]=%d 放置后数量 = %d，想要 %d", index, item, got, core.MaxStackCount-1)
 			}
 		}
 	})

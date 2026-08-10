@@ -10,31 +10,54 @@ import (
 	"minecraft-go/internal/world"
 )
 
-func TestChunkV6MigrationIsNoOp(t *testing.T) {
-	var dto chunkDTO
-	dto.Key = core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
-	dto.Revision = 19
-	dto.Sections[0] = world.ContainerSnapshot{
-		Kind: world.StorageIndexed,
-		Bits: 4,
-		Palette: []core.BlockID{
-			core.AirID,
-			core.LightBlockID,
-		},
-		Packed: []uint64{1},
+func TestChunkV6MigrationPreservesStaticLightState(t *testing.T) {
+	want := chunkDTO{
+		Key:      core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: -3}},
+		Revision: 17,
 	}
-	dto.Drops[0] = world.DropSlot{
-		Generation: 1,
-		Active:     true,
-		Stack:      core.ItemStack{Item: core.ItemLightBlock, Count: 1},
+	want.Sections[0] = world.ContainerSnapshot{
+		Kind: world.StorageIndexed, Bits: 4,
+		Palette: []core.BlockID{core.AirID, core.LightBlockID}, Packed: make([]uint64, 256),
+	}
+	want.Drops[0] = world.DropSlot{
+		Generation: 1, Active: true,
+		Stack: core.ItemStack{Item: core.ItemLightBlock, Count: 2}, BlockIndex: 4,
+	}
+	want.Furnaces[0] = world.FurnaceSlot{Generation: 2}
+	want.Chests[0] = world.ChestSlot{Generation: 3}
+
+	got, migrated, err := migrateChunk(6, want)
+	if err != nil || !migrated {
+		t.Fatalf("v6 identity migration migrated=%v err=%v", migrated, err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("v6→v8 identity migration\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
+func TestChunkV7MigrationPreservesCommonMaterialState(t *testing.T) {
+	var want chunkDTO
+	want.Sections[0] = world.ContainerSnapshot{
+		Kind: world.StorageIndexed, Bits: 4,
+		Palette: []core.BlockID{core.AirID, core.MossyCobblestoneID}, Packed: []uint64{1},
+	}
+	want.Drops[0] = world.DropSlot{
+		Generation: 1, Active: true,
+		Stack: core.ItemStack{Item: core.ItemMossyCobblestone, Count: 1},
 	}
 
-	got, changed, err := migrateChunk(6, dto)
+	got, changed, err := migrateChunk(7, want)
 	if err != nil || !changed {
-		t.Fatalf("migrateChunk(6) changed=%v err=%v", changed, err)
+		t.Fatalf("migrateChunk(7) changed=%v err=%v", changed, err)
 	}
-	if !reflect.DeepEqual(got, dto) {
-		t.Fatalf("v6→v7 no-op 改变 DTO：got=%+v want=%+v", got, dto)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("v7→v8 identity migration\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
+func TestChunkFutureSchemaIsRejected(t *testing.T) {
+	if _, migrated, err := migrateChunk(currentChunkSchema+1, chunkDTO{}); !errors.Is(err, ErrFutureVersion) || migrated {
+		t.Fatalf("未来区块 schema migrated=%v err=%v，想要 ErrFutureVersion", migrated, err)
 	}
 }
 

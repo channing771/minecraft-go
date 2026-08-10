@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"flag"
 	"strings"
 	"testing"
 
@@ -12,10 +11,6 @@ import (
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/world"
-)
-
-var updateStorageFixtures = flag.Bool(
-	"update-storage-fixtures", false, "rewrite committed storage fixtures",
 )
 
 func TestFutureSchemaIsRejectedWithoutMutation(t *testing.T) {
@@ -67,6 +62,38 @@ func TestChunkPayloadRoundTripsDeterministically(t *testing.T) {
 	}
 	if got.Key != key || got.Revision != 19 || got.Chunk.Hash() != chunk.Hash() {
 		t.Fatalf("roundtrip mismatch: %+v", got)
+	}
+}
+
+func TestChunkSchemaV8RoundTripsCommonBlockMaterialPalette(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	chunk := world.NewChunk(key.Pos)
+	want := []core.BlockID{
+		core.CobblestoneID, core.SmoothStoneID, core.SandID, core.GravelID,
+		core.OakLogID, core.OakPlanksID, core.LeavesID, core.GlassID,
+		core.BrickID, core.WhiteWoolID, core.RoofTileID, core.ClayID,
+		core.SnowBlockID, core.MossyCobblestoneID,
+	}
+	for index, id := range want {
+		setFixtureBlock(chunk, 0, index, id)
+	}
+	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 23, Chunk: chunk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeChunkPayload(key, 23, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentChunkSchema != 8 || got.Schema != 8 || got.Migrated {
+		t.Fatalf("区块 schema=%d decoded=%d migrated=%v，想要 8/8/false", currentChunkSchema, got.Schema, got.Migrated)
+	}
+	for index, id := range want {
+		x := index & core.SectionMask
+		z := index >> core.SectionShift & core.SectionMask
+		if block := got.Chunk.BlockAt(x, core.MinY, z); block != id {
+			t.Fatalf("新材料 %d 往返 = %d，想要 %d", index, block, id)
+		}
 	}
 }
 
@@ -342,8 +369,11 @@ func codecFixtureChunk(pos core.ChunkPos) *world.Chunk {
 	for index := 0; index < 16; index++ { // air + 16 IDs = 17 palette entries.
 		setFixtureBlock(chunk, 2, index, core.BlockID(index+1))
 	}
-	for index := 0; index < 256; index++ { // air + 256 IDs forces direct storage.
+	for index := 0; index < 256; index++ { // 先用不同值推进到 direct storage。
 		setFixtureBlock(chunk, 3, index, core.BlockID(index+1))
+	}
+	for index := 0; index < 256; index++ { // 冻结旧夹具的 0..28 direct 值域。
+		setFixtureBlock(chunk, 3, index, core.BlockID((index+1)%int(core.MossyCobblestoneID)))
 	}
 	return chunk
 }

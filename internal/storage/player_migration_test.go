@@ -1,10 +1,34 @@
 package storage
 
 import (
+	"errors"
+	"reflect"
 	"testing"
 
 	"minecraft-go/internal/core"
 )
+
+func TestPlayerV5MigrationPreservesState(t *testing.T) {
+	safe := PlayerLocation{Dimension: core.Overworld, Position: [3]float32{7, 8, 9}}
+	want := playerDTO{
+		PlayerID: fixturePlayerID(), Revision: 12, DisplayName: "Chen",
+		Current: PlayerLocation{Dimension: core.Overworld, Position: [3]float32{1, 2, 3}},
+		Yaw:     4, Pitch: 0.5, Safe: &safe, Inventory: fixturePlayerInventory(), Health: 13,
+	}
+	got, migrated, err := migratePlayer(5, want)
+	if err != nil || !migrated {
+		t.Fatalf("v5 identity migration migrated=%v err=%v", migrated, err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("v5 identity migration\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
+func TestPlayerFutureSchemaIsRejected(t *testing.T) {
+	if _, migrated, err := migratePlayer(7, playerDTO{}); !errors.Is(err, ErrFutureVersion) || migrated {
+		t.Fatalf("未来玩家 schema migrated=%v err=%v，想要 ErrFutureVersion", migrated, err)
+	}
+}
 
 func TestPlayerMigrationRegistryIsContinuous(t *testing.T) {
 	for schema := oldestPlayerSchema; schema < currentPlayerSchema; schema++ {

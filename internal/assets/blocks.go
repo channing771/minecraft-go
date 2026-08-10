@@ -19,6 +19,22 @@ const (
 	LayerIronBlock
 	LayerChest
 	LayerLightBlock
+	LayerLeaves
+	LayerGlass
+	LayerCobblestone
+	LayerSmoothStone
+	LayerSand
+	LayerGravel
+	LayerOakLogSide
+	LayerOakLogTop
+	LayerOakPlanks
+	LayerBrick
+	LayerWhiteWool
+	LayerRoofTile
+	LayerClay
+	LayerSnowTop
+	LayerSnowSide
+	LayerMossyCobblestone
 	layerCount
 )
 
@@ -42,12 +58,39 @@ func NewRegistry() *Registry {
 	r.layers[LayerIronBlock] = ironBlockTexture()
 	r.layers[LayerChest] = chestTexture()
 	r.layers[LayerLightBlock] = lightBlockTexture()
+	r.layers[LayerLeaves] = leavesTexture()
+	r.layers[LayerGlass] = glassTexture()
+	r.layers[LayerCobblestone] = cobblestoneTexture()
+	r.layers[LayerSmoothStone] = smoothStoneTexture()
+	r.layers[LayerSand] = sandTexture()
+	r.layers[LayerGravel] = gravelTexture()
+	r.layers[LayerOakLogSide] = oakLogSideTexture()
+	r.layers[LayerOakLogTop] = oakLogTopTexture()
+	r.layers[LayerOakPlanks] = oakPlanksTexture()
+	r.layers[LayerBrick] = brickTexture()
+	r.layers[LayerWhiteWool] = whiteWoolTexture()
+	r.layers[LayerRoofTile] = roofTileTexture()
+	r.layers[LayerClay] = clayTexture()
+	r.layers[LayerSnowTop] = snowTopTexture()
+	r.layers[LayerSnowSide] = snowSideTexture()
+	r.layers[LayerMossyCobblestone] = mossyCobblestoneTexture()
 	return r
 }
 
 // Opaque 返回方块是否完全不透明。实现 mesh.Registry。
 func (r *Registry) Opaque(id world.BlockID) bool {
-	return id != world.AirID
+	return core.RegisteredBlock(id) && id != core.AirID && id != core.GlassID && id != core.LeavesID
+}
+
+// FaceVisible 返回当前方块朝向相邻方块的面是否可绘制。实现 mesh.Registry。
+func (r *Registry) FaceVisible(id, adjacent world.BlockID) bool {
+	if !core.RegisteredBlock(id) || id == core.AirID || !core.RegisteredBlock(adjacent) || r.Opaque(adjacent) {
+		return false
+	}
+	if adjacent == core.AirID {
+		return true
+	}
+	return r.Opaque(id)
 }
 
 // Material 返回方块某个面的材质层号。实现 mesh.Registry。
@@ -73,6 +116,40 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 		return LayerChest
 	case core.LightBlockID:
 		return LayerLightBlock
+	case core.LeavesID:
+		return LayerLeaves
+	case core.GlassID:
+		return LayerGlass
+	case core.CobblestoneID:
+		return LayerCobblestone
+	case core.SmoothStoneID:
+		return LayerSmoothStone
+	case core.SandID:
+		return LayerSand
+	case core.GravelID:
+		return LayerGravel
+	case core.OakLogID:
+		if f == mesh.FacePosY || f == mesh.FaceNegY {
+			return LayerOakLogTop
+		}
+		return LayerOakLogSide
+	case core.OakPlanksID:
+		return LayerOakPlanks
+	case core.BrickID:
+		return LayerBrick
+	case core.WhiteWoolID:
+		return LayerWhiteWool
+	case core.RoofTileID:
+		return LayerRoofTile
+	case core.ClayID:
+		return LayerClay
+	case core.SnowBlockID:
+		if f == mesh.FacePosY {
+			return LayerSnowTop
+		}
+		return LayerSnowSide
+	case core.MossyCobblestoneID:
+		return LayerMossyCobblestone
 	case core.GrassID:
 		switch f {
 		case mesh.FacePosY:

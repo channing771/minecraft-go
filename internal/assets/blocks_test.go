@@ -9,6 +9,34 @@ import (
 	"minecraft-go/internal/world"
 )
 
+func TestRegistryFaceVisible(t *testing.T) {
+	r := assets.NewRegistry()
+	tests := []struct {
+		name         string
+		id, adjacent core.BlockID
+		want         bool
+	}{
+		{"空气不出面", core.AirID, core.AirID, false},
+		{"未知当前方块不出面", core.MossyCobblestoneID + 1, core.AirID, false},
+		{"石头面向空气", core.StoneID, core.AirID, true},
+		{"石头面向未知方块关闭", core.StoneID, core.MossyCobblestoneID + 1, false},
+		{"石头被石头遮住", core.StoneID, core.StoneID, false},
+		{"石头面向玻璃保留", core.StoneID, core.GlassID, true},
+		{"玻璃被石头遮住", core.GlassID, core.StoneID, false},
+		{"玻璃同类内部面剔除", core.GlassID, core.GlassID, false},
+		{"树叶同类内部面剔除", core.LeavesID, core.LeavesID, false},
+		{"不同 cutout 内部面剔除", core.GlassID, core.LeavesID, false},
+		{"玻璃面向空气", core.GlassID, core.AirID, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := r.FaceVisible(world.BlockID(tt.id), world.BlockID(tt.adjacent)); got != tt.want {
+				t.Fatalf("FaceVisible(%d, %d) = %v，想要 %v", tt.id, tt.adjacent, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStoneBrickHasOwnMaterialLayer(t *testing.T) {
 	registry := assets.NewRegistry()
 	layer := registry.Material(core.StoneBrickID, mesh.FacePosY)
@@ -41,6 +69,58 @@ func TestM4EBlocksHaveDistinctMaterialLayers(t *testing.T) {
 		if len(registry.LayerRGBA(int(layer))) == 0 {
 			t.Fatalf("方块 %d 的材质层为空", block)
 		}
+	}
+}
+
+func TestCutoutBlocksHaveOwnMaterialLayers(t *testing.T) {
+	registry := assets.NewRegistry()
+	for _, tt := range []struct {
+		block core.BlockID
+		want  uint16
+	}{
+		{core.LeavesID, assets.LayerLeaves},
+		{core.GlassID, assets.LayerGlass},
+	} {
+		if got := registry.Material(tt.block, mesh.FacePosY); got != tt.want {
+			t.Fatalf("方块 %d 材质层 = %d，想要 %d", tt.block, got, tt.want)
+		}
+	}
+}
+
+func TestCommonMaterialFaceMappings(t *testing.T) {
+	r := assets.NewRegistry()
+	if r.Material(core.OakLogID, mesh.FacePosY) != assets.LayerOakLogTop ||
+		r.Material(core.OakLogID, mesh.FaceNegY) != assets.LayerOakLogTop ||
+		r.Material(core.OakLogID, mesh.FacePosX) != assets.LayerOakLogSide {
+		t.Fatal("竖向原木顶底/侧面映射错误")
+	}
+	for _, tt := range []struct {
+		block core.BlockID
+		layer uint16
+	}{
+		{core.CobblestoneID, assets.LayerCobblestone},
+		{core.SmoothStoneID, assets.LayerSmoothStone},
+		{core.SandID, assets.LayerSand},
+		{core.GravelID, assets.LayerGravel},
+		{core.OakPlanksID, assets.LayerOakPlanks},
+		{core.LeavesID, assets.LayerLeaves},
+		{core.GlassID, assets.LayerGlass},
+		{core.BrickID, assets.LayerBrick},
+		{core.WhiteWoolID, assets.LayerWhiteWool},
+		{core.RoofTileID, assets.LayerRoofTile},
+		{core.ClayID, assets.LayerClay},
+		{core.MossyCobblestoneID, assets.LayerMossyCobblestone},
+	} {
+		if got := r.Material(tt.block, mesh.FacePosX); got != tt.layer {
+			t.Fatalf("方块 %d 材质层=%d，想要 %d", tt.block, got, tt.layer)
+		}
+		if r.Material(tt.block, mesh.FacePosY) != tt.layer {
+			t.Fatalf("方块 %d 不应按面变化", tt.block)
+		}
+	}
+	if r.Material(core.SnowBlockID, mesh.FacePosY) != assets.LayerSnowTop ||
+		r.Material(core.SnowBlockID, mesh.FacePosX) != assets.LayerSnowSide {
+		t.Fatal("雪块顶面与侧面应使用不同材质")
 	}
 }
 

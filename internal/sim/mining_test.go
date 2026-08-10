@@ -52,6 +52,36 @@ func TestMiningRule(t *testing.T) {
 	}
 }
 
+func TestCommonBlockMaterialMiningRules(t *testing.T) {
+	assertMiningRule := func(block core.BlockID, held core.ItemID, wantTicks uint16, wantHarvestable bool) {
+		t.Helper()
+		gotTicks, gotHarvestable := miningRule(block, held)
+		if gotTicks != wantTicks || gotHarvestable != wantHarvestable {
+			t.Fatalf("miningRule(%d,%d)=(%d,%v)，想要 (%d,%v)",
+				block, held, gotTicks, gotHarvestable, wantTicks, wantHarvestable)
+		}
+	}
+	for _, block := range []core.BlockID{
+		core.SandID, core.GravelID, core.LeavesID, core.GlassID,
+		core.WhiteWoolID, core.ClayID, core.SnowBlockID,
+	} {
+		assertMiningRule(block, core.ItemCoal, 5, true)
+	}
+	for _, block := range []core.BlockID{core.OakLogID, core.OakPlanksID} {
+		assertMiningRule(block, core.ItemCoal, 15, true)
+	}
+	for _, block := range []core.BlockID{
+		core.CobblestoneID, core.SmoothStoneID, core.BrickID,
+		core.RoofTileID, core.MossyCobblestoneID,
+	} {
+		assertMiningRule(block, core.ItemNone, 30, true)
+		assertMiningRule(block, core.ItemBrokenStonePickaxe, 30, true)
+		assertMiningRule(block, core.ItemStonePickaxe, 15, true)
+		assertMiningRule(block, core.ItemIronPickaxe, 8, true)
+		assertMiningRule(block, core.ItemCoal, 30, false)
+	}
+}
+
 func TestMiningProgressPublishesAndIncrementsExactlyOnce(t *testing.T) {
 	engine, sessions, targets := readyMiningPlayers(t, 1)
 	session := sessions[0]
@@ -285,6 +315,10 @@ func TestMiningCompletionUsesFixedToolAndDropRules(t *testing.T) {
 		{"错误工具采发光块不掉落", core.LightBlockID, core.ItemStone, 30, core.ItemNone},
 		{"石镐采发光块", core.LightBlockID, core.ItemStonePickaxe, 15, core.ItemLightBlock},
 		{"铁镐采发光块", core.LightBlockID, core.ItemIronPickaxe, 8, core.ItemLightBlock},
+		{"裸手采沙子", core.SandID, core.ItemNone, 5, core.ItemSand},
+		{"普通物品采原木", core.OakLogID, core.ItemCoal, 15, core.ItemOakLog},
+		{"石镐采圆石", core.CobblestoneID, core.ItemStonePickaxe, 15, core.ItemCobblestone},
+		{"普通物品采砖块不掉落", core.BrickID, core.ItemCoal, 30, core.ItemNone},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

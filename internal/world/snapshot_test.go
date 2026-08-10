@@ -45,6 +45,12 @@ func TestContainerSnapshotRoundTripsEveryStorageKind(t *testing.T) {
 			make: func() *world.PalettedContainer {
 				c := world.NewPalettedContainer(core.AirID)
 				fillDistinct(c, 1, 256)
+				for i := 0; i < 256; i++ {
+					x := i & core.SectionMask
+					z := (i >> core.SectionShift) & core.SectionMask
+					y := (i >> (2 * core.SectionShift)) & core.SectionMask
+					c.Set(x, y, z, core.BlockID(i%int(core.MossyCobblestoneID+1)))
+				}
 				return c
 			},
 		},
@@ -221,6 +227,46 @@ func TestContainerSnapshotRejectsMalformedData(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := world.NewPalettedContainerFromSnapshot(tc.snapshot()); err == nil {
 				t.Fatal("想要快照验证错误")
+			}
+		})
+	}
+}
+
+func TestContainerSnapshotRejectsUnknownBlockEveryStorage(t *testing.T) {
+	unknown := core.MossyCobblestoneID + 1
+	tests := []struct {
+		name     string
+		snapshot world.ContainerSnapshot
+	}{
+		{
+			name: "single",
+			snapshot: world.ContainerSnapshot{
+				Kind:   world.StorageSingle,
+				Single: unknown,
+			},
+		},
+		{
+			name: "indexed",
+			snapshot: world.ContainerSnapshot{
+				Kind:    world.StorageIndexed,
+				Bits:    4,
+				Palette: []core.BlockID{core.AirID, unknown},
+				Packed:  make([]uint64, 256),
+			},
+		},
+		{
+			name: "direct",
+			snapshot: world.ContainerSnapshot{
+				Kind:   world.StorageDirect,
+				Bits:   15,
+				Packed: append([]uint64{uint64(unknown)}, make([]uint64, 1023)...),
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := world.NewPalettedContainerFromSnapshot(tc.snapshot); err == nil {
+				t.Fatalf("未注册方块 %d 被接受", unknown)
 			}
 		})
 	}

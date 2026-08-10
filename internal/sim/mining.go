@@ -40,9 +40,13 @@ func (state playerMiningState) update() MiningUpdate {
 
 func miningRule(block core.BlockID, held core.ItemID) (uint16, bool) {
 	switch block {
-	case core.DirtID, core.GrassID:
+	case core.DirtID, core.GrassID, core.SandID, core.GravelID, core.LeavesID,
+		core.GlassID, core.WhiteWoolID, core.ClayID, core.SnowBlockID:
 		return 5, true
-	case core.StoneID:
+	case core.OakLogID, core.OakPlanksID:
+		return 15, true
+	case core.StoneID, core.CobblestoneID, core.SmoothStoneID, core.BrickID,
+		core.RoofTileID, core.MossyCobblestoneID:
 		switch held {
 		case core.ItemNone, core.ItemBrokenStonePickaxe, core.ItemBrokenIronPickaxe:
 			return 30, true

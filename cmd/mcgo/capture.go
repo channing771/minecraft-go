@@ -217,6 +217,77 @@ func applyCaptureBlockLightRoomChanges(app *application) error {
 	return nil
 }
 
+func prepareMaterialsShowcase(app *application) error {
+	if err := prepareCaptureAirNeighborhood(app); err != nil {
+		return err
+	}
+	blocks := make(map[core.ChunkPos]map[core.BlockPos]core.BlockID)
+	setBlock := func(position core.BlockPos, block core.BlockID) {
+		chunk := position.Chunk()
+		if blocks[chunk] == nil {
+			blocks[chunk] = make(map[core.BlockPos]core.BlockID)
+		}
+		blocks[chunk][position] = block
+	}
+	materials := [...]core.BlockID{
+		core.CobblestoneID, core.SmoothStoneID, core.SandID, core.GravelID,
+		core.OakLogID, core.OakPlanksID, core.LeavesID, core.GlassID,
+		core.BrickID, core.WhiteWoolID, core.RoofTileID, core.ClayID,
+		core.SnowBlockID, core.MossyCobblestoneID,
+	}
+	columnStarts := [...]int32{-10, -7, -4, -1, 2, 5, 8}
+	for index, block := range materials {
+		startY := int32(1)
+		if index >= len(columnStarts) {
+			startY = 4
+		}
+		startX := columnStarts[index%len(columnStarts)]
+		for y := startY; y <= startY+1; y++ {
+			for x := startX; x <= startX+1; x++ {
+				setBlock(core.BlockPos{X: x, Y: y, Z: -8}, block)
+			}
+		}
+	}
+	for y := int32(4); y <= 5; y++ {
+		for x := int32(-10); x <= -9; x++ {
+			setBlock(core.BlockPos{X: x, Y: y, Z: -9}, core.BrickID)
+		}
+	}
+	for x := int32(-4); x <= 3; x++ {
+		setBlock(core.BlockPos{X: x, Y: 0, Z: -1}, core.GrassID)
+	}
+	for z := int32(-2); z <= 0; z++ {
+		for x := int32(0); x <= 3; x++ {
+			setBlock(core.BlockPos{X: x, Y: 4, Z: z}, core.StoneID)
+		}
+	}
+	for y := int32(1); y <= 3; y++ {
+		setBlock(core.BlockPos{X: 7, Y: y, Z: -1}, core.OakLogID)
+	}
+
+	for z := int32(-1); z <= 1; z++ {
+		for x := int32(-1); x <= 1; x++ {
+			chunk := core.ChunkPos{X: x, Z: z}
+			changes := make([]network.BlockChange, 0, len(blocks[chunk]))
+			for position, block := range blocks[chunk] {
+				changes = append(changes, network.BlockChange{Position: position, Block: block})
+			}
+			sort.Slice(changes, func(i, j int) bool {
+				left, _ := world.ChunkBlockIndex(changes[i].Position)
+				right, _ := world.ChunkBlockIndex(changes[j].Position)
+				return left < right
+			})
+			if err := applyCaptureMirror(app, network.BlockChanges{
+				Dimension: core.Overworld, Chunk: chunk,
+				BaseRevision: 1, NewRevision: 2, Changes: changes,
+			}); err != nil {
+				return fmt.Errorf("装入材料展示变化 (%d,%d): %w", x, z, err)
+			}
+		}
+	}
+	return nil
+}
+
 func applyCaptureMirror(app *application, message network.ServerMessage) error {
 	update, err := app.mirror.Apply(message)
 	if err != nil {
@@ -436,6 +507,25 @@ var captureScenes = []captureScene{
 			app.furnace.Reset()
 			app.chest.Reset()
 			return nil
+		},
+	},
+	{
+		Name:         "materials-showcase",
+		WarmupFrames: 8,
+		Prepare:      prepareMaterialsShowcase,
+		Apply: func(app *application) error {
+			app.worldTimeTicks = 6000
+			app.camera.Pos = mgl32.Vec3{0.5, 5.8, 13.5}
+			app.camera.Yaw = 0
+			app.camera.Pitch = -0.12
+			app.inventoryOpen = false
+			app.remotePlayers.Reset()
+			app.furnace.Reset()
+			app.chest.Reset()
+			if app.panel != nil {
+				app.panel.visible = false
+			}
+			return app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{}})
 		},
 	},
 }

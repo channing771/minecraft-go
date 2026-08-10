@@ -20,6 +20,48 @@ func TestCanonicalItemIDsStayStable(t *testing.T) {
 	}
 }
 
+func TestCommonBlockMaterialsAreFixedAndRoundTrip(t *testing.T) {
+	tests := []struct {
+		block core.BlockID
+		item  core.ItemID
+	}{
+		{core.CobblestoneID, core.ItemCobblestone},
+		{core.SmoothStoneID, core.ItemSmoothStone},
+		{core.SandID, core.ItemSand},
+		{core.GravelID, core.ItemGravel},
+		{core.OakLogID, core.ItemOakLog},
+		{core.OakPlanksID, core.ItemOakPlanks},
+		{core.LeavesID, core.ItemLeaves},
+		{core.GlassID, core.ItemGlass},
+		{core.BrickID, core.ItemBrick},
+		{core.WhiteWoolID, core.ItemWhiteWool},
+		{core.RoofTileID, core.ItemRoofTile},
+		{core.ClayID, core.ItemClay},
+		{core.SnowBlockID, core.ItemSnowBlock},
+		{core.MossyCobblestoneID, core.ItemMossyCobblestone},
+	}
+	for i, tc := range tests {
+		if tc.block != core.LightBlockID+1+core.BlockID(i) || tc.item != core.ItemLightBlock+1+core.ItemID(i) {
+			t.Fatalf("材料 %d 的稳定编号不连续: block=%d item=%d", i, tc.block, tc.item)
+		}
+		if !core.RegisteredBlock(tc.block) || !core.RegisteredItem(tc.item) {
+			t.Fatalf("材料 %d 未注册", i)
+		}
+		if got, ok := core.ItemPlacement(tc.item); !ok || got != tc.block {
+			t.Fatalf("ItemPlacement(%d)=(%d,%v)，想要 (%d,true)", tc.item, got, ok, tc.block)
+		}
+		if got, ok := core.BlockDrop(tc.block); !ok || got != tc.item {
+			t.Fatalf("BlockDrop(%d)=(%d,%v)，想要 (%d,true)", tc.block, got, ok, tc.item)
+		}
+		if limit, ok := core.ItemStackLimit(tc.item); !ok || limit != 64 {
+			t.Fatalf("ItemStackLimit(%d)=(%d,%v)，想要 (64,true)", tc.item, limit, ok)
+		}
+	}
+	if core.RegisteredBlock(core.MossyCobblestoneID + 1) {
+		t.Fatal("未知方块被注册")
+	}
+}
+
 func TestToolIDsAndStackLimitsAreStable(t *testing.T) {
 	if core.ItemStonePickaxe != 10 || core.ItemIronPickaxe != 11 {
 		t.Fatalf("工具 ID 发生变化: stone=%d iron=%d", core.ItemStonePickaxe, core.ItemIronPickaxe)

@@ -273,13 +273,13 @@ func worstLegalBenchmarkSnapshot() ChunkSnapshot {
 	sections := make([]SectionData, core.SectionsPerChunk)
 	valuesPerWord := 64 / 15
 	words := (core.BlocksPerSection + valuesPerWord - 1) / valuesPerWord
-	for index := range sections {
+	for section := range sections {
 		packed := make([]uint64, words)
-		for word := range packed {
-			packed[word] = (uint64(index+1)*0x0101010101010101 ^
-				uint64(word)*0x9e3779b97f4a7c15) & ((uint64(1) << 60) - 1)
+		for index := 0; index < core.BlocksPerSection; index++ {
+			value := uint64((section + index) % int(core.MossyCobblestoneID+1))
+			packed[index/valuesPerWord] |= value << uint((index%valuesPerWord)*15)
 		}
-		sections[index] = SectionData{Y: int32(index), Storage: SectionDirect, Bits: 15, Packed: packed}
+		sections[section] = SectionData{Y: int32(section), Storage: SectionDirect, Bits: 15, Packed: packed}
 	}
 	return ChunkSnapshot{Dimension: core.Overworld, Chunk: core.ChunkPos{X: -3, Z: 7}, Revision: 19, Sections: sections}
 }

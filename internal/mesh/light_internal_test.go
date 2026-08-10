@@ -10,6 +10,9 @@ import (
 type internalTestRegistry struct{}
 
 func (internalTestRegistry) Opaque(id world.BlockID) bool { return id != world.AirID }
+func (internalTestRegistry) FaceVisible(id, adjacent world.BlockID) bool {
+	return id != world.AirID && adjacent == world.AirID
+}
 func (internalTestRegistry) Material(world.BlockID, Face) uint16 {
 	return 0
 }
@@ -39,7 +42,8 @@ func (r *countingRegistry) Opaque(world.BlockID) bool {
 	return false
 }
 
-func (*countingRegistry) Material(world.BlockID, Face) uint16 { return 0 }
+func (*countingRegistry) FaceVisible(world.BlockID, world.BlockID) bool { return false }
+func (*countingRegistry) Material(world.BlockID, Face) uint16           { return 0 }
 func (r *countingRegistry) Emission(world.BlockID) uint8 {
 	r.emissionQueries++
 	return 0
