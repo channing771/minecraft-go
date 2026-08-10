@@ -1,13 +1,16 @@
 ## 1. 确定性橡树世界生成
 
-- [ ] 1.1 在 `internal/worldgen` 为 8×8 候选格、固定 salt、候选位置和树高增加最小纯计算，并以 `oreHash` 保持正负坐标的确定性；验证：`go test ./internal/worldgen -race -count=1`。
-- [ ] 1.2 让 `Generator.BaseBlockAt` 在既有自然材料和矿石判断基础上合并草地根、原始空气树干、固定四层树冠和原木优先级，并让 `GenerateChunk` 复用同一判断；验证：`go test ./internal/worldgen -race -count=1`。
-- [ ] 1.3 在 `internal/worldgen` 测试中覆盖候选与 50% 门槛、草地限制、树干原始空气、世界上界、树冠形状、树叶无碰撞、原木优先、负坐标、跨 chunk、单点/整块一致与旧区块不迁移；验证：`go test ./internal/worldgen -race -count=1`。
+- [ ] 1.1 先在 `internal/worldgen/generator_test.go` 写固定种子、正负坐标候选格的 RED 测试，独立断言 `oreHash` 的 8×8 候选、`hash&1 == 0` 的 50% 门槛、4..6 树高、草地根、原始空气树干及固定四层树冠；同一测试还须逐点比对跨 chunk 的 `BaseBlockAt` 与 `GenerateChunk`。验证：`go test ./internal/worldgen -run 'Test.*Oak' -count=1` 必须因尚无树木规则失败。
+- [ ] 1.2 仅在 1.1 RED 后，于 `internal/worldgen` 用既有 `oreHash` 增加 8×8 候选与树木覆盖纯判断，并让 `BaseBlockAt` 和 `GenerateChunk` 复用它；树叶只覆盖原始空气、原木优先，且不改既有树叶碰撞语义、ID 或生成格式。验证：`go test ./internal/worldgen -run 'Test.*Oak' -race -count=1`。
+- [ ] 1.3 在 GREEN 后临时 mutation 候选 parity、负坐标格划分、树高/树冠层或原木优先级；每个 mutation MUST 使 1.1 的测试失败，再立即恢复。永久测试须覆盖负坐标、世界上界和原木优先；验证：`go test ./internal/worldgen -run 'Test.*Oak' -race -count=1`。
+- [ ] 1.4 在 `internal/server/persistence_integration_test.go` 扩展既有 `TestWorldPersistsAcrossRestartAndGeneratorUpgrade`：把已保存区块中的橡木原木与树叶作为旧内容保存，使用会生成不同内容的升级 generator 重启 server，并断言已保存 chunk 的 hash/revision 与橡树方块保持不变且升级 generator 对已探索区块调用数为零。此测试必须经过 storage 的磁盘保存/加载和 server acquire 路径，不得以纯 `internal/worldgen` 测试替代。验证：`go test ./internal/server -run TestWorldPersistsAcrossRestartAndGeneratorUpgrade -race -count=1`。
 
 ## 2. 无窗口橡树林视觉验收
 
-- [ ] 2.1 在 `cmd/mcgo/capture.go` 与 `cmd/mcgo/capture_test.go` 的现有表驱动场景机制中，以固定种子生成固定区块的方式在全部现有场景末尾加入 `oak-grove`，并固定正午、相机、mirror、mesher、renderer 与 upload 收敛路径；验证：`go test ./cmd/mcgo -race -count=1`。
-- [ ] 2.2 在受支持的无窗口图形环境显式更新并逐张复核实际变化的视觉基线，只加入 `oak-grove` 所需 golden；验证：`go run ./cmd/mcgo --capture <输出目录> --update-golden`，随后 `go run ./cmd/mcgo --capture <输出目录>`。
+- [ ] 2.1 先在 `cmd/mcgo/capture_test.go` 为表驱动场景写 `oak-grove` RED：它必须位于所有既有场景之后，并以固定 seed 与固定生成 chunk 经 mirror、mesher、renderer、upload 夹具收敛，固定正午和相机；验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -count=1` 必须因场景未注册或夹具缺失失败。
+- [ ] 2.2 仅在 2.1 RED 后，在 `cmd/mcgo/capture.go` 注册 `oak-grove` 并实现固定夹具与 Apply；不得新增渲染旁路、前台窗口或可调输入。验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -race -count=1`。
+- [ ] 2.3 在 GREEN 后临时删除场景、改动其末尾顺序、seed/chunk/正午/相机之一或绕过 mirror/mesher；每个 mutation MUST 使 2.1 测试失败，再立即恢复。验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -race -count=1`。
+- [ ] 2.4 在受支持的无窗口图形环境显式更新并逐张复核实际变化的视觉基线，只加入 `oak-grove` 所需 golden；验证：`go run ./cmd/mcgo --capture <输出目录> --update-golden`，随后 `go run ./cmd/mcgo --capture <输出目录>`。
 
 ## 3. 收尾验证
 
