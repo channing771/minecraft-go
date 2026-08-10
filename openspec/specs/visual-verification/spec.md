@@ -131,7 +131,7 @@
 
 `materials-showcase` MUST 保持既有固定正午、固定相机和确定性夹具，并经正常客户端镜像、mesher、renderer 与 upload 路径收敛后无窗口抓取，不得创建或聚焦前台游戏窗口。夹具 MUST 同时覆盖 14 种新材料、八格连续草地、相邻玻璃、相邻树叶，以及原木顶面年轮与侧面树皮。既有双阈值 MUST 保持不变。
 
-抓帧场景清单 MUST 在全部既有场景末尾追加 `target-block-feedback`。该场景 MUST 使用固定正午、固定相机和确定性夹具，且经正常客户端镜像、mesher、renderer、depth 与 name-tag 路径收敛后无窗口抓取。它 MUST 命中一个已注册材料方块，并同时可审查细轮廓、中文名称和正确的遮挡关系；抓帧或比对 MUST NOT 使用隐藏目标提示的专用开关。`inventory-crafting` 因打开背包而隐藏目标提示，其 golden MUST 保持逐字节不变。
+抓帧场景清单 MUST 保留 `target-block-feedback`，并在全部既有场景末尾追加 `oak-grove`。`target-block-feedback` MUST 使用固定正午、固定相机和确定性夹具，且经正常客户端镜像、mesher、renderer、depth 与 name-tag 路径收敛后无窗口抓取。它 MUST 命中一个已注册材料方块，并同时可审查细轮廓、中文名称和正确的遮挡关系；抓帧或比对 MUST NOT 使用隐藏目标提示的专用开关。`inventory-crafting` 因打开背包而隐藏目标提示，其目标提示隐藏状态、背包与合成区域语义 MUST 保持不变；若世界生成改变共享地形背景，其 golden MAY 在逐图复核后更新。`oak-grove` MUST 使用固定世界种子、固定生成区块、固定正午和固定相机，并经正常客户端 mirror、mesher、renderer 与 upload 路径收敛后无窗口抓取，不得创建或聚焦前台游戏窗口。
 
 #### Scenario: 地形与 HUD 风格变化产生可审查基线
 
@@ -162,15 +162,22 @@
 
 #### Scenario: 共享地形变化需完整复核
 
-- **GIVEN** 世界坐标 UV 改变了多个既有场景的共享地形背景
+- **GIVEN** 世界生成或世界坐标 UV 改变了多个既有场景的共享地形背景
 - **WHEN** 显式更新视觉基线
 - **THEN** 系统 MUST 只写入实际变化的 golden，调用方 MUST 逐张复核全部场景图像后才能接受更新
 
-#### Scenario: 目标反馈位于场景表末尾
+#### Scenario: 橡树林位于场景表末尾
 
 - **GIVEN** 既有无窗口场景清单保持原顺序
-- **WHEN** 注册 `target-block-feedback`
-- **THEN** 它 MUST 位于场景表末尾，且此前场景的名称与顺序 MUST 保持不变
+- **WHEN** 注册 `oak-grove`
+- **THEN** `oak-grove` MUST 位于场景表末尾，且此前场景的名称与顺序 MUST 保持不变
+
+#### Scenario: 橡树林通过正常渲染链路抓取
+
+- **GIVEN** `oak-grove` 的固定世界种子、生成区块、正午时间与相机已经装入客户端镜像
+- **WHEN** 场景完成预热、网格收敛和上传并抓帧
+- **THEN** 图像 MUST 由正常 mirror、mesher、renderer 与 upload 路径产出，且 MUST 显示固定橡树地貌
+- **AND** 抓帧 MUST NOT 创建或聚焦前台游戏窗口，且 MUST 继续使用既有双阈值
 
 #### Scenario: 目标反馈通过正常渲染链路验证遮挡
 
@@ -184,7 +191,8 @@
 - **GIVEN** `inventory-crafting` 场景打开背包
 - **WHEN** 显式更新所有视觉基线
 - **THEN** `inventory-crafting` MUST 不显示目标轮廓或名称
-- **AND** 它的 golden MUST 与变更前逐字节相同
+- **AND** 背包与合成区域的可观察语义 MUST 保持不变
+- **AND** 只有经逐图复核确认由共享地形背景变化引起时，它的 golden MAY 更新
 
 ### Requirement: 视觉基线覆盖调试面板
 
