@@ -85,6 +85,47 @@ func TestOakTreeCandidateIsStable(t *testing.T) {
 	}
 }
 
+// TestOakTreeCandidateUsesFullHalfGateAndMinimumHeight 锁定两个实际能生成的
+// 草地候选。若把 50% selector 收窄为 hash&3，或删掉高度 4，此测试必须失败。
+func TestOakTreeCandidateUsesFullHalfGateAndMinimumHeight(t *testing.T) {
+	generator := New(42)
+	tests := []struct {
+		name         string
+		cellX, cellZ int32
+		hash         uint64
+		root         core.BlockPos
+		height       int32
+	}{
+		{
+			name:  "grass candidate with low two bits 10",
+			cellX: -6, cellZ: -8,
+			hash: 0x4bf962227963310e,
+			root: core.BlockPos{X: -41, Y: 65, Z: -64}, height: 5,
+		},
+		{
+			name:  "grass candidate with minimum height four",
+			cellX: -7, cellZ: 0,
+			hash: 0x81e502aff310dc3e,
+			root: core.BlockPos{X: -49, Y: 78, Z: 3}, height: 4,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := oreHash(42, core.BlockPos{X: test.cellX, Z: test.cellZ}, oakTreeSalt); got != test.hash {
+				t.Fatalf("oreHash(cell=(%d,%d))=%016x，想要 %016x", test.cellX, test.cellZ, got, test.hash)
+			}
+			tree, spawned := generator.oakTreeForCell(test.cellX, test.cellZ)
+			if !spawned {
+				t.Fatalf("oakTreeForCell(%d,%d) 未生成橡树", test.cellX, test.cellZ)
+			}
+			if tree.Root != test.root || tree.Height != test.height {
+				t.Fatalf("oakTreeForCell(%d,%d)=%+v，想要 root=%+v height=%d",
+					test.cellX, test.cellZ, tree, test.root, test.height)
+			}
+		})
+	}
+}
+
 func TestOakTreeBlockAtUsesFixedCrownAndLogPriority(t *testing.T) {
 	tree := oakTree{Root: core.BlockPos{X: 0, Y: 65, Z: 0}, Height: 5}
 	for y := int32(65); y <= 69; y++ {
@@ -184,8 +225,10 @@ func TestApplyOakTreesKeepsIntersectingLogsIndependentOfOrder(t *testing.T) {
 	}
 
 	forward, reverse := world.NewChunk(chunkPos), world.NewChunk(chunkPos)
-	applyOakTreesInOrderForTest(forward, leafTree, logTree)
-	applyOakTreesInOrderForTest(reverse, logTree, leafTree)
+	applyOakTree(forward, leafTree)
+	applyOakTree(forward, logTree)
+	applyOakTree(reverse, logTree)
+	applyOakTree(reverse, leafTree)
 	assertChunksHaveSameBlocks(t, forward, reverse)
 	lx, _, lz := intersection.Local()
 	if got := forward.BlockAt(lx, intersection.Y, lz); got != core.OakLogID {
@@ -232,35 +275,6 @@ func generatedChunkWithoutTrees(generator *Generator, position core.ChunkPos) *w
 		}
 	}
 	return chunk
-}
-
-// applyOakTreesInOrderForTest 以 applyOakTrees 相同的覆盖规则应用给定树列，
-// 仅用于把候选遍历顺序固定为正序或逆序。
-func applyOakTreesInOrderForTest(chunk *world.Chunk, trees ...oakTree) {
-	for _, tree := range trees {
-		for y := tree.Root.Y; y <= tree.Root.Y+tree.Height; y++ {
-			for z := tree.Root.Z - 2; z <= tree.Root.Z+2; z++ {
-				for x := tree.Root.X - 2; x <= tree.Root.X+2; x++ {
-					position := core.BlockPos{X: x, Y: y, Z: z}
-					if position.Chunk() != chunk.Pos {
-						continue
-					}
-					block := oakTreeBlockAt(tree, position)
-					if block == core.AirID {
-						continue
-					}
-					lx, _, lz := position.Local()
-					current := chunk.BlockAt(lx, y, lz)
-					if block == core.OakLogID && (current == core.AirID || current == core.LeavesID) {
-						chunk.SetBlock(lx, y, lz, block)
-					}
-					if block == core.LeavesID && current == core.AirID {
-						chunk.SetBlock(lx, y, lz, block)
-					}
-				}
-			}
-		}
-	}
 }
 
 func assertChunksHaveSameBlocks(t *testing.T, left, right *world.Chunk) {

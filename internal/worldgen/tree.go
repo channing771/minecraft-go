@@ -99,26 +99,31 @@ func (g *Generator) applyOakTrees(chunk *world.Chunk) {
 			if !ok {
 				continue
 			}
-			for y := tree.Root.Y; y <= tree.Root.Y+tree.Height; y++ {
-				for z := tree.Root.Z - 2; z <= tree.Root.Z+2; z++ {
-					for x := tree.Root.X - 2; x <= tree.Root.X+2; x++ {
-						pos := core.BlockPos{X: x, Y: y, Z: z}
-						if pos.Chunk() != chunk.Pos {
-							continue
-						}
-						block := oakTreeBlockAt(tree, pos)
-						if block == core.AirID {
-							continue
-						}
-						lx, _, lz := pos.Local()
-						current := chunk.BlockAt(lx, y, lz)
-						if block == core.OakLogID && (current == core.AirID || current == core.LeavesID) {
-							chunk.SetBlock(lx, y, lz, block)
-						}
-						if block == core.LeavesID && current == core.AirID {
-							chunk.SetBlock(lx, y, lz, block)
-						}
-					}
+			applyOakTree(chunk, tree)
+		}
+	}
+}
+
+// applyOakTree 按原木优先、树叶仅覆盖空气的规则把一棵树写入当前区块。
+func applyOakTree(chunk *world.Chunk, tree oakTree) {
+	for y := tree.Root.Y; y <= tree.Root.Y+tree.Height; y++ {
+		for z := tree.Root.Z - 2; z <= tree.Root.Z+2; z++ {
+			for x := tree.Root.X - 2; x <= tree.Root.X+2; x++ {
+				pos := core.BlockPos{X: x, Y: y, Z: z}
+				if pos.Chunk() != chunk.Pos {
+					continue
+				}
+				block := oakTreeBlockAt(tree, pos)
+				if block == core.AirID {
+					continue
+				}
+				lx, _, lz := pos.Local()
+				current := chunk.BlockAt(lx, y, lz)
+				if block == core.OakLogID && (current == core.AirID || current == core.LeavesID) {
+					chunk.SetBlock(lx, y, lz, block)
+				}
+				if block == core.LeavesID && current == core.AirID {
+					chunk.SetBlock(lx, y, lz, block)
 				}
 			}
 		}
