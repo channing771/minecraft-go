@@ -29,3 +29,5 @@
 - [x] 6.1 回读 `proposal.md`、两个 delta spec、`design.md` 与本文件，完成每项实现后勾选对应任务；验证：`openspec validate target-block-feedback --strict --no-interactive`。
 - [x] 6.2 同步 `voxel-visual-presentation` 与 `visual-verification` 主规格并归档本 change，不修改其他 change；验证：`openspec validate --all --strict --no-interactive`、`openspec archive target-block-feedback --yes` 与 `test -z "$(openspec list --json | grep target-block-feedback || true)"`。
 - [x] 6.3 完成收尾质量门禁；验证：`gofmt -l .`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`git diff --check`、`openspec validate --all --strict --no-interactive` 和无窗口 `make visual-check`。
+- [x] 6.4 提交并推送 `codex/target-block-feedback`，创建以 `main` 为 base 的 ready PR；验证：远端分支与本地 `HEAD` 一致，且 PR 为非 draft。
+- [x] 6.5 在 PR 描述中列出目标隐藏条件、十二轮廓实例与八名牌容量、pass 顺序、实际 golden 清单、`inventory-crafting.png` 未变、无协议或 schema 变更及完整无窗口验证证据。
