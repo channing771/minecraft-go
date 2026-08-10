@@ -25,10 +25,12 @@ import (
 )
 
 type options struct {
-	Listen     string
-	World      string
-	Seed       int64
-	MaxPlayers int
+	Listen           string
+	World            string
+	Seed             int64
+	MaxPlayers       int
+	MigrateMaterials bool
+	Backup           string
 	// Config 是调参配置文件路径；留空表示使用 config.DefaultPath()。
 	Config string
 }
@@ -38,10 +40,11 @@ type mcgodHost interface {
 }
 
 type dependencies struct {
-	openDisk  func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error)
-	listenTCP func(string) (network.Listener, error)
-	newHost   func(server.Config, server.Generator, storage.WorldStore) mcgodHost
-	logger    *slog.Logger
+	openDisk         func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error)
+	listenTCP        func(string) (network.Listener, error)
+	newHost          func(server.Config, server.Generator, storage.WorldStore) mcgodHost
+	migrateMaterials func(context.Context, string, string) error
+	logger           *slog.Logger
 }
 
 func parseOptions(args []string) (options, error) {
@@ -52,6 +55,8 @@ func parseOptions(args []string) (options, error) {
 	seed := flags.Int64("seed", 42, "新世界种子")
 	maxPlayers := flags.Int("max-players", 8, "最大玩家数（1..8，默认 8）")
 	configPath := flags.String("config", "", "配置文件路径，留空使用默认路径")
+	migrate := flags.Bool("migrate-materials", false, "离线迁移旧世界自然材料")
+	backup := flags.String("backup", "", "材料迁移完整备份目录")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -71,9 +76,19 @@ func parseOptions(args []string) (options, error) {
 	if *maxPlayers < 1 || *maxPlayers > 8 {
 		return options{}, fmt.Errorf("--max-players 必须在 1..8 之间，实际为 %d", *maxPlayers)
 	}
+	backupPath := strings.TrimSpace(*backup)
+	if *migrate && backupPath == "" {
+		return options{}, errors.New("--migrate-materials 必须配合非空 --backup")
+	}
+	if !*migrate && backupPath != "" {
+		return options{}, errors.New("--backup 只能配合 --migrate-materials")
+	}
+	if backupPath != "" {
+		backupPath = filepath.Clean(backupPath)
+	}
 	return options{
 		Listen: listenAddress, World: filepath.Clean(*world), Seed: *seed, MaxPlayers: *maxPlayers,
-		Config: *configPath,
+		Config: *configPath, MigrateMaterials: *migrate, Backup: backupPath,
 	}, nil
 }
 
@@ -99,7 +114,8 @@ func defaultDependencies() dependencies {
 		newHost: func(config server.Config, generator server.Generator, store storage.WorldStore) mcgodHost {
 			return server.NewHost(config, generator, store)
 		},
-		logger: slog.Default(),
+		migrateMaterials: migrateMaterials,
+		logger:           slog.Default(),
 	}
 }
 
@@ -110,6 +126,10 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 	options, err := parseOptions(args)
 	if err != nil {
 		return err
+	}
+	if options.MigrateMaterials {
+		dependencies := mergeDependencies(injected)
+		return dependencies.migrateMaterials(ctx, options.World, options.Backup)
 	}
 	effective, err := resolveConfig(options)
 	if err != nil {
@@ -154,6 +174,9 @@ func mergeDependencies(injected dependencies) dependencies {
 	}
 	if injected.newHost != nil {
 		defaults.newHost = injected.newHost
+	}
+	if injected.migrateMaterials != nil {
+		defaults.migrateMaterials = injected.migrateMaterials
 	}
 	if injected.logger != nil {
 		defaults.logger = injected.logger

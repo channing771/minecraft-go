@@ -24,9 +24,9 @@
 
 ## 6. 接入互斥的 mcgod 离线命令
 
-- [ ] 6.1 在 `cmd/mcgod` 入口测试中增加 RED 覆盖：`--migrate-materials` 必须配合 `--backup`、迁移不监听 TCP/不启动服务端、锁冲突失败和同参数续跑；运行 `go test ./cmd/mcgod -run "MigrateMaterials" -count=1` 确认失败。
-- [ ] 6.2 修改 `cmd/mcgod` 入口，接入 `mcgod --world <世界目录> --migrate-materials --backup <备份目录>` 并调用 `material_migration.go` 的 runner，拒绝与常驻服务启动混用；运行 `go test ./cmd/mcgod -race -count=1`。
-- [ ] 6.3 使用真实临时磁盘世界执行命令级验证，确认 schema v8、protocol v15、metadata v2 不变；运行 `go test ./cmd/mcgod ./internal/storage -race -count=1`、`gofmt -w cmd/mcgod internal/storage`、`gofmt -l cmd/mcgod internal/storage` 和 `git diff --check`。
+- [x] 6.1 在 `cmd/mcgod` 入口测试中增加 RED 覆盖：`--migrate-materials` 必须配合 `--backup`、迁移不监听 TCP/不启动服务端、锁冲突失败和同参数续跑；运行 `go test ./cmd/mcgod -run "MigrateMaterials" -count=1` 确认失败。
+- [x] 6.2 修改 `cmd/mcgod` 入口，接入 `mcgod --world <世界目录> --migrate-materials --backup <备份目录>` 并调用 `material_migration.go` 的 runner，拒绝与常驻服务启动混用；运行 `go test ./cmd/mcgod -race -count=1`。
+- [x] 6.3 使用真实临时磁盘世界执行命令级验证，确认 schema v8、protocol v15、metadata v2 不变；运行 `go test ./cmd/mcgod ./internal/storage -race -count=1`、`gofmt -w cmd/mcgod internal/storage`、`gofmt -l cmd/mcgod internal/storage` 和 `git diff --check`。
 
 ## 7. 真实磁盘纵向验证、归档与 PR
 
