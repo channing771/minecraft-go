@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -76,6 +77,170 @@ func TestParseOptionsRejectsInvalidArguments(t *testing.T) {
 		if _, err := parseOptions(args); err == nil {
 			t.Fatalf("parseOptions(%v) accepted invalid options", args)
 		}
+	}
+}
+
+func TestParseOptionsMigrateMaterialsRequiresBackup(t *testing.T) {
+	for _, args := range [][]string{
+		{"--migrate-materials"},
+		{"--migrate-materials", "--backup", "   "},
+		{"--backup", "backups/world"},
+	} {
+		if _, err := parseOptions(args); err == nil {
+			t.Fatalf("parseOptions(%v) 接受了不互斥的迁移参数", args)
+		}
+	}
+
+	got, err := parseOptions([]string{
+		"--world", "worlds/./legacy",
+		"--migrate-materials",
+		"--backup", "backups/./legacy",
+	})
+	if err != nil {
+		t.Fatalf("parseOptions 拒绝有效迁移参数: %v", err)
+	}
+	if !got.MigrateMaterials || got.World != "worlds/legacy" || got.Backup != "backups/legacy" {
+		t.Fatalf("迁移 options = %+v", got)
+	}
+}
+
+func TestRunMigrateMaterialsReturnsBeforeConfigAndServerAssembly(t *testing.T) {
+	invalidConfig := filepath.Join(t.TempDir(), "invalid.json")
+	if err := os.WriteFile(invalidConfig, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("迁移已停止")
+	ctx := context.Background()
+	called := 0
+	err := run(ctx, []string{
+		"--world", "worlds/./legacy",
+		"--migrate-materials",
+		"--backup", "backups/./legacy",
+		"--config", invalidConfig,
+	}, dependencies{
+		migrateMaterials: func(gotContext context.Context, world, backup string) error {
+			called++
+			if gotContext != ctx || world != "worlds/legacy" || backup != "backups/legacy" {
+				t.Fatalf("迁移调用 context/world/backup = %v/%q/%q", gotContext, world, backup)
+			}
+			return want
+		},
+		openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
+			t.Fatal("迁移模式打开了普通 server store")
+			return nil, nil
+		},
+		listenTCP: func(string) (network.Listener, error) {
+			t.Fatal("迁移模式监听了 TCP")
+			return nil, nil
+		},
+		newHost: func(server.Config, server.Generator, storage.WorldStore) mcgodHost {
+			t.Fatal("迁移模式构造了 host")
+			return nil
+		},
+	})
+	if !errors.Is(err, want) || called != 1 {
+		t.Fatalf("run 迁移错误/调用次数 = %v/%d，期望 %v/1", err, called, want)
+	}
+}
+
+func TestRunMigrateMaterialsReturnsWorldLockConflict(t *testing.T) {
+	ctx := context.Background()
+	worldPath := filepath.Join(t.TempDir(), "world")
+	store, err := storage.OpenDisk(ctx, worldPath, storage.OpenOptions{Create: storage.Metadata{
+		FormatVersion: 2,
+		Seed:          42,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	err = run(ctx, []string{
+		"--world", worldPath,
+		"--migrate-materials",
+		"--backup", filepath.Join(t.TempDir(), "backup"),
+	}, migrationOnlyDependencies(t))
+	if !errors.Is(err, storage.ErrWorldLocked) {
+		t.Fatalf("锁冲突迁移错误 = %v，期望 ErrWorldLocked", err)
+	}
+	if _, err := os.Stat(filepath.Join(worldPath, materialMigrationStateName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("锁冲突后出现迁移状态，Stat 错误: %v", err)
+	}
+}
+
+func TestRunMigrateMaterialsDoesNotCreateMissingWorld(t *testing.T) {
+	root := t.TempDir()
+	worldPath := filepath.Join(root, "missing-world")
+	err := run(context.Background(), []string{
+		"--world", worldPath,
+		"--migrate-materials",
+		"--backup", filepath.Join(root, "backup"),
+	}, migrationOnlyDependencies(t))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("缺失 world.meta 的迁移错误 = %v，期望 os.ErrNotExist", err)
+	}
+	if _, err := os.Stat(worldPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("迁移创建了缺失世界，Stat 错误: %v", err)
+	}
+}
+
+func TestRunMigrateMaterialsCompletesAndRerunsWithSameArguments(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	worldPath := filepath.Join(root, "world")
+	backupPath := filepath.Join(root, "backup")
+	store, err := storage.OpenDisk(ctx, worldPath, storage.OpenOptions{Create: storage.Metadata{
+		FormatVersion:  2,
+		Seed:           42,
+		SpawnDimension: core.Overworld,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{
+		"--world", worldPath,
+		"--migrate-materials",
+		"--backup", backupPath,
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := run(ctx, args, migrationOnlyDependencies(t)); err != nil {
+			t.Fatalf("第 %d 次材料迁移失败: %v", attempt, err)
+		}
+	}
+	if state := readMaterialMigrationStateForTest(t, worldPath); !state.Complete {
+		t.Fatal("同参数重跑后迁移状态未完成")
+	}
+	reopened, err := storage.OpenDisk(ctx, worldPath, storage.OpenOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if got := reopened.Metadata().FormatVersion; got != 2 {
+		t.Fatalf("迁移后 metadata 版本 = %d，期望 2", got)
+	}
+	if network.ProtocolVersion != 15 {
+		t.Fatalf("迁移命令改变了协议版本: %d", network.ProtocolVersion)
+	}
+}
+
+func migrationOnlyDependencies(t *testing.T) dependencies {
+	t.Helper()
+	return dependencies{
+		openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
+			t.Fatal("迁移模式打开了普通 server store")
+			return nil, nil
+		},
+		listenTCP: func(string) (network.Listener, error) {
+			t.Fatal("迁移模式监听了 TCP")
+			return nil, nil
+		},
+		newHost: func(server.Config, server.Generator, storage.WorldStore) mcgodHost {
+			t.Fatal("迁移模式构造了 host")
+			return nil
+		},
 	}
 }
 
