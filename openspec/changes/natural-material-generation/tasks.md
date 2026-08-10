@@ -12,9 +12,9 @@
 
 ## 4. 在世界锁内创建可验证的完整备份
 
-- [ ] 4.1 在 `internal/storage` 增加 RED 故障注入测试，覆盖具体 `DiskStore.Backup` 的完整复制与同步、源目录内备份拒绝、symlink/临时文件处理、既有目录拒绝和匹配 `.mcgo-world-backup-v1.json` 的幂等复用；运行 `go test ./internal/storage -run "Backup" -count=1` 确认失败。
-- [ ] 4.2 修改 `internal/storage` 的具体 `DiskStore`，实现带 `.mcgo-world-backup-v1.json` 身份的外部完整 `Backup`，并保证失败或取消时源世界逐字节不变；不增加迁移、进度或 `worldgen` 依赖，运行 `go test ./internal/storage -race -count=1`。
-- [ ] 4.3 运行备份故障注入与格式检查：`gofmt -w internal/storage`、`gofmt -l internal/storage` 和 `git diff --check`。
+- [x] 4.1 在 `internal/storage` 增加 RED 故障注入测试，覆盖具体 `DiskStore.Backup` 的完整复制与同步、源目录内备份拒绝、symlink/临时文件处理、既有目录拒绝和匹配 `.mcgo-world-backup-v1.json` 的幂等复用；运行 `go test ./internal/storage -run "Backup" -count=1` 确认失败。
+- [x] 4.2 修改 `internal/storage` 的具体 `DiskStore`，实现带 `.mcgo-world-backup-v1.json` 身份的外部完整 `Backup`，并保证失败或取消时源世界逐字节不变；不增加迁移、进度或 `worldgen` 依赖，运行 `go test ./internal/storage -race -count=1`。
+- [x] 4.3 运行备份故障注入与格式检查：`gofmt -w internal/storage`、`gofmt -l internal/storage` 和 `git diff --check`。
 
 ## 5. 实现七种自然值的幂等迁移内核
 
