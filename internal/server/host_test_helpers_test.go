@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -64,6 +65,15 @@ func playerIdentity(number byte) network.Identity {
 	return network.Identity{
 		PlayerID:    core.PlayerID{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, number},
 		DisplayName: fmt.Sprintf("player-%d", number),
+	}
+}
+
+func assertLoginRejectCode(t *testing.T, err error, want network.LoginRejectCode) {
+	t.Helper()
+	var remote *network.RemoteError
+	if !errors.As(err, &remote) || remote.State != network.StateLogin ||
+		network.LoginRejectCode(remote.Code) != want {
+		t.Fatalf("login error = %v, want code %d", err, want)
 	}
 }
 

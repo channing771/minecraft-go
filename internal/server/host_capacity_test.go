@@ -356,15 +356,6 @@ func loginEightMemoryPlayers(t *testing.T, host *Host) []testLogin {
 	return logins
 }
 
-func assertLoginRejectCode(t *testing.T, err error, want network.LoginRejectCode) {
-	t.Helper()
-	var remote *network.RemoteError
-	if !errors.As(err, &remote) || remote.State != network.StateLogin ||
-		network.LoginRejectCode(remote.Code) != want {
-		t.Fatalf("login error = %v, want code %d", err, want)
-	}
-}
-
 func assertLoginCanAdvance(t *testing.T, login testLogin, sequence uint64) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
