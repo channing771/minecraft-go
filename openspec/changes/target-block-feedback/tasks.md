@@ -4,8 +4,8 @@
 
 ## 2. 中文名称与本地目标选择
 
-- [ ] 2.1 在 `internal/core/block_name.go` 与 `internal/core/block_name_test.go` 增加稳定的注册 `BlockID` 中文名查询，覆盖全部已注册 ID 的非空结果和未知 ID 失败；验证：`go test ./internal/core -race -count=1`。
-- [ ] 2.2 在 `cmd/mcgo/target_block.go` 与 `cmd/mcgo/target_block_test.go` 从相机、只读镜像和 `core.RaycastBlocks` 派生六格本地目标，覆盖完整已加载路径、空气/未注册/超距、未 ready、UI、断开和 reset 的清空行为；验证：`go test ./cmd/mcgo -race -count=1`。
+- [x] 2.1 在 `internal/core/block_name.go` 与 `internal/core/block_name_test.go` 增加稳定的注册 `BlockID` 中文名查询，覆盖全部已注册 ID 的非空结果和未知 ID 失败；验证：`go test ./internal/core -race -count=1`。
+- [x] 2.2 在 `cmd/mcgo/target_block.go` 与 `cmd/mcgo/target_block_test.go` 从相机、只读镜像和 `core.RaycastBlocks` 派生六格本地目标，覆盖完整已加载路径、空气/未注册/超距、未 ready、UI、断开和 reset 的清空行为；验证：`go test ./cmd/mcgo -race -count=1`。
 
 ## 3. 固定十二边深度轮廓 renderer
 
