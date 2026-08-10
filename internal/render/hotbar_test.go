@@ -736,15 +736,14 @@ func TestHotbarPrepareReusesLayoutAndUploadStorage(t *testing.T) {
 		upload: make([]byte, hotbarUploadBytes),
 	}
 	inventory := fullTestInventory()
-	overlay := fullFurnaceOverlay()
 	health := HealthOverlay{Confirmed: true, Value: 7}
 	budget := NewUploadBudget(1024)
-	if err := renderer.Prepare(inventory, true, 3, overlay, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
+	if err := renderer.Prepare(inventory, true, 3, nil, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
 		t.Fatalf("warm Prepare: %v", err)
 	}
 	allocations := testing.AllocsPerRun(1000, func() {
 		source.requestCount = 0
-		if err := renderer.Prepare(inventory, true, 3, overlay, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
+		if err := renderer.Prepare(inventory, true, 3, nil, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
 			panic(err)
 		}
 	})
@@ -852,6 +851,9 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
+	if got := inventoryRecipeIDs[len(inventoryRecipeIDs)-1]; got != core.RecipeOakPlanks {
+		t.Fatalf("固定配方末项=%d，想要橡木木板配方 %d", got, core.RecipeOakPlanks)
+	}
 
 	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
 	// source=-1：四层背包分组面板加选中框，没有来源高亮；空背包没有物品色块。
@@ -859,8 +861,8 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		t.Fatalf("空背包 quads=%d，想要分组面板、选中框、36 格和 %d 个配方实例共 %d",
 			len(open.quads), recipeQuads, openInventoryPanelQuads+1+core.InventorySlots+recipeQuads)
 	}
-	if len(open.glyphs) != 14 {
-		t.Fatalf("六条配方数字=%d，想要隐藏单件输出并为其余数字绘制阴影共 14", len(open.glyphs))
+	if len(open.glyphs) != 16 {
+		t.Fatalf("七条配方数字=%d，想要隐藏数量 1 并为其余数字绘制阴影共 16", len(open.glyphs))
 	}
 	overlay := open.quads[len(open.quads)-recipeQuads:]
 	wantItems := [][2]core.ItemID{
@@ -870,8 +872,9 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		{core.ItemStone, core.ItemStonePickaxe},
 		{core.ItemIronIngot, core.ItemIronPickaxe},
 		{core.ItemStone, core.ItemChest},
+		{core.ItemOakLog, core.ItemOakPlanks},
 	}
-	for row, y := range []float32{420, 368, 316, 264, 212, 160} {
+	for row, y := range []float32{420, 368, 316, 264, 212, 160, 108} {
 		start := 1 + row*9
 		input, output := overlay[start], overlay[start+3]
 		inputFace, outputFace := overlay[start+2], overlay[start+5]
@@ -972,6 +975,7 @@ func TestRecipeButtonHitTestMatchesDrawnGeometry(t *testing.T) {
 		{"石镐", 265, core.RecipeStonePickaxe},
 		{"铁镐", 213, core.RecipeIronPickaxe},
 		{"箱子", 161, core.RecipeChest},
+		{"橡木木板", 109, core.RecipeOakPlanks},
 	} {
 		got, ok := RecipeButtonAt(513, test.y, 1280, 720)
 		if !ok || got != test.recipe {

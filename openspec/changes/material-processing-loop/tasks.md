@@ -19,8 +19,8 @@
 
 ## 6. 七行固定合成 HUD
 
-- [ ] 6.1 在 `internal/render/hotbar.go` 将固定 recipe ID 列表扩为七条并从其长度同步更新面板、绘制、命中和固定容量；在 `internal/render/hotbar_test.go` 与 `cmd/mcgo/app_test.go` 覆盖 640×360 的第七行、命中矩形、容量和应用层点击；运行 `go test ./internal/render ./cmd/mcgo -race -count=1`。
-- [ ] 6.2 通过 `cmd/mcgo/capture.go` 的现有无窗口 `inventory-crafting` 场景更新且只更新 `cmd/mcgo/testdata/golden/inventory-crafting.png`；运行 `make visual-update`，再用 `test "$(git diff --name-only -- cmd/mcgo/testdata/golden)" = "cmd/mcgo/testdata/golden/inventory-crafting.png"` 断言没有其他 golden 变化，随后运行 `make visual-check` 与 `git diff --check`；不得启动或聚焦前台窗口。
+- [x] 6.1 在 `internal/render/hotbar.go` 将固定 recipe ID 列表扩为七条并从其长度同步更新面板、绘制、命中和固定容量；在 `internal/render/hotbar_test.go` 与 `cmd/mcgo/app_test.go` 覆盖 640×360 的第七行、命中矩形、容量和应用层点击；运行 `go test ./internal/render ./cmd/mcgo -race -count=1`。
+- [x] 6.2 通过 `cmd/mcgo/capture.go` 的现有无窗口 `inventory-crafting` 场景更新且只更新 `cmd/mcgo/testdata/golden/inventory-crafting.png`；运行 `make visual-update`，再用 `test "$(git diff --name-only -- cmd/mcgo/testdata/golden)" = "cmd/mcgo/testdata/golden/inventory-crafting.png"` 断言没有其他 golden 变化，随后运行 `make visual-check` 与 `git diff --check`；不得启动或聚焦前台窗口。
 
 ## 7. 收尾验证
 
