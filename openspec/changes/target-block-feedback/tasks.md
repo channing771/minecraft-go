@@ -9,14 +9,15 @@
 
 ## 3. 固定十二边深度轮廓 renderer
 
-- [ ] 3.1 在 `internal/render/block_outline.go` 与 `internal/render/block_outline_test.go` 实现容量恰为十二的方块边轮廓，固定 `0.0025` 向外偏移和 `0.025` 边宽，并复用现有立方体资源、实例编码和相机 uniform；验证：`go test ./internal/render -race -count=1`。
-- [ ] 3.2 在同一 renderer 测试中锁定 alpha 混合、深度测试且不写 depth、被地形遮挡、幂等释放以及预热后稳定态零分配；验证：`go test ./internal/render -race -count=1`。
+- [ ] 3.1 在 `internal/render/block_outline.go` 与 `internal/render/block_outline_test.go` 实现容量恰为十二的方块边轮廓，固定 expand `0.003`、width `0.018`、alpha `0.86`，并复用现有立方体资源、实例编码和相机 uniform；几何测试明确断言 bounds `position-0.003..position+1.003`、长边 `1.006`、两个横截面轴 `0.018` 与 alpha `0.86`；验证：`go test ./internal/render -race -count=1`。
+- [ ] 3.2 在同一 renderer 测试中锁定 alpha 混合、深度测试且不写 depth、被地形遮挡、固定十二实例、dynamic upload/overflow 结构与幂等释放；验证：`go test ./internal/render -race -count=1`。
 
 ## 4. 正常帧接线
 
 - [ ] 4.1 修改 `cmd/mcgo/app.go`、相关 `cmd/mcgo/*_test.go` 与必要的 `internal/render` name-tag 容量接线，使每帧在应用服务端消息后计算本地目标，name-tag 容量固定为七名远端玩家加一个目标名称；验证：`go test ./cmd/mcgo -race -count=1`。
 - [ ] 4.2 将 render 顺序固定为 terrain → avatar → item drops → block outline → name tags → damage overlay → HUD → debug panel，并证明轮廓共享本帧 `viewProj/daylight/depth`，目标不存在时不提交空名牌；验证：`go test ./cmd/mcgo -race -count=1`。
-- [ ] 4.3 确认服务端命令、Predictor、网络消息和存档均不读取或保存本地目标；验证：`go test ./internal/archcheck -count=1` 与 `go test ./cmd/mcgo -race -count=1`。
+- [ ] 4.3 在 `cmd/mcgo` 与 `internal/render` 相关测试中以“一个有效目标 + 七名远端玩家”为固定输入，预热一次后用 `AllocsPerRun` 包住 current target 更新、outline prepare、NameTag prepare/上传整条稳定路径并断言分配为 `0`，同时继续锁定既有 dynamic upload/overflow 结构且不新增抽象；验证：`go test ./cmd/mcgo ./internal/render -race -count=1`。
+- [ ] 4.4 确认服务端命令、Predictor、网络消息和存档均不读取或保存本地目标；验证：`go test ./internal/archcheck -count=1` 与 `go test ./cmd/mcgo -race -count=1`。
 
 ## 5. 无窗口目标反馈场景
 

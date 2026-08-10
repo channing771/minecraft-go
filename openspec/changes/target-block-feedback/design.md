@@ -26,13 +26,13 @@
 
 ### 固定轮廓几何与 pass
 
-`internal/render` 增加独立 `BlockOutlineRenderer`，复用已有 avatar 立方体顶点、shader、实例编码与相机 uniform。单位方块包围盒固定向外扩张 `0.0025` 个世界单位，每条边的横截面固定为 `0.025` 个世界单位；一个目标恰好编码为十二个细长立方体实例，容量也恰为十二。该 renderer 拥有自己的固定 GPU 缓冲和 pipeline，不重构 avatar 或掉落物 renderer。
+`internal/render` 增加独立 `BlockOutlineRenderer`，复用已有 avatar 立方体顶点、shader、实例编码与相机 uniform。单位方块包围盒固定向外扩张 `0.003` 个世界单位，因此目标位置为 `position` 时整体 bounds 固定为 `position-0.003..position+1.003`；每根边的长边固定为 `1.006`，两个横截面轴固定为 `0.018`，颜色 alpha 固定为 `0.86`。一个目标恰好编码为十二个细长立方体实例，容量也恰为十二。该 renderer 拥有自己的固定 GPU 缓冲和 pipeline，不重构 avatar 或掉落物 renderer。
 
 每帧顺序固定为：terrain → avatar → item drops → block outline → name tags → damage overlay → HUD → debug panel。轮廓共享本帧 `viewProj`、daylight 与 depth，开启 alpha 混合和深度测试、关闭深度写入。被否决的替代方案是把线框写进 terrain pass 或建立可扩展 overlay 框架：前者会污染 terrain 契约，后者当前没有第二个消费者。
 
 ### 名牌容量与数据边界
 
-目标名称复用 name-tag atlas、世界空间布局和上传路径。固定 name-tag 容量从七个远端玩家扩大为八个实例：七名远端玩家加一个目标名称；目标不存在时不占实例。初始化后，目标更新、轮廓几何准备、name-tag 准备和上传只写固定数组，稳定态不分配。
+目标名称复用 name-tag atlas、世界空间布局和上传路径。固定 name-tag 容量从七个远端玩家扩大为八个实例：七名远端玩家加一个目标名称；目标不存在时不占实例。完整稳定态零分配测试使用一个有效目标和七名远端玩家，预热一次后把 current target 更新、outline prepare、NameTag prepare 与上传整条路径包进同一次 `AllocsPerRun` 断言，并继续锁定既有 dynamic upload 与 overflow 结构，不为测试增加新抽象。
 
 `core` 只保存显示名查询；`cmd/mcgo` 拥有帧级目标状态；`render` 只接收不可变的当前帧输入。渲染 goroutine 不回写镜像或 Predictor，服务端路径不读取局部目标，维持现有依赖方向和并发边界。
 
@@ -45,7 +45,7 @@ Task 2 只拥有 `internal/core/block_name.go`、其测试以及 `cmd/mcgo/targe
 ## Risks / Trade-offs
 
 - [镜像区块未知导致误导性目标] → 路径必须完整已加载；任何未知或未 ready 状态立即清空。
-- [轮廓与地形共面闪烁] → 固定 `0.0025` 向外偏移，保持深度测试且不写深度。
+- [轮廓与地形共面闪烁] → 固定 `0.003` 向外偏移，保持深度测试且不写深度。
 - [世界空间名称抢占玩家名牌容量] → 容量精确扩为 7+1，目标缺失时不提交空实例。
 - [共享场景背景变化掩盖目标问题] → 新增独立目标场景，运行并逐张复核全部场景，且冻结 `inventory-crafting` 的逐字节结果。
 
