@@ -23,4 +23,4 @@
 
 ## Impact
 
-受影响实现范围为 `internal/core`、`internal/world`、`internal/sim` 与 `internal/render/hotbar.go`，以及上述三份 OpenSpec 主规格的 delta。服务端继续是唯一权威，客户端只呈现确认状态；Memory 与 TCP 继续共用语义。所有输入、产物和既有 `ItemStack`、`FurnaceSlot` 字段已经稳定存在，因此协议、玩家 schema、区块 schema 与世界 metadata 均不升级；熔炉仍由单一权威 tick 推进并复用固定容量与既有性能边界。
+受影响实现范围为 `internal/core`、`internal/world`、`internal/network`、`internal/sim` 与 `internal/render/hotbar.go`，以及上述三份 OpenSpec 主规格的 delta。服务端继续是唯一权威，客户端只呈现确认状态；Memory 与 TCP 继续共用语义。所有输入、产物和既有 `ItemStack`、`FurnaceSlot` 字段已经稳定存在，因此协议、玩家 schema、区块 schema 与世界 metadata 均不升级；熔炉仍由单一权威 tick 推进并复用固定容量与既有性能边界。

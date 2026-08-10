@@ -5,7 +5,7 @@
 ## 3. 熔炼映射与栏位校验
 
 - [ ] 3.1 在 `internal/core` 增加唯一的固定 `SmeltingOutput` 映射，覆盖粗铁到铁锭、沙子到玻璃、黏土块到砖块，并以单元测试冻结未知输入拒绝；运行 `go test ./internal/core -race -count=1`。
-- [ ] 3.2 在 `internal/world` 让熔炉输入、输出栏位只校验已注册熔炼输入和产物集合，保留燃料与输出来源限制；更新栏位与区块存档测试，运行 `go test ./internal/world -race -count=1`。
+- [ ] 3.2 修改 `internal/world/furnace.go`、`internal/world/furnace_test.go`、`internal/network/message.go` 与 `internal/network/furnace_test.go`，让 world/network 只通过 `core.SmeltingOutput` 校验熔炉栏位集合；正向接受 `ItemRawIron`、`ItemSand`、`ItemClay` 输入和 `ItemIronIngot`、`ItemGlass`、`ItemBrick` 输出，反向拒绝输入/输出集合之外的物品，并保留煤炭燃料与输出格只作来源的限制；运行 `go test ./internal/world ./internal/network -race -count=1`，再运行 codec/golden 定向命令 `go test ./internal/network -run 'Test(ProtocolV1SmallPacketGolden|ProtocolV7FurnacePacketIDsAreFrozen|ProtocolV12ContainerPayloadsAreFixedLength|FurnaceMessagesRejectInvalidValues|FurnaceDecodeRejectsUnknownWireValues)$' -count=1`。
 
 ## 4. 权威熔炉推进
 
@@ -19,8 +19,8 @@
 
 ## 6. 七行固定合成 HUD
 
-- [ ] 6.1 在 `internal/render/hotbar.go` 将固定 recipe ID 列表扩为七条，并从其长度同步更新面板、绘制、命中和固定容量；在 640×360 下覆盖第七行、命中矩形和容量；运行 `go test ./internal/render -race -count=1`。
-- [ ] 6.2 更新并以无窗口方式复核 `inventory-crafting` golden，确认七条配方完整可见且没有 overflow；运行对应 `materials-showcase`/render 场景测试，不启动或聚焦前台窗口。
+- [ ] 6.1 在 `internal/render/hotbar.go` 将固定 recipe ID 列表扩为七条并从其长度同步更新面板、绘制、命中和固定容量；在 `internal/render/hotbar_test.go` 与 `cmd/mcgo/app_test.go` 覆盖 640×360 的第七行、命中矩形、容量和应用层点击；运行 `go test ./internal/render ./cmd/mcgo -race -count=1`。
+- [ ] 6.2 通过 `cmd/mcgo/capture.go` 的现有无窗口 `inventory-crafting` 场景更新且只更新 `cmd/mcgo/testdata/golden/inventory-crafting.png`；运行 `make visual-update`，再用 `test "$(git diff --name-only -- cmd/mcgo/testdata/golden)" = "cmd/mcgo/testdata/golden/inventory-crafting.png"` 断言没有其他 golden 变化，随后运行 `make visual-check` 与 `git diff --check`；不得启动或聚焦前台窗口。
 
 ## 7. 收尾验证
 
