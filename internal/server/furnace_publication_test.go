@@ -219,6 +219,82 @@ func TestFurnaceMoveUpdatesBothSides(t *testing.T) {
 	}
 }
 
+func TestFurnaceInputKindResetOverMemory(t *testing.T) {
+	running, clientEndpoint, step := newFurnaceWorld(t, world.FurnaceSlot{
+		Input:         core.ItemStack{Item: core.ItemRawIron, Count: 2},
+		Output:        core.ItemStack{Item: core.ItemBrick, Count: 1},
+		ProgressTicks: 137,
+		BurnTicks:     1463,
+	})
+	running.SetPlayerInventoryForTest(1, func(inventory core.Inventory) core.Inventory {
+		inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemSand, Count: 3}
+		return inventory
+	})
+
+	sendClientMessage(t, clientEndpoint, network.OpenContainer{
+		Sequence: 10, Pitch: lookDownAtFurnace,
+	})
+	deadline := time.Now().Add(waitDeadline)
+	var ref core.FurnaceRef
+	for ref.Generation == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("等待熔炉状态超时")
+		}
+		if messages, _ := step(); len(messages.states) > 0 {
+			ref = messages.states[len(messages.states)-1].Furnace
+		}
+	}
+
+	sendClientMessage(t, clientEndpoint, network.MoveContainerStack{
+		Sequence: 11, Container: ref, From: 0, To: core.FurnaceInputSlot,
+	})
+	deadline = time.Now().Add(waitDeadline)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("等待异类输入切换超时")
+		}
+		messages, _ := step()
+		if len(messages.states) == 0 {
+			continue
+		}
+		state := messages.states[len(messages.states)-1]
+		if state.Input != (core.ItemStack{Item: core.ItemSand, Count: 3}) {
+			continue
+		}
+		if state.ProgressTicks != 0 || state.BurnTicks != 1463 {
+			t.Fatalf("Memory 切换状态 = %+v，想要进度清零且保留燃烧 tick", state)
+		}
+		break
+	}
+
+	chunk, _, ok := running.CloneReadyChunkForTest(core.ChunkKey{Dimension: core.Overworld})
+	if !ok {
+		t.Fatal("熔炉区块未 Ready")
+	}
+	want := world.FurnaceSlot{
+		Generation: 1, Active: true,
+		Input:         core.ItemStack{Item: core.ItemSand, Count: 3},
+		Output:        core.ItemStack{Item: core.ItemBrick, Count: 1},
+		ProgressTicks: 0,
+		BurnTicks:     1463,
+	}
+	got := chunk.Furnace(0)
+	if got.Generation != want.Generation || !got.Active || got.Input != want.Input ||
+		got.Output != want.Output || got.ProgressTicks != want.ProgressTicks ||
+		got.BurnTicks != want.BurnTicks {
+		t.Fatalf("Memory 切换后熔炉 = %+v，想要 %+v", got, want)
+	}
+	snapshot, ok := running.PlayerSnapshotFor(1)
+	if !ok {
+		t.Fatal("玩家快照不可用")
+	}
+	if got := snapshot.Inventory.Hotbar.Slots[0]; got != (core.ItemStack{
+		Item: core.ItemRawIron, Count: 2,
+	}) {
+		t.Fatalf("异类输入交换后的来源格 = %+v，想要生铁 x2", got)
+	}
+}
+
 // TestFurnaceRestartRestoresTimersWithoutCatchUp 覆盖 schema v4 的重启闭环：
 // 三格物品、熔炼进度与剩余燃烧 tick 原值恢复，且停服墙钟不补算进度。
 func TestFurnaceRestartRestoresTimersWithoutCatchUp(t *testing.T) {

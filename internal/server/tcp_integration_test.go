@@ -1944,6 +1944,70 @@ func TestFurnaceSharedByTwoPlayersOverTCP(t *testing.T) {
 	host.Shutdown(t)
 }
 
+func TestFurnaceInputKindResetSurvivesTCPRestart(t *testing.T) {
+	root := t.TempDir()
+	key := core.ChunkKey{Dimension: core.Overworld}
+	identity := integrationIdentity(0x93, "Glassmaker")
+	spawn := integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil)
+	spawn.Inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemSand, Count: 3}
+	seedIntegrationPlayer(t, root, identity, spawn)
+
+	first := startDiskHost(t, root, "127.0.0.1:0", changedGenerator{})
+	firstClient := dialIntegrationClient(t, first.Addr, identity)
+	waitClientReadyFor(t, first, firstClient, identity.PlayerID)
+	index, ok := world.ChunkBlockIndex(core.BlockPos{})
+	if !ok {
+		t.Fatal("熔炉位置没有区块索引")
+	}
+	first.Host.world.SetBlockForTest(core.BlockPos{}, core.FurnaceID)
+	first.Host.world.SetChunkFurnaceForTest(key, 0, world.FurnaceSlot{
+		Generation: 1, Active: true, BlockIndex: index,
+		Input:         core.ItemStack{Item: core.ItemRawIron, Count: 2},
+		Output:        core.ItemStack{Item: core.ItemBrick, Count: 1},
+		ProgressTicks: 137,
+		BurnTicks:     1463,
+	})
+
+	sendIntegration(t, firstClient.Endpoint, network.OpenContainer{
+		Sequence: 10, Pitch: -float32(math.Pi)/2 + 0.01,
+	})
+	opened := waitFurnaceState(t, firstClient, func(network.FurnaceState) bool { return true })
+	sendIntegration(t, firstClient.Endpoint, network.MoveContainerStack{
+		Sequence: 11, Container: opened.Furnace, From: 0, To: core.FurnaceInputSlot,
+	})
+	wantInput := core.ItemStack{Item: core.ItemSand, Count: 3}
+	switched := waitFurnaceState(t, firstClient, func(state network.FurnaceState) bool {
+		return state.Input == wantInput
+	})
+	if switched.ProgressTicks != 0 || switched.BurnTicks != 1463 {
+		t.Fatalf("TCP 切换状态 = %+v，想要进度清零且保留燃烧 tick", switched)
+	}
+
+	if err := firstClient.Close(); err != nil {
+		t.Fatal(err)
+	}
+	first.Shutdown(t)
+
+	second := startDiskHost(t, root, "127.0.0.1:0", changedGenerator{})
+	secondClient := dialIntegrationClient(t, second.Addr, identity)
+	waitClientReadyFor(t, second, secondClient, identity.PlayerID)
+	sendIntegration(t, secondClient.Endpoint, network.OpenContainer{
+		Sequence: 12, Pitch: -float32(math.Pi)/2 + 0.01,
+	})
+	restored := waitFurnaceState(t, secondClient, func(state network.FurnaceState) bool {
+		return state.Input == wantInput
+	})
+	if restored.ProgressTicks != 0 || restored.BurnTicks != 1463 ||
+		restored.Output != (core.ItemStack{Item: core.ItemBrick, Count: 1}) {
+		t.Fatalf("TCP 重连并重启后的熔炉 = %+v，想要进度清零且保留燃烧 tick", restored)
+	}
+
+	if err := secondClient.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second.Shutdown(t)
+}
+
 // waitFurnaceState 等待某个客户端收到满足条件的熔炉状态。
 func waitFurnaceState(
 	t *testing.T,
