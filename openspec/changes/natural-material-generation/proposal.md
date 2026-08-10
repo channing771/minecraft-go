@@ -21,6 +21,7 @@
 ## Impact
 
 - 受影响代码：`internal/worldgen`、`internal/storage` 与 `cmd/mcgod`。
+- 所有权：`internal/storage` 仅为具体 `DiskStore` 增加 `ChunkKeys` 与 `Backup`；七种自然值纯迁移、runner、进度文件和故障注入位于 `cmd/mcgod`，由该命令同时依赖 `storage` 与 `worldgen`，不扩大 `storage.Store`。
 - 存档与协议：继续使用区块 schema v8、协议 v15 和世界 metadata v2，不改变字节布局或语义版本；迁移状态单独保存。
 - 并发与性能：生成保持无状态纯判断；迁移只在离线模式执行，获得既有世界锁且不监听 TCP，不进入权威 tick 或渲染热路径。
 - 回退：正常关服后以迁移前的完整备份整体替换源世界；不提供逐块反向迁移。
