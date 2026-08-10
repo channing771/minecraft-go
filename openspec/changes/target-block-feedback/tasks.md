@@ -14,10 +14,10 @@
 
 ## 4. 正常帧接线
 
-- [ ] 4.1 修改 `cmd/mcgo/app.go`、相关 `cmd/mcgo/*_test.go` 与必要的 `internal/render` name-tag 容量接线，使每帧在应用服务端消息后计算本地目标，断线或 reset 的当帧清空已呈现目标，并将 name-tag 容量固定为七名远端玩家加一个目标名称；验证：`go test ./cmd/mcgo -race -count=1`。
-- [ ] 4.2 将 render 顺序固定为 terrain → avatar → item drops → block outline → name tags → damage overlay → HUD → debug panel，并证明轮廓共享本帧 `viewProj/daylight/depth`，目标不存在时不提交空名牌；验证：`go test ./cmd/mcgo -race -count=1`。
-- [ ] 4.3 在 `cmd/mcgo` 与 `internal/render` 相关测试中以“一个有效目标 + 七名远端玩家”为固定输入，预热一次后用 `AllocsPerRun` 包住 current target 更新、outline prepare、NameTag prepare/上传整条稳定路径并断言分配为 `0`，同时继续锁定既有 dynamic upload/overflow 结构且不新增抽象；验证：`go test ./cmd/mcgo ./internal/render -race -count=1`。
-- [ ] 4.4 确认服务端命令、Predictor、网络消息和存档均不读取或保存本地目标；验证：`go test ./internal/archcheck -count=1` 与 `go test ./cmd/mcgo -race -count=1`。
+- [x] 4.1 修改 `cmd/mcgo/app.go`、相关 `cmd/mcgo/*_test.go` 与必要的 `internal/render` name-tag 容量接线，使每帧在应用服务端消息后计算本地目标，断线或 reset 的当帧清空已呈现目标，并将 name-tag 容量固定为七名远端玩家加一个目标名称；验证：`go test ./cmd/mcgo -race -count=1`。
+- [x] 4.2 将 render 顺序固定为 terrain → avatar → item drops → block outline → name tags → damage overlay → HUD → debug panel，并证明轮廓共享本帧 `viewProj/daylight/depth`，目标不存在时不提交空名牌；验证：`go test ./cmd/mcgo -race -count=1`。
+- [x] 4.3 在 `cmd/mcgo` 与 `internal/render` 相关测试中以“一个有效目标 + 七名远端玩家”为固定输入，预热一次后用 `AllocsPerRun` 包住 current target 更新、outline prepare、NameTag prepare/上传整条稳定路径并断言分配为 `0`，同时继续锁定既有 dynamic upload/overflow 结构且不新增抽象；验证：`go test ./cmd/mcgo ./internal/render -race -count=1`。
+- [x] 4.4 确认服务端命令、Predictor、网络消息和存档均不读取或保存本地目标；验证：`go test ./internal/archcheck -count=1` 与 `go test ./cmd/mcgo -race -count=1`。
 
 ## 5. 无窗口目标反馈场景
 

@@ -27,6 +27,9 @@ import (
 	"minecraft-go/internal/worldgen"
 )
 
+// maxFrameNameTags 固定为七名远程玩家加一个当前方块目标。
+const maxFrameNameTags = 8
+
 type applicationOptions struct {
 	Seed               int64
 	Benchmark          bool
@@ -71,17 +74,18 @@ type application struct {
 	// configPath 是调试面板 F5 保存时的目标路径，来自 applicationOptions.ConfigPath。
 	configPath string
 	// panelLastFrameAt 是上一帧调试面板读数的采样时刻，用于计算 PanelReadout.FrameMillis。
-	panelLastFrameAt  time.Time
-	inventory         client.InventoryMirror
-	furnace           client.FurnaceMirror
-	chest             client.ChestMirror
-	miningOverlay     render.MiningOverlay
-	itemDropRenderer  *render.ItemDropRenderer
-	itemDrops         *client.ItemDrops
-	itemDropInstances []render.ItemDrop
-	inventoryOpen     bool
-	inventorySource   int
-	serverTick        uint64
+	panelLastFrameAt     time.Time
+	inventory            client.InventoryMirror
+	furnace              client.FurnaceMirror
+	chest                client.ChestMirror
+	miningOverlay        render.MiningOverlay
+	itemDropRenderer     *render.ItemDropRenderer
+	blockOutlineRenderer *render.BlockOutlineRenderer
+	itemDrops            *client.ItemDrops
+	itemDropInstances    []render.ItemDrop
+	inventoryOpen        bool
+	inventorySource      int
+	serverTick           uint64
 	// worldTimeTicks 是最后确认的权威绝对世界时间，只在接受更新状态时前进。
 	worldTimeTicks          uint64
 	glyphAtlas              *render.GlyphAtlas
@@ -109,6 +113,8 @@ type application struct {
 	closeErr                error
 	clientCloseOnce         sync.Once
 	clientCloseErr          error
+	clientSessionClosed     bool
+	blockTargetReset        bool
 	releaseResources        func()
 	// render 是渲染相关的生效配置快照，在构造时从 applicationOptions.Render 复制，
 	// 供渲染热路径（DropOutside 视距、鼠标灵敏度等）读取，不随配置文件热更新。
@@ -152,6 +158,7 @@ type applicationDependencies struct {
 	newNameTagRenderer       func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
 	newHotbarRenderer        func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*render.HotbarRenderer, error)
 	newItemDropRenderer      func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
+	newBlockOutlineRenderer  func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.BlockOutlineRenderer, error)
 	newDamageOverlayRenderer func(gfx.Device, gfx.TextureFormat) (*render.DamageOverlayRenderer, error)
 	newDebugPanelRenderer    func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.DebugPanelRenderer, error)
 }
@@ -336,6 +343,11 @@ func newApplicationWithDependencies(
 			return render.NewItemDropRenderer(dev, color, depth), nil
 		}
 	}
+	if dependencies.newBlockOutlineRenderer == nil {
+		dependencies.newBlockOutlineRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.BlockOutlineRenderer, error) {
+			return render.NewBlockOutlineRenderer(dev, color, depth), nil
+		}
+	}
 	if dependencies.newDamageOverlayRenderer == nil {
 		dependencies.newDamageOverlayRenderer = func(
 			device gfx.Device,
@@ -518,6 +530,7 @@ func newApplicationWithDependencies(
 		inventorySource: -1,
 		predictor:       client.NewPredictor(),
 		remotePlayers:   client.NewRemotePlayers(),
+		remoteNameTags:  make([]render.NameTag, 0, maxFrameNameTags),
 		camera:          camera,
 		center:          cameraChunk(camera.Pos),
 		loadedChunks:    make(map[core.ChunkPos]struct{}),
@@ -565,6 +578,13 @@ func newApplicationWithDependencies(
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建掉落物渲染器: %w", err), app.Close())
 	}
+	app.blockOutlineRenderer, err = dependencies.newBlockOutlineRenderer(
+		dev, colorFormat, gfx.FormatDepth32Float,
+	)
+	if err != nil {
+		app.releaseRemoteConstructionResources()
+		return nil, errors.Join(fmt.Errorf("创建方块轮廓渲染器: %w", err), app.Close())
+	}
 	app.damageOverlayRenderer, err = dependencies.newDamageOverlayRenderer(dev, colorFormat)
 	if err != nil {
 		app.releaseRemoteConstructionResources()
@@ -604,6 +624,10 @@ func (a *application) releaseRemoteConstructionResources() {
 	if a.damageOverlayRenderer != nil {
 		a.damageOverlayRenderer.Release()
 		a.damageOverlayRenderer = nil
+	}
+	if a.blockOutlineRenderer != nil {
+		a.blockOutlineRenderer.Release()
+		a.blockOutlineRenderer = nil
 	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
@@ -852,6 +876,9 @@ func (a *application) releaseOwnedResources() {
 	if a.damageOverlayRenderer != nil {
 		a.damageOverlayRenderer.Release()
 	}
+	if a.blockOutlineRenderer != nil {
+		a.blockOutlineRenderer.Release()
+	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
 	}
@@ -917,6 +944,7 @@ func (a *application) closeClientSession(cause error) {
 		a.inventoryOpen = false
 		a.inventorySource = -1
 		a.itemDrops.Reset()
+		a.clientSessionClosed = true
 	})
 }
 
@@ -961,6 +989,8 @@ func (a *application) frame(drainMax, meshWorkMax int, elapsed time.Duration) (b
 
 // renderFrame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
 func (a *application) renderFrame(workMax int) (bool, error) {
+	blockTargetReset := a.blockTargetReset
+	a.blockTargetReset = false
 	width, height := a.framebufferSize()
 	if width == 0 || height == 0 {
 		return false, nil
@@ -989,6 +1019,10 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		a.remoteNameTags[:0],
 		a.remotePresentations,
 	)
+	blockOutline := render.BlockOutline{}
+	if !blockTargetReset && !a.clientSessionClosed {
+		a.remoteNameTags, blockOutline = a.appendCurrentBlockTarget(a.remoteNameTags)
+	}
 	avatars, tags := a.remoteAvatars, a.remoteNameTags
 	renderTiming := a.multiplayerRenderTiming
 	var renderNow func() time.Time
@@ -1000,11 +1034,11 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		}
 		started := renderNow()
 		if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
-			return false, fmt.Errorf("准备远端玩家昵称: %w", err)
+			return false, fmt.Errorf("准备世界名牌: %w", err)
 		}
 		nameTagDuration = renderNow().Sub(started)
 	} else if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
-		return false, fmt.Errorf("准备远端玩家昵称: %w", err)
+		return false, fmt.Errorf("准备世界名牌: %w", err)
 	}
 	inventory, inventoryConfirmed := a.inventory.State()
 	if inventoryConfirmed {
@@ -1053,7 +1087,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	}
 	encoder := a.dev.CreateCommandEncoder()
 	// 每帧只从最后确认的权威世界时间计算一次昼夜；ViewProj 及其逆矩阵同样只计算一次，
-	// terrain、avatar、item-drop 与天空共用同一正向矩阵和 daylight。
+	// terrain、avatar、item-drop、block-outline 与天空共用同一正向矩阵和 daylight。
 	dayNight := render.DayNightAt(a.worldTimeTicks)
 	viewProj := a.camera.ViewProj()
 	viewProjInv := viewProj.Inv()
@@ -1070,12 +1104,13 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	if renderTiming != nil {
 		started = renderNow()
 	}
-	a.avatarRenderer.Render(encoder, target, a.depth.view, render.Camera{
+	entityCamera := render.Camera{
 		ViewProj: viewProj,
 		Pos:      a.camera.Pos,
 		Daylight: dayNight.Daylight,
 		SkyColor: dayNight.ClearColor,
-	}, avatars)
+	}
+	a.avatarRenderer.Render(encoder, target, a.depth.view, entityCamera, avatars)
 	if renderTiming != nil {
 		renderTiming.recordAvatar(renderNow().Sub(started))
 		started = renderNow()
@@ -1083,12 +1118,12 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	a.itemDropInstances = appendItemDropInstances(
 		a.itemDropInstances[:0], a.itemDrops.Presentations(),
 	)
-	a.itemDropRenderer.Render(encoder, target, a.depth.view, render.Camera{
-		ViewProj: viewProj,
-		Pos:      a.camera.Pos,
-		Daylight: dayNight.Daylight,
-		SkyColor: dayNight.ClearColor,
-	}, a.serverTick, a.itemDropInstances)
+	a.itemDropRenderer.Render(
+		encoder, target, a.depth.view, entityCamera, a.serverTick, a.itemDropInstances,
+	)
+	a.blockOutlineRenderer.Render(
+		encoder, target, a.depth.view, entityCamera, blockOutline,
+	)
 	right := mgl32.Vec3{
 		float32(math.Cos(float64(a.camera.Yaw))),
 		0,
@@ -1103,7 +1138,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		renderTiming.recordNameTag(nameTagDuration + renderNow().Sub(started))
 	}
 	a.damageOverlayRenderer.Render(encoder, target, a.damageStrength)
-	// HUD 在 terrain、avatar 与 name tag 之后绘制。
+	// HUD 在全部世界 pass 与 damage overlay 之后绘制。
 	if inventoryConfirmed {
 		a.hotbarRenderer.Render(encoder, target)
 	}
@@ -1125,7 +1160,30 @@ func remoteRenderPresentations(presentations []client.RemotePresentation) ([]ren
 	slices.SortFunc(ordered, func(left, right client.RemotePresentation) int {
 		return slices.Compare(left.PlayerID[:], right.PlayerID[:])
 	})
-	return remoteRenderPresentationsSortedInto(nil, nil, ordered)
+	return remoteRenderPresentationsSortedInto(
+		make([]render.Avatar, 0, len(ordered)),
+		make([]render.NameTag, 0, maxFrameNameTags),
+		ordered,
+	)
+}
+
+func (a *application) appendCurrentBlockTarget(
+	tags []render.NameTag,
+) ([]render.NameTag, render.BlockOutline) {
+	target, ok := a.currentBlockTarget()
+	if !ok {
+		return tags, render.BlockOutline{}
+	}
+	tags = append(tags, render.NameTag{
+		PlayerID: core.PlayerID{},
+		Text:     target.Name,
+		Anchor: mgl32.Vec3{
+			float32(target.Position.X) + 0.5,
+			float32(target.Position.Y) + 1.15,
+			float32(target.Position.Z) + 0.5,
+		},
+	})
+	return tags, render.BlockOutline{Visible: true, Position: target.Position}
 }
 
 func remoteRenderPresentationsSortedInto(
@@ -1188,6 +1246,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 				}
 			}
 			if state.Reset {
+				a.blockTargetReset = true
 				if a.containerOpen() {
 					a.clearContainerUI()
 				} else {
