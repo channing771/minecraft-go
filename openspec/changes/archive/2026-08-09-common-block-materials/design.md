@@ -1,8 +1,8 @@
 ## Context
 
-参见 `proposal.md` 的动机。当前稳定编号止于 `ChestID` / `ItemChest`；方块使用确定性的 16×16 程序化材质与固定 2D array atlas，terrain quad 以局部原点重置 UV。`mesh.Registry.Opaque` 同时承担自身可绘制、邻面遮挡及 AO/天空光遮挡，不能表达可见但不完全遮光的玻璃和树叶。
+参见 `proposal.md` 的动机。当前稳定编号止于 `LightBlockID` / `ItemLightBlock`；方块使用确定性的 16×16 程序化材质与固定 2D array atlas，terrain quad 以局部原点重置 UV。`mesh.Registry.Opaque` 同时承担自身可绘制、邻面遮挡及 AO/天空光/静态方块光遮挡，不能表达可见但不完全遮光的玻璃和树叶。
 
-服务端继续权威持有世界、玩家背包、放置、采掘与掉落状态；客户端只从权威镜像派生网格、AO、天空光与呈现。Memory 与 TCP 必须共享协议、codec 和校验。渲染仍受固定 atlas、单一 terrain pass、8 字节 quad 实例和预热后零分配约束。
+服务端继续权威持有世界、玩家背包、放置、采掘与掉落状态；客户端只从权威镜像派生网格、AO、天空光、静态方块光与呈现。Memory 与 TCP 必须共享协议、codec 和校验。渲染仍受固定 atlas、单一 terrain pass、8 字节 quad 实例和预热后零分配约束。
 
 受影响范围为 `internal/core`、`internal/sim`、`internal/physics`、`internal/network`、`internal/world`、`internal/storage`、`internal/server`、`internal/assets`、`internal/mesh`、`internal/client`、`internal/render` 与 `cmd/mcgo`，以及对应测试、golden 和性能记录。不新增包、依赖或外部资源。
 
@@ -11,9 +11,9 @@
 **Goals:**
 
 - 按固定顺序追加 14 组稳定方块与物品编号，并锁定注册、堆叠、放置、掉落和采掘规则。
-- 在不扩大服务端权威面和传输分叉的前提下完成协议 v14、玩家 schema v6、区块 schema v7 的语义升级。
+- 在不扩大服务端权威面和传输分叉的前提下完成协议 v15、玩家 schema v6、区块 schema v8 的语义升级。
 - 从共享 terrain 路径消除草地跨 quad、区段和区块的 UV 相位断层。
-- 在现有 atlas 与 pass 中支持有完整碰撞、但不完全遮挡 AO/天空光的玻璃和树叶 cutout。
+- 在现有 atlas 与 pass 中支持有完整碰撞、但不完全遮挡 AO/天空光/静态方块光的玻璃和树叶 cutout。
 - 只向存档缺失的玩家提供一次固定材料包，并用无窗口固定场景验收全部可观察行为。
 
 **Non-Goals:**
@@ -27,7 +27,7 @@
 
 ### 1. 固定追加编号并继续扩展现有注册 switch
 
-`BlockID` 在 `ChestID` 后、`ItemID` 在 `ItemChest` 后，依次追加圆石、平滑石、沙子、砾石、竖向橡木原木、橡木木板、树叶、玻璃、砖块、白色羊毛、红色瓦块、黏土、完整雪块和苔藓圆石。`core` 增加 `RegisteredBlock` 作为方块编号合法性的基础判断，现有 `RegisteredItem`、`ItemPlacement`、`BlockDrop` 与 `ItemStackLimit` 继续用固定 switch 表达一一对应关系。
+`BlockID` 在 `LightBlockID` 后、`ItemID` 在 `ItemLightBlock` 后，依次追加圆石、平滑石、沙子、砾石、竖向橡木原木、橡木木板、树叶、玻璃、砖块、白色羊毛、红色瓦块、黏土、完整雪块和苔藓圆石。`core` 增加 `RegisteredBlock` 作为方块编号合法性的基础判断，现有 `RegisteredItem`、`ItemPlacement`、`BlockDrop` 与 `ItemStackLimit` 继续用固定 switch 表达一一对应关系。
 
 `network`、`storage` 与物品入口在各自信任边界调用注册判断，未知编号立即返回带上下文的错误。`assets.Registry.Material` 只是已验证方块的内部材质选择器；terrain 网格必须先由 `FaceVisible` 对未注册当前方块 fail-closed，只有可见面才调用 `Material`。其 defensive fallback 不承担信任边界职责，也不得让未知方块实际渲染成石头。编号一经提交不得重排或复用。
 
@@ -43,19 +43,19 @@
 
 ### 3. 只升级语义版本，保持 wire 与存档布局
 
-协议常量从 v13 升为 v14，使旧客户端在 handshake 阶段明确拒绝；Memory 与 TCP 复用同一版本检查、codec 和消息合法性校验。玩家 schema 从 v5 升为 v6、区块 schema 从 v6 升为 v7，编码布局不变。
+协议常量从 v14 升为 v15，使旧客户端在 handshake 阶段明确拒绝；Memory 与 TCP 复用同一版本检查、codec 和消息合法性校验。玩家 schema 从 v5 升为 v6、区块 schema 从 v7 升为 v8，编码布局不变。
 
-玩家 v5→v6 identity migration 保留背包、耐久、位置与生命值，不注入材料包。区块 v6→v7 identity migration 保留 palette、掉落物、熔炉、箱子与 revision。新材料继续由既有稳定 `uint16` palette 表达。旧数据沿用 `NeedsRewrite` 机制重写；future schema 和未知方块/物品明确拒绝。
+玩家 v5→v6 identity migration 保留背包、耐久、位置与生命值，不注入材料包。区块 v7→v8 identity migration 保留静态发光块、palette、掉落物、熔炉、箱子与 revision。新材料继续由既有稳定 `uint16` palette 表达。旧数据沿用 `NeedsRewrite` 机制重写；future schema 和未知方块/物品明确拒绝。
 
 该选择避免一次无实际布局变化的数据重编码。若回退代码，新 schema 对旧程序是 future schema，必须拒绝而不能猜测解码；回退前需恢复兼容程序或保留新版本读取能力。
 
 ### 4. 分离面可见性与完全遮挡
 
-保留 `mesh.Registry.Opaque(id)`，只表示 AO 与天空光的完全遮挡。新增由当前方块与邻方块共同决定的 `FaceVisible` 规则：空气或未注册方块不产生面；相邻完全不透明方块遮住当前面；同类玻璃与同类树叶剔除内部面；不透明方块与 cutout 相邻时保留不透明方块面；玻璃与树叶相接时不生成重叠共面内部表面。
+保留 `mesh.Registry.Opaque(id)`，只表示 AO、天空光与静态方块光的完全遮挡。新增由当前方块与邻方块共同决定的 `FaceVisible` 规则：空气或未注册方块不产生面；相邻完全不透明方块遮住当前面；同类玻璃与同类树叶剔除内部面；不透明方块与 cutout 相邻时保留不透明方块面；玻璃与树叶相接时不生成重叠共面内部表面。
 
-玻璃和树叶继续使用标准完整方块碰撞。该分离只改变网格、AO 与客户端派生天空光的可观察语义，不改变物理形状或服务端权威状态。
+玻璃和树叶继续使用标准完整方块碰撞。该分离只改变网格、AO 与客户端派生天空光/静态方块光的可观察语义，不改变物理形状或服务端权威状态。
 
-否决继续复用单一 `Opaque` 布尔值：它无法同时满足 cutout 自身可见、邻面可见、AO/天空光可穿过和内部面剔除。
+否决继续复用单一 `Opaque` 布尔值：它无法同时满足 cutout 自身可见、邻面可见、AO/天空光/静态方块光可穿过和内部面剔除。
 
 ### 5. 用世界坐标派生 UV，不扩展 quad 实例
 
@@ -79,7 +79,7 @@ terrain shader 使用区段 origin 与 quad 局部顶点已有信息，按当前
 
 ### 8. 无窗口验收与 record-only 性能证据
 
-在现有 `captureScenes` 末尾追加 `materials-showcase`，使用固定正午、相机与确定性夹具，经正常镜像、mesher、renderer 和 upload 路径收敛后抓取。夹具覆盖 14 种材料、八格连续且跨 AO 或天空光拆分边界的草地、相邻玻璃、相邻树叶，以及原木顶面和侧面。抓帧不得创建或聚焦前台窗口，既有双阈值不放宽。
+在包含 `block-light-room` 的现有 `captureScenes` 末尾追加 `materials-showcase`，使用固定正午、相机与确定性夹具，经正常镜像、mesher、renderer 和 upload 路径收敛后抓取。夹具覆盖 14 种材料、八格连续且跨 AO 或光照拆分边界的草地、相邻玻璃、相邻树叶，以及原木顶面和侧面。抓帧不得创建或聚焦前台窗口，既有双阈值不放宽。
 
 实现前后记录 `BenchmarkMeshTerrainSection`、`BenchmarkMeshChunk`、quad 数与上传量。性能数值只记录；实例格式、固定 atlas、固定容量、无每帧分配和单 pass 是结构契约，真实 overflow、数据丢失、I/O 或报告结构错误仍失败。
 
@@ -95,9 +95,9 @@ terrain shader 使用区段 origin 与 quad 局部顶点已有信息，按当前
 ## Migration Plan
 
 1. 先冻结注册顺序、协议/存档版本和视觉验收规格，再记录未改生产代码时的 terrain mesh 基线。
-2. 追加 ID、注册与采掘规则；随后升级协议 v14、玩家 v6 和区块 v7，并完成 identity migration 与未知编号拒绝测试。
+2. 在既有发光块 ID 后追加材料 ID、注册与采掘规则；随后升级协议 v15、玩家 v6 和区块 v8，并完成 identity migration 与未知编号拒绝测试。
 3. 接入缺失玩家材料包，再分离面可见性与遮挡语义，最后实现世界 UV、单 pass cutout、材质与 mip。
 4. 生成 `materials-showcase`，执行完整无窗口抓帧并逐张复核实际变化；记录实现后性能证据。
 5. 运行受影响包 race、全仓 race、archcheck、vet、gofmt、diff 与 OpenSpec strict；同步三份主规格后归档。
 
-回滚代码时同时回退协议与 schema 常量；已经写成玩家 v6 或区块 v7 的数据不得由不认识 future schema 的旧程序强行读取。稳定编号不得在回滚后的后续版本中重排或复用。
+回滚代码时同时回退协议与 schema 常量；已经写成玩家 v6 或区块 v8 的数据不得由不认识 future schema 的旧程序强行读取。稳定编号不得在回滚后的后续版本中重排或复用。

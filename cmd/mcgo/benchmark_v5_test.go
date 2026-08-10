@@ -15,9 +15,9 @@ import (
 	"minecraft-go/internal/client"
 )
 
-func TestBenchmarkScenarioVersionIncludesPropagatedSkylightWorkload(t *testing.T) {
-	if scenarioVersion != 14 {
-		t.Fatalf("scenarioVersion=%d，想要传播天空光 workload 之后的 v14", scenarioVersion)
+func TestBenchmarkScenarioVersionIncludesStaticBlockLightWorkload(t *testing.T) {
+	if scenarioVersion != 15 {
+		t.Fatalf("scenarioVersion=%d，想要静态方块光 workload 之后的 v15", scenarioVersion)
 	}
 }
 

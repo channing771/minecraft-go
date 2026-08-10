@@ -65,7 +65,7 @@ func TestChunkPayloadRoundTripsDeterministically(t *testing.T) {
 	}
 }
 
-func TestChunkSchemaV7RoundTripsCommonBlockMaterialPalette(t *testing.T) {
+func TestChunkSchemaV8RoundTripsCommonBlockMaterialPalette(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	chunk := world.NewChunk(key.Pos)
 	want := []core.BlockID{
@@ -85,8 +85,8 @@ func TestChunkSchemaV7RoundTripsCommonBlockMaterialPalette(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if currentChunkSchema != 7 || got.Schema != 7 || got.Migrated {
-		t.Fatalf("区块 schema=%d decoded=%d migrated=%v，想要 7/7/false", currentChunkSchema, got.Schema, got.Migrated)
+	if currentChunkSchema != 8 || got.Schema != 8 || got.Migrated {
+		t.Fatalf("区块 schema=%d decoded=%d migrated=%v，想要 8/8/false", currentChunkSchema, got.Schema, got.Migrated)
 	}
 	for index, id := range want {
 		x := index & core.SectionMask
@@ -372,8 +372,8 @@ func codecFixtureChunk(pos core.ChunkPos) *world.Chunk {
 	for index := 0; index < 256; index++ { // 先用不同值推进到 direct storage。
 		setFixtureBlock(chunk, 3, index, core.BlockID(index+1))
 	}
-	for index := 0; index < 256; index++ { // direct 最终只保留已注册值。
-		setFixtureBlock(chunk, 3, index, core.BlockID((index+1)%int(core.MossyCobblestoneID+1)))
+	for index := 0; index < 256; index++ { // 冻结旧夹具的 0..28 direct 值域。
+		setFixtureBlock(chunk, 3, index, core.BlockID((index+1)%int(core.MossyCobblestoneID)))
 	}
 	return chunk
 }

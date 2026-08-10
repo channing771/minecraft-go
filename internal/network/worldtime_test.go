@@ -7,15 +7,15 @@ import (
 	"minecraft-go/internal/core"
 )
 
-func TestProtocolVersionIsFourteen(t *testing.T) {
-	if ProtocolVersion != 14 {
-		t.Fatalf("协议版本 = %d，想要 14", ProtocolVersion)
+func TestProtocolVersionIsFifteen(t *testing.T) {
+	if ProtocolVersion != 15 {
+		t.Fatalf("协议版本=%d，想要 15", ProtocolVersion)
 	}
 }
 
-func TestProtocolV14RejectsPriorVersionsBeforePlay(t *testing.T) {
-	// v13 是上一版本，必须和更早版本一样在 Handshake 阶段稳定拒绝。
-	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13} {
+func TestProtocolV15RejectsPriorVersionsBeforePlay(t *testing.T) {
+	// v14 是上一版本，必须和更早版本一样在 Handshake 阶段稳定拒绝。
+	for version := uint32(1); version < ProtocolVersion; version++ {
 		stream := &staticClientHelloStream{version: version}
 		if _, err := BeginServerLogin(t.Context(), stream); err == nil {
 			t.Fatalf("v%d ClientHello 被接受", version)
@@ -23,7 +23,7 @@ func TestProtocolV14RejectsPriorVersionsBeforePlay(t *testing.T) {
 		reject, ok := stream.sent.(HandshakeReject)
 		if !ok || reject.ServerProtocolVersion != ProtocolVersion ||
 			reject.Code != HandshakeVersionMismatch {
-			t.Fatalf("v%d 拒绝结果 = %#v，想要 v14 HandshakeReject", version, stream.sent)
+			t.Fatalf("v%d 拒绝结果 = %#v，想要 v15 HandshakeReject", version, stream.sent)
 		}
 	}
 }
@@ -88,7 +88,7 @@ func TestProtocolV9PlayerStateWorldTimeAcceptsFullRange(t *testing.T) {
 	}
 }
 
-func TestProtocolV13PlayerStateCarriesHealth(t *testing.T) {
+func TestProtocolV14PlayerStateCarriesHealth(t *testing.T) {
 	// 生命值恰好追加在既有采掘字段之后、世界时间之前的固定偏移。
 	for _, health := range []uint8{0, 1, core.MaxHealth} {
 		state := PlayerState{Dimension: core.Overworld, Health: health, WorldTimeTicks: 24000}
@@ -109,7 +109,7 @@ func TestProtocolV13PlayerStateCarriesHealth(t *testing.T) {
 	}
 }
 
-func TestProtocolV13PlayerStateRejectsOutOfRangeHealth(t *testing.T) {
+func TestProtocolV14PlayerStateRejectsOutOfRangeHealth(t *testing.T) {
 	invalid := PlayerState{Dimension: core.Overworld, Health: core.MaxHealth + 1}
 	if err := invalid.Validate(); err == nil {
 		t.Fatal("越界生命值通过了 Validate")

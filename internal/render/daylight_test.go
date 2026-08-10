@@ -179,41 +179,83 @@ func TestTerrainDaylightHeadlessDraw(t *testing.T) {
 	}
 	defer dev.Release()
 
-	color := dev.CreateTexture(gfx.TextureDesc{
-		Label: "terrain daylight color", Width: 64, Height: 64,
-		Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget,
-	})
-	defer color.Release()
-	colorView := color.View(gfx.TextureViewDesc{})
-	defer colorView.Release()
-	depth := dev.CreateTexture(gfx.TextureDesc{
-		Label: "terrain daylight depth", Width: 64, Height: 64,
-		Format: gfx.FormatDepth32Float, Usage: gfx.TextureUsageRenderTarget,
-	})
-	defer depth.Release()
-	depthView := depth.View(gfx.TextureViewDesc{Aspect: gfx.AspectDepthOnly})
-	defer depthView.Release()
-
 	renderer := New(dev, assets.NewRegistry(), gfx.FormatRGBA8Unorm)
 	defer renderer.Release()
 	renderer.QueueSection(core.SectionPos{Y: 4}, []mesh.Quad{
-		{W: 1, H: 1, Face: mesh.FacePosY, AO: 0xFF, Light: 0xF0},
-		{W: 1, H: 1, Face: mesh.FacePosY, AO: 0xFF, Light: 0x00},
+		{X: 0, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0xf0},
+		{X: 2, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x0f},
+		{X: 4, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x88},
+		{X: 6, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0x00, Light: 0x0f},
+		{X: 8, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosZ, AO: 0xff, Light: 0x0f},
+		{X: 10, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x80},
+		{X: 12, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x08},
 	})
+	renderer.BeginFrame()
+	renderer.FlushUploads(core.ChunkPos{})
 
-	// 同一份已上传网格必须能在正午和午夜之间只靠固定 uniform 切换。
-	for _, phase := range []uint64{0, 6000, 12000, 18000} {
-		dayNight := DayNightAt(phase)
-		encoder := dev.CreateCommandEncoder()
-		renderer.Render(encoder, colorView, depthView, Camera{
-			ViewProj: mgl32.Ident4(),
-			Daylight: dayNight.Daylight,
-			SkyColor: dayNight.ClearColor,
-		})
-		commands := encoder.Finish()
-		dev.Submit(commands)
-		commands.Release()
-		dev.Poll(true)
+	position := mgl32.Vec3{6.5, 8, 12}
+	direction := mgl32.Vec3{6.5, 0.5, 0.5}.Sub(position)
+	noonCamera := skyCameraAt(position, direction, 6000)
+	midnightCamera := skyCameraAt(position, direction, 18000)
+	noon := renderSkyHeadless(t, dev, renderer, noonCamera)
+	midnight := renderSkyHeadless(t, dev, renderer, midnightCamera)
+
+	sample := func(pixels []byte, camera Camera, point mgl32.Vec3) [4]byte {
+		clip := camera.ViewProj.Mul4x1(point.Vec4(1))
+		x := int(math.Round(float64((clip[0]/clip[3]*0.5 + 0.5) * skyHeadlessSize)))
+		y := int(math.Round(float64((-clip[1]/clip[3]*0.5 + 0.5) * skyHeadlessSize)))
+		return skyPixel(pixels, x, y)
+	}
+	centers := [...]mgl32.Vec3{
+		{0.5, 1, 0.5},
+		{2.5, 1, 0.5},
+		{4.5, 1, 0.5},
+		{6.5, 1, 0.5},
+		{8.5, 0.5, 1},
+		{10.5, 1, 0.5},
+		{12.5, 1, 0.5},
+	}
+	var noonPixels, midnightPixels [len(centers)][4]byte
+	for i, center := range centers {
+		noonPixels[i] = sample(noon, noonCamera, center)
+		midnightPixels[i] = sample(midnight, midnightCamera, center)
+	}
+
+	if skyBrightness(midnightPixels[0])*3 >= skyBrightness(noonPixels[0]) {
+		t.Fatalf("全天空光面未在午夜显著变暗：noon=%v midnight=%v", noonPixels[0], midnightPixels[0])
+	}
+	for channel := 0; channel < 3; channel++ {
+		if delta := int(noonPixels[1][channel]) - int(midnightPixels[1][channel]); delta < -2 || delta > 2 {
+			t.Fatalf("全方块光面受昼夜影响：noon=%v midnight=%v", noonPixels[1], midnightPixels[1])
+		}
+	}
+	if skyBrightness(midnightPixels[1]) <= skyBrightness(midnightPixels[0])*3 {
+		t.Fatalf("午夜方块光未独立照亮地形：sky=%v block=%v", midnightPixels[0], midnightPixels[1])
+	}
+	if skyBrightness(midnightPixels[2]) <= skyBrightness(midnightPixels[0])*2 ||
+		skyBrightness(noonPixels[2]) <= skyBrightness(midnightPixels[2]) {
+		t.Fatalf("0x88 未按最大值竞争：noon=%v midnight=%v midnight-sky=%v",
+			noonPixels[2], midnightPixels[2], midnightPixels[0])
+	}
+	for _, comparison := range []struct {
+		name        string
+		mixed, only [4]byte
+	}{
+		{name: "正午天空光胜出", mixed: noonPixels[2], only: noonPixels[5]},
+		{name: "午夜方块光胜出", mixed: midnightPixels[2], only: midnightPixels[6]},
+	} {
+		for channel := 0; channel < 3; channel++ {
+			if delta := int(comparison.mixed[channel]) - int(comparison.only[channel]); delta < -2 || delta > 2 {
+				t.Fatalf("%s未按 max 合成：0x88=%v control=%v channel=%d delta=%d",
+					comparison.name, comparison.mixed, comparison.only, channel, delta)
+			}
+		}
+	}
+	if skyBrightness(midnightPixels[3])*10 >= skyBrightness(midnightPixels[1])*7 {
+		t.Fatalf("AO 未继续降低方块光：full=%v occluded=%v", midnightPixels[1], midnightPixels[3])
+	}
+	if skyBrightness(midnightPixels[4])*10 >= skyBrightness(midnightPixels[1])*9 {
+		t.Fatalf("面朝向未继续降低方块光：top=%v side=%v", midnightPixels[1], midnightPixels[4])
 	}
 }
 

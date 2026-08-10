@@ -72,9 +72,10 @@ func TestPlayerCodecRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPlayerSchemaV6RoundTripsCommonBlockMaterial(t *testing.T) {
+func TestPlayerSchemaV6RoundTripsNewBlockItems(t *testing.T) {
 	id := fixturePlayerID()
 	want := fixturePlayerSave(id, 8)
+	want.Inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemLightBlock, Count: 17}
 	want.Inventory.Backpack[3] = core.ItemStack{
 		Item: core.ItemMossyCobblestone, Count: core.MaxStackCount,
 	}
@@ -87,7 +88,7 @@ func TestPlayerSchemaV6RoundTripsCommonBlockMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Inventory != want.Inventory || got.NeedsRewrite {
-		t.Fatalf("新材料玩家往返 inventory=%+v migrated=%v", got.Inventory, got.NeedsRewrite)
+		t.Fatalf("新方块物品往返 inventory=%+v needsRewrite=%v", got.Inventory, got.NeedsRewrite)
 	}
 }
 

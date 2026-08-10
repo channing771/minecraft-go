@@ -48,8 +48,8 @@ func TestChunkCodecRoundTripsChests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 7 {
-		t.Fatalf("schema = %d，想要 7", got.Schema)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 8 {
+		t.Fatalf("schema = %d，想要 8", got.Schema)
 	}
 	for slot := range core.ChestsPerChunk {
 		if got.Chunk.Chest(slot) != want.Chest(slot) {
@@ -137,7 +137,7 @@ func TestChunkV6FixtureMigratesLosslessly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !decoded.Migrated || decoded.Schema != 7 || decoded.Revision != 19 {
+	if !decoded.Migrated || decoded.Schema != currentChunkSchema || decoded.Revision != 19 {
 		t.Fatalf("v6 fixture schema=%d revision=%d migrated=%v", decoded.Schema, decoded.Revision, decoded.Migrated)
 	}
 	if decoded.Chunk.Hash() != want.Hash() || decoded.Chunk.DropsHash() != want.DropsHash() {
@@ -153,10 +153,13 @@ func TestChunkV6FixtureMigratesLosslessly(t *testing.T) {
 			t.Fatalf("v6 fixture 箱子槽 %d = %+v，想要 %+v", slot, decoded.Chunk.Chest(slot), want.Chest(slot))
 		}
 	}
+	if decoded.Chunk.Hash() != want.Hash() || decoded.Chunk.DropsHash() != want.DropsHash() {
+		t.Fatal("v6 fixture 迁移改变了方块或掉落物状态")
+	}
 }
 
-// TestChunkV7Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
-func TestChunkV7Fixture(t *testing.T) {
+// TestChunkV8Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
+func TestChunkV8Fixture(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	encoded, err := encodeChunkPayload(ChunkSave{
 		Key: key, Revision: 19, Chunk: chestFixtureChunk(t, key.Pos),
@@ -164,7 +167,7 @@ func TestChunkV7Fixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "chunk-v7.bin")
+	path := filepath.Join("testdata", "chunk-v8.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -175,7 +178,7 @@ func TestChunkV7Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(want, encoded) {
-		t.Fatal("v7 fixture drift; change schema version")
+		t.Fatal("v8 fixture drift; change schema version")
 	}
 }
 

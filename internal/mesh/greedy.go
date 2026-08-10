@@ -7,6 +7,7 @@ type Registry interface {
 	Opaque(world.BlockID) bool
 	FaceVisible(id world.BlockID, adjacent world.BlockID) bool
 	Material(id world.BlockID, f Face) uint16
+	Emission(world.BlockID) uint8
 }
 
 // maskCell 必须可比较，贪心合并靠 == 判断两格能否合并。
@@ -18,9 +19,9 @@ type maskCell struct {
 }
 
 // MeshSection 把一个区段转换成贪心合并后的四边形集合。
-func MeshSection(n *world.Neighborhood, reg Registry, light *SkyLightScratch) []Quad {
+func MeshSection(n *world.Neighborhood, reg Registry, light *LightScratch) []Quad {
 	if light == nil {
-		panic("mesh: nil sky light scratch")
+		panic("mesh: nil light scratch")
 	}
 	if id, single := n.Center.Blocks.IsUniform(); single && id == world.AirID {
 		return nil
@@ -54,11 +55,10 @@ func MeshSection(n *world.Neighborhood, reg Registry, light *SkyLightScratch) []
 						continue
 					}
 					mask[vi][ui] = maskCell{
-						used: true,
-						mat:  reg.Material(id, face),
-						ao:   computeAO(n, reg, p, axis, u, v, step),
-						// 高四位是相邻空气位置的天空光，低四位方块光尚未实现。
-						light: light.at(q[0], q[1], q[2]) << 4,
+						used:  true,
+						mat:   reg.Material(id, face),
+						ao:    computeAO(n, reg, p, axis, u, v, step),
+						light: light.at(q[0], q[1], q[2]),
 					}
 					any = true
 				}

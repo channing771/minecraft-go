@@ -107,7 +107,7 @@ func generateTerrain() map[core.ChunkPos]*world.Chunk {
 
 func queueMeshes(r *render.Renderer, reg *assets.Registry, chunks map[core.ChunkPos]*world.Chunk) {
 	get := func(p core.ChunkPos) *world.Chunk { return chunks[p] }
-	light := mesh.NewSkyLightScratch()
+	light := mesh.NewLightScratch()
 	for pos := range chunks {
 		for si := 0; si < core.SectionsPerChunk; si++ {
 			n := world.NeighborhoodAt(get, pos, si)

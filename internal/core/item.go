@@ -23,6 +23,7 @@ const (
 	ItemBrokenIronPickaxe
 	// ItemChest 是可堆叠的存储方块物品，没有耐久。
 	ItemChest
+	ItemLightBlock
 	ItemCobblestone
 	ItemSmoothStone
 	ItemSand
@@ -155,6 +156,8 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 		return ItemIronBlock, true
 	case ChestID:
 		return ItemChest, true
+	case LightBlockID:
+		return ItemLightBlock, true
 	case CobblestoneID:
 		return ItemCobblestone, true
 	case SmoothStoneID:
@@ -192,7 +195,7 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 func ItemStackLimit(item ItemID) (uint8, bool) {
 	switch item {
 	case ItemStone, ItemDirt, ItemGrass, ItemStoneBrick, ItemCoal,
-		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock, ItemChest,
+		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock, ItemChest, ItemLightBlock,
 		ItemCobblestone, ItemSmoothStone, ItemSand, ItemGravel, ItemOakLog,
 		ItemOakPlanks, ItemLeaves, ItemGlass, ItemBrick, ItemWhiteWool,
 		ItemRoofTile, ItemClay, ItemSnowBlock, ItemMossyCobblestone:
@@ -253,6 +256,8 @@ func ItemPlacement(item ItemID) (BlockID, bool) {
 		return IronBlockID, true
 	case ItemChest:
 		return ChestID, true
+	case ItemLightBlock:
+		return LightBlockID, true
 	case ItemCobblestone:
 		return CobblestoneID, true
 	case ItemSmoothStone:

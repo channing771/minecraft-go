@@ -274,13 +274,15 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	avatar := render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 	nameTag := render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
 	hotbar := render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, reg)
+	itemDrop := render.NewItemDropRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
+	damage := render.NewDamageOverlayRenderer(dev, gfx.FormatRGBA8Unorm)
 	color := dev.CreateTexture(gfx.TextureDesc{Label: "main color", Width: 4, Height: 4, Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget})
 	app := &application{
 		dev: dev, color: color, colorView: color.View(gfx.TextureViewDesc{}),
 		depth: newDepthTarget(dev, 4, 4), renderer: terrain,
 		glyphAtlas: atlas, avatarRenderer: avatar, nameTagRenderer: nameTag,
-		hotbarRenderer: hotbar,
-		remotePlayers:  client.NewRemotePlayers(),
+		hotbarRenderer: hotbar, itemDropRenderer: itemDrop, damageOverlayRenderer: damage,
+		remotePlayers: client.NewRemotePlayers(),
 	}
 	app.releaseResources = app.releaseOwnedResources
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{})); err != nil {
@@ -293,10 +295,10 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 		t.Fatalf("roster after Close=%d", got)
 	}
 	markers := dev.releaseMarkers([]string{
-		"hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
+		"damage overlay resources", "item drop resources", "hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
 		"main depth texture", "main color view", "main color texture", "device",
 	})
-	want := []string{"hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
+	want := []string{"damage overlay resources", "item drop resources", "hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
 	if !reflect.DeepEqual(markers, want) {
 		t.Fatalf("release markers=%v want=%v; all=%v", markers, want, dev.releases)
 	}
@@ -307,10 +309,10 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	}
 }
 
-// Mutation killed: constructing name tags before avatars, or cleaning a failed
-// name-tag construction in forward order, moves the avatar/atlas release markers.
+// Mutation 已验证：远端 renderer 构造乱序或受伤遮罩构造失败后正序清理，
+// 都会改变资源释放标记。
 func TestApplicationConstructionFailureReleasesRemoteResourcesInReverse(t *testing.T) {
-	wantErr := errors.New("injected name-tag construction failure")
+	wantErr := errors.New("injected damage-overlay construction failure")
 	rawEndpoint, serverEndpoint := network.NewMemoryPair(4)
 	endpoint := &connectionTestEndpoint{ClientEndpoint: rawEndpoint}
 	t.Cleanup(func() { _ = serverEndpoint.Close() })
@@ -337,19 +339,50 @@ func TestApplicationConstructionFailureReleasesRemoteResourcesInReverse(t *testi
 		constructionOrder = append(constructionOrder, "avatar")
 		return render.NewAvatarRenderer(device, color, depth), nil
 	}
-	dependencies.newNameTagRenderer = func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error) {
+	dependencies.newNameTagRenderer = func(
+		device gfx.Device,
+		color, depth gfx.TextureFormat,
+		atlas render.GlyphSource,
+	) (*render.NameTagRenderer, error) {
 		constructionOrder = append(constructionOrder, "name-tag")
+		return render.NewNameTagRenderer(device, color, depth, atlas), nil
+	}
+	dependencies.newHotbarRenderer = func(
+		device gfx.Device,
+		color gfx.TextureFormat,
+		atlas render.GlyphSource,
+		blocks *assets.Registry,
+	) (*render.HotbarRenderer, error) {
+		constructionOrder = append(constructionOrder, "hotbar")
+		return render.NewHotbarRenderer(device, color, atlas, blocks), nil
+	}
+	dependencies.newItemDropRenderer = func(
+		device gfx.Device,
+		color, depth gfx.TextureFormat,
+	) (*render.ItemDropRenderer, error) {
+		constructionOrder = append(constructionOrder, "item-drop")
+		return render.NewItemDropRenderer(device, color, depth), nil
+	}
+	dependencies.newDamageOverlayRenderer = func(
+		gfx.Device,
+		gfx.TextureFormat,
+	) (*render.DamageOverlayRenderer, error) {
+		constructionOrder = append(constructionOrder, "damage-overlay")
 		return nil, wantErr
 	}
 	app, err := newApplicationWithDependencies(remoteConnectionOptions(), dependencies)
 	if app != nil || !errors.Is(err, wantErr) {
 		t.Fatalf("construction result=(%v,%v), want nil/wrapped failure", app, err)
 	}
-	if want := []string{"atlas", "avatar", "name-tag"}; !reflect.DeepEqual(constructionOrder, want) {
+	if want := []string{"atlas", "avatar", "name-tag", "hotbar", "item-drop", "damage-overlay"}; !reflect.DeepEqual(constructionOrder, want) {
 		t.Fatalf("remote construction order=%v want=%v", constructionOrder, want)
 	}
-	markers := dev.releaseMarkers([]string{"avatar resources", "glyph-atlas texture", "terrain resources", "main depth texture", "device"})
-	wantMarkers := []string{"avatar resources", "glyph-atlas texture", "terrain resources", "main depth texture", "device"}
+	wantMarkers := []string{
+		"item drop resources", "hotbar resources", "name-tag resources",
+		"avatar resources", "glyph-atlas texture", "terrain resources",
+		"main depth texture", "device",
+	}
+	markers := dev.releaseMarkers(wantMarkers)
 	if !reflect.DeepEqual(markers, wantMarkers) {
 		t.Fatalf("failure release markers=%v want=%v; all=%v", markers, wantMarkers, dev.releases)
 	}
@@ -408,6 +441,9 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 		avatarRenderer:  render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float),
 		nameTagRenderer: render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, glyphs),
 		hotbarRenderer:  render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, glyphs, reg),
+		damageOverlayRenderer: render.NewDamageOverlayRenderer(
+			dev, gfx.FormatRGBA8Unorm,
+		),
 		itemDropRenderer: render.NewItemDropRenderer(
 			dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float,
 		),

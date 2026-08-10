@@ -1,11 +1,11 @@
 ## 1. 稳定 ID、物品映射与采掘规则
 
-- [x] 1.1 目标：`internal/core`、`internal/sim`、`internal/physics`。追加 14 组稳定 BlockID/ItemID，增加 RegisteredBlock，并完成 stack/place/drop/mining/完整碰撞测试。
+- [x] 1.1 目标：`internal/core`、`internal/sim`、`internal/physics`。在既有发光块编号后追加 14 组稳定 BlockID/ItemID，增加 RegisteredBlock，并完成 stack/place/drop/mining/完整碰撞测试。
   验证：`go test ./internal/core ./internal/sim ./internal/physics -race -count=1`
 
 ## 2. 协议与存档语义版本
 
-- [x] 2.1 目标：`internal/network`、`internal/world`、`internal/storage`。升级协议 v14、玩家 schema v6、区块 schema v7，增加 identity migration、未知方块拒绝和 Memory/TCP round-trip。
+- [x] 2.1 目标：`internal/network`、`internal/world`、`internal/storage`。升级协议 v15、玩家 schema v6、区块 schema v8，增加 identity migration、未知方块拒绝和 Memory/TCP round-trip。
   验证：`go test ./internal/network ./internal/world ./internal/storage -race -count=1`
 
 ## 3. 缺失玩家材料包
@@ -15,7 +15,7 @@
 
 ## 4. 面可见性与遮挡语义
 
-- [x] 4.1 目标：`internal/assets`、`internal/mesh`、`internal/client`、`internal/render`。为 mesh.Registry 增加 FaceVisible，分离 cutout 可绘制面与 Opaque 的 AO/天空光语义。
+- [x] 4.1 目标：`internal/assets`、`internal/mesh`、`internal/client`、`internal/render`。为 mesh.Registry 增加 FaceVisible，分离 cutout 可绘制面与 Opaque 的 AO/天空光/静态方块光语义。
   验证：`go test ./internal/assets ./internal/mesh ./internal/client ./internal/render -race -count=1`
 
 ## 5. 世界 UV 与单 pass cutout
@@ -35,5 +35,5 @@
 
 ## 8. 全仓验证、主规格同步与归档
 
-- [x] 8.1 目标：全仓、`openspec/specs/common-block-materials`、`openspec/specs/voxel-visual-presentation`、`openspec/specs/visual-verification` 与归档 change。完成全仓 race/vet/gofmt/archcheck/diff/OpenSpec strict，智能同步三份主规格，更新 M4N 基线说明并归档 change。
+- [x] 8.1 目标：全仓、`openspec/specs/common-block-materials`、`openspec/specs/voxel-visual-presentation`、`openspec/specs/visual-verification` 与归档 change。完成全仓 race/vet/gofmt/archcheck/diff/OpenSpec strict，智能同步三份主规格，更新 M4O 基线说明并归档 change。
   验证：`go test ./... -race`；`go vet ./...`；`gofmt -l .`；`git diff --check`；`openspec validate --all --strict --no-interactive`

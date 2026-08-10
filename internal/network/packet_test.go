@@ -40,6 +40,7 @@ func TestValidateClientPacket(t *testing.T) {
 		packet ClientPacket
 	}{
 		{"unsupported protocol", StateHandshake, ClientHello{}},
+		{"future protocol", StateHandshake, ClientHello{ProtocolVersion: ProtocolVersion + 1}},
 		{"zero player ID", StateLogin, LoginStart{DisplayName: "Chen"}},
 		{"non-v4 player ID", StateLogin, LoginStart{PlayerID: core.PlayerID{1}, DisplayName: "Chen"}},
 		{"invalid display name", StateLogin, LoginStart{PlayerID: validID, DisplayName: "Chen\nName"}},
@@ -79,8 +80,8 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 			t.Fatalf("%s state = %d, want %d", tc.name, tc.got, tc.want)
 		}
 	}
-	if ProtocolVersion != 14 {
-		t.Fatalf("protocol version = %d, want 14", ProtocolVersion)
+	if ProtocolVersion != 15 {
+		t.Fatalf("protocol version = %d, want 15", ProtocolVersion)
 	}
 
 	codes := []struct {
@@ -150,6 +151,7 @@ func TestValidateServerPacket(t *testing.T) {
 		packet ServerPacket
 	}{
 		{"unsupported protocol", StateHandshake, ServerHello{}},
+		{"future protocol", StateHandshake, ServerHello{ProtocolVersion: ProtocolVersion + 1}},
 		{"zero handshake code", StateHandshake, HandshakeReject{}},
 		{"unknown handshake code", StateHandshake, HandshakeReject{Code: HandshakeRejectCode(2)}},
 		{"invalid login success ID", StateLogin, LoginSuccess{}},

@@ -41,7 +41,7 @@ func TestCommonBlockMaterialsAreFixedAndRoundTrip(t *testing.T) {
 		{core.MossyCobblestoneID, core.ItemMossyCobblestone},
 	}
 	for i, tc := range tests {
-		if tc.block != core.ChestID+1+core.BlockID(i) || tc.item != core.ItemChest+1+core.ItemID(i) {
+		if tc.block != core.LightBlockID+1+core.BlockID(i) || tc.item != core.ItemLightBlock+1+core.ItemID(i) {
 			t.Fatalf("材料 %d 的稳定编号不连续: block=%d item=%d", i, tc.block, tc.item)
 		}
 		if !core.RegisteredBlock(tc.block) || !core.RegisteredItem(tc.item) {

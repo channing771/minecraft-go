@@ -304,7 +304,7 @@ func (mesher *Mesher) Close() {
 
 func (mesher *Mesher) work() {
 	defer mesher.wg.Done()
-	light := mesh.NewSkyLightScratch()
+	light := mesh.NewLightScratch()
 	for {
 		select {
 		case <-mesher.closed:
@@ -320,7 +320,7 @@ func (mesher *Mesher) work() {
 	}
 }
 
-func (mesher *Mesher) handle(job mesherJob, light *mesh.SkyLightScratch) {
+func (mesher *Mesher) handle(job mesherJob, light *mesh.LightScratch) {
 	claimed := false
 	defer func() {
 		recovered := recover()

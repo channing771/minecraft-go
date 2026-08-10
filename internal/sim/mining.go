@@ -57,7 +57,8 @@ func miningRule(block core.BlockID, held core.ItemID) (uint16, bool) {
 		default:
 			return 30, false
 		}
-	case core.StoneBrickID, core.FurnaceID, core.ChestID, core.CoalOreID, core.IronOreID:
+	case core.StoneBrickID, core.FurnaceID, core.ChestID, core.LightBlockID,
+		core.CoalOreID, core.IronOreID:
 		switch held {
 		case core.ItemStonePickaxe:
 			return 15, true

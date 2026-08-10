@@ -18,6 +18,12 @@ func (testRegistry) FaceVisible(id, adjacent world.BlockID) bool {
 func (testRegistry) Material(id world.BlockID, _ mesh.Face) uint16 {
 	return uint16(id)
 }
+func (testRegistry) Emission(id world.BlockID) uint8 {
+	if id == core.LightBlockID {
+		return 15
+	}
+	return 0
+}
 
 type materialCallRegistry struct {
 	*assets.Registry
@@ -90,7 +96,7 @@ func slabNeighbors(center *world.Section, topY int) *world.Neighborhood {
 
 func TestMeshEmptySectionProducesNothing(t *testing.T) {
 	n := solidNeighbors(world.NewSection())
-	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewSkyLightScratch()); len(q) != 0 {
+	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewLightScratch()); len(q) != 0 {
 		t.Fatalf("全空气区段产生了 %d 个面，应为 0", len(q))
 	}
 }
@@ -99,7 +105,7 @@ func TestMeshUnknownBlockDoesNotSelectMaterial(t *testing.T) {
 	center := world.NewSection()
 	center.Blocks.Set(8, 8, 8, core.MossyCobblestoneID+1)
 	registry := &materialCallRegistry{Registry: assets.NewRegistry()}
-	if quads := mesh.MeshSection(solidNeighbors(center), registry, mesh.NewSkyLightScratch()); len(quads) != 0 {
+	if quads := mesh.MeshSection(solidNeighbors(center), registry, mesh.NewLightScratch()); len(quads) != 0 {
 		t.Fatalf("未知方块产生了 %d 个面，想要 0", len(quads))
 	}
 	if registry.calls != 0 {
@@ -117,7 +123,7 @@ func TestMeshFullSectionProducesNothing(t *testing.T) {
 		}
 	}
 	n := solidNeighbors(center)
-	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewSkyLightScratch()); len(q) != 0 {
+	if q := mesh.MeshSection(n, testRegistry{}, mesh.NewLightScratch()); len(q) != 0 {
 		t.Fatalf("被实心邻居包围的实心区段产生了 %d 个面，应为 0", len(q))
 	}
 }
@@ -125,7 +131,7 @@ func TestMeshFullSectionProducesNothing(t *testing.T) {
 func TestMeshSingleBlockProducesSixUnitQuads(t *testing.T) {
 	center := world.NewSection()
 	center.Blocks.Set(8, 8, 8, world.BlockID(2))
-	quads := mesh.MeshSection(solidNeighbors(center), testRegistry{}, mesh.NewSkyLightScratch())
+	quads := mesh.MeshSection(solidNeighbors(center), testRegistry{}, mesh.NewLightScratch())
 	if len(quads) != 6 {
 		t.Fatalf("孤立方块产生了 %d 个面，应为 6", len(quads))
 	}
@@ -153,7 +159,7 @@ func TestMeshGreedyMergesFlatSurface(t *testing.T) {
 			}
 		}
 	}
-	quads := mesh.MeshSection(slabNeighbors(center, 7), testRegistry{}, mesh.NewSkyLightScratch())
+	quads := mesh.MeshSection(slabNeighbors(center, 7), testRegistry{}, mesh.NewLightScratch())
 	if len(quads) != 1 {
 		t.Fatalf("平坦顶面产生了 %d 个面，贪心合并后应为 1", len(quads))
 	}
@@ -174,7 +180,7 @@ func TestMeshDoesNotMergeAcrossMaterials(t *testing.T) {
 			center.Blocks.Set(x, 0, z, id)
 		}
 	}
-	quads := mesh.MeshSection(slabNeighbors(center, 0), testRegistry{}, mesh.NewSkyLightScratch())
+	quads := mesh.MeshSection(slabNeighbors(center, 0), testRegistry{}, mesh.NewLightScratch())
 	if len(quads) != 2 {
 		t.Fatalf("两种材质的平面产生了 %d 个面，应为 2", len(quads))
 	}
@@ -192,7 +198,7 @@ func TestMeshCutoutFaces(t *testing.T) {
 	t.Run("孤立玻璃产生六个面", func(t *testing.T) {
 		center := world.NewSection()
 		center.Blocks.Set(8, 8, 8, core.GlassID)
-		if got := len(mesh.MeshSection(solidNeighbors(center), reg, mesh.NewSkyLightScratch())); got != 6 {
+		if got := len(mesh.MeshSection(solidNeighbors(center), reg, mesh.NewLightScratch())); got != 6 {
 			t.Fatalf("孤立玻璃产生了 %d 个面，想要 6", got)
 		}
 	})
@@ -209,7 +215,7 @@ func TestMeshCutoutFaces(t *testing.T) {
 			center := world.NewSection()
 			center.Blocks.Set(7, 8, 8, tt.left)
 			center.Blocks.Set(8, 8, 8, tt.right)
-			quads := mesh.MeshSection(solidNeighbors(center), reg, mesh.NewSkyLightScratch())
+			quads := mesh.MeshSection(solidNeighbors(center), reg, mesh.NewLightScratch())
 			for _, q := range quads {
 				if q.Face == mesh.FacePosX && q.X == 7 || q.Face == mesh.FaceNegX && q.X == 8 {
 					t.Fatalf("cutout 边界产生了重叠内部面: %+v", q)
@@ -222,7 +228,7 @@ func TestMeshCutoutFaces(t *testing.T) {
 		center := world.NewSection()
 		center.Blocks.Set(7, 8, 8, core.StoneID)
 		center.Blocks.Set(8, 8, 8, core.GlassID)
-		quads := mesh.MeshSection(solidNeighbors(center), reg, mesh.NewSkyLightScratch())
+		quads := mesh.MeshSection(solidNeighbors(center), reg, mesh.NewLightScratch())
 		stoneFace, glassFace := false, false
 		for _, q := range quads {
 			stoneFace = stoneFace || q.Face == mesh.FacePosX && q.X == 7
@@ -241,7 +247,7 @@ func TestMeshCutoutDoesNotOccludeAOOrSkyLight(t *testing.T) {
 	center.Blocks.Set(7, 9, 8, core.GlassID)
 	center.Blocks.Set(8, 9, 7, core.LeavesID)
 	center.Blocks.Set(7, 9, 7, core.GlassID)
-	quads := mesh.MeshSection(solidNeighbors(center), reg, mesh.NewSkyLightScratch())
+	quads := mesh.MeshSection(solidNeighbors(center), reg, mesh.NewLightScratch())
 	found := false
 	for _, q := range quads {
 		if q.Face == mesh.FacePosY && q.X == 8 && q.Y == 8 && q.Z == 8 {
@@ -257,8 +263,8 @@ func TestMeshCutoutDoesNotOccludeAOOrSkyLight(t *testing.T) {
 
 	n, localY := propagatedSkyWorld(t, 0, nil)
 	n.Center.Blocks.Set(7, localY+1, 8, core.GlassID)
-	quads = mesh.MeshSection(n, reg, mesh.NewSkyLightScratch())
-	if got := topFaceLightAt(t, quads, 8, localY, 8); got != 7 {
+	quads = mesh.MeshSection(n, reg, mesh.NewLightScratch())
+	if got := topFaceLightAt(t, quads, 8, localY, 8) >> 4; got != 7 {
 		t.Fatalf("穿过玻璃后的天空光 = %d，想要 7", got)
 	}
 }
@@ -275,7 +281,7 @@ func BenchmarkMeshTerrainSection(b *testing.B) {
 	}
 	n := solidNeighbors(center)
 	reg := testRegistry{}
-	light := mesh.NewSkyLightScratch()
+	light := mesh.NewLightScratch()
 	var quads []mesh.Quad
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
