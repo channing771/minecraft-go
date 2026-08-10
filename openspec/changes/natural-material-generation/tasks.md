@@ -18,9 +18,9 @@
 
 ## 5. 实现七种自然值的幂等迁移内核
 
-- [ ] 5.1 在 `cmd/mcgod/material_migration_test.go` 增加 RED 纯函数测试，覆盖只重算石头、泥土、草、沙子、砾石、黏土和雪块，保留空气、矿石、其他方块及掉落物、熔炉和箱子负载，并验证输入区块不变和无变化 revision 不递增；运行 `go test ./cmd/mcgod -run "MigrateNatural" -count=1` 确认失败。
-- [ ] 5.2 在 `cmd/mcgod/material_migration.go` 实现七种自然值纯迁移和离线 runner，由 `cmd/mcgod` 同时依赖 `storage` 与 `worldgen`；runner 使用具体 `DiskStore` 的 `ChunkKeys`、`Backup`、既有世界锁、`SaveBatch` 与 `Sync`，仅在有变化时以 `revision+1` 保存，且不修改 `internal/storage` 的迁移逻辑或依赖；运行 `go test ./cmd/mcgod -race -count=1`。
-- [ ] 5.3 在 `cmd/mcgod/material_migration.go` 实现 `material-migration-v1.json`：稳定排序后每 `32` 个扫描键成批，每批依次 `SaveBatch`、`Sync`、原子记录 `LastKey`，最终不足 `32` 个键同样记录进度后再标记完成；在 `material_migration_test.go` 故障注入保存、进度写入和完成标记失败，覆盖最终 partial batch 重跑不重复 revision 与完成后幂等，运行 `go test ./cmd/mcgod -race -count=1`、`gofmt -w cmd/mcgod`、`gofmt -l cmd/mcgod` 和 `git diff --check`。
+- [x] 5.1 在 `cmd/mcgod/material_migration_test.go` 增加 RED 纯函数测试，覆盖只重算石头、泥土、草、沙子、砾石、黏土和雪块，保留空气、矿石、其他方块及掉落物、熔炉和箱子负载，并验证输入区块不变和无变化 revision 不递增；运行 `go test ./cmd/mcgod -run "MigrateNatural" -count=1` 确认失败。
+- [x] 5.2 在 `cmd/mcgod/material_migration.go` 实现七种自然值纯迁移和离线 runner，由 `cmd/mcgod` 同时依赖 `storage` 与 `worldgen`；runner 使用具体 `DiskStore` 的 `ChunkKeys`、`Backup`、既有世界锁、`SaveBatch` 与 `Sync`，仅在有变化时以 `revision+1` 保存，且不修改 `internal/storage` 的迁移逻辑或依赖；运行 `go test ./cmd/mcgod -race -count=1`。
+- [x] 5.3 在 `cmd/mcgod/material_migration.go` 实现 `material-migration-v1.json`：稳定排序后每 `32` 个扫描键成批，每批依次 `SaveBatch`、`Sync`、原子记录 `LastKey`，最终不足 `32` 个键同样记录进度后再标记完成；在 `material_migration_test.go` 故障注入保存、进度写入和完成标记失败，覆盖最终 partial batch 重跑不重复 revision 与完成后幂等，运行 `go test ./cmd/mcgod -race -count=1`、`gofmt -w cmd/mcgod`、`gofmt -l cmd/mcgod` 和 `git diff --check`。
 
 ## 6. 接入互斥的 mcgod 离线命令
 
