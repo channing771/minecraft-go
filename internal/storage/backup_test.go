@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,6 +84,144 @@ func TestWorldBackupCopiesCompleteWorldAndReusesMatchingBackup(t *testing.T) {
 
 	if err := store.Backup(context.Background(), destination); err != nil {
 		t.Fatalf("复用身份匹配的世界备份失败: %v", err)
+	}
+}
+
+func TestWorldBackupCanBackUpAnOpenedBackup(t *testing.T) {
+	store, _, firstDestination := newWorldBackupFixture(t)
+	if err := store.Backup(context.Background(), firstDestination); err != nil {
+		t.Fatalf("创建第一份世界备份失败: %v", err)
+	}
+
+	backupStore, err := OpenDisk(context.Background(), firstDestination, OpenOptions{})
+	if err != nil {
+		t.Fatalf("打开第一份世界备份失败: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := backupStore.Close(); err != nil {
+			t.Errorf("关闭第一份世界备份失败: %v", err)
+		}
+	})
+	secondDestination := filepath.Join(filepath.Dir(firstDestination), "second-backup")
+	if err := backupStore.Backup(context.Background(), secondDestination); err != nil {
+		t.Fatalf("从已打开备份创建第二份备份失败: %v", err)
+	}
+
+	identity := readWorldBackupIdentity(t, secondDestination)
+	absoluteFirst, err := filepath.Abs(firstDestination)
+	if err != nil {
+		t.Fatalf("规范第一份备份路径失败: %v", err)
+	}
+	if identity.Source != absoluteFirst || identity.Seed != 42 || identity.MigrationVersion != 1 {
+		t.Fatalf("第二份备份身份 = %+v，期望绑定第一份备份", identity)
+	}
+}
+
+func TestWorldBackupRejectsEveryMismatchedIdentityField(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*backupIdentity)
+	}{
+		{name: "Source", mutate: func(identity *backupIdentity) { identity.Source += "-other" }},
+		{name: "Seed", mutate: func(identity *backupIdentity) { identity.Seed++ }},
+		{name: "MigrationVersion", mutate: func(identity *backupIdentity) { identity.MigrationVersion++ }},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store, _, destination := newWorldBackupFixture(t)
+			if err := store.Backup(context.Background(), destination); err != nil {
+				t.Fatalf("创建世界备份失败: %v", err)
+			}
+			identity := readWorldBackupIdentity(t, destination)
+			tc.mutate(&identity)
+			mismatched, err := json.Marshal(identity)
+			if err != nil {
+				t.Fatalf("编码不匹配身份失败: %v", err)
+			}
+			mismatched = append(mismatched, '\n')
+			identityPath := filepath.Join(destination, ".mcgo-world-backup-v1.json")
+			if err := os.WriteFile(identityPath, mismatched, 0o600); err != nil {
+				t.Fatalf("写入不匹配身份失败: %v", err)
+			}
+			before := snapshotWorldBackupSource(t, destination)
+
+			if err := store.Backup(context.Background(), destination); err == nil {
+				t.Fatalf("%s 不匹配时 Backup() 未返回错误", tc.name)
+			}
+			after := snapshotWorldBackupSource(t, destination)
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("拒绝 %s 不匹配后目标被改变", tc.name)
+			}
+		})
+	}
+}
+
+func TestWorldBackupRejectsOversizedIdentity(t *testing.T) {
+	store, _, destination := newWorldBackupFixture(t)
+	if err := store.Backup(context.Background(), destination); err != nil {
+		t.Fatalf("创建世界备份失败: %v", err)
+	}
+	identityPath := filepath.Join(destination, ".mcgo-world-backup-v1.json")
+	identity, err := os.ReadFile(identityPath)
+	if err != nil {
+		t.Fatalf("读取备份身份失败: %v", err)
+	}
+	oversized := bytes.Repeat([]byte(" "), 4097)
+	copy(oversized, identity)
+	if err := os.WriteFile(identityPath, oversized, 0o600); err != nil {
+		t.Fatalf("写入超限备份身份失败: %v", err)
+	}
+
+	if err := store.Backup(context.Background(), destination); err == nil {
+		t.Fatal("身份超过 4 KiB 时 Backup() 未返回错误")
+	}
+	got, err := os.ReadFile(identityPath)
+	if err != nil {
+		t.Fatalf("读取拒绝后的超限身份失败: %v", err)
+	}
+	if !bytes.Equal(got, oversized) {
+		t.Fatal("拒绝超限身份后目标被改变")
+	}
+}
+
+func TestWorldBackupRetryCompletesParentSyncAfterPublish(t *testing.T) {
+	store, _, destination := newWorldBackupFixture(t)
+	parent := filepath.Dir(destination)
+	injected := errors.New("injected backup parent sync failure")
+	failedOnce := false
+	parentSyncCompleted := false
+	syncDir := func(path string) error {
+		if path != parent {
+			return syncDirectory(path)
+		}
+		if !failedOnce {
+			failedOnce = true
+			return injected
+		}
+		if err := syncDirectory(path); err != nil {
+			return err
+		}
+		parentSyncCompleted = true
+		return nil
+	}
+
+	err := store.backup(context.Background(), destination, os.Rename, syncDir)
+	if !errors.Is(err, injected) {
+		t.Fatalf("首次 Backup() 错误 = %v，期望注入的父目录同步错误", err)
+	}
+	if parentSyncCompleted {
+		t.Fatal("首次失败被错误地记录为已完成父目录同步")
+	}
+	if _, err := os.Stat(destination); err != nil {
+		t.Fatalf("rename 成功后的正式备份不可检查: %v", err)
+	}
+
+	if err := store.backup(context.Background(), destination, os.Rename, syncDir); err != nil {
+		t.Fatalf("重试世界备份失败: %v", err)
+	}
+	if !parentSyncCompleted {
+		t.Fatal("重试静默复用备份，未重新完成父目录同步")
 	}
 }
 
@@ -240,6 +379,19 @@ func assertSameFileContents(t *testing.T, source, destination string) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("备份文件 %q 内容 = %q，期望 %q", destination, got, want)
 	}
+}
+
+func readWorldBackupIdentity(t *testing.T, destination string) backupIdentity {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(destination, ".mcgo-world-backup-v1.json"))
+	if err != nil {
+		t.Fatalf("读取备份身份失败: %v", err)
+	}
+	var identity backupIdentity
+	if err := json.Unmarshal(data, &identity); err != nil {
+		t.Fatalf("解析备份身份失败: %v", err)
+	}
+	return identity
 }
 
 type worldBackupSnapshot struct {

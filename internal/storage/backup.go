@@ -15,6 +15,7 @@ import (
 const (
 	backupIdentityName     = ".mcgo-world-backup-v1.json"
 	backupMigrationVersion = 1
+	maxBackupIdentitySize  = int64(4 << 10)
 )
 
 type backupIdentity struct {
@@ -30,6 +31,15 @@ type backupDirectory struct {
 
 // Backup 在当前世界锁和存储锁内创建可验证的完整目录备份。
 func (store *DiskStore) Backup(ctx context.Context, destination string) error {
+	return store.backup(ctx, destination, os.Rename, syncDirectory)
+}
+
+func (store *DiskStore) backup(
+	ctx context.Context,
+	destination string,
+	rename func(string, string) error,
+	syncDir func(string) error,
+) error {
 	if store.closing.Load() {
 		return os.ErrClosed
 	}
@@ -79,6 +89,9 @@ func (store *DiskStore) Backup(ctx context.Context, destination string) error {
 	if exists, err := matchingBackup(destination, identity); err != nil {
 		return err
 	} else if exists {
+		if err := syncDir(filepath.Dir(destination)); err != nil {
+			return fmt.Errorf("sync existing backup parent for %q: %w", destination, err)
+		}
 		return nil
 	}
 
@@ -113,7 +126,7 @@ func (store *DiskStore) Backup(ctx context.Context, destination string) error {
 		if err := os.Chmod(directory.path, directory.mode.Perm()); err != nil {
 			return fmt.Errorf("set backup directory mode %q: %w", directory.path, err)
 		}
-		if err := syncDirectory(directory.path); err != nil {
+		if err := syncDir(directory.path); err != nil {
 			return fmt.Errorf("sync backup directory %q: %w", directory.path, err)
 		}
 	}
@@ -125,11 +138,11 @@ func (store *DiskStore) Backup(ctx context.Context, destination string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect backup destination %q: %w", destination, err)
 	}
-	if err := os.Rename(temporary, destination); err != nil {
+	if err := rename(temporary, destination); err != nil {
 		return fmt.Errorf("publish backup %q: %w", destination, err)
 	}
 	removeTemporary = false
-	if err := syncDirectory(filepath.Dir(destination)); err != nil {
+	if err := syncDir(filepath.Dir(destination)); err != nil {
 		return fmt.Errorf("sync backup parent for %q: %w", destination, err)
 	}
 	return nil
@@ -163,9 +176,19 @@ func matchingBackup(destination string, want backupIdentity) (bool, error) {
 	if !identityInfo.Mode().IsRegular() {
 		return false, fmt.Errorf("backup identity %q is not a regular file", identityPath)
 	}
-	data, err := os.ReadFile(identityPath)
+	if identityInfo.Size() > maxBackupIdentitySize {
+		return false, fmt.Errorf("backup identity %q exceeds %d bytes", identityPath, maxBackupIdentitySize)
+	}
+	file, err := os.Open(identityPath)
 	if err != nil {
+		return false, fmt.Errorf("open backup identity %q: %w", identityPath, err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, maxBackupIdentitySize+1))
+	if err := errors.Join(readErr, file.Close()); err != nil {
 		return false, fmt.Errorf("read backup identity %q: %w", identityPath, err)
+	}
+	if int64(len(data)) > maxBackupIdentitySize {
+		return false, fmt.Errorf("backup identity %q exceeds %d bytes", identityPath, maxBackupIdentitySize)
 	}
 	var got backupIdentity
 	if err := json.Unmarshal(data, &got); err != nil {
@@ -193,7 +216,7 @@ func copyWorldBackup(ctx context.Context, source, destination string) ([]backupD
 		if err != nil {
 			return err
 		}
-		if relative == "world.lock" {
+		if relative == "world.lock" || relative == backupIdentityName {
 			return nil
 		}
 		matchedTemporary, err := filepath.Match(".*.tmp-*", entry.Name())
