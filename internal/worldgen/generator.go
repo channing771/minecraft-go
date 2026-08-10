@@ -58,6 +58,15 @@ func (g *Generator) HeightAt(wx, wz int32) int32 {
 
 // BaseBlockAt 返回不应用会话修改时指定世界位置的确定性方块。
 func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
+	base := g.TerrainBlockAt(pos)
+	if base != core.AirID {
+		return base
+	}
+	return g.treeBlockAt(pos)
+}
+
+// TerrainBlockAt 返回不叠加橡树结构时指定世界位置的确定性地形方块。
+func (g *Generator) TerrainBlockAt(pos core.BlockPos) core.BlockID {
 	if pos.Y < core.MinY || pos.Y >= core.MaxY {
 		return core.AirID
 	}
@@ -131,6 +140,7 @@ func (g *Generator) GenerateChunk(pos core.ChunkPos) *world.Chunk {
 			}
 		}
 	}
+	g.applyOakTrees(c)
 	c.Compact()
 	return c
 }

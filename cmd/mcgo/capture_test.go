@@ -186,13 +186,13 @@ func TestCaptureMaterialsShowcaseFixtureUsesMirrorAndMesher(t *testing.T) {
 	}
 }
 
-// 杀死变异：遗漏末尾场景、未装入唯一砖块、绕过 Mirror/Mesher、未固定相机，
+// 杀死变异：遗漏目标反馈场景、未装入唯一砖块、绕过 Mirror/Mesher、未固定相机，
 // 或继承上个场景的 UI 与远端玩家状态都会改变这些可观察结果。
 func TestCaptureTargetBlockFeedbackUsesNormalTargetPath(t *testing.T) {
-	scene := captureScenes[len(captureScenes)-1]
+	scene := captureScenes[len(captureScenes)-2]
 	if scene.Name != "target-block-feedback" || scene.WarmupFrames != 8 ||
 		scene.Prepare == nil || scene.Apply == nil {
-		t.Fatalf("末场景=%+v，想要完整 target-block-feedback", scene)
+		t.Fatalf("倒数第二场景=%+v，想要完整 target-block-feedback", scene)
 	}
 
 	mesher := client.NewMesher(assets.NewRegistry(), 1)

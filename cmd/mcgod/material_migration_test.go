@@ -17,6 +17,33 @@ import (
 	"minecraft-go/internal/worldgen"
 )
 
+func TestMigrateNaturalMaterialsDoesNotIntroduceOakTrees(t *testing.T) {
+	generator := worldgen.New(42)
+	root := core.BlockPos{X: -4, Y: 65, Z: -4}
+	if got := generator.BaseBlockAt(root); got != core.OakLogID {
+		t.Fatalf("测试夹具树根 = %v，期望 %v", got, core.OakLogID)
+	}
+
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: root.Chunk()}
+	chunk := world.NewChunk(key.Pos)
+	x, _, z := root.Local()
+	chunk.SetBlock(x, root.Y, z, core.StoneID)
+
+	candidate, changed, err := migrateNaturalMaterials(generator, storage.StoredChunk{
+		Key: key, Revision: 8, PersistedRevision: 8, Chunk: chunk,
+	})
+	if err != nil {
+		t.Fatalf("迁移含树根坐标的旧区块失败: %v", err)
+	}
+	if !changed {
+		t.Fatal("可迁移的旧石头未报告变化")
+	}
+	got := candidate.Chunk.BlockAt(x, root.Y, z)
+	if got != core.AirID || got == core.OakLogID || got == core.LeavesID {
+		t.Fatalf("迁移后的树根位置 = %v，期望结构外地形 %v 且不得为橡树方块", got, core.AirID)
+	}
+}
+
 func TestMigrateNaturalMaterialsPreservesOtherBlocksAndPayloads(t *testing.T) {
 	seed := int64(42)
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -2, Z: 3}}
@@ -88,7 +115,7 @@ func TestMigrateNaturalMaterialsPreservesOtherBlocksAndPayloads(t *testing.T) {
 	generator := worldgen.New(seed)
 	for index := range natural {
 		position := blockPosition(key.Pos, index, core.MinY, 0)
-		want.SetBlock(index, core.MinY, 0, generator.BaseBlockAt(position))
+		want.SetBlock(index, core.MinY, 0, generator.TerrainBlockAt(position))
 	}
 
 	candidate, changed, err := migrateNaturalMaterials(generator, storage.StoredChunk{
@@ -228,7 +255,7 @@ func TestMaterialMigrationRealDiskRetriesProgressFailureWithoutSecondRevision(t 
 		t.Fatalf("进度失败后不应有正式状态，Stat 错误: %v", err)
 	}
 	want := chunk.Clone()
-	want.SetBlock(0, core.MinY, 0, worldgen.New(42).BaseBlockAt(blockPosition(key.Pos, 0, core.MinY, 0)))
+	want.SetBlock(0, core.MinY, 0, worldgen.New(42).TerrainBlockAt(blockPosition(key.Pos, 0, core.MinY, 0)))
 	assertMaterialMigrationDiskChunk(t, worldPath, key, 6, want)
 
 	if err := migrateMaterials(ctx, worldPath, backupPath); err != nil {
@@ -864,7 +891,7 @@ func materialMigrationDiskFixture(
 
 	want := chunk.Clone()
 	for x := range 7 {
-		want.SetBlock(x, core.MinY, 0, generator.BaseBlockAt(blockPosition(key.Pos, x, core.MinY, 0)))
+		want.SetBlock(x, core.MinY, 0, generator.TerrainBlockAt(blockPosition(key.Pos, x, core.MinY, 0)))
 	}
 	return chunk, want
 }
