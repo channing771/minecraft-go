@@ -51,6 +51,32 @@ func TestFurnaceMirrorAppliesAuthoritativeState(t *testing.T) {
 	}
 }
 
+func TestFurnaceMirrorAppliesAllMaterialStates(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  core.ItemStack
+		output core.ItemStack
+	}{
+		{"粗铁到铁锭", core.ItemStack{Item: core.ItemRawIron, Count: 7}, core.ItemStack{Item: core.ItemIronIngot, Count: 5}},
+		{"沙子到玻璃", core.ItemStack{Item: core.ItemSand, Count: 6}, core.ItemStack{Item: core.ItemGlass, Count: 4}},
+		{"黏土块到砖块", core.ItemStack{Item: core.ItemClay, Count: 3}, core.ItemStack{Item: core.ItemBrick, Count: 2}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var mirror client.FurnaceMirror
+			want := testFurnaceState(9)
+			want.Input = test.input
+			want.Output = test.output
+			if err := mirror.Apply(want); err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := mirror.State(); !ok || got != want {
+				t.Fatalf("完整镜像状态 = %+v, %v，想要 %+v", got, ok, want)
+			}
+		})
+	}
+}
+
 func TestFurnaceMirrorReplacesOnNewGeneration(t *testing.T) {
 	var mirror client.FurnaceMirror
 	if err := mirror.Apply(testFurnaceState(9)); err != nil {
@@ -88,19 +114,35 @@ func TestFurnaceMirrorIgnoresStaleClose(t *testing.T) {
 }
 
 func TestFurnaceMirrorRejectsInvalidState(t *testing.T) {
-	var mirror client.FurnaceMirror
 	valid := testFurnaceState(9)
-	if err := mirror.Apply(valid); err != nil {
-		t.Fatal(err)
+	badInput := valid
+	badInput.Input = core.ItemStack{Item: core.ItemCoal, Count: 1}
+	badFuel := valid
+	badFuel.Fuel = core.ItemStack{Item: core.ItemSand, Count: 1}
+	badOutput := valid
+	badOutput.Output = core.ItemStack{Item: core.ItemClay, Count: 1}
+	for _, test := range []struct {
+		name  string
+		state network.FurnaceState
+	}{
+		{"非法输入", badInput},
+		{"非法燃料", badFuel},
+		{"非法输出", badOutput},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var mirror client.FurnaceMirror
+			if err := mirror.Apply(valid); err != nil {
+				t.Fatal(err)
+			}
+			if err := mirror.Apply(test.state); err == nil {
+				t.Fatal("非法状态被接受")
+			}
+			if got, _ := mirror.State(); got != valid {
+				t.Fatalf("非法状态部分应用: %+v", got)
+			}
+		})
 	}
-	invalid := valid
-	invalid.Input = core.ItemStack{Item: core.ItemCoal, Count: 1}
-	if err := mirror.Apply(invalid); err == nil {
-		t.Fatal("非法状态被接受")
-	}
-	if got, _ := mirror.State(); got != valid {
-		t.Fatalf("非法状态部分应用: %+v", got)
-	}
+	var mirror client.FurnaceMirror
 	if err := mirror.Close(network.ContainerClosed{}); err == nil {
 		t.Fatal("非法关闭通知被接受")
 	}

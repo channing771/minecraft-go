@@ -295,27 +295,42 @@ func TestFurnaceInputKindResetOverMemory(t *testing.T) {
 	}
 }
 
-// TestFurnaceRestartRestoresTimersWithoutCatchUp 覆盖 schema v4 的重启闭环：
-// 三格物品、熔炼进度与剩余燃烧 tick 原值恢复，且停服墙钟不补算进度。
+// TestFurnaceRestartRestoresTimersWithoutCatchUp 覆盖 schema v8 的重启闭环：
+// 两种材料的三格物品、熔炼进度与剩余燃烧 tick 原值恢复，且停服墙钟不补算进度。
 func TestFurnaceRestartRestoresTimersWithoutCatchUp(t *testing.T) {
 	root := t.TempDir()
 	key := core.ChunkKey{Dimension: core.Overworld}
-	index, ok := world.ChunkBlockIndex(core.BlockPos{})
-	if !ok {
-		t.Fatal("熔炉位置没有区块索引")
+	positions := [...]core.BlockPos{{}, {X: 1}}
+	want := [...]world.FurnaceSlot{
+		{
+			Generation: 3, Active: true,
+			Input:         core.ItemStack{Item: core.ItemSand, Count: 4},
+			Fuel:          core.ItemStack{Item: core.ItemCoal, Count: 2},
+			Output:        core.ItemStack{Item: core.ItemGlass, Count: 1},
+			ProgressTicks: 137, BurnTicks: 1463,
+		},
+		{
+			Generation: 5, Active: true,
+			Input:         core.ItemStack{Item: core.ItemClay, Count: 3},
+			Fuel:          core.ItemStack{Item: core.ItemCoal, Count: 1},
+			Output:        core.ItemStack{Item: core.ItemBrick, Count: 2},
+			ProgressTicks: 91, BurnTicks: 1200,
+		},
 	}
-	want := world.FurnaceSlot{
-		Generation: 3, Active: true, BlockIndex: index,
-		Input:         core.ItemStack{Item: core.ItemRawIron, Count: 4},
-		Fuel:          core.ItemStack{Item: core.ItemCoal, Count: 2},
-		Output:        core.ItemStack{Item: core.ItemIronIngot, Count: 1},
-		ProgressTicks: 137, BurnTicks: 1463,
+	for slot, position := range positions {
+		index, ok := world.ChunkBlockIndex(position)
+		if !ok {
+			t.Fatalf("熔炉位置 %+v 没有区块索引", position)
+		}
+		want[slot].BlockIndex = index
 	}
 
 	first, firstStore, firstClient := newDropDiskWorld(t, root)
 	step := stepUntilDropReady(t, first, firstClient)
-	first.SetBlockForTest(core.BlockPos{}, core.FurnaceID)
-	first.SetChunkFurnaceForTest(key, 0, want)
+	for slot, position := range positions {
+		first.SetBlockForTest(position, core.FurnaceID)
+		first.SetChunkFurnaceForTest(key, slot, want[slot])
+	}
 	step()
 	flushDropWorld(t, first, firstStore)
 
@@ -336,8 +351,8 @@ func TestFurnaceRestartRestoresTimersWithoutCatchUp(t *testing.T) {
 	restart := stepUntilDropReady(t, second, secondClient)
 
 	deadline := time.Now().Add(waitDeadline)
-	var restored world.FurnaceSlot
-	for !restored.Active {
+	var restored [len(want)]world.FurnaceSlot
+	for !restored[0].Active || !restored[1].Active {
 		if time.Now().After(deadline) {
 			t.Fatal("等待重启后加载熔炉区块超时")
 		}
@@ -346,26 +361,31 @@ func TestFurnaceRestartRestoresTimersWithoutCatchUp(t *testing.T) {
 		if !ok {
 			continue
 		}
-		restored = chunk.Furnace(0)
+		for slot := range restored {
+			restored[slot] = chunk.Furnace(slot)
+		}
 	}
-	if restored.Input != want.Input || restored.Fuel != want.Fuel {
-		t.Fatalf("重启后三格 = %+v，想要 %+v", restored, want)
-	}
-	// 恢复后每推进一个 tick，进度加一且燃烧减一；两者的增量必须严格相等，
-	// 因此计时是从存档值继续，而不是被重置或按停服墙钟补算。
-	if restored.ProgressTicks < want.ProgressTicks {
-		t.Fatalf("重启后进度 = %d，低于存档值 %d", restored.ProgressTicks, want.ProgressTicks)
-	}
-	advanced := int(restored.ProgressTicks) - int(want.ProgressTicks)
-	burned := int(want.BurnTicks) - int(restored.BurnTicks)
-	if advanced != burned {
-		t.Fatalf("进度增量 %d 与燃烧减量 %d 不一致", advanced, burned)
-	}
-	// 停服 20ms 约合数百个 tick；若按墙钟补算，增量会远大于实际推进的 tick 数。
-	if advanced > 16 {
-		t.Fatalf("重启后进度增加 %d，疑似按墙钟补算", advanced)
-	}
-	if restored.Generation != want.Generation {
-		t.Fatalf("重启后 generation = %d，想要 %d", restored.Generation, want.Generation)
+	for slot, got := range restored {
+		expected := want[slot]
+		if got.Input != expected.Input || got.Fuel != expected.Fuel || got.Output != expected.Output {
+			t.Fatalf("重启后熔炉槽 %d 三格 = %+v，想要 %+v", slot, got, expected)
+		}
+		// 恢复后每推进一个 tick，进度加一且燃烧减一；两者的增量必须严格相等，
+		// 因此计时是从存档值继续，而不是被重置或按停服墙钟补算。
+		if got.ProgressTicks < expected.ProgressTicks {
+			t.Fatalf("重启后熔炉槽 %d 进度 = %d，低于存档值 %d", slot, got.ProgressTicks, expected.ProgressTicks)
+		}
+		advanced := int(got.ProgressTicks) - int(expected.ProgressTicks)
+		burned := int(expected.BurnTicks) - int(got.BurnTicks)
+		if advanced != burned {
+			t.Fatalf("熔炉槽 %d 进度增量 %d 与燃烧减量 %d 不一致", slot, advanced, burned)
+		}
+		// 停服 20ms 约合数百个 tick；若按墙钟补算，增量会远大于实际推进的 tick 数。
+		if advanced > 16 {
+			t.Fatalf("重启后熔炉槽 %d 进度增加 %d，疑似按墙钟补算", slot, advanced)
+		}
+		if got.Generation != expected.Generation {
+			t.Fatalf("重启后熔炉槽 %d generation = %d，想要 %d", slot, got.Generation, expected.Generation)
+		}
 	}
 }

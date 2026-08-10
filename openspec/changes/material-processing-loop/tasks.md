@@ -14,7 +14,7 @@
 
 ## 5. 熔炉性能与持久化回归
 
-- [ ] 5.1 更新受影响的 `internal/world`、`internal/sim` 存档和故障路径测试，确认既有 `FurnaceSlot` 字段可往返且无 schema 或协议版本升级；运行 `go test ./internal/world ./internal/sim -race -count=1`。
+- [x] 5.1 更新 `internal/storage`、`internal/client` 与 `internal/server` 的存档、镜像、重启和 Memory/TCP 纵向测试，确认三种完整熔炉状态使用既有 `FurnaceSlot` 与协议字段无损往返，非法镜像状态整包拒绝，且无 schema 或协议版本升级；运行 `go test ./internal/storage ./internal/client -run 'Furnace|ChunkV|Future' -race -count=1`、`go test ./internal/server -run 'MaterialProcessing|FurnaceRestart' -race -count=1` 与 `go test ./internal/server -race -count=1`。
 - [ ] 5.2 运行现有熔炉 benchmark 并仅记录数值，确认固定容量与热路径零分配门禁不退化；运行 `go test ./internal/sim -run '^$' -bench Furnace -benchmem -count=1`。
 
 ## 6. 七行固定合成 HUD
