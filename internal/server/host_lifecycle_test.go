@@ -367,3 +367,138 @@ func TestHostShutdownRetriesPlayerFlushBeforeWorldClose(t *testing.T) {
 		t.Fatal("Run did not exit during shutdown")
 	}
 }
+
+type endpointProgress struct {
+	login        testLogin
+	nextSequence uint64
+	nextMovement [2]int8
+	states       <-chan network.PlayerState
+	err          <-chan error
+	cancel       context.CancelFunc
+}
+
+func loginHealthyMemoryPlayers(t *testing.T, host *Host, count int, sequenceBase uint64) []endpointProgress {
+	t.Helper()
+	movements := [][2]int8{
+		{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1},
+	}
+	progress := make([]endpointProgress, 0, count)
+	for index := 0; index < count; index++ {
+		login := startMemoryLogin(t, host, playerIdentity(byte(index+1)))
+		waitReady(t, host, login)
+		current := monitorEndpointProgress(
+			login,
+			sequenceBase+uint64(index),
+			movements[index],
+		)
+		t.Cleanup(current.cancel)
+		progress = append(progress, current)
+	}
+	return progress
+}
+
+func monitorEndpointProgress(
+	login testLogin,
+	nextSequence uint64,
+	nextMovement [2]int8,
+) endpointProgress {
+	ctx, cancel := context.WithCancel(context.Background())
+	states := make(chan network.PlayerState, 1)
+	errResult := make(chan error, 1)
+	go func() {
+		for {
+			message, err := login.Client.Recv(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					errResult <- err
+				}
+				return
+			}
+			if state, ok := message.(network.PlayerState); ok {
+				select {
+				case states <- state:
+				default:
+					select {
+					case <-states:
+					default:
+					}
+					states <- state
+				}
+			}
+		}
+	}()
+	return endpointProgress{
+		login:        login,
+		nextSequence: nextSequence,
+		nextMovement: nextMovement,
+		states:       states,
+		err:          errResult,
+		cancel:       cancel,
+	}
+}
+
+func assertHealthyHostProgress(t *testing.T, host *Host, healthy []endpointProgress) {
+	t.Helper()
+	for index := range healthy {
+		progress := &healthy[index]
+		sequence := progress.nextSequence
+		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
+		if err := progress.login.Client.Send(ctx, network.PlayerInput{
+			Sequence: sequence,
+			MoveX:    progress.nextMovement[0],
+			MoveZ:    progress.nextMovement[1],
+		}); err != nil {
+			cancel()
+			t.Fatalf("healthy endpoint post-cleanup send: %v", err)
+		}
+		acknowledged := false
+		for !acknowledged {
+			select {
+			case state := <-progress.states:
+				if state.LastInputSequence >= sequence {
+					acknowledged = true
+				}
+			case err := <-progress.err:
+				cancel()
+				t.Fatalf("healthy endpoint post-cleanup recv: %v", err)
+			case <-ctx.Done():
+				cancel()
+				t.Fatalf("healthy endpoint did not acknowledge post-cleanup sequence %d", sequence)
+			}
+		}
+		cancel()
+		progress.nextSequence++
+	}
+	host.mu.Lock()
+	players, sessions := len(host.activeByPlayer), len(host.activeBySession)
+	host.mu.Unlock()
+	if players != len(healthy) || sessions != len(healthy) {
+		t.Fatalf("healthy indexes = players %d sessions %d, want %d/%d", players, sessions, len(healthy), len(healthy))
+	}
+	tick := host.world.TickCount()
+	waitForTickAfter(t, host, tick)
+}
+
+func startMemoryLoginWithCapacity(t *testing.T, host *Host, identity network.Identity, capacity int) testLogin {
+	t.Helper()
+	clientStream, serverStream := network.NewMemoryStreamPair(capacity)
+	done := make(chan error, 1)
+	go func() { done <- host.AcceptStream(context.Background(), serverStream) }()
+	client, err := network.LoginClient(context.Background(), clientStream, identity)
+	if err != nil {
+		t.Fatalf("LoginClient: %v", err)
+	}
+	return testLogin{Client: client, Done: done, Identity: identity}
+}
+
+type playErrorServerStream struct {
+	network.ServerPacketStream
+	err error
+}
+
+func (stream *playErrorServerStream) Recv(ctx context.Context, state network.State) (network.ClientPacket, error) {
+	if state == network.StatePlay {
+		return nil, stream.err
+	}
+	return stream.ServerPacketStream.Recv(ctx, state)
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,4 +343,98 @@ func TestHostRejectsSessionIDOverflowWithoutWrapping(t *testing.T) {
 	if host.nextSession != sim.SessionID(math.MaxUint64) {
 		t.Fatalf("nextSession wrapped to %d", host.nextSession)
 	}
+}
+
+func loginEightMemoryPlayers(t *testing.T, host *Host) []testLogin {
+	t.Helper()
+	logins := make([]testLogin, 0, 8)
+	for number := byte(1); number <= 8; number++ {
+		login := startMemoryLogin(t, host, playerIdentity(number))
+		waitReady(t, host, login)
+		logins = append(logins, login)
+	}
+	return logins
+}
+
+func assertLoginRejectCode(t *testing.T, err error, want network.LoginRejectCode) {
+	t.Helper()
+	var remote *network.RemoteError
+	if !errors.As(err, &remote) || remote.State != network.StateLogin ||
+		network.LoginRejectCode(remote.Code) != want {
+		t.Fatalf("login error = %v, want code %d", err, want)
+	}
+}
+
+func assertLoginCanAdvance(t *testing.T, login testLogin, sequence uint64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
+	defer cancel()
+	if err := login.Client.Send(ctx, network.PlayerInput{Sequence: sequence}); err != nil {
+		t.Fatalf("send on existing login: %v", err)
+	}
+	for {
+		message, err := login.Client.Recv(ctx)
+		if err != nil {
+			t.Fatalf("recv on existing login: %v", err)
+		}
+		if state, ok := message.(network.PlayerState); ok && state.LastInputSequence >= sequence {
+			return
+		}
+	}
+}
+
+func attemptMemoryLogin(host *Host, identity network.Identity) (network.ClientEndpoint, error) {
+	client, server := network.NewMemoryStreamPair(32)
+	done := make(chan error, 1)
+	go func() { done <- host.AcceptStream(context.Background(), server) }()
+	endpoint, err := network.LoginClient(context.Background(), client, identity)
+	if err != nil {
+		<-done
+	}
+	return endpoint, err
+}
+
+type burstHostListener struct {
+	streams       []network.ServerPacketStream
+	next          int
+	maxGoroutines int
+	acceptedAll   chan struct{}
+	closed        chan struct{}
+	closeOnce     sync.Once
+	acceptedOnce  sync.Once
+}
+
+func newBurstHostListener(streams []network.ServerPacketStream) *burstHostListener {
+	return &burstHostListener{
+		streams:     streams,
+		acceptedAll: make(chan struct{}),
+		closed:      make(chan struct{}),
+	}
+}
+
+func (listener *burstHostListener) Accept(ctx context.Context) (network.ServerPacketStream, error) {
+	if listener.next < len(listener.streams) {
+		if goroutines := runtime.NumGoroutine(); goroutines > listener.maxGoroutines {
+			listener.maxGoroutines = goroutines
+		}
+		stream := listener.streams[listener.next]
+		listener.next++
+		if listener.next == len(listener.streams) {
+			listener.acceptedOnce.Do(func() { close(listener.acceptedAll) })
+		}
+		return stream, nil
+	}
+	select {
+	case <-listener.closed:
+		return nil, network.ErrClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (listener *burstHostListener) Addr() string { return "burst" }
+
+func (listener *burstHostListener) Close() error {
+	listener.closeOnce.Do(func() { close(listener.closed) })
+	return nil
 }
