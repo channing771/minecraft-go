@@ -30,9 +30,18 @@ func TestLightBlockIDsMappingsStayStable(t *testing.T) {
 		t.Fatalf("发光块掉落映射=(%d,%v)", item, ok)
 	}
 	if core.RecipeOakPlanks != 7 {
-		t.Fatalf("最后一个固定配方 ID=%d，想要 7", core.RecipeOakPlanks)
+		t.Fatalf("RecipeOakPlanks=%d，想要 7", core.RecipeOakPlanks)
 	}
-	if _, ok := core.Recipe(core.RecipeOakPlanks + 1); ok {
+	if core.RecipeLightBlock != 8 {
+		t.Fatalf("RecipeLightBlock=%d，想要 8", core.RecipeLightBlock)
+	}
+	if core.RecipeLightBlock != core.RecipeOakPlanks+1 {
+		t.Fatalf("RecipeLightBlock=%d，必须紧随 RecipeOakPlanks(%d)", core.RecipeLightBlock, core.RecipeOakPlanks)
+	}
+	if _, ok := core.Recipe(core.RecipeLightBlock); !ok {
+		t.Fatal("发光方块配方未注册")
+	}
+	if _, ok := core.Recipe(core.RecipeLightBlock + 1); ok {
 		t.Fatal("未知配方不得被接受")
 	}
 }

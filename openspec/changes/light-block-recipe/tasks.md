@@ -1,12 +1,12 @@
 ## 1. 固定发光方块配方
 
-- [ ] 1.1 在 `internal/core/recipe_test.go` 先写失败测试，冻结 recipe ID `1..7` 不变、ID `8` 为 `4 Glass -> 4 LightBlock`、ID `0` 与 `>8` 拒绝，并覆盖原料不足、产物无空间时完整物品状态原子不变；运行 `go test ./internal/core -run 'Recipe|Craft|Light' -count=1` 确认 RED。
-- [ ] 1.2 仅在 `internal/core/recipe.go` 的既有固定配方 switch 末尾追加 ID `8` case，不修改 `Inventory.Craft` 或网络消息；运行 `gofmt -w internal/core/recipe.go internal/core/recipe_test.go` 与 `go test ./internal/core -race -count=1` 确认 GREEN，并以临时移除该 case 的 mutation 证明新增测试失败后恢复实现。
+- [x] 1.1 在 `internal/core/recipe_test.go` 先写失败测试，冻结 recipe ID `1..7` 不变、ID `8` 为 `4 Glass -> 4 LightBlock`、ID `0` 与 `>8` 拒绝，并覆盖原料不足、产物无空间时完整物品状态原子不变；运行 `go test ./internal/core -run 'Recipe|Craft|Light' -count=1` 确认 RED。
+- [x] 1.2 仅在 `internal/core/recipe.go` 的既有固定配方 switch 末尾追加 ID `8` case，不修改 `Inventory.Craft` 或网络消息；运行 `gofmt -w internal/core/recipe.go internal/core/recipe_test.go` 与 `go test ./internal/core -race -count=1` 确认 GREEN，并以临时移除该 case 的 mutation 证明新增测试失败后恢复实现。
 
 ## 2. 权威传输语义回归
 
-- [ ] 2.1 在 `internal/server` 的既有 Memory/TCP 合成测试装配中加入 recipe ID `8` 的成功与原子拒绝场景，断言相同初始状态和命令序列得到相同最终完整物品状态，且客户端仍只发送既有 recipe ID 字段；不得新增 transport 抽象或修改协议生产代码。运行 `go test ./internal/server ./internal/network -run 'Craft|Recipe|Protocol' -race -count=1`。
-- [ ] 2.2 核对本 change 没有修改协议 v15、玩家 schema v6、区块 schema v8、世界 metadata v2 或任何 wire 字段，并运行 `go test ./internal/network ./internal/storage -run 'Protocol|Schema|Future|Golden' -race -count=1`。
+- [x] 2.1 在 `internal/server` 的既有 Memory/TCP 合成测试装配中加入 recipe ID `8` 的成功与原子拒绝场景，断言相同初始状态和命令序列得到相同最终完整物品状态，且客户端仍只发送既有 recipe ID 字段；不得新增 transport 抽象或修改协议生产代码。运行 `go test ./internal/server ./internal/network -run 'Craft|Recipe|Protocol' -race -count=1`。
+- [x] 2.2 核对本 change 没有修改协议 v15、玩家 schema v6、区块 schema v8、世界 metadata v2 或任何 wire 字段，并运行 `go test ./internal/network ./internal/storage -run 'Protocol|Schema|Future|Golden' -race -count=1`。
 
 ## 3. 八行固定合成 HUD
 
