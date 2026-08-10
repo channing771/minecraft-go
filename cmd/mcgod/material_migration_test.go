@@ -133,6 +133,113 @@ func TestMigrateNaturalMaterialsKeepsRevisionWhenUnchanged(t *testing.T) {
 	}
 }
 
+func TestMaterialMigrationRealDiskRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	worldPath := filepath.Join(root, "world")
+	backupPath := filepath.Join(root, "world-before-materials")
+	generator := worldgen.New(42)
+	changedKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: 3}}
+	unchangedKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: -2}}
+	otherDimensionKey := core.ChunkKey{Dimension: 1, Pos: core.ChunkPos{X: -4, Z: 5}}
+	changedBefore, changedAfter := materialMigrationDiskFixture(t, generator, changedKey)
+	unchanged := generator.GenerateChunk(unchangedKey.Pos)
+	otherDimension := world.NewChunk(otherDimensionKey.Pos)
+	otherDimension.SetBlock(0, core.MinY, 0, core.StoneID)
+
+	store, err := storage.OpenDisk(ctx, worldPath, storage.OpenOptions{Create: storage.Metadata{
+		FormatVersion: 2,
+		Seed:          42,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SaveBatch(ctx, []storage.ChunkSave{
+		{Key: changedKey, Revision: 7, Chunk: changedBefore},
+		{Key: unchangedKey, Revision: 11, Chunk: unchanged},
+		{Key: otherDimensionKey, Revision: 13, Chunk: otherDimension},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(store.Sync(ctx), store.Close()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrateMaterials(ctx, worldPath, backupPath); err != nil {
+		t.Fatalf("运行真实磁盘材料迁移失败: %v", err)
+	}
+	state := readMaterialMigrationStateForTest(t, worldPath)
+	if !state.Complete {
+		t.Fatal("真实磁盘迁移未写入完成状态")
+	}
+
+	assertMaterialMigrationDiskChunk(t, backupPath, changedKey, 7, changedBefore)
+	assertMaterialMigrationDiskChunk(t, backupPath, unchangedKey, 11, unchanged)
+	assertMaterialMigrationDiskChunk(t, backupPath, otherDimensionKey, 13, otherDimension)
+	assertMaterialMigrationDiskChunk(t, worldPath, changedKey, 8, changedAfter)
+	assertMaterialMigrationDiskChunk(t, worldPath, unchangedKey, 11, unchanged)
+	assertMaterialMigrationDiskChunk(t, worldPath, otherDimensionKey, 13, otherDimension)
+
+	if err := migrateMaterials(ctx, worldPath, backupPath); err != nil {
+		t.Fatalf("重复运行真实磁盘材料迁移失败: %v", err)
+	}
+	assertMaterialMigrationDiskChunk(t, worldPath, changedKey, 8, changedAfter)
+}
+
+func TestMaterialMigrationRealDiskRetriesProgressFailureWithoutSecondRevision(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	worldPath := filepath.Join(root, "world")
+	backupPath := filepath.Join(root, "world-before-materials")
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 1, Z: -2}}
+	chunk := world.NewChunk(key.Pos)
+	chunk.SetBlock(0, core.MinY, 0, core.StoneID)
+
+	store, err := storage.OpenDisk(ctx, worldPath, storage.OpenOptions{Create: storage.Metadata{
+		FormatVersion: 2,
+		Seed:          42,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveBatch(ctx, []storage.ChunkSave{{
+		Key: key, Revision: 5, Chunk: chunk,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(store.Sync(ctx), store.Close()); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err = storage.OpenDisk(ctx, worldPath, storage.OpenOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected real disk progress rename failure")
+	err = runMaterialMigration(
+		ctx, store, worldPath, backupPath, store.Backup,
+		materialMigrationFS{rename: func(string, string) error { return injected }},
+	)
+	if !errors.Is(err, injected) {
+		t.Fatalf("真实磁盘首次迁移错误 = %v，期望 %v", err, injected)
+	}
+	if _, err := os.Stat(filepath.Join(worldPath, materialMigrationStateName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("进度失败后不应有正式状态，Stat 错误: %v", err)
+	}
+	want := chunk.Clone()
+	want.SetBlock(0, core.MinY, 0, worldgen.New(42).BaseBlockAt(blockPosition(key.Pos, 0, core.MinY, 0)))
+	assertMaterialMigrationDiskChunk(t, worldPath, key, 6, want)
+
+	if err := migrateMaterials(ctx, worldPath, backupPath); err != nil {
+		t.Fatalf("真实磁盘进度失败后重试迁移失败: %v", err)
+	}
+	assertMaterialMigrationDiskChunk(t, worldPath, key, 6, want)
+	if !readMaterialMigrationStateForTest(t, worldPath).Complete {
+		t.Fatal("真实磁盘进度失败后重试未完成")
+	}
+}
+
 func TestMaterialMigrationUsesStableOverworldBatches(t *testing.T) {
 	root := t.TempDir()
 	backupPath := root + string(filepath.Separator) + "." + string(filepath.Separator) + "backup"
@@ -705,6 +812,87 @@ func readMaterialMigrationStateForTest(t *testing.T, root string) materialMigrat
 		t.Fatal(err)
 	}
 	return state
+}
+
+func materialMigrationDiskFixture(
+	t *testing.T,
+	generator *worldgen.Generator,
+	key core.ChunkKey,
+) (*world.Chunk, *world.Chunk) {
+	t.Helper()
+	chunk := world.NewChunk(key.Pos)
+	for index, block := range []core.BlockID{
+		core.StoneID,
+		core.DirtID,
+		core.GrassID,
+		core.SandID,
+		core.GravelID,
+		core.ClayID,
+		core.SnowBlockID,
+	} {
+		chunk.SetBlock(index, core.MinY, 0, block)
+	}
+	payloadY := int32(1)
+	chunk.SetBlock(0, payloadY, 1, core.ChestID)
+	chunk.SetBlock(1, payloadY, 1, core.FurnaceID)
+	chunk.SetBlock(2, payloadY, 1, core.IronOreID)
+	chestIndex, ok := world.ChunkBlockIndex(blockPosition(key.Pos, 0, payloadY, 1))
+	if !ok {
+		t.Fatal("箱子位置无法转换为区块索引")
+	}
+	furnaceIndex, ok := world.ChunkBlockIndex(blockPosition(key.Pos, 1, payloadY, 1))
+	if !ok {
+		t.Fatal("熔炉位置无法转换为区块索引")
+	}
+	chunk.SetDrop(0, world.DropSlot{
+		Generation: 3, Active: true,
+		Stack:      core.ItemStack{Item: core.ItemStoneBrick, Count: 4},
+		BlockIndex: chestIndex, AgeTicks: 37, PickupDelayTicks: 2,
+	})
+	chunk.SetFurnace(0, world.FurnaceSlot{
+		Generation: 5, Active: true, BlockIndex: furnaceIndex,
+		Input:         core.ItemStack{Item: core.ItemRawIron, Count: 2},
+		Fuel:          core.ItemStack{Item: core.ItemCoal, Count: 3},
+		Output:        core.ItemStack{Item: core.ItemIronIngot, Count: 1},
+		ProgressTicks: 17, BurnTicks: 83,
+	})
+	var chestItems [core.ChestSlots]core.ItemStack
+	chestItems[0] = core.ItemStack{Item: core.ItemBrick, Count: 9}
+	chunk.SetChest(0, world.ChestSlot{
+		Generation: 7, Active: true, BlockIndex: chestIndex, Items: chestItems,
+	})
+
+	want := chunk.Clone()
+	for x := range 7 {
+		want.SetBlock(x, core.MinY, 0, generator.BaseBlockAt(blockPosition(key.Pos, x, core.MinY, 0)))
+	}
+	return chunk, want
+}
+
+func assertMaterialMigrationDiskChunk(
+	t *testing.T,
+	root string,
+	key core.ChunkKey,
+	revision uint64,
+	want *world.Chunk,
+) {
+	t.Helper()
+	store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{})
+	if err != nil {
+		t.Fatalf("打开真实磁盘世界 %q 失败: %v", root, err)
+	}
+	stored, loadErr := store.LoadChunk(context.Background(), key)
+	closeErr := store.Close()
+	if err := errors.Join(loadErr, closeErr); err != nil {
+		t.Fatalf("读取真实磁盘区块 %v 失败: %v", key, err)
+	}
+	if stored.Revision != revision || stored.PersistedRevision != revision {
+		t.Fatalf("真实磁盘区块 %v revision=%d/%d，期望 %d",
+			key, stored.Revision, stored.PersistedRevision, revision)
+	}
+	if stored.NeedsRewrite || stored.Recovered || !reflect.DeepEqual(stored.Chunk, want) {
+		t.Fatalf("真实磁盘区块 %v 内容或 schema v8 往返状态不符", key)
+	}
 }
 
 func blockPosition(chunk core.ChunkPos, localX int, y int32, localZ int) core.BlockPos {
