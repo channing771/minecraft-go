@@ -51,7 +51,7 @@ func (store *DiskStore) ChunkKeys(ctx context.Context) ([]core.ChunkKey, error) 
 			continue
 		}
 		dimension, err := strconv.ParseInt(dimensionEntry.Name(), 10, 32)
-		if err != nil {
+		if err != nil || dimensionEntry.Name() != strconv.FormatInt(dimension, 10) {
 			continue
 		}
 
@@ -81,7 +81,9 @@ func (store *DiskStore) ChunkKeys(ctx context.Context) ([]core.ChunkKey, error) 
 			}
 			regionX, errX := strconv.ParseInt(coordinates[0], 10, 32)
 			regionZ, errZ := strconv.ParseInt(coordinates[1], 10, 32)
-			if errX != nil || errZ != nil {
+			if errX != nil || errZ != nil ||
+				coordinates[0] != strconv.FormatInt(regionX, 10) ||
+				coordinates[1] != strconv.FormatInt(regionZ, 10) {
 				continue
 			}
 

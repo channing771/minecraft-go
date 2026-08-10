@@ -88,6 +88,65 @@ func TestChunkKeysEmptyWorldDoesNotCreateDimensions(t *testing.T) {
 	}
 }
 
+func TestChunkKeysIgnoresNonCanonicalAliasesAndUnrelatedFiles(t *testing.T) {
+	root := t.TempDir()
+	store, err := OpenDisk(context.Background(), root, OpenOptions{
+		Create: Metadata{FormatVersion: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := core.ChunkKey{Dimension: 0, Pos: core.ChunkPos{X: 0, Z: 0}}
+	if _, err := store.SaveBatch(context.Background(), diskSavesFor([]core.ChunkKey{key}, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	canonical := filepath.Join(root, "dimensions", "0", "regions", "r.0.0.region")
+	encoded, err := os.ReadFile(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, alias := range []string{
+		filepath.Join(root, "dimensions", "+0", "regions", "r.0.0.region"),
+		filepath.Join(root, "dimensions", "00", "regions", "r.0.0.region"),
+		filepath.Join(root, "dimensions", "0", "regions", "r.+0.0.region"),
+		filepath.Join(root, "dimensions", "0", "regions", "r.00.0.region"),
+		filepath.Join(root, "dimensions", "0", "regions", "r.0.+0.region"),
+		filepath.Join(root, "dimensions", "0", "regions", "r.0.00.region"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(alias), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(alias, encoded, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, unrelated := range []string{
+		filepath.Join(root, "dimensions", "说明.txt"),
+		filepath.Join(root, "dimensions", "0", "regions", "README"),
+		filepath.Join(root, "dimensions", "0", "regions", "r.x.0.region"),
+		filepath.Join(root, "dimensions", "0", "regions", "r.0.0.region.bak"),
+	} {
+		if err := os.WriteFile(unrelated, []byte("不是 region"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reopened, err := OpenDisk(context.Background(), root, OpenOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if got, err := reopened.ChunkKeys(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if want := []core.ChunkKey{key}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("包含 alias 的 ChunkKeys() = %v，期望 %v", got, want)
+	}
+}
+
 func TestChunkKeysRejectsCorruptRegion(t *testing.T) {
 	root := t.TempDir()
 	store, err := OpenDisk(context.Background(), root, OpenOptions{
