@@ -851,8 +851,11 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
-	if got := inventoryRecipeIDs[len(inventoryRecipeIDs)-1]; got != core.RecipeOakPlanks {
-		t.Fatalf("固定配方末项=%d，想要橡木木板配方 %d", got, core.RecipeOakPlanks)
+	if recipeQuads != 73 || recipeGlyphs != 20 {
+		t.Fatalf("八行配方容量 quads/glyphs=%d/%d，想要 73/20", recipeQuads, recipeGlyphs)
+	}
+	if got := inventoryRecipeIDs[len(inventoryRecipeIDs)-1]; got != core.RecipeLightBlock {
+		t.Fatalf("固定配方末项=%d，想要发光方块配方 %d", got, core.RecipeLightBlock)
 	}
 
 	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
@@ -861,8 +864,8 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		t.Fatalf("空背包 quads=%d，想要分组面板、选中框、36 格和 %d 个配方实例共 %d",
 			len(open.quads), recipeQuads, openInventoryPanelQuads+1+core.InventorySlots+recipeQuads)
 	}
-	if len(open.glyphs) != 16 {
-		t.Fatalf("七条配方数字=%d，想要隐藏数量 1 并为其余数字绘制阴影共 16", len(open.glyphs))
+	if len(open.glyphs) != 20 {
+		t.Fatalf("八条配方数字=%d，想要隐藏数量 1 并为其余数字绘制阴影共 20", len(open.glyphs))
 	}
 	overlay := open.quads[len(open.quads)-recipeQuads:]
 	wantItems := [][2]core.ItemID{
@@ -873,8 +876,9 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		{core.ItemIronIngot, core.ItemIronPickaxe},
 		{core.ItemStone, core.ItemChest},
 		{core.ItemOakLog, core.ItemOakPlanks},
+		{core.ItemGlass, core.ItemLightBlock},
 	}
-	for row, y := range []float32{420, 368, 316, 264, 212, 160, 108} {
+	for row, y := range []float32{420, 368, 316, 264, 212, 160, 108, 56} {
 		start := 1 + row*9
 		input, output := overlay[start], overlay[start+3]
 		inputFace, outputFace := overlay[start+2], overlay[start+5]
@@ -921,6 +925,21 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 	ironPickaxeButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, iron, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
 	if disabled[4].Color == ironPickaxeButtons[4].Color || disabled[3].Color != ironPickaxeButtons[3].Color {
 		t.Fatal("铁镐配方可用颜色不独立")
+	}
+
+	var glass core.Inventory
+	glass.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemGlass, Count: 4}
+	glassButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, glass, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
+	for index := range glassButtons {
+		if index == len(glassButtons)-1 {
+			if disabled[index].Color == glassButtons[index].Color {
+				t.Fatal("四个玻璃未启用发光方块配方")
+			}
+			continue
+		}
+		if disabled[index].Color != glassButtons[index].Color {
+			t.Fatalf("四个玻璃错误启用了配方 %d", inventoryRecipeIDs[index])
+		}
 	}
 }
 
@@ -976,6 +995,7 @@ func TestRecipeButtonHitTestMatchesDrawnGeometry(t *testing.T) {
 		{"铁镐", 213, core.RecipeIronPickaxe},
 		{"箱子", 161, core.RecipeChest},
 		{"橡木木板", 109, core.RecipeOakPlanks},
+		{"发光方块", 57, core.RecipeLightBlock},
 	} {
 		got, ok := RecipeButtonAt(513, test.y, 1280, 720)
 		if !ok || got != test.recipe {

@@ -10,8 +10,8 @@
 
 ## 3. 八行固定合成 HUD
 
-- [ ] 3.1 在 `internal/render/hotbar_test.go` 与 `cmd/mcgo/app_test.go` 先写失败测试，覆盖固定数组末项为 recipe ID `8`、`recipeQuads=73`、`recipeGlyphs=20`、`openHUDHeight=670`、640×360 第八行完整可见、按钮绘制与命中几何共源、最坏固定容量无真实 overflow 且预热后零分配；运行 `go test ./internal/render ./cmd/mcgo -run 'Recipe|Inventory|HUD|Craft' -count=1` 确认 RED。
-- [ ] 3.2 在 `internal/render/hotbar.go` 仅追加第八条固定 recipe ID 并机械更新三个固定容量值，不增加分页、滚动、自适应目录或新 UI 抽象；运行 `gofmt -w internal/render/hotbar.go internal/render/hotbar_test.go cmd/mcgo/app_test.go` 与 `go test ./internal/render ./cmd/mcgo -race -count=1` 确认 GREEN，并以临时恢复任一旧容量值的 mutation 证明容量测试失败后恢复实现。
+- [x] 3.1 在 `internal/render/hotbar_test.go` 与 `cmd/mcgo/app_test.go` 先写失败测试，覆盖固定数组末项为 recipe ID `8`、`recipeQuads=73`、`recipeGlyphs=20`、`openHUDHeight=670`、640×360 第八行完整可见、按钮绘制与命中几何共源、最坏固定容量无真实 overflow 且预热后零分配；运行 `go test ./internal/render ./cmd/mcgo -run 'Recipe|Inventory|HUD|Craft' -count=1` 确认 RED。
+- [x] 3.2 在 `internal/render/hotbar.go` 仅追加第八条固定 recipe ID 并机械更新三个固定容量值，不增加分页、滚动、自适应目录或新 UI 抽象；运行 `gofmt -w internal/render/hotbar.go internal/render/hotbar_test.go cmd/mcgo/app_test.go` 与 `go test ./internal/render ./cmd/mcgo -race -count=1` 确认 GREEN，并以临时恢复任一旧容量值的 mutation 证明容量测试失败后恢复实现。
 
 ## 4. 无窗口视觉证据
 
