@@ -27,3 +27,5 @@
 - [x] 7.1 对改动的 Go 文件运行 `gofmt -w`，并运行 `gofmt -l .`，输出必须为空。
 - [x] 7.2 运行 `go test ./internal/archcheck -count=1`、`go test ./... -race` 与 `go vet ./...`，修复由本 change 引入的失败。
 - [x] 7.3 运行 `openspec validate material-processing-loop --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`，确认契约、工作树和格式通过。
+- [x] 7.4 提交、推送 `codex/material-processing-loop` 并创建以 `main` 为 base 的 ready PR，禁止 force push。
+- [x] 7.5 PR 描述明确 RecipeID 7、三条熔炼映射、输入切换计时语义、版本全部不变、只有 `inventory-crafting` golden 变化及完整验证证据。
