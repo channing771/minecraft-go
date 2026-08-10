@@ -228,7 +228,7 @@ struct Sky {
 - `distance=(192-cameraY)/direction.y`，`distance<=0` 返回 0；
 - 交点 X 先减 `.w` 再按 16 格 floor；Z 不偏移；
 - macro 用 `floor(vec2f(cell)/4.0)` 得到，负坐标不得截断向零；
-- `hash_cell(vec3u(bitcast<u32>(macro.x), 0u, bitcast<u32>(macro.y)))`；
+- `hash_cell(vec3u(bitcast<u32>(macro.x), bitcast<u32>(macro.y), 0u))`；
 - `hash&3u==0u` 返回 0；中心由 bit2/bit3 选择 1 或2；Manhattan 距离 `<=1` 才填充；
 - 最终乘 `smoothstep(0.02,0.08,direction.y)` 地平线 fade。
 
