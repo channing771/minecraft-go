@@ -33,17 +33,34 @@ func (slot FurnaceSlot) Valid() bool {
 	if slot.ProgressTicks >= core.FurnaceSmeltTicks || slot.BurnTicks > core.FurnaceBurnTicks {
 		return false
 	}
-	return validFurnaceStack(slot.Input, core.ItemRawIron) &&
-		validFurnaceStack(slot.Fuel, core.ItemCoal) &&
-		validFurnaceStack(slot.Output, core.ItemIronIngot)
+	return validFurnaceInput(slot.Input) &&
+		slot.Fuel.Valid() && (slot.Fuel.Item == core.ItemNone || slot.Fuel.Item == core.ItemCoal) &&
+		validFurnaceOutput(slot.Output)
 }
 
-// validFurnaceStack 报告某个熔炉格是否为空或恰好装着允许的物品。
-func validFurnaceStack(stack core.ItemStack, allowed core.ItemID) bool {
-	if stack.Item == core.ItemNone {
-		return stack.Count == 0
+// validFurnaceInput 报告输入格是否为空或装着已注册的熔炼输入。
+func validFurnaceInput(stack core.ItemStack) bool {
+	if !stack.Valid() {
+		return false
 	}
-	return stack.Item == allowed && stack.Count >= 1 && stack.Count <= core.MaxStackCount
+	if stack.Item == core.ItemNone {
+		return true
+	}
+	_, ok := core.SmeltingOutput(stack.Item)
+	return ok
+}
+
+// validFurnaceOutput 报告输出格是否为空或装着固定熔炼产物。
+func validFurnaceOutput(stack core.ItemStack) bool {
+	if !stack.Valid() {
+		return false
+	}
+	switch stack.Item {
+	case core.ItemNone, core.ItemIronIngot, core.ItemGlass, core.ItemBrick:
+		return true
+	default:
+		return false
+	}
 }
 
 // Furnace 返回指定槽的当前值；槽位越界时返回零值。
