@@ -83,11 +83,12 @@ func NewBlockOutlineRenderer(
 				Format:         gfx.VertexFormatFloat32x3,
 			}},
 		}},
-		BindGroups:  []gfx.BindGroupLayout{layout},
-		ColorFormat: colorFormat,
-		DepthFormat: depthFormat,
-		DepthWrite:  false,
-		Blend:       gfx.BlendAlpha,
+		BindGroups:            []gfx.BindGroupLayout{layout},
+		ColorFormat:           colorFormat,
+		DepthFormat:           depthFormat,
+		DepthWrite:            false,
+		DepthCompareLessEqual: true,
+		Blend:                 gfx.BlendAlpha,
 	})
 	module.Release()
 	renderer.bind = dev.CreateBindGroup(gfx.BindGroupDesc{

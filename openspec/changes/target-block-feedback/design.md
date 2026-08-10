@@ -28,7 +28,7 @@
 
 `internal/render` 增加独立 `BlockOutlineRenderer`，复用已有 avatar 立方体顶点、shader、实例编码与相机 uniform。单位方块包围盒固定向外扩张 `0.003` 个世界单位，因此目标位置为 `position` 时整体 bounds 固定为 `position-0.003..position+1.003`；每根边的长边固定为 `1.006`，两个横截面轴固定为 `0.018`，颜色 alpha 固定为 `0.86`。一个目标恰好编码为十二个细长立方体实例，容量也恰为十二。该 renderer 拥有自己的固定 GPU 缓冲和 pipeline，不重构 avatar 或掉落物 renderer。
 
-每帧顺序固定为：terrain → avatar → item drops → block outline → name tags → damage overlay → HUD → debug panel。轮廓共享本帧 `viewProj`、daylight 与 depth，开启 alpha 混合和深度测试、关闭深度写入。被否决的替代方案是把线框写进 terrain pass 或建立可扩展 overlay 框架：前者会污染 terrain 契约，后者当前没有第二个消费者。
+每帧顺序固定为：terrain → avatar → item drops → block outline → name tags → damage overlay → HUD → debug panel。轮廓共享本帧 `viewProj`、daylight 与 depth，开启 alpha 混合和 `CompareLessEqual` 深度测试、关闭深度写入。`internal/gfx` 只增加 opt-in 的 `LessEqual` 选择并保持零值映射为既有 `Less`，其他 pipeline 无需修改。被否决的替代方案是把线框写进 terrain pass 或建立可扩展 overlay 框架：前者会污染 terrain 契约，后者当前没有第二个消费者。
 
 ### 名牌容量与数据边界
 
@@ -38,7 +38,7 @@
 
 ### 捕获夹具与文件所有权
 
-Task 2 只拥有 `internal/core/block_name.go`、其测试以及 `cmd/mcgo/target_block.go`、其测试。Task 3 只拥有 `internal/render/block_outline.go`、其测试和必要的 renderer 资源接线。Task 4 只拥有 `cmd/mcgo/app.go`、相关 app 测试、name-tag 容量与帧接线。Task 5 只拥有 `cmd/mcgo/capture.go`、其测试、新增 `target-block-feedback.png` 与实际受正常提示影响的 golden；`inventory-crafting.png` 严禁改动。Task 6 只更新本 change 的 `tasks.md` 并同步、归档本 change 的两个规格。
+Task 2 只拥有 `internal/core/block_name.go`、其测试以及 `cmd/mcgo/target_block.go`、其测试。Task 3 只拥有 `internal/render/block_outline.go`、其测试，以及 `internal/gfx/gfx.go`、`internal/gfx/wgpu.go` 与 `internal/gfx/wgpu_test.go` 中必要的深度比较选择与映射。Task 4 只拥有 `cmd/mcgo/app.go`、相关 app 测试、name-tag 容量与帧接线。Task 5 只拥有 `cmd/mcgo/capture.go`、其测试、新增 `target-block-feedback.png` 与实际受正常提示影响的 golden；`inventory-crafting.png` 严禁改动。Task 6 只更新本 change 的 `tasks.md` 并同步、归档本 change 的两个规格。
 
 捕获场景在现有场景表末尾追加 `target-block-feedback`：固定正午、相机 `{0.5, 3.5, 2.5}`、Yaw/Pitch `0`，以 `{X: 0, Y: 3, Z: -3}` 的 `BrickID` 为唯一目标。夹具经正常 Mirror、Mesher、renderer、depth 和 name-tag 路径收敛，不得用抓帧专用开关隐藏反馈。
 

@@ -74,8 +74,8 @@ func TestBlockOutlineRendererUsesFixedTransparentDepthPass(t *testing.T) {
 	assertBufferBindingRange(t, dev.bindDesc, 0, upload, 0, 80)
 	assertBufferBindingRange(t, dev.bindDesc, 1, upload, 256, 960)
 	if desc := dev.pipelineDesc; desc.DepthFormat != gfx.FormatDepth32Float ||
-		desc.DepthWrite || desc.Blend != gfx.BlendAlpha {
-		t.Fatalf("pipeline = %+v，想要 Depth32Float、只读深度和 alpha blend", desc)
+		desc.DepthWrite || !desc.DepthCompareLessEqual || desc.Blend != gfx.BlendAlpha {
+		t.Fatalf("pipeline = %+v，想要 Depth32Float、LessEqual 只读深度和 alpha blend", desc)
 	}
 
 	encoder := &blockOutlineTestEncoder{}

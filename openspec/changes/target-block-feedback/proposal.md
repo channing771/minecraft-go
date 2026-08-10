@@ -21,7 +21,7 @@
 
 ## Impact
 
-- 影响 `internal/core` 的方块显示名查询、`cmd/mcgo` 的本地目标状态与抓帧场景，以及 `internal/render` 的轮廓和 name-tag 容量。
+- 影响 `internal/core` 的方块显示名查询、`cmd/mcgo` 的本地目标状态与抓帧场景、`internal/render` 的轮廓和 name-tag 容量，以及 `internal/gfx` 的可选深度比较映射。
 - 客户端目标仅用于呈现；服务端采掘、放置和容器打开仍使用权威射线裁决。
 - 不修改网络协议、方块或物品 ID、玩家/区块 schema、世界 metadata 或存档内容；无需迁移。
 - 轮廓、名牌和捕获路径使用固定容量，预热后不得为稳定目标状态增加堆分配；不新增外部依赖或前台窗口。

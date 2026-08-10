@@ -10,7 +10,7 @@
 ## 3. 固定十二边深度轮廓 renderer
 
 - [x] 3.1 在 `internal/render/block_outline.go` 与 `internal/render/block_outline_test.go` 实现容量恰为十二的方块边轮廓，固定 expand `0.003`、width `0.018`、alpha `0.86`，并复用现有立方体资源、实例编码和相机 uniform；几何测试明确断言 bounds `position-0.003..position+1.003`、长边 `1.006`、两个横截面轴 `0.018` 与 alpha `0.86`；验证：`go test ./internal/render -race -count=1`。
-- [x] 3.2 在同一 renderer 测试中锁定 alpha 混合、深度测试且不写 depth、被地形遮挡、固定十二实例、dynamic upload/overflow 结构与幂等释放；验证：`go test ./internal/render -race -count=1`。
+- [x] 3.2 在同一 renderer 测试中锁定 alpha 混合、`CompareLessEqual` 深度测试且不写 depth、被地形遮挡、固定十二实例、dynamic upload/overflow 结构与幂等释放；在 `internal/gfx/gfx.go`、`internal/gfx/wgpu.go` 与 `internal/gfx/wgpu_test.go` 增加最小 opt-in 选择与 WebGPU 映射，其他 pipeline 的零值仍映射为 `Less`；验证：`go test ./internal/gfx ./internal/render -race -count=1`。
 
 ## 4. 正常帧接线
 

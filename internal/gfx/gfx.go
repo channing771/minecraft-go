@@ -82,7 +82,7 @@ type VertexBufferLayout struct {
 // RenderPipelineDesc 描述一条渲染管线。
 //
 // 图元状态目前固定为 triangle-list / 不剔除背面：本阶段还没有需要剔除的用例，
-// 等真正需要时再加字段。深度测试固定为 less。
+// 等真正需要时再加字段。
 type RenderPipelineDesc struct {
 	Label         string
 	Shader        ShaderModule
@@ -92,6 +92,8 @@ type RenderPipelineDesc struct {
 	BindGroups    []BindGroupLayout
 	// DepthWrite 为 false 时只做深度测试不写深度（半透明 pass 用）。
 	DepthWrite bool
+	// DepthCompareLessEqual 为 true 时使用 LessEqual；零值保持既有 Less。
+	DepthCompareLessEqual bool
 	// ColorFormat 必须与 surface 配置一致。
 	ColorFormat TextureFormat
 	// DepthFormat 为 FormatUndefined（零值）时不挂深度附件，此时 DepthWrite 无意义。
