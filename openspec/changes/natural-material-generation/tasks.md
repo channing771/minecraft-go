@@ -6,9 +6,9 @@
 
 ## 3. 为 DiskStore 增加确定性只读区块键枚举
 
-- [ ] 3.1 在 `internal/storage` 增加 RED 测试，覆盖持久区块键按维度、区块 X、区块 Z 的稳定只读枚举、空世界和非 Overworld 键；运行 `go test ./internal/storage -run "ChunkKeys" -count=1` 确认失败。
-- [ ] 3.2 修改 `internal/storage` 的具体 `DiskStore`，实现不扩张运行时 `storage.Store` 的确定性只读区块键枚举；运行 `go test ./internal/storage -race -count=1`。
-- [ ] 3.3 复核枚举不写入区块或改变 revision；运行 `gofmt -w internal/storage`、`gofmt -l internal/storage` 和 `git diff --check`。
+- [x] 3.1 在 `internal/storage` 增加 RED 测试，覆盖持久区块键按维度、区块 X、区块 Z 的稳定只读枚举、空世界和非 Overworld 键；运行 `go test ./internal/storage -run "ChunkKeys" -count=1` 确认失败。
+- [x] 3.2 修改 `internal/storage` 的具体 `DiskStore`，实现不扩张运行时 `storage.Store` 的确定性只读区块键枚举；运行 `go test ./internal/storage -race -count=1`。
+- [x] 3.3 复核枚举不写入区块或改变 revision；运行 `gofmt -w internal/storage`、`gofmt -l internal/storage` 和 `git diff --check`。
 
 ## 4. 在世界锁内创建可验证的完整备份
 
