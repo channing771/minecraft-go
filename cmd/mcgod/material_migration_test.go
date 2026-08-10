@@ -180,8 +180,10 @@ func TestMaterialMigrationUsesStableOverworldBatches(t *testing.T) {
 	if err := runMaterialMigration(context.Background(), store, root, backupPath, backup, fs); err != nil {
 		t.Fatalf("运行材料迁移失败: %v", err)
 	}
-	if len(store.events) == 0 || store.events[0] != "backup" {
-		t.Fatalf("迁移事件 = %v，必须先创建备份", store.events)
+	backupIndex := slices.Index(store.events, "backup")
+	keysIndex := slices.Index(store.events, "keys")
+	if backupIndex < 0 || keysIndex < 0 || backupIndex >= keysIndex {
+		t.Fatalf("迁移事件 = %v，备份必须先于区块枚举", store.events)
 	}
 	wantLoadKeys := make([]core.ChunkKey, 34)
 	for x := range int32(34) {
@@ -208,6 +210,67 @@ func TestMaterialMigrationUsesStableOverworldBatches(t *testing.T) {
 	assertMaterialMigrationState(t, writtenStates[2], 42, backupPath, 33, true)
 	if store.closed != 1 {
 		t.Fatalf("store.Close 调用 = %d，期望 1", store.closed)
+	}
+}
+
+func TestMaterialMigrationRejectsPartialStateWhenBackupIsMissing(t *testing.T) {
+	assertMaterialMigrationRejectsMissingExistingBackup(t, false)
+}
+
+func TestMaterialMigrationRejectsCompletedStateWhenBackupIsMissing(t *testing.T) {
+	assertMaterialMigrationRejectsMissingExistingBackup(t, true)
+}
+
+func assertMaterialMigrationRejectsMissingExistingBackup(t *testing.T, complete bool) {
+	t.Helper()
+	root := t.TempDir()
+	backupPath := filepath.Join(root, "backup")
+	store, key := changedMaterialMigrationStore()
+	wantHash := store.chunks[key].Chunk.Hash()
+	lastKey := key
+	if !complete {
+		lastKey.Pos.X--
+	}
+	state := materialMigrationState{
+		Version:    materialMigrationVersion,
+		Seed:       42,
+		BackupPath: backupPath,
+		LastKey:    &lastKey,
+		Complete:   complete,
+	}
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateData = append(stateData, '\n')
+	statePath := filepath.Join(root, materialMigrationStateName)
+	if err := os.WriteFile(statePath, stateData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err = runMaterialMigration(
+		context.Background(), store, root, backupPath,
+		func(_ context.Context, path string) error {
+			return os.Mkdir(path, 0o755)
+		}, defaultMaterialMigrationFS(),
+	)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("已有状态缺失备份的迁移错误 = %v，期望 os.ErrNotExist", err)
+	}
+	if _, err := os.Lstat(backupPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("已有状态缺失备份后创建了新备份，Lstat 错误: %v", err)
+	}
+	gotState, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotState, stateData) {
+		t.Fatal("拒绝缺失备份后迁移状态被改变")
+	}
+	stored := store.chunks[key]
+	if stored.Revision != 5 || stored.Chunk.Hash() != wantHash || len(store.saveCalls) != 0 {
+		t.Fatalf("拒绝缺失备份后区块改变: revision=%d saves=%d",
+			stored.Revision, len(store.saveCalls))
 	}
 }
 
@@ -606,7 +669,9 @@ func (store *materialMigrationTestStore) Close() error {
 	return nil
 }
 
-func successfulMaterialMigrationBackup(context.Context, string) error { return nil }
+func successfulMaterialMigrationBackup(_ context.Context, path string) error {
+	return os.MkdirAll(path, 0o755)
+}
 
 func assertMaterialMigrationState(
 	t *testing.T,

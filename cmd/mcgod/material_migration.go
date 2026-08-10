@@ -120,10 +120,6 @@ func runMaterialMigration(
 	if fs.syncDirectory == nil {
 		fs.syncDirectory = syncMaterialMigrationDirectory
 	}
-	if err := backup(ctx, absoluteBackup); err != nil {
-		return fmt.Errorf("创建迁移备份: %w", err)
-	}
-
 	metadata := store.Metadata()
 	statePath := filepath.Join(absoluteWorld, materialMigrationStateName)
 	state, exists, err := readMaterialMigrationState(statePath)
@@ -134,8 +130,8 @@ func runMaterialMigration(
 		if err := validateMaterialMigrationState(state, metadata.Seed, absoluteBackup); err != nil {
 			return err
 		}
-		if state.Complete {
-			return nil
+		if _, err := os.Lstat(absoluteBackup); err != nil {
+			return fmt.Errorf("检查已有迁移备份 %q: %w", absoluteBackup, err)
 		}
 	} else {
 		state = materialMigrationState{
@@ -143,6 +139,12 @@ func runMaterialMigration(
 			Seed:       metadata.Seed,
 			BackupPath: absoluteBackup,
 		}
+	}
+	if err := backup(ctx, absoluteBackup); err != nil {
+		return fmt.Errorf("创建或验证迁移备份: %w", err)
+	}
+	if state.Complete {
+		return nil
 	}
 
 	keys, err := store.ChunkKeys(ctx)
