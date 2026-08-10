@@ -16,14 +16,8 @@ type blockTarget struct {
 }
 
 func (a *application) currentBlockTarget() (blockTarget, bool) {
-	if _, ready := a.predictor.State(); !ready || a.inventoryOpen ||
+	if _, ready := a.predictor.State(); !ready || a.inventoryOpen || a.containerOpen() ||
 		(a.panel != nil && a.panel.visible) {
-		return blockTarget{}, false
-	}
-	if _, opened := a.furnace.State(); opened {
-		return blockTarget{}, false
-	}
-	if _, opened := a.chest.State(); opened {
 		return blockTarget{}, false
 	}
 
@@ -34,7 +28,8 @@ func (a *application) currentBlockTarget() (blockTarget, bool) {
 		6,
 		func(position core.BlockPos) (bool, error) {
 			id, loaded := a.mirror.BlockAt(core.Overworld, position)
-			if !loaded || !core.RegisteredBlock(id) {
+			chunk, _ := a.mirror.Chunk(core.Overworld, position.Chunk())
+			if !loaded || (chunk != nil && chunk.Desynced) || !core.RegisteredBlock(id) {
 				return false, errBlockTargetUnknown
 			}
 			targetID = id

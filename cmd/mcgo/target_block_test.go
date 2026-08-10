@@ -25,6 +25,35 @@ func TestCurrentBlockTargetHitsRegisteredBlockWithinSixBlocks(t *testing.T) {
 	}
 }
 
+func TestCurrentBlockTargetRejectsDesyncedStaleBlock(t *testing.T) {
+	app := newTargetBlockApplication(t, true, core.ChunkPos{})
+	position := core.BlockPos{X: 0, Y: 3, Z: -3}
+	chunk := world.NewChunk(position.Chunk())
+	x, _, z := position.Local()
+	chunk.SetBlock(x, position.Y, z, core.BrickID)
+	applyTargetMirrorChunk(t, app.mirror, chunk)
+	if got, ok := app.currentBlockTarget(); !ok || got.Position != position {
+		t.Fatalf("revision gap 前 currentBlockTarget() = %+v, %v，想要命中 %+v", got, ok, position)
+	}
+
+	update, err := app.mirror.Apply(network.BlockChanges{
+		Dimension:    core.Overworld,
+		Chunk:        position.Chunk(),
+		BaseRevision: 2,
+		NewRevision:  3,
+		Changes: []network.BlockChange{{
+			Position: position,
+			Block:    core.AirID,
+		}},
+	})
+	if err != nil || update.Resync == nil {
+		t.Fatalf("revision gap update = %+v, %v，想要 resync", update, err)
+	}
+	if got, ok := app.currentBlockTarget(); ok || got != (blockTarget{}) {
+		t.Fatalf("desynced currentBlockTarget() = %+v, %v，想要零值, false", got, ok)
+	}
+}
+
 func TestCurrentBlockTargetRejectsInvalidTargetsAndUI(t *testing.T) {
 	tests := []struct {
 		name  string
