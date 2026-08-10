@@ -7,10 +7,10 @@
 
 ## 2. 无窗口橡树林视觉验收
 
-- [ ] 2.1 先在 `cmd/mcgo/capture_test.go` 为表驱动场景写 `oak-grove` RED：它必须位于所有既有场景之后，并以固定 seed 与固定生成 chunk 经 mirror、mesher、renderer、upload 夹具收敛，固定正午和相机；验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -count=1` 必须因场景未注册或夹具缺失失败。
-- [ ] 2.2 仅在 2.1 RED 后，在 `cmd/mcgo/capture.go` 注册 `oak-grove` 并实现固定夹具与 Apply；不得新增渲染旁路、前台窗口或可调输入。验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -race -count=1`。
-- [ ] 2.3 在 GREEN 后临时删除场景、改动其末尾顺序、seed/chunk/正午/相机之一或绕过 mirror/mesher；每个 mutation MUST 使 2.1 测试失败，再立即恢复。验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -race -count=1`。
-- [ ] 2.4 在受支持的无窗口图形环境显式更新并逐张复核实际变化的视觉基线，只加入 `oak-grove` 所需 golden；验证：`go run ./cmd/mcgo --capture <输出目录> --update-golden`，随后 `go run ./cmd/mcgo --capture <输出目录>`。
+- [x] 2.1 先在 `cmd/mcgo/capture_test.go` 为表驱动场景写 `oak-grove` RED：它必须位于所有既有场景之后，并以固定 seed 与固定生成 chunk 经 mirror、mesher、renderer、upload 夹具收敛，固定正午和相机；验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -count=1` 必须因场景未注册或夹具缺失失败。
+- [x] 2.2 仅在 2.1 RED 后，在 `cmd/mcgo/capture.go` 注册 `oak-grove` 并实现固定夹具与 Apply；不得新增渲染旁路、前台窗口或可调输入。验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -race -count=1`。
+- [x] 2.3 在 GREEN 后临时删除场景、改动其末尾顺序、seed/chunk/正午/相机之一或绕过 mirror/mesher；每个 mutation MUST 使 2.1 测试失败，再立即恢复。验证：`go test ./cmd/mcgo -run TestCaptureOakGrove -race -count=1`。
+- [x] 2.4 在受支持的无窗口图形环境显式更新并逐张复核实际变化的视觉基线，只写入 `oak-grove` 以及经复核确认由新增橡树改变共享地形背景的既有 golden；既有 HUD、远端玩家、背包与目标提示语义 MUST 保持不变。验证：`go run ./cmd/mcgo --capture <输出目录> --update-golden`，随后 `go run ./cmd/mcgo --capture <输出目录>`。
 
 ## 3. 收尾验证
 

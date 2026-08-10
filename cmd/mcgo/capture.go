@@ -564,6 +564,12 @@ var captureScenes = []captureScene{
 			return app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{}})
 		},
 	},
+	{
+		Name:         "oak-grove",
+		WarmupFrames: 8,
+		Prepare:      prepareOakGrove,
+		Apply:        applyOakGroveCaptureState,
+	},
 }
 
 // capturePinnedServerTick 是 debug-panel 场景钉死的权威 tick 值。
