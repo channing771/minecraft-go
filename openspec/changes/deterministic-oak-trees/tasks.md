@@ -14,5 +14,5 @@
 
 ## 3. 收尾验证
 
-- [ ] 3.1 格式化并运行受影响包、架构与全量并发测试；验证：`gofmt -w internal/worldgen/*.go internal/worldgen/*_test.go cmd/mcgo/capture.go cmd/mcgo/capture_test.go`、`go test ./internal/worldgen -race -count=1`、`go test ./cmd/mcgo -race -count=1`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`gofmt -l .`。
-- [ ] 3.2 核对实现、golden 与 delta specs 一致，并运行严格 OpenSpec 校验；验证：`openspec validate deterministic-oak-trees --strict --no-interactive`、`openspec validate --all --strict --no-interactive`、`git diff --check`。
+- [x] 3.1 格式化并运行受影响包、架构与全量并发测试；验证：`gofmt -w internal/worldgen/*.go internal/worldgen/*_test.go cmd/mcgo/capture.go cmd/mcgo/capture_test.go`、`go test ./internal/worldgen -race -count=1`、`go test ./cmd/mcgo -race -count=1`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`gofmt -l .`。
+- [x] 3.2 核对实现、golden 与 delta specs 一致，并运行严格 OpenSpec 校验；验证：`openspec validate deterministic-oak-trees --strict --no-interactive`、`openspec validate --all --strict --no-interactive`、`git diff --check`。
