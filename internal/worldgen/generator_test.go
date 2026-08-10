@@ -137,3 +137,10 @@ func TestGeneratedChunkCompresses(t *testing.T) {
 		t.Fatalf("单区块 payload 估算 %d 字节，朴素 payload 为 196608，压缩比不达标", total)
 	}
 }
+
+func BenchmarkGenerateChunkWithOakTrees(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		worldgen.New(42).GenerateChunk(core.ChunkPos{X: -1, Z: -1})
+	}
+}

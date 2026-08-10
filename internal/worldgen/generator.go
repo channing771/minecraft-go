@@ -65,7 +65,11 @@ func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
 	if height >= core.MaxY {
 		height = core.MaxY - 1
 	}
-	return g.generatedBlockAt(pos, height)
+	base := g.generatedBlockAt(pos, height)
+	if base != core.AirID {
+		return base
+	}
+	return g.treeBlockAt(pos)
 }
 
 // generatedBlockAt 是单点查询与整区块生成共用的纯判断，
@@ -131,6 +135,7 @@ func (g *Generator) GenerateChunk(pos core.ChunkPos) *world.Chunk {
 			}
 		}
 	}
+	g.applyOakTrees(c)
 	c.Compact()
 	return c
 }
