@@ -21,8 +21,8 @@
 
 ## 5. 无窗口目标反馈场景
 
-- [ ] 5.1 修改 `cmd/mcgo/capture.go` 与 `cmd/mcgo/capture_test.go`，在场景表末尾注册 `target-block-feedback`；夹具固定正午、相机 `{0.5, 3.5, 2.5}`、Yaw/Pitch `0`，只在 `{X: 0, Y: 3, Z: -3}` 放置 `BrickID`，并断言当前目标为该砖块及名称“砖块”；验证：`go test ./cmd/mcgo -race -count=1`。
-- [ ] 5.2 生成 `cmd/mcgo/testdata/golden/target-block-feedback.png`，仅更新正常目标提示实际改变的既有 golden，逐张复核完整场景且保持 `inventory-crafting.png` 逐字节不变；验证：`zsh -ic 'make visual-update VISUAL_OUT=/private/tmp/target-block-feedback-visual-update'`、`test -f cmd/mcgo/testdata/golden/target-block-feedback.png`、`test -z "$(git diff --name-only -- cmd/mcgo/testdata/golden/inventory-crafting.png)"` 和 `zsh -ic 'make visual-check VISUAL_OUT=/private/tmp/target-block-feedback-visual-check'`。
+- [x] 5.1 修改 `cmd/mcgo/capture.go` 与 `cmd/mcgo/capture_test.go`，在场景表末尾注册 `target-block-feedback`；夹具固定正午、相机 `{0.5, 3.5, 2.5}`、Yaw/Pitch `0`，只在 `{X: 0, Y: 3, Z: -3}` 放置 `BrickID`，并断言当前目标为该砖块及名称“砖块”；验证：`go test ./cmd/mcgo -race -count=1`。
+- [x] 5.2 生成 `cmd/mcgo/testdata/golden/target-block-feedback.png`，仅更新正常目标提示实际改变的既有 golden，逐张复核完整场景且保持 `inventory-crafting.png` 逐字节不变；验证：`zsh -ic 'make visual-update VISUAL_OUT=/private/tmp/target-block-feedback-visual-update'`、`test -f cmd/mcgo/testdata/golden/target-block-feedback.png`、`test -z "$(git diff --name-only -- cmd/mcgo/testdata/golden/inventory-crafting.png)"` 和 `zsh -ic 'make visual-check VISUAL_OUT=/private/tmp/target-block-feedback-visual-check'`。
 
 ## 6. 收尾、同步与归档
 

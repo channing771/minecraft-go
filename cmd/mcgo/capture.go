@@ -288,6 +288,22 @@ func prepareMaterialsShowcase(app *application) error {
 	return nil
 }
 
+func prepareTargetBlockFeedback(app *application) error {
+	if err := prepareCaptureAirNeighborhood(app); err != nil {
+		return err
+	}
+	return applyCaptureMirror(app, network.BlockChanges{
+		Dimension:    core.Overworld,
+		Chunk:        core.ChunkPos{Z: -1},
+		BaseRevision: 1,
+		NewRevision:  2,
+		Changes: []network.BlockChange{{
+			Position: core.BlockPos{X: 0, Y: 3, Z: -3},
+			Block:    core.BrickID,
+		}},
+	})
+}
+
 func applyCaptureMirror(app *application, message network.ServerMessage) error {
 	update, err := app.mirror.Apply(message)
 	if err != nil {
@@ -519,6 +535,25 @@ var captureScenes = []captureScene{
 			app.camera.Yaw = 0
 			app.camera.Pitch = -0.12
 			app.inventoryOpen = false
+			app.remotePlayers.Reset()
+			app.furnace.Reset()
+			app.chest.Reset()
+			if app.panel != nil {
+				app.panel.visible = false
+			}
+			return app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{}})
+		},
+	},
+	{
+		Name:         "target-block-feedback",
+		WarmupFrames: 8,
+		Prepare:      prepareTargetBlockFeedback,
+		Apply: func(app *application) error {
+			app.worldTimeTicks = 6000
+			app.camera.Pos = mgl32.Vec3{0.5, 3.5, 2.5}
+			app.camera.Yaw, app.camera.Pitch = 0, 0
+			app.inventoryOpen = false
+			app.inventorySource = -1
 			app.remotePlayers.Reset()
 			app.furnace.Reset()
 			app.chest.Reset()
