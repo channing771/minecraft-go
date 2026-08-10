@@ -7,6 +7,51 @@ import (
 	"minecraft-go/internal/world"
 )
 
+// TestOakTreeHashSelectorUsesLowBitAndHalfGate 锁定候选选择器，而非把地表
+// 或树干过滤误当成 parity 拒绝。若反转 hash&1 选择器，此测试必须失败。
+func TestOakTreeHashSelectorUsesLowBitAndHalfGate(t *testing.T) {
+	generator := New(42)
+	tests := []struct {
+		name         string
+		cellX, cellZ int32
+		hash         uint64
+		selected     bool
+	}{
+		{name: "odd grass", cellX: 0, cellZ: 0, hash: 0xe5176d2daaceb9fb, selected: false},
+		{name: "even sand", cellX: 1, cellZ: 0, hash: 0x18658ce70a1c6fca, selected: true},
+		{name: "even negative grass", cellX: -1, cellZ: -1, hash: 0x327293006fcc3648, selected: true},
+		{name: "even positive grass", cellX: 2, cellZ: 2, hash: 0xddbd74fd046a28a0, selected: true},
+		{name: "odd grass north", cellX: 0, cellZ: 1, hash: 0x5a6d7124c2c05c4b, selected: false},
+		{name: "odd grass east", cellX: 1, cellZ: 1, hash: 0xb097452e1eeaf1d1, selected: false},
+		{name: "odd negative grass", cellX: -2, cellZ: -2, hash: 0x26036128ae922e11, selected: false},
+		{name: "even sand south", cellX: 0, cellZ: -1, hash: 0x55eccbec4fa392e4, selected: true},
+	}
+	selected := 0
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			hash := oreHash(42, core.BlockPos{X: test.cellX, Z: test.cellZ}, oakTreeSalt)
+			if hash != test.hash {
+				t.Fatalf("oreHash(cell=(%d,%d))=%016x，想要 %016x", test.cellX, test.cellZ, hash, test.hash)
+			}
+			if got := hash&1 == 0; got != test.selected {
+				t.Fatalf("hash&1==0=%v，想要 %v", got, test.selected)
+			}
+			if test.selected {
+				selected++
+			}
+		})
+	}
+	if selected != len(tests)/2 {
+		t.Fatalf("%d 个固定候选中 selected=%d，想要半数 %d", len(tests), selected, len(tests)/2)
+	}
+	if _, spawned := generator.oakTreeForCell(0, 0); spawned {
+		t.Fatal("草地上的 odd-parity 候选错误生成橡树")
+	}
+	if _, spawned := generator.oakTreeForCell(-1, -1); !spawned {
+		t.Fatal("草地上的 even-parity 候选未生成橡树")
+	}
+}
+
 func TestOakTreeCandidateIsStable(t *testing.T) {
 	generator := New(42)
 	tests := []struct {
@@ -123,6 +168,38 @@ func TestApplyOakTreesPreservesSolidLeafTargets(t *testing.T) {
 	}
 }
 
+// TestApplyOakTreesKeepsIntersectingLogsIndependentOfOrder 覆盖两棵不同橡树
+// 的叶/干交叉：先写哪棵树都必须得到原木。若 applyOakTrees 的原木覆盖退回
+// 成“只覆盖空气”，真实区块的交叉格会保留先前树叶而失败。
+func TestApplyOakTreesKeepsIntersectingLogsIndependentOfOrder(t *testing.T) {
+	chunkPos := core.ChunkPos{Z: 4}
+	leafTree := oakTree{Root: core.BlockPos{X: -1, Y: 79, Z: 71}, Height: 6}
+	logTree := oakTree{Root: core.BlockPos{X: 0, Y: 79, Z: 72}, Height: 5}
+	intersection := core.BlockPos{X: 0, Y: 82, Z: 72}
+	if got := oakTreeBlockAt(leafTree, intersection); got != core.LeavesID {
+		t.Fatalf("leaf tree at intersection=%d，想要 LeavesID", got)
+	}
+	if got := oakTreeBlockAt(logTree, intersection); got != core.OakLogID {
+		t.Fatalf("log tree at intersection=%d，想要 OakLogID", got)
+	}
+
+	forward, reverse := world.NewChunk(chunkPos), world.NewChunk(chunkPos)
+	applyOakTreesInOrderForTest(forward, leafTree, logTree)
+	applyOakTreesInOrderForTest(reverse, logTree, leafTree)
+	assertChunksHaveSameBlocks(t, forward, reverse)
+	lx, _, lz := intersection.Local()
+	if got := forward.BlockAt(lx, intersection.Y, lz); got != core.OakLogID {
+		t.Fatalf("forward intersection=%d，想要 OakLogID", got)
+	}
+
+	generator := New(42)
+	generated := generatedChunkWithoutTrees(generator, chunkPos)
+	generator.applyOakTrees(generated)
+	if got := generated.BlockAt(lx, intersection.Y, lz); got != core.OakLogID {
+		t.Fatalf("applyOakTrees intersection=%d，想要 OakLogID", got)
+	}
+}
+
 func TestBaseBlockAtMatchesGeneratedChunkWithOakTrees(t *testing.T) {
 	generator := New(42)
 	for _, chunkPos := range []core.ChunkPos{{X: -1, Z: -1}, {X: 0, Z: -1}, {X: 0, Z: 0}, {X: 1, Z: 0}, {X: 0, Z: 1}, {X: 1, Z: 1}} {
@@ -155,4 +232,46 @@ func generatedChunkWithoutTrees(generator *Generator, position core.ChunkPos) *w
 		}
 	}
 	return chunk
+}
+
+// applyOakTreesInOrderForTest 以 applyOakTrees 相同的覆盖规则应用给定树列，
+// 仅用于把候选遍历顺序固定为正序或逆序。
+func applyOakTreesInOrderForTest(chunk *world.Chunk, trees ...oakTree) {
+	for _, tree := range trees {
+		for y := tree.Root.Y; y <= tree.Root.Y+tree.Height; y++ {
+			for z := tree.Root.Z - 2; z <= tree.Root.Z+2; z++ {
+				for x := tree.Root.X - 2; x <= tree.Root.X+2; x++ {
+					position := core.BlockPos{X: x, Y: y, Z: z}
+					if position.Chunk() != chunk.Pos {
+						continue
+					}
+					block := oakTreeBlockAt(tree, position)
+					if block == core.AirID {
+						continue
+					}
+					lx, _, lz := position.Local()
+					current := chunk.BlockAt(lx, y, lz)
+					if block == core.OakLogID && (current == core.AirID || current == core.LeavesID) {
+						chunk.SetBlock(lx, y, lz, block)
+					}
+					if block == core.LeavesID && current == core.AirID {
+						chunk.SetBlock(lx, y, lz, block)
+					}
+				}
+			}
+		}
+	}
+}
+
+func assertChunksHaveSameBlocks(t *testing.T, left, right *world.Chunk) {
+	t.Helper()
+	for y := int32(core.MinY); y < core.MaxY; y++ {
+		for z := 0; z < core.SectionSize; z++ {
+			for x := 0; x < core.SectionSize; x++ {
+				if got, want := left.BlockAt(x, y, z), right.BlockAt(x, y, z); got != want {
+					t.Fatalf("chunk local=(%d,%d,%d)=%d，想要 %d", x, y, z, got, want)
+				}
+			}
+		}
+	}
 }
