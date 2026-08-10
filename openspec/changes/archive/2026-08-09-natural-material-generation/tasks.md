@@ -32,4 +32,4 @@
 
 - [x] 7.1 在 `cmd/mcgod` 完成真实磁盘纵向迁移测试，并保留 `internal/storage` 的 `ChunkKeys`/`Backup` 专项测试；覆盖完整备份、稳定顺序、七种值迁移、非自然负载保留、保存/进度/完成标记失败续跑、最终 partial batch 与完成后幂等和 future schema 拒绝，运行 `go test ./internal/storage ./cmd/mcgod -race -count=1`。
 - [x] 7.2 运行收尾门禁：`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`gofmt -l .`、`git diff --check`、`openspec validate natural-material-generation --strict --no-interactive` 和 `openspec validate --all --strict --no-interactive`。
-- [ ] 7.3 同步 delta spec 到主规格、核对所有任务和验证证据后归档 change，并以独立提交、分支和 PR 交付；在 PR 描述中明确七种自然材料建筑会被强制重算、恢复依赖完整备份且 schema v8/protocol v15/metadata v2 未修改。
+- [x] 7.3 同步 delta spec 到主规格、核对所有任务和验证证据后归档 change，并以独立提交、分支和 PR 交付；在 PR 描述中明确七种自然材料建筑会被强制重算、恢复依赖完整备份且 schema v8/protocol v15/metadata v2 未修改。
