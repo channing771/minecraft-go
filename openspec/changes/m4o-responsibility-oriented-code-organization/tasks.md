@@ -40,7 +40,7 @@
 
 ## 11. 客户端 mesher 与 predictor 拆分
 
-- [ ] 11.1 拆分 `internal/client/mesher.go`、`predictor.go` 与 predictor 测试，复用现有 ready queue 并保持 fixed-step/reconciliation 顺序；focused：`zsh -ic 'go test ./internal/client -race -count=1'`、`zsh -ic 'go test ./internal/client -run "Mesher|Predictor|Reconcile|Presentation" -count=1'`、`zsh -ic 'go test ./internal/mesh ./internal/render -run "Mesh|Light|Render" -count=1'`。
+- [x] 11.1 拆分 `internal/client/mesher.go`、`predictor.go` 与 predictor 测试，复用现有 ready queue 并保持 fixed-step/reconciliation 顺序；focused：`zsh -ic 'go test ./internal/client -race -count=1'`、`zsh -ic 'go test ./internal/client -run "Mesher|Predictor|Reconcile|Presentation" -count=1'`、`zsh -ic 'go test ./internal/mesh ./internal/render -run "Mesh|Light|Render" -count=1'`。
 
 ## 12. Renderer 上传与绘制职责拆分
 
