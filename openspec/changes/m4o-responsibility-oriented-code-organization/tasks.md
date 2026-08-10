@@ -32,7 +32,7 @@
 
 ## 9. 玩家持久化生命周期拆分
 
-- [ ] 9.1 拆分 `player_persistence.go` 与相关 persistence/flush 测试，复用现有 scheduler 并保持 save revision 身份；focused：`zsh -ic 'go test ./internal/server -run "PlayerPersistence|PlayerSave|PlayerFlush" -race -count=1'`、`zsh -ic 'go test ./internal/server -race -count=1'`。
+- [x] 9.1 拆分 `player_persistence.go` 与相关 persistence/flush 测试，复用现有 scheduler 并保持 save revision 身份；focused：`zsh -ic 'go test ./internal/server -run "PlayerPersistence|PlayerSave|PlayerFlush" -race -count=1'`、`zsh -ic 'go test ./internal/server -race -count=1'`。
 
 ## 10. 服务端大型集成测试按场景拆分
 

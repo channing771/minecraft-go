@@ -76,32 +76,6 @@ func TestPlayerFlushWaitsForInheritedRevisionAndAttemptsOnlyLatestFollowup(t *te
 	assertNoPlayerSaveStarted(t, store)
 }
 
-// 捕获：CloseWorker 等待 worker 后未应用已经进入 completion 队列的最终结果。
-func TestPlayerPersistenceCloseWorkerDrainsBufferedCompletions(t *testing.T) {
-	store := newControllablePlayerStore()
-	id := playerID(5)
-	store.loaded[id] = storedPlayerForTest(id, 7, "A", testPlayerSnapshot(3))
-	persistence := newPlayerPersistence(store, playerPersistenceTestConfig())
-	if _, err := persistence.Prepare(context.Background(), id, "A", testMetadata()); err != nil {
-		t.Fatal(err)
-	}
-	if err := persistence.Observe(id, "A", testPlayerSnapshot(10), 0, true); err != nil {
-		t.Fatal(err)
-	}
-	_ = receivePlayerSave(t, store)
-	store.complete(nil)
-	waitForPlayerSaveCompletionDepth(t, persistence.completions, 1)
-
-	persistence.CloseWorker()
-	persistence.mu.Lock()
-	player := persistence.cache[id]
-	persisted, inFlight := player.persisted, player.inFlight
-	persistence.mu.Unlock()
-	if persisted != 8 || inFlight {
-		t.Fatalf("closed player state: persisted=%d inFlight=%t, want 8/false", persisted, inFlight)
-	}
-}
-
 type deterministicFlushStore struct {
 	mu       sync.Mutex
 	loaded   map[core.PlayerID]storage.StoredPlayer
