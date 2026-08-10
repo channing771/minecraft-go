@@ -21,7 +21,7 @@
 
 ### `core.SmeltingOutput` 是唯一的固定映射
 
-`core` 提供从熔炼输入到唯一产物的固定查询，并覆盖粗铁到铁锭、沙子到玻璃、黏土块到砖块。`world.FurnaceSlot.Valid` 与 `network` 只用此结果校验输入、输出栏位是否属于允许集合；`sim` 依据当前输入查询结果决定能否推进和完成时产出什么。这样栏位准入不会把输出误当作当前产物，且只有 `sim` 决定某次 tick 的实际产物。
+`core` 提供从熔炼输入到唯一产物的固定查询，并覆盖粗铁到铁锭、沙子到玻璃、黏土块到砖块。`world.FurnaceSlot.Valid` 与 `network` 的输入校验查询 `core.SmeltingOutput`；输出校验仅接受固定集合 `{ItemNone, ItemIronIngot, ItemGlass, ItemBrick}`，不复制输入到产物映射。`sim` 依据当前输入查询结果决定能否推进和完成时产出什么。这样栏位准入不会把输出误当作当前产物，且只有 `sim` 决定某次 tick 的实际产物。
 
 否决为每个调用点各写 `switch`，因为映射会分叉；否决注册表或运行时目录，因为固定三条规则不需要额外抽象。
 

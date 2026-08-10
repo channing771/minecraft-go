@@ -5,7 +5,7 @@
 ## 3. 熔炼映射与栏位校验
 
 - [x] 3.1 在 `internal/core` 增加唯一的固定 `SmeltingOutput` 映射，覆盖粗铁到铁锭、沙子到玻璃、黏土块到砖块，并以单元测试冻结未知输入拒绝；运行 `go test ./internal/core -race -count=1`。
-- [x] 3.2 修改 `internal/world/furnace.go`、`internal/world/furnace_test.go`、`internal/network/message.go` 与 `internal/network/furnace_test.go`，让 world/network 只通过 `core.SmeltingOutput` 校验熔炉栏位集合；正向接受 `ItemRawIron`、`ItemSand`、`ItemClay` 输入和 `ItemIronIngot`、`ItemGlass`、`ItemBrick` 输出，反向拒绝输入/输出集合之外的物品，并保留煤炭燃料与输出格只作来源的限制；运行 `go test ./internal/world ./internal/network -race -count=1`，再运行 codec/golden 定向命令 `go test ./internal/network -run 'Test(ProtocolV1SmallPacketGolden|ProtocolV7FurnacePacketIDsAreFrozen|ProtocolV12ContainerPayloadsAreFixedLength|FurnaceMessagesRejectInvalidValues|FurnaceDecodeRejectsUnknownWireValues)$' -count=1`。
+- [x] 3.2 修改 `internal/world/furnace.go`、`internal/world/furnace_test.go`、`internal/network/message.go` 与 `internal/network/furnace_test.go`，让 world/network 的输入校验查询 `core.SmeltingOutput`，输出校验仅接受固定集合 `{ItemNone, ItemIronIngot, ItemGlass, ItemBrick}` 且不复制输入到产物映射；正向接受 `ItemRawIron`、`ItemSand`、`ItemClay` 输入和 `ItemIronIngot`、`ItemGlass`、`ItemBrick` 输出，反向拒绝输入/输出集合之外的物品，并保留煤炭燃料与输出格只作来源的限制；运行 `go test ./internal/world ./internal/network -race -count=1`，再运行 codec/golden 定向命令 `go test ./internal/network -run 'Test(ProtocolV1SmallPacketGolden|ProtocolV7FurnacePacketIDsAreFrozen|ProtocolV12ContainerPayloadsAreFixedLength|FurnaceMessagesRejectInvalidValues|FurnaceDecodeRejectsUnknownWireValues)$' -count=1`。
 
 ## 4. 权威熔炉推进
 
