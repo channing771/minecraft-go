@@ -24,7 +24,7 @@
 
 ## 7. session、Host 与发布职责拆分
 
-- [ ] 7.1 拆分 `internal/server/session.go`、`host.go`、`publication.go`，保持 session generation、heartbeat、interest、outbox、容量和关闭顺序；focused：`zsh -ic 'go test ./internal/server -race -count=1'`、`zsh -ic 'go test ./internal/server -run "Session|Heartbeat|Host|Publication|Interest" -count=1'`。
+- [x] 7.1 拆分 `internal/server/session.go`、`host.go`、`publication.go`，保持 session generation、heartbeat、interest、outbox、容量和关闭顺序；focused：`zsh -ic 'go test ./internal/server -race -count=1'`、`zsh -ic 'go test ./internal/server -run "Session|Heartbeat|Host|Publication|Interest" -count=1'`。
 
 ## 8. 世界持久化调度拆分
 
