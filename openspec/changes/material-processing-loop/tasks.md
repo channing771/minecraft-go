@@ -9,8 +9,8 @@
 
 ## 4. 权威熔炉推进
 
-- [ ] 4.1 在 `internal/sim` 复用 `core.SmeltingOutput` 决定推进和完成产物；覆盖三种输入的点火、持续推进、完成、输出冲突与输出已满，并保持单一权威 tick；运行 `go test ./internal/sim -race -count=1`。
-- [ ] 4.2 在 `internal/sim` 的权威容器移动提交点实现输入种类切换清零 `ProgressTicks`、保留 `BurnTicks`；覆盖移除并放回同种输入的重置，并验证 Memory/TCP 与重启恢复一致；运行 `go test ./internal/sim ./internal/server ./internal/network -race -count=1`。
+- [x] 4.1 在 `internal/sim` 复用 `core.SmeltingOutput` 决定推进和完成产物；覆盖三种输入的点火、持续推进、完成、输出冲突与输出已满，并保持单一权威 tick；运行 `go test ./internal/sim -race -count=1`。
+- [x] 4.2 在 `internal/sim` 的权威容器移动提交点实现输入种类切换清零 `ProgressTicks`、保留 `BurnTicks`；覆盖移除并放回同种输入的重置，并验证 Memory/TCP 与重启恢复一致；运行 `go test ./internal/sim ./internal/server ./internal/network -race -count=1`。
 
 ## 5. 熔炉性能与持久化回归
 
