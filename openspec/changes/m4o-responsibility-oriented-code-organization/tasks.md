@@ -44,7 +44,7 @@
 
 ## 12. Renderer 上传与绘制职责拆分
 
-- [ ] 12.1 在 `internal/render/renderer.go` 保留核心 lifecycle，只将 upload 和 draw 职责原样拆到 `renderer_upload.go`、`renderer_draw.go`，保持 upload budget、slot origin、render pass 与 release 顺序；focused：`zsh -ic 'go test ./internal/render -race -count=1'`、`zsh -ic 'go test ./internal/render -run "Renderer|Upload|Render|Allocation" -count=1'`。
+- [x] 12.1 在 `internal/render/renderer.go` 保留核心 lifecycle，只将 upload 和 draw 职责原样拆到 `renderer_upload.go`、`renderer_draw.go`，保持 upload budget、slot origin、render pass 与 release 顺序；focused：`zsh -ic 'go test ./internal/render -race -count=1'`、`zsh -ic 'go test ./internal/render -run "Renderer|Upload|Render|Allocation" -count=1'`。
 
 ## 13. 完整 HUD 提取为唯一新包
 
