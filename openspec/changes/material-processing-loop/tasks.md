@@ -15,15 +15,15 @@
 ## 5. 熔炉性能与持久化回归
 
 - [x] 5.1 更新 `internal/storage`、`internal/client` 与 `internal/server` 的存档、镜像、重启和 Memory/TCP 纵向测试，确认三种完整熔炉状态使用既有 `FurnaceSlot` 与协议字段无损往返，非法镜像状态整包拒绝，且无 schema 或协议版本升级；运行 `go test ./internal/storage ./internal/client -run 'Furnace|ChunkV|Future' -race -count=1`、`go test ./internal/server -run 'MaterialProcessing|FurnaceRestart' -race -count=1` 与 `go test ./internal/server -race -count=1`。
-- [ ] 5.2 运行现有熔炉 benchmark 并仅记录数值，确认固定容量与热路径零分配门禁不退化；运行 `go test ./internal/sim -run '^$' -bench Furnace -benchmem -count=1`。
+- [x] 5.2 运行现有熔炉 benchmark 并仅记录数值，确认固定容量与热路径零分配门禁不退化；运行 `go test ./internal/sim -run '^$' -bench Furnace -benchmem -count=1`。
 
 ## 6. 七行固定合成 HUD
 
-- [x] 6.1 在 `internal/render/hotbar.go` 将固定 recipe ID 列表扩为七条并从其长度同步更新面板、绘制、命中和固定容量；在 `internal/render/hotbar_test.go` 与 `cmd/mcgo/app_test.go` 覆盖 640×360 的第七行、命中矩形、容量和应用层点击；运行 `go test ./internal/render ./cmd/mcgo -race -count=1`。
+- [x] 6.1 在 `internal/render/hotbar.go` 将固定 recipe ID 列表扩为七条，并同步更新七行面板、绘制、命中和固定 quad/glyph 容量；在 `internal/render/hotbar_test.go` 与 `cmd/mcgo/app_test.go` 覆盖 640×360 的第七行、命中矩形、容量和应用层点击；运行 `go test ./internal/render ./cmd/mcgo -race -count=1`。
 - [x] 6.2 通过 `cmd/mcgo/capture.go` 的现有无窗口 `inventory-crafting` 场景更新且只更新 `cmd/mcgo/testdata/golden/inventory-crafting.png`；运行 `make visual-update`，再用 `test "$(git diff --name-only -- cmd/mcgo/testdata/golden)" = "cmd/mcgo/testdata/golden/inventory-crafting.png"` 断言没有其他 golden 变化，随后运行 `make visual-check` 与 `git diff --check`；不得启动或聚焦前台窗口。
 
 ## 7. 收尾验证
 
-- [ ] 7.1 对改动的 Go 文件运行 `gofmt -w`，并运行 `gofmt -l .`，输出必须为空。
-- [ ] 7.2 运行 `go test ./internal/archcheck -count=1`、`go test ./... -race` 与 `go vet ./...`，修复由本 change 引入的失败。
-- [ ] 7.3 运行 `openspec validate material-processing-loop --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`，确认契约、工作树和格式通过。
+- [x] 7.1 对改动的 Go 文件运行 `gofmt -w`，并运行 `gofmt -l .`，输出必须为空。
+- [x] 7.2 运行 `go test ./internal/archcheck -count=1`、`go test ./... -race` 与 `go vet ./...`，修复由本 change 引入的失败。
+- [x] 7.3 运行 `openspec validate material-processing-loop --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 和 `git diff --check`，确认契约、工作树和格式通过。
