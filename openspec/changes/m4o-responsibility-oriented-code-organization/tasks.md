@@ -36,7 +36,7 @@
 
 ## 10. 服务端大型集成测试按场景拆分
 
-- [ ] 10.1 将 TCP、Host、多人 Memory/TCP 大型测试拆成 restart/parity/furnace/capacity/lifecycle/gameplay/mining/cancel 场景和同包 helper，保持全部测试名；focused：`zsh -ic 'go test ./internal/server -race -count=1'`、`zsh -ic 'go test ./internal/server -run "TCPPlayer|Parity|Mining|Furnace|Host|Multiplayer" -count=1'`，并对比拆分前后 `func Test` 名单。
+- [x] 10.1 将 TCP、Host、多人 Memory/TCP 大型测试拆成 restart/parity/furnace/capacity/lifecycle/gameplay/mining/cancel 场景和同包 helper，保持全部测试名；focused：`zsh -ic 'go test ./internal/server -race -count=1'`、`zsh -ic 'go test ./internal/server -run "TCPPlayer|Parity|Mining|Furnace|Host|Multiplayer" -count=1'`，并对比拆分前后 `func Test` 名单。
 
 ## 11. 客户端 mesher 与 predictor 拆分
 
