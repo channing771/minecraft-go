@@ -26,6 +26,6 @@
 
 ## 6. 收尾、同步与归档
 
-- [ ] 6.1 回读 `proposal.md`、两个 delta spec、`design.md` 与本文件，完成每项实现后勾选对应任务；验证：`openspec validate target-block-feedback --strict --no-interactive`。
-- [ ] 6.2 同步 `voxel-visual-presentation` 与 `visual-verification` 主规格并归档本 change，不修改其他 change；验证：`openspec validate --all --strict --no-interactive`、`openspec archive target-block-feedback --yes` 与 `test -z "$(openspec list --json | grep target-block-feedback || true)"`。
-- [ ] 6.3 完成收尾质量门禁；验证：`gofmt -l .`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`git diff --check`、`openspec validate --all --strict --no-interactive` 和无窗口 `make visual-check`。
+- [x] 6.1 回读 `proposal.md`、两个 delta spec、`design.md` 与本文件，完成每项实现后勾选对应任务；验证：`openspec validate target-block-feedback --strict --no-interactive`。
+- [x] 6.2 同步 `voxel-visual-presentation` 与 `visual-verification` 主规格并归档本 change，不修改其他 change；验证：`openspec validate --all --strict --no-interactive`、`openspec archive target-block-feedback --yes` 与 `test -z "$(openspec list --json | grep target-block-feedback || true)"`。
+- [x] 6.3 完成收尾质量门禁；验证：`gofmt -l .`、`go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`git diff --check`、`openspec validate --all --strict --no-interactive` 和无窗口 `make visual-check`。
