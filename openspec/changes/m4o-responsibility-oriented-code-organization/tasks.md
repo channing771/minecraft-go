@@ -60,7 +60,7 @@
 
 ## 16. mcgo 入口、交互与视觉 capture 拆分
 
-- [ ] 16.1 拆分 `main.go`/`main_test.go` 与 `capture.go`/`capture_test.go` 为 options/run/interactive/capture scene/image 文件，严格保留各自 build tag 状态；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo -run "ParseMainOptions|RunWithDependencies|Interactive|Capture|Golden|PNG" -count=1'`、`VISUAL_OUT=/private/tmp/mcgo-m4o-capture-visual make visual-check`。
+- [x] 16.1 拆分 `main.go`/`main_test.go` 与 `capture.go`/`capture_test.go` 为 options/run/interactive/capture scene/image 文件，严格保留各自 build tag 状态；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo -run "ParseMainOptions|RunWithDependencies|Interactive|Capture|Golden|PNG" -count=1'`、`VISUAL_OUT=/private/tmp/mcgo-m4o-capture-visual make visual-check`。
 
 ## 17. benchmark 场景、测量与报告职责拆分
 
