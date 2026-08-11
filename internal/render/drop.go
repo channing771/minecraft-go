@@ -194,12 +194,48 @@ func dropAnimationPhase(serverTick uint64, id core.DropID) dropPhase {
 	}
 }
 
+// ItemColor 返回 HUD 与掉落物共享的稳定物品基色。
+func ItemColor(item core.ItemID) [4]float32 {
+	switch item {
+	case core.ItemStone:
+		return [4]float32{128.0 / 255, 128.0 / 255, 128.0 / 255, 1}
+	case core.ItemDirt:
+		return [4]float32{134.0 / 255, 96.0 / 255, 67.0 / 255, 1}
+	case core.ItemGrass:
+		return [4]float32{88.0 / 255, 140.0 / 255, 60.0 / 255, 1}
+	case core.ItemStoneBrick:
+		return [4]float32{122.0 / 255, 118.0 / 255, 112.0 / 255, 1}
+	case core.ItemCoal:
+		return [4]float32{38.0 / 255, 38.0 / 255, 40.0 / 255, 1}
+	case core.ItemRawIron:
+		return [4]float32{196.0 / 255, 154.0 / 255, 118.0 / 255, 1}
+	case core.ItemIronIngot:
+		return [4]float32{220.0 / 255, 220.0 / 255, 224.0 / 255, 1}
+	case core.ItemFurnace:
+		return [4]float32{88.0 / 255, 86.0 / 255, 88.0 / 255, 1}
+	case core.ItemIronBlock:
+		return [4]float32{214.0 / 255, 214.0 / 255, 216.0 / 255, 1}
+	case core.ItemChest:
+		return [4]float32{156.0 / 255, 108.0 / 255, 58.0 / 255, 1}
+	case core.ItemStonePickaxe:
+		return [4]float32{104.0 / 255, 112.0 / 255, 120.0 / 255, 1}
+	case core.ItemIronPickaxe:
+		return [4]float32{190.0 / 255, 198.0 / 255, 210.0 / 255, 1}
+	case core.ItemBrokenStonePickaxe:
+		return [4]float32{66.0 / 255, 60.0 / 255, 58.0 / 255, 1}
+	case core.ItemBrokenIronPickaxe:
+		return [4]float32{96.0 / 255, 88.0 / 255, 92.0 / 255, 1}
+	default:
+		return [4]float32{}
+	}
+}
+
 // itemDropColor 复用与程序化方块一致的稳定基色。
 func itemDropColor(item core.ItemID) ([4]float32, bool) {
 	if !core.RegisteredItem(item) {
 		return [4]float32{}, false
 	}
-	return hotbarItemColor(item), true
+	return ItemColor(item), true
 }
 
 // ItemDropBlock 把掉落物的区块内索引还原为世界方块位置。

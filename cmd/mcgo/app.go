@@ -22,6 +22,7 @@ import (
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/render"
+	"minecraft-go/internal/render/hud"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
 	"minecraft-go/internal/worldgen"
@@ -60,7 +61,7 @@ type application struct {
 	remoteNameTags      []render.NameTag
 	avatarRenderer      *render.AvatarRenderer
 	nameTagRenderer     *render.NameTagRenderer
-	hotbarRenderer      *render.HotbarRenderer
+	hotbarRenderer      *hud.HotbarRenderer
 	debugPanelRenderer  *render.DebugPanelRenderer
 	// panel 是调试面板的交互状态；只在 applicationOptions.Dev 为真时创建，
 	// 与 debugPanelRenderer 一同保持 nil/非 nil 同步。
@@ -72,7 +73,7 @@ type application struct {
 	inventory         client.InventoryMirror
 	furnace           client.FurnaceMirror
 	chest             client.ChestMirror
-	miningOverlay     render.MiningOverlay
+	miningOverlay     hud.MiningOverlay
 	itemDropRenderer  *render.ItemDropRenderer
 	itemDrops         *client.ItemDrops
 	itemDropInstances []render.ItemDrop
@@ -147,7 +148,7 @@ type applicationDependencies struct {
 	newGlyphAtlas         func(gfx.Device) (*render.GlyphAtlas, error)
 	newAvatarRenderer     func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
 	newNameTagRenderer    func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
-	newHotbarRenderer     func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*render.HotbarRenderer, error)
+	newHotbarRenderer     func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*hud.HotbarRenderer, error)
 	newItemDropRenderer   func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
 	newDebugPanelRenderer func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.DebugPanelRenderer, error)
 }
@@ -323,8 +324,8 @@ func newApplicationWithDependencies(
 		}
 	}
 	if dependencies.newHotbarRenderer == nil {
-		dependencies.newHotbarRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource, blocks *assets.Registry) (*render.HotbarRenderer, error) {
-			return render.NewHotbarRenderer(dev, color, atlas, blocks), nil
+		dependencies.newHotbarRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource, blocks *assets.Registry) (*hud.HotbarRenderer, error) {
+			return hud.NewHotbarRenderer(dev, color, atlas, blocks), nil
 		}
 	}
 	if dependencies.newItemDropRenderer == nil {
@@ -887,7 +888,7 @@ func (a *application) closeClientSession(cause error) {
 		a.inventory.Reset()
 		a.furnace.Reset()
 		a.chest.Reset()
-		a.miningOverlay = render.MiningOverlay{}
+		a.miningOverlay = hud.MiningOverlay{}
 		a.inventoryOpen = false
 		a.inventorySource = -1
 		a.itemDrops.Reset()
@@ -980,9 +981,9 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	}
 	inventory, inventoryConfirmed := a.inventory.State()
 	if inventoryConfirmed {
-		var overlay *render.FurnaceOverlay
+		var overlay *hud.FurnaceOverlay
 		if furnace, opened := a.furnace.State(); opened {
-			overlay = &render.FurnaceOverlay{
+			overlay = &hud.FurnaceOverlay{
 				Input:         furnace.Input,
 				Fuel:          furnace.Fuel,
 				Output:        furnace.Output,
@@ -990,16 +991,16 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 				BurnTicks:     furnace.BurnTicks,
 			}
 		}
-		var chestOverlay *render.ChestOverlay
+		var chestOverlay *hud.ChestOverlay
 		if chest, opened := a.chest.State(); opened {
-			chestOverlay = &render.ChestOverlay{Items: chest.Items}
+			chestOverlay = &hud.ChestOverlay{Items: chest.Items}
 		}
 		// 生命值的确认状态独立于背包：Predictor 尚未收到权威状态时 ready 为
 		// false，HUD 绝不画出预测或陈旧的生命值。
 		health, healthReady := a.predictor.Health()
 		if err := a.hotbarRenderer.Prepare(
 			inventory, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
-			a.miningOverlay, render.HealthOverlay{Confirmed: healthReady, Value: health},
+			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health},
 			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
@@ -1149,9 +1150,9 @@ func (a *application) drainServerMessages(maxMessages int) {
 			a.serverTick = state.ServerTick
 			a.worldTimeTicks = state.WorldTimeTicks
 			if state.Reset || !state.MiningActive {
-				a.miningOverlay = render.MiningOverlay{}
+				a.miningOverlay = hud.MiningOverlay{}
 			} else {
-				a.miningOverlay = render.MiningOverlay{
+				a.miningOverlay = hud.MiningOverlay{
 					Active:        true,
 					ProgressTicks: state.MiningProgressTicks,
 					RequiredTicks: state.MiningRequiredTicks,
@@ -1387,7 +1388,7 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 	furnace, furnaceOpen := a.furnace.State()
 	chest, chestOpen := a.chest.State()
 	if !furnaceOpen && !chestOpen {
-		if recipe, ok := render.RecipeButtonAt(cursorX, cursorY, width, height); ok {
+		if recipe, ok := hud.RecipeButtonAt(cursorX, cursorY, width, height); ok {
 			inventory, confirmed := a.inventory.State()
 			if !confirmed {
 				return
@@ -1409,11 +1410,11 @@ func (a *application) clickInventorySlot(cursorX, cursorY float64, width, height
 	var ok bool
 	switch {
 	case chestOpen:
-		slot, ok = render.ChestSlotAt(cursorX, cursorY, width, height)
+		slot, ok = hud.ChestSlotAt(cursorX, cursorY, width, height)
 	case furnaceOpen:
-		slot, ok = render.FurnaceSlotAt(cursorX, cursorY, width, height)
+		slot, ok = hud.FurnaceSlotAt(cursorX, cursorY, width, height)
 	default:
-		slot, ok = render.InventorySlotAt(cursorX, cursorY, width, height)
+		slot, ok = hud.InventorySlotAt(cursorX, cursorY, width, height)
 	}
 	if !ok {
 		return

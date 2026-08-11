@@ -1,6 +1,7 @@
 package render
 
 import (
+	_ "embed"
 	"math"
 	"reflect"
 	"strings"
@@ -13,6 +14,9 @@ import (
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/mesh"
 )
+
+//go:embed hud/shader/hotbar.wgsl
+var hotbarTestShader string
 
 func closeEnough(got, want float32) bool {
 	return math.Abs(float64(got-want)) <= 1e-5
@@ -275,7 +279,7 @@ func TestScreenSpaceRenderersIgnoreWorldDaylight(t *testing.T) {
 
 	// hotbar 与 name tag 的着色器不得引用昼夜亮度。
 	for name, source := range map[string]string{
-		"hotbar":   hotbarShader,
+		"hotbar":   hotbarTestShader,
 		"name_tag": nameTagShader,
 	} {
 		if strings.Contains(source, "daylight") {

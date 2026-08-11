@@ -24,6 +24,7 @@ import (
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/physics"
 	"minecraft-go/internal/render"
+	"minecraft-go/internal/render/hud"
 	"minecraft-go/internal/server"
 	"minecraft-go/internal/storage"
 )
@@ -273,7 +274,7 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	}
 	avatar := render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 	nameTag := render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
-	hotbar := render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, reg)
+	hotbar := hud.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, reg)
 	color := dev.CreateTexture(gfx.TextureDesc{Label: "main color", Width: 4, Height: 4, Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget})
 	app := &application{
 		dev: dev, color: color, colorView: color.View(gfx.TextureViewDesc{}),
@@ -407,7 +408,7 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 		depth: newDepthTarget(dev, 16, 16), renderer: render.New(dev, reg, gfx.FormatRGBA8Unorm),
 		avatarRenderer:  render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float),
 		nameTagRenderer: render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, glyphs),
-		hotbarRenderer:  render.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, glyphs, reg),
+		hotbarRenderer:  hud.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, glyphs, reg),
 		itemDropRenderer: render.NewItemDropRenderer(
 			dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float,
 		),
@@ -795,7 +796,7 @@ func TestApplicationMiningOverlayUsesOnlyConfirmedPlayerState(t *testing.T) {
 	}
 	sendInteractiveServerMessage(t, serverEndpoint, state)
 	app.drainServerMessages(1)
-	want := render.MiningOverlay{
+	want := hud.MiningOverlay{
 		Active: true, ProgressTicks: 6, RequiredTicks: 15, Harvestable: true,
 	}
 	if app.miningOverlay != want {
@@ -823,7 +824,7 @@ func TestApplicationMiningOverlayUsesOnlyConfirmedPlayerState(t *testing.T) {
 	inactive.MiningHarvestable = false
 	sendInteractiveServerMessage(t, serverEndpoint, inactive)
 	app.drainServerMessages(1)
-	if app.miningOverlay != (render.MiningOverlay{}) {
+	if app.miningOverlay != (hud.MiningOverlay{}) {
 		t.Fatalf("inactive 后采掘镜像=%+v，想要零值", app.miningOverlay)
 	}
 }
@@ -839,7 +840,7 @@ func TestApplicationMiningOverlayIgnoresStaleAndEqualPlayerState(t *testing.T) {
 	}
 	sendInteractiveServerMessage(t, serverEndpoint, active)
 	app.drainServerMessages(1)
-	want := render.MiningOverlay{
+	want := hud.MiningOverlay{
 		Active: true, ProgressTicks: 6, RequiredTicks: 15, Harvestable: true,
 	}
 	app.inventoryOpen = true
@@ -905,7 +906,7 @@ func TestApplicationMiningOverlayClearsOnResetAndSessionClose(t *testing.T) {
 			}
 
 			test.clear(app, serverEndpoint)
-			if app.miningOverlay != (render.MiningOverlay{}) {
+			if app.miningOverlay != (hud.MiningOverlay{}) {
 				t.Fatalf("清理后采掘镜像=%+v，想要零值", app.miningOverlay)
 			}
 		})
@@ -2558,7 +2559,7 @@ func chestSlotCenter(t *testing.T, slot int, width, height uint32) (float64, flo
 	t.Helper()
 	for x := range int(width) {
 		for y := range int(height) {
-			got, ok := render.ChestSlotAt(float64(x), float64(y), width, height)
+			got, ok := hud.ChestSlotAt(float64(x), float64(y), width, height)
 			if ok && int(got) == slot {
 				return float64(x), float64(y)
 			}
@@ -2751,7 +2752,7 @@ func inventorySlotCenter(t *testing.T, slot int, width, height uint32) (float64,
 	t.Helper()
 	for x := range int(width) {
 		for y := range int(height) {
-			got, ok := render.InventorySlotAt(float64(x), float64(y), width, height)
+			got, ok := hud.InventorySlotAt(float64(x), float64(y), width, height)
 			if ok && int(got) == slot {
 				return float64(x), float64(y)
 			}
@@ -2765,7 +2766,7 @@ func furnaceSlotCenter(t *testing.T, slot int, width, height uint32) (float64, f
 	t.Helper()
 	for x := range int(width) {
 		for y := range int(height) {
-			got, ok := render.FurnaceSlotAt(float64(x), float64(y), width, height)
+			got, ok := hud.FurnaceSlotAt(float64(x), float64(y), width, height)
 			if ok && int(got) == slot {
 				return float64(x), float64(y)
 			}
@@ -2779,7 +2780,7 @@ func recipeButtonCenter(t *testing.T, recipe core.RecipeID, width, height uint32
 	t.Helper()
 	for y := range int(height) {
 		for x := range int(width) {
-			if got, ok := render.RecipeButtonAt(float64(x), float64(y), width, height); ok &&
+			if got, ok := hud.RecipeButtonAt(float64(x), float64(y), width, height); ok &&
 				got == recipe {
 				return float64(x), float64(y)
 			}

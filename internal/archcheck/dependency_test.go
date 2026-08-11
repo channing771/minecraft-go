@@ -24,6 +24,7 @@ var allowed = map[string][]string{
 	"internal/mesh":       {"internal/core", "internal/world"},
 	"internal/assets":     {"internal/core", "internal/world", "internal/mesh", "internal/worldgen", "internal/gfx"},
 	"internal/render":     {"internal/core", "internal/world", "internal/mesh", "internal/assets", "internal/gfx"},
+	"internal/render/hud": {"internal/core", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
 	"internal/server":     {"internal/core", "internal/network", "internal/world", "internal/worldgen", "internal/sim", "internal/storage"},
 	"internal/client":     {"internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
 }
