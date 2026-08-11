@@ -71,6 +71,38 @@
 | 18 | perfcheck | `cmd/perfcheck/main.go`、`main_test.go` → compare/validate/regression 与 compare/migration/transport/regression/CLI/helper 测试文件 |
 | 19 | 审计收尾 | 仅更新本 change 的 `design.md`、`tasks.md`，核对所有 386 个文件和固定 artifact，无生产行为修改 |
 
+### Task 19 最终包级审计
+
+审计集合由 `git ls-tree -r --name-only 96c4aae -- cmd internal` 冻结，筛选并排序后的 386 个 Go 路径清单 SHA-256 为 `badfa2853c44fbc6860044149ce0a29c4f10003ffa724018646f43c19fb52416`。下表中的 split、extract、delete 与 keep 互斥，逐行合计等于该包的基线文件数；所有未在“非 keep 路径”列点名的该包基线 Go 文件均为 keep。
+
+| 包 | 基线 | split | extract | delete | keep | 非 keep 路径与结论 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `cmd/gfxspike` | 1 | 0 | 0 | 0 | 1 | 无；全部 keep |
+| `cmd/mcgo` | 23 | 10 | 0 | 0 | 13 | split：`app.go`、`app_test.go`、`benchmark.go`、`benchmark_v6_test.go`、`capture.go`、`capture_test.go`、`main.go`、`main_test.go`、`multiplayer_benchmark.go`、`multiplayer_benchmark_test.go` |
+| `cmd/mcgod` | 3 | 0 | 0 | 0 | 3 | 无；全部 keep |
+| `cmd/perfcheck` | 2 | 2 | 0 | 0 | 0 | split：`main.go`、`main_test.go` |
+| `internal/archcheck` | 1 | 1 | 0 | 0 | 0 | split：`deps_test.go` |
+| `internal/assets` | 6 | 0 | 0 | 0 | 6 | 无；全部 keep |
+| `internal/client` | 39 | 3 | 0 | 0 | 36 | split：`mesher.go`、`predictor.go`、`predictor_test.go` |
+| `internal/config` | 2 | 0 | 0 | 0 | 2 | 无；全部 keep |
+| `internal/core` | 28 | 0 | 0 | 0 | 28 | 无；全部 keep |
+| `internal/gfx` | 10 | 1 | 0 | 0 | 9 | split：`wgpu.go` |
+| `internal/gfx/shader` | 1 | 0 | 0 | 0 | 1 | 无；全部 keep |
+| `internal/logging` | 2 | 0 | 0 | 0 | 2 | 无；全部 keep |
+| `internal/mesh` | 9 | 0 | 0 | 0 | 9 | 无；全部 keep |
+| `internal/network` | 35 | 3 | 0 | 0 | 32 | split：`codec.go`、`codec_test.go`、`message.go` |
+| `internal/physics` | 11 | 0 | 0 | 0 | 11 | 无；全部 keep |
+| `internal/profile` | 4 | 0 | 0 | 0 | 4 | 无；全部 keep |
+| `internal/render` | 28 | 1 | 2 | 0 | 25 | split：`renderer.go`；extract：`hotbar.go`、`hotbar_test.go` 到唯一新包 `internal/render/hud`；keep 包含仅适配共享颜色或 test-only shader embed 的 `drop.go`、`drop_test.go`、`daylight_test.go` |
+| `internal/server` | 75 | 12 | 0 | 0 | 63 | split：`host.go`、`host_test.go`、`multiplayer_memory_integration_test.go`、`multiplayer_tcp_integration_test.go`、`persistence.go`、`persistence_test.go`、`player_flush_test.go`、`player_persistence.go`、`player_persistence_test.go`、`publication.go`、`session.go`、`tcp_integration_test.go` |
+| `internal/sim` | 43 | 1 | 0 | 0 | 42 | split：`engine.go` |
+| `internal/storage` | 40 | 2 | 0 | 0 | 38 | split：`chunk_codec.go`、`chunk_codec_test.go` |
+| `internal/world` | 17 | 0 | 0 | 0 | 17 | 无；全部 keep |
+| `internal/worldgen` | 6 | 0 | 0 | 0 | 6 | 无；全部 keep |
+| **总计** | **386** | **36** | **2** | **0** | **348** | **每个基线 Go 文件恰有一个结论** |
+
+没有基线 Go 文件被判定为 delete；Git 中消失的原路径均已按声明去向归入 split 或 extract，而不是死代码删除。当前包集合相对基线只新增预批准的 `internal/render/hud`，其余新增 Go 文件均是上表 split/extract 的目标文件。
+
 ### 默认同包拆分，唯一 HUD 提包
 
 共享包内权威状态的职责留在原包，避免协调接口、循环依赖和类型搬迁。唯一新包 `internal/render/hud` 只允许依赖 `internal/core`、`internal/mesh`、`internal/assets`、`internal/render`、`internal/gfx`；`internal/render` 不得反向依赖 HUD。程序化物品颜色的唯一实现从 `hotbarItemColor` 提升为 `internal/render/drop.go` 中的窄内部 API `render.ItemColor`，掉落物与 HUD 都直接调用它；`hud/layout.go` 不拥有或复制颜色实现，也不引入 wrapper、alias、callback/config、第二包或重复实现。只有 `internal/gfx` 可以直接导入 WebGPU 绑定，`sim` 不依赖渲染，`world` 不依赖 `network`。
