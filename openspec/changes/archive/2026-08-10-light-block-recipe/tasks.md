@@ -20,5 +20,5 @@
 
 ## 5. 收尾验证与归档
 
-- [ ] 5.1 对改动的 Go 文件运行 `gofmt -w`，再运行 `go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`gofmt -l .` 与 `git diff --check`；`gofmt -l .` 必须无输出，性能数值只记录且不得放宽真实 overflow 或数据丢失门禁。
-- [ ] 5.2 运行 `openspec validate light-block-recipe --strict --no-interactive` 与 `openspec validate --all --strict --no-interactive`，确认 proposal、三份 delta specs、design、tasks 与实现一致；完成独立评审后同步主规格并归档 change。
+- [x] 5.1 对改动的 Go 文件运行 `gofmt -w`，再运行 `go test ./internal/archcheck -count=1`、`go test ./... -race`、`go vet ./...`、`gofmt -l .` 与 `git diff --check`；`gofmt -l .` 必须无输出，性能数值只记录且不得放宽真实 overflow 或数据丢失门禁。
+- [x] 5.2 运行 `openspec validate light-block-recipe --strict --no-interactive` 与 `openspec validate --all --strict --no-interactive`，确认 proposal、三份 delta specs、design、tasks 与实现一致；完成独立评审后同步主规格并归档 change。

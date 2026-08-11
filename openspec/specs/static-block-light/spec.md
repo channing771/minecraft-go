@@ -6,18 +6,18 @@
 
 ## Requirements
 
-### Requirement: 发光块与物品 ID 稳定且没有正常获取入口
-系统 SHALL 在既有编号末尾追加稳定的 `LightBlockID = ChestID + 1` 与 `ItemLightBlock = ItemChest + 1`。发光块物品 MUST 以 `64` 为单格上限，MUST 可按普通完整方块规则放置，并 MUST 在使用正确镐采掘后掉落一个发光块物品；系统 MUST NOT 为其增加配方、初始发放、世界生成或管理命令入口，现有固定配方 MUST 仍恰好为六条。
+### Requirement: 发光块与物品 ID 稳定且具有固定配方入口
+系统 SHALL 保持稳定的 `LightBlockID = ChestID + 1` 与 `ItemLightBlock = ItemChest + 1`。发光块物品 MUST 以 `64` 为单格上限，MUST 可按普通完整方块规则放置，并 MUST 在使用正确镐采掘后掉落一个发光块物品；正常生存流程 MUST 允许玩家通过固定配方消耗 4 个玻璃并获得 4 个发光方块。
 
 #### Scenario: 已有发光块物品可放置并挖回
-- **GIVEN** 玩家通过测试装配持有一个有效发光块物品
+- **GIVEN** 玩家持有一个有效发光块物品
 - **WHEN** 玩家按普通整格放置规则成功放置并用正确镐完成采掘
 - **THEN** 权威世界 MUST 先出现发光块，随后 MUST 恢复为空气并产生一个发光块物品掉落
 
-#### Scenario: 正常生存流程不能产生首个发光块
-- **GIVEN** 世界和玩家状态中都没有发光块或发光块物品
-- **WHEN** 玩家只使用配方、初始物品、世界生成和现有游戏命令
-- **THEN** 系统 MUST NOT 产生发光块或发光块物品，且固定配方数量 MUST 保持为六条
+#### Scenario: 正常生存流程可合成首批发光块
+- **GIVEN** 世界和玩家状态中都没有发光块或发光块物品，且玩家持有 4 个玻璃
+- **WHEN** 玩家成功请求对应的固定配方
+- **THEN** 系统 MUST 消耗 4 个玻璃并向玩家完整物品状态加入 4 个发光方块
 
 ### Requirement: 客户端从权威方块镜像确定性派生静态方块光
 客户端 SHALL 只从已接受的权威方块镜像派生静态方块光。`LightBlockID` MUST 发出等级 `15`，其余已知或未知方块 MUST 发出 `0`；光在六个轴向上 MUST 仅向 `AirID` 相邻格传播并每格衰减 `1`，任何其他方块即使未来被标记为透明也 MUST 阻断方块光，多个光源在同一格 MUST 取最大值。缺失邻区 MUST 按非空气且无发光处理，服务端 MUST NOT 计算、存储或传输光照数组。
@@ -68,20 +68,20 @@
 - **WHEN** 客户端在任意昼夜相位绘制该面
 - **THEN** 基础亮度 MUST 取天空光曲线与归一化方块光的较大者，面朝向与 AO MUST 仍继续降低最终亮度
 
-### Requirement: 发光块兼容协议 v14 与区块 schema v7
-线上协议 SHALL 唯一支持 v14，区块存档 SHALL 写为 schema v7；两者的 packet、payload 和字段布局 MUST 保持不变，仅扩展稳定方块与物品语义。系统 MUST 支持区块 v6 到 v7 的 no-op 迁移，玩家 schema MUST 保持 v5，世界 metadata MUST 保持 v2；线上与存档 MUST NOT 新增天空光或方块光数组，也不得新增 packet。
+### Requirement: 发光块保持协议 v15 与区块 schema v8
+线上协议 MUST 保持 v15，区块存档 MUST 保持 schema v8；两者的 packet、payload 和字段布局 MUST 保持不变。玩家 schema MUST 保持 v6，世界 metadata MUST 保持 v2；线上与存档 MUST NOT 新增天空光或方块光数组、packet 或 wire 字段，方块光 MUST 继续只从权威方块镜像派生。
 
 #### Scenario: 旧协议在 Play 前拒绝
-- **GIVEN** 客户端声明协议 v13 或更早版本
-- **WHEN** 它连接协议 v14 服务端
+- **GIVEN** 客户端声明协议 v14 或更早版本
+- **WHEN** 它连接协议 v15 服务端
 - **THEN** 服务端 MUST 在进入 Play 前稳定拒绝，且不得协商或降级解码
 
-#### Scenario: v6 区块按原 payload 语义迁移
-- **GIVEN** 一个 CRC 有效的区块 schema v6 存档
-- **WHEN** 新程序读取并随后保存该区块
-- **THEN** 系统 MUST 保留原 payload 语义并写成 schema v7，且 v6 fixture 字节不得被改写
-
-#### Scenario: 玩家和 metadata 版本保持不变
-- **GIVEN** 玩家持有发光块物品且世界包含发光块
+#### Scenario: 玩家、区块和 metadata 版本保持不变
+- **GIVEN** 玩家通过固定配方获得发光块物品并在世界中放置发光块
 - **WHEN** 系统完成正常保存和重启
-- **THEN** 发光块 MUST 通过玩家 schema v5 与区块 schema v7 保真恢复，世界 metadata MUST 仍为 v2，光照 MUST 从方块镜像重新派生
+- **THEN** 发光块 MUST 通过玩家 schema v6 与区块 schema v8 保真恢复，世界 metadata MUST 仍为 v2，光照 MUST 从方块镜像重新派生
+
+#### Scenario: 合成请求不增加 wire 字段
+- **GIVEN** 玩家通过 Memory 或 TCP 请求发光方块固定配方
+- **WHEN** 服务端接收并处理请求
+- **THEN** 请求 MUST 继续只使用协议 v15 既有合成消息及 recipe ID 字段，且不得新增 packet、payload 字段或光照数组
