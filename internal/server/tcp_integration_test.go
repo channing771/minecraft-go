@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -476,70 +477,6 @@ func TestTCPPlayerAndWorldSurviveDisconnectAndRestart(t *testing.T) {
 	second.Shutdown(t)
 }
 
-func TestPlacementWaitsForInteractionChunkAfterPlayerReady(t *testing.T) {
-	root := t.TempDir()
-	key := core.ChunkKey{Dimension: core.Overworld}
-	seedV2CraftingChunk(t, root, key)
-	identity := integrationIdentity(0x80, "ReadyBeforeInteraction")
-	spawn := integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil)
-	spawn.Inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStoneBrick, Count: 1}
-	seedIntegrationPlayer(t, root, identity, spawn)
-
-	started := make(chan struct{}, 1)
-	release := make(chan struct{})
-	released := false
-	host := startDiskHost(t, root, "127.0.0.1:0", controlledInteractionGenerator{
-		started: started,
-		release: release,
-	})
-	t.Cleanup(func() {
-		if !released {
-			close(release)
-		}
-	})
-	connected := dialIntegrationClient(t, host.Addr, identity)
-	t.Cleanup(func() { _ = connected.Close() })
-	waitClientReadyFor(t, host, connected, identity.PlayerID)
-	waitIntegrationCondition(t, "交互区块生成开始", func() bool {
-		select {
-		case <-started:
-			return true
-		default:
-			return false
-		}
-	})
-	interaction := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{Z: -1}}
-	if _, _, ready := host.Host.world.CloneReadyChunkForTest(interaction); ready {
-		t.Fatal("受控交互区块在释放生成前已经 Ready")
-	}
-	close(release)
-	released = true
-	waitIntegrationCondition(t, "交互区块 Ready", func() bool {
-		_, _, ready := host.Host.world.CloneReadyChunkForTest(interaction)
-		return ready
-	})
-
-	sendIntegration(t, connected.Endpoint, network.PlaceBlock{
-		Sequence: 1, Yaw: 0, Pitch: -0.2, Slot: 0,
-	})
-	wantPosition := core.BlockPos{X: 0, Y: 1, Z: -5}
-	waitIntegrationState(t, connected, func(message network.ServerMessage) bool {
-		if rejected, ok := message.(network.CommandRejected); ok {
-			t.Fatalf("玩家 Ready 后的放置被拒绝: %+v", rejected)
-		}
-		changes, ok := message.(network.BlockChanges)
-		if !ok {
-			return false
-		}
-		for _, change := range changes.Changes {
-			if change.Position == wantPosition && change.Block == core.StoneBrickID {
-				return true
-			}
-		}
-		return false
-	})
-}
-
 func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	root := t.TempDir()
 	key := core.ChunkKey{Dimension: core.Overworld}
@@ -552,7 +489,14 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	seedIntegrationPlayer(t, root, firstIdentity, spawn)
 	seedIntegrationPlayer(t, root, secondIdentity, integrationPlayerSnapshotAt(0.5, 1.001, 0.5, nil))
 
-	firstHost := startDiskHost(t, root, "127.0.0.1:0", changedGenerator{})
+	firstStarted := make(chan struct{}, 1)
+	firstRelease := make(chan struct{})
+	var firstReleaseOnce sync.Once
+	firstHost := startDiskHost(t, root, "127.0.0.1:0", controlledInteractionGenerator{
+		started: firstStarted,
+		release: firstRelease,
+	})
+	t.Cleanup(func() { firstReleaseOnce.Do(func() { close(firstRelease) }) })
 	firstClient := dialIntegrationClient(t, firstHost.Addr, firstIdentity)
 	witness := dialIntegrationClient(t, firstHost.Addr, secondIdentity)
 	waitClientReadyFor(t, firstHost, firstClient, firstIdentity.PlayerID)
@@ -568,7 +512,19 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 		return integrationItemCount(inventory, core.ItemStoneBrick) == 4
 	})
 	interaction := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{Z: -1}}
-	waitIntegrationCondition(t, "合成重启交互区块 Ready", func() bool {
+	waitIntegrationCondition(t, "首次交互区块生成开始", func() bool {
+		select {
+		case <-firstStarted:
+			return true
+		default:
+			return false
+		}
+	})
+	if _, _, ready := firstHost.Host.world.CloneReadyChunkForTest(interaction); ready {
+		t.Fatal("首次受控交互区块在释放生成前已经 Ready")
+	}
+	firstReleaseOnce.Do(func() { close(firstRelease) })
+	waitIntegrationCondition(t, "首次合成重启交互区块 Ready", func() bool {
 		_, _, ready := firstHost.Host.world.CloneReadyChunkForTest(interaction)
 		return ready
 	})
@@ -646,6 +602,10 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	waitClientReadyFor(t, secondHost, reconnectedWitness, secondIdentity.PlayerID)
 	reconnected := dialIntegrationClient(t, secondHost.Addr, firstIdentity)
 	waitClientReadyFor(t, secondHost, reconnected, firstIdentity.PlayerID)
+	waitIntegrationCondition(t, "重启后合成交互区块 Ready", func() bool {
+		_, _, ready := secondHost.Host.world.CloneReadyChunkForTest(interaction)
+		return ready
+	})
 	assertPlayerRestored(t, secondHost, firstIdentity.PlayerID, wantPlayer)
 	if got := secondHost.PlayerSnapshot(t, secondIdentity.PlayerID).Inventory; got != (core.Inventory{}) {
 		t.Fatalf("乱序重连污染第二身份背包: %+v", got)
