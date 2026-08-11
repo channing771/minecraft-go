@@ -15,8 +15,8 @@
 
 ## 4. 无窗口视觉证据
 
-- [x] 4.1 在 `cmd/mcgo/capture.go` 的既有 `inventory-crafting` fixture 中加入足量玻璃，使第八行可合成；运行 `gofmt -w cmd/mcgo/capture.go` 和 `make visual-update VISUAL_OUT=/private/tmp/light-block-recipe-visual-update`，并断言 `test "$(git diff --name-only -- cmd/mcgo/testdata/golden | tr -d '\n')" = "cmd/mcgo/testdata/golden/inventory-crafting.png"`，不得启动或聚焦前台窗口。
-- [x] 4.2 只读检查 `cmd/mcgo/testdata/golden/inventory-crafting.png` 中八行完整、末行为玻璃到发光方块且无重叠或裁切；随后运行 `make visual-check VISUAL_OUT=/private/tmp/light-block-recipe-visual-check` 与 `git diff --check`。
+- [x] 4.1 在 `cmd/mcgo/capture.go` 的既有 `inventory-crafting` fixture 中加入足量玻璃，使第八行可合成；运行 `gofmt -w cmd/mcgo/capture.go`，在 fresh `VISUAL_OUT` 用 `make visual-check` 仅生成 candidate 且不得覆盖 golden，预期因 `inventory-crafting.png` 唯一差异 exit 2；逐张 `cmp` 十个场景只允许该图变化，并只读检查 candidate 中八行完整、末行为玻璃到发光方块且无重叠或裁切，等待用户明确确认，不得启动或聚焦前台窗口。
+- [x] 4.2 收到确认后只复制该 candidate 的 `inventory-crafting.png` 到 golden，机械断言 golden diff 只有该文件；在新的 `VISUAL_OUT` 运行一次 `make visual-check`，要求十个场景通过且 exit 0，并运行 `git diff --check`。
 
 ## 5. 收尾验证与归档
 
