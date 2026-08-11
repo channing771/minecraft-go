@@ -68,7 +68,7 @@
 
 ## 18. perfcheck 比较与阈值职责拆分
 
-- [ ] 18.1 拆分 `cmd/perfcheck/main.go` 与测试为 compare/validate/regression/CLI 等职责文件，保持唯一迁移 `14:15`、20% 相对比较、噪声与输出文本；focused：`zsh -ic 'go test ./cmd/perfcheck -race -count=1'`、`zsh -ic 'go test ./cmd/perfcheck -run "ScenarioUpgrade|CrossTransport|Threshold|NoiseFloor|PersistenceTail" -count=1'`、`zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current docs/notes/perf-baseline.json --max-regression 0.20'`。
+- [x] 18.1 拆分 `cmd/perfcheck/main.go` 与测试为 compare/validate/regression/CLI 等职责文件，保持唯一迁移 `14:15`、20% 相对比较、噪声与输出文本；focused：`zsh -ic 'go test ./cmd/perfcheck -race -count=1'`、`zsh -ic 'go test ./cmd/perfcheck -run "ScenarioUpgrade|CrossTransport|Threshold|NoiseFloor|PersistenceTail" -count=1'`、`zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current docs/notes/perf-baseline.json --max-regression 0.20'`。
 
 ## 19. 全仓审计、artifact 保真与最终门禁
 
