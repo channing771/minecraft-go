@@ -4,7 +4,7 @@
 
 **Goal:** 在不改变任何可观察行为的前提下，审计全仓 Go 文件，把混合职责的大文件整理为同包职责文件，并仅将完整 HUD 提取为一个新的内部包。
 
-**Architecture:** 以现有 package 与 `internal/archcheck` 依赖方向为基线，从叶子包向命令装配层逐波迁移声明。默认只做同包拆分；唯一预批准的新包是 `internal/render/hud`，其单向依赖既有 `internal/render` 字形接口、`gfx`、`assets` 与 `core`，而 `internal/render` 不反向依赖 HUD。
+**Architecture:** 以现有 package 与 `internal/archcheck` 依赖方向为基线，从叶子包向命令装配层逐波迁移声明。默认只做同包拆分；唯一预批准的新包是 `internal/render/hud`，其单向依赖既有 `internal/render` 字形接口与窄内部 API `render.ItemColor`，以及 `gfx`、`assets`、`core`、`mesh`，而 `internal/render` 不反向依赖 HUD。
 
 **Scope Decision:** 该规格横跨多个子系统；用户已明确选择一个 OpenSpec change 和一份计划、内部按包分阶段提交，而不是拆成多份独立计划。
 
@@ -1074,6 +1074,8 @@ git commit -m "refactor: 拆分渲染上传与绘制职责"
 - Delete: `internal/render/hotbar.go`
 - Delete: `internal/render/hotbar_test.go`
 - Delete: `internal/render/shader/hotbar.wgsl`
+- Modify: `internal/render/drop.go`
+- Modify: `internal/render/drop_test.go`
 - Create: `internal/render/hud/renderer.go`
 - Create: `internal/render/hud/layout.go`
 - Create: `internal/render/hud/container.go`
@@ -1094,10 +1096,15 @@ git commit -m "refactor: 拆分渲染上传与绘制职责"
 
 **Interfaces:**
 - Produces: package `minecraft-go/internal/render/hud`。
+- Produces narrow internal API: `render.ItemColor`，唯一实现归属 `internal/render/drop.go`，颜色值不变。
 - Produces unchanged names: `HotbarRenderer`、`NewHotbarRenderer`、`MiningOverlay`、`HealthOverlay`、`FurnaceOverlay`、`ChestOverlay`、`InventorySlotAt`、`FurnaceSlotAt`、`ChestSlotAt`、`RecipeButtonAt`。
-- Consumes: `render.GlyphSource`、`render.UploadBudget`、`gfx`、`assets`、`core`、`mesh`。
+- Consumes: `render.GlyphSource`、`render.UploadBudget`、`render.ItemColor`、`gfx`、`assets`、`core`、`mesh`。
 
-- [ ] **Step 1: 先让 archcheck 认识唯一新包**
+- [ ] **Step 1: 先提升唯一共享颜色实现**
+
+把 `hotbarItemColor` 的实现从 `hotbar.go` 移到 `internal/render/drop.go` 并导出为 `render.ItemColor`。`itemDropColor` 与迁移后的 HUD 都直接调用该实现；`drop_test.go` 改为断言 `ItemColor`，颜色值与覆盖范围不变。不得保留旧函数、wrapper、alias、callback/config 或第二份实现。
+
+- [ ] **Step 2: 让 archcheck 认识唯一新包**
 
 在 `allowed` 增加精确条目：
 
@@ -1110,9 +1117,9 @@ git commit -m "refactor: 拆分渲染上传与绘制职责"
 
 不要给 `internal/render` 增加 `internal/render/hud` 依赖。
 
-- [ ] **Step 2: 原样移动 HUD 生产声明**
+- [ ] **Step 3: 原样移动 HUD 生产声明**
 
-所有新文件 package 为 `hud`，仅把 `GlyphSource`、`Glyph`、`UploadBudget` 引用加 `render.` 前缀：
+所有新文件 package 为 `hud`，把 `GlyphSource`、`Glyph`、`UploadBudget` 引用加 `render.` 前缀，并把原 `hotbarItemColor` 调用改为 `render.ItemColor`：
 
 ```text
 renderer.go:
@@ -1123,7 +1130,7 @@ layout.go:
   layoutInventory, appendInventoryPanel, appendItemTile,
   appendDurabilityBar*, MiningOverlay, appendMiningBar,
   inventorySlotOrigin, hudScale, InventorySlotAt,
-  appendHotbarCount*, hotbarItemColor
+  appendHotbarCount*；物品颜色只调用 render.ItemColor
 container.go:
   recipe IDs/constants, FurnaceOverlay/ChestOverlay,
   appendFurnaceRow, appendChestGrid, appendRecipeRows,
@@ -1141,7 +1148,9 @@ encode.go:
 
 shader 使用 `//go:embed shader/hotbar.wgsl`，文件内容必须与移动前字节相同。
 
-- [ ] **Step 3: 迁移调用方和测试**
+`hud/layout.go` 不拥有或复制颜色实现；依赖保持 `hud -> render`，`internal/render` 不得导入 HUD。
+
+- [ ] **Step 4: 迁移调用方和测试**
 
 `cmd/mcgo/app.go` 与 `app_test.go` 把上述 HUD 类型/函数从 `render.` 改为 `hud.`，字形接口继续使用 `render.GlyphSource`。
 
@@ -1158,7 +1167,9 @@ helpers_test.go: inventory/container fixture 与 HUD 专用最小 gfx/glyph fake
 
 不得从 `internal/render` 导出仅供测试使用的 helper；HUD 测试自行持有最小 fake。
 
-- [ ] **Step 4: 验证 shader、视觉与依赖方向并提交**
+`drop_test.go` 保留全部测试名，并改为通过唯一实现 `render.ItemColor` 验证掉落物与 HUD 的程序化颜色一致。
+
+- [ ] **Step 5: 验证 shader、颜色、视觉与依赖方向并提交**
 
 先记录旧 shader hash，再比较移动后 hash：
 
@@ -1170,8 +1181,9 @@ shasum -a 256 internal/render/hud/shader/hotbar.wgsl
 Run:
 
 ```bash
-gofmt -w internal/render/hud cmd/mcgo/app.go cmd/mcgo/app_test.go internal/archcheck
+gofmt -w internal/render/drop.go internal/render/drop_test.go internal/render/hud cmd/mcgo/app.go cmd/mcgo/app_test.go internal/archcheck
 zsh -ic 'go test ./internal/render ./internal/render/hud ./cmd/mcgo -race -count=1'
+zsh -ic 'go test ./internal/render -run "ItemDropColors|ItemDropColor" -count=1'
 zsh -ic 'go test ./internal/render/hud -run "Hotbar|Inventory|Furnace|Chest|Health|Recipe" -count=1'
 zsh -ic 'go test ./internal/archcheck -race -count=1'
 VISUAL_OUT=/private/tmp/mcgo-m4o-hud-visual make visual-check
@@ -1179,7 +1191,7 @@ gofmt -l internal/render cmd/mcgo internal/archcheck
 git diff --check
 ```
 
-Expected: 两个 shader hash 相同；visual-check 只比较、不更新 golden。
+Expected: `render.ItemColor` 是唯一颜色实现，`hud -> render` 单向且 `render` 不依赖 `hud`；两个 shader hash 相同，颜色与 visual golden 不变；visual-check 只比较、不更新 golden。
 
 ```bash
 git add internal/render cmd/mcgo/app.go cmd/mcgo/app_test.go internal/archcheck openspec/changes/m4o-responsibility-oriented-code-organization/tasks.md

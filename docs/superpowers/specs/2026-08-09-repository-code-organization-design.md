@@ -84,7 +84,8 @@
 
 - `internal/client/mesher.go` 和 `predictor.go` 按队列、worker、状态推进和查询职责拆分。
 - 将 `internal/render/hotbar.go` 的完整 HUD 职责提取为 `internal/render/hud`。
-- `internal/render/hud` 负责快捷栏、背包、合成、熔炉、箱子、生命值、命中测试和对应 GPU pass；它使用既有 `render.GlyphSource`，`internal/render` 不反向依赖 HUD。
+- `internal/render/hud` 负责快捷栏、背包、合成、熔炉、箱子、生命值、命中测试和对应 GPU pass；它使用既有 `render.GlyphSource` 与窄内部 API `render.ItemColor`，`internal/render` 不反向依赖 HUD。
+- 程序化物品颜色的唯一实现归属 `internal/render/drop.go`：原 `hotbarItemColor` 提升为 `render.ItemColor`，掉落物与 HUD 都直接调用它；`hud/layout.go` 不拥有或复制实现，不增加 wrapper、alias、callback/config、第二包或重复实现。
 - `internal/render` 继续负责世界、天空、实体、文字和通用渲染设施。
 - HUD shader 随其唯一所有者移动，内容和渲染结果不变。
 
@@ -127,13 +128,13 @@
 - build tag、CGO 边界和无图形专用服务端构建能力保持不变。
 - 视觉 golden、benchmark workload、scenario 和硬件基线身份保持不变。
 
-package extraction 直接迁移内部调用方，不保留重复 wrapper、类型别名或旧实现兼容层。若迁移需要新增状态、行为分支或协调接口，说明边界判断错误，应停止并修订设计。
+package extraction 直接迁移内部调用方，不保留重复 wrapper、类型别名或旧实现兼容层。`render.ItemColor` 只服务既有生产调用方的真实跨包共享，不是测试 helper 或兼容层。若迁移需要新增状态、行为分支或协调接口，说明边界判断错误，应停止并修订设计。
 
 ## 8. 文件名相关守卫
 
 当前部分架构测试直接读取固定文件，例如 `internal/archcheck/deps_test.go` 对 `cmd/mcgo/app.go` 的登录路径检查。文件拆分后，这类守卫应改为扫描整个目标包，同时保留原有语义断言。
 
-不得因为声明移动而删除或放宽守卫。新的 `internal/render/hud` 必须登记精确依赖白名单；只有 `internal/gfx` 可以直接导入 WebGPU 绑定的限制继续生效。
+不得因为声明移动而删除或放宽守卫。新的 `internal/render/hud` 必须登记精确依赖白名单，并保持 `hud -> render` 单向依赖、拒绝 `render -> hud`；只有 `internal/gfx` 可以直接导入 WebGPU 绑定的限制继续生效。
 
 ## 9. 测试与验证
 
@@ -162,7 +163,8 @@ openspec validate --all --strict --no-interactive
 ## 10. 风险与回退
 
 - **隐式行为漂移**：移动时夹带条件、顺序或错误处理变化。通过单职责提交和 focused 测试隔离。
-- **依赖倒置**：新包反向读取原包状态。若窄 API 无法成立，则取消提包并改为同包拆分。
+- **依赖倒置**：新包反向读取原包状态。HUD 只调用 `render.ItemColor` 等既有窄接口，`internal/render` 不导入 HUD；若窄 API 无法成立，则取消提包并改为同包拆分。
+- **共享颜色漂移**：掉落物与 HUD 分别保留颜色实现会产生视觉分叉。只保留 `internal/render/drop.go` 中的 `render.ItemColor`，并用掉落物 focused 测试与视觉 golden 共同验证。
 - **平台构建破坏**：遗漏 build tag 或错误搬迁 CGO bridge。通过 Darwin focused 测试、无图形服务端构建和架构门禁验证。
 - **性能变化**：包边界可能影响内联。沿用现有 benchmark 与 baseline，自身差异不能通过升级基线掩盖。
 - **无意义碎片化**：为缩短文件制造大量单函数文件。以职责而非行数评审，内聚大文件允许保留。

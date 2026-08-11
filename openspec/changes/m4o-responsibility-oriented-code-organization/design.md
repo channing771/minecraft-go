@@ -40,7 +40,7 @@
 | `internal/network` | 13 | 22 | 35 | Task 4 点名文件 split，其余 keep |
 | `internal/physics` | 5 | 6 | 11 | keep |
 | `internal/profile` | 2 | 2 | 4 | keep |
-| `internal/render` | 11 | 17 | 28 | Task 12 split；Task 13 HUD move；其余 keep |
+| `internal/render` | 11 | 17 | 28 | Task 12 split；Task 13 HUD move，并更新 `drop.go`/`drop_test.go` 的共享颜色调用；其余 keep |
 | `internal/server` | 16 | 59 | 75 | Task 7–10 点名文件 split，其余 keep |
 | `internal/sim` | 14 | 29 | 43 | Task 6 点名文件 split，其余 keep |
 | `internal/storage` | 14 | 26 | 40 | Task 5 点名文件 split，其余 keep |
@@ -63,7 +63,7 @@
 | 10 | 服务端集成测试 | `tcp_integration_test.go`、`host_test.go`、`multiplayer_tcp_integration_test.go`、`multiplayer_memory_integration_test.go` → TCP restart/parity/furnace、Host capacity/lifecycle、多人 gameplay/capacity/mining/cancel 场景文件及 helper |
 | 11 | client mesher/predictor | `mesher.go`、`predictor.go`、`predictor_test.go` → mesher worker/queue、predictor advance/reconcile/presentation 及对应测试/helper |
 | 12 | Renderer | 核心 lifecycle 保留在 `renderer.go`；仅将 upload、draw 拆到 `renderer_upload.go`、`renderer_draw.go` |
-| 13 | 完整 HUD | `internal/render/hotbar.go`、测试和 shader → `internal/render/hud/{renderer,layout,container,health,atlas,encode}.go`、对应测试与 shader；迁移 `cmd/mcgo` 调用方并更新依赖白名单 |
+| 13 | 完整 HUD | `internal/render/hotbar.go`、测试和 shader → `internal/render/hud/{renderer,layout,container,health,atlas,encode}.go`、对应测试与 shader；把共享颜色的唯一实现提升为 `internal/render/drop.go` 中的 `render.ItemColor`，同步 `drop_test.go`，迁移 `cmd/mcgo` 调用方并更新依赖白名单 |
 | 14 | mcgo 应用装配 | `cmd/mcgo/app.go` → `app_{dependencies,metrics,startup,lifecycle,frame,messages,input,render}.go` |
 | 15 | mcgo 应用测试 | `app_test.go` → `app_{protocol,render,connection,input,celestial,test_helpers}_test.go` |
 | 16 | mcgo 入口与 capture | `main.go`/`main_test.go` → options、run、interactive；`capture.go`/`capture_test.go` → scene、image 生产与测试文件 |
@@ -73,7 +73,7 @@
 
 ### 默认同包拆分，唯一 HUD 提包
 
-共享包内权威状态的职责留在原包，避免协调接口、循环依赖和类型搬迁。唯一新包 `internal/render/hud` 只允许依赖 `internal/core`、`internal/mesh`、`internal/assets`、`internal/render`、`internal/gfx`；`internal/render` 不得反向依赖 HUD。只有 `internal/gfx` 可以直接导入 WebGPU 绑定，`sim` 不依赖渲染，`world` 不依赖 `network`。
+共享包内权威状态的职责留在原包，避免协调接口、循环依赖和类型搬迁。唯一新包 `internal/render/hud` 只允许依赖 `internal/core`、`internal/mesh`、`internal/assets`、`internal/render`、`internal/gfx`；`internal/render` 不得反向依赖 HUD。程序化物品颜色的唯一实现从 `hotbarItemColor` 提升为 `internal/render/drop.go` 中的窄内部 API `render.ItemColor`，掉落物与 HUD 都直接调用它；`hud/layout.go` 不拥有或复制颜色实现，也不引入 wrapper、alias、callback/config、第二包或重复实现。只有 `internal/gfx` 可以直接导入 WebGPU 绑定，`sim` 不依赖渲染，`world` 不依赖 `network`。
 
 被否决的替代方案是全面领域拆包、只做机械拆文件和新增文件行数门禁：前者扩大 API 与循环风险，第二项遗漏已稳定成域的 HUD，第三项鼓励无意义碎片化。
 
@@ -88,7 +88,7 @@
 
 - CLI、游戏行为、错误值/文本、日志字段、GPU label 和绘制顺序不变。
 - 协议 v14、packet ID、wire bytes、区块 schema v7、玩家 schema v5、世界 metadata v2、fixture 与 hash 不变。
-- 视觉 golden、benchmark workload、scenario v15、M2/M5 性能基线、阈值与报告格式不变。
+- 物品颜色值、视觉 golden、benchmark workload、scenario v15、M2/M5 性能基线、阈值与报告格式不变。
 - 测试、Benchmark、Fuzz 入口名保持不变；自动验证不启动前台窗口，也不更新 golden/baseline。
 
 ## Risks / Trade-offs
@@ -96,6 +96,7 @@
 - [声明移动夹带行为漂移] → 每项先记录 baseline green，只移动一个职责，随后跑 focused race 测试和架构守卫。
 - [架构守卫继续绑定旧文件名] → Task 2 先改为扫描生产文件集合与 `session*.go`，不得删除或放宽断言。
 - [HUD 形成反向依赖] → 白名单只登记 HUD 到既有底层包的依赖，并由 archcheck 拒绝 `internal/render` 反向导入。
+- [共享颜色出现重复实现或漂移] → `render.ItemColor` 是 `internal/render/drop.go` 中的唯一实现，掉落物与 HUD 共用它；focused 掉落物测试与视觉 golden 同时验证颜色不变。
 - [build tag 或 CGO 边界损坏] → 保留原 tag，运行 Darwin focused 测试、archcheck 与无图形服务端构建。
 - [性能或固定 artifact 漂移] → 对比既有 hash、visual capture、benchmark 与 baseline；不得改期望值掩盖差异。
 - [无意义碎片化] → 以职责为单位拆分，未点名且内聚的文件 keep，不设置行数门禁。

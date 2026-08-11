@@ -48,7 +48,7 @@
 
 ## 13. 完整 HUD 提取为唯一新包
 
-- [ ] 13.1 将 `internal/render/hotbar.go`、测试和 shader 移至 `internal/render/hud` 的 renderer/layout/container/health/atlas/encode 职责文件，迁移 mcgo 调用方并登记精确白名单；focused：`zsh -ic 'go test ./internal/render ./internal/render/hud ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./internal/render/hud -run "Hotbar|Inventory|Furnace|Chest|Health|Recipe" -count=1'`、`zsh -ic 'go test ./internal/archcheck -race -count=1'`、`VISUAL_OUT=/private/tmp/mcgo-m4o-hud-visual make visual-check`，且移动前后 shader hash 必须相同。
+- [ ] 13.1 先把 `hotbarItemColor` 的唯一实现提升为 `internal/render/drop.go` 中的 `render.ItemColor` 并同步 `drop_test.go`，再将 `internal/render/hotbar.go`、测试和 shader 移至 `internal/render/hud` 的 renderer/layout/container/health/atlas/encode 职责文件；HUD 只调用 `render.ItemColor`，迁移 mcgo 调用方并登记精确白名单，保持 `hud -> render` 且禁止 wrapper、alias、callback/config、第二包或重复实现；focused：`zsh -ic 'go test ./internal/render ./internal/render/hud ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./internal/render -run "ItemDropColors|ItemDropColor" -count=1'`、`zsh -ic 'go test ./internal/render/hud -run "Hotbar|Inventory|Furnace|Chest|Health|Recipe" -count=1'`、`zsh -ic 'go test ./internal/archcheck -race -count=1'`、`VISUAL_OUT=/private/tmp/mcgo-m4o-hud-visual make visual-check`，且颜色值、视觉 golden 与移动前后 shader hash 必须不变。
 
 ## 14. mcgo 生产装配按应用生命周期拆分
 
