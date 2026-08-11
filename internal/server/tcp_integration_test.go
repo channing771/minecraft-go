@@ -523,8 +523,8 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	if _, _, ready := firstHost.Host.world.CloneReadyChunkForTest(interaction); ready {
 		t.Fatal("首次受控交互区块在释放生成前已经 Ready")
 	}
-	firstReleaseOnce.Do(func() { close(firstRelease) })
 	waitIntegrationCondition(t, "首次合成重启交互区块 Ready", func() bool {
+		firstReleaseOnce.Do(func() { close(firstRelease) })
 		_, _, ready := firstHost.Host.world.CloneReadyChunkForTest(interaction)
 		return ready
 	})
