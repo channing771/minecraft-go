@@ -119,6 +119,7 @@ func (h *Host) RunAtInputBoundary(
 		return h.world.ctx.Err()
 	}
 }
+
 func NewHost(config Config, generator Generator, store storage.WorldStore) *Host {
 	config.validate()
 	if store == nil {
@@ -188,6 +189,7 @@ func (h *Host) Run(ctx context.Context, listener network.Listener) error {
 		}
 	}
 }
+
 func (h *Host) pollPlayers() {
 	tick := h.world.TickCount()
 	for _, active := range h.activeLogins() {

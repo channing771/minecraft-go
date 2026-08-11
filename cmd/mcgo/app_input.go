@@ -13,6 +13,8 @@ import (
 	"minecraft-go/internal/render/hud"
 )
 
+// dropSelectedItem 请求把权威选中栏位中的一个物品丢到脚下。
+// 客户端不预测：不读也不改本地背包镜像，不创建本地掉落物。
 func (a *application) dropSelectedItem() {
 	if _, ready := a.predictor.State(); !ready {
 		return

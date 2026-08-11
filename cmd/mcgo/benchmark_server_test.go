@@ -300,7 +300,7 @@ func TestScenarioV7EightSessionServerProbeIsRealAndBounded(t *testing.T) {
 	// 下面任何一条界限断言。
 	//
 	// 但要说清楚：**这不是本测试在 CI 上变红的成因**。实测四次红的断言都是
-	// multiplayer_benchmark.go 的 "server input boundary 已错过 50ms tick
+	// multiplayer_benchmark_server.go 的 "server input boundary 已错过 50ms tick
 	// deadline"，耗时 2.43s–7.75s，远在原预算之内——预算从来不是绑定约束，
 	// 放宽它对那一形态无效。真正的成因见
 	// docs/superpowers/specs/2026-08-07-ci-stability-merge-gate-design.md §4，

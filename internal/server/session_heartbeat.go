@@ -32,6 +32,7 @@ func (timer *realHeartbeatTimer) C() <-chan time.Time {
 func (timer *realHeartbeatTimer) Stop() {
 	timer.timer.Stop()
 }
+
 func (current *session) acceptHeartbeatReply(token uint64) bool {
 	current.mu.Lock()
 	if current.isClosed || token == 0 || token != current.outstandingToken {
@@ -46,6 +47,7 @@ func (current *session) acceptHeartbeatReply(token uint64) bool {
 	}
 	return true
 }
+
 func (current *session) heartbeatLoop(
 	clock heartbeatClock,
 	interval time.Duration,

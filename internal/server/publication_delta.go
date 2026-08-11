@@ -36,6 +36,7 @@ func (server *Server) publishDeltas(current *session, deltas []queuedDelta) bool
 	}
 	return true
 }
+
 func (server *Server) classifyDeltas(
 	current *session,
 	batches []sim.ChunkChangeBatch,
@@ -89,6 +90,7 @@ func (server *Server) classifyDeltas(
 	}
 	return deltas
 }
+
 func chunkKeyLessForPublication(left, right core.ChunkKey) bool {
 	if left.Dimension != right.Dimension {
 		return left.Dimension < right.Dimension

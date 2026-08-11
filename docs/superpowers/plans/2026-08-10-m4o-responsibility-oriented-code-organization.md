@@ -17,6 +17,7 @@
 - 本工作 MUST 使用一个 active change：`m4o-responsibility-oriented-code-organization`。已完成但尚未归档的 `m4n-static-block-light` 不得被本计划同步、归档或删除。
 - 全仓审计范围 MUST 覆盖基线时 `cmd/` 与 `internal/` 下全部 `386` 个 Go 文件（`144` 个生产文件、`242` 个测试文件）；审计不要求每个文件产生 diff。
 - CLI、游戏逻辑、协议 v14、区块 schema v7、玩家 schema v5、metadata v2、wire bytes、存档 fixture、视觉 golden、benchmark scenario v15、性能基线和并发语义 MUST 保持不变。
+- benchmark 与 `perfcheck` 的性能数值及既有阈值只保存记录，不改变退出状态；只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
 - 行数只用于发现候选；不得新增文件行数门禁，不得为了缩短文件制造单函数碎片。
 - 除 `internal/render/hud` 外不得新增内部包；若另一个候选确有独立边界，先停止并修改设计、OpenSpec 与本计划，经用户批准后再继续。
 - 不得新增第三方依赖、`utils`/`common` 包、工厂、单实现接口、兼容 wrapper 或类型别名层。
@@ -1450,7 +1451,7 @@ git commit -m "refactor: 拆分客户端入口与视觉捕获职责"
 - Modify: `openspec/changes/m4o-responsibility-oriented-code-organization/tasks.md`
 
 **Interfaces:**
-- Preserves: scenario v15、固定 workload、sample counts、所有绝对门禁、报告 JSON 与原子写入顺序。
+- Preserves: scenario v15、固定 workload、sample counts、阈值数值、性能仅记录语义、报告 JSON 与原子写入顺序。
 - Preserves: M2/M5 baseline 文件字节；本任务不运行 producer、不更新 baseline。
 
 - [ ] **Step 1: 记录 benchmark 单测与微基准基线**
@@ -1552,7 +1553,7 @@ git commit -m "refactor: 拆分性能场景与报告职责"
 - Modify: `openspec/changes/m4o-responsibility-oriented-code-organization/tasks.md`
 
 **Interfaces:**
-- Preserves: CLI flags、scenario 迁移矩阵、provenance、绝对门禁、20% 相对比较、量化噪声和输出文本。
+- Preserves: CLI flags、scenario 迁移矩阵、provenance、阈值数值、性能仅记录语义、20% 相对比较、量化噪声和输出文本。
 - Preserves: 唯一迁移 `14:15`，不新增其他授权。
 
 - [ ] **Step 1: 记录 perfcheck 基线**
@@ -1715,7 +1716,7 @@ TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck
 TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current /private/tmp/mcgo-m4o-current.json --max-regression 0.20"
 ```
 
-不得覆盖 tracked baseline。若最后一次比较出现不可解释回归，保留报告并停止提交，不提高阈值或 scenario。
+不得覆盖 tracked baseline，也不得提高阈值或 scenario。性能数值差异只保留在报告中，不阻断提交；只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败才停止。
 
 - [ ] **Step 4: 跑最终共享门禁**
 

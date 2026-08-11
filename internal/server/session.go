@@ -39,6 +39,7 @@ type SessionExit struct {
 	HasSnapshot bool
 	Err         error
 }
+
 type publication struct {
 	snapshotSent bool
 	lastRevision uint64
@@ -280,6 +281,7 @@ func (current *session) closed() bool {
 	defer current.mu.Unlock()
 	return current.isClosed
 }
+
 func (current *session) writeLoop() {
 	defer current.workers.Done()
 	defer func() {

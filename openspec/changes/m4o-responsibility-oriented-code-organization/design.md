@@ -90,7 +90,7 @@
 
 - CLI、游戏行为、错误值/文本、日志字段、GPU label 和绘制顺序不变。
 - 协议 v14、packet ID、wire bytes、区块 schema v7、玩家 schema v5、世界 metadata v2、fixture 与 hash 不变。
-- 物品颜色值、视觉 golden、benchmark workload、scenario v15、M2/M5 性能基线、阈值与报告格式不变。
+- 物品颜色值、视觉 golden、benchmark workload、scenario v15、M2/M5 性能基线、阈值数值与报告格式不变；benchmark 与 `perfcheck` 的性能数值只保存记录、不改变退出状态，只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
 - 除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余 Test、Benchmark、Fuzz 入口名保持不变；自动验证不启动前台窗口，也不更新 golden/baseline。
 
 ## Risks / Trade-offs
@@ -101,7 +101,7 @@
 - [共享颜色出现重复实现或漂移] → `render.ItemColor` 是 `internal/render/drop.go` 中的唯一实现，掉落物与 HUD 共用它；focused 掉落物测试与视觉 golden 同时验证颜色不变。
 - [HUD 迁移断开跨职责昼夜测试] → `daylight_test.go` 仅在测试构建中 embed 移动后的唯一 shader，保持原测试名以及 name tag/hotbar 断言，并比较移动前后 hash。
 - [build tag 或 CGO 边界损坏] → 保留原 tag，运行 Darwin focused 测试、archcheck 与无图形服务端构建。
-- [性能或固定 artifact 漂移] → 对比既有 hash、visual capture、benchmark 与 baseline；不得改期望值掩盖差异。
+- [性能或固定 artifact 漂移] → 对比既有 hash、visual capture、benchmark 与 baseline；固定 artifact、报告结构或身份异常按错误阻断，性能数值差异只记录，均不得改期望值掩盖差异。
 - [无意义碎片化] → 以职责为单位拆分，未点名且内聚的文件 keep，不设置行数门禁。
 
 ## Migration Plan
@@ -110,4 +110,4 @@
 2. Task 3–18 按叶子包到装配层顺序执行，每项独立提交并通过 focused 命令。
 3. Task 19 复核包级审计、测试入口、fixture/golden/baseline 和最终共享门禁；change 保持 active。
 
-本变更没有协议、存档或部署迁移。任一波次出现无法解释的行为、golden、hash 或性能差异时立即停止并回退该波次提交，不修改期望值、schema、scenario、阈值或基线；package extraction 若需要新状态、行为分支、协调接口或兼容 wrapper，则取消提包并先修订设计。
+本变更没有协议、存档或部署迁移。任一波次出现无法解释的行为、golden、hash、报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误或非数值命令失败时立即停止并回退该波次提交；性能数值差异只记录、不触发停止或回退。不得修改期望值、schema、scenario、阈值或基线；package extraction 若需要新状态、行为分支、协调接口或兼容 wrapper，则取消提包并先修订设计。

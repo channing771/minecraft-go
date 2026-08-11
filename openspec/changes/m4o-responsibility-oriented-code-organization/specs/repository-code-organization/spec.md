@@ -11,6 +11,8 @@
 - **GIVEN** 当前协议、存档、视觉与性能 fixture
 - **WHEN** 完成职责化文件和包迁移
 - **THEN** 除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余既有 Test、Benchmark、Fuzz 入口与固定 artifact MUST 保持不变
+- **AND** benchmark 与 `perfcheck` 的性能数值及既有阈值 MUST 只保存记录且不得改变退出状态
+- **AND** 只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败 MUST 阻断
 
 ### Requirement: 架构守卫不依赖单一源文件位置
 架构守卫 MUST 对完整职责文件集合执行原有检查，不得绑定单一固定源文件位置。

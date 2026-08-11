@@ -29,6 +29,7 @@ func (server *Server) queueReadyAndResync(current *session, result sim.TickResul
 		current.queueSnapshot(key, true)
 	}
 }
+
 func (current *session) queueSnapshot(key core.ChunkKey, resync bool) {
 	state := current.publications[key]
 	if state == nil {
@@ -82,6 +83,7 @@ func (current *session) applyForget(
 	}
 	return messages
 }
+
 func (server *Server) publishSnapshots(current *session) bool {
 	keys := make([]core.ChunkKey, 0, len(current.pendingSnapshots))
 	for key := range current.pendingSnapshots {

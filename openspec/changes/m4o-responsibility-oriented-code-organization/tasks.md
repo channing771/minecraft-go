@@ -64,12 +64,12 @@
 
 ## 17. benchmark 场景、测量与报告职责拆分
 
-- [x] 17.1 拆分 `benchmark.go`、`multiplayer_benchmark.go` 与大型测试，保持 scenario v15、固定 workload、sample count、绝对门禁、报告 JSON 和 baseline 字节；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo -run "ScenarioV15|BenchmarkServer|BenchmarkReport|PerformanceThresholds" -count=1'`、`zsh -ic 'go test ./internal/render ./internal/server -run ^$ -bench "RemoteAvatarNameTag|EightPlayerInterest" -benchmem -count=3'`。
+- [x] 17.1 拆分 `benchmark.go`、`multiplayer_benchmark.go` 与大型测试，保持 scenario v15、固定 workload、sample count、阈值数值、性能仅记录语义、报告 JSON 和 baseline 字节；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo -run "ScenarioV15|BenchmarkServer|BenchmarkReport|PerformanceThresholds" -count=1'`、`zsh -ic 'go test ./internal/render ./internal/server -run ^$ -bench "RemoteAvatarNameTag|EightPlayerInterest" -benchmem -count=3'`。
 
 ## 18. perfcheck 比较与阈值职责拆分
 
-- [x] 18.1 拆分 `cmd/perfcheck/main.go` 与测试为 compare/validate/regression/CLI 等职责文件，保持唯一迁移 `14:15`、20% 相对比较、噪声与输出文本；focused：`zsh -ic 'go test ./cmd/perfcheck -race -count=1'`、`zsh -ic 'go test ./cmd/perfcheck -run "ScenarioUpgrade|CrossTransport|Threshold|NoiseFloor|PersistenceTail" -count=1'`、`zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current docs/notes/perf-baseline.json --max-regression 0.20'`。
+- [x] 18.1 拆分 `cmd/perfcheck/main.go` 与测试为 compare/validate/regression/CLI 等职责文件，保持唯一迁移 `14:15`、20% 相对比较、阈值数值、性能仅记录语义、噪声与输出文本；focused：`zsh -ic 'go test ./cmd/perfcheck -race -count=1'`、`zsh -ic 'go test ./cmd/perfcheck -run "ScenarioUpgrade|CrossTransport|Threshold|NoiseFloor|PersistenceTail" -count=1'`、`zsh -ic 'go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current docs/notes/perf-baseline.json --max-regression 0.20'`。
 
 ## 19. 全仓审计、artifact 保真与最终门禁
 
-- [ ] 19.1 逐包确认计划点名文件为 split/move、其余基线文件为 keep，核对 386 个文件；除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余 Test、Benchmark、Fuzz 入口名与 `96c4aae` 完全一致，同时核对 storage fixture、视觉 golden、性能 baseline 字节；随后运行 `zsh -ic 'go test ./internal/archcheck -count=1'`、`zsh -ic 'go test ./... -race'`、`zsh -ic 'go vet ./...'`、`gofmt -l .`、`openspec validate --all --strict --no-interactive`、`git diff --check`，完成独立 review 后保持 change active。
+- [ ] 19.1 逐包确认计划点名文件为 split/move、其余基线文件为 keep，核对 386 个文件；除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余 Test、Benchmark、Fuzz 入口名与 `96c4aae` 完全一致，同时核对 storage fixture、视觉 golden、性能 baseline 字节；性能数值只记录，只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断；随后运行 `zsh -ic 'go test ./internal/archcheck -count=1'`、`zsh -ic 'go test ./... -race'`、`zsh -ic 'go vet ./...'`、`gofmt -l .`、`openspec validate --all --strict --no-interactive`、`git diff --check`，完成独立 review 后保持 change active。

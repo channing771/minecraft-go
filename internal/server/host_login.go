@@ -54,6 +54,7 @@ func (h *Host) acceptLoop(ctx context.Context, listener network.Listener) {
 		}(stream, streamID)
 	}
 }
+
 func (h *Host) activeLogins() []activeLogin {
 	h.mu.Lock()
 	active := make([]activeLogin, 0, len(h.activeBySession))
@@ -301,6 +302,7 @@ func (h *Host) finishStreamLifecycle(streamID uint64, promoted bool) {
 	}
 	h.mu.Unlock()
 }
+
 func hostPlayerLoadReject(err error) (network.LoginRejectCode, string) {
 	if errors.Is(err, storage.ErrCorrupt) || errors.Is(err, storage.ErrFutureVersion) {
 		return network.LoginPlayerDataCorrupt, "玩家数据已损坏"

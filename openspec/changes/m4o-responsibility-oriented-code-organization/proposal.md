@@ -33,4 +33,4 @@
 - 受影响区域：`cmd/`、`internal/`、`internal/archcheck` 与本 change 的规划产物。
 - API 与依赖：新增窄内部 API `render.ItemColor` 作为掉落物与 HUD 共享颜色的唯一实现，并新增 `internal/render/hud` 到既有底层包（含 `internal/render`）的精确单向依赖；`internal/render` 不反向依赖 HUD，外部行为不变。
 - 兼容性：协议 v14、区块 schema v7、玩家 schema v5、世界 metadata v2、benchmark scenario v15 及其 fixture/基线均不迁移。
-- 并发与性能：goroutine、channel、锁、buffer、资源释放顺序、workload 和阈值保持不变。
+- 并发与性能：goroutine、channel、锁、buffer、资源释放顺序、workload 和阈值数值保持不变；benchmark 与 `perfcheck` 的性能数值只保存记录、不改变退出状态，只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
