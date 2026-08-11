@@ -431,6 +431,7 @@ var captureScenes = []captureScene{
 			inventory.Backpack[3] = core.ItemStack{Item: core.ItemRawIron, Count: 8}
 			inventory.Backpack[4] = core.ItemStack{Item: core.ItemIronIngot, Count: 9}
 			inventory.Backpack[5] = core.ItemStack{Item: core.ItemOakLog, Count: 1}
+			inventory.Backpack[6] = core.ItemStack{Item: core.ItemGlass, Count: 4}
 			inventory.Backpack[9] = core.ItemStack{Item: core.ItemIronBlock, Count: 1}
 			return app.inventory.Apply(network.InventoryState{Inventory: inventory})
 		},

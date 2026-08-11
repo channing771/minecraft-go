@@ -20,6 +20,7 @@ type materialProcessingResult struct {
 	Furnace         world.FurnaceSlot
 	ChunkRevision   uint64
 	PersistenceHash [sha256.Size]byte
+	Rejection       network.CommandRejected
 }
 
 func TestMaterialProcessingMemoryTCPParity(t *testing.T) {
@@ -41,6 +42,7 @@ func runMaterialProcessingScript(t *testing.T, transport string) materialProcess
 	initial.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemSand, Count: 2}
 	initial.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemClay, Count: 1}
 	initial.Hotbar.Slots[3] = core.ItemStack{Item: core.ItemCoal, Count: 1}
+	initial.Backpack[0] = core.ItemStack{Item: core.ItemGlass, Count: 4}
 	location := storage.PlayerLocation{
 		Dimension: core.Overworld,
 		Position:  [3]float32{0.5, 1.001, 0.5},
@@ -116,19 +118,49 @@ func runMaterialProcessingScript(t *testing.T, transport string) materialProcess
 	if got, ok := materialProcessingInventory(craftedMessages); !ok || got != wantCrafted {
 		t.Fatalf("%s 原木合成后的背包 = %+v, %v，想要 %+v", transport, got, ok, wantCrafted)
 	}
+	lightMessages := step(network.CraftRecipe{Sequence: 2, Recipe: core.RecipeLightBlock})
+	wantLight := wantCrafted
+	wantLight.Backpack[0] = core.ItemStack{}
+	wantLight.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemLightBlock, Count: 4}
+	if got, ok := materialProcessingInventory(lightMessages); !ok || got != wantLight {
+		t.Fatalf("%s 发光方块合成后的背包 = %+v, %v，想要 %+v", transport, got, ok, wantLight)
+	}
+	sendIntegration(t, endpoint, network.CraftRecipe{Sequence: 3, Recipe: core.RecipeLightBlock})
+	waitIntegrationCondition(t, fmt.Sprintf("%s 发光方块拒绝合成 queued", transport), func() bool {
+		return len(host.world.incoming) > 0
+	})
+	_, rejectedMessages := parityStep(t, host, endpoint, mirror)
+	wantRejection := network.CommandRejected{Sequence: 3, Reason: network.RejectInvalidInput}
+	var rejection network.CommandRejected
+	foundRejection := false
+	for _, message := range rejectedMessages {
+		if candidate, ok := message.(network.CommandRejected); ok {
+			rejection, foundRejection = candidate, true
+		}
+	}
+	if !foundRejection || rejection != wantRejection {
+		t.Fatalf("%s 发光方块原料不足拒绝 = %+v, %v，想要 %+v", transport, rejection, foundRejection, wantRejection)
+	}
+	host.mu.Lock()
+	active := *host.activeByPlayer[identity.PlayerID]
+	host.mu.Unlock()
+	snapshot, ok := host.world.PlayerSnapshotFor(active.Session)
+	if !ok || snapshot.Inventory != wantLight {
+		t.Fatalf("%s 被拒绝后的权威背包 = %+v, %v，想要 %+v", transport, snapshot.Inventory, ok, wantLight)
+	}
 
 	openedMessages := step(network.OpenContainer{
-		Sequence: 2, Pitch: -float32(math.Pi)/2 + 0.01,
+		Sequence: 4, Pitch: -float32(math.Pi)/2 + 0.01,
 	})
 	opened := materialProcessingFurnaceState(t, transport, openedMessages)
 	state := materialProcessingFurnaceState(t, transport, step(network.MoveContainerStack{
-		Sequence: 3, Container: opened.Furnace, From: 1, To: core.FurnaceInputSlot,
+		Sequence: 5, Container: opened.Furnace, From: 1, To: core.FurnaceInputSlot,
 	}))
 	if state.Input != (core.ItemStack{Item: core.ItemSand, Count: 2}) {
 		t.Fatalf("%s 沙子未进入熔炉: %+v", transport, state)
 	}
 	state = materialProcessingFurnaceState(t, transport, step(network.MoveContainerStack{
-		Sequence: 4, Container: opened.Furnace, From: 3, To: core.FurnaceFuelSlot,
+		Sequence: 6, Container: opened.Furnace, From: 3, To: core.FurnaceFuelSlot,
 	}))
 	if state.Fuel != (core.ItemStack{Item: core.ItemCoal, Count: 1}) {
 		t.Fatalf("%s 煤炭未进入熔炉: %+v", transport, state)
@@ -150,7 +182,7 @@ func runMaterialProcessingScript(t *testing.T, transport string) materialProcess
 	}
 
 	state = materialProcessingFurnaceState(t, transport, step(network.MoveContainerStack{
-		Sequence: 5, Container: opened.Furnace, From: 2, To: core.FurnaceInputSlot,
+		Sequence: 7, Container: opened.Furnace, From: 2, To: core.FurnaceInputSlot,
 	}))
 	if state.Input != (core.ItemStack{Item: core.ItemClay, Count: 1}) ||
 		state.Output != (core.ItemStack{Item: core.ItemGlass, Count: 1}) ||
@@ -159,16 +191,22 @@ func runMaterialProcessingScript(t *testing.T, transport string) materialProcess
 	}
 
 	glassMessages := step(network.MoveContainerStack{
-		Sequence: 6, Container: opened.Furnace, From: core.FurnaceOutputSlot, To: 4,
+		Sequence: 8, Container: opened.Furnace, From: core.FurnaceOutputSlot, To: 5,
 	})
 	state = materialProcessingFurnaceState(t, transport, glassMessages)
-	wantFinalInventory := wantCrafted
+	wantFinalInventory := wantLight
 	wantFinalInventory.Hotbar.Slots[1] = core.ItemStack{}
 	wantFinalInventory.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemSand, Count: 1}
 	wantFinalInventory.Hotbar.Slots[3] = core.ItemStack{}
-	wantFinalInventory.Hotbar.Slots[4] = core.ItemStack{Item: core.ItemGlass, Count: 1}
-	if got, ok := materialProcessingInventory(glassMessages); !ok || got != wantFinalInventory {
-		t.Fatalf("%s 取出玻璃后的背包 = %+v, %v，想要 %+v", transport, got, ok, wantFinalInventory)
+	wantFinalInventory.Hotbar.Slots[5] = core.ItemStack{Item: core.ItemGlass, Count: 1}
+	gotInventory, ok := materialProcessingInventory(glassMessages)
+	if !ok || gotInventory != wantFinalInventory {
+		t.Fatalf("%s 取出玻璃后的背包 = %+v, %v，想要 %+v", transport, gotInventory, ok, wantFinalInventory)
+	}
+	if gotInventory.Hotbar.Slots[4] != (core.ItemStack{Item: core.ItemLightBlock, Count: 4}) ||
+		gotInventory.Hotbar.Slots[5] != (core.ItemStack{Item: core.ItemGlass, Count: 1}) {
+		t.Fatalf("%s 取出玻璃后的发光方块/玻璃栏位 = %+v / %+v", transport,
+			gotInventory.Hotbar.Slots[4], gotInventory.Hotbar.Slots[5])
 	}
 	if state.Output != (core.ItemStack{}) || state.ProgressTicks != 0 || state.BurnTicks != 1382 {
 		t.Fatalf("%s 取出玻璃后的熔炉 = %+v", transport, state)
@@ -188,10 +226,7 @@ func runMaterialProcessingScript(t *testing.T, transport string) materialProcess
 		t.Fatalf("%s 黏土块熔炼结果 = %+v", transport, state)
 	}
 
-	host.mu.Lock()
-	active := *host.activeByPlayer[identity.PlayerID]
-	host.mu.Unlock()
-	snapshot, ok := host.world.PlayerSnapshotFor(active.Session)
+	snapshot, ok = host.world.PlayerSnapshotFor(active.Session)
 	if !ok || snapshot.Inventory != wantFinalInventory {
 		t.Fatalf("%s 最终权威背包 = %+v, %v，想要 %+v", transport, snapshot.Inventory, ok, wantFinalInventory)
 	}
@@ -242,7 +277,7 @@ func runMaterialProcessingScript(t *testing.T, transport string) materialProcess
 	closed = true
 	return materialProcessingResult{
 		Inventory: snapshot.Inventory, Furnace: authorityFurnace,
-		ChunkRevision: revision, PersistenceHash: digest,
+		ChunkRevision: revision, PersistenceHash: digest, Rejection: rejection,
 	}
 }
 

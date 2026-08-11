@@ -18,6 +18,8 @@ const (
 	RecipeChest
 	// RecipeOakPlanks 用 1 个橡木原木合成 4 个橡木木板。
 	RecipeOakPlanks
+	// RecipeLightBlock 用 4 个玻璃合成 4 个发光方块。
+	RecipeLightBlock
 )
 
 // CraftingRecipe 是一条固定的单输入、单输出配方。
@@ -63,6 +65,11 @@ func Recipe(id RecipeID) (CraftingRecipe, bool) {
 		return CraftingRecipe{
 			Input:  ItemStack{Item: ItemOakLog, Count: 1},
 			Output: ItemStack{Item: ItemOakPlanks, Count: 4},
+		}, true
+	case RecipeLightBlock:
+		return CraftingRecipe{
+			Input:  ItemStack{Item: ItemGlass, Count: 4},
+			Output: ItemStack{Item: ItemLightBlock, Count: 4},
 		}, true
 	default:
 		return CraftingRecipe{}, false
