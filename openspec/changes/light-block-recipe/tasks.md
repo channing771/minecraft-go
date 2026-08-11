@@ -15,8 +15,8 @@
 
 ## 4. 无窗口视觉证据
 
-- [ ] 4.1 在 `cmd/mcgo/capture.go` 的既有 `inventory-crafting` fixture 中加入足量玻璃，使第八行可合成；运行 `gofmt -w cmd/mcgo/capture.go` 和 `make visual-update VISUAL_OUT=/private/tmp/light-block-recipe-visual-update`，并断言 `test "$(git diff --name-only -- cmd/mcgo/testdata/golden | tr -d '\n')" = "cmd/mcgo/testdata/golden/inventory-crafting.png"`，不得启动或聚焦前台窗口。
-- [ ] 4.2 只读检查 `cmd/mcgo/testdata/golden/inventory-crafting.png` 中八行完整、末行为玻璃到发光方块且无重叠或裁切；随后运行 `make visual-check VISUAL_OUT=/private/tmp/light-block-recipe-visual-check` 与 `git diff --check`。
+- [x] 4.1 在 `cmd/mcgo/capture.go` 的既有 `inventory-crafting` fixture 中加入足量玻璃，使第八行可合成；运行 `gofmt -w cmd/mcgo/capture.go` 和 `make visual-update VISUAL_OUT=/private/tmp/light-block-recipe-visual-update`，并断言 `test "$(git diff --name-only -- cmd/mcgo/testdata/golden | tr -d '\n')" = "cmd/mcgo/testdata/golden/inventory-crafting.png"`，不得启动或聚焦前台窗口。
+- [x] 4.2 只读检查 `cmd/mcgo/testdata/golden/inventory-crafting.png` 中八行完整、末行为玻璃到发光方块且无重叠或裁切；随后运行 `make visual-check VISUAL_OUT=/private/tmp/light-block-recipe-visual-check` 与 `git diff --check`。
 
 ## 5. 收尾验证与归档
 
