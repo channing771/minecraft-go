@@ -64,7 +64,7 @@
 
 ## 17. benchmark 场景、测量与报告职责拆分
 
-- [ ] 17.1 拆分 `benchmark.go`、`multiplayer_benchmark.go` 与大型测试，保持 scenario v15、固定 workload、sample count、绝对门禁、报告 JSON 和 baseline 字节；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo -run "ScenarioV15|BenchmarkServer|BenchmarkReport|PerformanceThresholds" -count=1'`、`zsh -ic 'go test ./internal/render ./internal/server -run ^$ -bench "RemoteAvatarNameTag|EightPlayerInterest" -benchmem -count=3'`。
+- [x] 17.1 拆分 `benchmark.go`、`multiplayer_benchmark.go` 与大型测试，保持 scenario v15、固定 workload、sample count、绝对门禁、报告 JSON 和 baseline 字节；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo -run "ScenarioV15|BenchmarkServer|BenchmarkReport|PerformanceThresholds" -count=1'`、`zsh -ic 'go test ./internal/render ./internal/server -run ^$ -bench "RemoteAvatarNameTag|EightPlayerInterest" -benchmem -count=3'`。
 
 ## 18. perfcheck 比较与阈值职责拆分
 
