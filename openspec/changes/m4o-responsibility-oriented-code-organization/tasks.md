@@ -52,7 +52,7 @@
 
 ## 14. mcgo 生产装配按应用生命周期拆分
 
-- [ ] 14.1 将 `cmd/mcgo/app.go` 原样拆为 dependencies/metrics/startup/lifecycle/frame/messages/input/render 文件并保留 Darwin build tag；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo -run "Application|Frame|Connection|Inventory|Render" -count=1'`、`zsh -ic 'go test ./internal/archcheck -race -count=1'`。
+- [x] 14.1 将 `cmd/mcgo/app.go` 原样拆为 dependencies/metrics/startup/lifecycle/frame/messages/input/render 文件并保留 Darwin build tag；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./cmd/mcgo -run "Application|Frame|Connection|Inventory|Render" -count=1'`、`zsh -ic 'go test ./internal/archcheck -race -count=1'`。
 
 ## 15. mcgo 应用测试按场景拆分
 
