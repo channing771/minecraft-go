@@ -91,7 +91,7 @@
 - CLI、游戏行为、错误值/文本、日志字段、GPU label 和绘制顺序不变。
 - 协议 v14、packet ID、wire bytes、区块 schema v7、玩家 schema v5、世界 metadata v2、fixture 与 hash 不变。
 - 物品颜色值、视觉 golden、benchmark workload、scenario v15、M2/M5 性能基线、阈值与报告格式不变。
-- 测试、Benchmark、Fuzz 入口名保持不变；自动验证不启动前台窗口，也不更新 golden/baseline。
+- 除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余 Test、Benchmark、Fuzz 入口名保持不变；自动验证不启动前台窗口，也不更新 golden/baseline。
 
 ## Risks / Trade-offs
 

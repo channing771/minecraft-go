@@ -1656,12 +1656,19 @@ zsh -ic 'go test ./cmd/gfxspike ./cmd/mcgo ./cmd/mcgod ./cmd/perfcheck -race -co
 再比较基线与当前的测试、benchmark 和 fuzz 入口名：
 
 ```bash
-git grep -h -E '^func (Test|Benchmark|Fuzz)' 96c4aae -- cmd internal | sed 's/(.*//' | sort > /private/tmp/m4o-symbols-before.txt
+{
+  git grep -h -E '^func (Test|Benchmark|Fuzz)' 96c4aae -- cmd internal \
+    | sed 's/(.*//' \
+    | sed 's/^func TestSessionLifecycleResponsibilitiesLiveInSessionFile$/func TestSessionLifecycleResponsibilitiesStayInSessionFiles/'
+  printf '%s\n' \
+    'func TestProductionGoSourceScansSplitFiles' \
+    'func TestTopLevelDeclarationNamesInScansSplitFiles'
+} | sort > /private/tmp/m4o-symbols-expected.txt
 rg '^func (Test|Benchmark|Fuzz)' cmd internal -g '*_test.go' | sed 's/.*func /func /; s/(.*//' | sort > /private/tmp/m4o-symbols-after.txt
-diff -u /private/tmp/m4o-symbols-before.txt /private/tmp/m4o-symbols-after.txt
+diff -u /private/tmp/m4o-symbols-expected.txt /private/tmp/m4o-symbols-after.txt
 ```
 
-Expected: `diff` 无输出；任何入口缺失都必须恢复后才能继续。
+Expected: `diff` 无输出。相对 `96c4aae` 只允许 Task 2 明确批准的两项新增测试 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，以及 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` → `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 重命名；除此之外任何 Test、Benchmark 或 Fuzz 入口变化都必须恢复后才能继续。
 
 - [ ] **Step 2: 核对协议、存档、视觉和性能 artifact 字节**
 

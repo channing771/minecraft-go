@@ -72,4 +72,4 @@
 
 ## 19. 全仓审计、artifact 保真与最终门禁
 
-- [ ] 19.1 逐包确认计划点名文件为 split/move、其余基线文件为 keep，核对 386 个文件、测试/Benchmark/Fuzz 入口名以及 storage fixture、视觉 golden、性能 baseline 字节；随后运行 `zsh -ic 'go test ./internal/archcheck -count=1'`、`zsh -ic 'go test ./... -race'`、`zsh -ic 'go vet ./...'`、`gofmt -l .`、`openspec validate --all --strict --no-interactive`、`git diff --check`，完成独立 review 后保持 change active。
+- [ ] 19.1 逐包确认计划点名文件为 split/move、其余基线文件为 keep，核对 386 个文件；除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余 Test、Benchmark、Fuzz 入口名与 `96c4aae` 完全一致，同时核对 storage fixture、视觉 golden、性能 baseline 字节；随后运行 `zsh -ic 'go test ./internal/archcheck -count=1'`、`zsh -ic 'go test ./... -race'`、`zsh -ic 'go vet ./...'`、`gofmt -l .`、`openspec validate --all --strict --no-interactive`、`git diff --check`，完成独立 review 后保持 change active。

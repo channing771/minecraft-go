@@ -10,7 +10,7 @@
 #### Scenario: 重组后既有契约不漂移
 - **GIVEN** 当前协议、存档、视觉与性能 fixture
 - **WHEN** 完成职责化文件和包迁移
-- **THEN** 所有既有测试与固定 artifact MUST 保持不变
+- **THEN** 除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余既有 Test、Benchmark、Fuzz 入口与固定 artifact MUST 保持不变
 
 ### Requirement: 架构守卫不依赖单一源文件位置
 架构守卫 MUST 对完整职责文件集合执行原有检查，不得绑定单一固定源文件位置。
