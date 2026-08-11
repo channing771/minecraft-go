@@ -3,8 +3,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -1043,6 +1046,33 @@ func recipeButtonCenter(t *testing.T, recipe core.RecipeID, width, height uint32
 	}
 	t.Fatalf("找不到 recipe %d 的按钮像素", recipe)
 	return 0, 0
+}
+
+func receiveInteractiveClientMessage(
+	t *testing.T,
+	endpoint network.ServerEndpoint,
+) network.ClientMessage {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	message, err := endpoint.Recv(ctx)
+	if err != nil {
+		t.Fatalf("接收客户端消息: %v", err)
+	}
+	return message
+}
+
+func assertNoInteractiveClientMessage(t *testing.T, endpoint network.ServerEndpoint) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	message, err := endpoint.Recv(ctx)
+	if err == nil {
+		t.Fatalf("意外客户端消息: %#v", message)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("检查无客户端消息: %v", err)
+	}
 }
 
 func TestInteractiveDropSendsOnlyWhenReadyAndAllowed(t *testing.T) {

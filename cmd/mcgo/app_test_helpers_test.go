@@ -4,19 +4,13 @@ package main
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"minecraft-go/internal/client"
-	"minecraft-go/internal/core"
 	"minecraft-go/internal/gfx"
 	"minecraft-go/internal/network"
 )
-
-func integrationPlayerID(last byte) core.PlayerID {
-	return core.PlayerID{0: 0x12, 6: 0x40, 8: 0x80, 15: last}
-}
 
 type fakeInteractiveWindow struct {
 	captured bool
@@ -69,31 +63,4 @@ func sendInteractiveServerMessage(
 	// The application intentionally drains a non-blocking Receiver; let its sole
 	// blocking reader hand this test message to the inbox before the frame drains.
 	time.Sleep(time.Millisecond)
-}
-
-func receiveInteractiveClientMessage(
-	t *testing.T,
-	endpoint network.ServerEndpoint,
-) network.ClientMessage {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	message, err := endpoint.Recv(ctx)
-	if err != nil {
-		t.Fatalf("接收客户端消息: %v", err)
-	}
-	return message
-}
-
-func assertNoInteractiveClientMessage(t *testing.T, endpoint network.ServerEndpoint) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	message, err := endpoint.Recv(ctx)
-	if err == nil {
-		t.Fatalf("意外客户端消息: %#v", message)
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("检查无客户端消息: %v", err)
-	}
 }

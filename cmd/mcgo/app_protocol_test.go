@@ -213,3 +213,7 @@ func newRemoteProtocolApplication(t *testing.T) (*application, network.ServerEnd
 func remoteSpawn(id byte, name string, tick uint64, position mgl32.Vec3) network.RemotePlayerSpawn {
 	return network.RemotePlayerSpawn{PlayerID: integrationPlayerID(id), DisplayName: name, ServerTick: tick, Dimension: core.Overworld, Position: position}
 }
+
+func integrationPlayerID(last byte) core.PlayerID {
+	return core.PlayerID{0: 0x12, 6: 0x40, 8: 0x80, 15: last}
+}
