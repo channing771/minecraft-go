@@ -1,26 +1,28 @@
 ## Context
 
-本变更基于提交 `96c4aae` 及其仅含规划文档的后代。基线 `cmd/` 与 `internal/` 共 386 个 Go 文件，其中 144 个生产文件、242 个测试文件；职责热点横跨架构守卫、WebGPU、网络、存储、模拟、服务端、客户端、渲染和命令装配。参见 `proposal.md` 与 `specs/repository-code-organization/spec.md`。
+Task 2–19 基于 `96c4aae` 完成了 386 个 Go 文件的职责整理与审计。其后 `origin/main` 前进到 `37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa`：该基线有 412 个 Go 文件（155 个生产文件、257 个测试文件），已经包含协议 v15、区块 schema v8、玩家 schema v6、已归档 M4N，以及 common materials、damage/target、material processing、natural generation/oak、light recipe 与 container-Y 等能力。Task 20 只负责把这些上游增量迁入既有职责文件，不把能力归因于 M4O。参见 `proposal.md` 与 `specs/repository-code-organization/spec.md`。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- 为 386 个基线 Go 文件建立包级审计覆盖，并让每个文件最终归入保留、同包拆分、提取新包或删除。
+- 保留 Task 19 基于 `96c4aae` 的 386 文件包级审计作为历史证据；以 `37cdb3e` 的 412 文件重做 Task 20 审计，并让每个文件最终归入保留、同包拆分、提取新包或删除。
 - 默认只移动声明；测试与其职责同波次整理，每个波次独立验证、提交和回退。
 - 仅把完整 HUD 提取到 `internal/render/hud`，同时让架构守卫覆盖拆分后的职责文件族。
+- 解决 13 个已知主线冲突，同时完整保留主线的新行为、fixture、golden 与入口。
 
 **Non-Goals:**
 
-- 不修改算法、CLI、游戏功能、协议/存档/性能契约或并发语义。
+- 不在 `37cdb3e` 之上另行修改算法、CLI、游戏功能、协议/存档/性能契约或并发语义；主线既有 v15/v8/v6 只做无损迁移。
 - 不以行数作为门禁，不新增通用包、其他新包、兼容 wrapper、工厂或单实现接口。
-- 不同步、归档或删除已完成的 `m4n-static-block-light` change。
+- 不重新实现、复制、回退或归因 `37cdb3e` 已有能力；主线已经归档 M4N，Task 20 不复活该 active change。
+- 不整份恢复拆分前旧大文件，不新增第二个内部包，不更新 golden/baseline，也不放宽测试。
 
 ## Decisions
 
-### 以包为审计闭环
+### Task 2–19 历史审计以包为闭环
 
-基线审计表冻结如下。计划点名的文件按 Task 2–18 执行 split/move/delete；同包其余基线文件均先判定为 keep，并由 Task 19 的逐包测试与入口名对比复核。行数只用于发现候选，不决定结论。
+以下表格是 `96c4aae` 上已经完成的 Task 19 历史审计。计划点名的文件按 Task 2–18 执行 split/move/delete；同包其余基线文件均先判定为 keep，并由 Task 19 的逐包测试与入口名对比复核。行数只用于发现候选，不决定结论；这些 386 文件数据不作为 Task 20 的当前验收值。
 
 | 包 | 生产 | 测试 | 合计 | 计划结论 |
 | --- | ---: | ---: | ---: | --- |
@@ -48,7 +50,7 @@
 | `internal/worldgen` | 3 | 3 | 6 | keep |
 | **总计** | **144** | **242** | **386** | **Task 19 完成最终复核** |
 
-### Task 2–19 文件映射
+### Task 2–19 历史文件映射
 
 | Task | 职责 | 文件映射 |
 | ---: | --- | --- |
@@ -71,7 +73,7 @@
 | 18 | perfcheck | `cmd/perfcheck/main.go`、`main_test.go` → compare/validate/regression 与 compare/migration/transport/regression/CLI/helper 测试文件 |
 | 19 | 审计收尾 | 仅更新本 change 的 `design.md`、`tasks.md`，核对所有 386 个文件和固定 artifact，无生产行为修改 |
 
-### Task 19 最终包级审计
+### Task 19 历史最终包级审计
 
 审计集合由 `git ls-tree -r --name-only 96c4aae -- cmd internal` 冻结，筛选并排序后的 386 个 Go 路径清单 SHA-256 为 `badfa2853c44fbc6860044149ce0a29c4f10003ffa724018646f43c19fb52416`。下表中的 split、extract、delete 与 keep 互斥，逐行合计等于该包的基线文件数；所有未在“非 keep 路径”列点名的该包基线 Go 文件均为 keep。
 
@@ -103,6 +105,30 @@
 
 没有基线 Go 文件被判定为 delete；Git 中消失的原路径均已按声明去向归入 split 或 extract，而不是死代码删除。当前包集合相对基线只新增预批准的 `internal/render/hud`，其余新增 Go 文件均是上表 split/extract 的目标文件。
 
+### Task 20 主线同步基线与冲突迁移
+
+Task 20 新基线固定为 `37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa`。`git ls-tree` 只读核对为 155 个生产 Go 文件 + 257 个测试 Go 文件 = 412；预期结论为 36 split + 2 extract + 0 delete + 374 keep = 412，且相对主线只允许新增已经批准的 `internal/render/hud` 包。M4N 已由主线归档，不得恢复成 active change。
+
+只读 `git merge-tree --write-tree --name-only HEAD origin/main` 精确得到以下 13 个冲突。每项必须按声明迁入目标职责文件；对于仍保留同名核心文件的 content conflict，也不得把上游整份大文件覆盖回来。
+
+| # | 冲突路径 | 目标职责文件 | 必须保留的上游语义 |
+| ---: | --- | --- | --- |
+| 1 | `cmd/mcgo/app.go` | 现有 `app_*` 生产文件族 | common materials、damage/target 的应用装配与输入/呈现路径 |
+| 2 | `cmd/mcgo/app_test.go` | `app_*_test.go` 场景文件 | damage/target、材料与资源释放断言 |
+| 3 | `cmd/mcgo/capture.go` | `capture.go`、`capture_scene.go`、`capture_image.go` | capture 场景扩为固定 10 项，场景顺序、settle 与 golden 比较不变 |
+| 4 | `internal/gfx/wgpu.go` | `wgpu_convert.go`、`wgpu_pipeline.go` | `DepthCompareLessEqual` 转换与 pipeline 使用语义 |
+| 5 | `internal/network/codec_test.go` | `codec_golden_test.go`、`codec_inventory_test.go` | 协议 v15 golden 与 inventory/material wire 字节 |
+| 6 | `internal/network/message.go` | `message_container.go` | smelting/container 校验顺序与错误语义 |
+| 7 | `internal/render/hotbar.go` | `internal/render/hud/{container,layout,atlas}.go` | common materials、8 个配方及 HUD 呈现 |
+| 8 | `internal/render/hotbar_test.go` | `internal/render/hud/{container,layout,atlas}_test.go` 与既有 helper | 8 个配方、材料颜色和命中测试 |
+| 9 | `internal/server/player_persistence.go` | `player_persistence_snapshot.go` | starter materials 的保存/恢复身份 |
+| 10 | `internal/server/player_persistence_test.go` | `player_persistence_lifecycle_test.go` | starter materials 生命周期与兼容恢复断言 |
+| 11 | `internal/server/tcp_integration_test.go` | `tcp_restart_integration_test.go`、`furnace_tcp_integration_test.go` | Ready barrier、重连与多人 smelting 行为 |
+| 12 | `internal/storage/chunk_codec.go` | `chunk_codec_container.go` | world-Y container 与 schema v8 逻辑载荷 |
+| 13 | `internal/storage/chunk_codec_envelope_test.go` | `chunk_codec_envelope_test.go`、`chunk_codec_roundtrip_test.go`、`chunk_codec_helpers_test.go` | schema v8 fixture、envelope、roundtrip 与 helper 唯一来源 |
+
+`37cdb3e` 的上游能力属于主线：M4O 只调整声明位置。冲突解决不得删除上游 case/fixture、不得复制实现或引入 wrapper，也不得用旧分支版本覆盖协议 v15、schema v8/v6、10 个视觉场景或已归档 M4N 能力。
+
 ### 默认同包拆分，唯一 HUD 提包
 
 共享包内权威状态的职责留在原包，避免协调接口、循环依赖和类型搬迁。唯一新包 `internal/render/hud` 只允许依赖 `internal/core`、`internal/mesh`、`internal/assets`、`internal/render`、`internal/gfx`；`internal/render` 不得反向依赖 HUD。程序化物品颜色的唯一实现从 `hotbarItemColor` 提升为 `internal/render/drop.go` 中的窄内部 API `render.ItemColor`，掉落物与 HUD 都直接调用它；`hud/layout.go` 不拥有或复制颜色实现，也不引入 wrapper、alias、callback/config、第二包或重复实现。只有 `internal/gfx` 可以直接导入 WebGPU 绑定，`sim` 不依赖渲染，`world` 不依赖 `network`。
@@ -120,10 +146,11 @@
 
 ### 行为与 artifact 不变量
 
-- CLI、游戏行为、错误值/文本、日志字段、GPU label 和绘制顺序不变。
-- 协议 v14、packet ID、wire bytes、区块 schema v7、玩家 schema v5、世界 metadata v2、fixture 与 hash 不变。
-- 物品颜色值、视觉 golden、benchmark workload、scenario v15、M2/M5 性能基线、阈值数值与报告格式不变；benchmark 与 `perfcheck` 的性能数值只保存记录、不改变退出状态，只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
-- 除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余 Test、Benchmark、Fuzz 入口名保持不变；自动验证不启动前台窗口，也不更新 golden/baseline。
+- Task 19 历史审计保持协议 v14、区块 schema v7、玩家 schema v5 与当时固定 hash 的事实不变；Task 20 不再把这些旧值当作当前验收值。
+- Task 20 的 CLI、游戏行为、错误值/文本、日志字段、GPU label 和绘制顺序必须与 `37cdb3e` 一致，并保留协议 v15、packet ID/wire bytes、区块 schema v8、玩家 schema v6、世界 metadata v2 和已归档 M4N 行为。
+- storage/network fixture、10 个视觉 golden 与其他固定 artifact 直接用 `git diff`/`cmp` 对比 `37cdb3e`，不得沿用 Task 19 的旧 hash 代替主线字节证明。若上游没有修改 M2/M5 性能 baseline，则它们保持原字节；benchmark workload、scenario v15、阈值数值与报告格式不变。
+- benchmark 与 `perfcheck` 的性能数值只保存记录、不改变退出状态，只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
+- 相对 `37cdb3e`，只允许 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles`；其余 Test、Benchmark、Fuzz 入口名完全一致。自动验证不启动前台窗口，也不更新 golden/baseline。
 
 ## Risks / Trade-offs
 
@@ -135,11 +162,13 @@
 - [build tag 或 CGO 边界损坏] → 保留原 tag，运行 Darwin focused 测试、archcheck 与无图形服务端构建。
 - [性能或固定 artifact 漂移] → 对比既有 hash、visual capture、benchmark 与 baseline；固定 artifact、报告结构或身份异常按错误阻断，性能数值差异只记录，均不得改期望值掩盖差异。
 - [无意义碎片化] → 以职责为单位拆分，未点名且内聚的文件 keep，不设置行数门禁。
+- [冲突解决复活旧大文件或丢失主线声明] → 只对上表 13 个冲突逐声明迁移，以 `37cdb3e` 的入口、artifact 和 focused 测试做双向 parity，不接受 ours/theirs 整文件覆盖。
 
 ## Migration Plan
 
 1. Task 2 先解除守卫对单一文件位置的依赖。
 2. Task 3–18 按叶子包到装配层顺序执行，每项独立提交并通过 focused 命令。
-3. Task 19 复核包级审计、测试入口、fixture/golden/baseline 和最终共享门禁；change 保持 active。
+3. Task 19 以 `96c4aae` 复核包级审计、测试入口、fixture/golden/baseline 和最终共享门禁；该历史阶段已完成。
+4. Task 20 先提交规划修订，再合并固定的 `origin/main=37cdb3e`；手工迁移 13 个冲突中的上游声明，完成 412 文件审计、声明/入口/artifact parity、focused/race/fuzz/10 场景视觉/性能记录与全仓门禁，独立 review 后才勾选、完成 merge commit 并 push。
 
-本变更没有协议、存档或部署迁移。任一波次出现无法解释的行为、golden、hash、报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误或非数值命令失败时立即停止并回退该波次提交；性能数值差异只记录、不触发停止或回退。不得修改期望值、schema、scenario、阈值或基线；package extraction 若需要新状态、行为分支、协调接口或兼容 wrapper，则取消提包并先修订设计。
+Task 20 没有自有协议、存档或部署迁移；协议 v15 与 schema v8/v6 是主线既有增量。任一波次出现无法解释的行为、golden、artifact、报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误或非数值命令失败时立即停止并回退该波次；性能数值差异只记录、不触发停止或回退。不得修改期望值、schema、scenario、阈值或基线；package extraction 若需要新状态、行为分支、协调接口或兼容 wrapper，则取消提包并先修订设计。

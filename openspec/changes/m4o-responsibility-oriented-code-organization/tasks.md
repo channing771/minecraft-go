@@ -1,6 +1,6 @@
-## Task 2–19 通用执行协议
+## Task 2–19 历史执行协议
 
-开始每项任务前 MUST 运行 `git status --short --branch`、`git merge-base --is-ancestor 96c4aae HEAD` 和 `openspec list --json`，确认分支为 `codex/m4o-code-organization`、工作树干净、HEAD 包含 `96c4aae`、M4O 是唯一实施中的 active change，且 `m4n-static-block-light` 仍为 complete。每项声明搬迁 MUST 遵循 baseline green → move → green；只有 focused 门禁通过后才能勾选该任务，并单独提交该任务列出的文件与对应 `tasks.md` checkbox。不得新增第三方依赖，不得关闭、改写 Hook 或设置豁免变量绕过失败。
+以下 Task 2–19 已完成，并保留其 `96c4aae`、386 文件、协议 v14、区块 schema v7、玩家 schema v5 与固定 hash 作为 Task 19 历史审计证据，不作为 Task 20 当前验收值。其执行时要求：开始每项任务前运行 `git status --short --branch`、`git merge-base --is-ancestor 96c4aae HEAD` 和 `openspec list --json`，确认分支为 `codex/m4o-code-organization`、工作树干净、HEAD 包含 `96c4aae`、M4O 是唯一实施中的 active change，且 `m4n-static-block-light` 仍为 complete。每项声明搬迁遵循 baseline green → move → green；只有 focused 门禁通过后才能勾选该任务，并单独提交该任务列出的文件与对应 `tasks.md` checkbox。不得新增第三方依赖，不得关闭、改写 Hook 或设置豁免变量绕过失败。
 
 ## 2. 架构守卫支持职责文件族
 
@@ -73,3 +73,7 @@
 ## 19. 全仓审计、artifact 保真与最终门禁
 
 - [x] 19.1 逐包确认计划点名文件为 split/move、其余基线文件为 keep，核对 386 个文件；除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余 Test、Benchmark、Fuzz 入口名与 `96c4aae` 完全一致，同时核对 storage fixture、视觉 golden、性能 baseline 字节；性能数值只记录，只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断；随后运行 `zsh -ic 'go test ./internal/archcheck -count=1'`、`zsh -ic 'go test ./... -race'`、`zsh -ic 'go vet ./...'`、`gofmt -l .`、`openspec validate --all --strict --no-interactive`、`git diff --check`，完成独立 review 后保持 change active。
+
+## 20. 同步 origin/main 并保持职责边界
+
+- [ ] 20.1 先提交本次规划修订，再固定 `origin/main=37cdb3e` 并以 `git merge --no-commit origin/main` 开始同步；仅手工把精确 13 个冲突中的上游声明迁入现有 `app_*`、`capture_*`、`wgpu_{convert,pipeline}`、`message_container`、`codec_{golden,inventory}_test`、`internal/render/hud`、`player_persistence_{snapshot,lifecycle}`、`tcp_restart`/`furnace_tcp` 与 `chunk_codec_{container,roundtrip,helpers}` 职责文件，不整份复活旧大文件；保持 damage/target 与 10 个 capture 场景、`DepthCompareLessEqual`、8 个配方、smelting validation、协议 v15 golden、starter materials、Ready barrier、world-Y container 与 schema v8 fixture。以 `37cdb3e` 的 412 个 Go 文件完成 36 split + 2 extract + 374 keep 审计；除 Task 2 两项新增测试和一项重命名外，Test/Benchmark/Fuzz 入口与新基线完全一致，storage/network fixture、10 个视觉 golden 与其他固定 artifact 用 `git diff`/`cmp` 证明字节相同，性能 baseline 在上游未改时保持原字节且性能数值只记录。通过 affected package race、network/storage fuzz、无窗口 visual-check、性能记录、archcheck、`go test ./... -race`、`go vet ./...`、`gofmt -l .`、OpenSpec strict 和 `git diff --check` 后请求独立 review；不得放宽测试或更新 golden/baseline，review 通过后才勾选并完成 merge commit 与 push。

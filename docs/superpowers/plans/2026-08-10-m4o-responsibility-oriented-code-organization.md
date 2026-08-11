@@ -10,13 +10,17 @@
 
 **Tech Stack:** Go 1.26、标准库、现有内部包、WebGPU/CGO Darwin 后端、OpenSpec、Go race/fuzz/benchmark、无窗口视觉 capture、`cmd/perfcheck`。
 
+**历史与当前基线：** Task 1–19 段落保留 `96c4aae`、386 文件、协议 v14、区块 schema v7、玩家 schema v5、7 个当时视觉 golden 与固定 hash，作为已经完成的 Task 19 历史审计证据；这些旧值不再是 Task 20 当前验收值。Task 20 单独以 `origin/main=37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa` 为基线。
+
 ## Global Constraints
 
 - 实施前 MUST 阅读 `AGENTS.md`、`openspec/config.yaml`、本计划、`docs/superpowers/specs/2026-08-09-repository-code-organization-design.md`，以及 active change 的 `proposal.md`、delta spec、`design.md` 和 `tasks.md`。
-- 当前基线 MUST 是设计提交 `96c4aae` 或其仅含后续规划提交的后代；开始每项任务前先检查 `git status --short --branch`，保留用户及无关修改。
-- 本工作 MUST 使用一个 active change：`m4o-responsibility-oriented-code-organization`。已完成但尚未归档的 `m4n-static-block-light` 不得被本计划同步、归档或删除。
-- 全仓审计范围 MUST 覆盖基线时 `cmd/` 与 `internal/` 下全部 `386` 个 Go 文件（`144` 个生产文件、`242` 个测试文件）；审计不要求每个文件产生 diff。
-- CLI、游戏逻辑、协议 v14、区块 schema v7、玩家 schema v5、metadata v2、wire bytes、存档 fixture、视觉 golden、benchmark scenario v15、性能基线和并发语义 MUST 保持不变。
+- Task 2–19 的历史基线是 `96c4aae`；Task 20 开始前 MUST 确认 `origin/main` 精确为 `37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa`，并检查 `git status --short --branch`，保留用户及无关修改。
+- 本工作 MUST 继续使用 active change `m4o-responsibility-oriented-code-organization`。`m4n-static-block-light` 已由 `37cdb3e` 所在主线归档；Task 20 不得复活其 active change 或篡改归档历史。
+- Task 20 全仓审计范围 MUST 覆盖 `37cdb3e` 时 `cmd/` 与 `internal/` 下全部 `412` 个 Go 文件（`155` 个生产文件、`257` 个测试文件），结论固定为 36 split + 2 extract + 0 delete + 374 keep；审计不要求每个文件产生 diff。
+- Task 20 MUST 保留主线已有的协议 v15、区块 schema v8、玩家 schema v6、metadata v2、已归档 M4N、common materials、damage/target、material processing、natural generation/oak、light recipe、container-Y、10 个 capture 场景与 benchmark scenario v15；这些能力不得归因于 M4O。
+- storage/network fixture、10 个视觉 golden 与其他固定 artifact MUST 直接用 `git diff`/`cmp` 对比 `37cdb3e`，不得用 Task 19 旧 hash 代替；若上游未改性能 baseline，则继续保持原字节。
+- 相对 `37cdb3e` 只允许 Task 2 已批准的两个新 Test 和一个 Test 重命名；其余 Test、Benchmark、Fuzz 入口 MUST 完全一致。
 - benchmark 与 `perfcheck` 的性能数值及既有阈值只保存记录，不改变退出状态；只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
 - 行数只用于发现候选；不得新增文件行数门禁，不得为了缩短文件制造单函数碎片。
 - 除 `internal/render/hud` 外不得新增内部包；若另一个候选确有独立边界，先停止并修改设计、OpenSpec 与本计划，经用户批准后再继续。
@@ -27,6 +31,7 @@
 - Go 注释、GoDoc、测试说明和文档 MUST 使用中文；原有英文协议名、wire 字段、外部 API 与 GPU label 保持原样。
 - 每项任务只提交该任务文件与对应 `openspec/.../tasks.md` checkbox；Hook 失败必须修根因，不得关闭、改写或设置豁免变量。
 - 自动验证不得启动交互式客户端；视觉验证只运行既有无窗口 capture，且不得使用 `--update-golden`。
+- Task 20 只允许逐声明解决只读 merge-tree 已确认的 13 个冲突；不得用 ours/theirs 整文件覆盖，不得复活拆分前旧大文件，不得放宽测试或更新 golden/baseline。
 
 ## File Structure
 
@@ -44,8 +49,11 @@
 - Split: `cmd/mcgo/{app.go,app_test.go,main.go,capture.go,benchmark.go,multiplayer_benchmark.go}` and their large tests by responsibility
 - Split: `cmd/perfcheck/{main.go,main_test.go}` by comparison, validation, threshold and CLI responsibility
 - Preserve: focused files not named above after explicit package audit; no mechanical rewrite of already cohesive code
+- Sync: 把 `37cdb3e` 在精确 13 个冲突路径上的上游增量迁入上述既有职责文件；不新增 `internal/render/hud` 以外的包
 
 ---
+
+以下 Task 1–19 是已完成历史计划。其 `96c4aae`、386 文件、v14/v7/v5、旧 hash 与当时未归档 M4N 的描述仅记录执行时事实；Task 20 的当前要求以文首新基线和末尾 Task 20 为准。
 
 ### Task 1: 建立 M4O OpenSpec change 与全仓审计清单
 
@@ -1631,7 +1639,7 @@ git add cmd/perfcheck openspec/changes/m4o-responsibility-oriented-code-organiza
 git commit -m "refactor: 拆分性能比较与阈值职责"
 ```
 
-### Task 19: 完成全仓审计、artifact 保真与最终门禁
+### Task 19（历史审计）: 完成全仓审计、artifact 保真与最终门禁
 
 **Files:**
 - Modify: `openspec/changes/m4o-responsibility-oriented-code-organization/design.md`
@@ -1754,3 +1762,179 @@ git commit -m "docs: 完成 M4O 全仓职责审计"
 ```
 
 保持 change active。只有用户明确要求时才 sync/archive、推送、创建 PR 或删除工作树。
+
+### Task 20: 同步 origin/main 并保持职责边界
+
+**Files:**
+- Modify: `docs/superpowers/plans/2026-08-10-m4o-responsibility-oriented-code-organization.md`
+- Modify: `openspec/changes/m4o-responsibility-oriented-code-organization/{proposal.md,design.md,tasks.md}`
+- Modify: `openspec/changes/m4o-responsibility-oriented-code-organization/specs/repository-code-organization/spec.md`
+- Merge conflicts: `cmd/mcgo/{app.go,app_test.go,capture.go}`
+- Merge conflict: `internal/gfx/wgpu.go`
+- Merge conflicts: `internal/network/{codec_test.go,message.go}`
+- Merge conflicts: `internal/render/{hotbar.go,hotbar_test.go}`
+- Merge conflicts: `internal/server/{player_persistence.go,player_persistence_test.go,tcp_integration_test.go}`
+- Merge conflicts: `internal/storage/{chunk_codec.go,chunk_codec_envelope_test.go}`
+
+**Interfaces:**
+- Consumes: Task 2–19 已完成的职责文件族，以及 `origin/main=37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa` 的上游增量。
+- Preserves: 协议 v15、区块 schema v8、玩家 schema v6、已归档 M4N、common materials、damage/target、material processing、natural generation/oak、light recipe、container-Y、10 个 capture 场景、所有固定 artifact 和测试入口。
+- Produces: 解决冲突的 merge commit、相对 `37cdb3e` 的 412 文件审计与已推送的 PR 分支；不把任何上游能力归因于 M4O。
+
+- [ ] **Step 1: 提交规划修订并冻结同步身份**
+
+本 Step 只修改上述五个规划/OpenSpec 文件，不执行 merge、不修改 Go 代码。Run:
+
+```bash
+git status --short --branch
+git rev-parse HEAD
+git rev-parse origin/main
+git merge-tree --write-tree --name-only HEAD origin/main
+git ls-tree -r --name-only 37cdb3e -- cmd internal | rg '\.go$' | wc -l
+openspec validate --all --strict --no-interactive
+git diff --check
+```
+
+Expected: `origin/main` 为 `37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa`；Go 文件为 412；merge-tree 精确列出本 Task `Files` 中的 13 个冲突；OpenSpec strict 全绿，diff 只有规划/OpenSpec。
+
+```bash
+git add docs/superpowers/plans/2026-08-10-m4o-responsibility-oriented-code-organization.md \
+  openspec/changes/m4o-responsibility-oriented-code-organization
+git commit -m "docs: 规划 M4O 主线同步冲突修复"
+```
+
+- [ ] **Step 2: 合并固定主线并停在 13 个已知冲突**
+
+```bash
+git fetch origin
+test "$(git rev-parse origin/main)" = 37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa
+git merge --no-commit origin/main
+git diff --name-only --diff-filter=U | sort
+```
+
+Expected: merge 只停在以下 13 个冲突；若主线身份或冲突集合变化，立即停止并先修订规划：
+
+```text
+cmd/mcgo/app.go
+cmd/mcgo/app_test.go
+cmd/mcgo/capture.go
+internal/gfx/wgpu.go
+internal/network/codec_test.go
+internal/network/message.go
+internal/render/hotbar.go
+internal/render/hotbar_test.go
+internal/server/player_persistence.go
+internal/server/player_persistence_test.go
+internal/server/tcp_integration_test.go
+internal/storage/chunk_codec.go
+internal/storage/chunk_codec_envelope_test.go
+```
+
+- [ ] **Step 3: 逐声明迁移上游冲突**
+
+严格按 active `design.md` 的 13 行映射手工解决：
+
+```text
+app.go/app_test.go/capture.go
+  → 现有 app_*、app_*_test.go、capture_* 文件族；保留 damage/target 与固定 10 场景
+wgpu.go
+  → wgpu_convert.go、wgpu_pipeline.go；保留 DepthCompareLessEqual
+hotbar.go/hotbar_test.go
+  → internal/render/hud 的 container/layout/atlas 及测试；保留 8 个配方
+message.go
+  → message_container.go；保留 smelting validation
+codec_test.go
+  → codec_golden_test.go、codec_inventory_test.go；保留协议 v15 golden
+player_persistence.go/player_persistence_test.go
+  → player_persistence_snapshot.go、player_persistence_lifecycle_test.go；保留 starter materials
+tcp_integration_test.go
+  → tcp_restart_integration_test.go、furnace_tcp_integration_test.go；保留 Ready barrier
+chunk_codec.go/chunk_codec_envelope_test.go
+  → chunk_codec_container.go、chunk_codec_roundtrip_test.go、chunk_codec_helpers_test.go 及精简 envelope 测试；保留 world-Y container 与 schema v8 fixture
+```
+
+不得接受任一冲突文件的整份 ours/theirs，不得恢复拆分前大文件、删除上游 case、复制实现、增加 wrapper/包/依赖、调整 schema/scenario/阈值或更新 artifact。
+
+- [ ] **Step 4: 证明声明、入口和 artifact 与新基线一致**
+
+逐包更新 active `design.md` 的 Task 20 审计，覆盖 `37cdb3e` 的全部 412 个 Go 文件，结论必须精确为 36 split + 2 extract + 0 delete + 374 keep；唯一新增包仍是 `internal/render/hud`。
+
+比较 Test/Benchmark/Fuzz 入口：
+
+```bash
+{
+  git grep -h -E '^func (Test|Benchmark|Fuzz)' 37cdb3e -- cmd internal \
+    | sed 's/(.*//' \
+    | sed 's/^func TestSessionLifecycleResponsibilitiesLiveInSessionFile$/func TestSessionLifecycleResponsibilitiesStayInSessionFiles/'
+  printf '%s\n' \
+    'func TestProductionGoSourceScansSplitFiles' \
+    'func TestTopLevelDeclarationNamesInScansSplitFiles'
+} | sort > /private/tmp/m4o-task20-symbols-expected.txt
+rg '^func (Test|Benchmark|Fuzz)' cmd internal -g '*_test.go' \
+  | sed 's/.*func /func /; s/(.*//' \
+  | sort > /private/tmp/m4o-task20-symbols-current.txt
+diff -u /private/tmp/m4o-task20-symbols-expected.txt /private/tmp/m4o-task20-symbols-current.txt
+```
+
+直接对比新主线 artifact，不沿用 Task 19 旧 hash：
+
+```bash
+git diff --exit-code 37cdb3e -- \
+  internal/storage/testdata \
+  internal/network/testdata \
+  cmd/mcgo/testdata/golden
+test "$(git ls-tree -r --name-only 37cdb3e -- cmd/mcgo/testdata/golden | rg '\.png$' | wc -l | tr -d ' ')" = 10
+git diff --exit-code 37cdb3e -- docs/notes/perf-baseline.json docs/notes/perf-baseline-m5.json
+```
+
+Expected: 入口 diff 与 artifact diff 均无输出；visual golden 精确 10 个。若上游未修改性能 baseline，上述比较同时证明其原字节不变。
+
+- [ ] **Step 5: 跑冲突域 focused、race、fuzz、视觉和性能记录**
+
+```bash
+gofmt -w cmd/mcgo internal/gfx internal/network internal/render internal/server internal/storage
+zsh -ic 'go test ./cmd/mcgo ./internal/gfx ./internal/network ./internal/render ./internal/render/hud ./internal/server ./internal/storage -race -count=1'
+zsh -ic 'go test ./cmd/mcgo -run "Damage|Target|Capture|Golden|Recipe|Material" -count=1'
+zsh -ic 'go test ./internal/gfx -run "DepthCompareLessEqual|Pipeline" -count=1'
+zsh -ic 'go test ./internal/network -run "ProtocolV15|Golden|Inventory|Container|Smelting" -count=1'
+zsh -ic 'go test ./internal/server -run "Starter|Ready|Furnace|TCPPlayer|PlayerPersistence" -count=1'
+zsh -ic 'go test ./internal/storage -run "ChunkPayload|Schema8|Container|WorldY|Fixture" -count=1'
+zsh -ic 'go test ./internal/network -run=^$ -fuzz=FuzzSmallPacketCodec -fuzztime=10s'
+zsh -ic 'go test ./internal/storage -run=^$ -fuzz=FuzzDecodeChunkPayload -fuzztime=10s'
+VISUAL_OUT=/private/tmp/mcgo-m4o-task20-visual make visual-check
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /private/tmp/mcgo-m4o-task20-current.json"
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline /private/tmp/mcgo-m4o-task20-current.json --current /private/tmp/mcgo-m4o-task20-current.json --max-regression 0.20"
+TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current /private/tmp/mcgo-m4o-task20-current.json --max-regression 0.20"
+```
+
+visual-check 只比较 10 个场景，绝不使用 `--update-golden`；性能数值只记录，不改变退出状态。只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
+
+- [ ] **Step 6: 跑最终共享门禁**
+
+```bash
+zsh -ic 'go test ./internal/archcheck -count=1'
+zsh -ic 'go test ./... -race'
+zsh -ic 'go vet ./...'
+gofmt -l .
+openspec validate --all --strict --no-interactive
+git diff --check
+```
+
+Expected: 所有命令成功，`gofmt -l .` 无输出；性能纯数值记录不改变退出状态。
+
+- [ ] **Step 7: 独立评审主线同步**
+
+独立 reviewer 必须逐项回答：13 个冲突是否全部按声明迁移；主线 v15/v8/v6 与已归档 M4N 能力是否完整；damage/target、10 场景、`DepthCompareLessEqual`、8 recipes、smelting validation、v15 golden、starter materials、Ready barrier、world-Y containers、schema8 fixtures 是否保留；是否复活旧大文件或新增包/抽象/wrapper；412 文件、入口与 artifact parity 是否完整。Critical/Important 全部关闭后才可继续。
+
+- [ ] **Step 8: 勾选、完成 merge commit 并 push**
+
+只把 active `tasks.md` 的 20.1 改为 `[x]`，确认 staged merge 精确包含主线增量、13 个冲突的职责化解决、Task 20 最终审计与 checkbox，不包含 ignored report，然后完成 merge commit 并推送当前分支：
+
+```bash
+git diff --cached --check
+git status --short
+git commit
+git push origin codex/m4o-code-organization
+```
+
+不得 archive/sync M4O、更新 golden/baseline、删除备份分支或删除 worktree；后续 PR 合并由用户另行决定。
