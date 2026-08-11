@@ -56,7 +56,7 @@
 
 ## 15. mcgo 应用测试按场景拆分
 
-- [ ] 15.1 将 `cmd/mcgo/app_test.go` 拆为 protocol/render/connection/input/celestial/helper 文件，保留 Darwin build tag、测试名、fake、timeout 和资源断言；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./internal/archcheck -count=1'`，并对比拆分前后 `func Test` 名单。
+- [x] 15.1 将 `cmd/mcgo/app_test.go` 拆为 protocol/render/connection/input/celestial/helper 文件，保留 Darwin build tag、测试名、fake、timeout 和资源断言；focused：`zsh -ic 'go test ./cmd/mcgo -race -count=1'`、`zsh -ic 'go test ./internal/archcheck -count=1'`，并对比拆分前后 `func Test` 名单。
 
 ## 16. mcgo 入口、交互与视觉 capture 拆分
 
