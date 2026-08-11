@@ -88,6 +88,7 @@
 - 程序化物品颜色的唯一实现归属 `internal/render/drop.go`：原 `hotbarItemColor` 提升为 `render.ItemColor`，掉落物与 HUD 都直接调用它；`hud/layout.go` 不拥有或复制实现，不增加 wrapper、alias、callback/config、第二包或重复实现。
 - `internal/render` 继续负责世界、天空、实体、文字和通用渲染设施。
 - HUD shader 随其唯一所有者移动，内容和渲染结果不变。
+- 跨职责的 `TestScreenSpaceRenderersIgnoreWorldDaylight` 仍留在 `internal/render/daylight_test.go`；它以 test-only `//go:embed hud/shader/hotbar.wgsl` 读取移动后的同一份唯一 shader，保留原测试名及 name tag/hotbar 断言，不复制字节、不新增生产 API 或 `render -> hud` 生产依赖，也不保留生产 wrapper。
 
 ### 5.5 命令与工具
 

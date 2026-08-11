@@ -1076,6 +1076,7 @@ git commit -m "refactor: 拆分渲染上传与绘制职责"
 - Delete: `internal/render/shader/hotbar.wgsl`
 - Modify: `internal/render/drop.go`
 - Modify: `internal/render/drop_test.go`
+- Modify: `internal/render/daylight_test.go`
 - Create: `internal/render/hud/renderer.go`
 - Create: `internal/render/hud/layout.go`
 - Create: `internal/render/hud/container.go`
@@ -1146,7 +1147,7 @@ encode.go:
   encodeHotbarViewport, encodeHotbarInstances
 ```
 
-shader 使用 `//go:embed shader/hotbar.wgsl`，文件内容必须与移动前字节相同。
+HUD 生产包使用 `//go:embed shader/hotbar.wgsl`，文件内容必须与移动前字节相同。
 
 `hud/layout.go` 不拥有或复制颜色实现；依赖保持 `hud -> render`，`internal/render` 不得导入 HUD。
 
@@ -1169,6 +1170,8 @@ helpers_test.go: inventory/container fixture 与 HUD 专用最小 gfx/glyph fake
 
 `drop_test.go` 保留全部测试名，并改为通过唯一实现 `render.ItemColor` 验证掉落物与 HUD 的程序化颜色一致。
 
+`daylight_test.go` 保留 `TestScreenSpaceRenderersIgnoreWorldDaylight` 名称以及既有 name tag/hotbar 断言。删除生产包原 `hotbarShader` 后，在该测试文件增加最小 embed import、test-only `//go:embed hud/shader/hotbar.wgsl` 与测试变量，读取移动后的同一份唯一 shader；不得复制 shader 字节、导出生产 helper、让 `internal/render` 生产包 import HUD，或保留生产 `hotbarShader` wrapper。
+
 - [ ] **Step 5: 验证 shader、颜色、视觉与依赖方向并提交**
 
 先记录旧 shader hash，再比较移动后 hash：
@@ -1181,9 +1184,9 @@ shasum -a 256 internal/render/hud/shader/hotbar.wgsl
 Run:
 
 ```bash
-gofmt -w internal/render/drop.go internal/render/drop_test.go internal/render/hud cmd/mcgo/app.go cmd/mcgo/app_test.go internal/archcheck
+gofmt -w internal/render/drop.go internal/render/drop_test.go internal/render/daylight_test.go internal/render/hud cmd/mcgo/app.go cmd/mcgo/app_test.go internal/archcheck
 zsh -ic 'go test ./internal/render ./internal/render/hud ./cmd/mcgo -race -count=1'
-zsh -ic 'go test ./internal/render -run "ItemDropColors|ItemDropColor" -count=1'
+zsh -ic 'go test ./internal/render -run "ItemDropColors|ItemDropColor|ScreenSpaceRenderersIgnoreWorldDaylight" -count=1'
 zsh -ic 'go test ./internal/render/hud -run "Hotbar|Inventory|Furnace|Chest|Health|Recipe" -count=1'
 zsh -ic 'go test ./internal/archcheck -race -count=1'
 VISUAL_OUT=/private/tmp/mcgo-m4o-hud-visual make visual-check
@@ -1191,7 +1194,7 @@ gofmt -l internal/render cmd/mcgo internal/archcheck
 git diff --check
 ```
 
-Expected: `render.ItemColor` 是唯一颜色实现，`hud -> render` 单向且 `render` 不依赖 `hud`；两个 shader hash 相同，颜色与 visual golden 不变；visual-check 只比较、不更新 golden。
+Expected: `render.ItemColor` 是唯一颜色实现，`hud -> render` 单向且 `render` 生产包不依赖 `hud`；`TestScreenSpaceRenderersIgnoreWorldDaylight` 名称及 name tag/hotbar 断言不变，daylight 测试只 embed 移动后的唯一 shader；两个 shader hash 相同，颜色与 visual golden 不变；visual-check 只比较、不更新 golden。
 
 ```bash
 git add internal/render cmd/mcgo/app.go cmd/mcgo/app_test.go internal/archcheck openspec/changes/m4o-responsibility-oriented-code-organization/tasks.md

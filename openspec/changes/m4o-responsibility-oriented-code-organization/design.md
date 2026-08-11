@@ -63,7 +63,7 @@
 | 10 | 服务端集成测试 | `tcp_integration_test.go`、`host_test.go`、`multiplayer_tcp_integration_test.go`、`multiplayer_memory_integration_test.go` → TCP restart/parity/furnace、Host capacity/lifecycle、多人 gameplay/capacity/mining/cancel 场景文件及 helper |
 | 11 | client mesher/predictor | `mesher.go`、`predictor.go`、`predictor_test.go` → mesher worker/queue、predictor advance/reconcile/presentation 及对应测试/helper |
 | 12 | Renderer | 核心 lifecycle 保留在 `renderer.go`；仅将 upload、draw 拆到 `renderer_upload.go`、`renderer_draw.go` |
-| 13 | 完整 HUD | `internal/render/hotbar.go`、测试和 shader → `internal/render/hud/{renderer,layout,container,health,atlas,encode}.go`、对应测试与 shader；把共享颜色的唯一实现提升为 `internal/render/drop.go` 中的 `render.ItemColor`，同步 `drop_test.go`，迁移 `cmd/mcgo` 调用方并更新依赖白名单 |
+| 13 | 完整 HUD | `internal/render/hotbar.go`、测试和 shader → `internal/render/hud/{renderer,layout,container,health,atlas,encode}.go`、对应测试与 shader；把共享颜色的唯一实现提升为 `internal/render/drop.go` 中的 `render.ItemColor`，同步 `drop_test.go`；`daylight_test.go` 以 test-only embed 读取移动后的同一份 shader；迁移 `cmd/mcgo` 调用方并更新依赖白名单 |
 | 14 | mcgo 应用装配 | `cmd/mcgo/app.go` → `app_{dependencies,metrics,startup,lifecycle,frame,messages,input,render}.go` |
 | 15 | mcgo 应用测试 | `app_test.go` → `app_{protocol,render,connection,input,celestial,test_helpers}_test.go` |
 | 16 | mcgo 入口与 capture | `main.go`/`main_test.go` → options、run、interactive；`capture.go`/`capture_test.go` → scene、image 生产与测试文件 |
@@ -74,6 +74,8 @@
 ### 默认同包拆分，唯一 HUD 提包
 
 共享包内权威状态的职责留在原包，避免协调接口、循环依赖和类型搬迁。唯一新包 `internal/render/hud` 只允许依赖 `internal/core`、`internal/mesh`、`internal/assets`、`internal/render`、`internal/gfx`；`internal/render` 不得反向依赖 HUD。程序化物品颜色的唯一实现从 `hotbarItemColor` 提升为 `internal/render/drop.go` 中的窄内部 API `render.ItemColor`，掉落物与 HUD 都直接调用它；`hud/layout.go` 不拥有或复制颜色实现，也不引入 wrapper、alias、callback/config、第二包或重复实现。只有 `internal/gfx` 可以直接导入 WebGPU 绑定，`sim` 不依赖渲染，`world` 不依赖 `network`。
+
+跨职责测试 `TestScreenSpaceRenderersIgnoreWorldDaylight` 继续留在 `internal/render/daylight_test.go` 并保留 name tag 与 hotbar 两项断言。HUD shader 移动后，该 `_test.go` 文件通过 test-only `//go:embed hud/shader/hotbar.wgsl` 读取同一份唯一 shader；这不复制 shader 字节、不新增生产 API、不让 `internal/render` 生产包导入 HUD，也不保留生产 `hotbarShader` wrapper。
 
 被否决的替代方案是全面领域拆包、只做机械拆文件和新增文件行数门禁：前者扩大 API 与循环风险，第二项遗漏已稳定成域的 HUD，第三项鼓励无意义碎片化。
 
@@ -97,6 +99,7 @@
 - [架构守卫继续绑定旧文件名] → Task 2 先改为扫描生产文件集合与 `session*.go`，不得删除或放宽断言。
 - [HUD 形成反向依赖] → 白名单只登记 HUD 到既有底层包的依赖，并由 archcheck 拒绝 `internal/render` 反向导入。
 - [共享颜色出现重复实现或漂移] → `render.ItemColor` 是 `internal/render/drop.go` 中的唯一实现，掉落物与 HUD 共用它；focused 掉落物测试与视觉 golden 同时验证颜色不变。
+- [HUD 迁移断开跨职责昼夜测试] → `daylight_test.go` 仅在测试构建中 embed 移动后的唯一 shader，保持原测试名以及 name tag/hotbar 断言，并比较移动前后 hash。
 - [build tag 或 CGO 边界损坏] → 保留原 tag，运行 Darwin focused 测试、archcheck 与无图形服务端构建。
 - [性能或固定 artifact 漂移] → 对比既有 hash、visual capture、benchmark 与 baseline；不得改期望值掩盖差异。
 - [无意义碎片化] → 以职责为单位拆分，未点名且内聚的文件 keep，不设置行数门禁。
