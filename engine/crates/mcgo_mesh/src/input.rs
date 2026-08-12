@@ -24,15 +24,19 @@ pub(crate) struct MeshInput<'a> {
 
 impl<'a> MeshInput<'a> {
     pub(crate) fn parse(input: &'a [u8]) -> Result<Self, InputError> {
-        Self::parse_inner(input, true)
+        let parsed = Self::parse_structural(input)?;
+        parsed.validate_registry(true)?;
+        Ok(parsed)
     }
 
     #[cfg(test)]
     pub(crate) fn parse_allowing_overbright(input: &'a [u8]) -> Result<Self, InputError> {
-        Self::parse_inner(input, false)
+        let parsed = Self::parse_structural(input)?;
+        parsed.validate_registry(false)?;
+        Ok(parsed)
     }
 
-    fn parse_inner(input: &'a [u8], reject_overbright: bool) -> Result<Self, InputError> {
+    pub(crate) fn parse_structural(input: &'a [u8]) -> Result<Self, InputError> {
         if input.len() < 16 || &input[0..4] != b"MGM1" {
             return Err(InputError::Input);
         }
@@ -80,10 +84,6 @@ impl<'a> MeshInput<'a> {
         };
         let air_id = read_u16(input, 12);
         let barrier_id = read_u16(input, 14);
-        if air_id == barrier_id {
-            return Err(InputError::Registry);
-        }
-        registry.validate(air_id, barrier_id, reject_overbright)?;
 
         Ok(Self {
             section_origin_y: read_i32(input, 4),
@@ -94,6 +94,14 @@ impl<'a> MeshInput<'a> {
             heights: &input[present_end..heights_end],
             registry,
         })
+    }
+
+    pub(crate) fn validate_registry(&self, reject_overbright: bool) -> Result<(), InputError> {
+        if self.air_id == self.barrier_id {
+            return Err(InputError::Registry);
+        }
+        self.registry
+            .validate(self.air_id, self.barrier_id, reject_overbright)
     }
 
     pub(crate) fn block(&self, x: i32, y: i32, z: i32) -> u16 {

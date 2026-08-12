@@ -150,7 +150,7 @@ pub unsafe extern "C" fn mcgo_mesh_section(
     catch_and_publish(published, || {
         // SAFETY: input 非空，范围不超过 isize::MAX 且地址加法不回绕；调用方声明其可读。
         let bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
-        let input = MeshInput::parse(bytes).map_err(|error| match error {
+        let input = MeshInput::parse_structural(bytes).map_err(|error| match error {
             InputError::Input => MCGO_STATUS_INPUT,
             InputError::Registry => MCGO_STATUS_REGISTRY,
             InputError::Emission => MCGO_STATUS_EMISSION,
@@ -158,6 +158,11 @@ pub unsafe extern "C" fn mcgo_mesh_section(
         if center_is_air(&input) {
             return Ok(0);
         }
+        input.validate_registry(true).map_err(|error| match error {
+            InputError::Input => MCGO_STATUS_INPUT,
+            InputError::Registry => MCGO_STATUS_REGISTRY,
+            InputError::Emission => MCGO_STATUS_EMISSION,
+        })?;
         // SAFETY: scratch 在进入 catch_unwind 前已通过对齐、长度和地址范围检查。
         let mut scratch = unsafe { light_scratch_from_raw(scratch) };
         build_light(&input, &input.registry, &mut scratch).map_err(|error| match error {
@@ -250,6 +255,97 @@ mod tests {
         };
 
         assert_eq!(status, MCGO_STATUS_OK);
+        assert_eq!(output_len, 0);
+        assert!(scratch.iter().all(|&word| word == 0xa5a5_a5a5));
+    }
+
+    #[test]
+    fn uniform_air_skips_unused_registry_semantics_and_light() {
+        const BLOCKS_OFFSET: usize = 16;
+        const BLOCKS_BYTES: usize = 27 * 4096 * 2;
+        const REGISTRY_OFFSET: usize = BLOCKS_OFFSET + BLOCKS_BYTES + 9 + 9 * 256 * 2;
+        let mut base = valid_input();
+        base[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].fill(0);
+        base[BLOCKS_OFFSET..BLOCKS_OFFSET + 2].copy_from_slice(&40000_u16.to_le_bytes());
+
+        let cases = [
+            ("overbright", {
+                let mut input = base.clone();
+                input[REGISTRY_OFFSET + 2 * 16 + 3] = 16;
+                input
+            }),
+            ("bad opacity", {
+                let mut input = base.clone();
+                input[REGISTRY_OFFSET + 2] = 2;
+                input
+            }),
+            ("duplicate id", {
+                let mut input = base.clone();
+                input[REGISTRY_OFFSET + 16..REGISTRY_OFFSET + 18]
+                    .copy_from_slice(&0_u16.to_le_bytes());
+                input
+            }),
+            ("same air and barrier", {
+                let mut input = base.clone();
+                input[14..16].copy_from_slice(&0_u16.to_le_bytes());
+                input
+            }),
+            ("missing barrier", {
+                let mut input = base;
+                input[REGISTRY_OFFSET + 16..REGISTRY_OFFSET + 18]
+                    .copy_from_slice(&2_u16.to_le_bytes());
+                input
+            }),
+        ];
+
+        for (name, input) in cases {
+            let mut scratch = vec![0xa5a5_a5a5_u32; (48 * 48 * 48 * 5) / 4];
+            let mut output = vec![0_u64; 6 * 4096];
+            let mut output_len = usize::MAX;
+            let status = unsafe {
+                mcgo_mesh_section(
+                    1,
+                    input.as_ptr(),
+                    input.len(),
+                    scratch.as_mut_ptr().cast(),
+                    scratch.len() * 4,
+                    output.as_mut_ptr(),
+                    output.len(),
+                    &mut output_len,
+                )
+            };
+
+            assert_eq!(status, MCGO_STATUS_OK, "{name}");
+            assert_eq!(output_len, 0, "{name}");
+            assert!(scratch.iter().all(|&word| word == 0xa5a5_a5a5), "{name}");
+        }
+    }
+
+    #[test]
+    fn uniform_air_still_rejects_structural_presence_error() {
+        const BLOCKS_OFFSET: usize = 16;
+        const BLOCKS_BYTES: usize = 27 * 4096 * 2;
+        let mut input = valid_input();
+        input[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].fill(0);
+        input[BLOCKS_OFFSET + BLOCKS_BYTES] = 2;
+        let mut scratch = vec![0xa5a5_a5a5_u32; (48 * 48 * 48 * 5) / 4];
+        let mut output = vec![0_u64; 6 * 4096];
+        let mut output_len = usize::MAX;
+
+        let status = unsafe {
+            mcgo_mesh_section(
+                1,
+                input.as_ptr(),
+                input.len(),
+                scratch.as_mut_ptr().cast(),
+                scratch.len() * 4,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+
+        assert_eq!(status, MCGO_STATUS_INPUT);
         assert_eq!(output_len, 0);
         assert!(scratch.iter().all(|&word| word == 0xa5a5_a5a5));
     }
