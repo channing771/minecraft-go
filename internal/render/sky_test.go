@@ -320,6 +320,23 @@ func skyCameraAt(position, direction mgl32.Vec3, phase uint64) Camera {
 	}
 }
 
+func BenchmarkSkyRender(b *testing.B) {
+	device := &skyTestDevice{}
+	renderer := newRenderer(device, assets.NewRegistry(), gfx.FormatRGBA8Unorm, 16, 1024, 4)
+	b.Cleanup(renderer.Release)
+	for _, buffer := range device.buffers {
+		buffer.discardWrites = true
+	}
+	encoder := &skyTestEncoder{discardCommands: true}
+	camera := skyCameraAt(mgl32.Vec3{115, 64, -152}, mgl32.Vec3{0, 1, 0}, 6000)
+	renderer.Render(encoder, nil, nil, camera)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		renderer.Render(encoder, nil, nil, camera)
+	}
+}
+
 func renderSkyHeadless(t *testing.T, device gfx.Device, renderer *Renderer, camera Camera) []byte {
 	t.Helper()
 	color := device.CreateTexture(gfx.TextureDesc{
@@ -655,13 +672,17 @@ func (device *skyTestDevice) bindGroup(t *testing.T, label string) *skyTestBindG
 }
 
 type skyTestBuffer struct {
-	desc     gfx.BufferDesc
-	writes   [][]byte
-	releases int
+	desc          gfx.BufferDesc
+	writes        [][]byte
+	discardWrites bool
+	releases      int
 }
 
 func (buffer *skyTestBuffer) Size() uint64 { return buffer.desc.Size }
 func (buffer *skyTestBuffer) Write(_ uint64, data []byte) {
+	if buffer.discardWrites {
+		return
+	}
 	buffer.writes = append(buffer.writes, append([]byte(nil), data...))
 }
 func (*skyTestBuffer) ReadBack() []byte { panic("unexpected readback") }
@@ -710,10 +731,16 @@ type skyTestSampler struct{ releases int }
 func (sampler *skyTestSampler) Release() { sampler.releases++ }
 
 type skyTestEncoder struct {
-	passes []*skyTestPass
+	passes          []*skyTestPass
+	discardCommands bool
+	discardPass     skyTestPass
 }
 
 func (encoder *skyTestEncoder) BeginRenderPass(gfx.RenderPassDesc) gfx.RenderPass {
+	if encoder.discardCommands {
+		encoder.discardPass.discardCommands = true
+		return &encoder.discardPass
+	}
 	pass := &skyTestPass{}
 	encoder.passes = append(encoder.passes, pass)
 	return pass
@@ -725,11 +752,15 @@ func (*skyTestEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64
 func (*skyTestEncoder) Finish() gfx.CommandBuffer { panic("unexpected finish") }
 
 type skyTestPass struct {
-	commands []string
-	current  string
+	commands        []string
+	current         string
+	discardCommands bool
 }
 
 func (pass *skyTestPass) SetPipeline(pipeline gfx.RenderPipeline) {
+	if pass.discardCommands {
+		return
+	}
 	pass.current = pipeline.(*skyTestRenderPipeline).desc.Label
 	pass.commands = append(pass.commands, "pipeline:"+pass.current)
 }
@@ -738,9 +769,15 @@ func (*skyTestPass) SetBindGroup(uint32, gfx.BindGroup)         {}
 func (*skyTestPass) SetVertexBuffer(uint32, gfx.Buffer, uint64) {}
 func (*skyTestPass) SetIndexBuffer(gfx.Buffer, uint64)          {}
 func (pass *skyTestPass) DrawIndexedIndirect(gfx.Buffer, uint64) {
+	if pass.discardCommands {
+		return
+	}
 	pass.commands = append(pass.commands, "draw:"+pass.current+":indirect")
 }
 func (pass *skyTestPass) Draw(vertices, instances uint32) {
+	if pass.discardCommands {
+		return
+	}
 	pass.commands = append(pass.commands, fmt.Sprintf("draw:%s:%d:%d", pass.current, vertices, instances))
 }
 func (*skyTestPass) End() {}
