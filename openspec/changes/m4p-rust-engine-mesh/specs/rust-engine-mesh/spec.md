@@ -37,12 +37,13 @@
 - **AND** light scratch MUST 保持不变
 
 ### Requirement: clean checkout 使用 Rust-first 构建
-系统 MUST 通过 canonical Make、CI 与 Hook 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust `cdylib`；workspace MUST 仅含 `mcgo_mesh`，并且该 crate 的 normal dependency MUST 只使用 `std`。
+系统 MUST 通过 canonical Make、CI 与 Hook 从 `engine/` workspace root 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust `cdylib`；workspace MUST 仅含 `mcgo_mesh`，并且该 crate 的 normal dependency MUST 只使用 `std`。
 
 #### Scenario: 无预编译 artifact 的构建
 - **GIVEN** clean checkout 不含 Cargo target 或 native library
 - **WHEN** 运行 `make test-race`
-- **THEN** 系统 MUST 先以 Rust 1.97.1 执行 `cargo build --locked --release`，再执行 Go race tests
+- **THEN** 系统 MUST 先在 `engine/` 目录中以 Rust 1.97.1 执行 `cargo build --locked --release`，再执行 Go race tests
+- **AND** `cd engine && rustup show active-toolchain` MUST 报告 `1.97.1` directory override
 - **AND** `cargo metadata --no-deps --format-version 1 --manifest-path engine/Cargo.toml` MUST 只报告 workspace member `mcgo_mesh`
 - **AND** `cargo tree --manifest-path engine/Cargo.toml --workspace --edges normal` MUST 只含 workspace root，且不得报告第三方 dependency
 

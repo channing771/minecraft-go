@@ -19,7 +19,7 @@
 
 ### Rust 仅拥有确定性 mesh/light 算法
 
-`engine/rust-toolchain.toml` 必须固定 Rust 1.97.1。新增且仅新增一个 `engine/crates/mcgo_mesh` crate，输出 `cdylib`；它不得引入第三方 Rust dependency，只使用 `std`。Go 的 `internal/mesh` 继续持有对外入口；只有该包 native bridge 接触 C ABI，`internal/client`、`internal/render` 和 `cmd/` 不直接调用 Rust 符号。Rust 接管贪心网格、AO、天空光和静态方块光，旧 Go 实现移动为 test-only oracle。
+`engine/rust-toolchain.toml` 必须固定 Rust 1.97.1。所有 canonical Make、Hook 与 CI Cargo/Rust 身份命令都从 `engine/` workspace root 执行，使 rustup 的目录 override 生效；不得依赖仓库根目录的 floating default toolchain 恰好同版。新增且仅新增一个 `engine/crates/mcgo_mesh` crate，输出 `cdylib`；它不得引入第三方 Rust dependency，只使用 `std`。Go 的 `internal/mesh` 继续持有对外入口；只有该包 native bridge 接触 C ABI，`internal/client`、`internal/render` 和 `cmd/` 不直接调用 Rust 符号。Rust 接管贪心网格、AO、天空光和静态方块光，旧 Go 实现移动为 test-only oracle。
 
 选择 `cdylib` 是既有 WebGPU 链接边界的必要结果：WebGPU native archive 已静态包含 Rust 1.91.1 `std`，而 M4P 固定 Rust 1.97.1；把第二个包含 `std` 的 Rust `staticlib` 拉进同一 Go 可执行文件会产生重复的 `_rust_eh_personality`，即使移除 `catch_unwind` 或改为 `panic=abort` 仍不能链接。`cdylib` 隔离两套 Rust runtime，并保留 panic 到稳定 ABI status 的原子映射；不得用允许重复符号、重命名 runtime symbol 或删除 panic 边界掩盖冲突。
 
@@ -47,7 +47,7 @@ ABI 显式区分 ABI 版本、input/scratch 长度、非法 registry snapshot、
 
 ### canonical 构建先锁定 Rust 再验证 Go
 
-`engine/rust-toolchain.toml` 固定 Rust 1.97.1。`make build`、`make test` 与 `make test-race` 先执行精确命令 `cargo build --locked --release`，再执行对应 Go 命令；CI 与共享 Hook 使用同一构建步骤。native 产物写入 ignored 目录，不提交 `.dylib` 或 Cargo `target/`。清洁 checkout 可用 canonical 入口重建；已构建后仍可直接运行 focused Go tests。
+`engine/rust-toolchain.toml` 固定 Rust 1.97.1。`make build`、`make test` 与 `make test-race` 先在 `engine/` 中执行精确命令 `cargo build --locked --release`，再执行对应 Go 命令；CI 的工具链身份检查也在 `engine/` 中运行，共享 Hook 复用同一 Make 构建/检查步骤。native 产物写入 ignored 目录，不提交 `.dylib` 或 Cargo `target/`。清洁 checkout 可用 canonical 入口重建；已构建后仍可直接运行 focused Go tests。
 
 `mcgo_mesh` build script 仅在 macOS 为 `libmcgo_mesh.dylib` 写入 `@rpath/libmcgo_mesh.dylib` install name。cgo bridge 写入 Cargo `target/release` 的绝对 runpath，供 `go test`、`go run` 和开发构建使用；`make build` 另外把 `@loader_path` 写入最终客户端并把 dylib 复制到 `bin/mcgo` 同目录。移开 `engine/target` 后，`bin/mcgo` 仍必须能由 dyld 加载并进入 Go 参数解析。普通 Go 命令不得依赖 `CGO_LDFLAGS_ALLOW` 等额外环境变量。M4P 不新增 `.app`、安装器或发布签名流程。
 

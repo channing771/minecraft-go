@@ -6,7 +6,7 @@
 
 **Architecture:** Go 继续暂时持有应用和世界状态，把一个 `world.Neighborhood` 与不可变 registry snapshot 编成版本化小端字节块；每个 section 经一次 C ABI 调用进入无全局状态的 Rust `mcgo_mesh` `cdylib`。Go 拥有 input、scratch 和 packed-output 缓冲，Rust 只在调用期间借用；旧 Go 算法仅编译进测试作为逐位 oracle。
 
-**Tech Stack:** Go 1.26、Rust 1.97.1 edition 2024、Cargo workspace、C ABI/cgo、Make、GitHub Actions、OpenSpec 1.7.0。
+**Tech Stack:** Go 1.26、Rust 1.97.1 edition 2024、Cargo workspace、C ABI/cgo、Make、GitHub Actions、OpenSpec 1.7.0。所有 canonical Cargo 命令从 `engine/` workspace root 执行，使 `engine/rust-toolchain.toml` 的 directory override 真正生效。
 
 ## Global Constraints
 
@@ -1205,18 +1205,19 @@ Run `node --test scripts/agent-hooks/guard.test.mjs`; expected FAIL for missing 
 Use prerequisites, not duplicated recipes. Ordinary Go commands use the Cargo target runpath from `native_abi.go`; only the local binary build adds `@loader_path`, so no command needs `CGO_LDFLAGS_ALLOW`:
 
 ```make
-RUST_DYLIB := engine/target/release/libmcgo_mesh.dylib
+RUST_DIR := engine
+RUST_DYLIB := $(RUST_DIR)/target/release/libmcgo_mesh.dylib
 MCGO_DYLIB := bin/libmcgo_mesh.dylib
 
 .PHONY: rust rust-check test-race
 
 rust:
-	$(CARGO) build --manifest-path $(RUST_MANIFEST) --locked --release
+	cd $(RUST_DIR) && $(CARGO) build --locked --release
 
 rust-check:
-	$(CARGO) fmt --manifest-path $(RUST_MANIFEST) --check
-	$(CARGO) clippy --manifest-path $(RUST_MANIFEST) --workspace --all-targets -- -D warnings
-	$(CARGO) test --manifest-path $(RUST_MANIFEST) --workspace --locked
+	cd $(RUST_DIR) && $(CARGO) fmt --check
+	cd $(RUST_DIR) && $(CARGO) clippy --workspace --all-targets -- -D warnings
+	cd $(RUST_DIR) && $(CARGO) test --workspace --locked
 
 run test test-multiplayer bench-multiplayer visual-check visual-update: rust
 build: rust
@@ -1246,10 +1247,10 @@ Tighten the existing `archcheck` shell assertion to include `internal/mesh`:
 
 `rustValidationRequired` returns true for `engine/**/*.rs`, Cargo files, `engine/include/mcgo_engine.h`, `internal/mesh/native*.go`, `internal/mesh/registry.go`, Makefile, or CI changes.
 
-In Stop handling:
+In Stop handling, reuse Make so Cargo runs from `engine/` under the pinned directory override:
 
 1. If any changed Go file or `rustValidationRequired(paths)`, run `make rust` before archcheck/test/vet.
-2. If `rustValidationRequired(paths)`, also run `cargo fmt --check`, clippy `-D warnings`, and cargo test.
+2. If `rustValidationRequired(paths)`, also run `make rust-check` (Cargo fmt, clippy `-D warnings`, and cargo test from `engine/`).
 3. If Rust changed without Go files, still run `go test ./internal/mesh ./internal/client -race -count=1` after `make rust`.
 4. Preserve all existing OpenSpec, gofmt, archcheck and vet checks; do not add an escape variable.
 
@@ -1262,6 +1263,7 @@ After checkout/setup-go/setup-node, add:
 ```yaml
       - name: Rust 工具链身份
         run: |
+          cd engine
           rustup show active-toolchain
           rustc --version
           cargo --version
