@@ -1,11 +1,48 @@
 package mesh
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/world"
 )
+
+func TestMeshSectionRejectsNativeABIMismatch(t *testing.T) {
+	n := fullyLoadedAirNeighborhood()
+	n.Center.Blocks.Set(8, 8, 8, core.StoneID)
+	scratch := NewLightScratch()
+	defer func() {
+		if recovered := recover(); recovered == nil || !strings.Contains(fmt.Sprint(recovered), "ABI") {
+			t.Fatalf("recovered=%v，想要 ABI mismatch panic", recovered)
+		}
+	}()
+	meshSectionNativeVersionForTest(n, internalTestRegistry{}, scratch, nativeABIVersionCurrent+1)
+}
+
+func TestNativeStatusPanicText(t *testing.T) {
+	tests := []struct {
+		status nativeStatus
+		want   string
+	}{
+		{nativeStatusABIVersion, "mesh: native ABI 版本不匹配"},
+		{nativeStatusInvalidArgument, "mesh: native 参数非法"},
+		{nativeStatusInput, "mesh: native 输入非法"},
+		{nativeStatusScratch, "mesh: native scratch 非法"},
+		{nativeStatusRegistry, "mesh: registry snapshot 非法"},
+		{nativeStatusEmission, "mesh: 方块发光等级超过 15"},
+		{nativeStatusOutputOverflow, "mesh: 四边形输出溢出"},
+		{nativeStatusQueueOverflow, "mesh: 光照内部队列溢出"},
+		{nativeStatusPanic, "mesh: Rust 网格内部 panic"},
+		{nativeStatus(99), "mesh: native 返回未知状态"},
+	}
+	for _, tt := range tests {
+		if got := nativeStatusPanicText(tt.status); got != tt.want {
+			t.Fatalf("status=%d panic=%q，想要 %q", tt.status, got, tt.want)
+		}
+	}
+}
 
 type internalTestRegistry struct{}
 
@@ -23,6 +60,19 @@ func (internalTestRegistry) Emission(id world.BlockID) uint8 {
 	return 0
 }
 
+func (r internalTestRegistry) MeshSnapshot() RegistrySnapshot {
+	snapshot, err := BuildRegistrySnapshot([]world.BlockID{
+		core.AirID,
+		core.BarrierID,
+		core.StoneID,
+		core.LightBlockID,
+	}, r)
+	if err != nil {
+		panic(err)
+	}
+	return snapshot
+}
+
 type countingRegistry struct {
 	opaqueQueries   int
 	emissionQueries int
@@ -37,6 +87,16 @@ func (overbrightRegistry) Emission(id world.BlockID) uint8 {
 	return 0
 }
 
+func (overbrightRegistry) MeshSnapshot() RegistrySnapshot {
+	snapshot := (internalTestRegistry{}).MeshSnapshot()
+	for i := range snapshot.Blocks {
+		if snapshot.Blocks[i].ID == core.LightBlockID {
+			snapshot.Blocks[i].Emission = 16
+		}
+	}
+	return snapshot
+}
+
 func (r *countingRegistry) Opaque(world.BlockID) bool {
 	r.opaqueQueries++
 	return false
@@ -47,6 +107,10 @@ func (*countingRegistry) Material(world.BlockID, Face) uint16           { return
 func (r *countingRegistry) Emission(world.BlockID) uint8 {
 	r.emissionQueries++
 	return 0
+}
+
+func (*countingRegistry) MeshSnapshot() RegistrySnapshot {
+	panic("countingRegistry.MeshSnapshot 不应被调用")
 }
 
 func fullyLoadedAirNeighborhood() *world.Neighborhood {
@@ -69,32 +133,6 @@ func fullyLoadedAirNeighborhood() *world.Neighborhood {
 	return n
 }
 
-func TestLightScratchExactCapacityAndStableBuildDoesNotAllocate(t *testing.T) {
-	if got, want := len(new(LightScratch).levels), 48*48*48; got != want {
-		t.Fatalf("levels=%d，想要 %d", got, want)
-	}
-	if got, want := len(new(LightScratch).queue), 48*48*48; got != want {
-		t.Fatalf("queue=%d，想要 %d", got, want)
-	}
-	n := fullyLoadedAirNeighborhood()
-	scratch := NewLightScratch()
-	scratch.build(n, internalTestRegistry{})
-	if got := testing.AllocsPerRun(100, func() { scratch.build(n, internalTestRegistry{}) }); got != 0 {
-		t.Fatalf("稳定传播分配=%v，想要 0", got)
-	}
-}
-
-func TestLightScratchDoesNotSampleSettledNeighbors(t *testing.T) {
-	n := fullyLoadedAirNeighborhood()
-	reg := new(countingRegistry)
-
-	NewLightScratch().build(n, reg)
-
-	if got, want := reg.opaqueQueries, lightVolume; got != want {
-		t.Fatalf("稳定全直射输入的不透明查询=%d，想要仅种子扫描的 %d", got, want)
-	}
-}
-
 func TestMeshSectionSkipsSingleAirWork(t *testing.T) {
 	n := fullyLoadedAirNeighborhood()
 	reg := new(countingRegistry)
@@ -107,70 +145,22 @@ func TestMeshSectionSkipsSingleAirWork(t *testing.T) {
 	}
 }
 
-func fillSection(section *world.Section, id world.BlockID) {
-	for y := 0; y < core.SectionSize; y++ {
-		for z := 0; z < core.SectionSize; z++ {
-			for x := 0; x < core.SectionSize; x++ {
-				section.Blocks.Set(x, y, z, id)
-			}
+func TestMeshSectionNilScratchPanicsBeforeUniformAirFastPath(t *testing.T) {
+	defer func() {
+		if recovered := recover(); fmt.Sprint(recovered) != "mesh: nil light scratch" {
+			t.Fatalf("recovered=%v，想要 mesh: nil light scratch", recovered)
 		}
-	}
-}
-
-func TestLightScratchWorstCaseMultipleSourcesFitsExactQueue(t *testing.T) {
-	n := fullyLoadedAirNeighborhood()
-	fillSection(n.Center, core.LightBlockID)
-	for dx := range n.Around {
-		for dy := range n.Around[dx] {
-			for dz, section := range n.Around[dx][dy] {
-				if dx == 1 && dy == 1 && dz == 1 {
-					continue
-				}
-				fillSection(section, core.LightBlockID)
-			}
-		}
-	}
-
-	scratch := NewLightScratch()
-	scratch.build(n, internalTestRegistry{})
-	if got, want := scratch.tail, 48*48*48; got != want {
-		t.Fatalf("全邻域多光源入队=%d，想要精确容量 %d", got, want)
-	}
-}
-
-func TestLightScratchBuildScansEachCellOnceForEmission(t *testing.T) {
-	n := fullyLoadedAirNeighborhood()
-	reg := new(countingRegistry)
-
-	NewLightScratch().build(n, reg)
-
-	if got, want := reg.emissionQueries, 48*48*48; got != want {
-		t.Fatalf("Emission 扫描=%d，想要精确 %d", got, want)
-	}
-}
-
-func TestLightScratchReusesQueueBetweenSkyAndBlockPasses(t *testing.T) {
-	n := fullyLoadedAirNeighborhood()
-	n.Center.Blocks.Set(8, 8, 8, core.LightBlockID)
-	scratch := NewLightScratch()
-
-	scratch.build(n, internalTestRegistry{})
-
-	if got, want := scratch.tail, 4089; got != want {
-		t.Fatalf("方块光 pass 入队=%d，想要复用清空后的队列得到 %d", got, want)
-	}
-	if got := scratch.at(9, 8, 8) & 0x0f; got != 14 {
-		t.Fatalf("光源相邻方块光=%d，想要 14", got)
-	}
+	}()
+	MeshSection(fullyLoadedAirNeighborhood(), internalTestRegistry{}, nil)
 }
 
 func TestLightScratchRejectsEmissionAboveFifteen(t *testing.T) {
 	n := fullyLoadedAirNeighborhood()
 	n.Center.Blocks.Set(8, 8, 8, core.LightBlockID)
 	defer func() {
-		if recovered := recover(); recovered == nil {
-			t.Fatal("Emission=16 未触发 panic")
+		if recovered := recover(); fmt.Sprint(recovered) != "mesh: 方块发光等级超过 15" {
+			t.Fatalf("recovered=%v，想要 mesh: 方块发光等级超过 15", recovered)
 		}
 	}()
-	NewLightScratch().build(n, overbrightRegistry{})
+	MeshSection(n, overbrightRegistry{}, NewLightScratch())
 }

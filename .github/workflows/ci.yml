@@ -16,6 +16,19 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Rust 工具链身份
+        run: |
+          cd engine
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
+
+      - name: Rust 格式、静态检查与单测
+        run: make rust-check
+
+      - name: 构建 Rust cdylib
+        run: make rust
+
       - name: OpenSpec 规格门禁
         run: npx --yes @fission-ai/openspec@1.7.0 validate --all --strict --no-interactive
 
@@ -38,7 +51,9 @@ jobs:
         run: go test ./internal/client ./internal/server ./cmd/mcgo ./cmd/perfcheck -run 'Test(PerfReportV6|ScenarioV6|PerfcheckV6|PerfcheckV5SameScenario|PerformanceThresholds|InterestObserver|HostStats|BenchmarkServerEpoch|BenchmarkServerMeasuredWindow)' -count=1
 
       - name: 构建无图形专用服务端
-        run: CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod
+        run: |
+          CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod
+          test -z "$(CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/mcgod | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
 
       - name: 静态检查
         run: |

@@ -25,6 +25,22 @@ func (testRegistry) Emission(id world.BlockID) uint8 {
 	return 0
 }
 
+func (r testRegistry) MeshSnapshot() mesh.RegistrySnapshot {
+	snapshot, err := mesh.BuildRegistrySnapshot([]world.BlockID{
+		core.AirID,
+		core.BarrierID,
+		core.StoneID,
+		core.DirtID,
+		core.GrassID,
+		core.StoneBrickID,
+		core.LightBlockID,
+	}, r)
+	if err != nil {
+		panic(err)
+	}
+	return snapshot
+}
+
 type materialCallRegistry struct {
 	*assets.Registry
 	calls int
@@ -269,7 +285,7 @@ func TestMeshCutoutDoesNotOccludeAOOrSkyLight(t *testing.T) {
 	}
 }
 
-func BenchmarkMeshTerrainSection(b *testing.B) {
+func benchmarkTerrainNeighborhood() *world.Neighborhood {
 	center := world.NewSection()
 	for z := 0; z < 16; z++ {
 		for x := 0; x < 16; x++ {
@@ -279,7 +295,11 @@ func BenchmarkMeshTerrainSection(b *testing.B) {
 			}
 		}
 	}
-	n := solidNeighbors(center)
+	return solidNeighbors(center)
+}
+
+func BenchmarkMeshTerrainSection(b *testing.B) {
+	n := benchmarkTerrainNeighborhood()
 	reg := testRegistry{}
 	light := mesh.NewLightScratch()
 	var quads []mesh.Quad

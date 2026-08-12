@@ -1,0 +1,6 @@
+[workspace]
+members = ["crates/mcgo_mesh"]
+resolver = "3"
+
+[profile.release]
+panic = "unwind"

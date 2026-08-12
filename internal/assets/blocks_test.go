@@ -37,6 +37,30 @@ func TestRegistryFaceVisible(t *testing.T) {
 	}
 }
 
+func TestRegistryMeshSnapshotMatchesRegistry(t *testing.T) {
+	registry := assets.NewRegistry()
+	snapshot := registry.MeshSnapshot()
+	if got, want := len(snapshot.Blocks), int(core.MossyCobblestoneID)+1; got != want {
+		t.Fatalf("snapshot block 数=%d，想要 %d", got, want)
+	}
+	for id := core.AirID; id <= core.MossyCobblestoneID; id++ {
+		block := snapshot.Blocks[int(id)]
+		if block.ID != id || block.Opaque != registry.Opaque(id) || block.Emission != registry.Emission(id) {
+			t.Fatalf("block %d snapshot=%+v", id, block)
+		}
+		for face := mesh.Face(0); face < 6; face++ {
+			if got, want := block.Materials[face], registry.Material(id, face); got != want {
+				t.Fatalf("block %d face %d material=%d，想要 %d", id, face, got, want)
+			}
+		}
+		for adjacent := core.AirID; adjacent <= core.MossyCobblestoneID; adjacent++ {
+			if got, want := snapshot.FaceVisible(id, adjacent), registry.FaceVisible(id, adjacent); got != want {
+				t.Fatalf("FaceVisible(%d, %d)=%v，想要 %v", id, adjacent, got, want)
+			}
+		}
+	}
+}
+
 func TestStoneBrickHasOwnMaterialLayer(t *testing.T) {
 	registry := assets.NewRegistry()
 	layer := registry.Material(core.StoneBrickID, mesh.FacePosY)

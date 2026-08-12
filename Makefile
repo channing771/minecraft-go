@@ -1,22 +1,34 @@
 .DEFAULT_GOAL := help
 
 GO := go
+CARGO := cargo
+RUST_DIR := engine
+RUST_DYLIB := $(RUST_DIR)/target/release/libmcgo_mesh.dylib
 APP := ./cmd/mcgo
 BINARY := bin/mcgo
+MCGO_DYLIB := bin/libmcgo_mesh.dylib
 ARGS ?=
 
-.PHONY: help run build test test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update
+.PHONY: help run build test test-race test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update rust rust-check
+
+run test test-multiplayer bench-multiplayer visual-check visual-update: rust
+build: rust
+build: GO_BUILD_LDFLAGS := -extldflags=-Wl,-rpath,@loader_path
+test-race: rust
 
 help:
 	@printf '%s\n' \
 		'常用命令：' \
 		'  make run              运行游戏，可通过 ARGS 传递参数' \
-		'  make build            构建客户端到 bin/mcgo' \
+		'  make build            构建 bin/mcgo 与同目录 Rust dylib' \
 		'  make test             运行全部测试' \
+		'  make test-race        使用 race detector 运行全部测试' \
 		'  make test-multiplayer 运行 M3C 八玩家与 v6 报告测试' \
 		'  make bench-multiplayer 运行三组 M3C 多人微基准' \
 		'  make archcheck        验证依赖闭包与无图形服务端边界' \
-		'  make fmt              格式化全部 Go 源码' \
+		'  make rust             构建固定版本的 Rust cdylib' \
+		'  make rust-check       运行 Rust 格式、clippy 与单测' \
+		'  make fmt              格式化全部 Rust 与 Go 源码' \
 		'  make visual-check     跑视觉场景并与 golden 基线比对' \
 		'  make visual-update    重新生成 golden 基线（VISUAL_OUT 覆盖输出目录）' \
 		'  make clean            删除 bin 目录' \
@@ -25,12 +37,24 @@ help:
 run:
 	$(GO) run $(APP) $(ARGS)
 
+rust:
+	cd $(RUST_DIR) && $(CARGO) build --locked --release
+
+rust-check:
+	cd $(RUST_DIR) && $(CARGO) fmt --check
+	cd $(RUST_DIR) && $(CARGO) clippy --workspace --all-targets -- -D warnings
+	cd $(RUST_DIR) && $(CARGO) test --workspace --locked
+
 build:
 	@mkdir -p $(dir $(BINARY))
-	$(GO) build -o $(BINARY) $(APP)
+	$(GO) build -ldflags='$(GO_BUILD_LDFLAGS)' -o $(BINARY) $(APP)
+	cp $(RUST_DYLIB) $(MCGO_DYLIB)
 
 test:
 	$(GO) test ./...
+
+test-race:
+	$(GO) test ./... -race
 
 test-multiplayer:
 	$(GO) test ./internal/client ./internal/server ./cmd/mcgo ./cmd/perfcheck \
@@ -42,9 +66,10 @@ bench-multiplayer:
 
 archcheck:
 	$(GO) test ./internal/archcheck -count=1
-	test -z "$$($(GO) list -deps ./cmd/mcgod | rg 'internal/(client|render|gfx)|glfw|webgpu|x/image/font')"
+	test -z "$$($(GO) list -deps ./cmd/mcgod | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
 
 fmt:
+	cd $(RUST_DIR) && $(CARGO) fmt
 	find . -type f -name '*.go' \
 		-not -path './vendor/*' \
 		-not -path './.worktrees/*' \

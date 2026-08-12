@@ -1,25 +1,22 @@
-package mesh
+package mesh_test
 
-import "minecraft-go/internal/world"
+import (
+	"testing"
 
-// Registry 提供网格化需要的方块属性。
-type Registry interface {
-	Opaque(world.BlockID) bool
-	FaceVisible(id world.BlockID, adjacent world.BlockID) bool
-	Material(id world.BlockID, f Face) uint16
-	Emission(world.BlockID) uint8
-}
+	"minecraft-go/internal/mesh"
+	"minecraft-go/internal/world"
+)
 
-// maskCell 必须可比较，贪心合并靠 == 判断两格能否合并。
-type maskCell struct {
+// oracleMaskCell 必须可比较，贪心合并靠 == 判断两格能否合并。
+type oracleMaskCell struct {
 	used  bool
 	mat   uint16
 	ao    uint8
 	light uint8
 }
 
-// MeshSection 把一个区段转换成贪心合并后的四边形集合。
-func MeshSection(n *world.Neighborhood, reg Registry, light *LightScratch) []Quad {
+// meshSectionGoOracle 把一个区段转换成贪心合并后的四边形集合。
+func meshSectionGoOracle(n *world.Neighborhood, reg mesh.Registry, light *goLightScratch) []mesh.Quad {
 	if light == nil {
 		panic("mesh: nil light scratch")
 	}
@@ -27,9 +24,9 @@ func MeshSection(n *world.Neighborhood, reg Registry, light *LightScratch) []Qua
 		return nil
 	}
 	light.build(n, reg)
-	out := make([]Quad, 0, 256)
+	out := make([]mesh.Quad, 0, 256)
 
-	for face := Face(0); face < 6; face++ {
+	for face := mesh.Face(0); face < 6; face++ {
 		axis := face.Axis()
 		u := (axis + 1) % 3
 		v := (axis + 2) % 3
@@ -40,7 +37,7 @@ func MeshSection(n *world.Neighborhood, reg Registry, light *LightScratch) []Qua
 		}
 
 		for slice := 0; slice < 16; slice++ {
-			var mask [16][16]maskCell
+			var mask [16][16]oracleMaskCell
 			any := false
 
 			for vi := 0; vi < 16; vi++ {
@@ -54,10 +51,10 @@ func MeshSection(n *world.Neighborhood, reg Registry, light *LightScratch) []Qua
 					if !reg.FaceVisible(id, n.At(q[0], q[1], q[2])) {
 						continue
 					}
-					mask[vi][ui] = maskCell{
+					mask[vi][ui] = oracleMaskCell{
 						used:  true,
 						mat:   reg.Material(id, face),
-						ao:    computeAO(n, reg, p, axis, u, v, step),
+						ao:    computeAOOracle(n, reg, p, axis, u, v, step),
 						light: light.at(q[0], q[1], q[2]),
 					}
 					any = true
@@ -93,13 +90,13 @@ func MeshSection(n *world.Neighborhood, reg Registry, light *LightScratch) []Qua
 
 					for dv := 0; dv < h; dv++ {
 						for du := 0; du < w; du++ {
-							mask[vi+dv][ui+du] = maskCell{}
+							mask[vi+dv][ui+du] = oracleMaskCell{}
 						}
 					}
 
 					var p [3]int
 					p[axis], p[u], p[v] = slice, ui, vi
-					out = append(out, Quad{
+					out = append(out, mesh.Quad{
 						X: uint8(p[0]), Y: uint8(p[1]), Z: uint8(p[2]),
 						W: uint8(w), H: uint8(h),
 						Face: face, Mat: c.mat, AO: c.ao, Light: c.light,
@@ -112,8 +109,8 @@ func MeshSection(n *world.Neighborhood, reg Registry, light *LightScratch) []Qua
 	return out
 }
 
-// computeAO 计算一个面 4 个角的环境光遮蔽，每角 2 位。
-func computeAO(n *world.Neighborhood, reg Registry, p [3]int, axis, u, v, step int) uint8 {
+// computeAOOracle 计算一个面 4 个角的环境光遮蔽，每角 2 位。
+func computeAOOracle(n *world.Neighborhood, reg mesh.Registry, p [3]int, axis, u, v, step int) uint8 {
 	base := p
 	base[axis] += step
 
@@ -139,4 +136,13 @@ func computeAO(n *world.Neighborhood, reg Registry, p [3]int, axis, u, v, step i
 		out |= uint8(level) << (i * 2)
 	}
 	return out
+}
+
+func TestGoMeshOracleBuildsDeterministicFixture(t *testing.T) {
+	center := world.NewSection()
+	center.Blocks.Set(8, 8, 8, world.BlockID(2))
+	quads := meshSectionGoOracle(solidNeighbors(center), testRegistry{}, newGoLightScratch())
+	if len(quads) != 6 {
+		t.Fatalf("Go oracle 孤立方块产生了 %d 个面，想要 6", len(quads))
+	}
 }
