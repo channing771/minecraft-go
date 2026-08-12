@@ -12,6 +12,7 @@
 
 # 依赖缓存
 /vendor/
+/engine/target/
 
 # 编辑器
 .DS_Store

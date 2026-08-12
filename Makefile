@@ -1,11 +1,13 @@
 .DEFAULT_GOAL := help
 
 GO := go
+CARGO := cargo
+RUST_MANIFEST := engine/Cargo.toml
 APP := ./cmd/mcgo
 BINARY := bin/mcgo
 ARGS ?=
 
-.PHONY: help run build test test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update
+.PHONY: help run build test test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update rust
 
 help:
 	@printf '%s\n' \
@@ -24,6 +26,9 @@ help:
 
 run:
 	$(GO) run $(APP) $(ARGS)
+
+rust:
+	$(CARGO) build --manifest-path $(RUST_MANIFEST) --locked --release
 
 build:
 	@mkdir -p $(dir $(BINARY))

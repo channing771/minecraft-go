@@ -1,6 +1,6 @@
 ## 2. pinned Cargo、ABI identity 与最小链接闭环
 
-- [ ] 2.1 创建 `engine/Cargo.toml`、`engine/Cargo.lock`、`engine/rust-toolchain.toml`、`engine/crates/mcgo_mesh/Cargo.toml`、`engine/crates/mcgo_mesh/src/lib.rs`、`engine/crates/mcgo_mesh/src/ffi.rs`、`engine/include/mcgo_engine.h`、`internal/mesh/native_abi.go` 与 `internal/mesh/native_abi_test.go`，并修改 `.gitignore`、`Makefile` 与本 `tasks.md`，建立 pinned Cargo、ABI identity 和最小静态链接闭环。验证：`make rust && cargo test --manifest-path engine/Cargo.toml --workspace --locked && go test ./internal/mesh -run '^TestNativeABIVersionMatchesGo$' -count=1`。
+- [x] 2.1 创建 `engine/Cargo.toml`、`engine/Cargo.lock`、`engine/rust-toolchain.toml`、`engine/crates/mcgo_mesh/Cargo.toml`、`engine/crates/mcgo_mesh/src/lib.rs`、`engine/crates/mcgo_mesh/src/ffi.rs`、`engine/include/mcgo_engine.h`、`internal/mesh/native_abi.go` 与 `internal/mesh/native_abi_test.go`，并修改 `.gitignore`、`Makefile` 与本 `tasks.md`，建立 pinned Cargo、ABI identity 和最小静态链接闭环。验证：`make rust && cargo test --manifest-path engine/Cargo.toml --workspace --locked && go test ./internal/mesh -run '^TestNativeABIVersionMatchesGo$' -count=1`。
 
 ## 3. registry snapshot 与版本化 neighborhood 输入
 
