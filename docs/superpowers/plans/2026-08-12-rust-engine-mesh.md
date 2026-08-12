@@ -933,6 +933,7 @@ Expose a Rust test counter only under `cfg(test)` is not visible to the Go-loade
 ```go
 func TestMeshSectionRejectsNativeABIMismatch(t *testing.T) {
 	n := fullyLoadedAirNeighborhood()
+	n.Center.Blocks.Set(8, 8, 8, core.StoneID)
 	scratch := NewLightScratch()
 	defer func() {
 		if recovered := recover(); recovered == nil || !strings.Contains(fmt.Sprint(recovered), "ABI") {
@@ -942,6 +943,8 @@ func TestMeshSectionRejectsNativeABIMismatch(t *testing.T) {
 	meshSectionNativeVersionForTest(n, internalTestRegistry{}, scratch, nativeABIVersionCurrent+1)
 }
 ```
+
+The center Stone is required: a uniform-Air fixture correctly returns from the Go fast path before snapshot/encoding/native call and therefore cannot exercise an ABI mismatch. Keep the test helper on the same private implementation as production; do not add a bypass for the fast path.
 
 Run it before adding the Go wrapper; expected compile FAIL for `meshSectionNativeVersionForTest`.
 
