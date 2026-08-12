@@ -24,7 +24,7 @@
 
 ## 8. Make、CI、Hook 与开发文档
 
-- [ ] 8.1 修改 `Makefile`、`.github/workflows/ci.yml`、`scripts/agent-hooks/guard.mjs`、`scripts/agent-hooks/guard.test.mjs`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`openspec/config.yaml` 与本 `tasks.md`，令 Make、CI、Hook 从 `engine/` workspace root 一致采用 Rust-first canonical 构建并真正应用 Rust 1.97.1 directory override，令 `make build` 将 `libmcgo_mesh.dylib` 复制到 `bin/mcgo` 同目录，且保持 Linux 无 CGO 服务端独立。验证：`cd engine && rustup show active-toolchain && cd .. && make rust-check && make build && test -f bin/libmcgo_mesh.dylib && make test && make test-race && node --test scripts/agent-hooks/guard.test.mjs && CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod && cmp AGENTS.md CLAUDE.md && openspec validate --all --strict --no-interactive`。
+- [x] 8.1 修改 `Makefile`、`.github/workflows/ci.yml`、`scripts/agent-hooks/guard.mjs`、`scripts/agent-hooks/guard.test.mjs`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`openspec/config.yaml` 与本 `tasks.md`，令 Make、CI、Hook 从 `engine/` workspace root 一致采用 Rust-first canonical 构建并真正应用 Rust 1.97.1 directory override，令 `make build` 将 `libmcgo_mesh.dylib` 复制到 `bin/mcgo` 同目录，且保持 Linux 无 CGO 服务端独立。验证：`cd engine && rustup show active-toolchain && cd .. && make rust-check && make build && test -f bin/libmcgo_mesh.dylib && make test && make test-race && node --test scripts/agent-hooks/guard.test.mjs && CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod && cmp AGENTS.md CLAUDE.md && openspec validate --all --strict --no-interactive`。
 
 ## 9. 下游保真、全仓门禁与独立评审
 

@@ -91,6 +91,20 @@ function componentFor(path) {
   return `${match[1]}/${match[2]}`;
 }
 
+export function rustValidationRequired(paths) {
+  const patterns = [
+    /^engine\/.*\.rs$/,
+    /^engine\/(?:Cargo\.toml|Cargo\.lock|rust-toolchain\.toml)$/,
+    /^engine\/crates\/.*\/Cargo\.toml$/,
+    /^engine\/include\/mcgo_engine\.h$/,
+    /^internal\/mesh\/native[^/]*\.go$/,
+    /^internal\/mesh\/registry\.go$/,
+    /^Makefile$/,
+    /^\.github\/workflows\/ci\.yml$/,
+  ];
+  return paths.some((path) => patterns.some((pattern) => pattern.test(path)));
+}
+
 export function openSpecRequirementReasons(paths) {
   const reasons = [];
   const highRiskPatterns = [
@@ -214,12 +228,12 @@ function changedGoFiles(paths) {
   return paths.filter((path) => path.endsWith(".go") && existsSync(resolve(repositoryRoot, path)));
 }
 
-function gofmtFailure(paths) {
+function gofmtFailure(paths, execute = run) {
   const files = changedGoFiles(paths);
   if (files.length === 0) {
     return null;
   }
-  const result = run("gofmt", ["-l", ...files], 30_000);
+  const result = execute("gofmt", ["-l", ...files], 30_000);
   const failure = commandFailure("gofmt 检查", result);
   if (failure) {
     return failure;
@@ -268,15 +282,15 @@ function hasReadyActiveChange() {
   });
 }
 
-function stopFailures(paths) {
+export function stopFailures(paths, execute = run) {
   const failures = [];
-  const diffCheck = run("git", ["diff", "--check"], 30_000);
+  const diffCheck = execute("git", ["diff", "--check"], 30_000);
   const diffFailure = commandFailure("git diff --check", diffCheck);
   if (diffFailure) {
     failures.push(diffFailure);
   }
 
-  const formatFailure = gofmtFailure(paths);
+  const formatFailure = gofmtFailure(paths, execute);
   if (formatFailure) {
     failures.push(formatFailure);
   }
@@ -295,8 +309,28 @@ function stopFailures(paths) {
   }
 
   const goFiles = changedGoFiles(paths);
+  const needsRustValidation = rustValidationRequired(paths);
+  if (goFiles.length > 0 || needsRustValidation) {
+    const rust = execute("make", ["rust"]);
+    const rustFailure = commandFailure("Rust 构建", rust);
+    if (rustFailure) {
+      failures.push(rustFailure);
+    }
+  }
+
+  if (needsRustValidation) {
+    const failure = commandFailure("Rust 检查", execute("make", ["rust-check"]));
+    if (failure) {
+      failures.push(failure);
+    }
+  }
+
   if (goFiles.length > 0) {
-    const architecture = run("go", ["test", "./internal/archcheck", "-count=1"], 120_000);
+    const architecture = execute(
+      "go",
+      ["test", "./internal/archcheck", "-count=1"],
+      120_000,
+    );
     const architectureFailure = commandFailure("架构门禁", architecture);
     if (architectureFailure) {
       failures.push(architectureFailure);
@@ -311,22 +345,36 @@ function stopFailures(paths) {
       ),
     ].sort();
     if (packageArguments.length > 0) {
-      const tests = run("go", ["test", "-race", "-count=1", ...packageArguments], 180_000);
+      const tests = execute(
+        "go",
+        ["test", "-race", "-count=1", ...packageArguments],
+        180_000,
+      );
       const testFailure = commandFailure("受影响包测试", tests);
       if (testFailure) {
         failures.push(testFailure);
       }
     }
 
-    const vet = run("go", ["vet", "./..."], 180_000);
+    const vet = execute("go", ["vet", "./..."], 180_000);
     const vetFailure = commandFailure("go vet", vet);
     if (vetFailure) {
       failures.push(vetFailure);
     }
+  } else if (needsRustValidation) {
+    const tests = execute(
+      "go",
+      ["test", "./internal/mesh", "./internal/client", "-race", "-count=1"],
+      180_000,
+    );
+    const testFailure = commandFailure("native 下游测试", tests);
+    if (testFailure) {
+      failures.push(testFailure);
+    }
   }
 
   if (readyActiveChange || paths.some((path) => path.startsWith("openspec/"))) {
-    const validation = run(
+    const validation = execute(
       "openspec",
       ["validate", "--all", "--strict", "--no-interactive"],
       120_000,

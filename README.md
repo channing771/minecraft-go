@@ -4,10 +4,13 @@
 
 项目仍处于早期开发阶段。目前已经具备程序化地形、GPU 地形渲染、玩家移动与碰撞、客户端预测、方块挖掘与放置、内置权威服务端、世界持久化、有界二进制协议、TCP 直连、无图形专用服务端以及稳定玩家状态存档；已完成的 M3 多人里程碑支持最多八名玩家通过局域网专用服务端同步移动、角色和 Unicode 昵称；M4A–M4D 依次增加权威快捷栏、持久掉落物、36 格背包与固定石砖配方；M4E 新增煤矿、铁矿、共享权威熔炉、铁锭与铁块资源链；M4F 新增服务端权威的按住采掘、石镐、铁镐与五条固定配方；M4J 为石镐和铁镐加入权威耐久、损坏形态及跨 TCP/存档的耐久保真；M4K 新增由区块拥有的固定容量共享箱子（每区块 16 个、每箱 27 格），把熔炉与箱子的查看生命周期收敛为共用实现，统一容器界面扩展为 `0..62`，并把线上协议升级到 v12、区块存档升级到 schema v6；M4L 新增由服务端唯一权威、跨重连与重启保真的生命值（满值 20），实现摔落伤害、未受伤自动回复与死亡时的背包掉落和重生结算，并把线上协议升级到 v13、玩家存档升级到 schema v5；M4M 增加由服务端权威推进的昼夜和客户端派生的传播天空光；M4N 增加客户端派生的静态方块光和发光块；当前 M4O 以协议 v15、玩家 schema v6、区块 schema v8、metadata v2 交付 14 种常见块状材料、缺失玩家一次性材料包、世界坐标 terrain UV、玻璃/树叶单 pass alpha cutout 和无窗口材料展示。
 
+当前 M4P 仅把 mesh/light 生产实现迁移到固定 Rust 1.97.1 的 `cdylib`；Go 仍拥有其余应用、世界、规则、网络、存储和渲染逻辑。
+
 ## 环境要求
 
 - macOS；客户端入口目前使用 Darwin 构建约束，主要在 Apple Silicon 上验证；
 - Go 1.26；
+- 通过 rustup 安装的 Rust 1.97.1；
 - 可用的 CGO 与 C 编译工具链，macOS 可通过 Xcode Command Line Tools 提供；
 - Make。
 
@@ -40,15 +43,19 @@ make build
 ./bin/mcgo --world worlds/default
 ```
 
+`make build` 会生成必须同目录使用的 `bin/mcgo` 与 `bin/libmcgo_mesh.dylib`。
+
 ## 常用命令
 
 | 命令 | 说明 |
 | --- | --- |
 | `make help` | 显示 Makefile 帮助，也是默认目标 |
 | `make run` | 运行客户端，可使用 `ARGS` 传递命令行参数 |
-| `make build` | 构建客户端到 `bin/mcgo` |
+| `make build` | 构建 `bin/mcgo` 与同目录 `bin/libmcgo_mesh.dylib` |
 | `make test` | 运行全部 Go 测试 |
-| `make fmt` | 使用 `gofmt` 格式化仓库内的 Go 源码 |
+| `make test-race` | 使用 race detector 运行全部 Go 测试 |
+| `make rust-check` | 运行 Rust 格式、clippy 与 workspace 单测 |
+| `make fmt` | 格式化仓库内的 Rust 与 Go 源码 |
 | `make clean` | 删除 `bin` 目录，不会删除世界存档 |
 
 ## 操作方式

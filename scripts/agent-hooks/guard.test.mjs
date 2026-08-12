@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { findBlockedCommand, openSpecRequirementReasons, runCommand } from "./guard.mjs";
+import {
+  findBlockedCommand,
+  openSpecRequirementReasons,
+  runCommand,
+  rustValidationRequired,
+  stopFailures,
+} from "./guard.mjs";
 
 test("blocks destructive git commands", () => {
   assert.match(findBlockedCommand("git reset --hard HEAD"), /reset --hard/);
@@ -47,6 +53,45 @@ test("does not require OpenSpec for one focused implementation component", () =>
   );
 });
 
+test("requires Rust validation for engine and native mesh changes", () => {
+  assert.equal(rustValidationRequired(["engine/crates/mcgo_mesh/src/light.rs"]), true);
+  assert.equal(rustValidationRequired(["internal/mesh/native.go"]), true);
+  assert.equal(rustValidationRequired(["internal/server/session_ingress.go"]), false);
+});
+
+test("runs Rust validation before Go checks for Rust-required changes", () => {
+  const calls = [];
+  const run = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    return { status: 0, stdout: "" };
+  };
+
+  assert.deepEqual(stopFailures(["engine/crates/mcgo_mesh/src/light.rs"], run), []);
+  assert.deepEqual(calls.slice(1, 4), [
+    ["make", ["rust"]],
+    ["make", ["rust-check"]],
+    ["go", ["test", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
+  ]);
+  assert.equal(calls.some(([command]) => command === "cargo"), false);
+});
+
+test("builds Rust before existing Go gates without unrelated cargo checks", () => {
+  const calls = [];
+  const run = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    return { status: 0, stdout: "" };
+  };
+
+  assert.deepEqual(stopFailures(["internal/server/session_ingress.go"], run), []);
+  assert.deepEqual(calls.slice(1, 5), [
+    ["gofmt", ["-l", "internal/server/session_ingress.go"]],
+    ["make", ["rust"]],
+    ["go", ["test", "./internal/archcheck", "-count=1"]],
+    ["go", ["test", "-race", "-count=1", "./internal/server"]],
+  ]);
+  assert.equal(calls.some(([command]) => command === "cargo"), false);
+});
+
 test("finds tools through the login shell when the hook PATH is incomplete", () => {
   const calls = [];
   const spawn = (command, argumentsList) => {
@@ -78,6 +123,33 @@ test("finds tools through the login shell when the hook PATH is incomplete", () 
     "/toolchain/bin/gofmt",
     ["-l", "internal/server/example.go"],
   ]);
+});
+
+test("finds cargo through the login shell when PATH is incomplete", () => {
+  const calls = [];
+  const spawn = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    if (
+      command === "cargo" ||
+      (command.endsWith("/cargo") && command !== "/toolchain/bin/cargo")
+    ) {
+      return { error: Object.assign(new Error("spawnSync cargo ENOENT"), { code: "ENOENT" }) };
+    }
+    if (command === "/bin/zsh") {
+      return { status: 0, stdout: "/toolchain/bin/cargo\n" };
+    }
+    return { status: 0, stdout: "" };
+  };
+
+  const result = runCommand("cargo", ["fmt", "--check"], 30_000, spawn, {
+    SHELL: "/bin/zsh",
+    PATH: "/usr/bin:/bin",
+  });
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(calls[0], ["cargo", ["fmt", "--check"]]);
+  assert.deepEqual(calls.at(-2), ["/bin/zsh", ["-lc", "command -v cargo"]]);
+  assert.deepEqual(calls.at(-1), ["/toolchain/bin/cargo", ["fmt", "--check"]]);
 });
 
 test("finds Go tools through GOROOT when the hook PATH is incomplete", () => {
