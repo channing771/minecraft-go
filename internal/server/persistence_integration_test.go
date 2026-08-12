@@ -25,7 +25,7 @@ import (
 
 func TestWorldPersistsAcrossRestartAndGeneratorUpgrade(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "world")
-	generatorA := newCountingPersistenceGenerator(core.StoneID)
+	generatorA := newOakPersistenceGenerator(core.StoneID)
 	first := newPersistentHarness(t, root, generatorA, false, nil)
 	first.waitReady()
 	first.placeAndBreakScript()
@@ -37,9 +37,23 @@ func TestWorldPersistsAcrossRestartAndGeneratorUpgrade(t *testing.T) {
 	if err := first.shutdown(); err != nil {
 		t.Fatalf("first Shutdown: %v", err)
 	}
+	key := persistenceChunkKey(interactionPersistenceChunk)
+	storedBeforeRestart := openPersistentDiskStore(t, root)
+	beforeRestart, err := storedBeforeRestart.LoadChunk(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPersistedOakBlocks(t, beforeRestart.Chunk)
+	if err := storedBeforeRestart.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	generatorB := newCountingPersistenceGenerator(core.DirtID)
-	second := newPersistentHarness(t, root, generatorB, false, nil)
+	var observed *noRewriteStore
+	second := newPersistentHarness(t, root, generatorB, false, func(store storage.Store) storage.Store {
+		observed = &noRewriteStore{Store: store, key: key}
+		return observed
+	})
 	second.waitReady()
 	gotHash, gotRevision := second.authoritativeChunk(interactionPersistenceChunk)
 	if gotHash != wantHash || gotRevision != wantRevision {
@@ -63,6 +77,22 @@ func TestWorldPersistsAcrossRestartAndGeneratorUpgrade(t *testing.T) {
 	}
 	if err := second.shutdown(); err != nil {
 		t.Fatalf("second Shutdown: %v", err)
+	}
+	if calls := observed.saveCalls(); calls != 0 {
+		t.Fatalf("normal restart rewrote saved chunk %v times", calls)
+	}
+	storedAfterRestart := openPersistentDiskStore(t, root)
+	afterRestart, err := storedAfterRestart.LoadChunk(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRestart.Chunk.Hash() != wantHash || afterRestart.Revision != wantRevision ||
+		afterRestart.PersistedRevision != wantRevision || afterRestart.NeedsRewrite {
+		t.Fatalf("normal restart stored=%+v hash=%x，想要 clean revision %d", afterRestart, afterRestart.Chunk.Hash(), wantRevision)
+	}
+	assertPersistedOakBlocks(t, afterRestart.Chunk)
+	if err := storedAfterRestart.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -571,9 +601,10 @@ func (h *persistentHarness) shutdown() error {
 }
 
 type countingPersistenceGenerator struct {
-	mu     sync.Mutex
-	marker core.BlockID
-	calls  map[core.ChunkPos]int
+	mu        sync.Mutex
+	marker    core.BlockID
+	legacyOak bool
+	calls     map[core.ChunkPos]int
 }
 
 func newCountingPersistenceGenerator(marker core.BlockID) *countingPersistenceGenerator {
@@ -583,11 +614,31 @@ func newCountingPersistenceGenerator(marker core.BlockID) *countingPersistenceGe
 	}
 }
 
+func newOakPersistenceGenerator(marker core.BlockID) *countingPersistenceGenerator {
+	generator := newCountingPersistenceGenerator(marker)
+	generator.legacyOak = true
+	return generator
+}
+
 func (generator *countingPersistenceGenerator) GenerateChunk(position core.ChunkPos) *world.Chunk {
 	generator.mu.Lock()
 	generator.calls[position]++
 	generator.mu.Unlock()
-	return persistenceChunk(position, generator.marker)
+	chunk := persistenceChunk(position, generator.marker)
+	if generator.legacyOak && position == interactionPersistenceChunk {
+		for _, block := range []struct {
+			position core.BlockPos
+			id       core.BlockID
+		}{
+			{position: persistedOakLog, id: core.OakLogID},
+			{position: persistedOakLeaves, id: core.LeavesID},
+		} {
+			x, _, z := block.position.Local()
+			chunk.SetBlock(x, block.position.Y, z, block.id)
+		}
+		chunk.Compact()
+	}
+	return chunk
 }
 
 func (generator *countingPersistenceGenerator) callsFor(position core.ChunkPos) int {
@@ -678,6 +729,52 @@ type migrationRewriteStore struct {
 	key       core.ChunkKey
 	marked    bool
 	saveCount int
+}
+
+type noRewriteStore struct {
+	storage.Store
+	mu        sync.Mutex
+	key       core.ChunkKey
+	saveCount int
+}
+
+func (store *noRewriteStore) SaveBatch(
+	ctx context.Context,
+	saves []storage.ChunkSave,
+) (storage.SaveResult, error) {
+	store.mu.Lock()
+	for _, save := range saves {
+		if save.Key == store.key {
+			store.saveCount++
+		}
+	}
+	store.mu.Unlock()
+	return store.Store.SaveBatch(ctx, saves)
+}
+
+func (store *noRewriteStore) saveCalls() int {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.saveCount
+}
+
+var persistedOakLog = core.BlockPos{X: 2, Y: 20, Z: -5}
+var persistedOakLeaves = core.BlockPos{X: 3, Y: 20, Z: -5}
+
+func assertPersistedOakBlocks(t *testing.T, chunk *world.Chunk) {
+	t.Helper()
+	for _, test := range []struct {
+		position core.BlockPos
+		want     core.BlockID
+	}{
+		{position: persistedOakLog, want: core.OakLogID},
+		{position: persistedOakLeaves, want: core.LeavesID},
+	} {
+		x, _, z := test.position.Local()
+		if got := chunk.BlockAt(x, test.position.Y, z); got != test.want {
+			t.Fatalf("stored block %+v=%d，想要 %d", test.position, got, test.want)
+		}
+	}
 }
 
 func (store *migrationRewriteStore) LoadChunk(

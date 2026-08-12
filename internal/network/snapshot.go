@@ -36,7 +36,7 @@ func (section SectionData) Validate() error {
 			return errors.New("network: single section has compressed payload")
 		}
 		if !validBlockID(section.Single) {
-			return fmt.Errorf("network: single block ID %d exceeds 15 bits", section.Single)
+			return fmt.Errorf("network: single block ID %d is unregistered", section.Single)
 		}
 		return nil
 
@@ -64,7 +64,7 @@ func (section SectionData) Validate() error {
 		seen := make(map[core.BlockID]struct{}, len(section.Palette))
 		for _, id := range section.Palette {
 			if !validBlockID(id) {
-				return fmt.Errorf("network: palette block ID %d exceeds 15 bits", id)
+				return fmt.Errorf("network: palette block ID %d is unregistered", id)
 			}
 			if _, duplicate := seen[id]; duplicate {
 				return fmt.Errorf("network: duplicate palette block ID %d", id)
@@ -101,6 +101,12 @@ func (section SectionData) Validate() error {
 		for index, word := range section.Packed {
 			if word>>60 != 0 {
 				return fmt.Errorf("network: direct packed word %d has unused high bits", index)
+			}
+		}
+		for index := 0; index < core.BlocksPerSection; index++ {
+			id := core.BlockID(readSectionPacked(section.Packed, section.Bits, index))
+			if !core.RegisteredBlock(id) {
+				return fmt.Errorf("network: direct block ID %d at block %d is unregistered", id, index)
 			}
 		}
 		return nil
@@ -196,7 +202,7 @@ func (changes BlockChanges) Validate() error {
 	var previous uint32
 	for index, change := range changes.Changes {
 		if !validBlockID(change.Block) {
-			return fmt.Errorf("network: block ID %d exceeds 15 bits", change.Block)
+			return fmt.Errorf("network: block ID %d is unregistered", change.Block)
 		}
 		if change.Position.Y < core.MinY || change.Position.Y >= core.MaxY {
 			return fmt.Errorf("network: block Y %d is outside world", change.Position.Y)
@@ -218,7 +224,7 @@ func (changes BlockChanges) Validate() error {
 }
 
 func validBlockID(id core.BlockID) bool {
-	return id < 1<<15
+	return core.RegisteredBlock(id)
 }
 
 func sectionWords(bits uint8) int {

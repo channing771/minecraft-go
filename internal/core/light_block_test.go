@@ -6,9 +6,9 @@ import (
 	"minecraft-go/internal/core"
 )
 
-// TestLightBlockIDsMappingsAndNoRecipeStayStable 杀死 ID 未追加、放置或掉落映射缺失、
-// 堆叠上限错误，以及意外新增配方的变异。
-func TestLightBlockIDsMappingsAndNoRecipeStayStable(t *testing.T) {
+// TestLightBlockIDsMappingsStayStable 杀死 ID 未追加、放置或掉落映射缺失、
+// 堆叠上限错误的变异。
+func TestLightBlockIDsMappingsStayStable(t *testing.T) {
 	if core.LightBlockID != core.ChestID+1 {
 		t.Fatalf("LightBlockID=%d，必须追加在 ChestID 之后", core.LightBlockID)
 	}
@@ -29,10 +29,19 @@ func TestLightBlockIDsMappingsAndNoRecipeStayStable(t *testing.T) {
 	if item, ok := core.BlockDrop(core.LightBlockID); !ok || item != core.ItemLightBlock {
 		t.Fatalf("发光块掉落映射=(%d,%v)", item, ok)
 	}
-	if core.RecipeChest != 6 {
-		t.Fatalf("最后一个固定配方 ID=%d，想要 6", core.RecipeChest)
+	if core.RecipeOakPlanks != 7 {
+		t.Fatalf("RecipeOakPlanks=%d，想要 7", core.RecipeOakPlanks)
 	}
-	if _, ok := core.Recipe(core.RecipeChest + 1); ok {
-		t.Fatal("发光块不得增加配方")
+	if core.RecipeLightBlock != 8 {
+		t.Fatalf("RecipeLightBlock=%d，想要 8", core.RecipeLightBlock)
+	}
+	if core.RecipeLightBlock != core.RecipeOakPlanks+1 {
+		t.Fatalf("RecipeLightBlock=%d，必须紧随 RecipeOakPlanks(%d)", core.RecipeLightBlock, core.RecipeOakPlanks)
+	}
+	if _, ok := core.Recipe(core.RecipeLightBlock); !ok {
+		t.Fatal("发光方块配方未注册")
+	}
+	if _, ok := core.Recipe(core.RecipeLightBlock + 1); ok {
+		t.Fatal("未知配方不得被接受")
 	}
 }

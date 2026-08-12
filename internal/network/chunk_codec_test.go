@@ -84,7 +84,7 @@ func TestLogicalSnapshotSizeMatchesWire(t *testing.T) {
 		Y:       0,
 		Storage: SectionDirect,
 		Bits:    15,
-		Packed:  testPacked(15, 1<<15, 0),
+		Packed:  testPacked(15, int(core.MossyCobblestoneID)+1, 0),
 	}
 
 	tests := []struct {
@@ -94,9 +94,8 @@ func TestLogicalSnapshotSizeMatchesWire(t *testing.T) {
 	}{
 		{"all single", repeatedSnapshot(SectionData{Storage: SectionSingle}), 117},
 		{"all 4-bit indexed", indexed(4, 16), 50085},
-		{"all 8-bit indexed palette 127", indexed(8, 127), 104565},
-		{"all 8-bit indexed palette 128", indexed(8, 128), 104637},
-		{"all 8-bit indexed palette 256", indexed(8, 256), 110781},
+		{"all 8-bit indexed palette 25", indexed(8, 25), 99669},
+		{"all 8-bit indexed palette 26", indexed(8, 26), 99717},
 		{"direct", direct, 8310},
 		{"all storages", fixtureSnapshot(core.ChunkPos{X: -3, Z: 7}, 19), 86271},
 		{"worst legal", worstLegalBenchmarkSnapshot(), 196749},
@@ -400,7 +399,7 @@ func fixtureSnapshot(pos core.ChunkPos, revision uint64) ChunkSnapshot {
 			palette := []core.BlockID{core.AirID, core.BarrierID, core.StoneID, core.DirtID, core.GrassID, core.BedrockID}
 			sections[y] = SectionData{Y: int32(y), Storage: SectionIndexed, Bits: 8, Palette: palette, Packed: testPacked(8, len(palette), y)}
 		case 3:
-			sections[y] = SectionData{Y: int32(y), Storage: SectionDirect, Bits: 15, Packed: testPacked(15, 1<<15, y)}
+			sections[y] = SectionData{Y: int32(y), Storage: SectionDirect, Bits: 15, Packed: testPacked(15, int(core.MossyCobblestoneID)+1, y)}
 		}
 	}
 	return ChunkSnapshot{Dimension: core.Overworld, Chunk: pos, Revision: revision, Sections: sections}

@@ -127,6 +127,13 @@ func toBlendState(mode BlendMode) wgpu.BlendState {
 	panic(fmt.Errorf("gfx: 未知的混合模式 %d", mode))
 }
 
+func toDepthCompare(lessEqual bool) wgpu.CompareFunction {
+	if lessEqual {
+		return wgpu.CompareFunctionLessEqual
+	}
+	return wgpu.CompareFunctionLess
+}
+
 func toViewDimension(d TextureViewDimension) wgpu.TextureViewDimension {
 	switch d {
 	case TextureViewDimensionAuto:

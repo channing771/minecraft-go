@@ -21,6 +21,14 @@
 - **AND** 10 个视觉场景、storage/network fixture 与其他固定 artifact MUST 与 `37cdb3e` 字节一致
 - **AND** 相对 `37cdb3e` 的 Test、Benchmark、Fuzz 入口除既有 Task 2 两项新增和一项重命名外 MUST 完全一致
 
+#### Scenario: 固定主线的同环境视觉基线失败不掩盖迁移漂移
+- **GIVEN** 同一 Apple M2/macOS 环境在原始 `37cdb3e` 连续复现 `materials-showcase` 的最大通道差 1、26 个差异像素（0.0113%），以及 `oak-grove` 的最大通道差 47、10 个差异像素（0.0043%），且其余 8 个场景各自通过 tracked golden
+- **WHEN** Task 20 分支与 detached `37cdb3e` 在该同一环境以同一 `make visual-check` 命令重新 capture 全部 10 个场景
+- **THEN** 两边 10 个场景输出 PNG MUST 逐字节一致
+- **AND** 两边 MUST 仅有上述 2 个场景失败，且场景名、最大通道差、差异像素数与比例的失败摘要完全一致
+- **AND** 其余 8 个场景 MUST 各自通过 tracked golden
+- **AND** 此裁决 MUST NOT 泛化为跳过其他视觉失败，也 MUST NOT 修改 golden、阈值或 capture 代码
+
 ### Requirement: 架构守卫不依赖单一源文件位置
 架构守卫 MUST 对完整职责文件集合执行原有检查，不得绑定单一固定源文件位置。
 

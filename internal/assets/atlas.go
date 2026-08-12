@@ -22,7 +22,11 @@ func (r *Registry) UploadTo(dev gfx.Device) (gfx.Texture, gfx.Sampler) {
 		size := texSize
 		tex.WriteLayer(uint32(layer), 0, px)
 		for mip := 1; mip < mips; mip++ {
-			px = downsample(px, size)
+			if layer == int(LayerLeaves) || layer == int(LayerGlass) {
+				px = downsampleCutout(px, size)
+			} else {
+				px = downsample(px, size)
+			}
 			size /= 2
 			tex.WriteLayer(uint32(layer), uint32(mip), px)
 		}
@@ -36,6 +40,23 @@ func (r *Registry) UploadTo(dev gfx.Device) (gfx.Texture, gfx.Sampler) {
 		Address:   gfx.AddressRepeat,
 	})
 	return tex, smp
+}
+
+func downsampleCutout(src []byte, size int) []byte {
+	dst := downsample(src, size)
+	half := size / 2
+	for y := 0; y < half; y++ {
+		for x := 0; x < half; x++ {
+			a := byte(0)
+			for dy := 0; dy < 2; dy++ {
+				for dx := 0; dx < 2; dx++ {
+					a = max(a, src[((y*2+dy)*size+x*2+dx)*4+3])
+				}
+			}
+			dst[(y*half+x)*4+3] = a
+		}
+	}
+	return dst
 }
 
 func downsample(src []byte, size int) []byte {

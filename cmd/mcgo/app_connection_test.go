@@ -251,6 +251,10 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	if app.host != nil || app.serverCancel != nil || app.serverDone != nil {
 		t.Fatalf("remote application acquired local Host lifecycle: host=%v cancel=%v done=%v", app.host, app.serverCancel, app.serverDone)
 	}
+	if app.blockOutlineRenderer == nil || len(app.remoteNameTags) != 0 || cap(app.remoteNameTags) != maxFrameNameTags {
+		t.Fatalf("remote target feedback renderer/tags=%v/%d/%d，想要非 nil/0/%d",
+			app.blockOutlineRenderer != nil, len(app.remoteNameTags), cap(app.remoteNameTags), maxFrameNameTags)
+	}
 	if windowCalls != 1 || deviceCalls != 1 {
 		t.Fatalf("remote success graphics calls window=%d device=%d, want 1/1", windowCalls, deviceCalls)
 	}

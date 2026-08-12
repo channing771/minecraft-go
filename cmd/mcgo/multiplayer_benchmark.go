@@ -57,7 +57,7 @@ func newMultiplayerBenchmarkScenario() multiplayerBenchmarkScenario {
 	local := benchmarkPlayerID(0)
 	names := [...]string{"星野", "月河", "云山", "海界", "星河", "月海", "云野"}
 	spawns := make([]network.RemotePlayerSpawn, len(names))
-	tags := make([]render.NameTag, len(names))
+	tags := make([]render.NameTag, len(names), maxFrameNameTags)
 	for index, name := range names {
 		angle := float64(index) * 2 * math.Pi / float64(len(names))
 		position := mgl32.Vec3{float32(math.Cos(angle)) * 4, 80, float32(math.Sin(angle))*4 - 8}

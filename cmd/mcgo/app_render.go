@@ -20,7 +20,30 @@ func remoteRenderPresentations(presentations []client.RemotePresentation) ([]ren
 	slices.SortFunc(ordered, func(left, right client.RemotePresentation) int {
 		return slices.Compare(left.PlayerID[:], right.PlayerID[:])
 	})
-	return remoteRenderPresentationsSortedInto(nil, nil, ordered)
+	return remoteRenderPresentationsSortedInto(
+		make([]render.Avatar, 0, len(ordered)),
+		make([]render.NameTag, 0, maxFrameNameTags),
+		ordered,
+	)
+}
+
+func (a *application) appendCurrentBlockTarget(
+	tags []render.NameTag,
+) ([]render.NameTag, render.BlockOutline) {
+	target, ok := a.currentBlockTarget()
+	if !ok {
+		return tags, render.BlockOutline{}
+	}
+	tags = append(tags, render.NameTag{
+		PlayerID: core.PlayerID{},
+		Text:     target.Name,
+		Anchor: mgl32.Vec3{
+			float32(target.Position.X) + 0.5,
+			float32(target.Position.Y) + 1.15,
+			float32(target.Position.Z) + 0.5,
+		},
+	})
+	return tags, render.BlockOutline{Visible: true, Position: target.Position}
 }
 
 func remoteRenderPresentationsSortedInto(

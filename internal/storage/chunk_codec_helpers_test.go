@@ -2,16 +2,11 @@ package storage
 
 import (
 	"encoding/binary"
-	"flag"
 
 	"github.com/klauspost/compress/zstd"
 
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/world"
-)
-
-var updateStorageFixtures = flag.Bool(
-	"update-storage-fixtures", false, "rewrite committed storage fixtures",
 )
 
 const testSingleSectionLength = 4 + 1 + 1 + 2 + 4 + 4
@@ -98,8 +93,11 @@ func codecFixtureChunk(pos core.ChunkPos) *world.Chunk {
 	for index := 0; index < 16; index++ { // air + 16 IDs = 17 palette entries.
 		setFixtureBlock(chunk, 2, index, core.BlockID(index+1))
 	}
-	for index := 0; index < 256; index++ { // air + 256 IDs forces direct storage.
+	for index := 0; index < 256; index++ { // 先用不同值推进到 direct storage。
 		setFixtureBlock(chunk, 3, index, core.BlockID(index+1))
+	}
+	for index := 0; index < 256; index++ { // 冻结旧夹具的 0..28 direct 值域。
+		setFixtureBlock(chunk, 3, index, core.BlockID((index+1)%int(core.MossyCobblestoneID)))
 	}
 	return chunk
 }

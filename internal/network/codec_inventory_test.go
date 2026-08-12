@@ -25,7 +25,7 @@ func TestProtocolV11InventoryCarriesWornToolDurability(t *testing.T) {
 	}
 }
 
-func TestProtocolV14InventoryCarriesLightBlockItem(t *testing.T) {
+func TestProtocolV15InventoryCarriesLightBlockItem(t *testing.T) {
 	var inventory core.Inventory
 	inventory.Hotbar.Selected = 3
 	inventory.Hotbar.Slots[3] = core.ItemStack{Item: core.ItemLightBlock, Count: 17}

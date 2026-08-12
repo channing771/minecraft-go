@@ -88,6 +88,19 @@ func newApplicationWithDependencies(
 			return render.NewItemDropRenderer(dev, color, depth), nil
 		}
 	}
+	if dependencies.newBlockOutlineRenderer == nil {
+		dependencies.newBlockOutlineRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.BlockOutlineRenderer, error) {
+			return render.NewBlockOutlineRenderer(dev, color, depth), nil
+		}
+	}
+	if dependencies.newDamageOverlayRenderer == nil {
+		dependencies.newDamageOverlayRenderer = func(
+			device gfx.Device,
+			color gfx.TextureFormat,
+		) (*render.DamageOverlayRenderer, error) {
+			return render.NewDamageOverlayRenderer(device, color), nil
+		}
+	}
 	if dependencies.newDebugPanelRenderer == nil {
 		dependencies.newDebugPanelRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource) (*render.DebugPanelRenderer, error) {
 			return render.NewDebugPanelRenderer(dev, color, atlas), nil
@@ -262,6 +275,7 @@ func newApplicationWithDependencies(
 		inventorySource: -1,
 		predictor:       client.NewPredictor(),
 		remotePlayers:   client.NewRemotePlayers(),
+		remoteNameTags:  make([]render.NameTag, 0, maxFrameNameTags),
 		camera:          camera,
 		center:          cameraChunk(camera.Pos),
 		loadedChunks:    make(map[core.ChunkPos]struct{}),
@@ -309,6 +323,18 @@ func newApplicationWithDependencies(
 		app.releaseRemoteConstructionResources()
 		return nil, errors.Join(fmt.Errorf("创建掉落物渲染器: %w", err), app.Close())
 	}
+	app.blockOutlineRenderer, err = dependencies.newBlockOutlineRenderer(
+		dev, colorFormat, gfx.FormatDepth32Float,
+	)
+	if err != nil {
+		app.releaseRemoteConstructionResources()
+		return nil, errors.Join(fmt.Errorf("创建方块轮廓渲染器: %w", err), app.Close())
+	}
+	app.damageOverlayRenderer, err = dependencies.newDamageOverlayRenderer(dev, colorFormat)
+	if err != nil {
+		app.releaseRemoteConstructionResources()
+		return nil, errors.Join(fmt.Errorf("创建受伤反馈渲染器: %w", err), app.Close())
+	}
 	app.configPath = options.ConfigPath
 	if options.Dev {
 		app.debugPanelRenderer, err = dependencies.newDebugPanelRenderer(dev, colorFormat, app.glyphAtlas)
@@ -339,6 +365,14 @@ func (a *application) releaseRemoteConstructionResources() {
 	if a.debugPanelRenderer != nil {
 		a.debugPanelRenderer.Release()
 		a.debugPanelRenderer = nil
+	}
+	if a.damageOverlayRenderer != nil {
+		a.damageOverlayRenderer.Release()
+		a.damageOverlayRenderer = nil
+	}
+	if a.blockOutlineRenderer != nil {
+		a.blockOutlineRenderer.Release()
+		a.blockOutlineRenderer = nil
 	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()

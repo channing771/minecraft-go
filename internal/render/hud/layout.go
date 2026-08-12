@@ -35,7 +35,7 @@ const (
 
 	hudEdgeMargin = float32(8)
 	// 固定合成最上沿到快捷栏下沿（含面板边距）的设计高度。
-	openHUDHeight = float32(566)
+	openHUDHeight = float32(670)
 )
 
 // hotbarDigits 是 HUD 需要的全部字形，登录后不再增长。

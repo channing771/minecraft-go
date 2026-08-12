@@ -17,6 +17,9 @@ import (
 	"minecraft-go/internal/server"
 )
 
+// maxFrameNameTags 固定为七名远程玩家加一个当前方块目标。
+const maxFrameNameTags = 8
+
 type applicationOptions struct {
 	Seed               int64
 	Benchmark          bool
@@ -36,39 +39,43 @@ type applicationOptions struct {
 }
 
 type application struct {
-	window              applicationWindow
-	dev                 gfx.Device
-	surface             gfx.Surface
-	color               gfx.Texture
-	colorView           gfx.TextureView
-	frameWidth          int
-	frameHeight         int
-	renderer            *render.Renderer
-	remotePlayers       *client.RemotePlayers
-	remotePresentations []client.RemotePresentation
-	remoteAvatars       []render.Avatar
-	remoteNameTags      []render.NameTag
-	avatarRenderer      *render.AvatarRenderer
-	nameTagRenderer     *render.NameTagRenderer
-	hotbarRenderer      *hud.HotbarRenderer
-	debugPanelRenderer  *render.DebugPanelRenderer
+	window                applicationWindow
+	dev                   gfx.Device
+	surface               gfx.Surface
+	color                 gfx.Texture
+	colorView             gfx.TextureView
+	frameWidth            int
+	frameHeight           int
+	renderer              *render.Renderer
+	remotePlayers         *client.RemotePlayers
+	remotePresentations   []client.RemotePresentation
+	remoteAvatars         []render.Avatar
+	remoteNameTags        []render.NameTag
+	avatarRenderer        *render.AvatarRenderer
+	nameTagRenderer       *render.NameTagRenderer
+	hotbarRenderer        *hud.HotbarRenderer
+	damageOverlayRenderer *render.DamageOverlayRenderer
+	damageFeedback        damageFeedback
+	damageStrength        float32
+	debugPanelRenderer    *render.DebugPanelRenderer
 	// panel 是调试面板的交互状态；只在 applicationOptions.Dev 为真时创建，
 	// 与 debugPanelRenderer 一同保持 nil/非 nil 同步。
 	panel *panelState
 	// configPath 是调试面板 F5 保存时的目标路径，来自 applicationOptions.ConfigPath。
 	configPath string
 	// panelLastFrameAt 是上一帧调试面板读数的采样时刻，用于计算 PanelReadout.FrameMillis。
-	panelLastFrameAt  time.Time
-	inventory         client.InventoryMirror
-	furnace           client.FurnaceMirror
-	chest             client.ChestMirror
-	miningOverlay     hud.MiningOverlay
-	itemDropRenderer  *render.ItemDropRenderer
-	itemDrops         *client.ItemDrops
-	itemDropInstances []render.ItemDrop
-	inventoryOpen     bool
-	inventorySource   int
-	serverTick        uint64
+	panelLastFrameAt     time.Time
+	inventory            client.InventoryMirror
+	furnace              client.FurnaceMirror
+	chest                client.ChestMirror
+	miningOverlay        hud.MiningOverlay
+	itemDropRenderer     *render.ItemDropRenderer
+	blockOutlineRenderer *render.BlockOutlineRenderer
+	itemDrops            *client.ItemDrops
+	itemDropInstances    []render.ItemDrop
+	inventoryOpen        bool
+	inventorySource      int
+	serverTick           uint64
 	// worldTimeTicks 是最后确认的权威绝对世界时间，只在接受更新状态时前进。
 	worldTimeTicks          uint64
 	glyphAtlas              *render.GlyphAtlas
@@ -96,6 +103,8 @@ type application struct {
 	closeErr                error
 	clientCloseOnce         sync.Once
 	clientCloseErr          error
+	clientSessionClosed     bool
+	blockTargetReset        bool
 	releaseResources        func()
 	// render 是渲染相关的生效配置快照，在构造时从 applicationOptions.Render 复制，
 	// 供渲染热路径（DropOutside 视距、鼠标灵敏度等）读取，不随配置文件热更新。

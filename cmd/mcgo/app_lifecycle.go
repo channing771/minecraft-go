@@ -33,6 +33,12 @@ func (a *application) releaseOwnedResources() {
 	if a.debugPanelRenderer != nil {
 		a.debugPanelRenderer.Release()
 	}
+	if a.damageOverlayRenderer != nil {
+		a.damageOverlayRenderer.Release()
+	}
+	if a.blockOutlineRenderer != nil {
+		a.blockOutlineRenderer.Release()
+	}
 	if a.itemDropRenderer != nil {
 		a.itemDropRenderer.Release()
 	}
@@ -93,8 +99,11 @@ func (a *application) closeClientSession(cause error) {
 		a.furnace.Reset()
 		a.chest.Reset()
 		a.miningOverlay = hud.MiningOverlay{}
+		a.damageFeedback.Reset()
+		a.damageStrength = 0
 		a.inventoryOpen = false
 		a.inventorySource = -1
 		a.itemDrops.Reset()
+		a.clientSessionClosed = true
 	})
 }

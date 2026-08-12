@@ -88,9 +88,9 @@ func (state FurnaceState) Validate() error {
 	if state.ProgressTicks >= core.FurnaceSmeltTicks || state.BurnTicks > core.FurnaceBurnTicks {
 		return errors.New("network: furnace timers are outside their fixed ranges")
 	}
-	if !validFurnaceStack(state.Input, core.ItemRawIron) ||
-		!validFurnaceStack(state.Fuel, core.ItemCoal) ||
-		!validFurnaceStack(state.Output, core.ItemIronIngot) {
+	if !validFurnaceInput(state.Input) ||
+		!state.Fuel.Valid() || (state.Fuel.Item != core.ItemNone && state.Fuel.Item != core.ItemCoal) ||
+		!validFurnaceOutput(state.Output) {
 		return errors.New("network: furnace slot holds an item it cannot contain")
 	}
 	return nil
@@ -177,7 +177,27 @@ func validAnyContainerRef(ref core.ContainerRef) error {
 	}
 }
 
-// validFurnaceStack 报告某个熔炉格是否为空或恰好装着允许的物品。
-func validFurnaceStack(stack core.ItemStack, allowed core.ItemID) bool {
-	return stack.Valid() && (stack.Item == core.ItemNone || stack.Item == allowed)
+// validFurnaceInput 报告输入格是否为空或装着已注册的熔炼输入。
+func validFurnaceInput(stack core.ItemStack) bool {
+	if !stack.Valid() {
+		return false
+	}
+	if stack.Item == core.ItemNone {
+		return true
+	}
+	_, ok := core.SmeltingOutput(stack.Item)
+	return ok
+}
+
+// validFurnaceOutput 报告输出格是否为空或装着固定熔炼产物。
+func validFurnaceOutput(stack core.ItemStack) bool {
+	if !stack.Valid() {
+		return false
+	}
+	switch stack.Item {
+	case core.ItemNone, core.ItemIronIngot, core.ItemGlass, core.ItemBrick:
+		return true
+	default:
+		return false
+	}
 }

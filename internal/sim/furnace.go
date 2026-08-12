@@ -52,7 +52,8 @@ func advanceChunkFurnaces(chunk *world.Chunk, burnTicks uint16, smeltTicks uint8
 // 因此燃料不会在空转中静默损失。burnTicks、smeltTicks 由调用方传入本 tick 的
 // 快照值，本函数本身绝不读取 ActiveTunables。
 func advanceFurnace(furnace world.FurnaceSlot, burnTicks uint16, smeltTicks uint8) (world.FurnaceSlot, bool) {
-	if !canSmelt(furnace) {
+	output, ok := canSmelt(furnace)
+	if !ok {
 		return furnace, false
 	}
 	if furnace.BurnTicks == 0 {
@@ -76,20 +77,21 @@ func advanceFurnace(furnace world.FurnaceSlot, burnTicks uint16, smeltTicks uint
 		furnace.Input = core.ItemStack{}
 	}
 	if furnace.Output.Item == core.ItemNone {
-		furnace.Output = core.ItemStack{Item: core.ItemIronIngot, Count: 1}
+		furnace.Output = core.ItemStack{Item: output, Count: 1}
 	} else {
 		furnace.Output.Count++
 	}
 	return furnace, true
 }
 
-// canSmelt 报告熔炉当前是否具备继续熔炼的输入与输出条件。
-func canSmelt(furnace world.FurnaceSlot) bool {
-	if furnace.Input.Item != core.ItemRawIron || furnace.Input.Count == 0 {
-		return false
+// canSmelt 返回当前输入的固定产物，并报告输出格是否仍可接收它。
+func canSmelt(furnace world.FurnaceSlot) (core.ItemID, bool) {
+	output, ok := core.SmeltingOutput(furnace.Input.Item)
+	if !ok || furnace.Input.Count == 0 {
+		return core.ItemNone, false
 	}
-	return furnace.Output.Item == core.ItemNone ||
-		(furnace.Output.Item == core.ItemIronIngot && furnace.Output.Count < core.MaxStackCount)
+	return output, furnace.Output.Item == core.ItemNone ||
+		(furnace.Output.Item == output && furnace.Output.Count < core.MaxStackCount)
 }
 
 // SetChunkFurnaceForTest 直接写入一个已 Ready 区块的熔炉槽，仅供测试构造固定场景。
@@ -224,20 +226,34 @@ func setFurnaceViewSlot(
 ) (core.Inventory, world.FurnaceSlot, bool) {
 	switch slot {
 	case core.FurnaceInputSlot:
-		if !allowedFurnaceStack(stack, core.ItemRawIron) {
+		if !stack.Valid() {
 			return inventory, furnace, false
 		}
+		if stack.Item != core.ItemNone {
+			if _, ok := core.SmeltingOutput(stack.Item); !ok {
+				return inventory, furnace, false
+			}
+		}
+		oldItem := furnace.Input.Item
 		furnace.Input = stack
+		if oldItem != stack.Item {
+			furnace.ProgressTicks = 0
+		}
 	case core.FurnaceFuelSlot:
 		if !allowedFurnaceStack(stack, core.ItemCoal) {
 			return inventory, furnace, false
 		}
 		furnace.Fuel = stack
 	case core.FurnaceOutputSlot:
-		if !allowedFurnaceStack(stack, core.ItemIronIngot) {
+		if !stack.Valid() {
 			return inventory, furnace, false
 		}
-		furnace.Output = stack
+		switch stack.Item {
+		case core.ItemNone, core.ItemIronIngot, core.ItemGlass, core.ItemBrick:
+			furnace.Output = stack
+		default:
+			return inventory, furnace, false
+		}
 	default:
 		next, ok := inventory.SetSlot(slot, stack)
 		if !ok {

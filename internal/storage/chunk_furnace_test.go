@@ -49,6 +49,17 @@ func furnaceBlockIndex(t *testing.T, pos core.ChunkPos, lx, y, lz int32) uint32 
 func TestChunkCodecRoundTripsFurnaces(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	want := furnaceFixtureChunk(t, key.Pos)
+	sand := want.Furnace(0)
+	sand.Input = core.ItemStack{Item: core.ItemSand, Count: 7}
+	sand.Output = core.ItemStack{Item: core.ItemGlass, Count: 5}
+	want.SetFurnace(0, sand)
+	clay := want.Furnace(31)
+	clay.Input = core.ItemStack{Item: core.ItemClay, Count: 6}
+	clay.Fuel = core.ItemStack{Item: core.ItemCoal, Count: 1}
+	clay.Output = core.ItemStack{Item: core.ItemBrick, Count: 4}
+	clay.ProgressTicks = 91
+	clay.BurnTicks = 1200
+	want.SetFurnace(31, clay)
 	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 19, Chunk: want})
 	if err != nil {
 		t.Fatal(err)
@@ -57,8 +68,8 @@ func TestChunkCodecRoundTripsFurnaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 7 {
-		t.Fatalf("schema = %d，想要 7", got.Schema)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 8 || got.Revision != 19 {
+		t.Fatalf("schema/revision = %d/%d，想要 8/19", got.Schema, got.Revision)
 	}
 	for slot := range core.FurnacesPerChunk {
 		if got.Chunk.Furnace(slot) != want.Furnace(slot) {
@@ -255,9 +266,9 @@ func TestChunkCodecRejectsFutureSchema(t *testing.T) {
 	_ = key
 }
 
-func TestPlayerSchemaV5KeepsM4EItems(t *testing.T) {
-	if currentPlayerSchema != 5 {
-		t.Fatalf("玩家 schema = %d，想要 5", currentPlayerSchema)
+func TestPlayerSchemaV6KeepsM4EItems(t *testing.T) {
+	if currentPlayerSchema != 6 {
+		t.Fatalf("玩家 schema = %d，想要 6", currentPlayerSchema)
 	}
 	var inventory core.Inventory
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemCoal, Count: 12}

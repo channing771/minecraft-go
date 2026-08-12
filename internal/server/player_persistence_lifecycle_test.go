@@ -11,6 +11,139 @@ import (
 	"minecraft-go/internal/storage"
 )
 
+func wantStarterMaterialInventory() core.Inventory {
+	items := [...]core.ItemID{
+		core.ItemCobblestone, core.ItemSmoothStone, core.ItemSand, core.ItemGravel,
+		core.ItemOakLog, core.ItemOakPlanks, core.ItemLeaves, core.ItemGlass,
+		core.ItemBrick, core.ItemWhiteWool, core.ItemRoofTile, core.ItemClay,
+		core.ItemSnowBlock, core.ItemMossyCobblestone,
+	}
+	var inventory core.Inventory
+	for slot, item := range items {
+		inventory.Backpack[slot] = core.ItemStack{Item: item, Count: core.MaxStackCount}
+	}
+	return inventory
+}
+
+// 捕获：缺失玩家的初始材料包没有通过 Prepare 交给模拟注册流程。
+func TestPlayerPersistencePrepareMissingProvidesStarterMaterialInventory(t *testing.T) {
+	store := newControllablePlayerStore()
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+
+	restored, err := p.Prepare(context.Background(), playerID(35), "Starter", testMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Current != nil || restored.Safe != nil {
+		t.Fatalf("missing restore exposed position: %+v", restored)
+	}
+	if restored.Inventory != wantStarterMaterialInventory() || restored.Inventory.Hotbar != (core.Hotbar{}) {
+		t.Fatalf("missing restore inventory=%+v, want fixed starter materials and empty hotbar", restored.Inventory)
+	}
+}
+
+// 捕获：已有玩家在加载时被错误地替换为初始材料包。
+func TestPlayerPersistencePrepareExistingKeepsCustomInventory(t *testing.T) {
+	store := newControllablePlayerStore()
+	id := playerID(36)
+	want := core.Inventory{}
+	want.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemStone, Count: 7}
+	want.Backpack[5] = core.ItemStack{Item: core.ItemGlass, Count: 3}
+	stored := storedPlayerForTest(id, 7, "Existing", testPlayerSnapshot(3))
+	stored.Inventory = want
+	store.loaded[id] = stored
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+
+	restored, err := p.Prepare(context.Background(), id, "Existing", testMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Inventory != want {
+		t.Fatalf("existing restore inventory=%+v, want=%+v", restored.Inventory, want)
+	}
+}
+
+// 捕获：未确认的缺失玩家在断开后保存材料包，或再次 Prepare 时重复累加材料。
+func TestPlayerPersistenceMissingStarterDoesNotPersistBeforeConfirm(t *testing.T) {
+	store := newControllablePlayerStore()
+	id := playerID(37)
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+
+	restored, err := p.Prepare(context.Background(), id, "Candidate", testMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Inventory != wantStarterMaterialInventory() {
+		t.Fatalf("first missing inventory=%+v", restored.Inventory)
+	}
+	if err := p.Activate(id, "Candidate"); err != nil {
+		t.Fatal(err)
+	}
+	p.Abort(id)
+	if err := p.Poll(6000); err != nil {
+		t.Fatal(err)
+	}
+	assertNoPlayerSaveStarted(t, store)
+
+	again, err := p.Prepare(context.Background(), id, "Candidate", testMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Inventory != wantStarterMaterialInventory() {
+		t.Fatalf("reprepared missing inventory=%+v, want one starter material set", again.Inventory)
+	}
+}
+
+// 捕获：确认后的初始材料包未保存，或重载时又被重新补发。
+func TestPlayerPersistenceConfirmPersistsStarterMaterialInventoryOnce(t *testing.T) {
+	store := newControllablePlayerStore()
+	id := playerID(38)
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+	if _, err := p.Prepare(context.Background(), id, "Starter", testMetadata()); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Activate(id, "Starter"); err != nil {
+		t.Fatal(err)
+	}
+	p.Confirm(id)
+	if err := p.Poll(6000); err != nil {
+		t.Fatal(err)
+	}
+	save := receivePlayerSave(t, store)
+	if save.Inventory != wantStarterMaterialInventory() {
+		t.Fatalf("confirmed save inventory=%+v", save.Inventory)
+	}
+	store.mu.Lock()
+	store.loaded[id] = storage.StoredPlayer{
+		PlayerID:    save.PlayerID,
+		Revision:    save.Revision,
+		DisplayName: save.DisplayName,
+		Current:     save.Current,
+		Yaw:         save.Yaw,
+		Pitch:       save.Pitch,
+		Safe:        save.Safe,
+		Inventory:   save.Inventory,
+		Health:      save.Health,
+	}
+	store.mu.Unlock()
+	store.complete(nil)
+	pollPlayerPersistenceUntilIdle(t, p, 6001)
+
+	reloaded := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(reloaded.CloseWorker)
+	restored, err := reloaded.Prepare(context.Background(), id, "Starter", testMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Inventory != wantStarterMaterialInventory() {
+		t.Fatalf("reloaded inventory=%+v, want unchanged starter material set", restored.Inventory)
+	}
+}
+
 // 捕获：Prepare 将缺失玩家提前标为 dirty，或把默认快照错误地暴露为恢复位置。
 func TestPlayerPersistencePrepareMissingIsSpawnOnlyBeforeConfirm(t *testing.T) {
 	store := newControllablePlayerStore()

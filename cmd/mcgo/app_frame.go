@@ -46,6 +46,8 @@ func (a *application) frame(drainMax, meshWorkMax int, elapsed time.Duration) (b
 			return false, err
 		}
 	}
+	health, ready := a.predictor.Health()
+	a.damageStrength = a.damageFeedback.Update(health, ready, elapsed)
 	if a.remotePlayers != nil {
 		a.remotePlayers.Advance(elapsed)
 	}
@@ -54,6 +56,8 @@ func (a *application) frame(drainMax, meshWorkMax int, elapsed time.Duration) (b
 
 // renderFrame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
 func (a *application) renderFrame(workMax int) (bool, error) {
+	blockTargetReset := a.blockTargetReset
+	a.blockTargetReset = false
 	width, height := a.framebufferSize()
 	if width == 0 || height == 0 {
 		return false, nil
@@ -82,6 +86,10 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		a.remoteNameTags[:0],
 		a.remotePresentations,
 	)
+	blockOutline := render.BlockOutline{}
+	if !blockTargetReset && !a.clientSessionClosed {
+		a.remoteNameTags, blockOutline = a.appendCurrentBlockTarget(a.remoteNameTags)
+	}
 	avatars, tags := a.remoteAvatars, a.remoteNameTags
 	renderTiming := a.multiplayerRenderTiming
 	var renderNow func() time.Time
@@ -93,11 +101,11 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		}
 		started := renderNow()
 		if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
-			return false, fmt.Errorf("准备远端玩家昵称: %w", err)
+			return false, fmt.Errorf("准备世界名牌: %w", err)
 		}
 		nameTagDuration = renderNow().Sub(started)
 	} else if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
-		return false, fmt.Errorf("准备远端玩家昵称: %w", err)
+		return false, fmt.Errorf("准备世界名牌: %w", err)
 	}
 	inventory, inventoryConfirmed := a.inventory.State()
 	if inventoryConfirmed {
@@ -146,7 +154,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	}
 	encoder := a.dev.CreateCommandEncoder()
 	// 每帧只从最后确认的权威世界时间计算一次昼夜；ViewProj 及其逆矩阵同样只计算一次，
-	// terrain、avatar、item-drop 与天空共用同一正向矩阵和 daylight。
+	// terrain、avatar、item-drop、block-outline 与天空共用同一正向矩阵和 daylight。
 	dayNight := render.DayNightAt(a.worldTimeTicks)
 	viewProj := a.camera.ViewProj()
 	viewProjInv := viewProj.Inv()
@@ -163,12 +171,13 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	if renderTiming != nil {
 		started = renderNow()
 	}
-	a.avatarRenderer.Render(encoder, target, a.depth.view, render.Camera{
+	entityCamera := render.Camera{
 		ViewProj: viewProj,
 		Pos:      a.camera.Pos,
 		Daylight: dayNight.Daylight,
 		SkyColor: dayNight.ClearColor,
-	}, avatars)
+	}
+	a.avatarRenderer.Render(encoder, target, a.depth.view, entityCamera, avatars)
 	if renderTiming != nil {
 		renderTiming.recordAvatar(renderNow().Sub(started))
 		started = renderNow()
@@ -176,12 +185,12 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	a.itemDropInstances = appendItemDropInstances(
 		a.itemDropInstances[:0], a.itemDrops.Presentations(),
 	)
-	a.itemDropRenderer.Render(encoder, target, a.depth.view, render.Camera{
-		ViewProj: viewProj,
-		Pos:      a.camera.Pos,
-		Daylight: dayNight.Daylight,
-		SkyColor: dayNight.ClearColor,
-	}, a.serverTick, a.itemDropInstances)
+	a.itemDropRenderer.Render(
+		encoder, target, a.depth.view, entityCamera, a.serverTick, a.itemDropInstances,
+	)
+	a.blockOutlineRenderer.Render(
+		encoder, target, a.depth.view, entityCamera, blockOutline,
+	)
 	right := mgl32.Vec3{
 		float32(math.Cos(float64(a.camera.Yaw))),
 		0,
@@ -195,7 +204,8 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	if renderTiming != nil {
 		renderTiming.recordNameTag(nameTagDuration + renderNow().Sub(started))
 	}
-	// HUD 在 terrain、avatar 与 name tag 之后绘制。
+	a.damageOverlayRenderer.Render(encoder, target, a.damageStrength)
+	// HUD 在全部世界 pass 与 damage overlay 之后绘制。
 	if inventoryConfirmed {
 		a.hotbarRenderer.Render(encoder, target)
 	}

@@ -39,7 +39,26 @@ const (
 	IronBlockID
 	ChestID
 	LightBlockID
+	CobblestoneID
+	SmoothStoneID
+	SandID
+	GravelID
+	OakLogID
+	OakPlanksID
+	LeavesID
+	GlassID
+	BrickID
+	WhiteWoolID
+	RoofTileID
+	ClayID
+	SnowBlockID
+	MossyCobblestoneID
 )
+
+// RegisteredBlock 报告 id 是否是已注册的稳定方块编号。
+func RegisteredBlock(id BlockID) bool {
+	return id <= MossyCobblestoneID
+}
 
 const (
 	BlockFaceNegX BlockFace = iota

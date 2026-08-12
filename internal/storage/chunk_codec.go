@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	currentChunkSchema uint32 = 7
+	currentChunkSchema uint32 = 8
 	maxCompressedChunk        = 1 << 20
 	maxDecodedChunk           = 2 << 20
 

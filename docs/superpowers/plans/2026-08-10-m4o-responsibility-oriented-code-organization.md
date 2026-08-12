@@ -20,6 +20,7 @@
 - Task 20 全仓审计范围 MUST 覆盖 `37cdb3e` 时 `cmd/` 与 `internal/` 下全部 `412` 个 Go 文件（`155` 个生产文件、`257` 个测试文件），结论固定为 36 split + 2 extract + 0 delete + 374 keep；审计不要求每个文件产生 diff。
 - Task 20 MUST 保留主线已有的协议 v15、区块 schema v8、玩家 schema v6、metadata v2、已归档 M4N、common materials、damage/target、material processing、natural generation/oak、light recipe、container-Y、10 个 capture 场景与 benchmark scenario v15；这些能力不得归因于 M4O。
 - storage/network fixture、10 个视觉 golden 与其他固定 artifact MUST 直接用 `git diff`/`cmp` 对比 `37cdb3e`，不得用 Task 19 旧 hash 代替；若上游未改性能 baseline，则继续保持原字节。
+- 视觉门禁不泛化跳过：同一 Apple M2/macOS 环境已在原始 `37cdb3e` 连续复现 `materials-showcase`（最大通道差 1、26 像素、0.0113%）与 `oak-grove`（最大通道差 47、10 像素、0.0043%）两个既有失败；Task 20 必须让分支与 detached `37cdb3e` 以同一命令重新 capture 的 10 个输出 PNG 逐字节一致、其余 8 场景各自通过 tracked golden，并证明两边仅上述 2 场景的失败摘要完全一致。不得修改 golden、阈值或 capture 代码。
 - 相对 `37cdb3e` 只允许 Task 2 已批准的两个新 Test 和一个 Test 重命名；其余 Test、Benchmark、Fuzz 入口 MUST 完全一致。
 - benchmark 与 `perfcheck` 的性能数值及既有阈值只保存记录，不改变退出状态；只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
 - 行数只用于发现候选；不得新增文件行数门禁，不得为了缩短文件制造单函数碎片。
@@ -1901,13 +1902,24 @@ zsh -ic 'go test ./internal/server -run "Starter|Ready|Furnace|TCPPlayer|PlayerP
 zsh -ic 'go test ./internal/storage -run "ChunkPayload|Schema8|Container|WorldY|Fixture" -count=1'
 zsh -ic 'go test ./internal/network -run=^$ -fuzz=FuzzSmallPacketCodec -fuzztime=10s'
 zsh -ic 'go test ./internal/storage -run=^$ -fuzz=FuzzDecodeChunkPayload -fuzztime=10s'
-VISUAL_OUT=/private/tmp/mcgo-m4o-task20-visual make visual-check
+VISUAL_OUT=/private/tmp/mcgo-m4o-task20-visual make visual-check > /private/tmp/mcgo-m4o-task20-visual.log 2>&1
+test $? -ne 0
+git worktree add --detach /private/tmp/mcgo-m4o-task20-main 37cdb3e
+(cd /private/tmp/mcgo-m4o-task20-main && VISUAL_OUT=/private/tmp/mcgo-m4o-task20-main-visual make visual-check > /private/tmp/mcgo-m4o-task20-main-visual.log 2>&1)
+test $? -ne 0
+for scene in terrain-noon hud-hotbar-health avatar-nametag inventory-crafting debug-panel skylight-tunnel block-light-room materials-showcase target-block-feedback oak-grove; do
+  cmp "/private/tmp/mcgo-m4o-task20-visual/${scene}.png" "/private/tmp/mcgo-m4o-task20-main-visual/${scene}.png"
+done
+rg '^已抓取场景 (materials-showcase|oak-grove):' /private/tmp/mcgo-m4o-task20-visual.log > /private/tmp/mcgo-m4o-task20-visual-failures.txt
+rg '^已抓取场景 (materials-showcase|oak-grove):' /private/tmp/mcgo-m4o-task20-main-visual.log > /private/tmp/mcgo-m4o-task20-main-visual-failures.txt
+cmp /private/tmp/mcgo-m4o-task20-visual-failures.txt /private/tmp/mcgo-m4o-task20-main-visual-failures.txt
+git worktree remove /private/tmp/mcgo-m4o-task20-main
 TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/mcgo --benchmark --benchmark-transport memory --perf-output /private/tmp/mcgo-m4o-task20-current.json"
 TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline /private/tmp/mcgo-m4o-task20-current.json --current /private/tmp/mcgo-m4o-task20-current.json --max-regression 0.20"
 TERM=xterm-256color zsh -ic "gvm use go1.26 >/dev/null && go run ./cmd/perfcheck --baseline docs/notes/perf-baseline.json --current /private/tmp/mcgo-m4o-task20-current.json --max-regression 0.20"
 ```
 
-visual-check 只比较 10 个场景，绝不使用 `--update-golden`；性能数值只记录，不改变退出状态。只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
+visual-check 只比较 10 个场景，绝不使用 `--update-golden`。上面两个非零状态只允许对应已在同环境原始 `37cdb3e` 连续复现的精确两项失败；两边 10/10 PNG、失败摘要或其余 8 场景任一不一致都阻断。性能数值只记录，不改变退出状态。只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和其他非数值命令失败阻断。
 
 - [ ] **Step 6: 跑最终共享门禁**
 

@@ -150,15 +150,14 @@ func TestHotbarPrepareReusesLayoutAndUploadStorage(t *testing.T) {
 		upload: make([]byte, hotbarUploadBytes),
 	}
 	inventory := fullTestInventory()
-	overlay := fullFurnaceOverlay()
 	health := HealthOverlay{Confirmed: true, Value: 7}
 	budget := render.NewUploadBudget(1024)
-	if err := renderer.Prepare(inventory, true, 3, overlay, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
+	if err := renderer.Prepare(inventory, true, 3, nil, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
 		t.Fatalf("warm Prepare: %v", err)
 	}
 	allocations := testing.AllocsPerRun(1000, func() {
 		source.requestCount = 0
-		if err := renderer.Prepare(inventory, true, 3, overlay, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
+		if err := renderer.Prepare(inventory, true, 3, nil, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
 			panic(err)
 		}
 	})

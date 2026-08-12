@@ -114,6 +114,46 @@ func TestChunkSnapshotRejectsMalformedSections(t *testing.T) {
 	}
 }
 
+func TestSectionDataRejectsUnknownBlockEveryStorage(t *testing.T) {
+	unknown := core.MossyCobblestoneID + 1
+	tests := []struct {
+		name    string
+		section network.SectionData
+	}{
+		{
+			name: "single",
+			section: network.SectionData{
+				Storage: network.SectionSingle,
+				Single:  unknown,
+			},
+		},
+		{
+			name: "indexed",
+			section: network.SectionData{
+				Storage: network.SectionIndexed,
+				Bits:    4,
+				Palette: []core.BlockID{core.AirID, unknown},
+				Packed:  make([]uint64, 256),
+			},
+		},
+		{
+			name: "direct",
+			section: network.SectionData{
+				Storage: network.SectionDirect,
+				Bits:    15,
+				Packed:  append([]uint64{uint64(unknown)}, make([]uint64, 1023)...),
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.section.Validate(); err == nil {
+				t.Fatalf("未注册方块 %d 被接受", unknown)
+			}
+		})
+	}
+}
+
 func TestBlockChangesValidateRevisionPositionAndOrder(t *testing.T) {
 	valid := network.BlockChanges{
 		Dimension:    core.Overworld,
@@ -165,9 +205,9 @@ func TestBlockChangesValidateRevisionPositionAndOrder(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid block ID",
+			name: "unregistered block ID",
 			mutate: func(changes *network.BlockChanges) {
-				changes.Changes[0].Block = core.BlockID(1 << 15)
+				changes.Changes[0].Block = core.MossyCobblestoneID + 1
 			},
 		},
 		{

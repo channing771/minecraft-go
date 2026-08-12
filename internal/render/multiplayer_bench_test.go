@@ -41,7 +41,7 @@ func BenchmarkRemoteAvatarNameTag(b *testing.B) {
 
 	names := [...]string{"星野", "月河", "云山", "海界", "星河", "月海", "云野"}
 	avatars := make([]Avatar, len(names))
-	tags := make([]NameTag, len(names))
+	tags := make([]NameTag, len(names), maxNameTags)
 	for index, name := range names {
 		id := core.PlayerID{0, 0, 0, byte(index + 1), 0, 0, 0x40, byte(index + 1), 0x80, 0, 0, 0, 0, 0, 0, byte(index + 1)}
 		position := mgl32.Vec3{float32(index-3) * 0.2, -0.9, 0}

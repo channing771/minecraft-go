@@ -35,8 +35,8 @@ func validateFurnaceSlots(chunk *world.Chunk) error {
 			return fmt.Errorf("furnace slot %d block index %d has no position",
 				slot, furnace.BlockIndex)
 		}
-		lx, y, lz := pos.Local()
-		if chunk.BlockAt(lx, int32(y), lz) != core.FurnaceID {
+		lx, _, lz := pos.Local()
+		if chunk.BlockAt(lx, pos.Y, lz) != core.FurnaceID {
 			return fmt.Errorf("furnace slot %d does not point at a furnace block", slot)
 		}
 	}
@@ -135,8 +135,8 @@ func validateChestSlots(chunk *world.Chunk) error {
 			return fmt.Errorf("chest slot %d block index %d has no position",
 				slot, chest.BlockIndex)
 		}
-		lx, y, lz := pos.Local()
-		if chunk.BlockAt(lx, int32(y), lz) != core.ChestID {
+		lx, _, lz := pos.Local()
+		if chunk.BlockAt(lx, pos.Y, lz) != core.ChestID {
 			return fmt.Errorf("chest slot %d does not point at a chest block", slot)
 		}
 	}

@@ -10,6 +10,7 @@
 - 调整依赖单一源文件位置的架构守卫，使其扫描完整职责文件集合。
 - Task 20 合并 `origin/main` 后，把协议 v15、区块 schema v8、玩家 schema v6、已归档 M4N 与 common materials、damage/target、material processing、natural generation/oak、light recipe、container-Y 等上游能力迁移到既有职责文件；这些能力不归因于 M4O，也不得回退或通过复活旧大文件实现。
 - 保持相对 `37cdb3e` 的 CLI、游戏行为、协议、存档、渲染、并发、测试入口和固定 artifact 契约不变。
+- 对同一 Apple M2/macOS 环境已在原始 `37cdb3e` 连续复现的 `materials-showcase` 与 `oak-grove` 既有 visual-check 失败，不泛化跳过视觉门禁：Task 20 必须让分支与 detached `37cdb3e` 的 10 个重新 capture PNG 逐字节一致，保留其余 8 场景各自通过 tracked golden，并证明两边仅上述 2 场景的失败摘要完全一致。
 
 非目标：
 
@@ -34,5 +35,5 @@
 
 - 受影响区域：`cmd/`、`internal/`、`internal/archcheck` 与本 change 的规划产物。
 - API 与依赖：新增窄内部 API `render.ItemColor` 作为掉落物与 HUD 共享颜色的唯一实现，并新增 `internal/render/hud` 到既有底层包（含 `internal/render`）的精确单向依赖；`internal/render` 不反向依赖 HUD，外部行为不变。
-- 兼容性：Task 2–19 历史审计曾保持协议 v14、区块 schema v7、玩家 schema v5；Task 20 改以 `37cdb3e` 已有的协议 v15、区块 schema v8、玩家 schema v6、世界 metadata v2 与 benchmark scenario v15 为不可回退基线。10 个视觉场景及 storage/network fixture 必须与主线字节一致；若上游未改性能 baseline，则继续保持其原字节。
+- 兼容性：Task 2–19 历史审计曾保持协议 v14、区块 schema v7、玩家 schema v5；Task 20 改以 `37cdb3e` 已有的协议 v15、区块 schema v8、玩家 schema v6、世界 metadata v2 与 benchmark scenario v15 为不可回退基线。10 个 tracked 视觉 golden 及 storage/network fixture 必须与主线字节一致；同一 Apple M2/macOS 上分支与 detached `37cdb3e` 的 10 个 capture 输出也必须逐字节一致，且不得修改 golden、阈值或 capture 代码。若上游未改性能 baseline，则继续保持其原字节。
 - 并发与性能：goroutine、channel、锁、buffer、资源释放顺序、workload 和阈值数值保持不变；benchmark 与 `perfcheck` 的性能数值只保存记录、不改变退出状态，只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。

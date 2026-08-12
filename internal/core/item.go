@@ -24,6 +24,20 @@ const (
 	// ItemChest 是可堆叠的存储方块物品，没有耐久。
 	ItemChest
 	ItemLightBlock
+	ItemCobblestone
+	ItemSmoothStone
+	ItemSand
+	ItemGravel
+	ItemOakLog
+	ItemOakPlanks
+	ItemLeaves
+	ItemGlass
+	ItemBrick
+	ItemWhiteWool
+	ItemRoofTile
+	ItemClay
+	ItemSnowBlock
+	ItemMossyCobblestone
 )
 
 const (
@@ -144,6 +158,34 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 		return ItemChest, true
 	case LightBlockID:
 		return ItemLightBlock, true
+	case CobblestoneID:
+		return ItemCobblestone, true
+	case SmoothStoneID:
+		return ItemSmoothStone, true
+	case SandID:
+		return ItemSand, true
+	case GravelID:
+		return ItemGravel, true
+	case OakLogID:
+		return ItemOakLog, true
+	case OakPlanksID:
+		return ItemOakPlanks, true
+	case LeavesID:
+		return ItemLeaves, true
+	case GlassID:
+		return ItemGlass, true
+	case BrickID:
+		return ItemBrick, true
+	case WhiteWoolID:
+		return ItemWhiteWool, true
+	case RoofTileID:
+		return ItemRoofTile, true
+	case ClayID:
+		return ItemClay, true
+	case SnowBlockID:
+		return ItemSnowBlock, true
+	case MossyCobblestoneID:
+		return ItemMossyCobblestone, true
 	default:
 		return ItemNone, false
 	}
@@ -153,7 +195,10 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 func ItemStackLimit(item ItemID) (uint8, bool) {
 	switch item {
 	case ItemStone, ItemDirt, ItemGrass, ItemStoneBrick, ItemCoal,
-		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock, ItemChest, ItemLightBlock:
+		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock, ItemChest, ItemLightBlock,
+		ItemCobblestone, ItemSmoothStone, ItemSand, ItemGravel, ItemOakLog,
+		ItemOakPlanks, ItemLeaves, ItemGlass, ItemBrick, ItemWhiteWool,
+		ItemRoofTile, ItemClay, ItemSnowBlock, ItemMossyCobblestone:
 		return MaxStackCount, true
 	case ItemStonePickaxe, ItemIronPickaxe,
 		ItemBrokenStonePickaxe, ItemBrokenIronPickaxe:
@@ -213,6 +258,34 @@ func ItemPlacement(item ItemID) (BlockID, bool) {
 		return ChestID, true
 	case ItemLightBlock:
 		return LightBlockID, true
+	case ItemCobblestone:
+		return CobblestoneID, true
+	case ItemSmoothStone:
+		return SmoothStoneID, true
+	case ItemSand:
+		return SandID, true
+	case ItemGravel:
+		return GravelID, true
+	case ItemOakLog:
+		return OakLogID, true
+	case ItemOakPlanks:
+		return OakPlanksID, true
+	case ItemLeaves:
+		return LeavesID, true
+	case ItemGlass:
+		return GlassID, true
+	case ItemBrick:
+		return BrickID, true
+	case ItemWhiteWool:
+		return WhiteWoolID, true
+	case ItemRoofTile:
+		return RoofTileID, true
+	case ItemClay:
+		return ClayID, true
+	case ItemSnowBlock:
+		return SnowBlockID, true
+	case ItemMossyCobblestone:
+		return MossyCobblestoneID, true
 	default:
 		return AirID, false
 	}

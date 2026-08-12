@@ -5,7 +5,11 @@
 ## Requirements
 ### Requirement: 程序化方块材质具有稳定且可辨识的像素图案
 
-系统 SHALL 继续以确定性的 16×16 程序化材质呈现方块，并 MUST 让草方块、石砖、矿石、熔炉、铁块和箱子等方块具有不同于单纯随机噪声的稳定结构图案。材质 MUST NOT 使用 Mojang 或其他未经授权的二进制美术资源。
+系统 SHALL 继续以确定性的 16×16 程序化材质呈现方块，并 MUST 让草方块、石砖、矿石、熔炉、铁块、箱子及新增的圆石、平滑石、沙子、砾石、原木、木板、树叶、玻璃、砖块、白色羊毛、红色瓦块、黏土、雪块和苔藓圆石具有不同于单纯随机噪声的稳定结构图案。材质 MUST NOT 使用 Mojang 或其他未经授权的二进制美术资源。
+
+terrain 材质采样相位 SHALL 由当前面的世界坐标轴决定；相同材质被 AO、天空光、贪心合并上限、区段或区块边界拆分时 MUST 保持连续，负世界坐标 MUST 继续周期采样。草顶明暗簇 MUST 跨 16×16 边界包裹，草侧缘 MUST 使用闭合周期序列，最右列与最左列的草缘高度差 MUST 不超过一个像素。
+
+树叶和玻璃 SHALL 使用现有 atlas 与 terrain pass 中 alpha 仅为 `0` 或 `255` 的 cutout 材质；透明像素 MUST 在 fragment 阶段丢弃，其余像素 MUST 按不透明颜色写入现有深度目标。cutout mip MUST 使用保持覆盖率的降采样，其他不透明层 MUST 保持颜色平均语义。
 
 #### Scenario: 同一方块材质重复生成保持一致
 
@@ -26,6 +30,23 @@
 - **WHEN** 检查其像素分布
 - **THEN** 顶面 MUST 同时包含相邻的明暗草簇
 - **AND** 侧面草缘 MUST 具有可辨识的深度变化与下垂像素
+- **AND** 顶面成簇图案 MUST 跨边界继续，侧面最右列与最左列草缘高度差 MUST 不超过一个像素
+
+#### Scenario: 十四种材料具有固定结构与分面
+- **GIVEN** 固定注册顺序中的 14 种新材料
+- **WHEN** 生成完整材质集合
+- **THEN** 每种材料 MUST 具有确定性的 16×16 RGBA 图案并保持设计规定的结构特征
+- **AND** 原木顶底面 MUST 显示同一组年轮、侧面 MUST 显示纵向树皮，雪块顶面与侧面 MUST 使用各自固定图案
+
+#### Scenario: 世界坐标保持纹理相位连续
+- **GIVEN** 同一材质表面跨越 quad、区段或区块边界，且边界任一侧可能位于负世界坐标
+- **WHEN** terrain shader 采样该表面
+- **THEN** 两侧 UV 相位 MUST 由相同世界坐标周期确定，且 MUST NOT 因 quad 局部原点重置而产生接缝
+
+#### Scenario: cutout alpha 与 mip 保持孔洞覆盖
+- **GIVEN** 树叶或玻璃的基础层与后续 mip
+- **WHEN** 检查 alpha 取值和各级透明覆盖
+- **THEN** 基础层 alpha MUST 仅为 `0` 或 `255`，透明像素 MUST 被丢弃，覆盖保持 mip MUST 防止边框或叶簇在远处整体消失
 
 ### Requirement: 物品栏及相邻容器使用统一层级
 
@@ -88,22 +109,22 @@
 
 ### Requirement: HUD 在无窗口视觉场景尺寸下保持可读
 
-系统 SHALL 保持 HUD 像素几何与命中几何一致，并 MUST 在 640×360 及更大的 framebuffer 中让九格快捷栏完整落在屏幕内；打开背包时，完整的固定合成区域 MUST 通过统一缩放落在 framebuffer 内且不得相互重叠。
+系统 SHALL 保持 HUD 像素几何与命中几何一致，并 MUST 在 640×360 及更大的 framebuffer 中让九格快捷栏完整落在屏幕内；打开背包时，完整的八行固定合成区域 MUST 通过统一整体缩放落在 framebuffer 内且不得相互重叠。每个配方按钮的命中矩形 MUST 与其绘制矩形来自同一组缩放后几何。
 
 #### Scenario: 640×360 关闭 HUD 完整可见
 
 - **WHEN** 在 640×360 framebuffer 绘制快捷栏与爱心栏
 - **THEN** 所有栏位、选中边界和左下角无背景爱心 MUST 位于 framebuffer 边界内
 
-#### Scenario: 640×360 打开固定合成区域
+#### Scenario: 640×360 打开八行固定合成区域
 
 - **WHEN** 在 640×360 framebuffer 打开背包与固定合成区域
-- **THEN** 全部背包栏位、配方行与合成按钮 MUST 位于 framebuffer 边界内
-- **AND** 命中测试 MUST 与缩放后的绘制矩形一致
+- **THEN** 全部背包栏位、八条配方行与合成按钮 MUST 位于 framebuffer 边界内
+- **AND** 每个按钮的命中测试 MUST 使用与缩放后绘制矩形相同的几何
 
 ### Requirement: 视觉优化保持固定有界渲染成本
 
-系统 MUST 复用现有 HUD render pass、字体图集与固定容量上传缓冲；热路径在预热后 MUST 保持零分配，且不得新增外部依赖、UI 框架或每帧动态资源。
+系统 MUST 复用现有 HUD render pass、字体图集与固定容量上传缓冲；热路径在预热后 MUST 保持零分配，且不得新增外部依赖、UI 框架或每帧动态资源。terrain 材质 MUST 继续使用固定 2D array atlas 与单一现有 terrain pass，quad 实例格式 MUST 保持 `8` 字节，不得增加第二个透明 pass、透明排序或每帧材质资源创建。
 
 #### Scenario: 最坏 HUD 布局仍受固定容量约束
 
@@ -111,6 +132,12 @@
 - **WHEN** 准备一帧 HUD
 - **THEN** quad 与 glyph 实例数 MUST 不超过编译期固定容量
 - **AND** 预热后的布局准备 MUST 不产生堆分配
+
+#### Scenario: 新 terrain 材质保持既有实例与 pass
+- **GIVEN** 同一帧包含全部 14 种新材料、玻璃和树叶 cutout
+- **WHEN** 准备并绘制 terrain
+- **THEN** 系统 MUST 只使用现有 atlas 与 terrain pass，quad 实例 MUST 保持 8 字节
+- **AND** 预热后 MUST 不因材质或 cutout 增加每帧堆分配或动态资源
 
 ### Requirement: 文本按字体原生度量渲染，窄字符不得丢失
 
@@ -140,3 +167,54 @@
 - **GIVEN** 上一行含下伸部字符、下一行含升部字符
 - **WHEN** 绘制这两行
 - **THEN** 两行的字形 MUST NOT 相互重叠
+
+### Requirement: 本地目标方块提供深度正确的轮廓与中文名称
+
+系统 SHALL 在普通游戏界面中，以当前相机位置和朝向、客户端只读方块镜像以及既有 `6` 格交互距离执行本地方块射线。仅当 Predictor ready、射线路径完整已加载、命中已注册的非空气方块且没有打开背包或容器时，系统 MUST 显示该目标的细轮廓和中文名称。任何路径未知或未加载、空气、未注册 ID、超距、未 ready、背包或容器打开、断开或 reset 时，系统 MUST 立即清空目标显示状态，不得显示占位名称或陈旧目标。
+
+轮廓 MUST 以十二根细长立方体覆盖单位方块包围盒的十二条边，并固定向外扩张 `0.003` 个世界单位；每根边的长边 MUST 为 `1.006` 个世界单位，两个横截面轴 MUST 为 `0.018` 个世界单位，颜色 alpha MUST 为 `0.86`。它 MUST 位于世界实体之后、HUD 之前的 alpha pass，使用现有深度附件执行 `CompareLessEqual` 深度测试、不得写入深度，并启用 alpha 混合；被目标本体或其他地形遮挡的边 MUST 不得穿透显示。所有当前注册方块 MUST 有非空中文显示名，未知 ID 查询 MUST 失败。
+
+目标名称 MUST 复用世界空间 name-tag 的可观察样式并锚定在目标方块上方。name-tag 固定容量 MUST 恰为七名远端玩家加一个目标名称；无目标时不得占用目标实例。轮廓固定容量 MUST 恰为十二个实例。初始化后，在稳定目标状态下更新目标、准备几何和上传 MUST 不产生堆分配。
+
+#### Scenario: 有效命中显示轮廓与中文名称
+
+- **GIVEN** Predictor 已 ready、普通游戏界面打开，且完整已加载的六格内射线命中一个已注册非空气方块
+- **WHEN** 客户端准备当前帧
+- **THEN** 系统 MUST 显示该方块的十二边轮廓和对应的非空中文名称
+- **AND** 名称 MUST 锚定在该方块上方
+
+#### Scenario: 不完整或无效射线不显示陈旧目标
+
+- **GIVEN** 当前或上一帧存在已显示的目标
+- **WHEN** 射线路径遇到未知或未加载区块，或结果为空气、未注册 ID 或超出六格
+- **THEN** 系统 MUST 清空轮廓和名称
+- **AND** 系统 MUST NOT 显示占位名称、陈旧轮廓或陈旧名称
+
+#### Scenario: UI、未 ready 与连接状态隐藏目标
+
+- **GIVEN** 当前已显示一个有效目标
+- **WHEN** 打开背包或容器，或 Predictor 变为未 ready、连接断开或发生 reset
+- **THEN** 系统 MUST 在该帧隐藏轮廓和名称
+- **AND** 目标状态 MUST NOT 进入网络消息或持久化内容
+
+#### Scenario: 全部注册方块具有中文名而未知 ID 失败
+
+- **GIVEN** 当前方块注册表和一个未注册方块 ID
+- **WHEN** 分别查询每个已注册 ID 与该未注册 ID 的中文显示名
+- **THEN** 每个已注册 ID MUST 返回非空中文名称
+- **AND** 未注册 ID MUST 返回失败且不得返回占位字符串
+
+#### Scenario: 轮廓尊重地形深度且不写深度
+
+- **GIVEN** 目标方块的部分边被自身或其他地形遮挡
+- **WHEN** 绘制目标轮廓
+- **THEN** 系统 MUST 只绘制可见边，并以十二个实例覆盖单位方块包围盒的十二条边
+- **AND** 几何 bounds MUST 为 `position-0.003..position+1.003`，每根边的长边 MUST 为 `1.006`、两个横截面轴 MUST 为 `0.018`，颜色 alpha MUST 为 `0.86`
+- **AND** 轮廓 pass MUST 使用 alpha 混合和 `CompareLessEqual` 深度测试，且 MUST NOT 写入深度附件
+
+#### Scenario: 固定容量在稳定态不分配
+
+- **GIVEN** 七名远端玩家、一个有效目标和已完成一次预热的渲染器
+- **WHEN** 连续执行 current target 更新、轮廓准备、name-tag 准备和上传的完整稳定路径
+- **THEN** name-tag 实例数 MUST 不超过八个，轮廓实例数 MUST 不超过十二个
+- **AND** 完整稳定路径 MUST 不产生堆分配，dynamic upload 与 overflow 结构 MUST 保持固定有界

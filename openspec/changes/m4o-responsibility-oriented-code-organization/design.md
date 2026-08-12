@@ -129,6 +129,38 @@ Task 20 新基线固定为 `37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa`。`git ls-
 
 `37cdb3e` 的上游能力属于主线：M4O 只调整声明位置。冲突解决不得删除上游 case/fixture、不得复制实现或引入 wrapper，也不得用旧分支版本覆盖协议 v15、schema v8/v6、10 个视觉场景或已归档 M4N 能力。
 
+### Task 20 最终包级审计
+
+审计集合由 `git ls-tree -r --name-only 37cdb3e -- cmd internal` 冻结，筛选并排序后的 412 个 Go 路径清单 SHA-256 为 `0bee13b98cdd2acc15cf5762185757d0d39c43f12fbc131ce97913acb877e0e3`。Task 2–18 的非 keep 路径与 Task 19 历史表相同；主线新增的 26 个 Go 文件均为 keep。下表每行互斥且完整，精确得到 36 split + 2 extract + 0 delete + 374 keep = 412。
+
+| 包 | 基线 | split | extract | delete | keep | 非 keep 路径与结论 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `cmd/gfxspike` | 1 | 0 | 0 | 0 | 1 | 无；全部 keep |
+| `cmd/mcgo` | 29 | 10 | 0 | 0 | 19 | split：`app.go`、`app_test.go`、`benchmark.go`、`benchmark_v6_test.go`、`capture.go`、`capture_test.go`、`main.go`、`main_test.go`、`multiplayer_benchmark.go`、`multiplayer_benchmark_test.go` |
+| `cmd/mcgod` | 5 | 0 | 0 | 0 | 5 | 无；全部 keep |
+| `cmd/perfcheck` | 2 | 2 | 0 | 0 | 0 | split：`main.go`、`main_test.go` |
+| `internal/archcheck` | 1 | 1 | 0 | 0 | 0 | split：`deps_test.go` |
+| `internal/assets` | 6 | 0 | 0 | 0 | 6 | 无；全部 keep |
+| `internal/client` | 39 | 3 | 0 | 0 | 36 | split：`mesher.go`、`predictor.go`、`predictor_test.go` |
+| `internal/config` | 2 | 0 | 0 | 0 | 2 | 无；全部 keep |
+| `internal/core` | 32 | 0 | 0 | 0 | 32 | 无；全部 keep |
+| `internal/gfx` | 10 | 1 | 0 | 0 | 9 | split：`wgpu.go` |
+| `internal/gfx/shader` | 1 | 0 | 0 | 0 | 1 | 无；全部 keep |
+| `internal/logging` | 2 | 0 | 0 | 0 | 2 | 无；全部 keep |
+| `internal/mesh` | 9 | 0 | 0 | 0 | 9 | 无；全部 keep |
+| `internal/network` | 35 | 3 | 0 | 0 | 32 | split：`codec.go`、`codec_test.go`、`message.go` |
+| `internal/physics` | 11 | 0 | 0 | 0 | 11 | 无；全部 keep |
+| `internal/profile` | 4 | 0 | 0 | 0 | 4 | 无；全部 keep |
+| `internal/render` | 33 | 1 | 2 | 0 | 30 | split：`renderer.go`；extract：`hotbar.go`、`hotbar_test.go` 到唯一新包 `internal/render/hud` |
+| `internal/server` | 76 | 12 | 0 | 0 | 64 | split：`host.go`、`host_test.go`、`multiplayer_memory_integration_test.go`、`multiplayer_tcp_integration_test.go`、`persistence.go`、`persistence_test.go`、`player_flush_test.go`、`player_persistence.go`、`player_persistence_test.go`、`publication.go`、`session.go`、`tcp_integration_test.go` |
+| `internal/sim` | 43 | 1 | 0 | 0 | 42 | split：`engine.go` |
+| `internal/storage` | 45 | 2 | 0 | 0 | 43 | split：`chunk_codec.go`、`chunk_codec_test.go` |
+| `internal/world` | 17 | 0 | 0 | 0 | 17 | 无；全部 keep |
+| `internal/worldgen` | 9 | 0 | 0 | 0 | 9 | 无；全部 keep |
+| **总计** | **412** | **36** | **2** | **0** | **374** | **每个主线基线 Go 文件恰有一个结论** |
+
+没有主线基线 Go 文件被判定为 delete；原路径消失仅代表其声明已按 split 或 extract 迁移。相对 `37cdb3e`，唯一新增包仍是预批准的 `internal/render/hud`。
+
 ### 默认同包拆分，唯一 HUD 提包
 
 共享包内权威状态的职责留在原包，避免协调接口、循环依赖和类型搬迁。唯一新包 `internal/render/hud` 只允许依赖 `internal/core`、`internal/mesh`、`internal/assets`、`internal/render`、`internal/gfx`；`internal/render` 不得反向依赖 HUD。程序化物品颜色的唯一实现从 `hotbarItemColor` 提升为 `internal/render/drop.go` 中的窄内部 API `render.ItemColor`，掉落物与 HUD 都直接调用它；`hud/layout.go` 不拥有或复制颜色实现，也不引入 wrapper、alias、callback/config、第二包或重复实现。只有 `internal/gfx` 可以直接导入 WebGPU 绑定，`sim` 不依赖渲染，`world` 不依赖 `network`。
@@ -149,6 +181,7 @@ Task 20 新基线固定为 `37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa`。`git ls-
 - Task 19 历史审计保持协议 v14、区块 schema v7、玩家 schema v5 与当时固定 hash 的事实不变；Task 20 不再把这些旧值当作当前验收值。
 - Task 20 的 CLI、游戏行为、错误值/文本、日志字段、GPU label 和绘制顺序必须与 `37cdb3e` 一致，并保留协议 v15、packet ID/wire bytes、区块 schema v8、玩家 schema v6、世界 metadata v2 和已归档 M4N 行为。
 - storage/network fixture、10 个视觉 golden 与其他固定 artifact 直接用 `git diff`/`cmp` 对比 `37cdb3e`，不得沿用 Task 19 的旧 hash 代替主线字节证明。若上游没有修改 M2/M5 性能 baseline，则它们保持原字节；benchmark workload、scenario v15、阈值数值与报告格式不变。
+- 同一 Apple M2/macOS 环境在原始 `37cdb3e` 连续复现了两个既有 visual-check 失败：`materials-showcase` 为最大通道差 1、26 个差异像素（0.0113%），`oak-grove` 为最大通道差 47、10 个差异像素（0.0043%）；其余 8 场景各自通过 tracked golden。用户裁决只覆盖这两个精确失败：Task 20 分支与 detached `37cdb3e` 必须在同一环境以同一命令重新 capture 全部 10 场景，10 个输出 PNG 逐字节一致，且两边仅上述 2 场景的失败摘要完全一致；不得据此忽略其他视觉失败，不得修改 golden、阈值或 capture 代码。
 - benchmark 与 `perfcheck` 的性能数值只保存记录、不改变退出状态，只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败阻断。
 - 相对 `37cdb3e`，只允许 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles`；其余 Test、Benchmark、Fuzz 入口名完全一致。自动验证不启动前台窗口，也不更新 golden/baseline。
 
@@ -161,6 +194,7 @@ Task 20 新基线固定为 `37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa`。`git ls-
 - [HUD 迁移断开跨职责昼夜测试] → `daylight_test.go` 仅在测试构建中 embed 移动后的唯一 shader，保持原测试名以及 name tag/hotbar 断言，并比较移动前后 hash。
 - [build tag 或 CGO 边界损坏] → 保留原 tag，运行 Darwin focused 测试、archcheck 与无图形服务端构建。
 - [性能或固定 artifact 漂移] → 对比既有 hash、visual capture、benchmark 与 baseline；固定 artifact、报告结构或身份异常按错误阻断，性能数值差异只记录，均不得改期望值掩盖差异。
+- [固定主线在当前 GPU 环境自身不通过 tracked visual 阈值] → 只对已在同一 Apple M2/macOS 上连续复现的两个精确上游失败使用双基线裁决；要求 10/10 分支与 detached 主线 capture 字节一致、其余 8 场景单独通过、两边失败摘要一致，任何额外失败或字节差异仍立即阻断。
 - [无意义碎片化] → 以职责为单位拆分，未点名且内聚的文件 keep，不设置行数门禁。
 - [冲突解决复活旧大文件或丢失主线声明] → 只对上表 13 个冲突逐声明迁移，以 `37cdb3e` 的入口、artifact 和 focused 测试做双向 parity，不接受 ours/theirs 整文件覆盖。
 
@@ -169,6 +203,6 @@ Task 20 新基线固定为 `37cdb3e0b3cd241bad1c3e70e5a25bcc9994c4fa`。`git ls-
 1. Task 2 先解除守卫对单一文件位置的依赖。
 2. Task 3–18 按叶子包到装配层顺序执行，每项独立提交并通过 focused 命令。
 3. Task 19 以 `96c4aae` 复核包级审计、测试入口、fixture/golden/baseline 和最终共享门禁；该历史阶段已完成。
-4. Task 20 先提交规划修订，再合并固定的 `origin/main=37cdb3e`；手工迁移 13 个冲突中的上游声明，完成 412 文件审计、声明/入口/artifact parity、focused/race/fuzz/10 场景视觉/性能记录与全仓门禁，独立 review 后才勾选、完成 merge commit 并 push。
+4. Task 20 先提交规划修订，再合并固定的 `origin/main=37cdb3e`；手工迁移 13 个冲突中的上游声明，完成 412 文件审计、声明/入口/artifact parity、focused/race/fuzz、同环境双基线 10 场景视觉证明、性能记录与全仓门禁，独立 review 后才勾选、完成 merge commit 并 push。
 
 Task 20 没有自有协议、存档或部署迁移；协议 v15 与 schema v8/v6 是主线既有增量。任一波次出现无法解释的行为、golden、artifact、报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误或非数值命令失败时立即停止并回退该波次；性能数值差异只记录、不触发停止或回退。不得修改期望值、schema、scenario、阈值或基线；package extraction 若需要新状态、行为分支、协调接口或兼容 wrapper，则取消提包并先修订设计。

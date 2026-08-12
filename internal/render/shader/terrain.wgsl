@@ -23,6 +23,12 @@ fn axis_vec(axis: u32) -> vec3f {
     return vec3f(0.0, 0.0, 1.0);
 }
 
+fn face_uv(world: vec3f, axis: u32) -> vec2f {
+    if (axis == 0u) { return vec2f(world.y, world.z); }
+    if (axis == 1u) { return vec2f(world.z, world.x); }
+    return vec2f(world.x, world.y);
+}
+
 fn face_shade(face: u32) -> f32 {
     switch face {
         case 3u: { return 1.00; }
@@ -76,7 +82,7 @@ fn vs_main(
 
     var out: VsOut;
     out.clip  = camera.view_proj * vec4f(world, 1.0);
-    out.uv    = vec2f(cu[vi] * w, cv[vi] * h);
+    out.uv    = face_uv(world, axis);
     out.layer = f32(mat);
     out.shade = face_shade(face) * ao_factor * base;
     return out;
@@ -85,5 +91,6 @@ fn vs_main(
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4f {
     let c = textureSample(atlas, atlas_smp, in.uv, i32(in.layer));
+    if (c.a < 0.5) { discard; }
     return vec4f(c.rgb * in.shade, 1.0);
 }

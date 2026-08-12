@@ -147,7 +147,7 @@ func (d *wgpuDevice) CreateRenderPipeline(desc RenderPipelineDesc) RenderPipelin
 		depthStencil = &wgpu.DepthStencilState{
 			Format:            toFormat(desc.DepthFormat),
 			DepthWriteEnabled: depthWrite,
-			DepthCompare:      wgpu.CompareFunctionLess,
+			DepthCompare:      toDepthCompare(desc.DepthCompareLessEqual),
 			StencilFront:      keep,
 			StencilBack:       keep,
 			StencilReadMask:   0xFFFFFFFF,

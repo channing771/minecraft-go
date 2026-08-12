@@ -20,6 +20,7 @@ import (
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/render"
 	"minecraft-go/internal/render/hud"
+	"minecraft-go/internal/world"
 )
 
 // Mutation killed: swapping, omitting, clearing, or creating empty remote
@@ -60,6 +61,190 @@ func TestApplicationRenderPassOrder(t *testing.T) {
 	}
 }
 
+// 杀死变异：漏画轮廓、把轮廓放到掉落物之前或名牌之后、丢失目标名称
+// 或为第八个名牌重新分配，都会改变这些可观察结果。
+func TestApplicationBlockTargetRenderOrderAndCapacity(t *testing.T) {
+	glyphs := &integrationGlyphSource{}
+	app, dev := newRemoteRenderApplication(t, glyphs)
+	configureTargetFeedback(t, app)
+	for index, name := range [...]string{"甲", "乙", "丙", "丁", "戊", "己", "庚"} {
+		if err := app.remotePlayers.Apply(remoteSpawn(
+			byte(index+1), name, 1, mgl32.Vec3{float32(index), 2, 3},
+		)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := app.itemDrops.Apply(network.ItemDropUpserts{
+		ServerTick: 2,
+		Drops: []network.ItemDrop{{
+			ID:   core.DropID{Dimension: core.Overworld, Generation: 1},
+			Item: core.ItemStone, Count: 1, BlockIndex: 9,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{
+		"terrain pass", "avatar pass", "item drop pass", "block outline pass", "name-tag pass",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("passes=%v want=%v", got, want)
+	}
+	if len(app.remoteNameTags) != 8 || cap(app.remoteNameTags) != 8 {
+		t.Fatalf("name tags len/cap=%d/%d，想要 8/8", len(app.remoteNameTags), cap(app.remoteNameTags))
+	}
+	wantTargetTag := render.NameTag{
+		Text: "砖块", Anchor: mgl32.Vec3{0.5, 4.15, -2.5},
+	}
+	if got := app.remoteNameTags[7]; got != wantTargetTag {
+		t.Fatalf("目标名牌=%+v，想要 %+v", got, wantTargetTag)
+	}
+	if glyphs.flushes != 1 {
+		t.Fatalf("NameTag Prepare/Flush 次数=%d，想要 1", glyphs.flushes)
+	}
+
+	readFloat := func(data []byte, offset int) float32 {
+		return math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+	}
+	outlineUpload := dev.bufferByLabel(t, "block outline dynamic upload").lastWrite
+	wantViewProj := app.camera.ViewProj()
+	for index, want := range wantViewProj {
+		if got := readFloat(outlineUpload, index*4); math.Abs(float64(got-want)) > 1e-5 {
+			t.Fatalf("outline ViewProj[%d]=%v，想要 %v", index, got, want)
+		}
+	}
+	if got, want := readFloat(outlineUpload, 64), render.DayNightAt(app.worldTimeTicks).Daylight; got != want {
+		t.Fatalf("outline Daylight=%v，想要 %v", got, want)
+	}
+	nameTagUpload := dev.bufferByLabel(t, "name-tag dynamic upload").lastWrite
+	if got := [3]float32{
+		readFloat(nameTagUpload, 768), readFloat(nameTagUpload, 772), readFloat(nameTagUpload, 776),
+	}; got != wantTargetTag.Anchor {
+		t.Fatalf("排序后首个名牌锚点=%v，想要目标锚点 %v", got, wantTargetTag.Anchor)
+	}
+}
+
+func TestApplicationBlockTargetHiddenByUIAndSessionState(t *testing.T) {
+	tests := []struct {
+		name string
+		hide func(*testing.T, *application)
+	}{
+		{name: "背包", hide: func(_ *testing.T, app *application) { app.inventoryOpen = true }},
+		{name: "熔炉", hide: func(t *testing.T, app *application) {
+			if err := app.furnace.Apply(network.FurnaceState{Furnace: core.FurnaceRef{Generation: 1}}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "箱子", hide: func(t *testing.T, app *application) {
+			if err := app.chest.Apply(network.ChestState{Chest: core.ContainerRef{Kind: core.ContainerKindChest, Generation: 1}}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "调试面板", hide: func(_ *testing.T, app *application) {
+			app.panel = &panelState{visible: true}
+		}},
+		{name: "reset 当帧", hide: func(_ *testing.T, app *application) {
+			app.blockTargetReset = true
+		}},
+		{name: "断线", hide: func(_ *testing.T, app *application) {
+			app.closeClientSession(nil)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+			configureTargetFeedback(t, app)
+			test.hide(t, app)
+			if rendered, err := app.renderFrame(1); err != nil || !rendered {
+				t.Fatalf("renderFrame=(%v,%v)", rendered, err)
+			}
+			if got, want := dev.lastPasses(), []string{"terrain pass"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("passes=%v want=%v", got, want)
+			}
+			if len(app.remoteNameTags) != 0 {
+				t.Fatalf("隐藏状态仍提交 %d 个名牌", len(app.remoteNameTags))
+			}
+		})
+	}
+}
+
+func TestApplicationPlayerResetHidesBlockTargetForOneFrame(t *testing.T) {
+	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	configureTargetFeedback(t, app)
+	clientEndpoint, serverEndpoint := network.NewMemoryPair(4)
+	app.clientEndpoint = clientEndpoint
+	app.receiver = client.NewReceiver(clientEndpoint, 4)
+	t.Cleanup(func() { _ = serverEndpoint.Close() })
+	sendInteractiveServerMessage(t, serverEndpoint, network.PlayerState{
+		ServerTick: 2, Dimension: core.Overworld, Ready: true, Reset: true,
+	})
+	app.drainServerMessages(1)
+
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("reset 当帧 renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{"terrain pass"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reset 当帧 passes=%v want=%v", got, want)
+	}
+	dev.resetPasses()
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("reset 后一帧 renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{
+		"terrain pass", "block outline pass", "name-tag pass",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reset 后一帧 passes=%v want=%v", got, want)
+	}
+}
+
+func TestApplicationBlockTargetStablePathDoesNotAllocate(t *testing.T) {
+	app := targetBlockHitApplication(t)
+	remoteTags := make([]render.NameTag, 7, 8)
+	for index := range remoteTags {
+		remoteTags[index] = render.NameTag{PlayerID: integrationPlayerID(byte(index + 1)), Text: "A"}
+	}
+	dev := &integrationRenderDevice{}
+	glyphs := &integrationGlyphSource{}
+	nameTags := render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, glyphs)
+	defer nameTags.Release()
+	outlineRenderer := render.NewBlockOutlineRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
+	defer outlineRenderer.Release()
+	encoder := &blockTargetAllocationEncoder{}
+	budget := render.NewUploadBudget(1 << 20)
+	var tags []render.NameTag
+	var outline render.BlockOutline
+	run := func() {
+		tags, outline = app.appendCurrentBlockTarget(remoteTags[:7])
+		if err := nameTags.Prepare(tags, budget); err != nil {
+			panic(err)
+		}
+		outlineRenderer.Render(encoder, nil, nil, render.Camera{}, outline)
+		nameTags.Render(encoder, nil, nil, render.BillboardCamera{})
+	}
+	run()
+	if allocations := testing.AllocsPerRun(100, run); allocations != 0 {
+		t.Fatalf("稳定目标反馈路径分配=%v，想要 0", allocations)
+	}
+	if len(tags) != 8 || !outline.Visible {
+		t.Fatalf("稳定路径 tags/outline=%d/%+v，想要 8/可见", len(tags), outline)
+	}
+}
+
+func configureTargetFeedback(t *testing.T, app *application) {
+	t.Helper()
+	app.camera = client.Camera{Pos: mgl32.Vec3{0.5, 3.5, 2.5}, FovY: mgl32.DegToRad(70), Aspect: 1, Near: 0.1, Far: 100}
+	if err := app.predictor.Begin(network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld, Ready: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applyTargetMirrorChunk(t, app.mirror, world.NewChunk(core.ChunkPos{}))
+	applyTargetMirrorChunk(t, app.mirror, world.NewChunk(core.ChunkPos{Z: -1}))
+	setTargetMirrorBlock(t, app.mirror, core.BlockPos{X: 0, Y: 3, Z: -3}, core.BrickID)
+}
+
 // Mutation killed: swallowing or replacing the atlas worker error prevents
 // errors.Is from observing it at the frame boundary.
 func TestRemoteGlyphErrorPropagatesFromFrame(t *testing.T) {
@@ -87,13 +272,17 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	avatar := render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 	nameTag := render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
 	hotbar := hud.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, reg)
+	itemDrop := render.NewItemDropRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
+	blockOutline := render.NewBlockOutlineRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
+	damage := render.NewDamageOverlayRenderer(dev, gfx.FormatRGBA8Unorm)
 	color := dev.CreateTexture(gfx.TextureDesc{Label: "main color", Width: 4, Height: 4, Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget})
 	app := &application{
 		dev: dev, color: color, colorView: color.View(gfx.TextureViewDesc{}),
 		depth: newDepthTarget(dev, 4, 4), renderer: terrain,
 		glyphAtlas: atlas, avatarRenderer: avatar, nameTagRenderer: nameTag,
-		hotbarRenderer: hotbar,
-		remotePlayers:  client.NewRemotePlayers(),
+		hotbarRenderer: hotbar, itemDropRenderer: itemDrop,
+		blockOutlineRenderer: blockOutline, damageOverlayRenderer: damage,
+		remotePlayers: client.NewRemotePlayers(),
 	}
 	app.releaseResources = app.releaseOwnedResources
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{})); err != nil {
@@ -106,10 +295,10 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 		t.Fatalf("roster after Close=%d", got)
 	}
 	markers := dev.releaseMarkers([]string{
-		"hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
+		"damage overlay resources", "block outline resources", "item drop resources", "hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources",
 		"main depth texture", "main color view", "main color texture", "device",
 	})
-	want := []string{"hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
+	want := []string{"damage overlay resources", "block outline resources", "item drop resources", "hotbar resources", "name-tag resources", "glyph-atlas texture", "avatar resources", "terrain resources", "main depth texture", "main color view", "main color texture", "device"}
 	if !reflect.DeepEqual(markers, want) {
 		t.Fatalf("release markers=%v want=%v; all=%v", markers, want, dev.releases)
 	}
@@ -120,10 +309,10 @@ func TestApplicationCloseReleasesRemoteRenderersInOrder(t *testing.T) {
 	}
 }
 
-// Mutation killed: constructing name tags before avatars, or cleaning a failed
-// name-tag construction in forward order, moves the avatar/atlas release markers.
+// Mutation 已验证：远端 renderer 构造乱序或受伤遮罩构造失败后正序清理，
+// 都会改变资源释放标记。
 func TestApplicationConstructionFailureReleasesRemoteResourcesInReverse(t *testing.T) {
-	wantErr := errors.New("injected name-tag construction failure")
+	wantErr := errors.New("injected damage-overlay construction failure")
 	rawEndpoint, serverEndpoint := network.NewMemoryPair(4)
 	endpoint := &connectionTestEndpoint{ClientEndpoint: rawEndpoint}
 	t.Cleanup(func() { _ = serverEndpoint.Close() })
@@ -150,19 +339,57 @@ func TestApplicationConstructionFailureReleasesRemoteResourcesInReverse(t *testi
 		constructionOrder = append(constructionOrder, "avatar")
 		return render.NewAvatarRenderer(device, color, depth), nil
 	}
-	dependencies.newNameTagRenderer = func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error) {
+	dependencies.newNameTagRenderer = func(
+		device gfx.Device,
+		color, depth gfx.TextureFormat,
+		atlas render.GlyphSource,
+	) (*render.NameTagRenderer, error) {
 		constructionOrder = append(constructionOrder, "name-tag")
+		return render.NewNameTagRenderer(device, color, depth, atlas), nil
+	}
+	dependencies.newHotbarRenderer = func(
+		device gfx.Device,
+		color gfx.TextureFormat,
+		atlas render.GlyphSource,
+		blocks *assets.Registry,
+	) (*hud.HotbarRenderer, error) {
+		constructionOrder = append(constructionOrder, "hotbar")
+		return hud.NewHotbarRenderer(device, color, atlas, blocks), nil
+	}
+	dependencies.newItemDropRenderer = func(
+		device gfx.Device,
+		color, depth gfx.TextureFormat,
+	) (*render.ItemDropRenderer, error) {
+		constructionOrder = append(constructionOrder, "item-drop")
+		return render.NewItemDropRenderer(device, color, depth), nil
+	}
+	dependencies.newBlockOutlineRenderer = func(
+		device gfx.Device,
+		color, depth gfx.TextureFormat,
+	) (*render.BlockOutlineRenderer, error) {
+		constructionOrder = append(constructionOrder, "block-outline")
+		return render.NewBlockOutlineRenderer(device, color, depth), nil
+	}
+	dependencies.newDamageOverlayRenderer = func(
+		gfx.Device,
+		gfx.TextureFormat,
+	) (*render.DamageOverlayRenderer, error) {
+		constructionOrder = append(constructionOrder, "damage-overlay")
 		return nil, wantErr
 	}
 	app, err := newApplicationWithDependencies(remoteConnectionOptions(), dependencies)
 	if app != nil || !errors.Is(err, wantErr) {
 		t.Fatalf("construction result=(%v,%v), want nil/wrapped failure", app, err)
 	}
-	if want := []string{"atlas", "avatar", "name-tag"}; !reflect.DeepEqual(constructionOrder, want) {
+	if want := []string{"atlas", "avatar", "name-tag", "hotbar", "item-drop", "block-outline", "damage-overlay"}; !reflect.DeepEqual(constructionOrder, want) {
 		t.Fatalf("remote construction order=%v want=%v", constructionOrder, want)
 	}
-	markers := dev.releaseMarkers([]string{"avatar resources", "glyph-atlas texture", "terrain resources", "main depth texture", "device"})
-	wantMarkers := []string{"avatar resources", "glyph-atlas texture", "terrain resources", "main depth texture", "device"}
+	wantMarkers := []string{
+		"block outline resources", "item drop resources", "hotbar resources", "name-tag resources",
+		"avatar resources", "glyph-atlas texture", "terrain resources",
+		"main depth texture", "device",
+	}
+	markers := dev.releaseMarkers(wantMarkers)
 	if !reflect.DeepEqual(markers, wantMarkers) {
 		t.Fatalf("failure release markers=%v want=%v; all=%v", markers, wantMarkers, dev.releases)
 	}
@@ -172,14 +399,60 @@ func TestApplicationConstructionFailureReleasesRemoteResourcesInReverse(t *testi
 	}
 }
 
+func TestApplicationBlockOutlineConstructionFailureReleasesPartialResources(t *testing.T) {
+	wantErr := errors.New("注入 block-outline 构造失败")
+	rawEndpoint, serverEndpoint := network.NewMemoryPair(4)
+	endpoint := &connectionTestEndpoint{ClientEndpoint: rawEndpoint}
+	t.Cleanup(func() { _ = serverEndpoint.Close() })
+	dev := &integrationRenderDevice{}
+	window := &connectionTestWindow{}
+	surface := &connectionTestSurface{}
+	dependencies := connectionTestDependencies(t)
+	dependencies.dialTCP = func(context.Context, string) (network.ClientPacketStream, error) {
+		return &connectionTestClientStream{}, nil
+	}
+	dependencies.loginClient = func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error) {
+		return endpoint, nil
+	}
+	dependencies.newWindow = func(int, int, string) (applicationWindow, error) { return window, nil }
+	dependencies.newDevice = func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error) {
+		return dev, surface, nil
+	}
+	dependencies.newBlockOutlineRenderer = func(
+		device gfx.Device,
+		color, depth gfx.TextureFormat,
+	) (*render.BlockOutlineRenderer, error) {
+		return render.NewBlockOutlineRenderer(device, color, depth), wantErr
+	}
+
+	app, err := newApplicationWithDependencies(remoteConnectionOptions(), dependencies)
+	if app != nil || !errors.Is(err, wantErr) {
+		t.Fatalf("construction result=(%v,%v)，想要 nil/包装后失败", app, err)
+	}
+	wantMarkers := []string{
+		"block outline resources", "item drop resources", "hotbar resources",
+		"name-tag resources", "avatar resources", "glyph-atlas texture",
+		"terrain resources", "main depth texture", "device",
+	}
+	if got := dev.releaseMarkers(wantMarkers); !reflect.DeepEqual(got, wantMarkers) {
+		t.Fatalf("部分构造失败释放=%v，想要 %v；all=%v", got, wantMarkers, dev.releases)
+	}
+	if endpoint.closeCalls.Load() != 1 || window.closeCalls.Load() != 1 || surface.releaseCalls.Load() != 1 {
+		t.Fatalf("失败后 endpoint/window/surface=%d/%d/%d，想要 1/1/1",
+			endpoint.closeCalls.Load(), window.closeCalls.Load(), surface.releaseCalls.Load())
+	}
+}
+
 type integrationGlyphSource struct {
 	flushErr   error
 	lastBudget *render.UploadBudget
+	flushes    int
 }
 
 func (*integrationGlyphSource) Request(string) {}
 func (atlas *integrationGlyphSource) FlushUploads(budget *render.UploadBudget) error {
 	atlas.lastBudget = budget
+	atlas.flushes++
 	return atlas.flushErr
 }
 func (*integrationGlyphSource) Glyph(rune) render.Glyph {
@@ -199,11 +472,19 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 		avatarRenderer:  render.NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float),
 		nameTagRenderer: render.NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, glyphs),
 		hotbarRenderer:  hud.NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, glyphs, reg),
+		damageOverlayRenderer: render.NewDamageOverlayRenderer(
+			dev, gfx.FormatRGBA8Unorm,
+		),
 		itemDropRenderer: render.NewItemDropRenderer(
 			dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float,
 		),
-		itemDrops:     client.NewItemDrops(),
-		remotePlayers: client.NewRemotePlayers(), mirror: client.NewMirror(), predictor: client.NewPredictor(),
+		blockOutlineRenderer: render.NewBlockOutlineRenderer(
+			dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float,
+		),
+		itemDrops:      client.NewItemDrops(),
+		remotePlayers:  client.NewRemotePlayers(),
+		remoteNameTags: make([]render.NameTag, 0, maxFrameNameTags),
+		mirror:         client.NewMirror(), predictor: client.NewPredictor(),
 		mesher: client.NewMesher(reg, 1), camera: client.Camera{FovY: mgl32.DegToRad(70), Aspect: 1, Near: 0.1, Far: 100},
 		loadedChunks: make(map[core.ChunkPos]struct{}),
 	}
@@ -400,6 +681,31 @@ func (*integrationComputePass) SetPipeline(gfx.ComputePipeline)    {}
 func (*integrationComputePass) SetBindGroup(uint32, gfx.BindGroup) {}
 func (*integrationComputePass) Dispatch(uint32, uint32, uint32)    {}
 func (*integrationComputePass) End()                               {}
+
+type blockTargetAllocationEncoder struct {
+	pass blockTargetAllocationPass
+}
+
+func (encoder *blockTargetAllocationEncoder) BeginRenderPass(gfx.RenderPassDesc) gfx.RenderPass {
+	return &encoder.pass
+}
+func (*blockTargetAllocationEncoder) BeginComputePass(string) gfx.ComputePass {
+	panic("目标反馈不应创建 compute pass")
+}
+func (*blockTargetAllocationEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {
+	panic("目标反馈不应复制 buffer")
+}
+func (*blockTargetAllocationEncoder) Finish() gfx.CommandBuffer { return nil }
+
+type blockTargetAllocationPass struct{}
+
+func (*blockTargetAllocationPass) SetPipeline(gfx.RenderPipeline)             {}
+func (*blockTargetAllocationPass) SetBindGroup(uint32, gfx.BindGroup)         {}
+func (*blockTargetAllocationPass) SetVertexBuffer(uint32, gfx.Buffer, uint64) {}
+func (*blockTargetAllocationPass) SetIndexBuffer(gfx.Buffer, uint64)          {}
+func (*blockTargetAllocationPass) DrawIndexedIndirect(gfx.Buffer, uint64)     {}
+func (*blockTargetAllocationPass) Draw(uint32, uint32)                        {}
+func (*blockTargetAllocationPass) End()                                       {}
 
 // TestApplicationConstructionSkipsDebugPanelRendererWhenDevOff 与
 // TestApplicationConstructionCreatesDebugPanelRendererWhenDevOn 一起守住

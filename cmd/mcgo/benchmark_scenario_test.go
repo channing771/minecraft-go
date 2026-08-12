@@ -186,6 +186,18 @@ func TestScenarioV8GPUCompletionStartsAfterTransportTeardown(t *testing.T) {
 	}
 }
 
+func TestMultiplayerBenchmarkReservesTargetNameTagSlotWithoutAddingTarget(t *testing.T) {
+	scenario := newMultiplayerBenchmarkScenario()
+	if len(scenario.Tags) != 7 || cap(scenario.Tags) != maxFrameNameTags {
+		t.Fatalf("benchmark tags len/cap=%d/%d，想要 7/%d", len(scenario.Tags), cap(scenario.Tags), maxFrameNameTags)
+	}
+	for index, tag := range scenario.Tags {
+		if tag.PlayerID == (core.PlayerID{}) || tag.Text == "" {
+			t.Fatalf("benchmark tag %d 伪造目标或空名牌: %+v", index, tag)
+		}
+	}
+}
+
 func TestScenarioV7RenderFrameSamplesExistingRemotePassesExactlyOnce(t *testing.T) {
 	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "星河", 1, mgl32.Vec3{0, 0, -4})); err != nil {

@@ -48,8 +48,8 @@ func TestChunkCodecRoundTripsChests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 7 {
-		t.Fatalf("schema = %d，想要 7", got.Schema)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 8 {
+		t.Fatalf("schema = %d，想要 8", got.Schema)
 	}
 	for slot := range core.ChestsPerChunk {
 		if got.Chunk.Chest(slot) != want.Chest(slot) {
@@ -125,21 +125,28 @@ func TestChunkV1ThroughV4FixturesChainMigrateToEmptyChests(t *testing.T) {
 	}
 }
 
-func TestChunkV6Fixture(t *testing.T) {
+func TestChunkV6FixtureMigratesLosslessly(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	want := chestFixtureChunk(t, key.Pos)
 	path := filepath.Join("testdata", "chunk-v6.bin")
-	got, err := os.ReadFile(path)
+	encoded, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	decoded, err := decodeChunkPayload(key, 19, got)
+	decoded, err := decodeChunkPayload(key, 19, encoded)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !decoded.Migrated || decoded.Schema != 7 {
-		t.Fatalf("v6 fixture 迁移结果 schema=%d migrated=%v", decoded.Schema, decoded.Migrated)
+	if !decoded.Migrated || decoded.Schema != currentChunkSchema || decoded.Revision != 19 {
+		t.Fatalf("v6 fixture schema=%d revision=%d migrated=%v", decoded.Schema, decoded.Revision, decoded.Migrated)
+	}
+	if decoded.Chunk.Hash() != want.Hash() || decoded.Chunk.DropsHash() != want.DropsHash() {
+		t.Fatal("v6 identity migration 改变了 palette 或掉落物")
+	}
+	for slot := range core.FurnacesPerChunk {
+		if decoded.Chunk.Furnace(slot) != want.Furnace(slot) {
+			t.Fatalf("v6 fixture 熔炉槽 %d = %+v，想要 %+v", slot, decoded.Chunk.Furnace(slot), want.Furnace(slot))
+		}
 	}
 	for slot := range core.ChestsPerChunk {
 		if decoded.Chunk.Chest(slot) != want.Chest(slot) {
@@ -148,6 +155,30 @@ func TestChunkV6Fixture(t *testing.T) {
 	}
 	if decoded.Chunk.Hash() != want.Hash() || decoded.Chunk.DropsHash() != want.DropsHash() {
 		t.Fatal("v6 fixture 迁移改变了方块或掉落物状态")
+	}
+}
+
+// TestChunkV8Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
+func TestChunkV8Fixture(t *testing.T) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
+	encoded, err := encodeChunkPayload(ChunkSave{
+		Key: key, Revision: 19, Chunk: chestFixtureChunk(t, key.Pos),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("testdata", "chunk-v8.bin")
+	if *updateStorageFixtures {
+		if err := os.WriteFile(path, encoded, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(want, encoded) {
+		t.Fatal("v8 fixture drift; change schema version")
 	}
 }
 

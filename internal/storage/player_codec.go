@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	currentPlayerSchema   uint32 = 5
+	currentPlayerSchema   uint32 = 6
 	playerEnvelopeVersion uint32 = 1
 	playerEnvelopeLength         = 44
 	maxPlayerPayload      uint32 = 1 << 20
@@ -240,7 +240,7 @@ func decodePlayerPayload(
 		return decodePlayerV3(playerID, revision, data)
 	case 4:
 		return decodePlayerV4(playerID, revision, data)
-	case 5:
+	case 5, 6:
 		return decodePlayerV5(playerID, revision, data)
 	default:
 		return playerDTO{}, fmt.Errorf("%w: unsupported player schema %d", ErrCorrupt, schema)

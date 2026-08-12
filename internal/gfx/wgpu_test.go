@@ -43,3 +43,12 @@ func TestBlendModeReplace(t *testing.T) {
 		t.Fatalf("replace blend = %#v, want %#v", got, wgpu.BlendStateReplace)
 	}
 }
+
+func TestDepthCompareDefaultsToLessAndSupportsLessEqual(t *testing.T) {
+	if got := toDepthCompare(false); got != wgpu.CompareFunctionLess {
+		t.Fatalf("默认 depth compare = %v，想要 %v", got, wgpu.CompareFunctionLess)
+	}
+	if got := toDepthCompare(true); got != wgpu.CompareFunctionLessEqual {
+		t.Fatalf("LessEqual depth compare = %v，想要 %v", got, wgpu.CompareFunctionLessEqual)
+	}
+}

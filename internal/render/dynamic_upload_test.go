@@ -79,11 +79,11 @@ func TestAvatarRendererBatchesOneDynamicUploadPerNonEmptyRender(t *testing.T) {
 	}
 }
 
-// Hand-derived name-tag layout: camera [0,96), backgrounds at the next
-// 256-byte boundary [256,704), and glyphs at [768,15104). Putting the small
-// fixed background region first keeps the one per-frame write compact.
-// Mutation killed: uploading in Prepare, retaining three GPU buffers/writes,
-// ignoring binding ranges, or uploading an empty layout fails observably.
+// 手工推导的 name-tag 布局：camera [0,96)，background 位于下一个
+// 256-byte 边界 [256,768)，glyph 位于 [768,17152)。小而固定的
+// background 区域放在前面，使每帧单次写入保持紧凑。
+// 杀死变异：在 Prepare 中上传、保留三个 GPU buffer/write、忽略绑定范围，
+// 或上传空布局都会产生可观察失败。
 func TestNameTagRendererDefersAndBatchesOneDynamicUploadPerRender(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
 	dev := &dynamicUploadTestDevice{}
@@ -91,7 +91,7 @@ func TestNameTagRendererDefersAndBatchesOneDynamicUploadPerRender(t *testing.T) 
 	defer renderer.Release()
 
 	upload := dev.bufferByLabel(t, "name-tag dynamic upload")
-	if got, want := upload.desc.Size, uint64(15104); got != want {
+	if got, want := upload.desc.Size, uint64(17152); got != want {
 		t.Fatalf("dynamic upload size=%d want=%d", got, want)
 	}
 	if got, want := upload.desc.Usage,
@@ -106,8 +106,8 @@ func TestNameTagRendererDefersAndBatchesOneDynamicUploadPerRender(t *testing.T) 
 	}
 	bind := dev.bindDescs[0]
 	assertBufferBindingRange(t, bind, 0, upload, 0, 96)
-	assertBufferBindingRange(t, bind, 1, upload, 768, 14336)
-	assertBufferBindingRange(t, bind, 2, upload, 256, 448)
+	assertBufferBindingRange(t, bind, 1, upload, 768, 16384)
+	assertBufferBindingRange(t, bind, 2, upload, 256, 512)
 
 	if err := renderer.Prepare([]NameTag{{
 		PlayerID: testNameTagID(1), Text: "AV", Anchor: mgl32.Vec3{3, 4, 5},

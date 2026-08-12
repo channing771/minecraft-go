@@ -85,6 +85,13 @@ func TestOreNeverReplacesNonStone(t *testing.T) {
 	}
 }
 
+func TestOreNeverReplacesNaturalGravel(t *testing.T) {
+	pos := core.BlockPos{X: -256, Y: 54, Z: -200}
+	if got := worldgen.New(42).BaseBlockAt(pos); got != core.GravelID {
+		t.Fatalf("自然砾石 %+v 被矿石覆盖为 %d", pos, got)
+	}
+}
+
 func TestBaseBlockAtMatchesGeneratedChunkWithOre(t *testing.T) {
 	generator := worldgen.New(42)
 	for _, chunkPos := range []core.ChunkPos{{}, {X: -3, Z: 7}, {X: 5, Z: -2}} {

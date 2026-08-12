@@ -64,13 +64,13 @@ func TestNameTagLayoutAddsOnePaddedTransparentBackground(t *testing.T) {
 	}
 }
 
-// Mutation killed: truncating before PlayerID byte-order sorting, retaining an
-// eighth tag, exceeding 224 glyphs, or depending on input order changes output.
-func TestNameTagLayoutSortsAndBoundsEightPlayers(t *testing.T) {
+// 杀死变异：排序前截断、保留第九个名牌、超过 256 个字形或依赖输入顺序
+// 都会改变这些可观察结果。
+func TestNameTagLayoutSortsAndBoundsNineTags(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
-	tags := make([]NameTag, 8)
+	tags := make([]NameTag, 9)
 	for index := range tags {
-		id := byte(8 - index)
+		id := byte(9 - index)
 		tags[index] = NameTag{
 			PlayerID: testNameTagID(id),
 			Text:     strings.Repeat("中", 32),
@@ -78,16 +78,16 @@ func TestNameTagLayoutSortsAndBoundsEightPlayers(t *testing.T) {
 		}
 	}
 	layout := layoutNameTags(nil, atlas, tags)
-	if got, want := len(layout.glyphs), 224; got != want {
+	if got, want := len(layout.glyphs), 256; got != want {
 		t.Fatalf("glyphs=%d want=%d", got, want)
 	}
-	if got, want := len(layout.backgrounds), 7; got != want {
+	if got, want := len(layout.backgrounds), 8; got != want {
 		t.Fatalf("backgrounds=%d want=%d", got, want)
 	}
 	if got, want := layout.glyphs[0].Anchor[0], float32(1); got != want {
 		t.Fatalf("first selected anchor x=%f want=%f", got, want)
 	}
-	if got, want := layout.glyphs[len(layout.glyphs)-1].Anchor[0], float32(7); got != want {
+	if got, want := layout.glyphs[len(layout.glyphs)-1].Anchor[0], float32(8); got != want {
 		t.Fatalf("last selected anchor x=%f want=%f", got, want)
 	}
 
@@ -202,7 +202,7 @@ func TestNameTagRendererUsesFixedTransparentDepthPass(t *testing.T) {
 	defer renderer.Release()
 
 	upload := dev.bufferByLabel(t, "name-tag dynamic upload")
-	if got, want := upload.desc.Size, uint64(15104); got != want {
+	if got, want := upload.desc.Size, uint64(17152); got != want {
 		t.Fatalf("dynamic upload size=%d want=%d", got, want)
 	}
 	if got, want := upload.desc.Usage, gfx.BufferUsageUniform|gfx.BufferUsageStorage|gfx.BufferUsageCopyDst; got != want {

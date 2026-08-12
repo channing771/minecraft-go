@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,27 +9,24 @@ import (
 	"minecraft-go/internal/world"
 )
 
-func TestChunkV6MigratesToV7WithoutChangingPayloadSemantics(t *testing.T) {
+func TestChunkV6MigratesToV8WithoutChangingPayloadSemantics(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "chunk-v6.bin"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := core.ChunkKey{
-		Dimension: core.Overworld,
-		Pos:       core.ChunkPos{X: -3, Z: 7},
-	}
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	got, err := decodeChunkPayload(key, 19, data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Migrated || got.Schema != 7 {
+	if !got.Migrated || got.Schema != currentChunkSchema {
 		t.Fatalf("v6 迁移结果 schema=%d migrated=%v", got.Schema, got.Migrated)
 	}
 }
 
-func TestChunkV7RoundTripsLightBlockAndDrop(t *testing.T) {
-	if currentChunkSchema != 7 {
-		t.Fatalf("区块 schema=%d，想要 7", currentChunkSchema)
+func TestChunkV7FixtureMigratesToV8WithLightBlockAndDrop(t *testing.T) {
+	if currentChunkSchema != 8 {
+		t.Fatalf("区块 schema=%d，想要 8", currentChunkSchema)
 	}
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	want := world.NewChunk(key.Pos)
@@ -44,45 +40,31 @@ func TestChunkV7RoundTripsLightBlockAndDrop(t *testing.T) {
 		PickupDelayTicks: 5,
 	})
 
-	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 19, Chunk: want})
+	data, err := os.ReadFile(filepath.Join("testdata", "chunk-v7.bin"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "chunk-v7.bin")
-	if *updateStorageFixtures {
-		if err := os.WriteFile(path, encoded, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	golden, err := os.ReadFile(path)
+	got, err := decodeChunkPayload(key, 19, data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(golden, encoded) {
-		t.Fatal("v7 fixture drift; change schema version")
-	}
-
-	got, err := decodeChunkPayload(key, 19, golden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Schema != 7 || got.Migrated {
-		t.Fatalf("v7 往返结果 schema=%d migrated=%v", got.Schema, got.Migrated)
+	if got.Schema != currentChunkSchema || !got.Migrated {
+		t.Fatalf("v7 迁移结果 schema=%d migrated=%v", got.Schema, got.Migrated)
 	}
 	if got.Key != key || got.Revision != 19 {
-		t.Fatalf("v7 往返 identity key=%+v revision=%d", got.Key, got.Revision)
+		t.Fatalf("v7 迁移 identity key=%+v revision=%d", got.Key, got.Revision)
 	}
 	if got.Chunk.Hash() != want.Hash() || got.Chunk.DropsHash() != want.DropsHash() {
-		t.Fatal("v7 往返改变了方块或掉落物状态")
+		t.Fatal("v7 迁移改变了方块或掉落物状态")
 	}
 	for slot := range core.FurnacesPerChunk {
 		if got.Chunk.Furnace(slot) != want.Furnace(slot) {
-			t.Fatalf("v7 往返改变熔炉槽 %d", slot)
+			t.Fatalf("v7 迁移改变熔炉槽 %d", slot)
 		}
 	}
 	for slot := range core.ChestsPerChunk {
 		if got.Chunk.Chest(slot) != want.Chest(slot) {
-			t.Fatalf("v7 往返改变箱子槽 %d", slot)
+			t.Fatalf("v7 迁移改变箱子槽 %d", slot)
 		}
 	}
 }

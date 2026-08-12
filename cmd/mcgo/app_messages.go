@@ -53,6 +53,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 				}
 			}
 			if state.Reset {
+				a.blockTargetReset = true
 				if a.containerOpen() {
 					a.clearContainerUI()
 				} else {
