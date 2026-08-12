@@ -145,12 +145,21 @@ func TestMeshSectionSkipsSingleAirWork(t *testing.T) {
 	}
 }
 
+func TestMeshSectionNilScratchPanicsBeforeUniformAirFastPath(t *testing.T) {
+	defer func() {
+		if recovered := recover(); fmt.Sprint(recovered) != "mesh: nil light scratch" {
+			t.Fatalf("recovered=%v，想要 mesh: nil light scratch", recovered)
+		}
+	}()
+	MeshSection(fullyLoadedAirNeighborhood(), internalTestRegistry{}, nil)
+}
+
 func TestLightScratchRejectsEmissionAboveFifteen(t *testing.T) {
 	n := fullyLoadedAirNeighborhood()
 	n.Center.Blocks.Set(8, 8, 8, core.LightBlockID)
 	defer func() {
-		if recovered := recover(); recovered == nil {
-			t.Fatal("Emission=16 未触发 panic")
+		if recovered := recover(); fmt.Sprint(recovered) != "mesh: 方块发光等级超过 15" {
+			t.Fatalf("recovered=%v，想要 mesh: 方块发光等级超过 15", recovered)
 		}
 	}()
 	MeshSection(n, overbrightRegistry{}, NewLightScratch())
