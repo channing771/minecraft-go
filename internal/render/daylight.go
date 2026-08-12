@@ -5,6 +5,26 @@ import "math"
 // DayLengthTicks 是一个完整昼夜的权威 tick 数。
 const DayLengthTicks = 24000
 
+const (
+	cloudTicksPerBlock  = 80
+	cloudBlocksPerMacro = 64
+)
+
+// CloudOffset 是供天空 shader 使用的拆分云时间偏移。
+type CloudOffset struct {
+	Local  float32
+	MacroX uint32
+}
+
+// CloudOffsetAt 从权威世界时间计算精确的云层偏移，避免绝对时间转 float32。
+func CloudOffsetAt(worldTime uint64) CloudOffset {
+	blocks := worldTime / cloudTicksPerBlock
+	return CloudOffset{
+		Local:  float32(blocks%cloudBlocksPerMacro) + float32(worldTime%cloudTicksPerBlock)/float32(cloudTicksPerBlock),
+		MacroX: uint32(blocks / cloudBlocksPerMacro),
+	}
+}
+
 // indoorBrightness 是完全没有直射天空光时的地形基础亮度。
 const indoorBrightness = 0.08
 

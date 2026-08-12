@@ -26,6 +26,49 @@ func closeDirection(got, want [3]float32) bool {
 	return closeEnough(got[0], want[0]) && closeEnough(got[1], want[1]) && closeEnough(got[2], want[2])
 }
 
+// Mutation killed: 先将绝对时间压成 float32 会在大时间丢失每 80 tick 的连续性。
+func TestCloudOffsetAdvancesOneBlockAtLargeTimes(t *testing.T) {
+	for _, worldTime := range []uint64{1 << 28, 1 << 31, math.MaxUint64 - 159} {
+		before := CloudOffsetAt(worldTime)
+		want := before
+		want.Local++
+		if want.Local == cloudBlocksPerMacro {
+			want.Local = 0
+			want.MacroX++
+		}
+		if got := CloudOffsetAt(worldTime + cloudTicksPerBlock); got != want {
+			t.Fatalf("worldTime=%d 的 80 tick 云偏移=%v，想要 %v", worldTime, got, want)
+		}
+	}
+}
+
+func TestCloudOffsetUsesAuthoritativeWorldTime(t *testing.T) {
+	for _, test := range []struct {
+		ticks uint64
+		want  CloudOffset
+	}{
+		{0, CloudOffset{}},
+		{1, CloudOffset{Local: 1.0 / 80.0}},
+		{40, CloudOffset{Local: 0.5}},
+		{79, CloudOffset{Local: 79.0 / 80.0}},
+		{80, CloudOffset{Local: 1}},
+		{160, CloudOffset{Local: 2}},
+	} {
+		if got := CloudOffsetAt(test.ticks); got != test.want {
+			t.Fatalf("CloudOffsetAt(%d)=%v，想要 %v", test.ticks, got, test.want)
+		}
+	}
+}
+
+func TestCloudOffsetRollsMacroEverySixtyFourBlocks(t *testing.T) {
+	if got, want := CloudOffsetAt((cloudBlocksPerMacro-1)*cloudTicksPerBlock), (CloudOffset{Local: cloudBlocksPerMacro - 1}); got != want {
+		t.Fatalf("rollover 前偏移=%v，想要 %v", got, want)
+	}
+	if got, want := CloudOffsetAt(cloudBlocksPerMacro*cloudTicksPerBlock), (CloudOffset{MacroX: 1}); got != want {
+		t.Fatalf("rollover 后偏移=%v，想要 %v", got, want)
+	}
+}
+
 func TestDayNightPhaseFormula(t *testing.T) {
 	tests := []struct {
 		name         string
