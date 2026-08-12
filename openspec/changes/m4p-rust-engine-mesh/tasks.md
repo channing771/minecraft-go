@@ -16,7 +16,7 @@
 
 ## 6. Go 生产 MeshSection 切到 Rust，保留 test-only oracle
 
-- [ ] 6.1 创建 `internal/mesh/native.go`、`internal/mesh/greedy_oracle_test.go` 与 `internal/mesh/light_oracle_test.go`，并修改 `internal/mesh/native_abi.go`、`internal/mesh/native_input.go`、`internal/mesh/greedy.go`、`internal/mesh/light.go`、`internal/mesh/light_internal_test.go` 与本 `tasks.md`；仅在 constructor 签名要求时修改 `internal/client/mesher_worker.go` 和 `cmd/gfxspike/main.go`，使 Rust 成为生产 `MeshSection` 且 Go 仅作 test-only oracle，并以中心非 Air 的 ABI mismatch 测试证明同一生产实现真正进入 native 调用。验证：`make rust && go test ./internal/mesh -race -count=1 && go test ./internal/client -run 'Mesher|Light|Dirty' -race -count=1 && go test ./internal/render -run 'Mesh|Light|Cull' -race -count=1 && go test ./cmd/gfxspike -count=1 && go test ./internal/archcheck -count=1`。
+- [x] 6.1 创建 `internal/mesh/native.go`、`internal/mesh/greedy_oracle_test.go` 与 `internal/mesh/light_oracle_test.go`，并修改 `internal/mesh/native_abi.go`、`internal/mesh/native_input.go`、`internal/mesh/greedy.go`、`internal/mesh/light.go`、`internal/mesh/light_internal_test.go` 与本 `tasks.md`；仅在 constructor 签名要求时修改 `internal/client/mesher_worker.go` 和 `cmd/gfxspike/main.go`，使 Rust 成为生产 `MeshSection` 且 Go 仅作 test-only oracle，并以中心非 Air 的 ABI mismatch 测试证明同一生产实现真正进入 native 调用。验证：`make rust && go test ./internal/mesh -race -count=1 && go test ./internal/client -run 'Mesher|Light|Dirty' -race -count=1 && go test ./internal/render -run 'Mesh|Light|Cull' -race -count=1 && go test ./cmd/gfxspike -count=1 && go test ./internal/archcheck -count=1`。
 
 ## 7. 跨语言 parity、错误原子性与并发
 

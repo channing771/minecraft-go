@@ -43,7 +43,7 @@ func encodeNativeInput(dst []byte, n *world.Neighborhood, snapshot RegistrySnaps
 			return 0, fmt.Errorf("mesh: registry block ID 未严格递增")
 		}
 		if block.Emission > 15 {
-			return 0, fmt.Errorf("mesh: block %d emission=%d 超过 15", block.ID, block.Emission)
+			return 0, fmt.Errorf("mesh: 方块发光等级超过 15")
 		}
 		air = air || block.ID == core.AirID
 		barrier = barrier || block.ID == core.BarrierID
