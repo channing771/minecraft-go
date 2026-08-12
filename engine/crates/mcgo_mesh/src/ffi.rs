@@ -148,11 +148,14 @@ mod mesh_tests {
 }
 #[cfg(test)]
 mod tests {
+    use std::mem::{align_of, size_of};
+
     use super::{
         MCGO_STATUS_ABI_VERSION, MCGO_STATUS_EMISSION, MCGO_STATUS_INPUT,
         MCGO_STATUS_INVALID_ARGUMENT, MCGO_STATUS_OK, MCGO_STATUS_OUTPUT_OVERFLOW,
         MCGO_STATUS_PANIC, MCGO_STATUS_QUEUE_OVERFLOW, MCGO_STATUS_REGISTRY, MCGO_STATUS_SCRATCH,
-        input_range_is_valid, mcgo_mesh_section,
+        SCRATCH_BYTES, input_range_is_valid, mcgo_mesh_section, output_range_is_valid,
+        scratch_range_is_valid,
     };
     use crate::input::tests::valid_input;
 
@@ -187,6 +190,32 @@ mod tests {
             std::ptr::without_provenance(usize::MAX),
             1
         ));
+    }
+
+    #[test]
+    fn scratch_range_rejects_aligned_address_wrap() {
+        let mut storage = vec![0_u64; SCRATCH_BYTES.div_ceil(size_of::<u64>())];
+        assert!(scratch_range_is_valid(
+            storage.as_mut_ptr().cast(),
+            SCRATCH_BYTES
+        ));
+
+        let aligned_max = usize::MAX & !(align_of::<u64>() - 1);
+        assert!(!scratch_range_is_valid(
+            std::ptr::without_provenance_mut(aligned_max),
+            SCRATCH_BYTES
+        ));
+    }
+
+    #[test]
+    fn output_range_rejects_address_and_capacity_overflow() {
+        let mut output = 0_u64;
+        assert!(output_range_is_valid(&mut output, 1));
+        assert!(!output_range_is_valid(
+            std::ptr::without_provenance_mut(usize::MAX),
+            1
+        ));
+        assert!(!output_range_is_valid(&mut output, usize::MAX));
     }
 
     #[test]
@@ -534,5 +563,51 @@ mod tests {
 
         assert_eq!(status, MCGO_STATUS_SCRATCH);
         assert_eq!(output_len, 0);
+    }
+
+    #[test]
+    fn overlapping_scratch_with_input_or_output_len_is_rejected_atomically() {
+        let input = valid_input();
+        let mut output = vec![0_u64; 6 * 4096];
+
+        let mut shared_input = vec![0_u64; SCRATCH_BYTES.div_ceil(size_of::<u64>())];
+        let shared_input_ptr = shared_input.as_mut_ptr().cast::<u8>();
+        // SAFETY: shared_input 容量大于 input，只在调用前把有效 input 拷贝进该对齐 buffer。
+        unsafe { std::slice::from_raw_parts_mut(shared_input_ptr, input.len()) }
+            .copy_from_slice(&input);
+        let mut output_len = usize::MAX;
+        // SAFETY: 除被测的 input/scratch 重叠外，其余指针与容量都有效；入口应在构造 slice 前拒绝。
+        let input_status = unsafe {
+            mcgo_mesh_section(
+                1,
+                shared_input_ptr,
+                input.len(),
+                shared_input_ptr,
+                SCRATCH_BYTES,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(input_status, MCGO_STATUS_SCRATCH);
+        assert_eq!(output_len, 0);
+
+        let mut shared_output_len = vec![usize::MAX; SCRATCH_BYTES.div_ceil(size_of::<usize>())];
+        let shared_output_len_ptr = shared_output_len.as_mut_ptr();
+        // SAFETY: 除被测的 scratch/output_len 重叠外，其余指针与容量都有效；入口先将 output_len 原子清零再拒绝重叠。
+        let output_len_status = unsafe {
+            mcgo_mesh_section(
+                1,
+                input.as_ptr(),
+                input.len(),
+                shared_output_len.as_mut_ptr().cast(),
+                SCRATCH_BYTES,
+                output.as_mut_ptr(),
+                output.len(),
+                shared_output_len_ptr,
+            )
+        };
+        assert_eq!(output_len_status, MCGO_STATUS_SCRATCH);
+        assert_eq!(shared_output_len[0], 0);
     }
 }

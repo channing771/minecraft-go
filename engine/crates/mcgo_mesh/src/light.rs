@@ -331,6 +331,38 @@ mod tests {
         assert_eq!(storage.light.at(0, 0, 32), 0);
     }
 
+    #[test]
+    fn reused_scratch_clears_old_light_before_a_dark_build() {
+        let lit = fixture_with_light_block(8, 8, 8);
+        let dark = parse_fixture(base_input(0));
+        let mut storage = ScratchFixture::new();
+
+        build_light(&lit.mesh, &lit.mesh.registry, &mut storage.light).unwrap();
+        assert_eq!(storage.light.at(8, 8, 8) & 0x0f, 15);
+        build_light(&dark.mesh, &dark.mesh.registry, &mut storage.light).unwrap();
+
+        assert_eq!(storage.light.at(8, 8, 8), 0);
+        assert_eq!(storage.light.at(9, 8, 8), 0);
+    }
+
+    #[test]
+    fn non_air_non_opaque_block_stops_block_light() {
+        let mut bytes = base_input(15);
+        for block in bytes[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].chunks_exact_mut(2) {
+            block.copy_from_slice(&1_u16.to_le_bytes());
+        }
+        bytes[REGISTRY_OFFSET + 16 + 2] = 0;
+        set_block(&mut bytes, 8, 8, 8, LIGHT_ID);
+        set_block(&mut bytes, 10, 8, 8, 0);
+        let input = parse_fixture(bytes);
+        let mut storage = ScratchFixture::new();
+
+        build_light(&input.mesh, &input.mesh.registry, &mut storage.light).unwrap();
+
+        assert_eq!(storage.light.at(9, 8, 8) & 0x0f, 0);
+        assert_eq!(storage.light.at(10, 8, 8) & 0x0f, 0);
+    }
+
     fn fixture_with_light_block(x: i32, y: i32, z: i32) -> InputFixture {
         let mut bytes = base_input(15);
         set_block(&mut bytes, x, y, z, LIGHT_ID);
