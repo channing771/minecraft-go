@@ -4,7 +4,7 @@
 
 ## 3. registry snapshot 与版本化 neighborhood 输入
 
-- [ ] 3.1 创建 `engine/crates/mcgo_mesh/src/input.rs`、`internal/mesh/registry.go`、`internal/mesh/native_input.go` 与 `internal/mesh/native_input_test.go`，并修改 `engine/crates/mcgo_mesh/src/lib.rs`、`engine/crates/mcgo_mesh/src/ffi.rs`、`engine/include/mcgo_engine.h`、`internal/mesh/greedy.go`、`internal/assets/blocks.go`、`internal/assets/blocks_test.go`、`internal/mesh/greedy_test.go`、`internal/mesh/light_internal_test.go`、`internal/mesh/light_test.go` 与本 `tasks.md`，实现可验证的 registry snapshot 与版本化 neighborhood input。验证：`make rust && cargo test --manifest-path engine/Cargo.toml --workspace --locked && go test ./internal/assets ./internal/mesh -run 'Registry|NativeInput' -count=1 && go test ./internal/mesh ./internal/assets -race -count=1`。
+- [ ] 3.1 创建 `engine/crates/mcgo_mesh/src/input.rs`、`internal/mesh/registry.go`、`internal/mesh/native_input.go` 与 `internal/mesh/native_input_test.go`，并修改 `engine/crates/mcgo_mesh/src/lib.rs`、`engine/crates/mcgo_mesh/src/ffi.rs`、`engine/include/mcgo_engine.h`、`internal/mesh/native_abi.go`、`internal/mesh/greedy.go`、`internal/assets/blocks.go`、`internal/assets/blocks_test.go`、`internal/mesh/greedy_test.go`、`internal/mesh/light_internal_test.go`、`internal/mesh/light_test.go` 与本 `tasks.md`，实现可验证的 registry snapshot 与版本化 neighborhood input。验证：`make rust && cargo test --manifest-path engine/Cargo.toml --workspace --locked && go test ./internal/assets ./internal/mesh -run 'Registry|NativeInput' -count=1 && go test ./internal/mesh ./internal/assets -race -count=1`。
 
 ## 4. Rust 有界天空光与方块光
 

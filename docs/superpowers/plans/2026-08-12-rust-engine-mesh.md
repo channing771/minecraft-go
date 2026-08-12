@@ -386,6 +386,7 @@ git commit -m "build: 建立 Rust 网格 ABI 链接"
 - Modify: `engine/crates/mcgo_mesh/src/lib.rs`
 - Modify: `engine/crates/mcgo_mesh/src/ffi.rs`
 - Modify: `engine/include/mcgo_engine.h`
+- Modify: `internal/mesh/native_abi.go`
 - Modify: `internal/mesh/greedy.go`
 - Modify: `internal/assets/blocks.go`
 - Modify: `internal/assets/blocks_test.go`
