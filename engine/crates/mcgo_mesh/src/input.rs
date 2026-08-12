@@ -24,6 +24,15 @@ pub(crate) struct MeshInput<'a> {
 
 impl<'a> MeshInput<'a> {
     pub(crate) fn parse(input: &'a [u8]) -> Result<Self, InputError> {
+        Self::parse_inner(input, true)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn parse_allowing_overbright(input: &'a [u8]) -> Result<Self, InputError> {
+        Self::parse_inner(input, false)
+    }
+
+    fn parse_inner(input: &'a [u8], reject_overbright: bool) -> Result<Self, InputError> {
         if input.len() < 16 || &input[0..4] != b"MGM1" {
             return Err(InputError::Input);
         }
@@ -74,7 +83,7 @@ impl<'a> MeshInput<'a> {
         if air_id == barrier_id {
             return Err(InputError::Registry);
         }
-        registry.validate(air_id, barrier_id)?;
+        registry.validate(air_id, barrier_id, reject_overbright)?;
 
         Ok(Self {
             section_origin_y: read_i32(input, 4),
@@ -130,7 +139,12 @@ pub(crate) struct RegistryView<'a> {
 }
 
 impl RegistryView<'_> {
-    fn validate(&self, air_id: u16, barrier_id: u16) -> Result<(), InputError> {
+    fn validate(
+        &self,
+        air_id: u16,
+        barrier_id: u16,
+        reject_overbright: bool,
+    ) -> Result<(), InputError> {
         let mut previous = None;
         let mut has_air = false;
         let mut has_barrier = false;
@@ -140,7 +154,7 @@ impl RegistryView<'_> {
             if previous.is_some_and(|previous| previous >= id) || self.entries[offset + 2] > 1 {
                 return Err(InputError::Registry);
             }
-            if self.entries[offset + 3] > 15 {
+            if reject_overbright && self.entries[offset + 3] > 15 {
                 return Err(InputError::Emission);
             }
             has_air |= id == air_id;

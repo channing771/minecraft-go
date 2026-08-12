@@ -8,7 +8,7 @@
 
 ## 4. Rust 有界天空光与方块光
 
-- [ ] 4.1 创建 `engine/crates/mcgo_mesh/src/light.rs`，并修改 `engine/crates/mcgo_mesh/src/lib.rs`、`engine/crates/mcgo_mesh/src/input.rs`、`engine/crates/mcgo_mesh/src/ffi.rs` 与本 `tasks.md`，实现固定容量的 Rust 天空光和方块光。验证：`cargo test --manifest-path engine/Cargo.toml -p mcgo_mesh light && make rust && go test ./internal/mesh -run '^TestNativeInputValidAirNeighborhoodReturnsZeroQuads$' -count=1`。
+- [x] 4.1 创建 `engine/crates/mcgo_mesh/src/light.rs`，并修改 `engine/crates/mcgo_mesh/src/lib.rs`、`engine/crates/mcgo_mesh/src/input.rs`、`engine/crates/mcgo_mesh/src/ffi.rs` 与本 `tasks.md`，实现固定容量的 Rust 天空光和方块光。验证：`cargo test --manifest-path engine/Cargo.toml -p mcgo_mesh light && make rust && go test ./internal/mesh -run '^TestNativeInputValidAirNeighborhoodReturnsZeroQuads$' -count=1`。
 
 ## 5. Rust AO、greedy mesh 与 packed quad
 
