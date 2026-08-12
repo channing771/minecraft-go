@@ -23,6 +23,19 @@ func (internalTestRegistry) Emission(id world.BlockID) uint8 {
 	return 0
 }
 
+func (r internalTestRegistry) MeshSnapshot() RegistrySnapshot {
+	snapshot, err := BuildRegistrySnapshot([]world.BlockID{
+		core.AirID,
+		core.BarrierID,
+		core.StoneID,
+		core.LightBlockID,
+	}, r)
+	if err != nil {
+		panic(err)
+	}
+	return snapshot
+}
+
 type countingRegistry struct {
 	opaqueQueries   int
 	emissionQueries int
@@ -37,6 +50,16 @@ func (overbrightRegistry) Emission(id world.BlockID) uint8 {
 	return 0
 }
 
+func (overbrightRegistry) MeshSnapshot() RegistrySnapshot {
+	snapshot := (internalTestRegistry{}).MeshSnapshot()
+	for i := range snapshot.Blocks {
+		if snapshot.Blocks[i].ID == core.LightBlockID {
+			snapshot.Blocks[i].Emission = 16
+		}
+	}
+	return snapshot
+}
+
 func (r *countingRegistry) Opaque(world.BlockID) bool {
 	r.opaqueQueries++
 	return false
@@ -47,6 +70,10 @@ func (*countingRegistry) Material(world.BlockID, Face) uint16           { return
 func (r *countingRegistry) Emission(world.BlockID) uint8 {
 	r.emissionQueries++
 	return 0
+}
+
+func (*countingRegistry) MeshSnapshot() RegistrySnapshot {
+	panic("countingRegistry.MeshSnapshot 不应被调用")
 }
 
 func fullyLoadedAirNeighborhood() *world.Neighborhood {

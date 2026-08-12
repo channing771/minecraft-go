@@ -5,4 +5,4 @@ edition = "2024"
 publish = false
 
 [lib]
-crate-type = ["rlib", "staticlib"]
+crate-type = ["rlib", "cdylib"]

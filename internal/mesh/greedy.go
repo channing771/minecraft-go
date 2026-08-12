@@ -2,14 +2,6 @@ package mesh
 
 import "minecraft-go/internal/world"
 
-// Registry 提供网格化需要的方块属性。
-type Registry interface {
-	Opaque(world.BlockID) bool
-	FaceVisible(id world.BlockID, adjacent world.BlockID) bool
-	Material(id world.BlockID, f Face) uint16
-	Emission(world.BlockID) uint8
-}
-
 // maskCell 必须可比较，贪心合并靠 == 判断两格能否合并。
 type maskCell struct {
 	used  bool

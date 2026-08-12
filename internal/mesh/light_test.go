@@ -104,6 +104,20 @@ func (nonOpaqueBlockRegistry) Opaque(id world.BlockID) bool {
 	return id != world.AirID && id != core.StoneBrickID
 }
 
+func (r nonOpaqueBlockRegistry) MeshSnapshot() mesh.RegistrySnapshot {
+	snapshot, err := mesh.BuildRegistrySnapshot([]world.BlockID{
+		core.AirID,
+		core.BarrierID,
+		core.StoneID,
+		core.StoneBrickID,
+		core.LightBlockID,
+	}, r)
+	if err != nil {
+		panic(err)
+	}
+	return snapshot
+}
+
 func blockLightCorridor(
 	t *testing.T,
 	floorY int32,

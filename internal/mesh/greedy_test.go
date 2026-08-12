@@ -25,6 +25,21 @@ func (testRegistry) Emission(id world.BlockID) uint8 {
 	return 0
 }
 
+func (r testRegistry) MeshSnapshot() mesh.RegistrySnapshot {
+	snapshot, err := mesh.BuildRegistrySnapshot([]world.BlockID{
+		core.AirID,
+		core.BarrierID,
+		core.StoneID,
+		core.DirtID,
+		core.StoneBrickID,
+		core.LightBlockID,
+	}, r)
+	if err != nil {
+		panic(err)
+	}
+	return snapshot
+}
+
 type materialCallRegistry struct {
 	*assets.Registry
 	calls int

@@ -40,7 +40,8 @@ const (
 
 // Registry 是方块属性与材质的注册表。
 type Registry struct {
-	layers [layerCount][]byte
+	layers       [layerCount][]byte
+	meshSnapshot mesh.RegistrySnapshot
 }
 
 // NewRegistry 构造注册表并生成全部占位材质。
@@ -74,6 +75,15 @@ func NewRegistry() *Registry {
 	r.layers[LayerSnowTop] = snowTopTexture()
 	r.layers[LayerSnowSide] = snowSideTexture()
 	r.layers[LayerMossyCobblestone] = mossyCobblestoneTexture()
+	ids := make([]world.BlockID, 0, int(core.MossyCobblestoneID)+1)
+	for id := core.AirID; id <= core.MossyCobblestoneID; id++ {
+		ids = append(ids, id)
+	}
+	snapshot, err := mesh.BuildRegistrySnapshot(ids, r)
+	if err != nil {
+		panic("assets: 构建 mesh registry snapshot: " + err.Error())
+	}
+	r.meshSnapshot = snapshot
 	return r
 }
 
@@ -171,6 +181,9 @@ func (r *Registry) Emission(id world.BlockID) uint8 {
 	}
 	return 0
 }
+
+// MeshSnapshot 返回构造时冻结的网格 registry 快照。
+func (r *Registry) MeshSnapshot() mesh.RegistrySnapshot { return r.meshSnapshot }
 
 func (r *Registry) LayerCount() int { return int(layerCount) }
 
