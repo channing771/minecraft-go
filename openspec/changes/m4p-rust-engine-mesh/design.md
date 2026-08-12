@@ -31,6 +31,8 @@ ABI 只暴露整数、指针和长度；`engine/include/mcgo_engine.h` 是 C 声
 
 输入包含 `3×3×3` section neighborhood、9 个带 presence 位的 height map、section Y 与只读 `MeshRegistrySnapshot`。Go 侧从现有 registry 缓存 snapshot；Rust 不回调 `Registry`。scratch 固定覆盖 `48³` packed light level 和 `48³` 队列项；output 固定最多 `6 × 16³ = 24576` 个 `uint64`。成功后 Go 用既有 `UnpackQuad` 恢复 `[]Quad`。
 
+输入解析分为复用同一布局实现的结构阶段与 registry 语义阶段。结构阶段只验证 magic、总长度、有界 registry count、visibility 行宽、presence 位与各借用切片范围，使 Rust 可以读取 center blocks；若 center 全为 header 声明的 AirID，FFI 在 registry 排序、air/barrier identity、opacity、emission 与 required-ID 校验之前原子返回零输出，且不触碰 light scratch。非 Air center 必须继续执行完整 registry/emission 校验。该例外只避免读取不会影响空 section 输出的 registry 语义，不放宽 ABI 指针、长度或结构安全检查。
+
 选择复制与固定缓冲区是为了明确单一所有权及保留有界 worker；否决共享 Go 对象内存和 Rust 分配返回值，二者都会制造跨语言生命周期或释放责任。以后 renderer 迁移前不增加直接消费 packed quad 的 API。
 
 ### 失败以原子 ABI 状态码表达
@@ -56,6 +58,7 @@ ABI 显式区分 ABI 版本、input/scratch 长度、非法 registry snapshot、
 - [跨语言展平与解包产生迁移期开销] → 保留该有界复制以换取所有权清晰；性能只记录，不改 baseline 或阈值。
 - [双实现短期语义漂移] → Go oracle 仅在测试中编译，并以固定夹具、随机输入和并发 parity 逐位比较。
 - [ABI 错误难定位] → 锁定版本、长度、registry、emission、overflow 与 panic 状态，且失败不暴露部分 output。
+- [空 section 快路径掩盖结构损坏] → 只允许跳过未使用的 registry 语义；magic、长度、count、行宽、presence 位和 slice range 仍先失败。
 - [平台链接差异] → Apple Silicon/macOS 是客户端正式验收平台；pure CPU crate 在 CI host 构建，Linux 专用服务端继续不链接 Rust。
 - [本地 binary 缺少 dylib] → `make build` 总是复制同一 release dylib 到 `bin/`，并以 `@rpath`、`@loader_path` 和移开 `engine/target` 的无窗口探针锁定可移动性。
 - [固定容量不足或意外分配] → overflow 立即失败且测试覆盖 `48³` 最坏队列与 `24576` output 上限；不截断或扩容。

@@ -797,6 +797,7 @@ git commit -m "feat: 用 Rust 计算传播光照"
 - Create: `engine/crates/mcgo_mesh/src/quad.rs`
 - Create: `engine/crates/mcgo_mesh/src/greedy.rs`
 - Modify: `engine/crates/mcgo_mesh/src/lib.rs`
+- Modify: `engine/crates/mcgo_mesh/src/input.rs`
 - Modify: `engine/crates/mcgo_mesh/src/ffi.rs`
 - Modify: `engine/include/mcgo_engine.h`
 - Modify: `openspec/changes/m4p-rust-engine-mesh/tasks.md`
@@ -870,7 +871,7 @@ let step = if (face as u8) & 1 == 1 { 1 } else { -1 };
 
 For each slice `0..16`, fill a `[MaskCell; 256]` in `vi` then `ui` order. Width grows along `ui`; height grows along `vi`; clear exactly the merged rectangle; append one packed quad before advancing `ui += width`. AO must preserve the Go corner order `(-1,-1),(1,-1),(1,1),(-1,1)` and 2-bit shifts.
 
-Before all work, return zero output for a center section containing only AirID. Do not invoke registry decoding/light work on that fast path.
+Before all registry semantics and light work, return zero output for a structurally valid input whose center section contains only AirID. Split the existing input parser without duplicating layout constants: structural parsing validates magic, lengths, bounded counts, presence bits and slice ranges; full parsing additionally validates air/barrier identity, sorted registry entries, opacity flags, emission and required IDs. The FFI uses structural parsing to inspect the center, returns `OK`/zero quads for uniform Air even when the unused registry semantics would otherwise fail, and runs full registry validation for every non-Air center. Add a canary with a uniform-Air center, non-Air halo and invalid/overbright registry to prove the short circuit precedes registry validation.
 
 - [ ] **Step 5: Complete the panic-safe FFI**
 
@@ -901,6 +902,8 @@ git add engine openspec/changes/m4p-rust-engine-mesh/tasks.md
 git diff --cached --check
 git commit -m "feat: 用 Rust 生成贪心网格"
 ```
+
+Review hardening also adds three non-symmetric exact-output tests: one AO fixture whose four 2-bit corners are all distinguishable in the required order, one multi-face/multi-slice fixture asserting the complete packed sequence, and one asymmetric nonzero-light fixture asserting the sampled adjacent-cell light bits. Tests that search output with `any`/`find` are insufficient for the ordering contract.
 
 ---
 

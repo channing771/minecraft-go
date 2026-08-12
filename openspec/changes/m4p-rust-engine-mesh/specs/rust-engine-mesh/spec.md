@@ -21,12 +21,20 @@
 - **THEN** 结果 MUST 确定且不得共享可变 native 状态
 
 ### Requirement: ABI 失败不得产生部分网格
-系统 MUST 对版本、长度、registry、emission、output overflow 与 Rust panic 返回可判定失败。
+系统 MUST 对版本、结构长度、非空区段使用的 registry、emission、output overflow 与 Rust panic 返回可判定失败。
 
 #### Scenario: 非法输入被原子拒绝
 - **WHEN** native 调用收到任一非法输入
 - **THEN** output length MUST 为 0
 - **AND** panic/unwind MUST NOT 穿过 C ABI
+
+#### Scenario: 全空气区段不读取 registry 语义
+- **GIVEN** native 输入的 magic、长度、bounded count、visibility 行宽、presence 位与借用范围结构合法
+- **AND** center section 的所有方块都等于 header 声明的 AirID
+- **WHEN** registry 排序、air/barrier identity、opacity、emission 或 required-ID 语义本会校验失败
+- **THEN** native 调用 MUST 在 registry 语义与传播光照之前返回成功
+- **AND** output length MUST 为 0
+- **AND** light scratch MUST 保持不变
 
 ### Requirement: clean checkout 使用 Rust-first 构建
 系统 MUST 通过 canonical Make、CI 与 Hook 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust `cdylib`；workspace MUST 仅含 `mcgo_mesh`，并且该 crate 的 normal dependency MUST 只使用 `std`。

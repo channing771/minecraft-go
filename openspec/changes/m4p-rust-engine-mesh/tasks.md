@@ -12,7 +12,7 @@
 
 ## 5. Rust AO、greedy mesh 与 packed quad
 
-- [x] 5.1 创建 `engine/crates/mcgo_mesh/src/quad.rs` 与 `engine/crates/mcgo_mesh/src/greedy.rs`，并修改 `engine/crates/mcgo_mesh/src/lib.rs`、`engine/crates/mcgo_mesh/src/ffi.rs`、`engine/include/mcgo_engine.h` 与本 `tasks.md`，实现 Rust AO、greedy mesh、精确 packed quad 输出，以及实际触发 panic 并断言 status 9/零输出的 FFI 单测。验证：`cargo test --manifest-path engine/Cargo.toml --workspace --locked && make rust && go test ./internal/mesh -run 'NativeABI|NativeInput' -count=1`。
+- [ ] 5.1 创建 `engine/crates/mcgo_mesh/src/quad.rs` 与 `engine/crates/mcgo_mesh/src/greedy.rs`，并修改 `engine/crates/mcgo_mesh/src/lib.rs`、`engine/crates/mcgo_mesh/src/input.rs`、`engine/crates/mcgo_mesh/src/ffi.rs`、`engine/include/mcgo_engine.h` 与本 `tasks.md`，实现 Rust AO、greedy mesh、精确 packed quad 输出、结构解析后的 uniform-Air registry/light 短路，以及实际触发 panic 并断言 status 9/零输出的 FFI 单测；以非对称 AO、完整有序 packed 序列和非零 light sampling 测试锁定 Go oracle。验证：`cargo test --manifest-path engine/Cargo.toml --workspace --locked && make rust && go test ./internal/mesh -run 'NativeABI|NativeInput' -count=1`。
 
 ## 6. Go 生产 MeshSection 切到 Rust，保留 test-only oracle
 
