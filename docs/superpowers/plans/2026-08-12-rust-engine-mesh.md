@@ -95,19 +95,19 @@ Expected: clean branch, ancestor check exit 0, M4O complete, and every Go comman
 ```markdown
 ## Why
 
-Go currently owns every engine layer. M4P establishes the first reversible Rust boundary by migrating only deterministic section meshing and propagated light.
+Go 当前拥有所有引擎层。M4P 通过只迁移确定性区段网格与传播光照，建立首个可回退的 Rust 边界。
 
 ## What Changes
 
-- Add a pinned Rust workspace and Rust-first canonical build chain.
-- Make Rust the only production implementation of mesh/light.
-- Keep the old Go implementation test-only as an exact oracle.
-- Preserve all existing gameplay, wire, storage, visual, concurrency and packed-quad behavior.
+- 添加固定版本的 Rust workspace 与 Rust-first canonical 构建链。
+- 让 Rust 成为 mesh/light 的唯一生产实现。
+- 将旧 Go 实现保留为仅测试编译的精确 oracle。
+- 保持既有 gameplay、wire、storage、visual、concurrency 与 packed-quad 行为。
 
 ## Non-Goals
 
-- No physics, world, sim, network, storage, render or process-entry migration.
-- No production Go fallback, native binary commits or performance threshold changes.
+- 不迁移 physics、world、sim、network、storage、render 或 process entry。
+- 不提供生产 Go fallback、不提交 native binary，也不改变性能阈值。
 ```
 
 `design.md` must copy the approved ownership, ABI buffer lifecycle, fixed capacities, error mapping, build workflow and rollback decisions without adding later-stage API.

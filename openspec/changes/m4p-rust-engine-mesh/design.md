@@ -19,7 +19,7 @@
 
 ### Rust 仅拥有确定性 mesh/light 算法
 
-新增单一 `engine/crates/mcgo_mesh` crate，输出 static library。Go 的 `internal/mesh` 继续持有对外入口；只有该包 native bridge 接触 C ABI，`internal/client`、`internal/render` 和 `cmd/` 不直接调用 Rust 符号。Rust 接管贪心网格、AO、天空光和静态方块光，旧 Go 实现移动为 test-only oracle。
+`engine/rust-toolchain.toml` 必须固定 Rust 1.97.1。新增且仅新增一个 `engine/crates/mcgo_mesh` crate，输出 static library；它不得引入第三方 Rust dependency，只使用 `std`。Go 的 `internal/mesh` 继续持有对外入口；只有该包 native bridge 接触 C ABI，`internal/client`、`internal/render` 和 `cmd/` 不直接调用 Rust 符号。Rust 接管贪心网格、AO、天空光和静态方块光，旧 Go 实现移动为 test-only oracle。
 
 采用该边界是因为它可独立验证且保持现有调用方和 `[]mesh.Quad` API 不变。否决通用 engine crate、抽象 backend 与细粒度 getter/setter FFI：它们会在未迁移子系统上预建抽象，并扩大 ABI 和生命周期风险。
 
@@ -43,7 +43,7 @@ ABI 显式区分 ABI 版本、input/scratch 长度、非法 registry snapshot、
 
 ### canonical 构建先锁定 Rust 再验证 Go
 
-`engine/rust-toolchain.toml` 固定验收过的 Rust 版本。`make build`、`make test` 与 `make test-race` 先执行 `cargo build --locked`，再执行对应 Go 命令；CI 与共享 Hook 使用同一构建步骤。native 产物写入 ignored 目录，不提交 `.a`、`.dylib` 或 Cargo `target/`。清洁 checkout 可用 canonical 入口重建；已构建后仍可直接运行 focused Go tests。
+`engine/rust-toolchain.toml` 固定 Rust 1.97.1。`make build`、`make test` 与 `make test-race` 先执行精确命令 `cargo build --locked --release`，再执行对应 Go 命令；CI 与共享 Hook 使用同一构建步骤。native 产物写入 ignored 目录，不提交 `.a`、`.dylib` 或 Cargo `target/`。清洁 checkout 可用 canonical 入口重建；已构建后仍可直接运行 focused Go tests。
 
 选择统一 Make/CI/Hook 是为避免本机和 CI 的构建漂移；否决提交预编译 library 与独立手工流程，因为它们破坏可重复构建。Linux `cmd/mcgod` 保持无 CGO，并不得获得 Rust、WebGPU 或窗口依赖。
 
