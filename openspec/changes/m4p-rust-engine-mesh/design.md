@@ -57,6 +57,7 @@ ABI 显式区分 ABI 版本、input/scratch 长度、非法 registry snapshot、
 
 - [跨语言展平与解包产生迁移期开销] → 保留该有界复制以换取所有权清晰；性能只记录，不改 baseline 或阈值。
 - [双实现短期语义漂移] → Go oracle 仅在测试中编译，并以固定夹具、随机输入和并发 parity 逐位比较。
+- [benchmark fixture 使用的 block 未进入测试 registry snapshot] → benchmark 与 parity 测试复用同一 terrain neighborhood，snapshot 明确覆盖其中的 Stone、Dirt 与 Grass，并锁定完整 packed parity 和 `2016 quads/op`；不得把未知 ID 造成的 workload 缩减当作性能改善。
 - [继承的 visual-check 在验收设备上已非零] → 不放宽阈值或更新 golden；只在同一设备、同一命令下冻结 pre-M4P 提交与 M4P HEAD 的 10/10 capture PNG、失败摘要及 actual/diff PNG 全部逐字节一致时认定迁移无视觉漂移，任一差异仍阻断。
 - [ABI 错误难定位] → 锁定版本、长度、registry、emission、overflow 与 panic 状态，且失败不暴露部分 output。
 - [空 section 快路径掩盖结构损坏] → 只允许跳过未使用的 registry 语义；magic、长度、count、行宽、presence 位和 slice range 仍先失败。
@@ -76,4 +77,4 @@ ABI 显式区分 ABI 版本、input/scratch 长度、非法 registry snapshot、
 
 不改变网络协议、packet ID、存档 schema、fixture、world metadata、benchmark scenario、workload、阈值、visual golden、GPU packed layout 或客户端 mesher generation/dirty/requeue/worker 语义。ABI v1 仅面向同一仓库同步构建的组件，版本不匹配直接失败，不承诺跨发布 native library 兼容。
 
-实现阶段至少验证 Rust `fmt`/`clippy`/测试、Go parity 与 race、`make test-race` clean checkout、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod`、`go test ./internal/archcheck -count=1`、`go vet ./...`、`gofmt -l .`、既有 mesh benchmark 与 10 个无窗口视觉场景，以及 OpenSpec strict 和 diff check。若冻结 pre-M4P 提交在同一设备上复现完全相同的既有视觉失败，则必须额外证明 10/10 capture PNG 和失败 actual/diff 全部逐字节一致，并保留非零摘要，不得把该裁决扩展到其他视觉失败。
+实现阶段至少验证 Rust `fmt`/`clippy`/测试、Go parity 与 race、`make test-race` clean checkout、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod`、`go test ./internal/archcheck -count=1`、`go vet ./...`、`gofmt -l .`、既有 mesh benchmark 与 10 个无窗口视觉场景，以及 OpenSpec strict 和 diff check。terrain benchmark 必须复用进入 native/oracle parity 的同一夹具并保持 `2016 quads/op`。若冻结 pre-M4P 提交在同一设备上复现完全相同的既有视觉失败，则必须额外证明 10/10 capture PNG 和失败 actual/diff 全部逐字节一致，并保留非零摘要，不得把该裁决扩展到其他视觉失败。

@@ -1348,6 +1348,8 @@ git commit -m "build: 统一 Rust 与 Go 验证入口"
 ### Task 9: 下游保真、全仓门禁与独立评审
 
 **Files:**
+- Modify before final approval for the single approved review fix: `internal/mesh/greedy_test.go`
+- Modify before final approval for the single approved review fix: `internal/mesh/native_parity_test.go`
 - Modify only after all gates and review: `openspec/changes/m4p-rust-engine-mesh/tasks.md`
 - Report only, ignored: `.superpowers/sdd/2026-08-12-m4p-rust-engine-mesh/task-9-report.md`
 
@@ -1425,6 +1427,8 @@ Reviewer must inspect the commit object from `2346ded..HEAD`, not unrelated work
 - artifact/protocol/storage/visual preservation verdict.
 
 Fix any Critical/Important finding in a separate commit, rerun the affected focused gates, and request scoped re-review. Do not mark Task 9 complete before approval.
+
+The approved round-1 review fix is limited to the benchmark terrain parity gap: extract the existing terrain construction into `benchmarkTerrainNeighborhood()`, reuse that exact neighborhood in the benchmark and a new `TestNativeOracleParityBenchmarkTerrain`, and add `core.GrassID` to `testRegistry.MeshSnapshot()`. First run the new parity test against the incomplete snapshot and require RED with native `1100` versus oracle `2016`; then add Grass and require exact packed parity plus `2016 quads/op`. Do not modify production Go/Rust, benchmark dimensions, materials, thresholds, or the deferred `UnpackQuad` GoDoc Minor.
 
 - [ ] **Step 6: Mark tasks complete and commit only audit metadata**
 
