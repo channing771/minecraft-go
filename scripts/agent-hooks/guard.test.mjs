@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  changedPaths,
   findBlockedCommand,
   openSpecRequirementReasons,
   runCommand,
@@ -66,13 +67,80 @@ test("runs Rust validation before Go checks for Rust-required changes", () => {
     return { status: 0, stdout: "" };
   };
 
-  assert.deepEqual(stopFailures(["engine/crates/mcgo_mesh/src/light.rs"], run), []);
+  assert.deepEqual(stopFailures(["engine/crates/mcgo_mesh/src/light.rs"], run, {}), []);
   assert.deepEqual(calls.slice(1, 4), [
     ["make", ["rust"]],
     ["make", ["rust-check"]],
     ["go", ["test", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
   ]);
   assert.equal(calls.some(([command]) => command === "cargo"), false);
+});
+
+test("passes login-shell Cargo through the full Stop route when PATH is restricted", () => {
+  const calls = [];
+  const environment = { SHELL: "/bin/zsh", PATH: "/usr/bin:/bin" };
+  const spawn = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    if (command === "/bin/zsh") {
+      return { status: 0, stdout: "/toolchain/bin/cargo\n" };
+    }
+    if (
+      command === "make" &&
+      ["rust", "rust-check"].includes(argumentsList[0]) &&
+      !argumentsList.includes("CARGO=/toolchain/bin/cargo")
+    ) {
+      return { status: 2, stderr: "cargo: command not found" };
+    }
+    return { status: 0, stdout: "" };
+  };
+  const run = (command, argumentsList, timeout) =>
+    runCommand(command, argumentsList, timeout, spawn, environment);
+
+  assert.deepEqual(
+    stopFailures(["engine/crates/mcgo_mesh/src/light.rs"], run, environment),
+    [],
+  );
+  assert.deepEqual(
+    calls.filter(([command]) => command === "make"),
+    [
+      ["make", ["rust", "CARGO=/toolchain/bin/cargo"]],
+      ["make", ["rust-check", "CARGO=/toolchain/bin/cargo"]],
+    ],
+  );
+});
+
+test("routes deleted Rust and native paths through Rust validation", () => {
+  const collect = (command, argumentsList) => {
+    assert.equal(command, "git");
+    if (argumentsList[0] === "diff") {
+      assert.ok(argumentsList.includes("--diff-filter=ACMRD"));
+      return {
+        status: 0,
+        stdout: "engine/crates/mcgo_mesh/src/removed.rs\0internal/mesh/native_removed.go\0",
+      };
+    }
+    return { status: 0, stdout: "" };
+  };
+  const paths = changedPaths(collect);
+  const calls = [];
+  const run = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    return { status: 0, stdout: "" };
+  };
+
+  assert.deepEqual(paths, [
+    "engine/crates/mcgo_mesh/src/removed.rs",
+    "internal/mesh/native_removed.go",
+  ]);
+  assert.deepEqual(stopFailures(paths, run, {}), []);
+  assert.deepEqual(
+    calls.filter(([command]) => command === "make"),
+    [
+      ["make", ["rust"]],
+      ["make", ["rust-check"]],
+    ],
+  );
+  assert.equal(calls.some(([command]) => command === "gofmt"), false);
 });
 
 test("builds Rust before existing Go gates without unrelated cargo checks", () => {
@@ -82,7 +150,7 @@ test("builds Rust before existing Go gates without unrelated cargo checks", () =
     return { status: 0, stdout: "" };
   };
 
-  assert.deepEqual(stopFailures(["internal/server/session_ingress.go"], run), []);
+  assert.deepEqual(stopFailures(["internal/server/session_ingress.go"], run, {}), []);
   assert.deepEqual(calls.slice(1, 5), [
     ["gofmt", ["-l", "internal/server/session_ingress.go"]],
     ["make", ["rust"]],

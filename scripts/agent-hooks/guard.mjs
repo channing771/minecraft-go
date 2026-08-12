@@ -207,13 +207,13 @@ function nulSeparated(result, label) {
   return (result.stdout ?? "").split("\0").filter(Boolean);
 }
 
-function changedPaths() {
+export function changedPaths(execute = run) {
   const tracked = nulSeparated(
-    run("git", ["diff", "--name-only", "--diff-filter=ACMR", "-z", "HEAD", "--"]),
+    execute("git", ["diff", "--name-only", "--diff-filter=ACMRD", "-z", "HEAD", "--"]),
     "读取已跟踪改动",
   );
   const untracked = nulSeparated(
-    run("git", ["ls-files", "--others", "--exclude-standard", "-z"]),
+    execute("git", ["ls-files", "--others", "--exclude-standard", "-z"]),
     "读取未跟踪改动",
   );
   return [...new Set([...tracked, ...untracked])].filter(
@@ -282,7 +282,7 @@ function hasReadyActiveChange() {
   });
 }
 
-export function stopFailures(paths, execute = run) {
+export function stopFailures(paths, execute = run, environment = process.env) {
   const failures = [];
   const diffCheck = execute("git", ["diff", "--check"], 30_000);
   const diffFailure = commandFailure("git diff --check", diffCheck);
@@ -310,8 +310,21 @@ export function stopFailures(paths, execute = run) {
 
   const goFiles = changedGoFiles(paths);
   const needsRustValidation = rustValidationRequired(paths);
+  let cargoOverride = [];
+  if ((goFiles.length > 0 || needsRustValidation) && environment.SHELL) {
+    const lookup = execute(environment.SHELL, ["-lc", "command -v cargo"], 30_000);
+    if (!lookup.error && lookup.status === 0) {
+      const cargo = (lookup.stdout ?? "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.startsWith("/"));
+      if (cargo) {
+        cargoOverride = [`CARGO=${cargo}`];
+      }
+    }
+  }
   if (goFiles.length > 0 || needsRustValidation) {
-    const rust = execute("make", ["rust"]);
+    const rust = execute("make", ["rust", ...cargoOverride]);
     const rustFailure = commandFailure("Rust 构建", rust);
     if (rustFailure) {
       failures.push(rustFailure);
@@ -319,7 +332,10 @@ export function stopFailures(paths, execute = run) {
   }
 
   if (needsRustValidation) {
-    const failure = commandFailure("Rust 检查", execute("make", ["rust-check"]));
+    const failure = commandFailure(
+      "Rust 检查",
+      execute("make", ["rust-check", ...cargoOverride]),
+    );
     if (failure) {
       failures.push(failure);
     }
