@@ -1,7 +1,9 @@
 struct Sky {
     view_proj_inv:   mat4x4f,
     sun_daylight:    vec4f,
-    star_visibility: vec4f,
+    star_visibility: f32,
+    cloud_macro_x:   u32,
+    padding:         vec2u,
     camera_cloud:    vec4f,
 };
 
@@ -88,7 +90,7 @@ fn cloud_mask(direction: vec3f) -> f32 {
     let intersection = sky.camera_cloud.xz + direction.xz * distance;
     let cell = vec2i(floor((intersection - vec2f(sky.camera_cloud.w, 0.0)) / 16.0));
     let macro_cell = vec2i(floor(vec2f(cell) / 4.0));
-    let hash = cloud_hash(macro_cell, bitcast<u32>(sky.star_visibility.y));
+    let hash = cloud_hash(macro_cell, sky.cloud_macro_x);
     if ((hash & 3u) == 0u) {
         return 0.0;
     }
@@ -114,7 +116,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4f {
     );
     var color = mix(night, day, clamp(sky.sun_daylight.w, 0.0, 1.0));
 
-    let star_visibility = clamp(sky.star_visibility.x, 0.0, 1.0);
+    let star_visibility = clamp(sky.star_visibility, 0.0, 1.0);
     var stars = 0.0;
     if (star_visibility > 0.0 && direction.y > 0.0) {
         stars = star_light(direction)

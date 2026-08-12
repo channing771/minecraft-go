@@ -4,7 +4,7 @@
 
 ## 2. 固定 uniform 与 shader
 
-- [x] 2.1 在 `internal/render/daylight.go`、`renderer.go` 与 `sky_test.go` 以既有 `render.Camera`、`DayNightAt` 和单一 sky uniform 传递相机世界坐标及拆分后的世界时间偏移：`0..63` block 局部 `f32` 和复用 `star_visibility` padding 的 `u32` macro X 偏移；总长保持 `112` bytes、一次上传、一次 draw 和零 Go 热路径分配，并覆盖 `2^28`、`2^31`、`MaxUint64` 邻近值和 64-block rollover 的 80-tick 连续性；运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render -run "TestSky(UniformLayoutAndUpload|PipelineConfiguration)|TestRendererRenderDoesNotAllocate|TestCloudOffset" -race -count=1'`。
+- [x] 2.1 在 `internal/render/daylight.go`、`renderer.go` 与 `sky_test.go` 以既有 `render.Camera`、`DayNightAt` 和单一 sky uniform 传递相机世界坐标及拆分后的世界时间偏移：`0..63` block 局部 `f32` 和紧随 `star_visibility` 的 typed `u32` macro X 偏移；总长保持 `112` bytes、一次上传、一次 draw 和零 Go 热路径分配，并覆盖 `2^28`、`2^31`、`MaxUint64` 邻近值和 64-block rollover 的 80-tick 连续性；运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render -run "TestSky(UniformLayoutAndUpload|PipelineConfiguration)|TestRendererRenderDoesNotAllocate|TestCloudOffset" -race -count=1'`。
 - [x] 2.2 在 `internal/render/shader/sky.wgsl` 复用 `hash_cell`，按 `design.md` 的唯一交点/cell/macro/hash/十字形算法实现云，负 `vec2i` 以 `bitcast<u32>` 哈希，并在现有星/月/日之后用 alpha `0.82` 与固定地平线 fade 合成；不得增加资源、pass、draw 或可调配置。运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render -run TestSkyHeadless -race -count=1'`。
 
 ## 3. 回归与成本门禁

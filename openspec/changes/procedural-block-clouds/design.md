@@ -20,7 +20,7 @@
 
 ### 固定云平面和唯一覆盖算法
 
-云平面固定为 Y=`192`，cell 固定为 `16` block，时间偏移固定为 `worldTime / 80`，因此随世界时间每 `80` tick 向东移动 `1` block。为保持完整 `uint64` 时间范围的连续性，上传值拆为 `0..63` block 的局部 `f32` 偏移和按生产 `u32` hash 输入自然取模的 macro X 偏移；局部值仍在 `camera_cloud.w`，macro 偏移复用 `star_visibility` 后的现有 padding word。每个可见像素只在相机位于平面下方且视线能求出稳定正交交点时计算；接近地平线以固定 fade 淡出。
+云平面固定为 Y=`192`，cell 固定为 `16` block，时间偏移固定为 `worldTime / 80`，因此随世界时间每 `80` tick 向东移动 `1` block。为保持完整 `uint64` 时间范围的连续性，上传值拆为 `0..63` block 的局部 `f32` 偏移和按生产 `u32` hash 输入自然取模的 macro X 偏移；局部值仍在 `camera_cloud.w`，macro 偏移位于 `star_visibility` 后的 typed `u32` 字段，随后保持既有 8-byte padding。每个可见像素只在相机位于平面下方且视线能求出稳定正交交点时计算；接近地平线以固定 fade 淡出。
 
 shader 必须使用下列唯一算法；不提供调节配置或替代噪声：
 

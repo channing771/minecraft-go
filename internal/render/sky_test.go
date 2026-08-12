@@ -180,6 +180,97 @@ func TestSkyUniformLayoutAndUpload(t *testing.T) {
 	}
 }
 
+// Mutation killed: 将 MacroX 放回 f32 lane 或忽略该字段会破坏完整 u32 hash 偏移。
+func TestSkyHeadlessCloudMacroUniformIsTypedUint(t *testing.T) {
+	want := [][2]uint32{
+		{1, 0x07030bbc},
+		{0x007fffff, 0xaa591afe},
+		{0x7f800000, 0x8e83660f},
+		{0x7fc00001, 0x3d029f3d},
+		{0xff800000, 0x66e9ccc9},
+		{math.MaxUint32, 0x5f47970e},
+	}
+	values := make([]uint32, len(want))
+	for index := range want {
+		values[index] = want[index][0]
+	}
+	got := skyCloudMacroUniformReadback(t, values)
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("production Sky.cloud_macro_x/hash[%d]=%#x，想要 %#x", index, got[index], want[index])
+		}
+	}
+}
+
+func skyCloudMacroUniformReadback(t *testing.T, values []uint32) [][2]uint32 {
+	t.Helper()
+	device, err := gfx.NewHeadlessDevice()
+	if err != nil {
+		if skyHeadlessAdapterUnavailable(err) {
+			t.Skipf("本机无可用 GPU 适配器: %v", err)
+		}
+		t.Fatalf("创建 headless GPU device: %v", err)
+	}
+	defer device.Release()
+
+	shader := device.CreateShaderModule(skyShader + `
+struct CloudMacroOutput {
+    value: vec2u,
+};
+
+@group(1) @binding(0) var<storage, read_write> cloud_macro_output: CloudMacroOutput;
+
+@compute @workgroup_size(1)
+fn cloud_macro_uniform_readback() {
+    cloud_macro_output.value = vec2u(sky.cloud_macro_x, cloud_hash(vec2i(0, 0), sky.cloud_macro_x));
+}
+`)
+	defer shader.Release()
+	skyLayout := gfx.BindGroupLayout{Label: "cloud macro test sky layout", Entries: []gfx.BindGroupLayoutEntry{
+		{Binding: 0, Type: gfx.BindingUniformBuffer, VisibleIn: gfx.StageCompute},
+	}}
+	outputLayout := gfx.BindGroupLayout{Label: "cloud macro test output layout", Entries: []gfx.BindGroupLayoutEntry{
+		{Binding: 0, Type: gfx.BindingStorageBufferRW, VisibleIn: gfx.StageCompute},
+	}}
+	pipeline := device.CreateComputePipeline(gfx.ComputePipelineDesc{
+		Label: "cloud macro uniform readback", Shader: shader, Entry: "cloud_macro_uniform_readback",
+		BindGroups: []gfx.BindGroupLayout{skyLayout, outputLayout},
+	})
+	defer pipeline.Release()
+
+	got := make([][2]uint32, len(values))
+	for index, value := range values {
+		uniform := device.CreateBuffer(gfx.BufferDesc{Label: "cloud macro test sky uniform", Size: 112, Usage: gfx.BufferUsageUniform | gfx.BufferUsageCopyDst})
+		data := make([]byte, 112)
+		binary.LittleEndian.PutUint32(data[84:88], value)
+		uniform.Write(0, data)
+		output := device.CreateBuffer(gfx.BufferDesc{Label: "cloud macro test output", Size: 8, Usage: gfx.BufferUsageStorage | gfx.BufferUsageCopySrc})
+		skyBind := device.CreateBindGroup(gfx.BindGroupDesc{Label: "cloud macro test sky bind", Layout: skyLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: uniform}}})
+		outputBind := device.CreateBindGroup(gfx.BindGroupDesc{Label: "cloud macro test output bind", Layout: outputLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: output}}})
+		encoder := device.CreateCommandEncoder()
+		pass := encoder.BeginComputePass("cloud macro uniform readback")
+		pass.SetPipeline(pipeline)
+		pass.SetBindGroup(0, skyBind)
+		pass.SetBindGroup(1, outputBind)
+		pass.Dispatch(1, 1, 1)
+		pass.End()
+		command := encoder.Finish()
+		device.Submit(command)
+		command.Release()
+		device.Poll(true)
+		readback := output.ReadBack()
+		if len(readback) != 8 {
+			t.Fatalf("MacroX readback bytes=%d，想要 8", len(readback))
+		}
+		got[index] = [2]uint32{binary.LittleEndian.Uint32(readback), binary.LittleEndian.Uint32(readback[4:])}
+		outputBind.Release()
+		skyBind.Release()
+		output.Release()
+		uniform.Release()
+	}
+	return got
+}
+
 func TestSkyHeadlessCloudHashFixedSample(t *testing.T) {
 	lowBits, active, filled, _, _ := skyCloudFixedSample(t)
 	if want := [4]uint32{72, 69, 62, 53}; lowBits != want {
@@ -212,6 +303,42 @@ func TestSkyHeadlessCloudMaskAsymmetricCenter(t *testing.T) {
 	_, _, _, _, got := skyCloudFixedSample(t)
 	if want := [4]uint8{0, 2, 7, 2}; got != want {
 		t.Fatalf("生产 cloud_mask 的非对称 center 4x4 输出=%v，想要 %v", got, want)
+	}
+}
+
+func TestSkyHeadlessCloudCompositionOverStar(t *testing.T) {
+	device, err := gfx.NewHeadlessDevice()
+	if err != nil {
+		if skyHeadlessAdapterUnavailable(err) {
+			t.Skipf("本机无可用 GPU 适配器: %v", err)
+		}
+		t.Fatalf("创建 headless GPU device: %v", err)
+	}
+	defer device.Release()
+	renderer := newRenderer(device, assets.NewRegistry(), gfx.FormatRGBA8Unorm, 64, 1024, 8)
+	defer renderer.Release()
+
+	position := mgl32.Vec3{115, 64, -152}
+	direction := mgl32.Vec3{0, 1, 0}
+	clouds := renderSkyHeadless(t, device, renderer, skyCameraAt(position, direction, 18000))
+	position[1] = 200
+	withoutClouds := renderSkyHeadless(t, device, renderer, skyCameraAt(position, direction, 18000))
+	const x, y = 43, 0
+	if got, want := skyPixel(withoutClouds, x, y), [4]byte{153, 164, 184, 255}; max(
+		math.Abs(float64(int(got[0])-int(want[0]))),
+		math.Abs(float64(int(got[1])-int(want[1]))),
+		math.Abs(float64(int(got[2])-int(want[2]))),
+	) > 2 {
+		t.Fatalf("固定 production star pixel=%v，想要 %v", got, want)
+	}
+	// 午夜 daylight=0.15，云色为 mix((.18,.22,.28),(.84,.88,.92),.15)。
+	// 此 fixed full-mask star pixel 按 alpha .82 写入 UNORM 后为 86/96/112。
+	if got, want := skyPixel(clouds, x, y), [4]byte{86, 96, 112, 255}; max(
+		math.Abs(float64(int(got[0])-int(want[0]))),
+		math.Abs(float64(int(got[1])-int(want[1]))),
+		math.Abs(float64(int(got[2])-int(want[2]))),
+	) > 2 {
+		t.Fatalf("alpha .82 的 production cloud-over-star pixel=%v，想要 %v", got, want)
 	}
 }
 
