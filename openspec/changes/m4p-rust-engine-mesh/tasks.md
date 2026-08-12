@@ -20,7 +20,7 @@
 
 ## 7. 跨语言 parity、错误原子性与并发
 
-- [ ] 7.1 创建 `internal/mesh/native_parity_test.go`，并修改 `internal/mesh/native_abi_test.go`、`engine/crates/mcgo_mesh/src/ffi.rs`、`engine/crates/mcgo_mesh/src/input.rs`、`engine/crates/mcgo_mesh/src/light.rs`、`engine/crates/mcgo_mesh/src/greedy.rs`、`engine/crates/mcgo_mesh/src/quad.rs` 与本 `tasks.md`，覆盖逐位 parity、原子错误与多 worker 并发。验证：`make rust && cargo test --manifest-path engine/Cargo.toml --workspace --locked && go test ./internal/mesh -run 'Parity|Native|Light|Mesh' -race -count=1 && go test ./internal/mesh -run '^$' -fuzz FuzzNativeMeshRejectsMalformedInput -fuzztime=10s`。
+- [x] 7.1 创建 `internal/mesh/native_parity_test.go`，并修改 `internal/mesh/native_abi_test.go`、`engine/crates/mcgo_mesh/src/ffi.rs`、`engine/crates/mcgo_mesh/src/input.rs`、`engine/crates/mcgo_mesh/src/light.rs`、`engine/crates/mcgo_mesh/src/greedy.rs`、`engine/crates/mcgo_mesh/src/quad.rs` 与本 `tasks.md`，覆盖逐位 parity、原子错误与多 worker 并发。验证：`make rust && cargo test --manifest-path engine/Cargo.toml --workspace --locked && go test ./internal/mesh -run 'Parity|Native|Light|Mesh' -race -count=1 && go test ./internal/mesh -run '^$' -fuzz FuzzNativeMeshRejectsMalformedInput -fuzztime=10s`。
 
 ## 8. Make、CI、Hook 与开发文档
 
