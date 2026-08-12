@@ -19,6 +19,10 @@ pub(crate) const MCGO_STATUS_PANIC: u32 = 9;
 const SCRATCH_BYTES: usize = 48 * 48 * 48 * 5;
 const OUTPUT_CAPACITY: usize = 6 * 4096;
 
+fn input_range_is_valid(input: *const u8, input_len: usize) -> bool {
+    input_len <= isize::MAX as usize && input.addr().checked_add(input_len).is_some()
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn mcgo_engine_abi_version() -> u32 {
     ABI_VERSION
@@ -46,6 +50,9 @@ pub unsafe extern "C" fn mcgo_mesh_section(
     if input.is_null() || scratch.is_null() || output.is_null() {
         return MCGO_STATUS_INVALID_ARGUMENT;
     }
+    if !input_range_is_valid(input, input_len) {
+        return MCGO_STATUS_INPUT;
+    }
     if scratch_len < SCRATCH_BYTES || !(scratch as usize).is_multiple_of(align_of::<u32>()) {
         return MCGO_STATUS_SCRATCH;
     }
@@ -57,7 +64,7 @@ pub unsafe extern "C" fn mcgo_mesh_section(
     }
 
     std::panic::catch_unwind(|| {
-        // SAFETY: input 非空，调用方声明 input_len 个可读字节；借用不越过本次调用。
+        // SAFETY: input 非空，范围不超过 isize::MAX 且地址加法不回绕；调用方声明其可读。
         let bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
         MeshInput::parse(bytes)
             .map(|_| MCGO_STATUS_OK)
@@ -85,7 +92,7 @@ mod tests {
         MCGO_STATUS_ABI_VERSION, MCGO_STATUS_EMISSION, MCGO_STATUS_INPUT,
         MCGO_STATUS_INVALID_ARGUMENT, MCGO_STATUS_OK, MCGO_STATUS_OUTPUT_OVERFLOW,
         MCGO_STATUS_PANIC, MCGO_STATUS_QUEUE_OVERFLOW, MCGO_STATUS_REGISTRY, MCGO_STATUS_SCRATCH,
-        mcgo_mesh_section,
+        input_range_is_valid, mcgo_mesh_section,
     };
     use crate::input::tests::valid_input;
 
@@ -108,6 +115,62 @@ mod tests {
             )
         };
         assert_eq!(status, MCGO_STATUS_OK);
+        assert_eq!(output_len, 0);
+    }
+
+    #[test]
+    fn input_range_rejects_slice_size_overflow_and_address_wrap() {
+        let byte = 0_u8;
+        assert!(input_range_is_valid(&byte, 1));
+        assert!(!input_range_is_valid(&byte, isize::MAX as usize + 1));
+        assert!(!input_range_is_valid(
+            std::ptr::without_provenance(usize::MAX),
+            1
+        ));
+    }
+
+    #[test]
+    fn oversized_input_len_returns_input_atomically() {
+        let input = valid_input();
+        let mut scratch = vec![0_u32; (48 * 48 * 48 * 5) / 4];
+        let mut output = vec![0_u64; 6 * 4096];
+        let mut output_len = usize::MAX;
+        // SAFETY: 被测入口在构造 slice 前拒绝超过 isize::MAX 的长度。
+        let status = unsafe {
+            mcgo_mesh_section(
+                1,
+                input.as_ptr(),
+                isize::MAX as usize + 1,
+                scratch.as_mut_ptr().cast(),
+                scratch.len() * 4,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MCGO_STATUS_INPUT);
+        assert_eq!(output_len, 0);
+    }
+
+    #[test]
+    fn wrapping_input_range_returns_input_atomically() {
+        let mut scratch = vec![0_u32; (48 * 48 * 48 * 5) / 4];
+        let mut output = vec![0_u64; 6 * 4096];
+        let mut output_len = usize::MAX;
+        // SAFETY: 被测入口在构造 slice 前拒绝地址加一发生回绕的范围。
+        let status = unsafe {
+            mcgo_mesh_section(
+                1,
+                std::ptr::without_provenance(usize::MAX),
+                1,
+                scratch.as_mut_ptr().cast(),
+                scratch.len() * 4,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MCGO_STATUS_INPUT);
         assert_eq!(output_len, 0);
     }
 
