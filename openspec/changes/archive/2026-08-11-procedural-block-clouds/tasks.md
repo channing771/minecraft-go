@@ -18,5 +18,5 @@
 ## 5. 视觉收尾、门禁与归档
 
 - [x] 5.1 在 storage、oak、light 均合入后的最终 `main` 统一生成全部受天空影响的视觉 candidate，并逐张人工确认；保持既有视觉阈值，不接受任何非天空内容漂移。
-- [ ] 5.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/archcheck -count=1 && go test ./... -race && go vet ./...'`、`gofmt -l .`、`openspec validate procedural-block-clouds --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 与 `git diff --check`，再完成独立评审；性能数值只记录，报告完整性、真实 overflow 和数据丢失仍是门禁。
-- [ ] 5.3 在 5.1 与 5.2 完成后，将 `celestial-sky-presentation` delta 同步至主规格并以 `openspec archive procedural-block-clouds --yes` 归档；再次运行 `openspec validate --all --strict --no-interactive`、`git diff --check` 与 `git status --short`，仅提交归档结果。
+- [x] 5.2 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/archcheck -count=1 && go test ./... -race && go vet ./...'`、`gofmt -l .`、`openspec validate procedural-block-clouds --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 与 `git diff --check`，再完成独立评审；性能数值只记录，报告完整性、真实 overflow 和数据丢失仍是门禁。
+- [x] 5.3 在 5.1 与 5.2 完成后，将 `celestial-sky-presentation` delta 同步至主规格并以 `openspec archive procedural-block-clouds --yes` 归档；再次运行 `openspec validate --all --strict --no-interactive`、`git diff --check` 与 `git status --short`，仅提交归档结果。
