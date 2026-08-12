@@ -57,6 +57,7 @@ ABI 显式区分 ABI 版本、input/scratch 长度、非法 registry snapshot、
 
 - [跨语言展平与解包产生迁移期开销] → 保留该有界复制以换取所有权清晰；性能只记录，不改 baseline 或阈值。
 - [双实现短期语义漂移] → Go oracle 仅在测试中编译，并以固定夹具、随机输入和并发 parity 逐位比较。
+- [继承的 visual-check 在验收设备上已非零] → 不放宽阈值或更新 golden；只在同一设备、同一命令下冻结 pre-M4P 提交与 M4P HEAD 的 10/10 capture PNG、失败摘要及 actual/diff PNG 全部逐字节一致时认定迁移无视觉漂移，任一差异仍阻断。
 - [ABI 错误难定位] → 锁定版本、长度、registry、emission、overflow 与 panic 状态，且失败不暴露部分 output。
 - [空 section 快路径掩盖结构损坏] → 只允许跳过未使用的 registry 语义；magic、长度、count、行宽、presence 位和 slice range 仍先失败。
 - [平台链接差异] → Apple Silicon/macOS 是客户端正式验收平台；pure CPU crate 在 CI host 构建，Linux 专用服务端继续不链接 Rust。
@@ -68,11 +69,11 @@ ABI 显式区分 ABI 版本、input/scratch 长度、非法 registry snapshot、
 1. 先落地 pinned workspace、locked 构建链和 CI/Hook 复用，确认 clean checkout 不需要预编译产物。
 2. 添加 ABI 和 Go bridge，以 test-only oracle 固定输入、输出、错误与并发契约。
 3. 分别迁移 Rust light 与 greedy mesh，再切换 Rust 为唯一生产路径；每一步保留逐位 parity、无窗口视觉与既有 mesher requeue 语义。
-4. 任何无法解释的 parity、visual、overflow、构建或并发失败均回退相应独立提交；不得更新期望值或启用 Go fallback。
+4. 任何无法解释的 parity、visual、overflow、构建或并发失败均回退相应独立提交；继承的 visual-check 非零只允许用同设备、同命令的 pre-M4P / HEAD 全产物逐字节一致证明无迁移漂移，不得更新期望值或启用 Go fallback。
 5. Rust production 切换合入后，在 clean checkout 重跑 Rust、Go、视觉与 OpenSpec 门禁；oracle 删除另开 change/提交评审。
 
 ## Compatibility and Verification
 
 不改变网络协议、packet ID、存档 schema、fixture、world metadata、benchmark scenario、workload、阈值、visual golden、GPU packed layout 或客户端 mesher generation/dirty/requeue/worker 语义。ABI v1 仅面向同一仓库同步构建的组件，版本不匹配直接失败，不承诺跨发布 native library 兼容。
 
-实现阶段至少验证 Rust `fmt`/`clippy`/测试、Go parity 与 race、`make test-race` clean checkout、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod`、`go test ./internal/archcheck -count=1`、`go vet ./...`、`gofmt -l .`、既有 mesh benchmark 与 10 个无窗口视觉场景，以及 OpenSpec strict 和 diff check。
+实现阶段至少验证 Rust `fmt`/`clippy`/测试、Go parity 与 race、`make test-race` clean checkout、`CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod`、`go test ./internal/archcheck -count=1`、`go vet ./...`、`gofmt -l .`、既有 mesh benchmark 与 10 个无窗口视觉场景，以及 OpenSpec strict 和 diff check。若冻结 pre-M4P 提交在同一设备上复现完全相同的既有视觉失败，则必须额外证明 10/10 capture PNG 和失败 actual/diff 全部逐字节一致，并保留非零摘要，不得把该裁决扩展到其他视觉失败。

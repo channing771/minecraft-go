@@ -1397,7 +1397,7 @@ go test ./internal/mesh -run '^$' -bench BenchmarkMeshTerrainSection -benchmem -
 go test ./internal/render -run '^$' -bench 'Mesh|Light' -benchmem -count=3
 ```
 
-Expected: all 10 tracked scenes pass without `--update-golden`; benchmark output is recorded with commit/toolchain identity but numeric differences do not fail. Any extra allocation must be explained in the report; real overflow or missing report fields fail.
+Expected: normally all 10 tracked scenes pass without `--update-golden`. If the same device and exact command reproduce an inherited non-zero result at frozen pre-M4P commit `2346dede27c5322045ea8c0bd467736e182a50a7`, acceptance requires all 10 capture PNG files plus every failed scene summary, actual PNG and diff PNG to be byte-identical between baseline and HEAD. Do not update golden, change thresholds, remove scenes or accept any new/different failure. Benchmark output is recorded with commit/toolchain identity but numeric differences do not fail. Any extra allocation must be explained in the report; real overflow or missing report fields fail.
 
 - [ ] **Step 4: Run final shared repository gates**
 

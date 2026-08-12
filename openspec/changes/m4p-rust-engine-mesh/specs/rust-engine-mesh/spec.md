@@ -12,6 +12,14 @@
 - **WHEN** Go oracle 与 Rust 生产实现分别网格化
 - **THEN** packed `uint64` 序列 MUST 完全一致
 
+#### Scenario: 继承的视觉基线失败不得掩盖迁移漂移
+- **GIVEN** 同一验收设备上的冻结 pre-M4P 提交与 M4P HEAD 使用同一 non-update visual-check 命令
+- **WHEN** 两者因同一既有 golden 偏差返回非零
+- **THEN** 全部 10 个场景 capture PNG MUST 逐字节一致
+- **AND** 每个失败场景的摘要、actual PNG 与 diff PNG MUST 逐字节一致
+- **AND** M4P MUST 不修改 golden、阈值或场景集合
+- **AND** 任一新增失败、摘要差异或字节差异 MUST 阻断验收
+
 ### Requirement: native 边界具有单一所有权
 系统 MUST 由 Go 持有 input、scratch 与 output，并禁止任一语言在调用结束后保留对方指针。
 
