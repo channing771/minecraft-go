@@ -1,6 +1,6 @@
 ## 1. 无窗口 RED 契约
 
-- [x] 1.1 在 `internal/render/sky_test.go` 先增加无窗口 RED 像素测试，覆盖 Y=`192`、`16` block cell、`4×4` macro 十字形，以及固定样本 `macro.x, macro.y ∈ [-8, 7]` 的 `256` 个 macro：`hash_cell(vec3u(bitcast<u32>(x), bitcast<u32>(y), 0u)) & 3` 的低两位计数必须为 `72/69/62/53`、活动 macro 必须为 `184`、填充 cell 必须为 `920/4096`、覆盖率必须为 `22.4609375%`（理论 `3/4` 与 `15/64`）；相同输入确定性、每 `80` tick 东移 `1` block、X/Z 世界坐标视差、上方/无正交交点不绘制、地平线 fade、昼夜颜色、云遮挡星/月/日及 terrain 深度覆盖；运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render -run TestSkyHeadless -count=1'`，确认失败来自云尚未实现。
+- [x] 1.1 在 `internal/render/sky_test.go` 增加直接执行嵌入 production WGSL 的无窗口 headless 行为回归与 mutation 门禁，覆盖 Y=`192`、`16` block cell、`4×4` macro 十字形，以及固定样本 `macro.x, macro.y ∈ [-8, 7]` 的 `256` 个 macro：`hash_cell(vec3u(bitcast<u32>(x), bitcast<u32>(y), 0u)) & 3` 的低两位计数必须为 `72/69/62/53`、活动 macro 必须为 `184`、填充 cell 必须为 `920/4096`、覆盖率必须为 `22.4609375%`（理论 `3/4` 与 `15/64`）；相同输入确定性、每 `80` tick 东移 `1` block、X/Z 世界坐标视差、上方/无正交交点不绘制、地平线 fade、昼夜颜色、云遮挡星/月/日及 terrain 深度覆盖；运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/render -run TestSkyHeadless -count=1'`，并以 production hash、二维输入、inactive/Manhattan/center 与相机/时间/合成 targeted mutation 确认回归稳定 RED。
 
 ## 2. 固定 uniform 与 shader
 
