@@ -1,7 +1,8 @@
 use std::mem::{align_of, size_of};
 
+use crate::greedy::{MeshError as GreedyError, center_is_air, mesh_section};
 use crate::input::{InputError, MeshInput};
-use crate::light::{LIGHT_VOLUME, LightScratch, MeshError, build_light};
+use crate::light::{LIGHT_VOLUME, LightScratch, MeshError as LightError, build_light};
 
 pub(crate) const ABI_VERSION: u32 = 1;
 
@@ -42,6 +43,21 @@ fn output_range_is_valid(output: *mut u64, output_capacity: usize) -> bool {
 
 fn ranges_overlap(left: usize, left_len: usize, right: usize, right_len: usize) -> bool {
     left < right + right_len && right < left + left_len
+}
+
+fn catch_and_publish(
+    output_len: &mut usize,
+    operation: impl FnOnce() -> Result<usize, u32>,
+) -> u32 {
+    *output_len = 0;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)) {
+        Ok(Ok(count)) => {
+            *output_len = count;
+            MCGO_STATUS_OK
+        }
+        Ok(Err(status)) => status,
+        Err(_) => MCGO_STATUS_PANIC,
+    }
 }
 
 unsafe fn light_scratch_from_raw<'a>(scratch: *mut u8) -> LightScratch<'a> {
@@ -100,13 +116,9 @@ pub unsafe extern "C" fn mcgo_mesh_section(
     {
         return MCGO_STATUS_INVALID_ARGUMENT;
     }
+    let output_bytes = output_capacity * size_of::<u64>();
     if ranges_overlap(scratch.addr(), SCRATCH_BYTES, input.addr(), input_len)
-        || ranges_overlap(
-            scratch.addr(),
-            SCRATCH_BYTES,
-            output.addr(),
-            output_capacity * size_of::<u64>(),
-        )
+        || ranges_overlap(scratch.addr(), SCRATCH_BYTES, output.addr(), output_bytes)
         || ranges_overlap(
             scratch.addr(),
             SCRATCH_BYTES,
@@ -116,25 +128,48 @@ pub unsafe extern "C" fn mcgo_mesh_section(
     {
         return MCGO_STATUS_SCRATCH;
     }
+    if ranges_overlap(input.addr(), input_len, output.addr(), output_bytes)
+        || ranges_overlap(
+            input.addr(),
+            input_len,
+            output_len.addr(),
+            size_of::<usize>(),
+        )
+        || ranges_overlap(
+            output.addr(),
+            output_bytes,
+            output_len.addr(),
+            size_of::<usize>(),
+        )
+    {
+        return MCGO_STATUS_INVALID_ARGUMENT;
+    }
 
-    std::panic::catch_unwind(|| {
+    // SAFETY: output_len 已验证非空、对齐、地址范围和与其他 buffer 不重叠。
+    let published = unsafe { &mut *output_len };
+    catch_and_publish(published, || {
         // SAFETY: input 非空，范围不超过 isize::MAX 且地址加法不回绕；调用方声明其可读。
         let bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
-        let input = match MeshInput::parse(bytes) {
-            Ok(input) => input,
-            Err(InputError::Input) => return MCGO_STATUS_INPUT,
-            Err(InputError::Registry) => return MCGO_STATUS_REGISTRY,
-            Err(InputError::Emission) => return MCGO_STATUS_EMISSION,
-        };
+        let input = MeshInput::parse(bytes).map_err(|error| match error {
+            InputError::Input => MCGO_STATUS_INPUT,
+            InputError::Registry => MCGO_STATUS_REGISTRY,
+            InputError::Emission => MCGO_STATUS_EMISSION,
+        })?;
+        if center_is_air(&input) {
+            return Ok(0);
+        }
         // SAFETY: scratch 在进入 catch_unwind 前已通过对齐、长度和地址范围检查。
         let mut scratch = unsafe { light_scratch_from_raw(scratch) };
-        match build_light(&input, &input.registry, &mut scratch) {
-            Ok(()) => MCGO_STATUS_OK,
-            Err(MeshError::EmissionOutOfRange) => MCGO_STATUS_EMISSION,
-            Err(MeshError::QueueOverflow) => MCGO_STATUS_QUEUE_OVERFLOW,
-        }
+        build_light(&input, &input.registry, &mut scratch).map_err(|error| match error {
+            LightError::EmissionOutOfRange => MCGO_STATUS_EMISSION,
+            LightError::QueueOverflow => MCGO_STATUS_QUEUE_OVERFLOW,
+        })?;
+        // SAFETY: output 非空、对齐、范围有效，且不与 input、scratch 或 output_len 重叠。
+        let output = unsafe { std::slice::from_raw_parts_mut(output, output_capacity) };
+        mesh_section(&input, &scratch, output).map_err(|error| match error {
+            GreedyError::OutputOverflow => MCGO_STATUS_OUTPUT_OVERFLOW,
+        })
     })
-    .unwrap_or(MCGO_STATUS_PANIC)
 }
 
 #[cfg(test)]
@@ -154,10 +189,21 @@ mod tests {
         MCGO_STATUS_ABI_VERSION, MCGO_STATUS_EMISSION, MCGO_STATUS_INPUT,
         MCGO_STATUS_INVALID_ARGUMENT, MCGO_STATUS_OK, MCGO_STATUS_OUTPUT_OVERFLOW,
         MCGO_STATUS_PANIC, MCGO_STATUS_QUEUE_OVERFLOW, MCGO_STATUS_REGISTRY, MCGO_STATUS_SCRATCH,
-        SCRATCH_BYTES, input_range_is_valid, mcgo_mesh_section, output_range_is_valid,
-        scratch_range_is_valid,
+        SCRATCH_BYTES, catch_and_publish, input_range_is_valid, mcgo_mesh_section,
+        output_range_is_valid, scratch_range_is_valid,
     };
     use crate::input::tests::valid_input;
+
+    #[test]
+    fn caught_panic_keeps_output_count_zero() {
+        let mut output_len = usize::MAX;
+        let status = catch_and_publish(&mut output_len, || -> Result<usize, u32> {
+            panic!("测试 panic")
+        });
+
+        assert_eq!(status, MCGO_STATUS_PANIC);
+        assert_eq!(output_len, 0);
+    }
 
     #[test]
     fn valid_input_returns_ok_and_zero_quads() {
@@ -179,6 +225,71 @@ mod tests {
         };
         assert_eq!(status, MCGO_STATUS_OK);
         assert_eq!(output_len, 0);
+    }
+
+    #[test]
+    fn uniform_air_returns_without_touching_light_scratch() {
+        const BLOCKS_OFFSET: usize = 16;
+        let mut input = valid_input();
+        input[BLOCKS_OFFSET..BLOCKS_OFFSET + 27 * 4096 * 2].fill(0);
+        let mut scratch = vec![0xa5a5_a5a5_u32; (48 * 48 * 48 * 5) / 4];
+        let mut output = vec![0_u64; 6 * 4096];
+        let mut output_len = usize::MAX;
+
+        let status = unsafe {
+            mcgo_mesh_section(
+                1,
+                input.as_ptr(),
+                input.len(),
+                scratch.as_mut_ptr().cast(),
+                scratch.len() * 4,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+
+        assert_eq!(status, MCGO_STATUS_OK);
+        assert_eq!(output_len, 0);
+        assert!(scratch.iter().all(|&word| word == 0xa5a5_a5a5));
+    }
+
+    #[test]
+    fn ffi_publishes_six_quads_only_after_complete_mesh() {
+        const BLOCKS_OFFSET: usize = 16;
+        const REGISTRY_OFFSET: usize = BLOCKS_OFFSET + 27 * 4096 * 2 + 9 + 9 * 256 * 2;
+        let mut input = valid_input();
+        input[BLOCKS_OFFSET..BLOCKS_OFFSET + 27 * 4096 * 2].fill(0);
+        input[REGISTRY_OFFSET + 3 * 16..REGISTRY_OFFSET + 3 * 16 + 8]
+            .copy_from_slice(&0_u64.to_le_bytes());
+        let center = BLOCKS_OFFSET + (13 * 4096 + ((8 << 8) | (8 << 4) | 8)) * 2;
+        input[center..center + 2].copy_from_slice(&1_u16.to_le_bytes());
+        let mut scratch = vec![0_u32; (48 * 48 * 48 * 5) / 4];
+        let mut output = vec![0_u64; 6 * 4096];
+        let mut output_len = usize::MAX;
+
+        let status = unsafe {
+            mcgo_mesh_section(
+                1,
+                input.as_ptr(),
+                input.len(),
+                scratch.as_mut_ptr().cast(),
+                scratch.len() * 4,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+
+        assert_eq!(status, MCGO_STATUS_OK);
+        assert_eq!(output_len, 6);
+        assert_eq!(
+            output[..6]
+                .iter()
+                .map(|packed| (packed >> 20) & 7)
+                .sum::<u64>(),
+            15
+        );
     }
 
     #[test]
@@ -587,6 +698,81 @@ mod tests {
 
         assert_eq!(status, MCGO_STATUS_SCRATCH);
         assert_eq!(output_len, 0);
+    }
+
+    #[test]
+    fn overlapping_input_and_output_are_rejected_atomically() {
+        let input = valid_input();
+        let mut shared = vec![0_u64; input.len().div_ceil(size_of::<u64>())];
+        // SAFETY: shared 的字节容量至少为 input.len()，这里只在调用前写入 encoded input。
+        unsafe {
+            std::slice::from_raw_parts_mut(shared.as_mut_ptr().cast::<u8>(), input.len())
+                .copy_from_slice(&input);
+        }
+        let mut scratch = vec![0_u64; SCRATCH_BYTES.div_ceil(size_of::<u64>())];
+        let mut output_len = usize::MAX;
+
+        // SAFETY: 每个指针都有效且容量足够；被测入口必须在创建 slice 前拒绝 input/output 别名。
+        let status = unsafe {
+            mcgo_mesh_section(
+                1,
+                shared.as_ptr().cast(),
+                input.len(),
+                scratch.as_mut_ptr().cast(),
+                SCRATCH_BYTES,
+                shared.as_mut_ptr(),
+                6 * 4096,
+                &mut output_len,
+            )
+        };
+
+        assert_eq!(status, MCGO_STATUS_INVALID_ARGUMENT);
+        assert_eq!(output_len, 0);
+    }
+
+    #[test]
+    fn overlapping_output_len_with_input_or_output_is_rejected_atomically() {
+        let input = valid_input();
+        let mut shared_input = vec![0_usize; input.len().div_ceil(size_of::<usize>())];
+        // SAFETY: shared_input 的字节容量覆盖完整 encoded input。
+        unsafe {
+            std::slice::from_raw_parts_mut(shared_input.as_mut_ptr().cast::<u8>(), input.len())
+                .copy_from_slice(&input);
+        }
+        let mut scratch = vec![0_u64; SCRATCH_BYTES.div_ceil(size_of::<u64>())];
+        let mut output = vec![0_u64; 6 * 4096];
+
+        // SAFETY: output_len 刻意指向 input；入口可写零，但必须在构造 input slice 前拒绝别名。
+        let input_status = unsafe {
+            mcgo_mesh_section(
+                1,
+                shared_input.as_ptr().cast(),
+                input.len(),
+                scratch.as_mut_ptr().cast(),
+                SCRATCH_BYTES,
+                output.as_mut_ptr(),
+                output.len(),
+                shared_input.as_mut_ptr(),
+            )
+        };
+        assert_eq!(input_status, MCGO_STATUS_INVALID_ARGUMENT);
+        assert_eq!(shared_input[0], 0);
+
+        // SAFETY: output_len 刻意指向 output；入口必须在构造 output slice 前拒绝别名。
+        let output_status = unsafe {
+            mcgo_mesh_section(
+                1,
+                input.as_ptr(),
+                input.len(),
+                scratch.as_mut_ptr().cast(),
+                SCRATCH_BYTES,
+                output.as_mut_ptr(),
+                output.len(),
+                output.as_mut_ptr().cast(),
+            )
+        };
+        assert_eq!(output_status, MCGO_STATUS_INVALID_ARGUMENT);
+        assert_eq!(output[0], 0);
     }
 
     #[test]
