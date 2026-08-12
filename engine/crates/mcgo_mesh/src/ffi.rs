@@ -542,6 +542,30 @@ mod tests {
     }
 
     #[test]
+    fn aligned_wrapping_output_len_is_rejected_before_write() {
+        let input = valid_input();
+        let mut scratch = vec![0_u64; SCRATCH_BYTES.div_ceil(size_of::<u64>())];
+        let mut output = vec![0_u64; 6 * 4096];
+        let aligned_max = usize::MAX & !(align_of::<usize>() - 1);
+
+        // SAFETY: output_len 为被测的对齐伪地址；入口必须在任何 write 前因地址回绕返回。
+        let status = unsafe {
+            mcgo_mesh_section(
+                1,
+                input.as_ptr(),
+                input.len(),
+                scratch.as_mut_ptr().cast(),
+                SCRATCH_BYTES,
+                output.as_mut_ptr(),
+                output.len(),
+                std::ptr::without_provenance_mut(aligned_max),
+            )
+        };
+
+        assert_eq!(status, MCGO_STATUS_INVALID_ARGUMENT);
+    }
+
+    #[test]
     fn overlapping_scratch_and_output_are_rejected_atomically() {
         let input = valid_input();
         let mut shared = vec![0_u64; (48_usize * 48 * 48 * 5).div_ceil(8)];
