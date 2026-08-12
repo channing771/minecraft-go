@@ -191,8 +191,9 @@ Go 在调用成功后使用现有 `UnpackQuad` 转成 `[]Quad`，因此当前 cl
 
 - ABI 输入缓冲；
 - Rust light/queue scratch；
-- 固定 packed quad 输出；
-- registry snapshot 缓存。
+- 固定 packed quad 输出。
+
+registry snapshot 由现有 `assets.Registry` 构造时缓存并只读提供，避免每个 worker 再保存一份相同属性表。
 
 同一个 `LightScratch` 不允许被并发使用；多个 worker 的 scratch 完全独立。Rust ABI 本身无全局可变状态，因此不同 worker 可并发调用。
 
