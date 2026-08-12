@@ -29,12 +29,14 @@
 - **AND** panic/unwind MUST NOT 穿过 C ABI
 
 ### Requirement: clean checkout 使用 Rust-first 构建
-系统 MUST 通过 canonical Make、CI 与 Hook 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust static library。
+系统 MUST 通过 canonical Make、CI 与 Hook 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust static library；workspace MUST 仅含 `mcgo_mesh`，并且该 crate 的 normal dependency MUST 只使用 `std`。
 
 #### Scenario: 无预编译 artifact 的构建
 - **GIVEN** clean checkout 不含 Cargo target 或 native library
 - **WHEN** 运行 `make test-race`
 - **THEN** 系统 MUST 先以 Rust 1.97.1 执行 `cargo build --locked --release`，再执行 Go race tests
+- **AND** `cargo metadata --no-deps --format-version 1 --manifest-path engine/Cargo.toml` MUST 只报告 workspace member `mcgo_mesh`
+- **AND** `cargo tree --manifest-path engine/Cargo.toml --workspace --edges normal` MUST 只含 workspace root，且不得报告第三方 dependency
 
 ### Requirement: Rust 客户端边界不污染无图形服务端
 系统 MUST 保持 `cmd/mcgod` 不依赖 CGO、Rust static library、WebGPU 或窗口包。
