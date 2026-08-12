@@ -12,18 +12,26 @@ import (
 	"minecraft-go/internal/world"
 )
 
-func assertNativeOracleParity(t *testing.T, n *world.Neighborhood, reg mesh.Registry) {
+func assertNativeOracleParity(t *testing.T, n *world.Neighborhood, reg mesh.Registry) []mesh.Quad {
 	t.Helper()
 	want := meshSectionGoOracle(n, reg, newGoLightScratch())
 	got := mesh.MeshSection(n, reg, mesh.NewLightScratch())
 	if len(got) != len(want) {
-		t.Fatalf("quad count=%d，oracle=%d", len(got), len(want))
+		t.Fatalf("native=%d，oracle=%d", len(got), len(want))
 	}
 	for i := range want {
 		if got[i].Pack() != want[i].Pack() {
 			t.Fatalf("quad[%d]=%#016x，oracle=%#016x\ngot=%+v\nwant=%+v",
 				i, got[i].Pack(), want[i].Pack(), got[i], want[i])
 		}
+	}
+	return got
+}
+
+func TestNativeOracleParityBenchmarkTerrain(t *testing.T) {
+	quads := assertNativeOracleParity(t, benchmarkTerrainNeighborhood(), testRegistry{})
+	if len(quads) != 2016 {
+		t.Fatalf("terrain benchmark quads=%d，想要 2016", len(quads))
 	}
 }
 

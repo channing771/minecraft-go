@@ -31,6 +31,7 @@ func (r testRegistry) MeshSnapshot() mesh.RegistrySnapshot {
 		core.BarrierID,
 		core.StoneID,
 		core.DirtID,
+		core.GrassID,
 		core.StoneBrickID,
 		core.LightBlockID,
 	}, r)
@@ -284,7 +285,7 @@ func TestMeshCutoutDoesNotOccludeAOOrSkyLight(t *testing.T) {
 	}
 }
 
-func BenchmarkMeshTerrainSection(b *testing.B) {
+func benchmarkTerrainNeighborhood() *world.Neighborhood {
 	center := world.NewSection()
 	for z := 0; z < 16; z++ {
 		for x := 0; x < 16; x++ {
@@ -294,7 +295,11 @@ func BenchmarkMeshTerrainSection(b *testing.B) {
 			}
 		}
 	}
-	n := solidNeighbors(center)
+	return solidNeighbors(center)
+}
+
+func BenchmarkMeshTerrainSection(b *testing.B) {
+	n := benchmarkTerrainNeighborhood()
 	reg := testRegistry{}
 	light := mesh.NewLightScratch()
 	var quads []mesh.Quad
