@@ -4,7 +4,7 @@ package mesh
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../engine/include
-#cgo LDFLAGS: ${SRCDIR}/../../engine/target/release/libmcgo_mesh.a -lSystem -lc -lm
+#cgo LDFLAGS: ${SRCDIR}/../../engine/target/release/libmcgo_mesh.a
 #include "mcgo_engine.h"
 */
 import "C"
