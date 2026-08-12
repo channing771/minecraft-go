@@ -1315,7 +1315,7 @@ openspec validate --all --strict --no-interactive
 git diff --check
 ```
 
-Then prove the local pair no longer depends on Cargo target. Move the freshly rebuilt `engine/target` to another unique temporary backup, install a trap that restores it, run `bin/mcgo -h`, and require the expected Go usage plus exit 1 while rejecting any dyld error. Restore the target and clear the trap before continuing. Use explicit validated paths; never use `git clean` or broad deletion.
+Then prove the local pair no longer depends on Cargo target. Move the freshly rebuilt `engine/target` to another unique temporary backup, install a trap that restores it, run `bin/mcgo -h`, and require exit 1 plus the existing `flag: help requested` diagnostic while rejecting any dyld error. Restore the target and clear the trap before continuing. Use explicit validated paths; never use `git clean` or broad deletion.
 
 ```bash
 M4P_PACKAGING_BACKUP=$(mktemp -d /private/tmp/mcgo-m4p-packaging.XXXXXX)
@@ -1329,7 +1329,7 @@ bin/mcgo -h >"$M4P_PACKAGING_BACKUP/help.txt" 2>&1
 M4P_HELP_STATUS=$?
 set -e
 test "$M4P_HELP_STATUS" -eq 1
-rg -q '^Usage of mcgo:' "$M4P_PACKAGING_BACKUP/help.txt"
+rg -q 'flag: help requested' "$M4P_PACKAGING_BACKUP/help.txt"
 test -z "$(rg 'dyld|Library not loaded' "$M4P_PACKAGING_BACKUP/help.txt" || true)"
 restore_m4p_target
 trap - EXIT
@@ -1386,7 +1386,7 @@ CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod
 test -z "$(CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/mcgod | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
 ```
 
-After these commands, repeat Task 8's exact recoverable `engine/target` move, `bin/mcgo -h`, usage-text, dyld-error rejection, restore and trap-clear block. Expected: all exit 0. Any uncaught Rust panic, parity mismatch, output overflow, missing packaged dylib or Linux server link to Rust is a blocker.
+After these commands, repeat Task 8's exact recoverable `engine/target` move, `bin/mcgo -h`, `flag: help requested` diagnostic, dyld-error rejection, restore and trap-clear block. Expected: all exit 0. Any uncaught Rust panic, parity mismatch, output overflow, missing packaged dylib or Linux server link to Rust is a blocker.
 
 - [ ] **Step 3: Run visual and performance record gates**
 

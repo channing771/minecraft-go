@@ -49,7 +49,7 @@ ABI 显式区分 ABI 版本、input/scratch 长度、非法 registry snapshot、
 
 `engine/rust-toolchain.toml` 固定 Rust 1.97.1。`make build`、`make test` 与 `make test-race` 先在 `engine/` 中执行精确命令 `cargo build --locked --release`，再执行对应 Go 命令；CI 的工具链身份检查也在 `engine/` 中运行，共享 Hook 复用同一 Make 构建/检查步骤。native 产物写入 ignored 目录，不提交 `.dylib` 或 Cargo `target/`。清洁 checkout 可用 canonical 入口重建；已构建后仍可直接运行 focused Go tests。
 
-`mcgo_mesh` build script 仅在 macOS 为 `libmcgo_mesh.dylib` 写入 `@rpath/libmcgo_mesh.dylib` install name。cgo bridge 写入 Cargo `target/release` 的绝对 runpath，供 `go test`、`go run` 和开发构建使用；`make build` 另外把 `@loader_path` 写入最终客户端并把 dylib 复制到 `bin/mcgo` 同目录。移开 `engine/target` 后，`bin/mcgo` 仍必须能由 dyld 加载并进入 Go 参数解析。普通 Go 命令不得依赖 `CGO_LDFLAGS_ALLOW` 等额外环境变量。M4P 不新增 `.app`、安装器或发布签名流程。
+`mcgo_mesh` build script 仅在 macOS 为 `libmcgo_mesh.dylib` 写入 `@rpath/libmcgo_mesh.dylib` install name。cgo bridge 写入 Cargo `target/release` 的绝对 runpath，供 `go test`、`go run` 和开发构建使用；`make build` 另外把 `@loader_path` 写入最终客户端并把 dylib 复制到 `bin/mcgo` 同目录。移开 `engine/target` 后，`bin/mcgo -h` 仍必须能由 dyld 加载并以 exit 1 和既有 `flag: help requested` 诊断证明已进入 Go 参数解析；不得要求当前入口并不会打印的 Usage 文本。普通 Go 命令不得依赖 `CGO_LDFLAGS_ALLOW` 等额外环境变量。M4P 不新增 `.app`、安装器或发布签名流程。
 
 选择统一 Make/CI/Hook 是为避免本机和 CI 的构建漂移；否决提交预编译 library 与独立手工流程，因为它们破坏可重复构建。Linux `cmd/mcgod` 保持无 CGO，并不得获得 Rust、WebGPU 或窗口依赖。
 

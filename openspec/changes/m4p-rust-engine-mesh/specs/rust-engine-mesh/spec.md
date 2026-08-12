@@ -51,6 +51,8 @@
 - **GIVEN** `make build` 已生成本地客户端产物
 - **WHEN** 临时移开 `engine/target`
 - **THEN** `bin/mcgo` MUST 从同目录加载 `libmcgo_mesh.dylib` 并进入 Go 参数解析
+- **AND** `bin/mcgo -h` MUST 以 exit 1 和 `flag: help requested` 诊断证明该解析路径已运行
+- **AND** 输出 MUST 不含 `dyld` 或 `Library not loaded`
 - **AND** 构建产物 MUST 不包含指向临时 Cargo `deps` 目录的 dylib load path
 
 ### Requirement: Rust 客户端边界不污染无图形服务端
