@@ -185,21 +185,33 @@ func TestSkyHeadlessCloudHashFixedSample(t *testing.T) {
 	if want := [4]uint32{72, 69, 62, 53}; lowBits != want {
 		t.Fatalf("生产 WGSL 固定 macro 样本 low2=%v，想要 %v", lowBits, want)
 	}
-	if active != 184 || filled != 920 {
-		t.Fatalf("生产 WGSL 固定 macro 样本 active/filled=%d/%d，想要 184/920", active, filled)
+	if active != 184 {
+		t.Fatalf("生产 WGSL 固定 macro 样本 active=%d，想要 184", active)
+	}
+	if filled != 920 {
+		t.Fatalf("生产 WGSL 固定 macro 样本 filled=%d，想要 920", filled)
 	}
 	if got := float64(filled) / (256 * 16); got != 0.224609375 {
 		t.Fatalf("生产 WGSL 固定 macro 样本覆盖率=%v，想要 0.224609375", got)
 	}
+	activeTheory := 3.0 / 4.0
+	coverageTheory := activeTheory * 5 / 16
+	if activeTheory != 0.75 || coverageTheory != 0.234375 {
+		t.Fatalf("理论 active/coverage=%v/%v，想要 0.75/0.234375", activeTheory, coverageTheory)
+	}
 }
 
 func TestSkyHeadlessCloudMaskFixedGrid(t *testing.T) {
-	_, _, _, got, asymmetric := skyCloudFixedSample(t)
+	_, _, _, got, _ := skyCloudFixedSample(t)
 	if want := [8]uint8{2, 71, 226, 64}; got != want {
 		t.Fatalf("生产 cloud_mask 的固定 8x8 输出=%v，想要 %v", got, want)
 	}
-	if want := [4]uint8{0, 2, 7, 2}; asymmetric != want {
-		t.Fatalf("生产 cloud_mask 的非对称 center 4x4 输出=%v，想要 %v", asymmetric, want)
+}
+
+func TestSkyHeadlessCloudMaskAsymmetricCenter(t *testing.T) {
+	_, _, _, _, got := skyCloudFixedSample(t)
+	if want := [4]uint8{0, 2, 7, 2}; got != want {
+		t.Fatalf("生产 cloud_mask 的非对称 center 4x4 输出=%v，想要 %v", got, want)
 	}
 }
 
@@ -215,7 +227,7 @@ func TestSkyHeadlessPixels(t *testing.T) {
 	renderer := newRenderer(device, assets.NewRegistry(), gfx.FormatRGBA8Unorm, 64, 1024, 8)
 	defer renderer.Release()
 
-	zenithPosition := mgl32.Vec3{0, 0, 0}
+	zenithPosition := mgl32.Vec3{0, 200, 0}
 	zenithDirection := mgl32.Vec3{0, 1, 0}
 	t.Run("正午天顶太阳为四度暖白圆盘", func(t *testing.T) {
 		pixels := renderSkyHeadless(t, device, renderer, skyCameraAt(zenithPosition, zenithDirection, 6000))
@@ -257,6 +269,137 @@ func TestSkyHeadlessPixels(t *testing.T) {
 		}
 	})
 
+	t.Run("世界锚定与时间偏移共同平移云层", func(t *testing.T) {
+		firstCamera := skyCameraAt(mgl32.Vec3{40, 64, -152}, zenithDirection, 6000)
+		firstCamera.CloudOffset = CloudOffset{}
+		compensatedCamera := skyCameraAt(mgl32.Vec3{56, 64, -152}, zenithDirection, 6000)
+		compensatedCamera.CloudOffset = CloudOffsetAt(16 * 80)
+		movedCamera := skyCameraAt(mgl32.Vec3{56, 64, -152}, zenithDirection, 6000)
+		movedCamera.CloudOffset = CloudOffset{}
+		offsetCamera := skyCameraAt(mgl32.Vec3{40, 64, -152}, zenithDirection, 6000)
+		offsetCamera.CloudOffset = CloudOffsetAt(16 * 80)
+
+		first := renderSkyHeadless(t, device, renderer, firstCamera)
+		compensated := renderSkyHeadless(t, device, renderer, compensatedCamera)
+		moved := renderSkyHeadless(t, device, renderer, movedCamera)
+		offset := renderSkyHeadless(t, device, renderer, offsetCamera)
+		if !bytes.Equal(first, compensated) {
+			differences, bounds := skyPixelDifferences(first, compensated)
+			t.Fatalf("相机与云偏移共同东移后改变了 %d 个像素，范围 %v", differences, bounds)
+		}
+		if bytes.Equal(first, moved) {
+			t.Fatal("只移动相机未改变云图案")
+		}
+		if bytes.Equal(first, offset) {
+			t.Fatal("只移动云偏移未改变云图案")
+		}
+	})
+
+	t.Run("仅沿 Z 轴平移改变云层", func(t *testing.T) {
+		firstCamera := skyCameraAt(mgl32.Vec3{40, 64, -152}, zenithDirection, 6000)
+		firstCamera.CloudOffset = CloudOffset{}
+		movedCamera := skyCameraAt(mgl32.Vec3{40, 64, -72}, zenithDirection, 6000)
+		movedCamera.CloudOffset = CloudOffset{}
+		first := renderSkyHeadless(t, device, renderer, firstCamera)
+		moved := renderSkyHeadless(t, device, renderer, movedCamera)
+		if bytes.Equal(first, moved) {
+			t.Fatal("只沿 Z 轴移动相机未改变云图案")
+		}
+		center := skyHeadlessSize / 2
+		if skyPixel(first, center, center) == skyPixel(moved, center, center) {
+			t.Fatal("只沿 Z 轴移动相机未改变中心 cloud mask")
+		}
+	})
+
+	t.Run("云只绘制在层下方且存在正向交点", func(t *testing.T) {
+		below := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115, 64, -152}, zenithDirection, 6000))
+		above := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115, 200, -152}, zenithDirection, 6000))
+		if bytes.Equal(below, above) {
+			t.Fatal("云层下方天顶与上方无云参考完全相同")
+		}
+		for _, test := range []struct {
+			name      string
+			direction mgl32.Vec3
+		}{
+			{"平行", mgl32.Vec3{1, 0, 0}},
+			{"阈值", mgl32.Vec3{1, 0.001, 0}},
+			{"向下", mgl32.Vec3{0, -1, 0}},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				lower := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115, 64, -152}, test.direction, 6000))
+				upper := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115, 200, -152}, test.direction, 6000))
+				center := skyHeadlessSize / 2
+				if lowerPixel, upperPixel := skyPixel(lower, center, center), skyPixel(upper, center, center); lowerPixel != upperPixel {
+					t.Fatalf("无正向交点的中心 ray 仍绘制云：lower=%v upper=%v", lowerPixel, upperPixel)
+				}
+			})
+		}
+	})
+
+	t.Run("固定地平线 fade 逐渐增强", func(t *testing.T) {
+		cloudDifference := func(slope float32) int {
+			direction := mgl32.Vec3{0, slope, -1}.Normalize()
+			distance := (192 - float32(64)) / direction[1]
+			position := mgl32.Vec3{115, 64, -152 - direction[2]*distance}
+			lower := renderSkyHeadless(t, device, renderer, skyCameraAt(position, direction, 6000))
+			position[1] = 200
+			upper := renderSkyHeadless(t, device, renderer, skyCameraAt(position, direction, 6000))
+			maximum := 0
+			for y := skyHeadlessSize/2 - 2; y <= skyHeadlessSize/2+2; y++ {
+				for x := skyHeadlessSize/2 - 2; x <= skyHeadlessSize/2+2; x++ {
+					maximum = max(maximum, skyPixelColorDifference(lower, upper, x, y))
+				}
+			}
+			return maximum
+		}
+		partial, full := cloudDifference(0.04), cloudDifference(0.10)
+		if partial <= 0 || full <= partial {
+			t.Fatalf("地平线 cloud difference partial/full=%d/%d，想要 0 < partial < full", partial, full)
+		}
+	})
+
+	t.Run("固定样本区域保持稀疏覆盖率", func(t *testing.T) {
+		clouds := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115, 80, -152}, zenithDirection, 6000))
+		reference := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115, 200, -152}, zenithDirection, 6000))
+		differences, bounds := skyPixelDifferences(clouds, reference)
+		coverage := float64(differences) / float64(skyHeadlessSize*skyHeadlessSize)
+		if coverage < 0.20 || coverage > 0.30 {
+			t.Fatalf("云像素=%d coverage=%v bounds=%v，想要 20%%..30%%", differences, coverage, bounds)
+		}
+		inactive := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{99, 64, 24}, zenithDirection, 6000))
+		inactiveReference := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{99, 200, 24}, zenithDirection, 6000))
+		center := skyHeadlessSize / 2
+		if got, want := skyPixel(inactive, center, center), skyPixel(inactiveReference, center, center); got != want {
+			t.Fatalf("hash low2=0 的 macro 中心仍绘制云：got=%v want=%v", got, want)
+		}
+	})
+
+	t.Run("昼夜云在天体之后混合", func(t *testing.T) {
+		noon := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115, 64, -152}, zenithDirection, 6000))
+		noonReference := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115, 200, -152}, zenithDirection, 6000))
+		midnight := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{265, 64, -152}, zenithDirection, 18000))
+		midnightReference := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{265, 200, -152}, zenithDirection, 18000))
+
+		noonCenter := skyPixel(noon, skyHeadlessSize/2, skyHeadlessSize/2)
+		noonReferenceCenter := skyPixel(noonReference, skyHeadlessSize/2, skyHeadlessSize/2)
+		if noonCenter == noonReferenceCenter || noonCenter[0] >= noonReferenceCenter[0] {
+			t.Fatalf("正午云未遮挡太阳：cloud=%v reference=%v", noonCenter, noonReferenceCenter)
+		}
+		midnightCenter := skyPixel(midnight, skyHeadlessSize/2, skyHeadlessSize/2)
+		midnightReferenceCenter := skyPixel(midnightReference, skyHeadlessSize/2, skyHeadlessSize/2)
+		if midnightCenter == midnightReferenceCenter || skyBrightness(midnightCenter) >= skyBrightness(midnightReferenceCenter) {
+			t.Fatalf("午夜云未遮挡月亮：cloud=%v reference=%v", midnightCenter, midnightReferenceCenter)
+		}
+		noonBrightness, noonCount := changedSkyBrightness(noon, noonReference)
+		midnightBrightness, midnightCount := changedSkyBrightness(midnight, midnightReference)
+		if noonCount == 0 || midnightCount == 0 || midnightBrightness >= noonBrightness {
+			t.Fatalf("云层昼夜 brightness/count noon=%d/%d midnight=%d/%d，想要午夜更暗", noonBrightness, noonCount, midnightBrightness, midnightCount)
+		}
+		if stars := countSkyStars(midnight, true); stars < 4 {
+			t.Fatalf("云外午夜 star pixels=%d，想要 >=4", stars)
+		}
+	})
+
 	t.Run("旋转改变星图且往返恢复", func(t *testing.T) {
 		position := mgl32.Vec3{1, 2, 3}
 		north := mgl32.Vec3{0, 0, -1}
@@ -275,26 +418,25 @@ func TestSkyHeadlessPixels(t *testing.T) {
 		}
 	})
 
-	t.Run("地形覆盖天体", func(t *testing.T) {
-		position := mgl32.Vec3{2, 0.5, 0.5}
-		camera := skyCameraAt(position, mgl32.Vec3{-1, 0, 0}, 11900)
-		angle := float32(math.Pi / 180)
-		camera.SunDirection = [3]float32{-float32(math.Cos(float64(angle))), float32(math.Sin(float64(angle))), 0}
+	t.Run("地形覆盖云层", func(t *testing.T) {
+		position := mgl32.Vec3{115.5, 0.5, -151.5}
+		camera := skyCameraAt(position, zenithDirection, 6000)
 		skyOnly := renderSkyHeadless(t, device, renderer, camera)
-		renderer.QueueSection(core.SectionPos{Y: 4}, []mesh.Quad{{
-			W: 1, H: 1, Face: mesh.FacePosX, Mat: 0, AO: 0xff, Light: 0xf0,
+		reference := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{115.5, 200, -151.5}, zenithDirection, 6000))
+		if skyPixel(skyOnly, skyHeadlessSize/2, skyHeadlessSize/2) == skyPixel(reference, skyHeadlessSize/2, skyHeadlessSize/2) {
+			t.Fatal("地形测试中心没有云")
+		}
+		renderer.QueueSection(core.SectionPos{X: 7, Y: 4, Z: -10}, []mesh.Quad{{
+			X: 3, Y: 1, Z: 8, W: 1, H: 1, Face: mesh.FaceNegY, Mat: 0, AO: 0xff, Light: 0xf0,
 		}})
 		renderer.BeginFrame()
 		renderer.FlushUploads(core.ChunkPos{})
 		withTerrain := renderSkyHeadless(t, device, renderer, camera)
 		skyCenter := skyPixel(skyOnly, skyHeadlessSize/2, skyHeadlessSize/2)
 		terrainCenter := skyPixel(withTerrain, skyHeadlessSize/2, skyHeadlessSize/2)
-		if skyCenter[0] < 180 {
-			t.Fatalf("sky-only center=%v want visible sun", skyCenter)
-		}
-		if terrainCenter == skyCenter || terrainCenter[0] >= 180 {
+		if terrainCenter == skyCenter {
 			differences, bounds := skyPixelDifferences(skyOnly, withTerrain)
-			t.Fatalf("terrain center=%v sky center=%v differences=%d bounds=%v stats=%+v want terrain coverage",
+			t.Fatalf("terrain center=%v sky center=%v differences=%d bounds=%v stats=%+v，想要地形覆盖云",
 				terrainCenter, skyCenter, differences, bounds, renderer.LastFrameStats())
 		}
 	})
@@ -410,6 +552,30 @@ func skyPixel(pixels []byte, x, y int) [4]byte {
 
 func skyBrightness(pixel [4]byte) int {
 	return int(pixel[0]) + int(pixel[1]) + int(pixel[2])
+}
+
+func skyPixelColorDifference(first, second []byte, x, y int) int {
+	firstPixel, secondPixel := skyPixel(first, x, y), skyPixel(second, x, y)
+	return max(int(firstPixel[0])-int(secondPixel[0]), int(secondPixel[0])-int(firstPixel[0])) +
+		max(int(firstPixel[1])-int(secondPixel[1]), int(secondPixel[1])-int(firstPixel[1])) +
+		max(int(firstPixel[2])-int(secondPixel[2]), int(secondPixel[2])-int(firstPixel[2]))
+}
+
+func changedSkyBrightness(pixels, reference []byte) (int, int) {
+	total, count := 0, 0
+	for y := 0; y < skyHeadlessSize; y++ {
+		for x := 0; x < skyHeadlessSize; x++ {
+			if skyPixel(pixels, x, y) == skyPixel(reference, x, y) {
+				continue
+			}
+			total += skyBrightness(skyPixel(pixels, x, y))
+			count++
+		}
+	}
+	if count == 0 {
+		return 0, 0
+	}
+	return total / count, count
 }
 
 func skyCloudFixedSample(t *testing.T) ([4]uint32, uint32, uint32, [8]uint8, [4]uint8) {

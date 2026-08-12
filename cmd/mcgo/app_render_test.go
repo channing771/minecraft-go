@@ -853,7 +853,8 @@ func TestApplicationRenderFrameCameraAndSkyParameters(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	app.worldTimeTicks = 3000
+	app.camera.Pos = mgl32.Vec3{17.25, 64.5, -93.75}
+	app.worldTimeTicks = 6000
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
 	}
