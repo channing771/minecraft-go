@@ -46,7 +46,7 @@ func TestItemDropPartsStayWithinFixedCapacity(t *testing.T) {
 func TestItemDropColorsMatchProceduralBlocks(t *testing.T) {
 	for _, item := range []core.ItemID{core.ItemStone, core.ItemDirt, core.ItemGrass} {
 		got, ok := itemDropColor(item)
-		if !ok || got != hotbarItemColor(item) {
+		if !ok || got != ItemColor(item) {
 			t.Fatalf("物品 %d 颜色 = %v, %v，想要与 HUD 一致", item, got, ok)
 		}
 	}
