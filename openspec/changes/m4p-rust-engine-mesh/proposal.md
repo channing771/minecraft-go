@@ -27,6 +27,6 @@ Go 当前拥有所有引擎层。M4P 通过只迁移确定性区段网格与传�
 ## Impact
 
 - 受影响包：`internal/mesh` 及其 test-only Go oracle、`internal/client` 的既有 mesher 调用路径、Makefile、CI 与 Hook 构建入口。
-- 新增受版本锁定的 Rust static library 构建链和窄 C ABI；Go 仍持有输入、scratch 与输出缓冲区。
+- 新增受版本锁定的 Rust `cdylib` 构建链和窄 C ABI；Go 仍持有输入、scratch 与输出缓冲区。
 - 不改变游戏玩法、线上协议、存档 schema、benchmark scenario、性能阈值或 GPU packed quad 格式；性能数值仅记录。
-- Linux 无图形 `cmd/mcgod` 保持不依赖 CGO、Rust static library、WebGPU 或窗口包；多 worker 继续使用独占 scratch，不共享可变 native 状态。
+- Linux 无图形 `cmd/mcgod` 保持不依赖 CGO、Rust `cdylib`、WebGPU 或窗口包；多 worker 继续使用独占 scratch，不共享可变 native 状态。

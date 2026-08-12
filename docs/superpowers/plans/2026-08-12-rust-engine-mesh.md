@@ -4,7 +4,7 @@
 
 **Goal:** 建立可重复的 Rust/Go native 构建与 ABI，并让 Rust 成为 `internal/mesh` 贪心网格、AO、天空光和方块光的唯一生产实现，同时保持现有 Go 行为、视觉和下游 API。
 
-**Architecture:** Go 继续暂时持有应用和世界状态，把一个 `world.Neighborhood` 与不可变 registry snapshot 编成版本化小端字节块；每个 section 经一次 C ABI 调用进入无全局状态的 Rust `mcgo_mesh` static library。Go 拥有 input、scratch 和 packed-output 缓冲，Rust 只在调用期间借用；旧 Go 算法仅编译进测试作为逐位 oracle。
+**Architecture:** Go 继续暂时持有应用和世界状态，把一个 `world.Neighborhood` 与不可变 registry snapshot 编成版本化小端字节块；每个 section 经一次 C ABI 调用进入无全局状态的 Rust `mcgo_mesh` `cdylib`。Go 拥有 input、scratch 和 packed-output 缓冲，Rust 只在调用期间借用；旧 Go 算法仅编译进测试作为逐位 oracle。
 
 **Tech Stack:** Go 1.26、Rust 1.97.1 edition 2024、Cargo workspace、C ABI/cgo、Make、GitHub Actions、OpenSpec 1.7.0。
 
@@ -37,6 +37,7 @@
 | `engine/Cargo.toml` | workspace 与 release panic 策略 |
 | `engine/Cargo.lock` | locked Rust dependency identity |
 | `engine/rust-toolchain.toml` | 固定 Rust 1.97.1、rustfmt、clippy |
+| `engine/crates/mcgo_mesh/build.rs` | macOS `@rpath` dylib install name |
 | `engine/include/mcgo_engine.h` | C ABI 唯一声明来源 |
 | `engine/crates/mcgo_mesh/src/ffi.rs` | 版本、状态码、输入验证、panic 边界与 exported symbols |
 | `engine/crates/mcgo_mesh/src/input.rs` | 小端 input 与 registry snapshot 解码 |
@@ -144,7 +145,7 @@ Go 当前拥有所有引擎层。M4P 通过只迁移确定性区段网格与传�
 - **AND** panic/unwind MUST NOT 穿过 C ABI
 
 ### Requirement: clean checkout 使用 Rust-first 构建
-系统 MUST 通过 canonical Make、CI 与 Hook 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust static library；workspace MUST 仅含 `mcgo_mesh`，并且该 crate 的 normal dependency MUST 只使用 `std`。
+系统 MUST 通过 canonical Make、CI 与 Hook 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust `cdylib`；workspace MUST 仅含 `mcgo_mesh`，并且该 crate 的 normal dependency MUST 只使用 `std`。
 
 #### Scenario: 无预编译 artifact 的构建
 - **GIVEN** clean checkout 不含 Cargo target 或 native library
@@ -153,8 +154,14 @@ Go 当前拥有所有引擎层。M4P 通过只迁移确定性区段网格与传�
 - **AND** `cargo metadata --no-deps --format-version 1 --manifest-path engine/Cargo.toml` MUST 只报告 workspace member `mcgo_mesh`
 - **AND** `cargo tree --manifest-path engine/Cargo.toml --workspace --edges normal` MUST 只含 workspace root，且不得报告第三方 dependency
 
+#### Scenario: 本地客户端产物不依赖 Cargo target 位置
+- **GIVEN** `make build` 已生成本地客户端产物
+- **WHEN** 临时移开 `engine/target`
+- **THEN** `bin/mcgo` MUST 从同目录加载 `libmcgo_mesh.dylib` 并进入 Go 参数解析
+- **AND** 构建产物 MUST 不包含指向临时 Cargo `deps` 目录的 dylib load path
+
 ### Requirement: Rust 客户端边界不污染无图形服务端
-系统 MUST 保持 `cmd/mcgod` 不依赖 CGO、Rust static library、WebGPU 或窗口包。
+系统 MUST 保持 `cmd/mcgod` 不依赖 CGO、Rust `cdylib`、WebGPU 或窗口包。
 
 #### Scenario: Linux 无 CGO 构建
 - **GIVEN** clean checkout 没有 Rust build artifact
@@ -379,10 +386,12 @@ git commit -m "build: 建立 Rust 网格 ABI 链接"
 ### Task 3: 定义 registry snapshot 与版本化 neighborhood 输入
 
 **Files:**
+- Create: `engine/crates/mcgo_mesh/build.rs`
 - Create: `engine/crates/mcgo_mesh/src/input.rs`
 - Create: `internal/mesh/registry.go`
 - Create: `internal/mesh/native_input.go`
 - Create: `internal/mesh/native_input_test.go`
+- Modify: `engine/crates/mcgo_mesh/Cargo.toml`
 - Modify: `engine/crates/mcgo_mesh/src/lib.rs`
 - Modify: `engine/crates/mcgo_mesh/src/ffi.rs`
 - Modify: `engine/include/mcgo_engine.h`
@@ -394,12 +403,45 @@ git commit -m "build: 建立 Rust 网格 ABI 链接"
 - Modify: `openspec/changes/m4p-rust-engine-mesh/tasks.md`
 
 **Interfaces:**
-- Consumes: Task 2 ABI identity and static library.
+- Consumes: Task 2 ABI identity；本任务先把初始 static link 切换为可与 WebGPU 共存的 `cdylib`。
 - Produces:
   - Go `type RegistryReader`, `type Registry`, `type RegistrySnapshot`, `type BlockProperties`.
   - Go `func BuildRegistrySnapshot(ids []world.BlockID, reader RegistryReader) (RegistrySnapshot, error)`.
   - Go `func encodeNativeInput(dst []byte, n *world.Neighborhood, snapshot RegistrySnapshot) (int, error)`.
   - C/Rust `mcgo_mesh_section(...)` returning status and initially zero quads for valid input.
+
+- [ ] **Step 0: Replace the incompatible static link with a relocatable cdylib**
+
+The external mesh tests and final client also import `assets -> gfx -> wgpu_native`. That archive already contains Rust 1.91.1 `std`; linking a second Rust 1.97.1 `staticlib` pulls two strong `_rust_eh_personality` symbols. Removing `catch_unwind` or switching to `panic=abort` does not remove the collision. Do not suppress duplicate symbols or weaken the panic status contract.
+
+Change the crate output to:
+
+```toml
+[lib]
+crate-type = ["rlib", "cdylib"]
+```
+
+Create `engine/crates/mcgo_mesh/build.rs`:
+
+```rust
+use std::env;
+
+fn main() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo::rustc-link-arg-cdylib=-Wl,-install_name,@rpath/libmcgo_mesh.dylib");
+    }
+}
+```
+
+Change the unique cgo bridge to link the dylib and provide only the Cargo development runpath:
+
+```go
+#cgo LDFLAGS: -L${SRCDIR}/../../engine/target/release -lmcgo_mesh -Wl,-rpath,${SRCDIR}/../../engine/target/release
+```
+
+Do not put `@loader_path` in `#cgo LDFLAGS`: Go 1.26 rejects it without `CGO_LDFLAGS_ALLOW`, and ordinary focused commands must not require an environment escape. Task 8 adds `@loader_path` only to `make build` and copies the dylib beside the local client.
+
+Run `make rust`, require `otool -D engine/target/release/libmcgo_mesh.dylib` to report exactly `@rpath/libmcgo_mesh.dylib`, then rerun the focused external Go test without `CGO_LDFLAGS_ALLOW`.
 
 - [ ] **Step 1: Write RED snapshot tests**
 
@@ -618,8 +660,9 @@ Declare the same numeric constants in Rust and Go tests. For this task, a valid 
 
 ```bash
 make rust
+otool -D engine/target/release/libmcgo_mesh.dylib | rg -Fx '@rpath/libmcgo_mesh.dylib'
 cargo test --manifest-path engine/Cargo.toml --workspace --locked
-go test ./internal/assets ./internal/mesh -run 'Registry|NativeInput' -count=1
+env -u CGO_LDFLAGS_ALLOW -u CGO_LDFLAGS go test ./internal/assets ./internal/mesh -run 'Registry|NativeInput' -count=1
 go test ./internal/mesh ./internal/assets -race -count=1
 git add engine internal/mesh internal/assets openspec/changes/m4p-rust-engine-mesh/tasks.md
 git diff --cached --check
@@ -844,6 +887,8 @@ let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 
 Set `*output_len = 0` before any validation. Publish the successful count only after the whole operation returns `Ok(count)`. Map each `MeshError` to one stable `MCGO_STATUS_*` constant declared in both `ffi.rs` and `mcgo_engine.h`; map caught panic to `MCGO_STATUS_PANIC`.
 
+Keep the catch-and-publish decision in one private helper that accepts `&mut usize` plus the operation closure. Add a Rust unit test whose closure deliberately panics after the count starts at `usize::MAX`; it must assert exact status `MCGO_STATUS_PANIC` and count `0`. This is the runnable regression check for the panic boundary—declaring status 9 alone is insufficient.
+
 - [ ] **Step 6: Run GREEN and commit**
 
 ```bash
@@ -880,7 +925,7 @@ git commit -m "feat: 用 Rust 生成贪心网格"
 
 - [ ] **Step 1: Add a RED test proving the production path reaches Rust**
 
-Expose a Rust test counter only under `cfg(test)` is not visible to Go staticlib, so use a behavior mutation guard instead. Add to `native_abi_test.go`:
+Expose a Rust test counter only under `cfg(test)` is not visible to the Go-loaded production `cdylib`, so use a behavior mutation guard instead. Add to `native_abi_test.go`:
 
 ```go
 func TestMeshSectionRejectsNativeABIMismatch(t *testing.T) {
@@ -1106,7 +1151,7 @@ git commit -m "test: 锁定 Rust 与 Go 网格一致性"
 
 **Interfaces:**
 - Consumes: `make rust` and completed Rust production path.
-- Produces: clean-checkout `make build`, `make test`, `make test-race`; shared Hook Rust routing; CI Rust-first gates.
+- Produces: clean-checkout `make build`, `make test`, `make test-race`; `bin/mcgo` 与同目录 `libmcgo_mesh.dylib`；shared Hook Rust routing；CI Rust-first gates。
 
 - [ ] **Step 1: Write RED Hook routing tests**
 
@@ -1151,9 +1196,12 @@ Run `node --test scripts/agent-hooks/guard.test.mjs`; expected FAIL for missing 
 
 - [ ] **Step 2: Complete canonical Make targets**
 
-Use prerequisites, not duplicated recipes:
+Use prerequisites, not duplicated recipes. Ordinary Go commands use the Cargo target runpath from `native_abi.go`; only the local binary build adds `@loader_path`, so no command needs `CGO_LDFLAGS_ALLOW`:
 
 ```make
+RUST_DYLIB := engine/target/release/libmcgo_mesh.dylib
+MCGO_DYLIB := bin/libmcgo_mesh.dylib
+
 .PHONY: rust rust-check test-race
 
 rust:
@@ -1164,12 +1212,23 @@ rust-check:
 	$(CARGO) clippy --manifest-path $(RUST_MANIFEST) --workspace --all-targets -- -D warnings
 	$(CARGO) test --manifest-path $(RUST_MANIFEST) --workspace --locked
 
-run build test test-multiplayer bench-multiplayer visual-check visual-update: rust
+run test test-multiplayer bench-multiplayer visual-check visual-update: rust
+build: rust
+build: GO_BUILD_LDFLAGS := -extldflags=-Wl,-rpath,@loader_path
 test-race: rust
 	$(GO) test ./... -race
 ```
 
-Keep every existing Go recipe after the prerequisite line. Add `rust`, `rust-check`, and `test-race` to help text. `fmt` must run both Cargo fmt and current Go formatting, without touching `engine/target`.
+Keep every existing Go recipe after the prerequisite line, but make the client build exact and colocate the runtime artifact:
+
+```make
+build:
+	@mkdir -p $(dir $(BINARY))
+	$(GO) build -ldflags='$(GO_BUILD_LDFLAGS)' -o $(BINARY) $(APP)
+	cp $(RUST_DYLIB) $(MCGO_DYLIB)
+```
+
+Add `rust`, `rust-check`, and `test-race` to help text. `fmt` must run both Cargo fmt and current Go formatting, without touching `engine/target`. `make clean` may keep deleting the existing `bin` directory; do not add an app bundle, installer or signing target.
 
 Tighten the existing `archcheck` shell assertion to include `internal/mesh`:
 
@@ -1204,7 +1263,7 @@ After checkout/setup-go/setup-node, add:
       - name: Rust 格式、静态检查与单测
         run: make rust-check
 
-      - name: 构建 Rust static library
+      - name: 构建 Rust cdylib
         run: make rust
 ```
 
@@ -1223,7 +1282,7 @@ In that headless-server step, append the same dependency assertion used by `make
 - only `internal/mesh` touches the new native ABI in this stage;
 - no production Go fallback.
 
-`README.md` prerequisites add Rust 1.97.1/rustup and common commands add `make rust-check`, `make test-race`. `openspec/config.yaml` updates current implementation context but must not claim final Rust host or Go rules library is already implemented.
+`README.md` prerequisites add Rust 1.97.1/rustup and common commands add `make rust-check`, `make test-race`; its build section states that `make build` produces the colocated `bin/mcgo` and `bin/libmcgo_mesh.dylib` pair. `openspec/config.yaml` updates current implementation context but must not claim final Rust host or Go rules library is already implemented.
 
 Run `cmp AGENTS.md CLAUDE.md`; expected exit 0.
 
@@ -1235,6 +1294,10 @@ Move the existing `engine/target` directory to a unique temporary backup, then r
 M4P_RUST_TARGET_BACKUP=$(mktemp -d /private/tmp/mcgo-m4p-rust-target.XXXXXX)
 mv engine/target "$M4P_RUST_TARGET_BACKUP/target"
 make rust-check
+make build
+test -f bin/libmcgo_mesh.dylib
+otool -L bin/mcgo | rg -F '@rpath/libmcgo_mesh.dylib'
+otool -l bin/mcgo | rg -F 'path @loader_path'
 make test
 make test-race
 node --test scripts/agent-hooks/guard.test.mjs
@@ -1244,7 +1307,25 @@ openspec validate --all --strict --no-interactive
 git diff --check
 ```
 
-Use an explicit temporary path validated as absent before `mv`; never use `git clean` or broad deletion.
+Then prove the local pair no longer depends on Cargo target. Move the freshly rebuilt `engine/target` to another unique temporary backup, install a trap that restores it, run `bin/mcgo -h`, and require the expected Go usage plus exit 1 while rejecting any dyld error. Restore the target and clear the trap before continuing. Use explicit validated paths; never use `git clean` or broad deletion.
+
+```bash
+M4P_PACKAGING_BACKUP=$(mktemp -d /private/tmp/mcgo-m4p-packaging.XXXXXX)
+mv engine/target "$M4P_PACKAGING_BACKUP/target"
+restore_m4p_target() {
+  test ! -d "$M4P_PACKAGING_BACKUP/target" || mv "$M4P_PACKAGING_BACKUP/target" engine/target
+}
+trap restore_m4p_target EXIT
+set +e
+bin/mcgo -h >"$M4P_PACKAGING_BACKUP/help.txt" 2>&1
+M4P_HELP_STATUS=$?
+set -e
+test "$M4P_HELP_STATUS" -eq 1
+rg -q '^Usage of mcgo:' "$M4P_PACKAGING_BACKUP/help.txt"
+test -z "$(rg 'dyld|Library not loaded' "$M4P_PACKAGING_BACKUP/help.txt" || true)"
+restore_m4p_target
+trap - EXIT
+```
 
 Commit:
 
@@ -1285,6 +1366,10 @@ Expected: only planned Rust/mesh/build/spec/doc files; no native artifact, golde
 ```bash
 make rust-check
 make rust
+make build
+test -f bin/libmcgo_mesh.dylib
+otool -L bin/mcgo | rg -F '@rpath/libmcgo_mesh.dylib'
+otool -l bin/mcgo | rg -F 'path @loader_path'
 go test ./internal/mesh ./internal/assets ./internal/client ./internal/render -race -count=1
 go test ./cmd/mcgo -run 'Capture|BlockLightRoom|MaterialsShowcase' -race -count=1
 go test ./internal/mesh -run '^$' -fuzz FuzzNativeMeshRejectsMalformedInput -fuzztime=10s
@@ -1293,7 +1378,7 @@ CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod
 test -z "$(CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/mcgod | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
 ```
 
-Expected: all exit 0. Any Rust panic, parity mismatch, output overflow or Linux server link to Rust is a blocker.
+After these commands, repeat Task 8's exact recoverable `engine/target` move, `bin/mcgo -h`, usage-text, dyld-error rejection, restore and trap-clear block. Expected: all exit 0. Any uncaught Rust panic, parity mismatch, output overflow, missing packaged dylib or Linux server link to Rust is a blocker.
 
 - [ ] **Step 3: Run visual and performance record gates**
 

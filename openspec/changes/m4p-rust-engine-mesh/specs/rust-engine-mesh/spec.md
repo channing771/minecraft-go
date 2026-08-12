@@ -29,7 +29,7 @@
 - **AND** panic/unwind MUST NOT 穿过 C ABI
 
 ### Requirement: clean checkout 使用 Rust-first 构建
-系统 MUST 通过 canonical Make、CI 与 Hook 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust static library；workspace MUST 仅含 `mcgo_mesh`，并且该 crate 的 normal dependency MUST 只使用 `std`。
+系统 MUST 通过 canonical Make、CI 与 Hook 使用固定的 Rust 1.97.1，在 Go 验证前执行 `cargo build --locked --release` 构建 pinned Rust `cdylib`；workspace MUST 仅含 `mcgo_mesh`，并且该 crate 的 normal dependency MUST 只使用 `std`。
 
 #### Scenario: 无预编译 artifact 的构建
 - **GIVEN** clean checkout 不含 Cargo target 或 native library
@@ -38,8 +38,14 @@
 - **AND** `cargo metadata --no-deps --format-version 1 --manifest-path engine/Cargo.toml` MUST 只报告 workspace member `mcgo_mesh`
 - **AND** `cargo tree --manifest-path engine/Cargo.toml --workspace --edges normal` MUST 只含 workspace root，且不得报告第三方 dependency
 
+#### Scenario: 本地客户端产物不依赖 Cargo target 位置
+- **GIVEN** `make build` 已生成本地客户端产物
+- **WHEN** 临时移开 `engine/target`
+- **THEN** `bin/mcgo` MUST 从同目录加载 `libmcgo_mesh.dylib` 并进入 Go 参数解析
+- **AND** 构建产物 MUST 不包含指向临时 Cargo `deps` 目录的 dylib load path
+
 ### Requirement: Rust 客户端边界不污染无图形服务端
-系统 MUST 保持 `cmd/mcgod` 不依赖 CGO、Rust static library、WebGPU 或窗口包。
+系统 MUST 保持 `cmd/mcgod` 不依赖 CGO、Rust `cdylib`、WebGPU 或窗口包。
 
 #### Scenario: Linux 无 CGO 构建
 - **GIVEN** clean checkout 没有 Rust build artifact
