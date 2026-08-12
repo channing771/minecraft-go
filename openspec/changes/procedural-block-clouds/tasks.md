@@ -13,7 +13,7 @@
 
 ## 4. 全量门禁
 
-- [ ] 4.1 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/archcheck -count=1 && go test ./... -race && go vet ./...'`，再运行 `gofmt -l .`、`openspec validate procedural-block-clouds --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 与 `git diff --check`；所有命令必须成功且 `gofmt -l .` 无输出。
+- [x] 4.1 运行 `zsh -ic 'gvm use go1.26.0 >/dev/null && go test ./internal/archcheck -count=1 && go test ./... -race && go vet ./...'`，再运行 `gofmt -l .`、`openspec validate procedural-block-clouds --strict --no-interactive`、`openspec validate --all --strict --no-interactive` 与 `git diff --check`；所有命令必须成功且 `gofmt -l .` 无输出。
 
 ## 5. 视觉收尾、门禁与归档
 
