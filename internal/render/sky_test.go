@@ -180,6 +180,29 @@ func TestSkyUniformLayoutAndUpload(t *testing.T) {
 	}
 }
 
+func TestSkyHeadlessCloudHashFixedSample(t *testing.T) {
+	lowBits, active, filled, _, _ := skyCloudFixedSample(t)
+	if want := [4]uint32{72, 69, 62, 53}; lowBits != want {
+		t.Fatalf("生产 WGSL 固定 macro 样本 low2=%v，想要 %v", lowBits, want)
+	}
+	if active != 184 || filled != 920 {
+		t.Fatalf("生产 WGSL 固定 macro 样本 active/filled=%d/%d，想要 184/920", active, filled)
+	}
+	if got := float64(filled) / (256 * 16); got != 0.224609375 {
+		t.Fatalf("生产 WGSL 固定 macro 样本覆盖率=%v，想要 0.224609375", got)
+	}
+}
+
+func TestSkyHeadlessCloudMaskFixedGrid(t *testing.T) {
+	_, _, _, got, asymmetric := skyCloudFixedSample(t)
+	if want := [8]uint8{2, 71, 226, 64}; got != want {
+		t.Fatalf("生产 cloud_mask 的固定 8x8 输出=%v，想要 %v", got, want)
+	}
+	if want := [4]uint8{0, 2, 7, 2}; asymmetric != want {
+		t.Fatalf("生产 cloud_mask 的非对称 center 4x4 输出=%v，想要 %v", asymmetric, want)
+	}
+}
+
 func TestSkyHeadlessPixels(t *testing.T) {
 	device, err := gfx.NewHeadlessDevice()
 	if err != nil {
@@ -370,6 +393,119 @@ func skyPixel(pixels []byte, x, y int) [4]byte {
 
 func skyBrightness(pixel [4]byte) int {
 	return int(pixel[0]) + int(pixel[1]) + int(pixel[2])
+}
+
+func skyCloudFixedSample(t *testing.T) ([4]uint32, uint32, uint32, [8]uint8, [4]uint8) {
+	t.Helper()
+	device, err := gfx.NewHeadlessDevice()
+	if err != nil {
+		if skyHeadlessAdapterUnavailable(err) {
+			t.Skipf("本机无可用 GPU 适配器: %v", err)
+		}
+		t.Fatalf("创建 headless GPU device: %v", err)
+	}
+	defer device.Release()
+
+	uniform := device.CreateBuffer(gfx.BufferDesc{
+		Label: "cloud hash test sky uniform", Size: 112, Usage: gfx.BufferUsageUniform | gfx.BufferUsageCopyDst,
+	})
+	defer uniform.Release()
+	uniformData := make([]byte, 112)
+	binary.LittleEndian.PutUint32(uniformData[100:104], math.Float32bits(64))
+	uniform.Write(0, uniformData)
+	output := device.CreateBuffer(gfx.BufferDesc{
+		Label: "cloud hash test output", Size: 4096 * 4, Usage: gfx.BufferUsageStorage | gfx.BufferUsageCopySrc,
+	})
+	defer output.Release()
+	shader := device.CreateShaderModule(skyShader + `
+struct CloudHashOutput {
+    values: array<u32, 4096>,
+};
+
+@group(1) @binding(0) var<storage, read_write> cloud_hash_output: CloudHashOutput;
+
+@compute @workgroup_size(64)
+fn cloud_hash_fixed_sample(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= 4096u) {
+        return;
+    }
+    let cell = vec2i(i32(id.x % 64u) - 32, i32(id.x / 64u) - 32);
+    let direction = vec3f((f32(cell.x) * 16.0 + 8.0) / 128.0, 1.0, (f32(cell.y) * 16.0 + 8.0) / 128.0);
+    var result = select(0u, 1u, cloud_mask(direction) > 0.5);
+    let macro_cell = vec2i(floor(vec2f(cell) / 4.0));
+    if (all(cell == macro_cell * 4)) {
+        result = result | ((cloud_hash(macro_cell, 0u) & 3u) << 1u) | 8u;
+    }
+    cloud_hash_output.values[id.x] = result;
+}
+`)
+	defer shader.Release()
+
+	skyLayout := gfx.BindGroupLayout{Label: "cloud hash test sky layout", Entries: []gfx.BindGroupLayoutEntry{
+		{Binding: 0, Type: gfx.BindingUniformBuffer, VisibleIn: gfx.StageVertex | gfx.StageFragment | gfx.StageCompute},
+	}}
+	outputLayout := gfx.BindGroupLayout{Label: "cloud hash test output layout", Entries: []gfx.BindGroupLayoutEntry{
+		{Binding: 0, Type: gfx.BindingStorageBufferRW, VisibleIn: gfx.StageCompute},
+	}}
+	pipeline := device.CreateComputePipeline(gfx.ComputePipelineDesc{
+		Label: "cloud hash fixed sample", Shader: shader, Entry: "cloud_hash_fixed_sample",
+		BindGroups: []gfx.BindGroupLayout{skyLayout, outputLayout},
+	})
+	defer pipeline.Release()
+	skyBind := device.CreateBindGroup(gfx.BindGroupDesc{
+		Label: "cloud hash test sky bind", Layout: skyLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: uniform}},
+	})
+	defer skyBind.Release()
+	outputBind := device.CreateBindGroup(gfx.BindGroupDesc{
+		Label: "cloud hash test output bind", Layout: outputLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: output}},
+	})
+	defer outputBind.Release()
+
+	encoder := device.CreateCommandEncoder()
+	pass := encoder.BeginComputePass("cloud hash fixed sample")
+	pass.SetPipeline(pipeline)
+	pass.SetBindGroup(0, skyBind)
+	pass.SetBindGroup(1, outputBind)
+	pass.Dispatch(64, 1, 1)
+	pass.End()
+	command := encoder.Finish()
+	device.Submit(command)
+	command.Release()
+	device.Poll(true)
+
+	data := output.ReadBack()
+	if len(data) != 4096*4 {
+		t.Fatalf("生产 WGSL cloud mask readback bytes=%d，想要 %d", len(data), 4096*4)
+	}
+	var lowBits [4]uint32
+	var active, filled uint32
+	var activeMasks [16][16]bool
+	var grid [8]uint8
+	var asymmetric [4]uint8
+	for z := 0; z < 64; z++ {
+		for x := 0; x < 64; x++ {
+			value := binary.LittleEndian.Uint32(data[(z*64+x)*4:])
+			filled += value & 1
+			activeMasks[z/4][x/4] = activeMasks[z/4][x/4] || value&1 != 0
+			if x%4 == 0 && z%4 == 0 {
+				lowBits[(value>>1)&3]++
+			}
+			if x >= 28 && x < 36 && z >= 28 && z < 36 && value&1 != 0 {
+				grid[z-28] |= 1 << (x - 28)
+			}
+			if x >= 4 && x < 8 && z < 4 && value&1 != 0 {
+				asymmetric[z] |= 1 << (x - 4)
+			}
+		}
+	}
+	for _, row := range activeMasks {
+		for _, isActive := range row {
+			if isActive {
+				active++
+			}
+		}
+	}
+	return lowBits, active, filled, grid, asymmetric
 }
 
 func countSkyStars(pixels []byte, excludeCenter bool) int {
