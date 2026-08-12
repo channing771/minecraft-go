@@ -2,6 +2,7 @@ struct Sky {
     view_proj_inv:   mat4x4f,
     sun_daylight:    vec4f,
     star_visibility: vec4f,
+    camera_cloud:    vec4f,
 };
 
 @group(0) @binding(0) var<uniform> sky: Sky;
@@ -72,6 +73,31 @@ fn star_light(direction: vec3f) -> f32 {
     return point * brightness;
 }
 
+fn cloud_hash(macro_cell: vec2i, macro_offset: u32) -> u32 {
+    return hash_cell(vec3u(bitcast<u32>(macro_cell.x) - macro_offset, bitcast<u32>(macro_cell.y), 0u));
+}
+
+fn cloud_mask(direction: vec3f) -> f32 {
+    if (sky.camera_cloud.y >= 192.0 || direction.y <= 0.001) {
+        return 0.0;
+    }
+    let distance = (192.0 - sky.camera_cloud.y) / direction.y;
+    if (distance <= 0.0) {
+        return 0.0;
+    }
+    let intersection = sky.camera_cloud.xz + direction.xz * distance;
+    let cell = vec2i(floor((intersection - vec2f(sky.camera_cloud.w, 0.0)) / 16.0));
+    let macro_cell = vec2i(floor(vec2f(cell) / 4.0));
+    let hash = cloud_hash(macro_cell, bitcast<u32>(sky.star_visibility.y));
+    if ((hash & 3u) == 0u) {
+        return 0.0;
+    }
+    let center = vec2i(1 + i32((hash >> 2u) & 1u), 1 + i32((hash >> 3u) & 1u));
+    let local = cell - macro_cell * 4;
+    let filled = abs(local.x - center.x) + abs(local.y - center.y) <= 1;
+    return select(0.0, smoothstep(0.02, 0.08, direction.y), filled);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4f {
     let direction = world_direction(in.ndc);
@@ -107,5 +133,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4f {
         * select(0.0, 1.0, moon_direction.y > 0.0);
     color = mix(color, vec3f(0.72, 0.80, 0.95), moon_disc);
     color = mix(color, vec3f(1.0, 0.92, 0.68), sun_disc);
+    let cloud = cloud_mask(direction);
+    color = mix(color, mix(vec3f(0.18, 0.22, 0.28), vec3f(0.84, 0.88, 0.92), sky.sun_daylight.w), cloud * 0.82);
     return vec4f(clamp(color, vec3f(0.0), vec3f(1.0)), 1.0);
 }

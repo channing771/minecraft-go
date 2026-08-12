@@ -907,6 +907,15 @@ func TestApplicationRenderFrameCameraAndSkyParameters(t *testing.T) {
 	if got := readFloat(sky.data, 80); got != dayNight.StarVisibility {
 		t.Fatalf("sky StarVisibility=%v want=%v", got, dayNight.StarVisibility)
 	}
+	cloudOffset := render.CloudOffsetAt(app.worldTimeTicks)
+	if got := binary.LittleEndian.Uint32(sky.data[84:88]); got != cloudOffset.MacroX {
+		t.Fatalf("sky CloudOffset.MacroX=%d want=%d", got, cloudOffset.MacroX)
+	}
+	for offset, want := range map[int]float32{96: app.camera.Pos[0], 100: app.camera.Pos[1], 104: app.camera.Pos[2], 108: cloudOffset.Local} {
+		if got := readFloat(sky.data, offset); got != want {
+			t.Fatalf("sky cloud float at %d=%v want=%v", offset, got, want)
+		}
+	}
 	if got := readFloat(terrain.data, 76); got != dayNight.Daylight {
 		t.Fatalf("terrain Daylight=%v want=%v", got, dayNight.Daylight)
 	}

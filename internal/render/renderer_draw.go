@@ -133,6 +133,10 @@ func writeSkyCameraBytes(out []byte, cam Camera) {
 	} {
 		binary.LittleEndian.PutUint32(out[64+i*4:], math.Float32bits(value))
 	}
+	binary.LittleEndian.PutUint32(out[84:], cam.CloudOffset.MacroX)
+	for i, value := range [...]float32{cam.Pos[0], cam.Pos[1], cam.Pos[2], cam.CloudOffset.Local} {
+		binary.LittleEndian.PutUint32(out[96+i*4:], math.Float32bits(value))
+	}
 }
 
 func uint32sToBytes(values []uint32) []byte {

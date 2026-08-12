@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -69,8 +70,8 @@ func TestSkyPipelineConfiguration(t *testing.T) {
 	}
 
 	uniform := device.buffer(t, "sky uniform")
-	if uniform.desc.Size != 96 {
-		t.Fatalf("sky uniform bytes=%d want=96", uniform.desc.Size)
+	if uniform.desc.Size != 112 {
+		t.Fatalf("sky uniform bytes=%d want=112", uniform.desc.Size)
 	}
 	if want := gfx.BufferUsageUniform | gfx.BufferUsageCopyDst; uniform.desc.Usage != want {
 		t.Fatalf("sky uniform usage=%v want=%v", uniform.desc.Usage, want)
@@ -133,6 +134,8 @@ func TestSkyUniformLayoutAndUpload(t *testing.T) {
 	renderer.Render(&skyTestEncoder{}, &skyTestView{}, &skyTestView{}, Camera{
 		ViewProj:       mgl32.Ident4(),
 		ViewProjInv:    viewProjInv,
+		Pos:            mgl32.Vec3{24, 64, -168},
+		CloudOffset:    CloudOffset{Local: 1.5, MacroX: 7},
 		SunDirection:   [3]float32{0.25, 0.5, 0.75},
 		Daylight:       0.8,
 		StarVisibility: 0.6,
@@ -143,8 +146,8 @@ func TestSkyUniformLayoutAndUpload(t *testing.T) {
 		t.Fatalf("terrain uniform writes/bytes=%d/%d want=1/80", got, writeBytes(terrainWrites))
 	}
 	skyWrites := device.buffer(t, "sky uniform").writes
-	if got := len(skyWrites); got != 1 || len(skyWrites[0]) != 96 {
-		t.Fatalf("sky uniform writes/bytes=%d/%d want=1/96", got, writeBytes(skyWrites))
+	if got := len(skyWrites); got != 1 || len(skyWrites[0]) != 112 {
+		t.Fatalf("sky uniform writes/bytes=%d/%d want=1/112", got, writeBytes(skyWrites))
 	}
 	data := skyWrites[0]
 	for index, want := range viewProjInv {
@@ -153,19 +156,26 @@ func TestSkyUniformLayoutAndUpload(t *testing.T) {
 		}
 	}
 	for offset, want := range map[int]float32{
-		64: 0.25,
-		68: 0.5,
-		72: 0.75,
-		76: 0.8,
-		80: 0.6,
+		64:  0.25,
+		68:  0.5,
+		72:  0.75,
+		76:  0.8,
+		80:  0.6,
+		96:  24,
+		100: 64,
+		104: -168,
+		108: 1.5,
 	} {
 		if got := float32At(data, offset); got != want {
 			t.Fatalf("sky uniform float at %d=%v want=%v", offset, got, want)
 		}
 	}
-	for offset, value := range data[84:] {
+	if got := binary.LittleEndian.Uint32(data[84:88]); got != 7 {
+		t.Fatalf("sky macro X offset=%d want=7", got)
+	}
+	for offset, value := range data[88:96] {
 		if value != 0 {
-			t.Fatalf("sky padding byte at %d=%d want=0", offset+84, value)
+			t.Fatalf("sky padding byte at %d=%d want=0", offset+88, value)
 		}
 	}
 }
@@ -215,9 +225,9 @@ func TestSkyHeadlessPixels(t *testing.T) {
 		}
 	})
 
-	t.Run("相机平移没有视差", func(t *testing.T) {
-		first := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{}, zenithDirection, 18000))
-		moved := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{4, 3, 2}, zenithDirection, 18000))
+	t.Run("云层上方相机平移不改变天体", func(t *testing.T) {
+		first := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{0, 193, 0}, zenithDirection, 18000))
+		moved := renderSkyHeadless(t, device, renderer, skyCameraAt(mgl32.Vec3{4, 193, 2}, zenithDirection, 18000))
 		if !bytes.Equal(first, moved) {
 			differences, bounds := skyPixelDifferences(first, moved)
 			t.Fatalf("translated camera changed %d sky pixels in %v", differences, bounds)
@@ -279,6 +289,7 @@ func skyCameraAt(position, direction mgl32.Vec3, phase uint64) Camera {
 		ViewProj:       viewProj,
 		ViewProjInv:    viewProj.Inv(),
 		Pos:            position,
+		CloudOffset:    CloudOffsetAt(phase),
 		SunDirection:   dayNight.SunDirection,
 		Daylight:       dayNight.Daylight,
 		StarVisibility: dayNight.StarVisibility,
