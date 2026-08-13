@@ -84,12 +84,14 @@ Task 7 同时切换：
 - `internal/config/migration_test.go`：仅允许字符串 literal `minecraft-go` 用于断言 legacy config 路由、保留与错误路径；
 - `internal/profile/profile.go`：仅允许字符串 literal `minecraft-go` 用于解析 legacy profile 默认目录；
 - `internal/profile/profile_test.go`：仅允许字符串 literal `minecraft-go` 用于断言 legacy profile 路由、身份保真与错误路径；
+- `cmd/mornlea/run_test.go`：仅允许 helper `legacyDataPath` 声明中的一个完整字符串 literal `minecraft-go`，供 `TestResolveConfigUsesDefaultMigration` 与 `TestLoadApplicationIdentityUsesDefaultMigration` 建立仅有 legacy 文件的真实 command 路由场景；
+- `cmd/mornlea-server/main_test.go`：仅允许 helper `legacyConfigPath` 声明中的一个完整字符串 literal `minecraft-go`，供 `TestResolveConfigUsesDefaultMigration` 建立仅有 legacy config 的真实 command 路由场景；
 - `internal/storage/backup.go`：仅允许字符串 literal `.mcgo-world-backup-v1.json` 作为既有世界备份兼容 identity；
 - `internal/storage/backup_test.go`：仅允许字符串 literal `.mcgo-world-backup-v1.json` 验证同一兼容 identity。
 
 这些文件不得出现其他裸旧 token；即使在 allowlist 文件中，旧 import、命令、C symbol、环境变量、类型/函数标识符或解释性注释也必须被 current-identity guard 拒绝。
 
-`TestMornleaCurrentIdentity` 必须扫描上述全部 current code/build roots，且不得通过 path exclusion 跳过这 6 个文件。测试逐个解析大小写不敏感的旧 token match：仅当 match 同时命中 allowlist 表中硬编码的精确 path、完整 string literal、用途位置和正整数 expected count 才接受；用途位置由 Go AST 的 string-literal span 与所在声明/测试职责判定。每个 tuple 的实际计数必须等于硬编码 expected count，未消费 match、额外/缺失 match、移动路径、comment/identifier 中的 match 均失败。expected count 不得从待测源码动态生成。当前文档不属于该 code/build guard，由 Task 8 的精确 `git grep` 门禁独立覆盖。
+`TestMornleaCurrentIdentity` 必须扫描上述全部 current code/build roots，且不得通过 path exclusion 跳过这 8 个文件。测试逐个解析大小写不敏感的旧 token match：仅当 match 同时命中 allowlist 表中硬编码的精确 path、完整 string literal、用途位置和正整数 expected count 才接受；用途位置由 Go AST 的 string-literal span 与所在声明/测试职责判定。两个 command helper 各自只能贡献一个 match，不得在调用测试中重复 literal 或用拼接、转义隐藏旧身份；完整 allowlist 固定为 41 个 tuple、45 个 expected matches。每个 tuple 的实际计数必须等于硬编码 expected count，未消费 match、额外/缺失 match、移动路径、comment/identifier 中的 match 均失败。expected count 不得从待测源码动态生成。当前文档不属于该 code/build guard，由 Task 8 的精确 `git grep` 门禁独立覆盖。
 
 兼容身份 `CHNK`、`MCGC`、`MCGM`、`MCPL`、`MCGR`、`MCGB`、`MGM1` 与 `.mcgo-world-backup-v1.json` 保持原值；它们不是品牌替换目标。历史原文 allowlist 精确为 `docs/superpowers/**`、`openspec/changes/archive/**` 与 `docs/notes/perf-baseline*.{md,json}`，另保留 Git 历史。当前 README 唯一旧字面量例外是链接 `docs/superpowers/specs/2026-07-26-minecraft-go-design.md`；`docs/notes/mornlea-migration.md` 作为新旧映射说明单独允许旧名。拒绝用全仓 `MCG` 禁令或宽泛目录豁免，以免误伤稳定 magic 或隐藏真实品牌残留。
 
