@@ -176,10 +176,15 @@ baseline_visual=$(mktemp -d /private/tmp/mornlea-main-visual.XXXXXX)
   set +e
   (cd "$baseline_tree" && HOME="$baseline_home" VISUAL_OUT="$baseline_visual" make visual-check > "$baseline_visual/run.log" 2>&1)
   baseline_visual_rc=$?
+  printf '%s\n' "$baseline_visual_rc" > "$baseline_visual/baseline_visual_rc"
   set -e
   restore_tree
   trap - EXIT HUP INT TERM
 )
+test -f "$baseline_visual/baseline_visual_rc"
+baseline_visual_rc=$(cat "$baseline_visual/baseline_visual_rc")
+test -n "$baseline_visual_rc"
+test "$baseline_visual_rc" -ge 0
 
 for scene in terrain-noon hud-hotbar-health avatar-nametag inventory-crafting debug-panel skylight-tunnel block-light-room materials-showcase target-block-feedback oak-grove; do
   cmp "$merged_visual/${scene}.png" "$baseline_visual/${scene}.png"
@@ -198,6 +203,8 @@ case "$hardware_chip" in
     rg -Fx '已抓取场景 oak-grove: 最大通道差 47，差异像素 10/230400（0.0043%），首个差异像素在 (89,86)' "$merged_visual/failures.txt"
     test "$(find "$merged_visual" -maxdepth 1 -name '*-actual.png' | wc -l | tr -d ' ')" = 2
     test "$(find "$merged_visual" -maxdepth 1 -name '*-diff.png' | wc -l | tr -d ' ')" = 2
+    test "$(find "$baseline_visual" -maxdepth 1 -name '*-actual.png' | wc -l | tr -d ' ')" = 2
+    test "$(find "$baseline_visual" -maxdepth 1 -name '*-diff.png' | wc -l | tr -d ' ')" = 2
     ;;
   *)
     test "$merged_visual_rc" -eq 0
@@ -1356,11 +1363,16 @@ chmod 0600 "$baseline_profile_dir/profile.json"
     set +e
     HOME="$baseline_home" VISUAL_OUT="$baseline_visual" make visual-check > "$baseline_visual/run.log" 2>&1
     baseline_visual_rc=$?
+    printf '%s\n' "$baseline_visual_rc" > "$baseline_visual/baseline_visual_rc"
     set -e
   )
   restore_tree
   trap - EXIT HUP INT TERM
 )
+test -f "$baseline_visual/baseline_visual_rc"
+baseline_visual_rc=$(cat "$baseline_visual/baseline_visual_rc")
+test -n "$baseline_visual_rc"
+test "$baseline_visual_rc" -ge 0
 
 for scene in terrain-noon hud-hotbar-health avatar-nametag inventory-crafting debug-panel skylight-tunnel block-light-room materials-showcase target-block-feedback oak-grove; do
   cmp "$current_visual/${scene}.png" "$baseline_visual/${scene}.png"
@@ -1379,6 +1391,8 @@ case "$hardware_chip" in
     rg -Fx '已抓取场景 oak-grove: 最大通道差 47，差异像素 10/230400（0.0043%），首个差异像素在 (89,86)' "$current_visual/failures.txt"
     test "$(find "$current_visual" -maxdepth 1 -name '*-actual.png' | wc -l | tr -d ' ')" = 2
     test "$(find "$current_visual" -maxdepth 1 -name '*-diff.png' | wc -l | tr -d ' ')" = 2
+    test "$(find "$baseline_visual" -maxdepth 1 -name '*-actual.png' | wc -l | tr -d ' ')" = 2
+    test "$(find "$baseline_visual" -maxdepth 1 -name '*-diff.png' | wc -l | tr -d ' ')" = 2
     ;;
   *)
     test "$current_visual_rc" -eq 0
