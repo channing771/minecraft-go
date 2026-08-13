@@ -150,6 +150,10 @@ func TestRunWithDependenciesPassesExplicitNameToProfile(t *testing.T) {
 
 var _ = profile.Options{}
 
+func legacyDataPath(base, name string) string {
+	return filepath.Join(base, "minecraft-go", name)
+}
+
 func TestResolveConfigUsesDefaultMigration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -157,11 +161,12 @@ func TestResolveConfigUsesDefaultMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserConfigDir: %v", err)
 	}
+	legacyPath := legacyDataPath(base, "config.json")
 	currentPath := filepath.Join(base, "mornlea", "config.json")
-	current := config.Defaults()
-	current.Physics.Gravity = 24
-	if err := current.Save(currentPath); err != nil {
-		t.Fatalf("Save current config: %v", err)
+	legacy := config.Defaults()
+	legacy.Physics.Gravity = 24
+	if err := legacy.Save(legacyPath); err != nil {
+		t.Fatalf("Save legacy config: %v", err)
 	}
 
 	got, err := resolveConfig(mainOptions{})
@@ -172,7 +177,7 @@ func TestResolveConfigUsesDefaultMigration(t *testing.T) {
 		t.Fatalf("gravity = %v，want 24", got.Physics.Gravity)
 	}
 	if _, err := os.ReadFile(currentPath); err != nil {
-		t.Fatalf("读取当前默认配置: %v", err)
+		t.Fatalf("读取迁移后默认配置: %v", err)
 	}
 }
 
@@ -218,13 +223,14 @@ func TestLoadApplicationIdentityUsesDefaultMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserConfigDir: %v", err)
 	}
+	legacyPath := legacyDataPath(base, "profile.json")
 	currentPath := filepath.Join(base, "mornlea", "profile.json")
-	if err := os.MkdirAll(filepath.Dir(currentPath), 0o700); err != nil {
-		t.Fatalf("MkdirAll current: %v", err)
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll legacy: %v", err)
 	}
 	stored := []byte(`{"version":1,"player_id":"00112233-4455-4677-8899-aabbccddeeff","display_name":"Chen"}`)
-	if err := os.WriteFile(currentPath, stored, 0o600); err != nil {
-		t.Fatalf("WriteFile current: %v", err)
+	if err := os.WriteFile(legacyPath, stored, 0o600); err != nil {
+		t.Fatalf("WriteFile legacy: %v", err)
 	}
 
 	got, err := loadApplicationIdentity(nil)
@@ -232,14 +238,14 @@ func TestLoadApplicationIdentityUsesDefaultMigration(t *testing.T) {
 		t.Fatalf("loadApplicationIdentity: %v", err)
 	}
 	if got.PlayerID.String() != "00112233-4455-4677-8899-aabbccddeeff" || got.DisplayName != "Chen" {
-		t.Fatalf("identity = %+v，want 当前 profile 身份", got)
+		t.Fatalf("identity = %+v，want 旧 profile 身份", got)
 	}
 	contents, err := os.ReadFile(currentPath)
 	if err != nil {
-		t.Fatalf("读取当前默认 profile: %v", err)
+		t.Fatalf("读取迁移后默认 profile: %v", err)
 	}
 	if string(contents) != string(stored) {
-		t.Fatalf("当前 profile = %q，want %q", contents, stored)
+		t.Fatalf("迁移后 profile = %q，want %q", contents, stored)
 	}
 }
 

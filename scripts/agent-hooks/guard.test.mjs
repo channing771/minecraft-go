@@ -90,16 +90,43 @@ test("runs the current identity guard for every identity-only root change", () =
     };
 
     assert.deepEqual(stopFailures([path], run, {}), []);
-    assert.ok(
-      calls.some(
+    assert.equal(
+      calls.filter(
         ([command, argumentsList]) =>
           command === "go" &&
           argumentsList.join(" ") ===
             "test ./internal/archcheck -run ^TestMornleaCurrentIdentity$ -count=1",
-      ),
-      `${path} did not route through TestMornleaCurrentIdentity`,
+      ).length,
+      1,
+      `${path} did not route exactly once through TestMornleaCurrentIdentity`,
     );
   }
+});
+
+test("does not repeat the focused identity guard after the full Go archcheck", () => {
+  const calls = [];
+  const run = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    return { status: 0, stdout: "" };
+  };
+
+  assert.deepEqual(stopFailures(["internal/archcheck/identity_test.go"], run, {}), []);
+  assert.equal(
+    calls.filter(
+      ([command, argumentsList]) =>
+        command === "go" &&
+        argumentsList.join(" ") === "test ./internal/archcheck -count=1",
+    ).length,
+    1,
+  );
+  assert.equal(
+    calls.filter(
+      ([command, argumentsList]) =>
+        command === "go" &&
+        argumentsList.includes("^TestMornleaCurrentIdentity$"),
+    ).length,
+    0,
+  );
 });
 
 test("passes login-shell Cargo through the full Stop route when PATH is restricted", () => {

@@ -26,6 +26,10 @@ func absentConfigArgs(t *testing.T) []string {
 	return []string{"--config", filepath.Join(t.TempDir(), "absent.json")}
 }
 
+func legacyConfigPath(base string) string {
+	return filepath.Join(base, "minecraft-go", "config.json")
+}
+
 func TestResolveConfigUsesDefaultMigration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -33,11 +37,12 @@ func TestResolveConfigUsesDefaultMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserConfigDir: %v", err)
 	}
+	legacyPath := legacyConfigPath(base)
 	currentPath := filepath.Join(base, "mornlea", "config.json")
-	current := config.Defaults()
-	current.Physics.Gravity = 24
-	if err := current.Save(currentPath); err != nil {
-		t.Fatalf("Save current config: %v", err)
+	legacy := config.Defaults()
+	legacy.Physics.Gravity = 24
+	if err := legacy.Save(legacyPath); err != nil {
+		t.Fatalf("Save legacy config: %v", err)
 	}
 
 	got, err := resolveConfig(options{})
@@ -48,7 +53,7 @@ func TestResolveConfigUsesDefaultMigration(t *testing.T) {
 		t.Fatalf("gravity = %v，want 24", got.Physics.Gravity)
 	}
 	if _, err := os.ReadFile(currentPath); err != nil {
-		t.Fatalf("读取当前默认配置: %v", err)
+		t.Fatalf("读取迁移后默认配置: %v", err)
 	}
 }
 

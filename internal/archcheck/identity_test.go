@@ -17,7 +17,11 @@ import (
 	"testing"
 )
 
-const modulePath = "github.com/channing771/mornlea"
+const (
+	modulePath                       = "github.com/channing771/mornlea"
+	expectedLegacyIdentityAllowances = 41
+	expectedLegacyIdentityMatches    = 45
+)
 
 var (
 	legacyDataDirectory  = identityToken("minecraft", "-go")
@@ -100,6 +104,8 @@ var legacyIdentityAllowances = []legacyIdentityAllowance{
 	{"internal/profile/profile_test.go", legacyDataDirectory, "TestLoadOrCreateDefaultRejectsTargetReplacedAfterPathValidation", 1},
 	{"internal/profile/profile_test.go", legacyDataDirectory, "TestLoadOrCreateDefaultRejectsSameInodeSymlinkInsertedBeforeOpen", 1},
 	{"internal/profile/profile_test.go", legacyDataDirectory, "TestLoadOrCreateDefaultLogsOnlySuccessfulMigrationPublisher", 3},
+	{"cmd/mornlea/run_test.go", legacyDataDirectory, "legacyDataPath", 1},
+	{"cmd/mornlea-server/main_test.go", legacyDataDirectory, "legacyConfigPath", 1},
 	{"internal/storage/backup.go", legacyBackupIdentity, "backupIdentityName", 1},
 	{"internal/storage/backup_test.go", legacyBackupIdentity, "TestWorldBackupCopiesCompleteWorldAndReusesMatchingBackup", 1},
 	{"internal/storage/backup_test.go", legacyBackupIdentity, "TestWorldBackupRejectsEveryMismatchedIdentityField", 1},
@@ -114,9 +120,30 @@ type sourceStringLiteral struct {
 	end   int
 }
 
+type goIdentityFile struct {
+	relative string
+	source   []byte
+	parsed   *ast.File
+}
+
+type goIdentityScanner struct {
+	fileSet  *token.FileSet
+	packages map[string][]goIdentityFile
+}
+
+func newGoIdentityScanner() *goIdentityScanner {
+	return &goIdentityScanner{
+		fileSet:  token.NewFileSet(),
+		packages: make(map[string][]goIdentityFile),
+	}
+}
+
 func TestMornleaCurrentIdentity(t *testing.T) {
 	if root := os.Getenv("MORNLEA_IDENTITY_TEST_ROOT"); root != "" {
-		scanCurrentIdentityRoot(t, root, "cmd", make([]int, len(legacyIdentityAllowances)))
+		actual := make([]int, len(legacyIdentityAllowances))
+		goScanner := newGoIdentityScanner()
+		scanCurrentIdentityRoot(t, root, "cmd", actual, goScanner)
+		goScanner.scanConstants(t, actual)
 		return
 	}
 
@@ -130,14 +157,24 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 	}
 
 	actual := make([]int, len(legacyIdentityAllowances))
+	goScanner := newGoIdentityScanner()
+	if len(legacyIdentityAllowances) != expectedLegacyIdentityAllowances {
+		t.Fatalf("旧数据身份 allowlist tuple 数 = %d，期望 %d", len(legacyIdentityAllowances), expectedLegacyIdentityAllowances)
+	}
+	expectedMatches := 0
 	for index, allowance := range legacyIdentityAllowances {
 		if allowance.expected <= 0 {
 			t.Fatalf("allowlist[%d] 的 expected 必须为正数", index)
 		}
+		expectedMatches += allowance.expected
+	}
+	if expectedMatches != expectedLegacyIdentityMatches {
+		t.Fatalf("旧数据身份 allowlist match 总数 = %d，期望 %d", expectedMatches, expectedLegacyIdentityMatches)
 	}
 	for _, relative := range currentIdentityRoots {
-		scanCurrentIdentityRoot(t, root, filepath.FromSlash(relative), actual)
+		scanCurrentIdentityRoot(t, root, filepath.FromSlash(relative), actual, goScanner)
 	}
+	goScanner.scanConstants(t, actual)
 	for index, allowance := range legacyIdentityAllowances {
 		if actual[index] != allowance.expected {
 			t.Errorf("旧数据身份 allowlist 计数错误：%s %s.%s = %d，期望 %d", allowance.path, allowance.literal, allowance.owner, actual[index], allowance.expected)
@@ -163,6 +200,11 @@ func testCurrentIdentityMutations(t *testing.T) {
 const artifact = "\x6d\x63\x67\x6f_mesh"
 `)
 		},
+		"escaped import": func(t *testing.T, root string) {
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "escaped_import.go"), `package sample
+import _ "github.com/channing771/minecraft\x2dgo/internal/core"
+`)
+		},
 		"binary expression": func(t *testing.T, root string) {
 			writeIdentityMutationFile(t, root, filepath.Join("cmd", "binary.go"), `package sample
 const artifact = "mc" + "go_mesh"
@@ -173,6 +215,14 @@ const artifact = "mc" + "go_mesh"
 const prefix = "mc"
 const identity = prefix + "go"
 const artifact = identity + "_mesh"
+`)
+		},
+		"cross-file constant identifier chain": func(t *testing.T, root string) {
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "prefix.go"), `package sample
+const prefix = "mc"
+`)
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "artifact.go"), `package sample
+const artifact = prefix + "go_mesh"
 `)
 		},
 		"invalid Go source": func(t *testing.T, root string) {
@@ -203,7 +253,7 @@ func writeIdentityMutationFile(t *testing.T, root, relative, source string) {
 	}
 }
 
-func scanCurrentIdentityRoot(t *testing.T, root, relative string, actual []int) {
+func scanCurrentIdentityRoot(t *testing.T, root, relative string, actual []int, goScanner *goIdentityScanner) {
 	t.Helper()
 	path := filepath.Join(root, relative)
 	scanCurrentIdentityPath(t, relative)
@@ -215,7 +265,7 @@ func scanCurrentIdentityRoot(t *testing.T, root, relative string, actual []int) 
 		return
 	}
 	if !info.IsDir() {
-		scanCurrentIdentityFile(t, root, path, actual)
+		scanCurrentIdentityFile(t, root, path, actual, goScanner)
 		return
 	}
 
@@ -240,7 +290,7 @@ func scanCurrentIdentityRoot(t *testing.T, root, relative string, actual []int) 
 			return nil
 		}
 		files++
-		scanCurrentIdentityFile(t, root, path, actual)
+		scanCurrentIdentityFile(t, root, path, actual, goScanner)
 		return nil
 	})
 	if err != nil {
@@ -263,7 +313,7 @@ func scanCurrentIdentityPath(t *testing.T, relative string) {
 	}
 }
 
-func scanCurrentIdentityFile(t *testing.T, root, path string, actual []int) {
+func scanCurrentIdentityFile(t *testing.T, root, path string, actual []int, goScanner *goIdentityScanner) {
 	t.Helper()
 	source, err := os.ReadFile(path)
 	if err != nil {
@@ -275,12 +325,18 @@ func scanCurrentIdentityFile(t *testing.T, root, path string, actual []int) {
 	}
 	relative = filepath.ToSlash(relative)
 	var (
-		fileSet  *token.FileSet
 		parsed   *ast.File
 		literals []sourceStringLiteral
 	)
 	if filepath.Ext(path) == ".go" {
-		fileSet, parsed, literals = parseSourceStringLiterals(t, path, source)
+		parsed, literals = parseSourceStringLiterals(t, goScanner.fileSet, path, source)
+		scanGoImports(t, relative, goScanner.fileSet, parsed)
+		key := filepath.Dir(relative) + "\x00" + parsed.Name.Name
+		goScanner.packages[key] = append(goScanner.packages[key], goIdentityFile{
+			relative: relative,
+			source:   source,
+			parsed:   parsed,
+		})
 	}
 
 	for _, forbidden := range forbiddenCurrentIdentity {
@@ -311,14 +367,10 @@ func scanCurrentIdentityFile(t *testing.T, root, path string, actual []int) {
 			t.Errorf("%s:%d 包含未获允许的旧身份 %q", relative, line, source[match[0]:match[1]])
 		}
 	}
-	if parsed != nil {
-		scanGoConstantIdentities(t, relative, source, fileSet, parsed, actual)
-	}
 }
 
-func parseSourceStringLiterals(t *testing.T, path string, source []byte) (*token.FileSet, *ast.File, []sourceStringLiteral) {
+func parseSourceStringLiterals(t *testing.T, fileSet *token.FileSet, path string, source []byte) (*ast.File, []sourceStringLiteral) {
 	t.Helper()
-	fileSet := token.NewFileSet()
 	parsed, err := parser.ParseFile(fileSet, path, source, 0)
 	if err != nil {
 		t.Fatalf("解析 %s: %v", path, err)
@@ -358,14 +410,41 @@ func parseSourceStringLiterals(t *testing.T, path string, source []byte) (*token
 			}
 		}
 	}
-	return fileSet, parsed, literals
+	return parsed, literals
 }
 
-func scanGoConstantIdentities(t *testing.T, relative string, source []byte, fileSet *token.FileSet, parsed *ast.File, actual []int) {
+func scanGoImports(t *testing.T, relative string, fileSet *token.FileSet, parsed *ast.File) {
 	t.Helper()
-	typeInfo := &types.Info{Types: make(map[ast.Expr]types.TypeAndValue)}
-	configuration := types.Config{Error: func(error) {}}
-	_, _ = configuration.Check(parsed.Name.Name, fileSet, []*ast.File{parsed}, typeInfo)
+	for _, specification := range parsed.Imports {
+		path, err := strconv.Unquote(specification.Path.Value)
+		if err != nil {
+			t.Fatalf("解析 %s import path: %v", relative, err)
+		}
+		if containsLegacyIdentity(path) {
+			t.Errorf("%s:%d 的 import path 包含未获允许的旧身份 %q", relative, fileSet.Position(specification.Path.Pos()).Line, path)
+		}
+	}
+}
+
+func (scanner *goIdentityScanner) scanConstants(t *testing.T, actual []int) {
+	t.Helper()
+	for _, files := range scanner.packages {
+		parsed := make([]*ast.File, 0, len(files))
+		for _, file := range files {
+			parsed = append(parsed, file.parsed)
+		}
+		typeInfo := &types.Info{Types: make(map[ast.Expr]types.TypeAndValue)}
+		configuration := types.Config{Error: func(error) {}}
+		_, _ = configuration.Check(parsed[0].Name.Name, scanner.fileSet, parsed, typeInfo)
+		for _, file := range files {
+			scanGoConstantIdentities(t, file, scanner.fileSet, typeInfo, actual)
+		}
+	}
+}
+
+func scanGoConstantIdentities(t *testing.T, file goIdentityFile, fileSet *token.FileSet, typeInfo *types.Info, actual []int) {
+	t.Helper()
+	relative, source, parsed := file.relative, file.source, file.parsed
 	definitionExpressions := make(map[ast.Expr]bool)
 	ast.Inspect(parsed, func(node ast.Node) bool {
 		value, ok := node.(*ast.ValueSpec)

@@ -406,7 +406,7 @@ export function stopFailures(paths, execute = run, environment = process.env) {
     }
   }
 
-  if (needsIdentityValidation) {
+  if (needsIdentityValidation && goFiles.length === 0) {
     const identity = execute(
       "go",
       ["test", "./internal/archcheck", "-run", "^TestMornleaCurrentIdentity$", "-count=1"],
