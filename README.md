@@ -1,10 +1,10 @@
-# minecraft-go
+# Mornlea
 
-`minecraft-go` 是一个使用 Go 编写的独立体素游戏实验项目。项目自研客户端、权威服务端、世界存储和 WebGPU 渲染管线，不追求兼容官方 Minecraft 的协议、存档或资源。
+`Mornlea` 是一个使用 Go 编写的独立体素游戏实验项目。项目自研客户端、权威服务端、世界存储和 WebGPU 渲染管线，不追求兼容官方 Minecraft 的协议、存档或资源。
 
 项目仍处于早期开发阶段。目前已经具备程序化地形、GPU 地形渲染、玩家移动与碰撞、客户端预测、方块挖掘与放置、内置权威服务端、世界持久化、有界二进制协议、TCP 直连、无图形专用服务端以及稳定玩家状态存档；已完成的 M3 多人里程碑支持最多八名玩家通过局域网专用服务端同步移动、角色和 Unicode 昵称；M4A–M4D 依次增加权威快捷栏、持久掉落物、36 格背包与固定石砖配方；M4E 新增煤矿、铁矿、共享权威熔炉、铁锭与铁块资源链；M4F 新增服务端权威的按住采掘、石镐、铁镐与五条固定配方；M4J 为石镐和铁镐加入权威耐久、损坏形态及跨 TCP/存档的耐久保真；M4K 新增由区块拥有的固定容量共享箱子（每区块 16 个、每箱 27 格），把熔炉与箱子的查看生命周期收敛为共用实现，统一容器界面扩展为 `0..62`，并把线上协议升级到 v12、区块存档升级到 schema v6；M4L 新增由服务端唯一权威、跨重连与重启保真的生命值（满值 20），实现摔落伤害、未受伤自动回复与死亡时的背包掉落和重生结算，并把线上协议升级到 v13、玩家存档升级到 schema v5；M4M 增加由服务端权威推进的昼夜和客户端派生的传播天空光；M4N 增加客户端派生的静态方块光和发光块；当前 M4O 以协议 v15、玩家 schema v6、区块 schema v8、metadata v2 交付 14 种常见块状材料、缺失玩家一次性材料包、世界坐标 terrain UV、玻璃/树叶单 pass alpha cutout 和无窗口材料展示。
 
-当前 M4P 仅把 mesh/light 生产实现迁移到固定 Rust 1.97.1 的 `cdylib`；Go 仍拥有其余应用、世界、规则、网络、存储和渲染逻辑。
+当前 M4Q 以合并的统一基线为基础，继承 M4P 把 mesh/light 生产实现迁移到固定 Rust 1.97.1 `cdylib` 的成果，以及主线的程序化方块云；Go 仍拥有其余应用、世界、规则、网络、存储和渲染逻辑。
 
 ## 环境要求
 
@@ -22,9 +22,11 @@ xcode-select --install
 
 ## 快速开始
 
+源码合并且 operator 完成外部仓库改名后，可按最终身份克隆：
+
 ```bash
-git clone https://github.com/channing771/minecraft-go.git
-cd minecraft-go
+git clone https://github.com/channing771/mornlea.git
+cd mornlea
 make run
 ```
 
@@ -40,10 +42,10 @@ make run ARGS="--world worlds/demo"
 
 ```bash
 make build
-./bin/mcgo --world worlds/default
+./bin/mornlea --world worlds/default
 ```
 
-`make build` 会生成必须同目录使用的 `bin/mcgo` 与 `bin/libmcgo_mesh.dylib`。
+`make build` 会生成 `bin/mornlea`、`bin/mornlea-server` 与必须同目录使用的 `bin/libmornlea_mesh.dylib`。
 
 ## 常用命令
 
@@ -51,7 +53,7 @@ make build
 | --- | --- |
 | `make help` | 显示 Makefile 帮助，也是默认目标 |
 | `make run` | 运行客户端，可使用 `ARGS` 传递命令行参数 |
-| `make build` | 构建 `bin/mcgo` 与同目录 `bin/libmcgo_mesh.dylib` |
+| `make build` | 构建 `bin/mornlea`、`bin/mornlea-server` 与同目录 `bin/libmornlea_mesh.dylib` |
 | `make test` | 运行全部 Go 测试 |
 | `make test-race` | 使用 race detector 运行全部 Go 测试 |
 | `make rust-check` | 运行 Rust 格式、clippy 与 workspace 单测 |
@@ -123,13 +125,13 @@ make build
 专用服务端、两个客户端的人工验收命令、身份语义、断线/关服存档行为与安全边界见[局域网专用服务端指南](docs/notes/lan-server.md)。最简启动方式：
 
 ```bash
-go run ./cmd/mcgod --listen :25565 --world worlds/lan --seed 42 --max-players 8
-go run ./cmd/mcgo --connect 127.0.0.1:25565 --name 玩家甲
+go run ./cmd/mornlea-server --listen :25565 --world worlds/lan --seed 42 --max-players 8
+go run ./cmd/mornlea --connect 127.0.0.1:25565 --name 玩家甲
 ```
 
 ## 配置文件与调试面板
 
-`mcgo`/`mcgod` 启动时读取同一份 JSON 配置文件，默认路径 `os.UserConfigDir()/minecraft-go/config.json`（与 `profile.json` 同目录），可用 `--config <path>` 覆盖。文件不存在时全部使用编译默认值，**不会自动创建文件**；字段缺失取默认值，越界值被钳制并 `slog.Warn`，未知字段被忽略，JSON 语法错误或不认识的 `version` 会导致启动失败。
+`mornlea`/`mornlea-server` 启动时读取同一份 JSON 配置文件，默认路径 `os.UserConfigDir()/mornlea/config.json`（与 `profile.json` 同目录），可用 `--config <path>` 覆盖。文件不存在时全部使用编译默认值，**不会自动创建文件**；字段缺失取默认值，越界值被钳制并 `slog.Warn`，未知字段被忽略，JSON 语法错误或不认识的 `version` 会导致启动失败。旧默认目录的迁移规则见[改名迁移说明](docs/notes/mornlea-migration.md)。
 
 配置分四组：
 
@@ -140,24 +142,24 @@ go run ./cmd/mcgo --connect 127.0.0.1:25565 --name 玩家甲
 | `sim` | 交互距离、掉落物寿命与拾取延迟、生命回复间隔、出生半径、熔炉冶炼/燃烧 tick 等权威模拟常量 |
 | `render` | `viewDistance`（重启生效，仅配置文件可改）、`fovDegrees`、`mouseSensitivity` |
 
-**`mouseSensitivity` 是无量纲倍率**，默认 `1`，区间 `[0.1, 5]`；实际弧度/像素系数是代码内基线常量 `baseMouseSensitivity = 0.002`（`cmd/mcgo/main.go`），运行时灵敏度 = 该基线 × 配置里的倍率。
+**`mouseSensitivity` 是无量纲倍率**，默认 `1`，区间 `[0.1, 5]`；实际弧度/像素系数是代码内基线常量 `baseMouseSensitivity = 0.002`（`cmd/mornlea/main.go`），运行时灵敏度 = 该基线 × 配置里的倍率。
 
 `--dev` 只控制游戏内调试面板是否可用，**不控制配置文件是否生效**：配置文件里调过的值无论是否加 `--dev` 都会生效；不加 `--dev` 时只是看不到、也改不了面板。
 
 加 `--dev` 后按 `F3` 切换面板显隐，面板按分组显示段头（如 `── physics ──`）加裸字段名（如 `gravity`，而非 `physics.gravity`）；方向键选行/步进，`Shift` 粗调 ×10，`Alt` 细调 ×0.1，`Enter` 重置当前行，`F5` 保存到配置文件，`F6` 全部重置。联机（`--connect`）时 `physics`/`sim` 两组灰显只读并标注服务端控制，`render` 组仍可写；`viewDistance` 无论是否联机都只读，只能通过配置文件调整并重启生效。
 
-`mcgod` 复用同一份配置文件的 `physics`/`sim`/`logging` 三组（不含 `render`，专用服务端没有图形）。
+`mornlea-server` 复用同一份配置文件的 `physics`/`sim`/`logging` 三组（不含 `render`，专用服务端没有图形）。
 
-**联机时本机配置文件里的 `physics`/`sim` 必须与服务端所用的一致**，否则客户端预测会与权威模拟持续分歧（位置回弹）。面板在联机时锁住这两组，但配置文件不受该锁约束——它始终生效。局域网下让 `mcgo` 与 `mcgod` 读同一份配置文件即可满足这条要求；`mcgo` 检测到"`--connect` + 这两组偏离默认值"时会打印一条 `slog.Warn` 提醒。
+**联机时本机配置文件里的 `physics`/`sim` 必须与服务端所用的一致**，否则客户端预测会与权威模拟持续分歧（位置回弹）。面板在联机时锁住这两组，但配置文件不受该锁约束——它始终生效。局域网下让 `mornlea` 与 `mornlea-server` 读同一份配置文件即可满足这条要求；`mornlea` 检测到"`--connect` + 这两组偏离默认值"时会打印一条 `slog.Warn` 提醒。
 
 ## 视觉验证
 
-`--capture <目录>` 让 `mcgo` 走无头 offscreen 路径，依次跑完 `cmd/mcgo/capture.go` 里表驱动的固定场景（`terrain-noon`、`hud-hotbar-health`、`avatar-nametag`、`inventory-crafting`、`debug-panel`、`skylight-tunnel`、`block-light-room`、`materials-showcase`），把每张 640×360 PNG 与 `cmd/mcgo/testdata/golden/` 下的基线比对。比对用双阈值（单像素最大通道差、差异像素占比，定义见 `cmd/mcgo/visual_compare.go`），两项都在阈值内才算通过；具体数值与实测漂移分布见[视觉验证设计文档](docs/superpowers/specs/2026-08-07-visual-verification-design.md) §6。
+`--capture <目录>` 让 `mornlea` 走无头 offscreen 路径，依次跑完 `cmd/mornlea/capture.go` 里表驱动的固定场景（`terrain-noon`、`hud-hotbar-health`、`avatar-nametag`、`inventory-crafting`、`debug-panel`、`skylight-tunnel`、`block-light-room`、`materials-showcase`），把每张 640×360 PNG 与 `cmd/mornlea/testdata/golden/` 下的基线比对。比对用双阈值（单像素最大通道差、差异像素占比，定义见 `cmd/mornlea/visual_compare.go`），两项都在阈值内才算通过；具体数值与实测漂移分布见[视觉验证设计文档](docs/superpowers/specs/2026-08-07-visual-verification-design.md) §6。
 
 ```bash
 make visual-check              # 抓帧并与基线比对，输出目录默认 build/visual
 VISUAL_OUT=/tmp/shots make visual-check   # 自定义输出目录
-make visual-update             # 重新生成基线，写入 cmd/mcgo/testdata/golden/
+make visual-update             # 重新生成基线，写入 cmd/mornlea/testdata/golden/
 ```
 
 比对失败时，实拍图与差异图（差异像素涂红，其余像素按基线压暗）会写进输出目录的 `<场景>-actual.png` 与 `<场景>-diff.png`，供人眼定位问题区域。
@@ -171,8 +173,8 @@ make visual-update             # 重新生成基线，写入 cmd/mcgo/testdata/g
 ```text
 .
 ├── cmd/
-│   ├── mcgo/          游戏客户端与内置服务端装配
-│   ├── mcgod/         无图形 TCP 专用服务端
+│   ├── mornlea/       游戏客户端与内置服务端装配
+│   ├── mornlea-server/ 无图形 TCP 专用服务端
 │   ├── gfxspike/      WebGPU 地形渲染验证程序
 │   └── perfcheck/     性能报告比较工具
 ├── internal/

@@ -135,7 +135,7 @@ Claude Code 与 Codex 使用同一个实现：`scripts/agent-hooks/guard.mjs`。
 - Codex：打开 `/hooks`，检查来源和命令后信任当前 `.codex/hooks.json`；文件内容变化后需要重新审查。
 - Claude Code：打开 `/hooks`，确认 Project 来源的三类 Hook 已加载。
 
-只有用户明确批准某次无 Spec 例外时，才能在启动 AI 工具前设置 `MINECRAFT_GO_HOOKS_ALLOW_NO_SPEC=1`。该变量只跳过 OpenSpec change 要求，不会关闭破坏性命令或质量检查。
+只有用户明确批准某次无 Spec 例外时，才能在启动 AI 工具前设置 `MORNLEA_HOOKS_ALLOW_NO_SPEC=1`。该变量只跳过 OpenSpec change 要求，不会关闭破坏性命令或质量检查。
 
 修改 Hook 策略后运行：
 

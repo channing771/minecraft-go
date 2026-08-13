@@ -177,7 +177,7 @@ git commit -m "refactor: 切换 Mornlea 项目身份"
 
 ## 8. 当前文档与迁移说明
 
-- [ ] 8.1 修改 `README.md`、`AGENTS.md`、`CLAUDE.md`、`openspec/config.yaml`、`docs/openspec.md`、`docs/notes/lan-server.md`，创建 `docs/notes/mornlea-migration.md`，并只随本项更新本 `tasks.md`；统一当前产品/module/命令/artifact/路径/Hook 身份，保持 `AGENTS.md` 与 `CLAUDE.md` 相同，以单一迁移说明记录新旧映射、只复制不删除、回退单向性和历史资料边界，不改 `docs/superpowers/**`、归档 OpenSpec 或历史性能证据。Ignored report：`.superpowers/sdd/2026-08-12-m4q-mornlea-project-rename/task-8-report.md`。
+- [x] 8.1 修改 `README.md`、`AGENTS.md`、`CLAUDE.md`、`openspec/config.yaml`、`docs/openspec.md`、`docs/notes/lan-server.md`，创建 `docs/notes/mornlea-migration.md`，并只随本项更新本 `tasks.md`；统一当前产品/module/命令/artifact/路径/Hook 身份，保持 `AGENTS.md` 与 `CLAUDE.md` 相同，以单一迁移说明记录新旧映射、只复制不删除、回退单向性和历史资料边界，不改 `docs/superpowers/**`、归档 OpenSpec 或历史性能证据。Ignored report：`.superpowers/sdd/2026-08-12-m4q-mornlea-project-rename/task-8-report.md`。
 
 Focused commands（按顺序直接运行）：
 
