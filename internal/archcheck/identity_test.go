@@ -2,16 +2,22 @@ package archcheck_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"go/ast"
+	"go/build"
 	"go/constant"
+	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -114,10 +120,11 @@ var legacyIdentityAllowances = []legacyIdentityAllowance{
 }
 
 type sourceStringLiteral struct {
-	value string
-	owner string
-	start int
-	end   int
+	value     string
+	owner     string
+	start     int
+	end       int
+	canonical bool
 }
 
 type goIdentityFile struct {
@@ -127,23 +134,27 @@ type goIdentityFile struct {
 }
 
 type goIdentityScanner struct {
-	fileSet  *token.FileSet
-	packages map[string][]goIdentityFile
+	root        string
+	fileSet     *token.FileSet
+	files       map[string]goIdentityFile
+	directories map[string]bool
 }
 
-func newGoIdentityScanner() *goIdentityScanner {
+func newGoIdentityScanner(root string) *goIdentityScanner {
 	return &goIdentityScanner{
-		fileSet:  token.NewFileSet(),
-		packages: make(map[string][]goIdentityFile),
+		root:        root,
+		fileSet:     token.NewFileSet(),
+		files:       make(map[string]goIdentityFile),
+		directories: make(map[string]bool),
 	}
 }
 
 func TestMornleaCurrentIdentity(t *testing.T) {
 	if root := os.Getenv("MORNLEA_IDENTITY_TEST_ROOT"); root != "" {
 		actual := make([]int, len(legacyIdentityAllowances))
-		goScanner := newGoIdentityScanner()
+		goScanner := newGoIdentityScanner(root)
 		scanCurrentIdentityRoot(t, root, "cmd", actual, goScanner)
-		goScanner.scanConstants(t, actual)
+		goScanner.scanConstants(t)
 		return
 	}
 
@@ -157,7 +168,7 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 	}
 
 	actual := make([]int, len(legacyIdentityAllowances))
-	goScanner := newGoIdentityScanner()
+	goScanner := newGoIdentityScanner(root)
 	if len(legacyIdentityAllowances) != expectedLegacyIdentityAllowances {
 		t.Fatalf("旧数据身份 allowlist tuple 数 = %d，期望 %d", len(legacyIdentityAllowances), expectedLegacyIdentityAllowances)
 	}
@@ -174,7 +185,7 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 	for _, relative := range currentIdentityRoots {
 		scanCurrentIdentityRoot(t, root, filepath.FromSlash(relative), actual, goScanner)
 	}
-	goScanner.scanConstants(t, actual)
+	goScanner.scanConstants(t)
 	for index, allowance := range legacyIdentityAllowances {
 		if actual[index] != allowance.expected {
 			t.Errorf("旧数据身份 allowlist 计数错误：%s %s.%s = %d，期望 %d", allowance.path, allowance.literal, allowance.owner, actual[index], allowance.expected)
@@ -185,6 +196,13 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 
 func testCurrentIdentityMutations(t *testing.T) {
 	t.Helper()
+	expectedOutput := map[string]string{
+		"cross-package selector constant chain": "常量值包含未获允许",
+		"build constrained constant chain":      "常量值包含未获允许",
+		"unresolved import":                     "类型检查",
+		"unresolved identifier":                 "类型检查",
+		"escaped allowlisted owner":             "常量值包含未获允许",
+	}
 	mutations := map[string]func(*testing.T, string){
 		"command path": func(t *testing.T, root string) {
 			writeIdentityMutationFile(t, root, filepath.Join("cmd", identityToken("mc", "go"), "main.go"), "package main\n")
@@ -225,6 +243,46 @@ const prefix = "mc"
 const artifact = prefix + "go_mesh"
 `)
 		},
+		"cross-package selector constant chain": func(t *testing.T, root string) {
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "helper", "pieces.go"), `package helper
+const Prefix = "mc"
+const Suffix = "go_mesh"
+`)
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "consumer", "main.go"), `package consumer
+import "github.com/channing771/mornlea/cmd/helper"
+const artifact = helper.Prefix + helper.Suffix
+`)
+		},
+		"build constrained constant chain": func(t *testing.T, root string) {
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "mornlea-server", "platform_darwin.go"), `//go:build darwin
+
+package platform
+const platformPrefix = "safe"
+`)
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "mornlea-server", "platform_linux.go"), `//go:build linux
+
+package platform
+const platformPrefix = "mc"
+`)
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "mornlea-server", "artifact.go"), `package platform
+const artifact = platformPrefix + "go_mesh"
+`)
+		},
+		"unresolved import": func(t *testing.T, root string) {
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "unresolved.go"), `package sample
+import _ "example.invalid/missing"
+`)
+		},
+		"unresolved identifier": func(t *testing.T, root string) {
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "unresolved.go"), `package sample
+const artifact = missingIdentityPiece
+`)
+		},
+		"escaped allowlisted owner": func(t *testing.T, root string) {
+			writeIdentityMutationFile(t, root, filepath.Join("cmd", "mornlea", "run_test.go"), `package main
+func legacyDataPath() string { return "minecraft\x2dgo" }
+`)
+		},
 		"invalid Go source": func(t *testing.T, root string) {
 			writeIdentityMutationFile(t, root, filepath.Join("cmd", "invalid.go"), "package sample\nfunc (")
 		},
@@ -235,8 +293,11 @@ const artifact = prefix + "go_mesh"
 			setup(t, root)
 			command := exec.Command(os.Args[0], "-test.run=^TestMornleaCurrentIdentity$")
 			command.Env = append(os.Environ(), "MORNLEA_IDENTITY_TEST_ROOT="+root)
-			if output, err := command.CombinedOutput(); err == nil {
+			output, err := command.CombinedOutput()
+			if err == nil {
 				t.Errorf("identity guard 接受了 mutation\n%s", output)
+			} else if want := expectedOutput[name]; want != "" && !bytes.Contains(output, []byte(want)) {
+				t.Errorf("identity guard 以错误原因拒绝 mutation，输出缺少 %q\n%s", want, output)
 			}
 		})
 	}
@@ -331,12 +392,12 @@ func scanCurrentIdentityFile(t *testing.T, root, path string, actual []int, goSc
 	if filepath.Ext(path) == ".go" {
 		parsed, literals = parseSourceStringLiterals(t, goScanner.fileSet, path, source)
 		scanGoImports(t, relative, goScanner.fileSet, parsed)
-		key := filepath.Dir(relative) + "\x00" + parsed.Name.Name
-		goScanner.packages[key] = append(goScanner.packages[key], goIdentityFile{
+		goScanner.files[relative] = goIdentityFile{
 			relative: relative,
 			source:   source,
 			parsed:   parsed,
-		})
+		}
+		goScanner.directories[filepath.Dir(relative)] = true
 	}
 
 	for _, forbidden := range forbiddenCurrentIdentity {
@@ -352,7 +413,7 @@ func scanCurrentIdentityFile(t *testing.T, root, path string, actual []int, goSc
 				continue
 			}
 			for _, literal := range literals {
-				if literal.value == allowance.literal && literal.owner == allowance.owner && match[0] >= literal.start && match[1] <= literal.end {
+				if literal.canonical && literal.value == allowance.literal && literal.owner == allowance.owner && match[0] >= literal.start && match[1] <= literal.end {
 					actual[index]++
 					consumed = true
 					break
@@ -388,10 +449,11 @@ func parseSourceStringLiterals(t *testing.T, fileSet *token.FileSet, path string
 				t.Fatalf("解析 %s 字符串 literal: %v", path, err)
 			}
 			literals = append(literals, sourceStringLiteral{
-				value: value,
-				owner: owner,
-				start: tokenFile.Offset(literal.Pos()),
-				end:   tokenFile.Offset(literal.End()),
+				value:     value,
+				owner:     owner,
+				start:     tokenFile.Offset(literal.Pos()),
+				end:       tokenFile.Offset(literal.End()),
+				canonical: literal.Value == strconv.Quote(value),
 			})
 			return true
 		})
@@ -426,23 +488,317 @@ func scanGoImports(t *testing.T, relative string, fileSet *token.FileSet, parsed
 	}
 }
 
-func (scanner *goIdentityScanner) scanConstants(t *testing.T, actual []int) {
-	t.Helper()
-	for _, files := range scanner.packages {
-		parsed := make([]*ast.File, 0, len(files))
-		for _, file := range files {
-			parsed = append(parsed, file.parsed)
+type identityBuild struct {
+	name      string
+	context   build.Context
+	root      string
+	fullRoots bool
+}
+
+func supportedIdentityBuilds() []identityBuild {
+	darwin := build.Default
+	darwin.GOOS = "darwin"
+	darwin.CgoEnabled = true
+	linux := build.Default
+	linux.GOOS = "linux"
+	linux.CgoEnabled = false
+	return []identityBuild{
+		{name: "darwin-cgo", context: darwin, fullRoots: true},
+		{name: "linux-server", context: linux, root: "cmd/mornlea-server"},
+	}
+}
+
+func (scanner *goIdentityScanner) buildDirectories(target identityBuild) ([]string, error) {
+	if target.fullRoots {
+		directories := make([]string, 0, len(scanner.directories))
+		for directory := range scanner.directories {
+			directories = append(directories, directory)
 		}
-		typeInfo := &types.Info{Types: make(map[ast.Expr]types.TypeAndValue)}
-		configuration := types.Config{Error: func(error) {}}
-		_, _ = configuration.Check(parsed[0].Name.Name, scanner.fileSet, parsed, typeInfo)
+		sort.Strings(directories)
+		return directories, nil
+	}
+	if !scanner.directories[target.root] {
+		return nil, nil
+	}
+	selected := map[string]bool{target.root: true}
+	queue := []string{target.root}
+	for len(queue) > 0 {
+		directory := queue[0]
+		queue = queue[1:]
+		files, err := scanner.matchingFiles(&target.context, directory, target.fullRoots)
+		if err != nil {
+			return nil, err
+		}
 		for _, file := range files {
-			scanGoConstantIdentities(t, file, scanner.fileSet, typeInfo, actual)
+			for _, specification := range file.parsed.Imports {
+				path, err := strconv.Unquote(specification.Path.Value)
+				if err != nil {
+					return nil, fmt.Errorf("解析 %s import path: %w", file.relative, err)
+				}
+				if path != modulePath && !strings.HasPrefix(path, modulePath+"/") {
+					continue
+				}
+				dependency := strings.TrimPrefix(strings.TrimPrefix(path, modulePath), "/")
+				if dependency == "" {
+					dependency = "."
+				}
+				if scanner.directories[dependency] && !selected[dependency] {
+					selected[dependency] = true
+					queue = append(queue, dependency)
+				}
+			}
+		}
+	}
+	directories := make([]string, 0, len(selected))
+	for directory := range selected {
+		directories = append(directories, directory)
+	}
+	sort.Strings(directories)
+	return directories, nil
+}
+
+func (scanner *goIdentityScanner) matchingFiles(context *build.Context, directory string, includeTests bool) ([]goIdentityFile, error) {
+	var files []goIdentityFile
+	for _, file := range scanner.files {
+		if filepath.Dir(file.relative) != directory || !includeTests && strings.HasSuffix(file.relative, "_test.go") {
+			continue
+		}
+		matched, err := context.MatchFile(filepath.Join(scanner.root, filepath.FromSlash(directory)), filepath.Base(file.relative))
+		if err != nil {
+			return nil, fmt.Errorf("匹配 %s 的 build constraints: %w", file.relative, err)
+		}
+		if matched {
+			files = append(files, file)
+		}
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].relative < files[j].relative })
+	return files, nil
+}
+
+func (scanner *goIdentityScanner) externalImporter(context *build.Context, directories []string, includeTests bool) (types.Importer, error) {
+	imports := make(map[string]bool)
+	for _, directory := range directories {
+		files, err := scanner.matchingFiles(context, directory, includeTests)
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range files {
+			for _, specification := range file.parsed.Imports {
+				path, err := strconv.Unquote(specification.Path.Value)
+				if err != nil {
+					return nil, fmt.Errorf("解析 %s import path: %w", file.relative, err)
+				}
+				if path != "C" && path != modulePath && !strings.HasPrefix(path, modulePath+"/") {
+					imports[path] = true
+				}
+			}
+		}
+	}
+	paths := make([]string, 0, len(imports))
+	for path := range imports {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		return importer.ForCompiler(scanner.fileSet, "gc", func(path string) (io.ReadCloser, error) {
+			return nil, fmt.Errorf("构建集合没有外部 import，却请求了 %s", path)
+		}), nil
+	}
+
+	arguments := append([]string{"list", "-e", "-export", "-deps", "-json"}, paths...)
+	command := exec.Command("go", arguments...)
+	command.Dir = scanner.root
+	command.Env = append(os.Environ(),
+		"GOOS="+context.GOOS,
+		"GOARCH="+context.GOARCH,
+		fmt.Sprintf("CGO_ENABLED=%d", boolInt(context.CgoEnabled)),
+		"GOWORK=off",
+		"GOPROXY=off",
+	)
+	output, err := command.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list 外部类型导出数据: %w", err)
+	}
+	type listedPackage struct {
+		ImportPath string
+		Export     string
+		Error      *struct{ Err string }
+	}
+	exports := make(map[string]string)
+	failures := make(map[string]string)
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	for {
+		var listed listedPackage
+		if err := decoder.Decode(&listed); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("解析 go list 外部类型导出数据: %w", err)
+		}
+		if listed.Export != "" {
+			exports[listed.ImportPath] = listed.Export
+		}
+		if listed.Error != nil {
+			failures[listed.ImportPath] = listed.Error.Err
+		}
+	}
+	lookup := func(path string) (io.ReadCloser, error) {
+		if failure := failures[path]; failure != "" {
+			return nil, fmt.Errorf("解析 %s: %s", path, failure)
+		}
+		if export := exports[path]; export != "" {
+			file, err := os.Open(export)
+			if err != nil {
+				return nil, fmt.Errorf("打开 %s 的导出数据: %w", path, err)
+			}
+			return file, nil
+		}
+		return nil, fmt.Errorf("go list 未提供 %s 的导出数据", path)
+	}
+	return importer.ForCompiler(scanner.fileSet, "gc", lookup), nil
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+type identitySourceImporter struct {
+	scanner  *goIdentityScanner
+	context  *build.Context
+	external types.Importer
+	packages map[string]*types.Package
+	loading  map[string]bool
+}
+
+func newIdentitySourceImporter(scanner *goIdentityScanner, context *build.Context, external types.Importer) *identitySourceImporter {
+	return &identitySourceImporter{
+		scanner:  scanner,
+		context:  context,
+		external: external,
+		packages: make(map[string]*types.Package),
+		loading:  make(map[string]bool),
+	}
+}
+
+func (sourceImporter *identitySourceImporter) Import(path string) (*types.Package, error) {
+	return sourceImporter.ImportFrom(path, "", 0)
+}
+
+func (sourceImporter *identitySourceImporter) ImportFrom(path, directory string, mode types.ImportMode) (*types.Package, error) {
+	if path != modulePath && !strings.HasPrefix(path, modulePath+"/") {
+		if importerFrom, ok := sourceImporter.external.(types.ImporterFrom); ok {
+			return importerFrom.ImportFrom(path, directory, mode)
+		}
+		return sourceImporter.external.Import(path)
+	}
+	if loaded := sourceImporter.packages[path]; loaded != nil {
+		return loaded, nil
+	}
+	if sourceImporter.loading[path] {
+		return nil, fmt.Errorf("本模块 import cycle: %s", path)
+	}
+	relative := strings.TrimPrefix(path, modulePath)
+	relative = strings.TrimPrefix(relative, "/")
+	if relative == "" {
+		relative = "."
+	}
+	files, err := sourceImporter.scanner.matchingFiles(sourceImporter.context, relative, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("本模块 package %s 在 %s/%s 没有匹配的生产 Go 文件", path, sourceImporter.context.GOOS, sourceImporter.context.GOARCH)
+	}
+	packageName := files[0].parsed.Name.Name
+	parsed := make([]*ast.File, 0, len(files))
+	for _, file := range files {
+		if file.parsed.Name.Name != packageName {
+			return nil, fmt.Errorf("本模块 package %s 同时声明 %s 和 %s", path, packageName, file.parsed.Name.Name)
+		}
+		parsed = append(parsed, file.parsed)
+	}
+	sourceImporter.loading[path] = true
+	defer delete(sourceImporter.loading, path)
+	configuration := types.Config{
+		Importer:    sourceImporter,
+		FakeImportC: true,
+		GoVersion:   "go1.26",
+	}
+	loaded, err := configuration.Check(path, sourceImporter.scanner.fileSet, parsed, nil)
+	if err != nil {
+		return nil, fmt.Errorf("类型检查 %s: %w", path, err)
+	}
+	sourceImporter.packages[path] = loaded
+	return loaded, nil
+}
+
+func (scanner *goIdentityScanner) scanConstants(t *testing.T) {
+	t.Helper()
+	for _, target := range supportedIdentityBuilds() {
+		directories, err := scanner.buildDirectories(target)
+		if err != nil {
+			t.Fatalf("准备 %s identity package 集合: %v", target.name, err)
+		}
+		if len(directories) == 0 {
+			continue
+		}
+		external, err := scanner.externalImporter(&target.context, directories, target.fullRoots)
+		if err != nil {
+			t.Fatalf("准备 %s identity importer: %v", target.name, err)
+		}
+		for _, directory := range directories {
+			sourceImporter := newIdentitySourceImporter(scanner, &target.context, external)
+			files, err := scanner.matchingFiles(&target.context, directory, target.fullRoots)
+			if err != nil {
+				t.Fatalf("准备 %s/%s identity 文件: %v", target.name, directory, err)
+			}
+			packages := make(map[string][]goIdentityFile)
+			for _, file := range files {
+				packages[file.parsed.Name.Name] = append(packages[file.parsed.Name.Name], file)
+			}
+			packageNames := make([]string, 0, len(packages))
+			for packageName := range packages {
+				packageNames = append(packageNames, packageName)
+			}
+			sort.Strings(packageNames)
+			for _, packageName := range packageNames {
+				files := packages[packageName]
+				parsed := make([]*ast.File, 0, len(files))
+				for _, file := range files {
+					parsed = append(parsed, file.parsed)
+				}
+				typeInfo := &types.Info{Types: make(map[ast.Expr]types.TypeAndValue)}
+				packagePath := modulePath
+				if directory != "." {
+					packagePath += "/" + filepath.ToSlash(directory)
+				}
+				if strings.HasSuffix(packageName, "_test") {
+					packagePath += "_test"
+				}
+				configuration := types.Config{
+					Importer:    sourceImporter,
+					FakeImportC: true,
+					GoVersion:   "go1.26",
+				}
+				checked, err := configuration.Check(packagePath, scanner.fileSet, parsed, typeInfo)
+				if err != nil {
+					t.Fatalf("%s 类型检查 %s (%s): %v", target.name, directory, packageName, err)
+				}
+				if !strings.HasSuffix(packageName, "_test") {
+					sourceImporter.packages[packagePath] = checked
+				}
+				for _, file := range files {
+					scanGoConstantIdentities(t, file, scanner.fileSet, typeInfo)
+				}
+			}
 		}
 	}
 }
 
-func scanGoConstantIdentities(t *testing.T, file goIdentityFile, fileSet *token.FileSet, typeInfo *types.Info, actual []int) {
+func scanGoConstantIdentities(t *testing.T, file goIdentityFile, fileSet *token.FileSet, typeInfo *types.Info) {
 	t.Helper()
 	relative, source, parsed := file.relative, file.source, file.parsed
 	definitionExpressions := make(map[ast.Expr]bool)
@@ -479,14 +835,6 @@ func scanGoConstantIdentities(t *testing.T, file goIdentityFile, fileSet *token.
 			}
 			if _, isIdentifier := expression.(*ast.Ident); isIdentifier && !definitionExpressions[expression] {
 				return true
-			}
-			if literal, ok := expression.(*ast.BasicLit); ok && literal.Kind == token.STRING {
-				for index, allowance := range legacyIdentityAllowances {
-					if allowance.path == relative && allowance.literal == value && allowance.owner == owner {
-						actual[index]++
-						return true
-					}
-				}
 			}
 			t.Errorf("%s:%d 的常量值包含未获允许的旧身份 %q", relative, fileSet.Position(expression.Pos()).Line, value)
 			return true
