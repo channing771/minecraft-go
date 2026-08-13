@@ -30,6 +30,7 @@ type Camera struct {
 	ViewProj    mgl32.Mat4
 	ViewProjInv mgl32.Mat4
 	Pos         mgl32.Vec3
+	CloudOffset CloudOffset
 	// Daylight 是本帧的固定昼夜亮度，SkyColor 是对应的天空背景色，
 	// 两者都来自同一个 DayNightAt 相位。
 	SunDirection   [3]float32
@@ -96,7 +97,7 @@ type Renderer struct {
 	visibleSections   []core.SectionPos
 	sectionRecords    []byte
 	terrainCameraData [80]byte
-	skyCameraData     [96]byte
+	skyCameraData     [112]byte
 }
 
 // New 创建使用默认 M1 容量与 4 MB/帧上传预算的渲染器。
@@ -142,7 +143,7 @@ func newRenderer(
 	})
 	r.skyCamera = dev.CreateBuffer(gfx.BufferDesc{
 		Label: "sky uniform",
-		Size:  96,
+		Size:  112,
 		Usage: gfx.BufferUsageUniform | gfx.BufferUsageCopyDst,
 	})
 	r.indirect = dev.CreateBuffer(gfx.BufferDesc{

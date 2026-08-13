@@ -162,6 +162,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		ViewProj:       viewProj,
 		ViewProjInv:    viewProjInv,
 		Pos:            a.camera.Pos,
+		CloudOffset:    render.CloudOffsetAt(a.worldTimeTicks),
 		SunDirection:   dayNight.SunDirection,
 		Daylight:       dayNight.Daylight,
 		StarVisibility: dayNight.StarVisibility,
