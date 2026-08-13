@@ -8,7 +8,7 @@
 
 ## 6. 客户端与专用服务端迁移路由
 
-- [ ] 6.1 以 TDD 原子修改 `internal/config/config.go`、`internal/config/migration_test.go`、`internal/profile/profile.go`、`internal/profile/profile_test.go`、`cmd/mcgo/main.go`、`cmd/mcgo/options.go`、`cmd/mcgo/run_test.go`、`cmd/mcgod/main.go`、`cmd/mcgod/main_test.go`：同时把两个公共 `DefaultPath` 切到 `mornlea`，让默认加载走迁移 API、显式 `--config` 跳过迁移、benchmark/capture config 保持编译默认值、材料迁移保持早返回；持久化 Task 7 初始 HEAD 与包含 Tasks 4–6 新测试的 entry manifest，并只随本项更新本 `tasks.md`。Ignored report：`.superpowers/sdd/2026-08-12-m4q-mornlea-project-rename/task-6-report.md`。
+- [x] 6.1 以 TDD 原子修改 `internal/config/config.go`、`internal/config/migration_test.go`、`internal/profile/profile.go`、`internal/profile/profile_test.go`、`cmd/mcgo/main.go`、`cmd/mcgo/options.go`、`cmd/mcgo/run_test.go`、`cmd/mcgod/main.go`、`cmd/mcgod/main_test.go`：同时把两个公共 `DefaultPath` 切到 `mornlea`，让默认加载走迁移 API、显式 `--config` 跳过迁移、benchmark/capture config 保持编译默认值、材料迁移保持早返回；持久化 Task 7 初始 HEAD 与包含 Tasks 4–6 新测试的 entry manifest，并只随本项更新本 `tasks.md`。Ignored report：`.superpowers/sdd/2026-08-12-m4q-mornlea-project-rename/task-6-report.md`。
 
 Focused commands（按顺序直接运行）：
 

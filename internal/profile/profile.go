@@ -40,7 +40,7 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("profile: user config directory: %w", err)
 	}
-	return filepath.Join(configDirectory, "minecraft-go", "profile.json"), nil
+	return filepath.Join(configDirectory, "mornlea", "profile.json"), nil
 }
 
 func defaultPaths() (current, legacy string, err error) {

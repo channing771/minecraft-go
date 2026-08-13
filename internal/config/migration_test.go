@@ -41,13 +41,23 @@ func TestLoadDefaultUsesMornleaCurrentAndMinecraftGoLegacy(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("LoadDefault = %+v，want %+v", got, want)
 	}
+}
 
-	publicPath, err := DefaultPath()
+func TestDefaultPathUsesMornleaDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	got, err := DefaultPath()
 	if err != nil {
 		t.Fatalf("DefaultPath: %v", err)
 	}
-	if publicPath != wantLegacy {
-		t.Fatalf("Task 4 的 DefaultPath = %q，want 旧路径 %q", publicPath, wantLegacy)
+	want := filepath.Join(base, "mornlea", "config.json")
+	if got != want {
+		t.Fatalf("DefaultPath = %q，want %q", got, want)
 	}
 }
 

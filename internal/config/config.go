@@ -69,13 +69,13 @@ func Defaults() Config {
 	}
 }
 
-// DefaultPath 返回默认配置文件路径：用户配置目录下的 minecraft-go/config.json。
+// DefaultPath 返回默认配置文件路径：用户配置目录下的 mornlea/config.json。
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("config: 定位用户配置目录: %w", err)
 	}
-	return filepath.Join(dir, "minecraft-go", "config.json"), nil
+	return filepath.Join(dir, "mornlea", "config.json"), nil
 }
 
 func defaultPaths() (current, legacy string, err error) {

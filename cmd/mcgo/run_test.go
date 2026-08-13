@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -14,14 +15,7 @@ import (
 )
 
 // absentConfigArgs 返回指向本次测试临时目录下一个不存在文件的 --config 参数。
-//
-// runWithDependencies 接线后一路调用 resolveConfig -> config.DefaultPath，未加
-// 这层隔离的非 benchmark/capture 用例会读到开发者本机
-// ~/Library/Application Support/minecraft-go/config.json（若存在）并通过
-// effective.Apply() 改写进程级 physics/sim 全局可调值——这正是 benchmark 隔离
-// 规则要防的"结论取决于开发者本机"那类危害，只是下沉到了非 benchmark 路径。
-// 指向不存在的文件让 config.Load 落回 config.Defaults()（见
-// internal/config/config.go:88-91）。
+// 它让普通运行测试走显式 config.Load 的 Defaults 回落，避免读写开发者的默认目录。
 func absentConfigArgs(t *testing.T) []string {
 	t.Helper()
 	return []string{"--config", filepath.Join(t.TempDir(), "absent.json")}
@@ -155,6 +149,100 @@ func TestRunWithDependenciesPassesExplicitNameToProfile(t *testing.T) {
 }
 
 var _ = profile.Options{}
+
+func TestResolveConfigUsesDefaultMigration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	legacyPath := filepath.Join(base, "minecraft-go", "config.json")
+	currentPath := filepath.Join(base, "mornlea", "config.json")
+	legacy := config.Defaults()
+	legacy.Physics.Gravity = 24
+	if err := legacy.Save(legacyPath); err != nil {
+		t.Fatalf("Save legacy config: %v", err)
+	}
+
+	got, err := resolveConfig(mainOptions{})
+	if err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if got.Physics.Gravity != 24 {
+		t.Fatalf("gravity = %v，want 24", got.Physics.Gravity)
+	}
+	if _, err := os.ReadFile(currentPath); err != nil {
+		t.Fatalf("读取迁移后默认配置: %v", err)
+	}
+}
+
+func TestResolveConfigExplicitPathSkipsDefaultMigration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	legacyPath := filepath.Join(base, "minecraft-go", "config.json")
+	currentPath := filepath.Join(base, "mornlea", "config.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll legacy: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`{"version":`), 0o600); err != nil {
+		t.Fatalf("WriteFile legacy: %v", err)
+	}
+	explicitPath := filepath.Join(t.TempDir(), "explicit.json")
+	explicit := config.Defaults()
+	explicit.Physics.Gravity = 31
+	if err := explicit.Save(explicitPath); err != nil {
+		t.Fatalf("Save explicit config: %v", err)
+	}
+
+	got, err := resolveConfig(mainOptions{ConfigPath: explicitPath})
+	if err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if got.Physics.Gravity != 31 {
+		t.Fatalf("gravity = %v，want 31", got.Physics.Gravity)
+	}
+	if _, err := os.Stat(currentPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("显式配置不得触发默认迁移，Stat err = %v", err)
+	}
+}
+
+func TestLoadApplicationIdentityUsesDefaultMigration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	legacyPath := filepath.Join(base, "minecraft-go", "profile.json")
+	currentPath := filepath.Join(base, "mornlea", "profile.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll legacy: %v", err)
+	}
+	legacy := []byte(`{"version":1,"player_id":"00112233-4455-4677-8899-aabbccddeeff","display_name":"Chen"}`)
+	if err := os.WriteFile(legacyPath, legacy, 0o600); err != nil {
+		t.Fatalf("WriteFile legacy: %v", err)
+	}
+
+	got, err := loadApplicationIdentity(nil)
+	if err != nil {
+		t.Fatalf("loadApplicationIdentity: %v", err)
+	}
+	if got.PlayerID.String() != "00112233-4455-4677-8899-aabbccddeeff" || got.DisplayName != "Chen" {
+		t.Fatalf("identity = %+v，want 旧 profile 身份", got)
+	}
+	contents, err := os.ReadFile(currentPath)
+	if err != nil {
+		t.Fatalf("读取迁移后默认 profile: %v", err)
+	}
+	if string(contents) != string(legacy) {
+		t.Fatalf("迁移后 profile = %q，want %q", contents, legacy)
+	}
+}
 
 // TestBenchmarkIgnoresUserConfig 守住"性能门禁不读本机配置"这条不变量。
 func TestBenchmarkIgnoresUserConfig(t *testing.T) {

@@ -95,14 +95,10 @@ func parseOptions(args []string) (options, error) {
 // resolveConfig 决定 mcgod 本次运行的生效配置：Config 非空时从该路径加载，
 // 否则用默认路径。mcgod 不消费渲染组，调用方应只取 Logging/Physics/Sim。
 func resolveConfig(opts options) (config.Config, error) {
-	path := opts.Config
-	if path == "" {
-		var err error
-		if path, err = config.DefaultPath(); err != nil {
-			return config.Config{}, err
-		}
+	if opts.Config != "" {
+		return config.Load(opts.Config)
 	}
-	return config.Load(path)
+	return config.LoadDefault()
 }
 
 func defaultDependencies() dependencies {

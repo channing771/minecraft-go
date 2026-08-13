@@ -125,11 +125,10 @@ func resolveConfig(options mainOptions) (config.Config, error) {
 	if options.Application.Benchmark || options.CaptureDir != "" {
 		return config.Defaults(), nil
 	}
-	path, err := resolveConfigPath(options)
-	if err != nil {
-		return config.Config{}, err
+	if options.ConfigPath != "" {
+		return config.Load(options.ConfigPath)
 	}
-	return config.Load(path)
+	return config.LoadDefault()
 }
 
 // remoteTuningDiverges 报告本次运行是否"连远端服务端 + 本机 physics/sim 偏离

@@ -110,11 +110,7 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 }
 
 func loadApplicationIdentity(requestedName *string) (network.Identity, error) {
-	path, err := profile.DefaultPath()
-	if err != nil {
-		return network.Identity{}, err
-	}
-	loaded, err := profile.LoadOrCreate(profile.Options{Path: path, RequestedName: requestedName})
+	loaded, err := profile.LoadOrCreate(profile.Options{RequestedName: requestedName})
 	if err != nil {
 		return network.Identity{}, err
 	}

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"minecraft-go/internal/config"
 	"minecraft-go/internal/core"
 	"minecraft-go/internal/network"
 	"minecraft-go/internal/server"
@@ -19,15 +20,71 @@ import (
 )
 
 // absentConfigArgs 返回指向本次测试临时目录下一个不存在文件的 --config 参数。
-//
-// run 接线后一路调用 resolveConfig -> config.DefaultPath，未加这层隔离会读到
-// 开发者本机 ~/Library/Application Support/minecraft-go/config.json（若存在）并
-// 通过 effective.Apply() 改写进程级 physics/sim 全局可调值——这正是 benchmark
-// 隔离规则要防的"结论取决于开发者本机"那类危害。指向不存在的文件让
-// config.Load 落回 config.Defaults()（internal/config/config.go:88-91）。
+// 它让普通运行测试走显式 config.Load 的 Defaults 回落，避免读写开发者的默认目录。
 func absentConfigArgs(t *testing.T) []string {
 	t.Helper()
 	return []string{"--config", filepath.Join(t.TempDir(), "absent.json")}
+}
+
+func TestResolveConfigUsesDefaultMigration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	legacyPath := filepath.Join(base, "minecraft-go", "config.json")
+	currentPath := filepath.Join(base, "mornlea", "config.json")
+	legacy := config.Defaults()
+	legacy.Physics.Gravity = 24
+	if err := legacy.Save(legacyPath); err != nil {
+		t.Fatalf("Save legacy config: %v", err)
+	}
+
+	got, err := resolveConfig(options{})
+	if err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if got.Physics.Gravity != 24 {
+		t.Fatalf("gravity = %v，want 24", got.Physics.Gravity)
+	}
+	if _, err := os.ReadFile(currentPath); err != nil {
+		t.Fatalf("读取迁移后默认配置: %v", err)
+	}
+}
+
+func TestResolveConfigExplicitPathSkipsDefaultMigration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	legacyPath := filepath.Join(base, "minecraft-go", "config.json")
+	currentPath := filepath.Join(base, "mornlea", "config.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll legacy: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`{"version":`), 0o600); err != nil {
+		t.Fatalf("WriteFile legacy: %v", err)
+	}
+	explicitPath := filepath.Join(t.TempDir(), "explicit.json")
+	explicit := config.Defaults()
+	explicit.Physics.Gravity = 31
+	if err := explicit.Save(explicitPath); err != nil {
+		t.Fatalf("Save explicit config: %v", err)
+	}
+
+	got, err := resolveConfig(options{Config: explicitPath})
+	if err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if got.Physics.Gravity != 31 {
+		t.Fatalf("gravity = %v，want 31", got.Physics.Gravity)
+	}
+	if _, err := os.Stat(currentPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("显式配置不得触发默认迁移，Stat err = %v", err)
+	}
 }
 
 func TestDefaultOptions(t *testing.T) {

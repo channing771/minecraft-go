@@ -258,7 +258,6 @@ func TestLoadOrCreateDefaultUsesMornleaCurrentAndMinecraftGoLegacy(t *testing.T)
 		t.Fatalf("UserConfigDir: %v", err)
 	}
 	current := filepath.Join(base, "mornlea", "profile.json")
-	legacy := filepath.Join(base, "minecraft-go", "profile.json")
 	body := []byte(`{"version":1,"player_id":"00112233-4455-4677-8899-aabbccddeeff","display_name":"Chen"}`)
 	writeProfileTestFile(t, current, body, 0o700, 0o600)
 
@@ -270,13 +269,23 @@ func TestLoadOrCreateDefaultUsesMornleaCurrentAndMinecraftGoLegacy(t *testing.T)
 	if got != want {
 		t.Fatalf("LoadOrCreate = %+v，want %+v", got, want)
 	}
+}
 
-	publicPath, err := DefaultPath()
+func TestDefaultProfilePathUsesMornleaDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	got, err := DefaultPath()
 	if err != nil {
 		t.Fatalf("DefaultPath: %v", err)
 	}
-	if publicPath != legacy {
-		t.Fatalf("Task 5 的 DefaultPath = %q，want 旧路径 %q", publicPath, legacy)
+	want := filepath.Join(base, "mornlea", "profile.json")
+	if got != want {
+		t.Fatalf("DefaultPath = %q，want %q", got, want)
 	}
 }
 
