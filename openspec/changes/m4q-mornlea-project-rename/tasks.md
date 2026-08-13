@@ -55,6 +55,8 @@ git rev-parse HEAD > "$mornlea_invariants/task6-head"
 
 - [ ] 7.1 在一个可构建提交中修改 `go.mod` 与所有精确导入 `minecraft-go/internal/...` 的 tracked Go 文件；移动 `cmd/mcgo/**` → `cmd/mornlea/**`、`cmd/mcgod/**` → `cmd/mornlea-server/**`、`engine/crates/mcgo_mesh/**` → `engine/crates/mornlea_mesh/**`、`engine/include/mcgo_engine.h` → `engine/include/mornlea_engine.h`；修改 `engine/Cargo.toml`、`engine/Cargo.lock`、`engine/crates/mornlea_mesh/Cargo.toml`、`engine/crates/mornlea_mesh/build.rs`、`engine/crates/mornlea_mesh/src/ffi.rs`、`internal/mesh/native_abi.go`、`Makefile`、`.github/workflows/ci.yml`、`.gitignore`、`.codex/hooks.json`、`scripts/agent-hooks/guard.mjs`、`scripts/agent-hooks/guard.test.mjs`、`internal/archcheck/helpers_test.go`、`internal/archcheck/platform_test.go`、`internal/archcheck/source_guards_test.go`、`cmd/gfxspike/main.go`、`internal/client/perf.go`、`internal/logging/logging.go`、`internal/render/avatar_test.go`、`internal/storage/region_crash_test.go`；创建 `internal/archcheck/identity_test.go`，并只随本项更新本 `tasks.md`。保持 ABI version/status、算法、Go API、fixture/golden/baseline 与测试入口清单，除 6 项精确重命名和新增 `TestMornleaCurrentIdentity`。Ignored report：`.superpowers/sdd/2026-08-12-m4q-mornlea-project-rename/task-7-report.md`。
 
+`TestMornleaCurrentIdentity` 必须成为 current code/build 的最终机械身份门禁，不得整文件排除 6 个 compatibility allowlist 文件。它必须扫描 design 中的完整 roots、逐个解析每个大小写不敏感旧 token match，并用硬编码 allowlist tuple 断言精确 path、完整 string literal、Go AST string-literal span、所在声明/测试用途和正整数 expected count；每个 tuple 的实际计数必须精确相等。任何未消费、额外、缺失、移动、comment/identifier match，或旧 import、command、symbol、env match 均失败；expected count 不得从待测源码动态生成。Task 8 的独立 `git grep` 只负责该测试未覆盖的当前 docs。
+
 Focused commands（按顺序直接运行）：
 
 ```bash
@@ -155,17 +157,8 @@ test -z "$(CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/mornlea-server | rg 'int
 ```
 
 ```bash
-go test ./internal/archcheck -run 'Mornlea|Identity|WebGPU|Server|LoginStreams' -count=1
-
-old_code_identity=$(git grep -n -I -i -E 'minecraft[-_]go|mcgo' -- \
-  go.mod cmd internal engine Makefile .github .codex scripts .gitignore \
-  ':!internal/config/config.go' \
-  ':!internal/config/migration_test.go' \
-  ':!internal/profile/profile.go' \
-  ':!internal/profile/profile_test.go' \
-  ':!internal/storage/backup.go' \
-  ':!internal/storage/backup_test.go' || true)
-test -z "$old_code_identity"
+go test ./internal/archcheck -run 'WebGPU|Server|LoginStreams' -count=1
+go test ./internal/archcheck -run '^TestMornleaCurrentIdentity$' -count=1
 ```
 
 ```bash
@@ -229,6 +222,7 @@ Focused commands（按顺序直接运行）：
 
 ```bash
 git status --short --branch
+test -z "$(git status --porcelain)"
 mornlea_invariants="$(git rev-parse --git-common-dir)/mornlea-m4q-evidence"
 task1_head=$(cat "$mornlea_invariants/task1-head")
 test -n "$task1_head"

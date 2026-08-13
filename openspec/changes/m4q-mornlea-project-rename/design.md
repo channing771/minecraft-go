@@ -89,6 +89,8 @@ Task 7 同时切换：
 
 这些文件不得出现其他裸旧 token；即使在 allowlist 文件中，旧 import、命令、C symbol、环境变量、类型/函数标识符或解释性注释也必须被 current-identity guard 拒绝。
 
+`TestMornleaCurrentIdentity` 必须扫描上述全部 current code/build roots，且不得通过 path exclusion 跳过这 6 个文件。测试逐个解析大小写不敏感的旧 token match：仅当 match 同时命中 allowlist 表中硬编码的精确 path、完整 string literal、用途位置和正整数 expected count 才接受；用途位置由 Go AST 的 string-literal span 与所在声明/测试职责判定。每个 tuple 的实际计数必须等于硬编码 expected count，未消费 match、额外/缺失 match、移动路径、comment/identifier 中的 match 均失败。expected count 不得从待测源码动态生成。当前文档不属于该 code/build guard，由 Task 8 的精确 `git grep` 门禁独立覆盖。
+
 兼容身份 `CHNK`、`MCGC`、`MCGM`、`MCPL`、`MCGR`、`MCGB`、`MGM1` 与 `.mcgo-world-backup-v1.json` 保持原值；它们不是品牌替换目标。历史原文 allowlist 精确为 `docs/superpowers/**`、`openspec/changes/archive/**` 与 `docs/notes/perf-baseline*.{md,json}`，另保留 Git 历史。当前 README 唯一旧字面量例外是链接 `docs/superpowers/specs/2026-07-26-minecraft-go-design.md`；`docs/notes/mornlea-migration.md` 作为新旧映射说明单独允许旧名。拒绝用全仓 `MCG` 禁令或宽泛目录豁免，以免误伤稳定 magic 或隐藏真实品牌残留。
 
 ### 6. 固定测试入口与 artifact，不以改名重置基线
