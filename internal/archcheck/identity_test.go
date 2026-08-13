@@ -613,7 +613,6 @@ func (scanner *goIdentityScanner) externalImporter(context *build.Context, direc
 		"GOARCH="+context.GOARCH,
 		fmt.Sprintf("CGO_ENABLED=%d", boolInt(context.CgoEnabled)),
 		"GOWORK=off",
-		"GOPROXY=off",
 	)
 	output, err := command.Output()
 	if err != nil {
