@@ -12,7 +12,7 @@
 
 - 实施分支为 `codex/mornlea-project-rename`；设计提交为 `6fbbb970d017d5fc2d3fe05cff61d0ed81cb18cc`。
 - 本计划必须在 Task 1 前作为独立 planning commit 跟踪；实施者先用 `git ls-files --error-unmatch docs/superpowers/plans/2026-08-12-mornlea-project-rename.md` 机械确认，不得在后续 Files 范围中顺带提交它。
-- 功能基线必须包含 M4P final `4c77539280d7e093001c2c9f3fc02da513fd3715` 与执行 Task 1 时最新的 `origin/main`；撰写计划时主线为 `dfdc71bb13e4c25eebe4ae877abd7afc98d46234`。
+- 功能基线必须包含 M4P final `4c77539280d7e093001c2c9f3fc02da513fd3715` 与执行 Task 1 时最新的 `origin/main`；执行前已冻结主线为 `e15541686b184df97d7ec2c74efc3e20979507a7`。
 - 第一项实施提交只允许合并主线，不得夹带品牌、路径、文档或数据迁移修改。若执行时 `origin/main` 已前进，先更新本计划与 M4Q 基线证据再合并。
 - 最终品牌为 `Mornlea`，机器标识为 `mornlea`，GitHub 仓库为 `channing771/mornlea`，Go module 为 `github.com/channing771/mornlea`。
 - 客户端入口/产物为 `cmd/mornlea` / `bin/mornlea`；专用服务端为 `cmd/mornlea-server` / `bin/mornlea-server`。不得保留 `mcgo`、`mcgod` wrapper、symlink、module alias、旧 C symbol 或旧环境变量 fallback。
@@ -90,7 +90,7 @@ openspec status --change m4p-rust-engine-mesh --json
 openspec validate --all --strict --no-interactive
 ```
 
-Expected: the exact report directory is locally ignored; tracked worktree clean; HEAD descends from M4P final; M4O/M4P both complete; strict validation PASS. The fetched `origin/main` commit is persisted once under Git common-dir and every later Task 1 step consumes that immutable OID. If it is not `dfdc71b...`, record the new head and inspect that exact commit before continuing.
+Expected: the exact report directory is locally ignored; tracked worktree clean; HEAD descends from M4P final; M4O/M4P both complete; strict validation PASS. The fetched `origin/main` commit is persisted once under Git common-dir and every later Task 1 step consumes that immutable OID. If it is not `e15541686b184df97d7ec2c74efc3e20979507a7`, record the new head and inspect that exact commit before continuing.
 
 - [ ] **Step 2: Inspect the merge before mutating**
 
