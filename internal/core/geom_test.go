@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/channing771/mornlea/internal/core"
 	"github.com/go-gl/mathgl/mgl32"
-	"minecraft-go/internal/core"
 )
 
 func TestFrustumCullsBehindCamera(t *testing.T) {

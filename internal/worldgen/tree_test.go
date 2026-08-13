@@ -3,8 +3,8 @@ package worldgen
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // TestOakTreeHashSelectorUsesLowBitAndHalfGate 锁定候选选择器，而非把地表

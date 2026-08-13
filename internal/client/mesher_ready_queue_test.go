@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestReadySectionHeapOrdersAndDeduplicates(t *testing.T) {

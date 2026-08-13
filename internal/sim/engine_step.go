@@ -3,8 +3,8 @@ package sim
 import (
 	"sort"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/physics"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/physics"
 )
 
 // Step 严格串行执行一个权威 tick。

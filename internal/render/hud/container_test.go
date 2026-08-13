@@ -3,7 +3,7 @@ package hud
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // 杀死变异：遗漏任一配方行、错放按钮或忽略已确认背包都会改变实例布局。

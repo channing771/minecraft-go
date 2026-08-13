@@ -12,7 +12,7 @@ import (
 	"sort"
 	"sync"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 type region struct {

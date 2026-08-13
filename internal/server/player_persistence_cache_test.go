@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // 捕获：同一 PlayerID 的并发 Prepare 各自调用 LoadPlayer，而没有共享 loading placeholder。

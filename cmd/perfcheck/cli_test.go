@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"minecraft-go/internal/client"
+	"github.com/channing771/mornlea/internal/client"
 )
 
 func TestComparisonSuccessMessageDescribesComparisonMode(t *testing.T) {

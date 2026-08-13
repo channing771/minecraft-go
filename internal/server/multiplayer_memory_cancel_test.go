@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 type delayedTask16AcceptListener struct {

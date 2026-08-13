@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestPlayClientPacketIDOneIsUnknown(t *testing.T) {

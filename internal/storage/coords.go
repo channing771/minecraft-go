@@ -1,6 +1,6 @@
 package storage
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 func floorDiv32(value int32) int32 {
 	wide := int64(value)

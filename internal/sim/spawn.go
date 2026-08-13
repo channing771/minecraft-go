@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/physics"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/physics"
 )
 
 // defaultSpawnRadius 是出生扫描的编译期默认半径。唯一读取入口是 Tunables 快照，

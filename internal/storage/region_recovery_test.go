@@ -12,7 +12,7 @@ import (
 	"os"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestRegionRecoversOldPayloadAndPromotesRevision(t *testing.T) {

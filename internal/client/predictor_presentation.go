@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/physics"
+	"github.com/channing771/mornlea/internal/physics"
 )
 
 // PresentationPosition 返回插值并应用纠正衰减后的显示脚底位置。

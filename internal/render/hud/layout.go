@@ -1,8 +1,8 @@
 package hud
 
 import (
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/render"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/render"
 )
 
 const (

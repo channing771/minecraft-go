@@ -1,8 +1,8 @@
 package worldgen
 
 import (
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // M1 用到的方块 ID。完整的方块注册表在 M4 建立（spec §6.3）。

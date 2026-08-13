@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // validateFurnaceSlots 检查全部熔炉槽的固定约束：

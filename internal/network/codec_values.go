@@ -3,7 +3,7 @@ package network
 import (
 	"errors"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 const (

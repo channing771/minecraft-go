@@ -1,6 +1,6 @@
 // Package logging 提供按模块分级过滤的 slog handler。
 //
-// 模块名从记录的调用点 PC 反查包路径末段得到（minecraft-go/internal/sim → sim），
+// 模块名从记录的调用点 PC 反查包路径末段得到（github.com/channing771/mornlea/internal/sim → sim），
 // 因此日志调用点不需要显式声明自己属于哪个模块，新写的日志也自动归入正确模块。
 package logging
 
@@ -90,7 +90,7 @@ func (h *handler) WithGroup(name string) slog.Handler {
 }
 
 // moduleForPC 从调用点 PC 反查模块名，取包路径末段。
-// frame.Function 形如 minecraft-go/internal/sim.(*Engine).Step，返回 sim。
+// frame.Function 形如 github.com/channing771/mornlea/internal/sim.(*Engine).Step，返回 sim。
 // 反查不出时返回空串，此时按全局等级处理。
 func moduleForPC(pc uintptr) string {
 	if pc == 0 {

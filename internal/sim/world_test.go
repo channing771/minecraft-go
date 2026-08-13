@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 func TestDimensionLifecycleReadyUnloadAndRetry(t *testing.T) {

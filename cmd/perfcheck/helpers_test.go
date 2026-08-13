@@ -1,6 +1,6 @@
 package main
 
-import "minecraft-go/internal/client"
+import "github.com/channing771/mornlea/internal/client"
 
 func completeV6ComparableReport(transport string) client.PerfReport {
 	report := completeV5ComparableReport(transport)

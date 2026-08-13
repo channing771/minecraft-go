@@ -227,7 +227,7 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[index]
 }
 
-// PerfReport 是 cmd/mcgo 与 cmd/perfcheck 共用的稳定 JSON 格式。
+// PerfReport 是 cmd/mornlea 与 cmd/perfcheck 共用的稳定 JSON 格式。
 type PerfReport struct {
 	ScenarioVersion int     `json:"scenario_version"`
 	Transport       string  `json:"transport,omitempty"`

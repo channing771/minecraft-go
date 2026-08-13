@@ -4,8 +4,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // emptyColumn 是空列的哨兵高度：没有任何非空气方块。

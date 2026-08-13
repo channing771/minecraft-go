@@ -7,10 +7,10 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/client"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 const (

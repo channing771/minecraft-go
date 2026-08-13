@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func FuzzDecodeChunkPayload(f *testing.F) {

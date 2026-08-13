@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/client"
+	"github.com/channing771/mornlea/internal/client"
 )
 
 func TestCameraPitchIsClamped(t *testing.T) {

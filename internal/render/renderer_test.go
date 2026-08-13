@@ -3,10 +3,10 @@ package render
 import (
 	"testing"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/gfx"
-	"minecraft-go/internal/mesh"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/gfx"
+	"github.com/channing771/mornlea/internal/mesh"
 )
 
 func TestPendingUploadsEventuallyDrain(t *testing.T) {

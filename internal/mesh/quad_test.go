@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"minecraft-go/internal/mesh"
+	"github.com/channing771/mornlea/internal/mesh"
 )
 
 func TestQuadPackRemainsEightBytes(t *testing.T) {

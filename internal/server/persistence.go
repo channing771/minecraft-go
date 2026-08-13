@@ -3,8 +3,8 @@ package server
 import (
 	"time"
 
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // saveKind 区分同一批 worker 处理的两类固定保存工作。

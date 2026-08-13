@@ -4,9 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // propagatedSkyWorld 造出一格高、一格宽的封闭通道；apertureX 是唯一露天天窗，

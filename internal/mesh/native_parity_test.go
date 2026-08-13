@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 func assertNativeOracleParity(t *testing.T, n *world.Neighborhood, reg mesh.Registry) []mesh.Quad {

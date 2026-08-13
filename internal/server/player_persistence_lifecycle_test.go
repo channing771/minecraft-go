@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 func wantStarterMaterialInventory() core.Inventory {

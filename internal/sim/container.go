@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // containerChunk 解析一个容器引用所在的区块；区块未加载或未 Ready 都视为失效。

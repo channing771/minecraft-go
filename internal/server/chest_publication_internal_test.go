@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 // TestChestPublicationOutboxFullClosesOnlySlowSession 证明箱子状态与关闭通知

@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"sort"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 var (

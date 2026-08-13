@@ -1,10 +1,10 @@
 package server
 
 import (
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/storage"
-	"minecraft-go/internal/worldgen"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/storage"
+	"github.com/channing771/mornlea/internal/worldgen"
 )
 
 func newAttachedWorldForTest(config Config, endpoint network.ServerEndpoint, generator Generator, store storage.Store) *Server {

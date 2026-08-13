@@ -5,9 +5,9 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // wornPickaxe 是死亡掉落用的已磨损铁镐，耐久必须原样出现在掉落物里。

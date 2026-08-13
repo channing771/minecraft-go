@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // Chunk 是一根 16×16 的世界柱，含 core.SectionsPerChunk 个区段。

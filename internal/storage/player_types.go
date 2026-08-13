@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 type PlayerLocation struct {

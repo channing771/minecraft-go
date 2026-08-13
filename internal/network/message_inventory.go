@@ -3,7 +3,7 @@ package network
 import (
 	"errors"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // InventoryState 是服务端发给所属玩家的完整权威物品状态。

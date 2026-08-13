@@ -3,8 +3,8 @@ package client
 import (
 	"errors"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 // InventoryMirror 是权威物品状态的固定只读镜像。

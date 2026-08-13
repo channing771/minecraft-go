@@ -1,9 +1,9 @@
 package hud
 
 import (
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
 )
 
 const (

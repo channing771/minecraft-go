@@ -6,7 +6,7 @@ import (
 	"hash/crc32"
 	"math"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 const (

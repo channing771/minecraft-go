@@ -3,10 +3,12 @@
 GO := go
 CARGO := cargo
 RUST_DIR := engine
-RUST_DYLIB := $(RUST_DIR)/target/release/libmcgo_mesh.dylib
-APP := ./cmd/mcgo
-BINARY := bin/mcgo
-MCGO_DYLIB := bin/libmcgo_mesh.dylib
+RUST_DYLIB := $(RUST_DIR)/target/release/libmornlea_mesh.dylib
+APP := ./cmd/mornlea
+BINARY := bin/mornlea
+SERVER := ./cmd/mornlea-server
+SERVER_BINARY := bin/mornlea-server
+MORNLEA_DYLIB := bin/libmornlea_mesh.dylib
 ARGS ?=
 
 .PHONY: help run build test test-race test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update rust rust-check
@@ -20,7 +22,7 @@ help:
 	@printf '%s\n' \
 		'常用命令：' \
 		'  make run              运行游戏，可通过 ARGS 传递参数' \
-		'  make build            构建 bin/mcgo 与同目录 Rust dylib' \
+		'  make build            构建 bin/mornlea、bin/mornlea-server 与同目录 Rust dylib' \
 		'  make test             运行全部测试' \
 		'  make test-race        使用 race detector 运行全部测试' \
 		'  make test-multiplayer 运行 M3C 八玩家与 v6 报告测试' \
@@ -48,7 +50,8 @@ rust-check:
 build:
 	@mkdir -p $(dir $(BINARY))
 	$(GO) build -ldflags='$(GO_BUILD_LDFLAGS)' -o $(BINARY) $(APP)
-	cp $(RUST_DYLIB) $(MCGO_DYLIB)
+	CGO_ENABLED=0 $(GO) build -o $(SERVER_BINARY) $(SERVER)
+	cp $(RUST_DYLIB) $(MORNLEA_DYLIB)
 
 test:
 	$(GO) test ./...
@@ -57,7 +60,7 @@ test-race:
 	$(GO) test ./... -race
 
 test-multiplayer:
-	$(GO) test ./internal/client ./internal/server ./cmd/mcgo ./cmd/perfcheck \
+	$(GO) test ./internal/client ./internal/server ./cmd/mornlea ./cmd/perfcheck \
 		-run 'Test(PerfReportV6|ScenarioV6|PerfcheckV6|PerfcheckV5SameScenario|PerformanceThresholds|InterestObserver|HostStats|BenchmarkServerEpoch|BenchmarkServerMeasuredWindow)' -count=1
 
 bench-multiplayer:
@@ -66,7 +69,7 @@ bench-multiplayer:
 
 archcheck:
 	$(GO) test ./internal/archcheck -count=1
-	test -z "$$($(GO) list -deps ./cmd/mcgod | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
+	test -z "$$($(GO) list -deps ./cmd/mornlea-server | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
 
 fmt:
 	cd $(RUST_DIR) && $(CARGO) fmt

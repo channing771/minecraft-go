@@ -7,10 +7,10 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/server"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/server"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 // healthLethalFallHeight 是从满血摔死所需的落差：伤害 = floor(落差) − 3 = 20。

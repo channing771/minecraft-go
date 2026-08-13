@@ -1,5 +1,5 @@
 {
-  "description": "minecraft-go repository enforcement hooks",
+  "description": "Mornlea repository enforcement hooks",
   "hooks": {
     "PreToolUse": [
       {

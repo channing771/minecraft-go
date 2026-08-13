@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"minecraft-go/internal/config"
-	"minecraft-go/internal/physics"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/config"
+	"github.com/channing771/mornlea/internal/physics"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 // 注意：config.Config 内嵌的 logging.Config 含 map 字段，因此 Config 整体

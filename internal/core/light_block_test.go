@@ -3,7 +3,7 @@ package core_test
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // TestLightBlockIDsMappingsStayStable 杀死 ID 未追加、放置或掉落映射缺失、

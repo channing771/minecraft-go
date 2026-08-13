@@ -3,7 +3,7 @@ package client
 import (
 	"container/heap"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 type readySectionHeap struct {

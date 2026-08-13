@@ -4,10 +4,10 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/server"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/server"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 func TestDefaultConfigUsesServerOwnedSubscriptionRadius(t *testing.T) {

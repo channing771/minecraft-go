@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-gl/glfw/v3.3/glfw"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 // Key 是主程序需要的最小按键集合。

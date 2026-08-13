@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestExistingMetadataOverridesCreateOptions(t *testing.T) {

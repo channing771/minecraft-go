@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/physics"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/physics"
 )
 
 var fullCube = core.AABB{Max: mgl32.Vec3{1, 1, 1}}

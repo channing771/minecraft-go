@@ -3,9 +3,9 @@ package client_test
 import (
 	"testing"
 
-	"minecraft-go/internal/client"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 func testFurnaceRef(generation uint32) core.FurnaceRef {

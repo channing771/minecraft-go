@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 // TestComputeFillsIndirectArgs 验证 compute shader 能通过原子累加

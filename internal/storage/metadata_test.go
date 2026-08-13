@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestMetadataEncodingIsDeterministic(t *testing.T) {

@@ -3,9 +3,9 @@ package client
 import (
 	"log/slog"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 func (mesher *Mesher) work() {

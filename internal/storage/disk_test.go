@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 func TestDiskStorePersistsNegativeAndMultipleRegions(t *testing.T) {

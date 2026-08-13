@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mcgo_mesh"]
+members = ["crates/mornlea_mesh"]
 resolver = "3"
 
 [profile.release]

@@ -5,8 +5,8 @@ import (
 	"math/rand"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // naiveSection 是对拍用的参考实现：最笨但显然正确。

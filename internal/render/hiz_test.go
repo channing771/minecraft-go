@@ -3,7 +3,7 @@ package render_test
 import (
 	"testing"
 
-	"minecraft-go/internal/render"
+	"github.com/channing771/mornlea/internal/render"
 )
 
 func TestHiZLevelSelectionIsConservative(t *testing.T) {

@@ -1,6 +1,6 @@
 package world
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 // BarrierID 是一个内部专用的实心方块 ID，玩家永远看不到它。
 //

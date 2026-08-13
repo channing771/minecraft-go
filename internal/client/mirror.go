@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // MirrorChunk 是客户端主线程持有的只读权威区块副本。

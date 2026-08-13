@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"unicode/utf8"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // CurrentVersion 是当前磁盘档案格式版本。

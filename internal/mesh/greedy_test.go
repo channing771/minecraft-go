@@ -3,10 +3,10 @@ package mesh_test
 import (
 	"testing"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 type testRegistry struct{}

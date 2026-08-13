@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func FuzzChunkSnapshotCodec(f *testing.F) {

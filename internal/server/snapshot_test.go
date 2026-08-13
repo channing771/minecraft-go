@@ -3,10 +3,10 @@ package server
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/world"
-	"minecraft-go/internal/worldgen"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/world"
+	"github.com/channing771/mornlea/internal/worldgen"
 )
 
 func TestBuildChunkSnapshotOwnsDataAndValidates(t *testing.T) {

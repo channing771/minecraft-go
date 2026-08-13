@@ -7,8 +7,8 @@ import (
 	"sort"
 	"sync"
 
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 func waitForHostWorkers(ctx context.Context, workers *sync.WaitGroup) error {

@@ -17,17 +17,17 @@ import (
 	"reflect"
 	"strings"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/logging"
-	"minecraft-go/internal/physics"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/logging"
+	"github.com/channing771/mornlea/internal/physics"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 // CurrentVersion 是本程序认识的配置文件版本。
 const CurrentVersion = 1
 
 // Render 是渲染相关的可调项。它是一个纯数据结构体，不依赖 internal/render，
-// 由 cmd/mcgo 自行读取并消费——这样 mcgod（无图形专用服务端）也能导入 config
+// 由 cmd/mornlea 自行读取并消费——这样 mornlea-server（无图形专用服务端）也能导入 config
 // 而不会传递性拖入图形依赖。
 //
 // json tag 与 Fields() 的 Name 逐字对应，保证配置文件写出的键名就是设计文档
@@ -510,7 +510,7 @@ func (c Config) Save(path string) error {
 }
 
 // Apply 把当前配置值写入 physics 与 sim 的运行时快照，供权威 tick 立即生效。
-// render 组不在这里处理：它是纯数据，由 cmd/mcgo 自行消费。
+// render 组不在这里处理：它是纯数据，由 cmd/mornlea 自行消费。
 func (c Config) Apply() {
 	physics.SetTunables(c.Physics)
 	sim.SetTunables(c.Sim)

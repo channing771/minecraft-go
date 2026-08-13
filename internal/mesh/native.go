@@ -1,6 +1,6 @@
 package mesh
 
-import "minecraft-go/internal/world"
+import "github.com/channing771/mornlea/internal/world"
 
 // LightScratch 保存一次 native 区段网格化复用的输入、光照与输出缓冲。
 type LightScratch struct {

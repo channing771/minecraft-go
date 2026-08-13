@@ -4,10 +4,10 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/gfx"
-	"minecraft-go/internal/render"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/gfx"
+	"github.com/channing771/mornlea/internal/render"
 )
 
 func TestHotbarBufferRegionsDoNotOverlap(t *testing.T) {

@@ -3,7 +3,7 @@ package network
 import (
 	"errors"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // OpenContainer 请求打开视线内的容器；服务端用权威射线验证距离与目标方块，

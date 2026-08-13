@@ -3,8 +3,8 @@ package world_test
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // chunkGetter 返回一个只认识给定区块的 get 函数。

@@ -42,18 +42,18 @@ jobs:
         run: go test ./... -race -p=1 -skip '^TestScenarioV7EightSessionServerProbeIsRealAndBounded$'
 
       - name: 50ms 服务端探针门禁
-        run: go test ./cmd/mcgo -run '^TestScenarioV7EightSessionServerProbeIsRealAndBounded$' -count=1
+        run: go test ./cmd/mornlea -run '^TestScenarioV7EightSessionServerProbeIsRealAndBounded$' -count=1
 
       - name: TCP 重启与 Memory/TCP parity 重复门禁
         run: go test ./internal/server -run 'TestTCPPlayerAndWorld|TestMemoryTCPParity' -race -count=10
 
       - name: M3C v6 八玩家与性能报告门禁
-        run: go test ./internal/client ./internal/server ./cmd/mcgo ./cmd/perfcheck -run 'Test(PerfReportV6|ScenarioV6|PerfcheckV6|PerfcheckV5SameScenario|PerformanceThresholds|InterestObserver|HostStats|BenchmarkServerEpoch|BenchmarkServerMeasuredWindow)' -count=1
+        run: go test ./internal/client ./internal/server ./cmd/mornlea ./cmd/perfcheck -run 'Test(PerfReportV6|ScenarioV6|PerfcheckV6|PerfcheckV5SameScenario|PerformanceThresholds|InterestObserver|HostStats|BenchmarkServerEpoch|BenchmarkServerMeasuredWindow)' -count=1
 
       - name: 构建无图形专用服务端
         run: |
-          CGO_ENABLED=0 GOOS=linux go build ./cmd/mcgod
-          test -z "$(CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/mcgod | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
+          CGO_ENABLED=0 GOOS=linux go build ./cmd/mornlea-server
+          test -z "$(CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/mornlea-server | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
 
       - name: 静态检查
         run: |

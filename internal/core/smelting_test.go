@@ -3,7 +3,7 @@ package core_test
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestSmeltingOutput(t *testing.T) {

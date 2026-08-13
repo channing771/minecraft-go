@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"slices"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 // MaxItemDrops 是客户端掉落物镜像的固定容量，与服务端单会话上限一致。

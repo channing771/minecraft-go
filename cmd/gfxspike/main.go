@@ -15,13 +15,13 @@ import (
 	"github.com/go-gl/glfw/v3.3/glfw"
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/gfx"
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/render"
-	"minecraft-go/internal/world"
-	"minecraft-go/internal/worldgen"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/gfx"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/render"
+	"github.com/channing771/mornlea/internal/world"
+	"github.com/channing771/mornlea/internal/worldgen"
 )
 
 func init() {
@@ -35,7 +35,7 @@ func main() {
 	defer glfw.Terminate()
 
 	glfw.WindowHint(glfw.ClientAPI, glfw.NoAPI)
-	win, err := glfw.CreateWindow(1280, 720, "minecraft-go — M1 terrain", nil, nil)
+	win, err := glfw.CreateWindow(1280, 720, "Mornlea — M1 terrain", nil, nil)
 	if err != nil {
 		log.Fatalf("创建窗口失败: %v", err)
 	}

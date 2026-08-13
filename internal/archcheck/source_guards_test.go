@@ -151,11 +151,11 @@ func TestOnlyCommandsImportConfig(t *testing.T) {
 		parts := strings.SplitN(line, "|", 2)
 		// internal/config 的外部测试包（package config_test）导入自身，需要整体跳过，
 		// 否则会自触发；这条豁免只对 config 包本身生效。
-		if len(parts) != 2 || parts[0] == "minecraft-go/internal/config" {
+		if len(parts) != 2 || parts[0] == "github.com/channing771/mornlea/internal/config" {
 			continue
 		}
 		for _, imported := range strings.Fields(parts[1]) {
-			if imported == "minecraft-go/internal/config" {
+			if imported == "github.com/channing771/mornlea/internal/config" {
 				t.Errorf("%s 导入了 internal/config；只有 cmd 可以导入它，否则本机配置会污染性能基线与抓帧 golden", parts[0])
 			}
 		}
@@ -224,8 +224,8 @@ func TestLegacyPlayerAuthorityMessagesAreGone(t *testing.T) {
 	}
 }
 
-func TestMcgoUsesLoginStreamsInsteadOfAttachedServerEndpoints(t *testing.T) {
-	path := filepath.Join(moduleRoot(t), "cmd", "mcgo")
+func TestMornleaUsesLoginStreamsInsteadOfAttachedServerEndpoints(t *testing.T) {
+	path := filepath.Join(moduleRoot(t), "cmd", "mornlea")
 	source := productionGoSource(t, path)
 	for _, legacy := range []string{"server.NewEmbedded(", "server.NewEmbeddedMemory(", "server.New("} {
 		if strings.Contains(source, legacy) {
@@ -237,8 +237,8 @@ func TestMcgoUsesLoginStreamsInsteadOfAttachedServerEndpoints(t *testing.T) {
 	}
 }
 
-func TestMcgoBenchmarkTCPPathUsesTheSharedLoginStateMachine(t *testing.T) {
-	path := filepath.Join(moduleRoot(t), "cmd", "mcgo")
+func TestMornleaBenchmarkTCPPathUsesTheSharedLoginStateMachine(t *testing.T) {
+	path := filepath.Join(moduleRoot(t), "cmd", "mornlea")
 	source := productionGoSource(t, path)
 	for _, required := range []string{"network.ListenTCP(", "network.BeginServerLogin(", "network.LoginClient(", "running.AttachTrustedObserver"} {
 		if !strings.Contains(source, required) {

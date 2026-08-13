@@ -96,7 +96,7 @@ export function rustValidationRequired(paths) {
     /^engine\/.*\.rs$/,
     /^engine\/(?:Cargo\.toml|Cargo\.lock|rust-toolchain\.toml)$/,
     /^engine\/crates\/.*\/Cargo\.toml$/,
-    /^engine\/include\/mcgo_engine\.h$/,
+    /^engine\/include\/mornlea_engine\.h$/,
     /^internal\/mesh\/native[^/]*\.go$/,
     /^internal\/mesh\/registry\.go$/,
     /^Makefile$/,
@@ -299,12 +299,12 @@ export function stopFailures(paths, execute = run, environment = process.env) {
   const readyActiveChange = hasReadyActiveChange();
   if (
     specReasons.length > 0 &&
-    process.env.MINECRAFT_GO_HOOKS_ALLOW_NO_SPEC !== "1" &&
+    process.env.MORNLEA_HOOKS_ALLOW_NO_SPEC !== "1" &&
     !readyActiveChange
   ) {
     failures.push(
       `检测到必须走 OpenSpec 的改动，但没有完整的 active change：\n- ${specReasons.join("\n- ")}\n` +
-        "请先生成 proposal、delta specs 和 tasks；仅在用户明确批准例外时设置 MINECRAFT_GO_HOOKS_ALLOW_NO_SPEC=1。",
+        "请先生成 proposal、delta specs 和 tasks；仅在用户明确批准例外时设置 MORNLEA_HOOKS_ALLOW_NO_SPEC=1。",
     );
   }
 
@@ -405,7 +405,7 @@ export function stopFailures(paths, execute = run, environment = process.env) {
 }
 
 function fail(message) {
-  process.stderr.write(`[minecraft-go hook] ${message}\n`);
+  process.stderr.write(`[mornlea hook] ${message}\n`);
   process.exitCode = 2;
 }
 
@@ -458,7 +458,7 @@ async function main() {
       process.stdout.write(
         `${JSON.stringify({
           continue: true,
-          systemMessage: `[minecraft-go hook] 复检仍未通过；为避免 Stop 循环，本次允许结束：\n${message}`,
+          systemMessage: `[mornlea hook] 复检仍未通过；为避免 Stop 循环，本次允许结束：\n${message}`,
         })}\n`,
       );
       return;

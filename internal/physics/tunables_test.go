@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/physics"
+	"github.com/channing771/mornlea/internal/physics"
 )
 
 // TestDefaultTunablesMatchLegacyConstants 是本次重构的行为不变式：

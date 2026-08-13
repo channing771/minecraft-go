@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 // TestComputeDoublesInput 验证 compute shader 能读入缓冲、计算、写出缓冲，

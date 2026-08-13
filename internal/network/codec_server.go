@@ -3,7 +3,7 @@ package network
 import (
 	"errors"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint32, payload []byte, err error) {

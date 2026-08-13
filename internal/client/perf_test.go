@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/client"
+	"github.com/channing771/mornlea/internal/client"
 )
 
 func TestPerfReportV6RequiresCompleteMultiplayerJSON(t *testing.T) {

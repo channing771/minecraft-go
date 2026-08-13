@@ -3,7 +3,7 @@ package sim
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // DayLengthTicks 之外的显示周期由呈现层负责，这里只验证绝对时间的推进。

@@ -3,8 +3,8 @@ package client
 import (
 	"errors"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 // ChestMirror 是当前查看箱子的固定只读镜像，与 FurnaceMirror 语义完全对称：

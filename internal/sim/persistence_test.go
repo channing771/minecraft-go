@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // emptyChunkEstimateBytes 是全空区块的存档估算：512 信封 + 32 个固定掉落物槽 +

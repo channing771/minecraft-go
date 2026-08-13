@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func dropTestID(slot uint8, generation uint32) core.DropID {

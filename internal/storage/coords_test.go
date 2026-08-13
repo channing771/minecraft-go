@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 func TestRegionForUsesFloorDivision(t *testing.T) {

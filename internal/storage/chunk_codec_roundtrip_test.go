@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 func TestChunkPayloadRoundTripsDeterministically(t *testing.T) {

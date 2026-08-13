@@ -3,8 +3,8 @@ package client
 import (
 	"fmt"
 
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // chunkFromSnapshot 先完整验证和解码，再返回可整体替换进镜像的区块。

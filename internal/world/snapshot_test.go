@@ -3,9 +3,9 @@ package world_test
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
-	"minecraft-go/internal/worldgen"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
+	"github.com/channing771/mornlea/internal/worldgen"
 )
 
 func TestContainerSnapshotRoundTripsEveryStorageKind(t *testing.T) {

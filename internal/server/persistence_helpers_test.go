@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/storage"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/storage"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // emptyChunkEstimateBytes 是全空区块的存档估算：512 信封 + 32 个固定掉落物槽 +

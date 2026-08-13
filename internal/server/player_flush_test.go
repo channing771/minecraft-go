@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // 捕获：Flush 在首个失败后立即返回、同次重试失败 revision，或依赖 map 顺序拼接错误。

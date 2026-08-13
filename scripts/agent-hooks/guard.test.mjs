@@ -55,7 +55,7 @@ test("does not require OpenSpec for one focused implementation component", () =>
 });
 
 test("requires Rust validation for engine and native mesh changes", () => {
-  assert.equal(rustValidationRequired(["engine/crates/mcgo_mesh/src/light.rs"]), true);
+  assert.equal(rustValidationRequired(["engine/crates/mornlea_mesh/src/light.rs"]), true);
   assert.equal(rustValidationRequired(["internal/mesh/native.go"]), true);
   assert.equal(rustValidationRequired(["internal/server/session_ingress.go"]), false);
 });
@@ -67,7 +67,7 @@ test("runs Rust validation before Go checks for Rust-required changes", () => {
     return { status: 0, stdout: "" };
   };
 
-  assert.deepEqual(stopFailures(["engine/crates/mcgo_mesh/src/light.rs"], run, {}), []);
+  assert.deepEqual(stopFailures(["engine/crates/mornlea_mesh/src/light.rs"], run, {}), []);
   assert.deepEqual(calls.slice(1, 4), [
     ["make", ["rust"]],
     ["make", ["rust-check"]],
@@ -97,7 +97,7 @@ test("passes login-shell Cargo through the full Stop route when PATH is restrict
     runCommand(command, argumentsList, timeout, spawn, environment);
 
   assert.deepEqual(
-    stopFailures(["engine/crates/mcgo_mesh/src/light.rs"], run, environment),
+    stopFailures(["engine/crates/mornlea_mesh/src/light.rs"], run, environment),
     [],
   );
   assert.deepEqual(
@@ -116,7 +116,7 @@ test("routes deleted Rust and native paths through Rust validation", () => {
       assert.ok(argumentsList.includes("--diff-filter=ACMRD"));
       return {
         status: 0,
-        stdout: "engine/crates/mcgo_mesh/src/removed.rs\0internal/mesh/native_removed.go\0",
+        stdout: "engine/crates/mornlea_mesh/src/removed.rs\0internal/mesh/native_removed.go\0",
       };
     }
     return { status: 0, stdout: "" };
@@ -129,7 +129,7 @@ test("routes deleted Rust and native paths through Rust validation", () => {
   };
 
   assert.deepEqual(paths, [
-    "engine/crates/mcgo_mesh/src/removed.rs",
+    "engine/crates/mornlea_mesh/src/removed.rs",
     "internal/mesh/native_removed.go",
   ]);
   assert.deepEqual(stopFailures(paths, run, {}), []);

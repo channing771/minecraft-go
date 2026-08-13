@@ -1,6 +1,6 @@
 package client
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 type Movement struct {
 	MoveX int8

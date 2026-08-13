@@ -1,7 +1,7 @@
 // Package world 提供世界数据模型：区块、区段、调色板存储与光照。
 package world
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 // BlockID 是核心域方块 ID 的兼容别名。
 type BlockID = core.BlockID

@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"time"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 type Config struct {

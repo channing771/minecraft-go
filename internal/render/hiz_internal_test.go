@@ -3,7 +3,7 @@ package render
 import (
 	"testing"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 func TestHiZPadsNonPowerOfTwoAndBuildsOnGPU(t *testing.T) {

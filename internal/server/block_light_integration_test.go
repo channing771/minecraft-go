@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/client"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 type staticBlockLightResult struct {

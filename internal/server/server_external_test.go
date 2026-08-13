@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"minecraft-go/internal/server"
+	"github.com/channing771/mornlea/internal/server"
 )
 
 func shutdownExternalServerForTest(t *testing.T, running *server.Server) {

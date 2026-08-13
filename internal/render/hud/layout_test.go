@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // Mutation killed: dropping the selection frame, mislaying slots, or letting the

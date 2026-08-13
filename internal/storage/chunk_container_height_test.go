@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // TestChunkCodecRoundTripsContainersAcrossWorldSections 防止把容器索引还原出的世界 Y

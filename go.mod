@@ -1,4 +1,4 @@
-module minecraft-go
+module github.com/channing771/mornlea
 
 go 1.26.0
 
