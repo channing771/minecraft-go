@@ -140,6 +140,9 @@ go test ./internal/mesh ./internal/render ./cmd/mcgo -race -count=1
 go test ./internal/archcheck -count=1
 
 visual_home=$(mktemp -d /private/tmp/mornlea-merge-home.XXXXXX)
+hardware_chip="$(system_profiler SPHardwareDataType | sed -n 's/^[[:space:]]*Chip: //p')"
+test -n "$hardware_chip"
+printf '视觉验证硬件 Chip: %s\n' "$hardware_chip"
 legacy_profile_dir="$visual_home/Library/Application Support/minecraft-go"
 mkdir -p "$legacy_profile_dir"
 chmod 0700 "$legacy_profile_dir"
@@ -151,7 +154,6 @@ set +e
 HOME="$visual_home" VISUAL_OUT="$merged_visual" make visual-check > "$merged_visual/run.log" 2>&1
 merged_visual_rc=$?
 set -e
-test "$merged_visual_rc" -ne 0
 
 baseline_home=$(mktemp -d /private/tmp/mornlea-main-home.XXXXXX)
 baseline_profile_dir="$baseline_home/Library/Application Support/minecraft-go"
@@ -175,7 +177,6 @@ baseline_visual=$(mktemp -d /private/tmp/mornlea-main-visual.XXXXXX)
   (cd "$baseline_tree" && HOME="$baseline_home" VISUAL_OUT="$baseline_visual" make visual-check > "$baseline_visual/run.log" 2>&1)
   baseline_visual_rc=$?
   set -e
-  test "$baseline_visual_rc" -ne 0
   restore_tree
   trap - EXIT HUP INT TERM
 )
@@ -183,16 +184,28 @@ baseline_visual=$(mktemp -d /private/tmp/mornlea-main-visual.XXXXXX)
 for scene in terrain-noon hud-hotbar-health avatar-nametag inventory-crafting debug-panel skylight-tunnel block-light-room materials-showcase target-block-feedback oak-grove; do
   cmp "$merged_visual/${scene}.png" "$baseline_visual/${scene}.png"
 done
-for artifact in materials-showcase-actual.png materials-showcase-diff.png oak-grove-actual.png oak-grove-diff.png; do
-  cmp "$merged_visual/$artifact" "$baseline_visual/$artifact"
-done
-rg '^已抓取场景 (materials-showcase|oak-grove):' "$merged_visual/run.log" > "$merged_visual/failures.txt"
-rg '^已抓取场景 (materials-showcase|oak-grove):' "$baseline_visual/run.log" > "$baseline_visual/failures.txt"
-cmp "$merged_visual/failures.txt" "$baseline_visual/failures.txt"
-rg -Fx '已抓取场景 materials-showcase: 最大通道差 1，差异像素 26/230400（0.0113%），首个差异像素在 (172,26)' "$merged_visual/failures.txt"
-rg -Fx '已抓取场景 oak-grove: 最大通道差 47，差异像素 10/230400（0.0043%），首个差异像素在 (89,86)' "$merged_visual/failures.txt"
-test "$(find "$merged_visual" -maxdepth 1 -name '*-actual.png' | wc -l | tr -d ' ')" = 2
-test "$(find "$merged_visual" -maxdepth 1 -name '*-diff.png' | wc -l | tr -d ' ')" = 2
+case "$hardware_chip" in
+  'Apple M2')
+    test "$merged_visual_rc" -ne 0
+    test "$baseline_visual_rc" -ne 0
+    for artifact in materials-showcase-actual.png materials-showcase-diff.png oak-grove-actual.png oak-grove-diff.png; do
+      cmp "$merged_visual/$artifact" "$baseline_visual/$artifact"
+    done
+    rg '^已抓取场景 (materials-showcase|oak-grove):' "$merged_visual/run.log" > "$merged_visual/failures.txt"
+    rg '^已抓取场景 (materials-showcase|oak-grove):' "$baseline_visual/run.log" > "$baseline_visual/failures.txt"
+    cmp "$merged_visual/failures.txt" "$baseline_visual/failures.txt"
+    rg -Fx '已抓取场景 materials-showcase: 最大通道差 1，差异像素 26/230400（0.0113%），首个差异像素在 (172,26)' "$merged_visual/failures.txt"
+    rg -Fx '已抓取场景 oak-grove: 最大通道差 47，差异像素 10/230400（0.0043%），首个差异像素在 (89,86)' "$merged_visual/failures.txt"
+    test "$(find "$merged_visual" -maxdepth 1 -name '*-actual.png' | wc -l | tr -d ' ')" = 2
+    test "$(find "$merged_visual" -maxdepth 1 -name '*-diff.png' | wc -l | tr -d ' ')" = 2
+    ;;
+  *)
+    test "$merged_visual_rc" -eq 0
+    test "$baseline_visual_rc" -eq 0
+    test "$(find "$merged_visual" -maxdepth 1 \( -name '*-actual.png' -o -name '*-diff.png' \) | wc -l | tr -d ' ')" = 0
+    test "$(find "$baseline_visual" -maxdepth 1 \( -name '*-actual.png' -o -name '*-diff.png' \) | wc -l | tr -d ' ')" = 0
+    ;;
+esac
 
 git diff --cached --check
 git commit -m "merge: 同步 Mornlea 改名前主线"
@@ -200,7 +213,7 @@ test "$(git rev-parse HEAD^2)" = "$origin_main"
 git show --stat --oneline --summary HEAD
 ```
 
-Expected: Rust mesh/light, cloud render tests, archcheck and build PASS before the isolated merge commit. On the approved Apple M2/macOS baseline, only the two inherited failures above are accepted: merged and raw main outputs must match for all 10 scene PNGs and all four failure artifacts, with exact summaries; the other eight scenes must not produce failure artifacts. Any extra failure, byte drift or summary drift blocks. Never update golden.
+Expected: Rust mesh/light, cloud render tests, archcheck and build PASS before the isolated merge commit. The script records `system_profiler SPHardwareDataType`'s exact Chip. On Apple M2/macOS, only the two inherited failures above are accepted: merged and raw main outputs must match for all 10 scene PNGs and all four failure artifacts, with exact summaries; the other eight scenes must not produce failure artifacts. On every non-M2 Chip, merged and raw main must first match byte-for-byte for all 10 scene PNGs, both `visual-check` commands must exit 0, and neither output may contain `*-actual.png` or `*-diff.png`. Any extra failure, byte drift or summary drift blocks. Never update golden, thresholds or capture code.
 
 - [ ] **Step 5: Freeze post-merge invariant hashes**
 
@@ -376,7 +389,7 @@ Expected: new `spec-driven` change exists and does not alter main specs.
 
 `design.md` must record exact name mapping, `os.Link` no-clobber publication, default-vs-explicit boundary, exact history/compatibility allowlists, one atomic identity switch, post-merge external operations and rollback. Do not introduce a migration framework, compatibility wrapper or new schema.
 
-It must also carry forward the already approved same-machine visual exception from the archived repository-organization contract: on Apple M2/macOS, raw Task 1 `origin/main` and the Mornlea branch must emit byte-identical PNGs for all 10 scenes; only `materials-showcase` (delta 1, 26 pixels, 0.0113%) and `oak-grove` (delta 47, 10 pixels, 0.0043%) may retain their exact inherited failures, while the other eight scenes pass tracked golden. This never permits a golden, threshold or capture-code update.
+It must also carry forward the hardware-conditioned same-machine visual contract from the archived repository-organization contract, recording `system_profiler SPHardwareDataType`'s exact Chip: on Apple M2/macOS, raw Task 1 `origin/main` and the Mornlea branch must emit byte-identical PNGs for all 10 scenes; only `materials-showcase` (delta 1, 26 pixels, 0.0113%) and `oak-grove` (delta 47, 10 pixels, 0.0043%) may retain their exact inherited failures, while the other eight scenes pass tracked golden. On every non-M2 Chip, the two trees must emit byte-identical PNGs for all 10 scenes, both non-update captures must exit 0, and neither tree may emit `*-actual.png` or `*-diff.png`. This never permits a golden, threshold or capture-code update.
 
 - [ ] **Step 3: Write observable delta specs**
 
@@ -405,12 +418,18 @@ It must also carry forward the already approved same-machine visual exception fr
 - **WHEN** 完成身份切换
 - **THEN** 所有静态 fixture/baseline hash 与按 basename 比较的 10 张 golden MUST 完全一致
 
-#### Scenario: 已批准的同环境视觉基线不掩盖改名漂移
+#### Scenario: Apple M2 已批准的同环境视觉基线不掩盖改名漂移
 - **GIVEN** Apple M2/macOS 上的原始 Task 1 `origin/main` 仅有 `materials-showcase` 和 `oak-grove` 两个精确已知失败
 - **WHEN** 原始主线与 Mornlea 分支在同一隔离 HOME 下运行非更新 capture
 - **THEN** 两边 10 个场景 PNG 与两个失败的 actual/diff MUST 逐字节一致
 - **AND** 失败摘要 MUST 精确保持 `materials-showcase` 最大差 1/26 像素/0.0113% 与 `oak-grove` 最大差 47/10 像素/0.0043%
 - **AND** 其余 8 个场景 MUST 通过 tracked golden，不得修改 golden、阈值或 capture 代码
+
+#### Scenario: 非 Apple M2 的同环境视觉基线不掩盖改名漂移
+- **GIVEN** `system_profiler SPHardwareDataType` 的 Chip 不是 `Apple M2`
+- **WHEN** 原始主线与 Mornlea 分支在同一隔离 HOME 下运行非更新 capture
+- **THEN** 两边 10 个场景 PNG MUST 逐字节一致，且两次 `visual-check` MUST 退出 0
+- **AND** 两边都 MUST 不产生 `*-actual.png` 或 `*-diff.png`，不得修改 golden、阈值或 capture 代码
 ```
 
 `specs/local-data-migration/spec.md` must include:
@@ -1301,6 +1320,9 @@ go test ./internal/mesh -run '^$' -fuzz '^FuzzNativeMeshRejectsMalformedInput$' 
 
 current_visual=$(mktemp -d /private/tmp/mornlea-m4q-visual.XXXXXX)
 current_home=$(mktemp -d /private/tmp/mornlea-m4q-home.XXXXXX)
+hardware_chip="$(system_profiler SPHardwareDataType | sed -n 's/^[[:space:]]*Chip: //p')"
+test -n "$hardware_chip"
+printf '视觉验证硬件 Chip: %s\n' "$hardware_chip"
 current_profile_dir="$current_home/Library/Application Support/mornlea"
 mkdir -p "$current_profile_dir"
 chmod 0700 "$current_profile_dir"
@@ -1310,7 +1332,6 @@ set +e
 HOME="$current_home" VISUAL_OUT="$current_visual" make visual-check > "$current_visual/run.log" 2>&1
 current_visual_rc=$?
 set -e
-test "$current_visual_rc" -ne 0
 
 baseline_visual=$(mktemp -d /private/tmp/mornlea-m4q-main-visual.XXXXXX)
 baseline_home=$(mktemp -d /private/tmp/mornlea-m4q-main-home.XXXXXX)
@@ -1336,7 +1357,6 @@ chmod 0600 "$baseline_profile_dir/profile.json"
     HOME="$baseline_home" VISUAL_OUT="$baseline_visual" make visual-check > "$baseline_visual/run.log" 2>&1
     baseline_visual_rc=$?
     set -e
-    test "$baseline_visual_rc" -ne 0
   )
   restore_tree
   trap - EXIT HUP INT TERM
@@ -1345,19 +1365,31 @@ chmod 0600 "$baseline_profile_dir/profile.json"
 for scene in terrain-noon hud-hotbar-health avatar-nametag inventory-crafting debug-panel skylight-tunnel block-light-room materials-showcase target-block-feedback oak-grove; do
   cmp "$current_visual/${scene}.png" "$baseline_visual/${scene}.png"
 done
-for artifact in materials-showcase-actual.png materials-showcase-diff.png oak-grove-actual.png oak-grove-diff.png; do
-  cmp "$current_visual/$artifact" "$baseline_visual/$artifact"
-done
-rg '^已抓取场景 (materials-showcase|oak-grove):' "$current_visual/run.log" > "$current_visual/failures.txt"
-rg '^已抓取场景 (materials-showcase|oak-grove):' "$baseline_visual/run.log" > "$baseline_visual/failures.txt"
-cmp "$current_visual/failures.txt" "$baseline_visual/failures.txt"
-rg -Fx '已抓取场景 materials-showcase: 最大通道差 1，差异像素 26/230400（0.0113%），首个差异像素在 (172,26)' "$current_visual/failures.txt"
-rg -Fx '已抓取场景 oak-grove: 最大通道差 47，差异像素 10/230400（0.0043%），首个差异像素在 (89,86)' "$current_visual/failures.txt"
-test "$(find "$current_visual" -maxdepth 1 -name '*-actual.png' | wc -l | tr -d ' ')" = 2
-test "$(find "$current_visual" -maxdepth 1 -name '*-diff.png' | wc -l | tr -d ' ')" = 2
+case "$hardware_chip" in
+  'Apple M2')
+    test "$current_visual_rc" -ne 0
+    test "$baseline_visual_rc" -ne 0
+    for artifact in materials-showcase-actual.png materials-showcase-diff.png oak-grove-actual.png oak-grove-diff.png; do
+      cmp "$current_visual/$artifact" "$baseline_visual/$artifact"
+    done
+    rg '^已抓取场景 (materials-showcase|oak-grove):' "$current_visual/run.log" > "$current_visual/failures.txt"
+    rg '^已抓取场景 (materials-showcase|oak-grove):' "$baseline_visual/run.log" > "$baseline_visual/failures.txt"
+    cmp "$current_visual/failures.txt" "$baseline_visual/failures.txt"
+    rg -Fx '已抓取场景 materials-showcase: 最大通道差 1，差异像素 26/230400（0.0113%），首个差异像素在 (172,26)' "$current_visual/failures.txt"
+    rg -Fx '已抓取场景 oak-grove: 最大通道差 47，差异像素 10/230400（0.0043%），首个差异像素在 (89,86)' "$current_visual/failures.txt"
+    test "$(find "$current_visual" -maxdepth 1 -name '*-actual.png' | wc -l | tr -d ' ')" = 2
+    test "$(find "$current_visual" -maxdepth 1 -name '*-diff.png' | wc -l | tr -d ' ')" = 2
+    ;;
+  *)
+    test "$current_visual_rc" -eq 0
+    test "$baseline_visual_rc" -eq 0
+    test "$(find "$current_visual" -maxdepth 1 \( -name '*-actual.png' -o -name '*-diff.png' \) | wc -l | tr -d ' ')" = 0
+    test "$(find "$baseline_visual" -maxdepth 1 \( -name '*-actual.png' -o -name '*-diff.png' \) | wc -l | tr -d ' ')" = 0
+    ;;
+esac
 ```
 
-Expected: all fuzzers complete without crash. The isolated-HOME current branch and raw Task 1 main have 10/10 byte-identical scene PNGs and four identical failure artifacts; only the two exact inherited summaries are nonzero, so the other eight scenes pass tracked golden. Any other failure or byte drift blocks. Never run `visual-update`.
+Expected: all fuzzers complete without crash. The script records `system_profiler SPHardwareDataType`'s exact Chip, then the isolated-HOME current branch and raw Task 1 main must first have 10/10 byte-identical scene PNGs. On Apple M2/macOS, the four identical failure artifacts and only the two exact inherited nonzero summaries are required, so the other eight scenes pass tracked golden. On every non-M2 Chip, both `visual-check` commands must exit 0 and neither output may contain `*-actual.png` or `*-diff.png`. Any other failure or byte drift blocks. Never run `visual-update`, update golden, thresholds or capture code.
 
 - [ ] **Step 4: Verify dylib portability and Linux server boundary**
 
