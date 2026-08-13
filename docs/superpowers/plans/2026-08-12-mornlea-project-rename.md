@@ -1357,14 +1357,11 @@ chmod 0600 "$baseline_profile_dir/profile.json"
   printf '%s\n' "$worktree_add_rc" > "$baseline_visual/worktree-add.rc"
   cat "$baseline_visual/worktree-add.log"
   test "$worktree_add_rc" -eq 0
-  (
-    cd "$baseline_tree"
-    set +e
-    HOME="$baseline_home" VISUAL_OUT="$baseline_visual" make visual-check > "$baseline_visual/run.log" 2>&1
-    baseline_visual_rc=$?
-    printf '%s\n' "$baseline_visual_rc" > "$baseline_visual/baseline_visual_rc"
-    set -e
-  )
+  set +e
+  HOME="$baseline_home" VISUAL_OUT="$baseline_visual" make -C "$baseline_tree" visual-check > "$baseline_visual/run.log" 2>&1
+  baseline_visual_rc=$?
+  printf '%s\n' "$baseline_visual_rc" > "$baseline_visual/baseline_visual_rc"
+  set -e
   restore_tree
   trap - EXIT HUP INT TERM
 )
