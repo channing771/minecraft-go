@@ -106,6 +106,14 @@ Task 6 完成后、Task 7 开始前持久化 Test/Benchmark/Fuzz 清单。相对
 
 两种裁决都禁止 `visual-update`、golden 更新、阈值调整或 capture 代码修改。相同硬件、命令、隔离 HOME 与原始主线对照是必要条件；不能用跨硬件 golden 偏差推导改名漂移。
 
+## Task 9 验证证据（Attempt 3）
+
+- Task 1 merge HEAD 为 `f8e2121aba7cdf8b0adc878444c5be08a5eaf2c3`，Task 1 冻结的 `origin/main` HEAD 为 `e15541686b184df97d7ec2c74efc3e20979507a7`。Tasks 1–8 实现连同获批的 Task 9 控制计划修正冻结为 producer HEAD `1a8096d5507dc682145067aa2b28d8fd2fbf4cb6`。
+- Git common-dir 中 18 项 `static.sha256` manifest 的 SHA-256 为 `751041b438d24b4d3ad64e2f52d82472d77f7a79cfa0a14709d07d22210bacc4`；10 项 basename `golden.sha256` manifest 的 SHA-256 为 `78e3588f7fa4e18fe19e58246aeed4f0c24a25b9734eacefa869bfa9cba20d6f`，Task 9 fresh 生成的 `golden-after.sha256` hash 与其相同。全部 manifest entry 复验通过，Task 1 后固定 artifact 路径无差异。
+- Memory v15 记录位于 Git common-dir 的 `mornlea-m4q-evidence/task9-memory-v15.json`，SHA-256 为 `ed2da341684aa8e74067e4a4f99ae7b89e5a1a30c0bd1d00c8dbf781ea06dea7`；其嵌入的 `git_commit` 精确为 `1a8096d5507dc682145067aa2b28d8fd2fbf4cb6`，`scenario_version` 为 `15`。这里只记录报告身份与完整性，不据数值作性能结论。
+- 双树视觉门禁硬件为 `Apple M5`。producer 使用隔离 HOME `/private/tmp/mornlea-m4q-home.93juhy`、输出 `/private/tmp/mornlea-m4q-visual.or5zwp`；raw Task 1 `origin/main` 使用隔离 HOME `/private/tmp/mornlea-m4q-main-home.8nVnUI`、输出 `/private/tmp/mornlea-m4q-main-visual.L5jp3g`。两次 non-update `visual-check` 均 exit 0，各产生 10 张 PNG，全部 10 个对应场景逐字节相同，双方 `*-actual.png`/`*-diff.png` 数量均为 0。current 与 baseline `run.log` 的 SHA-256 分别为 `2c0834c6fbcdf468c5e1d9a012fd6c91094ba71aea2d2e060e5d431b4185a610` 与 `d5d97db71b2a7134e218ae814da7d6790398aab3a352fbc5ea76bdf5fc464dd0`；baseline `worktree-add.rc` 为 0，临时 linked worktree 已恢复。未运行 `visual-update`，未启动或聚焦前台游戏窗口。
+- 本 change 仍位于 `openspec/changes/m4q-mornlea-project-rename`，archive state 为 active、未归档；9.1 在独立 review 前保持未勾选。执行者未获授权且未执行 GitHub repository、Git remote、本地仓库根目录或 GitNexus 的仓库外改名，也未 merge 或 push。
+
 ## Risks / Trade-offs
 
 - [并发发布后目标权限或内容不安全] → loser 和 winner 都在发布后重复执行 0700/0600 检查并从目标重读，不直接返回 candidate。
