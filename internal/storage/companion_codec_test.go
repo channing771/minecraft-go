@@ -85,6 +85,36 @@ func TestCompanionCodecV1RoundTripAndGolden(t *testing.T) {
 	if !bytes.Equal(want, encoded) {
 		t.Fatal("companions v1 fixture drift；需要升级 schema")
 	}
+	expected := got
+	expected.Records = append([]companion.Body(nil), got.Records...)
+	clear(encoded)
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("修改输入 bytes 后 decode 结果=%+v，想要保持 %+v", got, expected)
+	}
+}
+
+func TestCompanionCodecAcceptsMaximumStoredRecords(t *testing.T) {
+	records := make([]companion.Body, companion.MaxStored)
+	for index := range records {
+		records[index].ID = fixtureCompanionID(byte(index))
+	}
+	encoded, err := encodeCompanions(CompanionSave{Revision: 23, Records: records})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) != 14176 {
+		t.Fatalf("64 条记录长度=%d，想要 14176", len(encoded))
+	}
+	got, err := decodeCompanions(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Revision != 23 || len(got.Records) != 64 || !reflect.DeepEqual(got.Records, records) {
+		t.Fatalf("64 条记录 decode=%+v", got)
+	}
+	if _, err := decodeCompanions(append(encoded, 0)); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("14,177-byte decode error=%v，想要 ErrCorrupt", err)
+	}
 }
 
 func TestCompanionCodecRejectsCRCTruncationFutureVersionAndOversizedRecords(t *testing.T) {

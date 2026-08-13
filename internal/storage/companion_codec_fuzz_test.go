@@ -16,16 +16,23 @@ func FuzzDecodeCompanions(f *testing.F) {
 			f.Add(bytes.Clone(fixture[:length]))
 		}
 	}
-	for _, count := range []uint32{companion.MaxStored - 1, companion.MaxStored, companion.MaxStored + 1} {
-		payload := make([]byte, 32)
-		copy(payload, "MCAI")
-		binary.LittleEndian.PutUint32(payload[4:], 1)
-		binary.LittleEndian.PutUint32(payload[8:], 1)
-		binary.LittleEndian.PutUint64(payload[12:], 1)
-		binary.LittleEndian.PutUint32(payload[20:], count)
-		binary.LittleEndian.PutUint32(payload[24:], count*221)
-		f.Add(payload)
+	records := make([]companion.Body, companion.MaxStored)
+	for index := range records {
+		records[index].ID = fixtureCompanionID(byte(index))
 	}
+	maximum, err := encodeCompanions(CompanionSave{Revision: 1, Records: records})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(maximum)
+	oversized := make([]byte, 32)
+	copy(oversized, "MCAI")
+	binary.LittleEndian.PutUint32(oversized[4:], 1)
+	binary.LittleEndian.PutUint32(oversized[8:], 1)
+	binary.LittleEndian.PutUint64(oversized[12:], 1)
+	binary.LittleEndian.PutUint32(oversized[20:], companion.MaxStored+1)
+	binary.LittleEndian.PutUint32(oversized[24:], (companion.MaxStored+1)*221)
+	f.Add(oversized)
 	f.Fuzz(func(t *testing.T, payload []byte) {
 		got, err := decodeCompanions(payload)
 		if err != nil {
