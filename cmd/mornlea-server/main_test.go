@@ -33,12 +33,11 @@ func TestResolveConfigUsesDefaultMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserConfigDir: %v", err)
 	}
-	legacyPath := filepath.Join(base, "minecraft"+"-go", "config.json")
 	currentPath := filepath.Join(base, "mornlea", "config.json")
-	legacy := config.Defaults()
-	legacy.Physics.Gravity = 24
-	if err := legacy.Save(legacyPath); err != nil {
-		t.Fatalf("Save legacy config: %v", err)
+	current := config.Defaults()
+	current.Physics.Gravity = 24
+	if err := current.Save(currentPath); err != nil {
+		t.Fatalf("Save current config: %v", err)
 	}
 
 	got, err := resolveConfig(options{})
@@ -49,7 +48,7 @@ func TestResolveConfigUsesDefaultMigration(t *testing.T) {
 		t.Fatalf("gravity = %v，want 24", got.Physics.Gravity)
 	}
 	if _, err := os.ReadFile(currentPath); err != nil {
-		t.Fatalf("读取迁移后默认配置: %v", err)
+		t.Fatalf("读取当前默认配置: %v", err)
 	}
 }
 
@@ -60,13 +59,13 @@ func TestResolveConfigExplicitPathSkipsDefaultMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserConfigDir: %v", err)
 	}
-	legacyPath := filepath.Join(base, "minecraft"+"-go", "config.json")
 	currentPath := filepath.Join(base, "mornlea", "config.json")
-	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
-		t.Fatalf("MkdirAll legacy: %v", err)
+	if err := os.MkdirAll(filepath.Dir(currentPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll current: %v", err)
 	}
-	if err := os.WriteFile(legacyPath, []byte(`{"version":`), 0o600); err != nil {
-		t.Fatalf("WriteFile legacy: %v", err)
+	const invalidDefault = `{"version":`
+	if err := os.WriteFile(currentPath, []byte(invalidDefault), 0o600); err != nil {
+		t.Fatalf("WriteFile current: %v", err)
 	}
 	explicitPath := filepath.Join(t.TempDir(), "explicit.json")
 	explicit := config.Defaults()
@@ -82,8 +81,9 @@ func TestResolveConfigExplicitPathSkipsDefaultMigration(t *testing.T) {
 	if got.Physics.Gravity != 31 {
 		t.Fatalf("gravity = %v，want 31", got.Physics.Gravity)
 	}
-	if _, err := os.Stat(currentPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("显式配置不得触发默认迁移，Stat err = %v", err)
+	contents, err := os.ReadFile(currentPath)
+	if err != nil || string(contents) != invalidDefault {
+		t.Fatalf("显式配置不得读取或修改默认配置，contents = %q, err = %v", contents, err)
 	}
 }
 

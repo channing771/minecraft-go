@@ -105,6 +105,22 @@ export function rustValidationRequired(paths) {
   return paths.some((path) => patterns.some((pattern) => pattern.test(path)));
 }
 
+function identityValidationRequired(paths) {
+  const patterns = [
+    /^go\.mod$/,
+    /^cmd(?:\/|$)/,
+    /^internal(?:\/|$)/,
+    /^engine\/(?:Cargo\.toml|Cargo\.lock)$/,
+    /^engine\/(?:crates|include)(?:\/|$)/,
+    /^Makefile$/,
+    /^\.github\/workflows\/ci\.yml$/,
+    /^\.codex\/hooks\.json$/,
+    /^scripts\/agent-hooks(?:\/|$)/,
+    /^\.gitignore$/,
+  ];
+  return paths.some((path) => patterns.some((pattern) => pattern.test(path)));
+}
+
 export function openSpecRequirementReasons(paths) {
   const reasons = [];
   const highRiskPatterns = [
@@ -310,6 +326,7 @@ export function stopFailures(paths, execute = run, environment = process.env) {
 
   const goFiles = changedGoFiles(paths);
   const needsRustValidation = rustValidationRequired(paths);
+  const needsIdentityValidation = identityValidationRequired(paths);
   let cargoOverride = [];
   if ((goFiles.length > 0 || needsRustValidation) && environment.SHELL) {
     const lookup = execute(environment.SHELL, ["-lc", "command -v cargo"], 30_000);
@@ -386,6 +403,18 @@ export function stopFailures(paths, execute = run, environment = process.env) {
     const testFailure = commandFailure("native 下游测试", tests);
     if (testFailure) {
       failures.push(testFailure);
+    }
+  }
+
+  if (needsIdentityValidation) {
+    const identity = execute(
+      "go",
+      ["test", "./internal/archcheck", "-run", "^TestMornleaCurrentIdentity$", "-count=1"],
+      120_000,
+    );
+    const identityFailure = commandFailure("当前身份门禁", identity);
+    if (identityFailure) {
+      failures.push(identityFailure);
     }
   }
 

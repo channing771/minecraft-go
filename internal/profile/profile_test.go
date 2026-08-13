@@ -16,7 +16,7 @@ import (
 )
 
 func TestLoadOrCreateCreatesPrivateV1Profile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "minecraft-go", "profile.json")
+	path := filepath.Join(t.TempDir(), "mornlea", "profile.json")
 	name := "  Chen  "
 	got, err := LoadOrCreate(Options{
 		Path:          path,
@@ -47,7 +47,7 @@ func TestLoadOrCreateCreatesPrivateV1Profile(t *testing.T) {
 
 func TestLoadOrCreateUsesDefaultNameWhenCreatingWithoutRequest(t *testing.T) {
 	profile, err := LoadOrCreate(Options{
-		Path:   filepath.Join(t.TempDir(), "minecraft-go", "profile.json"),
+		Path:   filepath.Join(t.TempDir(), "mornlea", "profile.json"),
 		Random: bytes.NewReader([]byte("0123456789abcdef")),
 	})
 	if err != nil {

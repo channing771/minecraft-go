@@ -76,6 +76,32 @@ test("runs Rust validation before Go checks for Rust-required changes", () => {
   assert.equal(calls.some(([command]) => command === "cargo"), false);
 });
 
+test("runs the current identity guard for every identity-only root change", () => {
+  for (const path of [
+    "go.mod",
+    ".gitignore",
+    "engine/Cargo.toml",
+    "scripts/agent-hooks/guard.mjs",
+  ]) {
+    const calls = [];
+    const run = (command, argumentsList) => {
+      calls.push([command, argumentsList]);
+      return { status: 0, stdout: "" };
+    };
+
+    assert.deepEqual(stopFailures([path], run, {}), []);
+    assert.ok(
+      calls.some(
+        ([command, argumentsList]) =>
+          command === "go" &&
+          argumentsList.join(" ") ===
+            "test ./internal/archcheck -run ^TestMornleaCurrentIdentity$ -count=1",
+      ),
+      `${path} did not route through TestMornleaCurrentIdentity`,
+    );
+  }
+});
+
 test("passes login-shell Cargo through the full Stop route when PATH is restricted", () => {
   const calls = [];
   const environment = { SHELL: "/bin/zsh", PATH: "/usr/bin:/bin" };
