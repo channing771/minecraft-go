@@ -4,29 +4,30 @@
 为全仓 Go 文件提供可判定的职责审计与纯结构重组契约，确保文件或包边界变化不会改变任何既有外部行为、固定 artifact 或架构守卫语义。
 ## Requirements
 ### Requirement: 代码组织重构保持外部行为
-系统 MUST 确保职责化文件和包迁移不改变任何既有外部行为或固定 artifact。
+系统 MUST 确保 Mornlea 身份切换不改变任何未获批准的外部行为、测试入口或固定 artifact。测试入口基线 MUST 是 Task 7 初始 HEAD 持久化的清单，该 HEAD 已包含 Tasks 4–6 新增的数据迁移和命令路由测试。
 
-#### Scenario: 重组后既有契约不漂移
-- **GIVEN** Task 20 固定主线基线的协议、存档、视觉与性能 fixture
-- **WHEN** 完成职责化文件和包迁移
-- **THEN** 除 Task 2 明确批准新增 `TestProductionGoSourceScansSplitFiles`、`TestTopLevelDeclarationNamesInScansSplitFiles`，并将 `TestSessionLifecycleResponsibilitiesLiveInSessionFile` 重命名为 `TestSessionLifecycleResponsibilitiesStayInSessionFiles` 外，其余相对 `37cdb3e` 的 Test、Benchmark、Fuzz 入口与固定 artifact MUST 保持不变
+#### Scenario: 身份切换只改变获批测试入口
+- **GIVEN** Task 7 初始 HEAD 已持久化全部 Test、Benchmark 与 Fuzz 入口
+- **WHEN** 完成原子身份切换
+- **THEN** MUST 仅有以下 6 项重命名：`TestMCGodHasNoGraphicsDependencies` → `TestMornleaServerHasNoGraphicsDependencies`、`TestMcgoUsesLoginStreamsInsteadOfAttachedServerEndpoints` → `TestMornleaUsesLoginStreamsInsteadOfAttachedServerEndpoints`、`TestMcgoBenchmarkTCPPathUsesTheSharedLoginStateMachine` → `TestMornleaBenchmarkTCPPathUsesTheSharedLoginStateMachine`、`TestMCGodProcess` → `TestMornleaServerProcess`、`TestMCGodProcessReleasesWorldLockAfterSIGTERM` → `TestMornleaServerProcessReleasesWorldLockAfterSIGTERM`、`TestMCGodProcessSaveFailureExitsNonzero` → `TestMornleaServerProcessSaveFailureExitsNonzero`
+- **AND** MUST 仅新增 `TestMornleaCurrentIdentity`
+- **AND** 其余 Test、Benchmark、Fuzz 入口与 Task 1 后冻结的 fixture、golden 和性能 baseline MUST 保持不变
 - **AND** benchmark 与 `perfcheck` 的性能数值及既有阈值 MUST 只保存记录且不得改变退出状态
 - **AND** 只有报告结构、身份/provenance、真实 overflow、数据丢失、I/O 错误和非数值命令失败 MUST 阻断
 
-#### Scenario: 同步主线后上游能力不回退
-- **GIVEN** `origin/main` 的固定基线 `37cdb3e` 已提供协议 v15、区块 schema v8、玩家 schema v6、已归档 M4N 及其后续材料、伤害、目标反馈、加工、自然生成、配方和容器高度能力
-- **WHEN** M4O 同步该基线并解决职责文件冲突
-- **THEN** 这些上游能力及其可观察行为 MUST 全部保留且不得归因于 M4O
-- **AND** 10 个视觉场景、storage/network fixture 与其他固定 artifact MUST 与 `37cdb3e` 字节一致
-- **AND** 相对 `37cdb3e` 的 Test、Benchmark、Fuzz 入口除既有 Task 2 两项新增和一项重命名外 MUST 完全一致
+#### Scenario: Apple M2 固定主线的同环境视觉失败不掩盖身份漂移
+- **GIVEN** `system_profiler SPHardwareDataType` 的精确 Chip 为 `Apple M2`，且原始 Task 1 `origin/main` 仅有 `materials-showcase` 最大通道差 1、26 个差异像素（0.0113%）与 `oak-grove` 最大通道差 47、10 个差异像素（0.0043%）两个精确已知失败
+- **WHEN** 原始主线与 Mornlea 分支在各自隔离 HOME 下运行同一非更新 capture
+- **THEN** 两边 10 个场景 PNG 与上述两个失败的 actual/diff MUST 逐字节一致
+- **AND** 两边 MUST 仅有上述两个失败且摘要完全一致，其余 8 个场景 MUST 通过 tracked golden
+- **AND** 此裁决 MUST NOT 修改或放宽 golden、阈值、capture 代码或其他视觉失败
 
-#### Scenario: 固定主线的同环境视觉基线失败不掩盖迁移漂移
-- **GIVEN** 同一 Apple M2/macOS 环境在原始 `37cdb3e` 连续复现 `materials-showcase` 的最大通道差 1、26 个差异像素（0.0113%），以及 `oak-grove` 的最大通道差 47、10 个差异像素（0.0043%），且其余 8 个场景各自通过 tracked golden
-- **WHEN** Task 20 分支与 detached `37cdb3e` 在该同一环境以同一 `make visual-check` 命令重新 capture 全部 10 个场景
-- **THEN** 两边 10 个场景输出 PNG MUST 逐字节一致
-- **AND** 两边 MUST 仅有上述 2 个场景失败，且场景名、最大通道差、差异像素数与比例的失败摘要完全一致
-- **AND** 其余 8 个场景 MUST 各自通过 tracked golden
-- **AND** 此裁决 MUST NOT 泛化为跳过其他视觉失败，也 MUST NOT 修改 golden、阈值或 capture 代码
+#### Scenario: 非 Apple M2 固定主线同环境视觉结果不漂移
+- **GIVEN** `system_profiler SPHardwareDataType` 的精确 Chip 不是 `Apple M2`
+- **WHEN** 原始 Task 1 `origin/main` 与 Mornlea 分支在各自隔离 HOME 下运行同一非更新 capture
+- **THEN** 两边 10 个场景 PNG MUST 逐字节一致，且两次 `visual-check` MUST 退出 0
+- **AND** 两边都 MUST 不产生 `*-actual.png` 或 `*-diff.png`
+- **AND** 此裁决 MUST NOT 修改或放宽 golden、阈值或 capture 代码
 
 ### Requirement: 架构守卫不依赖单一源文件位置
 架构守卫 MUST 对完整职责文件集合执行原有检查，不得绑定单一固定源文件位置。
