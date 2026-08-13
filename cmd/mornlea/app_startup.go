@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -116,6 +117,7 @@ func newApplicationWithDependencies(
 	var err error
 	ticks, saves := newPerformanceRecorders(options.Benchmark)
 	config := server.DefaultConfig(options.Seed)
+	config.Companions = slices.Clone(options.Companions)
 	config.ViewRadius = options.Render.ViewDistance + 1
 	config.TrustedObserver = options.Benchmark
 	config.TickObserver = ticks.add

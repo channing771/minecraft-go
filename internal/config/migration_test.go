@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/channing771/mornlea/internal/companion"
 )
 
 func TestLoadDefaultUsesMornleaCurrentAndMinecraftGoLegacy(t *testing.T) {
@@ -83,7 +85,12 @@ func TestLoadDefaultMigratesLegacyConfigAndPreservesSource(t *testing.T) {
 	current := filepath.Join(root, "mornlea", "config.json")
 	legacy := filepath.Join(root, "minecraft-go", "config.json")
 	want := migrationConfig(24)
-	legacyBody := []byte(`{"version":1,"physics":{"gravity":24}}`)
+	id, err := companion.ParseID("00112233-4455-4677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.AI = &AI{Companions: []companion.Definition{{ID: id, Name: "阿木"}}}
+	legacyBody := canonicalConfig(t, want)
 	writeMigrationFile(t, legacy, legacyBody, 0o700, 0o600)
 
 	got, err := loadDefaultFromPaths(current, legacy, publishConfigExclusively)

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
@@ -126,6 +127,39 @@ func TestRunPassesMaxPlayersToHost(t *testing.T) {
 	})
 	if !errors.Is(err, want) || got != 3 {
 		t.Fatalf("run error=%v MaxPlayers=%d, want %v and 3", err, got, want)
+	}
+}
+
+func TestRunInjectsAICompanionsIntoDedicatedServer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	id, err := companion.ParseID("00112233-4455-4677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.AI = &config.AI{Companions: []companion.Definition{{ID: id, Name: "阿木"}}}
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("stop after config capture")
+	var got []companion.Definition
+	err = run(context.Background(), []string{"--config", path}, dependencies{
+		openDisk: func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) {
+			return storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: 42}), nil
+		},
+		listenTCP: func(string) (network.Listener, error) { return mornleaServerTestListener{}, nil },
+		newHost: func(config server.Config, _ server.Generator, _ storage.WorldStore) mornleaServerHost {
+			got = config.Companions
+			config.Companions[0].Name = "已改"
+			return &mornleaServerTestHost{runErr: want}
+		},
+	})
+	if !errors.Is(err, want) || len(got) != 1 || got[0].ID != id {
+		t.Fatalf("run error=%v companions=%+v", err, got)
+	}
+	reloaded, loadErr := config.Load(path)
+	if loadErr != nil || reloaded.CompanionDefinitions()[0].Name != "阿木" {
+		t.Fatalf("专服注入修改了配置值：%+v, %v", reloaded.CompanionDefinitions(), loadErr)
 	}
 }
 

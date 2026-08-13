@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -155,6 +156,7 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 	metadata := store.Metadata()
 	dependencies.logger.Info("mornlea-server 已启动", "listen", listener.Addr(), "world", options.World, "protocol", network.ProtocolVersion)
 	config := server.DefaultConfig(metadata.Seed)
+	config.Companions = slices.Clone(effective.CompanionDefinitions())
 	config.MaxPlayers = options.MaxPlayers
 	host := dependencies.newHost(config, worldgen.New(metadata.Seed), store)
 	return host.Run(ctx, listener)

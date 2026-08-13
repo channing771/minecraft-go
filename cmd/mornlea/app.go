@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/gfx"
@@ -21,6 +22,7 @@ import (
 const maxFrameNameTags = 8
 
 type applicationOptions struct {
+	Companions         []companion.Definition
 	Seed               int64
 	Benchmark          bool
 	BenchmarkTransport string

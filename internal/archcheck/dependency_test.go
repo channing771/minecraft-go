@@ -9,8 +9,9 @@ import (
 // allowed 列出每个内部包允许直接依赖的内部包。
 var allowed = map[string][]string{
 	"internal/archcheck":  {},
+	"internal/companion":  {"internal/core"},
 	"internal/core":       {},
-	"internal/config":     {"internal/core", "internal/physics", "internal/sim", "internal/logging"},
+	"internal/config":     {"internal/companion", "internal/core", "internal/physics", "internal/sim", "internal/logging"},
 	"internal/physics":    {"internal/core"},
 	"internal/gfx":        {},
 	"internal/logging":    {},
@@ -25,7 +26,7 @@ var allowed = map[string][]string{
 	"internal/assets":     {"internal/core", "internal/world", "internal/mesh", "internal/worldgen", "internal/gfx"},
 	"internal/render":     {"internal/core", "internal/world", "internal/mesh", "internal/assets", "internal/gfx"},
 	"internal/render/hud": {"internal/core", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
-	"internal/server":     {"internal/core", "internal/network", "internal/world", "internal/worldgen", "internal/sim", "internal/storage"},
+	"internal/server":     {"internal/companion", "internal/core", "internal/network", "internal/world", "internal/worldgen", "internal/sim", "internal/storage"},
 	"internal/client":     {"internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
 }
 

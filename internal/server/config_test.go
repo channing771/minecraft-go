@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 	"testing"
+
+	"github.com/channing771/mornlea/internal/companion"
 )
 
 func TestDefaultConfigUsesEightMaxPlayers(t *testing.T) {
@@ -41,4 +43,22 @@ func TestNewHostRejectsOutOfRangeMaxPlayers(t *testing.T) {
 			_ = NewHost(config, flatTestGenerator{}, newHostTestStore())
 		})
 	}
+}
+
+func TestServerConfigCompanionsValidatesDefinitions(t *testing.T) {
+	id, err := companion.ParseID("00112233-4455-4677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := DefaultConfig(42)
+	config.Companions = []companion.Definition{{ID: id, Name: "阿木"}}
+	config.validate()
+
+	config.Companions = append(config.Companions, companion.Definition{ID: id, Name: "另一个"})
+	defer func() {
+		if recover() == nil {
+			t.Fatal("server.Config 接受重复伙伴 ID")
+		}
+	}()
+	config.validate()
 }

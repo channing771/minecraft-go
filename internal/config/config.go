@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/logging"
 	"github.com/channing771/mornlea/internal/physics"
@@ -39,6 +40,11 @@ type Render struct {
 	MouseSensitivity float32 `json:"mouseSensitivity"`
 }
 
+// AI 是配置文件中的可选伙伴定义。
+type AI struct {
+	Companions []companion.Definition `json:"companions,omitempty"`
+}
+
 // Config 是完整的调参配置文件内容。
 //
 // 它内嵌的 logging.Config 含 map 字段，因此 Config 整体不可比较，不能用 ==。
@@ -48,6 +54,7 @@ type Config struct {
 	Physics physics.Tunables `json:"physics"`
 	Sim     sim.Tunables     `json:"sim"`
 	Render  Render           `json:"render"`
+	AI      *AI              `json:"ai,omitempty"`
 }
 
 // Defaults 返回全部字段取编译期默认值的配置。它是配置文件缺省或字段缺失时的
@@ -143,6 +150,11 @@ func decodeConfig(path string, contents []byte) (Config, error) {
 	if raw, ok := lookupCaseInsensitive(top, "logging"); ok {
 		if err := applyLogging(&cfg, raw); err != nil {
 			return Config{}, fmt.Errorf("config: 解析 logging 字段: %w", err)
+		}
+	}
+	if raw, ok := lookupCaseInsensitive(top, "ai"); ok {
+		if err := applyAI(&cfg, raw); err != nil {
+			return Config{}, fmt.Errorf("config: 解析 ai 字段: %w", err)
 		}
 	}
 	if err := applyGroups(&cfg, top); err != nil {
@@ -377,6 +389,57 @@ func applyLogging(cfg *Config, raw json.RawMessage) error {
 	return nil
 }
 
+// applyAI 只解析 M5A 已定义的 companions[].id/name，并对未来字段记录精确路径。
+func applyAI(cfg *Config, raw json.RawMessage) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for key := range fields {
+		if !strings.EqualFold(key, "companions") {
+			slog.Warn("配置项未知字段已忽略", "field", "ai."+key)
+		}
+	}
+	rawCompanions, ok := lookupCaseInsensitive(fields, "companions")
+	if !ok || string(rawCompanions) == "null" {
+		return nil
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(rawCompanions, &entries); err != nil {
+		return fmt.Errorf("解析 companions: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	definitions := make([]companion.Definition, len(entries))
+	for index, entry := range entries {
+		var definitionFields map[string]json.RawMessage
+		if err := json.Unmarshal(entry, &definitionFields); err != nil {
+			return fmt.Errorf("解析 companions[%d]: %w", index, err)
+		}
+		for key := range definitionFields {
+			if !strings.EqualFold(key, "id") && !strings.EqualFold(key, "name") {
+				slog.Warn("配置项未知字段已忽略", "field", fmt.Sprintf("ai.companions[%d].%s", index, key))
+			}
+		}
+		if value, exists := lookupCaseInsensitive(definitionFields, "id"); exists {
+			if err := json.Unmarshal(value, &definitions[index].ID); err != nil {
+				return fmt.Errorf("解析 companions[%d].id: %w", index, err)
+			}
+		}
+		if value, exists := lookupCaseInsensitive(definitionFields, "name"); exists {
+			if err := json.Unmarshal(value, &definitions[index].Name); err != nil {
+				return fmt.Errorf("解析 companions[%d].name: %w", index, err)
+			}
+		}
+	}
+	if err := companion.ValidateDefinitions(definitions); err != nil {
+		return err
+	}
+	cfg.AI = &AI{Companions: definitions}
+	return nil
+}
+
 // applyGroups 把 physics/sim/render 三个分组的原始 JSON 应用到 cfg。
 //
 // Fields() 是这三个分组已知字段与钳制区间的唯一权威来源，这里同时拿它做“未知
@@ -452,12 +515,20 @@ func applyGroups(cfg *Config, top map[string]json.RawMessage) error {
 
 // warnUnknownTopLevel 对不认识的顶层分组名 slog.Warn。
 func warnUnknownTopLevel(top map[string]json.RawMessage) {
-	known := map[string]bool{"version": true, "logging": true, "physics": true, "sim": true, "render": true}
+	known := map[string]bool{"version": true, "logging": true, "physics": true, "sim": true, "render": true, "ai": true}
 	for key := range top {
 		if !known[strings.ToLower(key)] {
 			slog.Warn("配置项未知字段已忽略", "field", key)
 		}
 	}
+}
+
+// CompanionDefinitions 返回当前配置中的伙伴定义；缺失或禁用时返回 nil。
+func (c Config) CompanionDefinitions() []companion.Definition {
+	if c.AI == nil {
+		return nil
+	}
+	return c.AI.Companions
 }
 
 func lookupCaseInsensitive(m map[string]json.RawMessage, key string) (json.RawMessage, bool) {

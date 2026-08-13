@@ -5,12 +5,14 @@ package main
 import (
 	"log/slog"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/physics"
 	"github.com/channing771/mornlea/internal/render"
@@ -316,6 +318,33 @@ func TestPanelSavePreservesExistingLoggingSection(t *testing.T) {
 	}
 	if got := saved.Logging.Modules["render"]; got != slog.LevelDebug {
 		t.Fatalf("logging.modules.render = %v, want LevelDebug（save 不得清空已有 logging 段）", got)
+	}
+}
+
+func TestPanelSavePreservesExistingAICompanions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	id, err := companion.ParseID("00112233-4455-4677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preexisting := config.Defaults()
+	preexisting.AI = &config.AI{Companions: []companion.Definition{{ID: id, Name: "阿木"}}}
+	if err := preexisting.Save(path); err != nil {
+		t.Fatalf("准备已有配置文件: %v", err)
+	}
+
+	state := newPanelState(config.Defaults())
+	state.effective.Render.FovDegrees = 88
+	if err := state.save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	saved, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("重新读取保存的配置: %v", err)
+	}
+	if !reflect.DeepEqual(saved.AI, preexisting.AI) {
+		t.Fatalf("AI = %+v，want 完全保留 %+v", saved.AI, preexisting.AI)
 	}
 }
 
