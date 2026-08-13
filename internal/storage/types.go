@@ -71,10 +71,11 @@ type Store interface {
 	Close() error
 }
 
-// WorldStore combines world chunk storage with persisted player state.
+// WorldStore 组合世界区块、玩家与伙伴聚合存档。
 type WorldStore interface {
 	Store
 	PlayerStore
+	CompanionStore
 }
 
 type RegionKey struct {

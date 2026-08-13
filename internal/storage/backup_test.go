@@ -87,6 +87,29 @@ func TestWorldBackupCopiesCompleteWorldAndReusesMatchingBackup(t *testing.T) {
 	}
 }
 
+func TestWorldBackupIncludesCompanionFileButSkipsTemporaryFiles(t *testing.T) {
+	store, source, destination := newWorldBackupFixture(t)
+	if err := store.SaveCompanions(context.Background(), CompanionSave{
+		Revision: 1, Records: fixtureCompanionBodies(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	temporary := filepath.Join(source, ".companions.ai.tmp-ignore")
+	if err := os.WriteFile(temporary, []byte("temporary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Backup(context.Background(), destination); err != nil {
+		t.Fatal(err)
+	}
+	assertSameFileContents(
+		t, filepath.Join(source, "companions.ai"), filepath.Join(destination, "companions.ai"),
+	)
+	if _, err := os.Lstat(filepath.Join(destination, filepath.Base(temporary))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("备份不应包含伙伴临时文件，Lstat 错误: %v", err)
+	}
+}
+
 func TestWorldBackupCanBackUpAnOpenedBackup(t *testing.T) {
 	store, _, firstDestination := newWorldBackupFixture(t)
 	if err := store.Backup(context.Background(), firstDestination); err != nil {

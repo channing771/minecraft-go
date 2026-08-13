@@ -18,9 +18,9 @@
 
 ## 4. Memory/Disk CompanionStore 与原子替换（计划 Task 5）
 
-- [ ] 4.1 在 `internal/storage` 先写 Memory/Disk 共用 contract、revision/idempotency/conflict/no-alias/context/close、原子替换失败、正式文件损坏不覆写和 backup 包含 `companions.ai` 但跳过 temp 的测试；运行 `go test ./internal/storage -run 'Test(CompanionStore|DiskCompanion|WorldBackupIncludesCompanion)' -race -count=1` 确认 RED。
-- [ ] 4.2 将 `CompanionStore` 组合进 `WorldStore`；Memory 保存 canonical bytes，Disk 使用固定根文件、`max+1` 有界读取和既有 temp/Sync/Rename/parent-Sync helper，不新增 repository/factory 或改动备份生产逻辑。
-- [ ] 4.3 运行 `go test ./internal/storage -run 'Test(CompanionStore|DiskCompanion|WorldBackupIncludesCompanion)' -race -count=1`、`go test ./internal/storage -race -count=1`、`go test ./internal/archcheck -count=1`、`go vet ./internal/storage`、`test -z "$(gofmt -l internal/storage)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时跳过正式文件验证并覆写损坏文件，确认包含 `Test(CompanionStore|DiskCompanion|WorldBackupIncludesCompanion)` 的命令 RED 后恢复并重跑至 PASS。
+- [x] 4.1 在 `internal/storage` 先写 Memory/Disk 共用 contract、revision/idempotency/conflict/no-alias/context/close、原子替换失败、正式文件损坏不覆写和 backup 包含 `companions.ai` 但跳过 temp 的测试；运行 `go test ./internal/storage -run 'Test(CompanionStore|DiskCompanion|WorldBackupIncludesCompanion)' -race -count=1` 确认 RED。
+- [x] 4.2 将 `CompanionStore` 组合进 `WorldStore`；Memory 保存 canonical bytes，Disk 使用固定根文件、`max+1` 有界读取和既有 temp/Sync/Rename/parent-Sync helper，不新增 repository/factory 或改动备份生产逻辑。
+- [x] 4.3 运行 `go test ./internal/storage -run 'Test(CompanionStore|DiskCompanion|WorldBackupIncludesCompanion)' -race -count=1`、`go test ./internal/storage -race -count=1`、`go test ./internal/archcheck -count=1`、`go vet ./internal/storage`、`test -z "$(gofmt -l internal/storage)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时跳过正式文件验证并覆写损坏文件，确认包含 `Test(CompanionStore|DiskCompanion|WorldBackupIncludesCompanion)` 的命令 RED 后恢复并重跑至 PASS。
 
 ## 5. sim 静态伙伴、出生与 3×3 兴趣（计划 Task 6）
 
