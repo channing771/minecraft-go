@@ -207,15 +207,41 @@ func TestConfigAIDisabledFormsAndDefinitionValidation(t *testing.T) {
 	}
 }
 
-func TestCompanionDefinitionsExposeConfiguredValues(t *testing.T) {
+func TestConfigAIKnownFieldErrorsIncludeExactPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantPath string
+	}{
+		{name: "ai", body: `{"version":1,"ai":[]}`, wantPath: "ai"},
+		{name: "companions", body: `{"version":1,"ai":{"companions":{}}}`, wantPath: "ai.companions"},
+		{name: "id", body: `{"version":1,"ai":{"companions":[{"id":7,"name":"阿木"}]}}`, wantPath: "ai.companions[0].id"},
+		{name: "name", body: `{"version":1,"ai":{"companions":[{"id":"00112233-4455-4677-8899-aabbccddeeff","name":7}]}}`, wantPath: "ai.companions[0].name"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := config.Load(writeConfig(t, test.body))
+			if err == nil || !strings.Contains(err.Error(), test.wantPath) {
+				t.Fatalf("Load error = %v，want path %q", err, test.wantPath)
+			}
+		})
+	}
+}
+
+func TestConfigAICompanionDefinitionsReturnsOwnedCopy(t *testing.T) {
 	wantID, err := companion.ParseID("00112233-4455-4677-8899-aabbccddeeff")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Defaults()
 	cfg.AI = &config.AI{Companions: []companion.Definition{{ID: wantID, Name: "阿木"}}}
-	if got := cfg.CompanionDefinitions(); !reflect.DeepEqual(got, cfg.AI.Companions) {
+	got := cfg.CompanionDefinitions()
+	if !reflect.DeepEqual(got, cfg.AI.Companions) {
 		t.Fatalf("CompanionDefinitions = %+v，want %+v", got, cfg.AI.Companions)
+	}
+	got[0].Name = "已改"
+	if cfg.AI.Companions[0].Name != "阿木" {
+		t.Fatalf("修改返回值反向改写了 Config：%+v", cfg.AI.Companions)
 	}
 }
 

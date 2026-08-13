@@ -3,6 +3,7 @@ package companion
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,35 @@ func TestValidateDefinitions(t *testing.T) {
 			err := ValidateDefinitions(test.definitions)
 			if (err != nil) != test.wantError {
 				t.Fatalf("ValidateDefinitions() error = %v，wantError %v", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestValidateDefinitionsNameBoundaries(t *testing.T) {
+	id := mustParseID(t, "00112233-4455-4677-8899-aabbccddeeff")
+	tests := []struct {
+		name      string
+		value     string
+		wantError bool
+	}{
+		{name: "空名称", value: "", wantError: true},
+		{name: "非法UTF8", value: string([]byte{0xff}), wantError: true},
+		{name: "Unicode control", value: "阿\n木", wantError: true},
+		{name: "一个rune", value: "阿"},
+		{name: "三十二个rune", value: strings.Repeat("阿", 32)},
+		{name: "三十三个rune", value: strings.Repeat("阿", 33), wantError: true},
+		{name: "三十二个四字节rune共128bytes", value: strings.Repeat("😀", 32)},
+	}
+	// 合法 UTF-8 单 rune 最多占 4 bytes；32-rune 上限内不存在独立的 129-byte 合法样本。
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := ValidateName(test.value); (err != nil) != test.wantError {
+				t.Errorf("ValidateName(%q) error = %v，wantError %v", test.value, err, test.wantError)
+			}
+			definitions := []Definition{{ID: id, Name: test.value}}
+			if err := ValidateDefinitions(definitions); (err != nil) != test.wantError {
+				t.Errorf("ValidateDefinitions(%q) error = %v，wantError %v", test.value, err, test.wantError)
 			}
 		})
 	}

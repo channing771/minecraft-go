@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/channing771/mornlea/internal/companion"
@@ -406,7 +407,7 @@ func applyAI(cfg *Config, raw json.RawMessage) error {
 	}
 	var entries []json.RawMessage
 	if err := json.Unmarshal(rawCompanions, &entries); err != nil {
-		return fmt.Errorf("解析 companions: %w", err)
+		return fmt.Errorf("解析 ai.companions: %w", err)
 	}
 	if len(entries) == 0 {
 		return nil
@@ -415,7 +416,7 @@ func applyAI(cfg *Config, raw json.RawMessage) error {
 	for index, entry := range entries {
 		var definitionFields map[string]json.RawMessage
 		if err := json.Unmarshal(entry, &definitionFields); err != nil {
-			return fmt.Errorf("解析 companions[%d]: %w", index, err)
+			return fmt.Errorf("解析 ai.companions[%d]: %w", index, err)
 		}
 		for key := range definitionFields {
 			if !strings.EqualFold(key, "id") && !strings.EqualFold(key, "name") {
@@ -424,12 +425,12 @@ func applyAI(cfg *Config, raw json.RawMessage) error {
 		}
 		if value, exists := lookupCaseInsensitive(definitionFields, "id"); exists {
 			if err := json.Unmarshal(value, &definitions[index].ID); err != nil {
-				return fmt.Errorf("解析 companions[%d].id: %w", index, err)
+				return fmt.Errorf("解析 ai.companions[%d].id: %w", index, err)
 			}
 		}
 		if value, exists := lookupCaseInsensitive(definitionFields, "name"); exists {
 			if err := json.Unmarshal(value, &definitions[index].Name); err != nil {
-				return fmt.Errorf("解析 companions[%d].name: %w", index, err)
+				return fmt.Errorf("解析 ai.companions[%d].name: %w", index, err)
 			}
 		}
 	}
@@ -528,7 +529,7 @@ func (c Config) CompanionDefinitions() []companion.Definition {
 	if c.AI == nil {
 		return nil
 	}
-	return c.AI.Companions
+	return slices.Clone(c.AI.Companions)
 }
 
 func lookupCaseInsensitive(m map[string]json.RawMessage, key string) (json.RawMessage, bool) {
