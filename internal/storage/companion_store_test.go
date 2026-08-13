@@ -285,6 +285,85 @@ func TestDiskCompanionAtomicReplaceReportsParentSyncFailureAfterPublish(t *testi
 	}
 }
 
+func TestDiskCompanionAtomicCancelDuringTempCompletionPreservesOldFile(t *testing.T) {
+	tests := []struct {
+		name   string
+		cancel func(*cancelingPlayerFile, context.CancelFunc)
+	}{
+		{
+			name: "sync",
+			cancel: func(file *cancelingPlayerFile, cancel context.CancelFunc) {
+				file.afterSync = cancel
+			},
+		},
+		{
+			name: "close",
+			cancel: func(file *cancelingPlayerFile, cancel context.CancelFunc) {
+				file.afterClose = cancel
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			store := openCompanionDisk(t, root)
+			first := CompanionSave{Revision: 1, Records: fixtureCompanionBodies()}
+			if err := store.SaveCompanions(context.Background(), first); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "companions.ai")
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			store.companionReplaceHooks = atomicReplaceHooks{
+				createTemp: func(directory, pattern string) (atomicReplaceFile, error) {
+					file, err := os.CreateTemp(directory, pattern)
+					if err != nil {
+						return nil, err
+					}
+					wrapped := &cancelingPlayerFile{File: file}
+					tc.cancel(wrapped, cancel)
+					return wrapped, nil
+				},
+			}
+			if err := store.SaveCompanions(ctx, CompanionSave{
+				Revision: 2, Records: fixtureCompanionBodies()[:1],
+			}); !errors.Is(err, context.Canceled) {
+				t.Fatalf("SaveCompanions error=%v，想要 context.Canceled", err)
+			}
+
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatal("取消后的 SaveCompanions 改写了旧正式文件")
+			}
+			got, err := store.LoadCompanions(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantRecords := slices.Clone(first.Records)
+			slices.Reverse(wantRecords)
+			if got.Revision != 1 || !reflect.DeepEqual(got.Records, wantRecords) {
+				t.Fatalf("取消后 loaded=%+v，想要旧值", got)
+			}
+			matches, err := filepath.Glob(filepath.Join(root, ".companions.ai.tmp-*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(matches) != 0 {
+				t.Fatalf("取消后残留伙伴临时文件: %v", matches)
+			}
+		})
+	}
+}
+
 func TestDiskCompanionOversizedFileIsCorruptAndSaveDoesNotOverwriteIt(t *testing.T) {
 	root := t.TempDir()
 	store := openCompanionDisk(t, root)
