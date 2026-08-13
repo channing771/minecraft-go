@@ -29,4 +29,4 @@
 
 ## Impact
 
-影响当前 Go module 与 imports、客户端和专用服务端入口、Rust mesh ABI 与打包、默认 config/profile 路径、构建/CI/Hook、架构守卫及当前文档。协议 v15、区块 schema v8、玩家 schema v6、metadata v2、ABI 数值、fixture、golden、benchmark scenario v15 与性能 baseline 保持不变；迁移仅复制旧本机文件并保留旧目录。
+影响当前 Go module 与 imports、客户端和专用服务端入口、Rust mesh ABI 与打包、默认 config/profile 路径、构建/CI/Hook、架构守卫及当前文档。仅默认 config/profile 加载新增跨进程原子 no-clobber 发布；显式路径继续使用既有 replace-on-save，权威 tick、客户端/服务端运行期边界与 goroutine 边界不变。协议 v15、区块 schema v8、玩家 schema v6、metadata v2、ABI 数值、fixture、golden、benchmark scenario v15 与性能 baseline 保持不变；迁移仅复制旧本机文件并保留旧目录。

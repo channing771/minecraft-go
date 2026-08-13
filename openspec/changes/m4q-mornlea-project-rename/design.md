@@ -78,7 +78,16 @@ Task 7 同时切换：
 
 当前代码/构建扫描只覆盖：`go.mod`、`cmd/**`、`internal/**`、`engine/Cargo.toml`、`engine/Cargo.lock`、`engine/crates/**`、`engine/include/**`、`Makefile`、`.github/workflows/ci.yml`、`.codex/hooks.json`、`scripts/agent-hooks/**`、`.gitignore`；明确不扫描 `.git/**`、`engine/target/**`、`bin/**`、`.superpowers/**` 或文档/历史根。
 
-该扫描对旧 module、import、命令、crate、dylib、header、C symbol 与环境变量零容忍。大小写不敏感的裸旧 token 仅允许在 `internal/config/**`、`internal/profile/**` 表达 legacy 数据目录；`.mcgo-world-backup-v1.json` 仅允许在 `internal/storage/backup.go` 与 `internal/storage/backup_test.go`。允许文件也不能豁免旧 import、命令、C symbol、环境变量或注释。
+该扫描对旧 module、import、命令、crate、dylib、header、C symbol 与环境变量零容忍。大小写不敏感的裸旧 token 只允许以下精确文件和用途：
+
+- `internal/config/config.go`：仅允许字符串 literal `minecraft-go` 用于解析 legacy config 默认目录；
+- `internal/config/migration_test.go`：仅允许字符串 literal `minecraft-go` 用于断言 legacy config 路由、保留与错误路径；
+- `internal/profile/profile.go`：仅允许字符串 literal `minecraft-go` 用于解析 legacy profile 默认目录；
+- `internal/profile/profile_test.go`：仅允许字符串 literal `minecraft-go` 用于断言 legacy profile 路由、身份保真与错误路径；
+- `internal/storage/backup.go`：仅允许字符串 literal `.mcgo-world-backup-v1.json` 作为既有世界备份兼容 identity；
+- `internal/storage/backup_test.go`：仅允许字符串 literal `.mcgo-world-backup-v1.json` 验证同一兼容 identity。
+
+这些文件不得出现其他裸旧 token；即使在 allowlist 文件中，旧 import、命令、C symbol、环境变量、类型/函数标识符或解释性注释也必须被 current-identity guard 拒绝。
 
 兼容身份 `CHNK`、`MCGC`、`MCGM`、`MCPL`、`MCGR`、`MCGB`、`MGM1` 与 `.mcgo-world-backup-v1.json` 保持原值；它们不是品牌替换目标。历史原文 allowlist 精确为 `docs/superpowers/**`、`openspec/changes/archive/**` 与 `docs/notes/perf-baseline*.{md,json}`，另保留 Git 历史。当前 README 唯一旧字面量例外是链接 `docs/superpowers/specs/2026-07-26-minecraft-go-design.md`；`docs/notes/mornlea-migration.md` 作为新旧映射说明单独允许旧名。拒绝用全仓 `MCG` 禁令或宽泛目录豁免，以免误伤稳定 magic 或隐藏真实品牌残留。
 

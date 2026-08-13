@@ -45,3 +45,25 @@
 - **GIVEN** 用户传入 `--config PATH`
 - **WHEN** 加载配置
 - **THEN** MUST 只读取显式路径并完全跳过默认目录迁移
+
+#### Scenario: 默认父目录或目标权限不安全
+- **GIVEN** 新默认父目录允许 group/other 访问，或新默认文件不是 0600
+- **WHEN** 加载默认 config 或 profile
+- **THEN** MUST 返回指向新默认路径的权限错误且不得回退旧文件
+- **AND** MUST 保持旧文件与既有新文件不变，不得返回或生成替代 PlayerID
+- **AND** MUST NOT 记录迁移成功日志或遗留自身临时文件
+
+#### Scenario: 并发赢家权限不安全
+- **GIVEN** 当前调用方未赢得 no-clobber 发布，且并发赢家发布的新默认文件权限不是 0600
+- **WHEN** 当前调用方读取并校验赢家
+- **THEN** MUST 返回指向新默认路径的权限错误且不得解码、覆盖或替换赢家
+- **AND** profile 调用 MUST NOT 返回候选或替代 PlayerID
+- **AND** 当前调用方 MUST NOT 记录迁移成功日志或遗留自身临时文件
+
+#### Scenario: 原子发布或持久化同步失败
+- **GIVEN** 新默认文件缺失，且旧文件有效或 profile 新旧文件均缺失
+- **WHEN** 新文件的临时写入、文件同步、no-clobber 发布或父目录持久化同步失败
+- **THEN** MUST 返回保留失败阶段和目标路径上下文的错误，不得回退、覆盖已有赢家或把失败当作成功
+- **AND** MUST 保持旧文件逐字节不变并清理当前调用方创建的临时文件
+- **AND** profile 调用 MUST NOT 返回或另行生成 PlayerID
+- **AND** 当前调用方 MUST NOT 记录迁移成功日志
