@@ -216,7 +216,7 @@ git commit -m "docs: 更新 Mornlea 当前入口"
 
 ## 9. 不变量、全仓门禁与独立评审
 
-- [ ] 9.1 以 Tasks 1–8 producer HEAD 为唯一被验收实现：除经 M4Q plan update 明确批准的缺陷修复外不改生产文件；门禁后仅修改 `openspec/changes/m4q-mornlea-project-rename/design.md` 写入 Task 1 merge/origin heads、静态/golden manifest hashes、Tasks 1–8 producer HEAD、performance report hash 与 embedded producer HEAD、精确双基线视觉证据、archive state 和仓库外操作权限事实。发布仅含 `design.md` 的证据提交后，请求独立 broad review，并停在 `READY_FOR_REVIEW`。Ignored report：`.superpowers/sdd/2026-08-12-m4q-mornlea-project-rename/task-9-report.md`。
+- [x] 9.1 以 Tasks 1–8 producer HEAD 为唯一被验收实现：除经 M4Q plan update 明确批准的缺陷修复外不改生产文件；门禁后仅修改 `openspec/changes/m4q-mornlea-project-rename/design.md` 写入 Task 1 merge/origin heads、静态/golden manifest hashes、Tasks 1–8 producer HEAD、performance report hash 与 embedded producer HEAD、精确双基线视觉证据、archive state 和仓库外操作权限事实。发布仅含 `design.md` 的证据提交后，请求独立 broad review，并停在 `READY_FOR_REVIEW`。Ignored report：`.superpowers/sdd/2026-08-12-m4q-mornlea-project-rename/task-9-report.md`。
 
 Focused commands（按顺序直接运行）：
 
