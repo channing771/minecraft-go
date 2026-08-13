@@ -187,6 +187,93 @@ func TestLoadDefaultRejectsUnsafeTargetPermissions(t *testing.T) {
 	assertNoMigrationTemps(t, filepath.Dir(current))
 }
 
+func TestLoadDefaultRejectsSymlinkTarget(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "mornlea", "config.json")
+	legacy := filepath.Join(root, "minecraft-go", "config.json")
+	realPath := filepath.Join(root, "real-config.json")
+	realBody := canonicalConfig(t, migrationConfig(24))
+	writeMigrationFile(t, realPath, realBody, 0o700, 0o600)
+	if err := os.MkdirAll(filepath.Dir(current), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(realPath, current); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	writeMigrationFile(t, legacy, []byte(`{"version":`), 0o700, 0o600)
+
+	_, err := loadDefaultFromPaths(current, legacy, publishConfigExclusively)
+	if !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), current) {
+		t.Fatalf("symlink 目标错误 = %v，必须包含新路径并匹配 fs.ErrPermission", err)
+	}
+	info, statErr := os.Lstat(current)
+	if statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("新路径必须仍是 symlink，Lstat = (%v, %v)", info, statErr)
+	}
+	assertFileBytes(t, realPath, realBody)
+	assertNoMigrationTemps(t, filepath.Dir(current))
+}
+
+func TestLoadDefaultRejectsTargetReplacedAfterPathValidation(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, current, legacy string) func(string, []byte) (bool, error)
+	}{
+		{
+			name: "已有current",
+			setup: func(t *testing.T, current, legacy string) func(string, []byte) (bool, error) {
+				writeMigrationFile(t, current, canonicalConfig(t, migrationConfig(24)), 0o700, 0o600)
+				writeMigrationFile(t, legacy, []byte(`{"version":`), 0o700, 0o600)
+				return func(string, []byte) (bool, error) {
+					t.Fatal("已有 current 不得进入发布流程")
+					return false, nil
+				}
+			},
+		},
+		{
+			name: "并发winner",
+			setup: func(t *testing.T, current, legacy string) func(string, []byte) (bool, error) {
+				writeMigrationFile(t, legacy, canonicalConfig(t, migrationConfig(24)), 0o700, 0o600)
+				return func(path string, _ []byte) (bool, error) {
+					writeMigrationFile(t, path, canonicalConfig(t, migrationConfig(31)), 0o700, 0o600)
+					return false, nil
+				}
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			current := filepath.Join(root, "mornlea", "config.json")
+			legacy := filepath.Join(root, "minecraft-go", "config.json")
+			publish := test.setup(t, current, legacy)
+			replacement := current + ".replacement"
+			replacementBody := canonicalConfig(t, migrationConfig(40))
+			writeMigrationFile(t, replacement, replacementBody, 0o700, 0o644)
+			swapped := false
+
+			_, err := loadDefaultFromPathsWithOpen(current, legacy, publish, func(path string) (*os.File, error) {
+				if !swapped {
+					swapped = true
+					if err := os.Rename(replacement, path); err != nil {
+						t.Fatalf("替换已校验 inode: %v", err)
+					}
+				}
+				return os.Open(path)
+			})
+			if !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), current) {
+				t.Fatalf("inode 置换错误 = %v，必须包含新路径并匹配 fs.ErrPermission", err)
+			}
+			if !swapped {
+				t.Fatal("测试必须在 pathname 校验后替换 inode")
+			}
+			assertFileBytes(t, current, replacementBody)
+			assertFileMode(t, current, 0o644)
+			assertNoMigrationTemps(t, filepath.Dir(current))
+		})
+	}
+}
+
 func TestLoadDefaultReadsConcurrentWinnerWithoutOverwritingIt(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "mornlea", "config.json")
@@ -258,6 +345,40 @@ func TestLoadDefaultPublishFailurePreservesLegacyAndCleansTemporary(t *testing.T
 	assertPathMissing(t, current)
 	assertFileMode(t, filepath.Dir(current), 0o700)
 	assertNoMigrationTemps(t, filepath.Dir(current))
+}
+
+func TestLoadDefaultDirectorySyncFailureIncludesTargetAndDoesNotLog(t *testing.T) {
+	previous := slog.Default()
+	var records bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&records, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	root := t.TempDir()
+	current := filepath.Join(root, "mornlea", "config.json")
+	legacy := filepath.Join(root, "minecraft-go", "config.json")
+	body := canonicalConfig(t, migrationConfig(24))
+	writeMigrationFile(t, legacy, body, 0o700, 0o600)
+	sentinel := errors.New("directory sync failure")
+
+	_, err := loadDefaultFromPaths(current, legacy, func(path string, contents []byte) (bool, error) {
+		return publishConfigExclusivelyWithLinkAndSync(path, contents, os.Link, func(directory string) error {
+			if directory != filepath.Dir(current) {
+				t.Errorf("Sync 目录 = %q，want %q", directory, filepath.Dir(current))
+			}
+			return sentinel
+		})
+	})
+	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "落盘") || !strings.Contains(err.Error(), current) {
+		t.Fatalf("目录 Sync 错误 = %v，必须包含落盘阶段、目标路径和 sentinel", err)
+	}
+	assertFileBytes(t, current, body)
+	assertFileMode(t, current, 0o600)
+	assertFileMode(t, filepath.Dir(current), 0o700)
+	assertFileBytes(t, legacy, body)
+	assertNoMigrationTemps(t, filepath.Dir(current))
+	if records.Len() != 0 {
+		t.Fatalf("目录 Sync 失败不得记录迁移成功日志：%q", records.String())
+	}
 }
 
 func TestPublishConfigExclusivelyAllowsExactlyOneConcurrentWinner(t *testing.T) {
@@ -334,6 +455,29 @@ func TestLoadDefaultLogsOnlySuccessfulMigrationPublisher(t *testing.T) {
 		t.Fatalf("loser loadDefaultFromPaths: %v", err)
 	}
 
+	failures := []struct {
+		name     string
+		contents []byte
+		mode     os.FileMode
+	}{
+		{name: "最终权限校验失败", contents: body, mode: 0o644},
+		{name: "最终解码失败", contents: []byte(`{"version":`), mode: 0o600},
+	}
+	for _, test := range failures {
+		t.Run(test.name, func(t *testing.T) {
+			failureCurrent := filepath.Join(root, test.name, "mornlea", "config.json")
+			failureLegacy := filepath.Join(root, test.name, "minecraft-go", "config.json")
+			writeMigrationFile(t, failureLegacy, body, 0o700, 0o600)
+			_, err := loadDefaultFromPaths(failureCurrent, failureLegacy, func(path string, _ []byte) (bool, error) {
+				writeMigrationFile(t, path, test.contents, 0o700, test.mode)
+				return true, nil
+			})
+			if err == nil {
+				t.Fatal("最终校验或解码失败必须返回错误")
+			}
+		})
+	}
+
 	lines := strings.Split(strings.TrimSpace(records.String()), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("迁移成功日志条数 = %d，want 1；日志=%q", len(lines), records.String())
@@ -342,10 +486,39 @@ func TestLoadDefaultLogsOnlySuccessfulMigrationPublisher(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &record); err != nil {
 		t.Fatalf("解析迁移日志: %v", err)
 	}
+	if record["level"] != "INFO" {
+		t.Fatalf("迁移日志 level = %v，want INFO", record["level"])
+	}
 	if record["legacy_path"] != legacy || record["current_path"] != current {
 		t.Fatalf("迁移日志路径 = (%v, %v)，want (%q, %q)",
 			record["legacy_path"], record["current_path"], legacy, current)
 	}
+}
+
+func TestSaveReplacesInExistingSharedParentWithoutChangingPermissions(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "shared")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Chmod(parent, 0o755); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	path := filepath.Join(parent, "custom.json")
+	writeMigrationFile(t, path, canonicalConfig(t, migrationConfig(24)), 0o755, 0o600)
+	want := migrationConfig(31)
+
+	if err := want.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("替换后的自定义配置 = %+v，want %+v", got, want)
+	}
+	assertFileMode(t, parent, 0o755)
+	assertNoMigrationTemps(t, parent)
 }
 
 func migrationConfig(gravity float32) Config {

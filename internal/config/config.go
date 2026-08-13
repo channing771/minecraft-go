@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -153,12 +154,19 @@ func decodeConfig(path string, contents []byte) (Config, error) {
 }
 
 func loadDefaultFromPaths(current, legacy string, publish func(string, []byte) (bool, error)) (Config, error) {
-	exists, err := validateDefaultConfigPath(current)
+	return loadDefaultFromPathsWithOpen(current, legacy, publish, os.Open)
+}
+
+func loadDefaultFromPathsWithOpen(current, legacy string, publish func(string, []byte) (bool, error), open func(string) (*os.File, error)) (Config, error) {
+	if err := validateDefaultConfigParent(current); err != nil {
+		return Config{}, err
+	}
+	cfg, exists, err := readDefaultConfigIfExistsWithOpen(current, open)
 	if err != nil {
 		return Config{}, err
 	}
 	if exists {
-		return readDefaultConfig(current)
+		return cfg, nil
 	}
 
 	legacyContents, err := os.ReadFile(legacy)
@@ -180,12 +188,15 @@ func loadDefaultFromPaths(current, legacy string, publish func(string, []byte) (
 	if err != nil {
 		return Config{}, err
 	}
-	if _, err := validateDefaultConfigPath(current); err != nil {
+	if err := validateDefaultConfigParent(current); err != nil {
 		return Config{}, err
 	}
-	cfg, err := readDefaultConfig(current)
+	cfg, exists, err = readDefaultConfigIfExistsWithOpen(current, open)
 	if err != nil {
 		return Config{}, err
+	}
+	if !exists {
+		return Config{}, fmt.Errorf("config: 读取默认配置文件 %s: %w", current, fs.ErrNotExist)
 	}
 	if published {
 		slog.Info("旧配置已迁移到 Mornlea 默认路径", "legacy_path", legacy, "current_path", current)
@@ -193,22 +204,51 @@ func loadDefaultFromPaths(current, legacy string, publish func(string, []byte) (
 	return cfg, nil
 }
 
-func validateDefaultConfigPath(path string) (bool, error) {
-	if err := validateDefaultConfigParent(path); err != nil {
-		return false, err
-	}
-	info, err := os.Stat(path)
+func readDefaultConfigIfExistsWithOpen(path string, open func(string) (*os.File, error)) (Config, bool, error) {
+	checked, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return Config{}, false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("config: 检查默认配置文件 %s: %w", path, err)
+		return Config{}, false, fmt.Errorf("config: 检查默认配置文件 %s: %w", path, err)
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		return false, fmt.Errorf("config: 默认配置文件 %s 权限不安全（实际 %04o，期望 0600）: %w",
-			path, info.Mode().Perm(), fs.ErrPermission)
+	if err := validateDefaultConfigFile(path, checked); err != nil {
+		return Config{}, false, err
 	}
-	return true, nil
+
+	file, err := open(path)
+	if err != nil {
+		return Config{}, false, fmt.Errorf("config: 打开默认配置文件 %s: %w", path, err)
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return Config{}, false, fmt.Errorf("config: 检查已打开默认配置文件 %s: %w", path, err)
+	}
+	if err := validateDefaultConfigFile(path, opened); err != nil {
+		return Config{}, false, err
+	}
+	if !os.SameFile(checked, opened) {
+		return Config{}, false, fmt.Errorf("config: 默认配置文件 %s 在校验后已被替换: %w", path, fs.ErrPermission)
+	}
+	contents, err := io.ReadAll(file)
+	if err != nil {
+		return Config{}, false, fmt.Errorf("config: 读取默认配置文件 %s: %w", path, err)
+	}
+	cfg, err := decodeConfig(path, contents)
+	if err != nil {
+		return Config{}, false, fmt.Errorf("config: 解码默认配置文件 %s: %w", path, err)
+	}
+	return cfg, true, nil
+}
+
+func validateDefaultConfigFile(path string, info fs.FileInfo) error {
+	mode := info.Mode()
+	if mode&os.ModeSymlink != 0 || !mode.IsRegular() || mode.Perm() != 0o600 {
+		return fmt.Errorf("config: 默认配置文件 %s 权限不安全（mode %s，期望 regular 0600）: %w",
+			path, mode, fs.ErrPermission)
+	}
+	return nil
 }
 
 func validateDefaultConfigParent(path string) error {
@@ -227,23 +267,15 @@ func validateDefaultConfigParent(path string) error {
 	return nil
 }
 
-func readDefaultConfig(path string) (Config, error) {
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		return Config{}, fmt.Errorf("config: 读取默认配置文件 %s: %w", path, err)
-	}
-	cfg, err := decodeConfig(path, contents)
-	if err != nil {
-		return Config{}, fmt.Errorf("config: 解码默认配置文件 %s: %w", path, err)
-	}
-	return cfg, nil
-}
-
 func publishConfigExclusively(path string, contents []byte) (bool, error) {
 	return publishConfigExclusivelyWithLink(path, contents, os.Link)
 }
 
 func publishConfigExclusivelyWithLink(path string, contents []byte, link func(string, string) error) (published bool, err error) {
+	return publishConfigExclusivelyWithLinkAndSync(path, contents, link, syncConfigDirectory)
+}
+
+func publishConfigExclusivelyWithLinkAndSync(path string, contents []byte, link func(string, string) error, syncParent func(string) error) (published bool, err error) {
 	parent := filepath.Dir(path)
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return false, fmt.Errorf("config: 创建默认配置目录 %s: %w", parent, err)
@@ -288,8 +320,8 @@ func publishConfigExclusivelyWithLink(path string, contents []byte, link func(st
 	if err := os.Remove(tempPath); err != nil {
 		return true, fmt.Errorf("config: 清理默认配置临时文件 %s: %w", path, err)
 	}
-	if err := syncConfigDirectory(parent); err != nil {
-		return true, fmt.Errorf("config: 落盘默认配置目录 %s: %w", parent, err)
+	if err := syncParent(parent); err != nil {
+		return true, fmt.Errorf("config: 落盘默认配置文件 %s 的父目录 %s: %w", path, parent, err)
 	}
 	return true, nil
 }
