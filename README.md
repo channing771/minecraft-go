@@ -6,9 +6,24 @@
   <img src="https://img.shields.io/badge/platform-macOS-9cf" alt="macOS">
   <img src="https://img.shields.io/badge/protocol-v15-blue" alt="协议 v15">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+  <img src="https://github.com/channing771/minecraft-go/actions/workflows/ci.yml/badge.svg" alt="CI">
 </p>
 
 `Mornlea` 是一个使用 Go 编写的独立体素游戏实验项目。项目自研客户端、权威服务端、世界存储和 WebGPU 渲染管线，不追求兼容官方 Minecraft 的协议、存档或资源。
+
+<details>
+<summary>English overview</summary>
+
+Mornlea is an original voxel game written from scratch in Go 1.26 — no Mojang assets, protocol, or saves. It ships a custom client, an authoritative server, world storage, physics, and a WebGPU renderer; chunk meshing, AO, skylight, and block-light production live in a pinned Rust 1.97.1 cdylib. The current M4Q baseline includes protocol v15, player schema v6, chunk schema v8, LAN multiplayer for up to 8 players, server-authoritative hotbar/inventory/crafting/furnaces/chests/mining/tool durability/health & death, persistent item drops, deterministic ores, natural materials and oak trees, a 24000-tick day/night cycle, client-derived `0..15` skylight and static block light, 14 placeable block materials, and headless visual-verification goldens. The graphical client is macOS-only (Apple Silicon verified); the dedicated server builds with `CGO_ENABLED=0`. MIT licensed.
+
+```bash
+git clone https://github.com/channing771/minecraft-go.git
+cd minecraft-go
+make run          # graphical client with a built-in authoritative server
+```
+
+Milestone history lives in [实现进度](docs/notes/progress.md); the LAN server guide is [docs/notes/lan-server.md](docs/notes/lan-server.md). Most docs are in Chinese.
+</details>
 
 项目仍处于早期开发阶段，已经具备程序化地形、GPU 地形渲染、玩家移动与碰撞、客户端预测、方块挖掘与放置、内置权威服务端、世界持久化、有界二进制协议、TCP 直连、无图形专用服务端与稳定玩家状态存档；已交付里程碑与协议/存档版本演进见[实现进度](docs/notes/progress.md)。
 
