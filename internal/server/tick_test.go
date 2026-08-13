@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/server"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/server"
 )
 
 func TestServerStepReportsTickDuration(t *testing.T) {

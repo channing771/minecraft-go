@@ -3,10 +3,10 @@ package hud
 import (
 	"testing"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/render"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/render"
 )
 
 // 杀死变异：重新用近似色块或复制错误方块面的像素，都无法通过逐像素来源核对。

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // StorageKind 是可传输调色板快照的存储形态。

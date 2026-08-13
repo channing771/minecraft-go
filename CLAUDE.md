@@ -1,10 +1,10 @@
-# minecraft-go 项目指南
+# Mornlea 项目指南
 
 ## 项目定位
 
-本仓库是 Go 1.26 编写的独立体素游戏，包含自研客户端、权威服务端、世界存储、物理和 WebGPU 渲染。它不追求兼容官方 Minecraft 的协议、存档或版权资源。
+本仓库是 Go 1.26 编写的独立体素游戏 Mornlea，Go module 为 `github.com/channing771/mornlea`，包含自研客户端、权威服务端、世界存储、物理和 WebGPU 渲染。它不追求兼容官方 Minecraft 的协议、存档或版权资源。
 
-当前代码基线是 M4P，已经包含协议 v15、Memory/TCP 共用登录与权威模拟、TCP 直连、无图形专用服务端、稳定玩家身份、玩家 schema v6 与区块 schema v8 存档、世界 metadata v2、最多八名玩家的局域网同步与远端玩家呈现、权威快捷栏、持久掉落物、固定 36 格背包、固定合成、确定性矿石、多人共享权威熔炉、权威计时采掘、权威单件原地丢弃、服务端权威工具耐久、损坏物品、共享箱子、权威生命值与死亡结算和确认伤害红色边缘反馈、14 种常见块状材料与缺失玩家一次性材料包、世界坐标 terrain UV、玻璃/树叶单 pass alpha cutout、无窗口 `materials-showcase`，以及由服务端权威推进的 24000 tick 昼夜和客户端从权威方块镜像派生的 `0..15` 传播天空光与静态方块光。M4P 仅把 mesh/light 生产实现迁移到固定 Rust 1.97.1 的 `cdylib`；Go 仍拥有 app、world、sim、network、storage、render 和 `internal/mesh` 对外 API，只有 `internal/mesh` 接触 native ABI，且没有生产 Go fallback。发光块可放置、可用石镐或铁镐挖回，但没有正常获取入口。benchmark scenario 为 v15；性能数值只记录，报告完整性、真实 overflow 和数据丢失仍是门禁。TCP 仅面向可信局域网且没有认证或加密。`docs/superpowers/` 同时保存了已实现里程碑和未来里程碑的设计/计划；文档写了某项能力不代表代码已经实现，判断现状时必须检查代码和测试。
+当前代码基线是 M4Q，已经包含协议 v15、Memory/TCP 共用登录与权威模拟、TCP 直连、无图形专用服务端、稳定玩家身份、玩家 schema v6 与区块 schema v8 存档、世界 metadata v2、最多八名玩家的局域网同步与远端玩家呈现、权威快捷栏、持久掉落物、固定 36 格背包、固定合成、确定性矿石、多人共享权威熔炉、权威计时采掘、权威单件原地丢弃、服务端权威工具耐久、损坏物品、共享箱子、权威生命值与死亡结算和确认伤害红色边缘反馈、14 种常见块状材料与缺失玩家一次性材料包、世界坐标 terrain UV、玻璃/树叶单 pass alpha cutout、无窗口 `materials-showcase`，以及由服务端权威推进的 24000 tick 昼夜、客户端从权威方块镜像派生的 `0..15` 传播天空光与静态方块光和程序化方块云。M4Q 继承 M4P 把 mesh/light 生产实现迁移到固定 Rust 1.97.1 `cdylib` 的成果；Rust crate 为 `mornlea_mesh`，dylib 为 `libmornlea_mesh.dylib`，Go 仍拥有 app、world、sim、network、storage、render 和 `internal/mesh` 对外 API，只有 `internal/mesh` 接触 native ABI，且没有生产 Go fallback。客户端命令为 `mornlea`（`cmd/mornlea`），专用服务端为 `mornlea-server`（`cmd/mornlea-server`）。发光块可放置、可用石镐或铁镐挖回，但没有正常获取入口。benchmark scenario 为 v15；性能数值只记录，报告完整性、真实 overflow 和数据丢失仍是门禁。TCP 仅面向可信局域网且没有认证或加密。`docs/superpowers/` 同时保存了已实现里程碑和未来里程碑的设计/计划；文档写了某项能力不代表代码已经实现，判断现状时必须检查代码和测试。
 
 ## 开始工作前
 
@@ -36,7 +36,7 @@
 - 文档、测试说明和开发者可读文本优先使用中文；Go 标识符、wire magic 和约定俗成的技术术语保留英文。
 - 涉及协议、存档格式或基准输出的变更必须说明兼容性与迁移策略，并保留 golden/fuzz/故障注入覆盖。
 - 自动测试不得启动或聚焦前台游戏窗口；只有用户明确要求人工验收时才运行交互式客户端。
-- `.codex/hooks.json` 与 `.claude/settings.json` 共用 `scripts/agent-hooks/guard.mjs`。Hook 失败时修复根因；不得关闭、改写或用 `MINECRAFT_GO_HOOKS_ALLOW_NO_SPEC=1` 绕过，除非用户明确批准例外。
+- `.codex/hooks.json` 与 `.claude/settings.json` 共用 `scripts/agent-hooks/guard.mjs`。Hook 失败时修复根因；不得关闭、改写或用 `MORNLEA_HOOKS_ALLOW_NO_SPEC=1` 绕过，除非用户明确批准例外。
 
 ## 验证
 

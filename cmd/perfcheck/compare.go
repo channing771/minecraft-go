@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"minecraft-go/internal/client"
+	"github.com/channing771/mornlea/internal/client"
 )
 
 func comparisonSuccessMessage(baselineVersion, currentVersion int) string {

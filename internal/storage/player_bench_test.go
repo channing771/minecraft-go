@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 var (

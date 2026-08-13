@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // MaxItemDropBatch 是单条掉落物消息可携带的固定上限。

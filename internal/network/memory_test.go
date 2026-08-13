@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 func TestMemoryTransportPreservesOrderBothDirections(t *testing.T) {

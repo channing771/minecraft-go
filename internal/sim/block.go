@@ -1,6 +1,6 @@
 package sim
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 func (dimension *Dimension) SetBlock(
 	position core.BlockPos,

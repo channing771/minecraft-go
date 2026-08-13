@@ -3,7 +3,7 @@ package world
 import (
 	"math"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // FurnaceSlotBytes 是单个熔炉槽的固定存档编码长度。

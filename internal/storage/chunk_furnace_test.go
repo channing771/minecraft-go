@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // furnaceFixtureChunk 返回一个同时含方块、掉落物与熔炉状态的固定区块。

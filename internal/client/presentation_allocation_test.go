@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/client"
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // Mutation killed: allocating a new presentation slice or using reflect-based

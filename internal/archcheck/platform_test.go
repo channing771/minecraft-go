@@ -22,21 +22,21 @@ func TestOnlyGfxImportsWebGPU(t *testing.T) {
 			continue
 		}
 		for _, imported := range strings.Fields(parts[1]) {
-			if strings.Contains(imported, "webgpu") && parts[0] != "minecraft-go/internal/gfx" {
+			if strings.Contains(imported, "webgpu") && parts[0] != "github.com/channing771/mornlea/internal/gfx" {
 				t.Errorf("%s 直接 import 了 WebGPU 绑定，只有 internal/gfx 可以", parts[0])
 			}
 		}
 	}
 }
 
-func TestMCGodHasNoGraphicsDependencies(t *testing.T) {
-	root := filepath.Join(moduleRoot(t), "cmd", "mcgod")
+func TestMornleaServerHasNoGraphicsDependencies(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "cmd", "mornlea-server")
 	files, err := filepath.Glob(filepath.Join(root, "*.go"))
 	if err != nil {
-		t.Fatalf("枚举 mcgod Go 文件: %v", err)
+		t.Fatalf("枚举 Mornlea server Go 文件: %v", err)
 	}
 	if len(files) == 0 {
-		t.Fatalf("mcgod must contain Go source files")
+		t.Fatalf("Mornlea server must contain Go source files")
 	}
 	for _, path := range files {
 		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
@@ -45,7 +45,7 @@ func TestMCGodHasNoGraphicsDependencies(t *testing.T) {
 		}
 		for _, imported := range parsed.Imports {
 			path := strings.Trim(imported.Path.Value, "\"")
-			for _, forbidden := range []string{"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu", "golang.org/x/image", "golang.org/x/image/font"} {
+			for _, forbidden := range []string{"github.com/channing771/mornlea/internal/client", "github.com/channing771/mornlea/internal/render", "github.com/channing771/mornlea/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu", "golang.org/x/image", "golang.org/x/image/font"} {
 				if strings.HasPrefix(path, forbidden) {
 					t.Errorf("%s imports forbidden graphics dependency %s", path, imported.Path.Value)
 				}
@@ -53,16 +53,16 @@ func TestMCGodHasNoGraphicsDependencies(t *testing.T) {
 		}
 	}
 
-	command := exec.Command("go", "list", "-f", "{{.ImportPath}}", "-deps", "./cmd/mcgod")
+	command := exec.Command("go", "list", "-f", "{{.ImportPath}}", "-deps", "./cmd/mornlea-server")
 	command.Dir = moduleRoot(t)
 	output, err := command.Output()
 	if err != nil {
-		t.Fatalf("枚举 mcgod 传递依赖: %v", err)
+		t.Fatalf("枚举 Mornlea server 传递依赖: %v", err)
 	}
 	for _, dependency := range strings.Fields(string(output)) {
-		for _, forbidden := range []string{"minecraft-go/internal/client", "minecraft-go/internal/render", "minecraft-go/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu", "golang.org/x/image", "golang.org/x/image/font"} {
+		for _, forbidden := range []string{"github.com/channing771/mornlea/internal/client", "github.com/channing771/mornlea/internal/render", "github.com/channing771/mornlea/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu", "golang.org/x/image", "golang.org/x/image/font"} {
 			if dependency == forbidden || strings.HasPrefix(dependency, forbidden+"/") {
-				t.Errorf("mcgod transitively depends on forbidden graphics package %s", dependency)
+				t.Errorf("Mornlea server transitively depends on forbidden graphics package %s", dependency)
 			}
 		}
 	}

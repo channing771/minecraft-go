@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"minecraft-go/internal/render"
+	"github.com/channing771/mornlea/internal/render"
 )
 
 func TestPoolAllocAndFree(t *testing.T) {

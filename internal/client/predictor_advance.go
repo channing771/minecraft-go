@@ -5,8 +5,8 @@ import (
 	"math"
 	"time"
 
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/physics"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/physics"
 )
 
 // Advance 累积渲染帧时间，并执行有上限的固定物理步。

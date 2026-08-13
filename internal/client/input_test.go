@@ -3,8 +3,8 @@ package client_test
 import (
 	"testing"
 
-	"minecraft-go/internal/client"
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestMovementFromKeysCancelsOpposites(t *testing.T) {

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // TestTCPDropSelectedItemSurvivesRestart 用真实 TCP 与 host 层玩家保存证明主动丢弃

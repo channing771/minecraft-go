@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 func (server *Server) publish(result sim.TickResult) {

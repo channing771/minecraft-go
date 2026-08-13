@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 var updateStorageFixtures = flag.Bool(

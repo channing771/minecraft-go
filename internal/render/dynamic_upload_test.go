@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 // Hand-derived avatar layout: camera [0,64), 256-byte aligned instances

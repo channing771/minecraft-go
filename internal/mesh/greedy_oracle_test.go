@@ -3,8 +3,8 @@ package mesh_test
 import (
 	"testing"
 
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // oracleMaskCell 必须可比较，贪心合并靠 == 判断两格能否合并。

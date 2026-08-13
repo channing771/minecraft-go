@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 var errReceiverInboxFull = errors.New("client: server message consumer is too slow")

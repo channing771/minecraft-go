@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"math"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 //go:embed shader/hiz_copy.wgsl

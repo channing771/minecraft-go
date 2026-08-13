@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"testing"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
-	"minecraft-go/internal/world"
-	"minecraft-go/internal/worldgen"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
+	"github.com/channing771/mornlea/internal/world"
+	"github.com/channing771/mornlea/internal/worldgen"
 )
 
 const benchSeed = 20260726

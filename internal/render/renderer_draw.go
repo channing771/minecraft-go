@@ -6,9 +6,9 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/gfx"
-	"minecraft-go/internal/mesh"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/gfx"
+	"github.com/channing771/mornlea/internal/mesh"
 )
 
 // Render 在 CPU 上只遍历候选区段，GPU 完成逐面背面剔除、实例压缩与计数。

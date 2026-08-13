@@ -3,9 +3,9 @@ package client_test
 import (
 	"testing"
 
-	"minecraft-go/internal/client"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 func dropID(chunkX int32, slot uint8, generation uint32) core.DropID {

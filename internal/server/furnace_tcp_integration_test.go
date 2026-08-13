@@ -5,9 +5,9 @@ import (
 	"math"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // TestFurnaceSharedByTwoPlayersOverTCP 覆盖两名玩家共享同一个熔炉的完整闭环：

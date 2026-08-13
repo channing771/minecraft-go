@@ -3,8 +3,8 @@ package server
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 func TestDropPublicationKeepsDurabilityAndDetectsDurabilityOnlyChange(t *testing.T) {

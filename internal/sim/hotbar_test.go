@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 const lookDown = -float32(math.Pi)/2 + 0.01

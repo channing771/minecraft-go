@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/storage"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/storage"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // TestChestRestartRestoresItemsCountsAndDurability 覆盖 schema v5 箱子的重启闭环：

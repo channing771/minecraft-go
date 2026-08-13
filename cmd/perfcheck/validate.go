@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"minecraft-go/internal/client"
+	"github.com/channing771/mornlea/internal/client"
 )
 
 func validateReportProvenance(label string, report client.PerfReport) error {

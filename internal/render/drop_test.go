@@ -3,8 +3,8 @@ package render
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 func testItemDrops(count int) []ItemDrop {

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"testing"
 
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 // worldTimeByTick 从客户端 transcript 中提取每个权威 tick 的绝对世界时间。

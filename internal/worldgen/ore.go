@@ -1,6 +1,6 @@
 package worldgen
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 const (
 	// 煤矿只出现在 Y<96 且约 1/2048 命中；铁矿只出现在 Y<48 且约 1/4096 命中。

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/worldgen"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/worldgen"
 )
 
 var update = flag.Bool("update", false, "重写黄金文件")

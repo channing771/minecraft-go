@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // ProtocolVersion 是 M4O 唯一支持的协议版本。

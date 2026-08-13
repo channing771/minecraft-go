@@ -5,9 +5,9 @@ import (
 	"math"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/gfx"
-	"minecraft-go/internal/render"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/gfx"
+	"github.com/channing771/mornlea/internal/render"
 )
 
 // fullFurnaceOverlay 是熔炉视图的最坏布局：三格都有物品且两条进度条都非空。

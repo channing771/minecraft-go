@@ -3,7 +3,7 @@ package core_test
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // TestChestIDsAppendAtEnd 锁定箱子的三个稳定编号都追加在既有编号末尾，

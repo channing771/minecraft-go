@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func testFurnaceRef() core.FurnaceRef {

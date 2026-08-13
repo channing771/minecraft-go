@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestChunkKeysEnumeratesPersistedChunksInOrder(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // ChunkKeys 返回磁盘上已有区块键的稳定只读快照。

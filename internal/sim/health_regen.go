@@ -1,6 +1,6 @@
 package sim
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 // defaultRegenDelayTicks 是最后一次受伤后必须连续经过的 tick 数才进入回复阶段。
 // 唯一读取入口是 Tunables 快照，不得再以导出常量暴露——见 internal/archcheck

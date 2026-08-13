@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func (engine *Engine) RegisterObserverSession(id SessionID) {

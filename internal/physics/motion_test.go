@@ -4,9 +4,9 @@ import (
 	"math"
 	"testing"
 
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/physics"
 	"github.com/go-gl/mathgl/mgl32"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/physics"
 )
 
 type emptySource struct{}

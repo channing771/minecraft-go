@@ -136,7 +136,7 @@ func isTunableDefaultName(name string) bool {
 }
 
 func localName(importPath string) string {
-	return strings.TrimPrefix(strings.TrimSpace(importPath), "minecraft-go/")
+	return strings.TrimPrefix(strings.TrimSpace(importPath), "github.com/channing771/mornlea/")
 }
 
 func moduleRoot(t *testing.T) string {

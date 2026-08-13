@@ -96,11 +96,27 @@ export function rustValidationRequired(paths) {
     /^engine\/.*\.rs$/,
     /^engine\/(?:Cargo\.toml|Cargo\.lock|rust-toolchain\.toml)$/,
     /^engine\/crates\/.*\/Cargo\.toml$/,
-    /^engine\/include\/mcgo_engine\.h$/,
+    /^engine\/include\/mornlea_engine\.h$/,
     /^internal\/mesh\/native[^/]*\.go$/,
     /^internal\/mesh\/registry\.go$/,
     /^Makefile$/,
     /^\.github\/workflows\/ci\.yml$/,
+  ];
+  return paths.some((path) => patterns.some((pattern) => pattern.test(path)));
+}
+
+function identityValidationRequired(paths) {
+  const patterns = [
+    /^go\.mod$/,
+    /^cmd(?:\/|$)/,
+    /^internal(?:\/|$)/,
+    /^engine\/(?:Cargo\.toml|Cargo\.lock)$/,
+    /^engine\/(?:crates|include)(?:\/|$)/,
+    /^Makefile$/,
+    /^\.github\/workflows\/ci\.yml$/,
+    /^\.codex\/hooks\.json$/,
+    /^scripts\/agent-hooks(?:\/|$)/,
+    /^\.gitignore$/,
   ];
   return paths.some((path) => patterns.some((pattern) => pattern.test(path)));
 }
@@ -299,17 +315,18 @@ export function stopFailures(paths, execute = run, environment = process.env) {
   const readyActiveChange = hasReadyActiveChange();
   if (
     specReasons.length > 0 &&
-    process.env.MINECRAFT_GO_HOOKS_ALLOW_NO_SPEC !== "1" &&
+    process.env.MORNLEA_HOOKS_ALLOW_NO_SPEC !== "1" &&
     !readyActiveChange
   ) {
     failures.push(
       `检测到必须走 OpenSpec 的改动，但没有完整的 active change：\n- ${specReasons.join("\n- ")}\n` +
-        "请先生成 proposal、delta specs 和 tasks；仅在用户明确批准例外时设置 MINECRAFT_GO_HOOKS_ALLOW_NO_SPEC=1。",
+        "请先生成 proposal、delta specs 和 tasks；仅在用户明确批准例外时设置 MORNLEA_HOOKS_ALLOW_NO_SPEC=1。",
     );
   }
 
   const goFiles = changedGoFiles(paths);
   const needsRustValidation = rustValidationRequired(paths);
+  const needsIdentityValidation = identityValidationRequired(paths);
   let cargoOverride = [];
   if ((goFiles.length > 0 || needsRustValidation) && environment.SHELL) {
     const lookup = execute(environment.SHELL, ["-lc", "command -v cargo"], 30_000);
@@ -389,6 +406,18 @@ export function stopFailures(paths, execute = run, environment = process.env) {
     }
   }
 
+  if (needsIdentityValidation && goFiles.length === 0) {
+    const identity = execute(
+      "go",
+      ["test", "./internal/archcheck", "-run", "^TestMornleaCurrentIdentity$", "-count=1"],
+      120_000,
+    );
+    const identityFailure = commandFailure("当前身份门禁", identity);
+    if (identityFailure) {
+      failures.push(identityFailure);
+    }
+  }
+
   if (readyActiveChange || paths.some((path) => path.startsWith("openspec/"))) {
     const validation = execute(
       "openspec",
@@ -405,7 +434,7 @@ export function stopFailures(paths, execute = run, environment = process.env) {
 }
 
 function fail(message) {
-  process.stderr.write(`[minecraft-go hook] ${message}\n`);
+  process.stderr.write(`[mornlea hook] ${message}\n`);
   process.exitCode = 2;
 }
 
@@ -458,7 +487,7 @@ async function main() {
       process.stdout.write(
         `${JSON.stringify({
           continue: true,
-          systemMessage: `[minecraft-go hook] 复检仍未通过；为避免 Stop 循环，本次允许结束：\n${message}`,
+          systemMessage: `[mornlea hook] 复检仍未通过；为避免 Stop 循环，本次允许结束：\n${message}`,
         })}\n`,
       );
       return;

@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 const (

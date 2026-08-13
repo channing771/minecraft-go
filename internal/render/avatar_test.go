@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 func TestBuildAvatarPartsIsBounded(t *testing.T) {
@@ -172,7 +172,7 @@ func TestAvatarColorIsStableAcrossProcesses(t *testing.T) {
 	want := fmt.Sprint(AvatarColor(testAvatarID(1)))
 	for run := 0; run < 2; run++ {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestAvatarColorProcessHelper$")
-		cmd.Env = append(os.Environ(), "MINECRAFT_GO_AVATAR_COLOR_HELPER=1")
+		cmd.Env = append(os.Environ(), "MORNLEA_AVATAR_COLOR_HELPER=1")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("helper process %d: %v\n%s", run, err, output)
@@ -185,7 +185,7 @@ func TestAvatarColorIsStableAcrossProcesses(t *testing.T) {
 }
 
 func TestAvatarColorProcessHelper(t *testing.T) {
-	if os.Getenv("MINECRAFT_GO_AVATAR_COLOR_HELPER") != "1" {
+	if os.Getenv("MORNLEA_AVATAR_COLOR_HELPER") != "1" {
 		return
 	}
 	fmt.Println(AvatarColor(testAvatarID(1)))

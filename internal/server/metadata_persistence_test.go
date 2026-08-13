@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // waitMetadataSaves 等待 store 记录到至少 want 次 metadata 提交。

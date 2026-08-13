@@ -1,6 +1,6 @@
 package assets
 
-import "minecraft-go/internal/gfx"
+import "github.com/channing771/mornlea/internal/gfx"
 
 // UploadTo 把全部材质层建成一张带 mipmap 的 2D 数组纹理。
 func (r *Registry) UploadTo(dev gfx.Device) (gfx.Texture, gfx.Sampler) {

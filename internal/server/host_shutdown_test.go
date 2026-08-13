@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // 捕获：Shutdown 在 accept-loop 仍可能 Add 时等待共享 WaitGroup，或遗留未读完握手的 stream。

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 func TestGlyphAtlasConstructsTofuAndBoundedQueues(t *testing.T) {

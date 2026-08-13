@@ -4,8 +4,8 @@ import (
 	"math"
 	"sort"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/mesh"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
 )
 
 // QueueSection 排队一个区段的最新网格；同位置的新结果覆盖旧 pending 结果。

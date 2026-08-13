@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // 捕获：在途保存期间允许第二个 SavePlayer，或首个成功错误清除了较新的 coalesced 快照。

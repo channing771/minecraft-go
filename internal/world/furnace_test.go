@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // furnaceChunkIndex 返回区块内某个局部坐标的方块索引。

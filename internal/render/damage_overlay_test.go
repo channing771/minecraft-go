@@ -8,7 +8,7 @@ import (
 	"math"
 	"testing"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 type damageOverlayTestEncoder struct {

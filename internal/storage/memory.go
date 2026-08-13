@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // MemoryStore 是保留存储所有权与 revision 语义的内存 Store。

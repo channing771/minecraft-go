@@ -3,7 +3,7 @@ package sim
 import (
 	"sync/atomic"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // Tunables 是可在运行时调整的权威模拟参数。

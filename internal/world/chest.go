@@ -3,7 +3,7 @@ package world
 import (
 	"math"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // ChestSlotBytes 是单个箱子槽的固定存档编码长度：

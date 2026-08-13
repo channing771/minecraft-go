@@ -7,7 +7,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 const (

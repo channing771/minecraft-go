@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // 捕获：player save scheduler 读取 world SaveWorkers、只启动一个 worker，或改变固定队列上限。

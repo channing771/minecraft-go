@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 type Identity struct {

@@ -5,8 +5,8 @@ import (
 	"context"
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // TestChunkEncodingIgnoresDerivedHeights 证明派生的列顶高度表不进入区块存档：

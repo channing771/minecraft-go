@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // readyRegenPlayer 构造一个已激活、生命值为 health 的玩家，站在安全的平坦地面上，

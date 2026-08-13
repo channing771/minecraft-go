@@ -1,8 +1,8 @@
 package server
 
 import (
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 type flatTestGenerator struct{}

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"math"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 const damageOverlayUniformBytes = 16

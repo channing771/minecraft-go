@@ -3,7 +3,7 @@ package network
 import (
 	"errors"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // PlayerInput 仅承载玩家输入值；语义验证由 sim 和 client 完成。

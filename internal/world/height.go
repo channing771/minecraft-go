@@ -1,6 +1,6 @@
 package world
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 // EmptyColumnHeight 是空列的哨兵高度，表示该列没有任何非空气方块。
 const EmptyColumnHeight = int32(core.MinY - 1)

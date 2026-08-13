@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"math"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // DropSlotBytes 是单个掉落物槽的固定线上/存档编码长度。

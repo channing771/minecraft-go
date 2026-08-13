@@ -1,6 +1,6 @@
 package world
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 // Neighborhood 是网格化的输入：一个中心区段加周围 3×3×3 邻域。
 //

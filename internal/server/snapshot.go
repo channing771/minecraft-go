@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 func buildChunkSnapshot(

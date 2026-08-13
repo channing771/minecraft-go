@@ -1,28 +1,28 @@
 # 局域网专用服务端
 
-`mcgod` 是无渲染 TCP 专用服务端。`--max-players` 只接受 `1..8`，默认 8。启动一个新世界或打开已有世界：
+`mornlea-server` 是无渲染 TCP 专用服务端。`--max-players` 只接受 `1..8`，默认 8。启动一个新世界或打开已有世界：
 
 ```sh
-go run ./cmd/mcgod --listen :25565 --world worlds/lan --seed 42 --max-players 8
+go run ./cmd/mornlea-server --listen :25565 --world worlds/lan --seed 42 --max-players 8
 ```
 
 同一局域网中的客户端可连接服务器所在机器的私有地址：
 
 ```sh
-go run ./cmd/mcgo --connect 192.168.x.x:25565 --name Chen
+go run ./cmd/mornlea --connect 192.168.x.x:25565 --name Chen
 ```
 
 如果只允许本机连接，请明确监听 loopback 地址：
 
 ```sh
-go run ./cmd/mcgod --listen 127.0.0.1:25565 --world worlds/local --max-players 8
+go run ./cmd/mornlea-server --listen 127.0.0.1:25565 --world worlds/local --max-players 8
 ```
 
 两个客户端人工验收时，在两个终端分别执行：
 
 ```sh
-go run ./cmd/mcgo --connect 127.0.0.1:25565 --name 星河
-go run ./cmd/mcgo --connect 127.0.0.1:25565 --name 月海
+go run ./cmd/mornlea --connect 127.0.0.1:25565 --name 星河
+go run ./cmd/mornlea --connect 127.0.0.1:25565 --name 月海
 ```
 
 客户端首次运行会在本机 profile 中创建稳定 UUIDv4；之后改变 `--name` 只更新这个 ID 的显示名，不会创建新玩家。相同 PlayerID 同时登录会被拒绝；不同 PlayerID 可使用相同显示名，因此昵称不是身份凭据，也不保证唯一。

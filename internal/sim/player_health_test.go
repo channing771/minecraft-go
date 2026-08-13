@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // TestRegisterPlayerDefaultsMissingHealthToFull 覆盖"新玩家以满血开始"场景：

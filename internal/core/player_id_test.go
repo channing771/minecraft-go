@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestPlayerIDCanonicalRoundTrip(t *testing.T) {

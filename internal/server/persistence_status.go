@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 func (server *Server) recordSaveFailure(

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 const regionCrashExitCode = 86
@@ -104,8 +104,8 @@ func TestRegionCrashSubprocessAlwaysReopensOldOrNew(t *testing.T) {
 			defer cancel()
 			command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRegionCrashHelper$")
 			command.Env = append(os.Environ(),
-				"MCGO_REGION_CRASH_AFTER="+strconv.Itoa(crashAfter),
-				"MCGO_REGION_CRASH_PATH="+path,
+				"MORNLEA_REGION_CRASH_AFTER="+strconv.Itoa(crashAfter),
+				"MORNLEA_REGION_CRASH_PATH="+path,
 			)
 			output, err := command.CombinedOutput()
 			if ctx.Err() != nil {
@@ -122,17 +122,17 @@ func TestRegionCrashSubprocessAlwaysReopensOldOrNew(t *testing.T) {
 }
 
 func TestRegionCrashHelper(t *testing.T) {
-	rawCrashAfter := os.Getenv("MCGO_REGION_CRASH_AFTER")
+	rawCrashAfter := os.Getenv("MORNLEA_REGION_CRASH_AFTER")
 	if rawCrashAfter == "" {
 		t.Skip("subprocess crash helper")
 	}
 	crashAfter, err := strconv.Atoi(rawCrashAfter)
 	if err != nil || crashAfter < 1 {
-		t.Fatalf("invalid MCGO_REGION_CRASH_AFTER %q", rawCrashAfter)
+		t.Fatalf("invalid MORNLEA_REGION_CRASH_AFTER %q", rawCrashAfter)
 	}
-	path := os.Getenv("MCGO_REGION_CRASH_PATH")
+	path := os.Getenv("MORNLEA_REGION_CRASH_PATH")
 	if path == "" {
-		t.Fatal("MCGO_REGION_CRASH_PATH is empty")
+		t.Fatal("MORNLEA_REGION_CRASH_PATH is empty")
 	}
 	key, chunkKey := crashRegionKeys()
 	r, _ := openRegionWithMutationHooks(t, path, key, 0, crashAfter)

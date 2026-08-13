@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"minecraft-go/internal/client"
+	"github.com/channing771/mornlea/internal/client"
 )
 
 func TestCompareReportsChecksPersistenceWhenBothHaveSamples(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 func TestMemoryLoginTransitionsToPlay(t *testing.T) {

@@ -4,8 +4,8 @@
 *.test
 *.out
 
-# go build ./cmd/mcgo 的本地产物
-/mcgo
+# go build ./cmd/mornlea 的本地产物
+/mornlea
 
 # make visual-check / visual-update 默认输出目录（实拍图与差异图，仅调试用）
 /build/
@@ -21,6 +21,9 @@
 
 # 仓库内隔离工作区
 /.worktrees/
+
+# GitNexus 本机索引
+/.gitnexus/
 
 # 本机 Claude Code 权限配置（可能包含宽泛的 shell 授权）
 /.claude/settings.local.json

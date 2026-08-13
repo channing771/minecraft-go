@@ -3,7 +3,7 @@ package assets
 import (
 	"testing"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 func TestDownsampleHalvesSizeAndAveragesRGBA(t *testing.T) {

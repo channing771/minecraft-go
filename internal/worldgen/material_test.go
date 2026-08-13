@@ -3,8 +3,8 @@ package worldgen_test
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/worldgen"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/worldgen"
 )
 
 func TestNaturalMaterialBoundaries(t *testing.T) {

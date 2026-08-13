@@ -3,8 +3,8 @@ package network_test
 import (
 	"testing"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 func TestChunkSnapshotValidatesCanonicalSections(t *testing.T) {

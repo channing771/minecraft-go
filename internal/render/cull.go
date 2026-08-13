@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/gfx"
-	"minecraft-go/internal/mesh"
+	"github.com/channing771/mornlea/internal/gfx"
+	"github.com/channing771/mornlea/internal/mesh"
 )
 
 //go:embed shader/cull.wgsl

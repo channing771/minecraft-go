@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // encodeLegacyMetadataV1 手工构造一份 CRC 有效的 metadata v1 字节。

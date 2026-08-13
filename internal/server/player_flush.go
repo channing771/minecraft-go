@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 type playerSaveKey struct {

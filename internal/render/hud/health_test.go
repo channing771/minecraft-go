@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // 杀死变异：忽略 Confirmed 标记或画出预测值，会让 HUD 在收到权威状态前显示猜测值。

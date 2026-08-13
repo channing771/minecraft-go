@@ -5,9 +5,9 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
 )
 
 // TestPlayerHealthPublishesOnlyToOwner 覆盖"生命值只随本人的权威玩家状态下发"：

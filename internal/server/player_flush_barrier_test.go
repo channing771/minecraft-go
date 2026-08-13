@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/storage"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // 捕获：Flush 遵守 retry backoff 而没有立即重试，或重试时改变已冻结的 SavePlayer 值。

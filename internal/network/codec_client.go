@@ -1,6 +1,6 @@
 package network
 
-import "minecraft-go/internal/core"
+import "github.com/channing771/mornlea/internal/core"
 
 func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint32, payload []byte, err error) {
 	if err := validateClientWirePacket(state, packet); err != nil {

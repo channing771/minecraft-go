@@ -13,7 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"minecraft-go/internal/core"
+	"github.com/channing771/mornlea/internal/core"
 )
 
 const maxPlayerFileLength = int64(playerEnvelopeLength) + int64(maxPlayerPayload)

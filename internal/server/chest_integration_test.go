@@ -8,11 +8,11 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/client"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // chestScriptLookDown 是俯视脚下箱子的固定视角，与熔炉纵向测试共用同一常量值。

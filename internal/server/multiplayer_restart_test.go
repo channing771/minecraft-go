@@ -10,11 +10,11 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/storage"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/storage"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 var multiplayerRestartTarget = core.BlockPos{X: 8, Y: 1, Z: 2}

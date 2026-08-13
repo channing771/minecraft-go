@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 type heartbeatTimer interface {

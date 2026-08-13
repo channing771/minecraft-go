@@ -3,9 +3,9 @@ package server
 import (
 	"github.com/go-gl/mathgl/mgl32"
 
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/sim"
-	"minecraft-go/internal/world"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // SetBlockForTest 直接写入权威世界的一个方块，仅供纵向测试构造固定场景。

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"minecraft-go/internal/gfx"
+	"github.com/channing771/mornlea/internal/gfx"
 )
 
 // newTestPanelRenderer 复用 name_tag_test.go 里已有的假设备与假字形源

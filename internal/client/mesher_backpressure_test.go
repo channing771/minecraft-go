@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"minecraft-go/internal/assets"
-	"minecraft-go/internal/core"
-	"minecraft-go/internal/network"
+	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 )
 
 func TestMesherScheduleFullJobQueueDoesNotScanDirtyBacklog(t *testing.T) {
