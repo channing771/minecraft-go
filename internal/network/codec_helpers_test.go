@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/hex"
+	"reflect"
 	"testing"
 
 	"github.com/channing771/mornlea/internal/core"
@@ -147,6 +148,9 @@ func sameClientPacket(got, want ClientPacket) bool {
 	case CloseContainer:
 		other, ok := want.(CloseContainer)
 		return ok && got == other
+	case ChatCommand:
+		other, ok := want.(ChatCommand)
+		return ok && got == other
 	default:
 		return false
 	}
@@ -202,6 +206,18 @@ func sameServerPacket(got, want ServerPacket) bool {
 		return ok && got == other
 	case InventoryState:
 		other, ok := want.(InventoryState)
+		return ok && got == other
+	case ChatEvent:
+		other, ok := want.(ChatEvent)
+		return ok && got == other
+	case CompanionSpawn:
+		other, ok := want.(CompanionSpawn)
+		return ok && got == other
+	case CompanionStates:
+		other, ok := want.(CompanionStates)
+		return ok && reflect.DeepEqual(got, other)
+	case CompanionDespawn:
+		other, ok := want.(CompanionDespawn)
 		return ok && got == other
 	default:
 		return false

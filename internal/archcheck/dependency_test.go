@@ -16,7 +16,7 @@ var allowed = map[string][]string{
 	"internal/gfx":        {},
 	"internal/logging":    {},
 	"internal/gfx/shader": {},
-	"internal/network":    {"internal/core"},
+	"internal/network":    {"internal/companion", "internal/core"},
 	"internal/profile":    {"internal/core"},
 	"internal/sim":        {"internal/core", "internal/physics", "internal/world"},
 	"internal/storage":    {"internal/core", "internal/world"},

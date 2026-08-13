@@ -30,6 +30,12 @@ func TestPerformanceRecordersOnlyEnableSaveSamplingForBenchmark(t *testing.T) {
 	}
 }
 
+func TestProtocolV16ClientIsCurrent(t *testing.T) {
+	if network.ProtocolVersion != 16 {
+		t.Fatalf("客户端协议版本 = %d，想要 16", network.ProtocolVersion)
+	}
+}
+
 // Mutation killed: routing any remote-player message through Mirror closes the
 // endpoint instead of completing the spawn/state/despawn roster lifecycle.
 func TestRemoteMessagesRouteOnlyToRoster(t *testing.T) {

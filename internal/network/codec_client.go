@@ -1,6 +1,10 @@
 package network
 
-import "github.com/channing771/mornlea/internal/core"
+import (
+	"errors"
+
+	"github.com/channing771/mornlea/internal/core"
+)
 
 func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint32, payload []byte, err error) {
 	if err := validateClientWirePacket(state, packet); err != nil {
@@ -65,6 +69,8 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 			e.u64(message.HaveRevision)
 		case KeepAliveReply:
 			e.u64(message.Token)
+		case ChatCommand:
+			e.string(message.Text, 1024)
 		default:
 			return 0, nil, codecError("encode client", state, packetID, invalidClientPacket(state, packet))
 		}
@@ -77,6 +83,9 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (ClientPacket, error) {
 	if err := checkSmallPayload(payload); err != nil {
 		return nil, codecError("decode client", state, packetID, err)
+	}
+	if state == StatePlay && packetID == 12 && len(payload) > chatCommandMaxWireBytes {
+		return nil, codecError("decode client", state, packetID, errors.New("network: chat command payload exceeds 1026 bytes"))
 	}
 	d := byteDecoder{data: payload}
 	var packet ClientPacket
@@ -224,6 +233,10 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			var drop DropSelectedItem
 			drop.Sequence, err = d.u64()
 			packet = drop
+		case 12:
+			var command ChatCommand
+			command.Text, err = d.string(1024, 1024)
+			packet = command
 		default:
 			return nil, codecError("decode client", state, packetID, errUnknownPacketID)
 		}

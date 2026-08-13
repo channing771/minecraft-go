@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -150,6 +151,82 @@ func BenchmarkRemotePlayerStateCodec(b *testing.B) {
 			benchmarkPacket = decoded
 		}
 	})
+}
+
+func BenchmarkChatCommandCodec(b *testing.B) {
+	packet := ChatCommand{Text: strings.Repeat("x", 1024)}
+	codec := benchmarkCodec(b)
+	defer codec.Close()
+	packetID, payload, err := codec.EncodeClient(StatePlay, packet)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Run("Encode", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_, encoded, encodeErr := codec.EncodeClient(StatePlay, packet)
+			if encodeErr != nil {
+				b.Fatal(encodeErr)
+			}
+			benchmarkPayload = encoded
+		}
+	})
+	b.Run("Decode", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			decoded, decodeErr := codec.DecodeClient(StatePlay, packetID, payload)
+			if decodeErr != nil {
+				b.Fatal(decodeErr)
+			}
+			benchmarkPacket = decoded
+		}
+	})
+}
+
+func BenchmarkCompanionMessageCodec(b *testing.B) {
+	states := make([]CompanionState, 4)
+	for index := range states {
+		states[index] = CompanionState{ID: testCompanionID(byte(index + 1)), Dimension: core.Overworld}
+	}
+	packets := []struct {
+		name   string
+		packet ServerPacket
+	}{
+		{"ChatEvent", validAcceptedChatEvent()},
+		{"Spawn", CompanionSpawn{ID: testCompanionID(1), Name: "A", Dimension: core.Overworld}},
+		{"States", CompanionStates{States: states}},
+		{"Despawn", CompanionDespawn{ID: testCompanionID(1)}},
+	}
+	for _, test := range packets {
+		b.Run(test.name, func(b *testing.B) {
+			codec := benchmarkCodec(b)
+			defer codec.Close()
+			packetID, payload, err := codec.EncodeServer(StatePlay, test.packet)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Run("Encode", func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					_, encoded, encodeErr := codec.EncodeServer(StatePlay, test.packet)
+					if encodeErr != nil {
+						b.Fatal(encodeErr)
+					}
+					benchmarkPayload = encoded
+				}
+			})
+			b.Run("Decode", func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					decoded, decodeErr := codec.DecodeServer(StatePlay, packetID, payload)
+					if decodeErr != nil {
+						b.Fatal(decodeErr)
+					}
+					benchmarkPacket = decoded
+				}
+			})
+		})
+	}
 }
 
 func BenchmarkWorstLegalChunkSnapshot(b *testing.B) {

@@ -156,6 +156,14 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 			for _, id := range message.IDs {
 				encodeDropID(&e, id)
 			}
+		case ChatEvent:
+			encodeChatEvent(&e, message)
+		case CompanionSpawn:
+			encodeCompanionSpawn(&e, message)
+		case CompanionStates:
+			encodeCompanionStates(&e, message)
+		case CompanionDespawn:
+			e.data = append(e.data, message.ID[:]...)
 		default:
 			return 0, nil, codecError("encode server", state, packetID, invalidServerPacket(state, packet))
 		}
@@ -168,6 +176,22 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 func decodeServerControlPayload(state State, packetID uint32, payload []byte) (ServerPacket, error) {
 	if err := checkSmallPayload(payload); err != nil {
 		return nil, codecError("decode server", state, packetID, err)
+	}
+	if state == StatePlay {
+		var max int
+		switch packetID {
+		case 16:
+			max = chatEventMaxWireBytes
+		case 17:
+			max = companionSpawnMaxWireBytes
+		case 18:
+			max = companionStatesMaxWireBytes
+		case 19:
+			max = len(CompanionDespawn{}.ID)
+		}
+		if max > 0 && len(payload) > max {
+			return nil, codecError("decode server", state, packetID, errors.New("network: companion payload exceeds fixed maximum"))
+		}
 	}
 	if state == StatePlay && packetID == 9 && len(payload) > remotePlayerStatesMaxPayload {
 		return nil, codecError("decode server", state, packetID, errors.New("network: remote player states payload exceeds 296 bytes"))
@@ -391,6 +415,16 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 				chest.Items[index], err = decodeItemStack(&d, err)
 			}
 			packet = chest
+		case 16:
+			packet, err = decodeChatEvent(&d)
+		case 17:
+			packet, err = decodeCompanionSpawn(&d)
+		case 18:
+			packet, err = decodeCompanionStates(&d)
+		case 19:
+			var despawn CompanionDespawn
+			err = decodeFixedID(&d, despawn.ID[:])
+			packet = despawn
 		default:
 			return nil, codecError("decode server", state, packetID, errUnknownPacketID)
 		}

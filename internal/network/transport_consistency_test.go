@@ -181,7 +181,7 @@ func TestCommonBlockMaterialPlayTranscriptMatchesMemoryAndTCP(t *testing.T) {
 	}
 }
 
-func TestProtocolVersion14HandshakeRejectMatchesMemoryAndTCP(t *testing.T) {
+func TestProtocolVersion15HandshakeRejectMatchesMemoryAndTCP(t *testing.T) {
 	for _, open := range transportOpeners {
 		t.Run(open.name, func(t *testing.T) {
 			client, server := open.open(t)
@@ -192,28 +192,28 @@ func TestProtocolVersion14HandshakeRejectMatchesMemoryAndTCP(t *testing.T) {
 				serverDone <- err
 			}()
 
-			sendProtocol14Hello(t, client)
+			sendProtocol15Hello(t, client)
 			packet, err := client.Recv(context.Background(), StateHandshake)
 			reject, ok := packet.(HandshakeReject)
-			if err != nil || !ok || reject.Code != HandshakeVersionMismatch || reject.ServerProtocolVersion != 15 {
-				t.Fatalf("v14 拒绝 = (%#v, %v)，想要服务端 v15 HandshakeVersionMismatch", packet, err)
+			if err != nil || !ok || reject.Code != HandshakeVersionMismatch || reject.ServerProtocolVersion != 16 {
+				t.Fatalf("v15 拒绝 = (%#v, %v)，想要服务端 v16 HandshakeVersionMismatch", packet, err)
 			}
 			if err := <-serverDone; err == nil {
-				t.Fatal("v14 握手意外进入登录")
+				t.Fatal("v15 握手意外进入登录")
 			}
 		})
 	}
 }
 
-func sendProtocol14Hello(t *testing.T, client ClientPacketStream) {
+func sendProtocol15Hello(t *testing.T, client ClientPacketStream) {
 	t.Helper()
 	switch client := client.(type) {
 	case *memoryClientStream:
-		if err := memorySend(t.Context(), client.pair, client.pair.clientToServer, ClientPacket(ClientHello{ProtocolVersion: 14})); err != nil {
+		if err := memorySend(t.Context(), client.pair, client.pair.clientToServer, ClientPacket(ClientHello{ProtocolVersion: 15})); err != nil {
 			t.Fatal(err)
 		}
 	case *tcpClientStream:
-		if err := WriteFrame(client.stream.conn, 0, []byte{14}); err != nil {
+		if err := WriteFrame(client.stream.conn, 0, []byte{15}); err != nil {
 			t.Fatal(err)
 		}
 	default:

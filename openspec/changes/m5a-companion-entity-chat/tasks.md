@@ -6,9 +6,9 @@
 
 ## 2. 协议 v16 与伙伴/聊天消息（计划 Task 3）
 
-- [ ] 2.1 在 `internal/network` 及客户端/专服协议测试中先锁定 v16/v15、旧 ID、Client 12、Server 16..19、最大 wire 长度、边界、排序与原子 decode，加入 companion codec fuzz/benchmark；运行 `go test ./internal/network ./cmd/mornlea ./cmd/mornlea-server -run 'Test(Companion|Chat|Protocol|Handshake|ServerProtocol)' -race -count=1` 确认 RED。
-- [ ] 2.2 最小实现五种消息、sealed registry 与 Memory/TCP 共用 codec；所有 decoder 在分配和返回前完成长度、UTF-8、枚举、ID、有限数值、`1..4` count 和严格排序校验。
-- [ ] 2.3 运行 `go test ./internal/network ./cmd/mornlea ./cmd/mornlea-server -run 'Test(Companion|Chat|Protocol|Handshake|Memory|TCP|ServerProtocol)' -race -count=1`、`go test ./internal/network -run '^$' -fuzz FuzzCompanionMessageCodec -fuzztime=5s`、`go test ./internal/network -run '^$' -bench 'Benchmark(Companion|ChatCommand)' -benchmem -count=5`、`go test ./internal/archcheck -count=1`、`go test ./internal/network ./cmd/mornlea ./cmd/mornlea-server -race -count=1`、`go vet ./internal/network ./cmd/mornlea ./cmd/mornlea-server`、`test -z "$(gofmt -l internal/network cmd/mornlea cmd/mornlea-server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时把 States 上限改为 5，确认第一条命令 RED 后恢复并重跑至 PASS。
+- [x] 2.1 在 `internal/network` 及客户端/专服协议测试中先锁定 v16/v15、旧 ID、Client 12、Server 16..19、最大 wire 长度、边界、排序与原子 decode，加入 companion codec fuzz/benchmark；`furnace_test.go` 与 `container_test.go` 只机械移除现已分配的 Client ID 12/Server ID 16 未分配断言，其余旧 ID 冻结语义不变；运行 `go test ./internal/network ./cmd/mornlea ./cmd/mornlea-server -run 'Test(Companion|Chat|Protocol|Handshake|ServerProtocol)' -race -count=1` 确认 RED。
+- [x] 2.2 最小实现五种消息、sealed registry 与共用消息/`Validate` 边界；TCP codec 实现 wire 编解码，Memory typed packet 传递继续执行同一验证且不绕过；所有 decoder 在分配和返回前完成长度、UTF-8、枚举、ID、有限数值、`1..4` count 和严格排序校验。
+- [x] 2.3 运行 `go test ./internal/network ./cmd/mornlea ./cmd/mornlea-server -run 'Test(Companion|Chat|Protocol|Handshake|Memory|TCP|ServerProtocol)' -race -count=1`、`go test ./internal/network -run '^$' -fuzz FuzzCompanionMessageCodec -fuzztime=5s`、`go test ./internal/network -run '^$' -bench 'Benchmark(Companion|ChatCommand)' -benchmem -count=5`、`go test ./internal/archcheck -count=1`、`go test ./internal/network ./cmd/mornlea ./cmd/mornlea-server -race -count=1`、`go vet ./internal/network ./cmd/mornlea ./cmd/mornlea-server`、`test -z "$(gofmt -l internal/network cmd/mornlea cmd/mornlea-server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时把 States 上限改为 5，确认第一条命令 RED 后恢复并重跑至 PASS。
 
 ## 3. Companion schema v1 编解码（计划 Task 4）
 

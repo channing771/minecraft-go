@@ -36,7 +36,7 @@ func chestStateGoldenHex() string {
 }
 
 // TestProtocolV12ChestStatePacketIDIsFrozen 锁定 ChestState 使用新分配的 packet ID 15，
-// 且它之外的 ID 仍然保持未分配。
+// 且旧类型与 ID 的映射保持不变。
 func TestProtocolV12ChestStatePacketIDIsFrozen(t *testing.T) {
 	assertServerRegistry(t, []struct {
 		state  State
@@ -45,9 +45,6 @@ func TestProtocolV12ChestStatePacketIDIsFrozen(t *testing.T) {
 	}{
 		{StatePlay, ChestState{}, 15},
 	})
-	if _, ok := serverPacketForID(StatePlay, 16); ok {
-		t.Fatal("unknown play server packet ID accepted")
-	}
 }
 
 // TestProtocolV12ChestStateGolden 覆盖 ChestState 的固定 153 字节布局：

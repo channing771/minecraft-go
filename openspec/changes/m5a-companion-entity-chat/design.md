@@ -42,7 +42,7 @@
 
 `ProtocolVersion=16`，不提供 v15 兼容登录。保留所有 v15 ID；追加 Client `ChatCommand=12`，Server `ChatEvent=16`、`CompanionSpawn=17`、`CompanionStates=18`、`CompanionDespawn=19`。最大 wire 长度分别锁定为 ChatCommand 1026、ChatEvent 1328、Spawn 178、States 173 bytes。
 
-所有 decoder 先读入局部值，在分配前检查字符串长度和 States `1..4` count，完整执行 UTF-8、枚举、ID、数值、排序和重复校验后才返回消息。`CompanionStates` 必须 ID 严格升序。Memory/TCP 继续共用 registry 和 codec；伙伴不得走 `RemotePlayerSpawn`。
+所有 decoder 先读入局部值，在分配前检查字符串长度和 States `1..4` count，完整执行 UTF-8、枚举、ID、数值、排序和重复校验后才返回消息。`CompanionStates` 必须 ID 严格升序。Memory/TCP 继续共用消息类型、sealed registry 和 `Validate` 边界；TCP codec 按相同的 `Validate`/decoder 规则实现 wire 边界，Memory 保持 typed packet 传递但不得绕过验证。伙伴不得走 `RemotePlayerSpawn`。
 
 `ChatCommand` 只承载 `1..1024` bytes 规范文本。`ChatEvent` 只有 Accepted/Rejected 事实：Accepted 携带玩家、伙伴和 trim 后命令；InvalidFormat 清空伙伴/命令；UnknownCompanion 只保留合法目标名称。
 

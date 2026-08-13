@@ -100,6 +100,12 @@ func TestDefaultOptions(t *testing.T) {
 	}
 }
 
+func TestServerProtocolV16IsCurrent(t *testing.T) {
+	if network.ProtocolVersion != 16 {
+		t.Fatalf("专用服务端协议版本 = %d，想要 16", network.ProtocolVersion)
+	}
+}
+
 func TestOptionsMaxPlayers(t *testing.T) {
 	got, err := parseOptions([]string{"--max-players=1"})
 	if err != nil || got.MaxPlayers != 1 {
@@ -317,7 +323,7 @@ func TestRunMigrateMaterialsCompletesAndRerunsWithSameArguments(t *testing.T) {
 	if got := reopened.Metadata().FormatVersion; got != 2 {
 		t.Fatalf("迁移后 metadata 版本 = %d，期望 2", got)
 	}
-	if network.ProtocolVersion != 15 {
+	if network.ProtocolVersion != 16 {
 		t.Fatalf("迁移命令改变了协议版本: %d", network.ProtocolVersion)
 	}
 }

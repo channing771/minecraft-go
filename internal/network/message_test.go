@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
 )
@@ -36,6 +37,7 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 			HaveRevision: 7,
 		},
 		network.KeepAliveReply{Token: 1},
+		network.ChatCommand{Text: "@A x"},
 	}
 	serverMessages := []network.ServerMessage{
 		network.ChunkSnapshot{},
@@ -70,8 +72,12 @@ func TestProtocolMessageShapesImplementSealedInterfaces(t *testing.T) {
 		network.InventoryState{},
 		network.ItemDropUpserts{},
 		network.ItemDropRemoves{},
+		network.ChatEvent{},
+		network.CompanionSpawn{},
+		network.CompanionStates{},
+		network.CompanionDespawn{ID: companion.ID{}},
 	}
-	if len(clientMessages) != 7 || len(serverMessages) != 13 {
+	if len(clientMessages) != 8 || len(serverMessages) != 17 {
 		t.Fatal("消息集合不完整")
 	}
 }

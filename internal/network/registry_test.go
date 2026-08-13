@@ -59,9 +59,6 @@ func TestProtocolV2RemotePlayerPacketIDsAreFrozen(t *testing.T) {
 			t.Fatalf("server packet ID %d decoded=%T ok=%v, want %T true", test.id, decoded, ok, test.packet)
 		}
 	}
-	if _, ok := serverPacketForID(StatePlay, 16); ok {
-		t.Fatal("unknown play server packet ID accepted")
-	}
 }
 
 func TestProtocolV3HotbarPacketIDsAreFrozen(t *testing.T) {
@@ -75,9 +72,6 @@ func TestProtocolV3HotbarPacketIDsAreFrozen(t *testing.T) {
 		packet ServerPacket
 		id     uint32
 	}{{StatePlay, InventoryState{}, 10}})
-	if _, ok := clientPacketForID(StatePlay, 12); ok {
-		t.Fatal("unknown play client packet ID accepted")
-	}
 	if _, ok := clientPacketForID(StatePlay, 1); ok {
 		t.Fatal("Play client packet ID 1 必须保持未分配")
 	}
@@ -87,7 +81,7 @@ func TestProtocolV1RegistryRejectsUnknownIDsAndStates(t *testing.T) {
 	if _, ok := clientPacketForID(StateHandshake, 1); ok {
 		t.Fatal("unknown handshake client packet ID accepted")
 	}
-	if _, ok := serverPacketForID(StatePlay, 16); ok {
+	if _, ok := serverPacketForID(StatePlay, 20); ok {
 		t.Fatal("unknown play server packet ID accepted")
 	}
 	if _, ok := clientPacketID(StateLogin, ClientHello{}); ok {
@@ -207,6 +201,9 @@ func sameClientPacketType(left, right ClientPacket) bool {
 	case DropSelectedItem:
 		_, ok := right.(DropSelectedItem)
 		return ok
+	case ChatCommand:
+		_, ok := right.(ChatCommand)
+		return ok
 	}
 	return false
 }
@@ -246,6 +243,15 @@ func sameServerPacketType(left, right ServerPacket) bool {
 	case Disconnect:
 		_, ok := right.(Disconnect)
 		return ok
+	case RemotePlayerSpawn:
+		_, ok := right.(RemotePlayerSpawn)
+		return ok
+	case RemotePlayerDespawn:
+		_, ok := right.(RemotePlayerDespawn)
+		return ok
+	case RemotePlayerStates:
+		_, ok := right.(RemotePlayerStates)
+		return ok
 	case InventoryState:
 		_, ok := right.(InventoryState)
 		return ok
@@ -263,6 +269,18 @@ func sameServerPacketType(left, right ServerPacket) bool {
 		return ok
 	case ContainerClosed:
 		_, ok := right.(ContainerClosed)
+		return ok
+	case ChatEvent:
+		_, ok := right.(ChatEvent)
+		return ok
+	case CompanionSpawn:
+		_, ok := right.(CompanionSpawn)
+		return ok
+	case CompanionStates:
+		_, ok := right.(CompanionStates)
+		return ok
+	case CompanionDespawn:
+		_, ok := right.(CompanionDespawn)
 		return ok
 	}
 	return false
