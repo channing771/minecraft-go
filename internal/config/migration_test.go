@@ -214,6 +214,42 @@ func TestLoadDefaultRejectsSymlinkTarget(t *testing.T) {
 	assertNoMigrationTemps(t, filepath.Dir(current))
 }
 
+func TestLoadDefaultRejectsSameInodeSymlinkInsertedBeforeOpen(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "mornlea", "config.json")
+	legacy := filepath.Join(root, "minecraft-go", "config.json")
+	body := canonicalConfig(t, migrationConfig(24))
+	writeMigrationFile(t, current, body, 0o700, 0o600)
+	writeMigrationFile(t, legacy, []byte(`{"version":`), 0o700, 0o600)
+	original := current + ".original"
+	swapped := false
+
+	_, err := loadDefaultFromPathsWithOpen(current, legacy, publishConfigExclusively, func(path string) (*os.File, error) {
+		if !swapped {
+			swapped = true
+			if err := os.Rename(path, original); err != nil {
+				t.Fatalf("移走已校验 inode: %v", err)
+			}
+			if err := os.Symlink(original, path); err != nil {
+				t.Fatalf("换入同 inode symlink: %v", err)
+			}
+		}
+		return os.Open(path)
+	})
+	if !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), current) {
+		t.Fatalf("同 inode symlink 置换错误 = %v，必须包含新路径并匹配 fs.ErrPermission", err)
+	}
+	if !swapped {
+		t.Fatal("测试必须在 pre-Lstat 后、打开前换入 symlink")
+	}
+	info, statErr := os.Lstat(current)
+	if statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("新路径必须是 symlink，Lstat = (%v, %v)", info, statErr)
+	}
+	assertFileBytes(t, original, body)
+	assertNoMigrationTemps(t, filepath.Dir(current))
+}
+
 func TestLoadDefaultRejectsTargetReplacedAfterPathValidation(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -249,7 +285,7 @@ func TestLoadDefaultRejectsTargetReplacedAfterPathValidation(t *testing.T) {
 			publish := test.setup(t, current, legacy)
 			replacement := current + ".replacement"
 			replacementBody := canonicalConfig(t, migrationConfig(40))
-			writeMigrationFile(t, replacement, replacementBody, 0o700, 0o644)
+			writeMigrationFile(t, replacement, replacementBody, 0o700, 0o600)
 			swapped := false
 
 			_, err := loadDefaultFromPathsWithOpen(current, legacy, publish, func(path string) (*os.File, error) {
@@ -268,7 +304,7 @@ func TestLoadDefaultRejectsTargetReplacedAfterPathValidation(t *testing.T) {
 				t.Fatal("测试必须在 pathname 校验后替换 inode")
 			}
 			assertFileBytes(t, current, replacementBody)
-			assertFileMode(t, current, 0o644)
+			assertFileMode(t, current, 0o600)
 			assertNoMigrationTemps(t, filepath.Dir(current))
 		})
 	}

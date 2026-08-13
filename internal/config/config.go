@@ -231,6 +231,16 @@ func readDefaultConfigIfExistsWithOpen(path string, open func(string) (*os.File,
 	if !os.SameFile(checked, opened) {
 		return Config{}, false, fmt.Errorf("config: 默认配置文件 %s 在校验后已被替换: %w", path, fs.ErrPermission)
 	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return Config{}, false, fmt.Errorf("config: 重新检查已打开默认配置文件 %s: %w", path, err)
+	}
+	if err := validateDefaultConfigFile(path, current); err != nil {
+		return Config{}, false, err
+	}
+	if !os.SameFile(current, opened) {
+		return Config{}, false, fmt.Errorf("config: 默认配置文件 %s 在打开后已被替换: %w", path, fs.ErrPermission)
+	}
 	contents, err := io.ReadAll(file)
 	if err != nil {
 		return Config{}, false, fmt.Errorf("config: 读取默认配置文件 %s: %w", path, err)
