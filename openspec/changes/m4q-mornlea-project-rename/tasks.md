@@ -286,7 +286,13 @@ chmod 0600 "$baseline_profile_dir/profile.json"
   trap 'restore_tree; exit 129' HUP
   trap 'restore_tree; exit 130' INT
   trap 'restore_tree; exit 143' TERM
-  git worktree add --detach "$baseline_tree" "$(cat "$mornlea_invariants/task1-origin-main")"
+  set +e
+  git worktree add --detach "$baseline_tree" "$(cat "$mornlea_invariants/task1-origin-main")" > "$baseline_visual/worktree-add.log" 2>&1
+  worktree_add_rc=$?
+  set -e
+  cat "$baseline_visual/worktree-add.log"
+  printf '%s\n' "$worktree_add_rc" > "$baseline_visual/worktree-add.rc"
+  test "$worktree_add_rc" -eq 0
   (
     cd "$baseline_tree"
     set +e
