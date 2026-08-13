@@ -998,7 +998,7 @@ var forbiddenCurrentIdentity = []string{
 }
 ```
 
-Use technical patterns above as zero-tolerance checks in every code/build root. Construct the separate case-insensitive bare-token regex from fragments too; it may allow only legacy data constants/tests in exact `internal/config` and `internal/profile` files plus `.mcgo-world-backup-v1.json` in `internal/storage/backup.go` and its test. It must not suppress an old import, command, C symbol, env variable or comment merely because it occurs in an allowed file. Do not ban broad `MCG` or the sentence explaining non-compatibility with Minecraft.
+Use technical patterns above as zero-tolerance checks in every code/build root. Construct the separate case-insensitive bare-token regex from fragments too. Parse every match and accept it only when it matches a hard-coded allowlist tuple containing the exact path, complete string literal, Go AST string-literal span, declaration/test purpose and positive expected count for the legacy config/profile data literals or `.mcgo-world-backup-v1.json`. Assert every tuple's actual count equals its hard-coded expected count; do not derive counts from scanned source. Missing, extra, moved or unconsumed matches, including comments, identifiers, old imports, commands, C symbols and environment variables, must fail even in an allowlisted file. Do not ban broad `MCG` or the sentence explaining non-compatibility with Minecraft.
 
 Run:
 
@@ -1128,21 +1128,14 @@ Expected: all commands PASS; only new dylib symbols load; server remains pure Li
 
 - [ ] **Step 8: Run exact current-identity scans**
 
-Run the permanent archcheck plus explicit tracked-tree diagnostics:
+Run the permanent archcheck guards:
 
 ```bash
-go test ./internal/archcheck -run 'Mornlea|Identity|WebGPU|Server|LoginStreams' -count=1
-
-old_code_identity=$(git grep -n -I -i -E 'minecraft[-_]go|mcgo' -- \
-  go.mod cmd internal engine Makefile .github .codex scripts .gitignore \
-  ':!internal/config/**' \
-  ':!internal/profile/**' \
-  ':!internal/storage/backup.go' \
-  ':!internal/storage/backup_test.go' || true)
-test -z "$old_code_identity"
+go test ./internal/archcheck -run 'WebGPU|Server|LoginStreams' -count=1
+go test ./internal/archcheck -run '^TestMornleaCurrentIdentity$' -count=1
 ```
 
-Expected: zero old identity outside the exact compatibility files. Current docs and stable OpenSpec specs are updated by Tasks 8 and 10 respectively; historical trees are never included in this code/build scan.
+Expected: the self-scanning identity guard rejects every unmatched old identity while accepting only the exact hard-coded compatibility tuples and counts. Current docs and stable OpenSpec specs are updated by Tasks 8 and 10 respectively; historical trees are never included in this code/build scan.
 
 - [ ] **Step 9: Format, validate and commit the atomic switch**
 
