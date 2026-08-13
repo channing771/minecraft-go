@@ -6,7 +6,7 @@
 
 ### Requirement: 伙伴是独立的服务端权威静态实体
 
-服务端 SHALL 为每个 active 定义持有一个独立伙伴实体。M5A 伙伴 MUST 保持 idle，不移动、不采掘、不放置、不跟随，也 MUST NOT 进入玩家登录、心跳、生命、伤害、死亡、掉落或重生语义。权威 tick MUST 是伙伴身体状态的唯一写者，并 MUST 按 `CompanionID` 字节序发布确定性状态。
+服务端 SHALL 为每个 active 定义持有一个独立伙伴实体。M5A 伙伴 MUST 保持 idle，不移动、不采掘、不放置、不跟随，也 MUST NOT 进入玩家登录、心跳、生命、伤害、死亡、掉落或重生语义。伙伴身体状态 MUST 只在权威 tick 边界变化，并 MUST 按 `CompanionID` 字节序发布确定性状态。
 
 #### Scenario: 乱序配置产生稳定静态状态
 
@@ -22,7 +22,7 @@
 
 ### Requirement: 玩家与伙伴容量彼此独立
 
-服务端 MUST 继续允许最多八名玩家，并 MAY 同时激活最多四个伙伴。伙伴 MUST NOT 消耗玩家 session、玩家可见性表项或玩家登录容量；相同 16 bytes 的 `PlayerID` 与 `CompanionID` MUST 仍表示两个不同实体。
+服务端 MUST 继续允许最多八名玩家，并 MAY 同时激活最多四个伙伴。伙伴 MUST NOT 消耗玩家登录容量，也不得使在线玩家或其呈现被替换；相同 16 bytes 的 `PlayerID` 与 `CompanionID` MUST 仍表示两个不同实体。
 
 #### Scenario: 八名玩家与四个伙伴同时存在
 
@@ -50,4 +50,4 @@
 
 - **GIVEN** 一个持久化身体的碰撞判定所需区块尚未全部就绪
 - **WHEN** 服务端推进伙伴恢复
-- **THEN** 伙伴 MUST 保持 pending，直到所需区块全部就绪后才验证恢复位置或执行有界出生回退
+- **THEN** 伙伴 MUST 在客户端保持不可见且不得占用未验证位置，直到所需区块全部就绪后才恢复原位置或执行有界出生回退

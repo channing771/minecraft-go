@@ -4,9 +4,9 @@
 
 系统 SHALL 通过既有无窗口固定场景记录并比对优化后的方块材质与 HUD 呈现。地形场景 MUST 覆盖程序化方块材质，HUD 场景 MUST 覆盖快捷栏、真实方块缩略图、数量阴影、耐久状态与左下角无背景爱心栏，并 MUST 以独立场景覆盖打开的背包与合成区域；更新基线时 MUST 继续执行既有显式更新与双阈值规则。
 
-`materials-showcase` MUST 保持既有固定正午、固定相机和确定性夹具，并经正常客户端镜像、mesher、renderer 与 upload 路径收敛后无窗口抓取，不得创建或聚焦前台游戏窗口。夹具 MUST 同时覆盖 14 种新材料、八格连续草地、相邻玻璃、相邻树叶，以及原木顶面年轮与侧面树皮。既有双阈值 MUST 保持不变。
+`materials-showcase` MUST 保持既有固定正午、固定相机和确定性夹具，并经与交互客户端相同的完整呈现链路收敛后无窗口抓取，不得创建或聚焦前台游戏窗口。夹具 MUST 同时覆盖 14 种新材料、八格连续草地、相邻玻璃、相邻树叶，以及原木顶面年轮与侧面树皮。既有双阈值 MUST 保持不变。
 
-抓帧场景清单 MUST 保留 `target-block-feedback` 和 `oak-grove` 的既有名称与顺序，并在 `oak-grove` 后追加 `ai-companion` 作为唯一末场景。`target-block-feedback` MUST 使用固定正午、固定相机和确定性夹具，且经正常客户端镜像、mesher、renderer、depth 与 name-tag 路径收敛后无窗口抓取。它 MUST 命中一个已注册材料方块，并同时可审查细轮廓、中文名称和正确的遮挡关系；抓帧或比对 MUST NOT 使用隐藏目标提示的专用开关。`inventory-crafting` 因打开背包而隐藏目标提示，其目标提示隐藏状态、背包与合成区域语义 MUST 保持不变；若世界生成改变共享地形背景，其 golden MAY 在逐图复核后更新。`oak-grove` MUST 使用固定世界种子、固定生成区块、固定正午和固定相机，并经正常客户端 mirror、mesher、renderer 与 upload 路径收敛后无窗口抓取，不得创建或聚焦前台游戏窗口。`ai-companion` MUST 使用固定世界时间、相机、伙伴身份、维度、位置与朝向，显示中文名牌“阿木”、一条 accepted ChatEvent 和打开的 `@阿木 挖石头` 输入，并经正常客户端镜像、Avatar、NameTag 与 HUD 路径无窗口抓取。
+抓帧场景清单 MUST 保留 `target-block-feedback` 和 `oak-grove` 的既有名称与顺序，并在 `oak-grove` 后追加 `ai-companion` 作为唯一末场景。`target-block-feedback` MUST 使用固定正午、固定相机和确定性夹具，且经与交互客户端相同的完整呈现链路收敛后无窗口抓取。它 MUST 命中一个已注册材料方块，并同时可审查细轮廓、中文名称和正确的遮挡关系；抓帧或比对 MUST NOT 使用隐藏目标提示的专用开关。`inventory-crafting` 因打开背包而隐藏目标提示，其目标提示隐藏状态、背包与合成区域语义 MUST 保持不变；若世界生成改变共享地形背景，其 golden MAY 在逐图复核后更新。`oak-grove` MUST 使用固定世界种子、固定生成区块、固定正午和固定相机，并经与交互客户端相同的完整呈现链路收敛后无窗口抓取，不得创建或聚焦前台游戏窗口。`ai-companion` MUST 使用固定世界时间、相机、伙伴身份、维度、位置与朝向，显示中文名牌“阿木”、一条 accepted ChatEvent 和打开的 `@阿木 挖石头` 输入，并经统一的人形、名牌和聊天 HUD 呈现链路无窗口抓取。
 
 #### Scenario: 地形与 HUD 风格变化产生可审查基线
 
@@ -35,7 +35,7 @@
 
 - **GIVEN** `materials-showcase` 使用固定正午与固定相机
 - **WHEN** 生成或比对 `materials-showcase`
-- **THEN** 抓帧 MUST 使用正常镜像、mesher、renderer、upload 链路
+- **THEN** 抓帧 MUST 使用与交互客户端相同的完整呈现链路
 - **AND** MUST NOT 创建或聚焦前台游戏窗口，且 MUST 继续使用现有双阈值
 
 #### Scenario: 共享地形变化需完整复核
@@ -54,14 +54,14 @@
 
 - **GIVEN** `oak-grove` 的固定世界种子、生成区块、正午时间与相机已经装入客户端镜像
 - **WHEN** 场景完成预热、网格收敛和上传并抓帧
-- **THEN** 图像 MUST 由正常 mirror、mesher、renderer 与 upload 路径产出，且 MUST 显示固定橡树地貌
+- **THEN** 图像 MUST 由与交互客户端相同的完整呈现链路产出，且 MUST 显示固定橡树地貌
 - **AND** 抓帧 MUST NOT 创建或聚焦前台游戏窗口，且 MUST 继续使用既有双阈值
 
 #### Scenario: AI 伙伴通过统一呈现链路抓取
 
 - **GIVEN** `ai-companion` 已重置前一场景的 remote、companion、chat、inventory、panel、container、mining、damage 和 item-drop 状态，并装入固定伙伴和聊天夹具
 - **WHEN** 场景完成预热和上传并抓帧
-- **THEN** 图像 MUST 由正常客户端镜像、Avatar、NameTag 与 HUD 路径产出，且 MUST 同时显示伙伴人形、中文名牌“阿木”、accepted 事件与打开的 `@阿木 挖石头` 输入
+- **THEN** 图像 MUST 由统一的人形、名牌与聊天 HUD 呈现链路产出，且 MUST 同时显示伙伴人形、中文名牌“阿木”、accepted 事件与打开的 `@阿木 挖石头` 输入
 - **AND** 抓帧 MUST NOT 创建或聚焦前台游戏窗口，且 MUST 继续使用既有双阈值
 
 #### Scenario: 目标反馈通过正常渲染链路验证遮挡
@@ -69,7 +69,7 @@
 - **GIVEN** `target-block-feedback` 的固定夹具命中一个已注册材料方块
 - **WHEN** 场景完成预热、网格收敛和上传并抓帧
 - **THEN** 图像 MUST 同时显示该方块的细轮廓、中文名称和被地形正确遮挡的边
-- **AND** 场景 MUST 使用正常镜像、mesher、renderer、depth 与 name-tag 路径，不得创建或聚焦前台游戏窗口
+- **AND** 场景 MUST 使用与交互客户端相同的完整呈现链路并保持正确遮挡，不得创建或聚焦前台游戏窗口
 
 #### Scenario: 打开背包的基线不受目标提示影响
 
@@ -87,7 +87,7 @@
 
 ### Requirement: 天空光通道场景只在收敛后无窗口抓取
 
-抓帧场景清单 MUST 保留既有 `skylight-tunnel` 和 `block-light-room`，并 MUST 以 `ai-companion` 作为整个清单的唯一末场景。两个光照场景 MUST 通过正常客户端镜像路径装入固定夹具，并经既有 dirty、调度、结果回收和 renderer upload 路径收敛后才抓取；抓帧 MUST NOT 创建或聚焦游戏窗口，既有视觉差异阈值 MUST 保持不变。设备型号 MUST NOT 作为该视觉语义验收的额外条件。`skylight-tunnel` MUST 保持露天入口、半遮蔽过渡区、超过传播距离的深处以及固定正午时间、相机位置和朝向。`block-light-room` MUST 是午夜的完整封闭房间，唯一照明源 MUST 是一个发光块；图像 MUST 显示室内由近到远的方块光衰减，房外和缺失邻区边界 MUST 无漏光。
+抓帧场景清单 MUST 保留既有 `skylight-tunnel` 和 `block-light-room`，并 MUST 以 `ai-companion` 作为整个清单的唯一末场景。两个光照场景 MUST 通过与交互客户端相同的世界状态与呈现链路装入固定夹具，并在全部有限后台工作收敛后才抓取；抓帧 MUST NOT 创建或聚焦游戏窗口，既有视觉差异阈值 MUST 保持不变。设备型号 MUST NOT 作为该视觉语义验收的额外条件。`skylight-tunnel` MUST 保持露天入口、半遮蔽过渡区、超过传播距离的深处以及固定正午时间、相机位置和朝向。`block-light-room` MUST 是午夜的完整封闭房间，唯一照明源 MUST 是一个发光块；图像 MUST 显示室内由近到远的方块光衰减，房外和缺失邻区边界 MUST 无漏光。
 
 #### Scenario: 收敛后的通道抓帧显示梯度
 
@@ -103,7 +103,7 @@
 
 #### Scenario: 未收敛时拒绝抓取半成品
 
-- **GIVEN** `skylight-tunnel` 或 `block-light-room` 的 Mesher 或待上传结果在有界预热内未收敛
+- **GIVEN** `skylight-tunnel` 或 `block-light-room` 的有限后台工作在有界预热内未收敛
 - **WHEN** 抓帧程序准备写出该场景
 - **THEN** 程序 MUST 返回包含场景名的错误，且 MUST NOT 写入该场景的新 golden
 

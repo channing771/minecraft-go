@@ -54,16 +54,16 @@ AI 启用时，服务端 SHALL 先验证配置再加载存档：已存且仍配�
 
 ### Requirement: 运行期保存异步、可重试且关服可靠
 
-伙伴身体变化 SHALL 只在 tick 内标记 dirty；磁盘 I/O MUST 由单个有界聚合 save worker 在 tick 外完成。任一时刻 MUST 最多有一份 in-flight save；运行期失败 MUST 保留旧正式文件、最新内存状态和 frozen retry snapshot，并在既有 tick 调度上重试。安全关服 MUST 在 store Sync/Close 前保存最后一次权威 step 后的最新身体；失败 MUST 返回错误并允许再次关服重试。
+伙伴身体变化 SHALL 在权威 tick 边界进入待保存状态，磁盘 I/O MUST NOT 阻塞权威 tick。任一时刻 MUST 最多执行一次聚合保存；运行期失败 MUST 保留旧正式文件与最新未保存状态，并按既有 tick 调度重试。安全关服 MUST 在世界存储完成持久同步与关闭前保存最后一次权威 step 后的最新身体；失败 MUST 返回错误并允许再次关服重试。
 
-#### Scenario: 保存失败保留 dirty 后重试
+#### Scenario: 保存失败保留未保存状态后重试
 
 - **GIVEN** 一次聚合保存因 I/O 错误失败且内存中有更新版本
 - **WHEN** 后续 retry tick 到达
-- **THEN** worker MUST 重试未保存状态，旧正式文件 MUST 在成功原子替换前保持可读，失败完成 MUST NOT 清除 newer dirty
+- **THEN** 系统 MUST 重试最新未保存状态，旧正式文件 MUST 在成功原子替换前保持可读，较早保存的失败或完成 MUST NOT 丢弃其后发生的更新
 
 #### Scenario: 关服顺序防止最后状态丢失
 
 - **GIVEN** 关服 drain 的最后一次权威 step 创建或更新了伙伴身体
 - **WHEN** 服务端执行安全关服
-- **THEN** 事件顺序 MUST 是 companion save、store Sync、store Close；保存失败时 MUST 不关闭 persistence 或 store，并 MUST 允许调用方重试
+- **THEN** 可观察持久化顺序 MUST 是伙伴保存、世界存储持久同步、世界存储关闭；伙伴保存失败时 MUST 保持可重试状态且不得继续关闭世界存储

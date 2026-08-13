@@ -6,7 +6,7 @@
 
 ### Requirement: 客户端伙伴镜像只读且批次原子
 
-客户端 SHALL 在独立、最多四项的 `CompanionID` map 中维护伙伴镜像，并 MUST 只响应 `CompanionSpawn`、`CompanionStates` 与 `CompanionDespawn`。spawn 前对应脚下区块 snapshot MUST 已发布；状态批次 MUST 全部验证后原子应用。客户端 MUST NOT 预测伙伴移动或产生伙伴世界写入。
+客户端 SHALL 维护独立于玩家且最多四项的伙伴只读镜像，并 MUST 只响应 `CompanionSpawn`、`CompanionStates` 与 `CompanionDespawn`。spawn 前对应脚下区块 snapshot MUST 已发布；状态批次 MUST 全部验证后原子应用。客户端 MUST NOT 预测伙伴移动或产生伙伴世界写入。
 
 #### Scenario: snapshot 后才出现伙伴
 
@@ -18,11 +18,11 @@
 
 - **GIVEN** `CompanionStates` 中至少一项未知、重复、过时或批次超过四项
 - **WHEN** 客户端验证该消息
-- **THEN** 整批 MUST 被拒绝，所有既有伙伴快照环和呈现状态 MUST 保持不变
+- **THEN** 整批 MUST 被拒绝，所有既有伙伴镜像和呈现状态 MUST 保持不变
 
 ### Requirement: 伙伴复用统一 Avatar 与 NameTag 呈现
 
-客户端 SHALL 在同一 Avatar pass 与同一 NameTag pass 中呈现玩家和伙伴，不得建立第二套 shader、renderer 或 GPU resource。实体排序键 MUST 含 kind 与 16-byte ID，使相同 bytes 的玩家、伙伴和目标标签互不冲突。Avatar MUST 容纳 7 名远端玩家加 4 个伙伴共 11 个 actor；NameTag MUST 容纳这些 actor 加 1 个目标标签共 12 个标签，overflow MUST 在 GPU write 或 atlas mutation 前原子失败。既有玩家配色 MUST 保持不变。
+客户端 SHALL 在同一 Avatar pass 与同一 NameTag pass 中呈现玩家和伙伴。相同 16 bytes 的玩家、伙伴和目标标签 MUST 仍作为不同对象独立呈现。Avatar MUST 容纳 7 名远端玩家加 4 个伙伴共 11 个 actor；NameTag MUST 容纳这些 actor 加 1 个目标标签共 12 个标签，overflow MUST 在任何帧上传、绘制或部分呈现状态变化前原子失败。既有玩家配色 MUST 保持不变。
 
 #### Scenario: 十一个 actor 单 pass 呈现
 
@@ -33,8 +33,8 @@
 #### Scenario: 超出固定容量在副作用前失败
 
 - **GIVEN** Avatar 输入有 12 个 actor 或 NameTag 输入有 13 个标签
-- **WHEN** renderer 准备该帧
-- **THEN** 操作 MUST 返回 overflow 错误，且不得执行 dynamic upload、render pass、atlas request/flush 或部分排序布局更新
+- **WHEN** 客户端准备呈现该帧
+- **THEN** 操作 MUST 返回 overflow 错误，且不得上传或绘制部分帧，也不得留下部分呈现状态变化
 
 ### Requirement: 聊天输入和事件显示固定有界
 

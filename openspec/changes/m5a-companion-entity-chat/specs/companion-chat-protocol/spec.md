@@ -6,7 +6,7 @@
 
 ### Requirement: 协议 v16 追加固定伙伴与聊天消息
 
-线上协议 SHALL 升级到 v16，且 MUST 保留全部 v15 message ID 不变。Client `ChatCommand` MUST 使用 ID 12；Server `ChatEvent`、`CompanionSpawn`、`CompanionStates`、`CompanionDespawn` MUST 分别使用 ID 16、17、18、19。v15 与 v16 MUST NOT 跨版本互通，Memory 与 TCP MUST 使用同一 registry、codec 和验证语义。
+线上协议 SHALL 升级到 v16，且 MUST 保留全部 v15 message ID 不变。Client `ChatCommand` MUST 使用 ID 12；Server `ChatEvent`、`CompanionSpawn`、`CompanionStates`、`CompanionDespawn` MUST 分别使用 ID 16、17、18、19。v15 与 v16 MUST NOT 跨版本互通，Memory 与 TCP MUST 产生相同 wire 内容、验证结果与可观察事件。
 
 #### Scenario: v16 登录成功而 v15 被拒绝
 
@@ -27,7 +27,7 @@
 #### Scenario: 文本边界原子验证
 
 - **GIVEN** 一条 1024-byte 的有效命令和一条 1025-byte 的命令
-- **WHEN** codec 分别编码或解码它们
+- **WHEN** 系统分别序列化或接收它们
 - **THEN** 1024-byte 命令 MUST 被接受，1025-byte 命令 MUST 在应用任何字段前被拒绝
 
 #### Scenario: 拒绝事件不泄漏无效字段
@@ -38,7 +38,7 @@
 
 ### Requirement: 伙伴同步消息有界且按 ID 排序
 
-`CompanionSpawn` SHALL 携带伙伴 ID、名称、tick、维度、位置与朝向；`CompanionStates` SHALL 携带一个 tick 内 `1..4` 个按 ID 严格升序且不重复的身体状态；`CompanionDespawn` SHALL 只按独立 `CompanionID` 寻址。固定最大 wire 长度 MUST 分别为 178、173 bytes；decoder MUST 在分配或应用前验证全部长度、计数、顺序和字段。
+`CompanionSpawn` SHALL 携带伙伴 ID、名称、tick、维度、位置与朝向；`CompanionStates` SHALL 携带一个 tick 内 `1..4` 个按 ID 严格升序且不重复的身体状态；`CompanionDespawn` SHALL 只按独立 `CompanionID` 寻址。固定最大 wire 长度 MUST 分别为 178、173 bytes；接收方 MUST 在接受消息前验证全部长度、计数、顺序和字段，非法计数不得触发与声明数量成比例的工作或内存增长。
 
 #### Scenario: 五项或无序状态被原子拒绝
 
@@ -54,7 +54,7 @@
 
 ### Requirement: 聊天只在 tick 边界执行精确寻址
 
-服务端 SHALL 只接受 `@伙伴名 指令`，按 bounded ingress channel 的接收顺序在 tick 边界处理，并按大小写精确匹配 active 名称。Accepted MUST 广播给全部 active sessions；InvalidFormat 与 UnknownCompanion MUST 只回复发令者。M5A MUST NOT 创建任务、FIFO、Planner 请求、模拟命令或任何世界动作。
+服务端 SHALL 只接受 `@伙伴名 指令`，以固定容量接收请求，按接收顺序在 tick 边界处理，并按大小写精确匹配 active 名称。Accepted MUST 广播给全部在线玩家；InvalidFormat 与 UnknownCompanion MUST 只回复发令者。M5A MUST NOT 创建任务、FIFO、Planner 请求、模拟命令或任何世界动作。
 
 #### Scenario: 精确名称产生接受事件
 
