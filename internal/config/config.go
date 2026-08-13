@@ -7,7 +7,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -75,6 +77,23 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, "minecraft-go", "config.json"), nil
 }
 
+func defaultPaths() (current, legacy string, err error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", "", fmt.Errorf("config: 定位用户配置目录: %w", err)
+	}
+	return filepath.Join(dir, "mornlea", "config.json"), filepath.Join(dir, "minecraft-go", "config.json"), nil
+}
+
+// LoadDefault 从 Mornlea 默认路径加载配置，并在新文件缺失时迁移旧配置。
+func LoadDefault() (Config, error) {
+	current, legacy, err := defaultPaths()
+	if err != nil {
+		return Config{}, err
+	}
+	return loadDefaultFromPaths(current, legacy, publishConfigExclusively)
+}
+
 // rawLogging 是日志分组的中间反序列化结构体。等级字段必须先解码为字符串再经
 // logging.ParseLevel 转换，不能让 json.Unmarshal 直接填进 slog.Level——
 // slog.Level 自带 UnmarshalJSON/UnmarshalText，遇到未知等级会让整个 Load 失败，
@@ -88,16 +107,19 @@ type rawLogging struct {
 // 会创建文件。缺失字段保留默认值，越界值被钳制，未知字段被忽略，这些情形都不
 // 报错，仅通过 slog.Warn 提示；只有 JSON 语法错误与不认识的 version 才报错。
 func Load(path string) (Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return Defaults(), nil
-		}
-		return Config{}, fmt.Errorf("config: 读取配置文件: %w", err)
+	contents, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return Defaults(), nil
 	}
+	if err != nil {
+		return Config{}, fmt.Errorf("config: 读取配置文件 %s: %w", path, err)
+	}
+	return decodeConfig(path, contents)
+}
 
+func decodeConfig(path string, contents []byte) (Config, error) {
 	var top map[string]json.RawMessage
-	if err := json.Unmarshal(data, &top); err != nil {
+	if err := json.Unmarshal(contents, &top); err != nil {
 		return Config{}, fmt.Errorf("config: 解析配置文件: %w", err)
 	}
 
@@ -128,6 +150,160 @@ func Load(path string) (Config, error) {
 	warnUnknownTopLevel(top)
 
 	return cfg, nil
+}
+
+func loadDefaultFromPaths(current, legacy string, publish func(string, []byte) (bool, error)) (Config, error) {
+	exists, err := validateDefaultConfigPath(current)
+	if err != nil {
+		return Config{}, err
+	}
+	if exists {
+		return readDefaultConfig(current)
+	}
+
+	legacyContents, err := os.ReadFile(legacy)
+	if errors.Is(err, os.ErrNotExist) {
+		return Defaults(), nil
+	}
+	if err != nil {
+		return Config{}, fmt.Errorf("config: 读取旧配置文件 %s: %w", legacy, err)
+	}
+	legacyConfig, err := decodeConfig(legacy, legacyContents)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: 解码旧配置文件 %s: %w", legacy, err)
+	}
+	contents, err := json.MarshalIndent(legacyConfig, "", "  ")
+	if err != nil {
+		return Config{}, fmt.Errorf("config: 序列化旧配置文件 %s: %w", legacy, err)
+	}
+	published, err := publish(current, contents)
+	if err != nil {
+		return Config{}, err
+	}
+	if _, err := validateDefaultConfigPath(current); err != nil {
+		return Config{}, err
+	}
+	cfg, err := readDefaultConfig(current)
+	if err != nil {
+		return Config{}, err
+	}
+	if published {
+		slog.Info("旧配置已迁移到 Mornlea 默认路径", "legacy_path", legacy, "current_path", current)
+	}
+	return cfg, nil
+}
+
+func validateDefaultConfigPath(path string) (bool, error) {
+	if err := validateDefaultConfigParent(path); err != nil {
+		return false, err
+	}
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("config: 检查默认配置文件 %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		return false, fmt.Errorf("config: 默认配置文件 %s 权限不安全（实际 %04o，期望 0600）: %w",
+			path, info.Mode().Perm(), fs.ErrPermission)
+	}
+	return true, nil
+}
+
+func validateDefaultConfigParent(path string) error {
+	parent := filepath.Dir(path)
+	info, err := os.Stat(parent)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("config: 检查默认配置目录 %s: %w", parent, err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("config: 默认配置路径 %s 的父目录 %s 权限不安全（实际 %04o，期望 0700）: %w",
+			path, parent, info.Mode().Perm(), fs.ErrPermission)
+	}
+	return nil
+}
+
+func readDefaultConfig(path string) (Config, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: 读取默认配置文件 %s: %w", path, err)
+	}
+	cfg, err := decodeConfig(path, contents)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: 解码默认配置文件 %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func publishConfigExclusively(path string, contents []byte) (bool, error) {
+	return publishConfigExclusivelyWithLink(path, contents, os.Link)
+}
+
+func publishConfigExclusivelyWithLink(path string, contents []byte, link func(string, string) error) (published bool, err error) {
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return false, fmt.Errorf("config: 创建默认配置目录 %s: %w", parent, err)
+	}
+	if err := validateDefaultConfigParent(path); err != nil {
+		return false, err
+	}
+
+	temp, err := os.CreateTemp(parent, "config-*.json.tmp")
+	if err != nil {
+		return false, fmt.Errorf("config: 创建默认配置临时文件 %s: %w", path, err)
+	}
+	tempPath := temp.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = temp.Close()
+		}
+		_ = os.Remove(tempPath)
+	}()
+
+	if err := temp.Chmod(0o600); err != nil {
+		return false, fmt.Errorf("config: 设置默认配置临时文件权限 %s: %w", path, err)
+	}
+	if _, err := temp.Write(contents); err != nil {
+		return false, fmt.Errorf("config: 写入默认配置临时文件 %s: %w", path, err)
+	}
+	if err := temp.Sync(); err != nil {
+		return false, fmt.Errorf("config: 落盘默认配置临时文件 %s: %w", path, err)
+	}
+	if err := temp.Close(); err != nil {
+		return false, fmt.Errorf("config: 关闭默认配置临时文件 %s: %w", path, err)
+	}
+	closed = true
+
+	if err := link(tempPath, path); errors.Is(err, fs.ErrExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("config: 发布默认配置文件 %s: %w", path, err)
+	}
+	published = true
+	if err := os.Remove(tempPath); err != nil {
+		return true, fmt.Errorf("config: 清理默认配置临时文件 %s: %w", path, err)
+	}
+	if err := syncConfigDirectory(parent); err != nil {
+		return true, fmt.Errorf("config: 落盘默认配置目录 %s: %w", parent, err)
+	}
+	return true, nil
+}
+
+func syncConfigDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	if err := directory.Sync(); err != nil {
+		_ = directory.Close()
+		return err
+	}
+	return directory.Close()
 }
 
 // applyLogging 把 logging 分组的原始 JSON 解析进 cfg.Logging。未知等级文本
@@ -259,7 +435,7 @@ func lookupCaseInsensitive(m map[string]json.RawMessage, key string) (json.RawMe
 // 临时文件。
 func (c Config) Save(path string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("config: 创建配置目录: %w", err)
 	}
 	temp, err := os.CreateTemp(dir, "config-*.json.tmp")
