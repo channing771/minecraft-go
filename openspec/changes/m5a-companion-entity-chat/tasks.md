@@ -12,9 +12,9 @@
 
 ## 3. Companion schema v1 编解码（计划 Task 4）
 
-- [ ] 3.1 在 `internal/storage` 先写 MCAI v1 round-trip/golden、排序不改输入、CRC/future/truncation/oversize、非法浮点/背包和 worn durability 测试与 fuzz；运行 `go test ./internal/storage -run 'TestCompanionCodec' -race -count=1` 确认 RED。
-- [ ] 3.2 最小实现 32-byte header、221-byte record、14,176-byte 上限、64 条预分配前门禁、canonical 排序、CRC32C 及 corrupt/future error；v1 不保存名称或任务。
-- [ ] 3.3 仅运行 `go test ./internal/storage -run '^TestCompanionCodecV1RoundTripAndGolden$' -update-storage-fixtures` 生成 `companions-v1.bin`；再运行 `go test ./internal/storage -run 'TestCompanionCodec' -race -count=1`、`go test ./internal/storage -run '^$' -fuzz FuzzDecodeCompanions -fuzztime=5s`、`shasum -a 256 internal/storage/testdata/companions-v1.bin`、`go test ./internal/archcheck -count=1`、`go test ./internal/storage -race -count=1`、`go vet ./internal/storage`、`test -z "$(gofmt -l internal/storage)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时移除预分配前 count guard，确认 codec 测试 RED 后恢复并重跑至 PASS。
+- [x] 3.1 在 `internal/storage` 先写 MCAI v1 round-trip/golden、排序不改输入、CRC/future/truncation/oversize、非法浮点/背包和 worn durability 测试与 fuzz；运行 `go test ./internal/storage -run 'TestCompanionCodec' -race -count=1` 确认 RED。
+- [x] 3.2 最小实现 32-byte header、221-byte record、14,176-byte 上限、64 条预分配前门禁、canonical 排序、CRC32C 及 corrupt/future error；v1 不保存名称或任务。
+- [x] 3.3 仅运行 `go test ./internal/storage -run '^TestCompanionCodecV1RoundTripAndGolden$' -update-storage-fixtures` 生成 `companions-v1.bin`；再运行 `go test ./internal/storage -run 'TestCompanionCodec' -race -count=1`、`go test ./internal/storage -run '^$' -fuzz FuzzDecodeCompanions -fuzztime=5s`、`shasum -a 256 internal/storage/testdata/companions-v1.bin`、`go test ./internal/archcheck -count=1`、`go test ./internal/storage -race -count=1`、`go vet ./internal/storage`、`test -z "$(gofmt -l internal/storage)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时移除预分配前 count guard，确认 codec 测试 RED 后恢复并重跑至 PASS。
 
 ## 4. Memory/Disk CompanionStore 与原子替换（计划 Task 5）
 
