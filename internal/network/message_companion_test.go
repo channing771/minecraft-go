@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -122,7 +123,8 @@ func TestChatCommandAccepts1024BytesAndRejects1025(t *testing.T) {
 		}
 	}
 	for _, text := range []string{
-		"", strings.Repeat("x", 1025), " x", "x ", "x\x00y", "x\ny", string([]byte{0xff}),
+		"", strings.Repeat("x", 1025), " x", "x ", "\u3000x", "x\u00a0",
+		"x\x00y", "x\ny", string([]byte{0xff}),
 	} {
 		packet := ChatCommand{Text: text}
 		if err := packet.Validate(); err == nil {
@@ -140,6 +142,8 @@ func TestChatCommandAccepts1024BytesAndRejects1025(t *testing.T) {
 		{3, 'x', '\n', 'y'},
 		{2, ' ', 'x'},
 		{2, 'x', ' '},
+		{4, 0xe3, 0x80, 0x80, 'x'},
+		{3, 'x', 0xc2, 0xa0},
 	} {
 		if packet, err := decodeClientPacketPayload(StatePlay, 12, payload); err == nil || packet != nil {
 			t.Fatalf("非法 ChatCommand wire 解码为 %#v, %v", packet, err)
@@ -168,15 +172,23 @@ func TestCompanionSpawnAndChatEventStringBoundaries(t *testing.T) {
 	}
 
 	tooManyRunes := strings.Repeat("a", 33)
+	// 单个合法 UTF-8 rune 最多四字节，因此超过 128 bytes 的合法名称必然也超过 32 rune。
+	exact129Bytes := strings.Repeat("𐐀", 32) + "a"
 	tooManyBytes := strings.Repeat("𐐀", 33)
+	if len(exact129Bytes) != 129 || utf8.RuneCountInString(exact129Bytes) != 33 {
+		t.Fatalf("精确边界夹具 = %d bytes/%d runes，想要 129/33",
+			len(exact129Bytes), utf8.RuneCountInString(exact129Bytes))
+	}
 	invalid := []interface{ Validate() error }{
 		CompanionSpawn{ID: id, Name: tooManyRunes, Dimension: core.Overworld},
+		CompanionSpawn{ID: id, Name: exact129Bytes, Dimension: core.Overworld},
 		CompanionSpawn{ID: id, Name: tooManyBytes, Dimension: core.Overworld},
 		CompanionSpawn{ID: id, Name: " A", Dimension: core.Overworld},
 		CompanionSpawn{ID: id, Name: "A\n", Dimension: core.Overworld},
 		CompanionSpawn{ID: id, Name: "A", Dimension: 1},
 		CompanionSpawn{ID: id, Name: "A", Dimension: core.Overworld, Pitch: 90.01},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: tooManyRunes, Kind: ChatEventRejected, RejectReason: ChatRejectInvalidFormat},
+		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: exact129Bytes, Kind: ChatEventRejected, RejectReason: ChatRejectInvalidFormat},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: tooManyBytes, Kind: ChatEventRejected, RejectReason: ChatRejectInvalidFormat},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: "Chen", CompanionID: id,
 			CompanionName: "A", Kind: ChatEventAccepted, RejectReason: ChatRejectNone},
@@ -197,6 +209,19 @@ func TestCompanionSpawnAndChatEventStringBoundaries(t *testing.T) {
 		if err := message.Validate(); err == nil {
 			t.Fatalf("非法 %T 被接受: %+v", message, message)
 		}
+	}
+
+	var oversizedNameEvent byteEncoder
+	oversizedNameEvent.u64(1)
+	oversizedNameEvent.data = append(oversizedNameEvent.data, playerID[:]...)
+	oversizedNameEvent.string(exact129Bytes, 129)
+	oversizedNameEvent.data = append(oversizedNameEvent.data, make([]byte, len(id))...)
+	oversizedNameEvent.string("", 128)
+	oversizedNameEvent.u8(uint8(ChatEventRejected))
+	oversizedNameEvent.u8(uint8(ChatRejectInvalidFormat))
+	oversizedNameEvent.string("", 1024)
+	if packet, err := decodeServerControlPayload(StatePlay, 16, oversizedNameEvent.data); err == nil || packet != nil {
+		t.Fatalf("129-byte player name wire 解码为 %#v, %v", packet, err)
 	}
 }
 
