@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"unicode/utf8"
@@ -41,17 +43,27 @@ func DefaultPath() (string, error) {
 	return filepath.Join(configDirectory, "minecraft-go", "profile.json"), nil
 }
 
+func defaultPaths() (current, legacy string, err error) {
+	configDirectory, err := os.UserConfigDir()
+	if err != nil {
+		return "", "", fmt.Errorf("profile: user config directory: %w", err)
+	}
+	return filepath.Join(configDirectory, "mornlea", "profile.json"), filepath.Join(configDirectory, "minecraft-go", "profile.json"), nil
+}
+
 // LoadOrCreate 读取本机档案，或以新 UUIDv4 创建一个。
 func LoadOrCreate(options Options) (Profile, error) {
-	path := options.Path
-	if path == "" {
-		var err error
-		path, err = DefaultPath()
-		if err != nil {
-			return Profile{}, err
-		}
+	if options.Path != "" {
+		return loadOrCreateAtPath(options.Path, options)
 	}
+	current, legacy, err := defaultPaths()
+	if err != nil {
+		return Profile{}, err
+	}
+	return loadOrCreateDefaultFromPaths(current, legacy, options, publishProfileExclusively)
+}
 
+func loadOrCreateAtPath(path string, options Options) (Profile, error) {
 	contents, err := os.ReadFile(path)
 	if err == nil {
 		profile, err := decodeProfile(contents)
@@ -99,6 +111,184 @@ func LoadOrCreate(options Options) (Profile, error) {
 		return Profile{}, err
 	}
 	return profile, nil
+}
+
+func loadOrCreateDefaultFromPaths(current, legacy string, options Options, publish func(string, []byte) (bool, error)) (Profile, error) {
+	return loadOrCreateDefaultFromPathsWithOpen(current, legacy, options, publish, os.Open)
+}
+
+func loadOrCreateDefaultFromPathsWithOpen(current, legacy string, options Options, publish func(string, []byte) (bool, error), open func(string) (*os.File, error)) (Profile, error) {
+	if err := validateDefaultProfileParent(current); err != nil {
+		return Profile{}, err
+	}
+	profile, exists, err := readDefaultProfileIfExistsWithOpen(current, open)
+	if err != nil {
+		return Profile{}, err
+	}
+	if exists {
+		return applyRequestedDefaultName(current, profile, options.RequestedName)
+	}
+
+	legacyContents, err := os.ReadFile(legacy)
+	migrating := err == nil
+	var contents []byte
+	if err == nil {
+		legacyProfile, err := decodeProfile(legacyContents)
+		if err != nil {
+			return Profile{}, fmt.Errorf("profile: decode legacy profile %s: %w", legacy, err)
+		}
+		contents, err = encodeProfile(legacyProfile)
+		if err != nil {
+			return Profile{}, fmt.Errorf("profile: encode legacy profile %s: %w", legacy, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Profile{}, fmt.Errorf("profile: read legacy profile %s: %w", legacy, err)
+	} else {
+		name := "Player"
+		if options.RequestedName != nil {
+			name, err = core.NormalizeDisplayName(*options.RequestedName)
+			if err != nil {
+				return Profile{}, err
+			}
+		}
+		if err := ensureDefaultProfileParent(current); err != nil {
+			return Profile{}, err
+		}
+		id, err := newPlayerID(options.Random)
+		if err != nil {
+			return Profile{}, err
+		}
+		contents, err = encodeProfile(Profile{Version: CurrentVersion, PlayerID: id, DisplayName: name})
+		if err != nil {
+			return Profile{}, err
+		}
+	}
+
+	if err := ensureDefaultProfileParent(current); err != nil {
+		return Profile{}, err
+	}
+	published, err := publish(current, contents)
+	if err != nil {
+		return Profile{}, fmt.Errorf("profile: publish default profile %s: %w", current, err)
+	}
+	if err := validateDefaultProfileParent(current); err != nil {
+		return Profile{}, err
+	}
+	profile, exists, err = readDefaultProfileIfExistsWithOpen(current, open)
+	if err != nil {
+		return Profile{}, err
+	}
+	if !exists {
+		return Profile{}, fmt.Errorf("profile: read default profile %s: %w", current, fs.ErrNotExist)
+	}
+	profile, err = applyRequestedDefaultName(current, profile, options.RequestedName)
+	if err != nil {
+		return Profile{}, err
+	}
+	if migrating && published {
+		slog.Info("旧 profile 已迁移到 Mornlea 默认路径", "legacy_path", legacy, "current_path", current)
+	}
+	return profile, nil
+}
+
+func applyRequestedDefaultName(path string, profile Profile, requested *string) (Profile, error) {
+	if requested == nil {
+		return profile, nil
+	}
+	name, err := core.NormalizeDisplayName(*requested)
+	if err != nil {
+		return Profile{}, err
+	}
+	if name == profile.DisplayName {
+		return profile, nil
+	}
+	if err := ensureDefaultProfileParent(path); err != nil {
+		return Profile{}, err
+	}
+	profile.DisplayName = name
+	if err := saveProfile(path, profile); err != nil {
+		return Profile{}, err
+	}
+	return profile, nil
+}
+
+func readDefaultProfileIfExistsWithOpen(path string, open func(string) (*os.File, error)) (Profile, bool, error) {
+	checked, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return Profile{}, false, nil
+	}
+	if err != nil {
+		return Profile{}, false, fmt.Errorf("profile: inspect default profile %s: %w", path, err)
+	}
+	if err := validateDefaultProfileFile(path, checked); err != nil {
+		return Profile{}, false, err
+	}
+
+	file, err := open(path)
+	if err != nil {
+		return Profile{}, false, fmt.Errorf("profile: open default profile %s: %w", path, err)
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return Profile{}, false, fmt.Errorf("profile: inspect opened default profile %s: %w", path, err)
+	}
+	if err := validateDefaultProfileFile(path, opened); err != nil {
+		return Profile{}, false, err
+	}
+	if !os.SameFile(checked, opened) {
+		return Profile{}, false, fmt.Errorf("profile: default profile %s was replaced after validation: %w", path, fs.ErrPermission)
+	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return Profile{}, false, fmt.Errorf("profile: re-inspect opened default profile %s: %w", path, err)
+	}
+	if err := validateDefaultProfileFile(path, current); err != nil {
+		return Profile{}, false, err
+	}
+	if !os.SameFile(current, opened) {
+		return Profile{}, false, fmt.Errorf("profile: default profile %s was replaced after opening: %w", path, fs.ErrPermission)
+	}
+	contents, err := io.ReadAll(file)
+	if err != nil {
+		return Profile{}, false, fmt.Errorf("profile: read default profile %s: %w", path, err)
+	}
+	profile, err := decodeProfile(contents)
+	if err != nil {
+		return Profile{}, false, fmt.Errorf("profile: decode default profile %s: %w", path, err)
+	}
+	return profile, true, nil
+}
+
+func validateDefaultProfileFile(path string, info fs.FileInfo) error {
+	mode := info.Mode()
+	if mode&os.ModeSymlink != 0 || !mode.IsRegular() || mode.Perm() != 0o600 {
+		return fmt.Errorf("profile: default profile %s has unsafe permissions (mode %s, want regular 0600): %w", path, mode, fs.ErrPermission)
+	}
+	return nil
+}
+
+func validateDefaultProfileParent(path string) error {
+	parent := filepath.Dir(path)
+	info, err := os.Lstat(parent)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("profile: inspect default profile directory %s: %w", parent, err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("profile: default profile path %s has unsafe parent %s (mode %s, want directory 0700): %w", path, parent, info.Mode(), fs.ErrPermission)
+	}
+	return nil
+}
+
+func ensureDefaultProfileParent(path string) error {
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return fmt.Errorf("profile: create default profile directory %s: %w", parent, err)
+	}
+	return validateDefaultProfileParent(path)
 }
 
 func ensureProfileParent(path string) error {
