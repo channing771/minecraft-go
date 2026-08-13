@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/badge/protocol-v15-blue" alt="协议 v15">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
   <img src="https://github.com/channing771/minecraft-go/actions/workflows/ci.yml/badge.svg" alt="CI">
+  <img src="https://img.shields.io/github/v/release/channing771/minecraft-go" alt="release">
 </p>
 
 `Mornlea` 是一个使用 Go 编写的独立体素游戏实验项目。项目自研客户端、权威服务端、世界存储和 WebGPU 渲染管线，不追求兼容官方 Minecraft 的协议、存档或资源。
