@@ -10,6 +10,8 @@
   <img src="https://img.shields.io/github/v/release/channing771/minecraft-go" alt="release">
 </p>
 
+> [English](README.en.md) · 简体中文（本文）
+
 `Mornlea` 是一个使用 Go 编写的独立体素游戏实验项目。项目自研客户端、权威服务端、世界存储和 WebGPU 渲染管线，不追求兼容官方 Minecraft 的协议、存档或资源。
 
 <details>
@@ -32,7 +34,9 @@ Milestone history lives in [实现进度](docs/notes/progress.md); the LAN serve
 
 ## 截图
 
-截图取自无窗口视觉验证基线（640×360，`make visual-check` 生成），从上到下依次为：正午地形、橡树林、方块光房间与材料展示。
+<p align="center"><img src="docs/demo.gif" width="640" alt="Mornlea 演示"></p>
+
+以下静态截图取自无窗口视觉验证基线（640×360，`make visual-check` 生成），从左到右、从上到下依次为：正午地形、橡树林、方块光房间与材料展示。
 
 <table>
   <tr>
