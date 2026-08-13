@@ -45,13 +45,13 @@ xcode-select --install
 
 ## 快速开始
 
-源码合并且 operator 完成外部仓库改名后，可按最终身份克隆：
-
 ```bash
-git clone https://github.com/channing771/mornlea.git
-cd mornlea
+git clone https://github.com/channing771/minecraft-go.git
+cd minecraft-go
 make run
 ```
+
+> 仓库后续计划改名为 `mornlea`；改名完成后请按新地址克隆。
 
 首次启动需要生成并加载视距内的地形，耗时会明显长于后续运行。默认世界保存在 `worlds/default`。
 
