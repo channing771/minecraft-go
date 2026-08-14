@@ -30,9 +30,9 @@
 
 ## 6. 单聚合伙伴持久化 worker（计划 Task 7）
 
-- [ ] 6.1 在 `internal/server` 先写单 in-flight、inactive 保留、失败 dirty/retry、Flush retry、mutex 外 Save、in-flight 期间更新、输入 no-alias 和 Flush latest 测试；运行 `go test ./internal/server -run 'TestCompanionPersistence' -race -count=1` 确认 RED。
-- [ ] 6.2 实现一个 capacity-1 jobs/completions worker、内部生命周期 context、frozen job/retry clone、Observe/Poll/Flush/Close；store I/O 不持 mutex、不阻塞 tick，不抽通用 worker。
-- [ ] 6.3 运行 `go test ./internal/server -run 'TestCompanionPersistence' -race -count=1`、`go test ./internal/server -race -count=1`、`go vet ./internal/server`、`test -z "$(gofmt -l internal/server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时把 `SaveCompanions` 放进 mutex，确认包含 `TestCompanionPersistence` 的命令 RED 后恢复并重跑至 PASS。
+- [x] 6.1 在 `internal/server` 先写单 in-flight、inactive 保留、失败 dirty/retry、Flush retry、mutex 外 Save、in-flight 期间更新、输入 no-alias 和 Flush latest 测试；运行 `go test ./internal/server -run 'TestCompanionPersistence' -race -count=1` 确认 RED。
+- [x] 6.2 实现一个 capacity-1 jobs/completions worker、内部生命周期 context、frozen job/retry clone、Observe/Poll/Flush/Close；store I/O 不持 mutex、不阻塞 tick，不抽通用 worker。
+- [x] 6.3 运行 `go test ./internal/server -run 'TestCompanionPersistence' -race -count=1`、`go test ./internal/server -race -count=1`、`go vet ./internal/server`、`test -z "$(gofmt -l internal/server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时把 `SaveCompanions` 放进 mutex，确认包含 `TestCompanionPersistence` 的命令 RED 后恢复并重跑至 PASS。
 
 ## 7. Host 启动合并、恢复与 shutdown（计划 Task 8）
 
