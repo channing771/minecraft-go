@@ -48,9 +48,9 @@
 
 ## 9. tick 边界聊天寻址与 Memory/TCP parity（计划 Task 10）
 
-- [ ] 9.1 在 `internal/server` 先写精确 parser、名称 32 rune/128 bytes 边界、Invalid/Unknown 单播、Accepted 广播顺序、stale generation 和 Memory/TCP parity 测试；运行 `go test ./internal/server -run 'Test(ChatCommand|MalformedOrUnknownCompanion|CompanionAddress|AcceptedCompanionChat|StaleSessionChat|CompanionChatMemoryTCPParity)' -race -count=1` 确认 RED。
-- [ ] 9.2 实现 bounded `incomingChats`、tick 前按 channel 顺序 drain、精确大小写名称查找和进程内 EventID；只产生事实 delivery，不构造 `sim.Command`、FIFO、任务或身体/world mutation。
-- [ ] 9.3 运行 `go test ./internal/server -run 'Test(ChatCommand|MalformedOrUnknownCompanion|CompanionAddress|AcceptedCompanionChat|StaleSessionChat|CompanionChatMemoryTCPParity)' -race -count=1`、`go test ./internal/server -run '^$' -bench BenchmarkChatRoutingFourCompanions -benchmem -count=5`、`go test ./internal/server -race -count=1`、`go vet ./internal/server`、`test -z "$(gofmt -l internal/server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时改为 prefix matching，确认包含 `Test(ChatCommand|MalformedOrUnknownCompanion|CompanionAddress|AcceptedCompanionChat|StaleSessionChat|CompanionChatMemoryTCPParity)` 的命令 RED 后恢复并重跑至 PASS。
+- [x] 9.1 在 `internal/server` 先写精确 parser、名称 32 rune/128 bytes 边界、Invalid/Unknown 单播、Accepted 广播顺序、stale generation 和 Memory/TCP parity 测试；运行 `go test ./internal/server -run 'Test(ChatCommand|MalformedOrUnknownCompanion|CompanionAddress|AcceptedCompanionChat|StaleSessionChat|CompanionChatMemoryTCPParity)' -race -count=1` 确认 RED。
+- [x] 9.2 实现 bounded `incomingChats`、tick 前按 channel 顺序 drain、精确大小写名称查找和进程内 EventID；只产生事实 delivery，不构造 `sim.Command`、FIFO、任务或身体/world mutation。
+- [x] 9.3 运行 `go test ./internal/server -run 'Test(ChatCommand|MalformedOrUnknownCompanion|CompanionAddress|AcceptedCompanionChat|StaleSessionChat|CompanionChatMemoryTCPParity)' -race -count=1`、`go test ./internal/server -run '^$' -bench BenchmarkChatRoutingFourCompanions -benchmem -count=5`、`go test ./internal/server -race -count=1`、`go vet ./internal/server`、`test -z "$(gofmt -l internal/server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时改为 prefix matching，确认包含 `Test(ChatCommand|MalformedOrUnknownCompanion|CompanionAddress|AcceptedCompanionChat|StaleSessionChat|CompanionChatMemoryTCPParity)` 的命令 RED 后恢复并重跑至 PASS。
 
 ## 10. 客户端伙伴插值与 ChatEvent 环（计划 Task 11）
 

@@ -12,6 +12,10 @@ import (
 )
 
 func (server *Server) publish(result sim.TickResult) {
+	server.publishWithChats(result, nil)
+}
+
+func (server *Server) publishWithChats(result sim.TickResult, chats []chatDelivery) {
 	players := make(map[sim.SessionID]sim.PlayerUpdate, len(result.Players))
 	for _, player := range result.Players {
 		players[player.Session] = player
@@ -30,10 +34,10 @@ func (server *Server) publish(result sim.TickResult) {
 		}
 		if observer := server.config.InterestObserver; observer != nil {
 			started := time.Now()
-			server.publishSession(current, result, players, definitions)
+			server.publishSession(current, result, players, definitions, chats)
 			observer(time.Since(started))
 		} else {
-			server.publishSession(current, result, players, definitions)
+			server.publishSession(current, result, players, definitions, chats)
 		}
 	}
 }
@@ -43,6 +47,7 @@ func (server *Server) publishSession(
 	result sim.TickResult,
 	players map[sim.SessionID]sim.PlayerUpdate,
 	definitions map[companion.ID]companion.Definition,
+	chats []chatDelivery,
 ) {
 	companions, ok := server.companionPublicationCandidates(current, result.Companions, definitions)
 	if !ok {
@@ -73,7 +78,26 @@ func (server *Server) publishSession(
 	if !server.publishDrops(current, result.Tick) {
 		return
 	}
+	if !server.publishChatDeliveries(current, chats) {
+		return
+	}
 	server.publishLocalResult(current, result, players[current.id])
+}
+
+func (server *Server) publishChatDeliveries(current *session, chats []chatDelivery) bool {
+	if current == server.trustedObserver {
+		return true
+	}
+	for _, delivery := range chats {
+		if delivery.recipient != 0 && delivery.recipient != current.id {
+			continue
+		}
+		if !current.enqueue(delivery.event) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
+			return false
+		}
+	}
+	return true
 }
 
 func (server *Server) updateSessionView(current *session, player sim.PlayerUpdate) {

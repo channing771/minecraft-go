@@ -61,6 +61,7 @@ func (server *Server) Shutdown(ctx context.Context) error {
 		freezeErr = server.drainSaveCompletionsWithError()
 		trustedCenter, trustedSequence, hasTrustedCenter := server.drainTrustedObserverCenter()
 		server.drainIncoming()
+		_ = server.drainIncomingChats()
 		server.drainAcquired()
 		server.drainGenerated()
 		server.engine.Step()

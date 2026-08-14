@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/sim"
@@ -38,13 +39,16 @@ type Server struct {
 	saveCtx     context.Context
 	cancelSaves context.CancelFunc
 
-	incoming      chan incomingCommand
-	inputBoundary atomic.Pointer[inputIngressBoundary]
-	jobs          chan chunkJob
-	acquired      chan sim.AcquiredChunk
-	generated     chan sim.GeneratedChunk
-	pending       []chunkJob
-	queued        map[core.ChunkKey]struct{}
+	incoming         chan incomingCommand
+	incomingChats    chan incomingChat
+	companionsByName map[string]companion.Definition
+	nextChatEventID  uint64
+	inputBoundary    atomic.Pointer[inputIngressBoundary]
+	jobs             chan chunkJob
+	acquired         chan sim.AcquiredChunk
+	generated        chan sim.GeneratedChunk
+	pending          []chunkJob
+	queued           map[core.ChunkKey]struct{}
 
 	trustedObserverMu       sync.Mutex
 	trustedObserverCenters  chan trustedObserverCenter
@@ -112,6 +116,7 @@ func newWorld(
 		saveCtx:         saveCtx,
 		cancelSaves:     cancelSaves,
 		incoming:        make(chan incomingCommand, inputCapacity),
+		incomingChats:   make(chan incomingChat, inputCapacity),
 		jobs:            make(chan chunkJob, queueCapacity),
 		acquired:        make(chan sim.AcquiredChunk, queueCapacity),
 		generated:       make(chan sim.GeneratedChunk, queueCapacity),
@@ -125,6 +130,15 @@ func newWorld(
 		closedDone:      make(chan struct{}),
 		shutdownGate:    shutdownGate,
 		companions:      companions,
+	}
+	if len(config.Companions) != 0 {
+		server.companionsByName = make(
+			map[string]companion.Definition,
+			len(config.Companions),
+		)
+		for _, definition := range config.Companions {
+			server.companionsByName[definition.Name] = definition
+		}
 	}
 	if config.TrustedObserver {
 		server.trustedObserverCenters = make(chan trustedObserverCenter, 1)
@@ -260,6 +274,7 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 	server.drainSaveCompletions()
 	trustedCenter, trustedSequence, hasTrustedCenter := server.drainTrustedObserverCenter()
 	server.drainIncoming()
+	chatDeliveries := server.drainIncomingChats()
 	server.drainAcquired()
 	server.drainGenerated()
 	result := server.engine.Step()
@@ -276,7 +291,7 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 			sequence:  trustedSequence,
 		}
 	}
-	server.publish(result)
+	server.publishWithChats(result, chatDeliveries)
 	server.cancelUnwantedPending()
 	server.appendChunkRequests(chunkJobLoad, result.Acquire)
 	server.appendChunkRequests(chunkJobGenerate, result.Generate)
