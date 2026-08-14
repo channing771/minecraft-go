@@ -154,7 +154,7 @@ go run ./cmd/mornlea --connect 127.0.0.1:25565 --name 玩家甲
 
 ## 视觉验证
 
-`--capture <目录>` 让 `mornlea` 走无头 offscreen 路径，依次跑完 `cmd/mornlea/capture.go` 里表驱动的固定场景（`terrain-noon`、`hud-hotbar-health`、`avatar-nametag`、`inventory-crafting`、`debug-panel`、`skylight-tunnel`、`block-light-room`、`materials-showcase`），把每张 640×360 PNG 与 `cmd/mornlea/testdata/golden/` 下的基线比对。比对用双阈值（单像素最大通道差、差异像素占比，定义见 `cmd/mornlea/visual_compare.go`），两项都在阈值内才算通过；具体数值与实测漂移分布见[视觉验证设计文档](docs/superpowers/specs/2026-08-07-visual-verification-design.md) §6。
+`--capture <目录>` 让 `mornlea` 走无头 offscreen 路径，依次跑完 `cmd/mornlea/capture.go` 里表驱动的固定场景（`terrain-noon`、`hud-hotbar-health`、`avatar-nametag`、`inventory-crafting`、`debug-panel`、`skylight-tunnel`、`block-light-room`、`materials-showcase`、`target-block-feedback`、`oak-grove`、末尾的 `ai-companion`），把每张 640×360 PNG 与 `cmd/mornlea/testdata/golden/` 下的基线比对。比对用双阈值（单像素最大通道差、差异像素占比，定义见 `cmd/mornlea/visual_compare.go`），两项都在阈值内才算通过；具体数值与实测漂移分布见[视觉验证设计文档](docs/superpowers/specs/2026-08-07-visual-verification-design.md) §6。
 
 ```bash
 make visual-check              # 抓帧并与基线比对，输出目录默认 build/visual

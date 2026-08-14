@@ -72,10 +72,10 @@
 
 ## 13. 无窗口 ai-companion 视觉场景（计划 Task 14）
 
-- [ ] 13.1 在 `cmd/mornlea` 先写 `ai-companion` 唯一末场景、旧场景按 Name 查找、固定 fixture 和污染后完整 reset 测试；运行 `go test ./cmd/mornlea -run 'TestCapture(AICompanion|OakGrove|TargetBlock)' -race -count=1` 确认 RED。
-- [ ] 13.2 在 `oak-grove` 后追加固定 `ai-companion`，更新 README 场景清单但不写 golden；运行 `VISUAL_OUT=/private/tmp/mornlea-m5a-ai-companion-candidate make visual-check`，要求仅因缺少 `ai-companion.png` 非零且全部旧场景通过既有双阈值。
-- [ ] 13.3 使用 `view_image` 检查 `/private/tmp/mornlea-m5a-ai-companion-candidate/ai-companion.png` 并运行 `shasum -a 256 /private/tmp/mornlea-m5a-ai-companion-candidate/ai-companion.png`；向用户报告绝对路径和 SHA-256，只有收到明确人工确认后才运行 `VISUAL_OUT=/private/tmp/mornlea-m5a-ai-companion-update make visual-update` 与 `test "$(git status --short --untracked-files=all -- cmd/mornlea/testdata/golden)" = "?? cmd/mornlea/testdata/golden/ai-companion.png"`。
-- [ ] 13.4 运行 `VISUAL_OUT=/private/tmp/mornlea-m5a-ai-companion-check-1 make visual-check`、`VISUAL_OUT=/private/tmp/mornlea-m5a-ai-companion-check-2 make visual-check`、`go test ./cmd/mornlea -race -count=1`、`go vet ./cmd/mornlea`、`test -z "$(gofmt -l cmd/mornlea)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；确认旧 golden 零修改后完成该任务。
+- [x] 13.1 在 `cmd/mornlea` 先写 `ai-companion` 唯一末场景、旧场景按 Name 查找、固定 fixture 和污染后完整 reset 测试；运行 `go test ./cmd/mornlea -run 'TestCapture(AICompanion|OakGrove|TargetBlock)' -race -count=1` 确认 RED。
+- [x] 13.2 在 `oak-grove` 后追加固定 `ai-companion`，更新 README 场景清单但不写 golden；运行 `VISUAL_OUT=/private/tmp/mornlea-m5a-ai-companion-candidate make visual-check`，要求仅因缺少 `ai-companion.png` 非零且全部旧场景通过既有双阈值。
+- [x] 13.3 使用 `view_image` 检查 `/private/tmp/mornlea-m5a-ai-companion-candidate/ai-companion.png` 并运行 `shasum -a 256 /private/tmp/mornlea-m5a-ai-companion-candidate/ai-companion.png`；向用户报告绝对路径和 SHA-256，只有收到明确人工确认后才运行 `VISUAL_OUT=/private/tmp/mornlea-m5a-ai-companion-update make visual-update` 与 `test "$(git status --short --untracked-files=all -- cmd/mornlea/testdata/golden)" = "?? cmd/mornlea/testdata/golden/ai-companion.png"`。
+- [x] 13.4 运行 `VISUAL_OUT=/private/tmp/mornlea-m5a-ai-companion-check-1 make visual-check`、`VISUAL_OUT=/private/tmp/mornlea-m5a-ai-companion-check-2 make visual-check`、`go test ./cmd/mornlea -race -count=1`、`go vet ./cmd/mornlea`、`test -z "$(gofmt -l cmd/mornlea)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；确认旧 golden 零修改后完成该任务。
 
 ## 14. 累计工程与性能门禁
 

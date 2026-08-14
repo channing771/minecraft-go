@@ -325,6 +325,12 @@ var captureScenes = []captureScene{
 		Prepare:      prepareOakGrove,
 		Apply:        applyOakGroveCaptureState,
 	},
+	{
+		Name:         "ai-companion",
+		WarmupFrames: 8,
+		Prepare:      prepareAICompanion,
+		Apply:        applyAICompanionCaptureState,
+	},
 }
 
 // capturePinnedServerTick 是 debug-panel 场景钉死的权威 tick 值。
