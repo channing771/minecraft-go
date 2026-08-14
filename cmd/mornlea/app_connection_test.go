@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-gl/mathgl/mgl32"
+
 	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/gfx"
@@ -724,5 +727,144 @@ func TestRunInteractiveReturnsReceiverDisconnectWithoutRendering(t *testing.T) {
 	}
 	if err := runInteractive(app); !errors.Is(err, network.ErrClosed) {
 		t.Fatalf("runInteractive error=%v, want network.ErrClosed", err)
+	}
+}
+
+func TestApplicationRoutesCompanionAndChatMessagesAndResetsOnDisconnect(t *testing.T) {
+	app, serverEndpoint, endpoint, cancelCount := newRemoteProtocolApplication(t)
+	app.companions = &client.Companions{}
+	app.chatEvents = &client.ChatEvents{}
+	spawn := applicationCompanionSpawn(1, 1, mgl32.Vec3{1, 64, 3})
+	event := applicationChatEvent(1)
+	sendInteractiveServerMessage(t, serverEndpoint, spawn)
+	sendInteractiveServerMessage(t, serverEndpoint, event)
+	app.drainServerMessages(2)
+	if got := app.companions.AppendPresentations(nil); len(got) != 1 || got[0].ID != spawn.ID {
+		t.Fatalf("companion presentations = %+v", got)
+	}
+	if got := app.chatEvents.Events(nil); len(got) != 1 || got[0] != event {
+		t.Fatalf("chat events = %+v", got)
+	}
+
+	// Apply 协议错误必须只关闭客户端会话，并原子清空两份镜像。
+	sendInteractiveServerMessage(t, serverEndpoint, spawn)
+	app.drainServerMessages(1)
+	if got := endpoint.closeCalls.Load(); got != 1 {
+		t.Fatalf("protocol close count = %d, want 1", got)
+	}
+	if got := cancelCount(); got != 0 {
+		t.Fatalf("server cancel count = %d, want 0", got)
+	}
+	if got := app.companions.AppendPresentations(nil); len(got) != 0 {
+		t.Fatalf("companions after close = %+v", got)
+	}
+	if got := app.chatEvents.Events(nil); len(got) != 0 {
+		t.Fatalf("chat events after close = %+v", got)
+	}
+
+	// transport 断开走同一清理路径。
+	app, serverEndpoint, _, _ = newRemoteProtocolApplication(t)
+	app.companions = &client.Companions{}
+	app.chatEvents = &client.ChatEvents{}
+	if err := app.companions.ApplySpawn(spawn); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.chatEvents.Apply(event); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverEndpoint.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for app.receiver.Err() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := app.frame(0, 0, 0); !errors.Is(err, network.ErrClosed) {
+		t.Fatalf("frame error = %v, want network.ErrClosed", err)
+	}
+	if len(app.companions.AppendPresentations(nil)) != 0 || len(app.chatEvents.Events(nil)) != 0 {
+		t.Fatal("disconnect left companion or chat state")
+	}
+}
+
+func TestApplicationAdvancesCompanionsExactlyOnceInFrameAndInteractiveLoops(t *testing.T) {
+	t.Run("frame", func(t *testing.T) {
+		app, serverEndpoint, _, _ := newRemoteProtocolApplication(t)
+		app.companions = &client.Companions{}
+		app.chatEvents = &client.ChatEvents{}
+		spawn := applicationCompanionSpawn(1, 1, mgl32.Vec3{0, 64, 0})
+		seedApplicationCompanion(t, app.companions, spawn)
+		sendInteractiveServerMessage(t, serverEndpoint, network.CompanionStates{
+			Tick: 3, States: []network.CompanionState{{
+				ID: spawn.ID, Dimension: core.Overworld, Position: mgl32.Vec3{8, 64, 0},
+			}},
+		})
+		rendered, err := app.frame(1, 1, 25*time.Millisecond)
+		if err != nil || rendered {
+			t.Fatalf("frame = (%v,%v), want (false,nil)", rendered, err)
+		}
+		if got := app.companions.AppendPresentations(nil)[0].Position; got != (mgl32.Vec3{2, 64, 0}) {
+			t.Fatalf("frame companion position = %v, want [2 64 0]", got)
+		}
+	})
+
+	t.Run("interactive", func(t *testing.T) {
+		app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+		app.companions = &client.Companions{}
+		app.chatEvents = &client.ChatEvents{}
+		clientEndpoint, serverEndpoint := network.NewMemoryPair(4)
+		app.clientEndpoint = clientEndpoint
+		app.receiver = client.NewReceiver(clientEndpoint, 4)
+		t.Cleanup(func() { _ = serverEndpoint.Close() })
+		spawn := applicationCompanionSpawn(1, 1, mgl32.Vec3{0, 64, 0})
+		seedApplicationCompanion(t, app.companions, spawn)
+		if err := app.companions.ApplyStates(network.CompanionStates{
+			Tick: 3, States: []network.CompanionState{{
+				ID: spawn.ID, Dimension: core.Overworld, Position: mgl32.Vec3{8, 64, 0},
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		app.window = &oneFrameInteractiveWindow{delay: 25 * time.Millisecond}
+		if err := runInteractive(app); err != nil {
+			t.Fatalf("runInteractive: %v", err)
+		}
+		x := app.companions.AppendPresentations(nil)[0].Position[0]
+		if x < 1.5 || x > 3 {
+			t.Fatalf("interactive companion x = %f, want one elapsed advance", x)
+		}
+	})
+}
+
+func seedApplicationCompanion(t *testing.T, companions *client.Companions, spawn network.CompanionSpawn) {
+	t.Helper()
+	if err := companions.ApplySpawn(spawn); err != nil {
+		t.Fatal(err)
+	}
+	if err := companions.ApplyStates(network.CompanionStates{
+		Tick: 2, States: []network.CompanionState{{
+			ID: spawn.ID, Dimension: core.Overworld, Position: mgl32.Vec3{4, 64, 0},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func applicationCompanionSpawn(last byte, tick uint64, position mgl32.Vec3) network.CompanionSpawn {
+	return network.CompanionSpawn{
+		ID:   companion.ID{0: 0x12, 6: 0x40, 8: 0x80, 15: last},
+		Name: "阿木", Tick: tick, Dimension: core.Overworld, Position: position,
+	}
+}
+
+func applicationChatEvent(eventID uint64) network.ChatEvent {
+	return network.ChatEvent{
+		EventID:       eventID,
+		PlayerID:      core.PlayerID{0: 0x12, 6: 0x40, 8: 0x80, 15: 9},
+		PlayerName:    "Chen",
+		CompanionID:   companion.ID{0: 0x12, 6: 0x40, 8: 0x80, 15: 1},
+		CompanionName: "阿木",
+		Kind:          network.ChatEventAccepted,
+		Command:       "挖石头",
 	}
 }

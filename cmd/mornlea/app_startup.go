@@ -277,6 +277,8 @@ func newApplicationWithDependencies(
 		inventorySource: -1,
 		predictor:       client.NewPredictor(),
 		remotePlayers:   client.NewRemotePlayers(),
+		companions:      &client.Companions{},
+		chatEvents:      &client.ChatEvents{},
 		remoteNameTags:  make([]render.NameTag, 0, maxFrameNameTags),
 		camera:          camera,
 		center:          cameraChunk(camera.Pos),

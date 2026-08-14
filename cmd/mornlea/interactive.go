@@ -153,6 +153,9 @@ func runInteractive(app *application) error {
 		}
 		app.applyInteractiveCursorInput(dt, movement, actions, captured, justCaptured)
 		app.remotePlayers.Advance(dt)
+		if app.companions != nil {
+			app.companions.Advance(dt)
+		}
 		if _, err := app.renderFrame(steadyFrameMeshWorkMax); err != nil {
 			return err
 		}

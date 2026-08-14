@@ -51,6 +51,9 @@ func (a *application) frame(drainMax, meshWorkMax int, elapsed time.Duration) (b
 	if a.remotePlayers != nil {
 		a.remotePlayers.Advance(elapsed)
 	}
+	if a.companions != nil {
+		a.companions.Advance(elapsed)
+	}
 	return a.renderFrame(meshWorkMax)
 }
 

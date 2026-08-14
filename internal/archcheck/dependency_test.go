@@ -27,7 +27,7 @@ var allowed = map[string][]string{
 	"internal/render":     {"internal/core", "internal/world", "internal/mesh", "internal/assets", "internal/gfx"},
 	"internal/render/hud": {"internal/core", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
 	"internal/server":     {"internal/companion", "internal/core", "internal/network", "internal/world", "internal/worldgen", "internal/sim", "internal/storage"},
-	"internal/client":     {"internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
+	"internal/client":     {"internal/companion", "internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
 }
 
 func TestInternalDependenciesAreOneWay(t *testing.T) {

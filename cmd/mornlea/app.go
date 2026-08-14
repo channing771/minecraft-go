@@ -50,6 +50,8 @@ type application struct {
 	frameHeight           int
 	renderer              *render.Renderer
 	remotePlayers         *client.RemotePlayers
+	companions            *client.Companions
+	chatEvents            *client.ChatEvents
 	remotePresentations   []client.RemotePresentation
 	remoteAvatars         []render.Avatar
 	remoteNameTags        []render.NameTag

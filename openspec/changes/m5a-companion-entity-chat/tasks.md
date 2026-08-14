@@ -54,9 +54,9 @@
 
 ## 10. 客户端伙伴插值与 ChatEvent 环（计划 Task 11）
 
-- [ ] 10.1 在 `internal/client` 与 `cmd/mornlea` 先写 Spawn/States/Despawn/Reset、未知/过时/五项批次原子拒绝、ID 排序、32 条事件环、stale EventID、消息路由、断线清理及两条真实循环恰好一次 Advance 测试；运行 `go test ./internal/client ./cmd/mornlea -run 'Test(Companion|ChatEvents|ApplicationRoutesCompanion|ApplicationAdvancesCompanions)' -race -count=1` 确认 RED。
-- [ ] 10.2 只抽未导出 `remoteActor`，实现最多四项伙伴镜像和固定 `[32]` ChatEvent 环；receiver 协议错误关闭 endpoint，断线 Reset，frame/interactive 同帧恰好推进一次，并只登记真实 `client -> companion` archcheck 边。
-- [ ] 10.3 运行 `go test ./internal/client ./cmd/mornlea -run 'Test(Companion|ChatEvents|ApplicationRoutesCompanion|ApplicationAdvancesCompanions)' -race -count=1`、`go test ./internal/client -run 'TestCompanionPresentationHotPathAllocations' -count=1`、`go test ./internal/client ./cmd/mornlea -race -count=1`、`go test ./internal/archcheck -count=1`、`go vet ./internal/client ./cmd/mornlea`、`test -z "$(gofmt -l internal/client cmd/mornlea)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时逐项 Apply 后再验证 batch，确认包含 `Test(Companion|ChatEvents|ApplicationRoutesCompanion|ApplicationAdvancesCompanions)` 的命令 RED 后恢复并重跑至 PASS。
+- [x] 10.1 在 `internal/client` 与 `cmd/mornlea` 先写 Spawn/States/Despawn/Reset、未知/过时/五项批次原子拒绝、ID 排序、32 条事件环、stale EventID、消息路由、断线清理及两条真实循环恰好一次 Advance 测试；运行 `go test ./internal/client ./cmd/mornlea -run 'Test(Companion|ChatEvents|ApplicationRoutesCompanion|ApplicationAdvancesCompanions)' -race -count=1` 确认 RED。
+- [x] 10.2 只抽未导出 `remoteActor`，实现最多四项伙伴镜像和固定 `[32]` ChatEvent 环；receiver 协议错误关闭 endpoint，断线 Reset，frame/interactive 同帧恰好推进一次，并只登记真实 `client -> companion` archcheck 边。
+- [x] 10.3 运行 `go test ./internal/client ./cmd/mornlea -run 'Test(Companion|ChatEvents|ApplicationRoutesCompanion|ApplicationAdvancesCompanions)' -race -count=1`、`go test ./internal/client -run 'TestCompanionPresentationHotPathAllocations' -count=1`、`go test ./internal/client ./cmd/mornlea -race -count=1`、`go test ./internal/archcheck -count=1`、`go vet ./internal/client ./cmd/mornlea`、`test -z "$(gofmt -l internal/client cmd/mornlea)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时逐项 Apply 后再验证 batch，确认包含 `Test(Companion|ChatEvents|ApplicationRoutesCompanion|ApplicationAdvancesCompanions)` 的命令 RED 后恢复并重跑至 PASS。
 
 ## 11. 统一 Avatar/NameTag 与 scenario v16（计划 Task 12）
 

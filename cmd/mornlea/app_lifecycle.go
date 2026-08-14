@@ -95,6 +95,12 @@ func (a *application) closeClientSession(cause error) {
 		if a.remotePlayers != nil {
 			a.remotePlayers.Reset()
 		}
+		if a.companions != nil {
+			a.companions.Reset()
+		}
+		if a.chatEvents != nil {
+			a.chatEvents.Reset()
+		}
 		a.inventory.Reset()
 		a.furnace.Reset()
 		a.chest.Reset()

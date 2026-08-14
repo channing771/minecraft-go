@@ -142,6 +142,32 @@ func (a *application) drainServerMessages(maxMessages int) {
 			}
 			continue
 		}
+		switch message := message.(type) {
+		case network.CompanionSpawn:
+			if err := a.companions.ApplySpawn(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		case network.CompanionStates:
+			if err := a.companions.ApplyStates(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		case network.CompanionDespawn:
+			if err := a.companions.ApplyDespawn(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		case network.ChatEvent:
+			if err := a.chatEvents.Apply(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		}
 		update, err := a.mirror.Apply(message)
 		if err != nil {
 			a.closeClientSession(err)
