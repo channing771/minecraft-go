@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -121,6 +122,92 @@ func TestCompanionRestoreChunkInitiallyMissingThenRestores(t *testing.T) {
 	restored := engine.Step().Companions
 	if len(restored) != 1 || restored[0].ID != id || restored[0].State.Position != position {
 		t.Fatalf("区块就绪后未恢复原位置: %+v", restored)
+	}
+}
+
+func TestCompanionRestoreRetriesRetainedChunkFailures(t *testing.T) {
+	tests := []struct {
+		name         string
+		reachFailure func(*testing.T, *Engine, core.ChunkKey) TickResult
+	}{
+		{
+			name: "load error",
+			reachFailure: func(t *testing.T, engine *Engine, key core.ChunkKey) TickResult {
+				engine.SubmitAcquired(AcquiredChunk{Key: key, Err: errors.New("temporary load failure")})
+				return engine.Step()
+			},
+		},
+		{
+			name: "loaded chunk apply error",
+			reachFailure: func(t *testing.T, engine *Engine, key core.ChunkKey) TickResult {
+				engine.SubmitAcquired(AcquiredChunk{Key: key})
+				return engine.Step()
+			},
+		},
+		{
+			name: "generation error",
+			reachFailure: func(t *testing.T, engine *Engine, key core.ChunkKey) TickResult {
+				advanceCompanionRestoreToGenerating(t, engine, key)
+				engine.SubmitGenerated(GeneratedChunk{
+					Dimension: key.Dimension,
+					Pos:       key.Pos,
+					Err:       errors.New("temporary generation failure"),
+				})
+				return engine.Step()
+			},
+		},
+		{
+			name: "generated chunk apply error",
+			reachFailure: func(t *testing.T, engine *Engine, key core.ChunkKey) TickResult {
+				advanceCompanionRestoreToGenerating(t, engine, key)
+				engine.SubmitGenerated(GeneratedChunk{Dimension: key.Dimension, Pos: key.Pos})
+				return engine.Step()
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine := NewEngine(0, 0)
+			id := companionTestID(1)
+			key := core.ChunkKey{Dimension: core.Overworld}
+			engine.RegisterCompanion(CompanionRestore{
+				ID: id,
+				Body: &companion.Body{
+					ID: id, Dimension: core.Overworld, Position: [3]float32{0.5, 1, 0.5},
+				},
+				SpawnDimension: core.Overworld,
+			})
+			first := engine.Step()
+			if !reflect.DeepEqual(first.Acquire, []core.ChunkKey{key}) {
+				t.Fatalf("首次 Acquire=%+v，想要 [%+v]", first.Acquire, key)
+			}
+
+			failed := test.reachFailure(t, engine, key)
+			if !reflect.DeepEqual(failed.Acquire, []core.ChunkKey{key}) || len(failed.Companions) != 0 {
+				t.Fatalf("失败后 Acquire=%+v Companions=%+v，想要重试且不激活",
+					failed.Acquire, failed.Companions)
+			}
+			advanceCompanionRestoreToGenerating(t, engine, key)
+			engine.SubmitGenerated(GeneratedChunk{
+				Dimension: key.Dimension,
+				Pos:       key.Pos,
+				Chunk:     companionFlatChunk(key.Pos),
+			})
+			restored := engine.Step().Companions
+			if len(restored) != 1 || restored[0].ID != id ||
+				restored[0].State.Position != (mgl32.Vec3{0.5, 1, 0.5}) {
+				t.Fatalf("重试成功后未恢复: %+v", restored)
+			}
+		})
+	}
+}
+
+func advanceCompanionRestoreToGenerating(t *testing.T, engine *Engine, key core.ChunkKey) {
+	t.Helper()
+	engine.SubmitAcquired(AcquiredChunk{Key: key, Missing: true})
+	result := engine.Step()
+	if !reflect.DeepEqual(result.Generate, []core.ChunkKey{key}) || len(result.Companions) != 0 {
+		t.Fatalf("Generate=%+v Companions=%+v，想要生成且不激活", result.Generate, result.Companions)
 	}
 }
 

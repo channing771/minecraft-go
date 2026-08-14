@@ -179,6 +179,9 @@ func (engine *Engine) applyAcquired(
 		switch {
 		case acquiredChunk.Err != nil:
 			dimension.MarkLoadFailed(key.Pos, acquiredChunk.Err)
+			if _, retained := wanted[key]; retained {
+				engine.subscriptionsDirty = true
+			}
 		case acquiredChunk.Missing:
 			if _, retained := wanted[key]; !retained {
 				dimension.DropLoading(key.Pos)
@@ -196,6 +199,9 @@ func (engine *Engine) applyAcquired(
 			)
 			if err != nil {
 				dimension.MarkLoadFailed(key.Pos, err)
+				if _, retained := wanted[key]; retained {
+					engine.subscriptionsDirty = true
+				}
 				continue
 			}
 			if _, retained := wanted[key]; !retained {
@@ -316,10 +322,16 @@ func (engine *Engine) applyGenerated(
 		}
 		if generatedChunk.Err != nil {
 			dimension.MarkFailed(key.Pos, generatedChunk.Err)
+			if _, retained := wanted[key]; retained {
+				engine.subscriptionsDirty = true
+			}
 			continue
 		}
 		if err := dimension.ApplyGenerated(key.Pos, generatedChunk.Chunk); err != nil {
 			dimension.MarkFailed(key.Pos, err)
+			if _, retained := wanted[key]; retained {
+				engine.subscriptionsDirty = true
+			}
 			continue
 		}
 		if _, retained := wanted[key]; !retained {
