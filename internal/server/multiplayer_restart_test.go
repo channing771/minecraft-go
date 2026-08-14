@@ -274,7 +274,7 @@ func startMultiplayerRestartHost(t *testing.T, root string, seed int64) multipla
 	config.ViewRadius = 0
 	config.OutboxCapacity = 512
 	config.AutosaveTicks = 20
-	host := NewHost(config, multiplayerRestartGenerator{}, store)
+	host := mustNewHost(t, config, multiplayerRestartGenerator{}, store)
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
 	return multiplayerRestartHost{

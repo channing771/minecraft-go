@@ -14,11 +14,8 @@ import (
 
 // 杀死变异：遗漏场景、改变其顺序、种子/区块/时间/相机或绕过 mirror/mesher
 // 都会改变此固定夹具或其可观察结果。
-func TestCaptureOakGrove(t *testing.T) {
-	if got := captureScenes[len(captureScenes)-1].Name; got != "oak-grove" {
-		t.Fatalf("最后一个 capture 场景=%q，想要 oak-grove", got)
-	}
-	scene := captureScenes[len(captureScenes)-1]
+func TestCaptureOakGroveFindsSceneByName(t *testing.T) {
+	scene := captureSceneByName(t, "oak-grove")
 	if scene.Prepare == nil || scene.Apply == nil {
 		t.Fatalf("oak-grove 场景不完整: %+v", scene)
 	}

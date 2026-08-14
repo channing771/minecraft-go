@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"slices"
 
 	"github.com/channing771/mornlea/internal/logging"
 	"github.com/channing771/mornlea/internal/network"
@@ -63,6 +64,9 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 		Level: slog.LevelDebug,
 	}), effective.Logging)
 	effective.Apply()
+	if options.Application.Connect == "" && !options.Application.Benchmark && options.CaptureDir == "" {
+		options.Application.Companions = slices.Clone(effective.CompanionDefinitions())
+	}
 	if remoteTuningDiverges(options, effective) {
 		slog.Warn("联机时本机配置改动了 physics/sim：这两组必须与服务端一致，"+
 			"否则客户端预测会与权威模拟持续分歧（面板在联机时已锁这两组，配置文件不受该锁约束）",

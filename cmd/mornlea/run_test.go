@@ -3,15 +3,19 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/profile"
+	"github.com/channing771/mornlea/internal/server"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // absentConfigArgs 返回指向本次测试临时目录下一个不存在文件的 --config 参数。
@@ -321,5 +325,72 @@ func TestCaptureIgnoresUserConfig(t *testing.T) {
 	}
 	if effective.Physics.Gravity != config.Defaults().Physics.Gravity {
 		t.Fatal("抓帧路径必须使用编译默认值，不得读用户配置")
+	}
+}
+
+func TestRunInjectsAIOnlyIntoOrdinaryLocalGame(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	id, err := companion.ParseID("00112233-4455-4677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.AI = &config.AI{Companions: []companion.Definition{{ID: id, Name: "阿木"}}}
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name string
+		args []string
+		want int
+	}{
+		{name: "普通本地", args: []string{"--config", path}, want: 1},
+		{name: "远程", args: []string{"--config", path, "--connect", "127.0.0.1:25565"}},
+		{name: "benchmark", args: []string{"--config", path, "--benchmark", "--perf-output", "x.json"}},
+		{name: "capture", args: []string{"--config", path, "--capture", t.TempDir()}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var got []companion.Definition
+			err := runWithDependencies(test.args, runDependencies{
+				loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+				newApplication: func(options applicationOptions) (*application, error) {
+					got = options.Companions
+					return nil, errors.New("stop before window")
+				},
+			})
+			if err == nil || len(got) != test.want {
+				t.Fatalf("run error=%v companions=%+v，want %d", err, got, test.want)
+			}
+		})
+	}
+}
+
+func TestRunLocalAIReachesServerConfigWithoutAliasingOptions(t *testing.T) {
+	id, err := companion.ParseID("00112233-4455-4677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions := []companion.Definition{{ID: id, Name: "阿木"}}
+	options := localConnectionOptions()
+	options.Companions = definitions
+	want := errors.New("stop after server config")
+	dependencies := connectionTestDependencies(t)
+	dependencies.openStore = func(context.Context, applicationOptions) (storage.WorldStore, error) {
+		return newConnectionTestStore(42), nil
+	}
+	dependencies.newHost = func(_ context.Context, config server.Config, _ server.Generator, _ storage.WorldStore) (applicationHost, error) {
+		if len(config.Companions) != 1 || config.Companions[0] != definitions[0] {
+			t.Fatalf("server companions = %+v", config.Companions)
+		}
+		config.Companions[0].Name = "已改"
+		return nil, want
+	}
+	_, gotErr := newApplicationWithDependencies(options, dependencies)
+	if !errors.Is(gotErr, want) {
+		t.Fatalf("newApplication error = %v，want %v", gotErr, want)
+	}
+	if definitions[0].Name != "阿木" {
+		t.Fatalf("server.Config 与 applicationOptions 共用 backing array：%+v", definitions)
 	}
 }

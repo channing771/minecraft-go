@@ -3,12 +3,48 @@ package client_test
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 )
+
+func TestCompanionPresentationHotPathAllocations(t *testing.T) {
+	var companions client.Companions
+	for last := byte(4); last > 0; last-- {
+		spawn := companionSpawn(last, 1, string(rune('A'+last)), mgl32.Vec3{float32(last), 0, 0})
+		if err := companions.ApplySpawn(spawn); err != nil {
+			t.Fatal(err)
+		}
+		for tick := uint64(2); tick <= 3; tick++ {
+			if err := companions.ApplyStates(network.CompanionStates{
+				Tick: tick,
+				States: []network.CompanionState{{
+					ID: spawn.ID, Dimension: core.Overworld,
+					Position: mgl32.Vec3{float32(last) + float32(tick), 0, 0},
+				}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	dst := make([]client.CompanionPresentation, 0, 4)
+	companions.Advance(25 * time.Millisecond)
+	dst = companions.AppendPresentations(dst)
+	allocations := testing.AllocsPerRun(1000, func() {
+		companions.Advance(25 * time.Millisecond)
+		dst = companions.AppendPresentations(dst[:0])
+	})
+	if allocations != 0 {
+		t.Fatalf("warmed Advance+AppendPresentations allocations=%v want=0", allocations)
+	}
+	if len(dst) != 4 {
+		t.Fatalf("presentation count=%d want=4", len(dst))
+	}
+}
 
 // Mutation killed: allocating a new presentation slice or using reflect-based
 // sorting makes the warmed caller-owned path allocate on every frame.

@@ -26,8 +26,9 @@ type DiskStore struct {
 	closing atomic.Bool
 	closed  bool
 
-	playerReplaceHooks   atomicReplaceHooks
-	metadataReplaceHooks atomicReplaceHooks
+	playerReplaceHooks    atomicReplaceHooks
+	companionReplaceHooks atomicReplaceHooks
+	metadataReplaceHooks  atomicReplaceHooks
 }
 
 func OpenDisk(ctx context.Context, root string, options OpenOptions) (*DiskStore, error) {
@@ -276,6 +277,92 @@ func (store *DiskStore) SavePlayer(
 	return save.Revision, nil
 }
 
+func (store *DiskStore) LoadCompanions(ctx context.Context) (StoredCompanions, error) {
+	if store.closing.Load() {
+		return StoredCompanions{}, os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return StoredCompanions{}, err
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.closing.Load() || store.closed {
+		return StoredCompanions{}, os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return StoredCompanions{}, err
+	}
+	encoded, err := readCompanionFile(store.companionPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return StoredCompanions{}, ErrCompanionsNotFound
+	}
+	if err != nil {
+		return StoredCompanions{}, fmt.Errorf("read companions: %w", err)
+	}
+	stored, err := decodeCompanions(encoded)
+	if err != nil {
+		return StoredCompanions{}, fmt.Errorf("decode companions: %w", err)
+	}
+	return stored, nil
+}
+
+func (store *DiskStore) SaveCompanions(ctx context.Context, save CompanionSave) error {
+	if store.closing.Load() {
+		return os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	encoded, err := encodeCompanions(save)
+	if err != nil {
+		return err
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.closing.Load() || store.closed {
+		return os.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path := store.companionPath()
+	previous, err := readCompanionFile(path)
+	switch {
+	case err == nil:
+		stored, decodeErr := decodeCompanions(previous)
+		if decodeErr != nil {
+			return fmt.Errorf("read existing companions: %w", decodeErr)
+		}
+		switch {
+		case save.Revision < stored.Revision:
+			return fmt.Errorf(
+				"%w: companion revision %d is below %d",
+				ErrRevisionConflict, save.Revision, stored.Revision,
+			)
+		case save.Revision == stored.Revision:
+			if !bytes.Equal(encoded, previous) {
+				return fmt.Errorf("%w: companion revision %d", ErrRevisionConflict, save.Revision)
+			}
+			return nil
+		}
+	case errors.Is(err, os.ErrNotExist):
+	default:
+		return fmt.Errorf("read existing companions: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	hooks := store.companionReplaceHooks
+	hooks.beforeRename = ctx.Err
+	if err := replaceFileAtomicallyWithPatternAndHooks(
+		path, ".companions.ai.tmp-*", encoded, 0o600, hooks,
+	); err != nil {
+		return fmt.Errorf("save companions: %w", err)
+	}
+	return nil
+}
+
 func validateAndNormalizeSaves(saves []ChunkSave) ([]ChunkSave, error) {
 	maxRevisions := make(map[core.ChunkKey]uint64, len(saves))
 	for _, save := range saves {
@@ -383,6 +470,10 @@ func (store *DiskStore) playerPath(id core.PlayerID) string {
 	return filepath.Join(store.files.root, "players", id.String()+".player")
 }
 
+func (store *DiskStore) companionPath() string {
+	return filepath.Join(store.files.root, "companions.ai")
+}
+
 func readPlayerFile(path string) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -396,6 +487,23 @@ func readPlayerFile(path string) ([]byte, error) {
 	if int64(len(encoded)) > maxPlayerFileLength {
 		return nil, fmt.Errorf(
 			"%w: player file exceeds %d bytes", ErrCorrupt, maxPlayerFileLength,
+		)
+	}
+	return encoded, nil
+}
+
+func readCompanionFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	encoded, readErr := io.ReadAll(io.LimitReader(file, int64(maxCompanionFileLength)+1))
+	if err := errors.Join(readErr, file.Close()); err != nil {
+		return nil, err
+	}
+	if len(encoded) > maxCompanionFileLength {
+		return nil, fmt.Errorf(
+			"%w: companion file exceeds %d bytes", ErrCorrupt, maxCompanionFileLength,
 		)
 	}
 	return encoded, nil

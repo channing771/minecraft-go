@@ -45,7 +45,7 @@ func TestInterestObserverSamplesEachObserverAndNilIsOptional(t *testing.T) {
 }
 
 func TestHostStatsAreScalarBoundedSnapshotsWithNoNestedLocking(t *testing.T) {
-	host := NewHost(hostTestConfig(), flatTestGenerator{}, newHostTestStore())
+	host := mustNewHost(t, hostTestConfig(), flatTestGenerator{}, newHostTestStore())
 	t.Cleanup(func() {
 		host.world.stepMu.Lock()
 		clear(host.world.sessions)

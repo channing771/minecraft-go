@@ -19,7 +19,7 @@ type applicationDependencies struct {
 	openStore                func(context.Context, applicationOptions) (storage.WorldStore, error)
 	dialTCP                  func(context.Context, string) (network.ClientPacketStream, error)
 	loginClient              func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
-	newHost                  func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
+	newHost                  func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
 	newMemoryStreamPair      func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
 	newWindow                func(int, int, string) (applicationWindow, error)
 	newDevice                func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
@@ -40,11 +40,12 @@ func defaultApplicationDependencies() applicationDependencies {
 		dialTCP:     network.DialTCP,
 		loginClient: network.LoginClient,
 		newHost: func(
+			ctx context.Context,
 			config server.Config,
 			generator server.Generator,
 			store storage.WorldStore,
 		) (applicationHost, error) {
-			return server.NewHost(config, generator, store), nil
+			return server.NewHost(ctx, config, generator, store)
 		},
 		newMemoryStreamPair: func(capacity int) (
 			network.ClientPacketStream,

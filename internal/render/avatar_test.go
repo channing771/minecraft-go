@@ -6,6 +6,8 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,10 +17,99 @@ import (
 	"github.com/channing771/mornlea/internal/gfx"
 )
 
+func TestEntityKeySeparatesEqualPlayerAndCompanionBytes(t *testing.T) {
+	id := [16]byte{0: 0x12, 6: 0x40, 8: 0x80, 15: 1}
+	player := EntityKey{Kind: EntityPlayer, ID: id}
+	companion := EntityKey{Kind: EntityCompanion, ID: id}
+	target := EntityKey{Kind: EntityTarget, ID: id}
+	if player == companion || player == target || companion == target {
+		t.Fatalf("相同 ID bytes 的实体键发生冲突: %v %v %v", player, companion, target)
+	}
+	keys := []EntityKey{
+		{Kind: EntityCompanion, ID: [16]byte{15: 2}},
+		target,
+		{Kind: EntityPlayer, ID: [16]byte{15: 2}},
+		player,
+	}
+	slices.SortFunc(keys, compareEntityKeys)
+	want := []EntityKey{
+		{Kind: EntityPlayer, ID: [16]byte{15: 2}},
+		player,
+		{Kind: EntityCompanion, ID: [16]byte{15: 2}},
+		target,
+	}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("实体键顺序=%v，想要 %v", keys, want)
+	}
+}
+
+func TestAvatarPlayerPaletteVectorsRemainUnchanged(t *testing.T) {
+	tests := []struct {
+		id   core.PlayerID
+		want [4]float32
+	}{
+		{testAvatarID(1), [4]float32{0.72, 0.42, 0.82, 0.9}},
+		{testAvatarID(2), [4]float32{0.28, 0.78, 0.68, 0.9}},
+		{core.PlayerID{0: 0x12, 6: 0x40, 8: 0x80, 15: 1}, [4]float32{0.68, 0.42, 0.28, 0.9}},
+	}
+	for _, test := range tests {
+		if got := AvatarColor(test.id); got != test.want {
+			t.Fatalf("AvatarColor(%x)=%v，想要固定玩家颜色 %v", test.id, got, test.want)
+		}
+	}
+	playerKey := EntityKey{Kind: EntityPlayer, ID: [16]byte(tests[0].id)}
+	companionKey := EntityKey{Kind: EntityCompanion, ID: playerKey.ID}
+	if got := avatarColor(playerKey); got != tests[0].want {
+		t.Fatalf("玩家 EntityKey 颜色=%v，想要 %v", got, tests[0].want)
+	}
+	if avatarColor(companionKey) == tests[0].want {
+		t.Fatal("伙伴与相同 bytes 的玩家共享了颜色域")
+	}
+}
+
+func TestAvatarRendererAcceptsElevenAndRejectsTwelveBeforeGPUWrite(t *testing.T) {
+	dev := &avatarTestDevice{}
+	renderer := NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
+	defer renderer.Release()
+	encoder := &avatarTestEncoder{}
+	upload := dev.bufferByLabel(t, "avatar dynamic upload")
+	if got, want := upload.desc.Size, uint64(5556); got != want {
+		t.Fatalf("dynamic upload size=%d，想要 %d", got, want)
+	}
+	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, makeTestAvatars(11)); err != nil {
+		t.Fatalf("11 个 Avatar Render: %v", err)
+	}
+	if got, want := len(renderer.parts), 66; got != want {
+		t.Fatalf("parts=%d，想要 %d", got, want)
+	}
+	if got, want := len(upload.lastWrite), 5556; got != want {
+		t.Fatalf("upload bytes=%d，想要 %d", got, want)
+	}
+	if avatarInstanceSize != 5280 || avatarIndirectOffset != 5536 || avatarUploadBytes != 5556 {
+		t.Fatalf("Avatar 布局=%d/%d/%d，想要 5280/5536/5556", avatarInstanceSize, avatarIndirectOffset, avatarUploadBytes)
+	}
+	wantOrdered := append([]Avatar(nil), renderer.ordered...)
+	wantParts := append([]avatarPart(nil), renderer.parts...)
+	wantUpload := append([]byte(nil), renderer.upload...)
+	upload.lastWrite = nil
+	encoder.passes = nil
+	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, makeTestAvatars(12)); err == nil {
+		t.Fatal("12 个 Avatar 未被拒绝")
+	}
+	if len(upload.lastWrite) != 0 || len(encoder.passes) != 0 {
+		t.Fatalf("overflow 后 GPU write/pass=%d/%d，想要 0/0", len(upload.lastWrite), len(encoder.passes))
+	}
+	if !reflect.DeepEqual(renderer.ordered, wantOrdered) ||
+		!reflect.DeepEqual(renderer.parts, wantParts) ||
+		!reflect.DeepEqual(renderer.upload, wantUpload) {
+		t.Fatal("overflow 改变了 AvatarRenderer 上一帧状态")
+	}
+}
+
 func TestBuildAvatarPartsIsBounded(t *testing.T) {
-	avatars := makeTestAvatars(8)
+	avatars := makeTestAvatars(11)
 	parts := buildAvatarParts(nil, avatars)
-	if got, want := len(parts), 42; got != want {
+	if got, want := len(parts), 66; got != want {
 		t.Fatalf("parts=%d want=%d", got, want)
 	}
 
@@ -27,15 +118,15 @@ func TestBuildAvatarPartsIsBounded(t *testing.T) {
 	firstBounds := avatarPartsBounds(parts[:avatarPartsPerBody])
 	assertVec3Near(t, firstBounds.min, mgl32.Vec3{0.7, 2, 2.7})
 	assertVec3Near(t, firstBounds.max, mgl32.Vec3{1.3, 3.8, 3.3})
-	if got := avatarPartsBounds(parts[36:42]); got.min[0] < 6.69 || got.max[0] > 7.31 {
-		t.Fatalf("seventh avatar bounds=%+v; renderer did not select sorted IDs 1..7", got)
+	if got := avatarPartsBounds(parts[60:66]); got.min[0] < 10.69 || got.max[0] > 11.31 {
+		t.Fatalf("第十一个 Avatar bounds=%+v；未保留排序后的 ID 1..11", got)
 	}
 }
 
 func TestBuildAvatarPartsMakesSixAnchoredCuboids(t *testing.T) {
 	position := mgl32.Vec3{4, 5, 6}
 	parts := buildAvatarParts(nil, []Avatar{{
-		PlayerID: testAvatarID(1),
+		Key:      testEntityKey(testAvatarID(1)),
 		Position: position,
 	}})
 	if got, want := len(parts), 6; got != want {
@@ -61,9 +152,9 @@ func TestBuildAvatarPartsMakesSixAnchoredCuboids(t *testing.T) {
 
 func TestBuildAvatarPartsAppliesBodyYawAndHeadPitch(t *testing.T) {
 	parts := buildAvatarParts(nil, []Avatar{{
-		PlayerID: testAvatarID(1),
-		Yaw:      float32(math.Pi / 2),
-		Pitch:    float32(math.Pi / 4),
+		Key:   testEntityKey(testAvatarID(1)),
+		Yaw:   float32(math.Pi / 2),
+		Pitch: float32(math.Pi / 4),
 	}})
 
 	torsoX := transformedDirection(parts[1].transform, mgl32.Vec3{1, 0, 0})
@@ -81,7 +172,7 @@ func TestBuildAvatarPartsAppliesBodyYawAndHeadPitch(t *testing.T) {
 }
 
 func TestBuildAvatarPartsPreservesIdentityColorWithPartShading(t *testing.T) {
-	parts := buildAvatarParts(nil, []Avatar{{PlayerID: testAvatarID(1)}})
+	parts := buildAvatarParts(nil, []Avatar{{Key: testEntityKey(testAvatarID(1))}})
 	base := AvatarColor(testAvatarID(1))
 	for channel := 0; channel < 3; channel++ {
 		if parts[0].color[channel] <= base[channel] {
@@ -106,7 +197,7 @@ func TestBuildAvatarPartsKeepsAllPalettePartChannelsInRange(t *testing.T) {
 		playerID := testAvatarID(lastByte)
 		base := AvatarColor(playerID)
 		seenColors[base] = struct{}{}
-		parts := buildAvatarParts(nil, []Avatar{{PlayerID: playerID}})
+		parts := buildAvatarParts(nil, []Avatar{{Key: testEntityKey(playerID)}})
 		if got, want := len(parts), avatarPartsPerBody; got != want {
 			t.Fatalf("palette slot %d parts=%d want=%d", slot, got, want)
 		}
@@ -196,7 +287,7 @@ func TestAvatarRendererUsesFixedStorageAndDepthPass(t *testing.T) {
 	renderer := NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
 
 	upload := dev.bufferByLabel(t, "avatar dynamic upload")
-	if got, want := upload.desc.Size, uint64(3636); got != want {
+	if got, want := upload.desc.Size, uint64(5556); got != want {
 		t.Fatalf("dynamic upload size=%d want=%d", got, want)
 	}
 	if want := gfx.BufferUsageUniform | gfx.BufferUsageStorage | gfx.BufferUsageIndirect | gfx.BufferUsageCopyDst; upload.desc.Usage != want {
@@ -211,12 +302,16 @@ func TestAvatarRendererUsesFixedStorageAndDepthPass(t *testing.T) {
 	}
 
 	encoder := &avatarTestEncoder{}
-	renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, nil)
+	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if len(encoder.passes) != 0 {
 		t.Fatalf("zero avatars created %d render passes", len(encoder.passes))
 	}
 
-	renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, makeTestAvatars(8))
+	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, makeTestAvatars(11)); err != nil {
+		t.Fatal(err)
+	}
 	if got, want := len(dev.buffers), 3; got != want {
 		t.Fatalf("render resized GPU buffers: got=%d want=%d", got, want)
 	}
@@ -230,12 +325,12 @@ func TestAvatarRendererUsesFixedStorageAndDepthPass(t *testing.T) {
 	if pass.draws != 1 || !pass.ended || !pass.setIndex {
 		t.Fatalf("encoded pass=%+v; want one indexed draw and End", pass)
 	}
-	args := upload.lastWrite[3616:3636]
+	args := upload.lastWrite[5536:5556]
 	if got := binary.LittleEndian.Uint32(args[0:4]); got != 36 {
 		t.Fatalf("index count=%d want=36", got)
 	}
-	if got := binary.LittleEndian.Uint32(args[4:8]); got != 42 {
-		t.Fatalf("instance count=%d want=42", got)
+	if got := binary.LittleEndian.Uint32(args[4:8]); got != 66 {
+		t.Fatalf("instance count=%d want=66", got)
 	}
 }
 
@@ -268,9 +363,11 @@ func TestAvatarRendererHeadlessDraw(t *testing.T) {
 		Label: "terrain clear", ColorView: colorView, DepthView: depthView, LoadClear: true,
 	})
 	clear.End()
-	renderer.Render(encoder, colorView, depthView, Camera{ViewProj: mgl32.Ident4()}, []Avatar{{
-		PlayerID: testAvatarID(1), Position: mgl32.Vec3{0, -0.9, 0},
-	}})
+	if err := renderer.Render(encoder, colorView, depthView, Camera{ViewProj: mgl32.Ident4()}, []Avatar{{
+		Key: testEntityKey(testAvatarID(1)), Position: mgl32.Vec3{0, -0.9, 0},
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	commands := encoder.Finish()
 	dev.Submit(commands)
 	commands.Release()
@@ -306,7 +403,7 @@ func makeTestAvatars(count int) []Avatar {
 	for i := range avatars {
 		last := byte(count - i)
 		avatars[i] = Avatar{
-			PlayerID: testAvatarID(last),
+			Key:      testEntityKey(testAvatarID(last)),
 			Position: mgl32.Vec3{float32(last), 2, 3},
 		}
 	}
@@ -315,6 +412,10 @@ func makeTestAvatars(count int) []Avatar {
 
 func testAvatarID(last byte) core.PlayerID {
 	return core.PlayerID{0, 1, 2, 3, 4, 5, 0x46, 7, 0x88, 9, 10, 11, 12, 13, 14, last}
+}
+
+func testEntityKey(id core.PlayerID) EntityKey {
+	return EntityKey{Kind: EntityPlayer, ID: [16]byte(id)}
 }
 
 type avatarBounds struct{ min, max mgl32.Vec3 }

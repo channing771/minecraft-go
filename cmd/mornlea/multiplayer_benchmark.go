@@ -67,8 +67,8 @@ func newMultiplayerBenchmarkScenario() multiplayerBenchmarkScenario {
 			Dimension: core.Overworld, Position: position,
 		}
 		tags[index] = render.NameTag{
-			PlayerID: playerID, Text: name,
-			Anchor: position.Add(mgl32.Vec3{0, 2.05, 0}),
+			Key:  render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(playerID)},
+			Text: name, Anchor: position.Add(mgl32.Vec3{0, 2.05, 0}),
 		}
 	}
 	return multiplayerBenchmarkScenario{LocalPlayerID: local, Spawns: spawns, Tags: tags}
@@ -231,9 +231,14 @@ func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) erro
 		for range gpuCompletionChunks {
 			encoder := app.dev.CreateCommandEncoder()
 			for range client.ScenarioV12GPUCompletionChunk {
-				app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
+				if err := app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
 					ViewProj: app.camera.ViewProj(), Pos: app.camera.Pos,
-				}, avatars)
+				}, avatars); err != nil {
+					for _, command := range commands {
+						command.Release()
+					}
+					return err
+				}
 				app.nameTagRenderer.Render(
 					encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app),
 				)

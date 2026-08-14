@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/sim"
@@ -120,16 +121,50 @@ func (h *Host) RunAtInputBoundary(
 	}
 }
 
-func NewHost(config Config, generator Generator, store storage.WorldStore) *Host {
+func NewHost(
+	ctx context.Context,
+	config Config,
+	generator Generator,
+	store storage.WorldStore,
+) (*Host, error) {
+	if ctx == nil {
+		return nil, errors.New("server: nil host constructor context")
+	}
 	config.validate()
 	if store == nil {
 		panic("server: nil host store")
+	}
+	if generator == nil {
+		panic("server: nil generator")
+	}
+	var companions *companionPersistence
+	if len(config.Companions) != 0 {
+		loaded, err := store.LoadCompanions(ctx)
+		if errors.Is(err, storage.ErrCompanionsNotFound) {
+			loaded = storage.StoredCompanions{}
+		} else if err != nil {
+			return nil, fmt.Errorf("load companions: %w", err)
+		}
+		ids := make(map[companion.ID]struct{}, len(loaded.Records)+len(config.Companions))
+		for _, body := range loaded.Records {
+			ids[body.ID] = struct{}{}
+		}
+		for _, definition := range config.Companions {
+			ids[definition.ID] = struct{}{}
+		}
+		if len(ids) > companion.MaxStored {
+			return nil, fmt.Errorf(
+				"server: companion active+inactive count %d exceeds %d",
+				len(ids), companion.MaxStored,
+			)
+		}
+		companions = newCompanionPersistence(store, loaded, config)
 	}
 	gate := make(chan struct{}, 1)
 	gate <- struct{}{}
 	return &Host{
 		config:          config,
-		world:           NewWorld(config, generator, store),
+		world:           newWorld(config, generator, store, companions),
 		players:         newPlayerPersistence(store, config),
 		preLogin:        make(chan struct{}, hostPreLoginCapacity),
 		activeByPlayer:  make(map[core.PlayerID]*activeLogin),
@@ -137,7 +172,7 @@ func NewHost(config Config, generator Generator, store storage.WorldStore) *Host
 		preLoginStreams: make(map[uint64]*pendingLoginStream),
 		runtimeDone:     make(chan error, 1),
 		shutdownGate:    gate,
-	}
+	}, nil
 }
 
 func (h *Host) Run(ctx context.Context, listener network.Listener) error {

@@ -13,7 +13,7 @@ import (
 )
 
 func (a *application) drainServerMessages(maxMessages int) {
-	if maxMessages <= 0 {
+	if maxMessages <= 0 || a.clientSessionClosed {
 		return
 	}
 	for range maxMessages {
@@ -137,6 +137,32 @@ func (a *application) drainServerMessages(maxMessages int) {
 			network.RemotePlayerDespawn, *network.RemotePlayerDespawn,
 			network.RemotePlayerStates, *network.RemotePlayerStates:
 			if err := a.remotePlayers.Apply(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		}
+		switch message := message.(type) {
+		case network.CompanionSpawn:
+			if err := a.companions.ApplySpawn(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		case network.CompanionStates:
+			if err := a.companions.ApplyStates(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		case network.CompanionDespawn:
+			if err := a.companions.ApplyDespawn(message); err != nil {
+				a.closeClientSession(err)
+				return
+			}
+			continue
+		case network.ChatEvent:
+			if err := a.chatEvents.Apply(message); err != nil {
 				a.closeClientSession(err)
 				return
 			}

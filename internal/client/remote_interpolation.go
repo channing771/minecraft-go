@@ -78,22 +78,22 @@ func (ring *remoteSnapshotRing) sample(target float64) remoteSnapshot {
 	return latest
 }
 
-func (player *remotePlayer) pushSnapshot(snapshot remoteSnapshot, reset bool) {
-	if player.snapshots.count > 0 {
-		latest := player.snapshots.latest()
+func (actor *remoteActor) pushSnapshot(snapshot remoteSnapshot, reset bool) {
+	if actor.snapshots.count > 0 {
+		latest := actor.snapshots.latest()
 		delta := snapshot.position.Sub(latest.position)
 		reset = reset ||
 			snapshot.dimension != latest.dimension ||
 			delta.Dot(delta) > remoteResetDistance*remoteResetDistance
 	}
-	if reset || player.snapshots.count == 0 {
-		player.snapshots.reset(snapshot)
+	if reset || actor.snapshots.count == 0 {
+		actor.snapshots.reset(snapshot)
 	} else {
-		player.snapshots.append(snapshot)
+		actor.snapshots.append(snapshot)
 	}
-	player.elapsed = 0
-	player.lastTick = snapshot.tick
-	player.setPresentation(snapshot)
+	actor.elapsed = 0
+	actor.lastTick = snapshot.tick
+	actor.setPresentation(snapshot)
 }
 
 func (players *RemotePlayers) Advance(elapsed time.Duration) {
@@ -102,28 +102,28 @@ func (players *RemotePlayers) Advance(elapsed time.Duration) {
 	}
 }
 
-func (player *remotePlayer) advance(elapsed time.Duration) {
+func (actor *remoteActor) advance(elapsed time.Duration) {
 	if elapsed > 0 {
-		if elapsed >= remoteMaxElapsed-player.elapsed {
-			player.elapsed = remoteMaxElapsed
+		if elapsed >= remoteMaxElapsed-actor.elapsed {
+			actor.elapsed = remoteMaxElapsed
 		} else {
-			player.elapsed += elapsed
+			actor.elapsed += elapsed
 		}
 	}
-	latest := player.snapshots.latest()
-	if player.snapshots.count < 3 {
-		player.setPresentation(latest)
+	latest := actor.snapshots.latest()
+	if actor.snapshots.count < 3 {
+		actor.setPresentation(latest)
 		return
 	}
-	target := float64(latest.tick) + player.elapsed.Seconds()*remoteTickRate - remoteInterpolationLag
-	player.setPresentation(player.snapshots.sample(target))
+	target := float64(latest.tick) + actor.elapsed.Seconds()*remoteTickRate - remoteInterpolationLag
+	actor.setPresentation(actor.snapshots.sample(target))
 }
 
-func (player *remotePlayer) setPresentation(snapshot remoteSnapshot) {
-	player.dimension = snapshot.dimension
-	player.position = snapshot.position
-	player.yaw = snapshot.yaw
-	player.pitch = snapshot.pitch
+func (actor *remoteActor) setPresentation(snapshot remoteSnapshot) {
+	actor.dimension = snapshot.dimension
+	actor.position = snapshot.position
+	actor.yaw = snapshot.yaw
+	actor.pitch = snapshot.pitch
 }
 
 func interpolateRemoteSnapshot(from, to remoteSnapshot, alpha float32) remoteSnapshot {

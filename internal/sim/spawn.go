@@ -391,9 +391,17 @@ func blockSpan(minimum, maximum float32) (int32, int32) {
 }
 
 func spawnRevisionsChanged(dimension *Dimension, player *playerState) bool {
-	for index, chunk := range player.candidateChunks {
+	return spawnChunkRevisionsChanged(dimension, player.candidateChunks, player.exhaustedRevisions)
+}
+
+func spawnChunkRevisionsChanged(
+	dimension *Dimension,
+	chunks []core.ChunkPos,
+	revisions []uint64,
+) bool {
+	for index, chunk := range chunks {
 		info, ok := dimension.Info(chunk)
-		if !ok || info.State != ChunkReady || info.Revision != player.exhaustedRevisions[index] {
+		if !ok || info.State != ChunkReady || info.Revision != revisions[index] {
 			return true
 		}
 	}

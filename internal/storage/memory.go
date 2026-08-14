@@ -12,10 +12,11 @@ import (
 
 // MemoryStore 是保留存储所有权与 revision 语义的内存 Store。
 type MemoryStore struct {
-	mu       sync.Mutex
-	metadata Metadata
-	chunks   map[core.ChunkKey]memoryChunk
-	players  map[core.PlayerID]memoryPlayer
+	mu         sync.Mutex
+	metadata   Metadata
+	chunks     map[core.ChunkKey]memoryChunk
+	players    map[core.PlayerID]memoryPlayer
+	companions memoryCompanions
 }
 
 type memoryChunk struct {
@@ -31,6 +32,11 @@ type pendingChunk struct {
 }
 
 type memoryPlayer struct {
+	revision uint64
+	encoded  []byte
+}
+
+type memoryCompanions struct {
 	revision uint64
 	encoded  []byte
 }
@@ -239,6 +245,52 @@ func (store *MemoryStore) SavePlayer(
 		encoded:  bytes.Clone(encoded),
 	}
 	return save.Revision, nil
+}
+
+func (store *MemoryStore) LoadCompanions(ctx context.Context) (StoredCompanions, error) {
+	if err := ctx.Err(); err != nil {
+		return StoredCompanions{}, err
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return StoredCompanions{}, err
+	}
+	if len(store.companions.encoded) == 0 {
+		return StoredCompanions{}, ErrCompanionsNotFound
+	}
+	return decodeCompanions(bytes.Clone(store.companions.encoded))
+}
+
+func (store *MemoryStore) SaveCompanions(ctx context.Context, save CompanionSave) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	encoded, err := encodeCompanions(save)
+	if err != nil {
+		return err
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if stored := store.companions; len(stored.encoded) != 0 {
+		switch {
+		case save.Revision < stored.revision:
+			return fmt.Errorf(
+				"%w: companion revision %d is below %d",
+				ErrRevisionConflict, save.Revision, stored.revision,
+			)
+		case save.Revision == stored.revision:
+			if !bytes.Equal(encoded, stored.encoded) {
+				return fmt.Errorf("%w: companion revision %d", ErrRevisionConflict, save.Revision)
+			}
+			return nil
+		}
+	}
+	store.companions = memoryCompanions{revision: save.Revision, encoded: bytes.Clone(encoded)}
+	return nil
 }
 
 func (store *MemoryStore) Sync(ctx context.Context) error {

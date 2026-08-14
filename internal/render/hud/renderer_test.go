@@ -2,6 +2,7 @@ package hud
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/channing771/mornlea/internal/assets"
@@ -48,9 +49,14 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 	}
 
 	// 传入满箱子叠加值与已确认的满血生命值，让实例数量达到最坏布局。
+	chatLine := strings.Repeat("中", maxChatRunes)
 	if err := renderer.Prepare(
-		fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{},
-		HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720, render.NewUploadBudget(1024),
+		fullTestInventory(), true, true, 5, nil, fullChestOverlay(), MiningOverlay{},
+		HealthOverlay{Confirmed: true, Value: core.MaxHealth}, ChatOverlay{
+			Open: true, Input: chatLine,
+			Lines: []string{chatLine, chatLine, chatLine, chatLine, chatLine, chatLine},
+		},
+		1280, 720, render.NewUploadBudget(1024),
 	); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -72,7 +78,10 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 	}
 	// fullTestInventory 里的物品都没有耐久上限；分组面板、两种高亮、栏位与双层物品
 	// 加满箱子和满生命条形成当前实例数，数字数量由背包与箱子共同达到上限。
-	want := []uint32{openInventoryPanelQuads + 2 + core.InventorySlots*3 + chestQuads + healthQuads, maxHotbarGlyphs}
+	want := []uint32{
+		openInventoryPanelQuads + 2 + core.InventorySlots*3 + chestQuads + healthQuads + maxChatQuads,
+		maxHotbarGlyphs,
+	}
 	if got := pass.drawInstances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("draw 实例数=%v want=%v", got, want)
 	}
@@ -94,7 +103,7 @@ func TestHotbarRendererUsesSingleUploadAndFixedDraws(t *testing.T) {
 func TestHotbarRendererSkipsEmptyPreparedLayout(t *testing.T) {
 	renderer := NewHotbarRenderer(&nameTagTestDevice{}, gfx.FormatRGBA8Unorm, newFakeNameTagAtlas(), assets.NewRegistry())
 	defer renderer.Release()
-	if err := renderer.Prepare(core.Inventory{}, false, -1, nil, nil, MiningOverlay{}, HealthOverlay{}, 0, 0, render.NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare(core.Inventory{}, true, false, -1, nil, nil, MiningOverlay{}, HealthOverlay{}, ChatOverlay{}, 0, 0, render.NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	encoder := &nameTagTestEncoder{}
@@ -152,12 +161,12 @@ func TestHotbarPrepareReusesLayoutAndUploadStorage(t *testing.T) {
 	inventory := fullTestInventory()
 	health := HealthOverlay{Confirmed: true, Value: 7}
 	budget := render.NewUploadBudget(1024)
-	if err := renderer.Prepare(inventory, true, 3, nil, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
+	if err := renderer.Prepare(inventory, true, true, 3, nil, nil, MiningOverlay{}, health, ChatOverlay{}, 1280, 720, budget); err != nil {
 		t.Fatalf("warm Prepare: %v", err)
 	}
 	allocations := testing.AllocsPerRun(1000, func() {
 		source.requestCount = 0
-		if err := renderer.Prepare(inventory, true, 3, nil, nil, MiningOverlay{}, health, 1280, 720, budget); err != nil {
+		if err := renderer.Prepare(inventory, true, true, 3, nil, nil, MiningOverlay{}, health, ChatOverlay{}, 1280, 720, budget); err != nil {
 			panic(err)
 		}
 	})
@@ -191,8 +200,9 @@ func TestHotbarRendererHeadlessBlendOverExistingColor(t *testing.T) {
 	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, atlas, assets.NewRegistry())
 	defer renderer.Release()
 	if err := renderer.Prepare(
-		fullTestInventory(), true, 0, nil, nil, MiningOverlay{},
-		HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 128, 128, render.NewUploadBudget(1<<20),
+		fullTestInventory(), true, true, 0, nil, nil, MiningOverlay{},
+		HealthOverlay{Confirmed: true, Value: core.MaxHealth}, ChatOverlay{},
+		128, 128, render.NewUploadBudget(1<<20),
 	); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}

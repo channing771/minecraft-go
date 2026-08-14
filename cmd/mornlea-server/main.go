@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -42,7 +43,7 @@ type mornleaServerHost interface {
 type dependencies struct {
 	openDisk         func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error)
 	listenTCP        func(string) (network.Listener, error)
-	newHost          func(server.Config, server.Generator, storage.WorldStore) mornleaServerHost
+	newHost          func(context.Context, server.Config, server.Generator, storage.WorldStore) (mornleaServerHost, error)
 	migrateMaterials func(context.Context, string, string) error
 	logger           *slog.Logger
 }
@@ -107,8 +108,8 @@ func defaultDependencies() dependencies {
 			return storage.OpenDisk(ctx, world, options)
 		},
 		listenTCP: network.ListenTCP,
-		newHost: func(config server.Config, generator server.Generator, store storage.WorldStore) mornleaServerHost {
-			return server.NewHost(config, generator, store)
+		newHost: func(ctx context.Context, config server.Config, generator server.Generator, store storage.WorldStore) (mornleaServerHost, error) {
+			return server.NewHost(ctx, config, generator, store)
 		},
 		migrateMaterials: migrateMaterials,
 		logger:           slog.Default(),
@@ -153,10 +154,18 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 	}
 
 	metadata := store.Metadata()
-	dependencies.logger.Info("mornlea-server 已启动", "listen", listener.Addr(), "world", options.World, "protocol", network.ProtocolVersion)
 	config := server.DefaultConfig(metadata.Seed)
+	config.Companions = slices.Clone(effective.CompanionDefinitions())
 	config.MaxPlayers = options.MaxPlayers
-	host := dependencies.newHost(config, worldgen.New(metadata.Seed), store)
+	host, err := dependencies.newHost(ctx, config, worldgen.New(metadata.Seed), store)
+	if err != nil {
+		return errors.Join(
+			fmt.Errorf("创建服务端 Host: %w", err),
+			listener.Close(),
+			store.Close(),
+		)
+	}
+	dependencies.logger.Info("mornlea-server 已启动", "listen", listener.Addr(), "world", options.World, "protocol", network.ProtocolVersion)
 	return host.Run(ctx, listener)
 }
 

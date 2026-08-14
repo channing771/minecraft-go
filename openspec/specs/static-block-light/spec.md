@@ -68,12 +68,12 @@
 - **WHEN** 客户端在任意昼夜相位绘制该面
 - **THEN** 基础亮度 MUST 取天空光曲线与归一化方块光的较大者，面朝向与 AO MUST 仍继续降低最终亮度
 
-### Requirement: 发光块保持协议 v15 与区块 schema v8
-线上协议 MUST 保持 v15，区块存档 MUST 保持 schema v8；两者的 packet、payload 和字段布局 MUST 保持不变。玩家 schema MUST 保持 v6，世界 metadata MUST 保持 v2；线上与存档 MUST NOT 新增天空光或方块光数组、packet 或 wire 字段，方块光 MUST 继续只从权威方块镜像派生。
+### Requirement: 发光块保持当前协议 v16 与既有存档布局
+线上协议 MUST 为 v16，区块存档 MUST 保持 schema v8；M5A 协议升级 MUST 保持发光块既有 message ID、payload 与字段布局不变。玩家 schema MUST 保持 v6，世界 metadata MUST 保持 v2；线上与存档 MUST NOT 新增天空光或方块光数组、packet 或 wire 字段，方块光 MUST 继续只从权威方块镜像派生。
 
 #### Scenario: 旧协议在 Play 前拒绝
-- **GIVEN** 客户端声明协议 v14 或更早版本
-- **WHEN** 它连接协议 v15 服务端
+- **GIVEN** 客户端声明协议 v15 或更早版本
+- **WHEN** 它连接协议 v16 服务端
 - **THEN** 服务端 MUST 在进入 Play 前稳定拒绝，且不得协商或降级解码
 
 #### Scenario: 玩家、区块和 metadata 版本保持不变
@@ -81,7 +81,7 @@
 - **WHEN** 系统完成正常保存和重启
 - **THEN** 发光块 MUST 通过玩家 schema v6 与区块 schema v8 保真恢复，世界 metadata MUST 仍为 v2，光照 MUST 从方块镜像重新派生
 
-#### Scenario: 合成请求不增加 wire 字段
+#### Scenario: 合成请求不增加既有 wire 字段
 - **GIVEN** 玩家通过 Memory 或 TCP 请求发光方块固定配方
-- **WHEN** 服务端接收并处理请求
-- **THEN** 请求 MUST 继续只使用协议 v15 既有合成消息及 recipe ID 字段，且不得新增 packet、payload 字段或光照数组
+- **WHEN** v16 服务端接收并处理请求
+- **THEN** 请求 MUST 继续使用既有合成消息及 recipe ID 字段，且不得新增发光块专用 packet、payload 字段或光照数组

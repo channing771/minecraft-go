@@ -44,6 +44,7 @@ const (
 	KeyRight
 	KeyEnter
 	KeyLeftAlt
+	KeyBackspace
 )
 
 var glfwKeys = [...]glfw.Key{
@@ -75,13 +76,17 @@ var glfwKeys = [...]glfw.Key{
 	KeyRight:       glfw.KeyRight,
 	KeyEnter:       glfw.KeyEnter,
 	KeyLeftAlt:     glfw.KeyLeftAlt,
+	KeyBackspace:   glfw.KeyBackspace,
 }
 
 // Window 封装 GLFW 窗口、输入和原生句柄。
 type Window struct {
-	raw      *glfw.Window
-	captured bool
-	closed   bool
+	raw               *glfw.Window
+	captured          bool
+	closed            bool
+	textInput         [1024]rune
+	textInputCount    int
+	textInputOverflow bool
 }
 
 func NewWindow(width, height int, title string) (*Window, error) {
@@ -94,10 +99,32 @@ func NewWindow(width, height int, title string) (*Window, error) {
 		glfw.Terminate()
 		return nil, fmt.Errorf("创建窗口: %w", err)
 	}
-	return &Window{raw: raw}, nil
+	window := &Window{raw: raw}
+	raw.SetCharCallback(func(_ *glfw.Window, char rune) {
+		window.enqueueTextInput(char)
+	})
+	return window, nil
 }
 
 func (w *Window) Poll() { glfw.PollEvents() }
+
+func (w *Window) enqueueTextInput(char rune) {
+	if w.textInputCount == len(w.textInput) {
+		w.textInputOverflow = true
+		return
+	}
+	w.textInput[w.textInputCount] = char
+	w.textInputCount++
+}
+
+// DrainTextInput 返回自上次 drain 后收到的字符与固定队列 overflow，并清空窗口队列。
+func (w *Window) DrainTextInput(dst []rune) ([]rune, bool) {
+	dst = append(dst, w.textInput[:w.textInputCount]...)
+	overflow := w.textInputOverflow
+	w.textInputCount = 0
+	w.textInputOverflow = false
+	return dst, overflow
+}
 
 func (w *Window) ShouldClose() bool { return w.raw.ShouldClose() }
 

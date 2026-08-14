@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -116,6 +117,7 @@ func newApplicationWithDependencies(
 	var err error
 	ticks, saves := newPerformanceRecorders(options.Benchmark)
 	config := server.DefaultConfig(options.Seed)
+	config.Companions = slices.Clone(options.Companions)
 	config.ViewRadius = options.Render.ViewDistance + 1
 	config.TrustedObserver = options.Benchmark
 	config.TickObserver = ticks.add
@@ -275,6 +277,8 @@ func newApplicationWithDependencies(
 		inventorySource: -1,
 		predictor:       client.NewPredictor(),
 		remotePlayers:   client.NewRemotePlayers(),
+		companions:      &client.Companions{},
+		chatEvents:      &client.ChatEvents{},
 		remoteNameTags:  make([]render.NameTag, 0, maxFrameNameTags),
 		camera:          camera,
 		center:          cameraChunk(camera.Pos),
@@ -472,7 +476,7 @@ func assembleLocalApplicationConnection(
 	chan error,
 	error,
 ) {
-	host, err := dependencies.newHost(config, generator, store)
+	host, err := dependencies.newHost(ctx, config, generator, store)
 	if err != nil {
 		return nil, nil, nil, nil, errors.Join(err, store.Close())
 	}

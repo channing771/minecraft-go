@@ -16,8 +16,8 @@ import (
 )
 
 func TestBenchmarkScenarioVersionIncludesStaticBlockLightWorkload(t *testing.T) {
-	if scenarioVersion != 15 {
-		t.Fatalf("scenarioVersion=%d，想要静态方块光 workload 之后的 v15", scenarioVersion)
+	if scenarioVersion != 16 {
+		t.Fatalf("scenarioVersion=%d，想要统一伙伴渲染布局之后的 v16", scenarioVersion)
 	}
 }
 

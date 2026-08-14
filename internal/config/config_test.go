@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/physics"
 	"github.com/channing771/mornlea/internal/sim"
@@ -158,6 +160,88 @@ func TestUnknownFieldsAreIgnored(t *testing.T) {
 	path := writeConfig(t, `{"version":1,"physics":{"antigravity":true}}`)
 	if _, err := config.Load(path); err != nil {
 		t.Fatalf("未知字段必须忽略而不是报错: %v", err)
+	}
+}
+
+func TestConfigAICompanionUnknownFieldsWarnAndIgnore(t *testing.T) {
+	previous := slog.Default()
+	var records bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&records, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	path := writeConfig(t, `{"version":1,"ai":{"endpoint":"later","companions":[`+
+		`{"id":"00112233-4455-4677-8899-aabbccddeeff","name":"阿木","persona":"later","task":"later"}]}}`)
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	definitions := loaded.CompanionDefinitions()
+	if len(definitions) != 1 || definitions[0].Name != "阿木" || definitions[0].ID.String() != "00112233-4455-4677-8899-aabbccddeeff" {
+		t.Fatalf("CompanionDefinitions = %+v", definitions)
+	}
+	for _, path := range []string{"ai.endpoint", "ai.companions[0].persona", "ai.companions[0].task"} {
+		if !strings.Contains(records.String(), `"field":"`+path+`"`) {
+			t.Errorf("未知字段日志 %q 缺少精确路径 %q", records.String(), path)
+		}
+	}
+}
+
+func TestConfigAIDisabledFormsAndDefinitionValidation(t *testing.T) {
+	for _, body := range []string{
+		`{"version":1}`,
+		`{"version":1,"ai":null}`,
+		`{"version":1,"ai":{}}`,
+		`{"version":1,"ai":{"companions":null}}`,
+		`{"version":1,"ai":{"companions":[]}}`,
+	} {
+		loaded, err := config.Load(writeConfig(t, body))
+		if err != nil || len(loaded.CompanionDefinitions()) != 0 {
+			t.Fatalf("Load(%s) = %+v, %v，want AI disabled", body, loaded.CompanionDefinitions(), err)
+		}
+	}
+
+	if _, err := config.Load(writeConfig(t, `{"version":1,"ai":{"companions":[`+
+		`{"id":"00112233-4455-4677-8899-aabbccddeeff","name":"A"},`+
+		`{"id":"10112233-4455-4677-8899-aabbccddeeff","name":"A"}]}}`)); err == nil {
+		t.Fatal("Load 接受重复伙伴名称")
+	}
+}
+
+func TestConfigAIKnownFieldErrorsIncludeExactPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantPath string
+	}{
+		{name: "ai", body: `{"version":1,"ai":[]}`, wantPath: "ai"},
+		{name: "companions", body: `{"version":1,"ai":{"companions":{}}}`, wantPath: "ai.companions"},
+		{name: "id", body: `{"version":1,"ai":{"companions":[{"id":7,"name":"阿木"}]}}`, wantPath: "ai.companions[0].id"},
+		{name: "name", body: `{"version":1,"ai":{"companions":[{"id":"00112233-4455-4677-8899-aabbccddeeff","name":7}]}}`, wantPath: "ai.companions[0].name"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := config.Load(writeConfig(t, test.body))
+			if err == nil || !strings.Contains(err.Error(), test.wantPath) {
+				t.Fatalf("Load error = %v，want path %q", err, test.wantPath)
+			}
+		})
+	}
+}
+
+func TestConfigAICompanionDefinitionsReturnsOwnedCopy(t *testing.T) {
+	wantID, err := companion.ParseID("00112233-4455-4677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.AI = &config.AI{Companions: []companion.Definition{{ID: wantID, Name: "阿木"}}}
+	got := cfg.CompanionDefinitions()
+	if !reflect.DeepEqual(got, cfg.AI.Companions) {
+		t.Fatalf("CompanionDefinitions = %+v，want %+v", got, cfg.AI.Companions)
+	}
+	got[0].Name = "已改"
+	if cfg.AI.Companions[0].Name != "阿木" {
+		t.Fatalf("修改返回值反向改写了 Config：%+v", cfg.AI.Companions)
 	}
 }
 

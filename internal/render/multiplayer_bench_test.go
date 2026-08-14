@@ -45,8 +45,9 @@ func BenchmarkRemoteAvatarNameTag(b *testing.B) {
 	for index, name := range names {
 		id := core.PlayerID{0, 0, 0, byte(index + 1), 0, 0, 0x40, byte(index + 1), 0x80, 0, 0, 0, 0, 0, 0, byte(index + 1)}
 		position := mgl32.Vec3{float32(index-3) * 0.2, -0.9, 0}
-		avatars[index] = Avatar{PlayerID: id, Position: position}
-		tags[index] = NameTag{PlayerID: id, Text: name, Anchor: position.Add(mgl32.Vec3{0, 2.05, 0})}
+		key := testEntityKey(id)
+		avatars[index] = Avatar{Key: key, Position: position}
+		tags[index] = NameTag{Key: key, Text: name, Anchor: position.Add(mgl32.Vec3{0, 2.05, 0})}
 	}
 	budget := NewUploadBudget(1 << 20)
 	if err := tagRenderer.Prepare(tags, budget); err != nil {
@@ -74,7 +75,9 @@ func BenchmarkRemoteAvatarNameTag(b *testing.B) {
 			b.Fatal(err)
 		}
 		encoder := dev.CreateCommandEncoder()
-		avatarRenderer.Render(encoder, colorView, depthView, camera, avatars)
+		if err := avatarRenderer.Render(encoder, colorView, depthView, camera, avatars); err != nil {
+			b.Fatal(err)
+		}
 		tagRenderer.Render(encoder, colorView, depthView, billboard)
 		command := encoder.Finish()
 		dev.Submit(command)

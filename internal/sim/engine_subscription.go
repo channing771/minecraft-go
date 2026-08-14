@@ -50,6 +50,7 @@ func (engine *Engine) reconcileSubscriptions(result *TickResult) {
 		sortChunkKeys(result.Forget[sessionID])
 		session.wanted = next
 	}
+	engine.addCompanionWanted(union)
 
 	candidates := make([]core.ChunkKey, 0)
 	for key := range union {
@@ -98,7 +99,34 @@ func (engine *Engine) wantedSnapshot() map[core.ChunkKey]struct{} {
 			wanted[key] = struct{}{}
 		}
 	}
+	engine.addCompanionWanted(wanted)
 	return wanted
+}
+
+func (engine *Engine) addCompanionWanted(wanted map[core.ChunkKey]struct{}) {
+	for _, state := range engine.companions {
+		if state.active {
+			center := companionChunk(state.body.Position)
+			for dz := -companionInterestRadius; dz <= companionInterestRadius; dz++ {
+				for dx := -companionInterestRadius; dx <= companionInterestRadius; dx++ {
+					wanted[core.ChunkKey{
+						Dimension: state.dimension,
+						Pos: core.ChunkPos{
+							X: center.X + int32(dx),
+							Z: center.Z + int32(dz),
+						},
+					}] = struct{}{}
+				}
+			}
+			continue
+		}
+		for key := range state.restoreWanted {
+			wanted[key] = struct{}{}
+		}
+		for chunk := range state.spawnWanted {
+			wanted[core.ChunkKey{Dimension: state.dimension, Pos: chunk}] = struct{}{}
+		}
+	}
 }
 
 func (engine *Engine) sessionWantedSnapshot(
@@ -151,6 +179,9 @@ func (engine *Engine) applyAcquired(
 		switch {
 		case acquiredChunk.Err != nil:
 			dimension.MarkLoadFailed(key.Pos, acquiredChunk.Err)
+			if engine.companionWantsChunk(key) {
+				engine.subscriptionsDirty = true
+			}
 		case acquiredChunk.Missing:
 			if _, retained := wanted[key]; !retained {
 				dimension.DropLoading(key.Pos)
@@ -168,6 +199,9 @@ func (engine *Engine) applyAcquired(
 			)
 			if err != nil {
 				dimension.MarkLoadFailed(key.Pos, err)
+				if engine.companionWantsChunk(key) {
+					engine.subscriptionsDirty = true
+				}
 				continue
 			}
 			if _, retained := wanted[key]; !retained {
@@ -192,7 +226,78 @@ func (engine *Engine) subscriptionDistanceSquared(key core.ChunkKey) int64 {
 			distance = candidate
 		}
 	}
+	for _, state := range engine.companions {
+		candidate, relevant := companionSubscriptionDistanceSquared(state, key)
+		if relevant && candidate < distance {
+			distance = candidate
+		}
+	}
 	return distance
+}
+
+func companionSubscriptionDistanceSquared(
+	state *companionState,
+	key core.ChunkKey,
+) (int64, bool) {
+	if state.active {
+		if key.Dimension != state.dimension {
+			return 0, false
+		}
+		center := companionChunk(state.body.Position)
+		if absChunkDelta(key.Pos.X, center.X) > companionInterestRadius ||
+			absChunkDelta(key.Pos.Z, center.Z) > companionInterestRadius {
+			return 0, false
+		}
+		return chunkDistanceSquared(key.Pos, center), true
+	}
+	distance := int64(math.MaxInt64)
+	relevant := false
+	if _, wanted := state.restoreWanted[key]; wanted {
+		for _, candidate := range state.restoreCandidates {
+			if candidate.location.Dimension != key.Dimension {
+				continue
+			}
+			distance = min(distance, chunkDistanceSquared(
+				key.Pos,
+				companionChunk(candidate.location.Position),
+			))
+			relevant = true
+		}
+	}
+	if key.Dimension == state.dimension {
+		if _, wanted := state.spawnWanted[key.Pos]; wanted && len(state.spawnCandidates) != 0 {
+			anchor := (core.BlockPos{
+				X: state.spawnCandidates[0].X,
+				Z: state.spawnCandidates[0].Z,
+			}).Chunk()
+			distance = min(distance, chunkDistanceSquared(key.Pos, anchor))
+			relevant = true
+		}
+	}
+	return distance, relevant
+}
+
+func (engine *Engine) companionWantsChunk(key core.ChunkKey) bool {
+	for _, state := range engine.companions {
+		if _, relevant := companionSubscriptionDistanceSquared(state, key); relevant {
+			return true
+		}
+	}
+	return false
+}
+
+func chunkDistanceSquared(left, right core.ChunkPos) int64 {
+	dx := int64(left.X - right.X)
+	dz := int64(left.Z - right.Z)
+	return dx*dx + dz*dz
+}
+
+func absChunkDelta(left, right int32) int {
+	delta := left - right
+	if delta < 0 {
+		delta = -delta
+	}
+	return int(delta)
 }
 
 func (engine *Engine) applyGenerated(
@@ -226,10 +331,16 @@ func (engine *Engine) applyGenerated(
 		}
 		if generatedChunk.Err != nil {
 			dimension.MarkFailed(key.Pos, generatedChunk.Err)
+			if engine.companionWantsChunk(key) {
+				engine.subscriptionsDirty = true
+			}
 			continue
 		}
 		if err := dimension.ApplyGenerated(key.Pos, generatedChunk.Chunk); err != nil {
 			dimension.MarkFailed(key.Pos, err)
+			if engine.companionWantsChunk(key) {
+				engine.subscriptionsDirty = true
+			}
 			continue
 		}
 		if _, retained := wanted[key]; !retained {

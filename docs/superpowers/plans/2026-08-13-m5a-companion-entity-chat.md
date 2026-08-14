@@ -1477,7 +1477,7 @@ Expected: 全部 PASS；`make rust` 使用现有 toolchain，不下载。若 car
 ~~~bash
 go test ./internal/network -run '^$' -fuzz FuzzCompanionMessageCodec -fuzztime=10s
 go test ./internal/storage -run '^$' -fuzz FuzzDecodeCompanions -fuzztime=10s
-go test ./internal/network ./internal/sim ./internal/server ./internal/render ./cmd/mornlea -run '^$' -bench 'Benchmark(Companion|ChatCommand|.*Step|ChatRoutingFourCompanions|Avatar|NameTag|Multiplayer)' -benchmem -count=5
+go test ./internal/network ./internal/sim ./internal/server ./internal/render ./cmd/mornlea -run '^$' -bench '^Benchmark(CompanionMessageCodec|ChatCommandCodec|EngineStep.*|ChatRoutingFourCompanions|RemoteAvatarNameTag|RemotePresentationConversion)$' -benchmem -count=5
 VISUAL_OUT=/private/tmp/mornlea-m5a-final-visual make visual-check
 ~~~
 

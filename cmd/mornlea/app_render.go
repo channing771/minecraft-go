@@ -35,8 +35,8 @@ func (a *application) appendCurrentBlockTarget(
 		return tags, render.BlockOutline{}
 	}
 	tags = append(tags, render.NameTag{
-		PlayerID: core.PlayerID{},
-		Text:     target.Name,
+		Key:  render.EntityKey{Kind: render.EntityTarget},
+		Text: target.Name,
 		Anchor: mgl32.Vec3{
 			float32(target.Position.X) + 0.5,
 			float32(target.Position.Y) + 1.15,
@@ -52,17 +52,47 @@ func remoteRenderPresentationsSortedInto(
 	ordered []client.RemotePresentation,
 ) ([]render.Avatar, []render.NameTag) {
 	for _, presentation := range ordered {
+		key := render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(presentation.PlayerID)}
 		avatars = append(avatars, render.Avatar{
-			PlayerID: presentation.PlayerID, Position: presentation.Position,
+			Key: key, Position: presentation.Position,
 			Yaw: presentation.Yaw, Pitch: presentation.Pitch,
 		})
 		tags = append(tags, render.NameTag{
-			PlayerID: presentation.PlayerID,
-			Text:     presentation.DisplayName,
-			Anchor:   presentation.Position.Add(mgl32.Vec3{0, 2.05, 0}),
+			Key:    key,
+			Text:   presentation.DisplayName,
+			Anchor: presentation.Position.Add(mgl32.Vec3{0, 2.05, 0}),
 		})
 	}
 	return avatars, tags
+}
+
+func appendCompanionRenderPresentationsInto(
+	avatars []render.Avatar,
+	tags []render.NameTag,
+	presentations []client.CompanionPresentation,
+) ([]render.Avatar, []render.NameTag) {
+	for _, presentation := range presentations {
+		key := render.EntityKey{Kind: render.EntityCompanion, ID: [16]byte(presentation.ID)}
+		avatars = append(avatars, render.Avatar{
+			Key: key, Position: presentation.Position,
+			Yaw: presentation.Yaw, Pitch: presentation.Pitch,
+		})
+		tags = append(tags, render.NameTag{
+			Key: key, Text: presentation.Name,
+			Anchor: presentation.Position.Add(mgl32.Vec3{0, 2.05, 0}),
+		})
+	}
+	return avatars, tags
+}
+
+func validateEntityPresentationCounts(avatars []render.Avatar, tags []render.NameTag) error {
+	if len(avatars) > maxFrameAvatars {
+		return fmt.Errorf("avatar count %d exceeds %d", len(avatars), maxFrameAvatars)
+	}
+	if len(tags) > maxFrameNameTags {
+		return fmt.Errorf("name tag count %d exceeds %d", len(tags), maxFrameNameTags)
+	}
+	return nil
 }
 
 func (a *application) framebufferLabel() string {

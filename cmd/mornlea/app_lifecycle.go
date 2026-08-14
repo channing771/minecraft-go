@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render/hud"
 )
 
@@ -94,6 +95,19 @@ func (a *application) closeClientSession(cause error) {
 		}
 		if a.remotePlayers != nil {
 			a.remotePlayers.Reset()
+		}
+		if a.companions != nil {
+			a.companions.Reset()
+		}
+		if a.chatEvents != nil {
+			a.chatEvents.Reset()
+		}
+		chatWasOpen := a.chatInput.open
+		a.chatInput.Cancel()
+		a.clearFormattedChatLines()
+		a.chatEventBuffer = [32]network.ChatEvent{}
+		if chatWasOpen && a.window != nil {
+			a.window.SetCursorCaptured(true)
 		}
 		a.inventory.Reset()
 		a.furnace.Reset()

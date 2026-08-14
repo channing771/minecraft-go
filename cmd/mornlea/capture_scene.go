@@ -4,10 +4,101 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/go-gl/mathgl/mgl32"
+
+	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/render/hud"
 	"github.com/channing771/mornlea/internal/world"
 )
+
+var captureAICompanionID = companion.ID{0: 0x42, 6: 0x40, 8: 0x80, 15: 0x14}
+
+func prepareAICompanion(app *application) error {
+	if err := prepareCaptureAirNeighborhood(app); err != nil {
+		return err
+	}
+	changes := make([]network.BlockChange, 0, 11*13*2)
+	for z := int32(0); z <= 12; z++ {
+		for x := int32(0); x <= 10; x++ {
+			changes = append(changes,
+				network.BlockChange{Position: core.BlockPos{X: x, Y: -1, Z: z}, Block: core.StoneID},
+				network.BlockChange{Position: core.BlockPos{X: x, Y: 0, Z: z}, Block: core.GrassID},
+			)
+		}
+	}
+	sort.Slice(changes, func(i, j int) bool {
+		left, _ := world.ChunkBlockIndex(changes[i].Position)
+		right, _ := world.ChunkBlockIndex(changes[j].Position)
+		return left < right
+	})
+	return applyCaptureMirror(app, network.BlockChanges{
+		Dimension: core.Overworld, Chunk: core.ChunkPos{},
+		BaseRevision: 1, NewRevision: 2, Changes: changes,
+	})
+}
+
+func applyAICompanionCaptureState(app *application) error {
+	if app.remotePlayers == nil || app.companions == nil || app.chatEvents == nil || app.itemDrops == nil {
+		return fmt.Errorf("ai-companion 需要完整客户端呈现镜像")
+	}
+
+	app.remotePlayers.Reset()
+	app.companions.Reset()
+	app.chatEvents.Reset()
+	app.chatInput.Cancel()
+	app.chatEventBuffer = [32]network.ChatEvent{}
+	app.chatLines = [6]string{}
+	app.chatLineCount = 0
+	app.formattedChatEventID = 0
+	app.inventory.Reset()
+	app.inventoryOpen = false
+	app.inventorySource = -1
+	app.furnace.Reset()
+	app.chest.Reset()
+	app.miningOverlay = hud.MiningOverlay{}
+	app.damageFeedback.Reset()
+	app.damageStrength = 0
+	app.itemDrops.Reset()
+	app.remotePresentations = app.remotePresentations[:0]
+	app.companionPresentations = app.companionPresentations[:0]
+	app.remoteAvatars = app.remoteAvatars[:0]
+	app.remoteNameTags = app.remoteNameTags[:0]
+	app.itemDropInstances = app.itemDropInstances[:0]
+	if app.panel != nil {
+		app.panel.visible = false
+	}
+
+	app.worldTimeTicks = 6000
+	app.camera = client.Camera{
+		Pos: mgl32.Vec3{5.5, 3.2, 9.5}, Yaw: 0, Pitch: -0.05,
+		FovY: mgl32.DegToRad(70), Aspect: float32(captureWidth) / captureHeight,
+		Near: 0.1, Far: 2000,
+	}
+	app.center = cameraChunk(app.camera.Pos)
+	app.blockTargetReset = false
+
+	if err := app.companions.ApplySpawn(network.CompanionSpawn{
+		ID: captureAICompanionID, Name: "阿木", Tick: 1, Dimension: core.Overworld,
+		Position: mgl32.Vec3{5.5, 1, 4}, Yaw: 3.1415927,
+	}); err != nil {
+		return fmt.Errorf("装入固定伙伴: %w", err)
+	}
+	if err := app.chatEvents.Apply(network.ChatEvent{
+		EventID: 1, PlayerID: core.PlayerID{0: 0x23, 6: 0x40, 8: 0x80, 15: 0x11},
+		PlayerName: "旅人", CompanionID: captureAICompanionID, CompanionName: "阿木",
+		Kind: network.ChatEventAccepted, Command: "挖石头",
+	}); err != nil {
+		return fmt.Errorf("装入固定聊天事件: %w", err)
+	}
+	app.chatInput.Open()
+	for _, value := range "@阿木 挖石头" {
+		app.chatInput.Append(value)
+	}
+	return nil
+}
 
 func prepareSkylightTunnel(app *application) error {
 	if err := prepareCaptureAirNeighborhood(app); err != nil {

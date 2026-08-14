@@ -5,10 +5,12 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 )
 
 type Config struct {
+	Companions            []companion.Definition
 	Seed                  int64
 	MaxPlayers            int
 	ViewRadius            int
@@ -63,6 +65,9 @@ func DefaultConfig(seed int64) Config {
 }
 
 func (config *Config) validate() {
+	if err := companion.ValidateDefinitions(config.Companions); err != nil {
+		panic("server: invalid companion definitions: " + err.Error())
+	}
 	if config.MaxPlayers == 0 {
 		config.MaxPlayers = 8
 	}

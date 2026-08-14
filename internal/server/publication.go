@@ -6,14 +6,26 @@ import (
 	"sort"
 	"time"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/sim"
 )
 
 func (server *Server) publish(result sim.TickResult) {
+	server.publishWithChats(result, nil)
+}
+
+func (server *Server) publishWithChats(result sim.TickResult, chats []chatDelivery) {
 	players := make(map[sim.SessionID]sim.PlayerUpdate, len(result.Players))
 	for _, player := range result.Players {
 		players[player.Session] = player
+	}
+	var definitions map[companion.ID]companion.Definition
+	if len(server.config.Companions) != 0 {
+		definitions = make(map[companion.ID]companion.Definition, len(server.config.Companions))
+		for _, definition := range server.config.Companions {
+			definitions[definition.ID] = definition
+		}
 	}
 	for _, id := range server.sortedPublicationIDsLocked() {
 		current := server.publicationSessionLocked(id)
@@ -22,10 +34,10 @@ func (server *Server) publish(result sim.TickResult) {
 		}
 		if observer := server.config.InterestObserver; observer != nil {
 			started := time.Now()
-			server.publishSession(current, result, players)
+			server.publishSession(current, result, players, definitions, chats)
 			observer(time.Since(started))
 		} else {
-			server.publishSession(current, result, players)
+			server.publishSession(current, result, players, definitions, chats)
 		}
 	}
 }
@@ -34,10 +46,20 @@ func (server *Server) publishSession(
 	current *session,
 	result sim.TickResult,
 	players map[sim.SessionID]sim.PlayerUpdate,
+	definitions map[companion.ID]companion.Definition,
+	chats []chatDelivery,
 ) {
+	companions, ok := server.companionPublicationCandidates(current, result.Companions, definitions)
+	if !ok {
+		return
+	}
 	server.updateSessionView(current, players[current.id])
 	server.queueReadyAndResync(current, result)
+	server.queueCompanionSnapshots(current, companions)
 	if !server.publishRemoteDespawns(current, players) {
+		return
+	}
+	if !server.publishCompanionDespawns(current, companions) {
 		return
 	}
 	if !server.publishForget(current, result.Forget[current.id]) {
@@ -47,13 +69,35 @@ func (server *Server) publishSession(
 	if !server.publishSnapshots(current) || !server.publishDeltas(current, deltas) {
 		return
 	}
+	if !server.publishCompanionSpawnsAndStates(current, result.Tick, companions) {
+		return
+	}
 	if !server.publishRemoteSpawnsAndStates(current, result.Tick, players) {
 		return
 	}
 	if !server.publishDrops(current, result.Tick) {
 		return
 	}
+	if !server.publishChatDeliveries(current, chats) {
+		return
+	}
 	server.publishLocalResult(current, result, players[current.id])
+}
+
+func (server *Server) publishChatDeliveries(current *session, chats []chatDelivery) bool {
+	if current == server.trustedObserver {
+		return true
+	}
+	for _, delivery := range chats {
+		if delivery.recipient != 0 && delivery.recipient != current.id {
+			continue
+		}
+		if !current.enqueue(delivery.event) {
+			server.closePublicationSessionLocked(current, errSessionOutboxFull)
+			return false
+		}
+	}
+	return true
 }
 
 func (server *Server) updateSessionView(current *session, player sim.PlayerUpdate) {

@@ -28,13 +28,17 @@ type RemotePresentation struct {
 
 type remotePlayer struct {
 	displayName string
-	dimension   core.DimensionID
-	position    mgl32.Vec3
-	yaw         float32
-	pitch       float32
-	lastTick    uint64
-	snapshots   remoteSnapshotRing
-	elapsed     time.Duration
+	remoteActor
+}
+
+type remoteActor struct {
+	dimension core.DimensionID
+	position  mgl32.Vec3
+	yaw       float32
+	pitch     float32
+	lastTick  uint64
+	snapshots remoteSnapshotRing
+	elapsed   time.Duration
 }
 
 type RemotePlayers struct {

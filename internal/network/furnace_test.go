@@ -34,14 +34,8 @@ func TestProtocolV7FurnacePacketIDsAreFrozen(t *testing.T) {
 		{StatePlay, FurnaceState{}, 13},
 		{StatePlay, ContainerClosed{}, 14},
 	})
-	if _, ok := clientPacketForID(StatePlay, 12); ok {
-		t.Fatal("unknown play client packet ID accepted")
-	}
 	if _, ok := clientPacketForID(StatePlay, 1); ok {
 		t.Fatal("Play client packet ID 1 必须保持未分配")
-	}
-	if _, ok := serverPacketForID(StatePlay, 16); ok {
-		t.Fatal("unknown play server packet ID accepted")
 	}
 }
 

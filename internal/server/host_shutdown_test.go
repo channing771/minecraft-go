@@ -16,7 +16,7 @@ import (
 // 捕获：Shutdown 在 accept-loop 仍可能 Add 时等待共享 WaitGroup，或遗留未读完握手的 stream。
 func TestHostShutdownPendingLoginClosesUnreadHandshakeAndWaitsAcceptLoop(t *testing.T) {
 	store := newHostTestStore()
-	host := NewHost(hostTestConfig(), flatTestGenerator{}, store)
+	host := mustNewHost(t, hostTestConfig(), flatTestGenerator{}, store)
 	listener := newHostTestListener()
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
@@ -56,7 +56,7 @@ func TestHostShutdownPendingLoginClosesUnreadHandshakeAndWaitsAcceptLoop(t *test
 func TestHostShutdownPendingLoginCancelsBlockedReservationLoad(t *testing.T) {
 	store := newHostTestStore()
 	store.blockLoads()
-	host := NewHost(hostTestConfig(), flatTestGenerator{}, store)
+	host := mustNewHost(t, hostTestConfig(), flatTestGenerator{}, store)
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- host.Run(runCtx, nil) }()
@@ -127,7 +127,7 @@ func TestHostShutdownMultiplayerFlushFailurePreservesRuntimeAndRetries(t *testin
 	store := newStrictShutdownStore()
 	config := hostTestConfig()
 	config.MaxPlayers = 3
-	host := NewHost(config, flatTestGenerator{}, store)
+	host := mustNewHost(t, config, flatTestGenerator{}, store)
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- host.Run(runCtx, nil) }()
@@ -270,7 +270,7 @@ func TestHostShutdownWorldFailureKeepsPlayerWorkersRetryable(t *testing.T) {
 			baseline := runtime.NumGoroutine()
 			wantErr := errors.New(test.name + " world failure")
 			store := newStrictShutdownStore()
-			host := NewHost(hostTestConfig(), flatTestGenerator{}, store)
+			host := mustNewHost(t, hostTestConfig(), flatTestGenerator{}, store)
 			runCtx, cancelRun := context.WithCancel(context.Background())
 			runDone := make(chan error, 1)
 			go func() { runDone <- host.Run(runCtx, nil) }()

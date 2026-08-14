@@ -22,9 +22,9 @@ import (
 	"github.com/channing771/mornlea/internal/worldgen"
 )
 
-func TestScenarioV15ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 15 {
-		t.Fatalf("scenarioVersion=%d, want 15", scenarioVersion)
+func TestScenarioV16ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 16 {
+		t.Fatalf("scenarioVersion=%d, want 16", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {
@@ -38,7 +38,7 @@ func TestScenarioV15ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 			spawn.DisplayName == "" || len([]rune(spawn.DisplayName)) == len(spawn.DisplayName) {
 			t.Fatalf("spawn[%d] does not prove distinct Unicode identity: %+v", index, spawn)
 		}
-		if scenario.Tags[index].PlayerID != spawn.PlayerID ||
+		if scenario.Tags[index].Key != (render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(spawn.PlayerID)}) ||
 			scenario.Tags[index].Text != spawn.DisplayName {
 			t.Fatalf("tag[%d]=%+v does not match spawn=%+v", index, scenario.Tags[index], spawn)
 		}
@@ -59,6 +59,31 @@ func TestScenarioV15ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 		if !strings.ContainsAny(tag.Text, "界月星河山海云") {
 			t.Fatalf("tag is not the fixed Unicode fixture: %q", tag.Text)
 		}
+	}
+}
+
+func TestBenchmarkScenarioV16AccountsForCompanionRendererUploadLayout(t *testing.T) {
+	if scenarioVersion != 16 {
+		t.Fatalf("scenarioVersion=%d，想要 16", scenarioVersion)
+	}
+	scenario := newMultiplayerBenchmarkScenario()
+	if len(scenario.Spawns) != 7 || len(scenario.Tags) != 7 {
+		t.Fatalf("固定 benchmark 玩家/名牌=%d/%d，想要 7/7", len(scenario.Spawns), len(scenario.Tags))
+	}
+	for index, tag := range scenario.Tags {
+		if tag.Key.Kind != render.EntityPlayer || tag.Key.ID != [16]byte(scenario.Spawns[index].PlayerID) {
+			t.Fatalf("benchmark tag[%d] key=%v，未保持玩家域", index, tag.Key)
+		}
+	}
+	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	if got := len(app.companions.AppendPresentations(nil)); got != 0 {
+		t.Fatalf("固定 benchmark 注入了 %d 个伙伴，想要 0", got)
+	}
+	if got, want := dev.bufferByLabel(t, "avatar dynamic upload").desc.Size, uint64(5556); got != want {
+		t.Fatalf("Avatar upload=%d，想要 %d", got, want)
+	}
+	if got, want := dev.bufferByLabel(t, "name-tag dynamic upload").desc.Size, uint64(25600); got != want {
+		t.Fatalf("NameTag upload=%d，想要 %d", got, want)
 	}
 }
 
@@ -192,7 +217,7 @@ func TestMultiplayerBenchmarkReservesTargetNameTagSlotWithoutAddingTarget(t *tes
 		t.Fatalf("benchmark tags len/cap=%d/%d，想要 7/%d", len(scenario.Tags), cap(scenario.Tags), maxFrameNameTags)
 	}
 	for index, tag := range scenario.Tags {
-		if tag.PlayerID == (core.PlayerID{}) || tag.Text == "" {
+		if tag.Key.Kind != render.EntityPlayer || tag.Key.ID == ([16]byte{}) || tag.Text == "" {
 			t.Fatalf("benchmark tag %d 伪造目标或空名牌: %+v", index, tag)
 		}
 	}

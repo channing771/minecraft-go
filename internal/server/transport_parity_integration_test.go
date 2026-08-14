@@ -218,7 +218,7 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	config := hostTestConfig()
 	config.ViewRadius = 1
 	config.AutosaveTicks = 1000
-	host := NewHost(config, miningParityGenerator{}, store)
+	host := mustNewHost(t, config, miningParityGenerator{}, store)
 	endpoint, acceptDone, closeTransport := openParityTransport(t, host, transport, identity)
 	defer closeTransport()
 	mirror := client.NewMirror()
@@ -472,7 +472,7 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	config := hostTestConfig()
 	config.ViewRadius = 1
 	config.AutosaveTicks = 1000
-	host := NewHost(config, flatGenerator{}, store)
+	host := mustNewHost(t, config, flatGenerator{}, store)
 	endpoint, acceptDone, closeTransport := openParityTransport(t, host, transport, identity)
 	mirror := client.NewMirror()
 	transcript := make([]string, 0, 64)

@@ -9,8 +9,8 @@ import (
 	"github.com/channing771/mornlea/internal/gfx"
 )
 
-// Hand-derived avatar layout: camera [0,64), 256-byte aligned instances
-// [256,3616), then five u32 indirect arguments [3616,3636).
+// 手工推导 Avatar 布局：camera [0,80)，实例位于 [256,5536)，
+// 五个 u32 indirect 参数位于 [5536,5556)。
 // Mutation killed: separate camera/instance/indirect writes, wrong binding
 // ranges, a stale instance count, or a wrong indirect draw offset all fail.
 func TestAvatarRendererBatchesOneDynamicUploadPerNonEmptyRender(t *testing.T) {
@@ -19,7 +19,7 @@ func TestAvatarRendererBatchesOneDynamicUploadPerNonEmptyRender(t *testing.T) {
 	defer renderer.Release()
 
 	upload := dev.bufferByLabel(t, "avatar dynamic upload")
-	if got, want := upload.desc.Size, uint64(3636); got != want {
+	if got, want := upload.desc.Size, uint64(5556); got != want {
 		t.Fatalf("dynamic upload size=%d want=%d", got, want)
 	}
 	if got, want := upload.desc.Usage,
@@ -34,11 +34,13 @@ func TestAvatarRendererBatchesOneDynamicUploadPerNonEmptyRender(t *testing.T) {
 	}
 	bind := dev.bindDescs[0]
 	assertBufferBindingRange(t, bind, 0, upload, 0, 80)
-	assertBufferBindingRange(t, bind, 1, upload, 256, 3360)
+	assertBufferBindingRange(t, bind, 1, upload, 256, 5280)
 
 	dev.resetWrites()
 	encoder := &dynamicUploadTestEncoder{}
-	renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, nil)
+	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if got := dev.writeCount(); got != 0 {
 		t.Fatalf("empty render writes=%d want=0", got)
 	}
@@ -46,7 +48,9 @@ func TestAvatarRendererBatchesOneDynamicUploadPerNonEmptyRender(t *testing.T) {
 		t.Fatalf("empty render passes=%d want=0", got)
 	}
 
-	renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{ViewProj: mgl32.Ident4()}, makeTestAvatars(8))
+	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{ViewProj: mgl32.Ident4()}, makeTestAvatars(11)); err != nil {
+		t.Fatal(err)
+	}
 	if got := dev.writeCount(); got != 1 {
 		t.Fatalf("non-empty render dynamic writes=%d want=1", got)
 	}
@@ -54,16 +58,16 @@ func TestAvatarRendererBatchesOneDynamicUploadPerNonEmptyRender(t *testing.T) {
 		t.Fatalf("upload buffer writes=%d want=1", got)
 	}
 	write := upload.writes[0]
-	if write.offset != 0 || len(write.data) != 3636 {
-		t.Fatalf("upload write offset/bytes=%d/%d want=0/3636", write.offset, len(write.data))
+	if write.offset != 0 || len(write.data) != 5556 {
+		t.Fatalf("upload write offset/bytes=%d/%d want=0/5556", write.offset, len(write.data))
 	}
 	for _, offset := range []int{0, 20, 40, 60} {
 		if got := float32At(write.data, offset); got != 1 {
 			t.Fatalf("camera identity diagonal at %d=%f want=1", offset, got)
 		}
 	}
-	args := write.data[3616:3636]
-	wantArgs := [...]uint32{36, 42, 0, 0, 0}
+	args := write.data[5536:5556]
+	wantArgs := [...]uint32{36, 66, 0, 0, 0}
 	for index, want := range wantArgs {
 		if got := binary.LittleEndian.Uint32(args[index*4:]); got != want {
 			t.Fatalf("indirect arg %d=%d want=%d", index, got, want)
@@ -73,14 +77,14 @@ func TestAvatarRendererBatchesOneDynamicUploadPerNonEmptyRender(t *testing.T) {
 		t.Fatalf("passes=%d want=%d", got, want)
 	}
 	pass := encoder.passes[0]
-	if pass.indirect != upload || pass.indirectOffset != 3616 || pass.indirectDraws != 1 {
-		t.Fatalf("indirect draw buffer/offset/count=%p/%d/%d want=%p/3616/1",
+	if pass.indirect != upload || pass.indirectOffset != 5536 || pass.indirectDraws != 1 {
+		t.Fatalf("indirect draw buffer/offset/count=%p/%d/%d want=%p/5536/1",
 			pass.indirect, pass.indirectOffset, pass.indirectDraws, upload)
 	}
 }
 
-// 手工推导的 name-tag 布局：camera [0,96)，background 位于下一个
-// 256-byte 边界 [256,768)，glyph 位于 [768,17152)。小而固定的
+// 手工推导的 name-tag 布局：camera [0,96)，background 位于
+// [256,1024)，glyph 位于 [1024,25600)。小而固定的
 // background 区域放在前面，使每帧单次写入保持紧凑。
 // 杀死变异：在 Prepare 中上传、保留三个 GPU buffer/write、忽略绑定范围，
 // 或上传空布局都会产生可观察失败。
@@ -91,7 +95,7 @@ func TestNameTagRendererDefersAndBatchesOneDynamicUploadPerRender(t *testing.T) 
 	defer renderer.Release()
 
 	upload := dev.bufferByLabel(t, "name-tag dynamic upload")
-	if got, want := upload.desc.Size, uint64(17152); got != want {
+	if got, want := upload.desc.Size, uint64(25600); got != want {
 		t.Fatalf("dynamic upload size=%d want=%d", got, want)
 	}
 	if got, want := upload.desc.Usage,
@@ -106,11 +110,11 @@ func TestNameTagRendererDefersAndBatchesOneDynamicUploadPerRender(t *testing.T) 
 	}
 	bind := dev.bindDescs[0]
 	assertBufferBindingRange(t, bind, 0, upload, 0, 96)
-	assertBufferBindingRange(t, bind, 1, upload, 768, 16384)
-	assertBufferBindingRange(t, bind, 2, upload, 256, 512)
+	assertBufferBindingRange(t, bind, 1, upload, 1024, 24576)
+	assertBufferBindingRange(t, bind, 2, upload, 256, 768)
 
 	if err := renderer.Prepare([]NameTag{{
-		PlayerID: testNameTagID(1), Text: "AV", Anchor: mgl32.Vec3{3, 4, 5},
+		Key: testEntityKey(testNameTagID(1)), Text: "AV", Anchor: mgl32.Vec3{3, 4, 5},
 	}}, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -129,13 +133,13 @@ func TestNameTagRendererDefersAndBatchesOneDynamicUploadPerRender(t *testing.T) 
 		t.Fatalf("upload buffer writes=%d want=1", got)
 	}
 	write := upload.writes[0]
-	if write.offset != 0 || len(write.data) != 896 {
-		t.Fatalf("upload write offset/bytes=%d/%d want=0/896", write.offset, len(write.data))
+	if write.offset != 0 || len(write.data) != 1152 {
+		t.Fatalf("upload write offset/bytes=%d/%d want=0/1152", write.offset, len(write.data))
 	}
 	if got := [3]float32{float32At(write.data, 64), float32At(write.data, 68), float32At(write.data, 72)}; got != [3]float32{0.25, 0.5, 0.75} {
 		t.Fatalf("camera right=%v want=[0.25 0.5 0.75]", got)
 	}
-	if got := [3]float32{float32At(write.data, 768), float32At(write.data, 772), float32At(write.data, 776)}; got != [3]float32{3, 4, 5} {
+	if got := [3]float32{float32At(write.data, 1024), float32At(write.data, 1028), float32At(write.data, 1032)}; got != [3]float32{3, 4, 5} {
 		t.Fatalf("first glyph anchor=%v want=[3 4 5]", got)
 	}
 	if got := [3]float32{float32At(write.data, 256), float32At(write.data, 260), float32At(write.data, 264)}; got != [3]float32{3, 4, 5} {
@@ -150,7 +154,7 @@ func TestNameTagRendererEmptyLayoutHasNoDynamicUpload(t *testing.T) {
 	dev := &dynamicUploadTestDevice{}
 	renderer := NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, newFakeNameTagAtlas())
 	defer renderer.Release()
-	if err := renderer.Prepare([]NameTag{{PlayerID: testNameTagID(1)}}, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare([]NameTag{{Key: testEntityKey(testNameTagID(1))}}, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	encoder := &dynamicUploadTestEncoder{}

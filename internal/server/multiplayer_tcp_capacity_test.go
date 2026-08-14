@@ -168,7 +168,7 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 	config.ViewRadius = 0
 	config.OutboxCapacity = 512
 	config.AutosaveTicks = 6000
-	host := NewHost(config, multiplayerManualGenerator{}, newHostTestStore())
+	host := mustNewHost(t, config, multiplayerManualGenerator{}, newHostTestStore())
 	hostDone := make(chan error, 1)
 	go func() { hostDone <- host.Run(context.Background(), listener) }()
 	var cleanupOnce sync.Once

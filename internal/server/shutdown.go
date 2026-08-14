@@ -61,9 +61,13 @@ func (server *Server) Shutdown(ctx context.Context) error {
 		freezeErr = server.drainSaveCompletionsWithError()
 		trustedCenter, trustedSequence, hasTrustedCenter := server.drainTrustedObserverCenter()
 		server.drainIncoming()
+		_ = server.drainIncomingChats()
 		server.drainAcquired()
 		server.drainGenerated()
 		server.engine.Step()
+		if server.companions != nil {
+			server.companions.Observe(server.engine.CompanionBodies())
+		}
 		if hasTrustedCenter {
 			server.appliedTrustedObserver = appliedTrustedObserverCenter{
 				dimension: trustedCenter.dimension,
@@ -98,6 +102,13 @@ func (server *Server) Shutdown(ctx context.Context) error {
 	if err := server.flushMetadata(ctx); err != nil {
 		return err
 	}
+	if server.companions != nil {
+		if err := server.companions.Flush(ctx); err != nil {
+			return server.persistenceErrorWithContext(
+				fmt.Errorf("flush companions: %w", err), ctx,
+			)
+		}
+	}
 	if server.storePhase == storeShutdownNeedsSync {
 		if err := server.store.Sync(ctx); err != nil {
 			return server.persistenceErrorWithContext(fmt.Errorf("sync world: %w", err), ctx)
@@ -112,6 +123,9 @@ func (server *Server) Shutdown(ctx context.Context) error {
 			return server.persistenceErrorWithContext(fmt.Errorf("close world: %w", err), ctx)
 		}
 		server.storePhase = storeShutdownClosed
+	}
+	if server.companions != nil {
+		server.companions.Close()
 	}
 	server.cancelSaves()
 	<-server.saveDone

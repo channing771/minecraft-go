@@ -19,7 +19,12 @@
 - **THEN** MUST 不存在 `mcgo`/`mcgod` wrapper、旧 C symbol、旧 dylib 或旧环境变量 fallback
 
 ### Requirement: 改名保持固定行为与 artifact
-系统 MUST 保持协议 v15、区块 schema v8、玩家 schema v6、metadata v2、benchmark scenario v15、ABI version/status、fixture、golden 与性能 baseline 不变。
+系统 MUST 保留 M4Q 纯改名冻结时协议 v15、区块 schema v8、玩家 schema v6、metadata v2、benchmark scenario v15、10 张 golden、ABI version/status、fixture 与性能 baseline 逐字节不变的历史证据。当前 M5A MUST 使用协议 v16 和 benchmark scenario v16，并 MUST 在保持原 10 张 golden 不变的前提下只追加 `ai-companion` 为第 11 张；区块 schema v8、玩家 schema v6、metadata v2、ABI 与既有性能 baseline MUST 继续不变。
+
+#### Scenario: 后续里程碑保留改名证据
+- **GIVEN** M4Q 纯改名的 v15、scenario v15 与 10 张 golden 证据已经冻结
+- **WHEN** 当前 M5A 增加伙伴协议、固定上传布局与 `ai-companion`
+- **THEN** 当前程序 MUST 使用协议 v16、scenario v16 与 11 张 golden，且 M4Q 的旧协议布局、旧 10 张 golden 和性能 baseline 证据 MUST 保持可审计且逐字节不变
 
 #### Scenario: 改名前后不变量逐字节一致
 - **GIVEN** 已在合并主线后的统一基线冻结固定 artifact

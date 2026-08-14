@@ -30,6 +30,12 @@ func TestPerformanceRecordersOnlyEnableSaveSamplingForBenchmark(t *testing.T) {
 	}
 }
 
+func TestProtocolV16ClientIsCurrent(t *testing.T) {
+	if network.ProtocolVersion != 16 {
+		t.Fatalf("客户端协议版本 = %d，想要 16", network.ProtocolVersion)
+	}
+}
+
 // Mutation killed: routing any remote-player message through Mirror closes the
 // endpoint instead of completing the spawn/state/despawn roster lifecycle.
 func TestRemoteMessagesRouteOnlyToRoster(t *testing.T) {
@@ -185,12 +191,12 @@ func TestRemotePresentationConversionPreservesSortedRenderData(t *testing.T) {
 	}
 	avatars, tags := remoteRenderPresentations(presentations)
 	wantAvatars := []render.Avatar{
-		{PlayerID: integrationPlayerID(1), Position: mgl32.Vec3{1, 2, 3}, Yaw: -0.4, Pitch: 0.2},
-		{PlayerID: integrationPlayerID(2), Position: mgl32.Vec3{8, 9, 10}, Yaw: 0.8, Pitch: -0.3},
+		{Key: render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(integrationPlayerID(1))}, Position: mgl32.Vec3{1, 2, 3}, Yaw: -0.4, Pitch: 0.2},
+		{Key: render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(integrationPlayerID(2))}, Position: mgl32.Vec3{8, 9, 10}, Yaw: 0.8, Pitch: -0.3},
 	}
 	wantTags := []render.NameTag{
-		{PlayerID: integrationPlayerID(1), Text: "甲", Anchor: mgl32.Vec3{1, 4.05, 3}},
-		{PlayerID: integrationPlayerID(2), Text: "乙", Anchor: mgl32.Vec3{8, 11.05, 10}},
+		{Key: render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(integrationPlayerID(1))}, Text: "甲", Anchor: mgl32.Vec3{1, 4.05, 3}},
+		{Key: render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(integrationPlayerID(2))}, Text: "乙", Anchor: mgl32.Vec3{8, 11.05, 10}},
 	}
 	if !reflect.DeepEqual(avatars, wantAvatars) || !reflect.DeepEqual(tags, wantTags) {
 		t.Fatalf("converted avatars/tags=%+v/%+v want=%+v/%+v", avatars, tags, wantAvatars, wantTags)

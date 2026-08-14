@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"slices"
 
@@ -14,9 +15,9 @@ import (
 )
 
 const (
-	maxRemoteAvatars    = 7
+	maxAvatars          = 11
 	avatarPartsPerBody  = 6
-	maxAvatarParts      = maxRemoteAvatars * avatarPartsPerBody
+	maxAvatarParts      = maxAvatars * avatarPartsPerBody
 	avatarInstanceBytes = 80
 
 	avatarCameraOffset   = 0
@@ -28,12 +29,40 @@ const (
 	avatarUploadBytes    = avatarIndirectOffset + avatarIndirectBytes
 )
 
+// EntityKind 区分共享渲染通道中的实体身份域。
+type EntityKind uint8
+
+const (
+	// EntityPlayer 表示玩家身份域。
+	EntityPlayer EntityKind = 1
+	// EntityCompanion 表示伙伴身份域。
+	EntityCompanion EntityKind = 2
+	// EntityTarget 表示当前方块目标名牌域。
+	EntityTarget EntityKind = 3
+)
+
+// EntityKey 由身份域和独立的 16-byte ID 组成。
+type EntityKey struct {
+	Kind EntityKind
+	ID   [16]byte
+}
+
+func compareEntityKeys(left, right EntityKey) int {
+	if left.Kind < right.Kind {
+		return -1
+	}
+	if left.Kind > right.Kind {
+		return 1
+	}
+	return bytes.Compare(left.ID[:], right.ID[:])
+}
+
 //go:embed shader/avatar.wgsl
 var avatarShader string
 
-// Avatar 是远端玩家渲染所需的插值后姿态。
+// Avatar 是远端玩家或伙伴渲染所需的插值后姿态。
 type Avatar struct {
-	PlayerID core.PlayerID
+	Key      EntityKey
 	Position mgl32.Vec3
 	Yaw      float32
 	Pitch    float32
@@ -44,7 +73,7 @@ type avatarPart struct {
 	color     [4]float32
 }
 
-// AvatarRenderer 管理固定容量的远端玩家实例与独立渲染 pass。
+// AvatarRenderer 管理固定容量的统一实体实例与独立渲染 pass。
 type AvatarRenderer struct {
 	dynamic  gfx.Buffer
 	vertices gfx.Buffer
@@ -56,11 +85,11 @@ type AvatarRenderer struct {
 	upload   []byte
 }
 
-// NewAvatarRenderer 一次性创建最多七个远端玩家所需的固定 GPU 资源。
+// NewAvatarRenderer 一次性创建最多十一个远端实体所需的固定 GPU 资源。
 func NewAvatarRenderer(dev gfx.Device, colorFormat, depthFormat gfx.TextureFormat) *AvatarRenderer {
 	renderer := &AvatarRenderer{
 		parts:   make([]avatarPart, 0, maxAvatarParts),
-		ordered: make([]Avatar, 0, maxRemoteAvatars),
+		ordered: make([]Avatar, 0, maxAvatars),
 		upload:  make([]byte, avatarUploadBytes),
 	}
 	renderer.dynamic = dev.CreateBuffer(gfx.BufferDesc{
@@ -131,11 +160,14 @@ func (renderer *AvatarRenderer) Render(
 	target, depth gfx.TextureView,
 	camera Camera,
 	avatars []Avatar,
-) {
+) error {
+	if len(avatars) > maxAvatars {
+		return fmt.Errorf("render: avatar count %d exceeds %d", len(avatars), maxAvatars)
+	}
 	renderer.ordered = orderedAvatarsInto(renderer.ordered[:0], avatars)
 	renderer.parts = buildOrderedAvatarParts(renderer.parts[:0], renderer.ordered)
 	if len(renderer.parts) == 0 {
-		return
+		return nil
 	}
 	encodeAvatarPartsInto(renderer.upload[avatarInstanceOffset:avatarIndirectOffset], renderer.parts)
 	encodeAvatarCameraInto(
@@ -158,6 +190,7 @@ func (renderer *AvatarRenderer) Render(
 	pass.SetIndexBuffer(renderer.indices, 0)
 	pass.DrawIndexedIndirect(renderer.dynamic, avatarIndirectOffset)
 	pass.End()
+	return nil
 }
 
 func encodeAvatarPartsInto(dst []byte, parts []avatarPart) {
@@ -200,11 +233,8 @@ func buildAvatarParts(dst []avatarPart, avatars []Avatar) []avatarPart {
 func orderedAvatarsInto(dst []Avatar, avatars []Avatar) []Avatar {
 	ordered := append(dst, avatars...)
 	slices.SortFunc(ordered, func(left, right Avatar) int {
-		return bytes.Compare(left.PlayerID[:], right.PlayerID[:])
+		return compareEntityKeys(left.Key, right.Key)
 	})
-	if len(ordered) > maxRemoteAvatars {
-		ordered = ordered[:maxRemoteAvatars]
-	}
 	return ordered
 }
 
@@ -213,7 +243,7 @@ func buildOrderedAvatarParts(dst []avatarPart, ordered []Avatar) []avatarPart {
 		root := mgl32.Translate3D(avatar.Position[0], avatar.Position[1], avatar.Position[2]).Mul4(
 			mgl32.HomogRotate3DY(avatar.Yaw),
 		)
-		base := AvatarColor(avatar.PlayerID)
+		base := avatarColor(avatar.Key)
 		head := root.Mul4(mgl32.Translate3D(0, 1.4, 0)).
 			Mul4(mgl32.HomogRotate3DX(avatar.Pitch)).
 			Mul4(mgl32.Translate3D(0, 0.2, 0)).
@@ -272,6 +302,30 @@ func AvatarColor(playerID core.PlayerID) [4]float32 {
 	)
 	hash := offset32
 	for _, value := range playerID {
+		hash ^= uint32(value)
+		hash *= prime32
+	}
+	return avatarPalette[hash%uint32(len(avatarPalette))]
+}
+
+func avatarColor(key EntityKey) [4]float32 {
+	if key.Kind == EntityPlayer {
+		return AvatarColor(core.PlayerID(key.ID))
+	}
+	if key.Kind != EntityCompanion {
+		panic("render: avatar color requires player or companion key")
+	}
+	const (
+		offset32             = uint32(2166136261)
+		prime32              = uint32(16777619)
+		companionColorDomain = "companion:"
+	)
+	hash := offset32
+	for index := range len(companionColorDomain) {
+		hash ^= uint32(companionColorDomain[index])
+		hash *= prime32
+	}
+	for _, value := range key.ID {
 		hash ^= uint32(value)
 		hash *= prime32
 	}

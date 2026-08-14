@@ -33,6 +33,8 @@ func clientPacketID(state State, packet ClientPacket) (uint32, bool) {
 			return 10, true
 		case DropSelectedItem:
 			return 11, true
+		case ChatCommand:
+			return 12, true
 		}
 	}
 	return 0, false
@@ -73,6 +75,8 @@ func clientPacketForID(state State, id uint32) (ClientPacket, bool) {
 			return CloseContainer{}, true
 		case 11:
 			return DropSelectedItem{}, true
+		case 12:
+			return ChatCommand{}, true
 		}
 	}
 	return nil, false
@@ -129,6 +133,14 @@ func serverPacketID(state State, packet ServerPacket) (uint32, bool) {
 			return 14, true
 		case ChestState:
 			return 15, true
+		case ChatEvent:
+			return 16, true
+		case CompanionSpawn:
+			return 17, true
+		case CompanionStates:
+			return 18, true
+		case CompanionDespawn:
+			return 19, true
 		}
 	}
 	return 0, false
@@ -185,6 +197,14 @@ func serverPacketForID(state State, id uint32) (ServerPacket, bool) {
 			return ContainerClosed{}, true
 		case 15:
 			return ChestState{}, true
+		case 16:
+			return ChatEvent{}, true
+		case 17:
+			return CompanionSpawn{}, true
+		case 18:
+			return CompanionStates{}, true
+		case 19:
+			return CompanionDespawn{}, true
 		}
 	}
 	return nil, false

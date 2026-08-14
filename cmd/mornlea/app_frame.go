@@ -51,17 +51,42 @@ func (a *application) frame(drainMax, meshWorkMax int, elapsed time.Duration) (b
 	if a.remotePlayers != nil {
 		a.remotePlayers.Advance(elapsed)
 	}
+	if a.companions != nil {
+		a.companions.Advance(elapsed)
+	}
 	return a.renderFrame(meshWorkMax)
 }
 
 // renderFrame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
 func (a *application) renderFrame(workMax int) (bool, error) {
 	blockTargetReset := a.blockTargetReset
-	a.blockTargetReset = false
 	width, height := a.framebufferSize()
 	if width == 0 || height == 0 {
 		return false, nil
 	}
+	a.remotePresentations = a.remotePlayers.AppendPresentations(a.remotePresentations[:0])
+	a.remoteAvatars, a.remoteNameTags = remoteRenderPresentationsSortedInto(
+		a.remoteAvatars[:0],
+		a.remoteNameTags[:0],
+		a.remotePresentations,
+	)
+	if a.companions != nil {
+		a.companionPresentations = a.companions.AppendPresentations(a.companionPresentations[:0])
+		a.remoteAvatars, a.remoteNameTags = appendCompanionRenderPresentationsInto(
+			a.remoteAvatars,
+			a.remoteNameTags,
+			a.companionPresentations,
+		)
+	}
+	blockOutline := render.BlockOutline{}
+	if !blockTargetReset && !a.clientSessionClosed {
+		a.remoteNameTags, blockOutline = a.appendCurrentBlockTarget(a.remoteNameTags)
+	}
+	avatars, tags := a.remoteAvatars, a.remoteNameTags
+	if err := validateEntityPresentationCounts(avatars, tags); err != nil {
+		return false, fmt.Errorf("准备实体呈现: %w", err)
+	}
+	a.blockTargetReset = false
 	if a.surface != nil && (uint32(width) != a.depth.width || uint32(height) != a.depth.height) {
 		a.surface.Resize(uint32(width), uint32(height))
 		a.depth.Release()
@@ -80,17 +105,6 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		a.renderer.QueueSection(result.Pos, result.Quads)
 	}
 	a.renderer.FlushUploads(a.center)
-	a.remotePresentations = a.remotePlayers.AppendPresentations(a.remotePresentations[:0])
-	a.remoteAvatars, a.remoteNameTags = remoteRenderPresentationsSortedInto(
-		a.remoteAvatars[:0],
-		a.remoteNameTags[:0],
-		a.remotePresentations,
-	)
-	blockOutline := render.BlockOutline{}
-	if !blockTargetReset && !a.clientSessionClosed {
-		a.remoteNameTags, blockOutline = a.appendCurrentBlockTarget(a.remoteNameTags)
-	}
-	avatars, tags := a.remoteAvatars, a.remoteNameTags
 	renderTiming := a.multiplayerRenderTiming
 	var renderNow func() time.Time
 	var nameTagDuration time.Duration
@@ -108,27 +122,29 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		return false, fmt.Errorf("准备世界名牌: %w", err)
 	}
 	inventory, inventoryConfirmed := a.inventory.State()
-	if inventoryConfirmed {
-		var overlay *hud.FurnaceOverlay
-		if furnace, opened := a.furnace.State(); opened {
-			overlay = &hud.FurnaceOverlay{
-				Input:         furnace.Input,
-				Fuel:          furnace.Fuel,
-				Output:        furnace.Output,
-				ProgressTicks: furnace.ProgressTicks,
-				BurnTicks:     furnace.BurnTicks,
-			}
+	var overlay *hud.FurnaceOverlay
+	if furnace, opened := a.furnace.State(); opened {
+		overlay = &hud.FurnaceOverlay{
+			Input:         furnace.Input,
+			Fuel:          furnace.Fuel,
+			Output:        furnace.Output,
+			ProgressTicks: furnace.ProgressTicks,
+			BurnTicks:     furnace.BurnTicks,
 		}
-		var chestOverlay *hud.ChestOverlay
-		if chest, opened := a.chest.State(); opened {
-			chestOverlay = &hud.ChestOverlay{Items: chest.Items}
-		}
-		// 生命值的确认状态独立于背包：Predictor 尚未收到权威状态时 ready 为
-		// false，HUD 绝不画出预测或陈旧的生命值。
-		health, healthReady := a.predictor.Health()
+	}
+	var chestOverlay *hud.ChestOverlay
+	if chest, opened := a.chest.State(); opened {
+		chestOverlay = &hud.ChestOverlay{Items: chest.Items}
+	}
+	// 生命值和聊天都独立于背包确认状态；未确认时 renderer 只跳过物品布局。
+	health, healthReady := a.predictor.Health()
+	chatOverlay := a.chatOverlay()
+	hudVisible := inventoryConfirmed || (healthReady && !a.clientSessionClosed) ||
+		chatOverlay.Open || len(chatOverlay.Lines) != 0
+	if hudVisible {
 		if err := a.hotbarRenderer.Prepare(
-			inventory, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
-			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health},
+			inventory, inventoryConfirmed, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
+			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health}, chatOverlay,
 			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
@@ -178,7 +194,9 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		Daylight: dayNight.Daylight,
 		SkyColor: dayNight.ClearColor,
 	}
-	a.avatarRenderer.Render(encoder, target, a.depth.view, entityCamera, avatars)
+	if err := a.avatarRenderer.Render(encoder, target, a.depth.view, entityCamera, avatars); err != nil {
+		return false, fmt.Errorf("呈现实体 Avatar: %w", err)
+	}
 	if renderTiming != nil {
 		renderTiming.recordAvatar(renderNow().Sub(started))
 		started = renderNow()
@@ -207,7 +225,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	}
 	a.damageOverlayRenderer.Render(encoder, target, a.damageStrength)
 	// HUD 在全部世界 pass 与 damage overlay 之后绘制。
-	if inventoryConfirmed {
+	if hudVisible {
 		a.hotbarRenderer.Render(encoder, target)
 	}
 	// 调试面板是最上层：必须在 HUD 之后绘制，否则会被背包/容器界面盖住。

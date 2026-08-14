@@ -9,9 +9,9 @@ const (
 	// 固定容量按最坏布局：背包分组面板、两种高亮、36 个栏位、双层物品内容、
 	// 九格快捷栏耐久条，再加最大的容器叠加层与十段生命条。
 	maxHotbarQuads = openInventoryPanelQuads + 2 + core.InventorySlots + core.InventorySlots*2 +
-		core.HotbarSlots*2 + maxOverlayQuads + healthQuads
+		core.HotbarSlots*2 + maxOverlayQuads + healthQuads + maxChatQuads
 	// 数量最多两位数（2..64），每个数字包含阴影与前景两个实例。
-	maxHotbarGlyphs = core.InventorySlots*4 + maxOverlayGlyphs
+	maxHotbarGlyphs = core.InventorySlots*4 + maxOverlayGlyphs + maxChatGlyphs
 
 	// 打开背包时依次绘制外框、背包区、快捷栏区和分隔线。
 	openInventoryPanelQuads = 4

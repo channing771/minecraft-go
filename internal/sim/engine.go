@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/physics"
 	"github.com/channing771/mornlea/internal/world"
@@ -49,6 +50,7 @@ type Engine struct {
 	viewRadius         int
 	dimensions         map[core.DimensionID]*Dimension
 	sessions           map[SessionID]*sessionState
+	companions         map[companion.ID]*companionState
 	wanted             map[core.ChunkKey]struct{}
 	inFlightSaves      map[core.ChunkKey]persistenceInFlight
 	subscriptionsDirty bool
@@ -84,6 +86,7 @@ func NewEngine(viewRadius int, worldTime uint64) *Engine {
 			core.Overworld: NewDimension(core.Overworld),
 		},
 		sessions:      make(map[SessionID]*sessionState),
+		companions:    make(map[companion.ID]*companionState),
 		wanted:        make(map[core.ChunkKey]struct{}),
 		inFlightSaves: make(map[core.ChunkKey]persistenceInFlight),
 	}

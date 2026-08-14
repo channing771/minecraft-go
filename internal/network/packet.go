@@ -7,8 +7,8 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// ProtocolVersion 是 M4O 唯一支持的协议版本。
-const ProtocolVersion uint32 = 15
+// ProtocolVersion 是 M5A 唯一支持的协议版本。
+const ProtocolVersion uint32 = 16
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -163,6 +163,8 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 			return clientPacket.Validate()
 		case DropSelectedItem:
 			return clientPacket.Validate()
+		case ChatCommand:
+			return clientPacket.Validate()
 		case RequestChunkResync:
 			return clientPacket.Validate()
 		case KeepAliveReply:
@@ -250,6 +252,14 @@ func ValidateServerPacket(state State, packet ServerPacket) error {
 		case ChestState:
 			return serverPacket.Validate()
 		case ContainerClosed:
+			return serverPacket.Validate()
+		case ChatEvent:
+			return serverPacket.Validate()
+		case CompanionSpawn:
+			return serverPacket.Validate()
+		case CompanionStates:
+			return serverPacket.Validate()
+		case CompanionDespawn:
 			return serverPacket.Validate()
 		default:
 			return invalidServerPacket(state, packet)

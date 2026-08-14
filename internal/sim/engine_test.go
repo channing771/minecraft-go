@@ -76,8 +76,8 @@ func TestAcquiredMissGeneratesExactlyOnceAndLoadErrorFails(t *testing.T) {
 	engine.SubmitAcquired(sim.AcquiredChunk{Key: failedKey, Err: wantErr})
 	failed := engine.Step()
 	info, ok := engine.ChunkInfo(failedKey)
-	if len(failed.Generate) != 0 || !ok || info.State != sim.ChunkFailed ||
-		!errors.Is(info.Err, wantErr) {
+	if len(failed.Acquire) != 0 || len(failed.Generate) != 0 || !ok ||
+		info.State != sim.ChunkFailed || !errors.Is(info.Err, wantErr) {
 		t.Fatalf("failed result=%+v info=%+v ok=%v", failed, info, ok)
 	}
 }

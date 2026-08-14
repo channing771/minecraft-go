@@ -626,7 +626,7 @@ func startIntegrationHostWithStore(t *testing.T, store storage.WorldStore, gener
 	config.AutosaveTicks = 20
 	config.RetryBaseTicks = 1
 	config.RetryMaxTicks = 2
-	host := NewHost(config, generator, store)
+	host := mustNewHost(t, config, generator, store)
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
 	t.Cleanup(func() {

@@ -89,6 +89,14 @@ func (server *Server) endpointReader(current *session) {
 			}
 			continue
 		}
+		if command, ok := message.(network.ChatCommand); ok {
+			server.enqueueIncomingChat(current.ctx, incomingChat{
+				sessionID:  current.id,
+				generation: current.generation,
+				command:    command,
+			})
+			continue
+		}
 		command, ok := translateClientMessage(current.id, message)
 		if !ok {
 			current.fail(errUnknownClientMessage)

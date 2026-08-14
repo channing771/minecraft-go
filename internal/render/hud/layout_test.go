@@ -2,6 +2,7 @@ package hud
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/channing771/mornlea/internal/core"
@@ -145,6 +146,11 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		&layout, atlas, maxQuadTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720,
 	)
 	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720)
+	chatLine := strings.Repeat("中", maxChatRunes)
+	appendChatOverlay(&layout, atlas, ChatOverlay{
+		Open: true, Input: chatLine,
+		Lines: []string{chatLine, chatLine, chatLine, chatLine, chatLine, chatLine},
+	}, 1280, 720)
 	if len(layout.quads) != maxHotbarQuads {
 		t.Fatalf("quad 上限见证 quads=%d，想要 %d", len(layout.quads), maxHotbarQuads)
 	}
@@ -152,8 +158,12 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		&layout, atlas, fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720,
 	)
 	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720)
-	if len(layout.glyphs) != 252 {
-		t.Fatalf("glyph 上限见证数字=%d，想要背包与箱子两位数阴影共 252", len(layout.glyphs))
+	appendChatOverlay(&layout, atlas, ChatOverlay{
+		Open: true, Input: chatLine,
+		Lines: []string{chatLine, chatLine, chatLine, chatLine, chatLine, chatLine},
+	}, 1280, 720)
+	if len(layout.glyphs) != maxHotbarGlyphs {
+		t.Fatalf("glyph 上限见证=%d，想要 %d", len(layout.glyphs), maxHotbarGlyphs)
 	}
 	if len(layout.quads) > maxHotbarQuads {
 		t.Fatalf("glyph 上限见证 quads=%d，超过固定上限 %d", len(layout.quads), maxHotbarQuads)
