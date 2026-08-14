@@ -14,8 +14,8 @@ PR #41 的同一代码树在 GitHub Actions 中出现两种偶发失败，而合
   立即用同一身份登录，被 Host 以“玩家已在线”拒绝；
 - run `31813364557` 的 `TestHostHeartbeatTimeoutCleanupIsIsolated` 在 30 秒后报告健康玩家
   未 Ready；
-- 合并后 run `31814398960` 通过，且失败与成功运行使用相同 tree，证明问题来自测试
-  缺失 happens-before，而不是代码树差异。
+- 合并后 run `31814398960` 通过，且失败与成功运行使用相同 tree；结合失败断言与代码中
+  缺失的同步边界，判定问题来自测试缺失 happens-before，而不是代码树差异。
 
 长期设计已经确定 Rust 最终持有底层引擎，阶段 2 从纯计算模块开始。本设计把 CI 根因
 修复与下一批 Rust 下沉放在同一个 OpenSpec change 中，但仍按严格先后顺序实施：先让
@@ -197,6 +197,13 @@ internal/core    ─┘
 `nativeabi` 只暴露 POD、`[]byte` 与数字数组，不依赖 `core`、`physics`、`mesh`、`world`
 等领域类型。领域包各自负责布局编码与结果解释，避免 bridge 反向拥有 gameplay 语义。
 
+mesh、collision 与 raycast 的 C 声明必须使用 Go 1.26 支持的 `#cgo noescape` 与
+`#cgo nocallback`，前提是 Rust FFI 结构审计确认对应 entry point 不保存地址、不回调 Go。
+Go escape diagnostics 与分配测试验证这些声明确实生效；这样常规栈上 input/output
+不因进入 cgo 而逃逸到 heap。若编译器 escape 检查或
+`AllocsPerRun` 证明该声明未生效，实施必须停下修复 bridge，不能用全局 pool 或放宽
+零分配门禁替代。
+
 现有 `internal/mesh/native_abi.go` 的 cgo 职责移入该包；mesh 的 Go API 和 packed quad
 结果不变。架构守卫同步登记 `core/physics/mesh → nativeabi`，并继续禁止其他包直接接触
 C header 或 native symbol。
@@ -237,14 +244,26 @@ cells in deterministic Y/X/Z order:
 `CollisionSource` 的生产实现必须在单次 Step 内为纯、一致的只读查询；现有 client mirror
 与 server dimension 满足该条件。
 
+Go encoder 保持现有 `clipAxis` 的兼容语义：先把 `CollisionBoxSet.Count` clamp 到
+`len(Boxes)==8`，只编码前八个 AABB。Rust 只接受编码后的 `boxCount<=8`；不得因为原始
+Count 是 9 或 255 而把既有可接受输入改成 panic。
+
 ### 8.2 容量与分配
 
 - 根据正式 config 的 tunable 上限推导并冻结常规 prism 容量；
 - 默认、colliding 和 stepping 稳定路径使用栈上固定缓冲并继续满足 `0 allocs/op`；
 - 合法但超出常规容量的测试/内部状态先以 checked arithmetic 计算完整长度，再使用临时
   动态缓冲；
+- dynamic path 的硬上限为 `4096` 个 cell，必须在查询 `CollisionSource`、分配和 FFI
+  前检查；
 - 不截断、不把 unknown 当 air、不以 Go 算法 fallback；
-- 长度乘法溢出或无法表示的 prism 在任何 native 调用和状态发布前失败。
+- 超过 cell 上限、长度乘法溢出或无法表示的 prism 以稳定 panic 在任何查询、分配、
+  native 调用和状态发布前失败。
+
+`4096` 是一个完整 `16³` section 的 cell 数，显著覆盖 config 允许的 `walkSpeed<=20`、
+`jumpSpeed<=30`、`terminalFallSpeed<=200`、`stepHeight<=1.5` 所需 swept volume，同时为
+内部异常状态提供明确资源天花板。该上限属于 observable resource contract，必须写入
+delta spec 并覆盖 `4096` 成功、`4097` 原子失败与超限时 source 零调用测试。
 
 ### 8.3 Rust collision kernel
 
@@ -257,6 +276,10 @@ Rust 使用 snapshot 完整执行：
 - ordinary move、ground probe；
 - step rise、水平移动、下降、headroom/landing 检查；
 - 水平进度严格更大时才选择 step path。
+
+`hitUnknown` 只来自最终选中的 ordinary 或 step path。若备选 step path 遇到 unknown 后
+被拒绝，最终返回的 ordinary 结果不得继承该备选路径的 unknown；这保持现有 Go
+`resolveStepMove` 返回 `(moveResult{}, false)` 后丢弃临时结果的语义。
 
 输出只包含：
 
@@ -310,6 +333,11 @@ Rust 保持：
 Go 按 record 顺序执行 callback。首个 error 原样返回；首个 solid 立即形成 RayHit；本批
 没有结果且 `done=false` 时，把 caller-owned cursor 传回下一次调用。
 
+所有 input、cursor 与 output capacity 检查必须在 traversal 前一次完成。一个已验证的
+batch 在生成最多 64 条 record 时是 total operation，不得因后续 cell 而返回新错误；
+`int32` cell 前进使用与 Go 相同的 wrapping 更新。这样 Rust 预计算后续 record 不会抢在
+本批第一条 callback 的 sentinel error 前发布另一种失败。
+
 64 条覆盖生产 reach=6 和现有 benchmark reach=32。更长合法射线分批继续，不设置新
 距离上限，也不复制 dense bounding prism。Rust 可以预计算本批后续 cell，但 Go 不会对
 命中/错误后的 record 执行 callback，因此惰性可观察行为不变。
@@ -342,7 +370,7 @@ version、magic、长度、对齐、指针范围、buffer overlap、count、curs
 - nil、长度、对齐、overlap、capacity、cursor 与 panic；
 - collision axis order、box overlap、unknown、step 选择与 ULP；
 - raycast 起点、负坐标、tie、endpoint、batch boundary 与 cursor；
-- stable collision/raycast kernel 不执行 heap allocation。
+- stable collision/raycast kernel 不执行 heap allocation，Go bridge 的常规栈缓冲不逃逸。
 
 ### 11.2 Go/Rust parity
 
@@ -352,7 +380,11 @@ Go oracle 与 Rust 生产实现对同一输入逐位比较：
 - 固定种子随机输入；
 - fuzz seed 与独立 fuzz target；
 - 负坐标、8 AABB、unknown、头顶不足、同高落点、极限 tunable/velocity；
+- 原始 collision Count 为 8、9、255 时与现有 clamp 语义一致；
+- ordinary path 已知、被拒绝的备选 step 遇到 unknown 时最终 `HitUnknown` 仍为 false；
+- collision snapshot 4096-cell 成功、4097-cell 原子失败且 source 零调用；
 - raycast callback error identity、64 条边界和多 batch；
+- raycast 靠近 int32 边界、首条 callback 返回 sentinel error 时仍原样返回该 error；
 - 多 goroutine 并发调用；
 - macOS arm64 与 Linux amd64 各自对相同 golden/parity corpus 验证。
 
@@ -407,6 +439,8 @@ combined change 至少包含：
 
 - `rust-engine-mesh` MODIFIED delta：workspace/library identity、Rust-first build、Linux
   headless server 的 Rust/CGO 新契约；
+- `project-identity` MODIFIED delta：`libmornlea_engine.dylib` 身份以及 Linux
+  `mornlea-server + libmornlea_engine.so` bundle，替换旧 CGO0 单文件承诺；
 - 新增 `rust-engine-collision-raycast` capability：collision snapshot、raycast batch、
   parity、所有权和失败原子性；
 - proposal/design/tasks 中的 CI root-cause 任务；已有 `test-timing-discipline` 已足够，
