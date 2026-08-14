@@ -60,7 +60,6 @@ func (a *application) frame(drainMax, meshWorkMax int, elapsed time.Duration) (b
 // renderFrame 绘制一帧，返回 surface 是否实际取得了可呈现纹理。
 func (a *application) renderFrame(workMax int) (bool, error) {
 	blockTargetReset := a.blockTargetReset
-	a.blockTargetReset = false
 	width, height := a.framebufferSize()
 	if width == 0 || height == 0 {
 		return false, nil
@@ -87,6 +86,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	if err := validateEntityPresentationCounts(avatars, tags); err != nil {
 		return false, fmt.Errorf("准备实体呈现: %w", err)
 	}
+	a.blockTargetReset = false
 	if a.surface != nil && (uint32(width) != a.depth.width || uint32(height) != a.depth.height) {
 		a.surface.Resize(uint32(width), uint32(height))
 		a.depth.Release()

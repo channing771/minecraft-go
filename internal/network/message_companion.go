@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -201,7 +202,7 @@ func validPlayerName(name string) bool {
 }
 
 func validCompanionPose(position mgl32.Vec3, yaw, pitch float32) bool {
-	return finiteVec3(position) && finite32(yaw) && finite32(pitch) && pitch >= -90 && pitch <= 90
+	return finiteVec3(position) && finite32(yaw) && finite32(pitch) && pitch >= -math.Pi/2 && pitch <= math.Pi/2
 }
 
 func encodeChatEvent(e *byteEncoder, event ChatEvent) {

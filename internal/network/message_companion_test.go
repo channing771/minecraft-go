@@ -157,7 +157,7 @@ func TestCompanionSpawnAndChatEventStringBoundaries(t *testing.T) {
 	maxName := strings.Repeat("𐐀", 32)
 	maxCommand := strings.Repeat("x", 1024)
 	valid := []interface{ Validate() error }{
-		CompanionSpawn{ID: id, Name: maxName, Dimension: core.Overworld, Pitch: 90},
+		CompanionSpawn{ID: id, Name: maxName, Dimension: core.Overworld, Pitch: float32(math.Pi / 2)},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: maxName, CompanionID: id,
 			CompanionName: maxName, Kind: ChatEventAccepted, RejectReason: ChatRejectNone, Command: maxCommand},
 		ChatEvent{EventID: 2, PlayerID: playerID, PlayerName: "Chen", Kind: ChatEventRejected,
@@ -186,7 +186,7 @@ func TestCompanionSpawnAndChatEventStringBoundaries(t *testing.T) {
 		CompanionSpawn{ID: id, Name: " A", Dimension: core.Overworld},
 		CompanionSpawn{ID: id, Name: "A\n", Dimension: core.Overworld},
 		CompanionSpawn{ID: id, Name: "A", Dimension: 1},
-		CompanionSpawn{ID: id, Name: "A", Dimension: core.Overworld, Pitch: 90.01},
+		CompanionSpawn{ID: id, Name: "A", Dimension: core.Overworld, Pitch: float32(math.Pi/2) + 0.01},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: tooManyRunes, Kind: ChatEventRejected, RejectReason: ChatRejectInvalidFormat},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: exact129Bytes, Kind: ChatEventRejected, RejectReason: ChatRejectInvalidFormat},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: tooManyBytes, Kind: ChatEventRejected, RejectReason: ChatRejectInvalidFormat},
@@ -222,6 +222,52 @@ func TestCompanionSpawnAndChatEventStringBoundaries(t *testing.T) {
 	oversizedNameEvent.string("", 1024)
 	if packet, err := decodeServerControlPayload(StatePlay, 16, oversizedNameEvent.data); err == nil || packet != nil {
 		t.Fatalf("129-byte player name wire 解码为 %#v, %v", packet, err)
+	}
+}
+
+func TestCompanionPitchUsesRadiansInValidateAndDecode(t *testing.T) {
+	id := testCompanionID(1)
+	halfPi := float32(math.Pi / 2)
+	aboveHalfPi := math.Nextafter32(halfPi, float32(math.Inf(1)))
+	belowNegativeHalfPi := math.Nextafter32(-halfPi, float32(math.Inf(-1)))
+
+	for _, pitch := range []float32{-halfPi, halfPi} {
+		if err := (CompanionSpawn{ID: id, Name: "A", Dimension: core.Overworld, Pitch: pitch}).Validate(); err != nil {
+			t.Fatalf("合法 Spawn pitch %v 被拒绝: %v", pitch, err)
+		}
+		if err := (CompanionStates{States: []CompanionState{{
+			ID: id, Dimension: core.Overworld, Pitch: pitch,
+		}}}).Validate(); err != nil {
+			t.Fatalf("合法 States pitch %v 被拒绝: %v", pitch, err)
+		}
+	}
+
+	for _, message := range []interface{ Validate() error }{
+		CompanionSpawn{ID: id, Name: "A", Dimension: core.Overworld, Pitch: aboveHalfPi},
+		CompanionSpawn{ID: id, Name: "A", Dimension: core.Overworld, Pitch: belowNegativeHalfPi},
+		CompanionStates{States: []CompanionState{{ID: id, Dimension: core.Overworld, Pitch: aboveHalfPi}}},
+		CompanionStates{States: []CompanionState{{ID: id, Dimension: core.Overworld, Pitch: belowNegativeHalfPi}}},
+	} {
+		if err := message.Validate(); err == nil {
+			t.Fatalf("非法 %T pitch 通过 Validate: %+v", message, message)
+		}
+	}
+
+	_, spawnWire, err := encodeServerControlPayload(StatePlay, CompanionSpawn{
+		ID: id, Name: "A", Dimension: core.Overworld, Pitch: halfPi,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.LittleEndian.PutUint32(spawnWire[len(spawnWire)-4:], math.Float32bits(aboveHalfPi))
+	if packet, err := decodeServerControlPayload(StatePlay, 17, spawnWire); err == nil || packet != nil {
+		t.Fatalf("非法 Spawn pitch raw wire 解码为 %#v, %v", packet, err)
+	}
+
+	statesWire := companionStatesWireFixture(id)
+	binary.LittleEndian.PutUint32(statesWire[len(statesWire)-5:len(statesWire)-1], math.Float32bits(belowNegativeHalfPi))
+	if packet, err := decodeServerControlPayload(StatePlay, 18, statesWire); err == nil || packet != nil {
+		t.Fatalf("非法 States pitch raw wire 解码为 %#v, %v", packet, err)
 	}
 }
 
@@ -310,7 +356,7 @@ func TestCompanionStatesRejectsFiveDuplicateOrUnsortedAtomically(t *testing.T) {
 
 func TestCompanionDecoderRejectsInvalidIDsEnumsNumbersAndDimensions(t *testing.T) {
 	spawn := CompanionSpawn{ID: testCompanionID(1), Name: "A", Tick: 1, Dimension: core.Overworld,
-		Position: mgl32.Vec3{1, 2, 3}, Yaw: 4, Pitch: 5}
+		Position: mgl32.Vec3{1, 2, 3}, Yaw: 4, Pitch: 0.5}
 	_, spawnWire, err := encodeServerControlPayload(StatePlay, spawn)
 	if err != nil {
 		t.Fatal(err)

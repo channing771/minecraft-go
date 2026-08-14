@@ -103,6 +103,7 @@ func TestApplicationRendersSevenPlayersAndFourCompanionsInOneAvatarAndNameTagPas
 func TestApplicationRejectsActorOverflowBeforeGPUOrAtlasMutation(t *testing.T) {
 	glyphs := &integrationGlyphSource{}
 	app, dev := newRemoteRenderApplication(t, glyphs)
+	configureTargetFeedback(t, app)
 	for index := range 12 {
 		if err := app.remotePlayers.Apply(remoteSpawn(
 			byte(index+1), "Remote", 1, mgl32.Vec3{float32(index), 2, -4},
@@ -113,6 +114,7 @@ func TestApplicationRejectsActorOverflowBeforeGPUOrAtlasMutation(t *testing.T) {
 	app.renderer.QueueSection(core.SectionPos{Y: 4}, []mesh.Quad{{
 		W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0xf0,
 	}})
+	app.blockTargetReset = true
 	dev.resetPasses()
 	for _, buffer := range dev.buffers {
 		buffer.writes = 0
@@ -134,6 +136,34 @@ func TestApplicationRejectsActorOverflowBeforeGPUOrAtlasMutation(t *testing.T) {
 	}
 	if glyphs.requests != 0 || glyphs.flushes != 0 {
 		t.Fatalf("overflow 后 atlas request/flush=%d/%d，想要 0/0", glyphs.requests, glyphs.flushes)
+	}
+	if !app.blockTargetReset {
+		t.Fatal("overflow 消费了尚未成功呈现的 block target reset")
+	}
+
+	app.remotePlayers.Reset()
+	dev.resetPasses()
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("移除 overflow 后 renderFrame=(%v,%v)", rendered, err)
+	}
+	if app.blockTargetReset {
+		t.Fatal("成功帧没有消费 block target reset")
+	}
+	if got, want := dev.lastPasses(), []string{"terrain pass", "hotbar pass"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reset 成功帧 passes=%v want=%v", got, want)
+	}
+	if len(app.remoteNameTags) != 0 {
+		t.Fatalf("reset 成功帧仍提交 %d 个目标名牌", len(app.remoteNameTags))
+	}
+
+	dev.resetPasses()
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("reset 后一帧 renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := dev.lastPasses(), []string{
+		"terrain pass", "block outline pass", "name-tag pass", "hotbar pass",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reset 后一帧 passes=%v want=%v", got, want)
 	}
 }
 
