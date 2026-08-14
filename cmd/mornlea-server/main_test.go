@@ -405,6 +405,7 @@ func TestNewHostFailureClosesDedicatedListenerAndStore(t *testing.T) {
 	wantErr := errors.New("companion bootstrap failed")
 	store := &mornleaServerClosingStore{WorldStore: storage.NewMemory(storage.Metadata{FormatVersion: 2})}
 	listener := &mornleaServerClosingListener{}
+	var logs bytes.Buffer
 	ctx := context.WithValue(context.Background(), struct{}{}, "constructor-context")
 	err := run(ctx, absentConfigArgs(t), dependencies{
 		openDisk:  func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) { return store, nil },
@@ -415,9 +416,13 @@ func TestNewHostFailureClosesDedicatedListenerAndStore(t *testing.T) {
 			}
 			return nil, wantErr
 		},
+		logger: slog.New(slog.NewTextHandler(&logs, nil)),
 	})
 	if !errors.Is(err, wantErr) || store.closes != 1 || listener.closes != 1 {
 		t.Fatalf("run error=%v store/listener closes=%d/%d", err, store.closes, listener.closes)
+	}
+	if strings.Contains(logs.String(), "mornlea-server 已启动") {
+		t.Fatalf("Host 构造失败却记录了启动日志：%q", logs.String())
 	}
 }
 

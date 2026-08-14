@@ -154,7 +154,6 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 	}
 
 	metadata := store.Metadata()
-	dependencies.logger.Info("mornlea-server 已启动", "listen", listener.Addr(), "world", options.World, "protocol", network.ProtocolVersion)
 	config := server.DefaultConfig(metadata.Seed)
 	config.Companions = slices.Clone(effective.CompanionDefinitions())
 	config.MaxPlayers = options.MaxPlayers
@@ -166,6 +165,7 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 			store.Close(),
 		)
 	}
+	dependencies.logger.Info("mornlea-server 已启动", "listen", listener.Addr(), "world", options.World, "protocol", network.ProtocolVersion)
 	return host.Run(ctx, listener)
 }
 

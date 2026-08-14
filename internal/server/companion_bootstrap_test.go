@@ -99,6 +99,31 @@ func TestNewHostRejectsSixtyFifthDistinctStoredOrNewCompanion(t *testing.T) {
 	}
 }
 
+func TestNewHostAcceptsSixtyFourStoredWhenConfiguredIDAlreadyExists(t *testing.T) {
+	records := make([]companion.Body, companion.MaxStored)
+	for index := range records {
+		records[index] = companionBootstrapBody(companionBootstrapID(byte(index+1)), float32(index)+0.5)
+	}
+	store := newCompanionBootstrapStore()
+	seedCompanionBootstrapStore(t, store, 9, records)
+	config := hostTestConfig()
+	config.Companions = []companion.Definition{{ID: records[0].ID, Name: "阿木"}}
+
+	host, err := NewHost(context.Background(), config, flatTestGenerator{}, store)
+	if err != nil {
+		t.Fatalf("NewHost: %v", err)
+	}
+	cleanupCompanionBootstrapHost(t, host)
+	got, revision := companionBootstrapRecords(host)
+	loads, saves := store.companionCallCounts()
+	if revision != 9 || !reflect.DeepEqual(got, records) {
+		t.Fatalf("64 条去重记录 revision=%d records=%+v", revision, got)
+	}
+	if loads != 1 || saves != 0 || store.syncCount() != 0 || store.closeCount() != 0 {
+		t.Fatalf("constructor calls load/save/sync/close=%d/%d/%d/%d", loads, saves, store.syncCount(), store.closeCount())
+	}
+}
+
 func TestNewHostRejectsCorruptOrFutureCompanionStoreBeforeWorkersStart(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -144,6 +169,45 @@ func TestRemovingAllCompanionConfigDisablesAIAndLeavesFileUntouched(t *testing.T
 	}
 }
 
+func TestCompanionNormalStepAutosavesAndRetriesAtTick(t *testing.T) {
+	id := companionBootstrapID(1)
+	store := newCompanionBootstrapStore()
+	wantErr := errors.New("companion autosave failed")
+	store.saveErrors = []error{wantErr, nil}
+	config := hostTestConfig()
+	config.Companions = []companion.Definition{{ID: id, Name: "阿木"}}
+	config.AutosaveTicks = 1
+	config.RetryBaseTicks = 2
+	config.RetryMaxTicks = 2
+	host, err := NewHost(context.Background(), config, flatTestGenerator{}, store)
+	if err != nil {
+		t.Fatalf("NewHost: %v", err)
+	}
+	cleanupCompanionBootstrapHost(t, host)
+
+	body, activationTick := stepUntilCompanionBootstrapBody(t, host, id)
+	first := receiveCompanionBootstrapSave(t, store)
+	if first.Revision != 1 || !reflect.DeepEqual(first.Records, []companion.Body{body}) {
+		t.Fatalf("autosave tick=%d save=%+v，want revision 1 body %+v", activationTick, first, body)
+	}
+	waitForCompanionBootstrapCompletion(t, host.world.companions)
+	harvest := host.world.StepForTest()
+	if harvest.Tick != activationTick+1 {
+		t.Fatalf("failure harvest tick=%d，want %d", harvest.Tick, activationTick+1)
+	}
+
+	beforeRetry := host.world.StepForTest()
+	if beforeRetry.Tick != harvest.Tick+1 {
+		t.Fatalf("before retry tick=%d，want %d", beforeRetry.Tick, harvest.Tick+1)
+	}
+	assertNoCompanionBootstrapSave(t, store)
+	retryTick := host.world.StepForTest()
+	retry := receiveCompanionBootstrapSave(t, store)
+	if retryTick.Tick != harvest.Tick+2 || !reflect.DeepEqual(retry, first) {
+		t.Fatalf("retry tick/save=%d/%+v，want %d/%+v", retryTick.Tick, retry, harvest.Tick+2, first)
+	}
+}
+
 func TestCompanionShutdownFlushFailureIsRetryable(t *testing.T) {
 	id := companionBootstrapID(1)
 	store := newCompanionBootstrapStore()
@@ -156,8 +220,15 @@ func TestCompanionShutdownFlushFailureIsRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHost: %v", err)
 	}
+	companions := host.world.companions
+	t.Cleanup(companions.Close)
+	workerDone := make(chan struct{})
+	go func() {
+		companions.waitGroup.Wait()
+		close(workerDone)
+	}()
 	latest := companionBootstrapBody(id, 9.5)
-	host.world.companions.Observe([]companion.Body{latest})
+	companions.Observe([]companion.Body{latest})
 
 	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	err = host.Shutdown(ctx)
@@ -165,10 +236,12 @@ func TestCompanionShutdownFlushFailureIsRetryable(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("first Shutdown error=%v，want %v", err, wantErr)
 	}
-	if store.syncCount() != 0 || store.closeCount() != 0 || host.world.companions.closed {
-		t.Fatalf("failed Flush closed resources: sync=%d close=%d persistenceClosed=%v", store.syncCount(), store.closeCount(), host.world.companions.closed)
+	if store.syncCount() != 0 || store.closeCount() != 0 {
+		t.Fatalf("failed Flush closed resources: sync=%d close=%d", store.syncCount(), store.closeCount())
 	}
+	assertCompanionBootstrapPersistenceOpen(t, companions, workerDone)
 	shutdownCompanionBootstrapHost(t, host)
+	assertCompanionBootstrapPersistenceClosed(t, companions, workerDone)
 	saves := store.companionSaveSnapshot()
 	if len(saves) != 2 || saves[0].Revision != 2 || saves[1].Revision != 2 || !reflect.DeepEqual(saves[1].Records, []companion.Body{latest}) {
 		t.Fatalf("retry saves=%+v，want same revision 2 and latest body", saves)
@@ -223,10 +296,14 @@ type companionBootstrapStore struct {
 	loadErr          error
 	saveErrors       []error
 	companionSaveLog []storage.CompanionSave
+	saveStarted      chan storage.CompanionSave
 }
 
 func newCompanionBootstrapStore() *companionBootstrapStore {
-	return &companionBootstrapStore{hostTestStore: newHostTestStore()}
+	return &companionBootstrapStore{
+		hostTestStore: newHostTestStore(),
+		saveStarted:   make(chan storage.CompanionSave, 16),
+	}
 }
 
 func (store *companionBootstrapStore) LoadCompanions(ctx context.Context) (storage.StoredCompanions, error) {
@@ -241,6 +318,7 @@ func (store *companionBootstrapStore) LoadCompanions(ctx context.Context) (stora
 }
 
 func (store *companionBootstrapStore) SaveCompanions(ctx context.Context, save storage.CompanionSave) error {
+	started := storage.CompanionSave{Revision: save.Revision, Records: slices.Clone(save.Records)}
 	store.mu.Lock()
 	store.companionSaves++
 	store.companionSaveLog = append(store.companionSaveLog, storage.CompanionSave{
@@ -253,6 +331,7 @@ func (store *companionBootstrapStore) SaveCompanions(ctx context.Context, save s
 		store.saveErrors = store.saveErrors[1:]
 	}
 	store.mu.Unlock()
+	store.saveStarted <- started
 	store.hostTestStore.mu.Lock()
 	store.hostTestStore.events = append(store.hostTestStore.events, "companion-save")
 	store.hostTestStore.mu.Unlock()
@@ -306,19 +385,104 @@ func cleanupCompanionBootstrapHost(t *testing.T, host *Host) {
 
 func waitForCompanionBootstrapBody(t *testing.T, host *Host, id companion.ID) companion.Body {
 	t.Helper()
+	body, _ := stepUntilCompanionBootstrapBody(t, host, id)
+	return body
+}
+
+func stepUntilCompanionBootstrapBody(t *testing.T, host *Host, id companion.ID) (companion.Body, uint64) {
+	t.Helper()
 	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
-		host.world.StepForTest()
+		result := host.world.StepForTest()
 		bodies := host.world.engine.CompanionBodies()
 		for _, body := range bodies {
 			if body.ID == id {
-				return body
+				return body, result.Tick
 			}
 		}
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("伙伴 %s 未激活", id)
-	return companion.Body{}
+	return companion.Body{}, 0
+}
+
+func receiveCompanionBootstrapSave(t *testing.T, store *companionBootstrapStore) storage.CompanionSave {
+	t.Helper()
+	select {
+	case save := <-store.saveStarted:
+		return save
+	case <-time.After(shortWaitDeadline):
+		t.Fatal("正常 server tick 未启动伙伴保存")
+		return storage.CompanionSave{}
+	}
+}
+
+func assertNoCompanionBootstrapSave(t *testing.T, store *companionBootstrapStore) {
+	t.Helper()
+	select {
+	case save := <-store.saveStarted:
+		t.Fatalf("retry deadline 前启动伙伴保存：%+v", save)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func waitForCompanionBootstrapCompletion(t *testing.T, persistence *companionPersistence) {
+	t.Helper()
+	deadline := time.Now().Add(shortWaitDeadline)
+	for len(persistence.completions) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(persistence.completions) == 0 {
+		t.Fatal("伙伴保存 completion 未返回")
+	}
+}
+
+func assertCompanionBootstrapPersistenceOpen(
+	t *testing.T,
+	persistence *companionPersistence,
+	workerDone <-chan struct{},
+) {
+	t.Helper()
+	persistence.mu.Lock()
+	closed := persistence.closed
+	persistence.mu.Unlock()
+	if closed {
+		t.Fatal("失败 Shutdown 关闭了伙伴 persistence")
+	}
+	select {
+	case <-persistence.ctx.Done():
+		t.Fatal("失败 Shutdown 取消了伙伴 worker context")
+	default:
+	}
+	select {
+	case <-workerDone:
+		t.Fatal("失败 Shutdown 退出了伙伴 worker")
+	default:
+	}
+}
+
+func assertCompanionBootstrapPersistenceClosed(
+	t *testing.T,
+	persistence *companionPersistence,
+	workerDone <-chan struct{},
+) {
+	t.Helper()
+	persistence.mu.Lock()
+	closed := persistence.closed
+	persistence.mu.Unlock()
+	if !closed {
+		t.Fatal("成功 Shutdown 未关闭伙伴 persistence")
+	}
+	select {
+	case <-persistence.ctx.Done():
+	default:
+		t.Fatal("成功 Shutdown 未取消伙伴 worker context")
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(shortWaitDeadline):
+		t.Fatal("成功 Shutdown 未等待伙伴 worker 退出")
+	}
 }
 
 func companionBootstrapRecords(host *Host) ([]companion.Body, uint64) {
