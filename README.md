@@ -1,10 +1,53 @@
 # Mornlea
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Go-1.26-00ADD8" alt="Go 1.26">
+  <img src="https://img.shields.io/badge/Rust-1.97.1-f74c00" alt="Rust 1.97.1">
+  <img src="https://img.shields.io/badge/platform-macOS-9cf" alt="macOS">
+  <img src="https://img.shields.io/badge/protocol-v15-blue" alt="协议 v15">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+  <img src="https://github.com/channing771/minecraft-go/actions/workflows/ci.yml/badge.svg" alt="CI">
+  <img src="https://img.shields.io/github/v/release/channing771/minecraft-go" alt="release">
+</p>
+
+> [English](README.en.md) · 简体中文（本文）
+
 `Mornlea` 是一个使用 Go 编写的独立体素游戏实验项目。项目自研客户端、权威服务端、世界存储和 WebGPU 渲染管线，不追求兼容官方 Minecraft 的协议、存档或资源。
 
-项目仍处于早期开发阶段。目前已经具备程序化地形、GPU 地形渲染、玩家移动与碰撞、客户端预测、方块挖掘与放置、内置权威服务端、世界持久化、有界二进制协议、TCP 直连、无图形专用服务端以及稳定玩家状态存档；已完成的 M3 多人里程碑支持最多八名玩家通过局域网专用服务端同步移动、角色和 Unicode 昵称；M4A–M4D 依次增加权威快捷栏、持久掉落物、36 格背包与固定石砖配方；M4E 新增煤矿、铁矿、共享权威熔炉、铁锭与铁块资源链；M4F 新增服务端权威的按住采掘、石镐、铁镐与五条固定配方；M4J 为石镐和铁镐加入权威耐久、损坏形态及跨 TCP/存档的耐久保真；M4K 新增由区块拥有的固定容量共享箱子（每区块 16 个、每箱 27 格），把熔炉与箱子的查看生命周期收敛为共用实现，统一容器界面扩展为 `0..62`，并把线上协议升级到 v12、区块存档升级到 schema v6；M4L 新增由服务端唯一权威、跨重连与重启保真的生命值（满值 20），实现摔落伤害、未受伤自动回复与死亡时的背包掉落和重生结算，并把线上协议升级到 v13、玩家存档升级到 schema v5；M4M 增加由服务端权威推进的昼夜和客户端派生的传播天空光；M4N 增加客户端派生的静态方块光和发光块；M4O 作为已完成的历史里程碑，以协议 v15、玩家 schema v6、区块 schema v8、metadata v2 交付 14 种常见块状材料、缺失玩家一次性材料包、世界坐标 terrain UV、玻璃/树叶单 pass alpha cutout 和无窗口材料展示。
+<details>
+<summary>English overview</summary>
 
-当前 M4Q 以合并的统一基线为基础，继承 M4P 把 mesh/light 生产实现迁移到固定 Rust 1.97.1 `cdylib` 的成果，以及主线的程序化方块云；Go 仍拥有其余应用、世界、规则、网络、存储和渲染逻辑。
+Mornlea is an original voxel game written from scratch in Go 1.26 — no Mojang assets, protocol, or saves. It ships a custom client, an authoritative server, world storage, physics, and a WebGPU renderer; chunk meshing, AO, skylight, and block-light production live in a pinned Rust 1.97.1 cdylib. The current M4Q baseline includes protocol v15, player schema v6, chunk schema v8, LAN multiplayer for up to 8 players, server-authoritative hotbar/inventory/crafting/furnaces/chests/mining/tool durability/health & death, persistent item drops, deterministic ores, natural materials and oak trees, a 24000-tick day/night cycle, client-derived `0..15` skylight and static block light, 14 placeable block materials, and headless visual-verification goldens. The graphical client is macOS-only (Apple Silicon verified); the dedicated server builds with `CGO_ENABLED=0`. MIT licensed.
+
+```bash
+git clone https://github.com/channing771/minecraft-go.git
+cd minecraft-go
+make run          # graphical client with a built-in authoritative server
+```
+
+Milestone history lives in [实现进度](docs/notes/progress.md); the LAN server guide is [docs/notes/lan-server.md](docs/notes/lan-server.md). Most docs are in Chinese.
+</details>
+
+项目仍处于早期开发阶段，已经具备程序化地形、GPU 地形渲染、玩家移动与碰撞、客户端预测、方块挖掘与放置、内置权威服务端、世界持久化、有界二进制协议、TCP 直连、无图形专用服务端与稳定玩家状态存档；已交付里程碑与协议/存档版本演进见[实现进度](docs/notes/progress.md)。
+
+当前基线为 M4Q：项目统一命名为 Mornlea，mesh/light 生产实现位于固定 Rust 1.97.1 `cdylib`（crate `mornlea_mesh`）；下一批 M5「AI-native 具名伙伴」尚处于设计规划阶段。基线细节与下一步方向见[实现进度](docs/notes/progress.md)。
+
+## 截图
+
+<p align="center"><img src="docs/demo.gif" width="640" alt="Mornlea 演示"></p>
+
+以下静态截图取自无窗口视觉验证基线（640×360，`make visual-check` 生成），从左到右、从上到下依次为：正午地形、橡树林、方块光房间与材料展示。
+
+<table>
+  <tr>
+    <td><img src="cmd/mornlea/testdata/golden/terrain-noon.png" width="380" alt="terrain-noon 正午地形"></td>
+    <td><img src="cmd/mornlea/testdata/golden/oak-grove.png" width="380" alt="oak-grove 橡树林"></td>
+  </tr>
+  <tr>
+    <td><img src="cmd/mornlea/testdata/golden/block-light-room.png" width="380" alt="block-light-room 方块光房间"></td>
+    <td><img src="cmd/mornlea/testdata/golden/materials-showcase.png" width="380" alt="materials-showcase 材料展示"></td>
+  </tr>
+</table>
 
 ## 环境要求
 
@@ -22,13 +65,13 @@ xcode-select --install
 
 ## 快速开始
 
-源码合并且 operator 完成外部仓库改名后，可按最终身份克隆：
-
 ```bash
-git clone https://github.com/channing771/mornlea.git
-cd mornlea
+git clone https://github.com/channing771/minecraft-go.git
+cd minecraft-go
 make run
 ```
+
+> 仓库后续计划改名为 `mornlea`；改名完成后请按新地址克隆。
 
 首次启动需要生成并加载视距内的地形，耗时会明显长于后续运行。默认世界保存在 `worlds/default`。
 
@@ -56,6 +99,10 @@ make build
 | `make build` | 构建 `bin/mornlea`、`bin/mornlea-server` 与同目录 `bin/libmornlea_mesh.dylib` |
 | `make test` | 运行全部 Go 测试 |
 | `make test-race` | 使用 race detector 运行全部 Go 测试 |
+| `make test-multiplayer` | 运行 M3C 八玩家与 v6 报告测试 |
+| `make bench-multiplayer` | 运行三组 M3C 多人微基准 |
+| `make archcheck` | 验证依赖闭包与无图形服务端边界 |
+| `make rust` | 构建固定 Rust 1.97.1 cdylib，`run`/`build`/`test` 等目标的前置依赖 |
 | `make rust-check` | 运行 Rust 格式、clippy 与 workspace 单测 |
 | `make fmt` | 格式化仓库内的 Rust 与 Go 源码 |
 | `make clean` | 删除 `bin` 目录，不会删除世界存档 |
@@ -72,25 +119,39 @@ make build
 | `1` … `9` | 选择快捷栏栏位，由服务端确认后生效 |
 | `E` | 打开/关闭背包，或关闭已打开的熔炉/箱子；界面打开时释放鼠标并抑制游戏输入。每名玩家同时只能查看一个容器，打开另一个会结束原有查看关系 |
 | `Q` | 把权威选中快捷栏中的**一个**物品丢到脚下方块处；按住不重复，容器打开或鼠标未捕获时不发送 |
-| 容器界面内左键 | 两次点击栏位可整堆移动；熔炉界面用统一栏位 `0..38`，箱子界面用统一栏位 `0..62`（`0..35` 玩家物品、`36..62` 箱子 27 格）；普通背包可点击石砖、熔炉、铁块、石镐、铁镐和箱子六条固定配方 |
+| 容器界面内左键 | 两次点击栏位可整堆移动；熔炉界面用统一栏位 `0..38`，箱子界面用统一栏位 `0..62`（`0..35` 玩家物品、`36..62` 箱子 27 格）；普通背包可点击石砖、熔炉、铁块、石镐、铁镐、箱子、橡木木板和发光方块八条固定配方 |
 | `Esc` | 容器打开时关闭界面并恢复捕获，否则释放鼠标指针 |
 | 释放指针后单击窗口 | 重新捕获鼠标指针 |
 
 关闭游戏窗口时，内置服务端会停止并刷新待保存的世界数据。运行时生成的世界目录已在 `.gitignore` 中排除。
 
+准星命中六格内可显示的注册方块时，画面上会显示深度正确的细轮廓与方块中文名提示，作为本地即时反馈，不参与权威裁决。
+
 ### 资源与熔炉
 
 新生成且未保存过的石头中，煤矿只出现在 `Y < 96`，约为 `1/2048`；铁矿只出现在 `Y < 48`，约为 `1/4096`，两者重合时铁矿优先。已保存区块不会被批量改写。
 
-对准已放置的熔炉右键，收到服务端确认后会打开统一 `0..38` 栏位界面：`0..35` 是玩家物品，36 是粗铁输入，37 是煤炭燃料，38 是铁锭输出。一个铁锭需要 200 个活动 tick，一个煤炭提供 1600 个燃烧 tick，可恰好支持 8 个铁锭；输入无效或输出已满时进度与燃料会一起暂停。多名玩家同时查看的是同一份世界状态，客户端不预测物品或进度。
+对准已放置的熔炉右键，收到服务端确认后会打开统一 `0..38` 栏位界面：`0..35` 是玩家物品，36 是原料输入，37 是煤炭燃料，38 是产物输出。熔炼固定三条映射：粗铁→铁锭、沙子→玻璃、黏土块→砖块。一个产物需要 200 个活动 tick，一个煤炭提供 1600 个燃烧 tick，可恰好支持 8 个产物；输入无效或输出已满时进度与燃料会一起暂停，输入种类切换时清零进度并保留燃烧时间。多名玩家同时查看的是同一份世界状态，客户端不预测物品或进度。
+
+### 自然材料与橡树
+
+新生成区块除煤矿、铁矿外还会按种子确定性生成自然材料：低处地表为沙子，其中噪声选中的黏土与浅层砾石穿插出现；高处地表为雪块。橡树按固定候选格生成在草方块上（树干高 4–6），产出橡木原木与树叶。已保存区块不会被批量改写。
+
+旧世界可以在停服后离线迁移到同一套自然材料规则：
+
+```bash
+mornlea-server --world <世界目录> --migrate-materials --backup <备份目录>
+```
+
+迁移必须先创建可验证的完整备份，只重算石头、泥土、草、沙子、砾石、黏土和雪块七种自然值，矿石、容器、掉落物等其他状态保持不变；中断后可用相同参数从进度处续跑。
 
 ### 箱子
 
-箱子是由区块拥有的固定容量共享存储，服务端固定配方 `8 石头 → 1 箱子`；箱子可放置、可挖掘，挖掘桶与熔炉相同（裸手/普通物品 `30` tick、石镐 `15` tick、铁镐 `8` tick，至少石镐才能取得掉落）。每个区块最多同时存在 16 个活动箱子，每个箱子固定 27 格，接受任何已注册物品（含带耐久的工具）；第 17 个箱子会被原子拒绝且不消耗玩家物品。
+箱子是由区块拥有的固定容量共享存储，服务端固定配方 `8 石头 → 1 箱子`；箱子可放置、可挖掘，挖掘耗时与熔炉相同（裸手/普通物品 `30` tick、石镐 `15` tick、铁镐 `8` tick，至少石镐才能取得掉落）。每个区块最多同时存在 16 个活动箱子，每个箱子固定 27 格，接受任何已注册物品（含带耐久的工具）；第 17 个箱子会被原子拒绝且不消耗玩家物品。
 
 对准已放置的箱子右键，收到服务端确认后会打开统一 `0..62` 栏位界面：`0..35` 是玩家物品，`36..62` 是箱子的 27 个格子，接受任何已注册物品且没有熔炉那样的物品类型限制。每名玩家同时只能查看一个容器：打开箱子会结束正在查看的熔炉，反之亦然；多名玩家可以同时查看同一个箱子并看到相同的最终状态。破坏箱子前，服务端会在掉落物副本上按箱子本体、再按 `36..62` 顺序预演全部非空格，只有全部堆都能完整放入所属区块的掉落物槽时才清除方块、停用槽位并一次性提交，容量不足时方块、箱子内容与掉落物都保持不变。
 
-图形背包的固定合成面板有石砖、熔炉、铁块、石镐、铁镐和箱子六条可点击入口，箱子可以直接在界面里合成。本批不实现大箱子合并、箱子命名、排序、快捷搬运、拆分堆、漏斗、比较器、潜行放置或任何自动化。
+图形背包的固定合成面板有石砖、熔炉、铁块、石镐、铁镐、箱子、橡木木板和发光方块八条可点击入口，箱子可以直接在界面里合成。本批不实现大箱子合并、箱子命名、排序、快捷搬运、拆分堆、漏斗、比较器、潜行放置或任何自动化。
 
 ### 权威采掘与工具
 
@@ -100,13 +161,13 @@ make build
 | --- | --- | --- | --- | --- |
 | 泥土、草方块 | 5 tick | 5 tick | 5 tick | 任意手持状态均掉落 |
 | 石头 | 30 tick | 15 tick | 8 tick | 仅空手、石镐或铁镐掉落；普通物品不是空手 |
-| 石砖、熔炉、箱子、煤矿、铁矿 | 30 tick | 15 tick | 8 tick | 至少石镐才掉落方块或矿物；箱子掉落时本体与全部格子内容原子一起掉落，容量不足则整体拒绝且方块保持不变；错误工具破坏熔炉时仍保全内部物品 |
+| 石砖、熔炉、箱子、煤矿、铁矿、发光块 | 30 tick | 15 tick | 8 tick | 至少石镐才掉落方块或矿物；箱子掉落时本体与全部格子内容原子一起掉落，容量不足则整体拒绝且方块保持不变；错误工具破坏熔炉时仍保全内部物品 |
 | 铁块 | 40 tick | 20 tick | 10 tick | 仅铁镐掉落 |
 | 基岩 | 不推进 | 不推进 | 不推进 | 不可破坏 |
 
 石镐最大耐久为 `131`，铁镐为 `250`。服务端只有在方块确实被成功破坏后才扣除所持工具恰好 1 点耐久，与工具是否达到掉落等级无关；受保护方块、区块未就绪和掉落物容量已满三条拒绝路径均不扣耐久。最后一点耐久仍会完成本次破坏和应有掉落，随后工具转为对应的损坏物品。
 
-损坏物品采掘时等同空手，可以保留、在背包中移动或丢弃，但不能参与合成、熔炼、修复或回收。当前没有补充既有工具耐久的途径；服务端固定配方为 `4 石头 → 4 石砖`、`8 石头 → 1 熔炉`、`8 石头 → 1 箱子`、`9 铁锭 → 1 铁块`、`3 石头 → 1 石镐`、`3 铁锭 → 1 铁镐`，新合成的镐为满耐久。可用镐与对应损坏物品每格最多一个，其他当前物品每格最多 64 个。快捷栏只为磨损中且仍可用的工具显示耐久条；满耐久工具、普通物品和损坏形态均不显示。
+损坏物品采掘时等同空手，可以保留、在背包中移动或丢弃，但不能参与合成、熔炼、修复或回收。当前没有补充既有工具耐久的途径；服务端固定配方为 `4 石头 → 4 石砖`、`8 石头 → 1 熔炉`、`9 铁锭 → 1 铁块`、`3 石头 → 1 石镐`、`3 铁锭 → 1 铁镐`、`8 石头 → 1 箱子`、`1 橡木原木 → 4 橡木木板`、`4 玻璃 → 4 发光方块`，新合成的镐为满耐久。可用镐与对应损坏物品每格最多一个，其他当前物品每格最多 64 个。快捷栏只为磨损中且仍可用的工具显示耐久条；满耐久工具、普通物品和损坏形态均不显示。
 
 ### 权威生命值与死亡
 
@@ -177,25 +238,56 @@ make visual-update             # 重新生成基线，写入 cmd/mornlea/testdat
 │   ├── mornlea-server/ 无图形 TCP 专用服务端
 │   ├── gfxspike/      WebGPU 地形渲染验证程序
 │   └── perfcheck/     性能报告比较工具
+├── engine/
+│   └── crates/mornlea_mesh/  固定 Rust 1.97.1 cdylib：贪心网格、AO 与光照生产实现
 ├── internal/
 │   ├── core/          坐标、几何与方块等公共领域类型
 │   ├── profile/       本机稳定玩家身份与档案
+│   ├── config/        共享 JSON 配置加载与校验
+│   ├── logging/       模块化日志
 │   ├── world/         区块和世界数据模型
-│   ├── worldgen/      程序化地形生成
+│   ├── worldgen/      程序化地形、矿石、自然材料与橡树生成
 │   ├── physics/       玩家运动与碰撞
 │   ├── sim/           权威世界模拟
 │   ├── server/        服务端 Host、会话、发布与玩家持久化
 │   ├── network/       二进制协议、登录状态机与 Memory/TCP 传输
 │   ├── storage/       世界、区域文件与玩家状态持久化
 │   ├── client/        输入、相机、预测与客户端镜像
-│   ├── mesh/          区块网格生成
+│   ├── mesh/          区块网格生产 API（实现位于 Rust cdylib）
 │   ├── render/        GPU 驱动渲染器
 │   ├── gfx/           WebGPU 抽象层
-│   └── assets/        方块定义与程序化材质
-└── docs/              设计、实施计划和性能记录
+│   ├── assets/        方块定义与程序化材质
+│   └── archcheck/     内部包依赖方向门禁测试
+├── scripts/agent-hooks/  Claude Code 与 Codex 共用的自动 Hook 守卫
+└── docs/              设计、实施计划、性能记录与实现进度
 ```
 
-整体架构与技术选型见[项目设计文档](docs/superpowers/specs/2026-07-26-minecraft-go-design.md)，当前性能基线见[性能记录](docs/notes/perf-baseline.md)。
+整体架构与技术选型见[项目设计文档](docs/superpowers/specs/2026-07-26-minecraft-go-design.md)。其余文档导览：
+
+- [实现进度](docs/notes/progress.md)：已交付里程碑、当前基线与下一步方向；
+- [局域网专用服务端](docs/notes/lan-server.md)：`mornlea-server` 的启动、身份、存档与安全边界；
+- [改名迁移说明](docs/notes/mornlea-migration.md)：M4Q 改名后的名称与本机数据迁移；
+- [性能基线](docs/notes/perf-baseline.md)（M2）与 [Apple M5 基线](docs/notes/perf-baseline-m5.md)：性能证据链；
+- [WebGPU 绑定 API 速查](docs/notes/webgpu-api.md)：绑定版本与常用 API；
+- [OpenSpec 工作流](docs/openspec.md)：OpenSpec 使用与自动 Hook 约束；
+- `docs/superpowers/specs/`、`docs/superpowers/plans/`：历史设计背景与决策记录，不代表当前实现。
+
+## Rust 与 Go 的职责划分
+
+自 M4P 起，区块网格与光照的生产实现迁移到固定 Rust 1.97.1 `cdylib`；Go 仍是其余全部逻辑的所有者。两者经 `engine/include/mornlea_engine.h` 声明的唯一 C ABI（ABI version 1）协作，只有 `internal/mesh` 接触 native ABI。
+
+| 语言 | 职责 |
+| --- | --- |
+| Rust（`engine/crates/mornlea_mesh`） | 确定性区段网格与传播光照的**唯一生产实现**：贪心网格与 AO（`greedy.rs`）、天空光与方块光（`light.rs`）、packed quad 输出（`quad.rs`）、native 输入解析（`input.rs`）与 C ABI（`ffi.rs`）。对同一 neighborhood 与 registry 输出和冻结 Go oracle 逐位一致的 quads；panic 不穿过 ABI，版本、输入、scratch、registry、emission 或输出容量非法时原子拒绝。workspace 只含该 crate，normal dependency 只有 `std`。 |
+| Go | 除网格与光照生产外的全部职责：应用装配（`cmd/`）、世界与区块数据模型、权威模拟、物理、网络与存档、客户端镜像与预测、GPU 渲染与 WebGPU 封装（`render`/`gfx`）、世界生成、资产与配置。`internal/mesh` 是 Go 侧对外 API 与 native 边界：持有 input/scratch/output 的所有权、组装 registry 快照与可见性、映射 ABI 状态码；`internal/client` 的 mesher 负责任务调度、revision 印章、有界队列，并用每 worker 独立 scratch 并发生产。 |
+
+边界规则：
+
+- 只有 `internal/mesh` 可以 `import "C"`（darwin + cgo 构建约束），其余包一律通过 `internal/mesh` 的 Go API 使用网格与光照结果；
+- 调用结束后任何语言都不得保留对方指针；没有生产 Go fallback——Go 侧贪心/光照 oracle 仅存在于测试；
+- 网格与光照结果不进入网络协议或存档：客户端从权威方块镜像本地派生，服务端与专用服务端完全不接触 Rust dylib。
+
+构建：`make run`/`build`/`test` 等目标先自动执行 `cargo build --locked --release`（`rust-toolchain.toml` 固定 1.97.1）；`make build` 把 `libmornlea_mesh.dylib` 复制到 `bin/` 并以 `@loader_path` rpath 供客户端加载；`make rust-check` 运行 Rust 格式、clippy 与单测。`cmd/mornlea-server` 以 `CGO_ENABLED=0` 构建，其依赖闭包不含 mesh/client/render/gfx（`make archcheck` 验证）。规范性契约见 [`openspec/specs/rust-engine-mesh/spec.md`](openspec/specs/rust-engine-mesh/spec.md)。
 
 ## 当前限制
 
@@ -208,12 +300,12 @@ make visual-update             # 重新生成基线，写入 cmd/mornlea/testdat
 - 掉落物生成 10 tick 后可被 1.25 格内的玩家拾取，累计 6000 活动 tick 后消失；只有玩家附近（区块半径 2）的掉落物才会推进寿命；
 - 拾取先填快捷栏再填背包（同类未满格优先，其次最低空格），两者都满时剩余物品留在地面；
 - 背包界面只支持整堆移动：空目标接收整堆、同物品合并到 64 并保留余量、不同物品交换；尚无拆分堆、拖拽与快捷搬运；
-- 服务端固定配方表与图形背包只包含上述六条单输入配方；尚无木材资源链、多原料合成、配方选择、合成网格、工作台、批量合成或队列；
-- 熔炉只接受煤炭和粗铁，每区块最多 32 个；工具尚无修复或损坏物品回收，采掘尚无多人共享进度和裂纹贴图，熔炉尚无多燃料、多熔炼配方、经验、自动化或离线进度补算；
+- 服务端固定配方表与图形背包只包含上述八条单输入配方；已有最小木材加工链（橡木原木 → 橡木木板），仍无多原料合成、配方选择、合成网格、工作台、批量合成或队列；
+- 熔炉固定三条熔炼映射（粗铁→铁锭、沙子→玻璃、黏土块→砖块）且只接受煤炭燃料，每区块最多 32 个；工具尚无修复或损坏物品回收，采掘尚无多人共享进度和裂纹贴图，熔炉尚无多燃料、经验、自动化或离线进度补算；
 - 每区块最多 16 个箱子，每个箱子固定 27 格且接受任何已注册物品；每名玩家同时只能查看一个容器，打开箱子会结束熔炉查看关系，反之亦然；尚无大箱子合并、命名、排序、快捷搬运、拆分堆、漏斗、比较器、潜行放置或任何自动化；
 - 世界时间由服务端权威推进，一个昼夜固定为 `24000` tick，所有客户端从权威玩家状态观察同一相位；地形、远端玩家、掉落物和天空背景按固定曲线随昼夜变化，HUD 与昵称不受世界明暗影响；
-- 天空光和静态方块光都由客户端从权威方块镜像派生：天空光直射起点为 `15`，方块光从发光块以 `15` 起步，两者沿空气六向传播并逐格递减；未知邻区按阻挡和黑暗处理。发光块可放置，也可用石镐或铁镐挖回，但没有配方、初始发放、世界生成或管理命令等正常获取入口；尚无真实火把、透明或半透明透光、彩色或动态光、动态阴影与天气；
-- 圆石、平滑石、沙子、砾石、橡木原木、橡木木板、树叶、玻璃、砖块、白色羊毛、红色瓦块、黏土、雪块和苔藓圆石均可权威放置、采掘并掉落自身；存档缺失的新玩家会在背包前 14 格各获得 64 个材料，已有玩家不会补发。当前不生成这些材料，也没有对应配方、重力、腐烂或融化行为；
+- 天空光和静态方块光都由客户端从权威方块镜像派生：天空光直射起点为 `15`，方块光从发光块以 `15` 起步，两者沿空气六向传播并逐格递减；未知邻区按阻挡和黑暗处理。发光块可放置，也可用石镐或铁镐挖回，有固定配方（`4 玻璃 → 4 发光方块`），但尚无初始发放、世界生成或管理命令等其他获取入口；尚无真实火把、透明或半透明透光、彩色或动态光、动态阴影与天气；
+- 圆石、平滑石、沙子、砾石、橡木原木、橡木木板、树叶、玻璃、砖块、白色羊毛、红色瓦块、黏土、雪块和苔藓圆石均可权威放置、采掘并掉落自身；沙子、砾石、黏土、雪块会按种子在新生成区块自然出现，橡树确定性生成橡木原木与树叶，旧世界可用 `mornlea-server --migrate-materials --backup` 离线迁移；存档缺失的新玩家会在背包前 14 格各获得 64 个材料，已有玩家不会补发。圆石、平滑石、玻璃、砖块、羊毛、红瓦、苔藓圆石等其余材料不自然生成；材料尚无重力、腐烂或融化行为；
 - 主动丢弃只支持单件原地转移：服务端在同一权威 tick 内校验玩家、选中栏位、脚底区块与每区块 32 个掉落物槽后原子扣除一件并在脚下创建掉落物，固定 `40` 个活动 tick 内不可拾取（采掘与方块破坏产生的掉落物仍为 `10`）。合并到同位置旧堆时保留其 ID 与寿命时间线，只把拾取禁止窗口延长到较长的来源延迟。所有已注册物品（含煤炭、粗铁、铁锭、两种镐及对应损坏物品）都可作为掉落物传播；
 - 尚无整组丢弃、丢弃数量选择、投掷速度、重力与水平移动、所有者专属拾取与客户端预测；
 - 生命值满值 20，只有摔落会扣血；尚无战斗、PvP、怪物、食物与饥饿，也没有溺水、窒息、岩浆、火焰等其他伤害源；死亡后直接在出生锚点满血重生，尚无床、自定义重生点、伤害动画音效或专门的死亡界面；生存、怪物等完整玩法尚未完成。
