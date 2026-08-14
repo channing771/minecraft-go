@@ -233,6 +233,7 @@ func (engine *Engine) Step() TickResult {
 	}
 	engine.applyAcquired(acquired, currentWanted, &result)
 	engine.applyGenerated(generated, currentWanted, &result)
+	engine.advancePendingCompanions()
 	engine.advancePendingPlayersPreservingInputSequence()
 	engine.advanceActivePlayers()
 	playerViewChanged := engine.derivePlayerCenters()
@@ -299,5 +300,6 @@ func (engine *Engine) Step() TickResult {
 	engine.publishInventories(&result)
 	engine.publishContainers(&result)
 	engine.publishPlayers(&result)
+	engine.publishCompanions(&result)
 	return result
 }

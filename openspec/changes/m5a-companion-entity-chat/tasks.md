@@ -24,9 +24,9 @@
 
 ## 5. sim 静态伙伴、出生与 3×3 兴趣（计划 Task 6）
 
-- [ ] 5.1 在 `internal/sim` 先写排序 idle、restore 碰撞就绪、revision retry、3×3 candidate/active interest、八玩家加四伙伴独立容量测试；运行 `go test ./internal/sim -run 'Test(Companion|EightPlayersAndFourCompanions)' -race -count=1` 确认 RED。
-- [ ] 5.2 实现最小独立 `companionState`、注册/身体快照、复用既有 restore/spawn 私有 helper 和 subscription union；不抽 `actorState`、不接 movement/mining/death/session。
-- [ ] 5.3 运行 `go test ./internal/sim -run 'Test(Companion|EightPlayersAndFourCompanions)' -race -count=1`、`go test ./internal/sim -run '^$' -bench 'Benchmark.*Step' -benchmem -count=5`、`go test ./internal/sim -race -count=1`、`go test ./internal/archcheck -count=1`、`go vet ./internal/sim`、`test -z "$(gofmt -l internal/sim)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时把兴趣半径改为 2，确认包含 `Test(Companion|EightPlayersAndFourCompanions)` 的命令 RED 后恢复并重跑至 PASS。
+- [x] 5.1 在 `internal/sim` 先写排序 idle、restore 碰撞就绪、revision retry、3×3 candidate/active interest、八玩家加四伙伴独立容量测试；运行 `go test ./internal/sim -run 'Test(Companion|EightPlayersAndFourCompanions)' -race -count=1` 确认 RED。
+- [x] 5.2 实现最小独立 `companionState`、注册/身体快照、复用既有 restore/spawn 私有 helper 和 subscription union；不抽 `actorState`、不接 movement/mining/death/session。
+- [x] 5.3 运行 `go test ./internal/sim -run 'Test(Companion|EightPlayersAndFourCompanions)' -race -count=1`、`go test ./internal/sim -run '^$' -bench 'Benchmark.*Step' -benchmem -count=5`、`go test ./internal/sim -race -count=1`、`go test ./internal/archcheck -count=1`、`go vet ./internal/sim`、`test -z "$(gofmt -l internal/sim)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时把兴趣半径改为 2，确认包含 `Test(Companion|EightPlayersAndFourCompanions)` 的命令 RED 后恢复并重跑至 PASS。
 
 ## 6. 单聚合伙伴持久化 worker（计划 Task 7）
 

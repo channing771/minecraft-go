@@ -3,6 +3,7 @@ package sim_test
 import (
 	"testing"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/sim"
 	"github.com/channing771/mornlea/internal/world"
@@ -29,6 +30,33 @@ func BenchmarkEngineStepPlayer(b *testing.B) {
 	result := engine.Step()
 	if len(result.Players) != 1 || !result.Players[0].Ready {
 		b.Fatalf("玩家未 Ready: %+v", result.Players)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		engine.Step()
+	}
+}
+
+func BenchmarkEngineStepFourCompanions(b *testing.B) {
+	engine := sim.NewEngine(0, 0)
+	for suffix := byte(1); suffix <= companion.MaxActive; suffix++ {
+		id := companion.ID{6: 0x40, 8: 0x80, 15: suffix}
+		engine.RegisterCompanion(sim.CompanionRestore{
+			ID: id, SpawnDimension: core.Overworld,
+		})
+	}
+	for len(engine.CompanionBodies()) != companion.MaxActive {
+		result := engine.Step()
+		submitAcquiredMisses(engine, result.Acquire)
+		for _, key := range result.Generate {
+			engine.SubmitGenerated(sim.GeneratedChunk{
+				Dimension: key.Dimension,
+				Pos:       key.Pos,
+				Chunk:     generateFlatChunk(key.Pos),
+			})
+		}
 	}
 
 	b.ReportAllocs()

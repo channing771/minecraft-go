@@ -129,6 +129,7 @@ type TickResult struct {
 	Rejected    []Rejection
 	Resync      []ResyncRequest
 	Players     []PlayerUpdate
+	Companions  []CompanionUpdate
 	Inventories []InventoryUpdate
 	Furnaces    []FurnaceUpdate
 	FurnaceEnds []FurnaceEnd
