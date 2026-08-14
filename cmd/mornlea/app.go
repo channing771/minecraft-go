@@ -54,6 +54,11 @@ type application struct {
 	remotePlayers          *client.RemotePlayers
 	companions             *client.Companions
 	chatEvents             *client.ChatEvents
+	chatInput              chatInput
+	chatEventBuffer        [32]network.ChatEvent
+	chatLines              [6]string
+	chatLineCount          int
+	formattedChatEventID   uint64
 	remotePresentations    []client.RemotePresentation
 	companionPresentations []client.CompanionPresentation
 	remoteAvatars          []render.Avatar
@@ -123,6 +128,7 @@ type applicationWindow interface {
 	CursorPos() (float64, float64)
 	ShouldClose() bool
 	Poll()
+	DrainTextInput([]rune) ([]rune, bool)
 	KeyDown(client.Key) bool
 	PrimaryButtonDown() bool
 	SecondaryButtonDown() bool

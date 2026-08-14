@@ -202,7 +202,7 @@ func TestApplicationBlockTargetRenderOrderAndCapacity(t *testing.T) {
 		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
 	}
 	if got, want := dev.lastPasses(), []string{
-		"terrain pass", "avatar pass", "item drop pass", "block outline pass", "name-tag pass",
+		"terrain pass", "avatar pass", "item drop pass", "block outline pass", "name-tag pass", "hotbar pass",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("passes=%v want=%v", got, want)
 	}
@@ -243,8 +243,9 @@ func TestApplicationBlockTargetRenderOrderAndCapacity(t *testing.T) {
 
 func TestApplicationBlockTargetHiddenByUIAndSessionState(t *testing.T) {
 	tests := []struct {
-		name string
-		hide func(*testing.T, *application)
+		name    string
+		hideHUD bool
+		hide    func(*testing.T, *application)
 	}{
 		{name: "背包", hide: func(_ *testing.T, app *application) { app.inventoryOpen = true }},
 		{name: "熔炉", hide: func(t *testing.T, app *application) {
@@ -263,7 +264,7 @@ func TestApplicationBlockTargetHiddenByUIAndSessionState(t *testing.T) {
 		{name: "reset 当帧", hide: func(_ *testing.T, app *application) {
 			app.blockTargetReset = true
 		}},
-		{name: "断线", hide: func(_ *testing.T, app *application) {
+		{name: "断线", hideHUD: true, hide: func(_ *testing.T, app *application) {
 			app.closeClientSession(nil)
 		}},
 	}
@@ -275,7 +276,11 @@ func TestApplicationBlockTargetHiddenByUIAndSessionState(t *testing.T) {
 			if rendered, err := app.renderFrame(1); err != nil || !rendered {
 				t.Fatalf("renderFrame=(%v,%v)", rendered, err)
 			}
-			if got, want := dev.lastPasses(), []string{"terrain pass"}; !reflect.DeepEqual(got, want) {
+			want := []string{"terrain pass", "hotbar pass"}
+			if test.hideHUD {
+				want = []string{"terrain pass"}
+			}
+			if got := dev.lastPasses(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("passes=%v want=%v", got, want)
 			}
 			if len(app.remoteNameTags) != 0 {
@@ -300,7 +305,7 @@ func TestApplicationPlayerResetHidesBlockTargetForOneFrame(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("reset 当帧 renderFrame=(%v,%v)", rendered, err)
 	}
-	if got, want := dev.lastPasses(), []string{"terrain pass"}; !reflect.DeepEqual(got, want) {
+	if got, want := dev.lastPasses(), []string{"terrain pass", "hotbar pass"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("reset 当帧 passes=%v want=%v", got, want)
 	}
 	dev.resetPasses()
@@ -308,7 +313,7 @@ func TestApplicationPlayerResetHidesBlockTargetForOneFrame(t *testing.T) {
 		t.Fatalf("reset 后一帧 renderFrame=(%v,%v)", rendered, err)
 	}
 	if got, want := dev.lastPasses(), []string{
-		"terrain pass", "block outline pass", "name-tag pass",
+		"terrain pass", "block outline pass", "name-tag pass", "hotbar pass",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("reset 后一帧 passes=%v want=%v", got, want)
 	}

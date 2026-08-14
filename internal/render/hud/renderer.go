@@ -130,24 +130,41 @@ func hotbarPipelineDesc(
 // 只要生命值本身已确认就会绘制，反之亦然。
 func (renderer *HotbarRenderer) Prepare(
 	inventory core.Inventory,
+	inventoryConfirmed bool,
 	open bool,
 	source int,
 	overlay *FurnaceOverlay,
 	chest *ChestOverlay,
 	mining MiningOverlay,
 	health HealthOverlay,
+	chat ChatOverlay,
 	width, height uint32,
 	budget *render.UploadBudget,
 ) error {
-	renderer.atlas.Request(hotbarDigits)
-	if err := renderer.atlas.FlushUploads(budget); err != nil {
-		return err
+	textRequested := false
+	if inventoryConfirmed {
+		renderer.atlas.Request(hotbarDigits)
+		textRequested = true
 	}
-	layoutInventory(
-		&renderer.layout, renderer.atlas, inventory, open, source, overlay, chest, mining,
-		float32(width), float32(height),
-	)
+	textRequested = requestChatText(renderer.atlas, chat) || textRequested
+	if textRequested {
+		if err := renderer.atlas.FlushUploads(budget); err != nil {
+			return err
+		}
+	}
+	if inventoryConfirmed {
+		layoutInventory(
+			&renderer.layout, renderer.atlas, inventory, open, source, overlay, chest, mining,
+			float32(width), float32(height),
+		)
+	} else {
+		renderer.layout.quads = renderer.layout.quads[:0]
+		renderer.layout.glyphs = renderer.layout.glyphs[:0]
+		renderer.layout.scale = hudScale(open, float32(width), float32(height))
+		renderer.layout.open = open
+	}
 	appendHealthBar(&renderer.layout, renderer.atlas, health, float32(width), float32(height))
+	appendChatOverlay(&renderer.layout, renderer.atlas, chat, float32(width), float32(height))
 	encodeHotbarViewport(
 		renderer.upload[hotbarViewportOffset:hotbarViewportOffset+hotbarViewportBytes],
 		float32(width), float32(height),

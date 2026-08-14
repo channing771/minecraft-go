@@ -122,27 +122,29 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		return false, fmt.Errorf("准备世界名牌: %w", err)
 	}
 	inventory, inventoryConfirmed := a.inventory.State()
-	if inventoryConfirmed {
-		var overlay *hud.FurnaceOverlay
-		if furnace, opened := a.furnace.State(); opened {
-			overlay = &hud.FurnaceOverlay{
-				Input:         furnace.Input,
-				Fuel:          furnace.Fuel,
-				Output:        furnace.Output,
-				ProgressTicks: furnace.ProgressTicks,
-				BurnTicks:     furnace.BurnTicks,
-			}
+	var overlay *hud.FurnaceOverlay
+	if furnace, opened := a.furnace.State(); opened {
+		overlay = &hud.FurnaceOverlay{
+			Input:         furnace.Input,
+			Fuel:          furnace.Fuel,
+			Output:        furnace.Output,
+			ProgressTicks: furnace.ProgressTicks,
+			BurnTicks:     furnace.BurnTicks,
 		}
-		var chestOverlay *hud.ChestOverlay
-		if chest, opened := a.chest.State(); opened {
-			chestOverlay = &hud.ChestOverlay{Items: chest.Items}
-		}
-		// 生命值的确认状态独立于背包：Predictor 尚未收到权威状态时 ready 为
-		// false，HUD 绝不画出预测或陈旧的生命值。
-		health, healthReady := a.predictor.Health()
+	}
+	var chestOverlay *hud.ChestOverlay
+	if chest, opened := a.chest.State(); opened {
+		chestOverlay = &hud.ChestOverlay{Items: chest.Items}
+	}
+	// 生命值和聊天都独立于背包确认状态；未确认时 renderer 只跳过物品布局。
+	health, healthReady := a.predictor.Health()
+	chatOverlay := a.chatOverlay()
+	hudVisible := inventoryConfirmed || (healthReady && !a.clientSessionClosed) ||
+		chatOverlay.Open || len(chatOverlay.Lines) != 0
+	if hudVisible {
 		if err := a.hotbarRenderer.Prepare(
-			inventory, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
-			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health},
+			inventory, inventoryConfirmed, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
+			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health}, chatOverlay,
 			uint32(width), uint32(height), a.renderer.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
@@ -223,7 +225,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	}
 	a.damageOverlayRenderer.Render(encoder, target, a.damageStrength)
 	// HUD 在全部世界 pass 与 damage overlay 之后绘制。
-	if inventoryConfirmed {
+	if hudVisible {
 		a.hotbarRenderer.Render(encoder, target)
 	}
 	// 调试面板是最上层：必须在 HUD 之后绘制，否则会被背包/容器界面盖住。

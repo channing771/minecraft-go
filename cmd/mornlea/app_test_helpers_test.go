@@ -22,14 +22,17 @@ func (window *fakeInteractiveWindow) SetCursorCaptured(captured bool) {
 func (*fakeInteractiveWindow) CursorPos() (float64, float64) { return 0, 0 }
 func (*fakeInteractiveWindow) ShouldClose() bool             { return false }
 func (*fakeInteractiveWindow) Poll()                         {}
-func (*fakeInteractiveWindow) KeyDown(client.Key) bool       { return false }
-func (*fakeInteractiveWindow) PrimaryButtonDown() bool       { return false }
-func (*fakeInteractiveWindow) SecondaryButtonDown() bool     { return false }
-func (window *fakeInteractiveWindow) CursorCaptured() bool   { return window.captured }
-func (*fakeInteractiveWindow) FramebufferSize() (int, int)   { return 1, 1 }
-func (*fakeInteractiveWindow) ContentSize() (int, int)       { return 1, 1 }
-func (*fakeInteractiveWindow) SetContentSize(int, int)       {}
-func (*fakeInteractiveWindow) CancelClose()                  {}
+func (*fakeInteractiveWindow) DrainTextInput(dst []rune) ([]rune, bool) {
+	return dst, false
+}
+func (*fakeInteractiveWindow) KeyDown(client.Key) bool     { return false }
+func (*fakeInteractiveWindow) PrimaryButtonDown() bool     { return false }
+func (*fakeInteractiveWindow) SecondaryButtonDown() bool   { return false }
+func (window *fakeInteractiveWindow) CursorCaptured() bool { return window.captured }
+func (*fakeInteractiveWindow) FramebufferSize() (int, int) { return 1, 1 }
+func (*fakeInteractiveWindow) ContentSize() (int, int)     { return 1, 1 }
+func (*fakeInteractiveWindow) SetContentSize(int, int)     {}
+func (*fakeInteractiveWindow) CancelClose()                {}
 func (*fakeInteractiveWindow) NativeHandle() gfx.NativeWindowHandle {
 	return gfx.NativeWindowHandle{}
 }

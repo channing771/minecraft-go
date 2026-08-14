@@ -25,10 +25,12 @@ func runInteractive(app *application) error {
 	panelDownWasDown := false
 	panelLeftWasDown := false
 	panelRightWasDown := false
-	panelEnterWasDown := false
+	enterWasDown := false
+	backspaceWasDown := false
 	panelSaveWasDown := false
 	panelResetAllWasDown := false
 	var input client.InputState
+	var textInputBuffer [1024]rune
 
 	for !app.window.ShouldClose() {
 		app.window.Poll()
@@ -41,18 +43,48 @@ func runInteractive(app *application) error {
 			app.closeClientSession(err)
 			return err
 		}
+		textInput, textOverflow := app.window.DrainTextInput(textInputBuffer[:0])
+		chatWasOpen := app.chatInput.open
+		if chatWasOpen {
+			if textOverflow {
+				app.chatInput.overflow = true
+			}
+			for _, char := range textInput {
+				app.chatInput.Append(char)
+			}
+		}
 
 		escapeDown := app.window.KeyDown(client.KeyEscape)
+		enterDown := app.window.KeyDown(client.KeyEnter)
+		enterPressed := enterDown && !enterWasDown
+		backspaceDown := app.window.KeyDown(client.KeyBackspace)
+		justCaptured := false
+		chatCanceled := false
 		if escapeDown && !escapeWasDown {
-			// 背包打开时 Escape 只关闭背包并重新捕获鼠标。
-			if app.inventoryOpen {
+			switch {
+			case app.chatInput.open:
+				chatCanceled = true
+				app.chatInput.Cancel()
+				app.window.SetCursorCaptured(true)
+				lastMouseX, lastMouseY = app.window.CursorPos()
+				justCaptured = true
+			case app.inventoryOpen:
+				// 背包打开时 Escape 只关闭背包并重新捕获鼠标。
 				app.setInventoryOpen(false)
 				lastMouseX, lastMouseY = app.window.CursorPos()
-			} else {
+				justCaptured = true
+			default:
 				app.window.SetCursorCaptured(false)
 			}
 		}
+		if chatCanceled {
+			enterPressed = false
+		}
 		escapeWasDown = escapeDown
+		if app.chatInput.open && backspaceDown && !backspaceWasDown {
+			app.chatInput.Backspace()
+		}
+		backspaceWasDown = backspaceDown
 
 		// 调试面板按键：F3/F5/F6、方向键与 Enter 都是边沿触发（按一下走一步），
 		// Shift/Alt 是电平读取的修饰键。面板不存在时（未开 --dev）整段直接跳过，
@@ -63,19 +95,20 @@ func runInteractive(app *application) error {
 			downDown := app.window.KeyDown(client.KeyDown)
 			leftDown := app.window.KeyDown(client.KeyLeft)
 			rightDown := app.window.KeyDown(client.KeyRight)
-			enterDown := app.window.KeyDown(client.KeyEnter)
 			saveDown := app.window.KeyDown(client.KeyF5)
 			resetAllDown := app.window.KeyDown(client.KeyF6)
+			panelBlocked := chatWasOpen || app.chatInput.open
 
 			keys := panelKeys{
-				Toggle:   toggleDown && !panelToggleWasDown,
-				Up:       upDown && !panelUpWasDown,
-				Down:     downDown && !panelDownWasDown,
-				Left:     leftDown && !panelLeftWasDown,
-				Right:    rightDown && !panelRightWasDown,
-				Enter:    enterDown && !panelEnterWasDown,
-				Save:     saveDown && !panelSaveWasDown,
-				ResetAll: resetAllDown && !panelResetAllWasDown,
+				Toggle: !panelBlocked && toggleDown && !panelToggleWasDown,
+				Up:     !panelBlocked && upDown && !panelUpWasDown,
+				Down:   !panelBlocked && downDown && !panelDownWasDown,
+				Left:   !panelBlocked && leftDown && !panelLeftWasDown,
+				Right:  !panelBlocked && rightDown && !panelRightWasDown,
+				Enter: !panelBlocked && !app.inventoryOpen && !app.containerOpen() &&
+					enterPressed && app.panel.visible,
+				Save:     !panelBlocked && saveDown && !panelSaveWasDown,
+				ResetAll: !panelBlocked && resetAllDown && !panelResetAllWasDown,
 				Shift:    app.window.KeyDown(client.KeyLeftShift),
 				Alt:      app.window.KeyDown(client.KeyLeftAlt),
 			}
@@ -84,7 +117,6 @@ func runInteractive(app *application) error {
 			panelDownWasDown = downDown
 			panelLeftWasDown = leftDown
 			panelRightWasDown = rightDown
-			panelEnterWasDown = enterDown
 			panelSaveWasDown = saveDown
 			panelResetAllWasDown = resetAllDown
 
@@ -100,16 +132,37 @@ func runInteractive(app *application) error {
 			}
 		}
 
+		if enterPressed {
+			switch {
+			case app.chatInput.open:
+				if command, ok := app.chatInput.Submit(); ok {
+					if err := app.send(command); err != nil {
+						slog.Warn("发送伙伴聊天失败", "error", err)
+					}
+					app.window.SetCursorCaptured(true)
+					lastMouseX, lastMouseY = app.window.CursorPos()
+					justCaptured = true
+				}
+			case app.inventoryOpen || app.containerOpen() || (app.panel != nil && app.panel.visible):
+				// 更高优先级的界面消费 Enter。
+			default:
+				app.chatInput.Open()
+				app.window.SetCursorCaptured(false)
+				app.applyInteractiveInput(0, client.Movement{}, client.Actions{}, false)
+			}
+		}
+		enterWasDown = enterDown
+		chatBlockedThisFrame := chatWasOpen || app.chatInput.open
+
 		clickDown := app.window.PrimaryButtonDown()
-		justCaptured := false
-		if clickDown && !clickWasDown && !app.window.CursorCaptured() && !app.inventoryOpen {
+		if clickDown && !clickWasDown && !app.window.CursorCaptured() && !app.inventoryOpen && !app.chatInput.open {
 			app.window.SetCursorCaptured(true)
 			lastMouseX, lastMouseY = app.window.CursorPos()
 			justCaptured = true
 		}
 		clickWasDown = clickDown
 		captured := app.window.CursorCaptured()
-		if captured && !justCaptured && !app.inventoryOpen {
+		if captured && !justCaptured && !app.inventoryOpen && !app.chatInput.open {
 			mouseX, mouseY := app.window.CursorPos()
 			// baseMouseSensitivity 是键鼠灵敏度默认为 1 时对应的原始弧度/像素系数；
 			// Render.MouseSensitivity 是相对该基线的倍率，默认值 1 保持行为不变。
@@ -126,9 +179,9 @@ func runInteractive(app *application) error {
 		actions := input.Update(
 			clickDown, app.window.SecondaryButtonDown(), number,
 			app.window.KeyDown(client.KeyE), app.window.KeyDown(client.KeyQ),
-			app.inventoryOpen,
+			app.inventoryOpen || chatBlockedThisFrame,
 		)
-		if actions.ToggleInventory {
+		if actions.ToggleInventory && !chatBlockedThisFrame {
 			app.setInventoryOpen(!app.inventoryOpen)
 			if !app.inventoryOpen {
 				lastMouseX, lastMouseY = app.window.CursorPos()
@@ -147,11 +200,13 @@ func runInteractive(app *application) error {
 			app.window.KeyDown(client.KeyD),
 			app.window.KeyDown(client.KeySpace),
 		)
-		if app.inventoryOpen {
+		if app.inventoryOpen || chatBlockedThisFrame {
 			// 界面打开时持续发送中性输入，避免服务端沿用上一帧移动。
 			movement = client.Movement{}
 		}
-		app.applyInteractiveCursorInput(dt, movement, actions, captured, justCaptured)
+		app.applyInteractiveCursorInput(
+			dt, movement, actions, captured && !chatBlockedThisFrame, justCaptured,
+		)
 		app.remotePlayers.Advance(dt)
 		if app.companions != nil {
 			app.companions.Advance(dt)
