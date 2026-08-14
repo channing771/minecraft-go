@@ -26,7 +26,7 @@ func newTestHost(t *testing.T) *Host {
 
 func newTestHostWithStore(t *testing.T, store storage.WorldStore) *Host {
 	t.Helper()
-	host := NewHost(hostTestConfig(), flatTestGenerator{}, store)
+	host := mustNewHost(t, hostTestConfig(), flatTestGenerator{}, store)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
@@ -34,6 +34,15 @@ func newTestHostWithStore(t *testing.T, store storage.WorldStore) *Host {
 			t.Errorf("Host cleanup Shutdown: %v", err)
 		}
 	})
+	return host
+}
+
+func mustNewHost(t *testing.T, config Config, generator Generator, store storage.WorldStore) *Host {
+	t.Helper()
+	host, err := NewHost(context.Background(), config, generator, store)
+	if err != nil {
+		t.Fatalf("NewHost: %v", err)
+	}
 	return host
 }
 
@@ -130,7 +139,7 @@ func startMultiHost(t *testing.T, store storage.WorldStore) (*Host, func()) {
 
 func startHostWithConfig(t *testing.T, config Config, store storage.WorldStore) (*Host, func()) {
 	t.Helper()
-	host := NewHost(config, flatTestGenerator{}, store)
+	host := mustNewHost(t, config, flatTestGenerator{}, store)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- host.Run(ctx, nil) }()

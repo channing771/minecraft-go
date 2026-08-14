@@ -211,12 +211,18 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 		FormatVersion: 2, Seed: benchmarkSeed,
 		SpawnDimension: core.Overworld, SpawnAnchor: core.ChunkPos{},
 	})
-	host := server.NewHost(config, worldgen.New(benchmarkSeed), store)
 	runCtx, cancelRun := context.WithTimeout(
 		context.Background(),
 		duration+benchmarkServerWarmupTicks*50*time.Millisecond+15*time.Second,
 	)
 	defer cancelRun()
+	host, err := server.NewHost(runCtx, config, worldgen.New(benchmarkSeed), store)
+	if err != nil {
+		return client.MultiplayerSummary{}, client.PhaseSummary{}, errors.Join(
+			fmt.Errorf("创建多人 benchmark Host: %w", err),
+			store.Close(),
+		)
+	}
 	runDone := make(chan error, 1)
 	go func() { runDone <- host.Run(runCtx, nil) }()
 

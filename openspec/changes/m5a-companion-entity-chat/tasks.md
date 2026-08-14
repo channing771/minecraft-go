@@ -36,9 +36,9 @@
 
 ## 7. Host 启动合并、恢复与 shutdown（计划 Task 8）
 
-- [ ] 7.1 在 `internal/server`、`cmd/mornlea` 与 `cmd/mornlea-server` 先写 AI-disabled 跳过 store、active/inactive merge、65th 拒绝、corrupt/future worker 前失败、清空配置不触碰文件、shutdown retry/final-step/order 测试；运行 `go test ./internal/server ./cmd/mornlea ./cmd/mornlea-server -run 'Test(NewHost|RemovingAllCompanion|CompanionShutdown)' -race -count=1` 确认 RED。
-- [ ] 7.2 实现 `NewHost(ctx, config, generator, store) (*Host,error)` 的同步 Load/merge 边界、caller-owned 资源清理、AI-disabled `NewWorld` 限制，以及 Server step Observe/Poll 和 save-before-Sync-before-Close；机械更新全部 `NewHost` caller。
-- [ ] 7.3 运行 `rg -n '\bNewHost\(' --glob '*.go'` 核对 caller，再运行 `go test ./internal/server ./cmd/mornlea ./cmd/mornlea-server -run 'Test(NewHost|RemovingAllCompanion|CompanionShutdown|Application.*Host)' -race -count=1`、`go test ./internal/server ./cmd/mornlea ./cmd/mornlea-server -race -count=1`、`go test ./internal/archcheck -count=1`、`go vet ./internal/server ./cmd/mornlea ./cmd/mornlea-server`、`test -z "$(gofmt -l internal/server cmd/mornlea cmd/mornlea-server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时在 merge 中丢弃 inactive records，确认包含 `Test(NewHost|RemovingAllCompanion|CompanionShutdown|Application.*Host)` 的命令 RED 后恢复并重跑至 PASS。
+- [x] 7.1 在 `internal/server`、`cmd/mornlea` 与 `cmd/mornlea-server` 先写 AI-disabled 跳过 store、active/inactive merge、65th 拒绝、corrupt/future worker 前失败、清空配置不触碰文件、shutdown retry/final-step/order 测试；运行 `go test ./internal/server ./cmd/mornlea ./cmd/mornlea-server -run 'Test(NewHost|RemovingAllCompanion|CompanionShutdown)' -race -count=1` 确认 RED。
+- [x] 7.2 实现 `NewHost(ctx, config, generator, store) (*Host,error)` 的同步 Load/merge 边界、caller-owned 资源清理、AI-disabled `NewWorld` 限制，以及 Server step Observe/Poll 和 save-before-Sync-before-Close；机械更新全部 `NewHost` caller。
+- [x] 7.3 运行 `rg -n '\bNewHost\(' --glob '*.go'` 核对 caller，再运行 `go test ./internal/server ./cmd/mornlea ./cmd/mornlea-server -run 'Test(NewHost|RemovingAllCompanion|CompanionShutdown|Application.*Host)' -race -count=1`、`go test ./internal/server ./cmd/mornlea ./cmd/mornlea-server -race -count=1`、`go test ./internal/archcheck -count=1`、`go vet ./internal/server ./cmd/mornlea ./cmd/mornlea-server`、`test -z "$(gofmt -l internal/server cmd/mornlea cmd/mornlea-server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时在 merge 中丢弃 inactive records，确认包含 `Test(NewHost|RemovingAllCompanion|CompanionShutdown|Application.*Host)` 的命令 RED 后恢复并重跑至 PASS。
 
 ## 8. 伙伴网络发布与独立容量（计划 Task 9）
 

@@ -72,7 +72,7 @@ func runStaticBlockLightScript(t *testing.T, transport string) staticBlockLightR
 	config := hostTestConfig()
 	config.ViewRadius = 1
 	config.AutosaveTicks = 1000
-	host := NewHost(config, flatGenerator{}, store)
+	host := mustNewHost(t, config, flatGenerator{}, store)
 	endpoint, acceptDone, closeTransport := openParityTransport(t, host, transport, identity)
 	t.Cleanup(func() {
 		_ = endpoint.Close()

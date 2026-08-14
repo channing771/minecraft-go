@@ -85,7 +85,7 @@ func startDiskHost(t *testing.T, root, address string, generator Generator) inte
 	config.AutosaveTicks = 20
 	config.RetryBaseTicks = 1
 	config.RetryMaxTicks = 4
-	host := NewHost(config, generator, store)
+	host := mustNewHost(t, config, generator, store)
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
 	t.Cleanup(func() {

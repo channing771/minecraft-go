@@ -126,9 +126,9 @@ func TestRunPassesMaxPlayersToHost(t *testing.T) {
 			return storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: 42}), nil
 		},
 		listenTCP: func(string) (network.Listener, error) { return mornleaServerTestListener{}, nil },
-		newHost: func(config server.Config, _ server.Generator, _ storage.WorldStore) mornleaServerHost {
+		newHost: func(_ context.Context, config server.Config, _ server.Generator, _ storage.WorldStore) (mornleaServerHost, error) {
 			got = config.MaxPlayers
-			return &mornleaServerTestHost{runErr: want}
+			return &mornleaServerTestHost{runErr: want}, nil
 		},
 	})
 	if !errors.Is(err, want) || got != 3 {
@@ -154,10 +154,10 @@ func TestRunInjectsAICompanionsIntoDedicatedServer(t *testing.T) {
 			return storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: 42}), nil
 		},
 		listenTCP: func(string) (network.Listener, error) { return mornleaServerTestListener{}, nil },
-		newHost: func(config server.Config, _ server.Generator, _ storage.WorldStore) mornleaServerHost {
+		newHost: func(_ context.Context, config server.Config, _ server.Generator, _ storage.WorldStore) (mornleaServerHost, error) {
 			got = config.Companions
 			config.Companions[0].Name = "已改"
-			return &mornleaServerTestHost{runErr: want}
+			return &mornleaServerTestHost{runErr: want}, nil
 		},
 	})
 	if !errors.Is(err, want) || len(got) != 1 || got[0].ID != id {
@@ -235,9 +235,9 @@ func TestRunMigrateMaterialsReturnsBeforeConfigAndServerAssembly(t *testing.T) {
 			t.Fatal("迁移模式监听了 TCP")
 			return nil, nil
 		},
-		newHost: func(server.Config, server.Generator, storage.WorldStore) mornleaServerHost {
+		newHost: func(context.Context, server.Config, server.Generator, storage.WorldStore) (mornleaServerHost, error) {
 			t.Fatal("迁移模式构造了 host")
-			return nil
+			return nil, nil
 		},
 	})
 	if !errors.Is(err, want) || called != 1 {
@@ -339,9 +339,9 @@ func migrationOnlyDependencies(t *testing.T) dependencies {
 			t.Fatal("迁移模式监听了 TCP")
 			return nil, nil
 		},
-		newHost: func(server.Config, server.Generator, storage.WorldStore) mornleaServerHost {
+		newHost: func(context.Context, server.Config, server.Generator, storage.WorldStore) (mornleaServerHost, error) {
 			t.Fatal("迁移模式构造了 host")
-			return nil
+			return nil, nil
 		},
 	}
 }
@@ -368,11 +368,11 @@ func TestRunOpensWorldBeforeListeningAndUsesStoredSeed(t *testing.T) {
 			events = append(events, "listen:"+address)
 			return mornleaServerTestListener{addr: "127.0.0.1:25565"}, nil
 		},
-		newHost: func(config server.Config, _ server.Generator, got storage.WorldStore) mornleaServerHost {
+		newHost: func(_ context.Context, config server.Config, _ server.Generator, got storage.WorldStore) (mornleaServerHost, error) {
 			if got != store || config.Seed != 91 {
 				t.Fatalf("host store=%T seed=%d, want persisted seed 91", got, config.Seed)
 			}
-			return host
+			return host, nil
 		},
 		logger: slog.New(slog.NewTextHandler(&logs, nil)),
 	})
@@ -401,6 +401,26 @@ func TestRunClosesWorldWhenListeningFails(t *testing.T) {
 	}
 }
 
+func TestNewHostFailureClosesDedicatedListenerAndStore(t *testing.T) {
+	wantErr := errors.New("companion bootstrap failed")
+	store := &mornleaServerClosingStore{WorldStore: storage.NewMemory(storage.Metadata{FormatVersion: 2})}
+	listener := &mornleaServerClosingListener{}
+	ctx := context.WithValue(context.Background(), struct{}{}, "constructor-context")
+	err := run(ctx, absentConfigArgs(t), dependencies{
+		openDisk:  func(context.Context, string, storage.OpenOptions) (storage.WorldStore, error) { return store, nil },
+		listenTCP: func(string) (network.Listener, error) { return listener, nil },
+		newHost: func(got context.Context, _ server.Config, _ server.Generator, _ storage.WorldStore) (mornleaServerHost, error) {
+			if got != ctx {
+				t.Fatalf("NewHost context = %v，want caller context", got)
+			}
+			return nil, wantErr
+		},
+	})
+	if !errors.Is(err, wantErr) || store.closes != 1 || listener.closes != 1 {
+		t.Fatalf("run error=%v store/listener closes=%d/%d", err, store.closes, listener.closes)
+	}
+}
+
 func TestRunCancellationLetsHostPerformSafeShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	host := &mornleaServerTestHost{shutdownOnCancel: true, started: make(chan struct{})}
@@ -412,7 +432,9 @@ func TestRunCancellationLetsHostPerformSafeShutdown(t *testing.T) {
 				return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 			},
 			listenTCP: func(string) (network.Listener, error) { return mornleaServerTestListener{addr: "127.0.0.1:9"}, nil },
-			newHost:   func(server.Config, server.Generator, storage.WorldStore) mornleaServerHost { return host },
+			newHost: func(context.Context, server.Config, server.Generator, storage.WorldStore) (mornleaServerHost, error) {
+				return host, nil
+			},
 		})
 	}()
 	<-host.started
@@ -433,8 +455,8 @@ func TestRunPreservesFlushFailures(t *testing.T) {
 					return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 				},
 				listenTCP: func(string) (network.Listener, error) { return mornleaServerTestListener{}, nil },
-				newHost: func(server.Config, server.Generator, storage.WorldStore) mornleaServerHost {
-					return &mornleaServerTestHost{runErr: want}
+				newHost: func(context.Context, server.Config, server.Generator, storage.WorldStore) (mornleaServerHost, error) {
+					return &mornleaServerTestHost{runErr: want}, nil
 				},
 			})
 			if !errors.Is(err, want) {
@@ -461,7 +483,9 @@ func TestRunCancellationDoesNotMaskFlushFailure(t *testing.T) {
 				return storage.NewMemory(storage.Metadata{FormatVersion: 2}), nil
 			},
 			listenTCP: func(string) (network.Listener, error) { return mornleaServerTestListener{}, nil },
-			newHost:   func(server.Config, server.Generator, storage.WorldStore) mornleaServerHost { return host },
+			newHost: func(context.Context, server.Config, server.Generator, storage.WorldStore) (mornleaServerHost, error) {
+				return host, nil
+			},
 		})
 	}()
 	<-host.started
@@ -507,6 +531,17 @@ func (listener mornleaServerTestListener) Accept(context.Context) (network.Serve
 }
 func (listener mornleaServerTestListener) Addr() string { return listener.addr }
 func (mornleaServerTestListener) Close() error          { return nil }
+
+type mornleaServerClosingListener struct{ closes int }
+
+func (*mornleaServerClosingListener) Accept(context.Context) (network.ServerPacketStream, error) {
+	return nil, network.ErrClosed
+}
+func (*mornleaServerClosingListener) Addr() string { return "127.0.0.1:9" }
+func (listener *mornleaServerClosingListener) Close() error {
+	listener.closes++
+	return nil
+}
 
 type mornleaServerClosingStore struct {
 	storage.WorldStore

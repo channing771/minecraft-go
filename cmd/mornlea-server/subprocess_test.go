@@ -36,8 +36,8 @@ func TestMornleaServerProcess(t *testing.T) {
 			listenTCP: func(string) (network.Listener, error) {
 				return mornleaServerTestListener{}, nil
 			},
-			newHost: func(server.Config, server.Generator, storage.WorldStore) mornleaServerHost {
-				return &mornleaServerTestHost{runErr: errors.New("save failed")}
+			newHost: func(context.Context, server.Config, server.Generator, storage.WorldStore) (mornleaServerHost, error) {
+				return &mornleaServerTestHost{runErr: errors.New("save failed")}, nil
 			},
 		})
 		if err == nil {

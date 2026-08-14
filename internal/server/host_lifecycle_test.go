@@ -12,7 +12,7 @@ import (
 func TestHostCleanupUsesEntryIdentity(t *testing.T) {
 	config := hostTestConfig()
 	config.MaxPlayers = 8
-	host := NewHost(config, flatTestGenerator{}, newHostTestStore())
+	host := mustNewHost(t, config, flatTestGenerator{}, newHostTestStore())
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
@@ -240,7 +240,7 @@ func TestHostAutosavesActivePlayer(t *testing.T) {
 	store := newHostTestStore()
 	config := hostTestConfig()
 	config.AutosaveTicks = 1
-	host := NewHost(config, flatTestGenerator{}, store)
+	host := mustNewHost(t, config, flatTestGenerator{}, store)
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- host.Run(runCtx, nil) }()

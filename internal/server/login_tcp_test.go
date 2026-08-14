@@ -13,7 +13,7 @@ func TestLoginTCPMultiplayer(t *testing.T) {
 	store := newHostTestStore()
 	config := hostTestConfig()
 	config.MaxPlayers = 8
-	host := NewHost(config, flatTestGenerator{}, store)
+	host := mustNewHost(t, config, flatTestGenerator{}, store)
 	listener, err := network.ListenTCP("127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

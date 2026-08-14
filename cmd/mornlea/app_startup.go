@@ -474,7 +474,7 @@ func assembleLocalApplicationConnection(
 	chan error,
 	error,
 ) {
-	host, err := dependencies.newHost(config, generator, store)
+	host, err := dependencies.newHost(ctx, config, generator, store)
 	if err != nil {
 		return nil, nil, nil, nil, errors.Join(err, store.Close())
 	}

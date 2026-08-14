@@ -366,7 +366,7 @@ func startMultiplayerTCPHost(t *testing.T) multiplayerTCPHost {
 	config.MaxPlayers = 2
 	config.ViewRadius = 1
 	config.OutboxCapacity = 512
-	host := NewHost(config, flatTestGenerator{}, newHostTestStore())
+	host := mustNewHost(t, config, flatTestGenerator{}, newHostTestStore())
 	done := make(chan error, 1)
 	go func() { done <- host.Run(context.Background(), listener) }()
 	return multiplayerTCPHost{Host: host, Addr: listener.Addr(), Done: done}

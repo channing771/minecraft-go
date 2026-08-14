@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -55,6 +57,7 @@ type Server struct {
 	saveCompletions chan saveCompletion
 	autosaveActive  bool
 	metadataSave    metadataSaveState
+	companions      *companionPersistence
 	retry           map[storage.RegionKey][]retrySave
 	retryInFlight   map[uint64]retrySave
 	nextRetryID     uint64
@@ -72,6 +75,18 @@ type Server struct {
 }
 
 func NewWorld(config Config, generator Generator, store storage.Store) *Server {
+	if len(config.Companions) != 0 {
+		panic("server: NewWorld does not support companions; use NewHost")
+	}
+	return newWorld(config, generator, store, nil)
+}
+
+func newWorld(
+	config Config,
+	generator Generator,
+	store storage.Store,
+	companions *companionPersistence,
+) *Server {
 	config.validate()
 	if generator == nil {
 		panic("server: nil generator")
@@ -84,11 +99,12 @@ func NewWorld(config Config, generator Generator, store storage.Store) *Server {
 	shutdownGate := make(chan struct{}, 1)
 	shutdownGate <- struct{}{}
 	queueCapacity := max(1, config.Workers*2)
+	metadata := store.Metadata()
 	server := &Server{
 		config:          config,
 		generator:       generator,
 		store:           store,
-		engine:          sim.NewEngine(config.ViewRadius, store.Metadata().WorldTimeTicks),
+		engine:          sim.NewEngine(config.ViewRadius, metadata.WorldTimeTicks),
 		sessions:        make(map[sim.SessionID]*session),
 		playerSessions:  make(map[core.PlayerID]sim.SessionID),
 		ctx:             ctx,
@@ -108,9 +124,30 @@ func NewWorld(config Config, generator Generator, store storage.Store) *Server {
 		saveDone:        make(chan struct{}),
 		closedDone:      make(chan struct{}),
 		shutdownGate:    shutdownGate,
+		companions:      companions,
 	}
 	if config.TrustedObserver {
 		server.trustedObserverCenters = make(chan trustedObserverCenter, 1)
+	}
+	if companions != nil {
+		companions.mu.Lock()
+		records := slices.Clone(companions.records)
+		companions.mu.Unlock()
+		for _, definition := range config.Companions {
+			restore := sim.CompanionRestore{
+				ID:             definition.ID,
+				SpawnDimension: metadata.SpawnDimension,
+				SpawnAnchor:    metadata.SpawnAnchor,
+			}
+			for index := range records {
+				if records[index].ID == definition.ID {
+					body := records[index]
+					restore.Body = &body
+					break
+				}
+			}
+			server.engine.RegisterCompanion(restore)
+		}
 	}
 
 	server.workers.Add(config.Workers)
@@ -226,6 +263,12 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 	server.drainAcquired()
 	server.drainGenerated()
 	result := server.engine.Step()
+	if server.companions != nil {
+		server.companions.Observe(server.engine.CompanionBodies())
+		if err := server.companions.Poll(result.Tick); err != nil {
+			slog.Warn("伙伴自动保存失败，保留重试", "error", err)
+		}
+	}
 	if hasTrustedCenter {
 		server.appliedTrustedObserver = appliedTrustedObserverCenter{
 			dimension: trustedCenter.dimension,

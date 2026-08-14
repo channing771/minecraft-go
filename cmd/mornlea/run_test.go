@@ -379,7 +379,7 @@ func TestRunLocalAIReachesServerConfigWithoutAliasingOptions(t *testing.T) {
 	dependencies.openStore = func(context.Context, applicationOptions) (storage.WorldStore, error) {
 		return newConnectionTestStore(42), nil
 	}
-	dependencies.newHost = func(config server.Config, _ server.Generator, _ storage.WorldStore) (applicationHost, error) {
+	dependencies.newHost = func(_ context.Context, config server.Config, _ server.Generator, _ storage.WorldStore) (applicationHost, error) {
 		if len(config.Companions) != 1 || config.Companions[0] != definitions[0] {
 			t.Fatalf("server companions = %+v", config.Companions)
 		}

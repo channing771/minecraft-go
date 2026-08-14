@@ -17,7 +17,7 @@ func TestDefaultConfigUsesEightMaxPlayers(t *testing.T) {
 func TestNewHostNormalizesZeroMaxPlayers(t *testing.T) {
 	config := DefaultConfig(42)
 	config.MaxPlayers = 0
-	host := NewHost(config, flatTestGenerator{}, newHostTestStore())
+	host := mustNewHost(t, config, flatTestGenerator{}, newHostTestStore())
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 		defer cancel()
@@ -40,7 +40,7 @@ func TestNewHostRejectsOutOfRangeMaxPlayers(t *testing.T) {
 					t.Fatalf("NewHost accepted MaxPlayers = %d", maxPlayers)
 				}
 			}()
-			_ = NewHost(config, flatTestGenerator{}, newHostTestStore())
+			_, _ = NewHost(context.Background(), config, flatTestGenerator{}, newHostTestStore())
 		})
 	}
 }
@@ -61,4 +61,18 @@ func TestServerConfigCompanionsValidatesDefinitions(t *testing.T) {
 		}
 	}()
 	config.validate()
+}
+
+func TestNewWorldRejectsEnabledCompanions(t *testing.T) {
+	config := hostTestConfig()
+	config.Companions = []companion.Definition{{
+		ID:   companion.ID{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1},
+		Name: "阿木",
+	}}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("NewWorld accepted enabled companions")
+		}
+	}()
+	_ = NewWorld(config, flatTestGenerator{}, newHostTestStore())
 }

@@ -57,7 +57,7 @@ func runMaterialProcessingScript(t *testing.T, transport string) materialProcess
 	config := hostTestConfig()
 	config.ViewRadius = 1
 	config.AutosaveTicks = 1000
-	host := NewHost(config, flatGenerator{}, store)
+	host := mustNewHost(t, config, flatGenerator{}, store)
 	endpoint, acceptDone, closeTransport := openParityTransport(t, host, transport, identity)
 	closed := false
 	t.Cleanup(func() {

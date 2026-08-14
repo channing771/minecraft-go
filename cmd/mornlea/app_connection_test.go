@@ -320,7 +320,7 @@ func TestApplicationConnectionLocalHostFailureClosesStoreBeforeWindow(t *testing
 	dependencies.openStore = func(context.Context, applicationOptions) (storage.WorldStore, error) {
 		return store, nil
 	}
-	dependencies.newHost = func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
+	dependencies.newHost = func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
 		return nil, hostErr
 	}
 	dependencies.newMemoryStreamPair = func(int) (network.ClientPacketStream, network.ServerPacketStream, error) {
@@ -350,7 +350,7 @@ func TestApplicationConnectionLocalMemoryFailureStopsHostAndClosesStoreBeforeWin
 	dependencies.openStore = func(context.Context, applicationOptions) (storage.WorldStore, error) {
 		return store, nil
 	}
-	dependencies.newHost = func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
+	dependencies.newHost = func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
 		return host, nil
 	}
 	dependencies.newMemoryStreamPair = func(int) (network.ClientPacketStream, network.ServerPacketStream, error) {
@@ -384,7 +384,7 @@ func TestApplicationConnectionLocalLoginFailureCleansStreamsHostAndStoreBeforeWi
 	dependencies.openStore = func(context.Context, applicationOptions) (storage.WorldStore, error) {
 		return store, nil
 	}
-	dependencies.newHost = func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
+	dependencies.newHost = func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
 		return host, nil
 	}
 	dependencies.newMemoryStreamPair = func(int) (network.ClientPacketStream, network.ServerPacketStream, error) {
@@ -460,7 +460,7 @@ func connectionTestDependencies(t *testing.T) applicationDependencies {
 			unexpected("loginClient")
 			return nil, nil
 		},
-		newHost: func(server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
+		newHost: func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
 			unexpected("newHost")
 			return nil, nil
 		},
