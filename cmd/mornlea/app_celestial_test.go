@@ -6,6 +6,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -63,7 +64,14 @@ func TestApplicationCelestialParametersMatchMemoryAndTCP(t *testing.T) {
 				serverCancel:   func() {},
 			}
 			sendInteractiveServerMessage(t, serverEndpoint, state)
-			app.drainServerMessages(1)
+			deadline := time.Now().Add(time.Second)
+			for app.serverTick != state.ServerTick && time.Now().Before(deadline) {
+				app.drainServerMessages(1)
+				time.Sleep(time.Millisecond)
+			}
+			if app.serverTick != state.ServerTick {
+				t.Fatalf("等待权威世界时间超时: receiver error=%v", app.receiver.Err())
+			}
 			got := render.DayNightAt(app.worldTimeTicks)
 			if math.Abs(float64(got.SunDirection[1]+1)) > 1e-5 || math.Abs(float64(got.SunDirection[0])) > 1e-5 || math.Abs(float64(got.SunDirection[2])) > 1e-5 {
 				t.Fatalf("午夜太阳方向 = %v，想要地平线下方", got.SunDirection)
