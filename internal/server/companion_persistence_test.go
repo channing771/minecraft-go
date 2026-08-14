@@ -102,10 +102,17 @@ func TestCompanionPersistenceFlushFailureCanBeRetried(t *testing.T) {
 	if !reflect.DeepEqual(retry, first) {
 		t.Fatalf("Flush retry=%+v, want %+v", retry, first)
 	}
+	p.Observe([]companion.Body{companionBody(1, 20)})
+	store.complete(nil)
+	latest := receiveCompanionSaveBeforeFlushReturns(t, store, secondDone)
+	if latest.Revision != 2 || latest.Records[0].Position[0] != 20 {
+		t.Fatalf("Flush latest=%+v, want revision 2 body 20", latest)
+	}
 	store.complete(nil)
 	if err := <-secondDone; err != nil {
 		t.Fatal(err)
 	}
+	assertNoCompanionSave(t, store)
 }
 
 func TestCompanionPersistenceDoesNotHoldMutexDuringStoreSave(t *testing.T) {
@@ -170,52 +177,129 @@ func TestCompanionPersistenceRetryDoesNotAliasStoreSaveInput(t *testing.T) {
 }
 
 func TestCompanionPersistenceFlushWaitsForInflightAndWritesLatestOnce(t *testing.T) {
-	t.Run("inherited", func(t *testing.T) {
-		store := newControllableCompanionStore()
-		p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
-		t.Cleanup(p.Close)
-		p.Observe([]companion.Body{companionBody(1, 10)})
-		_ = p.Poll(10)
-		_ = receiveCompanionSave(t, store)
-		p.Observe([]companion.Body{companionBody(1, 20)})
-		flushed := make(chan error, 1)
-		go func() { flushed <- p.Flush(context.Background()) }()
-		assertNoCompanionSave(t, store)
-		store.complete(nil)
-		latest := receiveCompanionSave(t, store)
-		if latest.Revision != 2 || latest.Records[0].Position[0] != 20 {
-			t.Fatalf("latest save=%+v", latest)
-		}
-		store.complete(nil)
-		if err := <-flushed; err != nil {
-			t.Fatal(err)
-		}
-		assertNoCompanionSave(t, store)
-	})
+	for _, test := range []struct {
+		name      string
+		inherited bool
+	}{
+		{name: "inherited", inherited: true},
+		{name: "self dispatched"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newControllableCompanionStore()
+			p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
+			t.Cleanup(p.Close)
+			p.Observe([]companion.Body{companionBody(1, 10)})
+			flushed := make(chan error, 1)
+			if test.inherited {
+				if err := p.Poll(10); err != nil {
+					t.Fatal(err)
+				}
+				_ = receiveCompanionSave(t, store)
+				go func() { flushed <- p.Flush(context.Background()) }()
+			} else {
+				go func() { flushed <- p.Flush(context.Background()) }()
+				first := receiveCompanionSaveBeforeFlushReturns(t, store, flushed)
+				if first.Revision != 1 || first.Records[0].Position[0] != 10 {
+					t.Fatalf("first save=%+v", first)
+				}
+			}
 
-	t.Run("self dispatched", func(t *testing.T) {
-		store := newControllableCompanionStore()
-		p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
-		t.Cleanup(p.Close)
-		p.Observe([]companion.Body{companionBody(1, 10)})
-		flushed := make(chan error, 1)
-		go func() { flushed <- p.Flush(context.Background()) }()
-		first := receiveCompanionSave(t, store)
-		if first.Revision != 1 || first.Records[0].Position[0] != 10 {
-			t.Fatalf("first save=%+v", first)
+			p.Observe([]companion.Body{companionBody(1, 20)})
+			store.complete(nil)
+			followup := receiveCompanionSaveBeforeFlushReturns(t, store, flushed)
+			if followup.Revision != 2 || followup.Records[0].Position[0] != 20 {
+				t.Fatalf("follow-up save=%+v, want revision 2 body 20", followup)
+			}
+			p.Observe([]companion.Body{companionBody(1, 30)})
+			store.complete(nil)
+			select {
+			case save := <-store.started:
+				t.Fatalf("same Flush wrote more than one follow-up: %+v", save)
+			case err := <-flushed:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(companionPersistenceTestDeadline):
+				t.Fatal("Flush did not return after its single follow-up")
+			}
+
+			next := make(chan error, 1)
+			go func() { next <- p.Flush(context.Background()) }()
+			latest := receiveCompanionSaveBeforeFlushReturns(t, store, next)
+			if latest.Revision != 3 || latest.Records[0].Position[0] != 30 {
+				t.Fatalf("next Flush save=%+v, want revision 3 body 30", latest)
+			}
+			store.complete(nil)
+			select {
+			case err := <-next:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(companionPersistenceTestDeadline):
+				t.Fatal("next Flush did not return")
+			}
+			assertNoCompanionSave(t, store)
+		})
+	}
+}
+
+func TestCompanionPersistenceFlushCancellationKeepsWorkerAndRetry(t *testing.T) {
+	store := newControllableCompanionStore()
+	p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
+	t.Cleanup(p.Close)
+	p.Observe([]companion.Body{companionBody(1, 10)})
+	if err := p.Poll(10); err != nil {
+		t.Fatal(err)
+	}
+	first := receiveCompanionSave(t, store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	canceled := make(chan error, 1)
+	go func() { canceled <- p.Flush(ctx) }()
+	waitForCompanionFlushWait(t, p)
+	cancel()
+	select {
+	case err := <-canceled:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled Flush error=%v, want context.Canceled", err)
 		}
-		p.Observe([]companion.Body{companionBody(1, 20)})
-		store.complete(nil)
-		latest := receiveCompanionSave(t, store)
-		if latest.Revision != 2 || latest.Records[0].Position[0] != 20 {
-			t.Fatalf("latest save=%+v", latest)
+	case <-time.After(companionPersistenceTestDeadline):
+		t.Fatal("Flush ignored caller cancellation")
+	}
+	if err := p.ctx.Err(); err != nil {
+		t.Fatalf("caller cancellation canceled internal worker: %v", err)
+	}
+
+	wantErr := errors.New("disk full after caller cancellation")
+	store.complete(wantErr)
+	collected := make(chan error, 1)
+	go func() { collected <- p.Flush(context.Background()) }()
+	select {
+	case save := <-store.started:
+		t.Fatalf("collecting failed in-flight dispatched another save: %+v", save)
+	case err := <-collected:
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("collecting Flush error=%v, want %v", err, wantErr)
 		}
-		store.complete(nil)
-		if err := <-flushed; err != nil {
+	case <-time.After(companionPersistenceTestDeadline):
+		t.Fatal("new Flush did not collect failed in-flight save")
+	}
+
+	replayed := make(chan error, 1)
+	go func() { replayed <- p.Flush(context.Background()) }()
+	retry := receiveCompanionSaveBeforeFlushReturns(t, store, replayed)
+	if !reflect.DeepEqual(retry, first) {
+		t.Fatalf("retry=%+v, want frozen %+v", retry, first)
+	}
+	store.complete(nil)
+	select {
+	case err := <-replayed:
+		if err != nil {
 			t.Fatal(err)
 		}
-		assertNoCompanionSave(t, store)
-	})
+	case <-time.After(companionPersistenceTestDeadline):
+		t.Fatal("replayed Flush did not return")
+	}
 }
 
 type controllableCompanionStore struct {
@@ -225,6 +309,8 @@ type controllableCompanionStore struct {
 	mutate  bool
 	onSave  func()
 }
+
+const companionPersistenceTestDeadline = time.Second
 
 func newControllableCompanionStore() *controllableCompanionStore {
 	return &controllableCompanionStore{
@@ -306,6 +392,40 @@ func receiveCompanionSave(t *testing.T, store *controllableCompanionStore) stora
 	case <-time.After(waitDeadline):
 		t.Fatal("SaveCompanions was not started")
 		return storage.CompanionSave{}
+	}
+}
+
+func receiveCompanionSaveBeforeFlushReturns(
+	t *testing.T,
+	store *controllableCompanionStore,
+	flushed <-chan error,
+) storage.CompanionSave {
+	t.Helper()
+	select {
+	case save := <-store.started:
+		return save
+	case err := <-flushed:
+		t.Fatalf("Flush returned before required save: %v", err)
+		return storage.CompanionSave{}
+	case <-time.After(companionPersistenceTestDeadline):
+		t.Fatal("SaveCompanions was not started before Flush deadline")
+		return storage.CompanionSave{}
+	}
+}
+
+func waitForCompanionFlushWait(t *testing.T, p *companionPersistence) {
+	t.Helper()
+	deadline := time.Now().Add(companionPersistenceTestDeadline)
+	for {
+		if p.completionMu.TryLock() {
+			p.completionMu.Unlock()
+		} else {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Flush did not start waiting for in-flight save")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
