@@ -1,20 +1,19 @@
 package render
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"slices"
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/gfx"
 )
 
 const (
-	maxNameTags      = 8
+	maxNameTags      = 12
 	maxNameTagRunes  = 32
 	maxNameTagGlyphs = maxNameTags * maxNameTagRunes
 
@@ -26,7 +25,7 @@ const (
 	nameTagCameraOffset     = 0
 	nameTagBackgroundOffset = 256
 	nameTagBackgroundSize   = maxNameTags * nameTagInstanceBytes
-	nameTagGlyphOffset      = 768
+	nameTagGlyphOffset      = (nameTagBackgroundOffset + nameTagBackgroundSize + 255) / 256 * 256
 	nameTagGlyphSize        = maxNameTagGlyphs * nameTagInstanceBytes
 	nameTagUploadBytes      = nameTagGlyphOffset + nameTagGlyphSize
 )
@@ -35,9 +34,9 @@ const (
 var nameTagShader string
 
 type NameTag struct {
-	PlayerID core.PlayerID
-	Text     string
-	Anchor   mgl32.Vec3
+	Key    EntityKey
+	Text   string
+	Anchor mgl32.Vec3
 }
 
 type BillboardCamera struct {
@@ -169,6 +168,9 @@ func nameTagPipelineDesc(
 }
 
 func (renderer *NameTagRenderer) Prepare(tags []NameTag, budget *UploadBudget) error {
+	if len(tags) > maxNameTags {
+		return fmt.Errorf("render: name tag count %d exceeds %d", len(tags), maxNameTags)
+	}
 	renderer.ordered = orderedNameTagsInto(renderer.ordered[:0], tags)
 	for index := range renderer.ordered {
 		renderer.ordered[index].Text = truncateNameTagText(renderer.ordered[index].Text)
@@ -285,11 +287,8 @@ func orderedNameTags(tags []NameTag) []NameTag {
 func orderedNameTagsInto(dst []NameTag, tags []NameTag) []NameTag {
 	ordered := append(dst, tags...)
 	slices.SortFunc(ordered, func(left, right NameTag) int {
-		return bytes.Compare(left.PlayerID[:], right.PlayerID[:])
+		return compareEntityKeys(left.Key, right.Key)
 	})
-	if len(ordered) > maxNameTags {
-		ordered = ordered[:maxNameTags]
-	}
 	return ordered
 }
 

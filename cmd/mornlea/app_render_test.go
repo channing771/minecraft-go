@@ -15,13 +15,127 @@ import (
 
 	"github.com/channing771/mornlea/internal/assets"
 	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/gfx"
+	"github.com/channing771/mornlea/internal/mesh"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
 	"github.com/channing771/mornlea/internal/render/hud"
 	"github.com/channing771/mornlea/internal/world"
 )
+
+func TestApplicationRendersSevenPlayersAndFourCompanionsInOneAvatarAndNameTagPass(t *testing.T) {
+	glyphs := &integrationGlyphSource{}
+	app, dev := newRemoteRenderApplication(t, glyphs)
+	app.companions = &client.Companions{}
+	configureTargetFeedback(t, app)
+	for index, name := range [...]string{"甲", "乙", "丙", "丁", "戊", "己", "庚"} {
+		if err := app.remotePlayers.Apply(remoteSpawn(
+			byte(index+1), name, 1, mgl32.Vec3{float32(index), 2, -4},
+		)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, name := range [...]string{"阿木", "小石", "青叶", "星尘"} {
+		id := companion.ID(integrationPlayerID(byte(index + 1)))
+		if err := app.companions.ApplySpawn(network.CompanionSpawn{
+			ID: id, Name: name, Tick: 1, Dimension: core.Overworld,
+			Position: mgl32.Vec3{float32(index), 2, -8},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rendered, err := app.renderFrame(1); err != nil || !rendered {
+		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
+	}
+	if got, want := len(app.remoteAvatars), 11; got != want {
+		t.Fatalf("avatars=%d，想要 %d", got, want)
+	}
+	if got, want := len(app.remoteNameTags), 12; got != want {
+		t.Fatalf("name tags=%d，想要 %d", got, want)
+	}
+	avatarKeys := make(map[render.EntityKey]struct{}, len(app.remoteAvatars))
+	for _, avatar := range app.remoteAvatars {
+		avatarKeys[avatar.Key] = struct{}{}
+	}
+	if len(avatarKeys) != 11 {
+		t.Fatalf("Avatar 实体键去重后=%d，想要 11", len(avatarKeys))
+	}
+	playerKey := render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(integrationPlayerID(1))}
+	companionKey := render.EntityKey{Kind: render.EntityCompanion, ID: playerKey.ID}
+	if _, ok := avatarKeys[playerKey]; !ok {
+		t.Fatalf("缺少玩家键 %v", playerKey)
+	}
+	if _, ok := avatarKeys[companionKey]; !ok {
+		t.Fatalf("缺少伙伴键 %v", companionKey)
+	}
+	nameTagKeys := make(map[render.EntityKey]struct{}, len(app.remoteNameTags))
+	for _, tag := range app.remoteNameTags {
+		nameTagKeys[tag.Key] = struct{}{}
+	}
+	if len(nameTagKeys) != 12 {
+		t.Fatalf("NameTag 实体键去重后=%d，想要 12", len(nameTagKeys))
+	}
+	if _, ok := nameTagKeys[render.EntityKey{Kind: render.EntityTarget}]; !ok {
+		t.Fatal("缺少目标 EntityTarget 名牌")
+	}
+	avatarPasses, nameTagPasses := 0, 0
+	for _, label := range dev.lastPasses() {
+		switch label {
+		case "avatar pass":
+			avatarPasses++
+		case "name-tag pass":
+			nameTagPasses++
+		}
+	}
+	if avatarPasses != 1 || nameTagPasses != 1 || glyphs.flushes != 1 {
+		t.Fatalf("Avatar/NameTag pass/flush=%d/%d/%d，想要 1/1/1", avatarPasses, nameTagPasses, glyphs.flushes)
+	}
+	if err := validateEntityPresentationCounts(make([]render.Avatar, 12), app.remoteNameTags); err == nil {
+		t.Fatal("12 个 Avatar 未被 App 层原子拒绝")
+	}
+	if err := validateEntityPresentationCounts(app.remoteAvatars, make([]render.NameTag, 13)); err == nil {
+		t.Fatal("13 个 NameTag 未被 App 层原子拒绝")
+	}
+}
+
+func TestApplicationRejectsActorOverflowBeforeGPUOrAtlasMutation(t *testing.T) {
+	glyphs := &integrationGlyphSource{}
+	app, dev := newRemoteRenderApplication(t, glyphs)
+	for index := range 12 {
+		if err := app.remotePlayers.Apply(remoteSpawn(
+			byte(index+1), "Remote", 1, mgl32.Vec3{float32(index), 2, -4},
+		)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	app.renderer.QueueSection(core.SectionPos{Y: 4}, []mesh.Quad{{
+		W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0xf0,
+	}})
+	dev.resetPasses()
+	for _, buffer := range dev.buffers {
+		buffer.writes = 0
+		buffer.lastWrite = nil
+	}
+	glyphs.requests = 0
+	glyphs.flushes = 0
+
+	if rendered, err := app.renderFrame(1); err == nil || rendered {
+		t.Fatalf("overflow renderFrame=(%v,%v)，想要 false/error", rendered, err)
+	}
+	if passes := dev.lastPasses(); len(passes) != 0 {
+		t.Fatalf("overflow 后 render passes=%v，想要空", passes)
+	}
+	for label, buffer := range dev.buffers {
+		if buffer.writes != 0 || len(buffer.lastWrite) != 0 {
+			t.Errorf("overflow 后 buffer %q write=%d/%d，想要 0/0", label, buffer.writes, len(buffer.lastWrite))
+		}
+	}
+	if glyphs.requests != 0 || glyphs.flushes != 0 {
+		t.Fatalf("overflow 后 atlas request/flush=%d/%d，想要 0/0", glyphs.requests, glyphs.flushes)
+	}
+}
 
 // Mutation killed: swapping, omitting, clearing, or creating empty remote
 // passes changes the real command encoder's captured pass descriptors.
@@ -92,10 +206,11 @@ func TestApplicationBlockTargetRenderOrderAndCapacity(t *testing.T) {
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("passes=%v want=%v", got, want)
 	}
-	if len(app.remoteNameTags) != 8 || cap(app.remoteNameTags) != 8 {
-		t.Fatalf("name tags len/cap=%d/%d，想要 8/8", len(app.remoteNameTags), cap(app.remoteNameTags))
+	if len(app.remoteNameTags) != 8 || cap(app.remoteNameTags) != maxFrameNameTags {
+		t.Fatalf("name tags len/cap=%d/%d，想要 8/%d", len(app.remoteNameTags), cap(app.remoteNameTags), maxFrameNameTags)
 	}
 	wantTargetTag := render.NameTag{
+		Key:  render.EntityKey{Kind: render.EntityTarget},
 		Text: "砖块", Anchor: mgl32.Vec3{0.5, 4.15, -2.5},
 	}
 	if got := app.remoteNameTags[7]; got != wantTargetTag {
@@ -120,9 +235,9 @@ func TestApplicationBlockTargetRenderOrderAndCapacity(t *testing.T) {
 	}
 	nameTagUpload := dev.bufferByLabel(t, "name-tag dynamic upload").lastWrite
 	if got := [3]float32{
-		readFloat(nameTagUpload, 768), readFloat(nameTagUpload, 772), readFloat(nameTagUpload, 776),
+		readFloat(nameTagUpload, 1472), readFloat(nameTagUpload, 1476), readFloat(nameTagUpload, 1480),
 	}; got != wantTargetTag.Anchor {
-		t.Fatalf("排序后首个名牌锚点=%v，想要目标锚点 %v", got, wantTargetTag.Anchor)
+		t.Fatalf("排序后目标名牌锚点=%v，想要 %v", got, wantTargetTag.Anchor)
 	}
 }
 
@@ -201,9 +316,12 @@ func TestApplicationPlayerResetHidesBlockTargetForOneFrame(t *testing.T) {
 
 func TestApplicationBlockTargetStablePathDoesNotAllocate(t *testing.T) {
 	app := targetBlockHitApplication(t)
-	remoteTags := make([]render.NameTag, 7, 8)
+	remoteTags := make([]render.NameTag, 7, maxFrameNameTags)
 	for index := range remoteTags {
-		remoteTags[index] = render.NameTag{PlayerID: integrationPlayerID(byte(index + 1)), Text: "A"}
+		id := integrationPlayerID(byte(index + 1))
+		remoteTags[index] = render.NameTag{
+			Key: render.EntityKey{Kind: render.EntityPlayer, ID: [16]byte(id)}, Text: "A",
+		}
 	}
 	dev := &integrationRenderDevice{}
 	glyphs := &integrationGlyphSource{}
@@ -446,10 +564,11 @@ func TestApplicationBlockOutlineConstructionFailureReleasesPartialResources(t *t
 type integrationGlyphSource struct {
 	flushErr   error
 	lastBudget *render.UploadBudget
+	requests   int
 	flushes    int
 }
 
-func (*integrationGlyphSource) Request(string) {}
+func (atlas *integrationGlyphSource) Request(string) { atlas.requests++ }
 func (atlas *integrationGlyphSource) FlushUploads(budget *render.UploadBudget) error {
 	atlas.lastBudget = budget
 	atlas.flushes++
@@ -483,6 +602,7 @@ func newRemoteRenderApplication(t *testing.T, glyphs render.GlyphSource) (*appli
 		),
 		itemDrops:      client.NewItemDrops(),
 		remotePlayers:  client.NewRemotePlayers(),
+		companions:     &client.Companions{},
 		remoteNameTags: make([]render.NameTag, 0, maxFrameNameTags),
 		mirror:         client.NewMirror(), predictor: client.NewPredictor(),
 		mesher: client.NewMesher(reg, 1), camera: client.Camera{FovY: mgl32.DegToRad(70), Aspect: 1, Near: 0.1, Far: 100},

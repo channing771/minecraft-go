@@ -29,11 +29,11 @@ func compareReportsWithScenarioUpgrade(
 	allowScenarioUpgrade string,
 ) ([]string, error) {
 	scenarioUpgrade := baseline.ScenarioVersion != current.ScenarioVersion
-	// 静态方块光改变 workload，因此当前唯一迁移是 v14 到 v15。
-	allowedScenarioUpgrade := baseline.ScenarioVersion == 14 && current.ScenarioVersion == 15 &&
-		allowScenarioUpgrade == "14:15"
+	// 统一伙伴渲染改变固定上传布局，因此当前唯一迁移是 v15 到 v16。
+	allowedScenarioUpgrade := baseline.ScenarioVersion == 15 && current.ScenarioVersion == 16 &&
+		allowScenarioUpgrade == "15:16"
 	if allowScenarioUpgrade != "" && !allowedScenarioUpgrade {
-		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v14 到 v15 使用 14:15", allowScenarioUpgrade)
+		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v15 到 v16 使用 15:16", allowScenarioUpgrade)
 	}
 	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(

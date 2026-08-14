@@ -65,6 +65,28 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	if width == 0 || height == 0 {
 		return false, nil
 	}
+	a.remotePresentations = a.remotePlayers.AppendPresentations(a.remotePresentations[:0])
+	a.remoteAvatars, a.remoteNameTags = remoteRenderPresentationsSortedInto(
+		a.remoteAvatars[:0],
+		a.remoteNameTags[:0],
+		a.remotePresentations,
+	)
+	if a.companions != nil {
+		a.companionPresentations = a.companions.AppendPresentations(a.companionPresentations[:0])
+		a.remoteAvatars, a.remoteNameTags = appendCompanionRenderPresentationsInto(
+			a.remoteAvatars,
+			a.remoteNameTags,
+			a.companionPresentations,
+		)
+	}
+	blockOutline := render.BlockOutline{}
+	if !blockTargetReset && !a.clientSessionClosed {
+		a.remoteNameTags, blockOutline = a.appendCurrentBlockTarget(a.remoteNameTags)
+	}
+	avatars, tags := a.remoteAvatars, a.remoteNameTags
+	if err := validateEntityPresentationCounts(avatars, tags); err != nil {
+		return false, fmt.Errorf("准备实体呈现: %w", err)
+	}
 	if a.surface != nil && (uint32(width) != a.depth.width || uint32(height) != a.depth.height) {
 		a.surface.Resize(uint32(width), uint32(height))
 		a.depth.Release()
@@ -83,17 +105,6 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		a.renderer.QueueSection(result.Pos, result.Quads)
 	}
 	a.renderer.FlushUploads(a.center)
-	a.remotePresentations = a.remotePlayers.AppendPresentations(a.remotePresentations[:0])
-	a.remoteAvatars, a.remoteNameTags = remoteRenderPresentationsSortedInto(
-		a.remoteAvatars[:0],
-		a.remoteNameTags[:0],
-		a.remotePresentations,
-	)
-	blockOutline := render.BlockOutline{}
-	if !blockTargetReset && !a.clientSessionClosed {
-		a.remoteNameTags, blockOutline = a.appendCurrentBlockTarget(a.remoteNameTags)
-	}
-	avatars, tags := a.remoteAvatars, a.remoteNameTags
 	renderTiming := a.multiplayerRenderTiming
 	var renderNow func() time.Time
 	var nameTagDuration time.Duration
@@ -181,7 +192,9 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		Daylight: dayNight.Daylight,
 		SkyColor: dayNight.ClearColor,
 	}
-	a.avatarRenderer.Render(encoder, target, a.depth.view, entityCamera, avatars)
+	if err := a.avatarRenderer.Render(encoder, target, a.depth.view, entityCamera, avatars); err != nil {
+		return false, fmt.Errorf("呈现实体 Avatar: %w", err)
+	}
 	if renderTiming != nil {
 		renderTiming.recordAvatar(renderNow().Sub(started))
 		started = renderNow()

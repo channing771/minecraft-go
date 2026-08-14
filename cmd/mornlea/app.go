@@ -18,8 +18,10 @@ import (
 	"github.com/channing771/mornlea/internal/server"
 )
 
-// maxFrameNameTags 固定为七名远程玩家加一个当前方块目标。
-const maxFrameNameTags = 8
+const (
+	maxFrameAvatars  = 11
+	maxFrameNameTags = 12
+)
 
 type applicationOptions struct {
 	Companions         []companion.Definition
@@ -41,27 +43,28 @@ type applicationOptions struct {
 }
 
 type application struct {
-	window                applicationWindow
-	dev                   gfx.Device
-	surface               gfx.Surface
-	color                 gfx.Texture
-	colorView             gfx.TextureView
-	frameWidth            int
-	frameHeight           int
-	renderer              *render.Renderer
-	remotePlayers         *client.RemotePlayers
-	companions            *client.Companions
-	chatEvents            *client.ChatEvents
-	remotePresentations   []client.RemotePresentation
-	remoteAvatars         []render.Avatar
-	remoteNameTags        []render.NameTag
-	avatarRenderer        *render.AvatarRenderer
-	nameTagRenderer       *render.NameTagRenderer
-	hotbarRenderer        *hud.HotbarRenderer
-	damageOverlayRenderer *render.DamageOverlayRenderer
-	damageFeedback        damageFeedback
-	damageStrength        float32
-	debugPanelRenderer    *render.DebugPanelRenderer
+	window                 applicationWindow
+	dev                    gfx.Device
+	surface                gfx.Surface
+	color                  gfx.Texture
+	colorView              gfx.TextureView
+	frameWidth             int
+	frameHeight            int
+	renderer               *render.Renderer
+	remotePlayers          *client.RemotePlayers
+	companions             *client.Companions
+	chatEvents             *client.ChatEvents
+	remotePresentations    []client.RemotePresentation
+	companionPresentations []client.CompanionPresentation
+	remoteAvatars          []render.Avatar
+	remoteNameTags         []render.NameTag
+	avatarRenderer         *render.AvatarRenderer
+	nameTagRenderer        *render.NameTagRenderer
+	hotbarRenderer         *hud.HotbarRenderer
+	damageOverlayRenderer  *render.DamageOverlayRenderer
+	damageFeedback         damageFeedback
+	damageStrength         float32
+	debugPanelRenderer     *render.DebugPanelRenderer
 	// panel 是调试面板的交互状态；只在 applicationOptions.Dev 为真时创建，
 	// 与 debugPanelRenderer 一同保持 nil/非 nil 同步。
 	panel *panelState

@@ -19,7 +19,7 @@ import (
 func TestNameTagLayoutUsesUnicodeRunesAndKerning(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
 	atlas.kerns[[2]rune{'A', 'V'}] = -2
-	layout := layoutNameTags(nil, atlas, []NameTag{{PlayerID: testNameTagID(1), Text: "AV 中文"}})
+	layout := layoutNameTags(nil, atlas, []NameTag{{Key: testEntityKey(testNameTagID(1)), Text: "AV 中文"}})
 	if got, want := len(layout.glyphs), 5; got != want {
 		t.Fatalf("glyphs=%d want=%d", got, want)
 	}
@@ -28,10 +28,82 @@ func TestNameTagLayoutUsesUnicodeRunesAndKerning(t *testing.T) {
 	}
 
 	long := strings.Repeat("中", 33)
-	layout = layoutNameTags(nil, atlas, []NameTag{{PlayerID: testNameTagID(1), Text: long}})
+	layout = layoutNameTags(nil, atlas, []NameTag{{Key: testEntityKey(testNameTagID(1)), Text: long}})
 	if got, want := len(layout.glyphs), 32; got != want {
 		t.Fatalf("Unicode-truncated glyphs=%d want=%d", got, want)
 	}
+}
+
+func TestNameTagRendererAcceptsTwelveAndRejectsThirteenBeforeAtlasMutation(t *testing.T) {
+	atlas := newFakeNameTagAtlas()
+	dev := &nameTagTestDevice{}
+	renderer := NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
+	defer renderer.Release()
+	tags := makeEntityNameTags(12, strings.Repeat("A", 32))
+	if err := renderer.Prepare(tags, NewUploadBudget(1<<20)); err != nil {
+		t.Fatalf("12 个 NameTag Prepare: %v", err)
+	}
+	if got, want := dev.bufferByLabel(t, "name-tag dynamic upload").desc.Size, uint64(25600); got != want {
+		t.Fatalf("dynamic upload size=%d，想要 %d", got, want)
+	}
+	if len(renderer.layout.backgrounds) != 12 || len(renderer.layout.glyphs) != 384 {
+		t.Fatalf("12 个 NameTag layout=%d/%d", len(renderer.layout.backgrounds), len(renderer.layout.glyphs))
+	}
+	if nameTagBackgroundSize != 768 || nameTagGlyphOffset != 1024 ||
+		nameTagGlyphSize != 24576 || nameTagUploadBytes != 25600 {
+		t.Fatalf("NameTag 布局=%d/%d/%d/%d，想要 768/1024/24576/25600",
+			nameTagBackgroundSize, nameTagGlyphOffset, nameTagGlyphSize, nameTagUploadBytes)
+	}
+	encoder := &nameTagTestEncoder{}
+	renderer.Render(encoder, &nameTagTestView{}, &nameTagTestView{}, BillboardCamera{})
+	upload := dev.bufferByLabel(t, "name-tag dynamic upload")
+	if got, want := len(upload.lastWrite), 25600; got != want {
+		t.Fatalf("12 个 32-rune NameTag upload=%d，想要 %d", got, want)
+	}
+	if got, want := len(encoder.passes), 1; got != want {
+		t.Fatalf("12 个 NameTag pass=%d，想要 %d", got, want)
+	}
+	wantOrdered := append([]NameTag(nil), renderer.ordered...)
+	wantLayout := nameTagLayout{
+		glyphs:      append([]nameTagGlyph(nil), renderer.layout.glyphs...),
+		backgrounds: append([]nameTagBackground(nil), renderer.layout.backgrounds...),
+	}
+	wantUpload := append([]byte(nil), renderer.upload...)
+	wantRequested := make(map[rune]struct{}, len(atlas.requested))
+	for char := range atlas.requested {
+		wantRequested[char] = struct{}{}
+	}
+	wantFlushes := atlas.flushes
+	upload.lastWrite = nil
+	encoder.passes = nil
+	if err := renderer.Prepare(makeEntityNameTags(13, "Z"), NewUploadBudget(1<<20)); err == nil {
+		t.Fatal("13 个 NameTag 未被拒绝")
+	}
+	if len(upload.lastWrite) != 0 || len(encoder.passes) != 0 {
+		t.Fatalf("overflow 后 GPU write/pass=%d/%d，想要 0/0", len(upload.lastWrite), len(encoder.passes))
+	}
+	if atlas.flushes != wantFlushes || !reflect.DeepEqual(atlas.requested, wantRequested) {
+		t.Fatalf("overflow 改变 atlas：flushes=%d/%d requested=%v/%v",
+			atlas.flushes, wantFlushes, atlas.requested, wantRequested)
+	}
+	if !reflect.DeepEqual(renderer.ordered, wantOrdered) ||
+		!reflect.DeepEqual(renderer.layout, wantLayout) ||
+		!reflect.DeepEqual(renderer.upload, wantUpload) {
+		t.Fatal("overflow 改变了 NameTagRenderer 上一帧状态")
+	}
+}
+
+func makeEntityNameTags(count int, text string) []NameTag {
+	tags := make([]NameTag, count)
+	for index := range tags {
+		last := byte(count - index)
+		tags[index] = NameTag{
+			Key:    EntityKey{Kind: EntityPlayer, ID: [16]byte(testNameTagID(last))},
+			Text:   text,
+			Anchor: mgl32.Vec3{float32(last), 2, 3},
+		}
+	}
+	return tags
 }
 
 // Mutation killed: using a zero/default advance for a missing rune places the
@@ -40,7 +112,7 @@ func TestNameTagLayoutUsesTofuAdvanceForMissingRune(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
 	atlas.tofu.Advance = 17
 	layout := layoutNameTags(nil, atlas, []NameTag{{
-		PlayerID: testNameTagID(1), Text: "\u0378A",
+		Key: testEntityKey(testNameTagID(1)), Text: "\u0378A",
 	}})
 	if got, want := layout.glyphs[1].X, float32(17); got != want {
 		t.Fatalf("glyph after tofu x=%f want=%f", got, want)
@@ -51,7 +123,7 @@ func TestNameTagLayoutUsesTofuAdvanceForMissingRune(t *testing.T) {
 // glyphs, or changing 4px horizontal / 2px vertical padding fails this check.
 func TestNameTagLayoutAddsOnePaddedTransparentBackground(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
-	layout := layoutNameTags(nil, atlas, []NameTag{{PlayerID: testNameTagID(1), Text: "AV"}})
+	layout := layoutNameTags(nil, atlas, []NameTag{{Key: testEntityKey(testNameTagID(1)), Text: "AV"}})
 	if got, want := len(layout.backgrounds), 1; got != want {
 		t.Fatalf("backgrounds=%d want=%d", got, want)
 	}
@@ -64,30 +136,29 @@ func TestNameTagLayoutAddsOnePaddedTransparentBackground(t *testing.T) {
 	}
 }
 
-// 杀死变异：排序前截断、保留第九个名牌、超过 256 个字形或依赖输入顺序
-// 都会改变这些可观察结果。
-func TestNameTagLayoutSortsAndBoundsNineTags(t *testing.T) {
+// 杀死变异：排序错误、遗漏第十二个名牌或依赖输入顺序都会改变这些结果。
+func TestNameTagLayoutSortsTwelveTags(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
-	tags := make([]NameTag, 9)
+	tags := make([]NameTag, 12)
 	for index := range tags {
-		id := byte(9 - index)
+		id := byte(12 - index)
 		tags[index] = NameTag{
-			PlayerID: testNameTagID(id),
-			Text:     strings.Repeat("中", 32),
-			Anchor:   mgl32.Vec3{float32(id), 2, 3},
+			Key:    testEntityKey(testNameTagID(id)),
+			Text:   strings.Repeat("中", 32),
+			Anchor: mgl32.Vec3{float32(id), 2, 3},
 		}
 	}
 	layout := layoutNameTags(nil, atlas, tags)
-	if got, want := len(layout.glyphs), 256; got != want {
+	if got, want := len(layout.glyphs), 384; got != want {
 		t.Fatalf("glyphs=%d want=%d", got, want)
 	}
-	if got, want := len(layout.backgrounds), 8; got != want {
+	if got, want := len(layout.backgrounds), 12; got != want {
 		t.Fatalf("backgrounds=%d want=%d", got, want)
 	}
 	if got, want := layout.glyphs[0].Anchor[0], float32(1); got != want {
 		t.Fatalf("first selected anchor x=%f want=%f", got, want)
 	}
-	if got, want := layout.glyphs[len(layout.glyphs)-1].Anchor[0], float32(8); got != want {
+	if got, want := layout.glyphs[len(layout.glyphs)-1].Anchor[0], float32(12); got != want {
 		t.Fatalf("last selected anchor x=%f want=%f", got, want)
 	}
 
@@ -106,7 +177,7 @@ func TestNameTagLayoutSortsAndBoundsNineTags(t *testing.T) {
 // the observable layout non-empty.
 func TestNameTagLayoutSkipsEmptyText(t *testing.T) {
 	layout := layoutNameTags(nil, newFakeNameTagAtlas(), []NameTag{{
-		PlayerID: testNameTagID(1), Text: "",
+		Key: testEntityKey(testNameTagID(1)), Text: "",
 	}})
 	if len(layout.glyphs) != 0 || len(layout.backgrounds) != 0 {
 		t.Fatalf("empty text layout=%+v; want no instances", layout)
@@ -126,7 +197,7 @@ func TestNameTagPrepareRequestsAllThenFlushesOnceBeforeLayout(t *testing.T) {
 	renderer := NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
 	defer renderer.Release()
 
-	if err := renderer.Prepare([]NameTag{{PlayerID: testNameTagID(1), Text: "QR"}}, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare([]NameTag{{Key: testEntityKey(testNameTagID(1)), Text: "QR"}}, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	if got, want := renderer.layout.glyphs[1].X, float32(19); got != want {
@@ -135,7 +206,7 @@ func TestNameTagPrepareRequestsAllThenFlushesOnceBeforeLayout(t *testing.T) {
 	if got := len(dev.bufferByLabel(t, "name-tag dynamic upload").lastWrite); got != 0 {
 		t.Fatalf("Prepare GPU upload bytes=%d want=0", got)
 	}
-	if got := float32At(renderer.upload, 768+nameTagInstanceBytes+16); got != 19 {
+	if got := float32At(renderer.upload, nameTagGlyphOffset+nameTagInstanceBytes+16); got != 19 {
 		t.Fatalf("second encoded glyph x=%f want=19", got)
 	}
 	if got := float32At(renderer.upload, 256+60); got <= 0 || got >= 1 {
@@ -152,7 +223,7 @@ func TestNameTagPreparePropagatesFlushError(t *testing.T) {
 	defer renderer.Release()
 	wantAnchor := mgl32.Vec3{1, 2, 3}
 	if err := renderer.Prepare([]NameTag{{
-		PlayerID: testNameTagID(1), Text: "A", Anchor: wantAnchor,
+		Key: testEntityKey(testNameTagID(1)), Text: "A", Anchor: wantAnchor,
 	}}, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("initial Prepare: %v", err)
 	}
@@ -166,7 +237,7 @@ func TestNameTagPreparePropagatesFlushError(t *testing.T) {
 	uploadBuffer := dev.bufferByLabel(t, "name-tag dynamic upload")
 	wantUpload := append([]byte(nil), renderer.upload...)
 	wantGPUWrite := append([]byte(nil), uploadBuffer.lastWrite...)
-	if got := float32At(wantUpload, 768); got != wantAnchor[0] {
+	if got := float32At(wantUpload, nameTagGlyphOffset); got != wantAnchor[0] {
 		t.Fatalf("initial encoded glyph anchor x=%f want=%f", got, wantAnchor[0])
 	}
 	if len(wantGPUWrite) != 0 {
@@ -176,7 +247,7 @@ func TestNameTagPreparePropagatesFlushError(t *testing.T) {
 	flushErr := errors.New("upload failed")
 	atlas.flushErr = flushErr
 	got := renderer.Prepare([]NameTag{{
-		PlayerID: testNameTagID(2), Text: "VV", Anchor: mgl32.Vec3{9, 8, 7},
+		Key: testEntityKey(testNameTagID(2)), Text: "VV", Anchor: mgl32.Vec3{9, 8, 7},
 	}}, NewUploadBudget(1024))
 	if got != flushErr {
 		t.Errorf("Prepare error=%v want exact error %v", got, flushErr)
@@ -202,7 +273,7 @@ func TestNameTagRendererUsesFixedTransparentDepthPass(t *testing.T) {
 	defer renderer.Release()
 
 	upload := dev.bufferByLabel(t, "name-tag dynamic upload")
-	if got, want := upload.desc.Size, uint64(17152); got != want {
+	if got, want := upload.desc.Size, uint64(25600); got != want {
 		t.Fatalf("dynamic upload size=%d want=%d", got, want)
 	}
 	if got, want := upload.desc.Usage, gfx.BufferUsageUniform|gfx.BufferUsageStorage|gfx.BufferUsageCopyDst; got != want {
@@ -220,7 +291,7 @@ func TestNameTagRendererUsesFixedTransparentDepthPass(t *testing.T) {
 		}
 	}
 
-	if err := renderer.Prepare([]NameTag{{PlayerID: testNameTagID(1), Text: "A"}}, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare([]NameTag{{Key: testEntityKey(testNameTagID(1)), Text: "A"}}, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	if len(upload.lastWrite) != 0 {
@@ -266,7 +337,7 @@ func TestNameTagRendererUsesFixedTransparentDepthPass(t *testing.T) {
 func TestNameTagRendererSkipsEmptyPreparedLayout(t *testing.T) {
 	renderer := NewNameTagRenderer(&nameTagTestDevice{}, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, newFakeNameTagAtlas())
 	defer renderer.Release()
-	if err := renderer.Prepare([]NameTag{{PlayerID: testNameTagID(1)}}, NewUploadBudget(1024)); err != nil {
+	if err := renderer.Prepare([]NameTag{{Key: testEntityKey(testNameTagID(1))}}, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	encoder := &nameTagTestEncoder{}
@@ -337,7 +408,7 @@ func TestNameTagRendererHeadlessClearOccluderAndDraw(t *testing.T) {
 	renderer := NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
 	defer renderer.Release()
 	if err := renderer.Prepare([]NameTag{{
-		PlayerID: testNameTagID(1), Text: "A中", Anchor: mgl32.Vec3{0, 0, 0.5},
+		Key: testEntityKey(testNameTagID(1)), Text: "A中", Anchor: mgl32.Vec3{0, 0, 0.5},
 	}}, NewUploadBudget(1024)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -347,9 +418,11 @@ func TestNameTagRendererHeadlessClearOccluderAndDraw(t *testing.T) {
 		Label: "terrain clear", ColorView: colorView, DepthView: depthView, LoadClear: true,
 	})
 	clear.End()
-	avatar.Render(encoder, colorView, depthView, Camera{ViewProj: mgl32.Ident4()}, []Avatar{{
-		PlayerID: testNameTagID(2), Position: mgl32.Vec3{0, -0.9, 0},
-	}})
+	if err := avatar.Render(encoder, colorView, depthView, Camera{ViewProj: mgl32.Ident4()}, []Avatar{{
+		Key: testEntityKey(testNameTagID(2)), Position: mgl32.Vec3{0, -0.9, 0},
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	renderer.Render(encoder, colorView, depthView, BillboardCamera{
 		ViewProj: mgl32.Ident4(), Right: mgl32.Vec3{1, 0, 0}, Up: mgl32.Vec3{0, 1, 0},
 	})
