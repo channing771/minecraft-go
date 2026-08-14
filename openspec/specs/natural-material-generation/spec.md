@@ -84,10 +84,10 @@
 - **WHEN** 用户以相同参数重跑迁移
 - **THEN** 已保存区块的 revision MUST 不再增加，迁移 MUST 恢复并写入正确进度与完成状态
 
-### Requirement: 既有存档与协议版本保持不变
-自然材料生成和迁移 MUST 继续使用区块 schema v8、协议 v15 和世界 metadata v2，不得改变这些格式的字节布局或语义版本。既有 schema v8 往返、future schema 拒绝和区域原子恢复语义 MUST 保持不变。
+### Requirement: 既有存档保持不变并通过当前协议访问
+自然材料生成和迁移 MUST 继续使用区块 schema v8 和世界 metadata v2，不得改变其字节布局或语义版本。当前线上协议 MUST 为 v16；M5A 的协议升级 MUST 保持自然材料既有 message ID、payload 字段与迁移语义不变。既有 schema v8 往返、future schema 拒绝和区域原子恢复语义 MUST 保持不变。
 
-#### Scenario: 迁移世界继续使用既有版本
+#### Scenario: 迁移世界继续使用既有存档版本
 - **GIVEN** 已完成自然材料迁移的世界
-- **WHEN** 当前程序保存并重新加载该世界，或客户端按协议登录
-- **THEN** 区块 schema MUST 为 v8、协议 MUST 为 v15、世界 metadata MUST 为 v2，且既有版本检查与恢复行为 MUST 不变
+- **WHEN** 当前 M5A 程序保存并重新加载该世界，或 v16 客户端登录
+- **THEN** 区块 schema MUST 为 v8、线上协议 MUST 为 v16、世界 metadata MUST 为 v2，且自然材料既有 message payload、版本检查与恢复行为 MUST 不变

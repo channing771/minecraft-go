@@ -1,8 +1,28 @@
 # Apple M5 性能基线
 
-## M4N scenario v15 状态
+## M5A scenario v16 record-only 证据（非新基线）
 
-M4N 当前基线在 Apple M2 上独立建立为 scenario v15；本文件对应的 M5 当前基线仍是下方 scenario v14，`docs/notes/perf-baseline-m5.json` 字节未改，SHA-256 仍为 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`。未来只有在相同 M5 硬件生成完整 v15 报告后，才可使用唯一显式 `14:15` 迁移；不得使用 M2 报告、`6:15` 或跨硬件例外替代。
+2026-08-14 在冻结提交 `2c1eb2dc3e49b2534958a7575eabba6935be99a3` 上生成两份完整无窗口报告。两者身份均为 scenario `16`、Apple M5 / 24GiB、macOS 26.5.1、Go 1.26.0 darwin/arm64、2560×1440；Memory 与 TCP 分别自比较通过，并完成一次显式跨 transport 比较。性能数值只记录，没有建立或提升任何 baseline。
+
+- Memory：`/private/tmp/mornlea-m5a-v16.hj9xYp/memory-v16.json`
+  - SHA-256：`1eb0ea86612b0c2d8a90618a0306e1802d515e934f7a5aea870b270b2a63cf37`
+- TCP：`/private/tmp/mornlea-m5a-v16.hj9xYp/tcp-v16.json`
+  - SHA-256：`6822cdb967bbe6ec62426fad90346913fa7b60ea8b56a396120f9b57628df1cb`
+
+| transport / 阶段 | FPS | p99 | Peak RSS |
+| --- | ---: | ---: | ---: |
+| Memory / still | 287.5 | 4.502ms | 1447.8MiB |
+| Memory / flying | 429.4 | 12.539ms | 1695.0MiB |
+| TCP / still | 290.9 | 3.847ms | 1448.9MiB |
+| TCP / flying | 426.2 | 13.010ms | 1766.0MiB |
+
+采集时宿主为 Darwin 25.5.0 / `RELEASE_ARM64_T8142`、model `Mac17,2`、内存 25,769,803,776 bytes；uptime 为 3 天 5:53，load averages 为 3.43 / 4.33 / 3.57，Battery Power 90% 且正在放电，没有遗留 `mornlea`/`mornlea-server` 进程。宿主状态只作 provenance，没有阻止或改变 producer workload。
+
+Memory flying p99 `12.539ms` 与 TCP flying p99 `13.010ms` 均按当前契约只记录；两份报告结构、阶段、样本、身份、真实 overflow 与数据丢失校验均通过。当前唯一显式场景迁移是 `15:16`；不得恢复 `14:15` 或增加 `14:16`。`docs/notes/perf-baseline.json` 的 M2 v15 SHA-256 仍为 `9691d9752f309795e77176c6f959c357c4c97f1f7daaa4a5a6fddff8bf164d78`，`docs/notes/perf-baseline-m5.json` 的 M5 v14 SHA-256 仍为 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`。
+
+## 历史 M4N scenario v15 状态
+
+M4N 在 Apple M2 上独立建立 scenario v15 时，本文件对应的 M5 基线仍是下方 scenario v14；`docs/notes/perf-baseline-m5.json` 字节未改，SHA-256 仍为 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`。当时的显式 `14:15` 迁移规则只作为历史证据保留；当前规则见上节，不再授权 `14:15`、`14:16` 或跨硬件例外。
 
 ## 当前 scenario v14 基线
 
