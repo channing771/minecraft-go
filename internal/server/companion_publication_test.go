@@ -258,7 +258,7 @@ func publicationCompanionUpdate(id companion.ID, x float32) sim.CompanionUpdate 
 		ID:        id,
 		Dimension: core.Overworld,
 		Yaw:       x,
-		Pitch:     -x,
+		Pitch:     -0.25,
 	}
 	update.State.Position = mgl32.Vec3{x, 2, 0.5}
 	return update
