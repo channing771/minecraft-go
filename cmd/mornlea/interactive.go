@@ -38,10 +38,15 @@ func runInteractive(app *application) error {
 		now := time.Now()
 		dt := min(now.Sub(lastFrame), 100*time.Millisecond)
 		lastFrame = now
+		capturedBeforeDrain := app.window.CursorCaptured()
 		app.drainServerMessages(64)
 		if err := app.receiver.Err(); err != nil {
 			app.closeClientSession(err)
 			return err
+		}
+		justCaptured := !capturedBeforeDrain && app.window.CursorCaptured()
+		if justCaptured {
+			lastMouseX, lastMouseY = app.window.CursorPos()
 		}
 		textInput, textOverflow := app.window.DrainTextInput(textInputBuffer[:0])
 		chatWasOpen := app.chatInput.open
@@ -58,7 +63,6 @@ func runInteractive(app *application) error {
 		enterDown := app.window.KeyDown(client.KeyEnter)
 		enterPressed := enterDown && !enterWasDown
 		backspaceDown := app.window.KeyDown(client.KeyBackspace)
-		justCaptured := false
 		chatCanceled := false
 		if escapeDown && !escapeWasDown {
 			switch {

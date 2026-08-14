@@ -266,6 +266,41 @@ func TestChatCloseRecapturesCursorAndResetsMouseBaseline(t *testing.T) {
 	}
 }
 
+func TestChatProtocolCloseRecapturesCursorAndResetsMouseBaseline(t *testing.T) {
+	var serverEndpoint network.ServerEndpoint
+	app, endpoint, window := newChatLoopApplication(t, []chatWindowFrame{
+		{
+			keys:    map[client.Key]bool{client.KeyEnter: true},
+			cursorX: 100, cursorY: 100,
+		},
+		{
+			cursorX: 500, cursorY: 300,
+			onPoll: func() {
+				sendInteractiveServerMessage(t, serverEndpoint, network.CompanionDespawn{
+					ID: companion.ID{0: 0x12, 6: 0x40, 8: 0x80, 15: 3},
+				})
+			},
+		},
+	})
+	serverEndpoint = endpoint
+	app.camera.Yaw, app.camera.Pitch = 0.2, -0.1
+	app.render.MouseSensitivity = 1
+
+	if err := runInteractive(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.receiver.Err(); err != nil {
+		t.Fatalf("receiver error=%v want=nil after mirror protocol close", err)
+	}
+	if !app.clientSessionClosed || app.chatInput.open || !window.captured {
+		t.Fatalf("closed=%v chatOpen=%v captured=%v",
+			app.clientSessionClosed, app.chatInput.open, window.captured)
+	}
+	if app.camera.Yaw != 0.2 || app.camera.Pitch != -0.1 {
+		t.Fatalf("camera=(%v,%v) want=(0.2,-0.1)", app.camera.Yaw, app.camera.Pitch)
+	}
+}
+
 func TestChatInputAndFormattedLinesResetOnDisconnect(t *testing.T) {
 	app, _ := newInteractiveTestApplication(t)
 	window := &fakeInteractiveWindow{}
@@ -408,6 +443,7 @@ type chatWindowFrame struct {
 	primary, secondary bool
 	cursorX, cursorY   float64
 	delay              time.Duration
+	onPoll             func()
 }
 
 type scriptedChatWindow struct {
@@ -429,6 +465,9 @@ func (window *scriptedChatWindow) Poll() {
 	window.pendingText = append(window.pendingText, frame.text...)
 	window.pendingOverflow = window.pendingOverflow || frame.overflow
 	time.Sleep(frame.delay)
+	if frame.onPoll != nil {
+		frame.onPoll()
+	}
 }
 func (window *scriptedChatWindow) KeyDown(key client.Key) bool {
 	return window.frame >= 0 && window.frames[window.frame].keys[key]
