@@ -42,9 +42,9 @@
 
 ## 8. 伙伴网络发布与独立容量（计划 Task 9）
 
-- [ ] 8.1 在 `internal/server` 先写 snapshot-before-spawn、排序 states/new-spawn 延迟一 tick、interest-exit despawn、8+4 容量和未知 definition 整批失败测试；运行 `go test ./internal/server -run 'Test(CompanionPublication|EightPlayersAndFourCompanions)' -race -count=1` 确认 RED。
-- [ ] 8.2 增加独立 `visibleCompanions`，复用脚下 chunk 小 helper，按 despawn/Forget/snapshot/spawn/states 固定顺序发布；整批 definition preflight 在任何 enqueue/visibility mutation 前完成，不建通用 entity publisher。
-- [ ] 8.3 运行 `go test ./internal/server -run 'Test(CompanionPublication|EightPlayersAndFourCompanions)' -race -count=1`、`go test ./internal/server -race -count=1`、`go vet ./internal/server`、`test -z "$(gofmt -l internal/server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时允许 snapshot 前 Spawn，确认包含 `Test(CompanionPublication|EightPlayersAndFourCompanions)` 的命令 RED 后恢复并重跑至 PASS。
+- [x] 8.1 在 `internal/server` 先写 snapshot-before-spawn、排序 states/new-spawn 延迟一 tick、interest-exit despawn、8+4 容量和未知 definition 整批失败测试；运行 `go test ./internal/server -run 'Test(CompanionPublication|EightPlayersAndFourCompanions)' -race -count=1` 确认 RED。
+- [x] 8.2 增加独立 `visibleCompanions`，复用脚下 chunk 小 helper，按 despawn/Forget/snapshot/spawn/states 固定顺序发布；整批 definition preflight 在任何 enqueue/visibility mutation 前完成，不建通用 entity publisher。
+- [x] 8.3 运行 `go test ./internal/server -run 'Test(CompanionPublication|EightPlayersAndFourCompanions)' -race -count=1`、`go test ./internal/server -race -count=1`、`go vet ./internal/server`、`test -z "$(gofmt -l internal/server)"`、`openspec validate m5a-companion-entity-chat --strict --no-interactive`；临时允许 snapshot 前 Spawn，确认包含 `Test(CompanionPublication|EightPlayersAndFourCompanions)` 的命令 RED 后恢复并重跑至 PASS。
 
 ## 9. tick 边界聊天寻址与 Memory/TCP parity（计划 Task 10）
 

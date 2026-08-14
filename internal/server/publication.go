@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/sim"
 )
@@ -15,6 +16,13 @@ func (server *Server) publish(result sim.TickResult) {
 	for _, player := range result.Players {
 		players[player.Session] = player
 	}
+	var definitions map[companion.ID]companion.Definition
+	if len(server.config.Companions) != 0 {
+		definitions = make(map[companion.ID]companion.Definition, len(server.config.Companions))
+		for _, definition := range server.config.Companions {
+			definitions[definition.ID] = definition
+		}
+	}
 	for _, id := range server.sortedPublicationIDsLocked() {
 		current := server.publicationSessionLocked(id)
 		if current == nil || current.closed() {
@@ -22,10 +30,10 @@ func (server *Server) publish(result sim.TickResult) {
 		}
 		if observer := server.config.InterestObserver; observer != nil {
 			started := time.Now()
-			server.publishSession(current, result, players)
+			server.publishSession(current, result, players, definitions)
 			observer(time.Since(started))
 		} else {
-			server.publishSession(current, result, players)
+			server.publishSession(current, result, players, definitions)
 		}
 	}
 }
@@ -34,10 +42,19 @@ func (server *Server) publishSession(
 	current *session,
 	result sim.TickResult,
 	players map[sim.SessionID]sim.PlayerUpdate,
+	definitions map[companion.ID]companion.Definition,
 ) {
+	companions, ok := server.companionPublicationCandidates(current, result.Companions, definitions)
+	if !ok {
+		return
+	}
 	server.updateSessionView(current, players[current.id])
 	server.queueReadyAndResync(current, result)
+	server.queueCompanionSnapshots(current, companions)
 	if !server.publishRemoteDespawns(current, players) {
+		return
+	}
+	if !server.publishCompanionDespawns(current, companions) {
 		return
 	}
 	if !server.publishForget(current, result.Forget[current.id]) {
@@ -45,6 +62,9 @@ func (server *Server) publishSession(
 	}
 	deltas := server.classifyDeltas(current, result.Changes)
 	if !server.publishSnapshots(current) || !server.publishDeltas(current, deltas) {
+		return
+	}
+	if !server.publishCompanionSpawnsAndStates(current, result.Tick, companions) {
 		return
 	}
 	if !server.publishRemoteSpawnsAndStates(current, result.Tick, players) {

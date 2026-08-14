@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/sim"
@@ -72,12 +73,13 @@ type session struct {
 	outstandingToken uint64
 	heartbeatReply   chan uint64
 
-	hasView          bool
-	viewDimension    core.DimensionID
-	viewCenter       core.ChunkPos
-	publications     map[core.ChunkKey]*publication
-	pendingSnapshots map[core.ChunkKey]snapshotRequest
-	visiblePlayers   map[core.PlayerID]visiblePlayer
+	hasView           bool
+	viewDimension     core.DimensionID
+	viewCenter        core.ChunkPos
+	publications      map[core.ChunkKey]*publication
+	pendingSnapshots  map[core.ChunkKey]snapshotRequest
+	visiblePlayers    map[core.PlayerID]visiblePlayer
+	visibleCompanions map[companion.ID]struct{}
 
 	// 掉落物差分状态：已发布镜像与三块复用 scratch，容量固定为 MaxSessionDrops。
 	publishedDrops    map[core.DropID]sim.DropSnapshot
@@ -117,6 +119,7 @@ func newSession(
 		publications:      make(map[core.ChunkKey]*publication),
 		pendingSnapshots:  make(map[core.ChunkKey]snapshotRequest),
 		visiblePlayers:    make(map[core.PlayerID]visiblePlayer),
+		visibleCompanions: make(map[companion.ID]struct{}),
 		publishedDrops:    make(map[core.DropID]sim.DropSnapshot, sim.MaxSessionDrops),
 		dropScratch:       make([]sim.DropSnapshot, 0, sim.MaxSessionDrops),
 		dropUpsertScratch: make([]network.ItemDrop, 0, sim.MaxSessionDrops),
@@ -142,19 +145,20 @@ func newObserverSession(
 	}
 	ctx, cancel := context.WithCancel(parent)
 	current := &session{
-		id:               id,
-		generation:       generation,
-		endpoint:         endpoint,
-		ctx:              ctx,
-		cancel:           cancel,
-		outbox:           make(chan network.ServerMessage, capacity),
-		workers:          workers,
-		detach:           detach,
-		heartbeatReply:   make(chan uint64, 1),
-		publications:     make(map[core.ChunkKey]*publication),
-		pendingSnapshots: make(map[core.ChunkKey]snapshotRequest),
-		visiblePlayers:   make(map[core.PlayerID]visiblePlayer),
-		publishedDrops:   make(map[core.DropID]sim.DropSnapshot),
+		id:                id,
+		generation:        generation,
+		endpoint:          endpoint,
+		ctx:               ctx,
+		cancel:            cancel,
+		outbox:            make(chan network.ServerMessage, capacity),
+		workers:           workers,
+		detach:            detach,
+		heartbeatReply:    make(chan uint64, 1),
+		publications:      make(map[core.ChunkKey]*publication),
+		pendingSnapshots:  make(map[core.ChunkKey]snapshotRequest),
+		visiblePlayers:    make(map[core.PlayerID]visiblePlayer),
+		visibleCompanions: make(map[companion.ID]struct{}),
+		publishedDrops:    make(map[core.DropID]sim.DropSnapshot),
 	}
 	workers.Add(1)
 	go current.writeLoop()

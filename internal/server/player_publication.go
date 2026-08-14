@@ -137,7 +137,7 @@ func (server *Server) visibleCandidates(
 		if err != nil || canonicalName != target.displayName {
 			continue
 		}
-		key := playerFootChunk(update)
+		key := publicationFootChunk(update.Dimension, update.State.Position)
 		if !server.engine.SessionWantsChunk(current.id, key) {
 			continue
 		}
@@ -156,12 +156,12 @@ func (server *Server) visibleCandidates(
 	return candidates
 }
 
-func playerFootChunk(update sim.PlayerUpdate) core.ChunkKey {
+func publicationFootChunk(dimension core.DimensionID, position [3]float32) core.ChunkKey {
 	return core.ChunkKey{
-		Dimension: update.Dimension,
+		Dimension: dimension,
 		Pos: core.ChunkPos{
-			X: int32(math.Floor(float64(update.State.Position.X()) / core.SectionSize)),
-			Z: int32(math.Floor(float64(update.State.Position.Z()) / core.SectionSize)),
+			X: int32(math.Floor(float64(position[0]) / core.SectionSize)),
+			Z: int32(math.Floor(float64(position[2]) / core.SectionSize)),
 		},
 	}
 }
