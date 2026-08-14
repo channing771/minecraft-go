@@ -13,7 +13,7 @@ import (
 )
 
 func (a *application) drainServerMessages(maxMessages int) {
-	if maxMessages <= 0 {
+	if maxMessages <= 0 || a.clientSessionClosed {
 		return
 	}
 	for range maxMessages {

@@ -787,6 +787,39 @@ func TestApplicationRoutesCompanionAndChatMessagesAndResetsOnDisconnect(t *testi
 	}
 }
 
+func TestApplicationClosedSessionDoesNotDrainQueuedCompanionMessages(t *testing.T) {
+	app, serverEndpoint, endpoint, _ := newRemoteProtocolApplication(t)
+	app.companions = &client.Companions{}
+	app.chatEvents = &client.ChatEvents{}
+	first := applicationCompanionSpawn(1, 1, mgl32.Vec3{1, 64, 1})
+	tailSpawn := applicationCompanionSpawn(2, 1, mgl32.Vec3{2, 64, 2})
+	tailEvent := applicationChatEvent(1)
+	for _, message := range []network.ServerMessage{first, first, tailSpawn, tailEvent} {
+		sendInteractiveServerMessage(t, serverEndpoint, message)
+	}
+
+	app.drainServerMessages(4)
+	if !app.clientSessionClosed || endpoint.closeCalls.Load() != 1 {
+		t.Fatalf("protocol close state=%v calls=%d", app.clientSessionClosed, endpoint.closeCalls.Load())
+	}
+	if len(app.companions.AppendPresentations(nil)) != 0 || len(app.chatEvents.Events(nil)) != 0 {
+		t.Fatal("protocol close did not reset mirrors")
+	}
+
+	app.drainServerMessages(4)
+	if len(app.companions.AppendPresentations(nil)) != 0 || len(app.chatEvents.Events(nil)) != 0 {
+		t.Fatal("closed session applied queued tail messages")
+	}
+	message, ok := app.receiver.TryRecv()
+	if !ok || message != tailSpawn {
+		t.Fatalf("queued tail head = %#v, %v; want untouched tail Spawn", message, ok)
+	}
+	message, ok = app.receiver.TryRecv()
+	if !ok || message != tailEvent {
+		t.Fatalf("queued tail second = %#v, %v; want untouched ChatEvent", message, ok)
+	}
+}
+
 func TestApplicationAdvancesCompanionsExactlyOnceInFrameAndInteractiveLoops(t *testing.T) {
 	t.Run("frame", func(t *testing.T) {
 		app, serverEndpoint, _, _ := newRemoteProtocolApplication(t)
