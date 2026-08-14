@@ -179,7 +179,7 @@ func (engine *Engine) applyAcquired(
 		switch {
 		case acquiredChunk.Err != nil:
 			dimension.MarkLoadFailed(key.Pos, acquiredChunk.Err)
-			if _, retained := wanted[key]; retained {
+			if engine.companionWantsChunk(key) {
 				engine.subscriptionsDirty = true
 			}
 		case acquiredChunk.Missing:
@@ -199,7 +199,7 @@ func (engine *Engine) applyAcquired(
 			)
 			if err != nil {
 				dimension.MarkLoadFailed(key.Pos, err)
-				if _, retained := wanted[key]; retained {
+				if engine.companionWantsChunk(key) {
 					engine.subscriptionsDirty = true
 				}
 				continue
@@ -277,6 +277,15 @@ func companionSubscriptionDistanceSquared(
 	return distance, relevant
 }
 
+func (engine *Engine) companionWantsChunk(key core.ChunkKey) bool {
+	for _, state := range engine.companions {
+		if _, relevant := companionSubscriptionDistanceSquared(state, key); relevant {
+			return true
+		}
+	}
+	return false
+}
+
 func chunkDistanceSquared(left, right core.ChunkPos) int64 {
 	dx := int64(left.X - right.X)
 	dz := int64(left.Z - right.Z)
@@ -322,14 +331,14 @@ func (engine *Engine) applyGenerated(
 		}
 		if generatedChunk.Err != nil {
 			dimension.MarkFailed(key.Pos, generatedChunk.Err)
-			if _, retained := wanted[key]; retained {
+			if engine.companionWantsChunk(key) {
 				engine.subscriptionsDirty = true
 			}
 			continue
 		}
 		if err := dimension.ApplyGenerated(key.Pos, generatedChunk.Chunk); err != nil {
 			dimension.MarkFailed(key.Pos, err)
-			if _, retained := wanted[key]; retained {
+			if engine.companionWantsChunk(key) {
 				engine.subscriptionsDirty = true
 			}
 			continue

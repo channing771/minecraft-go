@@ -3,6 +3,7 @@ package sim_test
 import (
 	"cmp"
 	"context"
+	"errors"
 	"math"
 	"reflect"
 	"slices"
@@ -71,11 +72,12 @@ func TestAcquiredMissGeneratesExactlyOnceAndLoadErrorFails(t *testing.T) {
 		Dimension: failedKey.Dimension, Center: failedKey.Pos,
 	})
 	engine.Step()
-	engine.SubmitAcquired(sim.AcquiredChunk{Key: failedKey, Err: context.Canceled})
+	wantErr := errors.New("permission denied")
+	engine.SubmitAcquired(sim.AcquiredChunk{Key: failedKey, Err: wantErr})
 	failed := engine.Step()
 	info, ok := engine.ChunkInfo(failedKey)
-	if !reflect.DeepEqual(failed.Acquire, []core.ChunkKey{failedKey}) ||
-		len(failed.Generate) != 0 || !ok || info.State != sim.ChunkLoading {
+	if len(failed.Acquire) != 0 || len(failed.Generate) != 0 || !ok ||
+		info.State != sim.ChunkFailed || !errors.Is(info.Err, wantErr) {
 		t.Fatalf("failed result=%+v info=%+v ok=%v", failed, info, ok)
 	}
 }
