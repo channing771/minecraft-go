@@ -385,13 +385,13 @@ func loginHealthyMemoryPlayers(t *testing.T, host *Host, count int, sequenceBase
 	progress := make([]endpointProgress, 0, count)
 	for index := 0; index < count; index++ {
 		login := startMemoryLogin(t, host, playerIdentity(byte(index+1)))
-		waitReady(t, host, login)
 		current := monitorEndpointProgress(
 			login,
 			sequenceBase+uint64(index),
 			movements[index],
 		)
 		t.Cleanup(current.cancel)
+		waitReady(t, host, login)
 		progress = append(progress, current)
 	}
 	return progress

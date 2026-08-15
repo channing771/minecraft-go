@@ -5,8 +5,8 @@
 
 ## 2. Task 3：修复健康 Memory endpoint 的 reader 顺序
 
-- [ ] 2.1 在 `internal/server/host_lifecycle_test.go` 先 `monitorEndpointProgress/Recv` 并登记 cleanup，后 `waitReady`；保持 `HeartbeatInterval=20ms`、`HeartbeatTimeout=150ms`、`waitDeadline` 与生产代码不变。
-- [ ] 2.2 记录 run `31813364557` 的 `30.00s`、`player did not become ready` source RED，并运行两个 fixture 的 `go test ./internal/server -run 'Test(ReconnectContinuesWorldTimeWithoutRollback|HostHeartbeatTimeoutCleanupIsIsolated)' -race -count=100` 与 `go test ./internal/server -race -count=1`；reader-after-ready mutation 恢复后不得留在树中。
+- [x] 2.1 在 `internal/server/host_lifecycle_test.go` 先 `monitorEndpointProgress/Recv` 并登记 cleanup，后 `waitReady`；保持 `HeartbeatInterval=20ms`、`HeartbeatTimeout=150ms`、`waitDeadline` 与生产代码不变。
+- [x] 2.2 记录 run `31813364557` 的 `30.00s`、`player did not become ready` source RED，并运行两个 fixture 的 `go test ./internal/server -run 'Test(ReconnectContinuesWorldTimeWithoutRollback|HostHeartbeatTimeoutCleanupIsIsolated)' -race -count=100` 与 `go test ./internal/server -race -count=1`；reader-after-ready mutation 恢复后不得留在树中。
 
 ## 3. Task 4：将唯一 Rust crate/library 改名为 `mornlea_engine`
 
