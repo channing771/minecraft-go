@@ -4,7 +4,7 @@
 
 当前 benchmark producer 为 scenario v16，工作负载变化只来自 Avatar、NameTag 与 Hotbar HUD 的固定上传布局；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `15:16`，v6..v15 历史报告仍可同版本读取。
 
-M5A 已在同一 Apple M5 / 24GiB、2560×1440 和同一提交上独立生成完整 Memory/TCP v16 报告，分别通过自比较，并通过一次显式跨 transport 比较；最新 Rust kernel 累计门禁已在 2026-08-15 从冻结 producer `5d510d91489391e949f17d5656b294b77693cf68` 完整重跑，输出见 [Apple M5 性能记录](perf-baseline-m5.md)。这些报告只作可重复生成的 record-only 证据，不提升基线。当前已接受的 M2 Memory v15 与 M5 Memory v14 baseline JSON 路径、字节和 SHA-256 均保持不变；性能数值只记录，报告结构、身份、真实 overflow、数据丢失和 I/O 错误仍失败。
+M5A 已在同一 Apple M5 / 24GiB、2560×1440 和同一提交上独立生成完整 Memory/TCP v16 报告，分别通过自比较，并通过一次显式跨 transport 比较；Linux GPU source-set 修复后的最新 Rust kernel 累计门禁已在 2026-08-15 从冻结 producer `931c57a7d4d017e37a94baf19eee833b042c68ce` 完整重跑，输出见 [Apple M5 性能记录](perf-baseline-m5.md)。这些报告只作可重复生成的 record-only 证据，不提升基线。当前已接受的 M2 Memory v15 与 M5 Memory v14 baseline JSON 路径、字节和 SHA-256 均保持不变；性能数值只记录，报告结构、身份、真实 overflow、数据丢失和 I/O 错误仍失败。
 
 ## 当前已接受的 M2 scenario v15 基线
 
