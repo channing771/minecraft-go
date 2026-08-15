@@ -17,13 +17,15 @@ func TestNativeEngineBridgeBoundary(t *testing.T) {
 	if info, err := os.Stat(bridge); err != nil || !info.IsDir() {
 		t.Fatalf("native engine bridge %s 不存在", bridge)
 	}
+	files := goFiles(t, filepath.Join(root, "internal"))
+	files = append(files, goFiles(t, filepath.Join(root, "cmd"))...)
 
 	for _, relative := range []string{
 		"mornlea_engine.h",
 		"-lmornlea_engine",
 		"C.mornlea_",
 	} {
-		for _, path := range goFiles(t, filepath.Join(root, "internal")) {
+		for _, path := range files {
 			contents, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatalf("读取 %s: %v", path, err)

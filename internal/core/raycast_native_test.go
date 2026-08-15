@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"math/rand"
 	"strconv"
@@ -52,7 +53,7 @@ func TestRaycastInputCursorAndRecordLayoutV1(t *testing.T) {
 		byte(BlockFacePosY), 0, 0, 0,
 		0x00, 0x00, 0xa0, 0x3f,
 	}
-	record := decodeRaycastRecord(recordBytes[:])
+	record := decodeRaycastRecord(recordBytes[:], input[:])
 	if record.block != (BlockPos{X: -7, Y: 8, Z: -9}) ||
 		record.face != BlockFacePosY || math.Float32bits(record.distance) != math.Float32bits(1.25) {
 		t.Fatalf("record=%+v", record)
@@ -169,7 +170,114 @@ func TestRaycastBlocksDoesNotAllocate(t *testing.T) {
 	}
 }
 
+func TestRaycastBlocksExtremeFiniteInputPreservesSecondCallbackError(t *testing.T) {
+	origin := mgl32.Vec3{float32(math.MaxInt32), 0.5, 0.5}
+	direction := mgl32.Vec3{1e-30, 1, 0}
+	want := [...]BlockPos{{X: math.MinInt32}, {X: math.MinInt32 + 1}}
+	sentinel := errors.New("extreme ray sentinel")
+	for _, test := range []struct {
+		name    string
+		raycast func(mgl32.Vec3, mgl32.Vec3, float32, func(BlockPos) (bool, error)) (RayHit, bool, error)
+	}{
+		{name: "oracle", raycast: oracleRaycastBlocks},
+		{name: "native", raycast: RaycastBlocks},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			var visited [2]BlockPos
+			_, found, err := test.raycast(origin, direction, 1, func(position BlockPos) (bool, error) {
+				if calls < len(visited) {
+					visited[calls] = position
+				}
+				calls++
+				if calls == len(want) {
+					return false, sentinel
+				}
+				return false, nil
+			})
+			if err != sentinel || found || calls != len(want) {
+				t.Fatalf("found/err/calls=%v/%v/%d，想要 false/sentinel/%d", found, err, calls, len(want))
+			}
+			if visited != want {
+				t.Fatalf("callback 顺序=%+v，想要 %+v", visited, want)
+			}
+		})
+	}
+}
+
+func TestRaycastBlocksExtremeFiniteInputPreservesSecondCellHit(t *testing.T) {
+	origin := mgl32.Vec3{float32(math.MaxInt32), 0.5, 0.5}
+	direction := mgl32.Vec3{1e-30, 1, 0}
+	target := BlockPos{X: math.MinInt32 + 1}
+	var oracleHit RayHit
+	for _, test := range []struct {
+		name    string
+		raycast func(mgl32.Vec3, mgl32.Vec3, float32, func(BlockPos) (bool, error)) (RayHit, bool, error)
+	}{
+		{name: "oracle", raycast: oracleRaycastBlocks},
+		{name: "native", raycast: RaycastBlocks},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			hit, found, err := test.raycast(origin, direction, 1, func(position BlockPos) (bool, error) {
+				calls++
+				return calls == 2, nil
+			})
+			if err != nil || !found || calls != 2 || hit.Block != target || hit.Face != BlockFaceNegX ||
+				!math.IsInf(float64(hit.Distance), -1) {
+				t.Fatalf("hit/found/err/calls=%+v/%v/%v/%d", hit, found, err, calls)
+			}
+			if test.name == "oracle" {
+				oracleHit = hit
+				return
+			}
+			for axis := range 3 {
+				if math.Float32bits(hit.Point[axis]) != math.Float32bits(oracleHit.Point[axis]) {
+					t.Fatalf("Point[%d] bits=%08x，oracle=%08x", axis, math.Float32bits(hit.Point[axis]), math.Float32bits(oracleHit.Point[axis]))
+				}
+			}
+		})
+	}
+}
+
+func TestRaycastBlocksExtremeFiniteInputContinuesAcrossBatch(t *testing.T) {
+	origin := mgl32.Vec3{float32(math.MaxInt32), 0.5, 0.5}
+	target := BlockPos{X: math.MinInt32 + 64}
+	for _, directionX := range []float32{1e-30, 1e-40} {
+		direction := mgl32.Vec3{directionX, 1, 0}
+		for _, test := range []struct {
+			name    string
+			raycast func(mgl32.Vec3, mgl32.Vec3, float32, func(BlockPos) (bool, error)) (RayHit, bool, error)
+		}{
+			{name: "oracle", raycast: oracleRaycastBlocks},
+			{name: "native", raycast: RaycastBlocks},
+		} {
+			t.Run(test.name+"/"+strconv.FormatUint(uint64(math.Float32bits(directionX)), 16), func(t *testing.T) {
+				sentinel := errors.New("cross-batch sentinel")
+				calls := 0
+				var last BlockPos
+				_, found, err := test.raycast(origin, direction, 1, func(position BlockPos) (bool, error) {
+					calls++
+					last = position
+					if calls == 65 {
+						return false, sentinel
+					}
+					return false, nil
+				})
+				if err != sentinel || found || calls != 65 {
+					t.Fatalf("found/err/calls=%v/%v/%d，想要 false/sentinel/65", found, err, calls)
+				}
+				if last != target {
+					t.Fatalf("callback[64]=%+v，想要 %+v", last, target)
+				}
+			})
+		}
+	}
+}
+
 func TestDecodeRaycastRecordRejectsInvalidConsumedRecord(t *testing.T) {
+	var rayInput [raycastInputBytes]byte
+	encodeRaycastInput(rayInput[:], mgl32.Vec3{0.5, 0.5, 0.5}, mgl32.Vec3{1, 0, 0}, 6)
 	valid := make([]byte, raycastRecordBytes)
 	valid[12] = byte(BlockFaceNegX)
 	for _, mutate := range []func([]byte){
@@ -187,8 +295,30 @@ func TestDecodeRaycastRecordRejectsInvalidConsumedRecord(t *testing.T) {
 					t.Error("非法 consumed record 未 panic")
 				}
 			}()
-			decodeRaycastRecord(record)
+			decodeRaycastRecord(record, rayInput[:])
 		}()
+	}
+}
+
+func TestDecodeRaycastRecordAllowsDerivedOverflowAfterCellWrap(t *testing.T) {
+	for _, test := range []struct {
+		directionX, distance float32
+	}{
+		{directionX: 1e-30, distance: float32(math.Inf(-1))},
+		{directionX: 1e-40, distance: float32(math.NaN())},
+	} {
+		var rayInput [raycastInputBytes]byte
+		encodeRaycastInput(
+			rayInput[:],
+			mgl32.Vec3{float32(math.MaxInt32), 0.5, 0.5},
+			mgl32.Vec3{test.directionX, 1, 0},
+			1,
+		)
+		var record [raycastRecordBytes]byte
+		binary.LittleEndian.PutUint32(record[0:4], uint32(math.MaxInt32))
+		record[12] = byte(BlockFaceNegX)
+		binary.LittleEndian.PutUint32(record[16:20], math.Float32bits(test.distance))
+		decodeRaycastRecord(record[:], rayInput[:])
 	}
 }
 
@@ -217,7 +347,7 @@ func nativeRaycastRecords(origin, direction mgl32.Vec3, maximum float32) []rayca
 	for {
 		count, done := nativeabi.RaycastBatch(input[:], cursor[:], output[:])
 		for index := range count {
-			records = append(records, decodeRaycastRecord(output[index*raycastRecordBytes:(index+1)*raycastRecordBytes]))
+			records = append(records, decodeRaycastRecord(output[index*raycastRecordBytes:(index+1)*raycastRecordBytes], input[:]))
 		}
 		if done {
 			return records

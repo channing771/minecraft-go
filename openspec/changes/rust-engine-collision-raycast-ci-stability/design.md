@@ -39,7 +39,9 @@ collision input 为 little-endian：64-byte header（`MGC1`、layout v1、positi
 
 Go 保留有限值/正距离/callback 校验、一次 nested `math.Hypot` 归一化、callback 顺序和 `RayHit.Point`；Rust 只产生 record。input 固定 40 bytes（`MGR1`、layout v1、origin、normalized direction、max distance、reserved）；cursor 固定 64 bytes（`MRC1`、layout/state、cell、step、t_delta、t_max、reserved）；record 为 20 bytes（block、face、reserved、distance），output 固定 64 records/1280 bytes。
 
-Rust 对一个 caller-owned cursor 最多生成 64 条，使用负坐标 floor、严格 `<` 以保留 X/Y/Z tie、精确 endpoint inclusion 和 int32 wrapping；首条是 origin/FaceNone/0。Go 逐条验证并调用 callback，首个 error 原样返回，首个 solid 立即返回，绝不消费 batch 余项；跨 batch 无新 distance cap。cursor/output 先在 Rust local storage 中完成，再一次发布。
+Rust 对一个 caller-owned cursor 最多生成 64 条，使用负坐标 floor、严格 `<` 以保留 X/Y/Z tie、精确 endpoint inclusion 和 int32 wrapping；floor 超出 int32 可表示域时统一映射为 `MinInt32`，不依赖目标平台的 float-to-int 转换。首条是 origin/FaceNone/0。Go 逐条验证并调用 callback，首个 error 原样返回，首个 solid 立即返回，绝不消费 batch 余项；跨 batch 无新 distance cap。cursor/output 先在 Rust local storage 中完成，再一次发布。
+
+公开 input 的 origin、direction 与 max distance 仍必须有限；test-only Go oracle 除用最小 helper 明确上述越界 floor 规则外，继续机械保留旧 DDA。若这些有限值在冻结 float32 DDA 的 boundary/delta 运算中可推导出 `-Inf`/`NaN` cursor 或 record，Rust 只放行与同一 input 相符的该类状态，Go 仍按 oracle 顺序先调用对应 callback。cursor delta 必须与同一 input 的 `1/abs(direction)` 逐 bit 相同，普通输入下伪造的非有限 cursor mutation 继续拒绝，不能把可推导溢出泛化为关闭数值校验。
 
 ### ABI 原子性、平台与兼容
 

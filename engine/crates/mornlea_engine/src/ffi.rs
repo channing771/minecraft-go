@@ -6,6 +6,7 @@ use crate::input::{InputError, MeshInput};
 use crate::light::{LIGHT_VOLUME, LightScratch, MeshError as LightError, build_light};
 use crate::raycast::{
     RAYCAST_CURSOR_BYTES, RAYCAST_INPUT_BYTES, RAYCAST_OUTPUT_BYTES, RaycastBatch, raycast_batch,
+    raycast_cursor_overflow_is_valid,
 };
 
 pub(crate) const ABI_VERSION: u32 = 1;
@@ -433,13 +434,17 @@ fn raycast_cursor_is_valid(input: &[u8], bytes: &[u8]) -> bool {
             0
         };
         let delta = read_f32(bytes, 36 + axis * 4);
+        let expected_delta = if component == 0.0 {
+            f32::INFINITY
+        } else {
+            1.0 / component.abs()
+        };
         let maximum = read_f32(bytes, 48 + axis * 4);
         if step != expected_step
-            || delta.is_nan()
-            || delta == f32::NEG_INFINITY
-            || delta <= 0.0
-            || maximum.is_nan()
-            || maximum == f32::NEG_INFINITY
+            || delta.to_bits() != expected_delta.to_bits()
+            || (!maximum.is_finite()
+                && maximum != f32::INFINITY
+                && !raycast_cursor_overflow_is_valid(input, axis, maximum))
             || (component == 0.0 && (delta != f32::INFINITY || maximum != f32::INFINITY))
         {
             return false;
@@ -1101,6 +1106,15 @@ mod tests {
                 base,
                 |_, cursor| {
                     write_test_f32(cursor, 36, 0.0);
+                },
+            );
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} delta finite mismatch"),
+                input,
+                base,
+                |_, cursor| {
+                    write_test_f32(cursor, 36, 2.0);
                 },
             );
             push_raycast_mutation(

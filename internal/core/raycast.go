@@ -63,7 +63,7 @@ func RaycastBlocks(
 	for {
 		count, done := nativeabi.RaycastBatch(input[:], cursor[:], output[:])
 		for index := range count {
-			record := decodeRaycastRecord(output[index*raycastRecordBytes : (index+1)*raycastRecordBytes])
+			record := decodeRaycastRecord(output[index*raycastRecordBytes:(index+1)*raycastRecordBytes], input[:])
 			if firstRecord && (record.face != BlockFaceNone || record.distance != 0) ||
 				!firstRecord && record.face == BlockFaceNone {
 				panic("core: native raycast origin record 非法")
@@ -125,8 +125,9 @@ func initializeRaycastCursor(cursor []byte) {
 	binary.LittleEndian.PutUint32(cursor[4:8], 1)
 }
 
-func decodeRaycastRecord(input []byte) raycastRecord {
-	if len(input) != raycastRecordBytes || input[13] != 0 || input[14] != 0 || input[15] != 0 {
+func decodeRaycastRecord(input, rayInput []byte) raycastRecord {
+	if len(input) != raycastRecordBytes || len(rayInput) != raycastInputBytes ||
+		input[13] != 0 || input[14] != 0 || input[15] != 0 {
 		panic("core: native raycast record 非法")
 	}
 	face := BlockFace(input[12])
@@ -134,10 +135,7 @@ func decodeRaycastRecord(input []byte) raycastRecord {
 		panic("core: native raycast record 非法")
 	}
 	distance := math.Float32frombits(binary.LittleEndian.Uint32(input[16:20]))
-	if !finiteFloat32(distance) {
-		panic("core: native raycast record 非法")
-	}
-	return raycastRecord{
+	record := raycastRecord{
 		block: BlockPos{
 			X: int32(binary.LittleEndian.Uint32(input[0:4])),
 			Y: int32(binary.LittleEndian.Uint32(input[4:8])),
@@ -146,4 +144,48 @@ func decodeRaycastRecord(input []byte) raycastRecord {
 		face:     face,
 		distance: distance,
 	}
+	if !raycastRecordDistanceIsValid(rayInput, record) {
+		panic("core: native raycast record 非法")
+	}
+	return record
+}
+
+func raycastRecordDistanceIsValid(input []byte, record raycastRecord) bool {
+	if finiteFloat32(record.distance) {
+		return true
+	}
+	if record.face == BlockFaceNone || math.IsInf(float64(record.distance), 1) {
+		return false
+	}
+
+	axis := int(record.face / 2)
+	direction := math.Float32frombits(binary.LittleEndian.Uint32(input[20+axis*4 : 24+axis*4]))
+	negativeStep := record.face&1 != 0
+	if negativeStep && direction >= 0 || !negativeStep && direction <= 0 {
+		return false
+	}
+	origin := math.Float32frombits(binary.LittleEndian.Uint32(input[8+axis*4 : 12+axis*4]))
+	cell := raycastFloorToI32(origin)
+	boundary := float32(cell)
+	if !negativeStep {
+		boundary = float32(cell + 1)
+	}
+	if !math.IsInf(float64((boundary-origin)/direction), -1) {
+		return false
+	}
+	if math.IsInf(float64(record.distance), -1) {
+		return true
+	}
+	if direction < 0 {
+		direction = -direction
+	}
+	return math.IsNaN(float64(record.distance)) && math.IsInf(float64(1/direction), 1)
+}
+
+func raycastFloorToI32(value float32) int32 {
+	floored := math.Floor(float64(value))
+	if floored < float64(math.MinInt32) || floored >= float64(math.MaxInt32)+1 {
+		return math.MinInt32
+	}
+	return int32(floored)
 }

@@ -31,9 +31,9 @@ func oracleRaycastBlocks(
 	direction = direction.Mul(float32(1 / length))
 
 	cell := [3]int32{
-		int32(math.Floor(float64(origin[0]))),
-		int32(math.Floor(float64(origin[1]))),
-		int32(math.Floor(float64(origin[2]))),
+		oracleFloorToI32(origin[0]),
+		oracleFloorToI32(origin[1]),
+		oracleFloorToI32(origin[2]),
 	}
 	start := BlockPos{X: cell[0], Y: cell[1], Z: cell[2]}
 	occupied, err := solid(start)
@@ -99,6 +99,14 @@ func oracleRaycastBlocks(
 			}, true, nil
 		}
 	}
+}
+
+func oracleFloorToI32(value float32) int32 {
+	floored := math.Floor(float64(value))
+	if floored < float64(math.MinInt32) || floored >= float64(math.MaxInt32)+1 {
+		return math.MinInt32
+	}
+	return int32(floored)
 }
 
 func oracleFiniteVec3(v mgl32.Vec3) bool {

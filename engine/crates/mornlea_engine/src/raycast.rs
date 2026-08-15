@@ -117,6 +117,21 @@ impl RaycastCursor {
     }
 }
 
+pub(crate) fn raycast_cursor_overflow_is_valid(
+    input_bytes: &[u8],
+    axis: usize,
+    maximum: f32,
+) -> bool {
+    let input = RaycastInput::decode(input_bytes);
+    let initial = RaycastCursor::start(&input);
+    maximum == f32::NEG_INFINITY
+        && initial.maximum[axis] == f32::NEG_INFINITY
+        && initial.delta[axis].is_finite()
+        || maximum.is_nan()
+            && initial.maximum[axis] == f32::NEG_INFINITY
+            && initial.delta[axis] == f32::INFINITY
+}
+
 pub(crate) fn raycast_batch(input_bytes: &[u8], cursor_bytes: &[u8]) -> RaycastBatch {
     let input = RaycastInput::decode(input_bytes);
     let fresh = cursor_bytes[8] == 0;

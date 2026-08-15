@@ -32,7 +32,7 @@
 ## 7. Task 8：将 `core.RaycastBlocks` 的 DDA 切到 Rust
 
 - [x] 7.1 在 header/Rust/nativeabi 追加独立 raycast v1 batch ABI，冻结 40-byte input、64-byte cursor、20-byte record 与 1280-byte output；实现 ABI 原子性、cursor/output 本地发布、64-record 上限和无跨调用所有权。
-- [x] 7.2 用 test-only Go DDA oracle 覆盖 origin/signed-zero、负坐标 floor、严格 XYZ tie、精确 endpoint、int32 wrapping、多 batch、callback 懒惰与 error identity；生产 `core.RaycastBlocks` 仅保留既有校验/一次归一化/Point 并逐 record callback，不留 Go traversal fallback。
+- [x] 7.2 用除越界 float-to-int 规范化为 `MinInt32` 外机械保留的 test-only Go DDA oracle，覆盖 origin/signed-zero、负坐标 floor、严格 XYZ tie、精确 endpoint、int32 wrapping、多 batch、callback 懒惰与 error identity；生产 `core.RaycastBlocks` 仅保留既有校验/一次归一化/Point 并逐 record callback，不留 Go traversal fallback。
 - [x] 7.3 运行 `make rust-check`、nativeabi/core race、raycast fuzz 30s、`BenchmarkRaycastBlocks` 5 次、downstream race、archcheck/Hook/vet/gofmt，并分别证明 tie、endpoint、cursor 与 callback-consumption mutation RED 后恢复 GREEN。
 
 ## 8. Task 9：冻结 HEAD 并生成累计正确性、视觉与性能证据
