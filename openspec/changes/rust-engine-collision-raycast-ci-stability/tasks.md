@@ -1,7 +1,7 @@
 ## 1. Task 2：修复同身份 TCP 重连 fixture
 
-- [ ] 1.1 在 `internal/server/daylight_multiplayer_test.go` 的关闭与同身份重连之间复用 `waitForPlayerReleased`，同时等待 Host 的 player/session 两个 active index；不得新增 sleep、重试、生产 hook 或 deadline 变更。
-- [ ] 1.2 记录 run `31813426121` 的 `0.65s`、`LoginAlreadyOnline/玩家已在线` source RED，并运行 `make rust && go test ./internal/server -run '^TestReconnectContinuesWorldTimeWithoutRollback$' -race -count=100`；移除 barrier 的 mutation 仅作 RED 证据后恢复。
+- [x] 1.1 在 `internal/server/daylight_multiplayer_test.go` 的关闭与同身份重连之间复用 `waitForPlayerReleased`，同时等待 Host 的 player/session 两个 active index；不得新增 sleep、重试、生产 hook 或 deadline 变更。
+- [x] 1.2 记录 run `31813426121` 的 `0.65s`、`LoginAlreadyOnline/玩家已在线` source RED，并运行 `make rust && go test ./internal/server -run '^TestReconnectContinuesWorldTimeWithoutRollback$' -race -count=100`；移除 barrier 的 mutation 仅作 RED 证据后恢复。
 
 ## 2. Task 3：修复健康 Memory endpoint 的 reader 顺序
 
