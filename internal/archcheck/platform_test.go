@@ -1,6 +1,7 @@
 package archcheck_test
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -88,7 +89,7 @@ func TestMornleaServerHasNoGraphicsDependencies(t *testing.T) {
 		}
 		for _, imported := range parsed.Imports {
 			path := strings.Trim(imported.Path.Value, "\"")
-			for _, forbidden := range []string{"github.com/channing771/mornlea/internal/client", "github.com/channing771/mornlea/internal/render", "github.com/channing771/mornlea/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu", "golang.org/x/image", "golang.org/x/image/font"} {
+			for _, forbidden := range []string{"github.com/channing771/mornlea/internal/client", "github.com/channing771/mornlea/internal/mesh", "github.com/channing771/mornlea/internal/render", "github.com/channing771/mornlea/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu", "golang.org/x/image", "golang.org/x/image/font"} {
 				if strings.HasPrefix(path, forbidden) {
 					t.Errorf("%s imports forbidden graphics dependency %s", path, imported.Path.Value)
 				}
@@ -102,11 +103,51 @@ func TestMornleaServerHasNoGraphicsDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("枚举 Mornlea server 传递依赖: %v", err)
 	}
+	foundNativeABI := false
 	for _, dependency := range strings.Fields(string(output)) {
-		for _, forbidden := range []string{"github.com/channing771/mornlea/internal/client", "github.com/channing771/mornlea/internal/render", "github.com/channing771/mornlea/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu", "golang.org/x/image", "golang.org/x/image/font"} {
+		if dependency == "github.com/channing771/mornlea/internal/nativeabi" {
+			foundNativeABI = true
+		}
+		for _, forbidden := range []string{"github.com/channing771/mornlea/internal/client", "github.com/channing771/mornlea/internal/mesh", "github.com/channing771/mornlea/internal/render", "github.com/channing771/mornlea/internal/gfx", "github.com/go-gl/glfw", "github.com/oliverbestmann/webgpu", "golang.org/x/image", "golang.org/x/image/font"} {
 			if dependency == forbidden || strings.HasPrefix(dependency, forbidden+"/") {
 				t.Errorf("Mornlea server transitively depends on forbidden graphics package %s", dependency)
 			}
 		}
+	}
+	if !foundNativeABI {
+		t.Error("Mornlea server 依赖闭包必须包含 internal/nativeabi")
+	}
+}
+
+func TestPhysicsUsesOnlyNativeCollision(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "internal", "physics")
+	if _, err := os.Stat(filepath.Join(root, "step.go")); !os.IsNotExist(err) {
+		t.Fatalf("生产 Go step resolver 必须删除: %v", err)
+	}
+
+	foundNativeABI := false
+	for _, path := range goFiles(t, root) {
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			t.Fatalf("解析 %s: %v", path, err)
+		}
+		for _, imported := range parsed.Imports {
+			if strings.Trim(imported.Path.Value, "\"") == "github.com/channing771/mornlea/internal/nativeabi" {
+				foundNativeABI = true
+			}
+		}
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			identifier, ok := node.(*ast.Ident)
+			if ok && (identifier.Name == "resolveMove" || identifier.Name == "clipAxis" || identifier.Name == "resolveStepMove") {
+				t.Errorf("%s 保留生产 Go collision resolver %s", path, identifier.Name)
+			}
+			return true
+		})
+	}
+	if !foundNativeABI {
+		t.Error("internal/physics 必须直接依赖 internal/nativeabi")
+	}
+	if !topLevelDeclarationNamesIn(t, root, "*.go")["resolveCollision"] {
+		t.Error("internal/physics 必须由 resolveCollision 统一编码并调用 native kernel")
 	}
 }

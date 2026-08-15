@@ -193,6 +193,7 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 	}
 
 	root := moduleRoot(t)
+	requireLinuxServerBundleIdentity(t, root)
 	goModule, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		t.Fatalf("读取 go.mod: %v", err)
@@ -226,6 +227,40 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 		}
 	}
 	testCurrentIdentityMutations(t)
+}
+
+func requireLinuxServerBundleIdentity(t *testing.T, root string) {
+	t.Helper()
+	var linux *identityBuild
+	for _, target := range supportedIdentityBuilds() {
+		if target.name == "linux-server" {
+			linux = &target
+			break
+		}
+	}
+	if linux == nil || linux.context.GOOS != "linux" || linux.context.GOARCH != "amd64" || !linux.context.CgoEnabled {
+		t.Fatalf("Linux server identity context 必须是 linux/amd64 且启用 CGO: %+v", linux)
+	}
+
+	help := exec.Command("make", "help")
+	help.Dir = root
+	output, err := help.CombinedOutput()
+	if err != nil {
+		t.Fatalf("运行 make help: %v\n%s", err, output)
+	}
+	if !bytes.Contains(output, []byte("make build-linux-server 构建 Linux amd64 专服与同目录 Rust .so")) {
+		t.Error("make help 未公开 canonical build-linux-server target")
+	}
+
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatalf("读取 CI workflow: %v", err)
+	}
+	for _, required := range []string{"linux-server:", "runs-on: ubuntu-latest", "make build-linux-server"} {
+		if !bytes.Contains(workflow, []byte(required)) {
+			t.Errorf("CI workflow 缺少 Linux native bundle 标记 %q", required)
+		}
+	}
 }
 
 func testCurrentIdentityMutations(t *testing.T) {
@@ -535,7 +570,8 @@ func supportedIdentityBuilds() []identityBuild {
 	darwin.CgoEnabled = true
 	linux := build.Default
 	linux.GOOS = "linux"
-	linux.CgoEnabled = false
+	linux.GOARCH = "amd64"
+	linux.CgoEnabled = true
 	return []identityBuild{
 		{name: "darwin-cgo", context: darwin, fullRoots: true},
 		{name: "linux-server", context: linux, root: "cmd/mornlea-server"},
@@ -642,10 +678,16 @@ func (scanner *goIdentityScanner) externalImporter(context *build.Context, direc
 	arguments := append([]string{"list", "-e", "-export", "-deps", "-json"}, paths...)
 	command := exec.Command("go", arguments...)
 	command.Dir = scanner.root
+	externalCgoEnabled := context.CgoEnabled
+	if context.GOOS != build.Default.GOOS || context.GOARCH != build.Default.GOARCH {
+		// identity 仍按目标平台的 CGO build constraints 选本仓库源码；外部导出数据
+		// 不应在 macOS 上假装执行 Linux C toolchain，真实 bundle 由 Ubuntu CI 构建。
+		externalCgoEnabled = false
+	}
 	command.Env = append(os.Environ(),
 		"GOOS="+context.GOOS,
 		"GOARCH="+context.GOARCH,
-		fmt.Sprintf("CGO_ENABLED=%d", boolInt(context.CgoEnabled)),
+		fmt.Sprintf("CGO_ENABLED=%d", boolInt(externalCgoEnabled)),
 		"GOWORK=off",
 	)
 	output, err := command.Output()

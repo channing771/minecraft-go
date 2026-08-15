@@ -50,11 +50,6 @@ jobs:
       - name: M3C v6 八玩家与性能报告门禁
         run: go test ./internal/client ./internal/server ./cmd/mornlea ./cmd/perfcheck -run 'Test(PerfReportV6|ScenarioV6|PerfcheckV6|PerfcheckV5SameScenario|PerformanceThresholds|InterestObserver|HostStats|BenchmarkServerEpoch|BenchmarkServerMeasuredWindow)' -count=1
 
-      - name: 构建无图形专用服务端
-        run: |
-          CGO_ENABLED=0 GOOS=linux go build ./cmd/mornlea-server
-          test -z "$(CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/mornlea-server | rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
-
       - name: 静态检查
         run: |
           go vet ./...
@@ -66,3 +61,53 @@ jobs:
 
       - name: M3C 多人微基准可执行性
         run: go test ./internal/network ./internal/server ./internal/render -run '^$' -bench '(RemotePlayerStateCodec|EightPlayerInterest|RemoteAvatarNameTag)' -benchmem -benchtime=100x -count=1
+
+  linux-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Rust 工具链身份
+        run: |
+          cd engine
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
+
+      - name: 构建并测试 native collision bundle
+        run: |
+          make rust
+          go test ./internal/nativeabi ./internal/core ./internal/physics ./internal/mesh -race -count=1
+          make build-linux-server
+
+      - name: Linux 专服架构与 ELF 门禁
+        run: |
+          go test ./internal/archcheck -count=1
+          test -z "$(CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go list -deps ./cmd/mornlea-server |
+            rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
+          readelf -d bin/mornlea-server | rg -F 'libmornlea_engine.so'
+          readelf -d bin/mornlea-server | rg '\$ORIGIN'
+          nm -D --defined-only bin/libmornlea_engine.so > /tmp/mornlea-engine-symbols.txt
+          for symbol in mornlea_engine_abi_version mornlea_mesh_section mornlea_collision_resolve; do
+            awk '{print $NF}' /tmp/mornlea-engine-symbols.txt | rg -Fx "$symbol"
+          done
+
+      - name: 脱离 Cargo target 加载相邻 so
+        run: |
+          native_target_backup="$(mktemp -d)/target"
+          trap 'test -e engine/target || mv "$native_target_backup" engine/target' EXIT
+          mv engine/target "$native_target_backup"
+          ldd bin/mornlea-server > /tmp/mornlea-server-ldd.txt
+          rg -F "$(pwd)/bin/libmornlea_engine.so" /tmp/mornlea-server-ldd.txt
+          set +e
+          bin/mornlea-server -h >/tmp/mornlea-server-help.txt 2>&1
+          native_help_rc=$?
+          set -e
+          mv "$native_target_backup" engine/target
+          trap - EXIT
+          test "$native_help_rc" -eq 1
+          rg -F 'flag: help requested' /tmp/mornlea-server-help.txt
+          ! rg 'error while loading shared libraries|cannot open shared object' /tmp/mornlea-server-help.txt

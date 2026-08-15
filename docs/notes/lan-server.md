@@ -1,6 +1,13 @@
 # 局域网专用服务端
 
-`mornlea-server` 是无渲染 TCP 专用服务端。`--max-players` 只接受 `1..8`，默认 8。启动一个新世界或打开已有世界：
+`mornlea-server` 是无渲染 TCP 专用服务端。Linux amd64 发布包虽不依赖 client、mesh、render、gfx 或窗口栈，但共享 Rust collision resolver，因此必须把 binary 与相邻 `libmornlea_engine.so` 作为同一不可跨版本混装的 release unit：
+
+```sh
+make build-linux-server
+./bin/mornlea-server --listen :25565 --world worlds/lan --seed 42 --max-players 8
+```
+
+在源码 checkout 中开发运行时，`--max-players` 只接受 `1..8`，默认 8。启动一个新世界或打开已有世界：
 
 ```sh
 go run ./cmd/mornlea-server --listen :25565 --world worlds/lan --seed 42 --max-players 8

@@ -25,9 +25,9 @@
 
 ## 6. Task 7：将生产 collision 切到 Rust 并交付 Linux server bundle
 
-- [ ] 6.1 将 checked collision prism encoder 与一次 native 调用放入 `internal/physics`，保持 `physics.Step` 签名、Go tunable/input/state 所有权和完整成功后发布；删除生产 Go resolver，仅留 `_test.go` oracle，且不添加 fallback/pool/interface。
-- [ ] 6.2 更新 `Makefile`、`.github/workflows/ci.yml`、archcheck、Hook 和当前文档，提供原生 Ubuntu amd64 `mornlea-server + libmornlea_engine.so` `$ORIGIN` bundle，并证明依赖闭包无 client/mesh/render/gfx/WebGPU/窗口栈。
-- [ ] 6.3 运行 physics/client/sim/server/commands race、4097 零查询、public unknown mutation、3 项 physics benchmark（5 次）、macOS dylib 脱离 target probe 和 Linux CI job 所需的 symbol/loader/`go list -deps` gate。
+- [x] 6.1 将 checked collision prism encoder 与一次 native 调用放入 `internal/physics`，保持 `physics.Step` 签名、Go tunable/input/state 所有权和完整成功后发布；删除生产 Go resolver，仅留 `_test.go` oracle，且不添加 fallback/pool/interface。
+- [x] 6.2 更新 `Makefile`、`.github/workflows/ci.yml`、archcheck、Hook 和当前文档，提供原生 Ubuntu amd64 `mornlea-server + libmornlea_engine.so` `$ORIGIN` bundle，并证明依赖闭包无 client/mesh/render/gfx/WebGPU/窗口栈。
+- [x] 6.3 运行 physics/client/sim/server/commands race、4097 零查询、public unknown mutation、3 项 physics benchmark（5 次）、macOS dylib 脱离 target probe 和 Linux CI job 所需的 symbol/loader/`go list -deps` gate。
 
 ## 7. Task 8：将 `core.RaycastBlocks` 的 DDA 切到 Rust
 

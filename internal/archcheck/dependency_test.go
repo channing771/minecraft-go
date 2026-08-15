@@ -13,7 +13,7 @@ var allowed = map[string][]string{
 	"internal/core":       {},
 	"internal/nativeabi":  {},
 	"internal/config":     {"internal/companion", "internal/core", "internal/physics", "internal/sim", "internal/logging"},
-	"internal/physics":    {"internal/core"},
+	"internal/physics":    {"internal/core", "internal/nativeabi"},
 	"internal/gfx":        {},
 	"internal/logging":    {},
 	"internal/gfx/shader": {},

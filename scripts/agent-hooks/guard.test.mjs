@@ -54,9 +54,10 @@ test("does not require OpenSpec for one focused implementation component", () =>
   );
 });
 
-test("requires Rust validation for engine and native mesh changes", () => {
+test("requires Rust validation for engine and native consumers", () => {
   assert.equal(rustValidationRequired(["engine/crates/mornlea_engine/src/light.rs"]), true);
   assert.equal(rustValidationRequired(["internal/mesh/native.go"]), true);
+  assert.equal(rustValidationRequired(["internal/physics/collision.go"]), true);
   assert.equal(rustValidationRequired(["internal/server/session_ingress.go"]), false);
 });
 
@@ -71,7 +72,21 @@ test("runs Rust validation before Go checks for Rust-required changes", () => {
   assert.deepEqual(calls.slice(1, 4), [
     ["make", ["rust"]],
     ["make", ["rust-check"]],
-    ["go", ["test", "./internal/nativeabi", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
+    [
+      "go",
+      [
+        "test",
+        "./internal/nativeabi",
+        "./internal/physics",
+        "./internal/mesh",
+        "./internal/client",
+        "./internal/sim",
+        "./internal/server",
+        "./cmd/mornlea-server",
+        "-race",
+        "-count=1",
+      ],
+    ],
   ]);
   assert.equal(calls.some(([command]) => command === "cargo"), false);
 });
@@ -86,7 +101,21 @@ test("runs the fixed native downstream union for Rust-only bridge changes", () =
   assert.deepEqual(stopFailures(["engine/crates/mornlea_engine/src/ffi.rs"], run, {}), []);
   assert.deepEqual(
     calls.find(([command, argumentsList]) => command === "go" && argumentsList.includes("./internal/nativeabi")),
-    ["go", ["test", "./internal/nativeabi", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
+    [
+      "go",
+      [
+        "test",
+        "./internal/nativeabi",
+        "./internal/physics",
+        "./internal/mesh",
+        "./internal/client",
+        "./internal/sim",
+        "./internal/server",
+        "./cmd/mornlea-server",
+        "-race",
+        "-count=1",
+      ],
+    ],
   );
 });
 
@@ -103,7 +132,21 @@ test("unions the fixed native downstream packages with mixed bridge Go changes",
   );
   assert.deepEqual(
     calls.find(([command, argumentsList]) => command === "go" && argumentsList.includes("./internal/nativeabi")),
-    ["go", ["test", "./internal/nativeabi", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
+    [
+      "go",
+      [
+        "test",
+        "./internal/nativeabi",
+        "./internal/physics",
+        "./internal/mesh",
+        "./internal/client",
+        "./internal/sim",
+        "./internal/server",
+        "./cmd/mornlea-server",
+        "-race",
+        "-count=1",
+      ],
+    ],
   );
 });
 

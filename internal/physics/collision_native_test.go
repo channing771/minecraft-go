@@ -2,6 +2,7 @@ package physics_test
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand"
 	"slices"
@@ -348,15 +349,17 @@ func (source *testRecordingCollisionSource) CollisionBoxes(position core.BlockPo
 }
 
 func TestCollisionSnapshotUsesYXZOrderAndQueriesEachCellOnce(t *testing.T) {
-	prism := testCollisionCheckedPrism(core.BlockPos{X: -1, Y: 2, Z: 3}, [3]uint32{2, 2, 2})
 	source := &testRecordingCollisionSource{set: physics.CollisionBoxSet{Loaded: true}}
-	input := make([]byte, prism.bytes)
-	testEncodeCollisionInputInto(input, prism, physics.State{}, mgl32.Vec3{}, source, false, 0)
+	physics.Step(physics.State{
+		Position: mgl32.Vec3{0.5, 1, 0.5},
+		Velocity: mgl32.Vec3{0, 1.6, 0},
+		OnGround: true,
+	}, physics.Input{}, source)
 	want := []core.BlockPos{
-		{X: -1, Y: 2, Z: 3}, {X: -1, Y: 2, Z: 4},
-		{X: 0, Y: 2, Z: 3}, {X: 0, Y: 2, Z: 4},
-		{X: -1, Y: 3, Z: 3}, {X: -1, Y: 3, Z: 4},
-		{X: 0, Y: 3, Z: 3}, {X: 0, Y: 3, Z: 4},
+		{X: 0, Y: 0, Z: 0},
+		{X: 0, Y: 1, Z: 0},
+		{X: 0, Y: 2, Z: 0},
+		{X: 0, Y: 3, Z: 0},
 	}
 	if !slices.Equal(source.positions, want) {
 		t.Fatalf("query order=%v，want Y/X/Z %v", source.positions, want)
@@ -368,46 +371,66 @@ func TestCollisionSnapshotClampsBoxCount(t *testing.T) {
 		t.Run(strconv.Itoa(int(rawCount)), func(t *testing.T) {
 			set := physics.CollisionBoxSet{Loaded: true, Count: rawCount}
 			for index := range set.Boxes {
-				set.Boxes[index] = core.AABB{Min: mgl32.Vec3{float32(index), 0, 0}, Max: mgl32.Vec3{float32(index) + 0.5, 1, 1}}
+				set.Boxes[index] = fullCube
 			}
-			prism := testCollisionCheckedPrism(core.BlockPos{}, [3]uint32{1, 1, 1})
-			input := make([]byte, prism.bytes)
-			testEncodeCollisionInputInto(input, prism, physics.State{}, mgl32.Vec3{}, testCollisionWorld{{}: set}, false, 0)
-			if got := input[testCollisionHeaderBytes+1]; got != 8 {
-				t.Fatalf("raw Count=%d encoded=%d，want 8", rawCount, got)
+			state := physics.State{
+				Position: mgl32.Vec3{0.5, 1, 0.5},
+				Velocity: mgl32.Vec3{10, 0, 0},
+				OnGround: true,
 			}
+			world := testCollisionWorld{{X: 1, Y: 1, Z: 0}: set}
+			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, world, mgl32.Vec3{7.5, -1.6, 0})
 		})
 	}
 }
 
 func TestCollisionSnapshotAllows4096Cells(t *testing.T) {
-	prism := testCollisionCheckedPrism(core.BlockPos{X: -8, Y: -8, Z: -8}, [3]uint32{16, 16, 16})
-	source := &testRecordingCollisionSource{set: physics.CollisionBoxSet{Loaded: true}}
-	input := make([]byte, prism.bytes)
-	testEncodeCollisionInputInto(input, prism, physics.State{}, mgl32.Vec3{}, source, false, 0)
-	if len(input) != testCollisionMaxBytes || len(source.positions) != testCollisionMaxCells {
-		t.Fatalf("4096 snapshot bytes/queries=%d/%d，want %d/%d", len(input), len(source.positions), testCollisionMaxBytes, testCollisionMaxCells)
+	t.Cleanup(func() { physics.SetTunables(physics.DefaultTunables()) })
+	tunables := physics.DefaultTunables()
+	tunables.StepHeight = 13.2
+	physics.SetTunables(tunables)
+	source := &testCountingCollisionSource{}
+	got := physics.Step(physics.State{
+		Position: mgl32.Vec3{0.5, 1.1, 0.5},
+		Velocity: mgl32.Vec3{5088.5, 1.6, 0},
+		OnGround: true,
+	}, physics.Input{}, source)
+	if source.queries != testCollisionMaxCells {
+		t.Fatalf("4096-cell production snapshot queries=%d，want %d", source.queries, testCollisionMaxCells)
 	}
-	var output [testCollisionOutputBytes]byte
-	nativeabi.CollisionResolve(input, output[:])
-	if got := testDecodeCollisionOutput(output[:]); got != (testCollisionResult{}) {
-		t.Fatalf("4096-cell native result=%+v，want zero movement", got)
+	if got.State.Position != (mgl32.Vec3{254.8, 1.1, 0.5}) {
+		t.Fatalf("4096-cell production result=%+v，want complete movement", got)
 	}
 }
 
 func TestCollisionSnapshotRejects4097BeforeQuery(t *testing.T) {
-	source := &testRecordingCollisionSource{set: physics.CollisionBoxSet{Loaded: true}}
+	t.Cleanup(func() { physics.SetTunables(physics.DefaultTunables()) })
+	tunables := physics.DefaultTunables()
+	tunables.StepHeight = 15
+	physics.SetTunables(tunables)
+
+	// x/y/z dimensions are exactly 241/17/1, for 4097 cells.
+	source := &testCountingCollisionSource{}
 	defer func() {
-		if recover() == nil {
-			t.Fatal("4097-cell snapshot 未 panic")
+		if got := fmt.Sprint(recover()); got != "physics: collision prism 超过 4096 cells" {
+			t.Errorf("4097-cell snapshot panic=%q，want stable capacity panic", got)
 		}
-		if len(source.positions) != 0 {
-			t.Fatalf("超限 snapshot 查询了 %d 个 cells，want 0", len(source.positions))
+		if source.queries != 0 {
+			t.Fatalf("超限 snapshot 查询了 %d 个 cells，want 0", source.queries)
 		}
 	}()
-	prism := testCollisionCheckedPrism(core.BlockPos{}, [3]uint32{4097, 1, 1})
-	input := make([]byte, prism.bytes)
-	testEncodeCollisionInputInto(input, prism, physics.State{}, mgl32.Vec3{}, source, false, 0)
+	physics.Step(physics.State{
+		Position: mgl32.Vec3{0.5, 1.1, 0.5},
+		Velocity: mgl32.Vec3{4788.5, 1.6, 0},
+		OnGround: true,
+	}, physics.Input{}, source)
+}
+
+type testCountingCollisionSource struct{ queries int }
+
+func (source *testCountingCollisionSource) CollisionBoxes(core.BlockPos) physics.CollisionBoxSet {
+	source.queries++
+	return physics.CollisionBoxSet{Loaded: true}
 }
 
 func TestCollisionConfiguredMaximumFitsRegularBuffer(t *testing.T) {
@@ -418,13 +441,89 @@ func TestCollisionConfiguredMaximumFitsRegularBuffer(t *testing.T) {
 }
 
 func TestCollisionSnapshotBeyondRegularBufferUsesExactAllocation(t *testing.T) {
-	state := physics.State{Position: mgl32.Vec3{0, 64, 0}}
-	displacement := mgl32.Vec3{2, -10, 1}
-	prism := testCollisionPrismFor(state.Position, displacement, 1.5)
-	if prism.cells <= testCollisionRegularCells || prism.cells > testCollisionMaxCells {
-		t.Fatalf("large collision prism=%d cells，want 136..4096", prism.cells)
+	t.Cleanup(func() { physics.SetTunables(physics.DefaultTunables()) })
+	tunables := physics.DefaultTunables()
+	tunables.StepHeight = 15
+	physics.SetTunables(tunables)
+	source := &testCountingCollisionSource{}
+	got := physics.Step(physics.State{
+		Position: mgl32.Vec3{0.5, 1.1, 0.5},
+		Velocity: mgl32.Vec3{168.5, 1.6, 0},
+		OnGround: true,
+	}, physics.Input{}, source)
+	if source.queries != 170 {
+		t.Fatalf("large production snapshot queries=%d，want 170", source.queries)
 	}
-	testAssertCollisionMatches(t, state, displacement, testCollisionWorld{}, false, 1.5)
+	if got.State.Position != (mgl32.Vec3{8.8, 1.1, 0.5}) {
+		t.Fatalf("large production snapshot result=%+v，want complete movement", got)
+	}
+}
+
+func TestStepProductionMatchesGoCollisionOracle(t *testing.T) {
+	tests := []struct {
+		name               string
+		state              physics.State
+		input              physics.Input
+		world              testCollisionWorld
+		integratedVelocity mgl32.Vec3
+	}{
+		{
+			name:               "falling onto floor",
+			state:              physics.State{Position: mgl32.Vec3{0.5, 1.2, 0.5}, Velocity: mgl32.Vec3{0, -8.4, 0}},
+			world:              testCollisionWorld{{X: 0, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}},
+			integratedVelocity: mgl32.Vec3{0, -10, 0},
+		},
+		{
+			name:               "closed unknown wall",
+			state:              physics.State{Position: mgl32.Vec3{0.5, 1, 0.5}, Velocity: mgl32.Vec3{10, 0, 0}, OnGround: true},
+			world:              testCollisionWorld{{X: 1, Y: 1, Z: 0}: {}},
+			integratedVelocity: mgl32.Vec3{7.5, -1.6, 0},
+		},
+		{
+			name:               "half block step",
+			state:              groundedTowardObstacle(),
+			input:              physics.Input{MoveX: 1},
+			world:              testCollisionWorld{{X: 0, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}, {X: 1, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}, {X: 1, Y: 1, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{{Max: mgl32.Vec3{1, 0.5, 1}}}}},
+			integratedVelocity: mgl32.Vec3{4.3, -1.6, math.Float32frombits(1 << 31)},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testAssertProductionStepMatchesOracle(t, test.state, test.input, test.world, test.integratedVelocity)
+		})
+	}
+}
+
+func testAssertProductionStepMatchesOracle(
+	t *testing.T,
+	state physics.State,
+	input physics.Input,
+	source physics.CollisionSource,
+	integratedVelocity mgl32.Vec3,
+) {
+	t.Helper()
+	integrated := state
+	integrated.Velocity = integratedVelocity
+	displacement := integratedVelocity.Mul(physics.FixedDeltaSeconds)
+	wantMove, wantUsedStep := oracleResolveCollision(integrated, displacement, source, state.OnGround, physics.DefaultTunables().StepHeight)
+	integrated.Position = wantMove.position
+	integrated.OnGround = wantMove.onGround
+	for axis, clipped := range wantMove.clipped {
+		if clipped {
+			integrated.Velocity[axis] = 0
+		}
+	}
+	want := physics.StepResult{State: integrated, UsedStep: wantUsedStep, HitUnknown: wantMove.hitUnknown}
+	got := physics.Step(state, input, source)
+	for axis := range 3 {
+		if math.Float32bits(got.State.Position[axis]) != math.Float32bits(want.State.Position[axis]) ||
+			math.Float32bits(got.State.Velocity[axis]) != math.Float32bits(want.State.Velocity[axis]) {
+			t.Fatalf("production Step axis %d=%+v，want oracle=%+v", axis, got, want)
+		}
+	}
+	if got.State.OnGround != want.State.OnGround || got.UsedStep != want.UsedStep || got.HitUnknown != want.HitUnknown {
+		t.Fatalf("production Step=%+v，want oracle=%+v", got, want)
+	}
 }
 
 func TestNativeCollisionMatchesGoOracle(t *testing.T) {
@@ -450,7 +549,18 @@ func TestNativeCollisionRejectedUnknownStepKeepsOrdinaryHitUnknownFalse(t *testi
 	testAssertCollisionMatches(t, state, mgl32.Vec3{0.5, 0, 0}, world, true, 0.6)
 }
 
-func TestNativeCollisionMatchesGoOracleDeterministicCorpus(t *testing.T) {
+func TestStepProductionMatchesGoCollisionOracleDeterministicCorpus(t *testing.T) {
+	previousTunables := physics.ActiveTunables()
+	t.Cleanup(func() { physics.SetTunables(previousTunables) })
+	tunables := physics.DefaultTunables()
+	tunables.WalkSpeed = math.MaxFloat32
+	tunables.GroundAcceleration = 0
+	tunables.GroundDeceleration = 0
+	tunables.AirAcceleration = 0
+	tunables.Gravity = 0
+	tunables.TerminalFallSpeed = math.MaxFloat32
+	physics.SetTunables(tunables)
+
 	floor := func(xs ...int32) testCollisionWorld {
 		world := testCollisionWorld{}
 		for _, x := range xs {
@@ -496,7 +606,14 @@ func TestNativeCollisionMatchesGoOracleDeterministicCorpus(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testAssertCollisionMatches(t, test.state, test.displacement, test.world, test.beganGrounded, test.stepHeight)
+			if test.stepHeight != tunables.StepHeight {
+				t.Fatalf("production parity step height=%v，want %v", test.stepHeight, tunables.StepHeight)
+			}
+			state := test.state
+			state.OnGround = test.beganGrounded
+			integratedVelocity := test.displacement.Mul(1 / physics.FixedDeltaSeconds)
+			state.Velocity = integratedVelocity
+			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, test.world, integratedVelocity)
 		})
 	}
 
@@ -516,7 +633,9 @@ func TestNativeCollisionMatchesGoOracleDeterministicCorpus(t *testing.T) {
 		state := physics.State{Position: mgl32.Vec3{float32(random.Intn(21)-10)/10 + 0.5, 1, float32(random.Intn(21)-10)/10 + 0.5}, OnGround: true}
 		displacement := mgl32.Vec3{float32(random.Intn(201)-100) / 100, float32(random.Intn(41)-20) / 100, float32(random.Intn(201)-100) / 100}
 		t.Run("random", func(t *testing.T) {
-			testAssertCollisionMatches(t, state, displacement, world, true, 0.6)
+			integratedVelocity := displacement.Mul(1 / physics.FixedDeltaSeconds)
+			state.Velocity = integratedVelocity
+			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, world, integratedVelocity)
 		})
 	}
 }

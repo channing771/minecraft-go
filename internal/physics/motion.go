@@ -40,18 +40,13 @@ func Step(state State, input Input, source CollisionSource) StepResult {
 		)
 	}
 	displacement := state.Velocity.Mul(FixedDeltaSeconds)
-	move := resolveMove(state, displacement, source)
-	usedStep := false
-	if (move.clipped[0] || move.clipped[2]) &&
-		(beganGrounded || move.onGround) &&
-		(displacement.X() != 0 || displacement.Z() != 0) {
-		if stepped, ok := resolveStepMove(state, displacement, source, tunables.StepHeight); ok &&
-			horizontalDistanceSquared(state.Position, stepped.position) >
-				horizontalDistanceSquared(state.Position, move.position) {
-			move = stepped
-			usedStep = true
-		}
-	}
+	move := resolveCollision(
+		state,
+		displacement,
+		source,
+		beganGrounded,
+		tunables.StepHeight,
+	)
 	state.Position = move.position
 	state.OnGround = move.onGround
 	for axis, clipped := range move.clipped {
@@ -60,7 +55,11 @@ func Step(state State, input Input, source CollisionSource) StepResult {
 		}
 	}
 
-	return StepResult{State: state, UsedStep: usedStep, HitUnknown: move.hitUnknown}
+	return StepResult{
+		State:      state,
+		UsedStep:   move.usedStep,
+		HitUnknown: move.hitUnknown,
+	}
 }
 
 func movementTarget(input Input, walkSpeed float32) mgl32.Vec3 {
