@@ -1,5 +1,14 @@
 # Apple M5 性能基线
 
+## rust-engine-physics-step 物理 Step 积分迁移 record-only 备注（非新基线）
+
+2026-08-15 在 rust-engine-physics-step 变更 Task 10 收尾验证中记录；宿主 Apple M5 / 24GiB、Go 1.26.0 darwin/arm64、Rust/cargo 1.97.1，同一主机同一 `go test ./internal/physics -run '^$' -bench . -benchmem -count=1` 命令。
+
+- 迁移后（HEAD `1b4ad98`，生产 `physics.Step` 走 native `mornlea_physics_step`）：`BenchmarkStepPlayerFlat` 779.1 ns/op、`BenchmarkStepPlayerColliding` 976.7 ns/op、`BenchmarkStepPlayerStepping` 974.3 ns/op，均 0 B/op、0 allocs/op。
+- 迁移前（commit `b44227e`，生产 Step 仍为 Go 积分、collision 走 native）：`BenchmarkStepPlayerFlat` 726.6 ns/op、`BenchmarkStepPlayerColliding` 941.6 ns/op、`BenchmarkStepPlayerStepping` 944.6 ns/op，均 0 allocs/op。
+
+积分迁入 native 后仍保持 0 allocs/op（由 `TestStepPlayerDoesNotAllocate` 等锁定）；flat/colliding/stepping 分别 +52.5/+35.1/+29.7 ns/op（约 +7.2%/+3.7%/+3.1%），源于 step header 64→128 字节、输出 16→32 字节的编解码开销。`go run ./cmd/perfcheck --baseline docs/notes/perf-baseline-m5.json --current docs/notes/perf-baseline-m5.json --max-regression 0.20` 自比较 exit 0，输出 `同场景性能记录完成`。以上数值只记录，不改变门禁与退出状态；M2 v15 与 M5 v14 基线字节未修改。
+
 ## Rust kernel 累计门禁 Attempt 6 scenario v16（record-only，非新基线）
 
 2026-08-15 在 Linux GPU source-set 修复后的冻结 producer `931c57a7d4d017e37a94baf19eee833b042c68ce` 上完成 fresh 本地/macOS 累计门禁。宿主为 Apple M5 / 24GiB、macOS 26.5.1、Go 1.26.0 darwin/arm64；Rust/cargo 为 1.97.1。Rust、race、两条历史 fixture ×100、Hook、三项 fuzz、三组 benchmark、四个 native symbol、相邻 dylib、detached load、11 个 headless visual、Memory/TCP producer、自比较、跨 transport 比较和最终 full gates 均通过。
