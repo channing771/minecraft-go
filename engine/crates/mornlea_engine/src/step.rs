@@ -169,8 +169,12 @@ pub(crate) fn step_input_is_valid(bytes: &[u8]) -> bool {
 type Vector = [f32; 3];
 
 // 与 Go mgl32.Vec3.Len 逐位一致：f32 平方和（左结合）→ f64 sqrt → f32。
+//
+// Go 在 arm64 上会把单表达式 x*x + y*y + z*z 收缩为 FMA：
+// ((x*x + y*y) + z*z) → fma(z, z, fma(x, x, y*y))。这里显式用 mul_add
+// 对齐，否则平方和与 Go 相差 1 ulp，会导致 sweep bounds 自检误判位移越界。
 fn vec3_len(v: Vector) -> f32 {
-    let sum = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    let sum = v[2].mul_add(v[2], v[0].mul_add(v[0], v[1] * v[1]));
     ((sum as f64).sqrt()) as f32
 }
 
@@ -316,7 +320,7 @@ pub(crate) fn physics_step(bytes: &[u8]) -> Result<[u8; STEP_OUTPUT_BYTES], Step
 mod tests {
     use super::{
         STEP_HEADER_BYTES, STEP_OUTPUT_BYTES, StepError, StepInput, integrate, physics_step,
-        read_f32, step_input_is_valid,
+        read_f32, step_input_is_valid, vec3_len,
     };
 
     const CELL_BYTES: usize = 196;
@@ -363,6 +367,14 @@ mod tests {
     #[test]
     fn accepts_valid_input() {
         assert!(step_input_is_valid(&valid_step_bytes()));
+    }
+
+    #[test]
+    fn vec3_len_matches_go_fma() {
+        // 该 delta 是 Task 8 差分语料中触发的真实输入：Go arm64 会把平方和
+        // 收缩为 FMA 得到 0x40829268，而严格 IEEE 是 0x40829267。
+        let delta = [f32::from_bits(0x3f048e4c), 0.0, f32::from_bits(0x4081842c)];
+        assert_eq!(vec3_len(delta).to_bits(), 0x40829268);
     }
 
     #[test]

@@ -123,11 +123,9 @@ func TestMornleaServerHasNoGraphicsDependencies(t *testing.T) {
 
 func TestPhysicsUsesOnlyNativeCollision(t *testing.T) {
 	root := filepath.Join(moduleRoot(t), "internal", "physics")
-	if _, err := os.Stat(filepath.Join(root, "step.go")); !os.IsNotExist(err) {
-		t.Fatalf("生产 Go step resolver 必须删除: %v", err)
-	}
 
 	foundNativeABI := false
+	nativePhysicsStepCalls := 0
 	for _, path := range goFiles(t, root) {
 		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 		if err != nil {
@@ -139,9 +137,15 @@ func TestPhysicsUsesOnlyNativeCollision(t *testing.T) {
 			}
 		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
-			identifier, ok := node.(*ast.Ident)
-			if ok && (identifier.Name == "resolveMove" || identifier.Name == "clipAxis" || identifier.Name == "resolveStepMove") {
-				t.Errorf("%s 保留生产 Go collision resolver %s", path, identifier.Name)
+			switch node := node.(type) {
+			case *ast.SelectorExpr:
+				if packageName, ok := node.X.(*ast.Ident); ok && packageName.Name == "nativeabi" && node.Sel.Name == "PhysicsStep" {
+					nativePhysicsStepCalls++
+				}
+			case *ast.Ident:
+				if node.Name == "resolveMove" || node.Name == "clipAxis" || node.Name == "resolveStepMove" {
+					t.Errorf("%s 保留生产 Go collision resolver %s", path, node.Name)
+				}
 			}
 			return true
 		})
@@ -149,8 +153,8 @@ func TestPhysicsUsesOnlyNativeCollision(t *testing.T) {
 	if !foundNativeABI {
 		t.Error("internal/physics 必须直接依赖 internal/nativeabi")
 	}
-	if !topLevelDeclarationNamesIn(t, root, "*.go")["resolveCollision"] {
-		t.Error("internal/physics 必须由 resolveCollision 统一编码并调用 native kernel")
+	if nativePhysicsStepCalls != 1 || !topLevelDeclarationNamesIn(t, root, "*.go")["Step"] {
+		t.Error("internal/physics 必须由 Step 单点编码并调用 native physics_step")
 	}
 }
 

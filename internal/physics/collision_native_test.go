@@ -434,9 +434,9 @@ func (source *testCountingCollisionSource) CollisionBoxes(core.BlockPos) physics
 }
 
 func TestCollisionConfiguredMaximumFitsRegularBuffer(t *testing.T) {
-	prism := testCollisionPrismFor(mgl32.Vec3{0, 64, 0}, mgl32.Vec3{1, -10, 1}, 1.5)
-	if prism.cells > testCollisionRegularCells || prism.bytes > testCollisionRegularBytes {
-		t.Fatalf("configured collision prism=%d cells/%d bytes，want <=135/26524", prism.cells, prism.bytes)
+	prism := testStepPrismFor(mgl32.Vec3{0, 64, 0}, mgl32.Vec3{0, -10, 0}, mgl32.Vec3{1, 0, 1}, 1.5)
+	if prism.cells > testStepRegularCells || prism.bytes > testStepRegularBytes {
+		t.Fatalf("configured step prism=%d cells/%d bytes，want <=135/%d", prism.cells, prism.bytes, testStepRegularBytes)
 	}
 }
 
