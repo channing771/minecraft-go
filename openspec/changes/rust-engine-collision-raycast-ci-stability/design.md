@@ -47,7 +47,7 @@ Rust 对一个 caller-owned cursor 最多生成 64 条，使用负坐标 floor�
 
 Rust 与 Go 双层检查 ABI version、magic/layout、长度、对齐、范围、overlap、reserved bytes、cursor state 与数值域。invalid input/panic 均不发布 collision output、raycast output/cursor 或 Go State；当 raycast 两个 result metadata 指针有效时先清零 `output_count`/`done`。panic 用 `catch_unwind` 围住，绝不越过 C ABI。ABI major 固定 `1`，mesh 的 `mornlea_engine_abi_version`、`mornlea_mesh_section`、layout/status 保持，collision/raycast 只追加 symbol。
 
-Rust 在清零 raycast result metadata 前 MUST 按 input/cursor/output 固定的 40/64/1280-byte footprint 完成 checked range 与 metadata overlap 检查，不得使用 caller-supplied length。
+Rust 在清零 raycast result metadata 前 MUST 对每个非空 input/cursor/output 按固定的 40/64/1280-byte footprint 完成 checked range 与 metadata overlap 检查，不得使用 caller-supplied length。
 
 macOS 以 `@rpath` 与 `@loader_path` 发布 `bin/mornlea`、`bin/mornlea-server` 和相邻 `libmornlea_engine.dylib`。Linux amd64 原生构建 `mornlea-server + libmornlea_engine.so`，ELF runpath 为 `$ORIGIN`；专服允许 Rust/CGO，但依赖闭包仍排除 client、mesh、render、gfx、WebGPU、GLFW、字体和窗口包。文件名切换是原子发布；旧 binary/new library 不能混装。
 
