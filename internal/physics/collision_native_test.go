@@ -379,7 +379,7 @@ func TestCollisionSnapshotClampsBoxCount(t *testing.T) {
 				OnGround: true,
 			}
 			world := testCollisionWorld{{X: 1, Y: 1, Z: 0}: set}
-			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, world, mgl32.Vec3{7.5, -1.6, 0})
+			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, world)
 		})
 	}
 }
@@ -461,35 +461,31 @@ func TestCollisionSnapshotBeyondRegularBufferUsesExactAllocation(t *testing.T) {
 
 func TestStepProductionMatchesGoCollisionOracle(t *testing.T) {
 	tests := []struct {
-		name               string
-		state              physics.State
-		input              physics.Input
-		world              testCollisionWorld
-		integratedVelocity mgl32.Vec3
+		name  string
+		state physics.State
+		input physics.Input
+		world testCollisionWorld
 	}{
 		{
-			name:               "falling onto floor",
-			state:              physics.State{Position: mgl32.Vec3{0.5, 1.2, 0.5}, Velocity: mgl32.Vec3{0, -8.4, 0}},
-			world:              testCollisionWorld{{X: 0, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}},
-			integratedVelocity: mgl32.Vec3{0, -10, 0},
+			name:  "falling onto floor",
+			state: physics.State{Position: mgl32.Vec3{0.5, 1.2, 0.5}, Velocity: mgl32.Vec3{0, -8.4, 0}},
+			world: testCollisionWorld{{X: 0, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}},
 		},
 		{
-			name:               "closed unknown wall",
-			state:              physics.State{Position: mgl32.Vec3{0.5, 1, 0.5}, Velocity: mgl32.Vec3{10, 0, 0}, OnGround: true},
-			world:              testCollisionWorld{{X: 1, Y: 1, Z: 0}: {}},
-			integratedVelocity: mgl32.Vec3{7.5, -1.6, 0},
+			name:  "closed unknown wall",
+			state: physics.State{Position: mgl32.Vec3{0.5, 1, 0.5}, Velocity: mgl32.Vec3{10, 0, 0}, OnGround: true},
+			world: testCollisionWorld{{X: 1, Y: 1, Z: 0}: {}},
 		},
 		{
-			name:               "half block step",
-			state:              groundedTowardObstacle(),
-			input:              physics.Input{MoveX: 1},
-			world:              testCollisionWorld{{X: 0, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}, {X: 1, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}, {X: 1, Y: 1, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{{Max: mgl32.Vec3{1, 0.5, 1}}}}},
-			integratedVelocity: mgl32.Vec3{4.3, -1.6, math.Float32frombits(1 << 31)},
+			name:  "half block step",
+			state: groundedTowardObstacle(),
+			input: physics.Input{MoveX: 1},
+			world: testCollisionWorld{{X: 0, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}, {X: 1, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}, {X: 1, Y: 1, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{{Max: mgl32.Vec3{1, 0.5, 1}}}}},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testAssertProductionStepMatchesOracle(t, test.state, test.input, test.world, test.integratedVelocity)
+			testAssertProductionStepMatchesOracle(t, test.state, test.input, test.world)
 		})
 	}
 }
@@ -499,21 +495,9 @@ func testAssertProductionStepMatchesOracle(
 	state physics.State,
 	input physics.Input,
 	source physics.CollisionSource,
-	integratedVelocity mgl32.Vec3,
 ) {
 	t.Helper()
-	integrated := state
-	integrated.Velocity = integratedVelocity
-	displacement := integratedVelocity.Mul(physics.FixedDeltaSeconds)
-	wantMove, wantUsedStep := oracleResolveCollision(integrated, displacement, source, state.OnGround, physics.DefaultTunables().StepHeight)
-	integrated.Position = wantMove.position
-	integrated.OnGround = wantMove.onGround
-	for axis, clipped := range wantMove.clipped {
-		if clipped {
-			integrated.Velocity[axis] = 0
-		}
-	}
-	want := physics.StepResult{State: integrated, UsedStep: wantUsedStep, HitUnknown: wantMove.hitUnknown}
+	want := oracleStep(state, input, source, physics.ActiveTunables())
 	got := physics.Step(state, input, source)
 	for axis := range 3 {
 		if math.Float32bits(got.State.Position[axis]) != math.Float32bits(want.State.Position[axis]) ||
@@ -611,9 +595,8 @@ func TestStepProductionMatchesGoCollisionOracleDeterministicCorpus(t *testing.T)
 			}
 			state := test.state
 			state.OnGround = test.beganGrounded
-			integratedVelocity := test.displacement.Mul(1 / physics.FixedDeltaSeconds)
-			state.Velocity = integratedVelocity
-			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, test.world, integratedVelocity)
+			state.Velocity = test.displacement.Mul(1 / physics.FixedDeltaSeconds)
+			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, test.world)
 		})
 	}
 
@@ -632,10 +615,9 @@ func TestStepProductionMatchesGoCollisionOracleDeterministicCorpus(t *testing.T)
 		}
 		state := physics.State{Position: mgl32.Vec3{float32(random.Intn(21)-10)/10 + 0.5, 1, float32(random.Intn(21)-10)/10 + 0.5}, OnGround: true}
 		displacement := mgl32.Vec3{float32(random.Intn(201)-100) / 100, float32(random.Intn(41)-20) / 100, float32(random.Intn(201)-100) / 100}
+		state.Velocity = displacement.Mul(1 / physics.FixedDeltaSeconds)
 		t.Run("random", func(t *testing.T) {
-			integratedVelocity := displacement.Mul(1 / physics.FixedDeltaSeconds)
-			state.Velocity = integratedVelocity
-			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, world, integratedVelocity)
+			testAssertProductionStepMatchesOracle(t, state, physics.Input{}, world)
 		})
 	}
 }
