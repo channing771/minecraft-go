@@ -20,7 +20,7 @@
 
 - 服务端是世界和玩家状态的唯一权威；客户端持有只读镜像并进行预测/呈现。
 - 单机模式和远程模式必须复用同一套模拟与校验逻辑，不能为单机绕过传输边界。
-- 内部包的允许依赖以 `internal/archcheck/deps_test.go` 为准；新增包必须同步登记并证明依赖方向合理。
+- 内部包的允许依赖以 `internal/archcheck/dependency_test.go` 为准；新增包必须同步登记并证明依赖方向合理。
 - 只有 `internal/gfx` 可以直接导入 WebGPU 绑定。
 - `sim` 不得依赖渲染包，`world` 不得依赖 `network`。
 - 跨 goroutine 发送成功后的消息及其切片视为不可变；重 CPU、磁盘和网络工作不得阻塞权威 tick 或渲染热路径。
