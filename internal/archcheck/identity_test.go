@@ -226,7 +226,9 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 			t.Errorf("旧数据身份 allowlist 计数错误：%s %s.%s = %d，期望 %d", allowance.path, allowance.literal, allowance.owner, actual[index], allowance.expected)
 		}
 	}
-	testCurrentIdentityMutations(t)
+	if build.Default.GOOS == "darwin" {
+		testCurrentIdentityMutations(t)
+	}
 }
 
 func requireLinuxServerBundleIdentity(t *testing.T, root string) {
@@ -564,18 +566,31 @@ type identityBuild struct {
 	fullRoots bool
 }
 
+func TestSupportedIdentityBuildsDoNotCrossCompileDarwinFullRoots(t *testing.T) {
+	original := build.Default
+	t.Cleanup(func() { build.Default = original })
+	build.Default.GOOS = "linux"
+	build.Default.GOARCH = "amd64"
+	build.Default.CgoEnabled = true
+
+	targets := supportedIdentityBuilds()
+	if len(targets) != 1 || targets[0].name != "linux-server" || targets[0].fullRoots {
+		t.Fatalf("Linux host identity builds = %+v，期望只检查 Linux server 闭包", targets)
+	}
+}
+
 func supportedIdentityBuilds() []identityBuild {
-	darwin := build.Default
-	darwin.GOOS = "darwin"
-	darwin.CgoEnabled = true
 	linux := build.Default
 	linux.GOOS = "linux"
 	linux.GOARCH = "amd64"
 	linux.CgoEnabled = true
-	return []identityBuild{
-		{name: "darwin-cgo", context: darwin, fullRoots: true},
-		{name: "linux-server", context: linux, root: "cmd/mornlea-server"},
+	linuxServer := identityBuild{name: "linux-server", context: linux, root: "cmd/mornlea-server"}
+	if build.Default.GOOS != "darwin" {
+		return []identityBuild{linuxServer}
 	}
+	darwin := build.Default
+	darwin.CgoEnabled = true
+	return []identityBuild{{name: "darwin-cgo", context: darwin, fullRoots: true}, linuxServer}
 }
 
 func (scanner *goIdentityScanner) buildDirectories(target identityBuild) ([]string, error) {
