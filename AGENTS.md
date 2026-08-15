@@ -6,6 +6,8 @@
 
 当前代码基线是 M5A，已经包含协议 v16、Memory/TCP 共用登录与权威模拟、TCP 直连、无图形专用服务端、稳定玩家身份、玩家 schema v6、区块 schema v8、世界 metadata v2、独立 `companions.ai` schema v1、最多八名玩家的局域网同步与远端玩家呈现，以及最多四个可配置、服务端权威且保持 idle 的具名伙伴。M5A 伙伴使用独立 `CompanionID`，active 与 inactive 身体记录合计最多 64 条；客户端通过统一 Avatar/NameTag pass 呈现伙伴，并提供有界 Unicode 聊天输入与 HUD。`@伙伴名 指令` 只在权威 tick 边界产生确定性寻址事实，不创建 Planner、HTTP 请求、FIFO、路径、采掘、放置、跟随、persona 或摘要。既有能力还包括权威快捷栏、持久掉落物、固定 36 格背包、固定合成、确定性矿石、多人共享权威熔炉、权威计时采掘、权威单件原地丢弃、服务端权威工具耐久、损坏物品、共享箱子、权威生命值与死亡结算和确认伤害红色边缘反馈、14 种常见块状材料与缺失玩家一次性材料包、世界坐标 terrain UV、玻璃/树叶单 pass alpha cutout、无窗口 `materials-showcase` 与 `ai-companion`、确定性自然材料与橡树生成、材料加工闭环、目标方块反馈、发光块固定配方、24000 tick 权威昼夜、客户端派生的 `0..15` 传播天空光与静态方块光，以及程序化方块云。M5A 继承 M4Q 的 Mornlea 项目身份和 M4P 固定 Rust 1.97.1 `mornlea_engine` cdylib；Rust 是 mesh/light 与 collision resolver 的唯一生产实现，Go 仍拥有 app、world、sim、network、storage、render、物理 state/input/tunable/snapshot 编码和领域 API，只有 `internal/nativeabi` 接触 engine C ABI，`internal/mesh` 与 `internal/physics` 是领域调用方，且没有生产 Go fallback。客户端命令为 `mornlea`，专用服务端为 `mornlea-server`；专服保持无图形，但 Linux 发布必须把相邻 `libmornlea_engine.so` 作为同一不可跨版本混装的 release unit。benchmark scenario 为 v16；当前唯一显式场景迁移是 `15:16`，性能数值只记录，报告完整性、身份、真实 overflow、数据丢失和 I/O 错误仍是门禁。M2 v15 与 M5 v14 基线保持原字节。TCP 仅面向可信局域网且没有认证或加密。已交付里程碑与协议/存档版本演进见 `docs/notes/progress.md`；`docs/superpowers/` 是历史背景，当前行为必须以代码、测试与 OpenSpec 主规格核实。
 
+Raycast 生产路径同样由 Rust `mornlea_engine` 独占 DDA 遍历；`internal/core` 只保留输入校验、一次归一化、64-record batch 驱动、惰性 callback 与 `RayHit.Point`，旧 Go DDA 只是测试 oracle，没有生产 fallback。
+
 ## 开始工作前
 
 1. 阅读 `openspec/config.yaml`。

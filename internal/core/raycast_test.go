@@ -100,6 +100,99 @@ func TestRaycastBlocksPropagatesUnavailableCell(t *testing.T) {
 	}
 }
 
+func TestRaycastBlocksPreservesCallbackErrorIdentity(t *testing.T) {
+	sentinel := errors.New("raycast sentinel")
+	calls := 0
+	_, _, err := core.RaycastBlocks(
+		mgl32.Vec3{0.5, 0.5, 0.5}, mgl32.Vec3{1, 0, 0}, 128,
+		func(core.BlockPos) (bool, error) {
+			calls++
+			return false, sentinel
+		},
+	)
+	if err != sentinel {
+		t.Fatalf("err=%v，想要同一 sentinel", err)
+	}
+	if calls != 1 {
+		t.Fatalf("callback calls=%d，想要 1", calls)
+	}
+}
+
+func TestRaycastBlocksStopsAfterFirstSolidInPrefetchedBatch(t *testing.T) {
+	calls := 0
+	hit, found, err := core.RaycastBlocks(
+		mgl32.Vec3{0.5, 0.5, 0.5}, mgl32.Vec3{1, 0, 0}, 128,
+		func(position core.BlockPos) (bool, error) {
+			calls++
+			return position.X == 2, nil
+		},
+	)
+	if err != nil || !found || hit.Block != (core.BlockPos{X: 2}) {
+		t.Fatalf("hit=%+v found=%v err=%v", hit, found, err)
+	}
+	if calls != 3 {
+		t.Fatalf("callback calls=%d，想要 3", calls)
+	}
+}
+
+func TestRaycastBlocksContinuesAcrossNativeBatchBoundary(t *testing.T) {
+	calls := 0
+	hit, found, err := core.RaycastBlocks(
+		mgl32.Vec3{0.5, 0.5, 0.5}, mgl32.Vec3{1, 0, 0}, 130,
+		func(position core.BlockPos) (bool, error) {
+			calls++
+			return position.X == 70, nil
+		},
+	)
+	if err != nil || !found || hit.Block != (core.BlockPos{X: 70}) || hit.Distance != 69.5 {
+		t.Fatalf("hit=%+v found=%v err=%v", hit, found, err)
+	}
+	if calls != 71 {
+		t.Fatalf("callback calls=%d，想要 71", calls)
+	}
+}
+
+func TestRaycastBlocksNearInt32BoundaryPreservesFirstCallbackError(t *testing.T) {
+	sentinel := errors.New("int32 boundary sentinel")
+	calls := 0
+	_, _, err := core.RaycastBlocks(
+		mgl32.Vec3{float32(math.MinInt32), 0.5, 0.5}, mgl32.Vec3{-1, 0, 0}, 3,
+		func(core.BlockPos) (bool, error) {
+			calls++
+			return false, sentinel
+		},
+	)
+	if err != sentinel || calls != 1 {
+		t.Fatalf("err/calls=%v/%d，想要 sentinel/1", err, calls)
+	}
+}
+
+func TestRaycastBlocksPreservesOriginAndRealFaceSignedZeroPoint(t *testing.T) {
+	negativeZero := math.Float32frombits(0x8000_0000)
+	origin := mgl32.Vec3{negativeZero, 0.5, negativeZero}
+	hit, found, err := core.RaycastBlocks(origin, mgl32.Vec3{1, 0, 0}, 2, func(position core.BlockPos) (bool, error) {
+		return position == (core.BlockPos{}), nil
+	})
+	if err != nil || !found || hit.Face != core.BlockFaceNone {
+		t.Fatalf("origin hit=%+v found=%v err=%v", hit, found, err)
+	}
+	if math.Float32bits(hit.Point[0]) != math.Float32bits(origin[0]) ||
+		math.Float32bits(hit.Point[2]) != math.Float32bits(origin[2]) {
+		t.Fatalf("origin point bits=%08x/%08x，想要 %08x/%08x", math.Float32bits(hit.Point[0]), math.Float32bits(hit.Point[2]), math.Float32bits(origin[0]), math.Float32bits(origin[2]))
+	}
+
+	origin = mgl32.Vec3{1, negativeZero, 0.5}
+	hit, found, err = core.RaycastBlocks(origin, mgl32.Vec3{-1, negativeZero, 0}, 2, func(position core.BlockPos) (bool, error) {
+		return position == (core.BlockPos{}), nil
+	})
+	if err != nil || !found || hit.Face != core.BlockFacePosX || hit.Distance != 0 {
+		t.Fatalf("boundary hit=%+v found=%v err=%v", hit, found, err)
+	}
+	if math.Float32bits(hit.Point[1]) != 0 {
+		t.Fatalf("real-face zero-distance point Y bits=%08x，想要 +0", math.Float32bits(hit.Point[1]))
+	}
+}
+
 func TestRaycastBlocksUsesXYZTiePriority(t *testing.T) {
 	var visited []core.BlockPos
 	_, _, err := core.RaycastBlocks(

@@ -14,4 +14,6 @@
 
 当前 `mornlea_engine` 也是 client prediction 与 authoritative simulation 共用的 collision resolver 唯一生产实现；Go 保留 physics state/input/tunable 与 checked snapshot 编码，旧 Go resolver 只作测试 oracle。无图形专服的 Linux amd64 canonical bundle 由 `make build-linux-server` 原生构建，binary 通过 `$ORIGIN` 加载同目录 `libmornlea_engine.so`；二者是不可跨版本混装的 release unit。
 
+当前 `mornlea_engine` 同时是方块射线 DDA 的唯一生产实现；Rust 以 caller-owned 64-record cursor batch 生成候选格，Go `core.RaycastBlocks` 仍保留输入校验、单次归一化、惰性 callback、首个 error identity 和 `RayHit.Point`。旧 Go DDA 只作测试 oracle，生产无 fallback。
+
 M5A 不包含 Planner、HTTP 模型调用、FIFO、移动、采掘、放置、跟随、persona 或摘要；这些能力仍属于后续 M5B–M5D 方向，开始真实变更前以新的 OpenSpec 为准。历史[设计](../superpowers/specs/2026-08-13-ai-native-companions-design.md)与[实施计划](../superpowers/plans/2026-08-13-m5a-companion-entity-chat.md)仅作决策背景。

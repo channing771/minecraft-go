@@ -4,6 +4,9 @@ use crate::collision::{COLLISION_STEP_HEIGHT_OFFSET, resolve_collision};
 use crate::greedy::{MeshError as GreedyError, center_is_air, mesh_section};
 use crate::input::{InputError, MeshInput};
 use crate::light::{LIGHT_VOLUME, LightScratch, MeshError as LightError, build_light};
+use crate::raycast::{
+    RAYCAST_CURSOR_BYTES, RAYCAST_INPUT_BYTES, RAYCAST_OUTPUT_BYTES, RaycastBatch, raycast_batch,
+};
 
 pub(crate) const ABI_VERSION: u32 = 1;
 
@@ -388,6 +391,215 @@ unsafe fn collision_resolve_with(
     }
 }
 
+fn raycast_input_is_valid(bytes: &[u8]) -> bool {
+    if bytes.len() != RAYCAST_INPUT_BYTES
+        || &bytes[0..4] != b"MGR1"
+        || read_u32(bytes, 4) != 1
+        || !bytes[36..40].iter().all(|&value| value == 0)
+    {
+        return false;
+    }
+    let origin_and_direction_are_finite = (8..32)
+        .step_by(4)
+        .all(|offset| read_f32(bytes, offset).is_finite());
+    let direction_is_nonzero = (20..32)
+        .step_by(4)
+        .any(|offset| read_f32(bytes, offset) != 0.0);
+    let maximum = read_f32(bytes, 32);
+    origin_and_direction_are_finite && direction_is_nonzero && maximum.is_finite() && maximum > 0.0
+}
+
+fn raycast_cursor_is_valid(input: &[u8], bytes: &[u8]) -> bool {
+    if bytes.len() != RAYCAST_CURSOR_BYTES
+        || &bytes[0..4] != b"MRC1"
+        || read_u32(bytes, 4) != 1
+        || bytes[8] > 2
+        || !bytes[9..12].iter().all(|&value| value == 0)
+        || !bytes[60..64].iter().all(|&value| value == 0)
+    {
+        return false;
+    }
+    if bytes[8] == 0 {
+        return bytes[12..].iter().all(|&value| value == 0);
+    }
+    for axis in 0..3 {
+        let component = read_f32(input, 20 + axis * 4);
+        let step = read_i32(bytes, 24 + axis * 4);
+        let expected_step = if component > 0.0 {
+            1
+        } else if component < 0.0 {
+            -1
+        } else {
+            0
+        };
+        let delta = read_f32(bytes, 36 + axis * 4);
+        let maximum = read_f32(bytes, 48 + axis * 4);
+        if step != expected_step
+            || delta.is_nan()
+            || delta == f32::NEG_INFINITY
+            || delta <= 0.0
+            || maximum.is_nan()
+            || maximum == f32::NEG_INFINITY
+            || (component == 0.0 && (delta != f32::INFINITY || maximum != f32::INFINITY))
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn raycast_metadata_is_valid(output_count: *mut usize, done: *mut u8) -> bool {
+    !output_count.is_null()
+        && (output_count as usize).is_multiple_of(align_of::<usize>())
+        && output_count
+            .addr()
+            .checked_add(size_of::<usize>())
+            .is_some()
+        && !done.is_null()
+        && done.addr().checked_add(size_of::<u8>()).is_some()
+        && !ranges_overlap(
+            output_count.addr(),
+            size_of::<usize>(),
+            done.addr(),
+            size_of::<u8>(),
+        )
+}
+
+fn raycast_metadata_overlaps_buffer(
+    output_count: *mut usize,
+    done: *mut u8,
+    pointer: *const u8,
+    length: usize,
+) -> bool {
+    !pointer.is_null()
+        && byte_range_is_valid(pointer, length)
+        && (ranges_overlap(
+            output_count.addr(),
+            size_of::<usize>(),
+            pointer.addr(),
+            length,
+        ) || ranges_overlap(done.addr(), size_of::<u8>(), pointer.addr(), length))
+}
+
+fn catch_raycast(
+    operation: impl FnOnce() -> Result<RaycastBatch, u32>,
+) -> Result<RaycastBatch, u32> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)) {
+        Ok(result) => result,
+        Err(_) => Err(MORNLEA_STATUS_PANIC),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_raycast_batch(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    cursor: *mut u8,
+    cursor_len: usize,
+    output: *mut u8,
+    output_len: usize,
+    output_count: *mut usize,
+    done: *mut u8,
+) -> u32 {
+    // SAFETY: C 调用方提供原始缓冲区；helper 会在解引用前验证全部指针、范围、长度与重叠。
+    unsafe {
+        raycast_batch_with(
+            abi_version,
+            input,
+            input_len,
+            cursor,
+            cursor_len,
+            output,
+            output_len,
+            output_count,
+            done,
+            raycast_batch,
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn raycast_batch_with(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    cursor: *mut u8,
+    cursor_len: usize,
+    output: *mut u8,
+    output_len: usize,
+    output_count: *mut usize,
+    done: *mut u8,
+    resolver: impl FnOnce(&[u8], &[u8]) -> RaycastBatch,
+) -> u32 {
+    if !raycast_metadata_is_valid(output_count, done) {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if raycast_metadata_overlaps_buffer(output_count, done, input, input_len)
+        || raycast_metadata_overlaps_buffer(output_count, done, cursor, cursor_len)
+        || raycast_metadata_overlaps_buffer(output_count, done, output, output_len)
+    {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    // SAFETY: 两个 metadata 指针已验证非空、对齐、范围有效且彼此及与 caller buffer 不重叠。
+    unsafe {
+        output_count.write(0);
+        done.write(0);
+    }
+    if abi_version != ABI_VERSION {
+        return MORNLEA_STATUS_ABI_VERSION;
+    }
+    if input.is_null() || cursor.is_null() || output.is_null() {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if input_len != RAYCAST_INPUT_BYTES || cursor_len != RAYCAST_CURSOR_BYTES {
+        return MORNLEA_STATUS_INPUT;
+    }
+    if output_len < RAYCAST_OUTPUT_BYTES {
+        return MORNLEA_STATUS_OUTPUT_OVERFLOW;
+    }
+    if output_len != RAYCAST_OUTPUT_BYTES
+        || !byte_range_is_valid(input, input_len)
+        || !byte_range_is_valid(cursor, cursor_len)
+        || !byte_range_is_valid(output, output_len)
+    {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if ranges_overlap(input.addr(), input_len, cursor.addr(), cursor_len)
+        || ranges_overlap(input.addr(), input_len, output.addr(), output_len)
+        || ranges_overlap(cursor.addr(), cursor_len, output.addr(), output_len)
+    {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+
+    let result = catch_raycast(|| {
+        // SAFETY: 三个 buffer 均非空、范围有效且互不重叠；这里只建立调用期借用。
+        let input_bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
+        // SAFETY: cursor 非空、范围有效且与其他 buffer 不重叠；resolver 只读取本地视图。
+        let cursor_bytes = unsafe { std::slice::from_raw_parts(cursor, cursor_len) };
+        if !raycast_input_is_valid(input_bytes)
+            || !raycast_cursor_is_valid(input_bytes, cursor_bytes)
+        {
+            return Err(MORNLEA_STATUS_INPUT);
+        }
+        Ok(resolver(input_bytes, cursor_bytes))
+    });
+    match result {
+        Ok(result) => {
+            debug_assert!(result.count <= 64);
+            // SAFETY: cursor/output 非空、范围有效且互不重叠；结果先完整位于 Rust local storage。
+            unsafe {
+                std::ptr::copy_nonoverlapping(result.cursor.as_ptr(), cursor, result.cursor.len());
+                std::ptr::copy_nonoverlapping(result.output.as_ptr(), output, result.output.len());
+                output_count.write(result.count);
+                done.write(u8::from(result.done));
+            }
+            MORNLEA_STATUS_OK
+        }
+        Err(status) => status,
+    }
+}
+
 #[cfg(test)]
 mod mesh_tests {
     use super::*;
@@ -408,10 +620,13 @@ mod tests {
         MORNLEA_STATUS_OUTPUT_OVERFLOW, MORNLEA_STATUS_PANIC, MORNLEA_STATUS_QUEUE_OVERFLOW,
         MORNLEA_STATUS_REGISTRY, MORNLEA_STATUS_SCRATCH, SCRATCH_BYTES, catch_and_publish,
         catch_collision, collision_resolve_with, input_range_is_valid, mornlea_collision_resolve,
-        mornlea_mesh_section, output_range_is_valid, read_f32, read_i32, read_u32,
-        scratch_range_is_valid,
+        mornlea_mesh_section, output_range_is_valid, raycast_batch_with, read_f32, read_i32,
+        read_u32, scratch_range_is_valid,
     };
     use crate::input::tests::valid_input;
+    use crate::raycast::{
+        RAYCAST_CURSOR_BYTES, RAYCAST_INPUT_BYTES, RAYCAST_OUTPUT_BYTES, RaycastBatch,
+    };
 
     #[test]
     fn caught_panic_keeps_output_count_zero() {
@@ -545,6 +760,190 @@ mod tests {
 
         assert_eq!(status, MORNLEA_STATUS_PANIC);
         assert_eq!(caller_output, [0xa5; COLLISION_OUTPUT_BYTES + 2]);
+    }
+
+    #[test]
+    fn raycast_panic_through_publish_path_is_atomic() {
+        let input = valid_raycast_input();
+        let mut cursor_arena = [0xa5_u8; RAYCAST_CURSOR_BYTES + 2];
+        cursor_arena[1..1 + RAYCAST_CURSOR_BYTES].copy_from_slice(&fresh_raycast_cursor());
+        let mut output_arena = [0xa5_u8; RAYCAST_OUTPUT_BYTES + 2];
+        let before_cursor = cursor_arena;
+        let before_output = output_arena;
+        let mut count = usize::MAX;
+        let mut done = 0xff;
+
+        let status = unsafe {
+            raycast_batch_with(
+                1,
+                input.as_ptr(),
+                input.len(),
+                cursor_arena[1..].as_mut_ptr(),
+                RAYCAST_CURSOR_BYTES,
+                output_arena[1..].as_mut_ptr(),
+                RAYCAST_OUTPUT_BYTES,
+                &mut count,
+                &mut done,
+                |_, _| -> RaycastBatch { panic!("测试 panic") },
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_PANIC);
+        assert_eq!((count, done), (0, 0));
+        assert_eq!(cursor_arena, before_cursor);
+        assert_eq!(output_arena, before_output);
+    }
+
+    #[test]
+    fn raycast_success_publishes_local_cursor_and_output_once() {
+        let input = valid_raycast_input();
+        let mut cursor_arena = [0xa5_u8; RAYCAST_CURSOR_BYTES + 2];
+        cursor_arena[1..1 + RAYCAST_CURSOR_BYTES].copy_from_slice(&fresh_raycast_cursor());
+        let mut output_arena = [0xa5_u8; RAYCAST_OUTPUT_BYTES + 2];
+        let mut count = usize::MAX;
+        let mut done = 0xff;
+
+        let status = unsafe {
+            raycast_batch_with(
+                1,
+                input.as_ptr(),
+                input.len(),
+                cursor_arena[1..].as_mut_ptr(),
+                RAYCAST_CURSOR_BYTES,
+                output_arena[1..].as_mut_ptr(),
+                RAYCAST_OUTPUT_BYTES,
+                &mut count,
+                &mut done,
+                |_, _| {
+                    let mut cursor = fresh_raycast_cursor();
+                    cursor[8] = 2;
+                    let mut output = [0_u8; RAYCAST_OUTPUT_BYTES];
+                    output[12] = 0xff;
+                    RaycastBatch {
+                        cursor,
+                        output,
+                        count: 1,
+                        done: true,
+                    }
+                },
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_OK);
+        assert_eq!((count, done), (1, 1));
+        assert_eq!(cursor_arena[0], 0xa5);
+        assert_eq!(cursor_arena[RAYCAST_CURSOR_BYTES + 1], 0xa5);
+        assert_eq!(cursor_arena[9], 2);
+        assert_eq!(output_arena[0], 0xa5);
+        assert_eq!(output_arena[RAYCAST_OUTPUT_BYTES + 1], 0xa5);
+        assert_eq!(output_arena[13], 0xff);
+    }
+
+    #[test]
+    fn invalid_raycast_metadata_is_not_partially_cleared() {
+        let input = valid_raycast_input();
+        let mut cursor = fresh_raycast_cursor();
+        let mut output = [0xa5_u8; RAYCAST_OUTPUT_BYTES];
+        let before_cursor = cursor;
+        let before_output = output;
+        let mut count = usize::MAX;
+
+        let status = unsafe {
+            super::mornlea_raycast_batch(
+                1,
+                input.as_ptr(),
+                input.len(),
+                cursor.as_mut_ptr(),
+                cursor.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                &mut count,
+                std::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(count, usize::MAX);
+        assert_eq!(cursor, before_cursor);
+        assert_eq!(output, before_output);
+    }
+
+    #[test]
+    fn overlapping_raycast_metadata_is_not_partially_cleared() {
+        let input = valid_raycast_input();
+        let mut cursor = fresh_raycast_cursor();
+        let mut output = [0xa5_u8; RAYCAST_OUTPUT_BYTES];
+        let before_cursor = cursor;
+        let before_output = output;
+        let mut count = usize::MAX;
+
+        let status = unsafe {
+            super::mornlea_raycast_batch(
+                1,
+                input.as_ptr(),
+                input.len(),
+                cursor.as_mut_ptr(),
+                cursor.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                &mut count,
+                (&mut count as *mut usize).cast(),
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(count, usize::MAX);
+        assert_eq!(cursor, before_cursor);
+        assert_eq!(output, before_output);
+    }
+
+    #[test]
+    fn raycast_metadata_overlapping_cursor_is_not_published() {
+        #[repr(align(8))]
+        struct AlignedCursor([u8; RAYCAST_CURSOR_BYTES]);
+
+        let input = valid_raycast_input();
+        let mut cursor = AlignedCursor(fresh_raycast_cursor());
+        let mut output = [0xa5_u8; RAYCAST_OUTPUT_BYTES];
+        let before_cursor = cursor.0;
+        let before_output = output;
+        let mut done = 0xff;
+
+        let status = unsafe {
+            super::mornlea_raycast_batch(
+                1,
+                input.as_ptr(),
+                input.len(),
+                cursor.0.as_mut_ptr(),
+                cursor.0.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                cursor.0.as_mut_ptr().cast(),
+                &mut done,
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(done, 0xff);
+        assert_eq!(cursor.0, before_cursor);
+        assert_eq!(output, before_output);
+    }
+
+    fn valid_raycast_input() -> [u8; RAYCAST_INPUT_BYTES] {
+        let mut input = [0_u8; RAYCAST_INPUT_BYTES];
+        input[0..4].copy_from_slice(b"MGR1");
+        input[4..8].copy_from_slice(&1_u32.to_le_bytes());
+        for (offset, value) in [(8, 0.5_f32), (12, -1.25), (16, 2.75), (20, 1.0), (32, 6.0)] {
+            input[offset..offset + 4].copy_from_slice(&value.to_bits().to_le_bytes());
+        }
+        input
+    }
+
+    fn fresh_raycast_cursor() -> [u8; RAYCAST_CURSOR_BYTES] {
+        let mut cursor = [0_u8; RAYCAST_CURSOR_BYTES];
+        cursor[0..4].copy_from_slice(b"MRC1");
+        cursor[4..8].copy_from_slice(&1_u32.to_le_bytes());
+        cursor
     }
 
     #[test]

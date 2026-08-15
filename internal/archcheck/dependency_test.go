@@ -10,7 +10,7 @@ import (
 var allowed = map[string][]string{
 	"internal/archcheck":  {},
 	"internal/companion":  {"internal/core"},
-	"internal/core":       {},
+	"internal/core":       {"internal/nativeabi"},
 	"internal/nativeabi":  {},
 	"internal/config":     {"internal/companion", "internal/core", "internal/physics", "internal/sim", "internal/logging"},
 	"internal/physics":    {"internal/core", "internal/nativeabi"},

@@ -1,12 +1,10 @@
-package core_test
+package core
 
 import (
 	"math"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
-
-	"github.com/channing771/mornlea/internal/core"
 )
 
 func FuzzRaycastBlocks(f *testing.F) {
@@ -40,10 +38,10 @@ func FuzzRaycastBlocks(f *testing.F) {
 			t.Skip()
 		}
 
-		solid := func(p core.BlockPos) (bool, error) {
+		solid := func(p BlockPos) (bool, error) {
 			return (p.X*31+p.Y*17+p.Z*13)&15 == 0, nil
 		}
-		hit, ok, err := core.RaycastBlocks(
+		hit, ok, err := RaycastBlocks(
 			mgl32.Vec3{ox, oy, oz},
 			mgl32.Vec3{dx, dy, dz},
 			maxDistance,
@@ -61,6 +59,28 @@ func FuzzRaycastBlocks(f *testing.F) {
 		occupied, err := solid(hit.Block)
 		if err != nil || !occupied {
 			t.Fatalf("返回的方块 %+v 不是实心", hit.Block)
+		}
+	})
+}
+
+func FuzzNativeRaycastMatchesGoOracle(f *testing.F) {
+	f.Add(float32(0.5), float32(1.5), float32(2.5), float32(1), float32(0), float32(0), float32(6))
+	f.Add(float32(-10.25), float32(-3.5), float32(-7.75), float32(-1), float32(0.5), float32(-0.25), float32(96))
+	f.Fuzz(func(t *testing.T, ox, oy, oz, dx, dy, dz, maximum float32) {
+		for _, value := range [...]float32{ox, oy, oz, dx, dy, dz, maximum} {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				t.Skip()
+			}
+		}
+		if ox < -1024 || ox > 1024 || oy < -1024 || oy > 1024 || oz < -1024 || oz > 1024 ||
+			maximum < 0.01 || maximum > 128 ||
+			math.Hypot(math.Hypot(float64(dx), float64(dy)), float64(dz)) < 1e-6 {
+			t.Skip()
+		}
+		actual := nativeRaycastRecords(mgl32.Vec3{ox, oy, oz}, mgl32.Vec3{dx, dy, dz}, maximum)
+		want := oracleRaycastRecords(t, mgl32.Vec3{ox, oy, oz}, mgl32.Vec3{dx, dy, dz}, maximum)
+		if mismatch := raycastRecordMismatch(actual, want); mismatch != "" {
+			t.Fatal(mismatch)
 		}
 	})
 }

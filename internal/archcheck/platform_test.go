@@ -151,3 +151,36 @@ func TestPhysicsUsesOnlyNativeCollision(t *testing.T) {
 		t.Error("internal/physics 必须由 resolveCollision 统一编码并调用 native kernel")
 	}
 }
+
+func TestCoreUsesOnlyNativeRaycast(t *testing.T) {
+	root := filepath.Join(moduleRoot(t), "internal", "core")
+	path := filepath.Join(root, "raycast.go")
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("解析 %s: %v", path, err)
+	}
+
+	foundNativeABI := false
+	foundNativeCall := false
+	for _, imported := range parsed.Imports {
+		if strings.Trim(imported.Path.Value, "\"") == "github.com/channing771/mornlea/internal/nativeabi" {
+			foundNativeABI = true
+		}
+	}
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.SelectorExpr:
+			if packageName, ok := node.X.(*ast.Ident); ok && packageName.Name == "nativeabi" && node.Sel.Name == "RaycastBatch" {
+				foundNativeCall = true
+			}
+		case *ast.Ident:
+			if node.Name == "tDelta" || node.Name == "tMax" || node.Name == "entryFace" {
+				t.Errorf("%s 保留生产 Go DDA %s", path, node.Name)
+			}
+		}
+		return true
+	})
+	if !foundNativeABI || !foundNativeCall {
+		t.Error("internal/core.RaycastBlocks 必须直接调用 internal/nativeabi.RaycastBatch")
+	}
+}

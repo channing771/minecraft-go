@@ -12,6 +12,8 @@ package nativeabi
 #cgo nocallback mornlea_mesh_section
 #cgo noescape mornlea_collision_resolve
 #cgo nocallback mornlea_collision_resolve
+#cgo noescape mornlea_raycast_batch
+#cgo nocallback mornlea_raycast_batch
 #include "mornlea_engine.h"
 */
 import "C"
@@ -88,5 +90,58 @@ func collisionStatusPanicText(status Status) string {
 		return "nativeabi: collision Rust panic"
 	default:
 		return "nativeabi: collision 未知状态"
+	}
+}
+
+// RaycastBatch 把调用方拥有的 raycast input、cursor 与 output 传给 engine。
+func RaycastBatch(input, cursor, output []byte) (count int, done bool) {
+	status, outputCount, rawDone := raycastBatchVersion(ABIVersion, input, cursor, output)
+	return raycastBatchResult(status, outputCount, rawDone)
+}
+
+func raycastBatchVersion(
+	version uint32,
+	input, cursor, output []byte,
+) (Status, uintptr, uint8) {
+	outputCount := ^C.size_t(0)
+	done := C.uint8_t(0xff)
+	status := C.mornlea_raycast_batch(
+		C.uint32_t(version),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(input))),
+		C.size_t(len(input)),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(cursor))),
+		C.size_t(len(cursor)),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(output))),
+		C.size_t(len(output)),
+		&outputCount,
+		&done,
+	)
+	return Status(status), uintptr(outputCount), uint8(done)
+}
+
+func raycastBatchResult(status Status, count uintptr, rawDone uint8) (int, bool) {
+	if status != StatusOK {
+		panic(raycastStatusPanicText(status))
+	}
+	if count > 64 || rawDone > 1 || count == 0 && rawDone == 0 {
+		panic("nativeabi: raycast success metadata 非法")
+	}
+	return int(count), rawDone == 1
+}
+
+func raycastStatusPanicText(status Status) string {
+	switch status {
+	case StatusABIVersion:
+		return "nativeabi: raycast ABI 版本不匹配"
+	case StatusInvalidArgument:
+		return "nativeabi: raycast 参数非法"
+	case StatusInput:
+		return "nativeabi: raycast 输入非法"
+	case StatusOutputOverflow:
+		return "nativeabi: raycast output 过短"
+	case StatusPanic:
+		return "nativeabi: raycast Rust panic"
+	default:
+		return "nativeabi: raycast 未知状态"
 	}
 }

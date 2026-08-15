@@ -98,6 +98,7 @@ export function rustValidationRequired(paths) {
     /^engine\/crates\/.*\/Cargo\.toml$/,
     /^engine\/include\/mornlea_engine\.h$/,
     /^internal\/nativeabi\/.*\.go$/,
+    /^internal\/core\/raycast[^/]*\.go$/,
     /^internal\/physics\/.*\.go$/,
     /^internal\/mesh\/native[^/]*\.go$/,
     /^internal\/mesh\/registry\.go$/,
@@ -401,11 +402,13 @@ export function stopFailures(paths, execute = run, environment = process.env) {
   if (needsRustValidation) {
     const packageArguments = [
       "./internal/nativeabi",
+      "./internal/core",
       "./internal/physics",
       "./internal/mesh",
       "./internal/client",
       "./internal/sim",
       "./internal/server",
+      "./cmd/mornlea",
       "./cmd/mornlea-server",
       ...new Set(
         goFiles

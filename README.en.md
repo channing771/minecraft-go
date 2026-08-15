@@ -14,7 +14,7 @@
 
 Mornlea is an original voxel game written from scratch in Go. It ships its own client, an authoritative server, world storage, and a WebGPU rendering pipeline. It does **not** aim for compatibility with Minecraft's protocol, saves, or copyrighted assets.
 
-The project is still in early development, but already includes an authoritative server, persistent worlds, direct TCP connections, a headless dedicated server, and LAN sessions for up to eight players. The current baseline is **M5A**: it adds up to four named, server-authoritative idle companions, protocol v16, an independent `companions.ai` schema v1 save, deterministic `@name command` addressing, unified Avatar/NameTag presentation, a bounded Unicode chat HUD, the `ai-companion` golden, and benchmark scenario v16. M5A records addressing facts only; it does not call a model, plan, queue, move, mine, place, or follow. It inherits M4Q's Mornlea identity, the pinned Rust 1.97.1 `mornlea_engine` cdylib for mesh/light and collision resolution, player schema v6, chunk schema v8, world metadata v2, and all existing gameplay systems. See [实现进度](docs/notes/progress.md) for the full milestone history.
+The project is still in early development, but already includes an authoritative server, persistent worlds, direct TCP connections, a headless dedicated server, and LAN sessions for up to eight players. The current baseline is **M5A**: it adds up to four named, server-authoritative idle companions, protocol v16, an independent `companions.ai` schema v1 save, deterministic `@name command` addressing, unified Avatar/NameTag presentation, a bounded Unicode chat HUD, the `ai-companion` golden, and benchmark scenario v16. M5A records addressing facts only; it does not call a model, plan, queue, move, mine, place, or follow. It inherits M4Q's Mornlea identity, the pinned Rust 1.97.1 `mornlea_engine` cdylib for mesh/light, collision resolution, and block-ray DDA, player schema v6, chunk schema v8, world metadata v2, and all existing gameplay systems. See [实现进度](docs/notes/progress.md) for the full milestone history.
 
 ## Screenshots
 
@@ -225,9 +225,9 @@ On mismatch, the actual and diff images (differing pixels painted red, the rest 
 │   ├── gfxspike/       WebGPU terrain-rendering spike
 │   └── perfcheck/      performance report comparison tool
 ├── engine/
-│   └── crates/mornlea_engine/  pinned Rust 1.97.1 cdylib: greedy meshing, AO & light production
+│   └── crates/mornlea_engine/  pinned Rust 1.97.1 cdylib: mesh/light/collision/raycast kernels
 ├── internal/
-│   ├── core/           shared domain types (coords, geometry, blocks)
+│   ├── core/           shared domain types & native raycast batch driver
 │   ├── companion/      independent companion identity, static definitions & body types
 │   ├── profile/        stable local player identity & profile
 │   ├── config/         shared JSON config loading & validation
@@ -263,17 +263,17 @@ Most of these are in Chinese.
 
 ## Rust & Go Responsibilities
 
-Production chunk meshing, light, and collision resolution live in a pinned Rust 1.97.1 `cdylib`; Go still owns game state, inputs, tunables, collision snapshot encoding, and the other domain logic. The two languages cooperate through the single C ABI declared in `engine/include/mornlea_engine.h` (ABI version 1); only `internal/nativeabi` directly touches the engine C ABI, while `internal/mesh` and `internal/physics` are its domain callers.
+Production chunk meshing, light, collision resolution, and block-ray DDA live in a pinned Rust 1.97.1 `cdylib`; Go still owns game state, inputs, tunables, collision snapshot encoding, plus ray validation, normalization, callbacks, and hit points. The two languages cooperate through the single C ABI declared in `engine/include/mornlea_engine.h` (ABI version 1); only `internal/nativeabi` directly touches the engine C ABI, while `internal/mesh`, `internal/physics`, and `internal/core` are its domain callers.
 
 | Language | Responsibilities |
 | --- | --- |
-| Rust (`engine/crates/mornlea_engine`) | The **only production implementation** of deterministic section meshing, propagated light, and shared collision/step resolution. Panics never cross the ABI, and invalid inputs are rejected before results are published. The workspace contains only this crate, with `std` as its only normal dependency. |
-| Go | Application assembly, world/chunk state, authoritative simulation, networking/storage, client mirror/prediction, rendering, generation, assets/config, plus physics state/input/tunables and collision snapshot encoding. `internal/nativeabi` is the only engine C bridge; `internal/mesh` and `internal/physics` own their domain APIs and buffers, and prediction and authoritative simulation share the same native-backed `physics.Step`. |
+| Rust (`engine/crates/mornlea_engine`) | The **only production implementation** of deterministic section meshing, propagated light, shared collision/step resolution, and 64-record cursor-batch block-ray DDA. Panics never cross the ABI, and invalid inputs are rejected before results are published. The workspace contains only this crate, with `std` as its only normal dependency. |
+| Go | Application assembly, world/chunk state, authoritative simulation, networking/storage, client mirror/prediction, rendering, generation, assets/config, plus physics state/input/tunables, collision snapshot encoding, and ray validation/normalization/callback/Point handling. `internal/nativeabi` is the only engine C bridge; `internal/mesh`, `internal/physics`, and `internal/core` own their domain APIs and caller buffers. |
 
 Boundary rules:
 
 - Only `internal/nativeabi` may `import "C"` for the engine (darwin/linux + cgo build constraint); other packages consume results through their domain Go APIs;
-- After a call returns, neither language may retain the other's pointers; there is no production Go fallback — Go mesh/light/collision oracles exist only in tests;
+- After a call returns, neither language may retain the other's pointers; there is no production Go fallback — Go mesh/light/collision/raycast oracles exist only in tests;
 - Mesh and light results never enter the network protocol or saves. Collision is shared by client prediction and authoritative server simulation, so the dedicated server uses Rust while remaining free of the graphics stack.
 
 Build: `make run`/`build`/`test` first run `cargo build --locked --release` automatically (`rust-toolchain.toml` pins 1.97.1). `make build` produces both macOS binaries and an adjacent `libmornlea_engine.dylib`, loaded through `@loader_path`; `make build-linux-server` natively builds the Linux amd64 server and adjacent `libmornlea_engine.so`, loaded through `$ORIGIN`. Each binary/library pair is one release unit and cannot be mixed across versions. The headless server's dependency closure still excludes mesh/client/render/gfx (verified by `make archcheck`); `make rust-check` runs Rust fmt, clippy, and tests.

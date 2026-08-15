@@ -58,6 +58,7 @@ test("requires Rust validation for engine and native consumers", () => {
   assert.equal(rustValidationRequired(["engine/crates/mornlea_engine/src/light.rs"]), true);
   assert.equal(rustValidationRequired(["internal/mesh/native.go"]), true);
   assert.equal(rustValidationRequired(["internal/physics/collision.go"]), true);
+  assert.equal(rustValidationRequired(["internal/core/raycast.go"]), true);
   assert.equal(rustValidationRequired(["internal/server/session_ingress.go"]), false);
 });
 
@@ -77,11 +78,13 @@ test("runs Rust validation before Go checks for Rust-required changes", () => {
       [
         "test",
         "./internal/nativeabi",
+        "./internal/core",
         "./internal/physics",
         "./internal/mesh",
         "./internal/client",
         "./internal/sim",
         "./internal/server",
+        "./cmd/mornlea",
         "./cmd/mornlea-server",
         "-race",
         "-count=1",
@@ -106,11 +109,13 @@ test("runs the fixed native downstream union for Rust-only bridge changes", () =
       [
         "test",
         "./internal/nativeabi",
+        "./internal/core",
         "./internal/physics",
         "./internal/mesh",
         "./internal/client",
         "./internal/sim",
         "./internal/server",
+        "./cmd/mornlea",
         "./cmd/mornlea-server",
         "-race",
         "-count=1",
@@ -137,11 +142,13 @@ test("unions the fixed native downstream packages with mixed bridge Go changes",
       [
         "test",
         "./internal/nativeabi",
+        "./internal/core",
         "./internal/physics",
         "./internal/mesh",
         "./internal/client",
         "./internal/sim",
         "./internal/server",
+        "./cmd/mornlea",
         "./cmd/mornlea-server",
         "-race",
         "-count=1",
