@@ -30,7 +30,7 @@ Milestone history lives in [实现进度](docs/notes/progress.md); the LAN serve
 
 项目仍处于早期开发阶段，已经具备程序化地形、GPU 地形渲染、玩家移动与碰撞、客户端预测、方块挖掘与放置、内置权威服务端、世界持久化、有界二进制协议、TCP 直连、无图形专用服务端与稳定玩家状态存档；已交付里程碑与协议/存档版本演进见[实现进度](docs/notes/progress.md)。
 
-当前基线为 M5A：在 M4Q 的 Mornlea 项目身份和固定 Rust 1.97.1 `mornlea_mesh` cdylib 基础上，新增最多四个服务端权威 idle 具名伙伴、协议 v16、独立 `companions.ai` schema v1、确定性 `@伙伴名 指令` 寻址、统一伙伴呈现、有界 Unicode 聊天 HUD、`ai-companion` 视觉基线和 benchmark scenario v16。M5A 只确认寻址事实，不调用模型、不规划、不排队，也不执行移动、采掘、放置或跟随。基线细节与下一步方向见[实现进度](docs/notes/progress.md)。
+当前基线为 M5A：在 M4Q 的 Mornlea 项目身份和固定 Rust 1.97.1 `mornlea_engine` cdylib 基础上，新增最多四个服务端权威 idle 具名伙伴、协议 v16、独立 `companions.ai` schema v1、确定性 `@伙伴名 指令` 寻址、统一伙伴呈现、有界 Unicode 聊天 HUD、`ai-companion` 视觉基线和 benchmark scenario v16。M5A 只确认寻址事实，不调用模型、不规划、不排队，也不执行移动、采掘、放置或跟随。基线细节与下一步方向见[实现进度](docs/notes/progress.md)。
 
 ## 截图
 
@@ -86,7 +86,7 @@ make build
 ./bin/mornlea --world worlds/default
 ```
 
-`make build` 会生成 `bin/mornlea`、`bin/mornlea-server` 与必须同目录使用的 `bin/libmornlea_mesh.dylib`。
+`make build` 会生成 `bin/mornlea`、`bin/mornlea-server` 与必须同目录使用的 `bin/libmornlea_engine.dylib`。
 
 ## 常用命令
 
@@ -94,7 +94,7 @@ make build
 | --- | --- |
 | `make help` | 显示 Makefile 帮助，也是默认目标 |
 | `make run` | 运行客户端，可使用 `ARGS` 传递命令行参数 |
-| `make build` | 构建 `bin/mornlea`、`bin/mornlea-server` 与同目录 `bin/libmornlea_mesh.dylib` |
+| `make build` | 构建 `bin/mornlea`、`bin/mornlea-server` 与同目录 `bin/libmornlea_engine.dylib` |
 | `make test` | 运行全部 Go 测试 |
 | `make test-race` | 使用 race detector 运行全部 Go 测试 |
 | `make test-multiplayer` | 运行 M3C 八玩家与 v6 报告测试 |
@@ -240,7 +240,7 @@ make visual-update             # 重新生成基线，写入 cmd/mornlea/testdat
 │   ├── gfxspike/      WebGPU 地形渲染验证程序
 │   └── perfcheck/     性能报告比较工具
 ├── engine/
-│   └── crates/mornlea_mesh/  固定 Rust 1.97.1 cdylib：贪心网格、AO 与光照生产实现
+│   └── crates/mornlea_engine/  固定 Rust 1.97.1 cdylib：贪心网格、AO 与光照生产实现
 ├── internal/
 │   ├── core/          坐标、几何与方块等公共领域类型
 │   ├── companion/     独立伙伴身份、静态定义与身体类型
@@ -280,7 +280,7 @@ make visual-update             # 重新生成基线，写入 cmd/mornlea/testdat
 
 | 语言 | 职责 |
 | --- | --- |
-| Rust（`engine/crates/mornlea_mesh`） | 确定性区段网格与传播光照的**唯一生产实现**：贪心网格与 AO（`greedy.rs`）、天空光与方块光（`light.rs`）、packed quad 输出（`quad.rs`）、native 输入解析（`input.rs`）与 C ABI（`ffi.rs`）。对同一 neighborhood 与 registry 输出和冻结 Go oracle 逐位一致的 quads；panic 不穿过 ABI，版本、输入、scratch、registry、emission 或输出容量非法时原子拒绝。workspace 只含该 crate，normal dependency 只有 `std`。 |
+| Rust（`engine/crates/mornlea_engine`） | 确定性区段网格与传播光照的**唯一生产实现**：贪心网格与 AO（`greedy.rs`）、天空光与方块光（`light.rs`）、packed quad 输出（`quad.rs`）、native 输入解析（`input.rs`）与 C ABI（`ffi.rs`）。对同一 neighborhood 与 registry 输出和冻结 Go oracle 逐位一致的 quads；panic 不穿过 ABI，版本、输入、scratch、registry、emission 或输出容量非法时原子拒绝。workspace 只含该 crate，normal dependency 只有 `std`。 |
 | Go | 除网格与光照生产外的全部职责：应用装配（`cmd/`）、世界与区块数据模型、权威模拟、物理、网络与存档、客户端镜像与预测、GPU 渲染与 WebGPU 封装（`render`/`gfx`）、世界生成、资产与配置。`internal/mesh` 是 Go 侧对外 API 与 native 边界：持有 input/scratch/output 的所有权、组装 registry 快照与可见性、映射 ABI 状态码；`internal/client` 的 mesher 负责任务调度、revision 印章、有界队列，并用每 worker 独立 scratch 并发生产。 |
 
 边界规则：
@@ -289,7 +289,7 @@ make visual-update             # 重新生成基线，写入 cmd/mornlea/testdat
 - 调用结束后任何语言都不得保留对方指针；没有生产 Go fallback——Go 侧贪心/光照 oracle 仅存在于测试；
 - 网格与光照结果不进入网络协议或存档：客户端从权威方块镜像本地派生，服务端与专用服务端完全不接触 Rust dylib。
 
-构建：`make run`/`build`/`test` 等目标先自动执行 `cargo build --locked --release`（`rust-toolchain.toml` 固定 1.97.1）；`make build` 把 `libmornlea_mesh.dylib` 复制到 `bin/` 并以 `@loader_path` rpath 供客户端加载；`make rust-check` 运行 Rust 格式、clippy 与单测。`cmd/mornlea-server` 以 `CGO_ENABLED=0` 构建，其依赖闭包不含 mesh/client/render/gfx（`make archcheck` 验证）。规范性契约见 [`openspec/specs/rust-engine-mesh/spec.md`](openspec/specs/rust-engine-mesh/spec.md)。
+构建：`make run`/`build`/`test` 等目标先自动执行 `cargo build --locked --release`（`rust-toolchain.toml` 固定 1.97.1）；`make build` 把 `libmornlea_engine.dylib` 复制到 `bin/` 并以 `@loader_path` rpath 供客户端加载；`make rust-check` 运行 Rust 格式、clippy 与单测。`cmd/mornlea-server` 以 `CGO_ENABLED=0` 构建，其依赖闭包不含 mesh/client/render/gfx（`make archcheck` 验证）。规范性契约见 [`openspec/specs/rust-engine-mesh/spec.md`](openspec/specs/rust-engine-mesh/spec.md)。
 
 ## 当前限制
 

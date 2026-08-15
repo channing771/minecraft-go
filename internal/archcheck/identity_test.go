@@ -149,6 +149,40 @@ func newGoIdentityScanner(root string) *goIdentityScanner {
 	}
 }
 
+func TestNativeEngineLibraryIdentity(t *testing.T) {
+	root := moduleRoot(t)
+	engineCrate := filepath.Join(root, "engine", "crates", "mornlea_engine")
+	if info, err := os.Stat(filepath.Join(engineCrate, "Cargo.toml")); err != nil || info.IsDir() {
+		t.Fatalf("Rust engine crate 必须存在: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "engine", "crates", "mornlea_mesh")); !os.IsNotExist(err) {
+		t.Fatalf("旧 Rust crate 不得存在: %v", err)
+	}
+
+	requireIdentity := func(relative, want, old string) {
+		t.Helper()
+		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatalf("读取 %s: %v", relative, err)
+		}
+		if !bytes.Contains(content, []byte(want)) {
+			t.Errorf("%s 必须包含 %q", relative, want)
+		}
+		if bytes.Contains(content, []byte(old)) {
+			t.Errorf("%s 不得包含旧身份 %q", relative, old)
+		}
+	}
+
+	requireIdentity("engine/Cargo.toml", `members = ["crates/mornlea_engine"]`, "crates/mornlea_mesh")
+	requireIdentity("engine/crates/mornlea_engine/Cargo.toml", `name = "mornlea_engine"`, `name = "mornlea_mesh"`)
+	requireIdentity("engine/crates/mornlea_engine/build.rs", "@rpath/libmornlea_engine.dylib", "libmornlea_mesh.dylib")
+	requireIdentity("Makefile", "libmornlea_engine.dylib", "libmornlea_mesh.dylib")
+	requireIdentity("internal/mesh/native_abi.go", "-lmornlea_engine", "-lmornlea_mesh")
+	for _, relative := range []string{"AGENTS.md", "CLAUDE.md", "README.md", "README.en.md", "openspec/config.yaml", "docs/notes/progress.md"} {
+		requireIdentity(relative, "mornlea_engine", "libmornlea_mesh")
+	}
+}
+
 func TestMornleaCurrentIdentity(t *testing.T) {
 	if root := os.Getenv("MORNLEA_IDENTITY_TEST_ROOT"); root != "" {
 		actual := make([]int, len(legacyIdentityAllowances))

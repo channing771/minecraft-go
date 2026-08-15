@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mornlea_mesh"]
+members = ["crates/mornlea_engine"]
 resolver = "3"
 
 [profile.release]

@@ -3,12 +3,12 @@
 GO := go
 CARGO := cargo
 RUST_DIR := engine
-RUST_DYLIB := $(RUST_DIR)/target/release/libmornlea_mesh.dylib
+RUST_DYLIB := $(RUST_DIR)/target/release/libmornlea_engine.dylib
 APP := ./cmd/mornlea
 BINARY := bin/mornlea
 SERVER := ./cmd/mornlea-server
 SERVER_BINARY := bin/mornlea-server
-MORNLEA_DYLIB := bin/libmornlea_mesh.dylib
+MORNLEA_DYLIB := bin/libmornlea_engine.dylib
 ARGS ?=
 
 .PHONY: help run build test test-race test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update rust rust-check

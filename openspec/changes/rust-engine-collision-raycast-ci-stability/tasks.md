@@ -10,8 +10,8 @@
 
 ## 3. Task 4：将唯一 Rust crate/library 改名为 `mornlea_engine`
 
-- [ ] 3.1 仅移动 `engine/crates/mornlea_mesh` 到 `engine/crates/mornlea_engine`，更新 Cargo workspace/package、锁文件、install name、Make/cgo/current identity 文档与 Hook fixture；保留 `mornlea_engine_abi_version`、`mornlea_mesh_section`、mesh layout/status `0..9`、算法和 `crate-type`。
-- [ ] 3.2 在 `internal/archcheck` 建立 identity RED/GREEN，验证一个 std-only crate、无旧 artifact 名和 macOS 相邻 dylib；运行 `make rust`、Cargo fmt/clippy/test/metadata/tree、`go test ./internal/mesh ./internal/client -race -count=1`、`go test ./internal/archcheck -count=1`、`node --test scripts/agent-hooks/guard.test.mjs`、脱离 `engine/target` 参数探针及现有 headless `visual-check`。
+- [x] 3.1 仅移动 `engine/crates/mornlea_mesh` 到 `engine/crates/mornlea_engine`，更新 Cargo workspace/package、锁文件、install name、Make/cgo/current identity 文档与 Hook fixture；保留 `mornlea_engine_abi_version`、`mornlea_mesh_section`、mesh layout/status `0..9`、算法和 `crate-type`。
+- [x] 3.2 在 `internal/archcheck` 建立 identity RED/GREEN，验证一个 std-only crate、无旧 artifact 名和 macOS 相邻 dylib；运行 `make rust`、Cargo fmt/clippy/test/metadata/tree、`go test ./internal/mesh ./internal/client -race -count=1`、`go test ./internal/archcheck -count=1`、`node --test scripts/agent-hooks/guard.test.mjs`、脱离 `engine/target` 参数探针及现有 headless `visual-check`。
 
 ## 4. Task 5：建立唯一 `internal/nativeabi` bridge
 

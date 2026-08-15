@@ -8,6 +8,8 @@
 
 ## 当前基线
 
-当前 M5A 基于 M4Q 的 Mornlea 项目身份和 M4P 固定 Rust 1.97.1 `mornlea_mesh` cdylib，交付最多四个可配置、服务端权威且保持 idle 的具名伙伴；伙伴独立于八名玩家容量，使用协议 v16 和独立 `companions.ai` schema v1，active 与 inactive 身体记录合计最多 64 条。客户端通过统一 Avatar/NameTag pass 呈现伙伴，并提供有界 Unicode 聊天输入与 HUD；`@伙伴名 指令` 只在权威 tick 边界确认大小写精确的寻址事实。无窗口视觉场景新增唯一末场景 `ai-companion`，benchmark producer 升到 scenario v16，M2 v15/M5 v14 基线保持不变。
+当前 M5A 基于 M4Q 的 Mornlea 项目身份和 M4P 固定 Rust 1.97.1 `mornlea_engine` cdylib，交付最多四个可配置、服务端权威且保持 idle 的具名伙伴；伙伴独立于八名玩家容量，使用协议 v16 和独立 `companions.ai` schema v1，active 与 inactive 身体记录合计最多 64 条。客户端通过统一 Avatar/NameTag pass 呈现伙伴，并提供有界 Unicode 聊天输入与 HUD；`@伙伴名 指令` 只在权威 tick 边界确认大小写精确的寻址事实。无窗口视觉场景新增唯一末场景 `ai-companion`，benchmark producer 升到 scenario v16，M2 v15/M5 v14 基线保持不变。
+
+当前 Rust 动态库已从 `mornlea_mesh` 原子改名为 `mornlea_engine`；现有 mesh ABI v1、`mornlea_mesh_section`、layout 与 status `0..9` 保持不变。
 
 M5A 不包含 Planner、HTTP 模型调用、FIFO、移动、采掘、放置、跟随、persona 或摘要；这些能力仍属于后续 M5B–M5D 方向，开始真实变更前以新的 OpenSpec 为准。历史[设计](../superpowers/specs/2026-08-13-ai-native-companions-design.md)与[实施计划](../superpowers/plans/2026-08-13-m5a-companion-entity-chat.md)仅作决策背景。

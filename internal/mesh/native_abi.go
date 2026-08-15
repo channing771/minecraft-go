@@ -4,7 +4,7 @@ package mesh
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../engine/include
-#cgo LDFLAGS: -L${SRCDIR}/../../engine/target/release -lmornlea_mesh -Wl,-rpath,${SRCDIR}/../../engine/target/release
+#cgo LDFLAGS: -L${SRCDIR}/../../engine/target/release -lmornlea_engine -Wl,-rpath,${SRCDIR}/../../engine/target/release
 #include "mornlea_engine.h"
 */
 import "C"
