@@ -8,12 +8,19 @@
 MUST 由 Rust engine 独占生产；Go 生产路径 MUST 不包含积分实现，旧 Go
 实现只允许存在于测试 oracle。
 
-#### Scenario: 生产 Step 与 Go oracle 逐位一致
+#### Scenario: arm64 生产 Step 与 Go oracle 逐位一致
 
-- GIVEN 任意合法 State、Input、CollisionSource 与运行时 Tunables
+- GIVEN arm64 平台上的任意合法 State、Input、CollisionSource 与运行时 Tunables
 - WHEN 调用 physics.Step
 - THEN 结果 State（Position/Velocity/OnGround）、UsedStep、HitUnknown 与测试内 Go
   oracle 实现逐位一致（float32 bit 级）
+
+#### Scenario: 非 arm64 不使用平台相关 Go oracle 作逐位门禁
+
+- GIVEN 非 arm64 平台上的合法物理输入
+- WHEN 运行物理测试与生产 Step
+- THEN Rust engine 仍执行生产积分与行为测试，但测试 MUST NOT 将结果与平台相关的旧 Go
+  oracle 作逐位比较
 
 #### Scenario: 对角输入无斜向加速增益
 

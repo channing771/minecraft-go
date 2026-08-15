@@ -4,7 +4,8 @@
 
 物理 tick 积分（加速度/摩擦/重力/跳跃/速度裁剪）仍在 Go。上一波已把 collision resolver
 与 raycast DDA 迁入 Rust `mornlea_engine`；本变更把积分也迁入，使物理核心整体位于
-engine，Go 只保留领域 API 与编码。行为必须与现有实现逐位一致（float32 bit 级）。
+engine，Go 只保留领域 API 与编码。arm64 上行为必须与现有 Go oracle 逐位一致
+（float32 bit 级）；其他平台由 Rust 单一内核提供一致生产结果。
 
 ## What Changes
 

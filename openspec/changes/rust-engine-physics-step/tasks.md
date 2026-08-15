@@ -10,3 +10,4 @@
 - [x] 8. Go 生产 Step 切 native（布局测试 TDD）→ go test ./internal/physics ./internal/nativeabi -race -count=1
 - [x] 9. step 级差分语料扩展 → go test ./internal/physics -race -count=1
 - [x] 10. 收尾验证与基线文档 → make rust-check; go test ./... -race; go vet ./...; gofmt -l .; openspec validate --all --strict --no-interactive
+- [x] 11. 限定 Go oracle 逐位门禁为 arm64 并修复 Linux PR-CI → make rust; go test ./internal/physics ./internal/nativeabi -race -count=1; go test ./internal/archcheck -count=1; openspec validate --all --strict --no-interactive
