@@ -4,8 +4,8 @@
 
 ### Requirement: 物理 tick 积分由 Rust engine 独占生产
 
-系统 MUST 使物理固定步的积分（移动目标、加速/摩擦、跳跃、重力、终端速度裁剪）与碰撞解析、速度裁剪
-在单次 `mornlea_physics_step` native 调用内完成；Go 生产路径不得包含积分实现，旧 Go
+物理固定步的积分（移动目标、加速/摩擦、跳跃、重力、终端速度裁剪）与碰撞解析、速度裁剪
+MUST 由 Rust engine 独占生产；Go 生产路径 MUST 不包含积分实现，旧 Go
 实现只允许存在于测试 oracle。
 
 #### Scenario: 生产 Step 与 Go oracle 逐位一致
@@ -19,7 +19,7 @@
 
 - GIVEN 地面玩家，OnGround=true，MoveX=1，MoveZ=1，默认 tunables
 - WHEN 执行一个固定步
-- THEN 水平速度模长 ≈ 2.0（acceleration×dt，误差 < 1e-5）
+- THEN 水平速度模长 ‖v‖ 满足 |‖v‖ − 2.0| < 1e-5（acceleration=40、dt=0.05）
 
 #### Scenario: 跳跃与重力使用固定常量
 
@@ -32,8 +32,7 @@
 
 ### Requirement: 运行时 tunables 每步生效
 
-Step MUST 在入口取一次 ActiveTunables 快照并随调用传入 engine；SetTunables 之后的下一次
-Step 使用新参数。
+SetTunables 之后的下一次 Step MUST 使用新参数。
 
 #### Scenario: SetTunables 后下一步生效
 
@@ -43,8 +42,8 @@ Step 使用新参数。
 
 ### Requirement: sweep bounds 违约拒绝
 
-Go MUST 按位移凸包界构建 prism 并在输入中携带 sweep bounds；Rust 积分后自检位移落在界内，
-违约返回 StatusInput，Go 以稳定中文 panic 文案报告，不得产出静默漂移结果。
+当输入携带的位移界不含该步积分位移时，调用 MUST 被拒绝并报告稳定中文 panic 文案，且
+MUST 不产出静默漂移结果。
 
 #### Scenario: 位移越界被拒绝
 
