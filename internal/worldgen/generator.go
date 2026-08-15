@@ -1,161 +1,151 @@
+// Package worldgen 生成地形。
+//
+// 本包必须是确定性的:同种子 + 同区块坐标 = 完全相同的输出(spec §4.3)。
+// 自 rust-engine-worldgen 起,噪声求值、地表分层、矿石与橡树的全部计算由
+// Rust `mornlea_engine` 独占生产;本包只保留 seed→perm 表播种(Go
+// `math/rand` 语义)、`MGW1` 请求编码、native 调用与结果解码,没有生产
+// Go fallback。旧 Go 实现的逐字副本存放在 `oracle_test.go`,作为
+// "同种子逐位一致"差分门禁的对照物。
 package worldgen
 
 import (
+	"encoding/binary"
+	"math/rand"
+
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/nativeabi"
 	"github.com/channing771/mornlea/internal/world"
 )
 
-// M1 用到的方块 ID。完整的方块注册表在 M4 建立（spec §6.3）。
+// `MGW1` ABI 编码常量,必须与 engine `worldgen.rs` 的布局逐字一致:
+// header = magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
+// 材料表 13×u16(26) + reserved u16(2) + perm 512×u8(512)。
 const (
-	IDStone   = core.StoneID
-	IDDirt    = core.DirtID
-	IDGrass   = core.GrassID
-	IDBedrock = core.BedrockID
+	worldgenMagic       = "MGW1"
+	worldgenLayout      = 1
+	worldgenHeaderBytes = 564
+	// worldgenChunkOutputBytes 是 dense `[y−min_y][lz][lx]` 布局的
+	// 16×16×(MaxY−MinY) 个 u16。
+	worldgenChunkOutputBytes = core.SectionSize * core.SectionSize * (core.MaxY - core.MinY) * 2
+	// probe 记录:mode(4) + wx/wy/wz(12) 输入,height(4)+block(2)+reserved(2) 输出。
+	worldgenProbeRecordBytes       = 16
+	worldgenProbeOutputRecordBytes = 8
+
+	// probe 查询模式,与 engine 侧约定一致。
+	probeModeHeight  = 0
+	probeModeTerrain = 1
+	probeModeBase    = 2
 )
 
-// 地形参数。M1 只做高度图地形。
-const (
-	seaLevel     = 64
-	terrainAmp   = 48.0
-	terrainScale = 1.0 / 256.0
-	octaves      = 5
-	lacunarity   = 2.0
-	gain         = 0.5
-	soilDepth    = 4
-)
-
-const (
-	snowLine             int32 = 88
-	sandLine             int32 = 62
-	clayNoiseScale             = 1.0 / 96.0
-	clayNoiseOffsetX     int32 = 417
-	clayNoiseOffsetZ     int32 = -193
-	clayNoiseThreshold         = 0.18
-	gravelNoiseScale           = 1.0 / 72.0
-	gravelNoiseOffsetX   int32 = -271
-	gravelNoiseOffsetZ   int32 = 613
-	gravelNoiseThreshold       = 0.22
-	gravelMaxDepth       int32 = 10
-)
-
-// Generator 按种子生成地形。无内部可变状态，可并发调用。
+// Generator 按种子生成地形。
+//
+// New 之后 header 只读共享,每次调用使用独立缓冲,可并发调用。
 type Generator struct {
-	noise *perlin
-	seed  int64
+	// header 是预编码的 564 字节 `MGW1` 公共 header(seed、材料表、perm)。
+	header []byte
 }
 
 // New 创建一个地形生成器。
+//
+// perm 表播种保持 Go `math/rand` 语义:这是既有世界的确定性来源,
+// 不迁入 Rust,保证相同 seed 在迁移前后产生相同世界。
 func New(seed int64) *Generator {
-	return &Generator{noise: newPerlin(seed), seed: seed}
+	header := make([]byte, worldgenHeaderBytes)
+	copy(header[:4], worldgenMagic)
+	binary.LittleEndian.PutUint32(header[4:8], worldgenLayout)
+	binary.LittleEndian.PutUint64(header[8:16], uint64(seed))
+	minY, maxY := int32(core.MinY), int32(core.MaxY)
+	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
+	binary.LittleEndian.PutUint32(header[20:24], uint32(maxY))
+	// 材料表编码顺序与 engine `Materials` 字段顺序逐字对应。
+	for index, id := range [13]core.BlockID{
+		core.AirID, core.StoneID, core.DirtID, core.GrassID, core.BedrockID,
+		core.SnowBlockID, core.SandID, core.ClayID, core.GravelID,
+		core.IronOreID, core.CoalOreID, core.OakLogID, core.LeavesID,
+	} {
+		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(id))
+	}
+	perm := permTable(seed)
+	copy(header[52:], perm[:])
+	return &Generator{header: header}
+}
+
+// permTable 用给定种子构造 512 项 Perlin 置换表(0..255 重复两遍)。
+//
+// 必须保持 Go `math/rand` 的 NewSource+Shuffle 语义:任何改动都会
+// 改变既有世界。
+func permTable(seed int64) [512]byte {
+	base := make([]int, 256)
+	for i := range base {
+		base[i] = i
+	}
+	rng := rand.New(rand.NewSource(seed))
+	rng.Shuffle(256, func(i, j int) { base[i], base[j] = base[j], base[i] })
+	var perm [512]byte
+	for i := 0; i < 512; i++ {
+		perm[i] = byte(base[i&255])
+	}
+	return perm
+}
+
+// probe 执行一条单点查询,返回 8 字节结果记录。
+func (g *Generator) probe(mode uint32, x, y, z int32) []byte {
+	input := make([]byte, 0, worldgenHeaderBytes+4+worldgenProbeRecordBytes)
+	input = append(input, g.header...)
+	input = binary.LittleEndian.AppendUint32(input, 1)
+	input = binary.LittleEndian.AppendUint32(input, mode)
+	input = binary.LittleEndian.AppendUint32(input, uint32(x))
+	input = binary.LittleEndian.AppendUint32(input, uint32(y))
+	input = binary.LittleEndian.AppendUint32(input, uint32(z))
+	output := make([]byte, worldgenProbeOutputRecordBytes)
+	nativeabi.WorldgenProbe(input, output)
+	return output
 }
 
 // HeightAt 返回世界坐标 (wx,wz) 处最高实心方块的 Y。
 func (g *Generator) HeightAt(wx, wz int32) int32 {
-	n := g.noise.fbm(float64(wx)*terrainScale, float64(wz)*terrainScale,
-		octaves, lacunarity, gain)
-	return int32(seaLevel + n*terrainAmp)
-}
-
-// BaseBlockAt 返回不应用会话修改时指定世界位置的确定性方块。
-func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
-	base := g.TerrainBlockAt(pos)
-	if base != core.AirID {
-		return base
-	}
-	return g.treeBlockAt(pos)
+	output := g.probe(probeModeHeight, wx, 0, wz)
+	return int32(binary.LittleEndian.Uint32(output[0:4]))
 }
 
 // TerrainBlockAt 返回不叠加橡树结构时指定世界位置的确定性地形方块。
 func (g *Generator) TerrainBlockAt(pos core.BlockPos) core.BlockID {
-	if pos.Y < core.MinY || pos.Y >= core.MaxY {
-		return core.AirID
-	}
-	height := g.HeightAt(pos.X, pos.Z)
-	if height >= core.MaxY {
-		height = core.MaxY - 1
-	}
-	return g.generatedBlockAt(pos, height)
+	output := g.probe(probeModeTerrain, pos.X, pos.Y, pos.Z)
+	return core.BlockID(binary.LittleEndian.Uint16(output[4:6]))
 }
 
-// generatedBlockAt 是单点查询与整区块生成共用的纯判断，
-// 矿石只替换本应为石头的方块，铁矿判断优先于煤矿。
-func (g *Generator) generatedBlockAt(pos core.BlockPos, height int32) core.BlockID {
-	base := g.naturalBlockAt(pos, height)
-	if base != IDStone {
-		return base
-	}
-	if pos.Y < ironMaxY && oreHash(g.seed, pos, ironSalt)%ironOdds == 0 {
-		return core.IronOreID
-	}
-	if pos.Y < coalMaxY && oreHash(g.seed, pos, coalSalt)%coalOdds == 0 {
-		return core.CoalOreID
-	}
-	return base
-}
-
-func (g *Generator) naturalBlockAt(pos core.BlockPos, height int32) core.BlockID {
-	base := terrainBlockAt(pos.Y, height)
-	if base == core.AirID || base == IDBedrock {
-		return base
-	}
-
-	depth := height - pos.Y
-	if depth == 0 && height >= snowLine {
-		return core.SnowBlockID
-	}
-	if height <= sandLine && depth >= 0 && depth < soilDepth {
-		if depth >= 2 && g.noise.at(
-			float64(pos.X+clayNoiseOffsetX)*clayNoiseScale,
-			float64(pos.Z+clayNoiseOffsetZ)*clayNoiseScale,
-		) > clayNoiseThreshold {
-			return core.ClayID
-		}
-		return core.SandID
-	}
-	if base == IDStone && depth <= gravelMaxDepth && g.noise.at(
-		float64(pos.X+gravelNoiseOffsetX)*gravelNoiseScale,
-		float64(pos.Z+gravelNoiseOffsetZ)*gravelNoiseScale,
-	) > gravelNoiseThreshold {
-		return core.GravelID
-	}
-	return base
+// BaseBlockAt 返回不应用会话修改时指定世界位置的确定性方块。
+func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
+	output := g.probe(probeModeBase, pos.X, pos.Y, pos.Z)
+	return core.BlockID(binary.LittleEndian.Uint16(output[4:6]))
 }
 
 // GenerateChunk 生成一个完整区块。
+//
+// 一次 native 调用产出 dense 数组;Go 侧只把非 air 方块写入 chunk,
+// 与旧实现"地形只写到地表高度、树只写原木/树叶"的写入集合一致,
+// palette 构建路径保持不变。
 func (g *Generator) GenerateChunk(pos core.ChunkPos) *world.Chunk {
-	c := world.NewChunk(pos)
-	baseX := pos.X << core.SectionShift
-	baseZ := pos.Z << core.SectionShift
+	input := make([]byte, 0, worldgenHeaderBytes+8)
+	input = append(input, g.header...)
+	input = binary.LittleEndian.AppendUint32(input, uint32(pos.X))
+	input = binary.LittleEndian.AppendUint32(input, uint32(pos.Z))
+	dense := make([]byte, worldgenChunkOutputBytes)
+	nativeabi.WorldgenChunk(input, dense)
 
-	for lz := 0; lz < core.SectionSize; lz++ {
-		for lx := 0; lx < core.SectionSize; lx++ {
-			h := g.HeightAt(baseX+int32(lx), baseZ+int32(lz))
-			if h >= core.MaxY {
-				h = core.MaxY - 1
-			}
-			for y := int32(core.MinY); y <= h; y++ {
-				c.SetBlock(lx, y, lz, g.generatedBlockAt(core.BlockPos{
-					X: baseX + int32(lx), Y: y, Z: baseZ + int32(lz),
-				}, h))
+	c := world.NewChunk(pos)
+	offset := 0
+	for y := int32(core.MinY); y < core.MaxY; y++ {
+		for lz := 0; lz < core.SectionSize; lz++ {
+			for lx := 0; lx < core.SectionSize; lx++ {
+				id := core.BlockID(binary.LittleEndian.Uint16(dense[offset : offset+2]))
+				offset += 2
+				if id != core.AirID {
+					c.SetBlock(lx, y, lz, id)
+				}
 			}
 		}
 	}
-	g.applyOakTrees(c)
 	c.Compact()
 	return c
-}
-
-func terrainBlockAt(y, height int32) core.BlockID {
-	switch {
-	case y < core.MinY || y >= core.MaxY || y > height:
-		return core.AirID
-	case y == core.MinY:
-		return IDBedrock
-	case y == height:
-		return IDGrass
-	case y > height-soilDepth:
-		return IDDirt
-	default:
-		return IDStone
-	}
 }

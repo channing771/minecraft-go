@@ -1,51 +1,29 @@
 package worldgen
 
-import (
-	"math"
-	"testing"
-)
+import "testing"
 
-func TestPerlinIsDeterministic(t *testing.T) {
-	a := newPerlin(42)
-	b := newPerlin(42)
-	for i := 0; i < 1000; i++ {
-		x := float64(i) * 0.137
-		z := float64(i) * 0.911
-		if a.at(x, z) != b.at(x, z) {
-			t.Fatalf("同种子在 (%f,%f) 处结果不同", x, z)
+// perm 播种是 Go 侧保留的唯一确定性计算:同种子必须逐字节稳定,
+// 且表本身必须是 0..255 的合法置换重复两遍。
+func TestPermTableIsDeterministicPermutation(t *testing.T) {
+	a := permTable(42)
+	b := permTable(42)
+	if a != b {
+		t.Fatal("同种子 perm 表不一致")
+	}
+	var seen [256]bool
+	for i := 0; i < 256; i++ {
+		if a[i] != a[i+256] {
+			t.Fatalf("perm[%d]=%d 与 perm[%d]=%d 不一致,应重复两遍", i, a[i], i+256, a[i+256])
 		}
+		if seen[a[i]] {
+			t.Fatalf("perm 值 %d 重复,不是合法置换", a[i])
+		}
+		seen[a[i]] = true
 	}
 }
 
-func TestPerlinDiffersBySeed(t *testing.T) {
-	a, b := newPerlin(1), newPerlin(2)
-	same := 0
-	for i := 0; i < 1000; i++ {
-		x := float64(i) * 0.137
-		if a.at(x, 0.5) == b.at(x, 0.5) {
-			same++
-		}
-	}
-	if same > 50 {
-		t.Fatalf("两个种子有 %d/1000 个采样点相同，种子未生效", same)
-	}
-}
-
-func TestPerlinRangeAndZeroAtLattice(t *testing.T) {
-	p := newPerlin(7)
-	for i := 0; i < 10000; i++ {
-		x := float64(i)*0.0173 - 80
-		z := float64(i)*0.0291 - 40
-		v := p.at(x, z)
-		if v < -1.5 || v > 1.5 {
-			t.Fatalf("噪声在 (%f,%f) 处越界: %f", x, z, v)
-		}
-	}
-	for x := -5; x <= 5; x++ {
-		for z := -5; z <= 5; z++ {
-			if v := p.at(float64(x), float64(z)); math.Abs(v) > 1e-9 {
-				t.Fatalf("格点 (%d,%d) 处噪声 = %f，应为 0", x, z, v)
-			}
-		}
+func TestPermTableDiffersBySeed(t *testing.T) {
+	if permTable(1) == permTable(2) {
+		t.Fatal("不同种子 perm 表相同,种子未生效")
 	}
 }

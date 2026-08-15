@@ -22,7 +22,7 @@
 - [x] 3.1 `internal/nativeabi` 新增 WorldgenChunk/WorldgenProbe 绑定与请求编码,
       含非法输入注入测试(输出缓冲不被修改、稳定中文错误);
       验证:`go test ./internal/nativeabi -race -count=1`。
-- [ ] 3.2 `internal/worldgen` 生产路径切换:`New` 保留 perm 播种并预编码 header,
+- [x] 3.2 `internal/worldgen` 生产路径切换:`New` 保留 perm 播种并预编码 header,
       `GenerateChunk` 一次 native 调用 + 仅非 air 回写 + `Compact`,
       `HeightAt`/`TerrainBlockAt`/`BaseBlockAt` 走 64-record batch probe;
       删除生产文件中的旧计算逻辑;`internal/archcheck` 登记

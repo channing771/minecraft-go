@@ -617,16 +617,19 @@ func TestWorldgenProbeMatchesChunkColumn(t *testing.T) {
 }
 
 func TestWorldgenStatusPanicTextIsStable(t *testing.T) {
-	for status, want := range map[Status]string{
-		StatusABIVersion:      "nativeabi: worldgen chunk ABI 版本不匹配",
-		StatusInvalidArgument: "nativeabi: worldgen chunk 参数非法",
-		StatusInput:           "nativeabi: worldgen chunk 输入非法",
-		StatusOutputOverflow:  "nativeabi: worldgen chunk output 过短",
-		StatusPanic:           "nativeabi: worldgen chunk Rust panic",
-		Status(200):           "nativeabi: worldgen chunk 未知状态",
+	for _, test := range []struct {
+		status Status
+		want   string
+	}{
+		{StatusABIVersion, "nativeabi: worldgen chunk ABI 版本不匹配"},
+		{StatusInvalidArgument, "nativeabi: worldgen chunk 参数非法"},
+		{StatusInput, "nativeabi: worldgen chunk 输入非法"},
+		{StatusOutputOverflow, "nativeabi: worldgen chunk output 过短"},
+		{StatusPanic, "nativeabi: worldgen chunk Rust panic"},
+		{Status(200), "nativeabi: worldgen chunk 未知状态"},
 	} {
-		if got := worldgenStatusPanicText("chunk", status); got != want {
-			t.Fatalf("status=%d 文案=%q，想要 %q", status, got, want)
+		if got := worldgenStatusPanicText("chunk", test.status); got != test.want {
+			t.Fatalf("status=%d 文案=%q，想要 %q", test.status, got, test.want)
 		}
 	}
 	if got := worldgenStatusPanicText("probe", StatusInput); got != "nativeabi: worldgen probe 输入非法" {
