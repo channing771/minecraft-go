@@ -3,11 +3,54 @@ package archcheck_test
 import (
 	"go/parser"
 	"go/token"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestNativeEngineBridgeBoundary(t *testing.T) {
+	root := moduleRoot(t)
+	bridge := filepath.Join(root, "internal", "nativeabi")
+	if info, err := os.Stat(bridge); err != nil || !info.IsDir() {
+		t.Fatalf("native engine bridge %s 不存在", bridge)
+	}
+
+	for _, relative := range []string{
+		"mornlea_engine.h",
+		"-lmornlea_engine",
+		"C.mornlea_",
+	} {
+		for _, path := range goFiles(t, filepath.Join(root, "internal")) {
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("读取 %s: %v", path, err)
+			}
+			if strings.Contains(string(contents), relative) && !strings.HasPrefix(path, bridge+string(filepath.Separator)) {
+				t.Errorf("%s 只允许 internal/nativeabi 接触，发现于 %s", relative, path)
+			}
+		}
+	}
+}
+
+func goFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("枚举 %s: %v", root, err)
+	}
+	return files
+}
 
 func TestOnlyGfxImportsWebGPU(t *testing.T) {
 	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}}|{{join .Imports \" \"}}", "./...")

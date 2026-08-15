@@ -276,16 +276,16 @@ make visual-update             # 重新生成基线，写入 cmd/mornlea/testdat
 
 ## Rust 与 Go 的职责划分
 
-自 M4P 起，区块网格与光照的生产实现迁移到固定 Rust 1.97.1 `cdylib`；Go 仍是其余全部逻辑的所有者。两者经 `engine/include/mornlea_engine.h` 声明的唯一 C ABI（ABI version 1）协作，只有 `internal/mesh` 接触 native ABI。
+自 M4P 起，区块网格与光照的生产实现迁移到固定 Rust 1.97.1 `cdylib`；Go 仍是其余全部逻辑的所有者。两者经 `engine/include/mornlea_engine.h` 声明的唯一 C ABI（ABI version 1）协作，只有 `internal/nativeabi` 直接接触 engine C ABI，`internal/mesh` 是领域调用方。
 
 | 语言 | 职责 |
 | --- | --- |
 | Rust（`engine/crates/mornlea_engine`） | 确定性区段网格与传播光照的**唯一生产实现**：贪心网格与 AO（`greedy.rs`）、天空光与方块光（`light.rs`）、packed quad 输出（`quad.rs`）、native 输入解析（`input.rs`）与 C ABI（`ffi.rs`）。对同一 neighborhood 与 registry 输出和冻结 Go oracle 逐位一致的 quads；panic 不穿过 ABI，版本、输入、scratch、registry、emission 或输出容量非法时原子拒绝。workspace 只含该 crate，normal dependency 只有 `std`。 |
-| Go | 除网格与光照生产外的全部职责：应用装配（`cmd/`）、世界与区块数据模型、权威模拟、物理、网络与存档、客户端镜像与预测、GPU 渲染与 WebGPU 封装（`render`/`gfx`）、世界生成、资产与配置。`internal/mesh` 是 Go 侧对外 API 与 native 边界：持有 input/scratch/output 的所有权、组装 registry 快照与可见性、映射 ABI 状态码；`internal/client` 的 mesher 负责任务调度、revision 印章、有界队列，并用每 worker 独立 scratch 并发生产。 |
+| Go | 除网格与光照生产外的全部职责：应用装配（`cmd/`）、世界与区块数据模型、权威模拟、物理、网络与存档、客户端镜像与预测、GPU 渲染与 WebGPU 封装（`render`/`gfx`）、世界生成、资产与配置。`internal/nativeabi` 是唯一 engine C header/symbol bridge；`internal/mesh` 是对外 API 与领域调用方，持有 input/scratch/output 的所有权、组装 registry 快照与可见性、映射 ABI 状态码；`internal/client` 的 mesher 负责任务调度、revision 印章、有界队列，并用每 worker 独立 scratch 并发生产。 |
 
 边界规则：
 
-- 只有 `internal/mesh` 可以 `import "C"`（darwin + cgo 构建约束），其余包一律通过 `internal/mesh` 的 Go API 使用网格与光照结果；
+- 只有 `internal/nativeabi` 可以为 engine `import "C"`（darwin/linux + cgo 构建约束）；其余包通过领域 Go API 使用结果；
 - 调用结束后任何语言都不得保留对方指针；没有生产 Go fallback——Go 侧贪心/光照 oracle 仅存在于测试；
 - 网格与光照结果不进入网络协议或存档：客户端从权威方块镜像本地派生，服务端与专用服务端完全不接触 Rust dylib。
 

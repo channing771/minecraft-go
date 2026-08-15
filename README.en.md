@@ -262,16 +262,16 @@ Most of these are in Chinese.
 
 ## Rust & Go Responsibilities
 
-Since M4P, chunk meshing and light production have been implemented in a pinned Rust 1.97.1 `cdylib`; Go owns everything else. The two languages cooperate through the single C ABI declared in `engine/include/mornlea_engine.h` (ABI version 1); only `internal/mesh` touches the native ABI.
+Since M4P, chunk meshing and light production have been implemented in a pinned Rust 1.97.1 `cdylib`; Go owns everything else. The two languages cooperate through the single C ABI declared in `engine/include/mornlea_engine.h` (ABI version 1); only `internal/nativeabi` directly touches the engine C ABI, while `internal/mesh` is its domain caller.
 
 | Language | Responsibilities |
 | --- | --- |
 | Rust (`engine/crates/mornlea_engine`) | The **only production implementation** of deterministic section meshing and propagated light: greedy meshing & AO (`greedy.rs`), skylight & block light (`light.rs`), packed quad output (`quad.rs`), native input parsing (`input.rs`), and the C ABI (`ffi.rs`). For the same neighborhood and registry it emits quads bit-identical to the frozen Go oracle; panics never cross the ABI, and invalid version/input/scratch/registry/emission/output capacity is rejected atomically. The workspace contains only this crate, with `std` as its only normal dependency. |
-| Go | Everything except mesh & light production: application assembly (`cmd/`), world & chunk data model, authoritative simulation, physics, networking & storage, client mirror & prediction, GPU rendering & WebGPU wrapper (`render`/`gfx`), world generation, assets, and config. `internal/mesh` is the Go-side public API and native boundary: it owns the input/scratch/output buffers, assembles the registry snapshot and visibility, and maps ABI status codes; the mesher in `internal/client` handles task scheduling, revision stamps, and bounded queues, producing concurrently with per-worker scratch buffers. |
+| Go | Everything except mesh & light production: application assembly (`cmd/`), world & chunk data model, authoritative simulation, physics, networking & storage, client mirror & prediction, GPU rendering & WebGPU wrapper (`render`/`gfx`), world generation, assets, and config. `internal/nativeabi` is the only engine C header/symbol bridge; `internal/mesh` is the public API and domain caller, owning input/scratch/output buffers, registry snapshots, visibility, and ABI status mapping; the mesher in `internal/client` handles task scheduling, revision stamps, and bounded queues, producing concurrently with per-worker scratch buffers. |
 
 Boundary rules:
 
-- Only `internal/mesh` may `import "C"` (darwin + cgo build constraint); every other package consumes mesh & light results through `internal/mesh`'s Go API;
+- Only `internal/nativeabi` may `import "C"` for the engine (darwin/linux + cgo build constraint); other packages consume results through their domain Go APIs;
 - After a call returns, neither language may retain the other's pointers; there is no production Go fallback — the Go greedy/light oracles exist only in tests;
 - Mesh & light results never enter the network protocol or saves: the client derives them locally from the authoritative block mirror, and the server and dedicated server never touch the Rust dylib.
 

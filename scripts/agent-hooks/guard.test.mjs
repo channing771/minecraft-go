@@ -32,7 +32,7 @@ test("requires OpenSpec for contract and architecture changes", () => {
   assert.deepEqual(openSpecRequirementReasons(["internal/network/packet.go"]), [
     "改动涉及协议、存档格式、性能基线或架构依赖门禁",
   ]);
-  assert.deepEqual(openSpecRequirementReasons(["internal/archcheck/deps_test.go"]), [
+  assert.deepEqual(openSpecRequirementReasons(["internal/archcheck/dependency_test.go"]), [
     "改动涉及协议、存档格式、性能基线或架构依赖门禁",
   ]);
 });
@@ -71,9 +71,40 @@ test("runs Rust validation before Go checks for Rust-required changes", () => {
   assert.deepEqual(calls.slice(1, 4), [
     ["make", ["rust"]],
     ["make", ["rust-check"]],
-    ["go", ["test", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
+    ["go", ["test", "./internal/nativeabi", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
   ]);
   assert.equal(calls.some(([command]) => command === "cargo"), false);
+});
+
+test("runs the fixed native downstream union for Rust-only bridge changes", () => {
+  const calls = [];
+  const run = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    return { status: 0, stdout: "" };
+  };
+
+  assert.deepEqual(stopFailures(["engine/crates/mornlea_engine/src/ffi.rs"], run, {}), []);
+  assert.deepEqual(
+    calls.find(([command, argumentsList]) => command === "go" && argumentsList.includes("./internal/nativeabi")),
+    ["go", ["test", "./internal/nativeabi", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
+  );
+});
+
+test("unions the fixed native downstream packages with mixed bridge Go changes", () => {
+  const calls = [];
+  const run = (command, argumentsList) => {
+    calls.push([command, argumentsList]);
+    return { status: 0, stdout: "" };
+  };
+
+  assert.deepEqual(
+    stopFailures(["engine/crates/mornlea_engine/src/ffi.rs", "internal/nativeabi/native.go"], run, {}),
+    [],
+  );
+  assert.deepEqual(
+    calls.find(([command, argumentsList]) => command === "go" && argumentsList.includes("./internal/nativeabi")),
+    ["go", ["test", "./internal/nativeabi", "./internal/mesh", "./internal/client", "-race", "-count=1"]],
+  );
 });
 
 test("runs the current identity guard for every identity-only root change", () => {

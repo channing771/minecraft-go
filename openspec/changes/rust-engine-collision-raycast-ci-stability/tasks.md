@@ -15,8 +15,8 @@
 
 ## 4. Task 5：建立唯一 `internal/nativeabi` bridge
 
-- [ ] 4.1 新建 `internal/nativeabi` 为唯一 engine header/cgo/status 叶子，将 mesh cgo 的 ABI/version/status/slice forwarding 迁入，保留 `internal/mesh` 私有兼容包装和既有错误文本；架构与 Hook 只允许该 leaf 直接接触 C/native symbol。
-- [ ] 4.2 以 nativeabi/mesh 原子性、overlap、canary、ABI/status、`#cgo noescape`/`nocallback` 审计和 `AllocsPerRun` 覆盖 bridge；运行 `make rust`、`go test ./internal/nativeabi ./internal/mesh ./internal/client -race -count=1`、escape diagnostics、`go test ./internal/archcheck -count=1`、Hook tests、`go vet ./internal/nativeabi ./internal/mesh`。
+- [x] 4.1 新建 `internal/nativeabi` 为唯一 engine header/cgo/status 叶子，将 mesh cgo 的 ABI/version/status/slice forwarding 迁入，保留 `internal/mesh` 私有兼容包装和既有错误文本；架构与 Hook 只允许该 leaf 直接接触 C/native symbol。
+- [x] 4.2 以 nativeabi/mesh 原子性、overlap、canary、ABI/status、`#cgo noescape`/`nocallback` 审计和 `AllocsPerRun` 覆盖 bridge；运行 `make rust`、`go test ./internal/nativeabi ./internal/mesh ./internal/client -race -count=1`、escape diagnostics、`go test ./internal/archcheck -count=1`、Hook tests、`go vet ./internal/nativeabi ./internal/mesh`。
 
 ## 5. Task 6：实现 collision ABI 与 test-only Go oracle parity
 
