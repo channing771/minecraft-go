@@ -2,7 +2,7 @@
 
 ## 1. Go oracle 提取
 
-- [ ] 1.1 把 `internal/worldgen` 的噪声/地形/矿石/橡树计算复制为 `oracle_test.go`
+- [x] 1.1 把 `internal/worldgen` 的噪声/地形/矿石/橡树计算复制为 `oracle_test.go`
       内独立 oracle 实现,现有测试改为断言生产 API 与 oracle 一致;
       验证:`go test ./internal/worldgen -race -count=1`(此时生产仍为旧实现,
       差分应全部通过)。
