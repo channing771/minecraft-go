@@ -41,26 +41,52 @@ struct Cell<'a> {
 
 impl<'a> CollisionInput<'a> {
     fn decode(bytes: &'a [u8]) -> Self {
+        let position = [read_f32(bytes, 8), read_f32(bytes, 12), read_f32(bytes, 16)];
+        let displacement = [
+            read_f32(bytes, 20),
+            read_f32(bytes, 24),
+            read_f32(bytes, 28),
+        ];
+        let began_grounded = bytes[32] == 1;
+        let step_height = read_f32(bytes, COLLISION_STEP_HEIGHT_OFFSET);
+        let origin = [
+            read_i32(bytes, 40),
+            read_i32(bytes, 44),
+            read_i32(bytes, 48),
+        ];
+        let dimensions = [
+            read_u32(bytes, 52),
+            read_u32(bytes, 56),
+            read_u32(bytes, 60),
+        ];
+        Self::from_parts(
+            position,
+            displacement,
+            began_grounded,
+            step_height,
+            origin,
+            dimensions,
+            &bytes[HEADER_BYTES..],
+        )
+    }
+
+    fn from_parts(
+        position: Vector,
+        displacement: Vector,
+        began_grounded: bool,
+        step_height: f32,
+        origin: [i32; 3],
+        dimensions: [u32; 3],
+        cells: &'a [u8],
+    ) -> Self {
         Self {
-            bytes,
-            position: [read_f32(bytes, 8), read_f32(bytes, 12), read_f32(bytes, 16)],
-            displacement: [
-                read_f32(bytes, 20),
-                read_f32(bytes, 24),
-                read_f32(bytes, 28),
-            ],
-            began_grounded: bytes[32] == 1,
-            step_height: read_f32(bytes, COLLISION_STEP_HEIGHT_OFFSET),
-            origin: [
-                read_i32(bytes, 40),
-                read_i32(bytes, 44),
-                read_i32(bytes, 48),
-            ],
-            dimensions: [
-                read_u32(bytes, 52),
-                read_u32(bytes, 56),
-                read_u32(bytes, 60),
-            ],
+            bytes: cells,
+            position,
+            displacement,
+            began_grounded,
+            step_height,
+            origin,
+            dimensions,
         }
     }
 
@@ -74,7 +100,7 @@ impl<'a> CollisionInput<'a> {
         let index = ((y as usize * self.dimensions[0] as usize) + x as usize)
             * self.dimensions[2] as usize
             + z as usize;
-        let offset = HEADER_BYTES + index * CELL_BYTES;
+        let offset = index * CELL_BYTES;
         Cell {
             bytes: &self.bytes[offset..offset + CELL_BYTES],
             position,
@@ -121,6 +147,33 @@ impl Cell<'_> {
 
 pub(crate) fn resolve_collision(bytes: &[u8]) -> [u8; 16] {
     let input = CollisionInput::decode(bytes);
+    resolve_collision_input(input)
+}
+
+// 供 Task 5 的 step.rs 零拷贝复用 cells；接入前先抑制 dead_code 告警。
+#[allow(dead_code)]
+pub(crate) fn resolve_collision_parts(
+    position: Vector,
+    displacement: Vector,
+    began_grounded: bool,
+    step_height: f32,
+    origin: [i32; 3],
+    dimensions: [u32; 3],
+    cells: &[u8],
+) -> [u8; 16] {
+    let input = CollisionInput::from_parts(
+        position,
+        displacement,
+        began_grounded,
+        step_height,
+        origin,
+        dimensions,
+        cells,
+    );
+    resolve_collision_input(input)
+}
+
+fn resolve_collision_input(input: CollisionInput<'_>) -> [u8; 16] {
     let mut ordinary = resolve_move(&input);
     let mut used_step = false;
     if (ordinary.clipped[0] || ordinary.clipped[2])
