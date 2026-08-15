@@ -1,6 +1,6 @@
 use std::mem::{align_of, size_of};
 
-use crate::collision::resolve_collision;
+use crate::collision::{COLLISION_STEP_HEIGHT_OFFSET, resolve_collision};
 use crate::greedy::{MeshError as GreedyError, center_is_air, mesh_section};
 use crate::input::{InputError, MeshInput};
 use crate::light::{LIGHT_VOLUME, LightScratch, MeshError as LightError, build_light};
@@ -83,7 +83,7 @@ fn collision_input_is_valid(bytes: &[u8]) -> bool {
     {
         return false;
     }
-    for offset in [8, 12, 16, 20, 24, 28, 36] {
+    for offset in [8, 12, 16, 20, 24, 28, COLLISION_STEP_HEIGHT_OFFSET] {
         if !read_f32(bytes, offset).is_finite() {
             return false;
         }
@@ -115,14 +115,14 @@ fn collision_input_is_valid(bytes: &[u8]) -> bool {
     if expected_length != bytes.len() {
         return false;
     }
-    for axis in 0..3 {
+    for (axis, dimension) in dimensions.into_iter().enumerate() {
         let origin = read_i32(bytes, 40 + axis * 4);
-        if origin.checked_add((dimensions[axis] - 1) as i32).is_none() {
+        if origin.checked_add((dimension - 1) as i32).is_none() {
             return false;
         }
-        if !collision_prism_covers_input(bytes, dimensions) {
-            return false;
-        }
+    }
+    if !collision_prism_covers_input(bytes, dimensions) {
+        return false;
     }
     for cell in bytes[COLLISION_HEADER_BYTES..].chunks_exact(COLLISION_CELL_BYTES) {
         if cell[0] > 1 || cell[1] > 8 || cell[2] != 0 || cell[3] != 0 {
@@ -151,7 +151,7 @@ fn collision_prism_covers_input(bytes: &[u8], dimensions: [u32; 3]) -> bool {
         read_f32(bytes, 24),
         read_f32(bytes, 28),
     ];
-    let step_height = read_f32(bytes, 36);
+    let step_height = read_f32(bytes, COLLISION_STEP_HEIGHT_OFFSET);
     let minimum = [
         position[0].min(position[0] + displacement[0]) - HALF_WIDTH - EPSILON,
         position[1] + 0_f32.min(displacement[1]).min(step_height) - GROUND_PROBE - EPSILON,
@@ -330,6 +330,27 @@ pub unsafe extern "C" fn mornlea_collision_resolve(
     output: *mut u8,
     output_len: usize,
 ) -> u32 {
+    // SAFETY: C 调用方提供原始缓冲区；helper 会在解引用前验证指针、范围、长度与重叠。
+    unsafe {
+        collision_resolve_with(
+            abi_version,
+            input,
+            input_len,
+            output,
+            output_len,
+            resolve_collision,
+        )
+    }
+}
+
+unsafe fn collision_resolve_with(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_len: usize,
+    resolver: impl FnOnce(&[u8]) -> [u8; COLLISION_OUTPUT_BYTES],
+) -> u32 {
     if abi_version != ABI_VERSION {
         return MORNLEA_STATUS_ABI_VERSION;
     }
@@ -355,7 +376,7 @@ pub unsafe extern "C" fn mornlea_collision_resolve(
         if !collision_input_is_valid(bytes) {
             return Err(MORNLEA_STATUS_INPUT);
         }
-        Ok(resolve_collision(bytes))
+        Ok(resolver(bytes))
     });
     match result {
         Ok(result) => {
@@ -382,12 +403,13 @@ mod tests {
 
     use super::{
         COLLISION_CELL_BYTES, COLLISION_HEADER_BYTES, COLLISION_MAX_CELLS, COLLISION_OUTPUT_BYTES,
-        MORNLEA_STATUS_ABI_VERSION, MORNLEA_STATUS_EMISSION, MORNLEA_STATUS_INPUT,
-        MORNLEA_STATUS_INVALID_ARGUMENT, MORNLEA_STATUS_OK, MORNLEA_STATUS_OUTPUT_OVERFLOW,
-        MORNLEA_STATUS_PANIC, MORNLEA_STATUS_QUEUE_OVERFLOW, MORNLEA_STATUS_REGISTRY,
-        MORNLEA_STATUS_SCRATCH, SCRATCH_BYTES, catch_and_publish, catch_collision,
-        input_range_is_valid, mornlea_collision_resolve, mornlea_mesh_section,
-        output_range_is_valid, scratch_range_is_valid,
+        COLLISION_STEP_HEIGHT_OFFSET, MORNLEA_STATUS_ABI_VERSION, MORNLEA_STATUS_EMISSION,
+        MORNLEA_STATUS_INPUT, MORNLEA_STATUS_INVALID_ARGUMENT, MORNLEA_STATUS_OK,
+        MORNLEA_STATUS_OUTPUT_OVERFLOW, MORNLEA_STATUS_PANIC, MORNLEA_STATUS_QUEUE_OVERFLOW,
+        MORNLEA_STATUS_REGISTRY, MORNLEA_STATUS_SCRATCH, SCRATCH_BYTES, catch_and_publish,
+        catch_collision, collision_resolve_with, input_range_is_valid, mornlea_collision_resolve,
+        mornlea_mesh_section, output_range_is_valid, read_f32, read_i32, read_u32,
+        scratch_range_is_valid,
     };
     use crate::input::tests::valid_input;
 
@@ -411,6 +433,82 @@ mod tests {
             COLLISION_HEADER_BYTES + COLLISION_MAX_CELLS * COLLISION_CELL_BYTES,
             802_880
         );
+
+        let header = [
+            0x4d, 0x47, 0x43, 0x31, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xa0, 0x3f, 0x00, 0x00,
+            0x20, 0xc0, 0x00, 0x00, 0x70, 0x40, 0x00, 0x00, 0x90, 0xc0, 0x00, 0x00, 0xa8, 0x40,
+            0x00, 0x00, 0xd8, 0xc0, 0x01, 0x00, 0x00, 0x00, 0x9a, 0x99, 0x19, 0x3f, 0xf9, 0xff,
+            0xff, 0xff, 0x08, 0x00, 0x00, 0x00, 0xf7, 0xff, 0xff, 0xff, 0x01, 0x00, 0x00, 0x00,
+            0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+        ];
+        assert_eq!(&header[0..4], b"MGC1");
+        assert_eq!(read_u32(&header, 4), 1);
+        assert_eq!(
+            [
+                read_f32(&header, 8).to_bits(),
+                read_f32(&header, 12).to_bits(),
+                read_f32(&header, 16).to_bits()
+            ],
+            [1.25_f32.to_bits(), (-2.5_f32).to_bits(), 3.75_f32.to_bits()]
+        );
+        assert_eq!(
+            [
+                read_f32(&header, 20).to_bits(),
+                read_f32(&header, 24).to_bits(),
+                read_f32(&header, 28).to_bits()
+            ],
+            [
+                (-4.5_f32).to_bits(),
+                5.25_f32.to_bits(),
+                (-6.75_f32).to_bits()
+            ]
+        );
+        assert_eq!(&header[32..36], &[1, 0, 0, 0]);
+        assert_eq!(COLLISION_STEP_HEIGHT_OFFSET, 36);
+        assert_eq!(
+            read_f32(&header, COLLISION_STEP_HEIGHT_OFFSET).to_bits(),
+            0.6_f32.to_bits()
+        );
+        assert_eq!(
+            [
+                read_i32(&header, 40),
+                read_i32(&header, 44),
+                read_i32(&header, 48)
+            ],
+            [-7, 8, -9]
+        );
+        assert_eq!(
+            [
+                read_u32(&header, 52),
+                read_u32(&header, 56),
+                read_u32(&header, 60)
+            ],
+            [1, 2, 3]
+        );
+
+        let cell_prefix = [
+            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x80, 0xbe, 0x00, 0x00, 0x00, 0x3e, 0x00, 0x00,
+            0x00, 0x3f, 0x00, 0x00, 0xa0, 0x3f, 0x00, 0x00, 0x60, 0x3f, 0x00, 0x00, 0xc0, 0x3f,
+        ];
+        assert_eq!(&cell_prefix[0..4], &[1, 1, 0, 0]);
+        for (index, want) in [-0.25_f32, 0.125, 0.5, 1.25, 0.875, 1.5]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(
+                read_f32(&cell_prefix, 4 + index * 4).to_bits(),
+                want.to_bits()
+            );
+        }
+
+        let output = [
+            0x00, 0x00, 0xa0, 0x3f, 0x00, 0x00, 0x20, 0xc0, 0x00, 0x00, 0x70, 0x40, 0x05, 0x01,
+            0x00, 0x01,
+        ];
+        assert_eq!(read_f32(&output, 0).to_bits(), 1.25_f32.to_bits());
+        assert_eq!(read_f32(&output, 4).to_bits(), (-2.5_f32).to_bits());
+        assert_eq!(read_f32(&output, 8).to_bits(), 3.75_f32.to_bits());
+        assert_eq!(&output[12..16], &[5, 1, 0, 1]);
     }
 
     #[test]
@@ -419,6 +517,34 @@ mod tests {
             panic!("测试 panic")
         });
         assert_eq!(result, Err(MORNLEA_STATUS_PANIC));
+    }
+
+    #[test]
+    fn collision_panic_through_publish_path_keeps_caller_output_unchanged() {
+        let mut input = [0_u8; 64 + 4 * 196];
+        input[0..4].copy_from_slice(b"MGC1");
+        input[4..8].copy_from_slice(&1_u32.to_le_bytes());
+        for (offset, value) in [(8, 0.5_f32), (12, 1.0), (16, 0.5), (36, 0.6)] {
+            input[offset..offset + 4].copy_from_slice(&value.to_bits().to_le_bytes());
+        }
+        input[52..56].copy_from_slice(&1_u32.to_le_bytes());
+        input[56..60].copy_from_slice(&4_u32.to_le_bytes());
+        input[60..64].copy_from_slice(&1_u32.to_le_bytes());
+        let mut caller_output = [0xa5_u8; COLLISION_OUTPUT_BYTES + 2];
+
+        let status = unsafe {
+            collision_resolve_with(
+                1,
+                input.as_ptr(),
+                input.len(),
+                caller_output[1..].as_mut_ptr(),
+                COLLISION_OUTPUT_BYTES,
+                |_| -> [u8; COLLISION_OUTPUT_BYTES] { panic!("测试 panic") },
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_PANIC);
+        assert_eq!(caller_output, [0xa5; COLLISION_OUTPUT_BYTES + 2]);
     }
 
     #[test]

@@ -69,6 +69,9 @@ func TestCollisionInputLayoutV1(t *testing.T) {
 	if input[32] != 1 || input[33] != 0 || input[34] != 0 || input[35] != 0 {
 		t.Fatalf("began_grounded/reserved=%v，want 1,0,0,0", input[32:36])
 	}
+	if got := binary.LittleEndian.Uint32(input[36:40]); got != math.Float32bits(0.6) {
+		t.Fatalf("step_height bits=%08x，want %08x", got, math.Float32bits(0.6))
+	}
 	if input[64] != 1 || input[65] != 1 || input[66] != 0 || input[67] != 0 {
 		t.Fatalf("cell header=%v，want 1,1,0,0", input[64:68])
 	}

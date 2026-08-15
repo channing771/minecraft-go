@@ -5,6 +5,8 @@ const PLAYER_HEIGHT: f32 = 1.8;
 const EPSILON: f32 = 1e-5;
 const GROUND_PROBE: f32 = 1e-4;
 
+pub(crate) const COLLISION_STEP_HEIGHT_OFFSET: usize = 36;
+
 type Vector = [f32; 3];
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -48,7 +50,7 @@ impl<'a> CollisionInput<'a> {
                 read_f32(bytes, 28),
             ],
             began_grounded: bytes[32] == 1,
-            step_height: read_f32(bytes, 36),
+            step_height: read_f32(bytes, COLLISION_STEP_HEIGHT_OFFSET),
             origin: [
                 read_i32(bytes, 40),
                 read_i32(bytes, 44),
