@@ -43,8 +43,8 @@
 
 ## 9. Task 10：完成累计独立评审与本地 gates
 
-- [ ] 9.1 使用独立只读评审核验两条 happens-before、单 std-only `mornlea_engine`、ABI v1/nativeabi leaf、collision/raycast layouts/atomicity/parity/laziness、macOS/Linux bundle、无图形专服和所有冻结 identity；对每项 finding 先复现或证伪，任何生产修复按范围重新冻结并重跑 Task 8 证据。
-- [ ] 9.2 仅在 Critical/Important/Minor 均为零后，运行 `gofmt -l .`、`go vet ./...`、`go test ./... -race`、`openspec validate rust-engine-collision-raycast-ci-stability --strict --no-interactive`、`openspec validate --all --strict --no-interactive`，勾选全部本地任务并确认只剩下 10.1 的真实 Linux PR-CI gate；archive 不是 active checkbox。
+- [x] 9.1 使用独立只读评审核验两条 happens-before、单 std-only `mornlea_engine`、ABI v1/nativeabi leaf、collision/raycast layouts/atomicity/parity/laziness、macOS/Linux bundle、无图形专服和所有冻结 identity；对每项 finding 先复现或证伪，任何生产修复按范围重新冻结并重跑 Task 8 证据。
+- [x] 9.2 仅在 Critical/Important/Minor 均为零后，运行 `gofmt -l .`、`go vet ./...`、`go test ./... -race`、`openspec validate rust-engine-collision-raycast-ci-stability --strict --no-interactive`、`openspec validate --all --strict --no-interactive`，勾选全部本地任务并确认只剩下 10.1 的真实 Linux PR-CI gate；archive 不是 active checkbox。
 
 ## 10. Task 11：经授权验证真实 Linux PR-CI
 
