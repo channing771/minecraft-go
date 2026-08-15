@@ -1,5 +1,14 @@
 # Apple M5 性能基线
 
+## Rust kernel 累计门禁 scenario v16（record-only，非新基线）
+
+2026-08-14 在冻结 producer `37f6fbe12d0b3ce15a500c8fdaadb358cbe5f688` 上完成完整本地/macOS 累计门禁。宿主为 Apple M5 / 24GiB、macOS 26.5.1、Go 1.26.0 darwin/arm64；scenario 为 `16`。Memory/TCP producer、自比较和显式 Memory→TCP 比较均通过，性能数值只记录。
+
+- Memory：`/private/tmp/mornlea-rust-kernel-attempt2-v16-37f6fbe12d0b3ce15a500c8fdaadb358cbe5f688/memory-v16.json`，SHA-256 `5bd268182693e4ed20d7391e5b8863935151b2be11093b417916634417277a2e`
+- TCP：`/private/tmp/mornlea-rust-kernel-attempt2-v16-37f6fbe12d0b3ce15a500c8fdaadb358cbe5f688/tcp-v16.json`，SHA-256 `97db856de51bc12a9899f4a469222cc917fc8840fefed26c4563691e9b41d578`
+
+这不是 baseline promotion：`perf-baseline.json`（M2 v15）和 `perf-baseline-m5.json`（M5 v14）未修改；完整性、身份、overflow、数据丢失与 I/O 仍为门禁。
+
 ## M5A scenario v16 record-only 证据（非新基线）
 
 2026-08-14 在冻结提交 `2c1eb2dc3e49b2534958a7575eabba6935be99a3` 上生成两份完整无窗口报告。两者身份均为 scenario `16`、Apple M5 / 24GiB、macOS 26.5.1、Go 1.26.0 darwin/arm64、2560×1440；Memory 与 TCP 分别自比较通过，并完成一次显式跨 transport 比较。性能数值只记录，没有建立或提升任何 baseline。
