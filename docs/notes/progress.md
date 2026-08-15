@@ -18,4 +18,6 @@
 
 当前 `mornlea_engine` 同时是物理 tick 积分的唯一生产实现；Go `physics.Step` 保留输入校验、tunables 快照、yaw 三角、位移凸包 sweep bounds 与 prism 编码，旧 Go 积分只作测试 oracle，生产无 fallback。
 
+当前 `mornlea_engine` 同时是世界生成（高度图地形、地表分层、矿石、橡树）的唯一生产实现；engine ABI 升到 v3，新增 `mornlea_worldgen_chunk` 整区块 dense 生成与 `mornlea_worldgen_probe` 64-record 单点查询。Go `worldgen` 保留 seed→perm 表播种（`math/rand` 语义）、材料表编码与 `world.Chunk` 回写，旧 Go 噪声/地形/矿石/橡树实现只作测试 oracle，生产无 fallback；同种子世界与迁移前逐位一致，差分门禁全平台启用。
+
 M5A 不包含 Planner、HTTP 模型调用、FIFO、移动、采掘、放置、跟随、persona 或摘要；这些能力仍属于后续 M5B–M5D 方向，开始真实变更前以新的 OpenSpec 为准。历史[设计](../superpowers/specs/2026-08-13-ai-native-companions-design.md)与[实施计划](../superpowers/plans/2026-08-13-m5a-companion-entity-chat.md)仅作决策背景。

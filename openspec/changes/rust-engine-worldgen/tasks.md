@@ -34,14 +34,14 @@
 - [x] 4.1 新增差分 fuzz/语料测试:随机种子×区块 dense 逐位对比 oracle、
       probe 与 chunk 交叉一致、跨区块橡树拼合一致;
       验证:`go test ./internal/worldgen -race -count=1`。
-- [ ] 4.2 运行既有矿石/橡树/自然材料行为测试与相关 golden,确认零改动通过;
+- [x] 4.2 运行既有矿石/橡树/自然材料行为测试与相关 golden,确认零改动通过;
       验证:`go test ./internal/worldgen ./internal/server -race -count=1`。
 
 ## 5. 收尾
 
-- [ ] 5.1 基准记录:运行区块生成相关 benchmark 与 `cmd/perfcheck`,数值只记录;
+- [x] 5.1 基准记录:运行区块生成相关 benchmark 与 `cmd/perfcheck`,数值只记录;
       验证:命令完成且报告完整。
-- [ ] 5.2 全量门禁:`gofmt -l .` 无输出、`go vet ./...`、
+- [x] 5.2 全量门禁:`gofmt -l .` 无输出、`go vet ./...`、
       `go test ./... -race`、`openspec validate --all --strict --no-interactive`。
-- [ ] 5.3 更新 `docs/notes/progress.md` 与 CLAUDE.md/AGENTS.md 项目定位段
+- [x] 5.3 更新 `docs/notes/progress.md` 与 CLAUDE.md/AGENTS.md 项目定位段
       (worldgen 加入 Rust 独占内核清单)。
