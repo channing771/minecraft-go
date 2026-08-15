@@ -1,3 +1,4 @@
+mod collision;
 mod ffi;
 mod greedy;
 mod light;

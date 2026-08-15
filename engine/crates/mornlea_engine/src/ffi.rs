@@ -1,5 +1,6 @@
 use std::mem::{align_of, size_of};
 
+use crate::collision::resolve_collision;
 use crate::greedy::{MeshError as GreedyError, center_is_air, mesh_section};
 use crate::input::{InputError, MeshInput};
 use crate::light::{LIGHT_VOLUME, LightScratch, MeshError as LightError, build_light};
@@ -21,6 +22,10 @@ const SCRATCH_PADDING: usize =
     (align_of::<u32>() - LIGHT_VOLUME % align_of::<u32>()) % align_of::<u32>();
 const SCRATCH_BYTES: usize = LIGHT_VOLUME + SCRATCH_PADDING + LIGHT_VOLUME * 4;
 const OUTPUT_CAPACITY: usize = 6 * 4096;
+const COLLISION_HEADER_BYTES: usize = 64;
+const COLLISION_CELL_BYTES: usize = 196;
+const COLLISION_OUTPUT_BYTES: usize = 16;
+const COLLISION_MAX_CELLS: usize = 4096;
 
 fn input_range_is_valid(input: *const u8, input_len: usize) -> bool {
     input_len <= isize::MAX as usize && input.addr().checked_add(input_len).is_some()
@@ -43,6 +48,146 @@ fn output_range_is_valid(output: *mut u64, output_capacity: usize) -> bool {
 
 fn ranges_overlap(left: usize, left_len: usize, right: usize, right_len: usize) -> bool {
     left < right + right_len && right < left + left_len
+}
+
+fn byte_range_is_valid(pointer: *const u8, length: usize) -> bool {
+    length <= isize::MAX as usize && pointer.addr().checked_add(length).is_some()
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(
+        bytes[offset..offset + 4]
+            .try_into()
+            .expect("validated range"),
+    )
+}
+
+fn read_i32(bytes: &[u8], offset: usize) -> i32 {
+    i32::from_le_bytes(
+        bytes[offset..offset + 4]
+            .try_into()
+            .expect("validated range"),
+    )
+}
+
+fn read_f32(bytes: &[u8], offset: usize) -> f32 {
+    f32::from_bits(read_u32(bytes, offset))
+}
+
+fn collision_input_is_valid(bytes: &[u8]) -> bool {
+    if bytes.len() < COLLISION_HEADER_BYTES
+        || &bytes[0..4] != b"MGC1"
+        || read_u32(bytes, 4) != 1
+        || !bytes[33..36].iter().all(|&value| value == 0)
+        || bytes[32] > 1
+    {
+        return false;
+    }
+    for offset in [8, 12, 16, 20, 24, 28, 36] {
+        if !read_f32(bytes, offset).is_finite() {
+            return false;
+        }
+    }
+
+    let dimensions = [
+        read_u32(bytes, 52),
+        read_u32(bytes, 56),
+        read_u32(bytes, 60),
+    ];
+    if dimensions.contains(&0) {
+        return false;
+    }
+    let Some(cell_count) = (dimensions[0] as usize)
+        .checked_mul(dimensions[1] as usize)
+        .and_then(|value| value.checked_mul(dimensions[2] as usize))
+    else {
+        return false;
+    };
+    if cell_count > COLLISION_MAX_CELLS {
+        return false;
+    }
+    let Some(expected_length) = cell_count
+        .checked_mul(COLLISION_CELL_BYTES)
+        .and_then(|cell_bytes| COLLISION_HEADER_BYTES.checked_add(cell_bytes))
+    else {
+        return false;
+    };
+    if expected_length != bytes.len() {
+        return false;
+    }
+    for axis in 0..3 {
+        let origin = read_i32(bytes, 40 + axis * 4);
+        if origin.checked_add((dimensions[axis] - 1) as i32).is_none() {
+            return false;
+        }
+        if !collision_prism_covers_input(bytes, dimensions) {
+            return false;
+        }
+    }
+    for cell in bytes[COLLISION_HEADER_BYTES..].chunks_exact(COLLISION_CELL_BYTES) {
+        if cell[0] > 1 || cell[1] > 8 || cell[2] != 0 || cell[3] != 0 {
+            return false;
+        }
+        for box_index in 0..cell[1] as usize {
+            let box_offset = 4 + box_index * 24;
+            for component in 0..6 {
+                if !read_f32(cell, box_offset + component * 4).is_finite() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn collision_prism_covers_input(bytes: &[u8], dimensions: [u32; 3]) -> bool {
+    const HALF_WIDTH: f32 = 0.3;
+    const PLAYER_HEIGHT: f32 = 1.8;
+    const EPSILON: f32 = 1e-5;
+    const GROUND_PROBE: f32 = 1e-4;
+    let position = [read_f32(bytes, 8), read_f32(bytes, 12), read_f32(bytes, 16)];
+    let displacement = [
+        read_f32(bytes, 20),
+        read_f32(bytes, 24),
+        read_f32(bytes, 28),
+    ];
+    let step_height = read_f32(bytes, 36);
+    let minimum = [
+        position[0].min(position[0] + displacement[0]) - HALF_WIDTH - EPSILON,
+        position[1] + 0_f32.min(displacement[1]).min(step_height) - GROUND_PROBE - EPSILON,
+        position[2].min(position[2] + displacement[2]) - HALF_WIDTH - EPSILON,
+    ];
+    let maximum = [
+        position[0].max(position[0] + displacement[0]) + HALF_WIDTH + EPSILON,
+        position[1] + 0_f32.max(displacement[1]).max(step_height) + PLAYER_HEIGHT + EPSILON,
+        position[2].max(position[2] + displacement[2]) + HALF_WIDTH + EPSILON,
+    ];
+    for axis in 0..3 {
+        if !minimum[axis].is_finite() || !maximum[axis].is_finite() {
+            return false;
+        }
+        let required_minimum = minimum[axis].floor() as i64;
+        let required_maximum = maximum[axis].floor() as i64;
+        let prism_minimum = read_i32(bytes, 40 + axis * 4) as i64;
+        let prism_maximum = prism_minimum + dimensions[axis] as i64 - 1;
+        if required_minimum < i32::MIN as i64
+            || required_maximum > i32::MAX as i64
+            || prism_minimum > required_minimum
+            || prism_maximum < required_maximum
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn catch_collision(
+    operation: impl FnOnce() -> Result<[u8; COLLISION_OUTPUT_BYTES], u32>,
+) -> Result<[u8; COLLISION_OUTPUT_BYTES], u32> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)) {
+        Ok(result) => result,
+        Err(_) => Err(MORNLEA_STATUS_PANIC),
+    }
 }
 
 fn catch_and_publish(
@@ -177,6 +322,51 @@ pub unsafe extern "C" fn mornlea_mesh_section(
     })
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_collision_resolve(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_len: usize,
+) -> u32 {
+    if abi_version != ABI_VERSION {
+        return MORNLEA_STATUS_ABI_VERSION;
+    }
+    if input.is_null() || output.is_null() {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if output_len < COLLISION_OUTPUT_BYTES {
+        return MORNLEA_STATUS_OUTPUT_OVERFLOW;
+    }
+    if output_len != COLLISION_OUTPUT_BYTES
+        || !byte_range_is_valid(input, input_len)
+        || !byte_range_is_valid(output, output_len)
+    {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if ranges_overlap(input.addr(), input_len, output.addr(), output_len) {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+
+    let result = catch_collision(|| {
+        // SAFETY: input 非空，范围不超过 isize::MAX，地址加法不回绕且不与 output 重叠。
+        let bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
+        if !collision_input_is_valid(bytes) {
+            return Err(MORNLEA_STATUS_INPUT);
+        }
+        Ok(resolve_collision(bytes))
+    });
+    match result {
+        Ok(result) => {
+            // SAFETY: output 非空、范围有效且与 input 不重叠；只在完整成功后一次发布。
+            unsafe { std::ptr::copy_nonoverlapping(result.as_ptr(), output, result.len()) };
+            MORNLEA_STATUS_OK
+        }
+        Err(status) => status,
+    }
+}
+
 #[cfg(test)]
 mod mesh_tests {
     use super::*;
@@ -191,11 +381,13 @@ mod tests {
     use std::mem::{align_of, size_of};
 
     use super::{
+        COLLISION_CELL_BYTES, COLLISION_HEADER_BYTES, COLLISION_MAX_CELLS, COLLISION_OUTPUT_BYTES,
         MORNLEA_STATUS_ABI_VERSION, MORNLEA_STATUS_EMISSION, MORNLEA_STATUS_INPUT,
         MORNLEA_STATUS_INVALID_ARGUMENT, MORNLEA_STATUS_OK, MORNLEA_STATUS_OUTPUT_OVERFLOW,
         MORNLEA_STATUS_PANIC, MORNLEA_STATUS_QUEUE_OVERFLOW, MORNLEA_STATUS_REGISTRY,
-        MORNLEA_STATUS_SCRATCH, SCRATCH_BYTES, catch_and_publish, input_range_is_valid,
-        mornlea_mesh_section, output_range_is_valid, scratch_range_is_valid,
+        MORNLEA_STATUS_SCRATCH, SCRATCH_BYTES, catch_and_publish, catch_collision,
+        input_range_is_valid, mornlea_collision_resolve, mornlea_mesh_section,
+        output_range_is_valid, scratch_range_is_valid,
     };
     use crate::input::tests::valid_input;
 
@@ -208,6 +400,54 @@ mod tests {
 
         assert_eq!(status, MORNLEA_STATUS_PANIC);
         assert_eq!(output_len, 0);
+    }
+
+    #[test]
+    fn collision_layout_v1_is_stable() {
+        assert_eq!(COLLISION_HEADER_BYTES, 64);
+        assert_eq!(COLLISION_CELL_BYTES, 196);
+        assert_eq!(COLLISION_OUTPUT_BYTES, 16);
+        assert_eq!(
+            COLLISION_HEADER_BYTES + COLLISION_MAX_CELLS * COLLISION_CELL_BYTES,
+            802_880
+        );
+    }
+
+    #[test]
+    fn collision_panic_is_contained_without_result() {
+        let result = catch_collision(|| -> Result<[u8; COLLISION_OUTPUT_BYTES], u32> {
+            panic!("测试 panic")
+        });
+        assert_eq!(result, Err(MORNLEA_STATUS_PANIC));
+    }
+
+    #[test]
+    fn malformed_collision_input_keeps_output_unchanged() {
+        let mut input = [0_u8; 64 + 4 * 196];
+        input[0..4].copy_from_slice(b"MGC1");
+        input[4..8].copy_from_slice(&1_u32.to_le_bytes());
+        for (offset, value) in [(8, 0.5_f32), (12, 1.0), (16, 0.5), (36, 0.6)] {
+            input[offset..offset + 4].copy_from_slice(&value.to_bits().to_le_bytes());
+        }
+        input[32] = 1;
+        input[33] = 1;
+        input[52..56].copy_from_slice(&1_u32.to_le_bytes());
+        input[56..60].copy_from_slice(&4_u32.to_le_bytes());
+        input[60..64].copy_from_slice(&1_u32.to_le_bytes());
+        let mut output = [0xa5_u8; 16];
+
+        let status = unsafe {
+            mornlea_collision_resolve(
+                1,
+                input.as_ptr(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_INPUT);
+        assert_eq!(output, [0xa5; 16]);
     }
 
     #[test]

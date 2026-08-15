@@ -20,8 +20,8 @@
 
 ## 5. Task 6：实现 collision ABI 与 test-only Go oracle parity
 
-- [ ] 5.1 在 `engine/include/mornlea_engine.h`、`ffi.rs`、`collision.rs` 与 `internal/nativeabi` 追加 collision v1 entry point；冻结 64/196/16-byte little-endian layout、双层输入校验、catch_unwind、无部分 output 和 ABI v1/status 复用。
-- [ ] 5.2 在 `internal/physics/*_test.go` 机械保留旧 Go collision/step oracle，并覆盖 Y/X/Z、unknown closed、严格 step、Count 8/9/255 clamp、4096 成功/4097 查询前 panic、并发、逐位 parity、fuzz 与零 allocation；运行 Cargo fmt/clippy/test、focused physics/nativeabi race、fuzz 30s、archcheck 与 targeted mutation RED/GREEN。
+- [x] 5.1 在 `engine/include/mornlea_engine.h`、`ffi.rs`、`collision.rs` 与 `internal/nativeabi` 追加 collision v1 entry point；冻结 64/196/16-byte little-endian layout、双层输入校验、catch_unwind、无部分 output 和 ABI v1/status 复用。
+- [x] 5.2 在 `internal/physics/*_test.go` 机械保留旧 Go collision/step oracle，并覆盖 Y/X/Z、unknown closed、严格 step、Count 8/9/255 clamp、4096 成功/4097 查询前 panic、并发、逐位 parity、fuzz 与零 allocation；运行 Cargo fmt/clippy/test、focused physics/nativeabi race、fuzz 30s、archcheck 与 targeted mutation RED/GREEN。
 
 ## 6. Task 7：将生产 collision 切到 Rust 并交付 Linux server bundle
 
