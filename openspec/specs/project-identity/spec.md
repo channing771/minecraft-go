@@ -9,14 +9,19 @@
 ### Requirement: 当前项目身份统一为 Mornlea
 系统 MUST 以 `Mornlea` 作为当前产品名，以 `github.com/channing771/mornlea` 作为 Go module，以 `mornlea` 和 `mornlea-server` 作为客户端与专用服务端命令。
 
-#### Scenario: clean checkout 构建新入口
-- **WHEN** 从 clean checkout 执行 canonical build
-- **THEN** MUST 生成 `bin/mornlea` 与同目录 `libmornlea_mesh.dylib`
-- **AND** `cmd/mornlea-server` MUST 继续可在 Linux 无 CGO 下独立构建
+#### Scenario: clean checkout 构建当前入口
+- **WHEN** 在 Apple Silicon/macOS 执行 canonical build
+- **THEN** MUST 生成 `bin/mornlea`、`bin/mornlea-server` 与同目录 `libmornlea_engine.dylib`
+
+#### Scenario: Linux 专服发布为同目录 bundle
+- **WHEN** 在 Linux amd64 原生执行 canonical server build
+- **THEN** MUST 生成同目录 `mornlea-server` 与 `libmornlea_engine.so`
+- **AND** 两者 MUST 作为一个不可混装的发布单元升级
 
 #### Scenario: 旧入口不再发布
 - **WHEN** 枚举当前 module、命令、native ABI、构建和 Hook 身份
-- **THEN** MUST 不存在 `mcgo`/`mcgod` wrapper、旧 C symbol、旧 dylib 或旧环境变量 fallback
+- **THEN** MUST 不存在 `mcgo`/`mcgod` wrapper、旧 `mcgo` C symbol、`libmornlea_mesh.dylib`、`libmornlea_mesh.so` 或旧环境变量 fallback
+- **AND** additive ABI v1 的 `mornlea_mesh_section` MUST 继续保留
 
 ### Requirement: 改名保持固定行为与 artifact
 系统 MUST 保留 M4Q 纯改名冻结时协议 v15、区块 schema v8、玩家 schema v6、metadata v2、benchmark scenario v15、10 张 golden、ABI version/status、fixture 与性能 baseline 逐字节不变的历史证据。当前 M5A MUST 使用协议 v16 和 benchmark scenario v16，并 MUST 在保持原 10 张 golden 不变的前提下只追加 `ai-companion` 为第 11 张；区块 schema v8、玩家 schema v6、metadata v2、ABI 与既有性能 baseline MUST 继续不变。
