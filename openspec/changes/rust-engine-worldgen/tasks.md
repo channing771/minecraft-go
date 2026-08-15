@@ -31,7 +31,7 @@
 
 ## 4. 差分与一致性门禁
 
-- [ ] 4.1 新增差分 fuzz/语料测试:随机种子×区块 dense 逐位对比 oracle、
+- [x] 4.1 新增差分 fuzz/语料测试:随机种子×区块 dense 逐位对比 oracle、
       probe 与 chunk 交叉一致、跨区块橡树拼合一致;
       验证:`go test ./internal/worldgen -race -count=1`。
 - [ ] 4.2 运行既有矿石/橡树/自然材料行为测试与相关 golden,确认零改动通过;
