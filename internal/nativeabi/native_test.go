@@ -87,6 +87,8 @@ func TestEngineCgoDirectivesArePresent(t *testing.T) {
 		"#cgo nocallback mornlea_collision_resolve",
 		"#cgo noescape mornlea_raycast_batch",
 		"#cgo nocallback mornlea_raycast_batch",
+		"#cgo noescape mornlea_physics_step",
+		"#cgo nocallback mornlea_physics_step",
 	} {
 		if !strings.Contains(string(contents), directive) {
 			t.Errorf("缺少 %s", directive)
@@ -153,6 +155,58 @@ func TestCollisionRawFailureAtomicity(t *testing.T) {
 		if got := collisionStatusPanicText(test.status); got != test.want {
 			t.Fatalf("status %d panic=%q，想要 %q", test.status, got, test.want)
 		}
+	}
+}
+
+func testValidPhysicsStepInput() []byte {
+	input := make([]byte, 128+196)
+	copy(input[:4], "MGP1")
+	binary.LittleEndian.PutUint32(input[4:8], 1)
+	for _, offset := range []int{8, 12, 16, 20, 24, 28, 36, 40, 44} {
+		binary.LittleEndian.PutUint32(input[offset:offset+4], math.Float32bits(0))
+	}
+	for index, value := range [...]float32{0.6, 4.3, 40, 50, 8, 8.4, 32, 78.4} {
+		binary.LittleEndian.PutUint32(input[48+index*4:52+index*4], math.Float32bits(value))
+	}
+	for _, offset := range []int{80, 84, 88, 92, 96, 100} {
+		binary.LittleEndian.PutUint32(input[offset:offset+4], math.Float32bits(0))
+	}
+	for index := range 3 {
+		binary.LittleEndian.PutUint32(input[116+index*4:120+index*4], 1)
+	}
+	input[128] = 1 // cell loaded
+	return input
+}
+
+func TestPhysicsStepRawFailureAtomicity(t *testing.T) {
+	validInput := testValidPhysicsStepInput()
+	malformed := slices.Clone(validInput)
+	malformed[33] = 2 // jump 非法
+	for _, test := range []struct {
+		name    string
+		version uint32
+		input   []byte
+		output  []byte
+		want    Status
+	}{
+		{name: "ABI version", version: ABIVersion + 1, input: validInput, output: make([]byte, 32), want: StatusABIVersion},
+		{name: "nil input", version: ABIVersion, output: make([]byte, 32), want: StatusInvalidArgument},
+		{name: "short input", version: ABIVersion, input: validInput[:127], output: make([]byte, 32), want: StatusInput},
+		{name: "long input", version: ABIVersion, input: append(slices.Clone(validInput), 0), output: make([]byte, 32), want: StatusInput},
+		{name: "jump flag", version: ABIVersion, input: malformed, output: make([]byte, 32), want: StatusInput},
+		{name: "short output", version: ABIVersion, input: validInput, output: make([]byte, 31), want: StatusOutputOverflow},
+		{name: "long output", version: ABIVersion, input: validInput, output: make([]byte, 33), want: StatusInvalidArgument},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := slices.Clone(test.output)
+			status := physicsStepVersion(test.version, test.input, output)
+			if status != test.want {
+				t.Fatalf("status=%d，想要 %d", status, test.want)
+			}
+			if !slices.Equal(output, test.output) {
+				t.Fatal("失败调用修改了 caller-owned output")
+			}
+		})
 	}
 }
 

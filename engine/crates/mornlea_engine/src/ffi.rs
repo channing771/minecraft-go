@@ -8,8 +8,18 @@ use crate::raycast::{
     RAYCAST_CURSOR_BYTES, RAYCAST_INPUT_BYTES, RAYCAST_OUTPUT_BYTES, RaycastBatch, raycast_batch,
     raycast_cursor_overflow_is_valid,
 };
+use crate::step::{STEP_HEADER_BYTES, STEP_OUTPUT_BYTES, physics_step};
 
-pub(crate) const ABI_VERSION: u32 = 1;
+pub(crate) const ABI_VERSION: u32 = 2;
+
+// 输入长度校验委托给 step::step_input_is_valid（内部使用 STEP_HEADER_BYTES），此常量保留供 ABI 文档对齐。
+#[allow(dead_code)]
+const PHYSICS_STEP_HEADER_BYTES: usize = STEP_HEADER_BYTES;
+const PHYSICS_STEP_OUTPUT_BYTES: usize = STEP_OUTPUT_BYTES;
+
+fn physics_step_input_is_valid(bytes: &[u8]) -> bool {
+    crate::step::step_input_is_valid(bytes)
+}
 
 pub(crate) const MORNLEA_STATUS_OK: u32 = 0;
 pub(crate) const MORNLEA_STATUS_ABI_VERSION: u32 = 1;
@@ -392,6 +402,63 @@ unsafe fn collision_resolve_with(
     }
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_physics_step(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_len: usize,
+) -> u32 {
+    // SAFETY: C 调用方提供原始缓冲区；helper 会在解引用前验证指针、范围、长度与重叠。
+    unsafe { physics_step_with(abi_version, input, input_len, output, output_len) }
+}
+
+unsafe fn physics_step_with(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_len: usize,
+) -> u32 {
+    if abi_version != ABI_VERSION {
+        return MORNLEA_STATUS_ABI_VERSION;
+    }
+    if input.is_null() || output.is_null() {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if output_len < PHYSICS_STEP_OUTPUT_BYTES {
+        return MORNLEA_STATUS_OUTPUT_OVERFLOW;
+    }
+    if output_len != PHYSICS_STEP_OUTPUT_BYTES
+        || !byte_range_is_valid(input, input_len)
+        || !byte_range_is_valid(output, output_len)
+    {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if ranges_overlap(input.addr(), input_len, output.addr(), output_len) {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: input 非空，范围不超过 isize::MAX，地址加法不回绕且不与 output 重叠。
+        let bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
+        if !physics_step_input_is_valid(bytes) {
+            return Err(MORNLEA_STATUS_INPUT);
+        }
+        physics_step(bytes).map_err(|_| MORNLEA_STATUS_INPUT)
+    }));
+    match result {
+        Ok(Ok(result)) => {
+            // SAFETY: output 非空、范围有效且与 input 不重叠；只在完整成功后一次发布。
+            unsafe { std::ptr::copy_nonoverlapping(result.as_ptr(), output, result.len()) };
+            MORNLEA_STATUS_OK
+        }
+        Ok(Err(status)) => status,
+        Err(_) => MORNLEA_STATUS_PANIC,
+    }
+}
+
 fn raycast_input_is_valid(bytes: &[u8]) -> bool {
     if bytes.len() != RAYCAST_INPUT_BYTES
         || &bytes[0..4] != b"MGR1"
@@ -619,8 +686,8 @@ mod mesh_tests {
     use super::*;
 
     #[test]
-    fn exported_version_is_one() {
-        assert_eq!(mornlea_engine_abi_version(), 1);
+    fn exported_version_is_two() {
+        assert_eq!(mornlea_engine_abi_version(), 2);
     }
 }
 #[cfg(test)]
@@ -764,7 +831,7 @@ mod tests {
 
         let status = unsafe {
             collision_resolve_with(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 caller_output[1..].as_mut_ptr(),
@@ -790,7 +857,7 @@ mod tests {
 
         let status = unsafe {
             raycast_batch_with(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 cursor_arena[1..].as_mut_ptr(),
@@ -820,7 +887,7 @@ mod tests {
 
         let status = unsafe {
             raycast_batch_with(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 cursor_arena[1..].as_mut_ptr(),
@@ -884,7 +951,7 @@ mod tests {
 
             let status = unsafe {
                 super::mornlea_raycast_batch(
-                    1,
+                    2,
                     input_pointer,
                     input.len(),
                     cursor_pointer,
@@ -934,7 +1001,7 @@ mod tests {
 
             let status = unsafe {
                 super::mornlea_raycast_batch(
-                    1,
+                    2,
                     input_pointer,
                     RAYCAST_INPUT_BYTES,
                     cursor_pointer,
@@ -966,7 +1033,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                1,
+                2,
                 std::ptr::without_provenance::<u8>(usize::MAX),
                 RAYCAST_INPUT_BYTES,
                 cursor.0.as_mut_ptr(),
@@ -996,7 +1063,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 cursor.as_mut_ptr(),
@@ -1025,7 +1092,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 cursor.as_mut_ptr(),
@@ -1057,7 +1124,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 cursor.0.as_mut_ptr(),
@@ -1382,7 +1449,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                1,
+                2,
                 input_arena[1..].as_ptr(),
                 RAYCAST_INPUT_BYTES,
                 cursor_arena[1..].as_mut_ptr(),
@@ -1433,7 +1500,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 cursor_arena[1..].as_mut_ptr(),
@@ -1545,7 +1612,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                1,
+                2,
                 input_pointer,
                 input_len,
                 cursor_pointer,
@@ -1594,7 +1661,7 @@ mod tests {
 
         let status = unsafe {
             mornlea_collision_resolve(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 output.as_mut_ptr(),
@@ -1614,7 +1681,7 @@ mod tests {
         let mut output_len = usize::MAX;
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1639,7 +1706,7 @@ mod tests {
 
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1700,7 +1767,7 @@ mod tests {
             let mut output_len = usize::MAX;
             let status = unsafe {
                 mornlea_mesh_section(
-                    1,
+                    2,
                     input.as_ptr(),
                     input.len(),
                     scratch.as_mut_ptr().cast(),
@@ -1730,7 +1797,7 @@ mod tests {
 
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1762,7 +1829,7 @@ mod tests {
 
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1830,7 +1897,7 @@ mod tests {
         // SAFETY: 被测入口在构造 slice 前拒绝超过 isize::MAX 的长度。
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 isize::MAX as usize + 1,
                 scratch.as_mut_ptr().cast(),
@@ -1852,7 +1919,7 @@ mod tests {
         // SAFETY: 被测入口在构造 slice 前拒绝地址加一发生回绕的范围。
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 std::ptr::without_provenance(usize::MAX),
                 1,
                 scratch.as_mut_ptr().cast(),
@@ -1893,7 +1960,7 @@ mod tests {
         let mut output_len = usize::MAX;
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                3,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1954,7 +2021,7 @@ mod tests {
             // SAFETY: 本测试提供有效对齐的独占缓冲区，长度均与切片一致。
             let status = unsafe {
                 mornlea_mesh_section(
-                    1,
+                    2,
                     case.as_ptr(),
                     case.len(),
                     scratch.as_mut_ptr().cast(),
@@ -1972,7 +2039,7 @@ mod tests {
         // SAFETY: 除被测的空 input 指针外，其余缓冲区均有效且对齐。
         let null_input = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 std::ptr::null(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1989,7 +2056,7 @@ mod tests {
         // SAFETY: scratch 指针有效但长度被刻意缩短一个字节。
         let short_scratch = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2006,7 +2073,7 @@ mod tests {
         // SAFETY: output 指针有效且对齐，capacity 被刻意缩短一个元素。
         let short_output = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2030,7 +2097,7 @@ mod tests {
         // SAFETY: 除被测的空 output_len 指针外，其余指针均有效且对齐。
         let null_output_len = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2045,7 +2112,7 @@ mod tests {
         // SAFETY: 除被测的空 scratch 指针外，其余指针均有效且对齐。
         let null_scratch = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 std::ptr::null_mut(),
@@ -2062,7 +2129,7 @@ mod tests {
         // SAFETY: 除被测的空 output 指针外，其余指针均有效且对齐。
         let null_output = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2079,7 +2146,7 @@ mod tests {
         // SAFETY: scratch 分配足够大；加一字节只用于验证未对齐检查，函数不会解引用。
         let misaligned_scratch = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast::<u8>().add(1),
@@ -2096,7 +2163,7 @@ mod tests {
         // SAFETY: scratch 额外分配了一个 u64；加四字节仅用于验证 8-byte 对齐检查。
         let four_byte_aligned_scratch = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast::<u8>().add(4),
@@ -2113,7 +2180,7 @@ mod tests {
         // SAFETY: output 分配足够大；加一字节只用于验证未对齐检查，函数不会解引用。
         let misaligned_output = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2130,7 +2197,7 @@ mod tests {
         // SAFETY: output_len 分配足够大；加一字节只用于验证未对齐检查，函数不会解引用。
         let misaligned_output_len = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2154,7 +2221,7 @@ mod tests {
         // SAFETY: output_len 为被测的对齐伪地址；入口必须在任何 write 前因地址回绕返回。
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2177,7 +2244,7 @@ mod tests {
         // SAFETY: 共享 buffer 容量同时满足 scratch 与 output；入口应在创建任何 Rust slice 前拒绝重叠。
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 shared.as_mut_ptr().cast(),
@@ -2207,7 +2274,7 @@ mod tests {
         // SAFETY: 每个指针都有效且容量足够；被测入口必须在创建 slice 前拒绝 input/output 别名。
         let status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 shared.as_ptr().cast(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2237,7 +2304,7 @@ mod tests {
         // SAFETY: output_len 刻意指向 input；入口可写零，但必须在构造 input slice 前拒绝别名。
         let input_status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 shared_input.as_ptr().cast(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2253,7 +2320,7 @@ mod tests {
         // SAFETY: output_len 刻意指向 output；入口必须在构造 output slice 前拒绝别名。
         let output_status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2281,7 +2348,7 @@ mod tests {
         // SAFETY: 除被测的 input/scratch 重叠外，其余指针与容量都有效；入口应在构造 slice 前拒绝。
         let input_status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 shared_input_ptr,
                 input.len(),
                 shared_input_ptr,
@@ -2299,7 +2366,7 @@ mod tests {
         // SAFETY: 除被测的 scratch/output_len 重叠外，其余指针与容量都有效；入口先将 output_len 原子清零再拒绝重叠。
         let output_len_status = unsafe {
             mornlea_mesh_section(
-                1,
+                2,
                 input.as_ptr(),
                 input.len(),
                 shared_output_len.as_mut_ptr().cast(),

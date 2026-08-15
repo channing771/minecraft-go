@@ -16,4 +16,6 @@
 
 当前 `mornlea_engine` 同时是方块射线 DDA 的唯一生产实现；Rust 以 caller-owned 64-record cursor batch 生成候选格，Go `core.RaycastBlocks` 仍保留输入校验、单次归一化、惰性 callback、首个 error identity 和 `RayHit.Point`。旧 Go DDA 只作测试 oracle，生产无 fallback。
 
+当前 `mornlea_engine` 同时是物理 tick 积分的唯一生产实现；Go `physics.Step` 保留输入校验、tunables 快照、yaw 三角、位移凸包 sweep bounds 与 prism 编码，旧 Go 积分只作测试 oracle，生产无 fallback。
+
 M5A 不包含 Planner、HTTP 模型调用、FIFO、移动、采掘、放置、跟随、persona 或摘要；这些能力仍属于后续 M5B–M5D 方向，开始真实变更前以新的 OpenSpec 为准。历史[设计](../superpowers/specs/2026-08-13-ai-native-companions-design.md)与[实施计划](../superpowers/plans/2026-08-13-m5a-companion-entity-chat.md)仅作决策背景。
