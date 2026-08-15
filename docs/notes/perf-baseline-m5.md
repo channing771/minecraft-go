@@ -2,7 +2,7 @@
 
 ## rust-engine-physics-step 物理 Step 积分迁移 record-only 备注（非新基线）
 
-2026-08-15 在 rust-engine-physics-step 变更 Task 10 收尾验证中记录；宿主 Apple M5 / 24GiB、Go 1.26.0 darwin/arm64、Rust/cargo 1.97.1，同一主机同一 `go test ./internal/physics -run '^$' -bench . -benchmem -count=1` 命令。
+2026-08-15 在 rust-engine-physics-step 变更 Task 10 收尾验证中记录；宿主 Apple M5 / 24GiB、Go 1.26.0 darwin/arm64、Rust/cargo 1.97.1，同一主机同一 `go test ./internal/physics -run '^$' -bench . -benchmem -count=1` 命令。该组数值测量于 `1b4ad98`（本变更 1–9 完成时），最终 HEAD 为 `a92f076`。
 
 - 迁移后（HEAD `1b4ad98`，生产 `physics.Step` 走 native `mornlea_physics_step`）：`BenchmarkStepPlayerFlat` 779.1 ns/op、`BenchmarkStepPlayerColliding` 976.7 ns/op、`BenchmarkStepPlayerStepping` 974.3 ns/op，均 0 B/op、0 allocs/op。
 - 迁移前（commit `b44227e`，生产 Step 仍为 Go 积分、collision 走 native）：`BenchmarkStepPlayerFlat` 726.6 ns/op、`BenchmarkStepPlayerColliding` 941.6 ns/op、`BenchmarkStepPlayerStepping` 944.6 ns/op，均 0 allocs/op。

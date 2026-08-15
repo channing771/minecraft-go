@@ -274,13 +274,16 @@ fn write_f32_output(output: &mut [u8], offset: usize, value: f32) {
 pub(crate) fn physics_step(bytes: &[u8]) -> Result<[u8; STEP_OUTPUT_BYTES], StepError> {
     let input = StepInput::decode(bytes);
     let (velocity, displacement) = integrate(&input);
+    // 三轴 sweep bounds 自检带 1 ulp 余量：Go 在 amd64 不做 FMA 收缩，sweep bounds
+    // 与积分位移可差 1 ulp。位移在界内或界外至多 1 ulp 均通过，物理正确性由 prism
+    // 构建的 1e-5 epsilon 边距兜底；相差超过 1 ulp 仍拒绝。
     for ((&minimum, &maximum), &offset) in input
         .sweep_min
         .iter()
         .zip(&input.sweep_max)
         .zip(&displacement)
     {
-        if !(minimum <= offset && offset <= maximum) {
+        if !(minimum.next_down() <= offset && offset <= maximum.next_up()) {
             return Err(StepError::DisplacementOutOfBounds);
         }
     }
@@ -631,6 +634,38 @@ mod tests {
         // 基础夹具 on_ground=1、velocity y=-1.6、sweep dy=[-0.08,0.05]，
         // 积分 dy = -0.16 越界 → DisplacementOutOfBounds。
         let input_bytes = Box::leak(valid_step_bytes().into_boxed_slice());
+        assert!(matches!(
+            physics_step(input_bytes),
+            Err(StepError::DisplacementOutOfBounds)
+        ));
+    }
+
+    #[test]
+    fn physics_step_allows_one_ulp_outside_sweep_bounds() {
+        // 位移恰好等于 sweep_max.next_up()（界外 1 ulp）应通过：Go 在 amd64 不收缩
+        // FMA，界与积分位移可差 1 ulp，物理正确性由 prism 的 epsilon 边距兜底。
+        let mut bytes = empty_prism_bytes();
+        let displacement = {
+            let input = StepInput::decode(&bytes);
+            integrate(&input).1
+        };
+        write_f32(&mut bytes, 88, displacement[1].next_down()); // dy_min 取更小确定值
+        write_f32(&mut bytes, 92, displacement[1].next_down()); // dy_max = 位移 − 1 ulp
+        let input_bytes = Box::leak(bytes.into_boxed_slice());
+        assert!(physics_step(input_bytes).is_ok());
+    }
+
+    #[test]
+    fn physics_step_rejects_two_ulp_outside_sweep_bounds() {
+        // 位移为 sweep_max.next_up().next_up()（界外 2 ulp）→ DisplacementOutOfBounds。
+        let mut bytes = empty_prism_bytes();
+        let displacement = {
+            let input = StepInput::decode(&bytes);
+            integrate(&input).1
+        };
+        write_f32(&mut bytes, 88, displacement[1].next_down()); // dy_min 取更小确定值
+        write_f32(&mut bytes, 92, displacement[1].next_down().next_down()); // dy_max = 位移 − 2 ulp
+        let input_bytes = Box::leak(bytes.into_boxed_slice());
         assert!(matches!(
             physics_step(input_bytes),
             Err(StepError::DisplacementOutOfBounds)

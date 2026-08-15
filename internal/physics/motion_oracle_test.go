@@ -9,6 +9,7 @@ import (
 )
 
 // oracleStep 是旧 Go 积分实现的逐字副本（生产曾位于 motion.go），
+// （三处 sanctioned 差异：tunables 作参数、省去 validate、collision 走 oracleResolveCollision）
 // 只用于与 native 生产路径做逐位奇偶断言。不得在生产代码引用。
 func oracleStep(
 	state physics.State,

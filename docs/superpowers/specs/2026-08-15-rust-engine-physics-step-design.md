@@ -211,6 +211,12 @@ openspec validate --all --strict --no-interactive
 3. **性能回退**：header 增加 80 字节、输出 32 字节，编码量略增；每 tick 仍一次 native
    调用。缓解：benchmark/perfcheck 记录数值对照。
 4. **Rust panic 跨 FFI**：catch_unwind + `StatusPanic` → 中文 panic 文案，与现有模式一致。
+5. **平台差异（arm64 奇偶 vs amd64 1 ulp）**：奇偶差分门禁只在 arm64（开发机与 macOS CI）
+   运行；amd64 上 Go bounds/oracle 不收缩而 Rust mul_add 融合（IEEE 正确舍入，跨平台一致），
+   二者可差 ≤1 ulp，由 prism 1e-5 epsilon 边距与自检 1 ulp 余量兜底；生产跨平台确定性由
+   Rust 单一内核保证。
+6. **非有限 tunables 行为变化**：旧 Go 对非有限 tunables 静默产出 NaN；新路径 Rust 校验在
+   输入阶段拒绝（fail-fast，返回 StatusInput 而非 NaN 结果）。
 
 ### 7.3 回退
 

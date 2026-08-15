@@ -121,7 +121,7 @@ func TestMornleaServerHasNoGraphicsDependencies(t *testing.T) {
 	}
 }
 
-func TestPhysicsUsesOnlyNativeCollision(t *testing.T) {
+func TestPhysicsStepUsesOnlyNative(t *testing.T) {
 	root := filepath.Join(moduleRoot(t), "internal", "physics")
 
 	foundNativeABI := false

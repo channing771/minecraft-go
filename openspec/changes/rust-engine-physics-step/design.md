@@ -14,3 +14,9 @@
 - collision.rs 拆分 `resolve_collision_parts`，cells 切片零拷贝复用输入尾部。
 - 依赖方向不变：physics → nativeabi → C ABI；archcheck 无需登记新边。
 - 回退：单 PR revert 恢复旧布局；oracle 即旧实现副本，可随时移回生产。
+
+## 平台假设
+
+奇偶差分门禁只在 arm64（开发机与 macOS CI）运行；amd64 上 Go bounds/oracle 不收缩而
+Rust mul_add 融合（IEEE 正确舍入，跨平台一致），二者可差 ≤1 ulp，由 prism 1e-5 epsilon
+边距与自检 1 ulp 余量兜底；生产跨平台确定性由 Rust 单一内核保证。

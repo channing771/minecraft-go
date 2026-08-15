@@ -42,14 +42,20 @@ SetTunables 之后的下一次 Step MUST 使用新参数。
 
 ### Requirement: sweep bounds 违约拒绝
 
-当输入携带的位移界不含该步积分位移时，调用 MUST 被拒绝并报告稳定中文 panic 文案，且
-MUST 不产出静默漂移结果。
+当输入携带的位移界与积分位移相差超过 1 ulp 时，调用 MUST 被拒绝并报告稳定中文 panic
+文案，且 MUST 不产出静默漂移结果；位移在界内或界外至多 1 ulp 时 MUST 通过。
 
-#### Scenario: 位移越界被拒绝
+#### Scenario: 位移越界超过 1 ulp 被拒绝
 
-- GIVEN 合法 state/input 但输入 sweep bounds 不含该步积分位移
+- GIVEN 合法 state/input 但输入 sweep bounds 与该步积分位移相差超过 1 ulp
 - WHEN 调用 native physics_step
 - THEN 返回 StatusInput，且输出缓冲不被修改
+
+#### Scenario: 位移在界内或界外至多 1 ulp 通过
+
+- GIVEN 合法 state/input，且该步积分位移在 sweep bounds 界内或界外至多 1 ulp
+- WHEN 调用 native physics_step
+- THEN 正常返回积分与碰撞结果，不返回 StatusInput
 
 ### Requirement: 碰撞差分入口保留
 
