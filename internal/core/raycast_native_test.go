@@ -241,37 +241,54 @@ func TestRaycastBlocksExtremeFiniteInputPreservesSecondCellHit(t *testing.T) {
 }
 
 func TestRaycastBlocksExtremeFiniteInputContinuesAcrossBatch(t *testing.T) {
-	origin := mgl32.Vec3{float32(math.MaxInt32), 0.5, 0.5}
-	target := BlockPos{X: math.MinInt32 + 64}
-	for _, directionX := range []float32{1e-30, 1e-40} {
-		direction := mgl32.Vec3{directionX, 1, 0}
-		for _, test := range []struct {
-			name    string
-			raycast func(mgl32.Vec3, mgl32.Vec3, float32, func(BlockPos) (bool, error)) (RayHit, bool, error)
-		}{
-			{name: "oracle", raycast: oracleRaycastBlocks},
-			{name: "native", raycast: RaycastBlocks},
-		} {
-			t.Run(test.name+"/"+strconv.FormatUint(uint64(math.Float32bits(directionX)), 16), func(t *testing.T) {
-				sentinel := errors.New("cross-batch sentinel")
-				calls := 0
-				var last BlockPos
-				_, found, err := test.raycast(origin, direction, 1, func(position BlockPos) (bool, error) {
-					calls++
-					last = position
-					if calls == 65 {
-						return false, sentinel
+	extreme := float32(math.MaxInt32)
+	for _, ray := range []struct {
+		name              string
+		origin, direction mgl32.Vec3
+		target            BlockPos
+	}{
+		{name: "single axis finite delta", origin: mgl32.Vec3{extreme, 0.5, 0.5}, direction: mgl32.Vec3{1e-30, 1, 0}, target: BlockPos{X: math.MinInt32 + 64}},
+		{name: "single axis infinite delta", origin: mgl32.Vec3{extreme, 0.5, 0.5}, direction: mgl32.Vec3{1e-40, 1, 0}, target: BlockPos{X: math.MinInt32 + 64}},
+		{name: "untouched infinite delta after negative infinity", origin: mgl32.Vec3{extreme, extreme, 0.5}, direction: mgl32.Vec3{1e-30, 1e-40, 1}, target: BlockPos{X: math.MinInt32 + 64, Y: math.MinInt32}},
+		{name: "untouched infinite delta after NaN", origin: mgl32.Vec3{extreme, extreme, 0.5}, direction: mgl32.Vec3{1e-40, 1e-40, 1}, target: BlockPos{X: math.MinInt32 + 64, Y: math.MinInt32}},
+	} {
+		t.Run(ray.name, func(t *testing.T) {
+			var oracleVisited [65]BlockPos
+			for _, test := range []struct {
+				name    string
+				raycast func(mgl32.Vec3, mgl32.Vec3, float32, func(BlockPos) (bool, error)) (RayHit, bool, error)
+			}{
+				{name: "oracle", raycast: oracleRaycastBlocks},
+				{name: "native", raycast: RaycastBlocks},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					sentinel := errors.New("cross-batch sentinel")
+					calls := 0
+					var visited [65]BlockPos
+					_, found, err := test.raycast(ray.origin, ray.direction, 1, func(position BlockPos) (bool, error) {
+						if calls < len(visited) {
+							visited[calls] = position
+						}
+						calls++
+						if calls == 65 {
+							return false, sentinel
+						}
+						return false, nil
+					})
+					if err != sentinel || found || calls != 65 {
+						t.Fatalf("found/err/calls=%v/%v/%d，想要 false/sentinel/65", found, err, calls)
 					}
-					return false, nil
+					if visited[64] != ray.target {
+						t.Fatalf("callback[64]=%+v，想要 %+v", visited[64], ray.target)
+					}
+					if test.name == "oracle" {
+						oracleVisited = visited
+					} else if visited != oracleVisited {
+						t.Fatalf("native callback 顺序=%+v，oracle=%+v", visited, oracleVisited)
+					}
 				})
-				if err != sentinel || found || calls != 65 {
-					t.Fatalf("found/err/calls=%v/%v/%d，想要 false/sentinel/65", found, err, calls)
-				}
-				if last != target {
-					t.Fatalf("callback[64]=%+v，想要 %+v", last, target)
-				}
-			})
-		}
+			}
+		})
 	}
 }
 

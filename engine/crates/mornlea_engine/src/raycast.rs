@@ -124,9 +124,7 @@ pub(crate) fn raycast_cursor_overflow_is_valid(
 ) -> bool {
     let input = RaycastInput::decode(input_bytes);
     let initial = RaycastCursor::start(&input);
-    maximum == f32::NEG_INFINITY
-        && initial.maximum[axis] == f32::NEG_INFINITY
-        && initial.delta[axis].is_finite()
+    maximum == f32::NEG_INFINITY && initial.maximum[axis] == f32::NEG_INFINITY
         || maximum.is_nan()
             && initial.maximum[axis] == f32::NEG_INFINITY
             && initial.delta[axis] == f32::INFINITY
