@@ -540,10 +540,13 @@ unsafe fn raycast_batch_with(
     if !raycast_metadata_is_valid(output_count, done) {
         return MORNLEA_STATUS_INVALID_ARGUMENT;
     }
-    if (!input.is_null() && !byte_range_is_valid(input, RAYCAST_INPUT_BYTES))
-        || (!cursor.is_null() && !byte_range_is_valid(cursor, RAYCAST_CURSOR_BYTES))
-        || (!output.is_null() && !byte_range_is_valid(output, RAYCAST_OUTPUT_BYTES))
-        || raycast_metadata_overlaps_buffer(output_count, done, input, RAYCAST_INPUT_BYTES)
+    let input_fixed_range_is_valid =
+        input.is_null() || byte_range_is_valid(input, RAYCAST_INPUT_BYTES);
+    let cursor_fixed_range_is_valid =
+        cursor.is_null() || byte_range_is_valid(cursor, RAYCAST_CURSOR_BYTES);
+    let output_fixed_range_is_valid =
+        output.is_null() || byte_range_is_valid(output, RAYCAST_OUTPUT_BYTES);
+    if raycast_metadata_overlaps_buffer(output_count, done, input, RAYCAST_INPUT_BYTES)
         || raycast_metadata_overlaps_buffer(output_count, done, cursor, RAYCAST_CURSOR_BYTES)
         || raycast_metadata_overlaps_buffer(output_count, done, output, RAYCAST_OUTPUT_BYTES)
     {
@@ -553,6 +556,9 @@ unsafe fn raycast_batch_with(
     unsafe {
         output_count.write(0);
         done.write(0);
+    }
+    if !input_fixed_range_is_valid || !cursor_fixed_range_is_valid || !output_fixed_range_is_valid {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
     }
     if abi_version != ABI_VERSION {
         return MORNLEA_STATUS_ABI_VERSION;
@@ -893,6 +899,90 @@ mod tests {
             assert_eq!((count, done), (0, 0), "{buffer:?}");
             assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT, "{buffer:?}");
         }
+    }
+
+    #[test]
+    fn wrapping_raycast_buffer_clears_metadata_without_publishing() {
+        for buffer in [
+            RaycastBuffer::Input,
+            RaycastBuffer::Cursor,
+            RaycastBuffer::Output,
+        ] {
+            let input = valid_raycast_input();
+            let mut cursor = fresh_raycast_cursor();
+            let mut output = [0xa5_u8; RAYCAST_OUTPUT_BYTES];
+            let before_input = input;
+            let before_cursor = cursor;
+            let before_output = output;
+            let mut count = usize::MAX;
+            let mut done = 0xff;
+            let input_pointer = if matches!(buffer, RaycastBuffer::Input) {
+                std::ptr::without_provenance::<u8>(usize::MAX)
+            } else {
+                input.as_ptr()
+            };
+            let cursor_pointer = if matches!(buffer, RaycastBuffer::Cursor) {
+                std::ptr::without_provenance_mut::<u8>(usize::MAX)
+            } else {
+                cursor.as_mut_ptr()
+            };
+            let output_pointer = if matches!(buffer, RaycastBuffer::Output) {
+                std::ptr::without_provenance_mut::<u8>(usize::MAX)
+            } else {
+                output.as_mut_ptr()
+            };
+
+            let status = unsafe {
+                super::mornlea_raycast_batch(
+                    1,
+                    input_pointer,
+                    RAYCAST_INPUT_BYTES,
+                    cursor_pointer,
+                    RAYCAST_CURSOR_BYTES,
+                    output_pointer,
+                    RAYCAST_OUTPUT_BYTES,
+                    &mut count,
+                    &mut done,
+                )
+            };
+
+            assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT, "{buffer:?}");
+            assert_eq!((count, done), (0, 0), "{buffer:?}");
+            assert_eq!(input, before_input, "{buffer:?}");
+            assert_eq!(cursor, before_cursor, "{buffer:?}");
+            assert_eq!(output, before_output, "{buffer:?}");
+        }
+    }
+
+    #[test]
+    fn raycast_metadata_alias_wins_over_a_wrapping_other_buffer() {
+        let input = valid_raycast_input();
+        let mut cursor = AlignedBytes(fresh_raycast_cursor());
+        let mut output = AlignedBytes([0xa5_u8; RAYCAST_OUTPUT_BYTES]);
+        let before_input = input;
+        let before_cursor = cursor.0;
+        let before_output = output.0;
+        let mut done = 0xff;
+
+        let status = unsafe {
+            super::mornlea_raycast_batch(
+                1,
+                std::ptr::without_provenance::<u8>(usize::MAX),
+                RAYCAST_INPUT_BYTES,
+                cursor.0.as_mut_ptr(),
+                RAYCAST_CURSOR_BYTES,
+                output.0.as_mut_ptr(),
+                RAYCAST_OUTPUT_BYTES,
+                cursor.0.as_mut_ptr().cast::<usize>(),
+                &mut done,
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(done, 0xff);
+        assert_eq!(input, before_input);
+        assert_eq!(cursor.0, before_cursor);
+        assert_eq!(output.0, before_output);
     }
 
     #[test]
