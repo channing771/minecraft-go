@@ -283,6 +283,92 @@ mod tests {
     }
 
     #[test]
+    fn rejects_on_ground_out_of_range() {
+        let mut bytes = valid_step_bytes();
+        bytes[32] = 2; // on_ground = 2
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_jump_out_of_range() {
+        let mut bytes = valid_step_bytes();
+        bytes[33] = 2; // jump = 2
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_move_z_out_of_range() {
+        let mut bytes = valid_step_bytes();
+        bytes[35] = 2; // move_z = 2
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_non_finite_position() {
+        let mut bytes = valid_step_bytes();
+        write_f32(&mut bytes, 8, f32::NAN); // position x
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_non_finite_velocity() {
+        let mut bytes = valid_step_bytes();
+        write_f32(&mut bytes, 20, f32::INFINITY); // velocity x
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_non_finite_yaw() {
+        let mut bytes = valid_step_bytes();
+        write_f32(&mut bytes, 36, f32::NAN); // yaw_sin
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_non_finite_delta() {
+        let mut bytes = valid_step_bytes();
+        write_f32(&mut bytes, 44, f32::INFINITY); // fixed_delta_seconds
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_zero_dimension() {
+        let mut bytes = valid_step_bytes();
+        bytes[116..120].copy_from_slice(&0u32.to_le_bytes()); // dimensions[0] = 0
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_origin_overflow() {
+        let mut bytes = valid_step_bytes();
+        bytes[104..108].copy_from_slice(&i32::MAX.to_le_bytes()); // origin[0] = i32::MAX
+        bytes[116..120].copy_from_slice(&2u32.to_le_bytes()); // dimensions[0] = 2
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_unloaded_cell() {
+        let mut bytes = valid_step_bytes();
+        bytes[STEP_HEADER_BYTES] = 2; // cell loaded = 2
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_nonzero_cell_reserved() {
+        let mut bytes = valid_step_bytes();
+        bytes[STEP_HEADER_BYTES + 2] = 1; // cell reserved byte != 0
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
+    fn rejects_non_finite_box() {
+        let mut bytes = valid_step_bytes();
+        bytes[STEP_HEADER_BYTES + 1] = 1; // cell box count = 1
+        write_f32(&mut bytes, STEP_HEADER_BYTES + 4, f32::NAN); // box[0] component 0
+        assert!(!step_input_is_valid(&bytes));
+    }
+
+    #[test]
     fn decodes_fields() {
         let bytes = valid_step_bytes();
         let input = StepInput::decode(&bytes);
