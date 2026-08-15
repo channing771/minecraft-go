@@ -62,9 +62,8 @@ func TestSetTunablesAffectsStep(t *testing.T) {
 
 // TestStepHeightTunableGatesStepUp 证明 StepHeight 确实经快照送达跨步判定。
 //
-// StepHeight 是唯一一个通过新增函数参数（resolveStepMove 的 stepHeight）而不是
-// 直接读快照字段送下去的可调项，因此也是最容易被接错的一个：把该实参写回
-// defaultStepHeight，其余物理测试无一会变红。这里直接钉住可观察行为——
+// StepHeight 经 Go collision snapshot header 传给 native resolver；若编码器把传入值
+// 回退为 defaultStepHeight，本测试会变红。这里直接钉住可观察行为——
 // StepHeight 归零后半格台阶必须跨不上去。
 func TestStepHeightTunableGatesStepUp(t *testing.T) {
 	t.Cleanup(func() { physics.SetTunables(physics.DefaultTunables()) })
