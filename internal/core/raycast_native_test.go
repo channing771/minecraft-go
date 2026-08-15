@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/binary"
 	"math"
+	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
@@ -88,6 +89,29 @@ func TestNativeRaycastMatchesGoOracleDeterministicCorpus(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			assertNativeRaycastMatchesOracle(t, test.origin, test.direction, test.maximum)
+		})
+	}
+}
+
+func TestNativeRaycastMatchesGoOracleFixedRandomCorpus(t *testing.T) {
+	random := rand.New(rand.NewSource(0x5241_5943_4153_5431))
+	for index := range 64 {
+		origin := mgl32.Vec3{
+			random.Float32()*2048 - 1024,
+			random.Float32()*2048 - 1024,
+			random.Float32()*2048 - 1024,
+		}
+		direction := mgl32.Vec3{
+			random.Float32()*2 - 1,
+			random.Float32()*2 - 1,
+			random.Float32()*2 - 1,
+		}
+		if direction.Len() < 1e-3 {
+			direction[0] = 1
+		}
+		maximum := 0.01 + random.Float32()*127.99
+		t.Run(strconv.Itoa(index), func(t *testing.T) {
+			assertNativeRaycastMatchesOracle(t, origin, direction, maximum)
 		})
 	}
 }

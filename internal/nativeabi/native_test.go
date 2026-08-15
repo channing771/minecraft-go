@@ -332,8 +332,8 @@ func TestRaycastBatchRejectsInvalidSuccessMetadata(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			defer func() {
-				if recover() == nil {
-					t.Fatal("非法 raycast success metadata 未 panic")
+				if got := recover(); got != "nativeabi: raycast success metadata 非法" {
+					t.Fatalf("panic=%v，想要 stable metadata 文本", got)
 				}
 			}()
 			raycastBatchResult(StatusOK, test.count, test.done)
@@ -345,6 +345,24 @@ func TestRaycastBatchRejectsInvalidSuccessMetadata(t *testing.T) {
 	}
 	if count, done := raycastBatchResult(StatusOK, 0, 1); count != 0 || !done {
 		t.Fatalf("done metadata=%d/%v，想要 0/true", count, done)
+	}
+}
+
+func TestRaycastStatusPanicTextIsStable(t *testing.T) {
+	for _, test := range []struct {
+		status Status
+		want   string
+	}{
+		{StatusABIVersion, "nativeabi: raycast ABI 版本不匹配"},
+		{StatusInvalidArgument, "nativeabi: raycast 参数非法"},
+		{StatusInput, "nativeabi: raycast 输入非法"},
+		{StatusOutputOverflow, "nativeabi: raycast output 过短"},
+		{StatusPanic, "nativeabi: raycast Rust panic"},
+		{StatusScratch, "nativeabi: raycast 未知状态"},
+	} {
+		if got := raycastStatusPanicText(test.status); got != test.want {
+			t.Fatalf("status %d panic=%q，想要 %q", test.status, got, test.want)
+		}
 	}
 }
 

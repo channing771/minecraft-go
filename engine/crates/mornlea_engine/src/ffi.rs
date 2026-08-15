@@ -626,6 +626,7 @@ mod tests {
     use crate::input::tests::valid_input;
     use crate::raycast::{
         RAYCAST_CURSOR_BYTES, RAYCAST_INPUT_BYTES, RAYCAST_OUTPUT_BYTES, RaycastBatch,
+        raycast_batch,
     };
 
     #[test]
@@ -929,6 +930,242 @@ mod tests {
         assert_eq!(output, before_output);
     }
 
+    #[test]
+    fn malformed_raycast_input_and_cursor_matrix_is_atomic() {
+        let valid_input = valid_raycast_input();
+        let fresh = fresh_raycast_cursor();
+        let mut active_input = valid_input;
+        active_input[32..36].copy_from_slice(&130.0_f32.to_bits().to_le_bytes());
+        let active_result = raycast_batch(&active_input, &fresh);
+        assert_eq!((active_result.count, active_result.done), (64, false));
+        let done_result = raycast_batch(&valid_input, &fresh);
+        assert!(done_result.done);
+
+        let mut cases = Vec::new();
+        push_raycast_mutation(&mut cases, "input magic", valid_input, fresh, |input, _| {
+            input[0] = b'X';
+        });
+        push_raycast_mutation(
+            &mut cases,
+            "input layout",
+            valid_input,
+            fresh,
+            |input, _| {
+                input[4] = 2;
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "input reserved",
+            valid_input,
+            fresh,
+            |input, _| {
+                input[36] = 1;
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "input origin NaN",
+            valid_input,
+            fresh,
+            |input, _| {
+                write_test_f32(input, 8, f32::NAN);
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "input direction NaN",
+            valid_input,
+            fresh,
+            |input, _| {
+                write_test_f32(input, 20, f32::NAN);
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "input zero direction",
+            valid_input,
+            fresh,
+            |input, _| {
+                input[20..32].fill(0);
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "input maximum NaN",
+            valid_input,
+            fresh,
+            |input, _| {
+                write_test_f32(input, 32, f32::NAN);
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "input maximum zero",
+            valid_input,
+            fresh,
+            |input, _| {
+                write_test_f32(input, 32, 0.0);
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "cursor magic",
+            valid_input,
+            fresh,
+            |_, cursor| {
+                cursor[0] = b'X';
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "cursor layout",
+            valid_input,
+            fresh,
+            |_, cursor| {
+                cursor[4] = 2;
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "cursor state 3",
+            valid_input,
+            fresh,
+            |_, cursor| {
+                cursor[8] = 3;
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "cursor header reserved",
+            valid_input,
+            fresh,
+            |_, cursor| {
+                cursor[9] = 1;
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "cursor tail reserved",
+            valid_input,
+            fresh,
+            |_, cursor| {
+                cursor[60] = 1;
+            },
+        );
+        push_raycast_mutation(
+            &mut cases,
+            "fresh nonzero payload",
+            valid_input,
+            fresh,
+            |_, cursor| {
+                cursor[12] = 1;
+            },
+        );
+
+        for (state_name, input, base) in [
+            ("active", active_input, active_result.cursor),
+            ("done", valid_input, done_result.cursor),
+        ] {
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} step"),
+                input,
+                base,
+                |_, cursor| {
+                    cursor[24..28].fill(0);
+                },
+            );
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} delta NaN"),
+                input,
+                base,
+                |_, cursor| {
+                    write_test_f32(cursor, 36, f32::NAN);
+                },
+            );
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} delta -Inf"),
+                input,
+                base,
+                |_, cursor| {
+                    write_test_f32(cursor, 36, f32::NEG_INFINITY);
+                },
+            );
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} delta zero"),
+                input,
+                base,
+                |_, cursor| {
+                    write_test_f32(cursor, 36, 0.0);
+                },
+            );
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} maximum NaN"),
+                input,
+                base,
+                |_, cursor| {
+                    write_test_f32(cursor, 48, f32::NAN);
+                },
+            );
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} maximum -Inf"),
+                input,
+                base,
+                |_, cursor| {
+                    write_test_f32(cursor, 48, f32::NEG_INFINITY);
+                },
+            );
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} zero-axis delta finite"),
+                input,
+                base,
+                |_, cursor| write_test_f32(cursor, 40, 1.0),
+            );
+            push_raycast_mutation(
+                &mut cases,
+                &format!("{state_name} zero-axis maximum finite"),
+                input,
+                base,
+                |_, cursor| write_test_f32(cursor, 52, 1.0),
+            );
+        }
+
+        for (name, input, cursor) in cases {
+            assert_raycast_input_failure_is_atomic(&name, input, cursor);
+        }
+    }
+
+    #[test]
+    fn invalid_raycast_metadata_pointer_matrix_is_atomic() {
+        for kind in [
+            InvalidMetadataPointer::MisalignedCount,
+            InvalidMetadataPointer::WrappingCount,
+            InvalidMetadataPointer::WrappingDone,
+        ] {
+            assert_invalid_raycast_metadata_pointer_is_atomic(kind);
+        }
+    }
+
+    #[test]
+    fn raycast_metadata_buffer_overlap_matrix_is_atomic() {
+        for metadata in [MetadataField::Count, MetadataField::Done] {
+            for buffer in [
+                RaycastBuffer::Input,
+                RaycastBuffer::Cursor,
+                RaycastBuffer::Output,
+            ] {
+                assert_raycast_metadata_overlap_is_atomic(metadata, buffer);
+            }
+        }
+    }
+
     fn valid_raycast_input() -> [u8; RAYCAST_INPUT_BYTES] {
         let mut input = [0_u8; RAYCAST_INPUT_BYTES];
         input[0..4].copy_from_slice(b"MGR1");
@@ -944,6 +1181,186 @@ mod tests {
         cursor[0..4].copy_from_slice(b"MRC1");
         cursor[4..8].copy_from_slice(&1_u32.to_le_bytes());
         cursor
+    }
+
+    fn push_raycast_mutation(
+        cases: &mut Vec<(
+            String,
+            [u8; RAYCAST_INPUT_BYTES],
+            [u8; RAYCAST_CURSOR_BYTES],
+        )>,
+        name: &str,
+        mut input: [u8; RAYCAST_INPUT_BYTES],
+        mut cursor: [u8; RAYCAST_CURSOR_BYTES],
+        mutate: impl FnOnce(&mut [u8; RAYCAST_INPUT_BYTES], &mut [u8; RAYCAST_CURSOR_BYTES]),
+    ) {
+        mutate(&mut input, &mut cursor);
+        cases.push((name.to_owned(), input, cursor));
+    }
+
+    fn write_test_f32<const N: usize>(bytes: &mut [u8; N], offset: usize, value: f32) {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_bits().to_le_bytes());
+    }
+
+    fn assert_raycast_input_failure_is_atomic(
+        name: &str,
+        input: [u8; RAYCAST_INPUT_BYTES],
+        cursor: [u8; RAYCAST_CURSOR_BYTES],
+    ) {
+        let mut input_arena = [0xa5_u8; RAYCAST_INPUT_BYTES + 2];
+        input_arena[1..1 + RAYCAST_INPUT_BYTES].copy_from_slice(&input);
+        let mut cursor_arena = [0xa5_u8; RAYCAST_CURSOR_BYTES + 2];
+        cursor_arena[1..1 + RAYCAST_CURSOR_BYTES].copy_from_slice(&cursor);
+        let mut output_arena = [0xa5_u8; RAYCAST_OUTPUT_BYTES + 2];
+        let before_input = input_arena;
+        let before_cursor = cursor_arena;
+        let before_output = output_arena;
+        let mut count = usize::MAX;
+        let mut done = 0xff;
+
+        let status = unsafe {
+            super::mornlea_raycast_batch(
+                1,
+                input_arena[1..].as_ptr(),
+                RAYCAST_INPUT_BYTES,
+                cursor_arena[1..].as_mut_ptr(),
+                RAYCAST_CURSOR_BYTES,
+                output_arena[1..].as_mut_ptr(),
+                RAYCAST_OUTPUT_BYTES,
+                &mut count,
+                &mut done,
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_INPUT, "{name}");
+        assert_eq!((count, done), (0, 0), "{name}");
+        assert_eq!(input_arena, before_input, "{name}");
+        assert_eq!(cursor_arena, before_cursor, "{name}");
+        assert_eq!(output_arena, before_output, "{name}");
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum InvalidMetadataPointer {
+        MisalignedCount,
+        WrappingCount,
+        WrappingDone,
+    }
+
+    fn assert_invalid_raycast_metadata_pointer_is_atomic(kind: InvalidMetadataPointer) {
+        let input = valid_raycast_input();
+        let mut cursor_arena = [0xa5_u8; RAYCAST_CURSOR_BYTES + 2];
+        cursor_arena[1..1 + RAYCAST_CURSOR_BYTES].copy_from_slice(&fresh_raycast_cursor());
+        let mut output_arena = [0xa5_u8; RAYCAST_OUTPUT_BYTES + 2];
+        let before_cursor = cursor_arena;
+        let before_output = output_arena;
+        let mut count = usize::MAX;
+        let mut done = 0xff;
+        let mut count_bytes = AlignedBytes([0xa5_u8; size_of::<usize>() + 1]);
+        let before_count_bytes = count_bytes.0;
+        let (count_pointer, done_pointer): (*mut usize, *mut u8) = match kind {
+            InvalidMetadataPointer::MisalignedCount => (
+                unsafe { count_bytes.0.as_mut_ptr().add(1).cast::<usize>() },
+                &mut done,
+            ),
+            InvalidMetadataPointer::WrappingCount => (
+                (usize::MAX & !(align_of::<usize>() - 1)) as *mut usize,
+                &mut done,
+            ),
+            InvalidMetadataPointer::WrappingDone => (&mut count, usize::MAX as *mut u8),
+        };
+
+        let status = unsafe {
+            super::mornlea_raycast_batch(
+                1,
+                input.as_ptr(),
+                input.len(),
+                cursor_arena[1..].as_mut_ptr(),
+                RAYCAST_CURSOR_BYTES,
+                output_arena[1..].as_mut_ptr(),
+                RAYCAST_OUTPUT_BYTES,
+                count_pointer,
+                done_pointer,
+            )
+        };
+
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT, "{kind:?}");
+        assert_eq!(count, usize::MAX, "{kind:?}");
+        assert_eq!(done, 0xff, "{kind:?}");
+        assert_eq!(count_bytes.0, before_count_bytes, "{kind:?}");
+        assert_eq!(cursor_arena, before_cursor, "{kind:?}");
+        assert_eq!(output_arena, before_output, "{kind:?}");
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum MetadataField {
+        Count,
+        Done,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum RaycastBuffer {
+        Input,
+        Cursor,
+        Output,
+    }
+
+    #[repr(align(8))]
+    struct AlignedBytes<const N: usize>([u8; N]);
+
+    fn assert_raycast_metadata_overlap_is_atomic(metadata: MetadataField, buffer: RaycastBuffer) {
+        const CANARY_BYTES: usize = 8;
+        let mut input_arena = AlignedBytes([0xa5_u8; RAYCAST_INPUT_BYTES + 2 * CANARY_BYTES]);
+        input_arena.0[CANARY_BYTES..CANARY_BYTES + RAYCAST_INPUT_BYTES]
+            .copy_from_slice(&valid_raycast_input());
+        let mut cursor_arena = AlignedBytes([0xa5_u8; RAYCAST_CURSOR_BYTES + 2 * CANARY_BYTES]);
+        cursor_arena.0[CANARY_BYTES..CANARY_BYTES + RAYCAST_CURSOR_BYTES]
+            .copy_from_slice(&fresh_raycast_cursor());
+        let mut output_arena = AlignedBytes([0xa5_u8; RAYCAST_OUTPUT_BYTES + 2 * CANARY_BYTES]);
+        let before_input = input_arena.0;
+        let before_cursor = cursor_arena.0;
+        let before_output = output_arena.0;
+        let input_pointer = unsafe { input_arena.0.as_mut_ptr().add(CANARY_BYTES) };
+        let cursor_pointer = unsafe { cursor_arena.0.as_mut_ptr().add(CANARY_BYTES) };
+        let output_pointer = unsafe { output_arena.0.as_mut_ptr().add(CANARY_BYTES) };
+        let overlap_pointer = match buffer {
+            RaycastBuffer::Input => input_pointer,
+            RaycastBuffer::Cursor => cursor_pointer,
+            RaycastBuffer::Output => output_pointer,
+        };
+        let mut count = usize::MAX;
+        let mut done = 0xff;
+        let count_pointer = match metadata {
+            MetadataField::Count => overlap_pointer.cast::<usize>(),
+            MetadataField::Done => &mut count,
+        };
+        let done_pointer = match metadata {
+            MetadataField::Count => &mut done,
+            MetadataField::Done => overlap_pointer,
+        };
+
+        let status = unsafe {
+            super::mornlea_raycast_batch(
+                1,
+                input_pointer,
+                RAYCAST_INPUT_BYTES,
+                cursor_pointer,
+                RAYCAST_CURSOR_BYTES,
+                output_pointer,
+                RAYCAST_OUTPUT_BYTES,
+                count_pointer,
+                done_pointer,
+            )
+        };
+
+        assert_eq!(
+            status, MORNLEA_STATUS_INVALID_ARGUMENT,
+            "{metadata:?}/{buffer:?}"
+        );
+        assert_eq!(count, usize::MAX, "{metadata:?}/{buffer:?}");
+        assert_eq!(done, 0xff, "{metadata:?}/{buffer:?}");
+        assert_eq!(input_arena.0, before_input, "{metadata:?}/{buffer:?}");
+        assert_eq!(cursor_arena.0, before_cursor, "{metadata:?}/{buffer:?}");
+        assert_eq!(output_arena.0, before_output, "{metadata:?}/{buffer:?}");
     }
 
     #[test]
