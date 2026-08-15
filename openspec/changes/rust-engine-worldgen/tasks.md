@@ -9,7 +9,7 @@
 
 ## 2. Rust worldgen 内核
 
-- [ ] 2.1 engine 新增 `worldgen.rs`:perlin/fbm(逐条镜像 Go 运算顺序,禁
+- [x] 2.1 engine 新增 `worldgen.rs`:perlin/fbm(逐条镜像 Go 运算顺序,禁
       `mul_add`)、地表分层、oreHash、橡树候选/树形/合并;单元测试覆盖
       固定语料;验证:`make rust`(含 cargo test)。
 - [ ] 2.2 `ffi.rs` 导出 `mornlea_worldgen_chunk` 与 `mornlea_worldgen_probe`

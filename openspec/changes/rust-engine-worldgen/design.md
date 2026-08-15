@@ -38,8 +38,8 @@ engine 现有 ABI v2(mesh/light/collision/raycast/step)。
 
 Block 注册表与随机源所有权留在 Go:Rust 不硬编码 BlockID、不内置 RNG。perm 表
 播种(`rand.NewSource`+`Shuffle`)是 Go 语义,移植风险高收益零,Go 算好 512 字节
-随 header 传入。engine 校验 perm 值 <256、材料表无 air 冲突,违约返回 StatusInput
-且不触碰输出缓冲。
+随 header 传入(512×u8,全部取值合法)。engine 校验材料表 13 项两两互异、Y 范围
+等于 −64/320、magic/layout/长度精确匹配,违约返回 StatusInput 且不触碰输出缓冲。
 
 ### 浮点逐条镜像,禁用 FMA
 
