@@ -14,6 +14,8 @@ package nativeabi
 #cgo nocallback mornlea_collision_resolve
 #cgo noescape mornlea_raycast_batch
 #cgo nocallback mornlea_raycast_batch
+#cgo noescape mornlea_physics_step
+#cgo nocallback mornlea_physics_step
 #include "mornlea_engine.h"
 */
 import "C"
@@ -90,6 +92,41 @@ func collisionStatusPanicText(status Status) string {
 		return "nativeabi: collision Rust panic"
 	default:
 		return "nativeabi: collision 未知状态"
+	}
+}
+
+// PhysicsStep 把调用方拥有的 physics step ABI 缓冲区传给 engine。
+func PhysicsStep(input, output []byte) {
+	status := physicsStepVersion(ABIVersion, input, output)
+	if status != StatusOK {
+		panic(physicsStepStatusPanicText(status))
+	}
+}
+
+func physicsStepVersion(version uint32, input, output []byte) Status {
+	return Status(C.mornlea_physics_step(
+		C.uint32_t(version),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(input))),
+		C.size_t(len(input)),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(output))),
+		C.size_t(len(output)),
+	))
+}
+
+func physicsStepStatusPanicText(status Status) string {
+	switch status {
+	case StatusABIVersion:
+		return "nativeabi: physics step ABI 版本不匹配"
+	case StatusInvalidArgument:
+		return "nativeabi: physics step 参数非法"
+	case StatusInput:
+		return "nativeabi: physics step 输入非法"
+	case StatusOutputOverflow:
+		return "nativeabi: physics step output 过短"
+	case StatusPanic:
+		return "nativeabi: physics step Rust panic"
+	default:
+		return "nativeabi: physics step 未知状态"
 	}
 }
 
