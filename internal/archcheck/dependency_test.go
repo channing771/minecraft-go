@@ -22,7 +22,7 @@ var allowed = map[string][]string{
 	"internal/sim":        {"internal/companion", "internal/core", "internal/physics", "internal/world"},
 	"internal/storage":    {"internal/companion", "internal/core", "internal/world"},
 	"internal/world":      {"internal/core"},
-	"internal/worldgen":   {"internal/core", "internal/world"},
+	"internal/worldgen":   {"internal/core", "internal/world", "internal/nativeabi"},
 	"internal/mesh":       {"internal/core", "internal/world", "internal/nativeabi"},
 	"internal/assets":     {"internal/core", "internal/world", "internal/mesh", "internal/worldgen", "internal/gfx"},
 	"internal/render":     {"internal/core", "internal/world", "internal/mesh", "internal/assets", "internal/gfx"},

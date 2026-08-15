@@ -44,13 +44,13 @@ seed→512 项 Perlin perm 表 MUST 继续由 Go `math/rand` 语义计算;engine
 
 ### Requirement: worldgen ABI 输入校验拒绝
 
-engine worldgen 入口收到非法输入(错误 magic、长度不符、perm 表越界值、Y 范围
+engine worldgen 入口收到非法输入(错误 magic、长度不符、材料表存在重复 ID、Y 范围
 非法)时 MUST 返回输入错误状态且 MUST 不修改输出缓冲;Go 侧 MUST 把该状态转换为
 带稳定中文文案的错误报告,MUST 不产出部分生成的区块。
 
 #### Scenario: 非法输入被拒绝且输出缓冲不变
 
-- GIVEN 构造的非法 worldgen 请求(如 perm 表含 ≥256 的值或输出缓冲长度不符)
+- GIVEN 构造的非法 worldgen 请求(如材料表两项 ID 相同或输出缓冲长度不符)
 - WHEN 调用 engine worldgen 入口
 - THEN 返回输入错误状态,输出缓冲保持调用前内容,Go 报告稳定中文错误
 

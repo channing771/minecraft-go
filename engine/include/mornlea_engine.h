@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MORNLEA_ENGINE_ABI_VERSION 2u
+#define MORNLEA_ENGINE_ABI_VERSION 3u
 
 #define MORNLEA_STATUS_OK 0u
 #define MORNLEA_STATUS_ABI_VERSION 1u
@@ -48,6 +48,20 @@ uint32_t mornlea_raycast_batch(
     uint8_t *done);
 
 uint32_t mornlea_physics_step(
+    uint32_t abi_version,
+    const uint8_t *input,
+    size_t input_len,
+    uint8_t *output,
+    size_t output_len);
+
+uint32_t mornlea_worldgen_chunk(
+    uint32_t abi_version,
+    const uint8_t *input,
+    size_t input_len,
+    uint8_t *output,
+    size_t output_len);
+
+uint32_t mornlea_worldgen_probe(
     uint32_t abi_version,
     const uint8_t *input,
     size_t input_len,

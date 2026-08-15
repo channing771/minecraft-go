@@ -16,6 +16,10 @@ package nativeabi
 #cgo nocallback mornlea_raycast_batch
 #cgo noescape mornlea_physics_step
 #cgo nocallback mornlea_physics_step
+#cgo noescape mornlea_worldgen_chunk
+#cgo nocallback mornlea_worldgen_chunk
+#cgo noescape mornlea_worldgen_probe
+#cgo nocallback mornlea_worldgen_probe
 #include "mornlea_engine.h"
 */
 import "C"
@@ -127,6 +131,65 @@ func physicsStepStatusPanicText(status Status) string {
 		return "nativeabi: physics step Rust panic"
 	default:
 		return "nativeabi: physics step 未知状态"
+	}
+}
+
+// WorldgenChunk 把调用方拥有的 worldgen chunk ABI 缓冲区传给 engine。
+//
+// input 为 `MGW1` header + chunk 坐标,output 为 196608 字节 dense 数组;
+// 任何非 OK 状态都以稳定中文文案 panic,且 engine 保证失败时不触碰 output。
+func WorldgenChunk(input, output []byte) {
+	status := worldgenChunkVersion(ABIVersion, input, output)
+	if status != StatusOK {
+		panic(worldgenStatusPanicText("chunk", status))
+	}
+}
+
+func worldgenChunkVersion(version uint32, input, output []byte) Status {
+	return Status(C.mornlea_worldgen_chunk(
+		C.uint32_t(version),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(input))),
+		C.size_t(len(input)),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(output))),
+		C.size_t(len(output)),
+	))
+}
+
+// WorldgenProbe 把调用方拥有的 worldgen 单点查询 batch 缓冲区传给 engine。
+//
+// input 为 `MGW1` header + record_count + 每条 16 字节记录(最多 64 条),
+// output 为每条 8 字节的结果;任何非 OK 状态都以稳定中文文案 panic。
+func WorldgenProbe(input, output []byte) {
+	status := worldgenProbeVersion(ABIVersion, input, output)
+	if status != StatusOK {
+		panic(worldgenStatusPanicText("probe", status))
+	}
+}
+
+func worldgenProbeVersion(version uint32, input, output []byte) Status {
+	return Status(C.mornlea_worldgen_probe(
+		C.uint32_t(version),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(input))),
+		C.size_t(len(input)),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(output))),
+		C.size_t(len(output)),
+	))
+}
+
+func worldgenStatusPanicText(entry string, status Status) string {
+	switch status {
+	case StatusABIVersion:
+		return "nativeabi: worldgen " + entry + " ABI 版本不匹配"
+	case StatusInvalidArgument:
+		return "nativeabi: worldgen " + entry + " 参数非法"
+	case StatusInput:
+		return "nativeabi: worldgen " + entry + " 输入非法"
+	case StatusOutputOverflow:
+		return "nativeabi: worldgen " + entry + " output 过短"
+	case StatusPanic:
+		return "nativeabi: worldgen " + entry + " Rust panic"
+	default:
+		return "nativeabi: worldgen " + entry + " 未知状态"
 	}
 }
 

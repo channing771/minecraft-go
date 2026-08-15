@@ -1,16 +1,23 @@
-package worldgen
+package worldgen_test
+
+// 本文件锁定橡树生成的冻结语义。候选选择器、树形与合并规则的生产实现
+// 已迁入 Rust engine;这里的细粒度断言作用在 oracle 副本上(oracle 与
+// 生产的逐位一致由 oracle_test.go 的差分测试保证),黑盒断言直接作用在
+// 生产 API 上。旧的 applyOakTrees"树叶不覆盖实心方块"人工注入测试随
+// 内部函数一并退役:该合并语义由 Rust 侧 chunk/pointwise 等价测试与
+// 差分门禁覆盖。
 
 import (
 	"testing"
 
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/world"
+	"github.com/channing771/mornlea/internal/worldgen"
 )
 
-// TestOakTreeHashSelectorUsesLowBitAndHalfGate 锁定候选选择器，而非把地表
-// 或树干过滤误当成 parity 拒绝。若反转 hash&1 选择器，此测试必须失败。
+// TestOakTreeHashSelectorUsesLowBitAndHalfGate 锁定候选选择器,而非把地表
+// 或树干过滤误当成 parity 拒绝。若反转 hash&1 选择器,此测试必须失败。
 func TestOakTreeHashSelectorUsesLowBitAndHalfGate(t *testing.T) {
-	generator := New(42)
+	oracle := newOracleGenerator(42)
 	tests := []struct {
 		name         string
 		cellX, cellZ int32
@@ -29,9 +36,9 @@ func TestOakTreeHashSelectorUsesLowBitAndHalfGate(t *testing.T) {
 	selected := 0
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			hash := oreHash(42, core.BlockPos{X: test.cellX, Z: test.cellZ}, oakTreeSalt)
+			hash := oracleHash(42, core.BlockPos{X: test.cellX, Z: test.cellZ}, oracleOakTreeSalt)
 			if hash != test.hash {
-				t.Fatalf("oreHash(cell=(%d,%d))=%016x，想要 %016x", test.cellX, test.cellZ, hash, test.hash)
+				t.Fatalf("oracleHash(cell=(%d,%d))=%016x，想要 %016x", test.cellX, test.cellZ, hash, test.hash)
 			}
 			if got := hash&1 == 0; got != test.selected {
 				t.Fatalf("hash&1==0=%v，想要 %v", got, test.selected)
@@ -44,16 +51,16 @@ func TestOakTreeHashSelectorUsesLowBitAndHalfGate(t *testing.T) {
 	if selected != len(tests)/2 {
 		t.Fatalf("%d 个固定候选中 selected=%d，想要半数 %d", len(tests), selected, len(tests)/2)
 	}
-	if _, spawned := generator.oakTreeForCell(0, 0); spawned {
+	if _, spawned := oracle.oakTreeForCell(0, 0); spawned {
 		t.Fatal("草地上的 odd-parity 候选错误生成橡树")
 	}
-	if _, spawned := generator.oakTreeForCell(-1, -1); !spawned {
+	if _, spawned := oracle.oakTreeForCell(-1, -1); !spawned {
 		t.Fatal("草地上的 even-parity 候选未生成橡树")
 	}
 }
 
 func TestOakTreeCandidateIsStable(t *testing.T) {
-	generator := New(42)
+	oracle := newOracleGenerator(42)
 	tests := []struct {
 		name         string
 		cellX, cellZ int32
@@ -68,27 +75,27 @@ func TestOakTreeCandidateIsStable(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tree, spawned := generator.oakTreeForCell(test.cellX, test.cellZ)
+			tree, spawned := oracle.oakTreeForCell(test.cellX, test.cellZ)
 			if spawned != test.spawn {
 				t.Fatalf("oakTreeForCell(%d,%d) spawned=%v，想要 %v", test.cellX, test.cellZ, spawned, test.spawn)
 			}
 			if !spawned {
 				return
 			}
-			if tree.Root.X != test.rootX || tree.Root.Z != test.rootZ || tree.Height != test.height {
+			if tree.root.X != test.rootX || tree.root.Z != test.rootZ || tree.height != test.height {
 				t.Fatalf("oakTreeForCell(%d,%d)=%+v，想要 root=(%d,*,%d) height=%d", test.cellX, test.cellZ, tree, test.rootX, test.rootZ, test.height)
 			}
-			if tree.Root.Y != generator.HeightAt(test.rootX, test.rootZ)+1 {
-				t.Fatalf("root Y=%d，想要地表上方 %d", tree.Root.Y, generator.HeightAt(test.rootX, test.rootZ)+1)
+			if tree.root.Y != oracle.heightAt(test.rootX, test.rootZ)+1 {
+				t.Fatalf("root Y=%d，想要地表上方 %d", tree.root.Y, oracle.heightAt(test.rootX, test.rootZ)+1)
 			}
 		})
 	}
 }
 
 // TestOakTreeCandidateUsesFullHalfGateAndMinimumHeight 锁定两个实际能生成的
-// 草地候选。若把 50% selector 收窄为 hash&3，或删掉高度 4，此测试必须失败。
+// 草地候选。若把 50% selector 收窄为 hash&3,或删掉高度 4,此测试必须失败。
 func TestOakTreeCandidateUsesFullHalfGateAndMinimumHeight(t *testing.T) {
-	generator := New(42)
+	oracle := newOracleGenerator(42)
 	tests := []struct {
 		name         string
 		cellX, cellZ int32
@@ -111,14 +118,14 @@ func TestOakTreeCandidateUsesFullHalfGateAndMinimumHeight(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := oreHash(42, core.BlockPos{X: test.cellX, Z: test.cellZ}, oakTreeSalt); got != test.hash {
-				t.Fatalf("oreHash(cell=(%d,%d))=%016x，想要 %016x", test.cellX, test.cellZ, got, test.hash)
+			if got := oracleHash(42, core.BlockPos{X: test.cellX, Z: test.cellZ}, oracleOakTreeSalt); got != test.hash {
+				t.Fatalf("oracleHash(cell=(%d,%d))=%016x，想要 %016x", test.cellX, test.cellZ, got, test.hash)
 			}
-			tree, spawned := generator.oakTreeForCell(test.cellX, test.cellZ)
+			tree, spawned := oracle.oakTreeForCell(test.cellX, test.cellZ)
 			if !spawned {
 				t.Fatalf("oakTreeForCell(%d,%d) 未生成橡树", test.cellX, test.cellZ)
 			}
-			if tree.Root != test.root || tree.Height != test.height {
+			if tree.root != test.root || tree.height != test.height {
 				t.Fatalf("oakTreeForCell(%d,%d)=%+v，想要 root=%+v height=%d",
 					test.cellX, test.cellZ, tree, test.root, test.height)
 			}
@@ -127,9 +134,9 @@ func TestOakTreeCandidateUsesFullHalfGateAndMinimumHeight(t *testing.T) {
 }
 
 func TestOakTreeBlockAtUsesFixedCrownAndLogPriority(t *testing.T) {
-	tree := oakTree{Root: core.BlockPos{X: 0, Y: 65, Z: 0}, Height: 5}
+	tree := oracleOakTree{root: core.BlockPos{X: 0, Y: 65, Z: 0}, height: 5}
 	for y := int32(65); y <= 69; y++ {
-		if got := oakTreeBlockAt(tree, core.BlockPos{Y: y}); got != core.OakLogID {
+		if got := oracleOakTreeBlockAt(tree, core.BlockPos{Y: y}); got != core.OakLogID {
 			t.Fatalf("trunk y=%d is %d，想要 OakLogID", y, got)
 		}
 	}
@@ -138,7 +145,7 @@ func TestOakTreeBlockAtUsesFixedCrownAndLogPriority(t *testing.T) {
 		occupied := 0
 		for z := int32(-2); z <= 2; z++ {
 			for x := int32(-2); x <= 2; x++ {
-				got := oakTreeBlockAt(tree, core.BlockPos{X: x, Y: y, Z: z})
+				got := oracleOakTreeBlockAt(tree, core.BlockPos{X: x, Y: y, Z: z})
 				if x == 0 && z == 0 {
 					if got != core.OakLogID {
 						t.Fatalf("crown center y=%d is %d，想要 OakLogID", y, got)
@@ -169,7 +176,7 @@ func TestOakTreeBlockAtUsesFixedCrownAndLogPriority(t *testing.T) {
 			if x == 0 && z == 0 {
 				want = core.OakLogID
 			}
-			if got := oakTreeBlockAt(tree, core.BlockPos{X: x, Y: 69, Z: z}); got != want {
+			if got := oracleOakTreeBlockAt(tree, core.BlockPos{X: x, Y: 69, Z: z}); got != want {
 				t.Fatalf("top (%d,69,%d)=%d，想要 %d", x, z, got, want)
 			}
 		}
@@ -177,74 +184,45 @@ func TestOakTreeBlockAtUsesFixedCrownAndLogPriority(t *testing.T) {
 	for _, position := range []core.BlockPos{
 		{X: 0, Y: 70, Z: 0}, {X: 1, Y: 70, Z: 0}, {X: -1, Y: 70, Z: 0}, {X: 0, Y: 70, Z: 1}, {X: 0, Y: 70, Z: -1},
 	} {
-		if got := oakTreeBlockAt(tree, position); got != core.LeavesID {
+		if got := oracleOakTreeBlockAt(tree, position); got != core.LeavesID {
 			t.Fatalf("top cross %+v=%d，想要 LeavesID", position, got)
 		}
 	}
-	if got := oakTreeBlockAt(tree, core.BlockPos{X: 1, Y: 70, Z: 1}); got != core.AirID {
+	if got := oracleOakTreeBlockAt(tree, core.BlockPos{X: 1, Y: 70, Z: 1}); got != core.AirID {
 		t.Fatalf("top corner=%d，想要空气", got)
 	}
-	if got := oakTreeBlockAt(oakTree{Root: core.BlockPos{Y: core.MaxY - 4}, Height: 4}, core.BlockPos{Y: core.MaxY - 1}); got != core.AirID {
+	if got := oracleOakTreeBlockAt(oracleOakTree{root: core.BlockPos{Y: core.MaxY - 4}, height: 4}, core.BlockPos{Y: core.MaxY - 1}); got != core.AirID {
 		t.Fatalf("world upper bound tree=%d，想要整棵树缺失", got)
 	}
 }
 
-func TestApplyOakTreesPreservesSolidLeafTargets(t *testing.T) {
-	generator := New(42)
-	chunk := generatedChunkWithoutTrees(generator, core.ChunkPos{X: -1, Z: -1})
-	tree, ok := generator.oakTreeForCell(-1, -1)
-	if !ok {
-		t.Fatal("seed 42 cell (-1,-1) 应有橡树")
-	}
-	leaf := core.BlockPos{X: tree.Root.X + 2, Y: tree.Root.Y + tree.Height - 3, Z: tree.Root.Z}
-	lx, _, lz := leaf.Local()
-	chunk.SetBlock(lx, leaf.Y, lz, core.StoneID)
-	generator.applyOakTrees(chunk)
-	if got := chunk.BlockAt(lx, leaf.Y, lz); got != core.StoneID {
-		t.Fatalf("solid leaf target=%d，想要 StoneID", got)
-	}
-	rx, _, rz := tree.Root.Local()
-	if got := chunk.BlockAt(rx, tree.Root.Y, rz); got != core.OakLogID {
-		t.Fatalf("tree root=%d，想要 OakLogID", got)
-	}
-}
-
-// TestApplyOakTreesKeepsIntersectingLogsIndependentOfOrder 覆盖两棵不同橡树
-// 的叶/干交叉：先写哪棵树都必须得到原木。若 applyOakTrees 的原木覆盖退回
-// 成“只覆盖空气”，真实区块的交叉格会保留先前树叶而失败。
-func TestApplyOakTreesKeepsIntersectingLogsIndependentOfOrder(t *testing.T) {
-	chunkPos := core.ChunkPos{Z: 4}
-	leafTree := oakTree{Root: core.BlockPos{X: -1, Y: 79, Z: 71}, Height: 6}
-	logTree := oakTree{Root: core.BlockPos{X: 0, Y: 79, Z: 72}, Height: 5}
+// TestGeneratedChunkKeepsIntersectingLogs 覆盖两棵不同橡树的叶/干交叉:
+// seed 42 的 chunk (0,4) 在 (0,82,72) 处叶与干重叠,生产结果必须是原木。
+// 若合并规则退回成"原木只覆盖空气",此测试必须失败。
+func TestGeneratedChunkKeepsIntersectingLogs(t *testing.T) {
+	leafTree := oracleOakTree{root: core.BlockPos{X: -1, Y: 79, Z: 71}, height: 6}
+	logTree := oracleOakTree{root: core.BlockPos{X: 0, Y: 79, Z: 72}, height: 5}
 	intersection := core.BlockPos{X: 0, Y: 82, Z: 72}
-	if got := oakTreeBlockAt(leafTree, intersection); got != core.LeavesID {
+	if got := oracleOakTreeBlockAt(leafTree, intersection); got != core.LeavesID {
 		t.Fatalf("leaf tree at intersection=%d，想要 LeavesID", got)
 	}
-	if got := oakTreeBlockAt(logTree, intersection); got != core.OakLogID {
+	if got := oracleOakTreeBlockAt(logTree, intersection); got != core.OakLogID {
 		t.Fatalf("log tree at intersection=%d，想要 OakLogID", got)
 	}
 
-	forward, reverse := world.NewChunk(chunkPos), world.NewChunk(chunkPos)
-	applyOakTree(forward, leafTree)
-	applyOakTree(forward, logTree)
-	applyOakTree(reverse, logTree)
-	applyOakTree(reverse, leafTree)
-	assertChunksHaveSameBlocks(t, forward, reverse)
+	generator := worldgen.New(42)
+	chunk := generator.GenerateChunk(intersection.Chunk())
 	lx, _, lz := intersection.Local()
-	if got := forward.BlockAt(lx, intersection.Y, lz); got != core.OakLogID {
-		t.Fatalf("forward intersection=%d，想要 OakLogID", got)
+	if got := chunk.BlockAt(lx, intersection.Y, lz); got != core.OakLogID {
+		t.Fatalf("生产区块交叉格=%d，想要 OakLogID", got)
 	}
-
-	generator := New(42)
-	generated := generatedChunkWithoutTrees(generator, chunkPos)
-	generator.applyOakTrees(generated)
-	if got := generated.BlockAt(lx, intersection.Y, lz); got != core.OakLogID {
-		t.Fatalf("applyOakTrees intersection=%d，想要 OakLogID", got)
+	if got := generator.BaseBlockAt(intersection); got != core.OakLogID {
+		t.Fatalf("BaseBlockAt 交叉格=%d，想要 OakLogID", got)
 	}
 }
 
 func TestBaseBlockAtMatchesGeneratedChunkWithOakTrees(t *testing.T) {
-	generator := New(42)
+	generator := worldgen.New(42)
 	for _, chunkPos := range []core.ChunkPos{{X: -1, Z: -1}, {X: 0, Z: -1}, {X: 0, Z: 0}, {X: 1, Z: 0}, {X: 0, Z: 1}, {X: 1, Z: 1}} {
 		chunk := generator.GenerateChunk(chunkPos)
 		baseX := chunkPos.X << core.SectionShift
@@ -256,34 +234,6 @@ func TestBaseBlockAtMatchesGeneratedChunkWithOakTrees(t *testing.T) {
 					if got, want := generator.BaseBlockAt(position), chunk.BlockAt(int(x), y, int(z)); got != want {
 						t.Fatalf("chunk=%+v BaseBlockAt(%+v)=%d，GenerateChunk=%d", chunkPos, position, got, want)
 					}
-				}
-			}
-		}
-	}
-}
-
-func generatedChunkWithoutTrees(generator *Generator, position core.ChunkPos) *world.Chunk {
-	chunk := world.NewChunk(position)
-	baseX := position.X << core.SectionShift
-	baseZ := position.Z << core.SectionShift
-	for z := 0; z < core.SectionSize; z++ {
-		for x := 0; x < core.SectionSize; x++ {
-			height := generator.HeightAt(baseX+int32(x), baseZ+int32(z))
-			for y := int32(core.MinY); y <= height; y++ {
-				chunk.SetBlock(x, y, z, generator.generatedBlockAt(core.BlockPos{X: baseX + int32(x), Y: y, Z: baseZ + int32(z)}, height))
-			}
-		}
-	}
-	return chunk
-}
-
-func assertChunksHaveSameBlocks(t *testing.T, left, right *world.Chunk) {
-	t.Helper()
-	for y := int32(core.MinY); y < core.MaxY; y++ {
-		for z := 0; z < core.SectionSize; z++ {
-			for x := 0; x < core.SectionSize; x++ {
-				if got, want := left.BlockAt(x, y, z), right.BlockAt(x, y, z); got != want {
-					t.Fatalf("chunk local=(%d,%d,%d)=%d，想要 %d", x, y, z, got, want)
 				}
 			}
 		}

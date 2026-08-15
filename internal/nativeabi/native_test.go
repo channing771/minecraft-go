@@ -89,6 +89,10 @@ func TestEngineCgoDirectivesArePresent(t *testing.T) {
 		"#cgo nocallback mornlea_raycast_batch",
 		"#cgo noescape mornlea_physics_step",
 		"#cgo nocallback mornlea_physics_step",
+		"#cgo noescape mornlea_worldgen_chunk",
+		"#cgo nocallback mornlea_worldgen_chunk",
+		"#cgo noescape mornlea_worldgen_probe",
+		"#cgo nocallback mornlea_worldgen_probe",
 	} {
 		if !strings.Contains(string(contents), directive) {
 			t.Errorf("缺少 %s", directive)
@@ -456,4 +460,179 @@ func testValidCollisionInput() []byte {
 		input[offset] = 1
 	}
 	return input
+}
+
+// testValidWorldgenHeader 构造合法 `MGW1` header:seed 42、互异材料表 1..=13、恒等 perm。
+func testValidWorldgenHeader() []byte {
+	header := make([]byte, 564)
+	copy(header[:4], "MGW1")
+	binary.LittleEndian.PutUint32(header[4:8], 1)
+	binary.LittleEndian.PutUint64(header[8:16], 42)
+	minY := int32(-64)
+	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
+	binary.LittleEndian.PutUint32(header[20:24], 320)
+	for index := 0; index < 13; index++ {
+		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(index+1))
+	}
+	for index := 0; index < 512; index++ {
+		header[52+index] = byte(index & 255)
+	}
+	return header
+}
+
+func testValidWorldgenChunkInput() []byte {
+	input := testValidWorldgenHeader()
+	input = append(input, make([]byte, 8)...)
+	return input
+}
+
+func testValidWorldgenProbeInput() []byte {
+	input := testValidWorldgenHeader()
+	input = binary.LittleEndian.AppendUint32(input, 1)
+	input = binary.LittleEndian.AppendUint32(input, 2) // mode 2 = BaseBlockAt
+	input = append(input, make([]byte, 12)...)
+	return input
+}
+
+const worldgenChunkOutputBytes = 16 * 16 * 384 * 2
+
+func TestWorldgenChunkRawFailureAtomicity(t *testing.T) {
+	validInput := testValidWorldgenChunkInput()
+	badMagic := slices.Clone(validInput)
+	badMagic[0] = 'X'
+	duplicateMaterial := slices.Clone(validInput)
+	// dirt 改为与 stone 相同,触发材料表互异性校验。
+	binary.LittleEndian.PutUint16(duplicateMaterial[26:28], 1)
+	wrongMinY := slices.Clone(validInput)
+	badMinY := int32(-32)
+	binary.LittleEndian.PutUint32(wrongMinY[16:20], uint32(badMinY))
+	for _, test := range []struct {
+		name    string
+		version uint32
+		input   []byte
+		output  []byte
+		want    Status
+	}{
+		{name: "ABI version", version: ABIVersion + 1, input: validInput, output: make([]byte, worldgenChunkOutputBytes), want: StatusABIVersion},
+		{name: "nil input", version: ABIVersion, output: make([]byte, worldgenChunkOutputBytes), want: StatusInvalidArgument},
+		{name: "bad magic", version: ABIVersion, input: badMagic, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
+		{name: "duplicate material", version: ABIVersion, input: duplicateMaterial, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
+		{name: "wrong min y", version: ABIVersion, input: wrongMinY, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
+		{name: "short input", version: ABIVersion, input: validInput[:len(validInput)-1], output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
+		{name: "short output", version: ABIVersion, input: validInput, output: make([]byte, worldgenChunkOutputBytes-1), want: StatusOutputOverflow},
+		{name: "long output", version: ABIVersion, input: validInput, output: make([]byte, worldgenChunkOutputBytes+1), want: StatusInvalidArgument},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := slices.Clone(test.output)
+			status := worldgenChunkVersion(test.version, test.input, output)
+			if status != test.want {
+				t.Fatalf("status=%d，想要 %d", status, test.want)
+			}
+			if !slices.Equal(output, test.output) {
+				t.Fatal("失败调用修改了 caller-owned output")
+			}
+		})
+	}
+}
+
+func TestWorldgenChunkHappyPathIsDeterministic(t *testing.T) {
+	input := testValidWorldgenChunkInput()
+	first := make([]byte, worldgenChunkOutputBytes)
+	second := make([]byte, worldgenChunkOutputBytes)
+	WorldgenChunk(input, first)
+	WorldgenChunk(input, second)
+	if !slices.Equal(first, second) {
+		t.Fatal("同输入两次生成结果不同")
+	}
+	// 最底层必须整层是 bedrock(材料表第 5 项 = 5)。
+	for index := 0; index < 16*16; index++ {
+		if got := binary.LittleEndian.Uint16(first[index*2 : index*2+2]); got != 5 {
+			t.Fatalf("基岩层 index=%d 得到 %d", index, got)
+		}
+	}
+}
+
+func TestWorldgenProbeRawFailureAtomicity(t *testing.T) {
+	validInput := testValidWorldgenProbeInput()
+	badMode := slices.Clone(validInput)
+	binary.LittleEndian.PutUint32(badMode[564+4:564+8], 3)
+	zeroCount := slices.Clone(validInput[:564+4])
+	binary.LittleEndian.PutUint32(zeroCount[564:568], 0)
+	for _, test := range []struct {
+		name    string
+		version uint32
+		input   []byte
+		output  []byte
+		want    Status
+	}{
+		{name: "ABI version", version: ABIVersion + 1, input: validInput, output: make([]byte, 8), want: StatusABIVersion},
+		{name: "nil input", version: ABIVersion, output: make([]byte, 8), want: StatusInvalidArgument},
+		{name: "bad mode", version: ABIVersion, input: badMode, output: make([]byte, 8), want: StatusInput},
+		{name: "zero count", version: ABIVersion, input: zeroCount, output: make([]byte, 8), want: StatusInput},
+		{name: "short input", version: ABIVersion, input: validInput[:len(validInput)-1], output: make([]byte, 8), want: StatusInput},
+		{name: "short output", version: ABIVersion, input: validInput, output: make([]byte, 7), want: StatusOutputOverflow},
+		{name: "long output", version: ABIVersion, input: validInput, output: make([]byte, 9), want: StatusInvalidArgument},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := slices.Clone(test.output)
+			status := worldgenProbeVersion(test.version, test.input, output)
+			if status != test.want {
+				t.Fatalf("status=%d，想要 %d", status, test.want)
+			}
+			if !slices.Equal(output, test.output) {
+				t.Fatal("失败调用修改了 caller-owned output")
+			}
+		})
+	}
+}
+
+func TestWorldgenProbeMatchesChunkColumn(t *testing.T) {
+	chunkInput := testValidWorldgenChunkInput()
+	dense := make([]byte, worldgenChunkOutputBytes)
+	WorldgenChunk(chunkInput, dense)
+
+	input := testValidWorldgenHeader()
+	input = binary.LittleEndian.AppendUint32(input, 2)
+	// mode 2 查询 (3, 0, 5),mode 0 查询同柱高度。
+	input = binary.LittleEndian.AppendUint32(input, 2)
+	input = binary.LittleEndian.AppendUint32(input, 3)
+	input = binary.LittleEndian.AppendUint32(input, 0)
+	input = binary.LittleEndian.AppendUint32(input, 5)
+	input = binary.LittleEndian.AppendUint32(input, 0)
+	input = binary.LittleEndian.AppendUint32(input, 3)
+	input = binary.LittleEndian.AppendUint32(input, 0)
+	input = binary.LittleEndian.AppendUint32(input, 5)
+	output := make([]byte, 16)
+	WorldgenProbe(input, output)
+
+	denseOffset := ((0+64)*16*16 + 5*16 + 3) * 2
+	want := binary.LittleEndian.Uint16(dense[denseOffset : denseOffset+2])
+	if got := binary.LittleEndian.Uint16(output[4:6]); got != want {
+		t.Fatalf("probe block=%d，chunk dense=%d", got, want)
+	}
+	height := int32(binary.LittleEndian.Uint32(output[8:12]))
+	if height < 0 || height > 200 {
+		t.Fatalf("height=%d 超出地形振幅范围", height)
+	}
+}
+
+func TestWorldgenStatusPanicTextIsStable(t *testing.T) {
+	for _, test := range []struct {
+		status Status
+		want   string
+	}{
+		{StatusABIVersion, "nativeabi: worldgen chunk ABI 版本不匹配"},
+		{StatusInvalidArgument, "nativeabi: worldgen chunk 参数非法"},
+		{StatusInput, "nativeabi: worldgen chunk 输入非法"},
+		{StatusOutputOverflow, "nativeabi: worldgen chunk output 过短"},
+		{StatusPanic, "nativeabi: worldgen chunk Rust panic"},
+		{Status(200), "nativeabi: worldgen chunk 未知状态"},
+	} {
+		if got := worldgenStatusPanicText("chunk", test.status); got != test.want {
+			t.Fatalf("status=%d 文案=%q，想要 %q", test.status, got, test.want)
+		}
+	}
+	if got := worldgenStatusPanicText("probe", StatusInput); got != "nativeabi: worldgen probe 输入非法" {
+		t.Fatalf("probe 文案=%q", got)
+	}
 }
