@@ -37,9 +37,9 @@
 
 ## 8. Task 9：冻结 HEAD 并生成累计正确性、视觉与性能证据
 
-- [x] 8.1 在所有重型命令前冻结 clean producer HEAD，逐字节核对 M2 v15/M5 v14 baseline JSON、11 张 golden 与 scenario v16 身份；不更新 baseline、golden、threshold 或 fixture。
-- [x] 8.2 在同一 producer 上运行 `make rust-check`、native/core/physics/mesh race、两个 CI fixture `-race -count=100`、server/client/sim race、archcheck、Hook、三项 fuzz、mesh/physics/raycast benchmark 各 5 次、scenario v16 Memory/TCP 报告和 11 个 headless visual-check；性能仅记录，完整性/overflow/数据丢失/I/O/native loading/正确性仍为门禁。
-- [x] 8.3 验证 macOS 四 symbol、相邻 dylib、`@loader_path`、脱离 Cargo target 参数探针，并在 tracked provenance note 记录 producer、命令与输出；报告文件保持 ignored。
+- [ ] 8.1 在所有重型命令前冻结 clean producer HEAD，逐字节核对 M2 v15/M5 v14 baseline JSON、11 张 golden 与 scenario v16 身份；不更新 baseline、golden、threshold 或 fixture。
+- [ ] 8.2 在同一 producer 上运行 `make rust-check`、native/core/physics/mesh race、两个 CI fixture `-race -count=100`、server/client/sim race、archcheck、Hook、三项 fuzz、mesh/physics/raycast benchmark 各 5 次、scenario v16 Memory/TCP 报告和 11 个 headless visual-check；性能仅记录，完整性/overflow/数据丢失/I/O/native loading/正确性仍为门禁。
+- [ ] 8.3 验证 macOS 四 symbol、相邻 dylib、`@loader_path`、脱离 Cargo target 参数探针，并在 tracked provenance note 记录 producer、命令与输出；报告文件保持 ignored。
 
 ## 9. Task 10：完成累计独立评审与本地 gates
 

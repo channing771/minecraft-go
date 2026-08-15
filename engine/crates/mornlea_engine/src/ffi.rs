@@ -540,9 +540,12 @@ unsafe fn raycast_batch_with(
     if !raycast_metadata_is_valid(output_count, done) {
         return MORNLEA_STATUS_INVALID_ARGUMENT;
     }
-    if raycast_metadata_overlaps_buffer(output_count, done, input, input_len)
-        || raycast_metadata_overlaps_buffer(output_count, done, cursor, cursor_len)
-        || raycast_metadata_overlaps_buffer(output_count, done, output, output_len)
+    if (!input.is_null() && !byte_range_is_valid(input, RAYCAST_INPUT_BYTES))
+        || (!cursor.is_null() && !byte_range_is_valid(cursor, RAYCAST_CURSOR_BYTES))
+        || (!output.is_null() && !byte_range_is_valid(output, RAYCAST_OUTPUT_BYTES))
+        || raycast_metadata_overlaps_buffer(output_count, done, input, RAYCAST_INPUT_BYTES)
+        || raycast_metadata_overlaps_buffer(output_count, done, cursor, RAYCAST_CURSOR_BYTES)
+        || raycast_metadata_overlaps_buffer(output_count, done, output, RAYCAST_OUTPUT_BYTES)
     {
         return MORNLEA_STATUS_INVALID_ARGUMENT;
     }
@@ -843,6 +846,53 @@ mod tests {
         assert_eq!(output_arena[0], 0xa5);
         assert_eq!(output_arena[RAYCAST_OUTPUT_BYTES + 1], 0xa5);
         assert_eq!(output_arena[13], 0xff);
+    }
+
+    #[test]
+    fn null_raycast_buffer_clears_metadata_before_invalid_argument() {
+        for buffer in [
+            RaycastBuffer::Input,
+            RaycastBuffer::Cursor,
+            RaycastBuffer::Output,
+        ] {
+            let input = valid_raycast_input();
+            let mut cursor = fresh_raycast_cursor();
+            let mut output = [0xa5_u8; RAYCAST_OUTPUT_BYTES];
+            let mut count = usize::MAX;
+            let mut done = 0xff;
+            let input_pointer = if matches!(buffer, RaycastBuffer::Input) {
+                std::ptr::null()
+            } else {
+                input.as_ptr()
+            };
+            let cursor_pointer = if matches!(buffer, RaycastBuffer::Cursor) {
+                std::ptr::null_mut()
+            } else {
+                cursor.as_mut_ptr()
+            };
+            let output_pointer = if matches!(buffer, RaycastBuffer::Output) {
+                std::ptr::null_mut()
+            } else {
+                output.as_mut_ptr()
+            };
+
+            let status = unsafe {
+                super::mornlea_raycast_batch(
+                    1,
+                    input_pointer,
+                    input.len(),
+                    cursor_pointer,
+                    cursor.len(),
+                    output_pointer,
+                    output.len(),
+                    &mut count,
+                    &mut done,
+                )
+            };
+
+            assert_eq!((count, done), (0, 0), "{buffer:?}");
+            assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT, "{buffer:?}");
+        }
     }
 
     #[test]
@@ -1175,7 +1225,15 @@ mod tests {
                 RaycastBuffer::Cursor,
                 RaycastBuffer::Output,
             ] {
-                assert_raycast_metadata_overlap_is_atomic(metadata, buffer);
+                for length in [
+                    RaycastBufferLength::Exact,
+                    RaycastBufferLength::Zero,
+                    RaycastBufferLength::Short,
+                    RaycastBufferLength::Long,
+                    RaycastBufferLength::Wrapping,
+                ] {
+                    assert_raycast_metadata_overlap_is_atomic(metadata, buffer, length);
+                }
             }
         }
     }
@@ -1318,10 +1376,38 @@ mod tests {
         Output,
     }
 
+    #[derive(Clone, Copy, Debug)]
+    enum RaycastBufferLength {
+        Exact,
+        Zero,
+        Short,
+        Long,
+        Wrapping,
+    }
+
     #[repr(align(8))]
     struct AlignedBytes<const N: usize>([u8; N]);
 
-    fn assert_raycast_metadata_overlap_is_atomic(metadata: MetadataField, buffer: RaycastBuffer) {
+    fn raycast_buffer_length(buffer: RaycastBuffer, length: RaycastBufferLength) -> usize {
+        let exact = match buffer {
+            RaycastBuffer::Input => RAYCAST_INPUT_BYTES,
+            RaycastBuffer::Cursor => RAYCAST_CURSOR_BYTES,
+            RaycastBuffer::Output => RAYCAST_OUTPUT_BYTES,
+        };
+        match length {
+            RaycastBufferLength::Exact => exact,
+            RaycastBufferLength::Zero => 0,
+            RaycastBufferLength::Short => exact - 1,
+            RaycastBufferLength::Long => exact + 1,
+            RaycastBufferLength::Wrapping => usize::MAX,
+        }
+    }
+
+    fn assert_raycast_metadata_overlap_is_atomic(
+        metadata: MetadataField,
+        buffer: RaycastBuffer,
+        length: RaycastBufferLength,
+    ) {
         const CANARY_BYTES: usize = 8;
         let mut input_arena = AlignedBytes([0xa5_u8; RAYCAST_INPUT_BYTES + 2 * CANARY_BYTES]);
         input_arena.0[CANARY_BYTES..CANARY_BYTES + RAYCAST_INPUT_BYTES]
@@ -1351,30 +1437,54 @@ mod tests {
             MetadataField::Count => &mut done,
             MetadataField::Done => overlap_pointer,
         };
+        let input_len = if matches!(buffer, RaycastBuffer::Input) {
+            raycast_buffer_length(buffer, length)
+        } else {
+            RAYCAST_INPUT_BYTES
+        };
+        let cursor_len = if matches!(buffer, RaycastBuffer::Cursor) {
+            raycast_buffer_length(buffer, length)
+        } else {
+            RAYCAST_CURSOR_BYTES
+        };
+        let output_len = if matches!(buffer, RaycastBuffer::Output) {
+            raycast_buffer_length(buffer, length)
+        } else {
+            RAYCAST_OUTPUT_BYTES
+        };
 
         let status = unsafe {
             super::mornlea_raycast_batch(
                 1,
                 input_pointer,
-                RAYCAST_INPUT_BYTES,
+                input_len,
                 cursor_pointer,
-                RAYCAST_CURSOR_BYTES,
+                cursor_len,
                 output_pointer,
-                RAYCAST_OUTPUT_BYTES,
+                output_len,
                 count_pointer,
                 done_pointer,
             )
         };
 
         assert_eq!(
-            status, MORNLEA_STATUS_INVALID_ARGUMENT,
-            "{metadata:?}/{buffer:?}"
+            input_arena.0, before_input,
+            "{metadata:?}/{buffer:?}/{length:?}"
         );
-        assert_eq!(count, usize::MAX, "{metadata:?}/{buffer:?}");
-        assert_eq!(done, 0xff, "{metadata:?}/{buffer:?}");
-        assert_eq!(input_arena.0, before_input, "{metadata:?}/{buffer:?}");
-        assert_eq!(cursor_arena.0, before_cursor, "{metadata:?}/{buffer:?}");
-        assert_eq!(output_arena.0, before_output, "{metadata:?}/{buffer:?}");
+        assert_eq!(
+            cursor_arena.0, before_cursor,
+            "{metadata:?}/{buffer:?}/{length:?}"
+        );
+        assert_eq!(
+            output_arena.0, before_output,
+            "{metadata:?}/{buffer:?}/{length:?}"
+        );
+        assert_eq!(count, usize::MAX, "{metadata:?}/{buffer:?}/{length:?}");
+        assert_eq!(done, 0xff, "{metadata:?}/{buffer:?}/{length:?}");
+        assert_eq!(
+            status, MORNLEA_STATUS_INVALID_ARGUMENT,
+            "{metadata:?}/{buffer:?}/{length:?}"
+        );
     }
 
     #[test]
