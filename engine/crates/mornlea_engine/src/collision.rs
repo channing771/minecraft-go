@@ -150,8 +150,7 @@ pub(crate) fn resolve_collision(bytes: &[u8]) -> [u8; 16] {
     resolve_collision_input(input)
 }
 
-// 供 Task 5 的 step.rs 零拷贝复用 cells；接入前先抑制 dead_code 告警。
-#[allow(dead_code)]
+// 供 Task 5 的 step.rs 零拷贝复用 cells。
 pub(crate) fn resolve_collision_parts(
     position: Vector,
     displacement: Vector,

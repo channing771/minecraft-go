@@ -249,15 +249,75 @@ pub(crate) fn integrate(input: &StepInput<'_>) -> (Vector, Vector) {
     if input.on_ground && input.jump {
         velocity[1] = input.jump_speed;
     } else {
+        // 与 Go 内建 max 逐位一致：f32::max 符号零语义为 +0 胜出。
         velocity[1] = (velocity[1] - input.gravity * dt).max(-input.terminal_fall_speed);
     }
     let displacement = [velocity[0] * dt, velocity[1] * dt, velocity[2] * dt];
     (velocity, displacement)
 }
 
+#[derive(Debug)]
+pub(crate) enum StepError {
+    DisplacementOutOfBounds,
+}
+
+fn write_f32_output(output: &mut [u8], offset: usize, value: f32) {
+    output[offset..offset + 4].copy_from_slice(&value.to_bits().to_le_bytes());
+}
+
+// physics_step 一次完成积分 + 碰撞解析 + 速度裁剪。
+// 积分位移必须落在输入 sweep bounds 内，否则返回 DisplacementOutOfBounds（调用方映射 StatusInput）。
+pub(crate) fn physics_step(bytes: &[u8]) -> Result<[u8; STEP_OUTPUT_BYTES], StepError> {
+    let input = StepInput::decode(bytes);
+    let (velocity, displacement) = integrate(&input);
+    for ((&minimum, &maximum), &offset) in input
+        .sweep_min
+        .iter()
+        .zip(&input.sweep_max)
+        .zip(&displacement)
+    {
+        if !(minimum <= offset && offset <= maximum) {
+            return Err(StepError::DisplacementOutOfBounds);
+        }
+    }
+    let result = crate::collision::resolve_collision_parts(
+        input.position,
+        displacement,
+        input.on_ground,
+        input.step_height,
+        input.origin,
+        input.dimensions,
+        input.bytes,
+    );
+    // result 布局沿用 collision ABI：position(0..12)、clipped mask(12)、on_ground(13)、used_step(14)、hit_unknown(15)
+    let clipped = result[12];
+    let mut velocity = velocity;
+    for (axis, component) in velocity.iter_mut().enumerate() {
+        if clipped & (1 << axis) != 0 {
+            *component = 0.0;
+        }
+    }
+    let mut output = [0u8; STEP_OUTPUT_BYTES];
+    for axis in 0..3 {
+        let result_component: [u8; 4] = result[axis * 4..axis * 4 + 4]
+            .try_into()
+            .expect("collision result 4 bytes");
+        write_f32_output(&mut output, axis * 4, f32::from_le_bytes(result_component));
+        write_f32_output(&mut output, 12 + axis * 4, velocity[axis]);
+    }
+    output[24] = clipped;
+    output[25] = result[13];
+    output[26] = result[14];
+    output[27] = result[15];
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{STEP_HEADER_BYTES, StepInput, integrate, step_input_is_valid};
+    use super::{
+        STEP_HEADER_BYTES, STEP_OUTPUT_BYTES, StepError, StepInput, integrate, physics_step,
+        read_f32, step_input_is_valid,
+    };
 
     const CELL_BYTES: usize = 196;
 
@@ -511,5 +571,94 @@ mod tests {
         let input = StepInput::decode(Box::leak(bytes.into_boxed_slice()));
         let (velocity, _) = integrate(&input);
         assert_eq!(velocity[0].to_bits(), 7.5f32.to_bits()); // 10 − 50*0.05
+    }
+
+    // empty_prism_bytes 构造"空中 + 空世界"夹具：position {0.5,1,0.5}、velocity 0、
+    // on_ground=0、move_x=0、sweep dy=[-0.08,0.05]、prism {1,4,1} 全空 cell。
+    // 积分结果：velocity {0,-1.6,0}，displacement {0,-0.08,0}，位置落到 y=0.92。
+    fn empty_prism_bytes() -> Vec<u8> {
+        let dimensions = [1u32, 4, 1];
+        let cell_count = (dimensions[0] * dimensions[1] * dimensions[2]) as usize;
+        let mut bytes = vec![0u8; STEP_HEADER_BYTES + cell_count * CELL_BYTES];
+        bytes[0..4].copy_from_slice(b"MGP1");
+        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        write_f32(&mut bytes, 8, 0.5);
+        write_f32(&mut bytes, 12, 1.0);
+        write_f32(&mut bytes, 16, 0.5);
+        // velocity 保持 0
+        bytes[32] = 0; // 空中
+        // move_x = 0
+        write_f32(&mut bytes, 36, 0.0); // yaw_sin
+        write_f32(&mut bytes, 40, 1.0); // yaw_cos
+        write_f32(&mut bytes, 44, 0.05); // dt
+        for (index, value) in [0.6f32, 4.3, 40.0, 50.0, 8.0, 8.4, 32.0, 78.4]
+            .iter()
+            .enumerate()
+        {
+            write_f32(&mut bytes, 48 + index * 4, *value);
+        }
+        write_f32(&mut bytes, 80, 0.0); // dx_min
+        write_f32(&mut bytes, 84, 0.0); // dx_max
+        write_f32(&mut bytes, 88, -1.6 * 0.05); // dy_min（与积分 dy 逐位一致）
+        write_f32(&mut bytes, 92, 0.05); // dy_max
+        write_f32(&mut bytes, 96, 0.0); // dz_min
+        write_f32(&mut bytes, 100, 0.0); // dz_max
+        for index in 0..3 {
+            bytes[104 + index * 4..108 + index * 4].copy_from_slice(&0u32.to_le_bytes());
+            bytes[116 + index * 4..120 + index * 4]
+                .copy_from_slice(&dimensions[index].to_le_bytes());
+        }
+        for cell in bytes[STEP_HEADER_BYTES..].chunks_exact_mut(CELL_BYTES) {
+            cell[0] = 1; // loaded、count 0
+        }
+        bytes
+    }
+
+    #[test]
+    fn physics_step_rejects_displacement_outside_sweep_bounds() {
+        // 基础夹具 on_ground=1、velocity y=-1.6、sweep dy=[-0.08,0.05]，
+        // 积分 dy = -0.16 越界 → DisplacementOutOfBounds。
+        let input_bytes = Box::leak(valid_step_bytes().into_boxed_slice());
+        assert!(matches!(
+            physics_step(input_bytes),
+            Err(StepError::DisplacementOutOfBounds)
+        ));
+    }
+
+    #[test]
+    fn physics_step_encodes_output_layout() {
+        let bytes = Box::leak(empty_prism_bytes().into_boxed_slice());
+        let output = physics_step(bytes).expect("valid input");
+        assert_eq!(output.len(), STEP_OUTPUT_BYTES);
+        assert_eq!(read_f32(&output, 0), 0.5); // position x
+        assert_eq!(read_f32(&output, 4), 0.92); // position y = 1 − 0.08
+        assert_eq!(read_f32(&output, 8), 0.5); // position z
+        assert_eq!(read_f32(&output, 12), 0.0); // velocity x
+        assert_eq!(read_f32(&output, 16), -1.6); // velocity y（重力 −1.6）
+        assert_eq!(read_f32(&output, 20), 0.0); // velocity z
+        assert_eq!(output[24], 0); // clipped mask
+        assert_eq!(output[25], 0); // on_ground（0.92 处无支撑）
+        assert_eq!(output[26], 0); // used_step
+        assert_eq!(output[27], 0); // hit_unknown
+        assert_eq!(&output[28..32], &[0, 0, 0, 0]); // reserved
+    }
+
+    #[test]
+    fn physics_step_lands_on_floor_and_clips_velocity() {
+        let mut bytes = empty_prism_bytes();
+        // 地板：cell (0,0,0)（prism Y/X/Z 顺序的第一个 cell）全立方
+        bytes[STEP_HEADER_BYTES + 1] = 1;
+        let box_offset = STEP_HEADER_BYTES + 4;
+        write_f32(&mut bytes, box_offset, 0.0);
+        write_f32(&mut bytes, box_offset + 4, 0.0);
+        write_f32(&mut bytes, box_offset + 8, 0.0);
+        write_f32(&mut bytes, box_offset + 12, 1.0);
+        write_f32(&mut bytes, box_offset + 16, 1.0);
+        write_f32(&mut bytes, box_offset + 20, 1.0);
+        let input_bytes = Box::leak(bytes.into_boxed_slice());
+        let output = physics_step(input_bytes).expect("valid input");
+        assert_eq!(read_f32(&output, 4), 1.0); // position y 落回 1.0
+        assert_eq!(read_f32(&output, 16), 0.0); // velocity y 被裁剪清零
+        assert_eq!(output[25], 1); // on_ground
     }
 }
