@@ -37,15 +37,15 @@
 
 ## 8. Task 9：冻结 HEAD 并生成累计正确性、视觉与性能证据
 
-- [x] 8.1 在所有重型命令前冻结 clean producer HEAD，逐字节核对 M2 v15/M5 v14 baseline JSON、11 张 golden 与 scenario v16 身份；不更新 baseline、golden、threshold 或 fixture。
-- [x] 8.2 在同一 producer 上运行 `make rust-check`、native/core/physics/mesh race、两个 CI fixture `-race -count=100`、server/client/sim race、archcheck、Hook、三项 fuzz、mesh/physics/raycast benchmark 各 5 次、scenario v16 Memory/TCP 报告和 11 个 headless visual-check；性能仅记录，完整性/overflow/数据丢失/I/O/native loading/正确性仍为门禁。
-- [x] 8.3 验证 macOS 四 symbol、相邻 dylib、`@loader_path`、脱离 Cargo target 参数探针，并在 tracked provenance note 记录 producer、命令与输出；报告文件保持 ignored。
+- [ ] 8.1 在所有重型命令前冻结 clean producer HEAD，逐字节核对 M2 v15/M5 v14 baseline JSON、11 张 golden 与 scenario v16 身份；不更新 baseline、golden、threshold 或 fixture。
+- [ ] 8.2 在同一 producer 上运行 `make rust-check`、native/core/physics/mesh race、两个 CI fixture `-race -count=100`、server/client/sim race、archcheck、Hook、三项 fuzz、mesh/physics/raycast benchmark 各 5 次、scenario v16 Memory/TCP 报告和 11 个 headless visual-check；性能仅记录，完整性/overflow/数据丢失/I/O/native loading/正确性仍为门禁。
+- [ ] 8.3 验证 macOS 四 symbol、相邻 dylib、`@loader_path`、脱离 Cargo target 参数探针，并在 tracked provenance note 记录 producer、命令与输出；报告文件保持 ignored。
 
 ## 9. Task 10：完成累计独立评审与本地 gates
 
-- [x] 9.1 使用独立只读评审核验两条 happens-before、单 std-only `mornlea_engine`、ABI v1/nativeabi leaf、collision/raycast layouts/atomicity/parity/laziness、macOS/Linux bundle、无图形专服和所有冻结 identity；对每项 finding 先复现或证伪，任何生产修复按范围重新冻结并重跑 Task 8 证据。
-- [x] 9.2 仅在 Critical/Important/Minor 均为零后，运行 `gofmt -l .`、`go vet ./...`、`go test ./... -race`、`openspec validate rust-engine-collision-raycast-ci-stability --strict --no-interactive`、`openspec validate --all --strict --no-interactive`，勾选全部本地任务并确认只剩下 10.1 的真实 Linux PR-CI gate；archive 不是 active checkbox。
+- [ ] 9.1 使用独立只读评审核验两条 happens-before、单 std-only `mornlea_engine`、ABI v1/nativeabi leaf、collision/raycast layouts/atomicity/parity/laziness、macOS/Linux bundle、无图形专服和所有冻结 identity；对每项 finding 先复现或证伪，任何生产修复按范围重新冻结并重跑 Task 8 证据。
+- [ ] 9.2 仅在 Critical/Important/Minor 均为零后，运行 `gofmt -l .`、`go vet ./...`、`go test ./... -race`、`openspec validate rust-engine-collision-raycast-ci-stability --strict --no-interactive`、`openspec validate --all --strict --no-interactive`，勾选全部本地任务并确认只剩下 10.1 的真实 Linux PR-CI gate；archive 不是 active checkbox。
 
 ## 10. Task 11：经授权验证真实 Linux PR-CI
 
-- [ ] 10.1 在用户明确授权发布 draft PR 后，确认 exact HEAD 的 macOS `test` 与 Ubuntu `linux-server` 均成功；日志必须证明 `libmornlea_engine.so`、`$ORIGIN`、脱离 target 参数解析和两条历史 flaky tests 均通过。此项完成后才可同步主 specs 并用官方 archive workflow 归档；不得自行 push、merge 或 archive。
+- [ ] 10.1 在用户明确授权发布 draft PR 后，确认 exact HEAD 的 macOS `test` 与 Ubuntu `linux-server` 均成功；日志必须证明 `libmornlea_engine.so`、`$ORIGIN`、脱离 target 参数解析和两条历史 flaky tests 均通过。首次 exact HEAD `1904300f` 的 PR run `31875600897` 因 mesh 测试间接编译 Darwin-only GPU API 而成为 source RED；必须修正 GPU 文件 build constraint、重新冻结并完成 8.1–9.2 后再等待新 run。此项完成后才可同步主 specs 并用官方 archive workflow 归档；不得自行 push、merge 或 archive。

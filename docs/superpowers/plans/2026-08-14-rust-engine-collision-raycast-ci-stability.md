@@ -1674,6 +1674,8 @@ Report the clean branch and zero-finding review, then ask only whether the user 
 ### Task 11: 经授权验证 Linux CI、同步主规格并归档
 
 **Files:**
+- Modify: `internal/assets/atlas.go`
+- Modify: `internal/assets/atlas_test.go`
 - Modify: `openspec/changes/rust-engine-collision-raycast-ci-stability/tasks.md`
 - Modify: `openspec/specs/rust-engine-mesh/spec.md`
 - Modify: `openspec/specs/project-identity/spec.md`
@@ -1731,6 +1733,8 @@ rg -F 'flag: help requested' /private/tmp/mornlea-rust-kernel-pr-run.log
 ```
 
 Record run ID/job URLs and confirm both historical flaky tests passed in the macOS full-race job. A missing/skipped Linux job, loader error, graphics dependency, parity/race failure or incomplete log blocks; fix the root cause, rerun Task 9 proportionally, obtain fresh review, and wait for a new green run.
+
+The first exact-head PR run `31875600897` is the Linux source RED: `internal/mesh.test` imports the CPU asset registry, but the untagged GPU upload file referenced Darwin-only `gfx` types. Mark only `internal/assets/atlas.go` and its GPU test Darwin-only; do not remove the Linux mesh gate, add a Linux gfx stub, or replace the real registry parity fixture. Because this changes a production Go file's platform source set, invalidate Task 9 and the cumulative review, then rerun Tasks 9–10 from a new frozen producer HEAD before requesting a new exact-head PR run.
 
 - [ ] **Step 3: Complete active tasks and archive with the official workflow**
 
