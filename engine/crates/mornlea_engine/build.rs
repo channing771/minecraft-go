@@ -2,6 +2,6 @@ use std::env;
 
 fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        println!("cargo::rustc-link-arg-cdylib=-Wl,-install_name,@rpath/libmornlea_mesh.dylib");
+        println!("cargo::rustc-link-arg-cdylib=-Wl,-install_name,@rpath/libmornlea_engine.dylib");
     }
 }

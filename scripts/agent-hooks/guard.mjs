@@ -97,6 +97,9 @@ export function rustValidationRequired(paths) {
     /^engine\/(?:Cargo\.toml|Cargo\.lock|rust-toolchain\.toml)$/,
     /^engine\/crates\/.*\/Cargo\.toml$/,
     /^engine\/include\/mornlea_engine\.h$/,
+    /^internal\/nativeabi\/.*\.go$/,
+    /^internal\/core\/raycast[^/]*\.go$/,
+    /^internal\/physics\/.*\.go$/,
     /^internal\/mesh\/native[^/]*\.go$/,
     /^internal\/mesh\/registry\.go$/,
     /^Makefile$/,
@@ -129,7 +132,7 @@ export function openSpecRequirementReasons(paths) {
     /^internal\/network\/testdata\/.*\.bin$/,
     /^internal\/storage\/testdata\/.*\.bin$/,
     /^docs\/notes\/perf-baseline\.(?:json|md)$/,
-    /^internal\/archcheck\/deps_test\.go$/,
+	/^internal\/archcheck\/dependency_test\.go$/,
   ];
 
   if (paths.some((path) => highRiskPatterns.some((pattern) => pattern.test(path)))) {
@@ -377,7 +380,7 @@ export function stopFailures(paths, execute = run, environment = process.env) {
           .map((directory) => `./${directory}`),
       ),
     ].sort();
-    if (packageArguments.length > 0) {
+    if (!needsRustValidation && packageArguments.length > 0) {
       const tests = execute(
         "go",
         ["test", "-race", "-count=1", ...packageArguments],
@@ -394,10 +397,29 @@ export function stopFailures(paths, execute = run, environment = process.env) {
     if (vetFailure) {
       failures.push(vetFailure);
     }
-  } else if (needsRustValidation) {
+  }
+
+  if (needsRustValidation) {
+    const packageArguments = [
+      "./internal/nativeabi",
+      "./internal/core",
+      "./internal/physics",
+      "./internal/mesh",
+      "./internal/client",
+      "./internal/sim",
+      "./internal/server",
+      "./cmd/mornlea",
+      "./cmd/mornlea-server",
+      ...new Set(
+        goFiles
+          .map((path) => dirname(path))
+          .filter((directory) => directory !== ".")
+          .map((directory) => `./${directory}`),
+      ),
+    ];
     const tests = execute(
       "go",
-      ["test", "./internal/mesh", "./internal/client", "-race", "-count=1"],
+      ["test", ...new Set(packageArguments), "-race", "-count=1"],
       180_000,
     );
     const testFailure = commandFailure("native 下游测试", tests);

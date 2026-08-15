@@ -113,6 +113,7 @@ func TestReconnectContinuesWorldTimeWithoutRollback(t *testing.T) {
 	beforeDisconnect := first.local.WorldTimeTicks
 
 	mustCloseMultiplayerTCPClient(t, first)
+	waitForPlayerReleased(t, host.Host, identity.PlayerID)
 	second = mustConnectMultiplayerTCPClient(t, deadline, host.Addr, identity)
 	mustDrainMultiplayer(t, deadline, second, nil, "重连就绪", func() bool {
 		return second.local.Ready && second.local.WorldTimeTicks > 0

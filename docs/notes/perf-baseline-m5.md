@@ -1,5 +1,43 @@
 # Apple M5 性能基线
 
+## Rust kernel 累计门禁 Attempt 6 scenario v16（record-only，非新基线）
+
+2026-08-15 在 Linux GPU source-set 修复后的冻结 producer `931c57a7d4d017e37a94baf19eee833b042c68ce` 上完成 fresh 本地/macOS 累计门禁。宿主为 Apple M5 / 24GiB、macOS 26.5.1、Go 1.26.0 darwin/arm64；Rust/cargo 为 1.97.1。Rust、race、两条历史 fixture ×100、Hook、三项 fuzz、三组 benchmark、四个 native symbol、相邻 dylib、detached load、11 个 headless visual、Memory/TCP producer、自比较、跨 transport 比较和最终 full gates 均通过。
+
+- Memory：`/private/tmp/mornlea-rust-kernel-attempt6-931c57a7d4d017e37a94baf19eee833b042c68ce-v16/memory-v16.json`，SHA-256 `4b8d007d62ad0260235c2a8551b0417334220b983127083ac3a1b96f06b92e9e`
+- TCP：`/private/tmp/mornlea-rust-kernel-attempt6-931c57a7d4d017e37a94baf19eee833b042c68ce-v16/tcp-v16.json`，SHA-256 `7b200463511c027b03921d62f661ea85a4c34d34580fb41c4a4de64fd5b3944b`
+- visual：`/private/tmp/mornlea-rust-kernel-attempt6-931c57a7d4d017e37a94baf19eee833b042c68ce-visual`，11 张 PNG 均为最大通道差 0、差异像素 0，且没有 `actual`/`diff` 文件。
+
+| transport / 阶段 | frames | FPS | p50 | p95 | p99 | max | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Memory / still | 17044 | 284.1 | 3.438ms | 3.846ms | 4.312ms | 17.914ms | 1209.5MiB |
+| Memory / flying | 54530 | 454.6 | 1.314ms | 6.872ms | 16.269ms | 145.369ms | 1408.4MiB |
+| TCP / still | 17028 | 283.8 | 3.449ms | 3.840ms | 4.345ms | 20.630ms | 1175.3MiB |
+| TCP / flying | 46326 | 386.2 | 1.706ms | 7.927ms | 16.361ms | 150.026ms | 1399.1MiB |
+
+两份报告均为 scenario `16`、`2560x1440`、同一 producer 与硬件，并含完整 still/flying、200 tick、persistence、protocol、player persistence 与 multiplayer 数据。Memory/TCP 自比较和 Memory→TCP 比较均为 exit 0；flying p99 与跨 transport p50 波动只作性能记录。
+
+这不是 baseline promotion：`perf-baseline.json`（M2 v15）和 `perf-baseline-m5.json`（M5 v14）字节未修改；11 张 golden、threshold、fixture、scenario、protocol 与 storage 也未修改。报告完整性、身份、真实 overflow、数据丢失与 I/O 仍为门禁。
+
+## Rust kernel 累计门禁 Attempt 4 scenario v16（record-only，非新基线）
+
+2026-08-15 在冻结 producer `5d510d91489391e949f17d5656b294b77693cf68` 上完成完整本地/macOS 累计门禁。宿主为 Apple M5 / 24GiB、macOS 26.5.1、Go 1.26.0 darwin/arm64；Rust/cargo 为 1.97.1。Rust、race、两条历史 fixture ×100、Hook、fuzz、benchmark、四个 native symbol、相邻 dylib、detached load、11 个 headless visual、Memory/TCP producer、自比较、跨 transport 比较和最终 full gates 均通过。
+
+- Memory：`/private/tmp/mornlea-rust-kernel-attempt4-5d510d91489391e949f17d5656b294b77693cf68-v16/memory-v16.json`，SHA-256 `9b7ee48d9eed9085b82852f501d23249c49385232cac672e4593e6003e4ab6cb`
+- TCP：`/private/tmp/mornlea-rust-kernel-attempt4-5d510d91489391e949f17d5656b294b77693cf68-v16/tcp-v16.json`，SHA-256 `16e663d8f272ca55f0b33f5a4467f9509bdc16cfc4c0c85887ed37c8bddadc6e`
+- 两份报告均为 scenario `16`、`2560x1440`、同一 producer 与硬件；Memory/TCP 自比较和 Memory→TCP 比较均为 exit 0。Memory/TCP flying p99 `15.538/13.862ms` 只作性能记录。
+
+这不是 baseline promotion：`perf-baseline.json`（M2 v15）和 `perf-baseline-m5.json`（M5 v14）字节未修改；11 张 golden、threshold、fixture 和 scenario 也未修改。报告完整性、身份、真实 overflow、数据丢失与 I/O 仍为门禁。
+
+## Rust kernel 累计门禁 scenario v16（record-only，非新基线）
+
+2026-08-14 在冻结 producer `37f6fbe12d0b3ce15a500c8fdaadb358cbe5f688` 上完成完整本地/macOS 累计门禁。宿主为 Apple M5 / 24GiB、macOS 26.5.1、Go 1.26.0 darwin/arm64；scenario 为 `16`。Memory/TCP producer、自比较和显式 Memory→TCP 比较均通过，性能数值只记录。
+
+- Memory：`/private/tmp/mornlea-rust-kernel-attempt2-v16-37f6fbe12d0b3ce15a500c8fdaadb358cbe5f688/memory-v16.json`，SHA-256 `5bd268182693e4ed20d7391e5b8863935151b2be11093b417916634417277a2e`
+- TCP：`/private/tmp/mornlea-rust-kernel-attempt2-v16-37f6fbe12d0b3ce15a500c8fdaadb358cbe5f688/tcp-v16.json`，SHA-256 `97db856de51bc12a9899f4a469222cc917fc8840fefed26c4563691e9b41d578`
+
+这不是 baseline promotion：`perf-baseline.json`（M2 v15）和 `perf-baseline-m5.json`（M5 v14）未修改；完整性、身份、overflow、数据丢失与 I/O 仍为门禁。
+
 ## M5A scenario v16 record-only 证据（非新基线）
 
 2026-08-14 在冻结提交 `2c1eb2dc3e49b2534958a7575eabba6935be99a3` 上生成两份完整无窗口报告。两者身份均为 scenario `16`、Apple M5 / 24GiB、macOS 26.5.1、Go 1.26.0 darwin/arm64、2560×1440；Memory 与 TCP 分别自比较通过，并完成一次显式跨 transport 比较。性能数值只记录，没有建立或提升任何 baseline。

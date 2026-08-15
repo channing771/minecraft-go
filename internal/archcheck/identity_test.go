@@ -149,6 +149,40 @@ func newGoIdentityScanner(root string) *goIdentityScanner {
 	}
 }
 
+func TestNativeEngineLibraryIdentity(t *testing.T) {
+	root := moduleRoot(t)
+	engineCrate := filepath.Join(root, "engine", "crates", "mornlea_engine")
+	if info, err := os.Stat(filepath.Join(engineCrate, "Cargo.toml")); err != nil || info.IsDir() {
+		t.Fatalf("Rust engine crate 必须存在: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "engine", "crates", "mornlea_mesh")); !os.IsNotExist(err) {
+		t.Fatalf("旧 Rust crate 不得存在: %v", err)
+	}
+
+	requireIdentity := func(relative, want, old string) {
+		t.Helper()
+		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatalf("读取 %s: %v", relative, err)
+		}
+		if !bytes.Contains(content, []byte(want)) {
+			t.Errorf("%s 必须包含 %q", relative, want)
+		}
+		if bytes.Contains(content, []byte(old)) {
+			t.Errorf("%s 不得包含旧身份 %q", relative, old)
+		}
+	}
+
+	requireIdentity("engine/Cargo.toml", `members = ["crates/mornlea_engine"]`, "crates/mornlea_mesh")
+	requireIdentity("engine/crates/mornlea_engine/Cargo.toml", `name = "mornlea_engine"`, `name = "mornlea_mesh"`)
+	requireIdentity("engine/crates/mornlea_engine/build.rs", "@rpath/libmornlea_engine.dylib", "libmornlea_mesh.dylib")
+	requireIdentity("Makefile", "libmornlea_engine.dylib", "libmornlea_mesh.dylib")
+	requireIdentity("internal/nativeabi/native.go", "-lmornlea_engine", "-lmornlea_mesh")
+	for _, relative := range []string{"AGENTS.md", "CLAUDE.md", "README.md", "README.en.md", "openspec/config.yaml", "docs/notes/progress.md"} {
+		requireIdentity(relative, "mornlea_engine", "libmornlea_mesh")
+	}
+}
+
 func TestMornleaCurrentIdentity(t *testing.T) {
 	if root := os.Getenv("MORNLEA_IDENTITY_TEST_ROOT"); root != "" {
 		actual := make([]int, len(legacyIdentityAllowances))
@@ -159,6 +193,7 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 	}
 
 	root := moduleRoot(t)
+	requireLinuxServerBundleIdentity(t, root)
 	goModule, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		t.Fatalf("读取 go.mod: %v", err)
@@ -191,7 +226,46 @@ func TestMornleaCurrentIdentity(t *testing.T) {
 			t.Errorf("旧数据身份 allowlist 计数错误：%s %s.%s = %d，期望 %d", allowance.path, allowance.literal, allowance.owner, actual[index], allowance.expected)
 		}
 	}
-	testCurrentIdentityMutations(t)
+	if build.Default.GOOS == "darwin" {
+		testCurrentIdentityMutations(t)
+	}
+}
+
+func requireLinuxServerBundleIdentity(t *testing.T, root string) {
+	t.Helper()
+	var linux *identityBuild
+	for _, target := range supportedIdentityBuilds() {
+		if target.name == "linux-server" {
+			linux = &target
+			break
+		}
+	}
+	if linux == nil || linux.context.GOOS != "linux" || linux.context.GOARCH != "amd64" || !linux.context.CgoEnabled {
+		t.Fatalf("Linux server identity context 必须是 linux/amd64 且启用 CGO: %+v", linux)
+	}
+
+	help := exec.Command("make", "help")
+	help.Dir = root
+	output, err := help.CombinedOutput()
+	if err != nil {
+		t.Fatalf("运行 make help: %v\n%s", err, output)
+	}
+	if !bytes.Contains(output, []byte("make build-linux-server 构建 Linux amd64 专服与同目录 Rust .so")) {
+		t.Error("make help 未公开 canonical build-linux-server target")
+	}
+
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatalf("读取 CI workflow: %v", err)
+	}
+	for _, required := range []string{"linux-server:", "runs-on: ubuntu-latest", "make build-linux-server"} {
+		if !bytes.Contains(workflow, []byte(required)) {
+			t.Errorf("CI workflow 缺少 Linux native bundle 标记 %q", required)
+		}
+	}
+	if bytes.Contains(workflow, []byte("rg ")) {
+		t.Error("CI workflow 不得依赖 runner 未安装的 rg")
+	}
 }
 
 func testCurrentIdentityMutations(t *testing.T) {
@@ -495,17 +569,31 @@ type identityBuild struct {
 	fullRoots bool
 }
 
+func TestSupportedIdentityBuildsDoNotCrossCompileDarwinFullRoots(t *testing.T) {
+	original := build.Default
+	t.Cleanup(func() { build.Default = original })
+	build.Default.GOOS = "linux"
+	build.Default.GOARCH = "amd64"
+	build.Default.CgoEnabled = true
+
+	targets := supportedIdentityBuilds()
+	if len(targets) != 1 || targets[0].name != "linux-server" || targets[0].fullRoots {
+		t.Fatalf("Linux host identity builds = %+v，期望只检查 Linux server 闭包", targets)
+	}
+}
+
 func supportedIdentityBuilds() []identityBuild {
-	darwin := build.Default
-	darwin.GOOS = "darwin"
-	darwin.CgoEnabled = true
 	linux := build.Default
 	linux.GOOS = "linux"
-	linux.CgoEnabled = false
-	return []identityBuild{
-		{name: "darwin-cgo", context: darwin, fullRoots: true},
-		{name: "linux-server", context: linux, root: "cmd/mornlea-server"},
+	linux.GOARCH = "amd64"
+	linux.CgoEnabled = true
+	linuxServer := identityBuild{name: "linux-server", context: linux, root: "cmd/mornlea-server"}
+	if build.Default.GOOS != "darwin" {
+		return []identityBuild{linuxServer}
 	}
+	darwin := build.Default
+	darwin.CgoEnabled = true
+	return []identityBuild{{name: "darwin-cgo", context: darwin, fullRoots: true}, linuxServer}
 }
 
 func (scanner *goIdentityScanner) buildDirectories(target identityBuild) ([]string, error) {
@@ -608,10 +696,16 @@ func (scanner *goIdentityScanner) externalImporter(context *build.Context, direc
 	arguments := append([]string{"list", "-e", "-export", "-deps", "-json"}, paths...)
 	command := exec.Command("go", arguments...)
 	command.Dir = scanner.root
+	externalCgoEnabled := context.CgoEnabled
+	if context.GOOS != build.Default.GOOS || context.GOARCH != build.Default.GOARCH {
+		// identity 仍按目标平台的 CGO build constraints 选本仓库源码；外部导出数据
+		// 不应在 macOS 上假装执行 Linux C toolchain，真实 bundle 由 Ubuntu CI 构建。
+		externalCgoEnabled = false
+	}
 	command.Env = append(os.Environ(),
 		"GOOS="+context.GOOS,
 		"GOARCH="+context.GOARCH,
-		fmt.Sprintf("CGO_ENABLED=%d", boolInt(context.CgoEnabled)),
+		fmt.Sprintf("CGO_ENABLED=%d", boolInt(externalCgoEnabled)),
 		"GOWORK=off",
 	)
 	output, err := command.Output()

@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build cgo && (darwin || linux)
 
 package mesh
 
@@ -9,6 +9,29 @@ const nativeOutputCanary = uint64(0xd15e_a5ed_f00d_cafe)
 func TestNativeABIVersionMatchesGo(t *testing.T) {
 	if got := nativeABIVersion(); got != nativeABIVersionCurrent {
 		t.Fatalf("native ABI version=%d，想要 %d", got, nativeABIVersionCurrent)
+	}
+}
+
+func TestNativeMeshBridgeDoesNotAllocate(t *testing.T) {
+	input := make([]byte, maxNativeInputBytes)
+	n := fullyLoadedAirNeighborhood()
+	n.Center.Blocks.Set(8, 8, 8, 2)
+	length, err := encodeNativeInput(input, n, (internalTestRegistry{}).MeshSnapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input = input[:length]
+	scratch := make([]uint64, (nativeScratchBytes+7)/8)
+	output := make([]uint64, maxNativeQuads)
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		status, count := nativeMeshSectionVersion(nativeABIVersionCurrent, input, scratch, output)
+		if status != nativeStatusOK || count == 0 {
+			panic("native mesh 调用失败")
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("native mesh bridge allocations = %v, want 0", allocs)
 	}
 }
 

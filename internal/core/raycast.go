@@ -1,11 +1,27 @@
 package core
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
 
 	"github.com/go-gl/mathgl/mgl32"
+
+	"github.com/channing771/mornlea/internal/nativeabi"
 )
+
+const (
+	raycastInputBytes  = 40
+	raycastCursorBytes = 64
+	raycastRecordBytes = 20
+	raycastOutputBytes = 64 * raycastRecordBytes
+)
+
+type raycastRecord struct {
+	block    BlockPos
+	face     BlockFace
+	distance float32
+}
 
 // RayHit 描述一条射线首次进入的实心方块。
 type RayHit struct {
@@ -38,73 +54,40 @@ func RaycastBlocks(
 	}
 	direction = direction.Mul(float32(1 / length))
 
-	cell := [3]int32{
-		int32(math.Floor(float64(origin[0]))),
-		int32(math.Floor(float64(origin[1]))),
-		int32(math.Floor(float64(origin[2]))),
-	}
-	start := BlockPos{X: cell[0], Y: cell[1], Z: cell[2]}
-	occupied, err := solid(start)
-	if err != nil {
-		return RayHit{}, false, err
-	}
-	if occupied {
-		return RayHit{
-			Block:    start,
-			Face:     BlockFaceNone,
-			Distance: 0,
-			Point:    origin,
-		}, true, nil
-	}
-
-	var step [3]int32
-	var tDelta, tMax [3]float32
-	for axis := range 3 {
-		component := direction[axis]
-		switch {
-		case component > 0:
-			step[axis] = 1
-			tDelta[axis] = 1 / component
-			boundary := float32(cell[axis] + 1)
-			tMax[axis] = (boundary - origin[axis]) / component
-		case component < 0:
-			step[axis] = -1
-			tDelta[axis] = -1 / component
-			boundary := float32(cell[axis])
-			tMax[axis] = (boundary - origin[axis]) / component
-		default:
-			tDelta[axis] = float32(math.Inf(1))
-			tMax[axis] = float32(math.Inf(1))
-		}
-	}
-
+	var input [raycastInputBytes]byte
+	var cursor [raycastCursorBytes]byte
+	var output [raycastOutputBytes]byte
+	encodeRaycastInput(input[:], origin, direction, maxDistance)
+	initializeRaycastCursor(cursor[:])
+	firstRecord := true
 	for {
-		axis := 0
-		if tMax[1] < tMax[axis] {
-			axis = 1
+		count, done := nativeabi.RaycastBatch(input[:], cursor[:], output[:])
+		for index := range count {
+			record := decodeRaycastRecord(output[index*raycastRecordBytes:(index+1)*raycastRecordBytes], input[:])
+			if firstRecord && (record.face != BlockFaceNone || record.distance != 0) ||
+				!firstRecord && record.face == BlockFaceNone {
+				panic("core: native raycast origin record 非法")
+			}
+			occupied, err := solid(record.block)
+			if err != nil {
+				return RayHit{}, false, err
+			}
+			if occupied {
+				point := origin.Add(direction.Mul(record.distance))
+				if record.face == BlockFaceNone {
+					point = origin
+				}
+				return RayHit{
+					Block:    record.block,
+					Face:     record.face,
+					Distance: record.distance,
+					Point:    point,
+				}, true, nil
+			}
+			firstRecord = false
 		}
-		if tMax[2] < tMax[axis] {
-			axis = 2
-		}
-		distance := tMax[axis]
-		if distance > maxDistance {
+		if done {
 			return RayHit{}, false, nil
-		}
-		cell[axis] += step[axis]
-		tMax[axis] += tDelta[axis]
-		face := entryFace(axis, step[axis])
-		pos := BlockPos{X: cell[0], Y: cell[1], Z: cell[2]}
-		occupied, err := solid(pos)
-		if err != nil {
-			return RayHit{}, false, err
-		}
-		if occupied {
-			return RayHit{
-				Block:    pos,
-				Face:     face,
-				Distance: distance,
-				Point:    origin.Add(direction.Mul(distance)),
-			}, true, nil
 		}
 	}
 }
@@ -117,9 +100,92 @@ func finiteFloat32(v float32) bool {
 	return !math.IsNaN(float64(v)) && !math.IsInf(float64(v), 0)
 }
 
-func entryFace(axis int, step int32) BlockFace {
-	if step > 0 {
-		return [...]BlockFace{BlockFaceNegX, BlockFaceNegY, BlockFaceNegZ}[axis]
+func encodeRaycastInput(output []byte, origin, direction mgl32.Vec3, maxDistance float32) {
+	if len(output) != raycastInputBytes {
+		panic("core: native raycast input 长度非法")
 	}
-	return [...]BlockFace{BlockFacePosX, BlockFacePosY, BlockFacePosZ}[axis]
+	copy(output[0:4], "MGR1")
+	binary.LittleEndian.PutUint32(output[4:8], 1)
+	for index, value := range origin {
+		binary.LittleEndian.PutUint32(output[8+index*4:12+index*4], math.Float32bits(value))
+	}
+	for index, value := range direction {
+		binary.LittleEndian.PutUint32(output[20+index*4:24+index*4], math.Float32bits(value))
+	}
+	binary.LittleEndian.PutUint32(output[32:36], math.Float32bits(maxDistance))
+	clear(output[36:40])
+}
+
+func initializeRaycastCursor(cursor []byte) {
+	if len(cursor) != raycastCursorBytes {
+		panic("core: native raycast cursor 长度非法")
+	}
+	clear(cursor)
+	copy(cursor[0:4], "MRC1")
+	binary.LittleEndian.PutUint32(cursor[4:8], 1)
+}
+
+func decodeRaycastRecord(input, rayInput []byte) raycastRecord {
+	if len(input) != raycastRecordBytes || len(rayInput) != raycastInputBytes ||
+		input[13] != 0 || input[14] != 0 || input[15] != 0 {
+		panic("core: native raycast record 非法")
+	}
+	face := BlockFace(input[12])
+	if face > BlockFacePosZ && face != BlockFaceNone {
+		panic("core: native raycast record 非法")
+	}
+	distance := math.Float32frombits(binary.LittleEndian.Uint32(input[16:20]))
+	record := raycastRecord{
+		block: BlockPos{
+			X: int32(binary.LittleEndian.Uint32(input[0:4])),
+			Y: int32(binary.LittleEndian.Uint32(input[4:8])),
+			Z: int32(binary.LittleEndian.Uint32(input[8:12])),
+		},
+		face:     face,
+		distance: distance,
+	}
+	if !raycastRecordDistanceIsValid(rayInput, record) {
+		panic("core: native raycast record 非法")
+	}
+	return record
+}
+
+func raycastRecordDistanceIsValid(input []byte, record raycastRecord) bool {
+	if finiteFloat32(record.distance) {
+		return true
+	}
+	if record.face == BlockFaceNone || math.IsInf(float64(record.distance), 1) {
+		return false
+	}
+
+	axis := int(record.face / 2)
+	direction := math.Float32frombits(binary.LittleEndian.Uint32(input[20+axis*4 : 24+axis*4]))
+	negativeStep := record.face&1 != 0
+	if negativeStep && direction >= 0 || !negativeStep && direction <= 0 {
+		return false
+	}
+	origin := math.Float32frombits(binary.LittleEndian.Uint32(input[8+axis*4 : 12+axis*4]))
+	cell := raycastFloorToI32(origin)
+	boundary := float32(cell)
+	if !negativeStep {
+		boundary = float32(cell + 1)
+	}
+	if !math.IsInf(float64((boundary-origin)/direction), -1) {
+		return false
+	}
+	if math.IsInf(float64(record.distance), -1) {
+		return true
+	}
+	if direction < 0 {
+		direction = -direction
+	}
+	return math.IsNaN(float64(record.distance)) && math.IsInf(float64(1/direction), 1)
+}
+
+func raycastFloorToI32(value float32) int32 {
+	floored := math.Floor(float64(value))
+	if floored < float64(math.MinInt32) || floored >= float64(math.MaxInt32)+1 {
+		return math.MinInt32
+	}
+	return int32(floored)
 }

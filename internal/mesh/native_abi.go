@@ -1,31 +1,24 @@
-//go:build darwin && cgo
+//go:build cgo && (darwin || linux)
 
 package mesh
 
-/*
-#cgo CFLAGS: -I${SRCDIR}/../../engine/include
-#cgo LDFLAGS: -L${SRCDIR}/../../engine/target/release -lmornlea_mesh -Wl,-rpath,${SRCDIR}/../../engine/target/release
-#include "mornlea_engine.h"
-*/
-import "C"
+import "github.com/channing771/mornlea/internal/nativeabi"
 
-import "unsafe"
+const nativeABIVersionCurrent = nativeabi.ABIVersion
 
-const nativeABIVersionCurrent = uint32(C.MORNLEA_ENGINE_ABI_VERSION)
-
-type nativeStatus uint32
+type nativeStatus = nativeabi.Status
 
 const (
-	nativeStatusOK              = nativeStatus(C.MORNLEA_STATUS_OK)
-	nativeStatusABIVersion      = nativeStatus(C.MORNLEA_STATUS_ABI_VERSION)
-	nativeStatusInvalidArgument = nativeStatus(C.MORNLEA_STATUS_INVALID_ARGUMENT)
-	nativeStatusInput           = nativeStatus(C.MORNLEA_STATUS_INPUT)
-	nativeStatusScratch         = nativeStatus(C.MORNLEA_STATUS_SCRATCH)
-	nativeStatusRegistry        = nativeStatus(C.MORNLEA_STATUS_REGISTRY)
-	nativeStatusEmission        = nativeStatus(C.MORNLEA_STATUS_EMISSION)
-	nativeStatusOutputOverflow  = nativeStatus(C.MORNLEA_STATUS_OUTPUT_OVERFLOW)
-	nativeStatusQueueOverflow   = nativeStatus(C.MORNLEA_STATUS_QUEUE_OVERFLOW)
-	nativeStatusPanic           = nativeStatus(C.MORNLEA_STATUS_PANIC)
+	nativeStatusOK              = nativeabi.StatusOK
+	nativeStatusABIVersion      = nativeabi.StatusABIVersion
+	nativeStatusInvalidArgument = nativeabi.StatusInvalidArgument
+	nativeStatusInput           = nativeabi.StatusInput
+	nativeStatusScratch         = nativeabi.StatusScratch
+	nativeStatusRegistry        = nativeabi.StatusRegistry
+	nativeStatusEmission        = nativeabi.StatusEmission
+	nativeStatusOutputOverflow  = nativeabi.StatusOutputOverflow
+	nativeStatusQueueOverflow   = nativeabi.StatusQueueOverflow
+	nativeStatusPanic           = nativeabi.StatusPanic
 )
 
 var nativeStatusPanicTexts = [...]string{
@@ -48,7 +41,7 @@ func nativeStatusPanicText(status nativeStatus) string {
 }
 
 func nativeABIVersion() uint32 {
-	return uint32(C.mornlea_engine_abi_version())
+	return nativeabi.EngineABIVersion()
 }
 
 func nativeMeshSection(input []byte, scratch []uint64, output []uint64) (nativeStatus, int) {
@@ -56,16 +49,5 @@ func nativeMeshSection(input []byte, scratch []uint64, output []uint64) (nativeS
 }
 
 func nativeMeshSectionVersion(version uint32, input []byte, scratch []uint64, output []uint64) (nativeStatus, int) {
-	var outputLen C.size_t
-	status := C.mornlea_mesh_section(
-		C.uint32_t(version),
-		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(input))),
-		C.size_t(len(input)),
-		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(scratch))),
-		C.size_t(len(scratch)*8),
-		(*C.uint64_t)(unsafe.Pointer(unsafe.SliceData(output))),
-		C.size_t(len(output)),
-		&outputLen,
-	)
-	return nativeStatus(status), int(outputLen)
+	return nativeabi.MeshSection(version, input, scratch, output)
 }

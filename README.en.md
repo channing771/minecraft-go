@@ -14,7 +14,7 @@
 
 Mornlea is an original voxel game written from scratch in Go. It ships its own client, an authoritative server, world storage, and a WebGPU rendering pipeline. It does **not** aim for compatibility with Minecraft's protocol, saves, or copyrighted assets.
 
-The project is still in early development, but already includes an authoritative server, persistent worlds, direct TCP connections, a headless dedicated server, and LAN sessions for up to eight players. The current baseline is **M5A**: it adds up to four named, server-authoritative idle companions, protocol v16, an independent `companions.ai` schema v1 save, deterministic `@name command` addressing, unified Avatar/NameTag presentation, a bounded Unicode chat HUD, the `ai-companion` golden, and benchmark scenario v16. M5A records addressing facts only; it does not call a model, plan, queue, move, mine, place, or follow. It inherits M4Q's Mornlea identity, the pinned Rust 1.97.1 `mornlea_mesh` cdylib, player schema v6, chunk schema v8, world metadata v2, and all existing gameplay systems. See [实现进度](docs/notes/progress.md) for the full milestone history.
+The project is still in early development, but already includes an authoritative server, persistent worlds, direct TCP connections, a headless dedicated server, and LAN sessions for up to eight players. The current baseline is **M5A**: it adds up to four named, server-authoritative idle companions, protocol v16, an independent `companions.ai` schema v1 save, deterministic `@name command` addressing, unified Avatar/NameTag presentation, a bounded Unicode chat HUD, the `ai-companion` golden, and benchmark scenario v16. M5A records addressing facts only; it does not call a model, plan, queue, move, mine, place, or follow. It inherits M4Q's Mornlea identity, the pinned Rust 1.97.1 `mornlea_engine` cdylib for mesh/light, collision resolution, and block-ray DDA, player schema v6, chunk schema v8, world metadata v2, and all existing gameplay systems. See [实现进度](docs/notes/progress.md) for the full milestone history.
 
 ## Screenshots
 
@@ -70,7 +70,7 @@ make build
 ./bin/mornlea --world worlds/default
 ```
 
-`make build` produces `bin/mornlea`, `bin/mornlea-server`, and `bin/libmornlea_mesh.dylib`, which must stay in the same directory as the client.
+`make build` produces `bin/mornlea`, `bin/mornlea-server`, and `bin/libmornlea_engine.dylib`, which must stay in the same directory as the client.
 
 ## Common Commands
 
@@ -78,7 +78,8 @@ make build
 | --- | --- |
 | `make help` | Show Makefile help (default target) |
 | `make run` | Run the client; pass extra flags via `ARGS` |
-| `make build` | Build `bin/mornlea`, `bin/mornlea-server`, and `bin/libmornlea_mesh.dylib` |
+| `make build` | Build `bin/mornlea`, `bin/mornlea-server`, and `bin/libmornlea_engine.dylib` |
+| `make build-linux-server` | Build the Linux amd64 server and adjacent `bin/libmornlea_engine.so` |
 | `make test` | Run all Go tests |
 | `make test-race` | Run all Go tests with the race detector |
 | `make test-multiplayer` | Run M3C eight-player and v6 report tests |
@@ -224,9 +225,9 @@ On mismatch, the actual and diff images (differing pixels painted red, the rest 
 │   ├── gfxspike/       WebGPU terrain-rendering spike
 │   └── perfcheck/      performance report comparison tool
 ├── engine/
-│   └── crates/mornlea_mesh/  pinned Rust 1.97.1 cdylib: greedy meshing, AO & light production
+│   └── crates/mornlea_engine/  pinned Rust 1.97.1 cdylib: mesh/light/collision/raycast kernels
 ├── internal/
-│   ├── core/           shared domain types (coords, geometry, blocks)
+│   ├── core/           shared domain types & native raycast batch driver
 │   ├── companion/      independent companion identity, static definitions & body types
 │   ├── profile/        stable local player identity & profile
 │   ├── config/         shared JSON config loading & validation
@@ -262,20 +263,20 @@ Most of these are in Chinese.
 
 ## Rust & Go Responsibilities
 
-Since M4P, chunk meshing and light production have been implemented in a pinned Rust 1.97.1 `cdylib`; Go owns everything else. The two languages cooperate through the single C ABI declared in `engine/include/mornlea_engine.h` (ABI version 1); only `internal/mesh` touches the native ABI.
+Production chunk meshing, light, collision resolution, and block-ray DDA live in a pinned Rust 1.97.1 `cdylib`; Go still owns game state, inputs, tunables, collision snapshot encoding, plus ray validation, normalization, callbacks, and hit points. The two languages cooperate through the single C ABI declared in `engine/include/mornlea_engine.h` (ABI version 1); only `internal/nativeabi` directly touches the engine C ABI, while `internal/mesh`, `internal/physics`, and `internal/core` are its domain callers.
 
 | Language | Responsibilities |
 | --- | --- |
-| Rust (`engine/crates/mornlea_mesh`) | The **only production implementation** of deterministic section meshing and propagated light: greedy meshing & AO (`greedy.rs`), skylight & block light (`light.rs`), packed quad output (`quad.rs`), native input parsing (`input.rs`), and the C ABI (`ffi.rs`). For the same neighborhood and registry it emits quads bit-identical to the frozen Go oracle; panics never cross the ABI, and invalid version/input/scratch/registry/emission/output capacity is rejected atomically. The workspace contains only this crate, with `std` as its only normal dependency. |
-| Go | Everything except mesh & light production: application assembly (`cmd/`), world & chunk data model, authoritative simulation, physics, networking & storage, client mirror & prediction, GPU rendering & WebGPU wrapper (`render`/`gfx`), world generation, assets, and config. `internal/mesh` is the Go-side public API and native boundary: it owns the input/scratch/output buffers, assembles the registry snapshot and visibility, and maps ABI status codes; the mesher in `internal/client` handles task scheduling, revision stamps, and bounded queues, producing concurrently with per-worker scratch buffers. |
+| Rust (`engine/crates/mornlea_engine`) | The **only production implementation** of deterministic section meshing, propagated light, shared collision/step resolution, and 64-record cursor-batch block-ray DDA. Panics never cross the ABI, and invalid inputs are rejected before results are published. The workspace contains only this crate, with `std` as its only normal dependency. |
+| Go | Application assembly, world/chunk state, authoritative simulation, networking/storage, client mirror/prediction, rendering, generation, assets/config, plus physics state/input/tunables, collision snapshot encoding, and ray validation/normalization/callback/Point handling. `internal/nativeabi` is the only engine C bridge; `internal/mesh`, `internal/physics`, and `internal/core` own their domain APIs and caller buffers. |
 
 Boundary rules:
 
-- Only `internal/mesh` may `import "C"` (darwin + cgo build constraint); every other package consumes mesh & light results through `internal/mesh`'s Go API;
-- After a call returns, neither language may retain the other's pointers; there is no production Go fallback — the Go greedy/light oracles exist only in tests;
-- Mesh & light results never enter the network protocol or saves: the client derives them locally from the authoritative block mirror, and the server and dedicated server never touch the Rust dylib.
+- Only `internal/nativeabi` may `import "C"` for the engine (darwin/linux + cgo build constraint); other packages consume results through their domain Go APIs;
+- After a call returns, neither language may retain the other's pointers; there is no production Go fallback — Go mesh/light/collision/raycast oracles exist only in tests;
+- Mesh and light results never enter the network protocol or saves. Collision is shared by client prediction and authoritative server simulation, so the dedicated server uses Rust while remaining free of the graphics stack.
 
-Build: `make run`/`build`/`test` first run `cargo build --locked --release` automatically (`rust-toolchain.toml` pins 1.97.1); `make build` copies `libmornlea_mesh.dylib` into `bin/` with an `@loader_path` rpath for the client; `make rust-check` runs Rust fmt, clippy, and unit tests. `cmd/mornlea-server` builds with `CGO_ENABLED=0` and its dependency closure excludes mesh/client/render/gfx (verified by `make archcheck`). The normative contract lives in [`openspec/specs/rust-engine-mesh/spec.md`](openspec/specs/rust-engine-mesh/spec.md).
+Build: `make run`/`build`/`test` first run `cargo build --locked --release` automatically (`rust-toolchain.toml` pins 1.97.1). `make build` produces both macOS binaries and an adjacent `libmornlea_engine.dylib`, loaded through `@loader_path`; `make build-linux-server` natively builds the Linux amd64 server and adjacent `libmornlea_engine.so`, loaded through `$ORIGIN`. Each binary/library pair is one release unit and cannot be mixed across versions. The headless server's dependency closure still excludes mesh/client/render/gfx (verified by `make archcheck`); `make rust-check` runs Rust fmt, clippy, and tests.
 
 ## Current Limitations
 

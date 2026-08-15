@@ -1,3 +1,5 @@
+//go:build darwin
+
 package assets
 
 import "github.com/channing771/mornlea/internal/gfx"

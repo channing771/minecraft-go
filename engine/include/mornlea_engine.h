@@ -29,4 +29,22 @@ uint32_t mornlea_mesh_section(
     size_t output_capacity,
     size_t *output_len);
 
+uint32_t mornlea_collision_resolve(
+    uint32_t abi_version,
+    const uint8_t *input,
+    size_t input_len,
+    uint8_t *output,
+    size_t output_len);
+
+uint32_t mornlea_raycast_batch(
+    uint32_t abi_version,
+    const uint8_t *input,
+    size_t input_len,
+    uint8_t *cursor,
+    size_t cursor_len,
+    uint8_t *output,
+    size_t output_len,
+    size_t *output_count,
+    uint8_t *done);
+
 #endif

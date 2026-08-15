@@ -3,19 +3,20 @@
 GO := go
 CARGO := cargo
 RUST_DIR := engine
-RUST_DYLIB := $(RUST_DIR)/target/release/libmornlea_mesh.dylib
+RUST_DYLIB := $(RUST_DIR)/target/release/libmornlea_engine.dylib
+RUST_SO := $(RUST_DIR)/target/release/libmornlea_engine.so
 APP := ./cmd/mornlea
 BINARY := bin/mornlea
 SERVER := ./cmd/mornlea-server
 SERVER_BINARY := bin/mornlea-server
-MORNLEA_DYLIB := bin/libmornlea_mesh.dylib
+MORNLEA_DYLIB := bin/libmornlea_engine.dylib
+MORNLEA_SO := bin/libmornlea_engine.so
 ARGS ?=
 
-.PHONY: help run build test test-race test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update rust rust-check
+.PHONY: help run build build-linux-server test test-race test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update rust rust-check
 
 run test test-multiplayer bench-multiplayer visual-check visual-update: rust
 build: rust
-build: GO_BUILD_LDFLAGS := -extldflags=-Wl,-rpath,@loader_path
 test-race: rust
 
 help:
@@ -23,6 +24,7 @@ help:
 		'常用命令：' \
 		'  make run              运行游戏，可通过 ARGS 传递参数' \
 		'  make build            构建 bin/mornlea、bin/mornlea-server 与同目录 Rust dylib' \
+		'  make build-linux-server 构建 Linux amd64 专服与同目录 Rust .so' \
 		'  make test             运行全部测试' \
 		'  make test-race        使用 race detector 运行全部测试' \
 		'  make test-multiplayer 运行 M3C 八玩家与 v6 报告测试' \
@@ -49,9 +51,16 @@ rust-check:
 
 build:
 	@mkdir -p $(dir $(BINARY))
-	$(GO) build -ldflags='$(GO_BUILD_LDFLAGS)' -o $(BINARY) $(APP)
-	CGO_ENABLED=0 $(GO) build -o $(SERVER_BINARY) $(SERVER)
+	$(GO) build -ldflags='-extldflags=-Wl,-rpath,@loader_path' -o $(BINARY) $(APP)
+	$(GO) build -ldflags='-extldflags=-Wl,-rpath,@loader_path' -o $(SERVER_BINARY) $(SERVER)
 	cp $(RUST_DYLIB) $(MORNLEA_DYLIB)
+
+build-linux-server: rust
+	@mkdir -p $(dir $(SERVER_BINARY))
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build \
+		-ldflags='-extldflags=-Wl,-rpath,$$ORIGIN' \
+		-o $(SERVER_BINARY) $(SERVER)
+	cp $(RUST_SO) $(MORNLEA_SO)
 
 test:
 	$(GO) test ./...

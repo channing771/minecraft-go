@@ -201,6 +201,47 @@ func FuzzStepKeepsFiniteNonOverlappingState(f *testing.F) {
 	})
 }
 
+func FuzzNativeCollisionMatchesGoOracle(f *testing.F) {
+	f.Add(int16(5), int16(10), int16(5), int16(50), int16(0), int16(0), uint8(0), uint8(1))
+	f.Add(int16(-5), int16(12), int16(-5), int16(-75), int16(-25), int16(50), uint8(1), uint8(9))
+	f.Add(int16(15), int16(10), int16(5), int16(100), int16(0), int16(-100), uint8(2), uint8(255))
+
+	f.Fuzz(func(t *testing.T, px, py, pz, dx, dy, dz int16, mode, rawCount uint8) {
+		if px < -40 || px > 40 || py < 5 || py > 30 || pz < -40 || pz > 40 ||
+			dx < -150 || dx > 150 || dy < -100 || dy > 100 || dz < -150 || dz > 150 {
+			t.Skip()
+		}
+		world := testCollisionWorld{}
+		for x := int32(-6); x <= 6; x++ {
+			for z := int32(-6); z <= 6; z++ {
+				world[core.BlockPos{X: x, Y: 0, Z: z}] = physics.CollisionBoxSet{Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}
+			}
+		}
+		count := rawCount
+		if count < 8 {
+			count = 8
+		}
+		obstacle := physics.CollisionBoxSet{Loaded: true, Count: count}
+		for index := range obstacle.Boxes {
+			obstacle.Boxes[index] = core.AABB{Max: mgl32.Vec3{1, float32(index+1) / 8, 1}}
+		}
+		switch mode % 3 {
+		case 0:
+			world[core.BlockPos{X: 1, Y: 1, Z: 0}] = obstacle
+		case 1:
+			world[core.BlockPos{X: -1, Y: 1, Z: 0}] = physics.CollisionBoxSet{}
+		case 2:
+			world[core.BlockPos{X: 0, Y: 3, Z: 0}] = obstacle
+		}
+		state := physics.State{
+			Position: mgl32.Vec3{float32(px) / 10, float32(py) / 10, float32(pz) / 10},
+			OnGround: py == 10,
+		}
+		displacement := mgl32.Vec3{float32(dx) / 100, float32(dy) / 100, float32(dz) / 100}
+		testAssertCollisionMatches(t, state, displacement, world, state.OnGround, 0.6)
+	})
+}
+
 func assertStepInvariants(t *testing.T, state physics.State, world invariantWorld) {
 	t.Helper()
 	if !finiteState(state) {

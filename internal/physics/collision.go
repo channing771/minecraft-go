@@ -1,195 +1,214 @@
 package physics
 
 import (
+	"encoding/binary"
 	"math"
 
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/nativeabi"
 )
 
-var axisOrder = [...]int{1, 0, 2} // Y, X, Z
+const (
+	collisionHeaderBytes  = 64
+	collisionCellBytes    = 196
+	collisionOutputBytes  = 16
+	collisionMaxCells     = 4096
+	collisionMaxBytes     = collisionHeaderBytes + collisionMaxCells*collisionCellBytes
+	collisionRegularCells = 135
+	collisionRegularBytes = collisionHeaderBytes + collisionRegularCells*collisionCellBytes
+)
+
+type collisionPrism struct {
+	origin     core.BlockPos
+	dimensions [3]uint32
+	cells      int
+	bytes      int
+}
 
 type moveResult struct {
 	position   mgl32.Vec3
 	clipped    [3]bool
 	onGround   bool
+	usedStep   bool
 	hitUnknown bool
 }
 
-func resolveMove(state State, displacement mgl32.Vec3, source CollisionSource) moveResult {
-	result := moveResult{position: state.Position}
-	for _, axis := range axisOrder {
-		moved, clipped, hitUnknown := clipAxis(result.position, axis, displacement[axis], source)
-		result.position[axis] += moved
-		result.clipped[axis] = clipped
-		result.hitUnknown = result.hitUnknown || hitUnknown
-		if axis == 1 && clipped && displacement[axis] < 0 {
-			result.onGround = true
-		}
-	}
-
-	_, supported, hitUnknown := clipAxis(result.position, 1, -GroundProbe, source)
-	result.onGround = supported
-	result.hitUnknown = result.hitUnknown || hitUnknown
-	return result
-}
-
-func clipAxis(feetPosition mgl32.Vec3, axis int, requested float32, source CollisionSource) (float32, bool, bool) {
-	if requested == 0 {
-		return 0, false, false
-	}
-
-	player := PlayerBounds(feetPosition)
-	min, max := player.Min, player.Max
-	if requested < 0 {
-		min[axis] += requested
+func resolveCollision(
+	state State,
+	displacement mgl32.Vec3,
+	source CollisionSource,
+	beganGrounded bool,
+	stepHeight float32,
+) moveResult {
+	prism := collisionPrismFor(state.Position, displacement, stepHeight)
+	var regular [collisionRegularBytes]byte
+	var input []byte
+	if prism.cells <= collisionRegularCells {
+		input = regular[:prism.bytes]
 	} else {
-		max[axis] += requested
+		input = make([]byte, prism.bytes)
+	}
+	encodeCollisionInput(input, prism, state, displacement, source, beganGrounded, stepHeight)
+	var output [collisionOutputBytes]byte
+	nativeabi.CollisionResolve(input, output[:])
+	return decodeCollisionOutput(output[:])
+}
+
+func collisionPrismFor(position, displacement mgl32.Vec3, stepHeight float32) collisionPrism {
+	halfWidth := PlayerWidth / 2
+	minimum := mgl32.Vec3{
+		min(position.X(), position.X()+displacement.X()) - halfWidth - CollisionEpsilon,
+		position.Y() + min(float32(0), displacement.Y(), stepHeight) - GroundProbe - CollisionEpsilon,
+		min(position.Z(), position.Z()+displacement.Z()) - halfWidth - CollisionEpsilon,
+	}
+	maximum := mgl32.Vec3{
+		max(position.X(), position.X()+displacement.X()) + halfWidth + CollisionEpsilon,
+		position.Y() + max(float32(0), displacement.Y(), stepHeight) + PlayerHeight + CollisionEpsilon,
+		max(position.Z(), position.Z()+displacement.Z()) + halfWidth + CollisionEpsilon,
+	}
+	origin := core.BlockPos{
+		X: collisionCheckedFloor(minimum.X()),
+		Y: collisionCheckedFloor(minimum.Y()),
+		Z: collisionCheckedFloor(minimum.Z()),
+	}
+	end := core.BlockPos{
+		X: collisionCheckedFloor(maximum.X()),
+		Y: collisionCheckedFloor(maximum.Y()),
+		Z: collisionCheckedFloor(maximum.Z()),
+	}
+	return collisionCheckedPrism(origin, [3]uint32{
+		collisionCheckedDimension(origin.X, end.X),
+		collisionCheckedDimension(origin.Y, end.Y),
+		collisionCheckedDimension(origin.Z, end.Z),
+	})
+}
+
+func collisionCheckedFloor(value float32) int32 {
+	floored := math.Floor(float64(value))
+	if math.IsNaN(floored) || math.IsInf(floored, 0) || floored < -1<<31 || floored > 1<<31-1 {
+		panic("physics: collision prism 坐标不可表示")
+	}
+	return int32(floored)
+}
+
+func collisionCheckedDimension(minimum, maximum int32) uint32 {
+	dimension := int64(maximum) - int64(minimum) + 1
+	if dimension <= 0 || dimension > 1<<32-1 {
+		panic("physics: collision prism 尺寸不可表示")
+	}
+	return uint32(dimension)
+}
+
+func collisionCheckedPrism(origin core.BlockPos, dimensions [3]uint32) collisionPrism {
+	coordinates := [...]int32{origin.X, origin.Y, origin.Z}
+	cells := uint64(1)
+	for axis, dimension := range dimensions {
+		if dimension == 0 || int64(coordinates[axis])+int64(dimension)-1 > 1<<31-1 {
+			panic("physics: collision prism 尺寸非法")
+		}
+		cells *= uint64(dimension)
+		if cells > collisionMaxCells {
+			panic("physics: collision prism 超过 4096 cells")
+		}
+	}
+	encodedBytes := uint64(collisionHeaderBytes) + cells*collisionCellBytes
+	if encodedBytes > collisionMaxBytes {
+		panic("physics: collision prism 编码长度溢出")
+	}
+	return collisionPrism{origin: origin, dimensions: dimensions, cells: int(cells), bytes: int(encodedBytes)}
+}
+
+func encodeCollisionInput(
+	input []byte,
+	prism collisionPrism,
+	state State,
+	displacement mgl32.Vec3,
+	source CollisionSource,
+	beganGrounded bool,
+	stepHeight float32,
+) {
+	if len(input) != prism.bytes {
+		panic("physics: collision input 缓冲区长度非法")
+	}
+	clear(input)
+	copy(input[:4], "MGC1")
+	binary.LittleEndian.PutUint32(input[4:8], 1)
+	putCollisionVec3(input[8:20], state.Position)
+	putCollisionVec3(input[20:32], displacement)
+	if beganGrounded {
+		input[32] = 1
+	}
+	putCollisionFloat(input[36:40], stepHeight)
+	for index, value := range [...]int32{prism.origin.X, prism.origin.Y, prism.origin.Z} {
+		binary.LittleEndian.PutUint32(input[40+index*4:44+index*4], uint32(value))
+	}
+	for index, value := range prism.dimensions {
+		binary.LittleEndian.PutUint32(input[52+index*4:56+index*4], value)
 	}
 
-	minX, maxX := blockRange(min.X()-CollisionEpsilon, max.X()+CollisionEpsilon)
-	minY, maxY := blockRange(min.Y()-CollisionEpsilon, max.Y()+CollisionEpsilon)
-	minZ, maxZ := blockRange(min.Z()-CollisionEpsilon, max.Z()+CollisionEpsilon)
-	clipped := requested
-	wasClipped := false
-	hitUnknown := false
-	for y := minY; y <= maxY; y++ {
-		for x := minX; x <= maxX; x++ {
-			for z := minZ; z <= maxZ; z++ {
-				blockPosition := core.BlockPos{X: x, Y: y, Z: z}
-				set := source.CollisionBoxes(blockPosition)
-				if !set.Loaded {
-					candidate, blocks := clipAgainst(feetPosition, player, axis, clipped, blockBounds(blockPosition, fullCubeBounds))
-					if blocks {
-						hitUnknown = true
-						clipped = candidate
-						wasClipped = true
+	offset := collisionHeaderBytes
+	for y := uint32(0); y < prism.dimensions[1]; y++ {
+		for x := uint32(0); x < prism.dimensions[0]; x++ {
+			for z := uint32(0); z < prism.dimensions[2]; z++ {
+				position := core.BlockPos{
+					X: prism.origin.X + int32(x),
+					Y: prism.origin.Y + int32(y),
+					Z: prism.origin.Z + int32(z),
+				}
+				set := source.CollisionBoxes(position)
+				if set.Loaded {
+					input[offset] = 1
+				}
+				count := min(int(set.Count), len(set.Boxes))
+				input[offset+1] = byte(count)
+				for boxIndex := range count {
+					box := set.Boxes[boxIndex]
+					components := [...]float32{
+						box.Min.X(), box.Min.Y(), box.Min.Z(),
+						box.Max.X(), box.Max.Y(), box.Max.Z(),
 					}
-					continue
-				}
-				count := int(set.Count)
-				if count > len(set.Boxes) {
-					count = len(set.Boxes)
-				}
-				for i := 0; i < count; i++ {
-					candidate, blocks := clipAgainst(feetPosition, player, axis, clipped, blockBounds(blockPosition, set.Boxes[i]))
-					if blocks {
-						clipped = candidate
-						wasClipped = true
+					for componentIndex, value := range components {
+						putCollisionFloat(input[offset+4+boxIndex*24+componentIndex*4:], value)
 					}
 				}
+				offset += collisionCellBytes
 			}
 		}
 	}
-	return clipped, wasClipped, hitUnknown
-}
-
-var fullCubeBounds = core.AABB{Max: mgl32.Vec3{1, 1, 1}}
-
-func blockBounds(position core.BlockPos, local core.AABB) core.AABB {
-	offset := mgl32.Vec3{float32(position.X), float32(position.Y), float32(position.Z)}
-	return core.AABB{Min: local.Min.Add(offset), Max: local.Max.Add(offset)}
-}
-
-func clipAgainst(position mgl32.Vec3, player core.AABB, axis int, requested float32, collider core.AABB) (float32, bool) {
-	if !overlapsOtherAxes(player, collider, axis) {
-		return requested, false
-	}
-	if !endpointTouchesCollider(position, collider, axis, requested) {
-		return requested, false
-	}
-
-	if requested > 0 {
-		distance := collider.Min[axis] - player.Max[axis]
-		if distance >= -CollisionEpsilon && distance <= requested+CollisionEpsilon {
-			candidate := min(distance, requested)
-			return safeCollisionDistance(position, collider, axis, requested, candidate), true
-		}
-		return requested, false
-	}
-
-	distance := collider.Max[axis] - player.Min[axis]
-	if distance <= CollisionEpsilon && distance >= requested-CollisionEpsilon {
-		candidate := max(distance, requested)
-		return safeCollisionDistance(position, collider, axis, requested, candidate), true
-	}
-	return requested, false
-}
-
-func endpointTouchesCollider(position mgl32.Vec3, collider core.AABB, axis int, requested float32) bool {
-	position[axis] += requested
-	player := PlayerBounds(position)
-	if requested > 0 {
-		return player.Max[axis] >= collider.Min[axis]
-	}
-	return player.Min[axis] <= collider.Max[axis]
-}
-
-func safeCollisionDistance(position mgl32.Vec3, collider core.AABB, axis int, requested, distance float32) float32 {
-	for {
-		finalPosition := position
-		finalPosition[axis] += distance
-		finalBounds := PlayerBounds(finalPosition)
-		if requested > 0 {
-			if finalBounds.Max[axis] <= collider.Min[axis] {
-				return distance
-			}
-			distance = math.Nextafter32(distance, float32(math.Inf(-1)))
-			continue
-		}
-		if finalBounds.Min[axis] >= collider.Max[axis] {
-			return distance
-		}
-		distance = math.Nextafter32(distance, float32(math.Inf(1)))
+	if offset != len(input) {
+		panic("physics: collision prism 编码不完整")
 	}
 }
 
-func overlapsOtherAxes(a, b core.AABB, axis int) bool {
-	for other := 0; other < 3; other++ {
-		if other == axis {
-			continue
-		}
-		if a.Min[other] >= b.Max[other] || a.Max[other] <= b.Min[other] {
-			return false
-		}
+func putCollisionVec3(output []byte, value mgl32.Vec3) {
+	for index := range 3 {
+		putCollisionFloat(output[index*4:index*4+4], value[index])
 	}
-	return true
 }
 
-func boundsAreCollisionFree(position mgl32.Vec3, source CollisionSource) (bool, bool) {
-	player := PlayerBounds(position)
-	minX, maxX := blockRange(player.Min.X(), player.Max.X())
-	minY, maxY := blockRange(player.Min.Y(), player.Max.Y())
-	minZ, maxZ := blockRange(player.Min.Z(), player.Max.Z())
-	for y := minY; y <= maxY; y++ {
-		for x := minX; x <= maxX; x++ {
-			for z := minZ; z <= maxZ; z++ {
-				set := source.CollisionBoxes(core.BlockPos{X: x, Y: y, Z: z})
-				if !set.Loaded {
-					return false, true
-				}
-				count := int(set.Count)
-				if count > len(set.Boxes) {
-					count = len(set.Boxes)
-				}
-				for i := 0; i < count; i++ {
-					if boundsOverlap(player, blockBounds(core.BlockPos{X: x, Y: y, Z: z}, set.Boxes[i])) {
-						return false, false
-					}
-				}
-			}
-		}
+func putCollisionFloat(output []byte, value float32) {
+	binary.LittleEndian.PutUint32(output, math.Float32bits(value))
+}
+
+func decodeCollisionOutput(output []byte) moveResult {
+	if len(output) != collisionOutputBytes || output[12]&^byte(7) != 0 ||
+		output[13] > 1 || output[14] > 1 || output[15] > 1 {
+		panic("physics: native collision output 非法")
 	}
-	return true, false
-}
-
-func boundsOverlap(a, b core.AABB) bool {
-	return a.Min.X() < b.Max.X() && a.Max.X() > b.Min.X() &&
-		a.Min.Y() < b.Max.Y() && a.Max.Y() > b.Min.Y() &&
-		a.Min.Z() < b.Max.Z() && a.Max.Z() > b.Min.Z()
-}
-
-func blockRange(min, max float32) (int32, int32) {
-	return int32(math.Floor(float64(min))), int32(math.Floor(float64(max)))
+	result := moveResult{
+		position: mgl32.Vec3{
+			math.Float32frombits(binary.LittleEndian.Uint32(output[0:4])),
+			math.Float32frombits(binary.LittleEndian.Uint32(output[4:8])),
+			math.Float32frombits(binary.LittleEndian.Uint32(output[8:12])),
+		},
+		onGround:   output[13] == 1,
+		usedStep:   output[14] == 1,
+		hitUnknown: output[15] == 1,
+	}
+	for axis, mask := range [...]byte{1, 2, 4} {
+		result.clipped[axis] = output[12]&mask != 0
+	}
+	return result
 }
