@@ -263,6 +263,9 @@ func requireLinuxServerBundleIdentity(t *testing.T, root string) {
 			t.Errorf("CI workflow 缺少 Linux native bundle 标记 %q", required)
 		}
 	}
+	if bytes.Contains(workflow, []byte("rg ")) {
+		t.Error("CI workflow 不得依赖 runner 未安装的 rg")
+	}
 }
 
 func testCurrentIdentityMutations(t *testing.T) {

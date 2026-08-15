@@ -87,12 +87,12 @@ jobs:
         run: |
           go test ./internal/archcheck -count=1
           test -z "$(CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go list -deps ./cmd/mornlea-server |
-            rg 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
-          readelf -d bin/mornlea-server | rg -F 'libmornlea_engine.so'
-          readelf -d bin/mornlea-server | rg '\$ORIGIN'
+            grep -E 'internal/(client|mesh|render|gfx)|glfw|webgpu|x/image/font')"
+          readelf -d bin/mornlea-server | grep -F 'libmornlea_engine.so'
+          readelf -d bin/mornlea-server | grep -F '$ORIGIN'
           nm -D --defined-only bin/libmornlea_engine.so > /tmp/mornlea-engine-symbols.txt
           for symbol in mornlea_engine_abi_version mornlea_mesh_section mornlea_collision_resolve mornlea_raycast_batch; do
-            awk '{print $NF}' /tmp/mornlea-engine-symbols.txt | rg -Fx "$symbol"
+            awk '{print $NF}' /tmp/mornlea-engine-symbols.txt | grep -Fx "$symbol"
           done
 
       - name: 脱离 Cargo target 加载相邻 so
@@ -101,7 +101,7 @@ jobs:
           trap 'test -e engine/target || mv "$native_target_backup" engine/target' EXIT
           mv engine/target "$native_target_backup"
           ldd bin/mornlea-server > /tmp/mornlea-server-ldd.txt
-          rg -F "$(pwd)/bin/libmornlea_engine.so" /tmp/mornlea-server-ldd.txt
+          grep -F "$(pwd)/bin/libmornlea_engine.so" /tmp/mornlea-server-ldd.txt
           set +e
           bin/mornlea-server -h >/tmp/mornlea-server-help.txt 2>&1
           native_help_rc=$?
@@ -109,5 +109,5 @@ jobs:
           mv "$native_target_backup" engine/target
           trap - EXIT
           test "$native_help_rc" -eq 1
-          rg -F 'flag: help requested' /tmp/mornlea-server-help.txt
-          ! rg 'error while loading shared libraries|cannot open shared object' /tmp/mornlea-server-help.txt
+          grep -F 'flag: help requested' /tmp/mornlea-server-help.txt
+          ! grep -E 'error while loading shared libraries|cannot open shared object' /tmp/mornlea-server-help.txt
