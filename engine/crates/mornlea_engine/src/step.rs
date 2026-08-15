@@ -166,9 +166,98 @@ pub(crate) fn step_input_is_valid(bytes: &[u8]) -> bool {
     true
 }
 
+type Vector = [f32; 3];
+
+// 与 Go mgl32.Vec3.Len 逐位一致：f32 平方和（左结合）→ f64 sqrt → f32。
+fn vec3_len(v: Vector) -> f32 {
+    let sum = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    ((sum as f64).sqrt()) as f32
+}
+
+// 与 Go mgl32.Vec3.Normalize 逐位一致：l = 1.0/Len，再逐分量乘。
+fn vec3_normalize(v: Vector) -> Vector {
+    let l = 1.0f32 / vec3_len(v);
+    [v[0] * l, v[1] * l, v[2] * l]
+}
+
+fn vec3_scale(v: Vector, c: f32) -> Vector {
+    [v[0] * c, v[1] * c, v[2] * c]
+}
+
+// 与 Go moveToward 逐位一致：delta = target−current；len <= max → target；
+// 否则 current + delta*(max/len)。
+fn move_toward(current: Vector, target: Vector, maximum_delta: f32) -> Vector {
+    let delta = [
+        target[0] - current[0],
+        target[1] - current[1],
+        target[2] - current[2],
+    ];
+    let length = vec3_len(delta);
+    if length <= maximum_delta {
+        return target;
+    }
+    let scale = maximum_delta / length;
+    [
+        current[0] + delta[0] * scale,
+        current[1] + delta[1] * scale,
+        current[2] + delta[2] * scale,
+    ]
+}
+
+// 与 Go movementTarget 逐位一致（三角已由 Go 算好传入）：
+// right.Mul(f32(MoveX)).Add(forward.Mul(f32(MoveZ)))，Normalize().Mul(walkSpeed)。
+fn movement_target(move_x: i8, move_z: i8, walk_speed: f32, yaw_sin: f32, yaw_cos: f32) -> Vector {
+    let forward = [-yaw_sin, 0.0, -yaw_cos];
+    let right = [yaw_cos, 0.0, -yaw_sin];
+    let intent = [
+        right[0] * move_x as f32 + forward[0] * move_z as f32,
+        right[1] * move_x as f32 + forward[1] * move_z as f32,
+        right[2] * move_x as f32 + forward[2] * move_z as f32,
+    ];
+    if vec3_len(intent) == 0.0 {
+        return [0.0; 3];
+    }
+    vec3_scale(vec3_normalize(intent), walk_speed)
+}
+
+// integrate 返回（积分后 velocity，displacement）。运算顺序逐条镜像 Go 旧 Step 实现。
+pub(crate) fn integrate(input: &StepInput<'_>) -> (Vector, Vector) {
+    let dt = input.fixed_delta_seconds;
+    let mut velocity = input.velocity;
+    let target = movement_target(
+        input.move_x,
+        input.move_z,
+        input.walk_speed,
+        input.yaw_sin,
+        input.yaw_cos,
+    );
+    let mut horizontal = [velocity[0], 0.0, velocity[2]];
+    if input.on_ground {
+        if vec3_len(target) == 0.0 {
+            horizontal = move_toward(horizontal, [0.0; 3], input.ground_deceleration * dt);
+        } else {
+            horizontal = move_toward(horizontal, target, input.ground_acceleration * dt);
+        }
+    } else {
+        horizontal = move_toward(horizontal, target, input.air_acceleration * dt);
+        if vec3_len(horizontal) > input.walk_speed {
+            horizontal = vec3_scale(vec3_normalize(horizontal), input.walk_speed);
+        }
+    }
+    velocity[0] = horizontal[0];
+    velocity[2] = horizontal[2];
+    if input.on_ground && input.jump {
+        velocity[1] = input.jump_speed;
+    } else {
+        velocity[1] = (velocity[1] - input.gravity * dt).max(-input.terminal_fall_speed);
+    }
+    let displacement = [velocity[0] * dt, velocity[1] * dt, velocity[2] * dt];
+    (velocity, displacement)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{STEP_HEADER_BYTES, StepInput, step_input_is_valid};
+    use super::{STEP_HEADER_BYTES, StepInput, integrate, step_input_is_valid};
 
     const CELL_BYTES: usize = 196;
 
@@ -383,5 +472,44 @@ mod tests {
         assert_eq!(input.fixed_delta_seconds, 0.05);
         assert_eq!(input.step_height, 0.6);
         assert_eq!(input.dimensions, [1, 1, 1]);
+    }
+
+    #[test]
+    fn diagonal_input_accelerates_without_boost() {
+        let mut bytes = valid_step_bytes();
+        bytes[35] = 1; // move_z = 1，真正的对角输入
+        let input = StepInput::decode(Box::leak(bytes.into_boxed_slice()));
+        let (velocity, _) = integrate(&input);
+        let horizontal = (velocity[0] * velocity[0] + velocity[2] * velocity[2]).sqrt();
+        assert!((horizontal - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn jump_uses_jump_speed() {
+        let mut bytes = valid_step_bytes();
+        bytes[33] = 1; // jump
+        let input = StepInput::decode(Box::leak(bytes.into_boxed_slice()));
+        let (velocity, _) = integrate(&input);
+        assert_eq!(velocity[1].to_bits(), 8.4f32.to_bits());
+    }
+
+    #[test]
+    fn gravity_clamps_to_terminal() {
+        let mut bytes = valid_step_bytes();
+        bytes[32] = 0; // 空中
+        write_f32(&mut bytes, 24, -78.0);
+        let input = StepInput::decode(Box::leak(bytes.into_boxed_slice()));
+        let (velocity, _) = integrate(&input);
+        assert_eq!(velocity[1].to_bits(), (-78.4f32).to_bits());
+    }
+
+    #[test]
+    fn zero_input_on_ground_decelerates() {
+        let mut bytes = valid_step_bytes();
+        bytes[34] = 0; // move_x = 0
+        write_f32(&mut bytes, 20, 10.0); // velocity x = 10
+        let input = StepInput::decode(Box::leak(bytes.into_boxed_slice()));
+        let (velocity, _) = integrate(&input);
+        assert_eq!(velocity[0].to_bits(), 7.5f32.to_bits()); // 10 − 50*0.05
     }
 }
