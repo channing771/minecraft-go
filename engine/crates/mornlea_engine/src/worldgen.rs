@@ -444,6 +444,166 @@ pub(crate) fn dense_index(lx: i32, y: i32, lz: i32) -> usize {
         + lx as usize
 }
 
+// ---- ABI 编码常量与解析 ----
+//
+// 两个 worldgen 入口共用 magic `MGW1` 的 564 字节 header:
+// magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
+// 材料表 13×u16(26) + reserved u16(2) + perm 512×u8(512)。
+// chunk 入口追加 chunk_x/chunk_z(8);probe 入口追加 record_count(4) 与
+// 每条 16 字节的查询记录(mode + wx/wy/wz)。
+
+/// 共用 header 字节数。
+pub(crate) const WORLDGEN_HEADER_BYTES: usize = 564;
+/// chunk 入口输入总字节数:header + chunk_x/chunk_z。
+pub(crate) const WORLDGEN_CHUNK_INPUT_BYTES: usize = WORLDGEN_HEADER_BYTES + 8;
+/// chunk 入口输出字节数:98304 个 u16 LE。
+pub(crate) const WORLDGEN_CHUNK_OUTPUT_BYTES: usize = CHUNK_VOLUME * 2;
+/// probe 入口单批最大记录数,沿用 raycast 的 64-record batch 约定。
+pub(crate) const WORLDGEN_PROBE_MAX_RECORDS: usize = 64;
+/// probe 输入记录字节数:mode(4) + wx/wy/wz(12)。
+pub(crate) const WORLDGEN_PROBE_RECORD_BYTES: usize = 16;
+/// probe 输出记录字节数:height(4) + block(2) + reserved(2)。
+pub(crate) const WORLDGEN_PROBE_OUTPUT_RECORD_BYTES: usize = 8;
+
+fn read_u16(bytes: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([bytes[offset], bytes[offset + 1]])
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
+fn read_i32(bytes: &[u8], offset: usize) -> i32 {
+    i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
+fn read_i64(bytes: &[u8], offset: usize) -> i64 {
+    i64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
+}
+
+/// 解析并校验共用 header;任何违约返回 None(FFI 层转为 StatusInput)。
+///
+/// 校验项:magic/layout 精确匹配、Y 范围必须与内核常量一致(防止 Go/Rust
+/// 世界高度漂移)、reserved 必须为零、材料表 13 项两两互异(air 是哨兵,
+/// 重复 ID 会破坏与 Go 语义的对应关系)。perm 为 u8,取值域即合法域。
+pub(crate) fn parse_header(bytes: &[u8]) -> Option<WorldgenParams> {
+    if bytes.len() < WORLDGEN_HEADER_BYTES
+        || &bytes[0..4] != b"MGW1"
+        || read_u32(bytes, 4) != 1
+        || read_i32(bytes, 16) != WORLD_MIN_Y
+        || read_i32(bytes, 20) != WORLD_MAX_Y
+        || read_u16(bytes, 50) != 0
+    {
+        return None;
+    }
+    let seed = read_i64(bytes, 8);
+    let materials = Materials {
+        air: read_u16(bytes, 24),
+        stone: read_u16(bytes, 26),
+        dirt: read_u16(bytes, 28),
+        grass: read_u16(bytes, 30),
+        bedrock: read_u16(bytes, 32),
+        snow: read_u16(bytes, 34),
+        sand: read_u16(bytes, 36),
+        clay: read_u16(bytes, 38),
+        gravel: read_u16(bytes, 40),
+        iron_ore: read_u16(bytes, 42),
+        coal_ore: read_u16(bytes, 44),
+        oak_log: read_u16(bytes, 46),
+        leaves: read_u16(bytes, 48),
+    };
+    let ids = materials.as_array();
+    for i in 0..ids.len() {
+        for j in i + 1..ids.len() {
+            if ids[i] == ids[j] {
+                return None;
+            }
+        }
+    }
+    let mut perm = [0u8; 512];
+    perm.copy_from_slice(&bytes[52..WORLDGEN_HEADER_BYTES]);
+    Some(WorldgenParams {
+        seed,
+        materials,
+        perm,
+    })
+}
+
+/// 解析 chunk 入口输入,返回参数与区块坐标。
+pub(crate) fn parse_chunk_input(bytes: &[u8]) -> Option<(WorldgenParams, i32, i32)> {
+    if bytes.len() != WORLDGEN_CHUNK_INPUT_BYTES {
+        return None;
+    }
+    let params = parse_header(bytes)?;
+    let chunk_x = read_i32(bytes, WORLDGEN_HEADER_BYTES);
+    let chunk_z = read_i32(bytes, WORLDGEN_HEADER_BYTES + 4);
+    Some((params, chunk_x, chunk_z))
+}
+
+/// 单条 probe 查询记录。mode:0=HeightAt,1=TerrainBlockAt,2=BaseBlockAt。
+pub(crate) struct ProbeRecord {
+    pub mode: u32,
+    pub wx: i32,
+    pub wy: i32,
+    pub wz: i32,
+}
+
+/// 解析 probe 入口输入,返回参数与查询记录;record_count 必须在 1..=64,
+/// 长度必须与记录数精确匹配,mode 越界拒绝。
+pub(crate) fn parse_probe_input(bytes: &[u8]) -> Option<(WorldgenParams, Vec<ProbeRecord>)> {
+    if bytes.len() < WORLDGEN_HEADER_BYTES + 4 {
+        return None;
+    }
+    let count = read_u32(bytes, WORLDGEN_HEADER_BYTES) as usize;
+    if count == 0
+        || count > WORLDGEN_PROBE_MAX_RECORDS
+        || bytes.len() != WORLDGEN_HEADER_BYTES + 4 + count * WORLDGEN_PROBE_RECORD_BYTES
+    {
+        return None;
+    }
+    let params = parse_header(bytes)?;
+    let mut records = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = WORLDGEN_HEADER_BYTES + 4 + index * WORLDGEN_PROBE_RECORD_BYTES;
+        let mode = read_u32(bytes, offset);
+        if mode > 2 {
+            return None;
+        }
+        records.push(ProbeRecord {
+            mode,
+            wx: read_i32(bytes, offset + 4),
+            wy: read_i32(bytes, offset + 8),
+            wz: read_i32(bytes, offset + 12),
+        });
+    }
+    Some((params, records))
+}
+
+/// 执行一批 probe 查询,把结果按输出布局写入 out(每条 8 字节)。
+///
+/// mode 0 写 height 字段,mode 1/2 写 block 字段;未使用字段保持零,
+/// 保证输出字节完全由输入决定。
+pub(crate) fn run_probe(params: &WorldgenParams, records: &[ProbeRecord], out: &mut [u8]) {
+    debug_assert_eq!(
+        out.len(),
+        records.len() * WORLDGEN_PROBE_OUTPUT_RECORD_BYTES
+    );
+    for (index, record) in records.iter().enumerate() {
+        let offset = index * WORLDGEN_PROBE_OUTPUT_RECORD_BYTES;
+        let mut height = 0i32;
+        let mut block = 0u16;
+        match record.mode {
+            0 => height = params.height_at(record.wx, record.wz),
+            1 => block = params.terrain_block_at(record.wx, record.wy, record.wz),
+            _ => block = params.base_block_at(record.wx, record.wy, record.wz),
+        }
+        out[offset..offset + 4].copy_from_slice(&height.to_le_bytes());
+        out[offset + 4..offset + 6].copy_from_slice(&block.to_le_bytes());
+        out[offset + 6] = 0;
+        out[offset + 7] = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

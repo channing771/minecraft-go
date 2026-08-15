@@ -12,7 +12,7 @@
 - [x] 2.1 engine 新增 `worldgen.rs`:perlin/fbm(逐条镜像 Go 运算顺序,禁
       `mul_add`)、地表分层、oreHash、橡树候选/树形/合并;单元测试覆盖
       固定语料;验证:`make rust`(含 cargo test)。
-- [ ] 2.2 `ffi.rs` 导出 `mornlea_worldgen_chunk` 与 `mornlea_worldgen_probe`
+- [x] 2.2 `ffi.rs` 导出 `mornlea_worldgen_chunk` 与 `mornlea_worldgen_probe`
       (magic `MGW1`、header 校验:min_y/max_y、perm<256、材料表无 air 冲突、
       缓冲长度;违约返回 StatusInput 且不写输出),engine ABI version 2→3,
       同步 `engine/include` 头文件;验证:`make rust`。

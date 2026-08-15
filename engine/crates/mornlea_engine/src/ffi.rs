@@ -9,8 +9,12 @@ use crate::raycast::{
     raycast_cursor_overflow_is_valid,
 };
 use crate::step::{STEP_HEADER_BYTES, STEP_OUTPUT_BYTES, physics_step};
+use crate::worldgen::{
+    CHUNK_VOLUME, WORLDGEN_CHUNK_OUTPUT_BYTES, WORLDGEN_PROBE_OUTPUT_RECORD_BYTES,
+    parse_chunk_input, parse_probe_input, run_probe,
+};
 
-pub(crate) const ABI_VERSION: u32 = 2;
+pub(crate) const ABI_VERSION: u32 = 3;
 
 // 输入长度校验委托给 step::step_input_is_valid（内部使用 STEP_HEADER_BYTES），此常量保留供 ABI 文档对齐。
 #[allow(dead_code)]
@@ -459,6 +463,136 @@ unsafe fn physics_step_with(
     }
 }
 
+/// 生成整区块的 worldgen 生产入口。
+///
+/// 输入为 `MGW1` header + chunk 坐标(共 572 字节),输出为 dense
+/// `[y−min_y][lz][lx]` 布局的 98304 个 u16 LE(196608 字节)。任何输入
+/// 违约返回错误状态且不修改输出缓冲;结果只在完整成功后一次发布。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_worldgen_chunk(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_len: usize,
+) -> u32 {
+    // SAFETY: C 调用方提供原始缓冲区；helper 会在解引用前验证指针、范围、长度与重叠。
+    unsafe { worldgen_chunk_with(abi_version, input, input_len, output, output_len) }
+}
+
+unsafe fn worldgen_chunk_with(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_len: usize,
+) -> u32 {
+    if abi_version != ABI_VERSION {
+        return MORNLEA_STATUS_ABI_VERSION;
+    }
+    if input.is_null() || output.is_null() {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if output_len < WORLDGEN_CHUNK_OUTPUT_BYTES {
+        return MORNLEA_STATUS_OUTPUT_OVERFLOW;
+    }
+    if output_len != WORLDGEN_CHUNK_OUTPUT_BYTES
+        || !byte_range_is_valid(input, input_len)
+        || !byte_range_is_valid(output, output_len)
+    {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if ranges_overlap(input.addr(), input_len, output.addr(), output_len) {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: input 非空，范围不超过 isize::MAX，地址加法不回绕且不与 output 重叠。
+        let bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
+        let (params, chunk_x, chunk_z) = parse_chunk_input(bytes).ok_or(MORNLEA_STATUS_INPUT)?;
+        // 先在本地缓冲生成，成功后一次拷贝，保证失败路径不触碰调用方输出。
+        let mut dense = vec![0u16; CHUNK_VOLUME];
+        params.generate_chunk(chunk_x, chunk_z, &mut dense);
+        let mut encoded = vec![0u8; WORLDGEN_CHUNK_OUTPUT_BYTES];
+        for (chunk, value) in encoded.chunks_exact_mut(2).zip(dense.iter()) {
+            chunk.copy_from_slice(&value.to_le_bytes());
+        }
+        Ok::<Vec<u8>, u32>(encoded)
+    }));
+    match result {
+        Ok(Ok(encoded)) => {
+            // SAFETY: output 非空、范围有效且与 input 不重叠；只在完整成功后一次发布。
+            unsafe { std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, encoded.len()) };
+            MORNLEA_STATUS_OK
+        }
+        Ok(Err(status)) => status,
+        Err(_) => MORNLEA_STATUS_PANIC,
+    }
+}
+
+/// 单点查询的 worldgen 生产入口(batch,最多 64 条)。
+///
+/// 输入为 `MGW1` header + record_count + 每条 16 字节的查询记录;输出为
+/// 每条 8 字节(height + block + reserved)。输出长度必须与记录数精确
+/// 匹配;任何输入违约返回错误状态且不修改输出缓冲。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_worldgen_probe(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_len: usize,
+) -> u32 {
+    // SAFETY: C 调用方提供原始缓冲区；helper 会在解引用前验证指针、范围、长度与重叠。
+    unsafe { worldgen_probe_with(abi_version, input, input_len, output, output_len) }
+}
+
+unsafe fn worldgen_probe_with(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_len: usize,
+) -> u32 {
+    if abi_version != ABI_VERSION {
+        return MORNLEA_STATUS_ABI_VERSION;
+    }
+    if input.is_null() || output.is_null() {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if !byte_range_is_valid(input, input_len) || !byte_range_is_valid(output, output_len) {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if ranges_overlap(input.addr(), input_len, output.addr(), output_len) {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: input 非空，范围不超过 isize::MAX，地址加法不回绕且不与 output 重叠。
+        let bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
+        let (params, records) = parse_probe_input(bytes).ok_or(MORNLEA_STATUS_INPUT)?;
+        let needed = records.len() * WORLDGEN_PROBE_OUTPUT_RECORD_BYTES;
+        if output_len < needed {
+            return Err(MORNLEA_STATUS_OUTPUT_OVERFLOW);
+        }
+        if output_len != needed {
+            return Err(MORNLEA_STATUS_INVALID_ARGUMENT);
+        }
+        let mut encoded = vec![0u8; needed];
+        run_probe(&params, &records, &mut encoded);
+        Ok::<Vec<u8>, u32>(encoded)
+    }));
+    match result {
+        Ok(Ok(encoded)) => {
+            // SAFETY: output 非空、范围有效且与 input 不重叠；只在完整成功后一次发布。
+            unsafe { std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, encoded.len()) };
+            MORNLEA_STATUS_OK
+        }
+        Ok(Err(status)) => status,
+        Err(_) => MORNLEA_STATUS_PANIC,
+    }
+}
+
 fn raycast_input_is_valid(bytes: &[u8]) -> bool {
     if bytes.len() != RAYCAST_INPUT_BYTES
         || &bytes[0..4] != b"MGR1"
@@ -686,8 +820,8 @@ mod mesh_tests {
     use super::*;
 
     #[test]
-    fn exported_version_is_two() {
-        assert_eq!(mornlea_engine_abi_version(), 2);
+    fn exported_version_is_three() {
+        assert_eq!(mornlea_engine_abi_version(), 3);
     }
 }
 #[cfg(test)]
@@ -695,14 +829,15 @@ mod tests {
     use std::mem::{align_of, size_of};
 
     use super::{
-        COLLISION_CELL_BYTES, COLLISION_HEADER_BYTES, COLLISION_MAX_CELLS, COLLISION_OUTPUT_BYTES,
-        COLLISION_STEP_HEIGHT_OFFSET, MORNLEA_STATUS_ABI_VERSION, MORNLEA_STATUS_EMISSION,
-        MORNLEA_STATUS_INPUT, MORNLEA_STATUS_INVALID_ARGUMENT, MORNLEA_STATUS_OK,
-        MORNLEA_STATUS_OUTPUT_OVERFLOW, MORNLEA_STATUS_PANIC, MORNLEA_STATUS_QUEUE_OVERFLOW,
-        MORNLEA_STATUS_REGISTRY, MORNLEA_STATUS_SCRATCH, SCRATCH_BYTES, catch_and_publish,
-        catch_collision, collision_resolve_with, input_range_is_valid, mornlea_collision_resolve,
-        mornlea_mesh_section, output_range_is_valid, raycast_batch_with, read_f32, read_i32,
-        read_u32, scratch_range_is_valid,
+        ABI_VERSION, COLLISION_CELL_BYTES, COLLISION_HEADER_BYTES, COLLISION_MAX_CELLS,
+        COLLISION_OUTPUT_BYTES, COLLISION_STEP_HEIGHT_OFFSET, MORNLEA_STATUS_ABI_VERSION,
+        MORNLEA_STATUS_EMISSION, MORNLEA_STATUS_INPUT, MORNLEA_STATUS_INVALID_ARGUMENT,
+        MORNLEA_STATUS_OK, MORNLEA_STATUS_OUTPUT_OVERFLOW, MORNLEA_STATUS_PANIC,
+        MORNLEA_STATUS_QUEUE_OVERFLOW, MORNLEA_STATUS_REGISTRY, MORNLEA_STATUS_SCRATCH,
+        SCRATCH_BYTES, catch_and_publish, catch_collision, collision_resolve_with,
+        input_range_is_valid, mornlea_collision_resolve, mornlea_mesh_section,
+        output_range_is_valid, raycast_batch_with, read_f32, read_i32, read_u32,
+        scratch_range_is_valid,
     };
     use crate::input::tests::valid_input;
     use crate::raycast::{
@@ -831,7 +966,7 @@ mod tests {
 
         let status = unsafe {
             collision_resolve_with(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 caller_output[1..].as_mut_ptr(),
@@ -857,7 +992,7 @@ mod tests {
 
         let status = unsafe {
             raycast_batch_with(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 cursor_arena[1..].as_mut_ptr(),
@@ -887,7 +1022,7 @@ mod tests {
 
         let status = unsafe {
             raycast_batch_with(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 cursor_arena[1..].as_mut_ptr(),
@@ -951,7 +1086,7 @@ mod tests {
 
             let status = unsafe {
                 super::mornlea_raycast_batch(
-                    2,
+                    ABI_VERSION,
                     input_pointer,
                     input.len(),
                     cursor_pointer,
@@ -1001,7 +1136,7 @@ mod tests {
 
             let status = unsafe {
                 super::mornlea_raycast_batch(
-                    2,
+                    ABI_VERSION,
                     input_pointer,
                     RAYCAST_INPUT_BYTES,
                     cursor_pointer,
@@ -1033,7 +1168,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                2,
+                ABI_VERSION,
                 std::ptr::without_provenance::<u8>(usize::MAX),
                 RAYCAST_INPUT_BYTES,
                 cursor.0.as_mut_ptr(),
@@ -1063,7 +1198,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 cursor.as_mut_ptr(),
@@ -1092,7 +1227,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 cursor.as_mut_ptr(),
@@ -1124,7 +1259,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 cursor.0.as_mut_ptr(),
@@ -1449,7 +1584,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                2,
+                ABI_VERSION,
                 input_arena[1..].as_ptr(),
                 RAYCAST_INPUT_BYTES,
                 cursor_arena[1..].as_mut_ptr(),
@@ -1500,7 +1635,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 cursor_arena[1..].as_mut_ptr(),
@@ -1612,7 +1747,7 @@ mod tests {
 
         let status = unsafe {
             super::mornlea_raycast_batch(
-                2,
+                ABI_VERSION,
                 input_pointer,
                 input_len,
                 cursor_pointer,
@@ -1661,7 +1796,7 @@ mod tests {
 
         let status = unsafe {
             mornlea_collision_resolve(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 output.as_mut_ptr(),
@@ -1681,7 +1816,7 @@ mod tests {
         let mut output_len = usize::MAX;
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1706,7 +1841,7 @@ mod tests {
 
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1767,7 +1902,7 @@ mod tests {
             let mut output_len = usize::MAX;
             let status = unsafe {
                 mornlea_mesh_section(
-                    2,
+                    ABI_VERSION,
                     input.as_ptr(),
                     input.len(),
                     scratch.as_mut_ptr().cast(),
@@ -1797,7 +1932,7 @@ mod tests {
 
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1829,7 +1964,7 @@ mod tests {
 
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -1897,7 +2032,7 @@ mod tests {
         // SAFETY: 被测入口在构造 slice 前拒绝超过 isize::MAX 的长度。
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 isize::MAX as usize + 1,
                 scratch.as_mut_ptr().cast(),
@@ -1919,7 +2054,7 @@ mod tests {
         // SAFETY: 被测入口在构造 slice 前拒绝地址加一发生回绕的范围。
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 std::ptr::without_provenance(usize::MAX),
                 1,
                 scratch.as_mut_ptr().cast(),
@@ -1960,7 +2095,7 @@ mod tests {
         let mut output_len = usize::MAX;
         let status = unsafe {
             mornlea_mesh_section(
-                3,
+                ABI_VERSION + 1,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2021,7 +2156,7 @@ mod tests {
             // SAFETY: 本测试提供有效对齐的独占缓冲区，长度均与切片一致。
             let status = unsafe {
                 mornlea_mesh_section(
-                    2,
+                    ABI_VERSION,
                     case.as_ptr(),
                     case.len(),
                     scratch.as_mut_ptr().cast(),
@@ -2039,7 +2174,7 @@ mod tests {
         // SAFETY: 除被测的空 input 指针外，其余缓冲区均有效且对齐。
         let null_input = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 std::ptr::null(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2056,7 +2191,7 @@ mod tests {
         // SAFETY: scratch 指针有效但长度被刻意缩短一个字节。
         let short_scratch = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2073,7 +2208,7 @@ mod tests {
         // SAFETY: output 指针有效且对齐，capacity 被刻意缩短一个元素。
         let short_output = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2097,7 +2232,7 @@ mod tests {
         // SAFETY: 除被测的空 output_len 指针外，其余指针均有效且对齐。
         let null_output_len = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2112,7 +2247,7 @@ mod tests {
         // SAFETY: 除被测的空 scratch 指针外，其余指针均有效且对齐。
         let null_scratch = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 std::ptr::null_mut(),
@@ -2129,7 +2264,7 @@ mod tests {
         // SAFETY: 除被测的空 output 指针外，其余指针均有效且对齐。
         let null_output = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2146,7 +2281,7 @@ mod tests {
         // SAFETY: scratch 分配足够大；加一字节只用于验证未对齐检查，函数不会解引用。
         let misaligned_scratch = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast::<u8>().add(1),
@@ -2163,7 +2298,7 @@ mod tests {
         // SAFETY: scratch 额外分配了一个 u64；加四字节仅用于验证 8-byte 对齐检查。
         let four_byte_aligned_scratch = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast::<u8>().add(4),
@@ -2180,7 +2315,7 @@ mod tests {
         // SAFETY: output 分配足够大；加一字节只用于验证未对齐检查，函数不会解引用。
         let misaligned_output = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2197,7 +2332,7 @@ mod tests {
         // SAFETY: output_len 分配足够大；加一字节只用于验证未对齐检查，函数不会解引用。
         let misaligned_output_len = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2221,7 +2356,7 @@ mod tests {
         // SAFETY: output_len 为被测的对齐伪地址；入口必须在任何 write 前因地址回绕返回。
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2244,7 +2379,7 @@ mod tests {
         // SAFETY: 共享 buffer 容量同时满足 scratch 与 output；入口应在创建任何 Rust slice 前拒绝重叠。
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 shared.as_mut_ptr().cast(),
@@ -2274,7 +2409,7 @@ mod tests {
         // SAFETY: 每个指针都有效且容量足够；被测入口必须在创建 slice 前拒绝 input/output 别名。
         let status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 shared.as_ptr().cast(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2304,7 +2439,7 @@ mod tests {
         // SAFETY: output_len 刻意指向 input；入口可写零，但必须在构造 input slice 前拒绝别名。
         let input_status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 shared_input.as_ptr().cast(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2320,7 +2455,7 @@ mod tests {
         // SAFETY: output_len 刻意指向 output；入口必须在构造 output slice 前拒绝别名。
         let output_status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 scratch.as_mut_ptr().cast(),
@@ -2348,7 +2483,7 @@ mod tests {
         // SAFETY: 除被测的 input/scratch 重叠外，其余指针与容量都有效；入口应在构造 slice 前拒绝。
         let input_status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 shared_input_ptr,
                 input.len(),
                 shared_input_ptr,
@@ -2366,7 +2501,7 @@ mod tests {
         // SAFETY: 除被测的 scratch/output_len 重叠外，其余指针与容量都有效；入口先将 output_len 原子清零再拒绝重叠。
         let output_len_status = unsafe {
             mornlea_mesh_section(
-                2,
+                ABI_VERSION,
                 input.as_ptr(),
                 input.len(),
                 shared_output_len.as_mut_ptr().cast(),
@@ -2378,5 +2513,230 @@ mod tests {
         };
         assert_eq!(output_len_status, MORNLEA_STATUS_SCRATCH);
         assert_eq!(shared_output_len[0], 0);
+    }
+
+    use super::{WORLDGEN_CHUNK_OUTPUT_BYTES, mornlea_worldgen_chunk, mornlea_worldgen_probe};
+    use crate::worldgen::{
+        WORLDGEN_CHUNK_INPUT_BYTES, WORLDGEN_HEADER_BYTES, WORLDGEN_PROBE_RECORD_BYTES,
+    };
+
+    /// 构造一个合法的 worldgen header:seed 42、互异材料表 1..=13、恒等 perm。
+    fn worldgen_header() -> Vec<u8> {
+        let mut bytes = vec![0u8; WORLDGEN_HEADER_BYTES];
+        bytes[0..4].copy_from_slice(b"MGW1");
+        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        bytes[8..16].copy_from_slice(&42i64.to_le_bytes());
+        bytes[16..20].copy_from_slice(&(-64i32).to_le_bytes());
+        bytes[20..24].copy_from_slice(&320i32.to_le_bytes());
+        for (index, id) in (1u16..=13).enumerate() {
+            // 材料表刻意避开 0:air=1 便于区分“输出缓冲原样”与“生成的空气”。
+            bytes[24 + index * 2..26 + index * 2].copy_from_slice(&id.to_le_bytes());
+        }
+        for (index, entry) in bytes[52..WORLDGEN_HEADER_BYTES].iter_mut().enumerate() {
+            *entry = (index & 255) as u8;
+        }
+        bytes
+    }
+
+    fn worldgen_chunk_input(chunk_x: i32, chunk_z: i32) -> Vec<u8> {
+        let mut bytes = worldgen_header();
+        bytes.extend_from_slice(&chunk_x.to_le_bytes());
+        bytes.extend_from_slice(&chunk_z.to_le_bytes());
+        bytes
+    }
+
+    fn worldgen_probe_input(records: &[(u32, i32, i32, i32)]) -> Vec<u8> {
+        let mut bytes = worldgen_header();
+        bytes.extend_from_slice(&(records.len() as u32).to_le_bytes());
+        for &(mode, wx, wy, wz) in records {
+            bytes.extend_from_slice(&mode.to_le_bytes());
+            bytes.extend_from_slice(&wx.to_le_bytes());
+            bytes.extend_from_slice(&wy.to_le_bytes());
+            bytes.extend_from_slice(&wz.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn worldgen_chunk_is_deterministic_and_wrong_abi_is_rejected() {
+        let input = worldgen_chunk_input(0, 0);
+        let mut first = vec![0u8; WORLDGEN_CHUNK_OUTPUT_BYTES];
+        let mut second = vec![0u8; WORLDGEN_CHUNK_OUTPUT_BYTES];
+        // SAFETY: 指针来自有效 Vec,长度与缓冲容量一致。
+        let status_first = unsafe {
+            mornlea_worldgen_chunk(
+                ABI_VERSION,
+                input.as_ptr(),
+                input.len(),
+                first.as_mut_ptr(),
+                first.len(),
+            )
+        };
+        // SAFETY: 同上。
+        let status_second = unsafe {
+            mornlea_worldgen_chunk(
+                ABI_VERSION,
+                input.as_ptr(),
+                input.len(),
+                second.as_mut_ptr(),
+                second.len(),
+            )
+        };
+        assert_eq!(status_first, MORNLEA_STATUS_OK);
+        assert_eq!(status_second, MORNLEA_STATUS_OK);
+        assert_eq!(first, second);
+        // 生成结果必然包含基岩层(材料 5),不可能全零。
+        assert!(first.iter().any(|&b| b != 0));
+
+        // SAFETY: 同上;仅 abi_version 不匹配。
+        let status_abi = unsafe {
+            mornlea_worldgen_chunk(
+                ABI_VERSION + 1,
+                input.as_ptr(),
+                input.len(),
+                second.as_mut_ptr(),
+                second.len(),
+            )
+        };
+        assert_eq!(status_abi, MORNLEA_STATUS_ABI_VERSION);
+    }
+
+    #[test]
+    fn worldgen_chunk_invalid_input_leaves_output_untouched() {
+        let mut output = vec![0xAAu8; WORLDGEN_CHUNK_OUTPUT_BYTES];
+        let canary = output.clone();
+
+        let mut bad_magic = worldgen_chunk_input(0, 0);
+        bad_magic[0] = b'X';
+        let mut duplicate_material = worldgen_chunk_input(0, 0);
+        // 把 dirt 改成与 stone 相同的 ID,触发材料表互异性校验。
+        duplicate_material[26..28].copy_from_slice(&1u16.to_le_bytes());
+        let mut wrong_min_y = worldgen_chunk_input(0, 0);
+        wrong_min_y[16..20].copy_from_slice(&(-32i32).to_le_bytes());
+        let truncated = worldgen_chunk_input(0, 0)[..WORLDGEN_CHUNK_INPUT_BYTES - 1].to_vec();
+
+        for input in [&bad_magic, &duplicate_material, &wrong_min_y, &truncated] {
+            // SAFETY: 指针来自有效 Vec,长度与缓冲容量一致。
+            let status = unsafe {
+                mornlea_worldgen_chunk(
+                    ABI_VERSION,
+                    input.as_ptr(),
+                    input.len(),
+                    output.as_mut_ptr(),
+                    output.len(),
+                )
+            };
+            assert_eq!(status, MORNLEA_STATUS_INPUT);
+            assert_eq!(output, canary);
+        }
+
+        let valid = worldgen_chunk_input(0, 0);
+        // SAFETY: 输出缓冲不足,入口应在写入前拒绝。
+        let status_short = unsafe {
+            mornlea_worldgen_chunk(
+                ABI_VERSION,
+                valid.as_ptr(),
+                valid.len(),
+                output.as_mut_ptr(),
+                output.len() - 1,
+            )
+        };
+        assert_eq!(status_short, MORNLEA_STATUS_OUTPUT_OVERFLOW);
+        assert_eq!(output, canary);
+    }
+
+    #[test]
+    fn worldgen_probe_matches_chunk_and_rejects_bad_records() {
+        let chunk_input = worldgen_chunk_input(0, 0);
+        let mut dense = vec![0u8; WORLDGEN_CHUNK_OUTPUT_BYTES];
+        // SAFETY: 指针来自有效 Vec,长度与缓冲容量一致。
+        let chunk_status = unsafe {
+            mornlea_worldgen_chunk(
+                ABI_VERSION,
+                chunk_input.as_ptr(),
+                chunk_input.len(),
+                dense.as_mut_ptr(),
+                dense.len(),
+            )
+        };
+        assert_eq!(chunk_status, MORNLEA_STATUS_OK);
+
+        // 探测区块内一根整列:mode 2(BaseBlockAt)必须与 dense 输出逐格一致。
+        let mut records = Vec::new();
+        for y in [-64i32, -20, 0, 64, 90, 319] {
+            records.push((2u32, 3i32, y, 5i32));
+        }
+        records.push((0, 3, 0, 5));
+        let probe_input = worldgen_probe_input(&records);
+        let mut probe_out = vec![0u8; records.len() * 8];
+        // SAFETY: 同上。
+        let probe_status = unsafe {
+            mornlea_worldgen_probe(
+                ABI_VERSION,
+                probe_input.as_ptr(),
+                probe_input.len(),
+                probe_out.as_mut_ptr(),
+                probe_out.len(),
+            )
+        };
+        assert_eq!(probe_status, MORNLEA_STATUS_OK);
+        for (index, &(_, _, y, _)) in records[..records.len() - 1].iter().enumerate() {
+            let block = u16::from_le_bytes([probe_out[index * 8 + 4], probe_out[index * 8 + 5]]);
+            let dense_offset = (((y + 64) * 16 * 16 + 5 * 16 + 3) * 2) as usize;
+            let expected = u16::from_le_bytes([dense[dense_offset], dense[dense_offset + 1]]);
+            assert_eq!(block, expected, "y={y}");
+        }
+        let height = i32::from_le_bytes(
+            probe_out[(records.len() - 1) * 8..(records.len() - 1) * 8 + 4]
+                .try_into()
+                .unwrap(),
+        );
+        // seed 42 的 (3,5) 高度必须落在地形振幅范围内。
+        assert!((0..200).contains(&height), "height={height}");
+
+        // mode 越界、record_count 与长度不符、输出长度不匹配都必须原样拒绝。
+        let mut bad_mode = worldgen_probe_input(&[(3, 0, 0, 0)]);
+        let mut out_one = vec![0xBBu8; 8];
+        let canary_one = out_one.clone();
+        // SAFETY: 同上。
+        let status_mode = unsafe {
+            mornlea_worldgen_probe(
+                ABI_VERSION,
+                bad_mode.as_ptr(),
+                bad_mode.len(),
+                out_one.as_mut_ptr(),
+                out_one.len(),
+            )
+        };
+        assert_eq!(status_mode, MORNLEA_STATUS_INPUT);
+        assert_eq!(out_one, canary_one);
+
+        bad_mode.truncate(WORLDGEN_HEADER_BYTES + 4 + WORLDGEN_PROBE_RECORD_BYTES - 1);
+        // SAFETY: 同上。
+        let status_truncated = unsafe {
+            mornlea_worldgen_probe(
+                ABI_VERSION,
+                bad_mode.as_ptr(),
+                bad_mode.len(),
+                out_one.as_mut_ptr(),
+                out_one.len(),
+            )
+        };
+        assert_eq!(status_truncated, MORNLEA_STATUS_INPUT);
+        assert_eq!(out_one, canary_one);
+
+        let valid_one = worldgen_probe_input(&[(0, 0, 0, 0)]);
+        // SAFETY: 输出缓冲不足,入口应在写入前拒绝。
+        let status_short = unsafe {
+            mornlea_worldgen_probe(
+                ABI_VERSION,
+                valid_one.as_ptr(),
+                valid_one.len(),
+                out_one.as_mut_ptr(),
+                out_one.len() - 1,
+            )
+        };
+        assert_eq!(status_short, MORNLEA_STATUS_OUTPUT_OVERFLOW);
+        assert_eq!(out_one, canary_one);
     }
 }
