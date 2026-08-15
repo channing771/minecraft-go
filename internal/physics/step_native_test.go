@@ -3,6 +3,7 @@ package physics_test
 import (
 	"encoding/binary"
 	"math"
+	"math/rand"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -246,6 +247,70 @@ func TestStepProductionMatchesGoIntegrationOracle(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			testAssertProductionStepMatchesOracle(t, test.state, test.input, test.world)
+		})
+	}
+}
+
+func TestStepProductionMatchesGoIntegrationOracleExtended(t *testing.T) {
+	previousTunables := physics.ActiveTunables()
+	t.Cleanup(func() { physics.SetTunables(previousTunables) })
+	physics.SetTunables(physics.DefaultTunables())
+
+	floor := func() testCollisionWorld {
+		world := testCollisionWorld{}
+		for x := int32(-3); x <= 3; x++ {
+			for z := int32(-3); z <= 3; z++ {
+				world[core.BlockPos{X: x, Y: 0, Z: z}] = physics.CollisionBoxSet{Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}}
+			}
+		}
+		return world
+	}
+
+	tests := []struct {
+		name  string
+		state physics.State
+		input physics.Input
+		world testCollisionWorld
+	}{
+		{name: "airborne walk speed clamp", state: physics.State{Position: mgl32.Vec3{0.5, 5, 0.5}, Velocity: mgl32.Vec3{30, 0, -20}}, input: physics.Input{MoveX: 1, MoveZ: 1, Yaw: 0.75}, world: floor()},
+		{name: "jump into ceiling", state: physics.State{Position: mgl32.Vec3{0.5, 1, 0.5}, OnGround: true}, input: physics.Input{Jump: true}, world: testCollisionWorld{
+			{X: 0, Y: 0, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}},
+			{X: 0, Y: 3, Z: 0}: {Loaded: true, Count: 1, Boxes: [8]core.AABB{fullCube}},
+		}},
+		{name: "yaw extreme", state: physics.State{Position: mgl32.Vec3{0.5, 1, 0.5}, OnGround: true}, input: physics.Input{MoveX: 1, MoveZ: 1, Yaw: -3.1415927}, world: floor()},
+		{name: "negative zero x velocity", state: physics.State{Position: mgl32.Vec3{0.5, 1, 0.5}, Velocity: mgl32.Vec3{math.Float32frombits(1 << 31), 0, 0}, OnGround: true}, input: physics.Input{}, world: floor()},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testAssertProductionStepMatchesOracle(t, test.state, test.input, test.world)
+		})
+	}
+
+	random := rand.New(rand.NewSource(991))
+	for range 128 {
+		world := floor()
+		for x := int32(-2); x <= 2; x++ {
+			for z := int32(-2); z <= 2; z++ {
+				if random.Intn(4) == 0 {
+					world[core.BlockPos{X: x, Y: 1, Z: z}] = physics.CollisionBoxSet{Loaded: true, Count: 1, Boxes: [8]core.AABB{{Max: mgl32.Vec3{1, float32(random.Intn(2)+1) / 2, 1}}}}
+				} else if random.Intn(17) == 0 {
+					world[core.BlockPos{X: x, Y: 1, Z: z}] = physics.CollisionBoxSet{}
+				}
+			}
+		}
+		state := physics.State{
+			Position: mgl32.Vec3{float32(random.Intn(41)-20)/10 + 0.5, 1, float32(random.Intn(41)-20)/10 + 0.5},
+			Velocity: mgl32.Vec3{float32(random.Intn(161)-80) / 10, float32(random.Intn(161)-80) / 10, float32(random.Intn(161)-80) / 10},
+			OnGround: random.Intn(2) == 0,
+		}
+		input := physics.Input{
+			MoveX: int8(random.Intn(3) - 1),
+			MoveZ: int8(random.Intn(3) - 1),
+			Jump:  random.Intn(2) == 0,
+			Yaw:   float32(random.Intn(629)-314) / 100,
+		}
+		t.Run("random", func(t *testing.T) {
+			testAssertProductionStepMatchesOracle(t, state, input, world)
 		})
 	}
 }
