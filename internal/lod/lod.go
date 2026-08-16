@@ -5,7 +5,8 @@
 // 壳请求编码(复用 worldgen `MGW1` header + tile 尾部)、20 字节 LE quad
 // 流解码与生成入口,不实现第二套 Go 壳算法。差分与结构 oracle 测试在
 // 本包测试内以 `mornlea_worldgen_probe` 为对照(oracle 保留方案)。
-// 任务 5.1 的 Scheduler 将在本包落地,本骨架不含任何队列语义。
+// 远环 tile 的排队、预算化生成与上传调度由本包 Scheduler 与其 worker
+// goroutine 承担(scheduler.go/worker.go/budget.go)。
 package lod
 
 import (
