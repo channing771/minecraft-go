@@ -61,7 +61,8 @@ func (q *TaskQueue) BeginHead() bool {
 // v2 的恢复路径）。恢复纪律：
 //   - 状态必须非终态且失败原因为空；Planning/Validating 由调用方先归一为
 //     Queued（未通过验证的计划不落盘，重启后重新规划）；
-//   - Running 必须携带合法 go_to 步骤且 StepIndex 落在计划范围内；
+//   - Running 必须携带合法计划步骤（M5C 交付全集四 kind）且 StepIndex 落在
+//     计划范围内；
 //   - 非 Running 不得携带计划、进度与计时（持久化层的同一耦合约束）；
 //   - Generation 以当前队列计数重新盖戳——重启后没有在途 worker 结果，
 //     盖戳只为保持“当前任务世代恒新”的不变量。
