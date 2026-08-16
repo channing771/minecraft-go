@@ -60,6 +60,20 @@ func FuzzDecodeCompanions(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Add(taskBearing)
+	// FIFO-only 形态（无当前任务、仅排队指令）：flags 仅 bit1，驱动
+	// 「HasCurrent 为假时 Current 零值」的编码/解码对称路径。
+	fifoOnly, err := encodeCompanions(CompanionSave{
+		Revision: 6,
+		Records:  fixtureCompanionBodies()[:1],
+		Queues: []StoredCompanionQueue{{
+			ID:      fixtureCompanionID(2),
+			Pending: []string{"仅排队甲", "仅排队乙"},
+		}},
+	})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(fifoOnly)
 	// 非法状态枚举与超界 count 种子：CRC 已修复，解码必须深入任务区校验。
 	invalidState := bytes.Clone(taskBearing)
 	invalidState[fuzzTaskStateOffset] = 7

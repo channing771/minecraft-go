@@ -162,7 +162,9 @@ func validateStoredCompanionQueues(queues []StoredCompanionQueue, records []comp
 }
 
 // validateStoredCompanionQueue 校验单条队列载荷：非空、ID 有效、当前任务
-// 与 FIFO 每条指令的字节上界。
+// 与 FIFO 每条指令的字节上界。HasCurrent 为假时 Current 不参与编码（任务
+// 区只随 flags bit0 落盘），因此必须整体为零值——非零的 Current 无法在
+// 磁盘上表达，放行它会静默丢数据，一律拒绝。
 func validateStoredCompanionQueue(queue StoredCompanionQueue) error {
 	if !queue.HasCurrent && len(queue.Pending) == 0 {
 		return fmt.Errorf("%w: empty companion queue", ErrCorrupt)
@@ -170,8 +172,12 @@ func validateStoredCompanionQueue(queue StoredCompanionQueue) error {
 	if !queue.ID.Valid() {
 		return fmt.Errorf("%w: invalid companion queue ID", ErrCorrupt)
 	}
-	if err := validateStoredCompanionTask(queue.Current); err != nil {
-		return err
+	if queue.HasCurrent {
+		if err := validateStoredCompanionTask(queue.Current); err != nil {
+			return err
+		}
+	} else if !storedCompanionTaskIsZero(queue.Current) {
+		return fmt.Errorf("%w: companion queue keeps current task without HasCurrent", ErrCorrupt)
 	}
 	if len(queue.Pending) > MaxCompanionFIFOEntries {
 		return fmt.Errorf(
@@ -184,4 +190,17 @@ func validateStoredCompanionQueue(queue StoredCompanionQueue) error {
 		}
 	}
 	return nil
+}
+
+// storedCompanionTaskIsZero 报告任务载荷是否为整体零值。载荷含切片字段
+// 不可用 == 比较，这里逐字段判断；HasCurrent 为假的队列要求 Current 为
+// 零值（磁盘形态无法表达它，非零即调用方缺陷）。
+func storedCompanionTaskIsZero(task StoredCompanionTask) bool {
+	return task.Command == "" &&
+		task.PlanSteps == nil &&
+		task.StepIndex == 0 &&
+		task.State == 0 &&
+		task.StartTick == 0 &&
+		task.DeadlineTicks == 0 &&
+		task.FailReason == companion.TaskFailNone
 }

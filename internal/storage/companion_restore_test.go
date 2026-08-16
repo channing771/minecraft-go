@@ -268,6 +268,49 @@ func TestCompanionRestoreTasksAndFIFOAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestCompanionRestoreFIFOOnlyQueueRoundTrip(t *testing.T) {
+	// FIFO-only 载荷（无当前任务、仅待执行指令）是服务端的真实形态：
+	// 任务终态清槽后 FIFO 仍有排队指令的瞬间即产出它。编码与解码必须
+	// 对这种记录对称——HasCurrent 为假时 Current 是零值，不得参与任务
+	// 枚举校验。
+	queue := StoredCompanionQueue{
+		ID:      fixtureCompanionID(1),
+		Pending: []string{"仅排队甲", "仅排队乙"},
+	}
+	encoded, err := encodeCompanions(CompanionSave{
+		Revision: 3,
+		Records:  fixtureCompanionBodies(),
+		Queues:   []StoredCompanionQueue{queue},
+	})
+	if err != nil {
+		t.Fatalf("FIFO-only encode error=%v，想要成功", err)
+	}
+	got, err := decodeCompanions(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Revision != 3 || !reflect.DeepEqual(got.Queues, []StoredCompanionQueue{queue}) {
+		t.Fatalf("FIFO-only codec round-trip=%+v，想要 %+v", got.Queues, queue)
+	}
+
+	root := t.TempDir()
+	store := openCompanionDisk(t, root)
+	if err := store.SaveCompanions(context.Background(), CompanionSave{
+		Revision: 3,
+		Records:  fixtureCompanionBodies(),
+		Queues:   []StoredCompanionQueue{queue},
+	}); err != nil {
+		t.Fatalf("FIFO-only 真实存档保存 error=%v，想要成功", err)
+	}
+	loaded, err := store.LoadCompanions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Revision != 3 || !reflect.DeepEqual(loaded.Queues, []StoredCompanionQueue{queue}) {
+		t.Fatalf("FIFO-only 磁盘 round-trip=%+v，想要 %+v", loaded.Queues, queue)
+	}
+}
+
 func TestCompanionRestoreRejectsCorruptTaskPayloads(t *testing.T) {
 	valid, err := encodeCompanions(CompanionSave{
 		Revision: 7,
@@ -351,6 +394,10 @@ func TestCompanionRestoreRejectsCorruptTaskPayloads(t *testing.T) {
 		}},
 		{"fifo entry empty", func(queues []StoredCompanionQueue) []StoredCompanionQueue {
 			queues[0].Pending[0] = ""
+			return queues
+		}},
+		{"current task without has current", func(queues []StoredCompanionQueue) []StoredCompanionQueue {
+			queues[0].HasCurrent = false
 			return queues
 		}},
 		{"queue without record", func(queues []StoredCompanionQueue) []StoredCompanionQueue {
