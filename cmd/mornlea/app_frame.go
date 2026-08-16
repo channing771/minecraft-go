@@ -166,6 +166,10 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		}
 	}
 	a.scheduler.DropOutside(a.center, a.render.ViewDistance)
+	// 远环半部:跨 tile 边界增量入队 → BeginFrame → FlushUploads →
+	// DropOutside(远环半径)。全部非阻塞;禁用时 lodScheduler 为 nil,
+	// pumpLodFrame 只做一次 nil 检查即返回。
+	a.pumpLodFrame()
 
 	// 每帧只从最后确认的权威世界时间计算一次昼夜;ViewProj 及其逆矩阵同样只计算一次。
 	dayNight := render.DayNightAt(a.worldTimeTicks)

@@ -151,9 +151,9 @@ func TestApplicationConnectionRemoteDialFailurePrecedesWindow(t *testing.T) {
 	}
 	dependencies.loginClient = func(
 		context.Context, network.ClientPacketStream, network.Identity,
-	) (network.ClientEndpoint, error) {
+	) (network.ClientEndpoint, uint64, error) {
 		loginCalls++
-		return nil, errors.New("login called after dial failure")
+		return nil, 0, errors.New("login called after dial failure")
 	}
 	dependencies.newWindow = connectionTestWindowFactory(&windowCalls)
 
@@ -176,8 +176,8 @@ func TestApplicationConnectionRemoteLoginFailureClosesStreamBeforeWindow(t *test
 	}
 	dependencies.loginClient = func(
 		context.Context, network.ClientPacketStream, network.Identity,
-	) (network.ClientEndpoint, error) {
-		return nil, loginErr
+	) (network.ClientEndpoint, uint64, error) {
+		return nil, 0, loginErr
 	}
 	dependencies.newWindow = connectionTestWindowFactory(&windowCalls)
 
@@ -211,12 +211,12 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 		_ context.Context,
 		got network.ClientPacketStream,
 		_ network.Identity,
-	) (network.ClientEndpoint, error) {
+	) (network.ClientEndpoint, uint64, error) {
 		if got != stream {
 			t.Fatalf("LoginClient stream=%T, want dialed stream", got)
 		}
 		loginComplete = true
-		return endpoint, nil
+		return endpoint, 0, nil
 	}
 	dependencies.newWindow = func(_, _ int, title string) (applicationWindow, error) {
 		windowCalls++
@@ -389,8 +389,8 @@ func TestApplicationConnectionLocalLoginFailureCleansStreamsHostAndStoreBeforeWi
 	}
 	dependencies.loginClient = func(
 		context.Context, network.ClientPacketStream, network.Identity,
-	) (network.ClientEndpoint, error) {
-		return nil, loginErr
+	) (network.ClientEndpoint, uint64, error) {
+		return nil, 0, loginErr
 	}
 	dependencies.newWindow = connectionTestWindowFactory(&windowCalls)
 
@@ -453,9 +453,9 @@ func connectionTestDependencies(t *testing.T) applicationDependencies {
 			unexpected("dialTCP")
 			return nil, nil
 		},
-		loginClient: func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error) {
+		loginClient: func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, uint64, error) {
 			unexpected("loginClient")
-			return nil, nil
+			return nil, 0, nil
 		},
 		newHost: func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
 			unexpected("newHost")

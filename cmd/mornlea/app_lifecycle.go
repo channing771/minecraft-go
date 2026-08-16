@@ -40,6 +40,11 @@ func (a *application) releaseOwnedResources() {
 	if a.mesher != nil {
 		a.mesher.Close()
 	}
+	// 远环调度器先于渲染器关闭:Close 停 worker 并等待在途生成返回,之后
+	// 不再有任何 sink 调用落到已释放的渲染器句柄上。幂等且 nil 安全。
+	if a.lodScheduler != nil {
+		a.lodScheduler.Close()
+	}
 	if a.renderer != nil {
 		a.renderer.Close()
 	}
