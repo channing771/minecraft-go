@@ -473,9 +473,15 @@ func TestFieldsCoverEveryTunable(t *testing.T) {
 	// 这条覆盖是 Finding 1 那类问题的根本防线——不校验覆盖度的话，往
 	// sim.Tunables 加字段或者把 Fields() 里的 Name 敲错一个字母，那个字段就
 	// 永久漏过钳制，而这个测试原本会一直是绿的。
-	assertFieldsMatchStruct(t, "physics", reflect.TypeOf(physics.Tunables{}), byGroup["physics"])
-	assertFieldsMatchStruct(t, "sim", reflect.TypeOf(sim.Tunables{}), byGroup["sim"])
-	assertFieldsMatchStruct(t, "render", reflect.TypeOf(config.Render{}), byGroup["render"])
+	assertFieldsMatchStruct(t, "physics", reflect.TypeOf(physics.Tunables{}), byGroup["physics"], nil)
+	assertFieldsMatchStruct(t, "sim", reflect.TypeOf(sim.Tunables{}), byGroup["sim"], nil)
+	// render 的三个 LOD 字段是配置文件键但不进 Fields()：布尔与离散合法集
+	// {2,4,8} 表达不了连续 min/max 的钳制语义（Fields 同时驱动调试面板的
+	// 数值行与 Load 的钳制）。它们的合法域由 Render.NormalizeLOD /
+	// applyRenderLOD 守护（覆盖见 lod_config_test.go），这里显式豁免，
+	// 而不是为了过覆盖门禁把不兼容的语义塞进 Fields()。
+	assertFieldsMatchStruct(t, "render", reflect.TypeOf(config.Render{}), byGroup["render"],
+		map[string]bool{"LodEnabled": true, "LodFarMultiplier": true, "LodStep": true})
 }
 
 // defaultFieldFloat 读出 field 在 defaults 里的取值并统一成 float64，
@@ -512,15 +518,25 @@ func defaultFieldFloat(t *testing.T, defaults config.Config, field config.Field)
 
 // assertFieldsMatchStruct 双向校验：structType 的每个字段都在 fieldNames 中
 // 以小写开头的驼峰名出现过，且 fieldNames 中的每一项都能在 structType 上找到
-// 对应的导出字段（首字母大写）。
-func assertFieldsMatchStruct(t *testing.T, group string, structType reflect.Type, fieldNames map[string]bool) {
+// 对应的导出字段（首字母大写）。exempt 中的 Go 字段名（如 render 组的三个
+// LOD 字段）是"结构体有、Fields() 刻意没有"的豁免项，数量校验同步扣除。
+func assertFieldsMatchStruct(
+	t *testing.T,
+	group string,
+	structType reflect.Type,
+	fieldNames map[string]bool,
+	exempt map[string]bool,
+) {
 	t.Helper()
-	if structType.NumField() != len(fieldNames) {
-		t.Errorf("%s: Fields() 有 %d 项，%s 结构体有 %d 个字段，数量不匹配",
-			group, len(fieldNames), structType.Name(), structType.NumField())
+	if structType.NumField()-len(exempt) != len(fieldNames) {
+		t.Errorf("%s: Fields() 有 %d 项，%s 结构体有 %d 个字段（含 %d 个豁免），数量不匹配",
+			group, len(fieldNames), structType.Name(), structType.NumField(), len(exempt))
 	}
 	for i := 0; i < structType.NumField(); i++ {
 		goName := structType.Field(i).Name
+		if exempt[goName] {
+			continue
+		}
 		lowerCamel := strings.ToLower(goName[:1]) + goName[1:]
 		if !fieldNames[lowerCamel] {
 			t.Errorf("%s: 结构体字段 %s 没有出现在 Fields() 中（期望 Name=%q）", group, goName, lowerCamel)

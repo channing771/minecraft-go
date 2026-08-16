@@ -28,17 +28,46 @@ import (
 // CurrentVersion 是本程序认识的配置文件版本。
 const CurrentVersion = 1
 
+// 远环 LOD 调参项的合法域（rust-engine-lod-shell design「Go 编排」裁决）。
+// 这组常量是 multiplier 钳制与 step 离散集的唯一权威：Load 的解析、
+// NormalizeLOD 与 cmd/mornlea 的接线推导都从这里取值，不另写第二份数字。
+const (
+	// LodFarMultiplierMin 是 lodFarMultiplier 的合法下界（含）。
+	LodFarMultiplierMin = 2
+	// LodFarMultiplierMax 是 lodFarMultiplier 的合法上界（含）。最大合法
+	// 组合 viewDistance=64 × multiplier=8 决定了 client 渲染器的 tile 表
+	// 容量需求（见 cmd/mornlea 的 lodMaxTiles 锚定注释）。
+	LodFarMultiplierMax = 8
+	// LodFarMultiplierDefault 是 lodFarMultiplier 的编译期默认值：默认
+	// 几何 32×3×16 = 1536 block 远环半径，雾锚点 768/1152 与 Rust 渲染器
+	// 的编译期默认一致。
+	LodFarMultiplierDefault = 3
+	// LodStepDefault 是 lodStep 的编译期默认值。
+	LodStepDefault = 4
+)
+
 // Render 是渲染相关的可调项。它是一个纯数据结构体，不依赖 internal/render，
 // 由 cmd/mornlea 自行读取并消费——这样 mornlea-server（无图形专用服务端）也能导入 config
 // 而不会传递性拖入图形依赖。
 //
 // json tag 与 Fields() 的 Name 逐字对应，保证配置文件写出的键名就是设计文档
 // 与 README 里写的小写驼峰；读取侧大小写不敏感，加 tag 之前写出的文件仍可
-// 正常读入。
+// 正常读入。LOD 三项（lodEnabled/lodFarMultiplier/lodStep）不进 Fields()：
+// 布尔与离散合法集 {2,4,8} 表达不了连续数值的 min/max 钳制语义，由
+// applyRenderLOD 与 NormalizeLOD 按各自规则归一。
 type Render struct {
 	ViewDistance     int     `json:"viewDistance"`
 	FovDegrees       float32 `json:"fovDegrees"`
 	MouseSensitivity float32 `json:"mouseSensitivity"`
+	// LodEnabled 是远环 LOD 的行为级开关，false 时客户端零参与（不建
+	// Scheduler、不消费登录种子、渲染器远环 pass 空转）。
+	LodEnabled bool `json:"lodEnabled"`
+	// LodFarMultiplier 是远环半径相对近环视距的倍率，合法区间
+	// [LodFarMultiplierMin, LodFarMultiplierMax]，默认 3。
+	LodFarMultiplier int `json:"lodFarMultiplier"`
+	// LodStep 是远环壳的列合并步长，离散合法集 {2,4,8}，默认 4
+	// （与 internal/lod.ValidStep 同一契约）。
+	LodStep int `json:"lodStep"`
 }
 
 // AI 是配置文件中的可选 ai 组：模型运行时设置与伙伴定义。
@@ -91,6 +120,9 @@ func Defaults() Config {
 			ViewDistance:     32,
 			FovDegrees:       70,
 			MouseSensitivity: 1,
+			LodEnabled:       true,
+			LodFarMultiplier: LodFarMultiplierDefault,
+			LodStep:          LodStepDefault,
 		},
 		// 默认开启：fluid-presentation-survival 交付呈现与生存后，水已是
 		// 面向普通玩家的正常世界内容，见字段 GoDoc。
@@ -191,6 +223,10 @@ func decodeConfig(path string, contents []byte) (Config, error) {
 	if err := applyGroups(&cfg, top); err != nil {
 		return Config{}, fmt.Errorf("config: %w", err)
 	}
+	// 兜底归一：无论键缺席、解析告警回退还是默认值，出函数的 Render.LOD
+	// 三字段必须落在合法域内（cmd/mornlea 直接用它派生雾距离与环形半径，
+	// 越界值会在渲染器侧触发 panic 契约）。对已合法值是恒等变换。
+	cfg.Render = cfg.Render.NormalizeLOD()
 	warnUnknownTopLevel(top)
 
 	return cfg, nil
@@ -661,7 +697,7 @@ func applyGroups(cfg *Config, top map[string]json.RawMessage) error {
 		rawGroups[group] = fields
 	}
 
-	known := make(map[string]bool, len(Fields()))
+	known := make(map[string]bool, len(Fields())+3)
 	for _, field := range Fields() {
 		known[field.Group+"."+strings.ToLower(field.Name)] = true
 
@@ -699,11 +735,79 @@ func applyGroups(cfg *Config, top map[string]json.RawMessage) error {
 		setFloat(target, clamped)
 	}
 
+	// LOD 三键不在 Fields() 里（布尔/离散集与连续 min/max 钳制语义不兼容），
+	// 但它们是 render 分组的已识别键：单独解析并计入 known（键名同样按
+	// 小写登记，与上方 Fields() 条目及未知字段判定的大小写规则一致），
+	// 否则会被未知字段告警误报、值也悄悄丢失。
+	for _, key := range []string{"render.lodenabled", "render.lodfarmultiplier", "render.lodstep"} {
+		known[key] = true
+	}
+	if renderFields, ok := rawGroups["render"]; ok {
+		if err := applyRenderLOD(&cfg.Render, renderFields); err != nil {
+			return err
+		}
+	}
+
 	for group, fields := range rawGroups {
 		for key := range fields {
 			if !known[group+"."+strings.ToLower(key)] {
 				slog.Warn("配置项未知字段已忽略", "field", group+"."+key)
 			}
+		}
+	}
+	return nil
+}
+
+// applyRenderLOD 解析 render 分组的三个远环 LOD 键（大小写不敏感，与
+// physics/sim/render 既有键同一纪律）：
+//
+//   - lodEnabled 是布尔；解析失败告警并保留默认（Load 不因此失败）。
+//   - lodFarMultiplier 按数值解码后经 Render.NormalizeLOD 的同一区间钳制，
+//     越界告警不报错（与 Fields() 字段的「越界已钳制」纪律一致）。
+//   - lodStep 只接受离散集 {2,4,8}（整数)；非法值告警并落回默认 4，
+//     镜像 logging 未知等级的「落回默认并告警」纪律——步长不是连续区间，
+//     钳制语义对它不成立。
+//
+// 最终域保证由 decodeConfig 末尾的 NormalizeLOD 兜底，本函数只负责带
+// 精确字段路径的告警。
+func applyRenderLOD(render *Render, fields map[string]json.RawMessage) error {
+	if raw, ok := lookupCaseInsensitive(fields, "lodEnabled"); ok {
+		var enabled bool
+		if err := json.Unmarshal(raw, &enabled); err != nil {
+			slog.Warn("配置项类型非法已忽略", "field", "render.lodEnabled", "want", "布尔")
+		} else {
+			render.LodEnabled = enabled
+		}
+	}
+	if raw, ok := lookupCaseInsensitive(fields, "lodFarMultiplier"); ok {
+		var multiplier float64
+		if err := json.Unmarshal(raw, &multiplier); err != nil {
+			return fmt.Errorf("字段 render.lodFarMultiplier 不是合法数值: %w", err)
+		}
+		clamped := multiplier
+		if clamped < LodFarMultiplierMin {
+			clamped = LodFarMultiplierMin
+		}
+		if clamped > LodFarMultiplierMax {
+			clamped = LodFarMultiplierMax
+		}
+		if clamped != multiplier {
+			slog.Warn("配置项越界已钳制", "field", "render.lodFarMultiplier",
+				"value", multiplier, "clamped", clamped)
+		}
+		render.LodFarMultiplier = int(clamped)
+	}
+	if raw, ok := lookupCaseInsensitive(fields, "lodStep"); ok {
+		var step float64
+		if err := json.Unmarshal(raw, &step); err != nil {
+			return fmt.Errorf("字段 render.lodStep 不是合法数值: %w", err)
+		}
+		switch step {
+		case 2, 4, 8:
+			render.LodStep = int(step)
+		default:
+			slog.Warn("lodStep 非法已落回默认值", "field", "render.lodStep",
+				"value", step, "default", LodStepDefault, "legal", "{2,4,8}")
 		}
 	}
 	return nil
@@ -727,6 +831,27 @@ func (c Config) CompanionDefinitions() []companion.Definition {
 		return nil
 	}
 	return slices.Clone(c.AI.Companions)
+}
+
+// NormalizeLOD 返回远环 LOD 三字段归一到合法域后的 Render 副本：
+// LodFarMultiplier 钳制到 [LodFarMultiplierMin, LodFarMultiplierMax]，
+// LodStep 只接受离散集 {2,4,8}、其余落回 LodStepDefault，LodEnabled 原样
+// 保留。Load 的解析与 cmd/mornlea 的装配点（防御直接构造 Render 的调用方）
+// 共用这一份规则，避免同一约束出现两处数字。已合法的输入是恒等变换。
+func (r Render) NormalizeLOD() Render {
+	normalized := r
+	if normalized.LodFarMultiplier < LodFarMultiplierMin {
+		normalized.LodFarMultiplier = LodFarMultiplierMin
+	}
+	if normalized.LodFarMultiplier > LodFarMultiplierMax {
+		normalized.LodFarMultiplier = LodFarMultiplierMax
+	}
+	switch normalized.LodStep {
+	case 2, 4, 8:
+	default:
+		normalized.LodStep = LodStepDefault
+	}
+	return normalized
 }
 
 func lookupCaseInsensitive(m map[string]json.RawMessage, key string) (json.RawMessage, bool) {

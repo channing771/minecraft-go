@@ -110,6 +110,15 @@ func permTable(seed int64) [512]byte {
 	return perm
 }
 
+// Header 返回生成器预编码的 564 字节 `MGW1` 公共 header(seed、材料表、
+// perm)。返回切片与生成器内部共享，构造后只读——调用方不得修改，否则
+// 会同时污染近环 worldgen 与所有共享方。远环壳生成(internal/lod)用同一
+// 种子构造的 header 与近环逐字节一致，保证同一世界的近环与远环地形来自
+// 同一份确定性输入。
+func (g *Generator) Header() []byte {
+	return g.header
+}
+
 // probe 执行一条单点查询,返回 8 字节结果记录。
 func (g *Generator) probe(mode uint32, x, y, z int32) []byte {
 	input := make([]byte, 0, worldgenHeaderBytes+4+worldgenProbeRecordBytes)

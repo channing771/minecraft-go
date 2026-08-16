@@ -104,6 +104,44 @@ func TestBeginServerLoginSendsConfiguredWorldSeed(t *testing.T) {
 	}
 }
 
+// TestLoginClientWithSeedSurfacesWorldSeed 验证 5.2 的种子消费入口:
+// LoginClientWithSeed 走与 LoginClient 完全相同的登录状态机,并额外把
+// LoginSuccess.WorldSeed 返回给调用方(cmd/mornlea 装配点用它播种远环
+// 壳)。uint64 全值域(含 0 与 two's complement 负种子)都必须无损返回;
+// 登录失败时不返回端点。
+func TestLoginClientWithSeedSurfacesWorldSeed(t *testing.T) {
+	for _, worldSeed := range []uint64{0, 42, 0x5eed_cafe_beef_0000, ^uint64(0)} {
+		clientStream, serverStream := NewMemoryStreamPair(8)
+		t.Cleanup(func() { _ = clientStream.Close() })
+		identity := testIdentity(24)
+		serverDone := make(chan error, 1)
+		go func() {
+			pending, err := BeginServerLogin(context.Background(), serverStream, worldSeed)
+			if err != nil {
+				serverDone <- err
+				return
+			}
+			serverDone <- pending.Accept(context.Background(), func(ServerEndpoint) error { return nil })
+		}()
+		endpoint, gotSeed, err := LoginClientWithSeed(context.Background(), clientStream, identity)
+		if err != nil {
+			t.Fatalf("种子 %#x: LoginClientWithSeed: %v", worldSeed, err)
+		}
+		if gotSeed != worldSeed {
+			t.Fatalf("种子 %#x: 返回 %#x, want 原样", worldSeed, gotSeed)
+		}
+		if endpoint == nil {
+			t.Fatalf("种子 %#x: 登录成功必须返回端点", worldSeed)
+		}
+		if err := endpoint.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-serverDone; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // TestV18ClientRejectsV17ServerAcrossTransports 模拟一个只会说 v17 的
 // 服务端（生产服务端已升 v23，只能以对端身份模拟；类型化 Send 会拒绝
 // 非 v23 的 ServerHello，因此按传输写原始字节），验证 v23 客户端在
