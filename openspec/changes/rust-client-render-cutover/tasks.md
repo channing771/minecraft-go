@@ -35,9 +35,9 @@
 
 ## 4. 收尾
 
-- [ ] 4.1 全量门禁:`gofmt -l .` 无输出、`go vet ./...`、
+- [x] 4.1 全量门禁:`gofmt -l .` 无输出、`go vet ./...`、
       `go test ./... -race`、`openspec validate --all --strict
       --no-interactive`;benchmark/perfcheck 数值记录。
-- [ ] 4.2 真实窗口自动化验收(CGEvent 注入,复用 R1 工具):启动截图内容
+- [x] 4.2 真实窗口自动化验收(CGEvent 注入,复用 R1 工具):启动截图内容
       比对、SetContentSize 后画面正确、关闭路径干净退出;
       验证:截图与退出码。
