@@ -2,14 +2,14 @@
 
 ## 1. Rust client crate
 
-- [ ] 1.1 workspace 新增 `engine/crates/mornlea_client`(cdylib,winit +
+- [x] 1.1 workspace 新增 `engine/crates/mornlea_client`(cdylib,winit +
       raw-window-handle darwin 依赖,Cargo.lock 锁定),实现窗口状态机与
       输入快照模型:键位映射表(29 键 bitmask)、有界 UTF-32 文本队列
       (1024 + overflow)、光标捕获 delta 合成;单测覆盖映射表、队列有界/
       溢出、快照编码布局(无头,不建真窗口);
       验证:`cd engine && cargo test -p mornlea_client && cargo clippy
       --all-targets -- -D warnings`。
-- [ ] 1.2 导出 C ABI(`mornlea_client_abi_version`=1、window create/destroy、
+- [x] 1.2 导出 C ABI(`mornlea_client_abi_version`=1、window create/destroy、
       `window_poll` 单次快照、cursor captured/content size/floating/focus/
       cancel close、native NSWindow 查询),入口做 ABI 版本、空指针、缓冲
       长度、句柄有效性与主线程校验,违约返回错误状态且不写调用方缓冲;
