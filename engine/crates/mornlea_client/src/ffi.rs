@@ -1,8 +1,9 @@
 //! mornlea_client 的 C ABI 出口。
 //!
 //! 契约:
-//! - ABI version 1;所有入口第一个参数是调用方期望的 ABI 版本,不匹配立即
-//!   返回 `MORNLEA_CLIENT_STATUS_ABI_VERSION`。
+//! - 所有入口第一个参数是调用方期望的 ABI 版本,不匹配立即返回
+//!   `MORNLEA_CLIENT_STATUS_ABI_VERSION`;当前版本见 [`CLIENT_ABI_VERSION`]
+//!   (v6 起 `render_upload_lod_tile`/`render_drop_lod_tile` 加入)。
 //! - 窗口句柄存放在 thread-local 表中:句柄只在创建线程有效,跨线程调用
 //!   查不到句柄而返回 `MORNLEA_CLIENT_STATUS_WINDOW`——这同时兜住了 winit
 //!   macOS 的主线程约束(Go 侧已 `LockOSThread`)。
@@ -17,10 +18,13 @@ use crate::window::ClientWindow;
 
 /// 当前 client ABI 版本。
 ///
+/// v6:新增远环 `render_upload_lod_tile`/`render_drop_lod_tile` 出口,既有入口
+/// 签名不变。变基重编:该出口在旧基线上原编号 v5,main 合并 fluid 系列后 v5
+/// 已被下方 water pass 占用,故顺延重编为 v6。
 /// v5:`mornlea_client_render_upload_section` 按 material 分成不透明与水面两条
 /// 流,渲染器新增半透明 water pass。必须与 `engine/include/mornlea_client.h`
 /// 的 `MORNLEA_CLIENT_ABI_VERSION` 逐版本一致。
-pub const CLIENT_ABI_VERSION: u32 = 5;
+pub const CLIENT_ABI_VERSION: u32 = 6;
 
 /// 调用成功。
 pub const MORNLEA_CLIENT_STATUS_OK: u32 = 0;
@@ -271,7 +275,8 @@ mod tests {
 
     #[test]
     fn abi_version_is_five() {
-        assert_eq!(mornlea_client_abi_version(), 5);
+        // 变基重编:v6 = 远环 tile 出口(main 的 water pass 占用 v5 后顺延)。
+        assert_eq!(mornlea_client_abi_version(), 6);
     }
 
     #[test]
@@ -1152,6 +1157,142 @@ mod atlas_ffi_tests {
         assert_eq!(
             mornlea_client_render_destroy(CLIENT_ABI_VERSION, handle),
             MORNLEA_CLIENT_STATUS_OK
+        );
+    }
+}
+
+/// 上传/替换一个远环 tile 的壳 quad 字节流(20 字节/quad 的 LE 编码,
+/// 布局与 engine `mornlea_lod_shell` 输出逐字一致;空等价 drop)。
+/// 整 tile 替换语义:重复上传同 tile 即整体替换。流非法返回
+/// INVALID_ARGUMENT,tile 表容量耗尽返回 CAPACITY。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_upload_lod_tile(
+    abi_version: u32,
+    handle: u64,
+    tile_x: i32,
+    tile_z: i32,
+    quads: *const u8,
+    quads_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if !quads_len.is_multiple_of(crate::render::lod::LOD_QUAD_BYTES)
+        || (quads.is_null() && quads_len != 0)
+    {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            let data = if quads_len == 0 {
+                &[][..]
+            } else {
+                // SAFETY: quads 非空,调用方保证 quads_len 字节可读。
+                unsafe { std::slice::from_raw_parts(quads, quads_len) }
+            };
+            match renderer.upload_lod_tile((tile_x, tile_z), data) {
+                Ok(()) => MORNLEA_CLIENT_STATUS_OK,
+                Err(crate::render::lod::LodUploadError::Invalid) => {
+                    MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+                }
+                Err(crate::render::lod::LodUploadError::Capacity) => MORNLEA_CLIENT_STATUS_CAPACITY,
+            }
+        })
+    })
+}
+
+/// 丢弃一个远环 tile;不存在时为幂等空操作。
+#[unsafe(no_mangle)]
+pub extern "C" fn mornlea_client_render_drop_lod_tile(
+    abi_version: u32,
+    handle: u64,
+    tile_x: i32,
+    tile_z: i32,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            renderer.drop_lod_tile((tile_x, tile_z));
+            MORNLEA_CLIENT_STATUS_OK
+        })
+    })
+}
+
+#[cfg(test)]
+mod lod_ffi_tests {
+    use super::*;
+
+    // 远环入口的无头校验:错误 ABI、非法 quad 流长度、空指针与未知句柄。
+    // tile 替换语义与图像路径在 render 模块的 GPU-or-skip 测试中覆盖。
+
+    #[test]
+    fn lod_entries_reject_bad_abi_and_arguments() {
+        let quads = [0u8; 20];
+        // SAFETY: 指针来自有效局部变量。
+        let wrong_abi = unsafe {
+            mornlea_client_render_upload_lod_tile(
+                CLIENT_ABI_VERSION + 1,
+                0xBEEF,
+                0,
+                0,
+                quads.as_ptr(),
+                quads.len(),
+            )
+        };
+        assert_eq!(wrong_abi, MORNLEA_CLIENT_STATUS_ABI_VERSION);
+        assert_eq!(
+            mornlea_client_render_drop_lod_tile(CLIENT_ABI_VERSION + 1, 0xBEEF, 0, 0),
+            MORNLEA_CLIENT_STATUS_ABI_VERSION
+        );
+
+        // 长度非 20 的倍数必须在校验层拒绝。
+        let odd = [0u8; 21];
+        // SAFETY: 同上。
+        let misaligned = unsafe {
+            mornlea_client_render_upload_lod_tile(
+                CLIENT_ABI_VERSION,
+                0xBEEF,
+                0,
+                0,
+                odd.as_ptr(),
+                odd.len(),
+            )
+        };
+        assert_eq!(misaligned, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+
+        // 空指针 + 非零长度拒绝;空指针 + 零长度是合法的 drop 语义,
+        // 只会因句柄未知停在 WINDOW。
+        // SAFETY: 刻意的空指针,长度非零必须先于解引用被拒绝。
+        let null = unsafe {
+            mornlea_client_render_upload_lod_tile(
+                CLIENT_ABI_VERSION,
+                0xBEEF,
+                0,
+                0,
+                std::ptr::null(),
+                4,
+            )
+        };
+        assert_eq!(null, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+
+        // 参数本身合法时,未知句柄一律 WINDOW。
+        // SAFETY: 同上。
+        let unknown = unsafe {
+            mornlea_client_render_upload_lod_tile(
+                CLIENT_ABI_VERSION,
+                0xF00D,
+                0,
+                0,
+                quads.as_ptr(),
+                quads.len(),
+            )
+        };
+        assert_eq!(unknown, MORNLEA_CLIENT_STATUS_WINDOW);
+        assert_eq!(
+            mornlea_client_render_drop_lod_tile(CLIENT_ABI_VERSION, 0xF00D, 0, 0),
+            MORNLEA_CLIENT_STATUS_WINDOW
         );
     }
 }

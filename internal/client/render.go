@@ -2,10 +2,10 @@
 
 package client
 
-// 本文件是 `mornlea_client` render ABI(client ABI v2)的 Go 绑定:R2a 的
-// 离屏 Rust 渲染器只被双后端对照测试与后续期使用,生产渲染仍是 Go 路径。
-// 链接与 include 标志在 window.go 的 cgo 序言中声明,此处只补 render
-// 入口的逃逸与回调指令。
+// 本文件是 `mornlea_client` render ABI 族的 Go 绑定(v2 引入,v6 增补
+// 远环 tile 上传/丢弃入口——变基重编,main 的 water pass 占用 v5):R2a 的离屏 Rust 渲染器只被双后端对照测试
+// 与后续期使用,生产渲染仍是 Go 路径。链接与 include 标志在 window.go
+// 的 cgo 序言中声明,此处只补 render 入口的逃逸与回调指令。
 
 /*
 #cgo noescape mornlea_client_render_create
@@ -18,6 +18,10 @@ package client
 #cgo nocallback mornlea_client_render_upload_section
 #cgo noescape mornlea_client_render_drop_section
 #cgo nocallback mornlea_client_render_drop_section
+#cgo noescape mornlea_client_render_upload_lod_tile
+#cgo nocallback mornlea_client_render_upload_lod_tile
+#cgo noescape mornlea_client_render_drop_lod_tile
+#cgo nocallback mornlea_client_render_drop_lod_tile
 #cgo noescape mornlea_client_render_frame
 #cgo nocallback mornlea_client_render_frame
 #cgo noescape mornlea_client_render_readback
@@ -198,6 +202,33 @@ func (r *Renderer) DropSection(x, y, z int32) {
 		C.MORNLEA_CLIENT_ABI_VERSION,
 		C.uint64_t(r.handle),
 		C.int32_t(x), C.int32_t(y), C.int32_t(z),
+	)))
+}
+
+// UploadLodTile 上传/替换一个远环 tile 的壳 quad 字节流(每 quad 20 字节
+// LE,布局与 engine mornlea_lod_shell 输出逐字一致;空等价 drop)。整 tile
+// 替换语义:重复上传同 tile 即整体替换。tile 坐标为 chunk 坐标,每 tile
+// 覆盖 4×4 chunk;流非法或 tile 表容量耗尽时 panic(编程错误)。
+func (r *Renderer) UploadLodTile(x, z int32, quads []byte) {
+	var ptr *C.uint8_t
+	if len(quads) > 0 {
+		ptr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(quads)))
+	}
+	r.check("upload lod tile", uint32(C.mornlea_client_render_upload_lod_tile(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(r.handle),
+		C.int32_t(x), C.int32_t(z),
+		ptr,
+		C.size_t(len(quads)),
+	)))
+}
+
+// DropLodTile 丢弃一个远环 tile(幂等)。
+func (r *Renderer) DropLodTile(x, z int32) {
+	r.check("drop lod tile", uint32(C.mornlea_client_render_drop_lod_tile(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(r.handle),
+		C.int32_t(x), C.int32_t(z),
 	)))
 }
 
