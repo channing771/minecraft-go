@@ -16,7 +16,7 @@ use crate::input::SNAPSHOT_BYTES;
 use crate::window::ClientWindow;
 
 /// 当前 client ABI 版本。
-pub const CLIENT_ABI_VERSION: u32 = 2;
+pub const CLIENT_ABI_VERSION: u32 = 3;
 
 /// 调用成功。
 pub const MORNLEA_CLIENT_STATUS_OK: u32 = 0;
@@ -266,8 +266,8 @@ mod tests {
     // 校验拒绝路径:ABI 版本、参数校验与无效句柄。
 
     #[test]
-    fn abi_version_is_two() {
-        assert_eq!(mornlea_client_abi_version(), 2);
+    fn abi_version_is_three() {
+        assert_eq!(mornlea_client_abi_version(), 3);
     }
 
     #[test]
@@ -906,6 +906,190 @@ mod frame_v2_tests {
         assert_eq!(
             parse_status(&v1_trailing),
             MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+    }
+}
+
+/// 上传字形图集矩形(R8);越界/长度不符拒绝且不写纹理。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_upload_glyph_rect(
+    abi_version: u32,
+    handle: u64,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    pixels: *const u8,
+    pixels_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if pixels.is_null() {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            // SAFETY: pixels 非空,调用方保证 pixels_len 字节可读。
+            let data = unsafe { std::slice::from_raw_parts(pixels, pixels_len) };
+            if renderer.upload_glyph_rect(x, y, width, height, data) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+            }
+        })
+    })
+}
+
+/// 上传 HUD 图集(RGBA,一次性;重复上传替换);长度不符拒绝。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_upload_hud_atlas(
+    abi_version: u32,
+    handle: u64,
+    width: u32,
+    height: u32,
+    pixels: *const u8,
+    pixels_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if pixels.is_null() {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            // SAFETY: pixels 非空,调用方保证 pixels_len 字节可读。
+            let data = unsafe { std::slice::from_raw_parts(pixels, pixels_len) };
+            if renderer.upload_hud_atlas(width, height, data) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+            }
+        })
+    })
+}
+
+#[cfg(test)]
+mod atlas_ffi_tests {
+    use super::*;
+
+    #[test]
+    fn atlas_entries_reject_bad_abi_arguments_and_handles() {
+        let pixels = [0u8; 16];
+        // SAFETY: 指针来自有效局部变量。
+        let wrong_abi = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION + 1,
+                1,
+                0,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(wrong_abi, MORNLEA_CLIENT_STATUS_ABI_VERSION);
+        // SAFETY: 同上;句柄未知(校验先于纹理写入,经 with_renderer)。
+        let unknown = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION,
+                0xF00D,
+                0,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(unknown, MORNLEA_CLIENT_STATUS_WINDOW);
+        // SAFETY: 同上。
+        let hud_unknown = unsafe {
+            mornlea_client_render_upload_hud_atlas(
+                CLIENT_ABI_VERSION,
+                0xF00D,
+                2,
+                2,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(hud_unknown, MORNLEA_CLIENT_STATUS_WINDOW);
+    }
+
+    #[test]
+    fn atlas_bounds_and_length_are_validated_on_live_renderer() {
+        let mut handle = 0u64;
+        // SAFETY: 指针来自有效局部变量。
+        let create =
+            unsafe { mornlea_client_render_create(CLIENT_ABI_VERSION, 16, 16, &mut handle) };
+        if create == MORNLEA_CLIENT_STATUS_ADAPTER {
+            return; // 无 GPU 环境跳过。
+        }
+        assert_eq!(create, MORNLEA_CLIENT_STATUS_OK);
+        let pixels = [0u8; 16];
+        // 越界矩形(x+w 超过 1024)。
+        // SAFETY: 同上。
+        let oob = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION,
+                handle,
+                1022,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(oob, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+        // 长度不符。
+        // SAFETY: 同上。
+        let short = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION,
+                handle,
+                0,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                8,
+            )
+        };
+        assert_eq!(short, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+        // 合法矩形与 HUD 图集。
+        // SAFETY: 同上。
+        let ok = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION,
+                handle,
+                0,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(ok, MORNLEA_CLIENT_STATUS_OK);
+        // SAFETY: 同上。
+        let hud = unsafe {
+            mornlea_client_render_upload_hud_atlas(
+                CLIENT_ABI_VERSION,
+                handle,
+                2,
+                2,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(hud, MORNLEA_CLIENT_STATUS_OK);
+        assert_eq!(
+            mornlea_client_render_destroy(CLIENT_ABI_VERSION, handle),
+            MORNLEA_CLIENT_STATUS_OK
         );
     }
 }

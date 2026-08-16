@@ -7,7 +7,7 @@
       纯地形帧继续接受;单测覆盖解析矩阵;
       验证:`cd engine && cargo test -p mornlea_client && cargo clippy
       --all-targets -- -D warnings`。
-- [ ] 1.2 图集入口与 ABI 2→3:`render_upload_glyph_rect`(R8 增量矩形,
+- [x] 1.2 图集入口与 ABI 2→3:`render_upload_glyph_rect`(R8 增量矩形,
       界内校验)与 `render_upload_hud_atlas`(一次性 RGBA,长度精确匹配),
       同步 `mornlea_client.h`;拒绝路径单测;验证:`make rust` + crate 单测。
 

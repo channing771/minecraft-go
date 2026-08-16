@@ -39,6 +39,8 @@ pub const ATLAS_TEX_SIZE: u32 = 16;
 pub const ATLAS_MIPS: u32 = 5;
 /// section Y 槽位的世界基准:SectionPos.Y 从 0 起,世界 Y 从 core.MinY 起。
 const WORLD_MIN_Y: i32 = -64;
+/// 字形图集边长(像素,R8),与 Go `glyphAtlasSize` 一致。
+pub const GLYPH_ATLAS_SIZE: u32 = 1024;
 
 /// 渲染器创建失败的稳定原因,FFI 层转错误状态码。
 #[derive(Debug)]
@@ -362,6 +364,11 @@ pub struct OffscreenRenderer {
 
     hiz: HiZ,
 
+    /// 字形图集(R8,增量矩形上传);内容全部来自 Go 光栅化 worker。
+    glyph_atlas: wgpu::Texture,
+    /// HUD 图集;None 表示尚未上传。
+    hud_atlas: Option<wgpu::Texture>,
+
     pool: Pool,
     sections: HashMap<(i32, i32, i32), SectionSlot>,
     next_origin: u32,
@@ -621,6 +628,21 @@ impl OffscreenRenderer {
         );
         let dummy_hiz_view = dummy_hiz.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let glyph_atlas = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("glyph-atlas"),
+            size: wgpu::Extent3d {
+                width: GLYPH_ATLAS_SIZE,
+                height: GLYPH_ATLAS_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
         let hiz = HiZ::new(&device, &queue, width, height);
         let cull_bind = make_cull_bind(
             &device,
@@ -663,6 +685,8 @@ impl OffscreenRenderer {
             dummy_hiz_view,
             cull_uses_hiz: false,
             hiz,
+            glyph_atlas,
+            hud_atlas: None,
             pool: Pool::new(POOL_FACES),
             sections: HashMap::new(),
             next_origin: 0,
@@ -850,6 +874,81 @@ impl OffscreenRenderer {
             self.pool.free(slot.alloc);
             self.free_origins.push(slot.origin_idx);
         }
+    }
+
+    /// 上传字形图集的一块 R8 矩形;越界或长度不符返回 false。
+    /// 内容必须与 Go `GlyphAtlas` 写入自身纹理的字节一致(单源约定)。
+    pub fn upload_glyph_rect(&mut self, x: u32, y: u32, w: u32, h: u32, pixels: &[u8]) -> bool {
+        if w == 0
+            || h == 0
+            || x.checked_add(w).is_none_or(|edge| edge > GLYPH_ATLAS_SIZE)
+            || y.checked_add(h).is_none_or(|edge| edge > GLYPH_ATLAS_SIZE)
+            || pixels.len() != (w * h) as usize
+        {
+            return false;
+        }
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.glyph_atlas,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        true
+    }
+
+    /// 上传 HUD 图集(一次性 RGBA;重复上传替换);长度不符返回 false。
+    pub fn upload_hud_atlas(&mut self, width: u32, height: u32, pixels: &[u8]) -> bool {
+        if width == 0 || height == 0 || pixels.len() != (width * height * 4) as usize {
+            return false;
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("hotbar texture atlas"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.hud_atlas = Some(texture);
+        true
     }
 
     /// 输出图像的精确字节数(width×height×4),FFI 回读长度校验使用。
