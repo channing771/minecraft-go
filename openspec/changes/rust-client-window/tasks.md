@@ -18,7 +18,7 @@
 
 ## 2. Go 切换
 
-- [ ] 2.1 重写 `internal/client/window.go`:cgo 链接 `libmornlea_client`,
+- [x] 2.1 重写 `internal/client/window.go`:cgo 链接 `libmornlea_client`,
       `Poll()` 单次 FFI 快照 + 帧内缓存,`Window` 公共方法集与语义不变,
       错误状态转稳定中文 panic 文案;新增快照解码/缓存语义与
       `DrainTextInput` 有界语义单测(注入固定字节,不开真实窗口);
