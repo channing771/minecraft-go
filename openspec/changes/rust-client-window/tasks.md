@@ -30,12 +30,12 @@
 
 ## 3. 门禁与收尾
 
-- [ ] 3.1 全仓验证:`go test ./... -race`、`go test ./internal/archcheck
+- [x] 3.1 全仓验证:`go test ./... -race`、`go test ./internal/archcheck
       -count=1`、`go vet ./...`、`gofmt -l .` 无输出、
       `openspec validate --all --strict --no-interactive`。
 - [ ] 3.2 人工验收(用户执行):运行 `mornlea` 确认移动/跳跃/快捷栏、聊天
       中文 IME、光标捕获视角连续、Esc 与窗口关闭、调试面板按键;
       验证:用户确认清单通过。
-- [ ] 3.3 更新 `docs/notes/progress.md` 与 CLAUDE.md/AGENTS.md(窗口/事件
+- [x] 3.3 更新 `docs/notes/progress.md` 与 CLAUDE.md/AGENTS.md(窗口/事件
       循环由 `mornlea_client` 独占、GLFW 移除、R1 完成);
       验证:文档与实现一致。

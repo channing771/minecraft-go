@@ -20,4 +20,6 @@
 
 当前 `mornlea_engine` 同时是世界生成（高度图地形、地表分层、矿石、橡树）的唯一生产实现；engine ABI 升到 v3，新增 `mornlea_worldgen_chunk` 整区块 dense 生成与 `mornlea_worldgen_probe` 64-record 单点查询。Go `worldgen` 保留 seed→perm 表播种（`math/rand` 语义）、材料表编码与 `world.Chunk` 回写，旧 Go 噪声/地形/矿石/橡树实现只作测试 oracle，生产无 fallback；同种子世界与迁移前逐位一致，差分门禁全平台启用。
 
+当前 darwin 客户端的窗口与事件循环由新的 Rust `mornlea_client` cdylib(winit,client ABI v1)独占生产;Go `internal/client` 保留 `Window` 领域 API、快照解码与帧内缓存,每帧一次 FFI 输入快照取代逐键轮询,`go-gl/glfw` 依赖已移除。client 库与 engine 库 ABI 互不耦合,Linux 专服不链接 client 库。这是"GPU 与窗口迁 Rust"路线图(R1 窗口→R2 渲染核心→R3 HUD 呈现)的第一步。
+
 M5A 不包含 Planner、HTTP 模型调用、FIFO、移动、采掘、放置、跟随、persona 或摘要；这些能力仍属于后续 M5B–M5D 方向，开始真实变更前以新的 OpenSpec 为准。历史[设计](../superpowers/specs/2026-08-13-ai-native-companions-design.md)与[实施计划](../superpowers/plans/2026-08-13-m5a-companion-entity-chat.md)仅作决策背景。

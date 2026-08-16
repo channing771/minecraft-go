@@ -20,19 +20,64 @@ func TestNativeEngineBridgeBoundary(t *testing.T) {
 	files := goFiles(t, filepath.Join(root, "internal"))
 	files = append(files, goFiles(t, filepath.Join(root, "cmd"))...)
 
-	for _, relative := range []string{
+	clientBridge := filepath.Join(root, "internal", "client")
+	inDir := func(path, dir string) bool {
+		return strings.HasPrefix(path, dir+string(filepath.Separator))
+	}
+
+	// engine C ABI 只允许 internal/nativeabi 接触。
+	for _, token := range []string{
 		"mornlea_engine.h",
 		"-lmornlea_engine",
-		"C.mornlea_",
 	} {
 		for _, path := range files {
 			contents, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatalf("读取 %s: %v", path, err)
 			}
-			if strings.Contains(string(contents), relative) && !strings.HasPrefix(path, bridge+string(filepath.Separator)) {
-				t.Errorf("%s 只允许 internal/nativeabi 接触，发现于 %s", relative, path)
+			if strings.Contains(string(contents), token) && !inDir(path, bridge) {
+				t.Errorf("%s 只允许 internal/nativeabi 接触，发现于 %s", token, path)
 			}
+		}
+	}
+
+	// client C ABI 只允许 internal/client 接触(与 nativeabi 之于 engine 同构)。
+	for _, token := range []string{
+		"mornlea_client.h",
+		"-lmornlea_client",
+		"C.mornlea_client_",
+	} {
+		for _, path := range files {
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("读取 %s: %v", path, err)
+			}
+			if strings.Contains(string(contents), token) && !inDir(path, clientBridge) {
+				t.Errorf("%s 只允许 internal/client 接触，发现于 %s", token, path)
+			}
+		}
+	}
+
+	// 通用 C.mornlea_ 调用只允许出现在两个 bridge;且 internal/client 内
+	// 每一次 C.mornlea_ 都必须是 C.mornlea_client_,防止 client 绕过
+	// nativeabi 直接触碰 engine ABI。
+	for _, path := range files {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("读取 %s: %v", path, err)
+		}
+		text := string(contents)
+		if !strings.Contains(text, "C.mornlea_") {
+			continue
+		}
+		switch {
+		case inDir(path, bridge):
+		case inDir(path, clientBridge):
+			if strings.Count(text, "C.mornlea_") != strings.Count(text, "C.mornlea_client_") {
+				t.Errorf("internal/client 只允许调用 client ABI,发现 engine ABI 调用于 %s", path)
+			}
+		default:
+			t.Errorf("C.mornlea_ 只允许 bridge 包接触，发现于 %s", path)
 		}
 	}
 }
