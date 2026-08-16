@@ -531,11 +531,13 @@ fn read_u16(bytes: &[u8], offset: usize) -> u16 {
     u16::from_le_bytes([bytes[offset], bytes[offset + 1]])
 }
 
-fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+/// 从字节流读取小端 u32;lod 模块解析 tile 输入时共用(避免第二份解码)。
+pub(crate) fn read_u32(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
 
-fn read_i32(bytes: &[u8], offset: usize) -> i32 {
+/// 从字节流读取小端 i32;lod 模块解析 tile 坐标与列数时共用。
+pub(crate) fn read_i32(bytes: &[u8], offset: usize) -> i32 {
     i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
 
