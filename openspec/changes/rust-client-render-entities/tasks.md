@@ -35,13 +35,13 @@
       `diffThreshold` 内一致(含字形收敛 settle);调用计数断言(每帧
       1 次 render FFI、无变化 0 次上传);
       验证:`go test ./cmd/mornlea -race -count=1 -run DualBackend`。
-- [ ] 4.2 既有 golden 与 capture 测试零改动通过;
+- [x] 4.2 既有 golden 与 capture 测试零改动通过;
       验证:`go test ./cmd/mornlea -race -count=1`。
 
 ## 5. 收尾
 
-- [ ] 5.1 全量门禁:`gofmt -l .` 无输出、`go vet ./...`、
+- [x] 5.1 全量门禁:`gofmt -l .` 无输出、`go vet ./...`、
       `go test ./... -race`、archcheck、
       `openspec validate --all --strict --no-interactive`。
-- [ ] 5.2 更新 `docs/notes/progress.md`(R2b 完整帧平行渲染交付);
+- [x] 5.2 更新 `docs/notes/progress.md`(R2b 完整帧平行渲染交付);
       验证:文档与实现一致。
