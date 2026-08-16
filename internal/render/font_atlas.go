@@ -103,7 +103,8 @@ func newGlyphAtlasWith(dev gfx.Device, factory glyphFaceFactory, rasterizer glyp
 		MipLevels: 1,
 		Format:    gfx.FormatR8Unorm,
 		Dimension: gfx.TextureDimension2D,
-		Usage:     gfx.TextureUsageBinding | gfx.TextureUsageCopyDst,
+		// CopySrc 供 AtlasPixels 整图回读(平行渲染器同步同一份字形)。
+		Usage: gfx.TextureUsageBinding | gfx.TextureUsageCopyDst | gfx.TextureUsageCopySrc,
 	})
 	view := texture.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
 	tofu, pixels := tofuGlyph()

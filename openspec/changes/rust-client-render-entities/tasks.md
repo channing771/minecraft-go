@@ -24,7 +24,7 @@
 
 ## 3. Go 装配与绑定
 
-- [ ] 3.1 `internal/client` 绑定扩展:frame v2 编码器(pass 段装配)、
+- [x] 3.1 `internal/client` 绑定扩展:frame v2 编码器(pass 段装配)、
       glyph rect 与 HUD atlas 上传、调用计数;`internal/render` 按需最小
       导出既有字节编码;绑定与编码单测;
       验证:`go test ./internal/client ./internal/render -race -count=1`。

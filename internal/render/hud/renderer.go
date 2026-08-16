@@ -27,6 +27,8 @@ type HotbarRenderer struct {
 
 	layout hotbarLayout
 	upload []byte
+	// hudPixels 保留构建贴图时的像素,供 AtlasPixels 导出同一份内容。
+	hudPixels []byte
 }
 
 func NewHotbarRenderer(
@@ -81,7 +83,8 @@ func NewHotbarRenderer(
 		Label: "hotbar texture atlas", Width: uint32(hotbarTextureWidth), Height: hotbarTextureSize,
 		Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageBinding | gfx.TextureUsageCopyDst,
 	})
-	renderer.hudTexture.WriteLayer(0, 0, buildHotbarTextureAtlas(blocks))
+	renderer.hudPixels = buildHotbarTextureAtlas(blocks)
+	renderer.hudTexture.WriteLayer(0, 0, renderer.hudPixels)
 	renderer.hudView = renderer.hudTexture.View(gfx.TextureViewDesc{})
 	renderer.bind = dev.CreateBindGroup(gfx.BindGroupDesc{
 		Label:  "hotbar resources",
