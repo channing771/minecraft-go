@@ -20,7 +20,9 @@ use crate::window::ClientWindow;
 ///
 /// v6:新增远环 `render_upload_lod_tile`/`render_drop_lod_tile` 出口,既有入口
 /// 签名不变。变基重编:该出口在旧基线上原编号 v5,main 合并 fluid 系列后 v5
-/// 已被下方 water pass 占用,故顺延重编为 v6。
+/// 已被下方 water pass 占用,故顺延重编为 v6。雾参数化 `render_set_lod_fog`
+/// (终审 Ruling 14 增补)暂在本版本内追加——纯新增出口,与 Go 绑定同仓同
+/// 构建,不存在跨版本混装的调用方;随后由「client ABI v7 定版」提交升版。
 /// v5:`mornlea_client_render_upload_section` 按 material 分成不透明与水面两条
 /// 流,渲染器新增半透明 water pass。必须与 `engine/include/mornlea_client.h`
 /// 的 `MORNLEA_CLIENT_ABI_VERSION` 逐版本一致。
@@ -1220,6 +1222,34 @@ pub extern "C" fn mornlea_client_render_drop_lod_tile(
     })
 }
 
+/// 设置远环距离雾参数(Ruling 14 参数化):`start` 起雾距离、`full`
+/// 全雾距离(block)。入口校验 start > 0 且 full > start(NaN 天然被拒),
+/// 违约返回 INVALID_ARGUMENT 且校验先于句柄查找(不触碰任何渲染器
+/// 状态);渲染器内的默认值 768/1152 锚定 lodFarMultiplier=3 的默认
+/// 几何,非默认倍率的推导接线由上层(5.2)按配置计算后调用本出口。
+#[unsafe(no_mangle)]
+pub extern "C" fn mornlea_client_render_set_lod_fog(
+    abi_version: u32,
+    handle: u64,
+    start: f32,
+    full: f32,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if !(start > 0.0 && full > start) {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            // 入口校验已通过;渲染器层同契约再校验一次(防御直连调用方),
+            // 理论上恒为 true。
+            renderer.set_lod_fog(start, full);
+            MORNLEA_CLIENT_STATUS_OK
+        })
+    })
+}
+
 #[cfg(test)]
 mod lod_ffi_tests {
     use super::*;
@@ -1292,6 +1322,37 @@ mod lod_ffi_tests {
         assert_eq!(unknown, MORNLEA_CLIENT_STATUS_WINDOW);
         assert_eq!(
             mornlea_client_render_drop_lod_tile(CLIENT_ABI_VERSION, 0xF00D, 0, 0),
+            MORNLEA_CLIENT_STATUS_WINDOW
+        );
+    }
+
+    /// 雾参数化 setter(Ruling 14)的无头校验矩阵:入口校验(start > 0、
+    /// full > start,NaN 与任一违约都拒绝)必须先于句柄查找——非法参数
+    /// 配未知句柄仍报 INVALID_ARGUMENT;参数合法才因句柄未知停在 WINDOW。
+    #[test]
+    fn set_lod_fog_validates_arguments_before_handle_lookup() {
+        // 错误 ABI 优先于一切参数校验。
+        assert_eq!(
+            mornlea_client_render_set_lod_fog(CLIENT_ABI_VERSION + 1, 0xF00D, 768.0, 1152.0),
+            MORNLEA_CLIENT_STATUS_ABI_VERSION
+        );
+        for (name, start, full) in [
+            ("start 为零", 0.0, 100.0),
+            ("start 为负", -1.0, 100.0),
+            ("start 为 NaN", f32::NAN, 100.0),
+            ("full 等于 start", 100.0, 100.0),
+            ("full 小于 start", 200.0, 100.0),
+            ("full 为 NaN", 100.0, f32::NAN),
+        ] {
+            assert_eq!(
+                mornlea_client_render_set_lod_fog(CLIENT_ABI_VERSION, 0xF00D, start, full),
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT,
+                "{name}"
+            );
+        }
+        // 参数合法 + 未知句柄 → WINDOW,证明校验通过后到达句柄查找。
+        assert_eq!(
+            mornlea_client_render_set_lod_fog(CLIENT_ABI_VERSION, 0xF00D, 768.0, 1152.0),
             MORNLEA_CLIENT_STATUS_WINDOW
         );
     }

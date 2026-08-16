@@ -11,21 +11,16 @@ struct LodCamera {
     cam_pos:   vec4f,
     // fog_color 是雾目标色 = 本帧天空色（随昼夜变化，与 clear 色同源）。
     fog_color: vec4f,
+    // fog 是距离雾参数（Ruling 14 参数化）：fog.x = 起雾距离、
+    // fog.y = 全雾距离，由渲染器可设状态写入；默认 768/1152 锚定
+    // lodFarMultiplier=3 的默认几何（推导见 render/lod.rs 的
+    // DEFAULT_FOG_*），非默认倍率由上层按配置推导后经 setter 设置。
+    fog:       vec2f,
 };
 
 @group(0) @binding(0) var<uniform>   camera:   LodCamera;
 @group(0) @binding(1) var            atlas:    texture_2d_array<f32>;
 @group(0) @binding(2) var            atlas_smp: sampler;
-
-// 距离雾参数（定稿常量，不做配置面；如需调整另立 change）。
-// 默认几何：近环半径 viewDistance 32 chunk = 512 block，远环半径
-// lodFarMultiplier 3 × 512 = 1536 block。据此定稿（基准均为远环半径
-// 1536，即以相机为圆心的可视半径，而非环形带 [512,1536]）：
-// - FOG_START 768 = 0.5 × 1536：半径中点起雾，内侧保持清晰；
-// - FOG_FULL 1152 = 0.75 × 1536：全雾带 [1152,1536] 恰为半径的最外
-//   25%，远环外缘完全融入天空色，隐藏壳分辨率边界。
-const FOG_START: f32 = 768.0;
-const FOG_FULL:  f32 = 1152.0;
 
 struct VsOut {
     @builtin(position) clip:  vec4f,
@@ -69,9 +64,10 @@ fn vs_main(
 fn fs_main(in: VsOut) -> @location(0) vec4f {
     let c = textureSample(atlas, atlas_smp, in.uv, i32(in.layer));
     if (c.a < 0.5) { discard; }
-    // 距离雾：按相机世界距离向天空色 mix；超出 FOG_FULL 的最外缘带
-    // fog == 1，完全呈现天空色。近环 v1 不雾化，雾只存在于本 pass。
+    // 距离雾：按相机世界距离向天空色 mix；超出全雾距离（camera.fog.y）
+    // 的最外缘带 fog == 1，完全呈现天空色。近环 v1 不雾化，雾只存在于
+    // 本 pass。setter 出口已保证 full > start > 0，分母恒正。
     let dist = distance(in.world, camera.cam_pos.xyz);
-    let fog = clamp((dist - FOG_START) / (FOG_FULL - FOG_START), 0.0, 1.0);
+    let fog = clamp((dist - camera.fog.x) / (camera.fog.y - camera.fog.x), 0.0, 1.0);
     return vec4f(mix(c.rgb * in.shade, camera.fog_color.rgb, fog), 1.0);
 }

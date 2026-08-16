@@ -25,18 +25,34 @@ pub const LOD_QUAD_BYTES: usize = 20;
 /// 的 tile 原点语义一致(tile 覆盖 [tile_x×64, tile_x×64+64) 列)。
 pub const LOD_TILE_WORLD_BLOCKS: i32 = 64;
 
-/// tile 表容量上界:覆盖 `lodFarMultiplier` 8 × `viewDistance` 32 的全环
-/// (半径 256 chunk = 64 tile,π×64² ≈ 12.9k tile);超出视为编程错误,
-/// 返回容量不足由 FFI 层转为 CAPACITY。
-pub const MAX_LOD_TILES: usize = 16384;
+/// tile 表容量上界。Go 调度(`internal/lod` 的 QueueRing/DropOutside)按
+/// **切比雪夫方环**(而非圆环)入队,容量必须覆盖最大合法配置的全方环:
+/// `lodFarMultiplier` 8 × `viewDistance` 32 chunk = 256 chunk 远环半径,
+/// 每 tile 4×4 chunk → tile 半径 256/4 = 64,全方环
+/// (2×64+1)² = 16641(即 (2×8×8+1)² = 129²;方环角块数远超同半径圆环
+/// π×64² ≈ 12.9k,按圆环论证的旧值 16384 装不下方环角区)。取 32768
+/// (对 16641 约 2 倍余量,同时保持 2 的幂);5.2 全方播种时峰值上传数
+/// 不触顶。超出仍视为编程错误,返回容量不足由 FFI 层转为 CAPACITY。
+pub const MAX_LOD_TILES: usize = 32768;
 
 /// 单顶点字节数:world vec3f(12)| layer u32 | shade u32 | axis u32。
 const LOD_VERTEX_BYTES: usize = 24;
 
-/// 远环相机 uniform(96 字节):布局与近环 terrain camera 同源
-/// (view_proj + pos/daylight),额外携带雾目标色(= 本帧天空色,随昼夜
-/// 变化,不新增独立昼夜状态)。
-const LOD_UNIFORM_BYTES: usize = 96;
+/// 远环相机 uniform:布局与近环 terrain camera 同源(view_proj +
+/// pos/daylight),额外携带雾目标色(= 本帧天空色,随昼夜变化,不新增
+/// 独立昼夜状态)与雾距离参数(Ruling 14 参数化)。字节推导:mat4x4f
+/// (64)+ vec4f cam_pos(16)+ vec4f fog_color(16)+ vec2f fog(8)= 104,
+/// WGSL uniform 结构按最大成员对齐(mat4x4f 的 16)补齐到 112。
+const LOD_UNIFORM_BYTES: usize = 112;
+
+/// 默认起雾距离(block):0.5 × 1536。默认几何下近环半径 viewDistance
+/// 32 chunk = 512 block,远环半径 lodFarMultiplier 3 × 512 = 1536 block;
+/// 半径中点起雾,内侧保持清晰。非默认倍率不做配置面推导——5.2 接线按
+/// lodFarMultiplier 计算后经 [`LodPass::set_fog`] / FFI setter 设置。
+const DEFAULT_FOG_START: f32 = 768.0;
+/// 默认全雾距离(block):0.75 × 1536,全雾带 [1152,1536] 恰为默认半径的
+/// 最外 25%,远环外缘完全融入天空色,隐藏壳分辨率边界。
+const DEFAULT_FOG_FULL: f32 = 1152.0;
 
 /// 解码后的单个壳 quad(字段为渲染装配所需的数值形式)。
 struct DecodedQuad {
@@ -238,7 +254,12 @@ pub struct LodPass {
     pipeline: wgpu::RenderPipeline,
     bind: Option<wgpu::BindGroup>,
     uniform: wgpu::Buffer,
-    /// BTreeMap 保证 tile 遍历序确定(坐标升序),同输入同录制序;
+    /// 距离雾参数(起雾/全雾距离,block),随 [`LodPass::set_fog`] 更新,
+    /// 每帧由 `write_camera` 写入 uniform;默认值锚定 multiplier=3 的
+    /// 默认几何(见 [`DEFAULT_FOG_START`]/[`DEFAULT_FOG_FULL`])。
+    fog_start: f32,
+    fog_full: f32,
+    /// BTreeMap保证 tile 遍历序确定(坐标升序),同输入同录制序;
     /// 不透明深度写入的最终图像本就与 draw 顺序无关,这里是双保险。
     tiles: BTreeMap<(i32, i32), LodTile>,
 }
@@ -363,8 +384,22 @@ impl LodPass {
             pipeline,
             bind: None,
             uniform,
+            fog_start: DEFAULT_FOG_START,
+            fog_full: DEFAULT_FOG_FULL,
             tiles: BTreeMap::new(),
         }
+    }
+
+    /// 设置距离雾参数(start 起雾距离、full 全雾距离,block)。校验契约
+    /// 与 FFI setter 出口一致:start > 0 且 full > start(NaN 与任一比较
+    /// 为 false 的取值天然被拒),非法参数返回 false 且不改变既有状态。
+    pub fn set_fog(&mut self, start: f32, full: f32) -> bool {
+        if !(start > 0.0 && full > start) {
+            return false;
+        }
+        self.fog_start = start;
+        self.fog_full = full;
+        true
     }
 
     /// (重)建 bind group:材质图集与采样器直接复用近环 terrain 的对象
@@ -452,7 +487,8 @@ impl LodPass {
     }
 
     /// 写入本帧相机 uniform:view_proj、相机位置 + 昼夜亮度(与近环
-    /// terrain camera 同一语义)、雾目标色(= 本帧天空色)。
+    /// terrain camera 同一语义)、雾目标色(= 本帧天空色)与当前雾距离
+    /// 参数(`set_fog` 状态,默认 768/1152)。
     pub fn write_camera(
         &self,
         queue: &wgpu::Queue,
@@ -472,6 +508,8 @@ impl LodPass {
         for i in 0..4 {
             data[80 + i * 4..84 + i * 4].copy_from_slice(&fog_color[i].to_le_bytes());
         }
+        data[96..100].copy_from_slice(&self.fog_start.to_le_bytes());
+        data[100..104].copy_from_slice(&self.fog_full.to_le_bytes());
         queue.write_buffer(&self.uniform, 0, &data);
     }
 
@@ -538,6 +576,26 @@ mod tests {
 
     fn read_u32(bytes: &[u8], index: usize) -> u32 {
         u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap())
+    }
+
+    /// 容量必须覆盖切比雪夫方环峰值(Ruling 13):Go 调度(internal/lod
+    /// QueueRing/DropOutside)按切比雪夫方环入队,最大合法配置
+    /// multiplier=8 × viewDistance=32 chunk = 256 chunk 半径 = 64 tile,
+    /// 全方环 (2×64+1)² = 16641。5.2 全方播种时第 16642 次上传必须仍
+    /// 在容量内,否则触发 CAPACITY → UploadLodTile 的 check panic。
+    #[test]
+    fn max_lod_tiles_covers_chebyshev_full_ring() {
+        const MAX_MULTIPLIER: i32 = 8;
+        const VIEW_DISTANCE_CHUNKS: i32 = 32;
+        const TILE_CHUNKS: i32 = 4;
+        let tile_radius = MAX_MULTIPLIER * VIEW_DISTANCE_CHUNKS / TILE_CHUNKS;
+        let full_ring = (2 * tile_radius + 1).pow(2);
+        assert_eq!(tile_radius, 64);
+        assert_eq!(full_ring, 16641, "(2×64+1)² = 129²");
+        assert!(
+            MAX_LOD_TILES >= full_ring as usize,
+            "容量 {MAX_LOD_TILES} 必须覆盖切比雪夫方环峰值 {full_ring}"
+        );
     }
 
     #[test]
@@ -703,6 +761,77 @@ mod tests {
         assert_ne!(near_region, far_region, "距离雾必须改变远环着色");
         // 全雾区域 == 天空色:B=255(1.0),R/G 允许 ±2 的 sRGB 编码舍入。
         for px in far_region.chunks(4) {
+            assert_eq!(px[0], 255, "全雾 B 分量应为 1.0");
+            assert!((px[1] as i32 - 188).abs() <= 2, "全雾 G 分量应近 sRGB(0.5)");
+            assert!(
+                (px[2] as i32 - 137).abs() <= 2,
+                "全雾 R 分量应近 sRGB(0.25)"
+            );
+            assert_eq!(px[3], 255);
+        }
+    }
+
+    /// 雾距离参数化(Ruling 14):默认状态保持 768/1152(距 80 的 quad
+    /// 无雾,既有行为锁);set_fog 把全雾距离移近后,同一相机距离的 quad
+    /// 区域整体呈天空色;非法参数被拒绝且不改变既有雾行为。
+    #[test]
+    fn lod_fog_distance_is_renderer_settable() {
+        let Some(mut renderer) = renderer_or_skip_pub(64, 64) else {
+            return;
+        };
+        let bytes_per_layer: usize = (0..ATLAS_MIPS)
+            .map(|mip| {
+                let s = (ATLAS_TEX_SIZE >> mip).max(1) as usize;
+                s * s * 4
+            })
+            .sum();
+        assert!(renderer.upload_atlas(1, &vec![200u8; bytes_per_layer]));
+        // NegZ 侧裙:距相机(0,80,0)约 80——默认 FOG_START 768 之下无雾。
+        let skirt = encode_quad(0, 0, -4, 8, 8, 3, 0, 153);
+        assert!(renderer.upload_lod_tile((0, 0), &skirt).is_ok());
+
+        let mut frame = empty_frame_pub();
+        for i in 0..4 {
+            frame.view_proj[i * 4 + i] = 0.05;
+            frame.view_proj_inv[i * 4 + i] = 20.0;
+        }
+        frame.pos = [0.0, 80.0, 0.0];
+        frame.daylight = 1.0;
+        assert_eq!(renderer.render_frame(&frame), FrameResult::Rendered);
+        let mut near = vec![0u8; 64 * 64 * 4];
+        assert!(renderer.readback(&mut near));
+
+        // 非法参数被渲染器层拒绝(与 FFI 入口同一契约),状态不变:
+        // 下一帧仍与拒绝前的近距帧逐字节一致。
+        assert!(!renderer.set_lod_fog(0.0, 40.0), "start 必须大于 0");
+        assert!(!renderer.set_lod_fog(40.0, 40.0), "full 必须大于 start");
+        assert!(!renderer.set_lod_fog(f32::NAN, 40.0), "NaN 必须拒绝");
+        assert_eq!(renderer.render_frame(&frame), FrameResult::Rendered);
+        let mut unchanged = vec![0u8; 64 * 64 * 4];
+        assert!(renderer.readback(&mut unchanged));
+        assert_eq!(near, unchanged, "拒绝非法参数不得改变雾行为");
+
+        // (10, 40):dist 80 > 40 → 全雾,quad 区域应呈现天空色。
+        assert!(renderer.set_lod_fog(10.0, 40.0));
+        assert_eq!(renderer.render_frame(&frame), FrameResult::Rendered);
+        let mut fogged = vec![0u8; 64 * 64 * 4];
+        assert!(renderer.readback(&mut fogged));
+
+        // quad 投影区域采样窗(与 fog/daylight 行为锁测试同一窗口)。
+        let region = |img: &[u8]| -> Vec<u8> {
+            let mut out = Vec::new();
+            for y in 28..36 {
+                for x in 36..52 {
+                    out.extend_from_slice(&img[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4]);
+                }
+            }
+            out
+        };
+        let near_region = region(&near);
+        let fogged_region = region(&fogged);
+        assert_ne!(near_region, fogged_region, "set_fog 后近距 quad 必须起雾");
+        // 全雾区域 == 天空色:B=255(1.0),R/G 允许 ±2 的 sRGB 编码舍入。
+        for px in fogged_region.chunks(4) {
             assert_eq!(px[0], 255, "全雾 B 分量应为 1.0");
             assert!((px[1] as i32 - 188).abs() <= 2, "全雾 G 分量应近 sRGB(0.5)");
             assert!(

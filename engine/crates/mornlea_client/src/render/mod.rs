@@ -1400,6 +1400,14 @@ impl OffscreenRenderer {
         self.lod_pass.drop_tile(tile);
     }
 
+    /// 设置远环距离雾参数(start 起雾距离、full 全雾距离,block);校验
+    /// 契约与 FFI setter 出口一致(start > 0 且 full > start,NaN 拒绝),
+    /// 非法参数返回 false 且不改变状态。默认 768/1152 锚定
+    /// lodFarMultiplier=3 的默认几何;5.2 接线按配置推导后调用。
+    pub fn set_lod_fog(&mut self, start: f32, full: f32) -> bool {
+        self.lod_pass.set_fog(start, full)
+    }
+
     /// 已上传远环 tile 数,供测试断言替换/丢弃语义。
     pub fn lod_tile_count(&self) -> usize {
         self.lod_pass.tile_count()

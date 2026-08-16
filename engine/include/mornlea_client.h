@@ -118,6 +118,17 @@ uint32_t mornlea_client_render_drop_lod_tile(
     int32_t tile_x,
     int32_t tile_z);
 
+/* 设置远环距离雾参数(client ABI v5,Ruling 14 参数化):start 起雾
+ * 距离、full 全雾距离(block)。入口校验 start > 0 且 full > start
+ * (NaN 拒绝),违约返回 INVALID_ARGUMENT 且先于句柄查找;渲染器默认
+ * 768/1152 锚定 lodFarMultiplier=3 的默认几何,非默认倍率由上层按
+ * 配置推导后调用。 */
+uint32_t mornlea_client_render_set_lod_fog(
+    uint32_t abi_version,
+    uint64_t handle,
+    float start,
+    float full);
+
 uint32_t mornlea_client_render_frame(
     uint32_t abi_version,
     uint64_t handle,
