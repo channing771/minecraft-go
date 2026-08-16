@@ -136,11 +136,21 @@ pub(crate) fn parse_lod_input(bytes: &[u8]) -> Option<LodShellRequest> {
     if columns != LOD_TILE_COLUMNS as u32 || !LOD_STEPS.contains(&step) {
         return None;
     }
-    // 越界 tile 拒绝:原点 × 64 是 tile 内一切世界坐标推导的基数,乘法
-    // 溢出说明该 tile 无法在 i32 世界坐标内表示。checked_mul 通过时
-    // base+63 必然仍在 i32 界内(base 是 64 的倍数)。
-    tile_x.checked_mul(LOD_TILE_COLUMNS)?;
-    tile_z.checked_mul(LOD_TILE_COLUMNS)?;
+    // 越界 tile 拒绝:原点 × 64(base)是 tile 内一切世界坐标推导的基数。
+    // 窗口场连同边界外一圈实际访问的坐标区间是 [base − 8, base + 64 + 7]
+    // (边界环 gi = −1 按最大步长 8 向外扩;gi = n 的窗口起点是 base + 64,
+    // 窗内列再 +step−1,step ≤ 8)。由于 base 是 64 的倍数而 step ≤ 8 < 64,
+    // 在 64 倍数网格上 "base + 64 ≤ i32::MAX" 与 "base + 64 + step − 1 ≤
+    // i32::MAX" 之间不存在格点,checked_add(64) 通过即隐含后者;负方向由
+    // 对 base 本身的 checked_sub(8) 精确兜住最小访问 base − 8(注意不能与
+    // 正向校验链式串联——那会错检 base + 56)。任一环节失败都说明该 tile
+    // 无法在 i32 世界坐标内表示,由 FFI 层转为 INPUT。
+    let max_step = LOD_STEPS[2] as i32;
+    for tile in [tile_x, tile_z] {
+        let base = tile.checked_mul(LOD_TILE_COLUMNS)?;
+        base.checked_add(LOD_TILE_COLUMNS)?;
+        base.checked_sub(max_step)?;
+    }
     Some(LodShellRequest {
         params,
         tile_x,
@@ -629,6 +639,32 @@ mod tests {
         // tile 原点 × 64 溢出 i32(越界 tile)。
         assert!(parse_lod_input(&lod_input(42, i32::MAX, 0, 64, 4)).is_none());
         assert!(parse_lod_input(&lod_input(42, 0, i32::MIN, 64, 4)).is_none());
+    }
+
+    /// 极值 tile 邻域(真实 overflow 门禁):窗口场连同边界外一圈会访问
+    /// [base−8, base+64+step−1] 的世界坐标,校验链必须把该区间整体锁在
+    /// i32 界内——仅 checked_mul(64) 会放过 base+64 或 base−8 溢出的 tile,
+    /// 导致 debug panic / release 回绕两种构建结果分叉。
+    #[test]
+    fn parse_rejects_extreme_tiles_at_i32_boundary() {
+        // 正向:33554430 = (i32::MAX − 64 − 7)/64 是最大合法 tile(base =
+        // 2147483520,边界环 +64 与窗内 +step−1 后仍 ≤ i32::MAX);
+        // 33554431 = 2²⁵−1 通过 checked_mul(64) 但 base+64 = 2³¹ 溢出。
+        assert!(parse_lod_input(&lod_input(42, 33554430, 0, 64, 8)).is_some());
+        assert!(parse_lod_input(&lod_input(42, 33554431, 0, 64, 4)).is_none());
+        assert!(parse_lod_input(&lod_input(42, 0, 33554431, 64, 2)).is_none());
+        // 负向:−33554431 合法(base = i32::MIN + 64,边界环 −8 不溢出);
+        // −33554432 的 base = i32::MIN 恰通过 checked_mul(64),但边界环
+        // gi = −1 × 最大步长 8 会下溢。
+        assert!(parse_lod_input(&lod_input(42, -33554431, 0, 64, 8)).is_some());
+        assert!(parse_lod_input(&lod_input(42, -33554432, 0, 64, 2)).is_none());
+        assert!(parse_lod_input(&lod_input(42, 0, -33554432, 64, 8)).is_none());
+        // 合法极值 tile 必须真正可生成(边界环每个坐标都可计算、不 panic),
+        // 编码长度保持 20 字节对齐。
+        let request = parse_lod_input(&lod_input(42, -33554431, 33554430, 64, 8)).unwrap();
+        let mut encoded = Vec::new();
+        encode_shell(&lod_shell(&request), &mut encoded);
+        assert_eq!(encoded.len() % LOD_SHELL_QUAD_BYTES, 0);
     }
 
     #[test]

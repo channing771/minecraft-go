@@ -2954,6 +2954,15 @@ mod tests {
         let mut overflow_tile_z = valid.clone();
         overflow_tile_z[WORLDGEN_HEADER_BYTES + 4..WORLDGEN_HEADER_BYTES + 8]
             .copy_from_slice(&i32::MIN.to_le_bytes());
+        // 极值 tile 邻域:33554431(2²⁵−1)通过 ×64 但边界环 base+64 溢出;
+        // −33554432 的 base = i32::MIN,边界环 −step 下溢。两者都必须按
+        // INPUT 拒绝,而不是 panic 收敛(status 9)或 release 静默回绕。
+        let mut extreme_tile_x = valid.clone();
+        extreme_tile_x[WORLDGEN_HEADER_BYTES..WORLDGEN_HEADER_BYTES + 4]
+            .copy_from_slice(&33554431_i32.to_le_bytes());
+        let mut extreme_tile_z = valid.clone();
+        extreme_tile_z[WORLDGEN_HEADER_BYTES + 4..WORLDGEN_HEADER_BYTES + 8]
+            .copy_from_slice(&(-33554432_i32).to_le_bytes());
         let mut cases: Vec<(&str, Vec<u8>)> = vec![
             ("short input", valid[..valid.len() - 1].to_vec()),
             ("long input", {
@@ -2966,6 +2975,8 @@ mod tests {
             ("wrong step", wrong_step),
             ("overflow tile_x", overflow_tile_x),
             ("overflow tile_z", overflow_tile_z),
+            ("extreme tile_x base+64 overflows", extreme_tile_x),
+            ("extreme tile_z base-step underflows", extreme_tile_z),
         ];
         for (name, input) in cases.drain(..) {
             let mut output = vec![0xA5_u8; 64];
