@@ -13,14 +13,12 @@ import (
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
-
-	"github.com/channing771/mornlea/internal/gfx"
 )
 
 func TestGlyphAtlasConstructsTofuAndBoundedQueues(t *testing.T) {
-	dev := &glyphTestDevice{}
+	sink := &glyphTestSink{}
 	renderFace, workerFace := &glyphTestFace{}, &glyphTestFace{}
-	atlas, err := newGlyphAtlasWith(dev, func() (font.Face, font.Face, error) {
+	atlas, err := newGlyphAtlasSink(sink, func() (font.Face, font.Face, error) {
 		return renderFace, workerFace, nil
 	}, &glyphTestRasterizer{})
 	if err != nil {
@@ -34,10 +32,7 @@ func TestGlyphAtlasConstructsTofuAndBoundedQueues(t *testing.T) {
 	if cap(atlas.requests) != 1024 || cap(atlas.results) != 32 {
 		t.Fatalf("queue capacities = %d/%d, want 1024/32", cap(atlas.requests), cap(atlas.results))
 	}
-	if dev.desc.Width != 1024 || dev.desc.Height != 1024 || dev.desc.Format != gfx.FormatR8Unorm {
-		t.Fatalf("texture descriptor = %#v, want 1024x1024 R8", dev.desc)
-	}
-	writes := dev.texture.snapshotWrites()
+	writes := sink.snapshotWrites()
 	if len(writes) != 1 {
 		t.Fatalf("constructor writes = %d, want synchronous tofu write", len(writes))
 	}
@@ -51,10 +46,9 @@ func TestGlyphAtlasConstructsTofuAndBoundedQueues(t *testing.T) {
 }
 
 func TestGlyphAtlasRequestDeduplicatesAndWorkerIsFIFO(t *testing.T) {
-	dev := &glyphTestDevice{}
 	renderFace, workerFace := &glyphTestFace{}, &glyphTestFace{}
 	raster := &glyphTestRasterizer{}
-	atlas := mustGlyphTestAtlas(t, dev, renderFace, workerFace, raster)
+	atlas := mustGlyphTestAtlas(t, &glyphTestSink{}, renderFace, workerFace, raster)
 
 	atlas.Request("中A中VAA")
 	waitForResultCount(t, atlas, 3)
@@ -83,10 +77,8 @@ func TestGlyphAtlasRequestDeduplicatesAndWorkerIsFIFO(t *testing.T) {
 }
 
 func TestGlyphAtlasRequestFullQueueCanRetry(t *testing.T) {
-	dev := &glyphTestDevice{}
-	renderFace, workerFace := &glyphTestFace{}, &glyphTestFace{}
 	raster := newBlockingGlyphTestRasterizer()
-	atlas := mustGlyphTestAtlas(t, dev, renderFace, workerFace, raster)
+	atlas := mustGlyphTestAtlas(t, &glyphTestSink{}, &glyphTestFace{}, &glyphTestFace{}, raster)
 
 	atlas.Request("a")
 	select {
@@ -119,8 +111,8 @@ func TestGlyphAtlasRequestFullQueueCanRetry(t *testing.T) {
 }
 
 func TestGlyphAtlasFlushRetainsPendingUntilBudgetAvailable(t *testing.T) {
-	dev := &glyphTestDevice{}
-	atlas := mustGlyphTestAtlas(t, dev, &glyphTestFace{}, &glyphTestFace{}, &glyphTestRasterizer{})
+	sink := &glyphTestSink{}
+	atlas := mustGlyphTestAtlas(t, sink, &glyphTestFace{}, &glyphTestFace{}, &glyphTestRasterizer{})
 	atlas.Request("A")
 	waitForResultCount(t, atlas, 1)
 
@@ -134,7 +126,7 @@ func TestGlyphAtlasFlushRetainsPendingUntilBudgetAvailable(t *testing.T) {
 	if atlas.pendingUpload == nil {
 		t.Fatal("result was not retained when budget was insufficient")
 	}
-	if got := len(dev.texture.snapshotWrites()); got != 1 {
+	if got := len(sink.snapshotWrites()); got != 1 {
 		t.Fatalf("writes with insufficient budget = %d, want only tofu", got)
 	}
 
@@ -142,7 +134,7 @@ func TestGlyphAtlasFlushRetainsPendingUntilBudgetAvailable(t *testing.T) {
 	if err := atlas.FlushUploads(budget); err != nil {
 		t.Fatal(err)
 	}
-	writes := dev.texture.snapshotWrites()
+	writes := sink.snapshotWrites()
 	if len(writes) != 2 {
 		t.Fatalf("writes after replenishing budget = %d, want 2", len(writes))
 	}
@@ -155,7 +147,7 @@ func TestGlyphAtlasFlushRetainsPendingUntilBudgetAvailable(t *testing.T) {
 func TestGlyphAtlasRasterErrorDoesNotConsumeBudget(t *testing.T) {
 	wantErr := errors.New("synthetic raster failure")
 	raster := &glyphTestRasterizer{errFor: map[rune]error{'!': wantErr}}
-	atlas := mustGlyphTestAtlas(t, &glyphTestDevice{}, &glyphTestFace{}, &glyphTestFace{}, raster)
+	atlas := mustGlyphTestAtlas(t, &glyphTestSink{}, &glyphTestFace{}, &glyphTestFace{}, raster)
 	atlas.Request("!")
 	waitForResultCount(t, atlas, 1)
 	budget := NewUploadBudget(1024)
@@ -169,9 +161,9 @@ func TestGlyphAtlasRasterErrorDoesNotConsumeBudget(t *testing.T) {
 }
 
 func TestGlyphAtlasMissingResultUsesTofuWithoutSlotOrUpload(t *testing.T) {
-	dev := &glyphTestDevice{}
+	sink := &glyphTestSink{}
 	raster := &glyphTestRasterizer{missingFor: map[rune]bool{'?': true}}
-	atlas := mustGlyphTestAtlas(t, dev, &glyphTestFace{}, &glyphTestFace{}, raster)
+	atlas := mustGlyphTestAtlas(t, sink, &glyphTestFace{}, &glyphTestFace{}, raster)
 	atlas.Request("?")
 	waitForResultCount(t, atlas, 1)
 
@@ -182,8 +174,8 @@ func TestGlyphAtlasMissingResultUsesTofuWithoutSlotOrUpload(t *testing.T) {
 	if got := atlas.Glyph('?').Slot; got != 0 {
 		t.Fatalf("missing glyph slot = %d, want tofu", got)
 	}
-	if atlas.nextSlot != 1 || budget.spent != 0 || len(dev.texture.snapshotWrites()) != 1 {
-		t.Fatalf("missing glyph changed slot/budget/writes = %d/%d/%d, want 1/0/1", atlas.nextSlot, budget.spent, len(dev.texture.snapshotWrites()))
+	if atlas.nextSlot != 1 || budget.spent != 0 || len(sink.snapshotWrites()) != 1 {
+		t.Fatalf("missing glyph changed slot/budget/writes = %d/%d/%d, want 1/0/1", atlas.nextSlot, budget.spent, len(sink.snapshotWrites()))
 	}
 	atlas.Request("?")
 	if len(atlas.requests) != 0 {
@@ -192,7 +184,7 @@ func TestGlyphAtlasMissingResultUsesTofuWithoutSlotOrUpload(t *testing.T) {
 }
 
 func TestGlyphAtlasExhaustionPermanentlyUsesTofu(t *testing.T) {
-	atlas := mustGlyphTestAtlas(t, &glyphTestDevice{}, &glyphTestFace{}, &glyphTestFace{}, &glyphTestRasterizer{})
+	atlas := mustGlyphTestAtlas(t, &glyphTestSink{}, &glyphTestFace{}, &glyphTestFace{}, &glyphTestRasterizer{})
 	runes := make([]rune, 1024)
 	for i := range runes {
 		runes[i] = rune(0x2000 + i)
@@ -217,8 +209,7 @@ func TestGlyphAtlasExhaustionPermanentlyUsesTofu(t *testing.T) {
 }
 
 func TestGlyphAtlasReleaseCancelsBlockedWorkerAndIsConcurrentIdempotent(t *testing.T) {
-	dev := &glyphTestDevice{}
-	atlas := mustGlyphTestAtlas(t, dev, &glyphTestFace{}, &glyphTestFace{}, &glyphTestRasterizer{})
+	atlas := mustGlyphTestAtlas(t, &glyphTestSink{}, &glyphTestFace{}, &glyphTestFace{}, &glyphTestRasterizer{})
 	runes := make([]rune, 34)
 	for i := range runes {
 		runes[i] = rune(0x3000 + i)
@@ -245,15 +236,14 @@ func TestGlyphAtlasReleaseCancelsBlockedWorkerAndIsConcurrentIdempotent(t *testi
 		t.Fatal("Release blocked behind full result queue")
 	}
 	atlas.Request("after release")
-	if dev.texture.releaseCalls.Load() != 1 || dev.texture.view.releaseCalls.Load() != 1 {
-		t.Fatalf("texture/view releases = %d/%d, want 1/1", dev.texture.releaseCalls.Load(), dev.texture.view.releaseCalls.Load())
+	if atlas.renderFace != nil {
+		t.Fatal("renderFace was not cleared by Release")
 	}
 }
 
 func TestGlyphAtlasConcurrentReleaseWaitsForTeardown(t *testing.T) {
-	dev := &glyphTestDevice{}
 	raster := newBlockingGlyphTestRasterizer()
-	atlas := mustGlyphTestAtlasNoCleanup(t, dev, &glyphTestFace{}, &glyphTestFace{}, raster)
+	atlas := mustGlyphTestAtlasNoCleanup(t, &glyphTestSink{}, &glyphTestFace{}, &glyphTestFace{}, raster)
 	atlas.Request("a")
 	select {
 	case <-raster.started:
@@ -294,14 +284,11 @@ func TestGlyphAtlasConcurrentReleaseWaitsForTeardown(t *testing.T) {
 	if secondReturnedEarly {
 		t.Fatal("concurrent Release returned before the shared teardown completed")
 	}
-	if dev.texture.releaseCalls.Load() != 1 || dev.texture.view.releaseCalls.Load() != 1 {
-		t.Fatalf("texture/view releases = %d/%d, want 1/1", dev.texture.releaseCalls.Load(), dev.texture.view.releaseCalls.Load())
-	}
 }
 
 func TestGlyphAtlasEmbeddedFont(t *testing.T) {
-	dev := &glyphTestDevice{}
-	atlas, err := NewGlyphAtlas(dev)
+	sink := &glyphTestSink{}
+	atlas, err := NewGlyphAtlasWithSink(sink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +312,7 @@ func TestGlyphAtlasEmbeddedFont(t *testing.T) {
 	}
 	missing := rune(0x10ffff)
 	beforeSlot := atlas.nextSlot
-	beforeWrites := len(dev.texture.snapshotWrites())
+	beforeWrites := len(sink.snapshotWrites())
 	atlas.Request(string(missing))
 	waitForResultCount(t, atlas, 1)
 	missingBudget := NewUploadBudget(1024)
@@ -335,8 +322,8 @@ func TestGlyphAtlasEmbeddedFont(t *testing.T) {
 	if got := atlas.Glyph(missing).Slot; got != 0 {
 		t.Fatalf("missing glyph slot = %d, want tofu", got)
 	}
-	if atlas.nextSlot != beforeSlot || missingBudget.spent != 0 || len(dev.texture.snapshotWrites()) != beforeWrites {
-		t.Fatalf("missing glyph changed slot/budget/writes = %d/%d/%d, want %d/0/%d", atlas.nextSlot, missingBudget.spent, len(dev.texture.snapshotWrites()), beforeSlot, beforeWrites)
+	if atlas.nextSlot != beforeSlot || missingBudget.spent != 0 || len(sink.snapshotWrites()) != beforeWrites {
+		t.Fatalf("missing glyph changed slot/budget/writes = %d/%d/%d, want %d/0/%d", atlas.nextSlot, missingBudget.spent, len(sink.snapshotWrites()), beforeSlot, beforeWrites)
 	}
 	atlas.Request(string(missing))
 	if len(atlas.requests) != 0 {
@@ -346,7 +333,7 @@ func TestGlyphAtlasEmbeddedFont(t *testing.T) {
 		t.Fatalf("kern(A,V) = %v, want finite", kern)
 	}
 	nonzeroUploads := 0
-	for _, write := range dev.texture.snapshotWrites()[1:] {
+	for _, write := range sink.snapshotWrites()[1:] {
 		if !allZero(write.pixels) {
 			nonzeroUploads++
 		}
@@ -356,16 +343,67 @@ func TestGlyphAtlasEmbeddedFont(t *testing.T) {
 	}
 }
 
-func mustGlyphTestAtlas(t *testing.T, dev *glyphTestDevice, renderFace, workerFace font.Face, raster glyphRasterizer) *GlyphAtlas {
+// TestGlyphUVCoversInkNotWholeCell 守住字形 UV 与四边形的尺度一致性。
+//
+// 全部消费方（hotbar、name tag、调试面板）统一按 Glyph.Width × Glyph.Height 画
+// 四边形，并直接用 Glyph 的 UV 采样图集。因此 UV 覆盖的图集区域必须与四边形
+// 等尺寸——只覆盖 ink 本身，而不是整个 glyphCellSize×glyphCellSize 的格子。
+//
+// 若 UV 覆盖整格，整格（绝大部分是空白）会被压进 ink 大小的四边形，压缩比为
+// Width/glyphCellSize。实测 'w' 约 0.56 只是变细，而 'i' 约 0.09 会把 2.9px 的
+// 墨迹缩成 0.26px 而彻底消失——表现为窄字符成片丢失、宽字符偏细，名牌与 HUD
+// 数字同样受影响。
+func TestGlyphUVCoversInkNotWholeCell(t *testing.T) {
+	atlas, err := NewGlyphAtlasWithSink(&glyphTestSink{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer atlas.Release()
+
+	// 刻意混合最窄（i r t .）与较宽（w S 6）的字形：缺陷的严重度与字宽成反比，
+	// 只取宽字形会让偏差落在容差内而漏掉。
+	const probe = "irt.wS6"
+	atlas.Request(probe)
+	for _, char := range probe {
+		waitUntil(t, func() bool {
+			budget := NewUploadBudget(1024)
+			if err := atlas.FlushUploads(budget); err != nil {
+				t.Fatalf("FlushUploads: %v", err)
+			}
+			return atlas.Glyph(char).Slot != 0
+		})
+	}
+
+	for _, char := range probe {
+		glyph := atlas.Glyph(char)
+		if glyph.Slot == 0 {
+			t.Fatalf("%q 落到了 tofu，无法校验 UV", char)
+		}
+		uvWidth := float64(glyph.U1-glyph.U0) * float64(glyphAtlasSize)
+		uvHeight := float64(glyph.V1-glyph.V0) * float64(glyphAtlasSize)
+		// 容差 1px：UV 落在图集的整数像素边界上，而 Width/Height 是分数 ink 尺寸。
+		if math.Abs(uvWidth-float64(glyph.Width)) > 1 {
+			t.Errorf("%q: UV 宽 %.2fpx 与四边形宽 %.2fpx 不符（差 %.2fpx）——"+
+				"整格宽为 %d，UV 很可能覆盖了整格而非 ink",
+				char, uvWidth, glyph.Width, uvWidth-float64(glyph.Width), glyphCellSize)
+		}
+		if math.Abs(uvHeight-float64(glyph.Height)) > 1 {
+			t.Errorf("%q: UV 高 %.2fpx 与四边形高 %.2fpx 不符（差 %.2fpx）",
+				char, uvHeight, glyph.Height, uvHeight-float64(glyph.Height))
+		}
+	}
+}
+
+func mustGlyphTestAtlas(t *testing.T, sink *glyphTestSink, renderFace, workerFace font.Face, raster glyphRasterizer) *GlyphAtlas {
 	t.Helper()
-	atlas := mustGlyphTestAtlasNoCleanup(t, dev, renderFace, workerFace, raster)
+	atlas := mustGlyphTestAtlasNoCleanup(t, sink, renderFace, workerFace, raster)
 	t.Cleanup(atlas.Release)
 	return atlas
 }
 
-func mustGlyphTestAtlasNoCleanup(t *testing.T, dev *glyphTestDevice, renderFace, workerFace font.Face, raster glyphRasterizer) *GlyphAtlas {
+func mustGlyphTestAtlasNoCleanup(t *testing.T, sink *glyphTestSink, renderFace, workerFace font.Face, raster glyphRasterizer) *GlyphAtlas {
 	t.Helper()
-	atlas, err := newGlyphAtlasWith(dev, func() (font.Face, font.Face, error) {
+	atlas, err := newGlyphAtlasSink(sink, func() (font.Face, font.Face, error) {
 		return renderFace, workerFace, nil
 	}, raster)
 	if err != nil {
@@ -404,8 +442,8 @@ func waitUntil(t *testing.T, condition func() bool) {
 
 func assertGlyphWrite(t *testing.T, write glyphTestWrite, x, y uint32) {
 	t.Helper()
-	if write.layer != 0 || write.mip != 0 || write.x != x || write.y != y || write.width != 32 || write.height != 32 || len(write.pixels) != 1024 {
-		t.Fatalf("WriteRegion = %#v, want layer/mip=0, origin=%d,%d, 32x32, 1024 bytes", write, x, y)
+	if write.x != x || write.y != y || write.width != 32 || write.height != 32 || len(write.pixels) != 1024 {
+		t.Fatalf("WriteGlyphRect = %#v, want origin=%d,%d, 32x32, 1024 bytes", write, x, y)
 	}
 }
 
@@ -491,111 +529,26 @@ func (r *blockingGlyphTestRasterizer) Rasterize(face font.Face, char rune) (Glyp
 	return r.glyphTestRasterizer.Rasterize(face, char)
 }
 
-type glyphTestDevice struct {
-	desc    gfx.TextureDesc
-	texture glyphTestTexture
-}
-
-func (*glyphTestDevice) CreateBuffer(gfx.BufferDesc) gfx.Buffer     { panic("unused") }
-func (*glyphTestDevice) CreateShaderModule(string) gfx.ShaderModule { panic("unused") }
-func (*glyphTestDevice) CreateRenderPipeline(gfx.RenderPipelineDesc) gfx.RenderPipeline {
-	panic("unused")
-}
-func (*glyphTestDevice) CreateComputePipeline(gfx.ComputePipelineDesc) gfx.ComputePipeline {
-	panic("unused")
-}
-func (*glyphTestDevice) CreateBindGroup(gfx.BindGroupDesc) gfx.BindGroup { panic("unused") }
-func (d *glyphTestDevice) CreateTexture(desc gfx.TextureDesc) gfx.Texture {
-	d.desc = desc
-	return &d.texture
-}
-func (*glyphTestDevice) CreateSampler(gfx.SamplerDesc) gfx.Sampler { panic("unused") }
-func (*glyphTestDevice) CreateCommandEncoder() gfx.CommandEncoder  { panic("unused") }
-func (*glyphTestDevice) Submit(...gfx.CommandBuffer)               {}
-func (*glyphTestDevice) Poll(bool)                                 {}
-func (*glyphTestDevice) Release()                                  {}
-
+// glyphTestWrite 记录一次 WriteGlyphRect 调用的矩形与像素。
 type glyphTestWrite struct {
-	layer, mip, x, y, width, height uint32
-	pixels                          []byte
+	x, y, width, height uint32
+	pixels              []byte
 }
 
-type glyphTestTexture struct {
-	mu           sync.Mutex
-	writes       []glyphTestWrite
-	view         glyphTestView
-	releaseCalls atomic.Int32
+// glyphTestSink 是记录型 GlyphSink,替代旧 gfx 纹理 fake。
+type glyphTestSink struct {
+	mu     sync.Mutex
+	writes []glyphTestWrite
 }
 
-func (t *glyphTestTexture) View(gfx.TextureViewDesc) gfx.TextureView { return &t.view }
-func (t *glyphTestTexture) WriteLayer(layer, mip uint32, pixels []byte) {
-	t.WriteRegion(layer, mip, 0, 0, 1024, 1024, pixels)
-}
-func (t *glyphTestTexture) WriteRegion(layer, mip, x, y, width, height uint32, pixels []byte) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.writes = append(t.writes, glyphTestWrite{layer, mip, x, y, width, height, append([]byte(nil), pixels...)})
-}
-func (t *glyphTestTexture) ReadLayer(uint32, uint32) []byte { return nil }
-func (t *glyphTestTexture) Release()                        { t.releaseCalls.Add(1) }
-func (t *glyphTestTexture) snapshotWrites() []glyphTestWrite {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return append([]glyphTestWrite(nil), t.writes...)
+func (s *glyphTestSink) WriteGlyphRect(x, y, width, height uint32, pixels []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.writes = append(s.writes, glyphTestWrite{x, y, width, height, append([]byte(nil), pixels...)})
 }
 
-type glyphTestView struct{ releaseCalls atomic.Int32 }
-
-func (v *glyphTestView) Release() { v.releaseCalls.Add(1) }
-
-// TestGlyphUVCoversInkNotWholeCell 守住字形 UV 与四边形的尺度一致性。
-//
-// 全部消费方（hotbar、name tag、调试面板）统一按 Glyph.Width × Glyph.Height 画
-// 四边形，并直接用 Glyph 的 UV 采样图集。因此 UV 覆盖的图集区域必须与四边形
-// 等尺寸——只覆盖 ink 本身，而不是整个 glyphCellSize×glyphCellSize 的格子。
-//
-// 若 UV 覆盖整格，整格（绝大部分是空白）会被压进 ink 大小的四边形，压缩比为
-// Width/glyphCellSize。实测 'w' 约 0.56 只是变细，而 'i' 约 0.09 会把 2.9px 的
-// 墨迹缩成 0.26px 而彻底消失——表现为窄字符成片丢失、宽字符偏细，名牌与 HUD
-// 数字同样受影响。
-func TestGlyphUVCoversInkNotWholeCell(t *testing.T) {
-	dev := &glyphTestDevice{}
-	atlas, err := NewGlyphAtlas(dev)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer atlas.Release()
-
-	// 刻意混合最窄（i r t .）与较宽（w S 6）的字形：缺陷的严重度与字宽成反比，
-	// 只取宽字形会让偏差落在容差内而漏掉。
-	const probe = "irt.wS6"
-	atlas.Request(probe)
-	for _, char := range probe {
-		waitUntil(t, func() bool {
-			budget := NewUploadBudget(1024)
-			if err := atlas.FlushUploads(budget); err != nil {
-				t.Fatalf("FlushUploads: %v", err)
-			}
-			return atlas.Glyph(char).Slot != 0
-		})
-	}
-
-	for _, char := range probe {
-		glyph := atlas.Glyph(char)
-		if glyph.Slot == 0 {
-			t.Fatalf("%q 落到了 tofu，无法校验 UV", char)
-		}
-		uvWidth := float64(glyph.U1-glyph.U0) * float64(glyphAtlasSize)
-		uvHeight := float64(glyph.V1-glyph.V0) * float64(glyphAtlasSize)
-		// 容差 1px：UV 落在图集的整数像素边界上，而 Width/Height 是分数 ink 尺寸。
-		if math.Abs(uvWidth-float64(glyph.Width)) > 1 {
-			t.Errorf("%q: UV 宽 %.2fpx 与四边形宽 %.2fpx 不符（差 %.2fpx）——"+
-				"整格宽为 %d，UV 很可能覆盖了整格而非 ink",
-				char, uvWidth, glyph.Width, uvWidth-float64(glyph.Width), glyphCellSize)
-		}
-		if math.Abs(uvHeight-float64(glyph.Height)) > 1 {
-			t.Errorf("%q: UV 高 %.2fpx 与四边形高 %.2fpx 不符（差 %.2fpx）",
-				char, uvHeight, glyph.Height, uvHeight-float64(glyph.Height))
-		}
-	}
+func (s *glyphTestSink) snapshotWrites() []glyphTestWrite {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]glyphTestWrite(nil), s.writes...)
 }

@@ -25,8 +25,9 @@ winit window,`instance.create_surface`,按窗口 framebuffer 尺寸配置
 depth/HiZ。`render_frame` 在窗口模式下 acquire surface 纹理为 color
 target,提交后 present;acquire 失败(遮挡/过期)返回专用 SKIPPED 状态,
 调用方跳帧。`render_resize(abi, handle, w, h)` 重建 target/HiZ 并重配
-surface。窗口模式渲染器与窗口同线程(thread-local 窗口表约束),因此
-windowed 渲染器也放窗口线程表;离屏渲染器保持全局 Mutex 表。
+surface。winit `Window` 本身 Send+Sync(仅事件循环绑定主线程),因此
+windowed 渲染器持 `Arc<Window>` 与离屏渲染器同放全局 Mutex 表;创建时的
+窗口句柄查表仍须在窗口线程调用。
 
 ### Go 帧装配替换 pass 驱动
 
@@ -39,7 +40,10 @@ Go 计算(`mesh.VisibleSectionsInto`,与对照测试同路径);FrameStats 类
 ### GlyphAtlas 与 HUD 图集经 sink 解耦
 
 `render` 包新增 `GlyphSink` 接口(`WriteGlyphRect(x, y, w, h, pixels)`),
-`GlyphAtlas` 构造改收 sink,tofu 与 FlushUploads 的写入全部走 sink;
+`GlyphAtlas` 内部写点统一走 sink:切换段保留 gfx 纹理 sink 变体(既有
+Go renderer 与测试继续可用)并新增 `NewGlyphAtlasWithSink`;三个文本
+renderer 增加 layout-only 构造(跳过 GPU 资源,Prepare/FrameStreams 可用),
+生产 app 用之;删除段移除 gfx 变体与 GPU 半部;
 `Glyph`/`Kern`/布局 API 不变。生产 sink 由 cmd/mornlea 以
 `client.Renderer.UploadGlyphRect` 适配;HUD 图集像素经
 `Renderer.UploadHUDAtlas` 一次上传(`buildHotbarTextureAtlas` 保留)。

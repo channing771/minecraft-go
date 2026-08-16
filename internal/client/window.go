@@ -28,8 +28,6 @@ package client
 #cgo nocallback mornlea_client_window_focus
 #cgo noescape mornlea_client_window_cancel_close
 #cgo nocallback mornlea_client_window_cancel_close
-#cgo noescape mornlea_client_window_ns_window
-#cgo nocallback mornlea_client_window_ns_window
 #include "mornlea_client.h"
 */
 import "C"
@@ -39,8 +37,6 @@ import (
 	"fmt"
 	"math"
 	"unsafe"
-
-	"github.com/channing771/mornlea/internal/gfx"
 )
 
 // Key 是主程序需要的最小按键集合。
@@ -282,17 +278,6 @@ func (w *Window) SetCursorCaptured(captured bool) {
 
 // CursorCaptured 报告当前捕获状态。
 func (w *Window) CursorCaptured() bool { return w.captured }
-
-// NativeHandle 返回 macOS 的 NSWindow*；gfx 负责把它接到 Metal surface。
-func (w *Window) NativeHandle() gfx.NativeWindowHandle {
-	var pointer C.uintptr_t
-	w.call("ns window", uint32(C.mornlea_client_window_ns_window(
-		C.MORNLEA_CLIENT_ABI_VERSION, C.uint64_t(w.handle), &pointer)))
-	return gfx.NativeWindowHandle{
-		Kind:    gfx.HandleKindNSWindow,
-		Pointer: uintptr(pointer),
-	}
-}
 
 // Close 销毁窗口;重复调用安全。
 func (w *Window) Close() {

@@ -1,15 +1,12 @@
 package render
 
 import (
-	_ "embed"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"strconv"
 
 	"github.com/go-gl/mathgl/mgl32"
-
-	"github.com/channing771/mornlea/internal/gfx"
 )
 
 const (
@@ -52,9 +49,6 @@ const (
 	panelHighlightInset = float32(2)
 )
 
-//go:embed shader/debug_panel.wgsl
-var debugPanelShader string
-
 // PanelRow 是调试面板中一条参数行：标签、当前值，以及是否只读、是否被选中。
 // 按键交互（移动选中项、编辑数值）属于后续任务，本渲染器只按传入状态绘制。
 type PanelRow struct {
@@ -91,101 +85,10 @@ type panelLayout struct {
 type DebugPanelRenderer struct {
 	atlas GlyphSource
 
-	dynamic       gfx.Buffer
-	quadPipeline  gfx.RenderPipeline
-	glyphPipeline gfx.RenderPipeline
-	bind          gfx.BindGroup
-	sampler       gfx.Sampler
-
 	layout panelLayout
 	upload []byte
 }
 
-func NewDebugPanelRenderer(
-	dev gfx.Device,
-	colorFormat gfx.TextureFormat,
-	atlas GlyphSource,
-) *DebugPanelRenderer {
-	renderer := &DebugPanelRenderer{
-		atlas:  atlas,
-		upload: make([]byte, panelUploadBytes),
-		layout: panelLayout{
-			quads:  make([]panelInstance, 0, maxPanelQuads),
-			glyphs: make([]panelInstance, 0, maxPanelGlyphs),
-		},
-	}
-	renderer.dynamic = dev.CreateBuffer(gfx.BufferDesc{
-		Label: "debug panel dynamic upload",
-		Size:  panelUploadBytes,
-		Usage: gfx.BufferUsageUniform | gfx.BufferUsageStorage | gfx.BufferUsageCopyDst,
-	})
-	layout := gfx.BindGroupLayout{
-		Label: "debug panel layout",
-		Entries: []gfx.BindGroupLayoutEntry{
-			{Binding: 0, Type: gfx.BindingUniformBuffer, VisibleIn: gfx.StageVertex},
-			{Binding: 1, Type: gfx.BindingStorageBufferRO, VisibleIn: gfx.StageVertex},
-			{Binding: 2, Type: gfx.BindingStorageBufferRO, VisibleIn: gfx.StageVertex},
-			{
-				Binding: 3, Type: gfx.BindingSampledTextureFloat,
-				VisibleIn: gfx.StageFragment, ViewDimension: gfx.TextureViewDimension2D,
-			},
-			{Binding: 4, Type: gfx.BindingSampler, VisibleIn: gfx.StageFragment},
-		},
-	}
-	module := dev.CreateShaderModule(debugPanelShader)
-	renderer.quadPipeline = dev.CreateRenderPipeline(panelPipelineDesc(
-		"debug panel quad", module, colorFormat, layout, "quad_vs", "quad_fs",
-	))
-	renderer.glyphPipeline = dev.CreateRenderPipeline(panelPipelineDesc(
-		"debug panel glyph", module, colorFormat, layout, "glyph_vs", "glyph_fs",
-	))
-	module.Release()
-	renderer.sampler = dev.CreateSampler(gfx.SamplerDesc{
-		Label: "debug panel glyph sampler", MagFilter: gfx.FilterLinear, MinFilter: gfx.FilterLinear,
-		MipFilter: gfx.FilterNearest, Address: gfx.AddressClampToEdge,
-	})
-	renderer.bind = dev.CreateBindGroup(gfx.BindGroupDesc{
-		Label:  "debug panel resources",
-		Layout: layout,
-		Entries: []gfx.BindGroupEntry{
-			{
-				Binding: 0, Buffer: renderer.dynamic,
-				Offset: panelViewportOffset, Size: panelViewportBytes,
-			},
-			{
-				Binding: 1, Buffer: renderer.dynamic,
-				Offset: panelQuadOffset, Size: panelQuadSize,
-			},
-			{
-				Binding: 2, Buffer: renderer.dynamic,
-				Offset: panelGlyphOffset, Size: panelGlyphSize,
-			},
-			{Binding: 3, Texture: atlas.TextureView()},
-			{Binding: 4, Sampler: renderer.sampler},
-		},
-	})
-	return renderer
-}
-
-func panelPipelineDesc(
-	label string,
-	module gfx.ShaderModule,
-	colorFormat gfx.TextureFormat,
-	layout gfx.BindGroupLayout,
-	vertexEntry, fragmentEntry string,
-) gfx.RenderPipelineDesc {
-	return gfx.RenderPipelineDesc{
-		Label: label, Shader: module,
-		VertexEntry: vertexEntry, FragmentEntry: fragmentEntry,
-		BindGroups:  []gfx.BindGroupLayout{layout},
-		ColorFormat: colorFormat,
-		Blend:       gfx.BlendAlpha,
-	}
-}
-
-// Prepare 按可见性、只读读数与参数行重建固定布局。visible 为 false 时
-// 只清空布局并立即返回：不请求字形、不做任何 GPU 或几何计算，这是面板
-// 关闭时的零开销路径。rows 超过 maxPanelRows 的部分不绘制。
 func (renderer *DebugPanelRenderer) Prepare(
 	visible bool,
 	readout PanelReadout,
@@ -233,27 +136,6 @@ func (renderer *DebugPanelRenderer) Prepare(
 }
 
 // Render 在 HUD 与 name tag 之后以屏幕空间透明 pass 绘制调试面板。
-func (renderer *DebugPanelRenderer) Render(encoder gfx.CommandEncoder, target gfx.TextureView) {
-	if len(renderer.layout.quads) == 0 {
-		return
-	}
-	uploadBytes := panelGlyphOffset + len(renderer.layout.glyphs)*panelInstanceBytes
-	renderer.dynamic.Write(0, renderer.upload[:uploadBytes])
-	pass := encoder.BeginRenderPass(gfx.RenderPassDesc{
-		Label: "debug panel pass", ColorView: target, LoadClear: false,
-	})
-	pass.SetBindGroup(0, renderer.bind)
-	pass.SetPipeline(renderer.quadPipeline)
-	pass.Draw(6, uint32(len(renderer.layout.quads)))
-	if len(renderer.layout.glyphs) != 0 {
-		pass.SetPipeline(renderer.glyphPipeline)
-		pass.Draw(6, uint32(len(renderer.layout.glyphs)))
-	}
-	pass.End()
-}
-
-// panelReadoutRows 把权威读数格式化成固定 7 行只读文本：帧时、坐标、朝向、
-// tick、时刻、区块数、模式。数量与顺序由 maxPanelReadoutRows 固定。
 func panelReadoutRows(readout PanelReadout) [maxPanelReadoutRows]PanelRow {
 	return [maxPanelReadoutRows]PanelRow{
 		{Label: "帧时", Value: fmt.Sprintf("%.2f ms", readout.FrameMillis), ReadOnly: true},
@@ -419,28 +301,4 @@ func (renderer *DebugPanelRenderer) dimmedGlyphCount() int {
 		}
 	}
 	return count
-}
-
-// Release 只释放渲染器自有句柄；字形 atlas 与其视图由应用持有。
-func (renderer *DebugPanelRenderer) Release() {
-	if renderer.bind != nil {
-		renderer.bind.Release()
-		renderer.bind = nil
-	}
-	if renderer.glyphPipeline != nil {
-		renderer.glyphPipeline.Release()
-		renderer.glyphPipeline = nil
-	}
-	if renderer.quadPipeline != nil {
-		renderer.quadPipeline.Release()
-		renderer.quadPipeline = nil
-	}
-	if renderer.sampler != nil {
-		renderer.sampler.Release()
-		renderer.sampler = nil
-	}
-	if renderer.dynamic != nil {
-		renderer.dynamic.Release()
-		renderer.dynamic = nil
-	}
 }

@@ -16,7 +16,7 @@ use crate::input::SNAPSHOT_BYTES;
 use crate::window::ClientWindow;
 
 /// 当前 client ABI 版本。
-pub const CLIENT_ABI_VERSION: u32 = 3;
+pub const CLIENT_ABI_VERSION: u32 = 4;
 
 /// 调用成功。
 pub const MORNLEA_CLIENT_STATUS_OK: u32 = 0;
@@ -266,8 +266,8 @@ mod tests {
     // 校验拒绝路径:ABI 版本、参数校验与无效句柄。
 
     #[test]
-    fn abi_version_is_three() {
-        assert_eq!(mornlea_client_abi_version(), 3);
+    fn abi_version_is_four() {
+        assert_eq!(mornlea_client_abi_version(), 4);
     }
 
     #[test]
@@ -378,12 +378,14 @@ mod tests {
 
 // ---- render 入口族(client ABI v2)----
 
-use crate::render::{FrameInput, OffscreenRenderer, RenderCreateError};
+use crate::render::{FrameInput, FrameResult, OffscreenRenderer, RenderCreateError};
 
 /// 本机无可用 GPU 适配器;调用方(测试)应据此跳过而非失败。
 pub const MORNLEA_CLIENT_STATUS_ADAPTER: u32 = 5;
 /// 渲染资源容量不足(face 池或 origin 槽位耗尽)。
 pub const MORNLEA_CLIENT_STATUS_CAPACITY: u32 = 6;
+/// 窗口 surface 本帧不可用(遮挡/过期),调用方跳帧后重试。
+pub const MORNLEA_CLIENT_STATUS_SKIPPED: u32 = 7;
 
 /// render_frame 输入的固定头部字节数;其后是 visible_count×12 的 section 列表。
 const FRAME_HEADER_BYTES: usize = 192;
@@ -672,12 +674,10 @@ pub unsafe extern "C" fn mornlea_client_render_frame(
         let Some(input) = parse_frame(bytes) else {
             return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
         };
-        with_renderer(handle, |renderer| {
-            if renderer.render_frame(&input) {
-                MORNLEA_CLIENT_STATUS_OK
-            } else {
-                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
-            }
+        with_renderer(handle, |renderer| match renderer.render_frame(&input) {
+            FrameResult::Rendered => MORNLEA_CLIENT_STATUS_OK,
+            FrameResult::Skipped => MORNLEA_CLIENT_STATUS_SKIPPED,
+            FrameResult::Invalid => MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT,
         })
     })
 }
@@ -703,8 +703,12 @@ pub unsafe extern "C" fn mornlea_client_render_readback(
             }
             // SAFETY: out 非空且长度已校验,调用方保证可写。
             let out = unsafe { std::slice::from_raw_parts_mut(out, out_len) };
-            renderer.readback(out);
-            MORNLEA_CLIENT_STATUS_OK
+            if renderer.readback(out) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                // 窗口模式不支持回读。
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+            }
         })
     })
 }
@@ -1095,4 +1099,69 @@ mod atlas_ffi_tests {
             MORNLEA_CLIENT_STATUS_OK
         );
     }
+}
+
+/// 创建窗口模式渲染器:`window_handle` 必须是本线程窗口表中的有效句柄
+/// (winit 窗口与其表同线程);渲染器句柄写入 `out_handle` 并存入全局表。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_create_windowed(
+    abi_version: u32,
+    window_handle: u64,
+    out_handle: *mut u64,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if out_handle.is_null() {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        let (window, width, height) = match WINDOWS.with(|windows| {
+            windows.borrow().get(&window_handle).and_then(|entry| {
+                entry.shared_window().map(|window| {
+                    let size = window.inner_size();
+                    (window, size.width.max(1), size.height.max(1))
+                })
+            })
+        }) {
+            Some(parts) => parts,
+            None => return MORNLEA_CLIENT_STATUS_WINDOW,
+        };
+        let renderer = match OffscreenRenderer::new_windowed(window, width, height) {
+            Ok(renderer) => renderer,
+            Err(RenderCreateError::Adapter) => return MORNLEA_CLIENT_STATUS_ADAPTER,
+            Err(RenderCreateError::Device) => return MORNLEA_CLIENT_STATUS_WINDOW,
+        };
+        let handle = NEXT_RENDER_HANDLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        RENDERERS
+            .lock()
+            .expect("渲染器表锁中毒")
+            .get_or_insert_with(HashMap::new)
+            .insert(handle, renderer);
+        // SAFETY: out_handle 已判非空,只在完整成功后写一次。
+        unsafe { out_handle.write(handle) };
+        MORNLEA_CLIENT_STATUS_OK
+    })
+}
+
+/// 调整渲染器输出尺寸:重建 color/depth/HiZ,窗口模式重配 surface。
+#[unsafe(no_mangle)]
+pub extern "C" fn mornlea_client_render_resize(
+    abi_version: u32,
+    handle: u64,
+    width: u32,
+    height: u32,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if width == 0 || height == 0 {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            renderer.resize(width, height);
+            MORNLEA_CLIENT_STATUS_OK
+        })
+    })
 }

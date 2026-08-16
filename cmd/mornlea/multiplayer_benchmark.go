@@ -12,7 +12,6 @@ import (
 
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
 )
@@ -221,42 +220,34 @@ const gpuCompletionChunks = client.ScenarioV12GPUCompletionBatch /
 
 func (probe *multiplayerClientProbe) measureGPUCompletion(app *application) error {
 	avatars, tags := remoteRenderPresentations(probe.roster.Presentations())
-	// 一个样本是一批绘制只等待一次完成的总耗时除以批次数量：
-	// Poll 的固定节拍在样本内只出现一次，被摊薄到可忽略。
+	// 切换到 Rust 渲染器后,一个样本是一批完整 RenderFrame(含提交与完成)
+	// 的总耗时摊到批次数;Poll 的固定节拍在样本内只出现一次,被摊薄到可忽略。
 	for range client.ScenarioV12GPUCompletionSamples {
-		if err := app.nameTagRenderer.Prepare(tags, app.renderer.UploadBudget()); err != nil {
+		if err := app.nameTagRenderer.Prepare(tags, app.scheduler.UploadBudget()); err != nil {
 			return err
 		}
-		commands := make([]gfx.CommandBuffer, 0, gpuCompletionChunks)
-		for range gpuCompletionChunks {
-			encoder := app.dev.CreateCommandEncoder()
-			for range client.ScenarioV12GPUCompletionChunk {
-				if err := app.avatarRenderer.Render(encoder, app.colorView, app.depth.view, render.Camera{
-					ViewProj: app.camera.ViewProj(), Pos: app.camera.Pos,
-				}, avatars); err != nil {
-					for _, command := range commands {
-						command.Release()
-					}
-					return err
-				}
-				app.nameTagRenderer.Render(
-					encoder, app.colorView, app.depth.view, benchmarkBillboardCamera(app),
-				)
-			}
-			commands = append(commands, encoder.Finish())
+		viewProj := app.camera.ViewProj()
+		avatarStream := (&render.InstanceEncoder{}).EncodeAvatarInstances(nil, avatars)
+		billboard := benchmarkBillboardCamera(app)
+		backgrounds, glyphs := app.nameTagRenderer.FrameStreams()
+		frame := client.RenderFrame{
+			ViewProj:        viewProj,
+			ViewProjInv:     viewProj.Inv(),
+			Pos:             app.camera.Pos,
+			Daylight:        1,
+			SkyColor:        [4]float32{0, 0, 0, 1},
+			AvatarInstances: avatarStream,
+			NameTagSegment: client.EncodeQuadSegment(
+				render.EncodeBillboardCameraBytes(nil, billboard), backgrounds, glyphs, 64,
+			),
 		}
 		started := probe.now()
-		app.dev.Submit(commands...)
-		app.dev.Poll(true)
-		probe.gpuComplete.Add(probe.now().Sub(started) / client.ScenarioV12GPUCompletionBatch)
-		for _, command := range commands {
-			command.Release()
+		for range client.ScenarioV12GPUCompletionBatch {
+			app.renderer.RenderFrame(frame)
 		}
-		// 计时区间之外再推进一次设备队列，确保本样本的 command buffer 被回收，
-		// 不会累积到下一个样本触发 Metal 的预算上限。
-		app.dev.Poll(true)
-		// 每个样本都回收：ru_maxrss 是进程生命周期的历史峰值，一旦被推高就无法
-		// 降回，因此必须阻止批量分摊产生的对象在采样过程中累积。
+		probe.gpuComplete.Add(probe.now().Sub(started) / client.ScenarioV12GPUCompletionBatch)
+		// 每个样本都回收:ru_maxrss 是进程生命周期的历史峰值,必须阻止
+		// 采样过程中的对象累积。
 		runtime.GC()
 	}
 	return nil

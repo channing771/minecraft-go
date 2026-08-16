@@ -7,34 +7,40 @@ package render
 // 字节流暴露给平行 Rust 渲染器的帧装配。所有函数只是既有内部逻辑的
 // 复用出口,不改变任何渲染行为。
 
+// InstanceEncoder 持有实例编码的复用缓冲:热路径(每帧编码)零分配。
+type InstanceEncoder struct {
+	ordered []Avatar
+	parts   []avatarPart
+}
+
 // EncodeAvatarInstances 把插值后的 avatars 编码为 80 字节/实例的字节流,
 // 与 AvatarRenderer.Render 的内部编码逐字节一致。dst 会被重置复用。
-func EncodeAvatarInstances(dst []byte, avatars []Avatar) []byte {
-	ordered := orderedAvatarsInto(nil, avatars)
-	parts := buildOrderedAvatarParts(nil, ordered)
-	dst = growEncodeBuffer(dst, len(parts)*avatarInstanceBytes)
-	encodeAvatarPartsInto(dst, parts)
+func (e *InstanceEncoder) EncodeAvatarInstances(dst []byte, avatars []Avatar) []byte {
+	e.ordered = orderedAvatarsInto(e.ordered[:0], avatars)
+	e.parts = buildOrderedAvatarParts(e.parts[:0], e.ordered)
+	dst = growEncodeBuffer(dst, len(e.parts)*avatarInstanceBytes)
+	encodeAvatarPartsInto(dst, e.parts)
 	return dst
 }
 
 // EncodeItemDropInstances 把掉落物编码为 80 字节/实例的字节流,
 // 与 ItemDropRenderer.Render 的内部编码逐字节一致。
-func EncodeItemDropInstances(dst []byte, serverTick uint64, drops []ItemDrop) []byte {
-	parts := buildItemDropParts(nil, serverTick, drops)
-	dst = growEncodeBuffer(dst, len(parts)*avatarInstanceBytes)
-	encodeAvatarPartsInto(dst, parts)
+func (e *InstanceEncoder) EncodeItemDropInstances(dst []byte, serverTick uint64, drops []ItemDrop) []byte {
+	e.parts = buildItemDropParts(e.parts[:0], serverTick, drops)
+	dst = growEncodeBuffer(dst, len(e.parts)*avatarInstanceBytes)
+	encodeAvatarPartsInto(dst, e.parts)
 	return dst
 }
 
 // EncodeBlockOutlineInstances 把目标方块轮廓编码为 12×80 字节实例流;
 // 不可见时返回空。
-func EncodeBlockOutlineInstances(dst []byte, outline BlockOutline) []byte {
+func (e *InstanceEncoder) EncodeBlockOutlineInstances(dst []byte, outline BlockOutline) []byte {
 	if !outline.Visible {
 		return dst[:0]
 	}
-	parts := buildBlockOutlineParts(nil, outline.Position)
-	dst = growEncodeBuffer(dst, len(parts)*avatarInstanceBytes)
-	encodeAvatarPartsInto(dst, parts)
+	e.parts = buildBlockOutlineParts(e.parts[:0], outline.Position)
+	dst = growEncodeBuffer(dst, len(e.parts)*avatarInstanceBytes)
+	encodeAvatarPartsInto(dst, e.parts)
 	return dst
 }
 
@@ -65,12 +71,6 @@ func (renderer *DebugPanelRenderer) FrameStreams() (viewport, quads, glyphs []by
 	return viewport, quads, glyphs
 }
 
-// AtlasPixels 回读整张字形图集(R8,1024×1024),供平行渲染器同步同一份
-// 字形内容。仅测试与装配路径使用。
-func (atlas *GlyphAtlas) AtlasPixels() []byte {
-	return atlas.texture.ReadLayer(0, 0)
-}
-
 // GlyphAtlasSize 导出字形图集边长,供装配方校验。
 const GlyphAtlasSize = glyphAtlasSize
 
@@ -79,4 +79,30 @@ func growEncodeBuffer(dst []byte, size int) []byte {
 		return make([]byte, size)
 	}
 	return dst[:size]
+}
+
+// NewNameTagLayouter 创建 layout-only 的名牌 renderer:只支持 Prepare 与
+// FrameStreams,不创建任何 GPU 资源(生产切换后由 Rust 渲染器绘制)。
+func NewNameTagLayouter(atlas GlyphSource) *NameTagRenderer {
+	return &NameTagRenderer{
+		atlas:   atlas,
+		ordered: make([]NameTag, 0, maxNameTags),
+		upload:  make([]byte, nameTagUploadBytes),
+		layout: nameTagLayout{
+			glyphs:      make([]nameTagGlyph, 0, maxNameTagGlyphs),
+			backgrounds: make([]nameTagBackground, 0, maxNameTags),
+		},
+	}
+}
+
+// NewDebugPanelLayouter 创建 layout-only 的调试面板 renderer,同上。
+func NewDebugPanelLayouter(atlas GlyphSource) *DebugPanelRenderer {
+	return &DebugPanelRenderer{
+		atlas:  atlas,
+		upload: make([]byte, panelUploadBytes),
+		layout: panelLayout{
+			quads:  make([]panelInstance, 0, maxPanelQuads),
+			glyphs: make([]panelInstance, 0, maxPanelGlyphs),
+		},
+	}
 }

@@ -3,10 +3,6 @@
 package main
 
 import (
-	"encoding/binary"
-	"math"
-	"reflect"
-	"slices"
 	"testing"
 	"time"
 
@@ -15,7 +11,6 @@ import (
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
 )
@@ -84,8 +79,8 @@ func applyDamageFeedbackHealth(t *testing.T, app *application, tick uint64, heal
 
 func TestApplicationDamageOverlayUsesConfirmedHealthAndStaysBelowHUD(t *testing.T) {
 	glyphs := &integrationGlyphSource{}
-	app, device := newRemoteRenderApplication(t, glyphs)
-	app.debugPanelRenderer = render.NewDebugPanelRenderer(device, gfx.FormatRGBA8Unorm, glyphs)
+	app := newRemoteRenderApplication(t, glyphs)
+	app.debugPanelRenderer = render.NewDebugPanelLayouter(glyphs)
 	app.panel = newPanelStateFromActive(config.Defaults().Render)
 	app.panel.visible = true
 	if err := app.remotePlayers.Apply(remoteSpawn(1, "Remote-1", 1, mgl32.Vec3{1, 2, 3})); err != nil {
@@ -104,48 +99,33 @@ func TestApplicationDamageOverlayUsesConfirmedHealthAndStaysBelowHUD(t *testing.
 	if rendered, err := app.frame(0, 1, 0); err != nil || !rendered {
 		t.Fatalf("建立基线 frame=(%v,%v)", rendered, err)
 	}
-	if contains := slices.Contains(device.lastPasses(), "damage overlay pass"); contains {
-		t.Fatalf("首次确认误画 overlay: %v", device.lastPasses())
+	if app.damageStrength != 0 {
+		t.Fatalf("首次确认误画 overlay: strength=%v", app.damageStrength)
 	}
 
 	applyDamageFeedbackHealth(t, app, 2, 7, true)
-	device.resetPasses()
 	if rendered, err := app.frame(0, 1, time.Second); err != nil || !rendered {
 		t.Fatalf("确认受伤 frame=(%v,%v)", rendered, err)
 	}
-	want := []string{
-		"terrain pass", "avatar pass", "name-tag pass", "damage overlay pass",
-		"hotbar pass", "debug panel pass",
-	}
-	if got := device.lastPasses(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("passes=%v，想要 %v", got, want)
-	}
-	strength := math.Float32frombits(binary.LittleEndian.Uint32(
-		device.bufferByLabel(t, "damage overlay uniform").lastWrite[:4],
-	))
-	if strength != 1 {
-		t.Fatalf("受伤当帧 strength=%v，想要 1", strength)
+	// 受伤当帧 overlay 强度进帧协议;强度值即旧 uniform 首 4 字节。
+	if app.damageStrength != 1 {
+		t.Fatalf("受伤当帧 strength=%v，想要 1", app.damageStrength)
 	}
 
 	applyDamageFeedbackHealth(t, app, 3, 8, true)
-	device.resetPasses()
 	if rendered, err := app.frame(0, 1, 90*time.Millisecond); err != nil || !rendered {
 		t.Fatalf("回复期间淡出 frame=(%v,%v)", rendered, err)
 	}
-	strength = math.Float32frombits(binary.LittleEndian.Uint32(
-		device.bufferByLabel(t, "damage overlay uniform").lastWrite[:4],
-	))
-	if strength != 0.5 {
-		t.Fatalf("回复不得重启反馈，90ms strength=%v，想要 0.5", strength)
+	if app.damageStrength != 0.5 {
+		t.Fatalf("回复不得重启反馈，90ms strength=%v，想要 0.5", app.damageStrength)
 	}
 
 	applyDamageFeedbackHealth(t, app, 4, 0, false)
-	device.resetPasses()
 	if rendered, err := app.frame(0, 1, 0); err != nil || !rendered {
 		t.Fatalf("not-ready frame=(%v,%v)", rendered, err)
 	}
-	if slices.Contains(device.lastPasses(), "damage overlay pass") {
-		t.Fatalf("not-ready 后仍画 overlay: %v", device.lastPasses())
+	if app.damageStrength != 0 {
+		t.Fatalf("not-ready 后仍画 overlay: strength=%v", app.damageStrength)
 	}
 }
 

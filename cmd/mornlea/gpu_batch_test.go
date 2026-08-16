@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 )
 
 func TestScenarioV12GPUCompletionAmortizesOverFixedBatch(t *testing.T) {
-	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	probe, err := newMultiplayerClientProbe(app)
 	if err != nil {
 		t.Fatal(err)
@@ -21,11 +20,10 @@ func TestScenarioV12GPUCompletionAmortizesOverFixedBatch(t *testing.T) {
 	// 每次读钟推进 1ms：一批的总耗时因此恒为 1ms，样本值必须是 1ms / 批次数量。
 	clockReads := 0
 	probe.now = func() time.Time {
-		dev.events = append(dev.events, "now")
 		clockReads++
 		return time.Unix(0, int64(clockReads)*int64(time.Millisecond))
 	}
-	dev.events = nil
+	framesBefore := app.renderer.FrameCalls()
 	if err := probe.measureGPUCompletion(app); err != nil {
 		t.Fatal(err)
 	}
@@ -40,25 +38,13 @@ func TestScenarioV12GPUCompletionAmortizesOverFixedBatch(t *testing.T) {
 		t.Fatalf("样本 p50 = %v ms，想要摊薄后的 %v ms", summary.P50MS, wantMS)
 	}
 
-	// 每个样本只允许一次 submit/poll 与一对读钟；编码、标签准备与释放都在区间外。
-	chunks := client.ScenarioV12GPUCompletionBatch / client.ScenarioV12GPUCompletionChunk
-	want := make([]string, 0, chunks*2+4)
-	for range chunks {
-		want = append(want, "finish")
+	// 每个样本恰好一批 RenderFrame 与一对读钟;准备与编码都在计时区间外。
+	wantFrames := client.ScenarioV12GPUCompletionSamples * client.ScenarioV12GPUCompletionBatch
+	if got := app.renderer.FrameCalls() - framesBefore; got != wantFrames {
+		t.Fatalf("GPU completion render FFI=%d,想要 %d", got, wantFrames)
 	}
-	want = append(want, "now", "submit", "poll", "now")
-	for range chunks {
-		want = append(want, "release")
-	}
-	want = append(want, "poll")
-	if got, expected := len(dev.events), client.ScenarioV12GPUCompletionSamples*len(want); got != expected {
-		t.Fatalf("GPU 事件数 = %d，想要 %d", got, expected)
-	}
-	for sample := range client.ScenarioV12GPUCompletionSamples {
-		start := sample * len(want)
-		if got := dev.events[start : start+len(want)]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("样本 %d 事件 = %v，想要 %v", sample, got, want)
-		}
+	if clockReads != client.ScenarioV12GPUCompletionSamples*2 {
+		t.Fatalf("读钟=%d,想要每样本一对(%d)", clockReads, client.ScenarioV12GPUCompletionSamples*2)
 	}
 }
 
@@ -94,7 +80,7 @@ func TestScenarioV12GPUCompletionBatchIsLargeEnoughToAmortizePollTick(t *testing
 }
 
 func TestScenarioV12GPUCompletionBatchIsRecordedInReport(t *testing.T) {
-	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	probe, err := newMultiplayerClientProbe(app)
 	if err != nil {
 		t.Fatal(err)

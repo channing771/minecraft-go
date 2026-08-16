@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/render"
 )
 
@@ -124,8 +123,6 @@ func (atlas *fakeNameTagAtlas) Glyph(char rune) render.Glyph {
 
 func (*fakeNameTagAtlas) Kern(rune, rune) float32 { return 0 }
 
-func (atlas *fakeNameTagAtlas) TextureView() gfx.TextureView { return atlas.view }
-
 type allocationGlyphSource struct {
 	requestCount int
 	flushErr     error
@@ -143,87 +140,7 @@ func (*allocationGlyphSource) Glyph(rune) render.Glyph {
 	return render.Glyph{Advance: 8, BearingX: 1, BearingY: 10, Width: 7, Height: 12}
 }
 
-func (*allocationGlyphSource) Kern(rune, rune) float32      { return 0.25 }
-func (*allocationGlyphSource) TextureView() gfx.TextureView { return nil }
-
-type nameTagTestDevice struct {
-	buffers       []*nameTagTestBuffer
-	pipelineDescs []gfx.RenderPipelineDesc
-	pipelines     []*nameTagTestPipeline
-	textures      []*nameTagTestTexture
-	bind          *nameTagTestBindGroup
-	sampler       *nameTagTestSampler
-}
-
-func (d *nameTagTestDevice) CreateBuffer(desc gfx.BufferDesc) gfx.Buffer {
-	buffer := &nameTagTestBuffer{desc: desc}
-	d.buffers = append(d.buffers, buffer)
-	return buffer
-}
-
-func (*nameTagTestDevice) CreateShaderModule(string) gfx.ShaderModule { return &nameTagTestShader{} }
-
-func (d *nameTagTestDevice) CreateRenderPipeline(desc gfx.RenderPipelineDesc) gfx.RenderPipeline {
-	pipeline := &nameTagTestPipeline{label: desc.Label}
-	d.pipelineDescs = append(d.pipelineDescs, desc)
-	d.pipelines = append(d.pipelines, pipeline)
-	return pipeline
-}
-
-func (*nameTagTestDevice) CreateComputePipeline(gfx.ComputePipelineDesc) gfx.ComputePipeline {
-	panic("unexpected compute pipeline")
-}
-
-func (d *nameTagTestDevice) CreateBindGroup(gfx.BindGroupDesc) gfx.BindGroup {
-	d.bind = &nameTagTestBindGroup{}
-	return d.bind
-}
-
-func (d *nameTagTestDevice) CreateTexture(desc gfx.TextureDesc) gfx.Texture {
-	texture := &nameTagTestTexture{desc: desc, view: &nameTagTestView{}}
-	d.textures = append(d.textures, texture)
-	return texture
-}
-
-func (d *nameTagTestDevice) CreateSampler(gfx.SamplerDesc) gfx.Sampler {
-	d.sampler = &nameTagTestSampler{}
-	return d.sampler
-}
-
-func (*nameTagTestDevice) CreateCommandEncoder() gfx.CommandEncoder {
-	panic("unexpected encoder")
-}
-func (*nameTagTestDevice) Submit(...gfx.CommandBuffer) {}
-func (*nameTagTestDevice) Poll(bool)                   {}
-func (*nameTagTestDevice) Release()                    {}
-
-func (d *nameTagTestDevice) bufferByLabel(t *testing.T, label string) *nameTagTestBuffer {
-	t.Helper()
-	for _, buffer := range d.buffers {
-		if buffer.desc.Label == label {
-			return buffer
-		}
-	}
-	t.Fatalf("buffer %q was not created", label)
-	return nil
-}
-
-type nameTagTestBuffer struct {
-	desc      gfx.BufferDesc
-	lastWrite []byte
-	writes    int
-	releases  int
-}
-
-func (b *nameTagTestBuffer) Size() uint64 { return b.desc.Size }
-
-func (b *nameTagTestBuffer) Write(_ uint64, data []byte) {
-	b.lastWrite = append(b.lastWrite[:0], data...)
-	b.writes++
-}
-
-func (*nameTagTestBuffer) ReadBack() []byte { panic("unexpected readback") }
-func (b *nameTagTestBuffer) Release()       { b.releases++ }
+func (*allocationGlyphSource) Kern(rune, rune) float32 { return 0.25 }
 
 type nameTagTestShader struct{}
 
@@ -243,82 +160,6 @@ func (group *nameTagTestBindGroup) Release() { group.releases++ }
 type nameTagTestSampler struct{ releases int }
 
 func (sampler *nameTagTestSampler) Release() { sampler.releases++ }
-
-type nameTagTestTexture struct {
-	desc     gfx.TextureDesc
-	view     *nameTagTestView
-	pixels   []byte
-	releases int
-}
-
-func (texture *nameTagTestTexture) View(gfx.TextureViewDesc) gfx.TextureView {
-	return texture.view
-}
-
-func (texture *nameTagTestTexture) WriteLayer(_ uint32, _ uint32, pixels []byte) {
-	texture.pixels = append(texture.pixels[:0], pixels...)
-}
-
-func (*nameTagTestTexture) WriteRegion(uint32, uint32, uint32, uint32, uint32, uint32, []byte) {
-	panic("unexpected texture region")
-}
-
-func (*nameTagTestTexture) ReadLayer(uint32, uint32) []byte {
-	panic("unexpected texture read")
-}
-
-func (texture *nameTagTestTexture) Release() { texture.releases++ }
-
-type nameTagTestEncoder struct {
-	passes []*nameTagTestPass
-}
-
-func (encoder *nameTagTestEncoder) BeginRenderPass(desc gfx.RenderPassDesc) gfx.RenderPass {
-	pass := &nameTagTestPass{desc: desc}
-	encoder.passes = append(encoder.passes, pass)
-	return pass
-}
-
-func (*nameTagTestEncoder) BeginComputePass(string) gfx.ComputePass {
-	panic("unexpected compute pass")
-}
-
-func (*nameTagTestEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {
-	panic("unexpected buffer copy")
-}
-
-func (*nameTagTestEncoder) Finish() gfx.CommandBuffer {
-	panic("unexpected finish")
-}
-
-type nameTagTestPass struct {
-	desc           gfx.RenderPassDesc
-	pipelineLabels []string
-	drawInstances  []uint32
-	ended          bool
-}
-
-func (pass *nameTagTestPass) SetPipeline(pipeline gfx.RenderPipeline) {
-	pass.pipelineLabels = append(pass.pipelineLabels, pipeline.(*nameTagTestPipeline).label)
-}
-
-func (*nameTagTestPass) SetBindGroup(uint32, gfx.BindGroup)         {}
-func (*nameTagTestPass) SetVertexBuffer(uint32, gfx.Buffer, uint64) {}
-func (*nameTagTestPass) SetIndexBuffer(gfx.Buffer, uint64) {
-	panic("unexpected index buffer")
-}
-func (*nameTagTestPass) DrawIndexedIndirect(gfx.Buffer, uint64) {
-	panic("unexpected indirect draw")
-}
-
-func (pass *nameTagTestPass) Draw(vertices, instances uint32) {
-	if vertices != 6 {
-		panic("hotbar quad did not use six vertices")
-	}
-	pass.drawInstances = append(pass.drawInstances, instances)
-}
-
-func (pass *nameTagTestPass) End() { pass.ended = true }
 
 type nameTagTestView struct {
 	releases int

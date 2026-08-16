@@ -4,8 +4,6 @@ package assets
 
 import (
 	"testing"
-
-	"github.com/channing771/mornlea/internal/gfx"
 )
 
 func TestDownsampleHalvesSizeAndAveragesRGBA(t *testing.T) {
@@ -71,20 +69,4 @@ func TestDownsampleMipChainEndsAtOnePixel(t *testing.T) {
 			t.Fatalf("mip %dx%d 长度 = %d", size, size, len(px))
 		}
 	}
-}
-
-func TestUploadToHeadlessGPU(t *testing.T) {
-	dev, err := gfx.NewHeadlessDevice()
-	if err != nil {
-		t.Skipf("本机无可用 GPU 适配器: %v", err)
-	}
-	defer dev.Release()
-
-	tex, sampler := NewRegistry().UploadTo(dev)
-	defer tex.Release()
-	defer sampler.Release()
-
-	view := tex.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2DArray})
-	view.Release()
-	dev.Poll(true)
 }

@@ -19,7 +19,7 @@ import (
 // continue after a glyph worker failure instead of returning it immediately.
 func TestRunInteractivePropagatesRemoteGlyphError(t *testing.T) {
 	wantErr := errors.New("interactive glyph worker failure")
-	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{flushErr: wantErr})
+	app := newRemoteRenderApplication(t, &integrationGlyphSource{flushErr: wantErr})
 	app.window = &oneFrameInteractiveWindow{delay: 25 * time.Millisecond}
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(4)
 	app.clientEndpoint = clientEndpoint

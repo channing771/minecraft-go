@@ -16,7 +16,6 @@ import (
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/server"
 	"github.com/channing771/mornlea/internal/storage"
@@ -200,11 +199,10 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	t.Cleanup(func() { _ = rawEndpoint.Close() })
 	stream := &connectionTestClientStream{}
 	window := &connectionTestWindow{}
-	surface := &connectionTestSurface{}
 	loginComplete := false
 	windowCalls := 0
 	windowTitle := ""
-	deviceCalls := 0
+	rendererCalls := 0
 	dependencies := connectionTestDependencies(t)
 	dependencies.dialTCP = func(context.Context, string) (network.ClientPacketStream, error) {
 		return stream, nil
@@ -228,17 +226,16 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 		}
 		return window, nil
 	}
-	dependencies.newDevice = func(
-		gfx.NativeWindowHandle,
-		uint32,
-		uint32,
-	) (gfx.Device, gfx.Surface, error) {
-		deviceCalls++
+	dependencies.newWindowedRenderer = func(applicationWindow) (*client.Renderer, error) {
+		rendererCalls++
 		if !loginComplete || windowCalls != 1 {
-			t.Fatal("device created before remote login and window")
+			t.Fatal("renderer created before remote login and window")
 		}
-		device, err := gfx.NewHeadlessDevice()
-		return device, surface, err
+		renderer, err := client.NewRenderer(64, 64)
+		if errors.Is(err, client.ErrNoGPUAdapter) {
+			t.Skip("无 GPU 适配器")
+		}
+		return renderer, err
 	}
 
 	app, err := newApplicationWithDependencies(remoteConnectionOptions(), dependencies)
@@ -254,12 +251,12 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	if app.host != nil || app.serverCancel != nil || app.serverDone != nil {
 		t.Fatalf("remote application acquired local Host lifecycle: host=%v cancel=%v done=%v", app.host, app.serverCancel, app.serverDone)
 	}
-	if app.blockOutlineRenderer == nil || len(app.remoteNameTags) != 0 || cap(app.remoteNameTags) != maxFrameNameTags {
-		t.Fatalf("remote target feedback renderer/tags=%v/%d/%d，想要非 nil/0/%d",
-			app.blockOutlineRenderer != nil, len(app.remoteNameTags), cap(app.remoteNameTags), maxFrameNameTags)
+	if len(app.remoteNameTags) != 0 || cap(app.remoteNameTags) != maxFrameNameTags {
+		t.Fatalf("remote target feedback tags=%d/%d，想要 0/%d",
+			len(app.remoteNameTags), cap(app.remoteNameTags), maxFrameNameTags)
 	}
-	if windowCalls != 1 || deviceCalls != 1 {
-		t.Fatalf("remote success graphics calls window=%d device=%d, want 1/1", windowCalls, deviceCalls)
+	if windowCalls != 1 || rendererCalls != 1 {
+		t.Fatalf("remote success graphics calls window=%d renderer=%d, want 1/1", windowCalls, rendererCalls)
 	}
 	if windowTitle != "Mornlea — M3C multiplayer world" {
 		t.Fatalf("interactive window title = %q, want M3C title", windowTitle)
@@ -275,9 +272,6 @@ func TestApplicationConnectionRemoteLoginSuccessReturnsOwnedApplicationAfterGrap
 	}
 	if got := window.closeCalls.Load(); got != 1 {
 		t.Fatalf("remote application window Close calls=%d, want 1", got)
-	}
-	if got := surface.releaseCalls.Load(); got != 1 {
-		t.Fatalf("remote application surface Release calls=%d, want 1", got)
 	}
 }
 
@@ -583,23 +577,8 @@ type connectionTestWindow struct {
 	closeCalls atomic.Int32
 }
 
-func (*connectionTestWindow) NativeHandle() gfx.NativeWindowHandle {
-	return gfx.NativeWindowHandle{}
-}
-
 func (window *connectionTestWindow) Close() {
 	window.closeCalls.Add(1)
-}
-
-type connectionTestSurface struct{ releaseCalls atomic.Int32 }
-
-func (*connectionTestSurface) Acquire() gfx.TextureView             { return nil }
-func (*connectionTestSurface) Present()                             {}
-func (*connectionTestSurface) SetPresentMode(gfx.PresentMode) error { return nil }
-func (*connectionTestSurface) Resize(uint32, uint32)                {}
-func (*connectionTestSurface) Format() gfx.TextureFormat            { return gfx.FormatBGRA8UnormSrgb }
-func (surface *connectionTestSurface) Release() {
-	surface.releaseCalls.Add(1)
 }
 
 type connectionTestServerStream struct{ closeCalls atomic.Int32 }
@@ -842,7 +821,7 @@ func TestApplicationAdvancesCompanionsExactlyOnceInFrameAndInteractiveLoops(t *t
 	})
 
 	t.Run("interactive", func(t *testing.T) {
-		app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+		app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 		app.companions = &client.Companions{}
 		app.chatEvents = &client.ChatEvents{}
 		clientEndpoint, serverEndpoint := network.NewMemoryPair(4)

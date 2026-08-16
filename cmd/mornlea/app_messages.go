@@ -200,7 +200,7 @@ func (a *application) drainServerMessages(maxMessages int) {
 			if key.Dimension != core.Overworld {
 				continue
 			}
-			a.renderer.DropSection(key.Pos)
+			a.scheduler.QueueSection(key.Pos, nil)
 			if key.Pos.Y == 0 {
 				a.mesher.ForgetChunk(key.Dimension, core.ChunkPos{X: key.Pos.X, Z: key.Pos.Z})
 			}

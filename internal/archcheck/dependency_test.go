@@ -19,9 +19,7 @@ var allowed = map[string][]string{
 	"internal/nativeabi":  {},
 	"internal/config":     {"internal/companion", "internal/core", "internal/physics", "internal/sim", "internal/logging"},
 	"internal/physics":    {"internal/core", "internal/nativeabi"},
-	"internal/gfx":        {},
 	"internal/logging":    {},
-	"internal/gfx/shader": {},
 	"internal/network":    {"internal/companion", "internal/core"},
 	"internal/profile":    {"internal/core"},
 	"internal/sim":        {"internal/companion", "internal/core", "internal/physics", "internal/world"},
@@ -29,11 +27,11 @@ var allowed = map[string][]string{
 	"internal/world":      {"internal/core"},
 	"internal/worldgen":   {"internal/core", "internal/world", "internal/nativeabi"},
 	"internal/mesh":       {"internal/core", "internal/world", "internal/nativeabi"},
-	"internal/assets":     {"internal/core", "internal/world", "internal/mesh", "internal/worldgen", "internal/gfx"},
-	"internal/render":     {"internal/core", "internal/world", "internal/mesh", "internal/assets", "internal/gfx"},
-	"internal/render/hud": {"internal/core", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
+	"internal/assets":     {"internal/core", "internal/world", "internal/mesh", "internal/worldgen"},
+	"internal/render":     {"internal/core", "internal/world", "internal/mesh", "internal/assets"},
+	"internal/render/hud": {"internal/core", "internal/mesh", "internal/assets", "internal/render"},
 	"internal/server":     {"internal/companion", "internal/core", "internal/network", "internal/physics", "internal/world", "internal/worldgen", "internal/sim", "internal/storage"},
-	"internal/client":     {"internal/companion", "internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
+	"internal/client":     {"internal/companion", "internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets", "internal/render"},
 }
 
 func TestInternalDependenciesAreOneWay(t *testing.T) {

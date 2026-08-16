@@ -100,7 +100,7 @@ func goFiles(t *testing.T, root string) []string {
 	return files
 }
 
-func TestOnlyGfxImportsWebGPU(t *testing.T) {
+func TestNoPackageImportsWebGPU(t *testing.T) {
 	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}}|{{join .Imports \" \"}}", "./...")
 	cmd.Dir = moduleRoot(t)
 	out, err := cmd.Output()
@@ -113,8 +113,8 @@ func TestOnlyGfxImportsWebGPU(t *testing.T) {
 			continue
 		}
 		for _, imported := range strings.Fields(parts[1]) {
-			if strings.Contains(imported, "webgpu") && parts[0] != "github.com/channing771/mornlea/internal/gfx" {
-				t.Errorf("%s 直接 import 了 WebGPU 绑定，只有 internal/gfx 可以", parts[0])
+			if strings.Contains(imported, "webgpu") {
+				t.Errorf("%s import 了 WebGPU 绑定;R2c 后 GPU 只经 Rust mornlea_client,全仓禁止 Go WebGPU 绑定", parts[0])
 			}
 		}
 	}

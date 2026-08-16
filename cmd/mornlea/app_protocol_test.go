@@ -147,7 +147,7 @@ func TestFrameAdvancesRemotePlayersOnceAfterDrain(t *testing.T) {
 }
 
 func TestFrameKeepsMesherWorkBoundIndependentFromMessageDrain(t *testing.T) {
-	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	sections := make([]network.SectionData, core.SectionsPerChunk)
 	for index := range sections {
 		sections[index] = network.SectionData{
