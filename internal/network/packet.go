@@ -7,8 +7,8 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// ProtocolVersion 是 M5A 唯一支持的协议版本。
-const ProtocolVersion uint32 = 16
+// ProtocolVersion 是当前唯一支持的协议版本；v17 追加任务生命周期枚举并拒绝 v16 及更早登录。
+const ProtocolVersion uint32 = 17
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8

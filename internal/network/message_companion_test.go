@@ -72,6 +72,220 @@ func TestCompanionMessageIDsAreAppendOnly(t *testing.T) {
 	}
 }
 
+func TestChatEventTaskEnumsAreFrozen(t *testing.T) {
+	// v17 在既有 kind 1..2 之后追加任务生命周期 kind 3..7；未知 kind 8 仍非法。
+	kinds := []struct {
+		name string
+		got  ChatEventKind
+		want uint8
+	}{
+		{"accepted", ChatEventAccepted, 1},
+		{"rejected", ChatEventRejected, 2},
+		{"task started", ChatEventTaskStarted, 3},
+		{"task progress", ChatEventTaskProgress, 4},
+		{"task completed", ChatEventTaskCompleted, 5},
+		{"task failed", ChatEventTaskFailed, 6},
+		{"task timed out", ChatEventTaskTimedOut, 7},
+	}
+	for _, kind := range kinds {
+		if uint8(kind.got) != kind.want {
+			t.Fatalf("%s kind = %d, want %d", kind.name, kind.got, kind.want)
+		}
+	}
+
+	// QueueFull 取 4：值 3 预留，拒绝原因保留 0..15 的编号空间。
+	reasons := []struct {
+		name string
+		got  ChatRejectReason
+		want uint8
+	}{
+		{"none", ChatRejectNone, 0},
+		{"invalid format", ChatRejectInvalidFormat, 1},
+		{"unknown companion", ChatRejectUnknownCompanion, 2},
+		{"queue full", ChatRejectQueueFull, 4},
+	}
+	for _, reason := range reasons {
+		if uint8(reason.got) != reason.want {
+			t.Fatalf("%s reject reason = %d, want %d", reason.name, reason.got, reason.want)
+		}
+	}
+
+	// TaskFailReason 与拒绝原因共用 reason 槽位，从 16 起错开区间。
+	failReasons := []struct {
+		name string
+		got  TaskFailReason
+		want uint8
+	}{
+		{"planner unavailable", TaskFailPlannerUnavailable, 16},
+		{"invalid plan", TaskFailInvalidPlan, 17},
+		{"path unreachable", TaskFailPathUnreachable, 18},
+		{"world changed", TaskFailWorldChanged, 19},
+	}
+	for _, reason := range failReasons {
+		if uint8(reason.got) != reason.want {
+			t.Fatalf("%s task fail reason = %d, want %d", reason.name, reason.got, reason.want)
+		}
+	}
+}
+
+func TestChatEventTaskLifecycleCombinationsValidateAndRoundTrip(t *testing.T) {
+	// 任务事件必须携带完整伙伴身份与原始指令；TaskFailed 额外要求固定失败原因枚举，
+	// QueueFull 拒绝事件携带与 Accepted 相同的身份与指令。
+	valid := []ChatEvent{
+		taskChatEvent(2, ChatEventTaskStarted, ChatRejectNone),
+		taskChatEvent(3, ChatEventTaskProgress, ChatRejectNone),
+		taskChatEvent(4, ChatEventTaskCompleted, ChatRejectNone),
+		taskChatEvent(5, ChatEventTaskTimedOut, ChatRejectNone),
+		taskChatEvent(6, ChatEventTaskFailed, ChatRejectReason(TaskFailPlannerUnavailable)),
+		taskChatEvent(7, ChatEventTaskFailed, ChatRejectReason(TaskFailInvalidPlan)),
+		taskChatEvent(8, ChatEventTaskFailed, ChatRejectReason(TaskFailPathUnreachable)),
+		taskChatEvent(9, ChatEventTaskFailed, ChatRejectReason(TaskFailWorldChanged)),
+		taskChatEvent(10, ChatEventRejected, ChatRejectQueueFull),
+	}
+	for _, event := range valid {
+		if err := event.Validate(); err != nil {
+			t.Fatalf("合法任务事件 %d/%d 被拒绝: %v", event.Kind, event.RejectReason, err)
+		}
+		packetID, payload, err := encodeServerControlPayload(StatePlay, event)
+		if err != nil || packetID != 16 {
+			t.Fatalf("任务事件编码 = (%d,%d,%v)", packetID, len(payload), err)
+		}
+		decoded, err := decodeServerControlPayload(StatePlay, packetID, payload)
+		if err != nil || !reflect.DeepEqual(decoded, event) {
+			t.Fatalf("任务事件往返 = %#v, %v，想要 %#v", decoded, err, event)
+		}
+	}
+}
+
+func TestChatEventTaskLifecycleCombinationsAreRejectedAtomically(t *testing.T) {
+	// 任一字段不合要求即整体拒绝：不存在"部分应用"的组合。
+	invalid := []interface{ Validate() error }{
+		// 非 TaskFailed 的任务 kind 携带任何 reason 都非法。
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskStarted, ChatRejectNone), func(e *ChatEvent) { e.RejectReason = ChatRejectInvalidFormat }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskProgress, ChatRejectNone), func(e *ChatEvent) { e.RejectReason = ChatRejectQueueFull }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskCompleted, ChatRejectNone), func(e *ChatEvent) { e.RejectReason = ChatRejectReason(TaskFailInvalidPlan) }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskTimedOut, ChatRejectNone), func(e *ChatEvent) { e.RejectReason = ChatRejectReason(TaskFailWorldChanged) }),
+		// 任务事件缺少伙伴身份。
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskStarted, ChatRejectNone), func(e *ChatEvent) { e.CompanionID = companion.ID{} }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskFailed, ChatRejectReason(TaskFailPlannerUnavailable)), func(e *ChatEvent) { e.CompanionID = companion.ID{} }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskProgress, ChatRejectNone), func(e *ChatEvent) { e.CompanionName = "" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskCompleted, ChatRejectNone), func(e *ChatEvent) { e.CompanionName = " A" }),
+		// 任务事件缺少合法原始指令。
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskStarted, ChatRejectNone), func(e *ChatEvent) { e.Command = "" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskTimedOut, ChatRejectNone), func(e *ChatEvent) { e.Command = " x" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskFailed, ChatRejectReason(TaskFailPathUnreachable)), func(e *ChatEvent) { e.Command = "x " }),
+		// TaskFailed 原因必须落在 16..19 固定枚举内。
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskFailed, ChatRejectNone), func(e *ChatEvent) {}),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskFailed, ChatRejectInvalidFormat), func(e *ChatEvent) {}),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskFailed, ChatRejectUnknownCompanion), func(e *ChatEvent) {}),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskFailed, ChatRejectQueueFull), func(e *ChatEvent) {}),
+		ChatEvent{EventID: 1, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
+			CompanionID: testCompanionID(1), CompanionName: "A", Kind: ChatEventTaskFailed,
+			RejectReason: ChatRejectReason(15), Command: "x"},
+		ChatEvent{EventID: 1, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
+			CompanionID: testCompanionID(1), CompanionName: "A", Kind: ChatEventTaskFailed,
+			RejectReason: ChatRejectReason(20), Command: "x"},
+		// QueueFull 拒绝必须携带完整伙伴身份与合法指令。
+		ChatEvent{EventID: 1, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
+			Kind: ChatEventRejected, RejectReason: ChatRejectQueueFull},
+		mutateTaskEvent(taskChatEvent(1, ChatEventRejected, ChatRejectQueueFull), func(e *ChatEvent) { e.CompanionID = companion.ID{} }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventRejected, ChatRejectQueueFull), func(e *ChatEvent) { e.CompanionName = "" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventRejected, ChatRejectQueueFull), func(e *ChatEvent) { e.Command = "" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventRejected, ChatRejectQueueFull), func(e *ChatEvent) { e.Command = " x" }),
+		// 其余 RejectReason 值（含预留 3）在 Rejected 上仍非法。
+		ChatEvent{EventID: 1, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
+			Kind: ChatEventRejected, RejectReason: ChatRejectReason(3)},
+		ChatEvent{EventID: 1, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
+			Kind: ChatEventRejected, RejectReason: ChatRejectReason(TaskFailInvalidPlan)},
+		// 任务失败原因不得出现在非 TaskFailed kind 上。
+		mutateTaskEvent(validAcceptedChatEvent(), func(e *ChatEvent) { e.RejectReason = ChatRejectReason(TaskFailInvalidPlan) }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventRejected, ChatRejectInvalidFormat), func(e *ChatEvent) {
+			e.RejectReason = ChatRejectReason(TaskFailWorldChanged)
+			e.CompanionID = testCompanionID(1)
+			e.Command = "x"
+		}),
+		// 未知 kind 保持非法。
+		ChatEvent{EventID: 1, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
+			CompanionID: testCompanionID(1), CompanionName: "A", Kind: ChatEventKind(8),
+			RejectReason: ChatRejectNone, Command: "x"},
+	}
+	for _, message := range invalid {
+		if err := message.Validate(); err == nil {
+			t.Fatalf("非法任务组合被接受: %+v", message)
+		}
+		// 编码同样拒绝：非法组合不得进入 wire。
+		if event, ok := message.(ChatEvent); ok {
+			if _, _, err := encodeServerControlPayload(StatePlay, event); err == nil {
+				t.Fatalf("非法任务组合被编码: %+v", event)
+			}
+		}
+	}
+}
+
+func TestChatEventTaskDecoderRejectsInvalidKindReasonCombinations(t *testing.T) {
+	// 从合法 TaskStarted wire 出发做单字节突变，解码必须整体拒绝。
+	started := taskChatEvent(1, ChatEventTaskStarted, ChatRejectNone)
+	_, eventWire, err := encodeServerControlPayload(StatePlay, started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kindOffset := 8 + 16 + 1 + len(started.PlayerName) + 16 + 1 + len(started.CompanionName)
+	for _, mutation := range []struct {
+		name   string
+		offset int
+		value  byte
+	}{
+		{"unknown kind", kindOffset, 8},
+		{"task kind with rejection reason", kindOffset + 1, byte(ChatRejectInvalidFormat)},
+		{"task kind with queue full reason", kindOffset + 1, byte(ChatRejectQueueFull)},
+		{"task kind with task fail reason", kindOffset + 1, byte(TaskFailPlannerUnavailable)},
+	} {
+		payload := append([]byte(nil), eventWire...)
+		payload[mutation.offset] = mutation.value
+		if packet, err := decodeServerControlPayload(StatePlay, 16, payload); err == nil || packet != nil {
+			t.Fatalf("%s wire 解码为 %#v, %v", mutation.name, packet, err)
+		}
+	}
+
+	// TaskFailed 的 reason 槽位只接受 16..19；15/20 与拒绝原因 4 都必须被拒。
+	failed := taskChatEvent(2, ChatEventTaskFailed, ChatRejectReason(TaskFailPlannerUnavailable))
+	_, failedWire, err := encodeServerControlPayload(StatePlay, failed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range []byte{0, 4, 15, 20} {
+		payload := append([]byte(nil), failedWire...)
+		payload[kindOffset+1] = reason
+		if packet, err := decodeServerControlPayload(StatePlay, 16, payload); err == nil || packet != nil {
+			t.Fatalf("TaskFailed reason %d wire 解码为 %#v, %v", reason, packet, err)
+		}
+	}
+	for _, reason := range []byte{16, 17, 18, 19} {
+		payload := append([]byte(nil), failedWire...)
+		payload[kindOffset+1] = reason
+		packet, err := decodeServerControlPayload(StatePlay, 16, payload)
+		if err != nil {
+			t.Fatalf("TaskFailed reason %d 合法 wire 被拒: %v", reason, err)
+		}
+		event, ok := packet.(ChatEvent)
+		if !ok || event.RejectReason != ChatRejectReason(reason) {
+			t.Fatalf("TaskFailed reason %d 往返 = %#v", reason, packet)
+		}
+	}
+
+	// QueueFull 拒绝缺少伙伴身份的 wire 必须被拒。
+	queueFull := taskChatEvent(3, ChatEventRejected, ChatRejectQueueFull)
+	_, queueFullWire, err := encodeServerControlPayload(StatePlay, queueFull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueFullWire = append([]byte(nil), queueFullWire...)
+	clear(queueFullWire[8+16+1+len(queueFull.PlayerName) : 8+16+1+len(queueFull.PlayerName)+16])
+	if packet, err := decodeServerControlPayload(StatePlay, 16, queueFullWire); err == nil || packet != nil {
+		t.Fatalf("缺少伙伴身份的 QueueFull wire 解码为 %#v, %v", packet, err)
+	}
+}
+
 func TestCompanionMessageGolden(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -84,6 +298,24 @@ func TestCompanionMessageGolden(t *testing.T) {
 		{"ChatEvent", nil, validAcceptedChatEvent(), 16,
 			"0100000000000000" + "10000000000040008000000000000009" + "044368656e" +
 				"10000000000040008000000000000001" + "0141" + "0100" + "0178"},
+		{"ChatEventTaskStarted", nil, taskChatEvent(2, ChatEventTaskStarted, ChatRejectNone), 16,
+			"0200000000000000" + "10000000000040008000000000000009" + "044368656e" +
+				"10000000000040008000000000000001" + "0141" + "0300" + "0178"},
+		{"ChatEventTaskProgress", nil, taskChatEvent(3, ChatEventTaskProgress, ChatRejectNone), 16,
+			"0300000000000000" + "10000000000040008000000000000009" + "044368656e" +
+				"10000000000040008000000000000001" + "0141" + "0400" + "0178"},
+		{"ChatEventTaskCompleted", nil, taskChatEvent(4, ChatEventTaskCompleted, ChatRejectNone), 16,
+			"0400000000000000" + "10000000000040008000000000000009" + "044368656e" +
+				"10000000000040008000000000000001" + "0141" + "0500" + "0178"},
+		{"ChatEventTaskFailed", nil, taskChatEvent(5, ChatEventTaskFailed, ChatRejectReason(TaskFailPlannerUnavailable)), 16,
+			"0500000000000000" + "10000000000040008000000000000009" + "044368656e" +
+				"10000000000040008000000000000001" + "0141" + "0610" + "0178"},
+		{"ChatEventTaskTimedOut", nil, taskChatEvent(6, ChatEventTaskTimedOut, ChatRejectNone), 16,
+			"0600000000000000" + "10000000000040008000000000000009" + "044368656e" +
+				"10000000000040008000000000000001" + "0141" + "0700" + "0178"},
+		{"ChatEventQueueFull", nil, taskChatEvent(7, ChatEventRejected, ChatRejectQueueFull), 16,
+			"0700000000000000" + "10000000000040008000000000000009" + "044368656e" +
+				"10000000000040008000000000000001" + "0141" + "0204" + "0178"},
 		{"CompanionSpawn", nil, CompanionSpawn{ID: testCompanionID(1), Name: "A", Tick: 1}, 17,
 			"10000000000040008000000000000001" + "0141" + "0100000000000000" +
 				"00000000" + "000000000000000000000000" + "0000000000000000"},
@@ -164,6 +396,12 @@ func TestCompanionSpawnAndChatEventStringBoundaries(t *testing.T) {
 			RejectReason: ChatRejectInvalidFormat},
 		ChatEvent{EventID: 3, PlayerID: playerID, PlayerName: "Chen", CompanionName: maxName,
 			Kind: ChatEventRejected, RejectReason: ChatRejectUnknownCompanion},
+		ChatEvent{EventID: 4, PlayerID: playerID, PlayerName: maxName, CompanionID: id,
+			CompanionName: maxName, Kind: ChatEventTaskFailed,
+			RejectReason: ChatRejectReason(TaskFailWorldChanged), Command: maxCommand},
+		ChatEvent{EventID: 5, PlayerID: playerID, PlayerName: maxName, CompanionID: id,
+			CompanionName: maxName, Kind: ChatEventRejected,
+			RejectReason: ChatRejectQueueFull, Command: maxCommand},
 	}
 	for _, message := range valid {
 		if err := message.Validate(); err != nil {
@@ -203,7 +441,7 @@ func TestCompanionSpawnAndChatEventStringBoundaries(t *testing.T) {
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: "Chen", CompanionID: id,
 			CompanionName: "A", Kind: ChatEventAccepted, RejectReason: ChatRejectInvalidFormat, Command: "x"},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: "Chen", CompanionID: id,
-			CompanionName: "A", Kind: ChatEventKind(3), RejectReason: ChatRejectNone, Command: "x"},
+			CompanionName: "A", Kind: ChatEventKind(8), RejectReason: ChatRejectNone, Command: "x"},
 	}
 	for _, message := range invalid {
 		if err := message.Validate(); err == nil {
@@ -302,6 +540,14 @@ func TestCompanionMessagesHaveFixedMaximumWireLengths(t *testing.T) {
 				CompanionName: maxName, Kind: ChatEventAccepted, RejectReason: ChatRejectNone, Command: maxCommand})
 			return payload, err
 		}},
+		// 任务事件复用同一 wire 形状，固定上限仍是 1328 bytes。
+		{"ChatEventTaskFailed", 1328, func() ([]byte, error) {
+			_, payload, err := encodeServerControlPayload(StatePlay, ChatEvent{EventID: 1,
+				PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: maxName, CompanionID: id,
+				CompanionName: maxName, Kind: ChatEventTaskFailed,
+				RejectReason: ChatRejectReason(TaskFailPlannerUnavailable), Command: maxCommand})
+			return payload, err
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -384,7 +630,7 @@ func TestCompanionDecoderRejectsInvalidIDsEnumsNumbersAndDimensions(t *testing.T
 	}
 	kindOffset := 8 + 16 + 1 + len(accepted.PlayerName) + 16 + 1 + len(accepted.CompanionName)
 	for _, mutation := range []func([]byte){
-		func(payload []byte) { payload[kindOffset] = 3 },
+		func(payload []byte) { payload[kindOffset] = 8 },
 		func(payload []byte) { payload[kindOffset+1] = byte(ChatRejectInvalidFormat) },
 		func(payload []byte) { clear(payload[8 : 8+16]) },
 	} {
@@ -470,6 +716,22 @@ func validAcceptedChatEvent() ChatEvent {
 		CompanionID: testCompanionID(1), CompanionName: "A",
 		Kind: ChatEventAccepted, RejectReason: ChatRejectNone, Command: "x",
 	}
+}
+
+// taskChatEvent 构造一条携带完整伙伴身份与原始指令的任务生命周期事件；
+// reason 槽位同时承载拒绝原因与 TaskFailReason。
+func taskChatEvent(id uint64, kind ChatEventKind, reason ChatRejectReason) ChatEvent {
+	return ChatEvent{
+		EventID: id, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
+		CompanionID: testCompanionID(1), CompanionName: "A",
+		Kind: kind, RejectReason: reason, Command: "x",
+	}
+}
+
+// mutateTaskEvent 返回应用单字段突变后的任务事件副本，用于原子拒绝用例。
+func mutateTaskEvent(event ChatEvent, mutate func(*ChatEvent)) ChatEvent {
+	mutate(&event)
+	return event
 }
 
 func testCompanionID(last byte) companion.ID {
