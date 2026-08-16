@@ -67,9 +67,15 @@ type captureScene struct {
 	PinVolatile func(*application) error
 }
 
-func captureSettled(stats client.MesherStats, pending int) bool {
+// captureSettled 判定抓帧收敛。近环半部沿用 mesher stats + pending uploads；
+// lodBusy 是远环调度器的 Busy() 计数（未接线 LOD 的运行传 0）。远环 tile 的
+// 生成与上传完全异步，若不等它清零就回读，golden 里的远景带会随机器速度
+// 时有时无——远景带像素就成了不可复现的输入，这是 5.3 把 LOD 并入收敛
+// 判据的原因。
+func captureSettled(stats client.MesherStats, pending, lodBusy int) bool {
 	return stats.DirtySections == 0 && stats.QueuedJobs == 0 &&
-		stats.InFlightJobs == 0 && stats.ReadyResults == 0 && pending == 0
+		stats.InFlightJobs == 0 && stats.ReadyResults == 0 && pending == 0 &&
+		lodBusy == 0
 }
 
 // captureScenes 是表驱动的场景清单，新增场景即新增一行。
@@ -430,12 +436,18 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 			return fmt.Errorf("场景收敛第 %d 帧: %w", i, err)
 		}
 		stats, pending := app.mesher.Stats(), app.scheduler.PendingUploads()
-		if i+1 >= captureGlyphSettleFrames && captureSettled(stats, pending) {
+		// 远环收敛判据与近环同源：pending==0 且 worker 空闲（Busy 归零）。
+		// 禁用路径 lodScheduler 为 nil，传 0 即与旧语义一致。
+		lodBusy := 0
+		if app.lodScheduler != nil {
+			lodBusy = app.lodScheduler.Busy()
+		}
+		if i+1 >= captureGlyphSettleFrames && captureSettled(stats, pending, lodBusy) {
 			break
 		}
 		if time.Now().After(settleDeadline) {
-			return fmt.Errorf("场景 %s 在 %s 内未收敛：mesher=%+v pending=%d",
-				scene.Name, captureSettleTimeout, stats, pending)
+			return fmt.Errorf("场景 %s 在 %s 内未收敛：mesher=%+v pending=%d lodBusy=%d",
+				scene.Name, captureSettleTimeout, stats, pending, lodBusy)
 		}
 	}
 	// PinVolatile 必须在收敛帧之后、最后一帧之前：收敛帧本身会推进那些随机器
