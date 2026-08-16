@@ -88,8 +88,11 @@ engine v3→v4 先例);5.2 接线按 `lodFarMultiplier` 推导雾距离并调用
 最新、按与中心 chunk 距离升序冲刷、`DropOutside` 丢弃远环半径外的
 pending 与已上传 tile(触发 `render_drop_lod_tile`);生成调用与上传
 共享一个**独立帧预算**(默认与近环同量级,数值只记录),绝不与近环
-`SectionScheduler` 共享预算。入队时机:登录成功取得种子后播种全环;
-玩家跨 tile 边界时增量入队新进入范围的 tile。`internal/nativeabi` 新增
+`SectionScheduler` 共享预算。入队时机:登录成功取得种子后播种**远环带**
+(Ruling 19:只入队 d ≥ floor(viewDistance/4)+1 的 tile——壳覆盖块
+d×64 ≥ VD×16,与近 mesh 半径无缝零重叠;近处壳的 max 高度会在眼平线
+遮挡精细 mesh,全盘入队被几何证据否决);玩家跨 tile 边界时增量入队新
+进入带内的 tile。`internal/nativeabi` 新增
 `LodShell` 绑定;archcheck 登记 `internal/lod`(依赖 core/nativeabi,
 不得依赖 render/sim/network)。配置:`lodEnabled`(默认 true;benchmark
 与 capture 既有场景按需关闭)、`lodFarMultiplier`(默认 3,范围 2..8)、
