@@ -14,13 +14,11 @@ pub const HIZ_COPY: &str = include_str!("../../shaders/hiz_copy.wgsl");
 /// 实体 pass(avatar 与掉落物共用)。
 pub const AVATAR: &str = include_str!("../../shaders/avatar.wgsl");
 /// 伤害红边全屏 pass。
-pub const DAMAGE_OVERLAY: &str =
-    include_str!("../../shaders/damage_overlay.wgsl");
+pub const DAMAGE_OVERLAY: &str = include_str!("../../shaders/damage_overlay.wgsl");
 /// 名牌 billboard pass。
 pub const NAME_TAG: &str = include_str!("../../shaders/name_tag.wgsl");
 /// 调试面板 pass。
-pub const DEBUG_PANEL: &str =
-    include_str!("../../shaders/debug_panel.wgsl");
+pub const DEBUG_PANEL: &str = include_str!("../../shaders/debug_panel.wgsl");
 /// HUD(hotbar 家族)pass。
 pub const HUD_HOTBAR: &str = include_str!("../../shaders/hotbar.wgsl");
 
