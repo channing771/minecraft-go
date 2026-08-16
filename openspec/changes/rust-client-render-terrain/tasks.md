@@ -34,13 +34,13 @@
       `diffThreshold` 双阈值比较;帧循环调用计数断言(每帧 1 次 render
       FFI、无变化不 upload);验证:`go test ./cmd/mornlea -race -count=1
       -run 'DualBackend|Capture'`。
-- [ ] 3.2 既有视觉 golden 与 capture 测试零改动通过,确认生产路径未变;
+- [x] 3.2 既有视觉 golden 与 capture 测试零改动通过,确认生产路径未变;
       验证:`go test ./cmd/mornlea -race -count=1`。
 
 ## 4. 收尾
 
-- [ ] 4.1 全量门禁:`gofmt -l .` 无输出、`go vet ./...`、
+- [x] 4.1 全量门禁:`gofmt -l .` 无输出、`go vet ./...`、
       `go test ./... -race`、archcheck、
       `openspec validate --all --strict --no-interactive`。
-- [ ] 4.2 更新 `docs/notes/progress.md`(R2a 平行渲染器与对照门禁交付,
+- [x] 4.2 更新 `docs/notes/progress.md`(R2a 平行渲染器与对照门禁交付,
       生产仍为 Go 渲染器);验证:文档与实现一致。
