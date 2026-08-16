@@ -16,17 +16,14 @@ func TestBenchmarkCooldownIsFixedAndNonZero(t *testing.T) {
 }
 
 func TestBenchmarkCooldownDoesNotSubmitRenderWork(t *testing.T) {
-	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
-	dev.events = nil
+	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	framesBefore := app.renderer.FrameCalls()
 
 	// 冷却期间只允许窗口事件泵，不得提交任何渲染工作。
 	runBenchmarkCooldown(app, 10*time.Millisecond)
 
-	for _, event := range dev.events {
-		switch event {
-		case "submit", "finish", "poll":
-			t.Fatalf("冷却期间提交了渲染工作：%v", dev.events)
-		}
+	if got := app.renderer.FrameCalls(); got != framesBefore {
+		t.Fatalf("冷却期间触发 %d 次 render FFI,想要 %d", got, framesBefore)
 	}
 }
 

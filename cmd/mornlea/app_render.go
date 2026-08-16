@@ -11,7 +11,6 @@ import (
 
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/render"
 )
 
@@ -107,49 +106,28 @@ func (a *application) framebufferSize() (int, int) {
 	return a.frameWidth, a.frameHeight
 }
 
+// cameraSectionPos 返回相机所在 section(Y 槽位钳制),复刻旧渲染器的
+// cameraSection 语义,供可见性 BFS 起点使用。
+func cameraSectionPos(pos mgl32.Vec3) core.SectionPos {
+	block := core.BlockPos{
+		X: int32(math.Floor(float64(pos[0]))),
+		Y: int32(math.Floor(float64(pos[1]))),
+		Z: int32(math.Floor(float64(pos[2]))),
+	}
+	y := int32(block.SectionIndex())
+	if y < 0 {
+		y = 0
+	} else if y >= core.SectionsPerChunk {
+		y = core.SectionsPerChunk - 1
+	}
+	return core.SectionPos{X: block.Chunk().X, Y: y, Z: block.Chunk().Z}
+}
+
 func cameraChunk(pos mgl32.Vec3) core.ChunkPos {
 	return core.BlockPos{
 		X: int32(math.Floor(float64(pos.X()))),
 		Z: int32(math.Floor(float64(pos.Z()))),
 	}.Chunk()
-}
-
-type depthTarget struct {
-	texture       gfx.Texture
-	view          gfx.TextureView
-	width, height uint32
-}
-
-func newDepthTarget(dev gfx.Device, width, height uint32) *depthTarget {
-	texture := dev.CreateTexture(gfx.TextureDesc{
-		Label:     "main depth",
-		Width:     width,
-		Height:    height,
-		Format:    gfx.FormatDepth32Float,
-		Dimension: gfx.TextureDimension2D,
-		Usage:     gfx.TextureUsageRenderTarget | gfx.TextureUsageBinding,
-	})
-	view := texture.View(gfx.TextureViewDesc{
-		Dimension: gfx.TextureViewDimension2D,
-		Aspect:    gfx.AspectDepthOnly,
-	})
-	return &depthTarget{
-		texture: texture,
-		view:    view,
-		width:   width,
-		height:  height,
-	}
-}
-
-func (d *depthTarget) Release() {
-	if d.view != nil {
-		d.view.Release()
-		d.view = nil
-	}
-	if d.texture != nil {
-		d.texture.Release()
-		d.texture = nil
-	}
 }
 
 // appendItemDropInstances 把只读镜像转换为渲染实例，复用调用方切片。

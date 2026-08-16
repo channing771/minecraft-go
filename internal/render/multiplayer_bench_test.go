@@ -1,3 +1,5 @@
+//go:build darwin
+
 package render
 
 import (
@@ -6,38 +8,18 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 )
 
+// BenchmarkRemoteAvatarNameTag 度量多人热路径的 CPU 半部:名牌布局
+// (Prepare + FrameStreams)与 avatar 实例编码。GPU pass 自 R2c 起由
+// Rust 渲染器执行,不在本 bench 范围;数值只记录,不作门禁。
 func BenchmarkRemoteAvatarNameTag(b *testing.B) {
-	dev, err := gfx.NewHeadlessDevice()
-	if err != nil {
-		b.Skipf("本机无可用 GPU 适配器: %v", err)
-	}
-	defer dev.Release()
-	color := dev.CreateTexture(gfx.TextureDesc{
-		Label: "multiplayer benchmark color", Width: 256, Height: 256,
-		Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget,
-	})
-	defer color.Release()
-	colorView := color.View(gfx.TextureViewDesc{})
-	defer colorView.Release()
-	depth := dev.CreateTexture(gfx.TextureDesc{
-		Label: "multiplayer benchmark depth", Width: 256, Height: 256,
-		Format: gfx.FormatDepth32Float, Usage: gfx.TextureUsageRenderTarget,
-	})
-	defer depth.Release()
-	depthView := depth.View(gfx.TextureViewDesc{Aspect: gfx.AspectDepthOnly})
-	defer depthView.Release()
-	atlas, err := NewGlyphAtlas(dev)
+	atlas, err := NewGlyphAtlasWithSink(&glyphTestSink{})
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer atlas.Release()
-	avatarRenderer := NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
-	defer avatarRenderer.Release()
-	tagRenderer := NewNameTagRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float, atlas)
-	defer tagRenderer.Release()
+	tagRenderer := NewNameTagLayouter(atlas)
 
 	names := [...]string{"星野", "月河", "云山", "海界", "星河", "月海", "云野"}
 	avatars := make([]Avatar, len(names))
@@ -53,20 +35,12 @@ func BenchmarkRemoteAvatarNameTag(b *testing.B) {
 	if err := tagRenderer.Prepare(tags, budget); err != nil {
 		b.Fatal(err)
 	}
-	clearEncoder := dev.CreateCommandEncoder()
-	clear := clearEncoder.BeginRenderPass(gfx.RenderPassDesc{
-		Label: "multiplayer benchmark clear", ColorView: colorView, DepthView: depthView, LoadClear: true,
-	})
-	clear.End()
-	clearCommand := clearEncoder.Finish()
-	dev.Submit(clearCommand)
-	clearCommand.Release()
-	dev.Poll(true)
 
-	camera := Camera{ViewProj: mgl32.Ident4()}
 	billboard := BillboardCamera{
 		ViewProj: mgl32.Ident4(), Right: mgl32.Vec3{1, 0, 0}, Up: mgl32.Vec3{0, 1, 0},
 	}
+	var encoder InstanceEncoder
+	var avatarStream, billboardBytes []byte
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
@@ -74,15 +48,11 @@ func BenchmarkRemoteAvatarNameTag(b *testing.B) {
 		if err := tagRenderer.Prepare(tags, budget); err != nil {
 			b.Fatal(err)
 		}
-		encoder := dev.CreateCommandEncoder()
-		if err := avatarRenderer.Render(encoder, colorView, depthView, camera, avatars); err != nil {
-			b.Fatal(err)
+		backgrounds, glyphs := tagRenderer.FrameStreams()
+		avatarStream = encoder.EncodeAvatarInstances(avatarStream[:0], avatars)
+		billboardBytes = EncodeBillboardCameraBytes(billboardBytes[:0], billboard)
+		if len(backgrounds) == 0 || len(glyphs) == 0 || len(avatarStream) == 0 {
+			b.Fatal("empty frame streams")
 		}
-		tagRenderer.Render(encoder, colorView, depthView, billboard)
-		command := encoder.Finish()
-		dev.Submit(command)
-		command.Release()
 	}
-	b.StopTimer()
-	dev.Poll(true)
 }

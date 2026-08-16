@@ -26,6 +26,10 @@ package client
 #cgo nocallback mornlea_client_render_upload_glyph_rect
 #cgo noescape mornlea_client_render_upload_hud_atlas
 #cgo nocallback mornlea_client_render_upload_hud_atlas
+#cgo noescape mornlea_client_render_create_windowed
+#cgo nocallback mornlea_client_render_create_windowed
+#cgo noescape mornlea_client_render_resize
+#cgo nocallback mornlea_client_render_resize
 #include "mornlea_client.h"
 */
 import "C"
@@ -50,6 +54,8 @@ type Renderer struct {
 	width  int
 	height int
 	closed bool
+	// windowed 标记 surface 模式(不支持 Readback)。
+	windowed bool
 	// frameCalls 统计 RenderFrame 触发的 FFI 次数,供"每帧一次"断言。
 	frameCalls int
 	// uploadCalls 统计 section 上传 FFI 次数,供"无变化不上传"断言。
@@ -114,6 +120,36 @@ func NewRenderer(width, height int) (*Renderer, error) {
 	default:
 		return nil, errors.New("client: render create " + renderStatusText(uint32(status)))
 	}
+}
+
+// NewWindowedRenderer 为已创建的窗口建立 surface 渲染器;每帧渲染直接
+// 呈现到窗口。必须与窗口同线程调用。
+func NewWindowedRenderer(window *Window) (*Renderer, error) {
+	var handle C.uint64_t
+	status := C.mornlea_client_render_create_windowed(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(window.handle),
+		&handle,
+	)
+	switch status {
+	case C.MORNLEA_CLIENT_STATUS_OK:
+		width, height := window.FramebufferSize()
+		return &Renderer{handle: uint64(handle), width: width, height: height, windowed: true}, nil
+	case C.MORNLEA_CLIENT_STATUS_ADAPTER:
+		return nil, ErrNoGPUAdapter
+	default:
+		return nil, errors.New("client: windowed render create " + renderStatusText(uint32(status)))
+	}
+}
+
+// Resize 调整渲染输出尺寸(窗口模式重配 surface,离屏重建 target)。
+func (r *Renderer) Resize(width, height int) {
+	r.width, r.height = width, height
+	r.check("resize", uint32(C.mornlea_client_render_resize(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(r.handle),
+		C.uint32_t(width), C.uint32_t(height),
+	)))
 }
 
 // UploadAtlas 上传材质 atlas(assets.Registry.AtlasPixels 的字节流)。
@@ -233,16 +269,22 @@ func (r *Renderer) FrameCalls() int { return r.frameCalls }
 // UploadCalls 返回累计的 section 上传 FFI 调用次数。
 func (r *Renderer) UploadCalls() int { return r.uploadCalls }
 
-// RenderFrame 渲染一帧;每帧恰好一次 render FFI 调用。
-func (r *Renderer) RenderFrame(frame RenderFrame) {
+// RenderFrame 渲染一帧;每帧恰好一次 render FFI 调用。返回 false 表示
+// 窗口 surface 本帧不可用(遮挡/过期),调用方跳帧即可。
+func (r *Renderer) RenderFrame(frame RenderFrame) bool {
 	r.frameCalls++
 	encoded := EncodeRenderFrame(frame)
-	r.check("frame", uint32(C.mornlea_client_render_frame(
+	status := uint32(C.mornlea_client_render_frame(
 		C.MORNLEA_CLIENT_ABI_VERSION,
 		C.uint64_t(r.handle),
 		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(encoded))),
 		C.size_t(len(encoded)),
-	)))
+	))
+	if status == uint32(C.MORNLEA_CLIENT_STATUS_SKIPPED) {
+		return false
+	}
+	r.check("frame", status)
+	return true
 }
 
 // UploadGlyphRect 上传字形图集的一块 R8 矩形(与 Go GlyphAtlas 同字节)。
@@ -309,6 +351,8 @@ func renderStatusText(status uint32) string {
 		return "本机无可用 GPU 适配器"
 	case uint32(C.MORNLEA_CLIENT_STATUS_CAPACITY):
 		return "渲染资源容量不足"
+	case uint32(C.MORNLEA_CLIENT_STATUS_SKIPPED):
+		return "surface 本帧不可用"
 	default:
 		return "client 未知状态"
 	}

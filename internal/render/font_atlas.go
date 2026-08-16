@@ -13,8 +13,6 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
-
-	"github.com/channing771/mornlea/internal/gfx"
 )
 
 const (
@@ -60,10 +58,16 @@ type glyphRasterizer interface {
 	Rasterize(font.Face, rune) (Glyph, []byte, bool, error)
 }
 
+// GlyphSink 接收字形图集的 R8 矩形写入。生产实现是 Rust 渲染器的
+// 上传入口;gfx 纹理 sink 供切换期的既有 Go renderer 与测试使用。
+type GlyphSink interface {
+	WriteGlyphRect(x, y, width, height uint32, pixels []byte)
+}
+
 // GlyphAtlas owns a bounded 1024x1024 R8 texture split into 32x32 cells.
 type GlyphAtlas struct {
-	texture       gfx.Texture
-	view          gfx.TextureView
+	// sink 是唯一的图集写出口(生产 = Rust 渲染器上传入口)。
+	sink          GlyphSink
 	pendingUpload *glyphResult
 	renderFace    font.Face
 
@@ -81,12 +85,17 @@ type GlyphAtlas struct {
 	worker      sync.WaitGroup
 }
 
-// NewGlyphAtlas creates the atlas from the embedded, pinned Noto font.
-func NewGlyphAtlas(dev gfx.Device) (*GlyphAtlas, error) {
-	return newGlyphAtlasWith(dev, embeddedGlyphFaceFactory, opentypeGlyphRasterizer{})
+// NewGlyphAtlasWithSink 创建字形图集:全部矩形写入经 sink
+// (生产路径 = Rust 渲染器上传入口)。
+func NewGlyphAtlasWithSink(sink GlyphSink) (*GlyphAtlas, error) {
+	return newGlyphAtlasSink(sink, embeddedGlyphFaceFactory, opentypeGlyphRasterizer{})
 }
 
-func newGlyphAtlasWith(dev gfx.Device, factory glyphFaceFactory, rasterizer glyphRasterizer) (*GlyphAtlas, error) {
+func newGlyphAtlasSink(
+	sink GlyphSink,
+	factory glyphFaceFactory,
+	rasterizer glyphRasterizer,
+) (*GlyphAtlas, error) {
 	renderFace, workerFace, err := factory()
 	if err != nil {
 		return nil, fmt.Errorf("render: create glyph faces: %w", err)
@@ -94,25 +103,19 @@ func newGlyphAtlasWith(dev gfx.Device, factory glyphFaceFactory, rasterizer glyp
 	if renderFace == nil || workerFace == nil {
 		return nil, fmt.Errorf("render: glyph face factory returned nil face")
 	}
+	return assembleGlyphAtlas(sink, renderFace, workerFace, rasterizer)
+}
 
-	texture := dev.CreateTexture(gfx.TextureDesc{
-		Label:     "glyph-atlas",
-		Width:     glyphAtlasSize,
-		Height:    glyphAtlasSize,
-		Layers:    1,
-		MipLevels: 1,
-		Format:    gfx.FormatR8Unorm,
-		Dimension: gfx.TextureDimension2D,
-		// CopySrc 供 AtlasPixels 整图回读(平行渲染器同步同一份字形)。
-		Usage: gfx.TextureUsageBinding | gfx.TextureUsageCopyDst | gfx.TextureUsageCopySrc,
-	})
-	view := texture.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
+func assembleGlyphAtlas(
+	sink GlyphSink,
+	renderFace, workerFace font.Face,
+	rasterizer glyphRasterizer,
+) (*GlyphAtlas, error) {
 	tofu, pixels := tofuGlyph()
-	texture.WriteRegion(0, 0, 0, 0, glyphCellSize, glyphCellSize, pixels)
+	sink.WriteGlyphRect(0, 0, glyphCellSize, glyphCellSize, pixels)
 
 	atlas := &GlyphAtlas{
-		texture:     texture,
-		view:        view,
+		sink:        sink,
 		renderFace:  renderFace,
 		requests:    make(chan rune, glyphRequestCapacity),
 		results:     make(chan glyphResult, glyphResultCapacity),
@@ -271,7 +274,7 @@ func (atlas *GlyphAtlas) FlushUploads(budget *UploadBudget) error {
 	slot := atlas.nextSlot
 	x := uint32(slot%32) * glyphCellSize
 	y := uint32(slot/32) * glyphCellSize
-	atlas.texture.WriteRegion(0, 0, x, y, glyphCellSize, glyphCellSize, pending.pixels)
+	atlas.sink.WriteGlyphRect(x, y, glyphCellSize, glyphCellSize, pending.pixels)
 	pending.glyph.Slot = slot
 	// UV 只覆盖 ink 本身，不覆盖整格。
 	//
@@ -317,17 +320,7 @@ func (atlas *GlyphAtlas) Kern(left, right rune) float32 {
 	return float32(atlas.renderFace.Kern(left, right)) / 64
 }
 
-// TextureView returns the atlas-owned borrowed view. Callers must not release it.
-func (atlas *GlyphAtlas) TextureView() gfx.TextureView {
-	atlas.mu.Lock()
-	defer atlas.mu.Unlock()
-	if atlas.released {
-		return nil
-	}
-	return atlas.view
-}
-
-// Release stops the worker, then releases the view and texture exactly once.
+// Release stops the worker exactly once.
 func (atlas *GlyphAtlas) Release() {
 	atlas.mu.Lock()
 	if atlas.released {
@@ -346,15 +339,7 @@ func (atlas *GlyphAtlas) Release() {
 	atlas.mu.Lock()
 	atlas.renderFace = nil
 	atlas.pendingUpload = nil
-	view, texture := atlas.view, atlas.texture
-	atlas.view, atlas.texture = nil, nil
 	atlas.mu.Unlock()
-	if view != nil {
-		view.Release()
-	}
-	if texture != nil {
-		texture.Release()
-	}
 	close(atlas.releaseDone)
 }
 

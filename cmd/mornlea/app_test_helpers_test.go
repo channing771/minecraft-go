@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/channing771/mornlea/internal/client"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/network"
 )
 
@@ -33,10 +32,7 @@ func (*fakeInteractiveWindow) FramebufferSize() (int, int) { return 1, 1 }
 func (*fakeInteractiveWindow) ContentSize() (int, int)     { return 1, 1 }
 func (*fakeInteractiveWindow) SetContentSize(int, int)     {}
 func (*fakeInteractiveWindow) CancelClose()                {}
-func (*fakeInteractiveWindow) NativeHandle() gfx.NativeWindowHandle {
-	return gfx.NativeWindowHandle{}
-}
-func (*fakeInteractiveWindow) Close() {}
+func (*fakeInteractiveWindow) Close()                      {}
 
 func newInteractiveTestApplication(
 	t *testing.T,

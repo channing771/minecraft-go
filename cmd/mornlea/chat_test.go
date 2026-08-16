@@ -394,7 +394,7 @@ func TestChatEventFormattingIsStableForAcceptedInvalidAndUnknown(t *testing.T) {
 }
 
 func TestApplicationRendersHealthBeforeInventoryConfirmation(t *testing.T) {
-	app, dev := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	if err := app.predictor.Begin(network.PlayerState{
 		ServerTick: 1, Dimension: core.Overworld,
 		Position: mgl32.Vec3{0.5, 10, 0.5}, Ready: true, Health: 12,
@@ -404,18 +404,15 @@ func TestApplicationRendersHealthBeforeInventoryConfirmation(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
 	}
-	passes := dev.lastPasses()
-	if len(passes) != 2 || passes[0] != "terrain pass" || passes[1] != "hotbar pass" {
-		t.Fatalf("passes=%v", passes)
-	}
-	if got := dev.lastDrawInstanceCount(); got != healthQuadInstancesForHUDTest {
-		t.Fatalf("unconfirmed inventory health quads=%d want=%d", got, healthQuadInstancesForHUDTest)
+	// 未确认背包时 HUD 只画生命值爱心(quad 流恰为爱心实例数)。
+	if _, quads, _ := app.hotbarRenderer.FrameStreams(); len(quads)/48 != int(healthQuadInstancesForHUDTest) {
+		t.Fatalf("unconfirmed inventory health quads=%d want=%d", len(quads)/48, healthQuadInstancesForHUDTest)
 	}
 }
 
 func TestApplicationRendersChatBeforeInventoryConfirmation(t *testing.T) {
 	glyphs := &integrationGlyphSource{}
-	app, dev := newRemoteRenderApplication(t, glyphs)
+	app := newRemoteRenderApplication(t, glyphs)
 	app.chatEvents = &client.ChatEvents{}
 	if err := app.chatEvents.Apply(acceptedChatEvent(1)); err != nil {
 		t.Fatal(err)
@@ -427,12 +424,9 @@ func TestApplicationRendersChatBeforeInventoryConfirmation(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
 	}
-	passes := dev.lastPasses()
-	if len(passes) != 2 || passes[0] != "terrain pass" || passes[1] != "hotbar pass" {
-		t.Fatalf("passes=%v", passes)
-	}
-	if len(dev.bufferByLabel(t, "hotbar dynamic upload").lastWrite) <= 11776 {
-		t.Fatal("chat glyphs were not uploaded before inventory confirmation")
+	// 背包未确认时聊天字形仍进入 HUD glyph 流。
+	if _, _, hudGlyphs := app.hotbarRenderer.FrameStreams(); len(hudGlyphs) == 0 {
+		t.Fatal("chat glyphs were not laid out before inventory confirmation")
 	}
 }
 
@@ -508,7 +502,7 @@ func newChatLoopApplication(
 	frames []chatWindowFrame,
 ) (*application, network.ServerEndpoint, *scriptedChatWindow) {
 	t.Helper()
-	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	clientEndpoint, serverEndpoint := network.NewMemoryPair(64)
 	app.clientEndpoint = clientEndpoint
 	app.receiver = client.NewReceiver(clientEndpoint, 64)

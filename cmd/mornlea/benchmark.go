@@ -10,7 +10,6 @@ import (
 
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/server"
 )
 
@@ -95,11 +94,6 @@ func runBenchmark(app *application, outputPath string) error {
 	width, height := app.framebufferSize()
 	if width != 2560 || height != 1440 {
 		return fmt.Errorf("benchmark framebuffer=%dx%d，要求精确 2560x1440", width, height)
-	}
-	if app.surface != nil {
-		if err := app.surface.SetPresentMode(gfx.PresentModeAutoNoVSync); err != nil {
-			return fmt.Errorf("关闭 VSync: %w", err)
-		}
 	}
 
 	loadStarted := time.Now()

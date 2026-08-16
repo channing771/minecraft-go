@@ -3,20 +3,8 @@ package render
 import (
 	_ "embed"
 	"math"
-	"reflect"
-	"strings"
 	"testing"
-
-	"github.com/go-gl/mathgl/mgl32"
-
-	"github.com/channing771/mornlea/internal/assets"
-	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
-	"github.com/channing771/mornlea/internal/mesh"
 )
-
-//go:embed hud/shader/hotbar.wgsl
-var hotbarTestShader string
 
 func closeEnough(got, want float32) bool {
 	return math.Abs(float64(got-want)) <= 1e-5
@@ -216,117 +204,5 @@ func TestTerrainBrightnessMatchesSpecification(t *testing.T) {
 	mid := TerrainBrightness(daylight, 8)
 	if mid <= TerrainBrightness(daylight, 0) || mid >= TerrainBrightness(daylight, 15) {
 		t.Fatalf("中间天空光亮度 = %v，想要严格落在 0.08 与 1 之间", mid)
-	}
-}
-
-func TestTerrainDaylightHeadlessDraw(t *testing.T) {
-	dev, err := gfx.NewHeadlessDevice()
-	if err != nil {
-		t.Skipf("本机无可用 GPU 适配器: %v", err)
-	}
-	defer dev.Release()
-
-	renderer := New(dev, assets.NewRegistry(), gfx.FormatRGBA8Unorm)
-	defer renderer.Release()
-	renderer.QueueSection(core.SectionPos{Y: 4}, []mesh.Quad{
-		{X: 0, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0xf0},
-		{X: 2, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x0f},
-		{X: 4, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x88},
-		{X: 6, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0x00, Light: 0x0f},
-		{X: 8, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosZ, AO: 0xff, Light: 0x0f},
-		{X: 10, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x80},
-		{X: 12, Y: 0, Z: 0, W: 1, H: 1, Face: mesh.FacePosY, AO: 0xff, Light: 0x08},
-	})
-	renderer.BeginFrame()
-	renderer.FlushUploads(core.ChunkPos{})
-
-	position := mgl32.Vec3{6.5, 8, 12}
-	direction := mgl32.Vec3{6.5, 0.5, 0.5}.Sub(position)
-	noonCamera := skyCameraAt(position, direction, 6000)
-	midnightCamera := skyCameraAt(position, direction, 18000)
-	noon := renderSkyHeadless(t, dev, renderer, noonCamera)
-	midnight := renderSkyHeadless(t, dev, renderer, midnightCamera)
-
-	sample := func(pixels []byte, camera Camera, point mgl32.Vec3) [4]byte {
-		clip := camera.ViewProj.Mul4x1(point.Vec4(1))
-		x := int(math.Round(float64((clip[0]/clip[3]*0.5 + 0.5) * skyHeadlessSize)))
-		y := int(math.Round(float64((-clip[1]/clip[3]*0.5 + 0.5) * skyHeadlessSize)))
-		return skyPixel(pixels, x, y)
-	}
-	centers := [...]mgl32.Vec3{
-		{0.5, 1, 0.5},
-		{2.5, 1, 0.5},
-		{4.5, 1, 0.5},
-		{6.5, 1, 0.5},
-		{8.5, 0.5, 1},
-		{10.5, 1, 0.5},
-		{12.5, 1, 0.5},
-	}
-	var noonPixels, midnightPixels [len(centers)][4]byte
-	for i, center := range centers {
-		noonPixels[i] = sample(noon, noonCamera, center)
-		midnightPixels[i] = sample(midnight, midnightCamera, center)
-	}
-
-	if skyBrightness(midnightPixels[0])*3 >= skyBrightness(noonPixels[0]) {
-		t.Fatalf("全天空光面未在午夜显著变暗：noon=%v midnight=%v", noonPixels[0], midnightPixels[0])
-	}
-	for channel := 0; channel < 3; channel++ {
-		if delta := int(noonPixels[1][channel]) - int(midnightPixels[1][channel]); delta < -2 || delta > 2 {
-			t.Fatalf("全方块光面受昼夜影响：noon=%v midnight=%v", noonPixels[1], midnightPixels[1])
-		}
-	}
-	if skyBrightness(midnightPixels[1]) <= skyBrightness(midnightPixels[0])*3 {
-		t.Fatalf("午夜方块光未独立照亮地形：sky=%v block=%v", midnightPixels[0], midnightPixels[1])
-	}
-	if skyBrightness(midnightPixels[2]) <= skyBrightness(midnightPixels[0])*2 ||
-		skyBrightness(noonPixels[2]) <= skyBrightness(midnightPixels[2]) {
-		t.Fatalf("0x88 未按最大值竞争：noon=%v midnight=%v midnight-sky=%v",
-			noonPixels[2], midnightPixels[2], midnightPixels[0])
-	}
-	for _, comparison := range []struct {
-		name        string
-		mixed, only [4]byte
-	}{
-		{name: "正午天空光胜出", mixed: noonPixels[2], only: noonPixels[5]},
-		{name: "午夜方块光胜出", mixed: midnightPixels[2], only: midnightPixels[6]},
-	} {
-		for channel := 0; channel < 3; channel++ {
-			if delta := int(comparison.mixed[channel]) - int(comparison.only[channel]); delta < -2 || delta > 2 {
-				t.Fatalf("%s未按 max 合成：0x88=%v control=%v channel=%d delta=%d",
-					comparison.name, comparison.mixed, comparison.only, channel, delta)
-			}
-		}
-	}
-	if skyBrightness(midnightPixels[3])*10 >= skyBrightness(midnightPixels[1])*7 {
-		t.Fatalf("AO 未继续降低方块光：full=%v occluded=%v", midnightPixels[1], midnightPixels[3])
-	}
-	if skyBrightness(midnightPixels[4])*10 >= skyBrightness(midnightPixels[1])*9 {
-		t.Fatalf("面朝向未继续降低方块光：top=%v side=%v", midnightPixels[1], midnightPixels[4])
-	}
-}
-
-func TestScreenSpaceRenderersIgnoreWorldDaylight(t *testing.T) {
-	// HUD、容器、采掘进度和昵称都是屏幕空间元素：
-	// 它们的 camera 类型里根本没有昼夜字段，因此不可能乘上世界亮度。
-	var billboard BillboardCamera
-	if reflect.TypeOf(billboard).NumField() != 3 {
-		t.Fatalf("BillboardCamera 字段数 = %d，想要仅 ViewProj/Right/Up 三个",
-			reflect.TypeOf(billboard).NumField())
-	}
-	for _, name := range []string{"Daylight", "SkyColor", "Sun"} {
-		if _, found := reflect.TypeOf(billboard).FieldByName(name); found {
-			t.Fatalf("BillboardCamera 含世界亮度字段 %s", name)
-		}
-	}
-
-	// hotbar 与 name tag 的着色器不得引用昼夜亮度。
-	for name, source := range map[string]string{
-		"hotbar":   hotbarTestShader,
-		"name_tag": nameTagShader,
-	} {
-		if strings.Contains(source, "daylight") {
-			t.Fatalf("%s 着色器引用了 daylight", name)
-		}
 	}
 }

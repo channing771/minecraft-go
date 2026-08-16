@@ -5,6 +5,7 @@
 //! 主循环。本模块依赖真实窗口系统,不做单元测试;可无头验证的逻辑全部
 //! 位于 [`crate::input`]。
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use winit::application::ApplicationHandler;
@@ -28,7 +29,7 @@ pub enum CreateError {
 
 /// ApplicationHandler 实现:把 winit 事件写入输入状态机。
 struct App {
-    window: Option<Window>,
+    window: Option<Arc<Window>>,
     input: InputState,
     title: String,
     width: u32,
@@ -77,7 +78,9 @@ impl ApplicationHandler for App {
             Ok(window) => {
                 // 聊天需要 IME 提交的 Unicode 文本(GLFW char 回调的等价物)。
                 window.set_ime_allowed(true);
-                self.window = Some(window);
+                // Arc 包装:渲染器 surface 需要共享窗口所有权(wgpu
+                // create_surface 的 'static 约束)。
+                self.window = Some(Arc::new(window));
                 self.refresh_sizes();
             }
             Err(_) => {
@@ -229,6 +232,11 @@ impl ClientWindow {
     /// 撤销关闭请求。
     pub fn cancel_close(&mut self) {
         self.app.input.cancel_close();
+    }
+
+    /// 返回窗口的共享引用,供 windowed 渲染器创建 wgpu surface。
+    pub fn shared_window(&self) -> Option<Arc<Window>> {
+        self.app.window.clone()
     }
 
     /// 返回 NSWindow 指针供 gfx 创建 Metal surface。

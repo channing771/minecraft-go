@@ -3,7 +3,6 @@
 package main
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -22,16 +21,20 @@ const healthQuadInstancesForHUDTest = 16
 // number the server never confirmed.
 func TestHUDHealthReflectsOnlyConfirmedPredictorState(t *testing.T) {
 	glyphs := &integrationGlyphSource{}
-	app, dev := newRemoteRenderApplication(t, glyphs)
+	app := newRemoteRenderApplication(t, glyphs)
 	if err := app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{}}); err != nil {
 		t.Fatal(err)
+	}
+	hudQuadCount := func() int {
+		_, quads, _ := app.hotbarRenderer.FrameStreams()
+		return len(quads) / 48
 	}
 
 	// 收到权威状态之前：Predictor 尚未就绪，HUD 不得画出任何生命值数字。
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("未确认生命值 renderFrame=(%v,%v)", rendered, err)
 	}
-	baseline := dev.lastDrawInstanceCount()
+	baseline := hudQuadCount()
 
 	// 收到生命值为 12 的权威状态：HUD 必须显示十颗空心和六颗填充爱心。
 	if err := app.predictor.Begin(network.PlayerState{
@@ -44,8 +47,8 @@ func TestHUDHealthReflectsOnlyConfirmedPredictorState(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("已确认生命值 renderFrame=(%v,%v)", rendered, err)
 	}
-	confirmed := dev.lastDrawInstanceCount()
-	if got, want := confirmed-baseline, uint32(healthQuadInstancesForHUDTest); got != want {
+	confirmed := hudQuadCount()
+	if got, want := confirmed-baseline, int(healthQuadInstancesForHUDTest); got != want {
 		t.Fatalf("确认生命值 12 后 quad 增量=%d，想要 %d（无背景的空心与填充爱心）", got, want)
 	}
 
@@ -59,7 +62,7 @@ func TestHUDHealthReflectsOnlyConfirmedPredictorState(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("玩家状态 reset 后 renderFrame=(%v,%v)", rendered, err)
 	}
-	afterReset := dev.lastDrawInstanceCount()
+	afterReset := hudQuadCount()
 	if afterReset != baseline {
 		t.Fatalf("玩家状态 reset 后 quad=%d，想要回到未确认基线 %d", afterReset, baseline)
 	}
@@ -70,7 +73,7 @@ func TestHUDHealthReflectsOnlyConfirmedPredictorState(t *testing.T) {
 // current session never confirmed.
 func TestHUDHealthHiddenAfterDisconnect(t *testing.T) {
 	glyphs := &integrationGlyphSource{}
-	app, dev := newRemoteRenderApplication(t, glyphs)
+	app := newRemoteRenderApplication(t, glyphs)
 	if err := app.inventory.Apply(network.InventoryState{Inventory: core.Inventory{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,16 +87,17 @@ func TestHUDHealthHiddenAfterDisconnect(t *testing.T) {
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("已确认生命值 renderFrame=(%v,%v)", rendered, err)
 	}
-	if !slices.Contains(dev.lastPasses(), "hotbar pass") {
-		t.Fatalf("已确认生命值时 passes=%v，想要包含 hotbar pass", dev.lastPasses())
+	flushesWithHUD := glyphs.flushes
+	if flushesWithHUD < 2 {
+		t.Fatalf("已确认生命值时 flush=%d,想要名牌+HUD 两次 Prepare", flushesWithHUD)
 	}
 
 	app.closeClientSession(nil)
-	dev.resetPasses()
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("断线后 renderFrame=(%v,%v)", rendered, err)
 	}
-	if slices.Contains(dev.lastPasses(), "hotbar pass") {
-		t.Fatalf("断线后 passes=%v，不应再绘制 HUD（含生命值）", dev.lastPasses())
+	// 断线帧 hudVisible 为假:只有名牌 Prepare 冲刷一次,HUD 不再准备。
+	if got := glyphs.flushes - flushesWithHUD; got != 1 {
+		t.Fatalf("断线后新增 flush=%d,想要仅名牌 1 次(HUD 不得准备)", got)
 	}
 }

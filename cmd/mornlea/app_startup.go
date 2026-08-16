@@ -17,7 +17,6 @@ import (
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
 	"github.com/channing771/mornlea/internal/render/hud"
@@ -67,45 +66,13 @@ func newApplicationWithDependencies(
 		options.Render = config.Defaults().Render
 	}
 	if dependencies.newGlyphAtlas == nil {
-		dependencies.newGlyphAtlas = render.NewGlyphAtlas
+		dependencies.newGlyphAtlas = render.NewGlyphAtlasWithSink
 	}
-	if dependencies.newAvatarRenderer == nil {
-		dependencies.newAvatarRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.AvatarRenderer, error) {
-			return render.NewAvatarRenderer(dev, color, depth), nil
-		}
+	if dependencies.newWindowedRenderer == nil {
+		dependencies.newWindowedRenderer = defaultApplicationDependencies().newWindowedRenderer
 	}
-	if dependencies.newNameTagRenderer == nil {
-		dependencies.newNameTagRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat, atlas render.GlyphSource) (*render.NameTagRenderer, error) {
-			return render.NewNameTagRenderer(dev, color, depth, atlas), nil
-		}
-	}
-	if dependencies.newHotbarRenderer == nil {
-		dependencies.newHotbarRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource, blocks *assets.Registry) (*hud.HotbarRenderer, error) {
-			return hud.NewHotbarRenderer(dev, color, atlas, blocks), nil
-		}
-	}
-	if dependencies.newItemDropRenderer == nil {
-		dependencies.newItemDropRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.ItemDropRenderer, error) {
-			return render.NewItemDropRenderer(dev, color, depth), nil
-		}
-	}
-	if dependencies.newBlockOutlineRenderer == nil {
-		dependencies.newBlockOutlineRenderer = func(dev gfx.Device, color, depth gfx.TextureFormat) (*render.BlockOutlineRenderer, error) {
-			return render.NewBlockOutlineRenderer(dev, color, depth), nil
-		}
-	}
-	if dependencies.newDamageOverlayRenderer == nil {
-		dependencies.newDamageOverlayRenderer = func(
-			device gfx.Device,
-			color gfx.TextureFormat,
-		) (*render.DamageOverlayRenderer, error) {
-			return render.NewDamageOverlayRenderer(device, color), nil
-		}
-	}
-	if dependencies.newDebugPanelRenderer == nil {
-		dependencies.newDebugPanelRenderer = func(dev gfx.Device, color gfx.TextureFormat, atlas render.GlyphSource) (*render.DebugPanelRenderer, error) {
-			return render.NewDebugPanelRenderer(dev, color, atlas), nil
-		}
+	if dependencies.newOffscreenRenderer == nil {
+		dependencies.newOffscreenRenderer = client.NewRenderer
 	}
 	ctx := context.Background()
 	var store storage.WorldStore
@@ -179,62 +146,25 @@ func newApplicationWithDependencies(
 	receiver := client.NewReceiver(clientEndpoint, 256)
 
 	var window applicationWindow
-	var dev gfx.Device
-	var surface gfx.Surface
-	var color gfx.Texture
-	var colorView gfx.TextureView
-	var colorFormat gfx.TextureFormat
+	var rustRenderer *client.Renderer
 	width, height := 2560, 1440
 	headless := options.Benchmark || options.CaptureDir != ""
 	if options.CaptureDir != "" {
 		width, height = captureWidth, captureHeight
 	}
 	if headless {
-		dev, err = dependencies.newHeadlessDevice()
-		colorFormat = gfx.FormatBGRA8UnormSrgb
-		if err == nil {
-			// CopySrc 是抓帧回读的前提；benchmark 不回读，只在抓帧模式下才加这个
-			// usage 位——spec 要求"不得因抓帧能力的存在产生任何额外的渲染或读回
-			// 开销"，按构造为真好过口头论证"反正零成本"。
-			usage := gfx.TextureUsageRenderTarget
-			if options.CaptureDir != "" {
-				usage |= gfx.TextureUsageCopySrc
-			}
-			color = dev.CreateTexture(gfx.TextureDesc{
-				Label:     "headless offscreen color",
-				Width:     uint32(width),
-				Height:    uint32(height),
-				Format:    colorFormat,
-				Dimension: gfx.TextureDimension2D,
-				Usage:     usage,
-			})
-			colorView = color.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
-		}
+		rustRenderer, err = dependencies.newOffscreenRenderer(width, height)
 	} else {
 		window, err = dependencies.newWindow(2560, 1440, "Mornlea — M3C multiplayer world")
 		if err == nil {
 			fitFramebuffer(window, width, height)
 			width, height = window.FramebufferSize()
-			dev, surface, err = dependencies.newDevice(
-				window.NativeHandle(), uint32(width), uint32(height),
-			)
-			if err == nil {
-				colorFormat = surface.Format()
-			}
+			rustRenderer, err = dependencies.newWindowedRenderer(window)
 		}
 	}
 	if err != nil {
-		if colorView != nil {
-			colorView.Release()
-		}
-		if color != nil {
-			color.Release()
-		}
-		if surface != nil {
-			surface.Release()
-		}
-		if dev != nil {
-			dev.Release()
+		if rustRenderer != nil {
+			rustRenderer.Close()
 		}
 		if window != nil {
 			window.Close()
@@ -260,10 +190,7 @@ func newApplicationWithDependencies(
 	}
 	app := &application{
 		window:          window,
-		dev:             dev,
-		surface:         surface,
-		color:           color,
-		colorView:       colorView,
+		renderer:        rustRenderer,
 		frameWidth:      width,
 		frameHeight:     height,
 		clientEndpoint:  clientEndpoint,
@@ -294,58 +221,21 @@ func newApplicationWithDependencies(
 		}(),
 	}
 	app.releaseResources = app.releaseOwnedResources
-	app.renderer = render.New(dev, reg, colorFormat)
-	app.renderer.Resize(uint32(width), uint32(height))
-	app.depth = newDepthTarget(dev, uint32(width), uint32(height))
-	app.glyphAtlas, err = dependencies.newGlyphAtlas(dev)
+	// 材质与 HUD 图集一次性上传;mesh 上传调度经 SectionScheduler 下沉。
+	atlasLayers, atlasPixels := reg.AtlasPixels()
+	rustRenderer.UploadAtlas(atlasLayers, atlasPixels)
+	app.scheduler = render.NewSectionScheduler(rustRenderer, applicationUploadPerFrame)
+	app.glyphAtlas, err = dependencies.newGlyphAtlas(rendererGlyphSink{renderer: rustRenderer})
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("创建字形图集: %w", err), app.Close())
 	}
-	app.avatarRenderer, err = dependencies.newAvatarRenderer(
-		dev, colorFormat, gfx.FormatDepth32Float,
-	)
-	if err != nil {
-		app.releaseRemoteConstructionResources()
-		return nil, errors.Join(fmt.Errorf("创建远端玩家渲染器: %w", err), app.Close())
-	}
-	app.nameTagRenderer, err = dependencies.newNameTagRenderer(
-		dev, colorFormat, gfx.FormatDepth32Float, app.glyphAtlas,
-	)
-	if err != nil {
-		app.releaseRemoteConstructionResources()
-		return nil, errors.Join(fmt.Errorf("创建昵称渲染器: %w", err), app.Close())
-	}
-	app.hotbarRenderer, err = dependencies.newHotbarRenderer(dev, colorFormat, app.glyphAtlas, reg)
-	if err != nil {
-		app.releaseRemoteConstructionResources()
-		return nil, errors.Join(fmt.Errorf("创建快捷栏渲染器: %w", err), app.Close())
-	}
-	app.itemDropRenderer, err = dependencies.newItemDropRenderer(
-		dev, colorFormat, gfx.FormatDepth32Float,
-	)
-	if err != nil {
-		app.releaseRemoteConstructionResources()
-		return nil, errors.Join(fmt.Errorf("创建掉落物渲染器: %w", err), app.Close())
-	}
-	app.blockOutlineRenderer, err = dependencies.newBlockOutlineRenderer(
-		dev, colorFormat, gfx.FormatDepth32Float,
-	)
-	if err != nil {
-		app.releaseRemoteConstructionResources()
-		return nil, errors.Join(fmt.Errorf("创建方块轮廓渲染器: %w", err), app.Close())
-	}
-	app.damageOverlayRenderer, err = dependencies.newDamageOverlayRenderer(dev, colorFormat)
-	if err != nil {
-		app.releaseRemoteConstructionResources()
-		return nil, errors.Join(fmt.Errorf("创建受伤反馈渲染器: %w", err), app.Close())
-	}
+	app.nameTagRenderer = render.NewNameTagLayouter(app.glyphAtlas)
+	app.hotbarRenderer = hud.NewHotbarLayout(app.glyphAtlas, reg)
+	hudWidth, hudHeight, hudPixels := app.hotbarRenderer.AtlasPixels()
+	rustRenderer.UploadHUDAtlas(hudWidth, hudHeight, hudPixels)
 	app.configPath = options.ConfigPath
 	if options.Dev {
-		app.debugPanelRenderer, err = dependencies.newDebugPanelRenderer(dev, colorFormat, app.glyphAtlas)
-		if err != nil {
-			app.releaseRemoteConstructionResources()
-			return nil, errors.Join(fmt.Errorf("创建调试面板渲染器: %w", err), app.Close())
-		}
+		app.debugPanelRenderer = render.NewDebugPanelLayouter(app.glyphAtlas)
 		// 面板的初始生效值取当前已生效的 physics/sim 快照（main.go 在构造
 		// application 之前已经调用过 config.Config.Apply）与调用方传入的
 		// Render，三组合起来与启动时真正生效的参数保持一致，不需要额外
@@ -365,39 +255,15 @@ func newApplicationWithDependencies(
 	return app, nil
 }
 
-func (a *application) releaseRemoteConstructionResources() {
-	if a.debugPanelRenderer != nil {
-		a.debugPanelRenderer.Release()
-		a.debugPanelRenderer = nil
-	}
-	if a.damageOverlayRenderer != nil {
-		a.damageOverlayRenderer.Release()
-		a.damageOverlayRenderer = nil
-	}
-	if a.blockOutlineRenderer != nil {
-		a.blockOutlineRenderer.Release()
-		a.blockOutlineRenderer = nil
-	}
-	if a.itemDropRenderer != nil {
-		a.itemDropRenderer.Release()
-		a.itemDropRenderer = nil
-	}
-	if a.hotbarRenderer != nil {
-		a.hotbarRenderer.Release()
-		a.hotbarRenderer = nil
-	}
-	if a.nameTagRenderer != nil {
-		a.nameTagRenderer.Release()
-		a.nameTagRenderer = nil
-	}
-	if a.avatarRenderer != nil {
-		a.avatarRenderer.Release()
-		a.avatarRenderer = nil
-	}
-	if a.glyphAtlas != nil {
-		a.glyphAtlas.Release()
-		a.glyphAtlas = nil
-	}
+// applicationUploadPerFrame 是每帧 mesh 上传字节预算,与旧渲染器默认一致。
+const applicationUploadPerFrame = 4 << 20
+
+// rendererGlyphSink 把字形矩形写入适配到 Rust 渲染器上传入口。
+type rendererGlyphSink struct{ renderer *client.Renderer }
+
+// WriteGlyphRect 直传 client 渲染器的字形图集入口。
+func (sink rendererGlyphSink) WriteGlyphRect(x, y, width, height uint32, pixels []byte) {
+	sink.renderer.UploadGlyphRect(int(x), int(y), int(width), int(height), pixels)
 }
 
 func assembleBenchmarkObserverConnection(

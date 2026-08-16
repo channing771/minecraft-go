@@ -11,7 +11,7 @@ import (
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
+	"github.com/channing771/mornlea/internal/mesh"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
 	"github.com/channing771/mornlea/internal/render/hud"
@@ -43,14 +43,23 @@ type applicationOptions struct {
 }
 
 type application struct {
-	window                 applicationWindow
-	dev                    gfx.Device
-	surface                gfx.Surface
-	color                  gfx.Texture
-	colorView              gfx.TextureView
-	frameWidth             int
-	frameHeight            int
-	renderer               *render.Renderer
+	window applicationWindow
+	// renderer 是 Rust 渲染器句柄:窗口模式呈现到 surface,无头模式离屏。
+	renderer *client.Renderer
+	// scheduler 承接 mesh 上传调度(pending/预算/近距优先),下沉给 renderer。
+	scheduler   *render.SectionScheduler
+	frameWidth  int
+	frameHeight int
+	// visibleScratch/visibleSections 是每帧可见性计算的复用缓冲。
+	visibleScratch         mesh.VisibilityScratch
+	visibleSections        []core.SectionPos
+	rustVisible            [][3]int32
+	avatarStream           []byte
+	dropStream             []byte
+	outlineStream          []byte
+	billboardBytes         []byte
+	entityEncoder          render.InstanceEncoder
+	lastFrameStats         render.FrameStats
 	remotePlayers          *client.RemotePlayers
 	companions             *client.Companions
 	chatEvents             *client.ChatEvents
@@ -63,10 +72,8 @@ type application struct {
 	companionPresentations []client.CompanionPresentation
 	remoteAvatars          []render.Avatar
 	remoteNameTags         []render.NameTag
-	avatarRenderer         *render.AvatarRenderer
 	nameTagRenderer        *render.NameTagRenderer
 	hotbarRenderer         *hud.HotbarRenderer
-	damageOverlayRenderer  *render.DamageOverlayRenderer
 	damageFeedback         damageFeedback
 	damageStrength         float32
 	debugPanelRenderer     *render.DebugPanelRenderer
@@ -76,18 +83,16 @@ type application struct {
 	// configPath 是调试面板 F5 保存时的目标路径，来自 applicationOptions.ConfigPath。
 	configPath string
 	// panelLastFrameAt 是上一帧调试面板读数的采样时刻，用于计算 PanelReadout.FrameMillis。
-	panelLastFrameAt     time.Time
-	inventory            client.InventoryMirror
-	furnace              client.FurnaceMirror
-	chest                client.ChestMirror
-	miningOverlay        hud.MiningOverlay
-	itemDropRenderer     *render.ItemDropRenderer
-	blockOutlineRenderer *render.BlockOutlineRenderer
-	itemDrops            *client.ItemDrops
-	itemDropInstances    []render.ItemDrop
-	inventoryOpen        bool
-	inventorySource      int
-	serverTick           uint64
+	panelLastFrameAt  time.Time
+	inventory         client.InventoryMirror
+	furnace           client.FurnaceMirror
+	chest             client.ChestMirror
+	miningOverlay     hud.MiningOverlay
+	itemDrops         *client.ItemDrops
+	itemDropInstances []render.ItemDrop
+	inventoryOpen     bool
+	inventorySource   int
+	serverTick        uint64
 	// worldTimeTicks 是最后确认的权威绝对世界时间，只在接受更新状态时前进。
 	worldTimeTicks          uint64
 	glyphAtlas              *render.GlyphAtlas
@@ -100,7 +105,6 @@ type application struct {
 	mirror                  *client.Mirror
 	predictor               *client.Predictor
 	mesher                  *client.Mesher
-	depth                   *depthTarget
 	camera                  client.Camera
 	center                  core.ChunkPos
 	sequence                uint64
@@ -137,7 +141,6 @@ type applicationWindow interface {
 	ContentSize() (int, int)
 	SetContentSize(int, int)
 	CancelClose()
-	NativeHandle() gfx.NativeWindowHandle
 	Close()
 }
 

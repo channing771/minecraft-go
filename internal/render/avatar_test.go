@@ -1,7 +1,6 @@
 package render
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 )
 
 func TestEntityKeySeparatesEqualPlayerAndCompanionBytes(t *testing.T) {
@@ -64,45 +62,6 @@ func TestAvatarPlayerPaletteVectorsRemainUnchanged(t *testing.T) {
 	}
 	if avatarColor(companionKey) == tests[0].want {
 		t.Fatal("伙伴与相同 bytes 的玩家共享了颜色域")
-	}
-}
-
-func TestAvatarRendererAcceptsElevenAndRejectsTwelveBeforeGPUWrite(t *testing.T) {
-	dev := &avatarTestDevice{}
-	renderer := NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
-	defer renderer.Release()
-	encoder := &avatarTestEncoder{}
-	upload := dev.bufferByLabel(t, "avatar dynamic upload")
-	if got, want := upload.desc.Size, uint64(5556); got != want {
-		t.Fatalf("dynamic upload size=%d，想要 %d", got, want)
-	}
-	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, makeTestAvatars(11)); err != nil {
-		t.Fatalf("11 个 Avatar Render: %v", err)
-	}
-	if got, want := len(renderer.parts), 66; got != want {
-		t.Fatalf("parts=%d，想要 %d", got, want)
-	}
-	if got, want := len(upload.lastWrite), 5556; got != want {
-		t.Fatalf("upload bytes=%d，想要 %d", got, want)
-	}
-	if avatarInstanceSize != 5280 || avatarIndirectOffset != 5536 || avatarUploadBytes != 5556 {
-		t.Fatalf("Avatar 布局=%d/%d/%d，想要 5280/5536/5556", avatarInstanceSize, avatarIndirectOffset, avatarUploadBytes)
-	}
-	wantOrdered := append([]Avatar(nil), renderer.ordered...)
-	wantParts := append([]avatarPart(nil), renderer.parts...)
-	wantUpload := append([]byte(nil), renderer.upload...)
-	upload.lastWrite = nil
-	encoder.passes = nil
-	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, makeTestAvatars(12)); err == nil {
-		t.Fatal("12 个 Avatar 未被拒绝")
-	}
-	if len(upload.lastWrite) != 0 || len(encoder.passes) != 0 {
-		t.Fatalf("overflow 后 GPU write/pass=%d/%d，想要 0/0", len(upload.lastWrite), len(encoder.passes))
-	}
-	if !reflect.DeepEqual(renderer.ordered, wantOrdered) ||
-		!reflect.DeepEqual(renderer.parts, wantParts) ||
-		!reflect.DeepEqual(renderer.upload, wantUpload) {
-		t.Fatal("overflow 改变了 AvatarRenderer 上一帧状态")
 	}
 }
 
@@ -282,122 +241,6 @@ func TestAvatarColorProcessHelper(t *testing.T) {
 	fmt.Println(AvatarColor(testAvatarID(1)))
 }
 
-func TestAvatarRendererUsesFixedStorageAndDepthPass(t *testing.T) {
-	dev := &avatarTestDevice{}
-	renderer := NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
-
-	upload := dev.bufferByLabel(t, "avatar dynamic upload")
-	if got, want := upload.desc.Size, uint64(5556); got != want {
-		t.Fatalf("dynamic upload size=%d want=%d", got, want)
-	}
-	if want := gfx.BufferUsageUniform | gfx.BufferUsageStorage | gfx.BufferUsageIndirect | gfx.BufferUsageCopyDst; upload.desc.Usage != want {
-		t.Fatalf("dynamic upload usage=%v want=%v", upload.desc.Usage, want)
-	}
-	if got, want := len(dev.buffers), 3; got != want {
-		t.Fatalf("constructor buffers=%d want=%d", got, want)
-	}
-	if dev.pipelineDesc.Blend != gfx.BlendReplace || !dev.pipelineDesc.DepthWrite ||
-		dev.pipelineDesc.DepthFormat != gfx.FormatDepth32Float {
-		t.Fatalf("avatar pipeline=%+v; want replace blend and depth less/write pipeline", dev.pipelineDesc)
-	}
-
-	encoder := &avatarTestEncoder{}
-	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if len(encoder.passes) != 0 {
-		t.Fatalf("zero avatars created %d render passes", len(encoder.passes))
-	}
-
-	if err := renderer.Render(encoder, avatarTestView{}, avatarTestView{}, Camera{}, makeTestAvatars(11)); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(dev.buffers), 3; got != want {
-		t.Fatalf("render resized GPU buffers: got=%d want=%d", got, want)
-	}
-	if got, want := len(encoder.passes), 1; got != want {
-		t.Fatalf("avatar passes=%d want=%d", got, want)
-	}
-	pass := encoder.passes[0]
-	if pass.desc.Label != "avatar pass" || pass.desc.LoadClear {
-		t.Fatalf("pass descriptor=%+v; want label avatar pass and load existing attachments", pass.desc)
-	}
-	if pass.draws != 1 || !pass.ended || !pass.setIndex {
-		t.Fatalf("encoded pass=%+v; want one indexed draw and End", pass)
-	}
-	args := upload.lastWrite[5536:5556]
-	if got := binary.LittleEndian.Uint32(args[0:4]); got != 36 {
-		t.Fatalf("index count=%d want=36", got)
-	}
-	if got := binary.LittleEndian.Uint32(args[4:8]); got != 66 {
-		t.Fatalf("instance count=%d want=66", got)
-	}
-}
-
-func TestAvatarRendererHeadlessDraw(t *testing.T) {
-	dev, err := gfx.NewHeadlessDevice()
-	if err != nil {
-		t.Skipf("本机无可用 GPU 适配器: %v", err)
-	}
-	defer dev.Release()
-
-	color := dev.CreateTexture(gfx.TextureDesc{
-		Label: "avatar test color", Width: 64, Height: 64,
-		Format: gfx.FormatRGBA8Unorm, Usage: gfx.TextureUsageRenderTarget,
-	})
-	defer color.Release()
-	colorView := color.View(gfx.TextureViewDesc{})
-	defer colorView.Release()
-	depth := dev.CreateTexture(gfx.TextureDesc{
-		Label: "avatar test depth", Width: 64, Height: 64,
-		Format: gfx.FormatDepth32Float, Usage: gfx.TextureUsageRenderTarget,
-	})
-	defer depth.Release()
-	depthView := depth.View(gfx.TextureViewDesc{Aspect: gfx.AspectDepthOnly})
-	defer depthView.Release()
-
-	renderer := NewAvatarRenderer(dev, gfx.FormatRGBA8Unorm, gfx.FormatDepth32Float)
-	defer renderer.Release()
-	encoder := dev.CreateCommandEncoder()
-	clear := encoder.BeginRenderPass(gfx.RenderPassDesc{
-		Label: "terrain clear", ColorView: colorView, DepthView: depthView, LoadClear: true,
-	})
-	clear.End()
-	if err := renderer.Render(encoder, colorView, depthView, Camera{ViewProj: mgl32.Ident4()}, []Avatar{{
-		Key: testEntityKey(testAvatarID(1)), Position: mgl32.Vec3{0, -0.9, 0},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	commands := encoder.Finish()
-	dev.Submit(commands)
-	commands.Release()
-	dev.Poll(true)
-}
-
-func TestAvatarRendererReleaseIsIdempotent(t *testing.T) {
-	upload := &avatarReleaseBuffer{}
-	vertices := &avatarReleaseBuffer{}
-	indices := &avatarReleaseBuffer{}
-	pipeline := &avatarReleasePipeline{}
-	bind := &avatarReleaseBindGroup{}
-	renderer := &AvatarRenderer{
-		dynamic: upload, vertices: vertices, indices: indices,
-		pipeline: pipeline, bind: bind,
-	}
-
-	renderer.Release()
-	renderer.Release()
-	for name, got := range map[string]int{
-		"dynamic": upload.releases, "vertices": vertices.releases,
-		"indices": indices.releases, "pipeline": pipeline.releases,
-		"bind": bind.releases,
-	} {
-		if got != 1 {
-			t.Errorf("%s release calls=%d want=1", name, got)
-		}
-	}
-}
-
 func makeTestAvatars(count int) []Avatar {
 	avatars := make([]Avatar, count)
 	for i := range avatars {
@@ -476,91 +319,9 @@ func assertVec3Near(t *testing.T, got, want mgl32.Vec3) {
 	}
 }
 
-type avatarTestDevice struct {
-	buffers      []*avatarTestBuffer
-	pipelineDesc gfx.RenderPipelineDesc
-	bindDesc     gfx.BindGroupDesc
-}
-
-func (d *avatarTestDevice) CreateBuffer(desc gfx.BufferDesc) gfx.Buffer {
-	b := &avatarTestBuffer{desc: desc}
-	d.buffers = append(d.buffers, b)
-	return b
-}
-func (*avatarTestDevice) CreateShaderModule(string) gfx.ShaderModule { return &avatarTestShader{} }
-func (d *avatarTestDevice) CreateRenderPipeline(desc gfx.RenderPipelineDesc) gfx.RenderPipeline {
-	d.pipelineDesc = desc
-	return &avatarReleasePipeline{}
-}
-func (*avatarTestDevice) CreateComputePipeline(gfx.ComputePipelineDesc) gfx.ComputePipeline {
-	panic("unexpected compute pipeline")
-}
-func (d *avatarTestDevice) CreateBindGroup(desc gfx.BindGroupDesc) gfx.BindGroup {
-	d.bindDesc = desc
-	return &avatarReleaseBindGroup{}
-}
-func (*avatarTestDevice) CreateTexture(gfx.TextureDesc) gfx.Texture { panic("unexpected texture") }
-func (*avatarTestDevice) CreateSampler(gfx.SamplerDesc) gfx.Sampler { panic("unexpected sampler") }
-func (*avatarTestDevice) CreateCommandEncoder() gfx.CommandEncoder  { panic("unexpected encoder") }
-func (*avatarTestDevice) Submit(...gfx.CommandBuffer)               {}
-func (*avatarTestDevice) Poll(bool)                                 {}
-func (*avatarTestDevice) Release()                                  {}
-
-func (d *avatarTestDevice) bufferByLabel(t *testing.T, label string) *avatarTestBuffer {
-	t.Helper()
-	for _, buffer := range d.buffers {
-		if buffer.desc.Label == label {
-			return buffer
-		}
-	}
-	t.Fatalf("buffer %q was not created", label)
-	return nil
-}
-
-type avatarTestBuffer struct {
-	desc      gfx.BufferDesc
-	lastWrite []byte
-	releases  int
-}
-
-func (b *avatarTestBuffer) Size() uint64 { return b.desc.Size }
-func (b *avatarTestBuffer) Write(_ uint64, data []byte) {
-	b.lastWrite = append(b.lastWrite[:0], data...)
-}
-func (*avatarTestBuffer) ReadBack() []byte { panic("unexpected readback") }
-func (b *avatarTestBuffer) Release()       { b.releases++ }
-
 type avatarTestShader struct{ releases int }
 
 func (s *avatarTestShader) Release() { s.releases++ }
-
-type avatarTestEncoder struct{ passes []*avatarTestPass }
-
-func (e *avatarTestEncoder) BeginRenderPass(desc gfx.RenderPassDesc) gfx.RenderPass {
-	pass := &avatarTestPass{desc: desc}
-	e.passes = append(e.passes, pass)
-	return pass
-}
-func (*avatarTestEncoder) BeginComputePass(string) gfx.ComputePass { panic("unexpected compute pass") }
-func (*avatarTestEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {
-	panic("unexpected buffer copy")
-}
-func (*avatarTestEncoder) Finish() gfx.CommandBuffer { panic("unexpected finish") }
-
-type avatarTestPass struct {
-	desc     gfx.RenderPassDesc
-	draws    int
-	ended    bool
-	setIndex bool
-}
-
-func (*avatarTestPass) SetPipeline(gfx.RenderPipeline)             {}
-func (*avatarTestPass) SetBindGroup(uint32, gfx.BindGroup)         {}
-func (*avatarTestPass) SetVertexBuffer(uint32, gfx.Buffer, uint64) {}
-func (p *avatarTestPass) SetIndexBuffer(gfx.Buffer, uint64)        { p.setIndex = true }
-func (p *avatarTestPass) DrawIndexedIndirect(gfx.Buffer, uint64)   { p.draws++ }
-func (*avatarTestPass) Draw(uint32, uint32)                        { panic("unexpected direct draw") }
-func (p *avatarTestPass) End()                                     { p.ended = true }
 
 type avatarTestView struct{}
 

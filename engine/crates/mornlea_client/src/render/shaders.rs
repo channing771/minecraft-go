@@ -1,31 +1,26 @@
-//! WGSL 单源内嵌:双后端共存期间,shader 必须与 Go 渲染器逐字节同源。
-//!
-//! 这里以 `include_str!` 相对路径直引 `internal/render/shader/` 下的文件,
-//! 杜绝复制漂移;R2c 删除 Go 渲染器时再把文件迁入本 crate。相对路径的
-//! 脆弱性由本模块单测(非空且含入口点)兜底。
+//! WGSL 内嵌:R2c 起 shader 归属本 crate(`shaders/` 目录),Rust 渲染器
+//! 是唯一消费方。路径失效或文件清空由本模块单测(非空且含入口点)兜底。
 
 /// 地形 pass(实例化紧凑 quad)。
-pub const TERRAIN: &str = include_str!("../../../../../internal/render/shader/terrain.wgsl");
+pub const TERRAIN: &str = include_str!("../../shaders/terrain.wgsl");
 /// 天空与程序化方块云 pass。
-pub const SKY: &str = include_str!("../../../../../internal/render/shader/sky.wgsl");
+pub const SKY: &str = include_str!("../../shaders/sky.wgsl");
 /// GPU culling compute。
-pub const CULL: &str = include_str!("../../../../../internal/render/shader/cull.wgsl");
+pub const CULL: &str = include_str!("../../shaders/cull.wgsl");
 /// HiZ mip 链构建 compute。
-pub const HIZ_BUILD: &str = include_str!("../../../../../internal/render/shader/hiz_build.wgsl");
+pub const HIZ_BUILD: &str = include_str!("../../shaders/hiz_build.wgsl");
 /// HiZ 深度拷贝 compute。
-pub const HIZ_COPY: &str = include_str!("../../../../../internal/render/shader/hiz_copy.wgsl");
+pub const HIZ_COPY: &str = include_str!("../../shaders/hiz_copy.wgsl");
 /// 实体 pass(avatar 与掉落物共用)。
-pub const AVATAR: &str = include_str!("../../../../../internal/render/shader/avatar.wgsl");
+pub const AVATAR: &str = include_str!("../../shaders/avatar.wgsl");
 /// 伤害红边全屏 pass。
-pub const DAMAGE_OVERLAY: &str =
-    include_str!("../../../../../internal/render/shader/damage_overlay.wgsl");
+pub const DAMAGE_OVERLAY: &str = include_str!("../../shaders/damage_overlay.wgsl");
 /// 名牌 billboard pass。
-pub const NAME_TAG: &str = include_str!("../../../../../internal/render/shader/name_tag.wgsl");
+pub const NAME_TAG: &str = include_str!("../../shaders/name_tag.wgsl");
 /// 调试面板 pass。
-pub const DEBUG_PANEL: &str =
-    include_str!("../../../../../internal/render/shader/debug_panel.wgsl");
+pub const DEBUG_PANEL: &str = include_str!("../../shaders/debug_panel.wgsl");
 /// HUD(hotbar 家族)pass。
-pub const HUD_HOTBAR: &str = include_str!("../../../../../internal/render/hud/shader/hotbar.wgsl");
+pub const HUD_HOTBAR: &str = include_str!("../../shaders/hotbar.wgsl");
 
 #[cfg(test)]
 mod tests {

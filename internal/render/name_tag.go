@@ -1,15 +1,12 @@
 package render
 
 import (
-	_ "embed"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
 
 	"github.com/go-gl/mathgl/mgl32"
-
-	"github.com/channing771/mornlea/internal/gfx"
 )
 
 const (
@@ -30,9 +27,6 @@ const (
 	nameTagUploadBytes      = nameTagGlyphOffset + nameTagGlyphSize
 )
 
-//go:embed shader/name_tag.wgsl
-var nameTagShader string
-
 type NameTag struct {
 	Key    EntityKey
 	Text   string
@@ -50,7 +44,6 @@ type GlyphSource interface {
 	FlushUploads(*UploadBudget) error
 	Glyph(rune) Glyph
 	Kern(rune, rune) float32
-	TextureView() gfx.TextureView
 }
 
 type nameTagGlyph struct {
@@ -76,95 +69,9 @@ type nameTagLayout struct {
 type NameTagRenderer struct {
 	atlas GlyphSource
 
-	dynamic            gfx.Buffer
-	backgroundPipeline gfx.RenderPipeline
-	glyphPipeline      gfx.RenderPipeline
-	bind               gfx.BindGroup
-	sampler            gfx.Sampler
-
 	layout  nameTagLayout
 	ordered []NameTag
 	upload  []byte
-}
-
-func NewNameTagRenderer(
-	dev gfx.Device,
-	colorFormat, depthFormat gfx.TextureFormat,
-	atlas GlyphSource,
-) *NameTagRenderer {
-	renderer := &NameTagRenderer{
-		atlas:   atlas,
-		ordered: make([]NameTag, 0, maxNameTags),
-		upload:  make([]byte, nameTagUploadBytes),
-	}
-	renderer.dynamic = dev.CreateBuffer(gfx.BufferDesc{
-		Label: "name-tag dynamic upload",
-		Size:  nameTagUploadBytes,
-		Usage: gfx.BufferUsageUniform | gfx.BufferUsageStorage | gfx.BufferUsageCopyDst,
-	})
-	renderer.layout = nameTagLayout{
-		glyphs:      make([]nameTagGlyph, 0, maxNameTagGlyphs),
-		backgrounds: make([]nameTagBackground, 0, maxNameTags),
-	}
-	layout := gfx.BindGroupLayout{
-		Label: "name-tag layout",
-		Entries: []gfx.BindGroupLayoutEntry{
-			{Binding: 0, Type: gfx.BindingUniformBuffer, VisibleIn: gfx.StageVertex},
-			{Binding: 1, Type: gfx.BindingStorageBufferRO, VisibleIn: gfx.StageVertex},
-			{Binding: 2, Type: gfx.BindingStorageBufferRO, VisibleIn: gfx.StageVertex},
-			{Binding: 3, Type: gfx.BindingSampledTextureFloat, VisibleIn: gfx.StageFragment, ViewDimension: gfx.TextureViewDimension2D},
-			{Binding: 4, Type: gfx.BindingSampler, VisibleIn: gfx.StageFragment},
-		},
-	}
-	module := dev.CreateShaderModule(nameTagShader)
-	renderer.backgroundPipeline = dev.CreateRenderPipeline(nameTagPipelineDesc(
-		"name-tag background", module, colorFormat, depthFormat, layout, "background_vs", "background_fs",
-	))
-	renderer.glyphPipeline = dev.CreateRenderPipeline(nameTagPipelineDesc(
-		"name-tag glyph", module, colorFormat, depthFormat, layout, "glyph_vs", "glyph_fs",
-	))
-	module.Release()
-	renderer.sampler = dev.CreateSampler(gfx.SamplerDesc{
-		Label: "name-tag glyph sampler", MagFilter: gfx.FilterLinear, MinFilter: gfx.FilterLinear,
-		MipFilter: gfx.FilterNearest, Address: gfx.AddressClampToEdge,
-	})
-	renderer.bind = dev.CreateBindGroup(gfx.BindGroupDesc{
-		Label:  "name-tag resources",
-		Layout: layout,
-		Entries: []gfx.BindGroupEntry{
-			{
-				Binding: 0, Buffer: renderer.dynamic,
-				Offset: nameTagCameraOffset, Size: nameTagCameraBytes,
-			},
-			{
-				Binding: 1, Buffer: renderer.dynamic,
-				Offset: nameTagGlyphOffset, Size: nameTagGlyphSize,
-			},
-			{
-				Binding: 2, Buffer: renderer.dynamic,
-				Offset: nameTagBackgroundOffset, Size: nameTagBackgroundSize,
-			},
-			{Binding: 3, Texture: atlas.TextureView()},
-			{Binding: 4, Sampler: renderer.sampler},
-		},
-	})
-	return renderer
-}
-
-func nameTagPipelineDesc(
-	label string,
-	module gfx.ShaderModule,
-	colorFormat, depthFormat gfx.TextureFormat,
-	layout gfx.BindGroupLayout,
-	vertexEntry, fragmentEntry string,
-) gfx.RenderPipelineDesc {
-	return gfx.RenderPipelineDesc{
-		Label: label, Shader: module,
-		VertexEntry: vertexEntry, FragmentEntry: fragmentEntry,
-		BindGroups:  []gfx.BindGroupLayout{layout},
-		ColorFormat: colorFormat, DepthFormat: depthFormat,
-		DepthWrite: false, Blend: gfx.BlendAlpha,
-	}
 }
 
 func (renderer *NameTagRenderer) Prepare(tags []NameTag, budget *UploadBudget) error {
@@ -187,36 +94,6 @@ func (renderer *NameTagRenderer) Prepare(tags []NameTag, budget *UploadBudget) e
 	)
 	encodeNameTagGlyphs(renderer.upload[nameTagGlyphOffset:nameTagUploadBytes], renderer.layout.glyphs)
 	return nil
-}
-
-func (renderer *NameTagRenderer) Render(
-	encoder gfx.CommandEncoder,
-	target, depth gfx.TextureView,
-	camera BillboardCamera,
-) {
-	if len(renderer.layout.backgrounds) == 0 && len(renderer.layout.glyphs) == 0 {
-		return
-	}
-	encodeBillboardCamera(renderer.upload[nameTagCameraOffset:nameTagCameraBytes], camera)
-	uploadBytes := nameTagGlyphOffset + len(renderer.layout.glyphs)*nameTagInstanceBytes
-	renderer.dynamic.Write(0, renderer.upload[:uploadBytes])
-	pass := encoder.BeginRenderPass(nameTagPassDesc(target, depth))
-	pass.SetBindGroup(0, renderer.bind)
-	if len(renderer.layout.backgrounds) != 0 {
-		pass.SetPipeline(renderer.backgroundPipeline)
-		pass.Draw(6, uint32(len(renderer.layout.backgrounds)))
-	}
-	if len(renderer.layout.glyphs) != 0 {
-		pass.SetPipeline(renderer.glyphPipeline)
-		pass.Draw(6, uint32(len(renderer.layout.glyphs)))
-	}
-	pass.End()
-}
-
-func nameTagPassDesc(target, depth gfx.TextureView) gfx.RenderPassDesc {
-	return gfx.RenderPassDesc{
-		Label: "name-tag pass", ColorView: target, DepthView: depth, LoadClear: false,
-	}
 }
 
 func layoutNameTags(dst *nameTagLayout, atlas GlyphSource, tags []NameTag) nameTagLayout {
@@ -353,33 +230,4 @@ func encodeBillboardCamera(out []byte, camera BillboardCamera) []byte {
 		binary.LittleEndian.PutUint32(out[80+index*4:], math.Float32bits(value))
 	}
 	return out
-}
-
-// Release releases only handles owned by the renderer. The atlas and its view
-// are borrowed from the application and deliberately remain untouched.
-func (renderer *NameTagRenderer) Release() {
-	if renderer.bind != nil {
-		renderer.bind.Release()
-		renderer.bind = nil
-	}
-	if renderer.glyphPipeline != nil {
-		renderer.glyphPipeline.Release()
-		renderer.glyphPipeline = nil
-	}
-	if renderer.backgroundPipeline != nil {
-		renderer.backgroundPipeline.Release()
-		renderer.backgroundPipeline = nil
-	}
-	if renderer.sampler != nil {
-		renderer.sampler.Release()
-		renderer.sampler = nil
-	}
-	for _, buffer := range []*gfx.Buffer{
-		&renderer.dynamic,
-	} {
-		if *buffer != nil {
-			(*buffer).Release()
-			*buffer = nil
-		}
-	}
 }
