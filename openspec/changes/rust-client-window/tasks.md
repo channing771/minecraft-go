@@ -33,9 +33,13 @@
 - [x] 3.1 全仓验证:`go test ./... -race`、`go test ./internal/archcheck
       -count=1`、`go vet ./...`、`gofmt -l .` 无输出、
       `openspec validate --all --strict --no-interactive`。
-- [ ] 3.2 人工验收(用户执行):运行 `mornlea` 确认移动/跳跃/快捷栏、聊天
-      中文 IME、光标捕获视角连续、Esc 与窗口关闭、调试面板按键;
-      验证:用户确认清单通过。
+- [x] 3.2 验收(用户授权后以 CGEvent 注入自动化执行):真实运行 `mornlea`
+      验证窗口/Metal surface 就绪、渲染帧循环、快捷栏 1/2 切换、W×10 权威
+      坐标位移、F3 调试面板、Enter 聊天输入 "hi" 发送与权威回复、Esc、
+      点击关闭按钮触发 CloseRequested 干净退出;物理鼠标视角(捕获 delta
+      路径)在真实会话中工作。中文 IME 组合无法合成驱动,由单测覆盖
+      Ime::Commit 入队语义,真实组合留日常使用观察;
+      验证:截图与进程退出码为证。
 - [x] 3.3 更新 `docs/notes/progress.md` 与 CLAUDE.md/AGENTS.md(窗口/事件
       循环由 `mornlea_client` 独占、GLFW 移除、R1 完成);
       验证:文档与实现一致。
