@@ -70,10 +70,15 @@ func testCompanionStoreContract(
 		store := open(t)
 		t.Cleanup(func() { _ = store.Close() })
 		input := fixtureCompanionBodies()
-		if err := store.SaveCompanions(context.Background(), CompanionSave{Revision: 7, Records: input}); err != nil {
+		queues := fixtureCompanionQueues()
+		if err := store.SaveCompanions(context.Background(), CompanionSave{
+			Revision: 7, Records: input, Queues: queues,
+		}); err != nil {
 			t.Fatal(err)
 		}
 		input[0].Position[0] = 999
+		queues[0].Current.PlanSteps[0].X = 999
+		queues[0].Pending[0] = "被篡改"
 
 		loaded, err := store.LoadCompanions(context.Background())
 		if err != nil {
@@ -81,16 +86,23 @@ func testCompanionStoreContract(
 		}
 		wantBodies := fixtureCompanionBodies()
 		slices.Reverse(wantBodies)
-		if loaded.Revision != 7 || !reflect.DeepEqual(loaded.Records, wantBodies) {
-			t.Fatalf("loaded=%+v，想要 revision=7 records=%+v", loaded, wantBodies)
+		wantQueues := fixtureCompanionQueues()
+		if loaded.Revision != 7 || !reflect.DeepEqual(loaded.Records, wantBodies) ||
+			!reflect.DeepEqual(loaded.Queues, wantQueues) {
+			t.Fatalf(
+				"loaded=%+v，想要 revision=7 records=%+v queues=%+v",
+				loaded, wantBodies, wantQueues,
+			)
 		}
 		loaded.Records[0].Position[1] = 998
+		loaded.Queues[0].Pending[1] = "污染"
 		again, err := store.LoadCompanions(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if again.Revision != 7 || !reflect.DeepEqual(again.Records, wantBodies) {
-			t.Fatalf("second load=%+v，想要保持 %+v", again, wantBodies)
+		if again.Revision != 7 || !reflect.DeepEqual(again.Records, wantBodies) ||
+			!reflect.DeepEqual(again.Queues, wantQueues) {
+			t.Fatalf("second load=%+v，想要保持 %+v/%+v", again, wantBodies, wantQueues)
 		}
 	})
 
@@ -222,7 +234,11 @@ func TestDiskCompanionAtomicReplaceKeepsOldFileOnFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			store := openCompanionDisk(t, root)
-			first := CompanionSave{Revision: 1, Records: fixtureCompanionBodies()}
+			first := CompanionSave{
+				Revision: 1,
+				Records:  fixtureCompanionBodies(),
+				Queues:   fixtureCompanionQueues(),
+			}
 			if err := store.SaveCompanions(context.Background(), first); err != nil {
 				t.Fatal(err)
 			}
@@ -239,8 +255,9 @@ func TestDiskCompanionAtomicReplaceKeepsOldFileOnFailure(t *testing.T) {
 			}
 			wantRecords := fixtureCompanionBodies()
 			slices.Reverse(wantRecords)
-			if got.Revision != 1 || !reflect.DeepEqual(got.Records, wantRecords) {
-				t.Fatalf("after failed replace loaded=%+v，想要旧值", got)
+			if got.Revision != 1 || !reflect.DeepEqual(got.Records, wantRecords) ||
+				!reflect.DeepEqual(got.Queues, fixtureCompanionQueues()) {
+				t.Fatalf("after failed replace loaded=%+v，想要旧值（含任务载荷）", got)
 			}
 			matches, err := filepath.Glob(filepath.Join(root, ".companions.ai.tmp-*"))
 			if err != nil {

@@ -31,6 +31,7 @@ import (
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/physics"
 	"github.com/channing771/mornlea/internal/sim"
+	"github.com/channing771/mornlea/internal/storage"
 )
 
 // companionPlanner 是规划器依赖面：生产实现是 companion.PlannerClient，
@@ -577,7 +578,7 @@ func (m *companionManager) pathWorker(
 }
 
 // taskStates 返回有任务内容的伙伴的任务域观察输入，经 companionPersistence.
-// Observe 参与 dirty 判定（载荷落盘由任务 7 扩展）。空闲队列（无当前任务且
+// Observe 参与 dirty 判定并随保存载荷落盘。空闲队列（无当前任务且
 // FIFO 为空）没有可持久化的任务事实，跳过它避免「首次观察到空队列」被误判
 // 为任务状态变化而触发无意义的存档。
 func (m *companionManager) taskStates() []companion.TaskQueueState {
@@ -594,6 +595,63 @@ func (m *companionManager) taskStates() []companion.TaskQueueState {
 		states = append(states, state)
 	}
 	return states
+}
+
+// restoredIssuerIdentity 是恢复任务的合成发令者事实：指令的真实发令者
+// （玩家 ID/名称/位置）不落盘，重启后无法回溯；任务事件又必须携带合法
+// 玩家身份才能通过 ChatEvent.Validate 发布，因此使用固定的「未知发令者」
+// 身份。位置沿用 captureIssuer 的有界缺省。
+var restoredIssuerIdentity = companionTaskIssuer{
+	playerID: core.PlayerID{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 0},
+	name:     "未知发令者",
+	position: [3]float32{0, 1, 0},
+}
+
+// restoreQueues 把启动加载的任务域载荷恢复进对应槽位（newWorld 在构造
+// Manager 后调用一次）。未配置（inactive）的伙伴没有槽位，任务事实不
+// 恢复——配置移除的伙伴不参与编排，存档中的 inactive 记录仍只保留身体。
+func (m *companionManager) restoreQueues(queues []storage.StoredCompanionQueue) {
+	for _, queue := range queues {
+		slot := m.slots[queue.ID]
+		if slot == nil {
+			continue
+		}
+		m.restoreQueue(slot, queue)
+	}
+}
+
+// restoreQueue 恢复单个槽位的任务域：当前任务与 FIFO 指令按存档顺序回填。
+// 归一纪律（恢复侧）：Planning/Validating 按 Queued 恢复并保留原始指令，
+// 重启后重新发起规划；Running 保留步骤索引与 deadline，但路径绝不落盘，
+// 恢复后 slot.path 为 nil——首个动作前必须经 dispatchPathRequests 按当前
+// 权威世界重算，天然满足「恢复任务在下一动作前重验」的规格约束。
+func (m *companionManager) restoreQueue(slot *companionTaskSlot, queue storage.StoredCompanionQueue) {
+	if queue.HasCurrent {
+		task := companion.Task{
+			Command:       companion.TaskCommand(queue.Current.Command),
+			Plan:          companion.Plan{Steps: queue.Current.PlanSteps},
+			StepIndex:     queue.Current.StepIndex,
+			State:         queue.Current.State,
+			StartTick:     queue.Current.StartTick,
+			DeadlineTicks: queue.Current.DeadlineTicks,
+		}
+		if task.State == companion.TaskPlanning || task.State == companion.TaskValidating {
+			task.State = companion.TaskQueued
+			task.Plan = companion.Plan{}
+			task.StepIndex = 0
+			task.StartTick = 0
+			task.DeadlineTicks = 0
+		}
+		if slot.queue.RestoreCurrent(task) {
+			slot.currentIssuer = restoredIssuerIdentity
+			slot.currentCommand = task.Command
+		}
+	}
+	for _, command := range queue.Pending {
+		if slot.queue.Enqueue(companion.TaskCommand(command)) {
+			slot.issuers = append(slot.issuers, restoredIssuerIdentity)
+		}
+	}
 }
 
 // beginShutdown 进入关服序列：取消在途模型请求。调用点（Server.Shutdown

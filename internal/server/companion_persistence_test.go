@@ -302,6 +302,62 @@ func TestCompanionPersistenceFlushCancellationKeepsWorkerAndRetry(t *testing.T) 
 	}
 }
 
+func TestCompanionPersistenceDefersQueueWithoutBodyRecordUntilActivation(t *testing.T) {
+	store := newControllableCompanionStore()
+	p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
+	t.Cleanup(p.Close)
+	// 出生扫描在途的伙伴可以先收到排队指令：队列没有身体记录不能编码，
+	// 保存载荷丢弃它而不是失败，激活后的首次保存补上完整载荷。
+	pending := companion.TaskQueueState{
+		ID:      companionBody(9, 90).ID,
+		Pending: []companion.TaskCommand{"出生前的指令"},
+	}
+	p.Observe(nil, []companion.TaskQueueState{pending})
+	if err := p.Poll(10); err != nil {
+		t.Fatal(err)
+	}
+	first := receiveCompanionSave(t, store)
+	if first.Revision != 1 || len(first.Queues) != 0 {
+		t.Fatalf("无身体记录的保存载荷=%+v，想要 revision=1 且无队列", first)
+	}
+	store.complete(nil)
+
+	// 身体激活前 dirty 保持（排队指令尚未落盘），期间可能重复保存无队列
+	// 载荷；激活后逐个收尾，直到出现包含排队指令的保存。
+	p.Observe([]companion.Body{companionBody(9, 90)}, []companion.TaskQueueState{pending})
+	var withQueue storage.CompanionSave
+	deadline := time.Now().Add(waitDeadline)
+	for time.Now().Before(deadline) {
+		if err := p.Poll(20); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case save := <-store.started:
+			if len(save.Queues) != 0 {
+				withQueue = save
+			}
+			store.complete(nil)
+		default:
+		}
+		if len(withQueue.Queues) != 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	want := []storage.StoredCompanionQueue{{
+		ID:      companionBody(9, 90).ID,
+		Pending: []string{"出生前的指令"},
+	}}
+	if !reflect.DeepEqual(withQueue.Queues, want) {
+		t.Fatalf("激活后的保存载荷=%+v，想要 queues=%+v", withQueue.Queues, want)
+	}
+	pollCompanionPersistenceUntil(t, p, 30, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return !p.dirty && !p.inFlight
+	})
+}
+
 type controllableCompanionStore struct {
 	mu      sync.Mutex
 	started chan storage.CompanionSave
@@ -381,6 +437,7 @@ func companionBody(id, position byte) companion.Body {
 func cloneCompanionSaveForTest(save storage.CompanionSave) storage.CompanionSave {
 	copy := save
 	copy.Records = append([]companion.Body(nil), save.Records...)
+	copy.Queues = cloneStoredQueues(save.Queues)
 	return copy
 }
 

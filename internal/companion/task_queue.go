@@ -57,6 +57,39 @@ func (q *TaskQueue) BeginHead() bool {
 	return true
 }
 
+// RestoreCurrent 把一条持久化恢复的任务放入当前槽位（companions.ai schema
+// v2 的恢复路径）。恢复纪律：
+//   - 状态必须非终态且失败原因为空；Planning/Validating 由调用方先归一为
+//     Queued（未通过验证的计划不落盘，重启后重新规划）；
+//   - Running 必须携带合法 go_to 步骤且 StepIndex 落在计划范围内；
+//   - 非 Running 不得携带计划、进度与计时（持久化层的同一耦合约束）；
+//   - Generation 以当前队列计数重新盖戳——重启后没有在途 worker 结果，
+//     盖戳只为保持“当前任务世代恒新”的不变量。
+//
+// 参数非法或已有当前任务时返回 false，队列内容保持不变。
+func (q *TaskQueue) RestoreCurrent(task Task) bool {
+	if q.hasCurrent || task.State.Terminal() || task.FailReason != TaskFailNone ||
+		task.Command.Validate() != nil {
+		return false
+	}
+	if task.State == TaskRunning {
+		if err := validPlanSteps(task.Plan.Steps); err != nil {
+			return false
+		}
+		if task.StepIndex < 0 || task.StepIndex >= len(task.Plan.Steps) {
+			return false
+		}
+	} else if len(task.Plan.Steps) != 0 || task.StepIndex != 0 ||
+		task.StartTick != 0 || task.DeadlineTicks != 0 {
+		return false
+	}
+	q.generation++
+	task.Generation = q.generation
+	q.current = task
+	q.hasCurrent = true
+	return true
+}
+
 // BeginPlanning 把当前任务从 Queued 迁移到 Planning。规划请求的发起由编排层
 // 在迁移成功后进行；本方法只推进状态，不产生公开事件（Planning 是内部阶段）。
 func (q *TaskQueue) BeginPlanning() bool {

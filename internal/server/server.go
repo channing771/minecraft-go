@@ -147,6 +147,7 @@ func newWorld(
 	if companions != nil {
 		companions.mu.Lock()
 		records := slices.Clone(companions.records)
+		loadedQueues := cloneStoredQueues(companions.loadedQueues)
 		companions.mu.Unlock()
 		for _, definition := range config.Companions {
 			restore := sim.CompanionRestore{
@@ -170,6 +171,9 @@ func newWorld(
 			panic("server: construct companion planner: " + err.Error())
 		}
 		server.companionManager = newCompanionManager(server.engine, config, planner)
+		// 恢复接线：任务域载荷在首个 tick 之前回填槽位（Planning/
+		// Validating 归一为 Queued，Running 保留进度且路径留空待重算）。
+		server.companionManager.restoreQueues(loadedQueues)
 	}
 
 	server.workers.Add(config.Workers)

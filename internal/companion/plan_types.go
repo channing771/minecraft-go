@@ -310,10 +310,17 @@ func (p Plan) Validate() error {
 	if err := validatePlanText("计划 summary", p.Summary, MaxPlanSummaryBytes, true); err != nil {
 		return err
 	}
-	if len(p.Steps) == 0 {
+	return validPlanSteps(p.Steps)
+}
+
+// validPlanSteps 校验步骤序列本身：非空且每步都是合法 go_to。持久化恢复的
+// 计划不保留 summary（模型自由文本不属于任务事实），RestoreCurrent 复用
+// 本函数做与 Validate 完全一致的步骤校验。
+func validPlanSteps(steps []PlanStep) error {
+	if len(steps) == 0 {
 		return fmt.Errorf("companion: 计划 steps 为空")
 	}
-	for index, step := range p.Steps {
+	for index, step := range steps {
 		if step.Kind != PlanStepGoTo {
 			return fmt.Errorf("companion: 计划 steps[%d] kind %d 不是已交付的 go_to", index, step.Kind)
 		}
