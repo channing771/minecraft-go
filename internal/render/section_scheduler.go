@@ -147,5 +147,19 @@ func schedulerDistance2(p core.SectionPos, center core.ChunkPos) int64 {
 }
 
 func schedulerOutside(p core.SectionPos, center core.ChunkPos, radius int) bool {
-	return abs32Render(p.X-center.X) > int32(radius) || abs32Render(p.Z-center.Z) > int32(radius)
+	return schedulerAbs32(p.X-center.X) > int32(radius) || schedulerAbs32(p.Z-center.Z) > int32(radius)
+}
+
+func schedulerAbs32(v int32) int32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// FrameStats 是最近一帧的 CPU 侧候选统计(承接旧渲染器的同名结构)。
+type FrameStats struct {
+	CandidateSections int
+	CandidateBytes    int
+	CandidateFaces    int
 }

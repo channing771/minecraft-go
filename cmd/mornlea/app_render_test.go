@@ -19,7 +19,6 @@ import (
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/mesh"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
@@ -505,7 +504,3 @@ func (source *integrationGlyphSource) Glyph(rune) render.Glyph {
 }
 
 func (source *integrationGlyphSource) Kern(rune, rune) float32 { return 0 }
-
-// TextureView 是旧 GPU 构造遗留的接口占位;layout-only 路径不使用,
-// 删除段随 GlyphSource 接口收敛一并移除。
-func (source *integrationGlyphSource) TextureView() gfx.TextureView { return nil }

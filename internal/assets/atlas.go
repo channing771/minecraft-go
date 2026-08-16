@@ -2,8 +2,6 @@
 
 package assets
 
-import "github.com/channing771/mornlea/internal/gfx"
-
 // atlasMips 是材质 atlas 的 mip 层数;与 Rust 渲染器的 ATLAS_MIPS 必须一致。
 const atlasMips = 5
 
@@ -36,35 +34,6 @@ func (r *Registry) AtlasPixels() (int, []byte) {
 		}
 	}
 	return r.LayerCount(), out
-}
-
-// UploadTo 把全部材质层建成一张带 mipmap 的 2D 数组纹理。
-func (r *Registry) UploadTo(dev gfx.Device) (gfx.Texture, gfx.Sampler) {
-	tex := dev.CreateTexture(gfx.TextureDesc{
-		Label:     "block-textures",
-		Width:     texSize,
-		Height:    texSize,
-		Layers:    uint32(r.LayerCount()),
-		MipLevels: atlasMips,
-		Format:    gfx.FormatRGBA8Unorm,
-		Dimension: gfx.TextureDimension2DArray,
-		Usage:     gfx.TextureUsageBinding | gfx.TextureUsageCopyDst,
-	})
-
-	for layer := 0; layer < r.LayerCount(); layer++ {
-		for mip, px := range r.layerMipChain(layer) {
-			tex.WriteLayer(uint32(layer), uint32(mip), px)
-		}
-	}
-
-	smp := dev.CreateSampler(gfx.SamplerDesc{
-		Label:     "block-sampler",
-		MagFilter: gfx.FilterNearest,
-		MinFilter: gfx.FilterLinear,
-		MipFilter: gfx.FilterLinear,
-		Address:   gfx.AddressRepeat,
-	})
-	return tex, smp
 }
 
 func downsampleCutout(src []byte, size int) []byte {

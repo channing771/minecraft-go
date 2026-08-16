@@ -5,9 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/channing771/mornlea/internal/assets"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/render"
 )
 
@@ -34,39 +32,6 @@ func TestChatOverlayShowsSixEventsAndInputWithinFixedCapacity(t *testing.T) {
 	}
 	if len(renderer.layout.quads) > maxHotbarQuads || len(renderer.layout.glyphs) > maxHotbarGlyphs {
 		t.Fatalf("chat layout exceeds fixed capacity")
-	}
-}
-
-func TestEmptyChatDoesNotAddHUDPassOrAllocation(t *testing.T) {
-	source := &chatCountingGlyphSource{}
-	renderer := &HotbarRenderer{
-		atlas: source,
-		layout: hotbarLayout{
-			quads:  make([]hotbarInstance, 0, maxHotbarQuads),
-			glyphs: make([]hotbarInstance, 0, maxHotbarGlyphs),
-		},
-		upload: make([]byte, hotbarUploadBytes),
-	}
-	budget := render.NewUploadBudget(1024)
-	prepare := func() {
-		if err := renderer.Prepare(
-			core.Inventory{}, false, false, -1, nil, nil, MiningOverlay{}, HealthOverlay{},
-			ChatOverlay{}, 1280, 720, budget,
-		); err != nil {
-			panic(err)
-		}
-	}
-	prepare()
-	if allocations := testing.AllocsPerRun(1000, prepare); allocations != 0 {
-		t.Fatalf("empty chat allocations=%v", allocations)
-	}
-	encoder := &nameTagTestEncoder{}
-	renderer.Render(encoder, &nameTagTestView{})
-	if len(encoder.passes) != 0 {
-		t.Fatalf("empty chat passes=%d", len(encoder.passes))
-	}
-	if source.flushes != 0 {
-		t.Fatalf("empty chat atlas flushes=%d", source.flushes)
 	}
 }
 
@@ -165,27 +130,6 @@ func assertChatGlyphPairInsidePanel(t *testing.T, pair []hotbarInstance, panel h
 	if foreground.Y < panel.Y || shadow.Y+shadow.Height > panel.Y+panel.Height {
 		t.Fatalf("glyph ink outside panel: foregroundTop=%v shadowBottom=%v panel=[%v,%v]",
 			foreground.Y, shadow.Y+shadow.Height, panel.Y, panel.Y+panel.Height)
-	}
-}
-
-func TestChatHUDCapacityAndOffsetsAreIncludedInScenarioV16(t *testing.T) {
-	if maxHotbarQuads != 236 || maxHotbarGlyphs != 700 || hotbarGlyphOffset != 11776 || hotbarUploadBytes != 45376 {
-		t.Fatalf("HUD layout quads=%d glyphs=%d offset=%d bytes=%d",
-			maxHotbarQuads, maxHotbarGlyphs, hotbarGlyphOffset, hotbarUploadBytes)
-	}
-	dev := &nameTagTestDevice{}
-	renderer := NewHotbarRenderer(dev, gfx.FormatRGBA8Unorm, newFakeNameTagAtlas(), assets.NewRegistry())
-	defer renderer.Release()
-	if err := renderer.Prepare(
-		core.Inventory{}, true, false, -1, nil, nil, MiningOverlay{}, HealthOverlay{},
-		ChatOverlay{}, 1280, 720, render.NewUploadBudget(1024),
-	); err != nil {
-		t.Fatal(err)
-	}
-	encoder := &nameTagTestEncoder{}
-	renderer.Render(encoder, &nameTagTestView{})
-	if got := len(dev.bufferByLabel(t, "hotbar dynamic upload").lastWrite); got != 11776 {
-		t.Fatalf("empty-chat actual upload=%d want=11776", got)
 	}
 }
 

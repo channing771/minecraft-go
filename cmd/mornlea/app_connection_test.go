@@ -16,7 +16,6 @@ import (
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/server"
 	"github.com/channing771/mornlea/internal/storage"
@@ -576,10 +575,6 @@ func (endpoint *connectionTestEndpoint) Close() error {
 type connectionTestWindow struct {
 	fakeInteractiveWindow
 	closeCalls atomic.Int32
-}
-
-func (*connectionTestWindow) NativeHandle() gfx.NativeWindowHandle {
-	return gfx.NativeWindowHandle{}
 }
 
 func (window *connectionTestWindow) Close() {

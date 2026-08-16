@@ -71,12 +71,6 @@ func (renderer *DebugPanelRenderer) FrameStreams() (viewport, quads, glyphs []by
 	return viewport, quads, glyphs
 }
 
-// AtlasPixels 回读整张字形图集(R8,1024×1024),供平行渲染器同步同一份
-// 字形内容。仅测试与装配路径使用。
-func (atlas *GlyphAtlas) AtlasPixels() []byte {
-	return atlas.texture.ReadLayer(0, 0)
-}
-
 // GlyphAtlasSize 导出字形图集边长,供装配方校验。
 const GlyphAtlasSize = glyphAtlasSize
 

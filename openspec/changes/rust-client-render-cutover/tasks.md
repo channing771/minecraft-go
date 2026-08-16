@@ -24,12 +24,12 @@
 
 ## 3. 删除段
 
-- [ ] 3.1 删除 `internal/gfx`、`oliverbestmann/webgpu` 依赖、render/hud 包
+- [x] 3.1 删除 `internal/gfx`、`oliverbestmann/webgpu` 依赖、render/hud 包
       GPU 半部(pipeline/pool/cull/hiz 与各 renderer 的 GPU 路径)、
       `assets.UploadTo`、双后端对照测试;CPU 半部保留并收敛;
       验证:`go build ./... && go test ./internal/render
       ./internal/render/hud ./internal/assets ./cmd/mornlea -race -count=1`。
-- [ ] 3.2 archcheck 与文档:白名单删 gfx、webgpu 全仓禁止、依赖表更新;
+- [x] 3.2 archcheck 与文档:白名单删 gfx、webgpu 全仓禁止、依赖表更新;
       CLAUDE.md/AGENTS.md 项目定位与 `docs/notes/progress.md` 改写;
       验证:`go test ./internal/archcheck -count=1`。
 

@@ -31,17 +31,8 @@ func (a *application) Close() error {
 }
 
 func (a *application) releaseOwnedResources() {
-	// layouter(名牌/HUD/面板)与 Release 解耦:layout-only 变体无 GPU
-	// 资源;字形图集停 worker,渲染器句柄经 Close 归还 Rust。
-	if a.hotbarRenderer != nil {
-		a.hotbarRenderer.Release()
-	}
-	if a.nameTagRenderer != nil {
-		a.nameTagRenderer.Release()
-	}
-	if a.debugPanelRenderer != nil {
-		a.debugPanelRenderer.Release()
-	}
+	// layouter(名牌/HUD/面板)无 GPU 资源,无需释放;字形图集停 worker,
+	// 渲染器句柄经 Close 归还 Rust。
 	if a.glyphAtlas != nil {
 		a.glyphAtlas.Release()
 	}
