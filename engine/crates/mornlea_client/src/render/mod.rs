@@ -13,11 +13,13 @@
 //! - mesh packed face 字节只在 section 变脏时过境一次;
 //! - 每帧一次 [`OffscreenRenderer::render_frame`],帧内无逐 pass FFI。
 
+pub mod entity;
 pub mod pool;
 pub mod shaders;
 
 use std::collections::HashMap;
 
+use entity::EntityPass;
 use pool::{Alloc, Pool};
 
 /// 离屏 color 格式,必须与 Go capture 的 `FormatBGRA8UnormSrgb` 一致。
@@ -364,6 +366,11 @@ pub struct OffscreenRenderer {
 
     hiz: HiZ,
 
+    /// avatar pass(11 具身体 × 6 部件容量)。
+    avatar_pass: EntityPass,
+    /// 掉落物 pass(800 实例容量,与 avatar 同 shader)。
+    drop_pass: EntityPass,
+
     /// 字形图集(R8,增量矩形上传);内容全部来自 Go 光栅化 worker。
     glyph_atlas: wgpu::Texture,
     /// HUD 图集;None 表示尚未上传。
@@ -628,6 +635,29 @@ impl OffscreenRenderer {
         );
         let dummy_hiz_view = dummy_hiz.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let avatar_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("avatar"),
+            source: wgpu::ShaderSource::Wgsl(shaders::AVATAR.into()),
+        });
+        let avatar_pass = EntityPass::new(
+            &device,
+            &queue,
+            &avatar_module,
+            "avatar",
+            entity::AVATAR_MAX_INSTANCES,
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+        let drop_pass = EntityPass::new(
+            &device,
+            &queue,
+            &avatar_module,
+            "item drop",
+            entity::DROP_MAX_INSTANCES,
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+
         let glyph_atlas = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("glyph-atlas"),
             size: wgpu::Extent3d {
@@ -685,6 +715,8 @@ impl OffscreenRenderer {
             dummy_hiz_view,
             cull_uses_hiz: false,
             hiz,
+            avatar_pass,
+            drop_pass,
             glyph_atlas,
             hud_atlas: None,
             pool: Pool::new(POOL_FACES),
@@ -967,7 +999,13 @@ impl OffscreenRenderer {
     /// 渲染一帧,pass 顺序镜像 Go `Render`:
     /// 候选 record → uniform → 清零 indirect → cull(可选 HiZ)→
     /// render pass(clear 天空色 → sky → terrain indirect)→ HiZ build。
-    pub fn render_frame(&mut self, input: &FrameInput) {
+    pub fn render_frame(&mut self, input: &FrameInput) -> bool {
+        // 语义校验先于任何 GPU 写入:非法 pass 段拒绝且不触碰 target。
+        if !self.avatar_pass.instances_valid(&input.avatar_instances)
+            || !self.drop_pass.instances_valid(&input.drop_instances)
+        {
+            return false;
+        }
         // 构建候选 record(编码镜像 Go sectionRecords)。
         let mut records: Vec<u8> = Vec::with_capacity(input.visible.len() * SECTION_RECORD_BYTES);
         let mut candidates = 0u32;
@@ -1126,10 +1164,40 @@ impl OffscreenRenderer {
             }
         }
         self.hiz.build(&self.device, &mut encoder, &self.depth_view);
+        // 实体 pass:顺序镜像 app_frame(avatar → item drop),空段跳过。
+        if !input.avatar_instances.is_empty() {
+            self.avatar_pass.upload(
+                &self.queue,
+                &input.view_proj,
+                input.daylight,
+                &input.avatar_instances,
+            );
+            self.avatar_pass.record(
+                &mut encoder,
+                &self.color_view,
+                &self.depth_view,
+                "avatar pass",
+            );
+        }
+        if !input.drop_instances.is_empty() {
+            self.drop_pass.upload(
+                &self.queue,
+                &input.view_proj,
+                input.daylight,
+                &input.drop_instances,
+            );
+            self.drop_pass.record(
+                &mut encoder,
+                &self.color_view,
+                &self.depth_view,
+                "item drop pass",
+            );
+        }
         self.last_pos = input.pos;
         self.last_view_proj = input.view_proj;
         self.have_last_camera = true;
         self.queue.submit([encoder.finish()]);
+        true
     }
 
     /// 阻塞回读离屏 color(BGRA,逐行紧密拼接);`out` 长度必须恰为
@@ -1527,5 +1595,57 @@ pub(crate) mod tests_support {
             visible: Vec::new(),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod entity_tests {
+    use super::entity;
+    use super::tests_support::*;
+
+    /// 单个红色 avatar 实例(identity 变换)在 identity 相机下必然覆盖
+    /// 画面中心:实体 pass 输出必须改变图像,且非法 instance 段被拒绝。
+    #[test]
+    fn avatar_instances_render_and_invalid_lengths_reject() {
+        let Some(mut renderer) = renderer_or_skip_pub(64, 64) else {
+            return;
+        };
+        let empty = empty_frame_pub();
+        assert!(renderer.render_frame(&empty));
+        let mut base = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut base);
+
+        // identity mat4(列主序)+ 红色。
+        let mut instance = [0u8; 80];
+        for i in 0..4 {
+            instance[(i * 4 + i) * 4..(i * 4 + i) * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        instance[64..68].copy_from_slice(&1.0f32.to_le_bytes());
+        instance[76..80].copy_from_slice(&1.0f32.to_le_bytes());
+        let mut frame = empty_frame_pub();
+        frame.avatar_instances = instance.to_vec();
+        assert!(renderer.render_frame(&frame));
+        let mut with_avatar = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut with_avatar);
+        assert_ne!(base, with_avatar, "avatar 实例必须改变图像");
+
+        // 掉落物走同一路径:同一实例流经 drop 段也必须生效。
+        let mut drop_frame = empty_frame_pub();
+        drop_frame.drop_instances = instance.to_vec();
+        assert!(renderer.render_frame(&drop_frame));
+        let mut with_drop = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut with_drop);
+        assert_ne!(base, with_drop, "掉落物实例必须改变图像");
+
+        // 非 80 倍数与超容量拒绝,且 target 保持上一帧内容。
+        let mut bad = empty_frame_pub();
+        bad.avatar_instances = vec![0u8; 84];
+        assert!(!renderer.render_frame(&bad));
+        let mut after_bad = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut after_bad);
+        assert_eq!(with_drop, after_bad, "拒绝帧不得触碰 target");
+        let mut oversized = empty_frame_pub();
+        oversized.avatar_instances = vec![0u8; (entity::AVATAR_MAX_INSTANCES + 1) * 80];
+        assert!(!renderer.render_frame(&oversized));
     }
 }

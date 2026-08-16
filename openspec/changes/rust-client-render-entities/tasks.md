@@ -13,7 +13,7 @@
 
 ## 2. Rust pass 移植
 
-- [ ] 2.1 avatar 与 item drop pass:顶点/索引缓冲、instance 消费与 indexed
+- [x] 2.1 avatar 与 item drop pass:顶点/索引缓冲、instance 消费与 indexed
       indirect,镜像 Go avatar.go/drop.go 的缓冲布局与管线状态;smoke 单测;
       验证:crate 单测。
 - [ ] 2.2 block outline 与 damage overlay pass:LessEqual 轮廓与全屏 alpha

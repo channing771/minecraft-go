@@ -673,8 +673,11 @@ pub unsafe extern "C" fn mornlea_client_render_frame(
             return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
         };
         with_renderer(handle, |renderer| {
-            renderer.render_frame(&input);
-            MORNLEA_CLIENT_STATUS_OK
+            if renderer.render_frame(&input) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+            }
         })
     })
 }
