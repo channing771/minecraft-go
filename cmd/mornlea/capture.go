@@ -492,7 +492,9 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 		if old, err := readPNG(goldenPath); err == nil {
 			guard := newNearBandGuard(
 				app.camera, app.lodTileCenter,
-				lodNearTileRadius(app.render.ViewDistance), app.lodScheduler != nil,
+				lodNearTileRadius(app.render.ViewDistance),
+				lodFarTileRadius(app.render.ViewDistance, app.render.LodFarMultiplier),
+				app.lodScheduler != nil,
 			)
 			if guardErr := guard.assertUnchanged(scene.Name, old, img); guardErr != nil {
 				return fmt.Errorf("拒绝更新基线 %s: %w", goldenPath, guardErr)
