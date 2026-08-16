@@ -18,6 +18,13 @@ type companionPersistence struct {
 	mu           sync.Mutex
 	completionMu sync.Mutex
 	records      []companion.Body
+	// tasks 是最近一次 Observe 的任务域观察输入；任务状态变化即令存档
+	// dirty。latestJobLocked 在投递保存前把它转换为 storage 载荷（含
+	// Planning/Validating→Queued 的保存侧归一）。
+	tasks []companion.TaskQueueState
+	// loadedQueues 是启动加载时存档携带的任务域载荷，构造后不变；newWorld
+	// 在构造 Companion Manager 后读取一次用于恢复接线。
+	loadedQueues []storage.StoredCompanionQueue
 	persisted    uint64
 	dirty        bool
 	inFlight     bool
@@ -50,21 +57,25 @@ func newCompanionPersistence(
 ) *companionPersistence {
 	ctx, cancel := context.WithCancel(context.Background())
 	persistence := &companionPersistence{
-		store:       store,
-		config:      config,
-		records:     cloneAndSortCompanionBodies(loaded.Records),
-		persisted:   loaded.Revision,
-		jobs:        make(chan companionSaveJob, 1),
-		completions: make(chan companionSaveCompletion, 1),
-		ctx:         ctx,
-		cancel:      cancel,
+		store:        store,
+		config:       config,
+		records:      cloneAndSortCompanionBodies(loaded.Records),
+		loadedQueues: cloneStoredQueues(loaded.Queues),
+		persisted:    loaded.Revision,
+		jobs:         make(chan companionSaveJob, 1),
+		completions:  make(chan companionSaveCompletion, 1),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 	persistence.waitGroup.Add(1)
 	go persistence.worker()
 	return persistence
 }
 
-func (p *companionPersistence) Observe(active []companion.Body) {
+// Observe 合并权威身体与任务域观察输入：任一变化即标记存档 dirty。tasks
+// 与身体同批观察保证冻结快照（关服最终保存）里身体与任务状态属于同一
+// 权威 tick。
+func (p *companionPersistence) Observe(active []companion.Body, tasks []companion.TaskQueueState) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	byID := make(map[companion.ID]companion.Body, len(p.records)+len(active))
@@ -82,11 +93,72 @@ func (p *companionPersistence) Observe(active []companion.Body) {
 		records = append(records, body)
 	}
 	sortCompanionBodies(records)
-	if slices.Equal(records, p.records) {
+	tasksChanged := !equalTaskQueueStates(tasks, p.tasks)
+	if slices.Equal(records, p.records) && !tasksChanged {
 		return
 	}
 	p.records = records
+	p.tasks = cloneTaskQueueStates(tasks)
 	p.dirty = true
+}
+
+// equalTaskQueueStates 比较两份任务域观察输入是否逐字段相等（含计划步骤）。
+func equalTaskQueueStates(left, right []companion.TaskQueueState) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if !equalTaskQueueState(left[index], right[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalTaskQueueState(left, right companion.TaskQueueState) bool {
+	if left.ID != right.ID || left.HasCurrent != right.HasCurrent ||
+		!slices.Equal(left.Pending, right.Pending) {
+		return false
+	}
+	if !left.HasCurrent {
+		return true
+	}
+	return equalTask(left.Current, right.Current)
+}
+
+func equalTask(left, right companion.Task) bool {
+	return left.Generation == right.Generation &&
+		left.Command == right.Command &&
+		left.StepIndex == right.StepIndex &&
+		left.State == right.State &&
+		left.StartTick == right.StartTick &&
+		left.DeadlineTicks == right.DeadlineTicks &&
+		left.FailReason == right.FailReason &&
+		equalPlan(left.Plan, right.Plan)
+}
+
+func equalPlan(left, right companion.Plan) bool {
+	if left.Summary != right.Summary || len(left.Steps) != len(right.Steps) {
+		return false
+	}
+	for index := range left.Steps {
+		if left.Steps[index] != right.Steps[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// cloneTaskQueueStates 深拷贝任务域观察输入：Pending 切片与当前任务的计划
+// 步骤都独立于调用方，Observe 之后的任何调用方修改都不影响已冻结的快照。
+func cloneTaskQueueStates(states []companion.TaskQueueState) []companion.TaskQueueState {
+	cloned := make([]companion.TaskQueueState, len(states))
+	for index := range states {
+		cloned[index] = states[index]
+		cloned[index].Pending = slices.Clone(states[index].Pending)
+		cloned[index].Current.Plan.Steps = slices.Clone(states[index].Current.Plan.Steps)
+	}
+	return cloned
 }
 
 func (p *companionPersistence) Poll(tick uint64) error {
@@ -289,15 +361,23 @@ func (p *companionPersistence) applyCompletionLocked(
 	}
 	p.persisted = completion.Job.Save.Revision
 	p.retry = nil
-	p.dirty = !slices.Equal(p.records, completion.Job.Save.Records)
+	// 任务域的 dirty 重判使用「未激活丢弃」口径：身体记录尚未出现的队列
+	// 无法落盘（编码要求队列关联记录），保持 dirty 让激活后的首次保存
+	// 补上完整载荷，窗口内的排队指令不会静默丢失。
+	currentQueues, droppedPending := companionQueuesForSave(p.tasks, p.records)
+	p.dirty = !slices.Equal(p.records, completion.Job.Save.Records) ||
+		droppedPending ||
+		!equalStoredQueues(currentQueues, completion.Job.Save.Queues)
 	return nil
 }
 
 func (p *companionPersistence) latestJobLocked() companionSaveJob {
+	queues, _ := companionQueuesForSave(p.tasks, p.records)
 	return companionSaveJob{
 		Save: storage.CompanionSave{
 			Revision: p.persisted + 1,
 			Records:  slices.Clone(p.records),
+			Queues:   queues,
 		},
 		Attempt: 1,
 	}
@@ -310,7 +390,111 @@ func cloneCompanionSaveJob(job companionSaveJob) companionSaveJob {
 
 func cloneCompanionSave(save storage.CompanionSave) storage.CompanionSave {
 	save.Records = slices.Clone(save.Records)
+	save.Queues = cloneStoredQueues(save.Queues)
 	return save
+}
+
+// cloneStoredQueues 深拷贝任务域载荷（计划步骤与 FIFO），返回值与输入切片
+// 完全独立。
+func cloneStoredQueues(queues []storage.StoredCompanionQueue) []storage.StoredCompanionQueue {
+	if queues == nil {
+		return nil
+	}
+	cloned := make([]storage.StoredCompanionQueue, len(queues))
+	for index := range queues {
+		cloned[index] = queues[index]
+		cloned[index].Current.PlanSteps = slices.Clone(queues[index].Current.PlanSteps)
+		cloned[index].Pending = slices.Clone(queues[index].Pending)
+	}
+	return cloned
+}
+
+// companionQueuesForSave 把任务域观察输入转换为存档载荷并执行保存侧归一：
+// Planning/Validating 尚未通过验证，按 Queued + 原始指令落盘（spec：模型
+// 计划只在 Validating 成功后落盘）；Running 精确保留计划、步骤索引与
+// deadline；终态快照（防御路径，正常快照不会出现）不落当前任务。records
+// 是当前已知身体记录：队列必须关联记录才能编码，身体尚未激活（出生扫描
+// 在途）的伙伴的队列被丢弃并经 dropped 报告——调用方保持 dirty，激活后的
+// 首次保存补上完整载荷。返回值深拷贝自输入，与调用方切片完全独立。
+func companionQueuesForSave(
+	states []companion.TaskQueueState,
+	records []companion.Body,
+) (queues []storage.StoredCompanionQueue, dropped bool) {
+	known := make(map[companion.ID]struct{}, len(records))
+	for _, body := range records {
+		known[body.ID] = struct{}{}
+	}
+	queues = make([]storage.StoredCompanionQueue, 0, len(states))
+	for _, state := range states {
+		if _, exists := known[state.ID]; !exists {
+			dropped = true
+			continue
+		}
+		queue := storage.StoredCompanionQueue{ID: state.ID}
+		if state.HasCurrent {
+			current := state.Current
+			switch {
+			case current.State.Terminal():
+				// 终态任务在快照瞬间已被清出当前槽；这里只是防御，
+				// 不落任何任务事实。
+			case current.State == companion.TaskPlanning ||
+				current.State == companion.TaskValidating:
+				queue.HasCurrent = true
+				queue.Current = storage.StoredCompanionTask{
+					Command: string(current.Command),
+					State:   companion.TaskQueued,
+				}
+			default:
+				queue.HasCurrent = true
+				queue.Current = storage.StoredCompanionTask{
+					Command:       string(current.Command),
+					PlanSteps:     slices.Clone(current.Plan.Steps),
+					StepIndex:     current.StepIndex,
+					State:         current.State,
+					StartTick:     current.StartTick,
+					DeadlineTicks: current.DeadlineTicks,
+				}
+			}
+		}
+		if len(state.Pending) != 0 {
+			queue.Pending = make([]string, len(state.Pending))
+			for index, command := range state.Pending {
+				queue.Pending[index] = string(command)
+			}
+		}
+		if queue.HasCurrent || len(queue.Pending) != 0 {
+			queues = append(queues, queue)
+		}
+	}
+	return queues, dropped
+}
+
+// equalStoredQueues 逐字段比较两份存档载荷（含计划步骤与 FIFO 顺序），
+// 供保存完成后的 dirty 重判使用。
+func equalStoredQueues(left, right []storage.StoredCompanionQueue) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		a, b := left[index], right[index]
+		if a.ID != b.ID || a.HasCurrent != b.HasCurrent || !slices.Equal(a.Pending, b.Pending) {
+			return false
+		}
+		if a.HasCurrent && !equalStoredCompanionTask(a.Current, b.Current) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalStoredCompanionTask(a, b storage.StoredCompanionTask) bool {
+	return a.Command == b.Command &&
+		a.StepIndex == b.StepIndex &&
+		a.State == b.State &&
+		a.StartTick == b.StartTick &&
+		a.DeadlineTicks == b.DeadlineTicks &&
+		a.FailReason == b.FailReason &&
+		slices.Equal(a.PlanSteps, b.PlanSteps)
 }
 
 func cloneAndSortCompanionBodies(records []companion.Body) []companion.Body {

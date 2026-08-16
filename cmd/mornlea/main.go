@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"slices"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/logging"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/profile"
@@ -66,6 +67,13 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 	effective.Apply()
 	if options.Application.Connect == "" && !options.Application.Benchmark && options.CaptureDir == "" {
 		options.Application.Companions = slices.Clone(effective.CompanionDefinitions())
+		// 模型设置与已解析密钥只注入普通本地模式，与伙伴注入共用同一分支：
+		// 远程、benchmark、capture 三条路径永远不携带半套 AI 运行时。配置层
+		// （config.Load）已保证非空伙伴时模型字段完整，这里只做转发与密钥解析。
+		if effective.AI != nil {
+			options.Application.AIModel = effective.AI.ModelSettings
+			options.Application.AIAPIKey = resolveAIAPIKey(effective.AI.ModelSettings)
+		}
 	}
 	if remoteTuningDiverges(options, effective) {
 		slog.Warn("联机时本机配置改动了 physics/sim：这两组必须与服务端一致，"+
@@ -119,6 +127,19 @@ func loadApplicationIdentity(requestedName *string) (network.Identity, error) {
 		return network.Identity{}, err
 	}
 	return network.Identity{PlayerID: loaded.PlayerID, DisplayName: loaded.DisplayName}, nil
+}
+
+// resolveAIAPIKey 按 settings.APIKeyEnv 指向的环境变量名解析密钥值。
+//
+// 环境变量名为空（loopback http 免密钥的本地联调形态）返回空串；变量未设置
+// 或值为空同样返回空串——是否构成启动错误由 server.NewHost 的密钥边界统一
+// 裁决，这里不做二次判断。密钥值只流入内存中的 applicationOptions，绝不写
+// 日志或配置文件。
+func resolveAIAPIKey(settings companion.ModelSettings) string {
+	if settings.APIKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(settings.APIKeyEnv)
 }
 
 // clientMemoryLimit 是客户端进程的 Go 堆软上限。

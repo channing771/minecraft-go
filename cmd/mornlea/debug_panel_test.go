@@ -328,7 +328,16 @@ func TestPanelSavePreservesExistingAICompanions(t *testing.T) {
 		t.Fatal(err)
 	}
 	preexisting := config.Defaults()
-	preexisting.AI = &config.AI{Companions: []companion.Definition{{ID: id, Name: "阿木"}}}
+	// M5B 起非空伙伴必须携带完整模型设置才能通过 config.Load；这里用免密钥的
+	// loopback 形态（超时未设置走默认值），保持本测试"面板保存完全保留 ai 组"
+	// 的主题不变，顺带锁定模型字段随 Load→改 render→Save 往返不丢。
+	preexisting.AI = &config.AI{
+		ModelSettings: companion.ModelSettings{
+			Endpoint: "http://127.0.0.1:1/v1",
+			Model:    "test-model",
+		},
+		Companions: []companion.Definition{{ID: id, Name: "阿木"}},
+	}
 	if err := preexisting.Save(path); err != nil {
 		t.Fatalf("准备已有配置文件: %v", err)
 	}

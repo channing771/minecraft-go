@@ -44,52 +44,54 @@ func fixtureCompanionBodies() []companion.Body {
 }
 
 func TestCompanionCodecV1RoundTripAndGolden(t *testing.T) {
-	if maxCompanionFileLength != 14176 {
-		t.Fatalf("max companion file length=%d，想要 14176", maxCompanionFileLength)
+	// v1 golden 字节零改动：编码端只写 v2，v1 路径由冻结的 golden 驱动
+	// 只读迁移验证。
+	path := filepath.Join("testdata", "companions-v1.bin")
+	golden, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(golden) != 32+2*companionRecordLength {
+		t.Fatalf("v1 golden 长度=%d，想要 %d", len(golden), 32+2*companionRecordLength)
+	}
+	if schema := binary.LittleEndian.Uint32(golden[8:12]); schema != 1 {
+		t.Fatalf("v1 golden schema=%d，想要 1", schema)
+	}
+	got, err := decodeCompanions(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRecords := []companion.Body{fixtureCompanionBodies()[1], fixtureCompanionBodies()[0]}
+	if got.Revision != 19 || !reflect.DeepEqual(got.Records, wantRecords) {
+		t.Fatalf("v1 golden decode=%+v，想要 revision=19 records=%+v", got, wantRecords)
+	}
+	if got.Queues != nil {
+		t.Fatalf("v1 golden 携带任务域=%+v，想要空", got.Queues)
+	}
+
+	// 同一载荷的首次保存必须写出 v2：记录 = v1 身体 + flags 字节。
 	input := fixtureCompanionBodies()
 	before := append([]companion.Body(nil), input...)
 	encoded, err := encodeCompanions(CompanionSave{Revision: 19, Records: input})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(encoded) != 32+2*221 {
-		t.Fatalf("encoded length=%d，想要 %d", len(encoded), 32+2*221)
+	if len(encoded) != 32+2*(companionRecordLength+1) {
+		t.Fatalf("无任务双记录长度=%d，想要 %d", len(encoded), 32+2*(companionRecordLength+1))
 	}
 	if !reflect.DeepEqual(input, before) {
 		t.Fatalf("编码修改调用者 records：got=%+v want=%+v", input, before)
 	}
-	wantFirstID := fixtureCompanionID(1)
-	if !bytes.Equal(encoded[32:48], wantFirstID[:]) {
-		t.Fatalf("首条 ID=%x，想要 canonical 最小 ID", encoded[32:48])
+	if schema := binary.LittleEndian.Uint32(encoded[8:12]); schema != currentCompanionSchema {
+		t.Fatalf("首次保存 schema=%d，想要 %d", schema, currentCompanionSchema)
 	}
-	got, err := decodeCompanions(encoded)
+	migrated, err := decodeCompanions(encoded)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantRecords := []companion.Body{input[1], input[0]}
-	if got.Revision != 19 || !reflect.DeepEqual(got.Records, wantRecords) {
-		t.Fatalf("decode=%+v，想要 revision=19 records=%+v", got, wantRecords)
-	}
-
-	path := filepath.Join("testdata", "companions-v1.bin")
-	if *updateStorageFixtures {
-		if err := os.WriteFile(path, encoded, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(want, encoded) {
-		t.Fatal("companions v1 fixture drift；需要升级 schema")
-	}
-	expected := got
-	expected.Records = append([]companion.Body(nil), got.Records...)
-	clear(encoded)
-	if !reflect.DeepEqual(got, expected) {
-		t.Fatalf("修改输入 bytes 后 decode 结果=%+v，想要保持 %+v", got, expected)
+	if migrated.Revision != 19 || !reflect.DeepEqual(migrated.Records, wantRecords) ||
+		migrated.Queues != nil {
+		t.Fatalf("迁移写 v2 后 decode=%+v", migrated)
 	}
 }
 
@@ -102,8 +104,11 @@ func TestCompanionCodecAcceptsMaximumStoredRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(encoded) != 14176 {
-		t.Fatalf("64 条记录长度=%d，想要 14176", len(encoded))
+	if len(encoded) != 32+companion.MaxStored*(companionRecordLength+1) {
+		t.Fatalf(
+			"64 条无任务记录长度=%d，想要 %d",
+			len(encoded), 32+companion.MaxStored*(companionRecordLength+1),
+		)
 	}
 	got, err := decodeCompanions(encoded)
 	if err != nil {
@@ -113,7 +118,7 @@ func TestCompanionCodecAcceptsMaximumStoredRecords(t *testing.T) {
 		t.Fatalf("64 条记录 decode=%+v", got)
 	}
 	if _, err := decodeCompanions(append(encoded, 0)); !errors.Is(err, ErrCorrupt) {
-		t.Fatalf("14,177-byte decode error=%v，想要 ErrCorrupt", err)
+		t.Fatalf("trailing byte decode error=%v，想要 ErrCorrupt", err)
 	}
 }
 
@@ -137,7 +142,11 @@ func TestCompanionCodecRejectsCRCTruncationFutureVersionAndOversizedRecords(t *t
 		{"old envelope", func() []byte { p := bytes.Clone(valid); binary.LittleEndian.PutUint32(p[4:], 0); return p }, ErrCorrupt},
 		{"future envelope", func() []byte { p := bytes.Clone(valid); binary.LittleEndian.PutUint32(p[4:], 2); return p }, ErrFutureVersion},
 		{"old schema", func() []byte { p := bytes.Clone(valid); binary.LittleEndian.PutUint32(p[8:], 0); return p }, ErrCorrupt},
-		{"future schema", func() []byte { p := bytes.Clone(valid); binary.LittleEndian.PutUint32(p[8:], 2); return p }, ErrFutureVersion},
+		{"future schema", func() []byte {
+			p := bytes.Clone(valid)
+			binary.LittleEndian.PutUint32(p[8:], currentCompanionSchema+1)
+			return p
+		}, ErrFutureVersion},
 		{"zero revision", func() []byte { p := bytes.Clone(valid); clear(p[12:20]); repairCompanionCRC(p); return p }, ErrCorrupt},
 		{"payload length", func() []byte { p := bytes.Clone(valid); binary.LittleEndian.PutUint32(p[24:], 1); return p }, ErrCorrupt},
 		{"CRC", func() []byte { p := bytes.Clone(valid); p[28] ^= 1; return p }, ErrCorrupt},
@@ -239,8 +248,8 @@ func TestCompanionCodecDoesNotPersistNameTaskOrPersona(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(encoded) != 32+221 {
-		t.Fatalf("单记录文件长度=%d，想要固定 %d；v1 不应包含名称、任务或 persona", len(encoded), 32+221)
+	if len(encoded) != 32+companionRecordLength+1 {
+		t.Fatalf("单记录文件长度=%d，想要固定 %d；任务区缺席时只追加 flags 字节", len(encoded), 32+companionRecordLength+1)
 	}
 	for _, forbidden := range [][]byte{[]byte("阿木"), []byte("挖石头"), []byte("persona")} {
 		if bytes.Contains(encoded, forbidden) {

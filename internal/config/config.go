@@ -41,8 +41,14 @@ type Render struct {
 	MouseSensitivity float32 `json:"mouseSensitivity"`
 }
 
-// AI 是配置文件中的可选伙伴定义。
+// AI 是配置文件中的可选 ai 组：模型运行时设置与伙伴定义。
+//
+// 嵌入 companion.ModelSettings 让 endpoint/model/apiKeyEnv/taskTimeoutMinutes
+// 四个字段提升为 ai 组的直接键，随 Save/Load 与调试面板的"只覆盖 physics/sim/
+// render、其余原样保留"保存策略自动往返。APIKeyEnv 只是环境变量名——密钥值
+// 绝不进入配置文件，由各入口进程启动时解析进内存。
 type AI struct {
+	companion.ModelSettings
 	Companions []companion.Definition `json:"companions,omitempty"`
 }
 
@@ -390,16 +396,75 @@ func applyLogging(cfg *Config, raw json.RawMessage) error {
 	return nil
 }
 
-// applyAI 只解析 M5A 已定义的 companions[].id/name，并对未来字段记录精确路径。
+// knownAIFieldKeys 是 ai 分组已识别的键（大小写不敏感）。未列出的键按既有
+// 未知字段纪律告警后忽略——persona 等未交付字段继续走这条路径。
+var knownAIFieldKeys = []string{
+	"companions",
+	"endpoint",
+	"model",
+	"apiKeyEnv",
+	"taskTimeoutMinutes",
+}
+
+// knownAIField 报告 key（任意大小写）是否为 ai 分组的已识别键。
+func knownAIField(key string) bool {
+	for _, known := range knownAIFieldKeys {
+		if strings.EqualFold(key, known) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyAI 解析 ai 分组：M5A 的 companions[].id/name 与 M5B 的四个模型运行时
+// 字段（endpoint/model/apiKeyEnv/taskTimeoutMinutes，均大小写不敏感）。
+//
+// 模型字段只要出现就立即校验语法（endpoint 形态、超时区间），错误带
+// ai.endpoint 等精确路径，让配置问题在读文件时暴露而不是等到启动；而
+// endpoint/model/apiKeyEnv 的完整性（非空伙伴时必须齐全、https 必须配
+// apiKeyEnv）在确认伙伴列表非空后才检查——AI 关闭时孤立的模型字段只做语法
+// 校验、不启用 AI，也不要求任何模型字段。密钥值永远不进配置文件，这里只
+// 处理环境变量名。
 func applyAI(cfg *Config, raw json.RawMessage) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
 	for key := range fields {
-		if !strings.EqualFold(key, "companions") {
+		if !knownAIField(key) {
 			slog.Warn("配置项未知字段已忽略", "field", "ai."+key)
 		}
+	}
+	var settings companion.ModelSettings
+	if value, exists := lookupCaseInsensitive(fields, "endpoint"); exists {
+		if err := json.Unmarshal(value, &settings.Endpoint); err != nil {
+			return fmt.Errorf("解析 ai.endpoint: %w", err)
+		}
+		if err := companion.ValidateModelEndpoint(settings.Endpoint); err != nil {
+			return fmt.Errorf("ai.endpoint: %w", err)
+		}
+	}
+	if value, exists := lookupCaseInsensitive(fields, "model"); exists {
+		if err := json.Unmarshal(value, &settings.Model); err != nil {
+			return fmt.Errorf("解析 ai.model: %w", err)
+		}
+	}
+	if value, exists := lookupCaseInsensitive(fields, "apiKeyEnv"); exists {
+		if err := json.Unmarshal(value, &settings.APIKeyEnv); err != nil {
+			return fmt.Errorf("解析 ai.apiKeyEnv: %w", err)
+		}
+	}
+	if value, exists := lookupCaseInsensitive(fields, "taskTimeoutMinutes"); exists {
+		var minutes int
+		if err := json.Unmarshal(value, &minutes); err != nil {
+			return fmt.Errorf("解析 ai.taskTimeoutMinutes: %w", err)
+		}
+		// 显式 0 也拒绝："0=未设置"只对字段缺席成立。显式写 0 几乎必然是想
+		// 表达别的意思（单位搞错、漏填数字），按错误暴露而不是悄悄落回默认。
+		if err := companion.ValidateTaskTimeoutMinutes(minutes); err != nil {
+			return fmt.Errorf("ai.taskTimeoutMinutes: %w", err)
+		}
+		settings.TaskTimeoutMinutes = minutes
 	}
 	rawCompanions, ok := lookupCaseInsensitive(fields, "companions")
 	if !ok || string(rawCompanions) == "null" {
@@ -434,10 +499,15 @@ func applyAI(cfg *Config, raw json.RawMessage) error {
 			}
 		}
 	}
+	// 先验证伙伴定义（M5A 语义），再检查模型设置完整性：重复名称等定义错误
+	// 优先暴露，与既有错误路径保持一致。
 	if err := companion.ValidateDefinitions(definitions); err != nil {
 		return err
 	}
-	cfg.AI = &AI{Companions: definitions}
+	if err := settings.Validate(); err != nil {
+		return fmt.Errorf("ai: %w", err)
+	}
+	cfg.AI = &AI{ModelSettings: settings, Companions: definitions}
 	return nil
 }
 

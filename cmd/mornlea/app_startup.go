@@ -85,6 +85,10 @@ func newApplicationWithDependencies(
 	ticks, saves := newPerformanceRecorders(options.Benchmark)
 	config := server.DefaultConfig(options.Seed)
 	config.Companions = slices.Clone(options.Companions)
+	// 模型运行时与已解析密钥原样转发：均为值拷贝，不与 options 共享引用；
+	// NewHost 会在打开存档前对非空伙伴列表做完整性校验。
+	config.AIModel = options.AIModel
+	config.AIAPIKey = options.AIAPIKey
 	config.ViewRadius = options.Render.ViewDistance + 1
 	config.TrustedObserver = options.Benchmark
 	config.TickObserver = ticks.add

@@ -100,9 +100,9 @@ func TestDefaultOptions(t *testing.T) {
 	}
 }
 
-func TestServerProtocolV16IsCurrent(t *testing.T) {
-	if network.ProtocolVersion != 16 {
-		t.Fatalf("专用服务端协议版本 = %d，想要 16", network.ProtocolVersion)
+func TestServerProtocolV17IsCurrent(t *testing.T) {
+	if network.ProtocolVersion != 17 {
+		t.Fatalf("专用服务端协议版本 = %d，想要 17", network.ProtocolVersion)
 	}
 }
 
@@ -143,7 +143,15 @@ func TestRunInjectsAICompanionsIntoDedicatedServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Defaults()
-	cfg.AI = &config.AI{Companions: []companion.Definition{{ID: id, Name: "阿木"}}}
+	// M5B 起非空伙伴必须携带完整模型设置才能通过 config.Load；这里用免密钥的
+	// loopback 形态，保持本测试"专服注入伙伴且不改写配置文件"的主题不变。
+	cfg.AI = &config.AI{
+		ModelSettings: companion.ModelSettings{
+			Endpoint: "http://127.0.0.1:1/v1",
+			Model:    "test-model",
+		},
+		Companions: []companion.Definition{{ID: id, Name: "阿木"}},
+	}
 	if err := cfg.Save(path); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +331,7 @@ func TestRunMigrateMaterialsCompletesAndRerunsWithSameArguments(t *testing.T) {
 	if got := reopened.Metadata().FormatVersion; got != 2 {
 		t.Fatalf("迁移后 metadata 版本 = %d，期望 2", got)
 	}
-	if network.ProtocolVersion != 16 {
+	if network.ProtocolVersion != 17 {
 		t.Fatalf("迁移命令改变了协议版本: %d", network.ProtocolVersion)
 	}
 }

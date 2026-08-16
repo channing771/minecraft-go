@@ -110,14 +110,48 @@ func (a *application) clearFormattedChatLines() {
 	a.formattedChatEventID = 0
 }
 
+// formatChatEvent 将服务器确认的聊天事实格式化为稳定中文事实行。
+// 任务生命周期事件（Task*）只复述伙伴名、固定中文模板与玩家原始指令摘要，
+// 不存在也不显示任何模型生成的自由文本；每行最终经 truncateChatLine 截断到 32 rune。
 func formatChatEvent(event network.ChatEvent) string {
+	switch event.Kind {
+	case network.ChatEventTaskStarted:
+		return event.CompanionName + " 开始执行：" + event.Command
+	case network.ChatEventTaskProgress:
+		return event.CompanionName + " 正在执行：" + event.Command
+	case network.ChatEventTaskCompleted:
+		return event.CompanionName + " 已完成：" + event.Command
+	case network.ChatEventTaskTimedOut:
+		return event.CompanionName + " 任务超时：" + event.Command
+	case network.ChatEventTaskFailed:
+		return event.CompanionName + " 任务失败（" + taskFailReasonText(event.RejectReason) + "）：" + event.Command
+	}
 	switch event.RejectReason {
 	case network.ChatRejectInvalidFormat:
 		return "系统：格式应为 @伙伴名 指令"
 	case network.ChatRejectUnknownCompanion:
 		return "系统：未找到伙伴 " + event.CompanionName
+	case network.ChatRejectQueueFull:
+		return "系统：" + event.CompanionName + " 任务队列已满：" + event.Command
 	default:
 		return event.PlayerName + " → " + event.CompanionName + "：" + event.Command
+	}
+}
+
+// taskFailReasonText 把 TaskFailed 携带的固定失败原因枚举映射为稳定中文短语。
+// 枚举值只会在 network.Validate 通过的组合中出现；未知值仍给出占位事实而非模型文本。
+func taskFailReasonText(reason network.ChatRejectReason) string {
+	switch network.TaskFailReason(reason) {
+	case network.TaskFailPlannerUnavailable:
+		return "规划器不可用"
+	case network.TaskFailInvalidPlan:
+		return "计划无效"
+	case network.TaskFailPathUnreachable:
+		return "路径不可达"
+	case network.TaskFailWorldChanged:
+		return "世界已变化"
+	default:
+		return "未知原因"
 	}
 }
 

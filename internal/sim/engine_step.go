@@ -7,11 +7,31 @@ import (
 	"github.com/channing771/mornlea/internal/physics"
 )
 
+// stepPhase 标识 Step 内部的固定处理阶段。权威 tick 的阶段顺序是规格契约：
+// 玩家命令 → 伙伴 action → 统一物理与世界变更；三个阶段写互不相交的状态，
+// 无法从外部结果观察先后，因此用 stepPhaseObserver 探针显式锁定。
+type stepPhase uint8
+
+const (
+	phasePlayerCommands stepPhase = iota + 1
+	phaseCompanionActions
+	phasePhysicsAdvance
+)
+
+// notifyStepPhase 把阶段进入事件上报给测试探针；生产环境探针恒为 nil。
+func (engine *Engine) notifyStepPhase(phase stepPhase) {
+	if engine.stepPhaseObserver != nil {
+		engine.stepPhaseObserver(phase)
+	}
+}
+
 // Step 严格串行执行一个权威 tick。
 func (engine *Engine) Step() TickResult {
 	engine.tunables = ActiveTunables()
 	engine.physicsTunables = physics.ActiveTunables()
 	commands, acquired, generated := engine.takeInbox()
+	companionActions := engine.takeCompanionActions()
+	engine.notifyStepPhase(phasePlayerCommands)
 	sort.SliceStable(commands, func(i, j int) bool {
 		if commands[i].Session != commands[j].Session {
 			return commands[i].Session < commands[j].Session
@@ -227,15 +247,24 @@ func (engine *Engine) Step() TickResult {
 			})
 		}
 	}
+	// 伙伴 action 阶段：必须严格位于玩家命令之后、统一物理推进之前，为同一
+	// tick 建立固定顺序（见 applyCompanionActions 的顺序契约注释）。
+	engine.notifyStepPhase(phaseCompanionActions)
+	engine.applyCompanionActions(companionActions)
 	var currentWanted map[core.ChunkKey]struct{}
 	if len(acquired) != 0 || len(generated) != 0 {
 		currentWanted = engine.wantedSnapshot()
 	}
 	engine.applyAcquired(acquired, currentWanted, &result)
 	engine.applyGenerated(generated, currentWanted, &result)
+	// 物理阶段：active 伙伴与玩家汇入同一 Rust physics.Step 积分出口，按先
+	// 玩家后伙伴的固定顺序逐 actor 步进；两类 actor 之间没有相互碰撞，顺序
+	// 只影响确定性，不影响结果。
+	engine.notifyStepPhase(phasePhysicsAdvance)
 	engine.advancePendingCompanions()
 	engine.advancePendingPlayersPreservingInputSequence()
 	engine.advanceActivePlayers()
+	engine.advanceActiveCompanions()
 	playerViewChanged := engine.derivePlayerCenters()
 	viewChanged = viewChanged || playerViewChanged || engine.subscriptionsDirty
 	engine.subscriptionsDirty = false

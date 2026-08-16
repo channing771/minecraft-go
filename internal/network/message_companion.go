@@ -37,21 +37,41 @@ func (command ChatCommand) Validate() error {
 	return validateCommandText(command.Text)
 }
 
-// ChatEventKind 标识聊天寻址是否成功。
+// ChatEventKind 标识聊天寻址是否成功以及伙伴任务生命周期的推进阶段。
 type ChatEventKind uint8
 
 const (
 	ChatEventAccepted ChatEventKind = iota + 1
 	ChatEventRejected
+	ChatEventTaskStarted
+	ChatEventTaskProgress
+	ChatEventTaskCompleted
+	ChatEventTaskFailed
+	ChatEventTaskTimedOut
 )
 
-// ChatRejectReason 标识聊天寻址被拒绝的原因。
+// ChatRejectReason 标识聊天寻址被拒绝的原因。值 3 预留未分配，
+// 拒绝原因整体保留 0..15 的编号空间，与 TaskFailReason 错开。
 type ChatRejectReason uint8
 
 const (
 	ChatRejectNone ChatRejectReason = iota
 	ChatRejectInvalidFormat
 	ChatRejectUnknownCompanion
+	_
+	ChatRejectQueueFull
+)
+
+// TaskFailReason 是 TaskFailed 事件携带的稳定失败原因枚举。
+// 它与 ChatRejectReason 共用 ChatEvent 的 reason wire 槽位，但从 16 起编号，
+// 只允许出现在 ChatEventTaskFailed 上。
+type TaskFailReason uint8
+
+const (
+	TaskFailPlannerUnavailable TaskFailReason = 16 + iota
+	TaskFailInvalidPlan
+	TaskFailPathUnreachable
+	TaskFailWorldChanged
 )
 
 // ChatEvent 是服务端在 tick 边界确认的聊天寻址事实。
@@ -70,6 +90,12 @@ func (ChatEvent) serverMessage() {}
 func (ChatEvent) serverPacket()  {}
 
 // Validate 验证事件种类与所携字段的精确组合。
+//
+// 组合规则是原子的：任一字段不满足当前 kind/reason 的要求即整体拒绝。
+// 任务事件（Task*）必须携带完整伙伴身份与原始指令，且 MUST NOT 携带模型
+// 生成的自由文本——wire 形状上唯一的文本字段就是玩家原始指令 Command，
+// 因此该约束由组合校验结构性保证。QueueFull 拒绝保留与 Accepted 相同的
+// 身份与指令要求，以便发令者能对应到具体未入队的指令。
 func (event ChatEvent) Validate() error {
 	if event.EventID == 0 || !event.PlayerID.Valid() || !validPlayerName(event.PlayerName) {
 		return errors.New("network: invalid chat event player identity")
@@ -81,25 +107,55 @@ func (event ChatEvent) Validate() error {
 			return errors.New("network: invalid accepted chat event")
 		}
 	case ChatEventRejected:
-		if event.CompanionID != (companion.ID{}) || event.Command != "" {
-			return errors.New("network: rejected chat event leaks companion ID or command")
-		}
 		switch event.RejectReason {
 		case ChatRejectInvalidFormat:
-			if event.CompanionName != "" {
-				return errors.New("network: invalid-format chat event leaks companion name")
+			// 格式错误的指令连寻址都没发生：伙伴身份与指令必须全部清空。
+			if event.CompanionID != (companion.ID{}) || event.Command != "" || event.CompanionName != "" {
+				return errors.New("network: invalid-format chat event leaks companion identity or command")
 			}
 		case ChatRejectUnknownCompanion:
-			if companion.ValidateName(event.CompanionName) != nil {
-				return errors.New("network: unknown-companion chat event has invalid name")
+			// 只保留合法目标名称，供发令者核对拼写；身份与指令必须清空。
+			if event.CompanionID != (companion.ID{}) || event.Command != "" ||
+				companion.ValidateName(event.CompanionName) != nil {
+				return errors.New("network: unknown-companion chat event carries identity or command")
+			}
+		case ChatRejectQueueFull:
+			// 队列满必须让发令者能定位被拒指令，因此携带完整伙伴身份与合法指令。
+			if !event.CompanionID.Valid() || companion.ValidateName(event.CompanionName) != nil ||
+				validateCommandText(event.Command) != nil {
+				return errors.New("network: queue-full chat event lacks companion identity or command")
 			}
 		default:
 			return errors.New("network: invalid chat rejection reason")
+		}
+	case ChatEventTaskStarted, ChatEventTaskProgress, ChatEventTaskCompleted, ChatEventTaskTimedOut:
+		// 任务推进事件只复述原始指令；reason 槽位必须保持 None，
+		// 失败原因只允许出现在 TaskFailed 上。
+		if event.RejectReason != ChatRejectNone || !event.CompanionID.Valid() ||
+			companion.ValidateName(event.CompanionName) != nil || validateCommandText(event.Command) != nil {
+			return fmt.Errorf("network: invalid %d task chat event", event.Kind)
+		}
+	case ChatEventTaskFailed:
+		// TaskFailed 的 reason 槽位承载 TaskFailReason 固定枚举（16..19）。
+		if !validTaskFailReason(TaskFailReason(event.RejectReason)) || !event.CompanionID.Valid() ||
+			companion.ValidateName(event.CompanionName) != nil || validateCommandText(event.Command) != nil {
+			return errors.New("network: invalid failed task chat event")
 		}
 	default:
 		return errors.New("network: invalid chat event kind")
 	}
 	return nil
+}
+
+// validTaskFailReason 判断失败原因是否属于 TaskFailed 允许的固定枚举；
+// 拒绝原因区间（0..15）与其他越界值都必须为假。
+func validTaskFailReason(reason TaskFailReason) bool {
+	switch reason {
+	case TaskFailPlannerUnavailable, TaskFailInvalidPlan, TaskFailPathUnreachable, TaskFailWorldChanged:
+		return true
+	default:
+		return false
+	}
 }
 
 // CompanionSpawn 在客户端首次可见时发布伙伴的完整身份与身体。

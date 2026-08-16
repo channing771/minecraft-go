@@ -35,11 +35,12 @@ type CompanionUpdate struct {
 }
 
 type companionState struct {
+	// actorState 内嵌玩家与伙伴共有的运动/朝向/背包状态（物理体由提升的
+	// state 字段承载，等价于旧 body 字段）；稳定 CompanionID 与激活状态等
+	// 伙伴专属语义留在本结构体。提取范围与动机见 actor.go。
+	actorState
 	id                 companion.ID
 	dimension          core.DimensionID
-	body               physics.State
-	yaw, pitch         float32
-	inventory          core.Inventory
 	active, reset      bool
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
@@ -67,10 +68,10 @@ func (engine *Engine) RegisterCompanion(restore CompanionRestore) {
 		panic("sim: too many registered companions")
 	}
 	candidates := spawnCandidates(restore.SpawnAnchor, companionSpawnRadius)
-	state := &companionState{
+	entry := &companionState{
 		id:              restore.ID,
 		dimension:       restore.SpawnDimension,
-		body:            physics.State{Position: mgl32.Vec3{float32(restore.SpawnAnchor.X)*core.SectionSize + 0.5, core.MaxY + 1, float32(restore.SpawnAnchor.Z)*core.SectionSize + 0.5}},
+		actorState:      actorState{state: physics.State{Position: mgl32.Vec3{float32(restore.SpawnAnchor.X)*core.SectionSize + 0.5, core.MaxY + 1, float32(restore.SpawnAnchor.Z)*core.SectionSize + 0.5}}},
 		restoreWanted:   make(map[core.ChunkKey]struct{}),
 		spawnCandidates: candidates,
 		spawnChunks:     spawnCandidateChunks(candidates),
@@ -83,16 +84,16 @@ func (engine *Engine) RegisterCompanion(restore CompanionRestore) {
 		if !restore.Body.Inventory.Valid() {
 			panic("sim: register companion with invalid inventory")
 		}
-		state.body.Position = mgl32.Vec3(restore.Body.Position)
-		state.yaw = restore.Body.Yaw
-		state.pitch = restore.Body.Pitch
-		state.inventory = restore.Body.Inventory
-		state.restoreCandidates = []restoreCandidate{{location: PlayerLocation{
+		entry.state.Position = mgl32.Vec3(restore.Body.Position)
+		entry.yaw = restore.Body.Yaw
+		entry.pitch = restore.Body.Pitch
+		entry.inventory = restore.Body.Inventory
+		entry.restoreCandidates = []restoreCandidate{{location: PlayerLocation{
 			Dimension: restore.Body.Dimension,
-			Position:  state.body.Position,
+			Position:  entry.state.Position,
 		}}}
 	}
-	engine.companions[restore.ID] = state
+	engine.companions[restore.ID] = entry
 	engine.subscriptionsDirty = true
 }
 
@@ -105,7 +106,7 @@ func (engine *Engine) CompanionBodies() []companion.Body {
 		bodies = append(bodies, companion.Body{
 			ID:        id,
 			Dimension: state.dimension,
-			Position:  [3]float32(state.body.Position),
+			Position:  [3]float32(state.state.Position),
 			Yaw:       state.yaw,
 			Pitch:     state.pitch,
 			Inventory: state.inventory,
@@ -198,7 +199,7 @@ func (engine *Engine) advancePendingCompanion(state *companionState) {
 
 func (state *companionState) activate(location PlayerLocation, onGround bool) {
 	state.dimension = location.Dimension
-	state.body = physics.State{Position: location.Position, OnGround: onGround}
+	state.state = physics.State{Position: location.Position, OnGround: onGround}
 	state.active = true
 	state.reset = true
 	state.restoreCandidates = nil
@@ -209,7 +210,7 @@ func (engine *Engine) publishCompanions(result *TickResult) {
 	for _, id := range engine.activeCompanionIDs() {
 		state := engine.companions[id]
 		result.Companions = append(result.Companions, CompanionUpdate{
-			ID: id, Dimension: state.dimension, State: state.body,
+			ID: id, Dimension: state.dimension, State: state.state,
 			Yaw: state.yaw, Pitch: state.pitch, Reset: state.reset,
 		})
 		state.reset = false

@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -181,39 +182,42 @@ func TestCommonBlockMaterialPlayTranscriptMatchesMemoryAndTCP(t *testing.T) {
 	}
 }
 
-func TestProtocolVersion15HandshakeRejectMatchesMemoryAndTCP(t *testing.T) {
-	for _, open := range transportOpeners {
-		t.Run(open.name, func(t *testing.T) {
-			client, server := open.open(t)
-			t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
-			serverDone := make(chan error, 1)
-			go func() {
-				_, err := BeginServerLogin(context.Background(), server)
-				serverDone <- err
-			}()
+func TestProtocolOutdatedHandshakeRejectMatchesMemoryAndTCP(t *testing.T) {
+	// v15 与 v16 都是过时版本：Memory 与 TCP 必须产生相同的 v17 版本不匹配拒绝。
+	for _, version := range []uint32{15, 16} {
+		for _, open := range transportOpeners {
+			t.Run(fmt.Sprintf("v%d/%s", version, open.name), func(t *testing.T) {
+				client, server := open.open(t)
+				t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+				serverDone := make(chan error, 1)
+				go func() {
+					_, err := BeginServerLogin(context.Background(), server)
+					serverDone <- err
+				}()
 
-			sendProtocol15Hello(t, client)
-			packet, err := client.Recv(context.Background(), StateHandshake)
-			reject, ok := packet.(HandshakeReject)
-			if err != nil || !ok || reject.Code != HandshakeVersionMismatch || reject.ServerProtocolVersion != 16 {
-				t.Fatalf("v15 拒绝 = (%#v, %v)，想要服务端 v16 HandshakeVersionMismatch", packet, err)
-			}
-			if err := <-serverDone; err == nil {
-				t.Fatal("v15 握手意外进入登录")
-			}
-		})
+				sendProtocolVersionHello(t, client, version)
+				packet, err := client.Recv(context.Background(), StateHandshake)
+				reject, ok := packet.(HandshakeReject)
+				if err != nil || !ok || reject.Code != HandshakeVersionMismatch || reject.ServerProtocolVersion != 17 {
+					t.Fatalf("v%d 拒绝 = (%#v, %v)，想要服务端 v17 HandshakeVersionMismatch", version, packet, err)
+				}
+				if err := <-serverDone; err == nil {
+					t.Fatalf("v%d 握手意外进入登录", version)
+				}
+			})
+		}
 	}
 }
 
-func sendProtocol15Hello(t *testing.T, client ClientPacketStream) {
+func sendProtocolVersionHello(t *testing.T, client ClientPacketStream, version uint32) {
 	t.Helper()
 	switch client := client.(type) {
 	case *memoryClientStream:
-		if err := memorySend(t.Context(), client.pair, client.pair.clientToServer, ClientPacket(ClientHello{ProtocolVersion: 15})); err != nil {
+		if err := memorySend(t.Context(), client.pair, client.pair.clientToServer, ClientPacket(ClientHello{ProtocolVersion: version})); err != nil {
 			t.Fatal(err)
 		}
 	case *tcpClientStream:
-		if err := WriteFrame(client.stream.conn, 0, []byte{15}); err != nil {
+		if err := WriteFrame(client.stream.conn, 0, []byte{byte(version)}); err != nil {
 			t.Fatal(err)
 		}
 	default:

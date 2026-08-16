@@ -10,7 +10,15 @@ import (
 )
 
 type Config struct {
-	Companions            []companion.Definition
+	Companions []companion.Definition
+	// AIModel 是伙伴 AI 的模型运行时设置。伙伴列表非空时 NewHost 会校验它的
+	// 静态完整性（AIModel.Validate），并要求 https endpoint 携带非空 AIAPIKey，
+	// 否则拒绝启动；伙伴列表为空时不做任何要求（AI 关闭）。
+	AIModel companion.ModelSettings
+	// AIAPIKey 是按 AIModel.APIKeyEnv 指向的环境变量解析出的密钥值。
+	// 它只存在于进程内存：不写入配置文件与任何存档，也不进入日志或错误
+	// 文本；需要打印配置的地方必须跳过该字段。
+	AIAPIKey              string
 	Seed                  int64
 	MaxPlayers            int
 	ViewRadius            int
