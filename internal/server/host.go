@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"sync"
 	"time"
 
@@ -139,6 +140,19 @@ func NewHost(
 	}
 	var companions *companionPersistence
 	if len(config.Companions) != 0 {
+		// 伙伴启用即要求模型运行时就绪。config.Load 已在配置层守住静态完整性，
+		// 这里是第二道边界：直接构造 server.Config 的入口（测试、未来的嵌入方）
+		// 也不能带着残缺模型设置启动。校验放在 LoadCompanions 之前，失败时
+		// 不触碰任何存档。错误只引用字段名与环境变量名，绝不回显密钥值。
+		if err := config.AIModel.Validate(); err != nil {
+			return nil, fmt.Errorf("server: 伙伴配置缺少可用的 AI 模型设置: %w", err)
+		}
+		if isHTTPSEndpoint(config.AIModel.Endpoint) && config.AIAPIKey == "" {
+			return nil, fmt.Errorf(
+				"server: AI endpoint 为 https 但未解析到 API 密钥（AIAPIKey 为空，检查环境变量 %q）",
+				config.AIModel.APIKeyEnv,
+			)
+		}
 		loaded, err := store.LoadCompanions(ctx)
 		if errors.Is(err, storage.ErrCompanionsNotFound) {
 			loaded = storage.StoredCompanions{}
@@ -173,6 +187,15 @@ func NewHost(
 		runtimeDone:     make(chan error, 1),
 		shutdownGate:    gate,
 	}, nil
+}
+
+// isHTTPSEndpoint 报告 endpoint 是否使用 https scheme。只服务于 NewHost 的
+// 密钥边界检查：调用前 endpoint 必已通过 companion.ModelSettings.Validate，
+// 因此这里不重复完整形态校验；解析失败按非 https 处理，让 Validate 的错误
+// 保持唯一的形态权威。
+func isHTTPSEndpoint(endpoint string) bool {
+	parsed, err := url.Parse(endpoint)
+	return err == nil && parsed.Scheme == "https"
 }
 
 func (h *Host) Run(ctx context.Context, listener network.Listener) error {

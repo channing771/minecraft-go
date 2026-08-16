@@ -143,7 +143,15 @@ func TestRunInjectsAICompanionsIntoDedicatedServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Defaults()
-	cfg.AI = &config.AI{Companions: []companion.Definition{{ID: id, Name: "阿木"}}}
+	// M5B 起非空伙伴必须携带完整模型设置才能通过 config.Load；这里用免密钥的
+	// loopback 形态，保持本测试"专服注入伙伴且不改写配置文件"的主题不变。
+	cfg.AI = &config.AI{
+		ModelSettings: companion.ModelSettings{
+			Endpoint: "http://127.0.0.1:1/v1",
+			Model:    "test-model",
+		},
+		Companions: []companion.Definition{{ID: id, Name: "阿木"}},
+	}
 	if err := cfg.Save(path); err != nil {
 		t.Fatal(err)
 	}
