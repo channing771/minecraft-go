@@ -2,7 +2,7 @@
 
 ## 1. Rust surface 模式
 
-- [ ] 1.1 client ABI 3→4:`render_create_windowed`(窗口句柄→wgpu surface,
+- [x] 1.1 client ABI 3→4:`render_create_windowed`(窗口句柄→wgpu surface,
       Bgra8UnormSrgb/FIFO,窗口线程表)与 `render_resize`(重建 target/HiZ
       与 surface 配置);`render_frame` 窗口模式 acquire/present,失败返回
       SKIPPED 状态;入口校验拒绝单测;同步 `mornlea_client.h`;

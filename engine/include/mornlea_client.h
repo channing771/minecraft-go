@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MORNLEA_CLIENT_ABI_VERSION 3u
+#define MORNLEA_CLIENT_ABI_VERSION 4u
 
 #define MORNLEA_CLIENT_STATUS_OK 0u
 #define MORNLEA_CLIENT_STATUS_ABI_VERSION 1u
@@ -13,6 +13,7 @@
 #define MORNLEA_CLIENT_STATUS_PANIC 4u
 #define MORNLEA_CLIENT_STATUS_ADAPTER 5u
 #define MORNLEA_CLIENT_STATUS_CAPACITY 6u
+#define MORNLEA_CLIENT_STATUS_SKIPPED 7u
 
 /* 输入快照:64 字节头 + 1024 x u32 文本段,布局见 crate input 模块文档。 */
 #define MORNLEA_CLIENT_SNAPSHOT_BYTES 4160u
@@ -114,6 +115,17 @@ uint32_t mornlea_client_render_upload_hud_atlas(
     uint32_t height,
     const uint8_t *pixels,
     size_t pixels_len);
+
+uint32_t mornlea_client_render_create_windowed(
+    uint32_t abi_version,
+    uint64_t window_handle,
+    uint64_t *out_handle);
+
+uint32_t mornlea_client_render_resize(
+    uint32_t abi_version,
+    uint64_t handle,
+    uint32_t width,
+    uint32_t height);
 
 uint32_t mornlea_client_render_readback(
     uint32_t abi_version,

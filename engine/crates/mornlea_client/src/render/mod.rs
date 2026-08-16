@@ -46,6 +46,33 @@ const WORLD_MIN_Y: i32 = -64;
 /// 字形图集边长(像素,R8),与 Go `glyphAtlasSize` 一致。
 pub const GLYPH_ATLAS_SIZE: u32 = 1024;
 
+/// 一帧渲染的结果:输入违约、surface 不可用跳帧、或成功。
+#[derive(Debug, PartialEq, Eq)]
+pub enum FrameResult {
+    /// 输入违约,未触碰任何 GPU 状态。
+    Invalid,
+    /// 窗口 surface 获取失败(遮挡/过期),本帧跳过。
+    Skipped,
+    /// 渲染完成(窗口模式已 present)。
+    Rendered,
+}
+
+/// 渲染目标模式:离屏纹理或窗口 surface。
+enum TargetMode {
+    /// 离屏:固定 color 纹理,支持 readback。
+    Offscreen {
+        color: wgpu::Texture,
+        color_view: wgpu::TextureView,
+    },
+    /// 窗口:每帧 acquire surface 纹理并 present;不支持 readback。
+    Windowed {
+        surface: wgpu::Surface<'static>,
+        config: wgpu::SurfaceConfiguration,
+        /// 持有窗口共享所有权,保证 surface 生命周期内窗口存活。
+        _window: std::sync::Arc<winit::window::Window>,
+    },
+}
+
 /// 渲染器创建失败的稳定原因,FFI 层转错误状态码。
 #[derive(Debug)]
 pub enum RenderCreateError {
@@ -338,8 +365,7 @@ pub struct OffscreenRenderer {
     queue: wgpu::Queue,
     width: u32,
     height: u32,
-    color: wgpu::Texture,
-    color_view: wgpu::TextureView,
+    mode: TargetMode,
     depth_view: wgpu::TextureView,
 
     faces: wgpu::Buffer,
@@ -409,17 +435,83 @@ impl OffscreenRenderer {
     pub fn new(width: u32, height: u32) -> Result<Self, RenderCreateError> {
         // 离屏渲染不需要 display handle。
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        Self::build_renderer(instance, None, width, height)
+    }
+
+    /// 创建窗口模式渲染器:从共享窗口建 wgpu surface 并按 FIFO 配置
+    /// (镜像 Go surface 配置),其余管线与离屏一致。
+    pub fn new_windowed(
+        window: std::sync::Arc<winit::window::Window>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, RenderCreateError> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let surface = instance
+            .create_surface(window.clone())
+            .map_err(|_| RenderCreateError::Device)?;
+        Self::build_renderer(instance, Some((surface, window)), width, height)
+    }
+
+    fn build_renderer(
+        instance: wgpu::Instance,
+        windowed: Option<(
+            wgpu::Surface<'static>,
+            std::sync::Arc<winit::window::Window>,
+        )>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, RenderCreateError> {
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
-            compatible_surface: None,
+            compatible_surface: windowed.as_ref().map(|(surface, _)| surface),
         }))
         .map_err(|_| RenderCreateError::Adapter)?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("mornlea offscreen"),
+            label: Some("mornlea renderer"),
             ..Default::default()
         }))
         .map_err(|_| RenderCreateError::Device)?;
+
+        // 目标模式:窗口 surface(FIFO/BGRA sRGB,镜像 Go 配置)或离屏纹理。
+        let mode = match windowed {
+            Some((surface, window)) => {
+                let config = wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: COLOR_FORMAT,
+                    width,
+                    height,
+                    present_mode: wgpu::PresentMode::Fifo,
+                    desired_maximum_frame_latency: 2,
+                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    view_formats: vec![],
+                };
+                surface.configure(&device, &config);
+                TargetMode::Windowed {
+                    surface,
+                    config,
+                    _window: window,
+                }
+            }
+            None => {
+                let color = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("offscreen color"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: COLOR_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
+                TargetMode::Offscreen { color, color_view }
+            }
+        };
 
         let make_target = |format, usage, label: &str| {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -437,17 +529,11 @@ impl OffscreenRenderer {
                 view_formats: &[],
             })
         };
-        let color = make_target(
-            COLOR_FORMAT,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            "offscreen color",
-        );
         let depth = make_target(
             DEPTH_FORMAT,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             "offscreen depth",
         );
-        let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
 
         use wgpu::BufferUsages as BU;
@@ -854,8 +940,7 @@ impl OffscreenRenderer {
             queue,
             width,
             height,
-            color,
-            color_view,
+            mode,
             depth_view,
             faces,
             instances,
@@ -1174,14 +1259,14 @@ impl OffscreenRenderer {
     /// 渲染一帧,pass 顺序镜像 Go `Render`:
     /// 候选 record → uniform → 清零 indirect → cull(可选 HiZ)→
     /// render pass(clear 天空色 → sky → terrain indirect)→ HiZ build。
-    pub fn render_frame(&mut self, input: &FrameInput) -> bool {
+    pub fn render_frame(&mut self, input: &FrameInput) -> FrameResult {
         // 语义校验先于任何 GPU 写入:非法 pass 段拒绝且不触碰 target。
         if !self.avatar_pass.instances_valid(&input.avatar_instances)
             || !self.drop_pass.instances_valid(&input.drop_instances)
             || !self.outline_pass.instances_valid(&input.outline)
             || input.overlay_strength.is_nan()
         {
-            return false;
+            return FrameResult::Invalid;
         }
         // 文本类段:非空时必须能按各自布局解析,失败在任何 GPU 写入前拒绝。
         let name_tag_segment = if input.name_tag_vertices.is_empty() {
@@ -1189,7 +1274,7 @@ impl OffscreenRenderer {
         } else {
             match self.name_tag_pass.parse_segment(&input.name_tag_vertices) {
                 Some(parts) => Some(parts),
-                None => return false,
+                None => return FrameResult::Invalid,
             }
         };
         let hud_segment = if input.hud_vertices.is_empty() {
@@ -1197,7 +1282,7 @@ impl OffscreenRenderer {
         } else {
             match self.hud_pass.parse_segment(&input.hud_vertices) {
                 Some(parts) => Some(parts),
-                None => return false,
+                None => return FrameResult::Invalid,
             }
         };
         let debug_segment = if input.debug_vertices.is_empty() {
@@ -1205,9 +1290,29 @@ impl OffscreenRenderer {
         } else {
             match self.debug_pass.parse_segment(&input.debug_vertices) {
                 Some(parts) => Some(parts),
-                None => return false,
+                None => return FrameResult::Invalid,
             }
         };
+        // 窗口模式先获取 surface 纹理:失败(遮挡/过期)跳帧,镜像 Go
+        // `Surface.Acquire` 返回 nil 的语义;离屏模式使用固定 color 纹理。
+        let acquired = match &self.mode {
+            TargetMode::Offscreen { .. } => None,
+            TargetMode::Windowed { surface, .. } => match surface.get_current_texture() {
+                // Suboptimal 仍可用本帧呈现;下一次 resize 会重配 surface。
+                wgpu::CurrentSurfaceTexture::Success(frame)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Some(frame),
+                // Timeout/遮挡/其余状况:跳帧,镜像 Go Acquire 返回 nil。
+                _ => return FrameResult::Skipped,
+            },
+        };
+        let frame_view = match (&self.mode, &acquired) {
+            (TargetMode::Offscreen { color_view, .. }, _) => color_view.clone(),
+            (_, Some(frame)) => frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default()),
+            _ => unreachable!("windowed 模式必有已获取的 surface 纹理"),
+        };
+
         // 构建候选 record(编码镜像 Go sectionRecords)。
         let mut records: Vec<u8> = Vec::with_capacity(input.visible.len() * SECTION_RECORD_BYTES);
         let mut candidates = 0u32;
@@ -1330,7 +1435,7 @@ impl OffscreenRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.color_view,
+                    view: &frame_view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -1374,12 +1479,8 @@ impl OffscreenRenderer {
                 input.daylight,
                 &input.avatar_instances,
             );
-            self.avatar_pass.record(
-                &mut encoder,
-                &self.color_view,
-                &self.depth_view,
-                "avatar pass",
-            );
+            self.avatar_pass
+                .record(&mut encoder, &frame_view, &self.depth_view, "avatar pass");
         }
         if !input.drop_instances.is_empty() {
             self.drop_pass.upload(
@@ -1390,7 +1491,7 @@ impl OffscreenRenderer {
             );
             self.drop_pass.record(
                 &mut encoder,
-                &self.color_view,
+                &frame_view,
                 &self.depth_view,
                 "item drop pass",
             );
@@ -1405,7 +1506,7 @@ impl OffscreenRenderer {
             );
             self.outline_pass.record(
                 &mut encoder,
-                &self.color_view,
+                &frame_view,
                 &self.depth_view,
                 "block outline pass",
             );
@@ -1415,7 +1516,7 @@ impl OffscreenRenderer {
             self.name_tag_pass.upload_and_record(
                 &self.queue,
                 &mut encoder,
-                &self.color_view,
+                &frame_view,
                 Some(&self.depth_view),
                 uniform,
                 backgrounds,
@@ -1432,7 +1533,7 @@ impl OffscreenRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("damage overlay pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.color_view,
+                    view: &frame_view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -1454,7 +1555,7 @@ impl OffscreenRenderer {
             self.hud_pass.upload_and_record(
                 &self.queue,
                 &mut encoder,
-                &self.color_view,
+                &frame_view,
                 None,
                 uniform,
                 quads,
@@ -1465,7 +1566,7 @@ impl OffscreenRenderer {
             self.debug_pass.upload_and_record(
                 &self.queue,
                 &mut encoder,
-                &self.color_view,
+                &frame_view,
                 None,
                 uniform,
                 quads,
@@ -1476,12 +1577,82 @@ impl OffscreenRenderer {
         self.last_view_proj = input.view_proj;
         self.have_last_camera = true;
         self.queue.submit([encoder.finish()]);
-        true
+        if let Some(frame) = acquired {
+            frame.present();
+        }
+        FrameResult::Rendered
+    }
+
+    /// 调整输出尺寸:重建 depth 与 HiZ,离屏重建 color,窗口重配 surface;
+    /// HiZ 失效一帧(镜像 Go `Resize` 重置 haveLastCamera)。
+    pub fn resize(&mut self, width: u32, height: u32) {
+        if width == self.width && height == self.height {
+            return;
+        }
+        self.width = width;
+        self.height = height;
+        let make_target = |device: &wgpu::Device, format, usage, label: &str| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        let depth = make_target(
+            &self.device,
+            DEPTH_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            "offscreen depth",
+        );
+        self.depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
+        match &mut self.mode {
+            TargetMode::Offscreen { color, color_view } => {
+                *color = make_target(
+                    &self.device,
+                    COLOR_FORMAT,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    "offscreen color",
+                );
+                *color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
+            }
+            TargetMode::Windowed {
+                surface, config, ..
+            } => {
+                config.width = width;
+                config.height = height;
+                surface.configure(&self.device, config);
+            }
+        }
+        self.hiz = HiZ::new(&self.device, &self.queue, width, height);
+        self.cull_bind = make_cull_bind(
+            &self.device,
+            &self.cull_layout,
+            &self.cull_uniforms,
+            &self.cull_sections,
+            &self.faces,
+            &self.instances,
+            &self.indirect,
+            &self.dummy_hiz_view,
+        );
+        self.cull_uses_hiz = false;
+        self.have_last_camera = false;
     }
 
     /// 阻塞回读离屏 color(BGRA,逐行紧密拼接);`out` 长度必须恰为
     /// width×height×4(FFI 层校验)。
-    pub fn readback(&self, out: &mut [u8]) {
+    pub fn readback(&self, out: &mut [u8]) -> bool {
+        let TargetMode::Offscreen { color, .. } = &self.mode else {
+            return false;
+        };
         debug_assert_eq!(out.len(), (self.width * self.height * 4) as usize);
         // WebGPU 要求 bytes_per_row 按 256 对齐;宽度不整除时按对齐行距
         // 拷出再紧缩。
@@ -1500,7 +1671,7 @@ impl OffscreenRenderer {
             });
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &self.color,
+                texture: color,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -1539,6 +1710,7 @@ impl OffscreenRenderer {
         }
         drop(data);
         buffer.unmap();
+        true
     }
 }
 
@@ -1748,11 +1920,11 @@ mod tests {
         };
         renderer.render_frame(&empty_frame());
         let mut first = vec![0u8; 64 * 32 * 4];
-        renderer.readback(&mut first);
+        assert!(renderer.readback(&mut first));
         assert!(first.iter().any(|&b| b != 0), "sky 渲染后回读不应全零");
         renderer.render_frame(&empty_frame());
         let mut second = vec![0u8; 64 * 32 * 4];
-        renderer.readback(&mut second);
+        assert!(renderer.readback(&mut second));
         assert_eq!(first, second, "同输入两帧必须逐字节一致");
     }
 
@@ -1808,11 +1980,11 @@ mod tests {
         frame.visible = vec![(0, 5, 0), (9, 9, 9)];
         renderer.render_frame(&frame);
         let mut first = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut first);
+        assert!(renderer.readback(&mut first));
         // 第二帧相机不动:走 HiZ 启用路径,图像必须稳定。
         renderer.render_frame(&frame);
         let mut second = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut second);
+        assert!(renderer.readback(&mut second));
         assert_eq!(first, second, "HiZ 启用帧不得改变图像");
     }
 }
@@ -1833,7 +2005,7 @@ mod daylight_tests {
         day.star_visibility = 0.0;
         renderer.render_frame(&day);
         let mut day_img = vec![0u8; 64 * 32 * 4];
-        renderer.readback(&mut day_img);
+        assert!(renderer.readback(&mut day_img));
 
         let mut night = empty_frame_pub();
         night.daylight = 0.05;
@@ -1841,7 +2013,7 @@ mod daylight_tests {
         night.sky_color = [0.01, 0.01, 0.03, 1.0];
         renderer.render_frame(&night);
         let mut night_img = vec![0u8; 64 * 32 * 4];
-        renderer.readback(&mut night_img);
+        assert!(renderer.readback(&mut night_img));
         assert_ne!(day_img, night_img, "昼夜 sky 输出不应相同");
     }
 }
@@ -1879,6 +2051,7 @@ pub(crate) mod tests_support {
 
 #[cfg(test)]
 mod entity_tests {
+    use super::FrameResult;
     use super::entity;
     use super::tests_support::*;
 
@@ -1890,9 +2063,9 @@ mod entity_tests {
             return;
         };
         let empty = empty_frame_pub();
-        assert!(renderer.render_frame(&empty));
+        assert_eq!(renderer.render_frame(&empty), FrameResult::Rendered);
         let mut base = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut base);
+        assert!(renderer.readback(&mut base));
 
         // identity mat4(列主序)+ 红色。
         let mut instance = [0u8; 80];
@@ -1903,34 +2076,35 @@ mod entity_tests {
         instance[76..80].copy_from_slice(&1.0f32.to_le_bytes());
         let mut frame = empty_frame_pub();
         frame.avatar_instances = instance.to_vec();
-        assert!(renderer.render_frame(&frame));
+        assert_eq!(renderer.render_frame(&frame), FrameResult::Rendered);
         let mut with_avatar = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut with_avatar);
+        assert!(renderer.readback(&mut with_avatar));
         assert_ne!(base, with_avatar, "avatar 实例必须改变图像");
 
         // 掉落物走同一路径:同一实例流经 drop 段也必须生效。
         let mut drop_frame = empty_frame_pub();
         drop_frame.drop_instances = instance.to_vec();
-        assert!(renderer.render_frame(&drop_frame));
+        assert_eq!(renderer.render_frame(&drop_frame), FrameResult::Rendered);
         let mut with_drop = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut with_drop);
+        assert!(renderer.readback(&mut with_drop));
         assert_ne!(base, with_drop, "掉落物实例必须改变图像");
 
         // 非 80 倍数与超容量拒绝,且 target 保持上一帧内容。
         let mut bad = empty_frame_pub();
         bad.avatar_instances = vec![0u8; 84];
-        assert!(!renderer.render_frame(&bad));
+        assert_eq!(renderer.render_frame(&bad), FrameResult::Invalid);
         let mut after_bad = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut after_bad);
+        assert!(renderer.readback(&mut after_bad));
         assert_eq!(with_drop, after_bad, "拒绝帧不得触碰 target");
         let mut oversized = empty_frame_pub();
         oversized.avatar_instances = vec![0u8; (entity::AVATAR_MAX_INSTANCES + 1) * 80];
-        assert!(!renderer.render_frame(&oversized));
+        assert_eq!(renderer.render_frame(&oversized), FrameResult::Invalid);
     }
 }
 
 #[cfg(test)]
 mod outline_overlay_tests {
+    use super::FrameResult;
     use super::tests_support::*;
 
     /// 轮廓实例与伤害红边都必须改变图像;NaN 强度拒绝且 target 不变。
@@ -1940,9 +2114,9 @@ mod outline_overlay_tests {
             return;
         };
         let empty = empty_frame_pub();
-        assert!(renderer.render_frame(&empty));
+        assert_eq!(renderer.render_frame(&empty), FrameResult::Rendered);
         let mut base = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut base);
+        assert!(renderer.readback(&mut base));
 
         // identity 变换白色轮廓实例(alpha 0.86)。
         let mut instance = [0u8; 80];
@@ -1954,26 +2128,31 @@ mod outline_overlay_tests {
         }
         let mut outline_frame = empty_frame_pub();
         outline_frame.outline = instance.to_vec();
-        assert!(renderer.render_frame(&outline_frame));
+        assert_eq!(renderer.render_frame(&outline_frame), FrameResult::Rendered);
         let mut with_outline = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut with_outline);
+        assert!(renderer.readback(&mut with_outline));
         assert_ne!(base, with_outline, "轮廓必须改变图像");
 
         let mut overlay_frame = empty_frame_pub();
         overlay_frame.overlay_strength = 1.0;
-        assert!(renderer.render_frame(&overlay_frame));
+        assert_eq!(renderer.render_frame(&overlay_frame), FrameResult::Rendered);
         let mut with_overlay = vec![0u8; 64 * 64 * 4];
-        renderer.readback(&mut with_overlay);
+        assert!(renderer.readback(&mut with_overlay));
         assert_ne!(base, with_overlay, "伤害红边必须改变图像");
 
         let mut nan_frame = empty_frame_pub();
         nan_frame.overlay_strength = f32::NAN;
-        assert!(!renderer.render_frame(&nan_frame), "NaN 强度必须拒绝");
+        assert_eq!(
+            renderer.render_frame(&nan_frame),
+            FrameResult::Invalid,
+            "NaN 强度必须拒绝"
+        );
     }
 }
 
 #[cfg(test)]
 mod text_pass_tests {
+    use super::FrameResult;
     use super::tests_support::*;
 
     /// 文本段的结构校验:合法段(含零实例)通过,布局违约在渲染前拒绝。
@@ -1990,7 +2169,11 @@ mod text_pass_tests {
         name_tag.extend_from_slice(&[0u8; 64]);
         let mut frame = empty_frame_pub();
         frame.name_tag_vertices = name_tag;
-        assert!(renderer.render_frame(&frame), "合法名牌段必须通过");
+        assert_eq!(
+            renderer.render_frame(&frame),
+            FrameResult::Rendered,
+            "合法名牌段必须通过"
+        );
 
         // HUD:16B viewport + 1 quad + 1 glyph(HUD 图集未上传时跳过绘制,
         // 但解析必须通过)。
@@ -2000,7 +2183,11 @@ mod text_pass_tests {
         hud.extend_from_slice(&[0u8; 96]);
         let mut hud_frame = empty_frame_pub();
         hud_frame.hud_vertices = hud;
-        assert!(renderer.render_frame(&hud_frame), "合法 HUD 段必须通过");
+        assert_eq!(
+            renderer.render_frame(&hud_frame),
+            FrameResult::Rendered,
+            "合法 HUD 段必须通过"
+        );
 
         // 面板:声明计数与字节不符必须拒绝。
         let mut bad_debug = vec![0u8; 16];
@@ -2009,11 +2196,15 @@ mod text_pass_tests {
         bad_debug.extend_from_slice(&[0u8; 48]);
         let mut bad_frame = empty_frame_pub();
         bad_frame.debug_vertices = bad_debug;
-        assert!(!renderer.render_frame(&bad_frame), "计数与字节不符必须拒绝");
+        assert_eq!(
+            renderer.render_frame(&bad_frame),
+            FrameResult::Invalid,
+            "计数与字节不符必须拒绝"
+        );
 
         // 名牌段短于相机头必须拒绝。
         let mut short_frame = empty_frame_pub();
         short_frame.name_tag_vertices = vec![0u8; 40];
-        assert!(!renderer.render_frame(&short_frame));
+        assert_eq!(renderer.render_frame(&short_frame), FrameResult::Invalid);
     }
 }
