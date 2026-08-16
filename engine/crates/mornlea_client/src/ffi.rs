@@ -3,7 +3,7 @@
 //! 契约:
 //! - 所有入口第一个参数是调用方期望的 ABI 版本,不匹配立即返回
 //!   `MORNLEA_CLIENT_STATUS_ABI_VERSION`;当前版本见 [`CLIENT_ABI_VERSION`]
-//!   (v6 起 `render_upload_lod_tile`/`render_drop_lod_tile` 加入)。
+//!   (v6 起远环 tile 出口加入,v7 起雾 setter 出口加入)。
 //! - 窗口句柄存放在 thread-local 表中:句柄只在创建线程有效,跨线程调用
 //!   查不到句柄而返回 `MORNLEA_CLIENT_STATUS_WINDOW`——这同时兜住了 winit
 //!   macOS 的主线程约束(Go 侧已 `LockOSThread`)。
@@ -18,15 +18,16 @@ use crate::window::ClientWindow;
 
 /// 当前 client ABI 版本。
 ///
-/// v6:新增远环 `render_upload_lod_tile`/`render_drop_lod_tile` 出口,既有入口
-/// 签名不变。变基重编:该出口在旧基线上原编号 v5,main 合并 fluid 系列后 v5
-/// 已被下方 water pass 占用,故顺延重编为 v6。雾参数化 `render_set_lod_fog`
-/// (终审 Ruling 14 增补)暂在本版本内追加——纯新增出口,与 Go 绑定同仓同
-/// 构建,不存在跨版本混装的调用方;随后由「client ABI v7 定版」提交升版。
-/// v5:`mornlea_client_render_upload_section` 按 material 分成不透明与水面两条
-/// 流,渲染器新增半透明 water pass。必须与 `engine/include/mornlea_client.h`
-/// 的 `MORNLEA_CLIENT_ABI_VERSION` 逐版本一致。
-pub const CLIENT_ABI_VERSION: u32 = 6;
+/// v7:终审修复波(Ruling 14/16)新增雾参数化 `render_set_lod_fog` 出口——
+/// 新增导出面即 bump,ABI 版本是"同版本 = 同表面"的不可混装契约(与
+/// engine v3→v4、client v4→5 同一先例);既有入口签名不变。
+/// v6:新增远环 `render_upload_lod_tile`/`render_drop_lod_tile` 出口。
+/// 变基重编说明:远环两项出口在旧基线上原编号 v5/v6,main 合并 fluid 系列
+/// 后 v5 已被 water pass(`mornlea_client_render_upload_section` 按 material
+/// 分成不透明与水面两条流,新增半透明 water pass)占用,故整体顺延一格。
+/// 必须与 `engine/include/mornlea_client.h` 的 `MORNLEA_CLIENT_ABI_VERSION`
+/// 逐版本一致。
+pub const CLIENT_ABI_VERSION: u32 = 7;
 
 /// 调用成功。
 pub const MORNLEA_CLIENT_STATUS_OK: u32 = 0;
@@ -276,9 +277,9 @@ mod tests {
     // 校验拒绝路径:ABI 版本、参数校验与无效句柄。
 
     #[test]
-    fn abi_version_is_five() {
-        // 变基重编:v6 = 远环 tile 出口(main 的 water pass 占用 v5 后顺延)。
-        assert_eq!(mornlea_client_abi_version(), 6);
+    fn abi_version_is_seven() {
+        // 变基重编:main 的 water pass 占用 v5,远环 tile 顺延 v6,雾 setter v7。
+        assert_eq!(mornlea_client_abi_version(), 7);
     }
 
     #[test]

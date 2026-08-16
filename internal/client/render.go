@@ -3,8 +3,8 @@
 package client
 
 // 本文件是 `mornlea_client` render ABI 族的 Go 绑定(v2 引入,v6 增补
-// 远环 tile 上传/丢弃入口与雾参数化 SetLodFog——tile 出口变基重编为 v6,
-// main 的 water pass 占用 v5;雾 setter 随后由 v7 定版):R2a 的离屏
+// 远环 tile 上传/丢弃入口,v7 增补雾参数化 SetLodFog——变基重编后
+// v5 归 main 的 water pass,远环两项出口顺延为 v6/v7):R2a 的离屏
 // Rust 渲染器只被双后端对照测试与后续期使用,生产渲染仍是 Go 路径。
 // 链接与 include 标志在 window.go 的 cgo 序言中声明,此处只补 render
 // 入口的逃逸与回调指令。

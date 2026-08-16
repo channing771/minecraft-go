@@ -4,10 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* v6:新增远环 LOD tile 出口(render_upload_lod_tile/drop_lod_tile);
- * 变基重编:旧基线原编号 v5,main 的 water pass(按 material 分流 + 半透明
- * water pass)占用 v5 后顺延为 v6。 */
-#define MORNLEA_CLIENT_ABI_VERSION 6u
+/* v7:终审修复波新增雾参数化 render_set_lod_fog 出口(新增导出面即
+ * bump,同版本 = 同表面的不可混装契约);v6:新增远环 LOD tile 出口
+ * (render_upload_lod_tile/drop_lod_tile)。变基重编:远环两项出口在旧基线
+ * 上原编号 v5/v6,main 的 water pass(按 material 分流 + 半透明 water
+ * pass)占用 v5 后整体顺延一格;v5 归 main 的 water pass。 */
+#define MORNLEA_CLIENT_ABI_VERSION 7u
 
 #define MORNLEA_CLIENT_STATUS_OK 0u
 #define MORNLEA_CLIENT_STATUS_ABI_VERSION 1u
@@ -118,7 +120,7 @@ uint32_t mornlea_client_render_drop_lod_tile(
     int32_t tile_x,
     int32_t tile_z);
 
-/* 设置远环距离雾参数(client ABI v5,Ruling 14 参数化):start 起雾
+/* 设置远环距离雾参数(client ABI v6,Ruling 14 参数化):start 起雾
  * 距离、full 全雾距离(block)。入口校验 start > 0 且 full > start
  * (NaN 拒绝),违约返回 INVALID_ARGUMENT 且先于句柄查找;渲染器默认
  * 768/1152 锚定 lodFarMultiplier=3 的默认几何,非默认倍率由上层按
