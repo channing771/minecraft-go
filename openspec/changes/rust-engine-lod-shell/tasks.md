@@ -28,8 +28,10 @@
 ## 3. 协议 v18 种子下发
 
 - [ ] 3.1 `internal/network`:`LoginSuccess.WorldSeed uint64`、协议版本
-      v16→v18、编解码与 golden wire 更新、握手版本拒绝新旧组合测试
-      (Memory 与 TCP 双传输);
+      v17→v18(v17 已由 M5B 任务生命周期占用)、编解码与 golden wire
+      更新、握手版本拒绝新旧组合测试(Memory 与 TCP 双传输);服务端
+      在构造 LoginSuccess 时填入真实世界种子(internal/server,单机与
+      专服同一路径);
       验证:`go test ./internal/network -race -count=1`。
 
 ## 4. client 远环 pass(Rust;ABI v4→v5,终审修复波随雾 setter 升 v6)
