@@ -913,6 +913,209 @@ func TestCompanionManagerPlanSnapshotBoundedAndOrdered(t *testing.T) {
 	}
 }
 
+// taskTickEvent 记录一条任务事件与其被发布的权威 tick，供按 tick 断言
+// 「三连失败预算属于单个任务」的可观察节奏（两次 20 tick 冷却窗口）。
+type taskTickEvent struct {
+	tick  uint64
+	event network.ChatEvent
+}
+
+// TestCompanionManagerPathFailureBudgetResetsPerTask 验证路径三连失败预算
+// 属于单个任务而非槽位：前一条任务以三次寻路失败终结后，同伙伴的下一条
+// 不可达任务必须重新经历完整的「三次失败 + 两次 20 tick 冷却」，而不是在
+// 第一次寻路失败时立即继承前任务的满额计数而终结（pathfinding spec：
+// 「同一任务内连续三次无法得到可用路径」）。
+//
+// 判定依据是权威 tick 节奏而非墙钟：TaskStarted tick（首次寻路派发）到
+// 第三次失败至少要跨过两个完整冷却窗口（2 × PathReplanCooldownTicks）；
+// 若预算跨任务泄漏，任务会在第一次失败（Started 后数 tick 内）立即终结。
+func TestCompanionManagerPathFailureBudgetResetsPerTask(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(5), Name: "阿木"}}
+	host, client, body := companionManagerHostReady(t, definitions, nil)
+	// 两条指令共用同一个不可达目标（寻路窗口外）：各自都要走满三次失败。
+	model := newFakeCompanionModel(t,
+		[3]int32{int32(body.Position[0]) + 1000, 1, int32(body.Position[2])})
+	host.world.companionManager.replacePlannerForTest(t, model)
+
+	// stepUntilTaskEvent 推进世界并按 (tick, event) 收集事件，直到 predicate
+	// 命中或步数耗尽（步数耗尽时返回已收集事件，由调用方断言失败）。
+	stepUntilTaskEvent := func(maxTicks int, predicate func(event network.ChatEvent) bool) []taskTickEvent {
+		collected := make([]taskTickEvent, 0, 8)
+		for range maxTicks {
+			result := host.world.StepForTest()
+			for _, event := range companionChatEvents(receiveCompanionChatTick(t, client, result.Tick)) {
+				collected = append(collected, taskTickEvent{tick: result.Tick, event: event})
+				if predicate(event) {
+					return collected
+				}
+			}
+		}
+		return collected
+	}
+
+	// 任务 A：从零预算出发，按既有语义三次失败后以 PathUnreachable 终结。
+	sendIntegration(t, client, network.ChatCommand{Text: "@阿木 第一次去远方"})
+	first := stepUntilTaskEvent(600, func(event network.ChatEvent) bool {
+		return event.Kind == network.ChatEventTaskFailed && event.Command == "第一次去远方"
+	})
+	firstFailed := eventsWithKind(
+		networkEventsOf(first), network.ChatEventTaskFailed)
+	if len(firstFailed) != 1 ||
+		network.TaskFailReason(firstFailed[0].RejectReason) != network.TaskFailPathUnreachable {
+		t.Fatalf("任务 A 失败事件=%v（全部事件=%v），想要 1 次 PathUnreachable",
+			chatEventKinds(networkEventsOf(first)), chatEventKinds(networkEventsOf(first)))
+	}
+
+	// 任务 B：前任务已把槽位计数耗到 3，若预算按任务重置，B 仍要完整走
+	// 三次失败；若泄漏，B 会在第一次寻路失败（Started 后数 tick 内）终结。
+	sendIntegration(t, client, network.ChatCommand{Text: "@阿木 第二次去远方"})
+	second := stepUntilTaskEvent(600, func(event network.ChatEvent) bool {
+		return event.Kind == network.ChatEventTaskFailed && event.Command == "第二次去远方"
+	})
+	var startedTick, failedTick uint64
+	failedCount := 0
+	for _, entry := range second {
+		if entry.event.Command != "第二次去远方" {
+			continue
+		}
+		switch entry.event.Kind {
+		case network.ChatEventTaskStarted:
+			startedTick = entry.tick
+		case network.ChatEventTaskFailed:
+			failedTick = entry.tick
+			failedCount++
+			if network.TaskFailReason(entry.event.RejectReason) != network.TaskFailPathUnreachable {
+				t.Fatalf("任务 B 失败原因=%d，想要 PathUnreachable", entry.event.RejectReason)
+			}
+		}
+	}
+	if failedCount != 1 {
+		t.Fatalf("任务 B TaskFailed=%d（事件=%v），想要恰好 1 次",
+			failedCount, chatEventKinds(networkEventsOf(second)))
+	}
+	if startedTick == 0 {
+		t.Fatalf("任务 B 缺少 TaskStarted：%v", chatEventKinds(networkEventsOf(second)))
+	}
+	// 三次寻路失败需要两次固定冷却（2 × 20 tick）：Started 到 Failed 至少
+	// 跨 2*PathReplanCooldownTicks 个权威 tick。泄漏时该间距只有数 tick。
+	if span := failedTick - startedTick; span < 2*companion.PathReplanCooldownTicks {
+		t.Fatalf("任务 B 从 TaskStarted(tick %d) 到 TaskFailed(tick %d) 仅 %d tick，"+
+			"三连失败预算被前任务泄漏（需要 ≥ %d tick 的两次冷却窗口）",
+			startedTick, failedTick, span, 2*companion.PathReplanCooldownTicks)
+	}
+}
+
+// networkEventsOf 把带 tick 的事件记录展开为纯事件切片，复用既有过滤助手。
+func networkEventsOf(entries []taskTickEvent) []network.ChatEvent {
+	events := make([]network.ChatEvent, len(entries))
+	for index, entry := range entries {
+		events[index] = entry.event
+	}
+	return events
+}
+
+// TestCompanionManagerSnapshotFailureTerminatesTaskAndAdvancesFIFO 验证规划
+// 快照构造失败（服务端缺陷的确定性替身：发令者视线命中 Y 越界）时任务真实
+// 终结且 FIFO 继续推进，绝不原地死循环。缺陷任务必须在进入 Planning 后以
+// TaskFailed(PlannerUnavailable) 终结、绝不抵达模型；队首之后的指令照常
+// 被提升、规划与启动。
+func TestCompanionManagerSnapshotFailureTerminatesTaskAndAdvancesFIFO(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(6), Name: "阿木"}}
+	host, client, body := companionManagerHostReady(t, definitions, nil)
+	baseX, baseZ := int32(body.Position[0]), int32(body.Position[2])
+	model := newFakeCompanionModel(t, [3]int32{baseX + 2, 1, baseZ})
+	host.world.companionManager.replacePlannerForTest(t, model)
+
+	identity := integrationIdentity(0x78, "发令者")
+	// 在 stepMu 下直接构造「队首任务已提升但快照必然构造失败」的现场：
+	// lookHit.Y=core.MaxY 落在世界竖直边界之外，PlanSnapshot.Validate 必然
+	// 拒绝——它只污染规划输入，不影响 ChatEvent 的事实组装（事件不携带
+	// 视线命中），因此失败路径仍能产出可发布的 TaskFailed 事件。
+	host.world.stepMu.Lock()
+	slot := host.world.companionManager.slots[definitions[0].ID]
+	if !slot.queue.Enqueue(companion.TaskCommand("坏快照")) ||
+		!slot.queue.Enqueue(companion.TaskCommand("下一条")) ||
+		!slot.queue.BeginHead() {
+		host.world.stepMu.Unlock()
+		t.Fatal("构造缺陷队列状态失败")
+	}
+	slot.currentCommand = companion.TaskCommand("坏快照")
+	slot.currentIssuer = companionTaskIssuer{
+		playerID:   identity.PlayerID,
+		name:       "发令者",
+		position:   [3]float32{0, 1, 0},
+		lookHit:    core.BlockPos{Y: core.MaxY},
+		hasLookHit: true,
+	}
+	// 「下一条」被提升时的发令者配对（enqueueCommand 的等价手工路径）。
+	slot.issuers = append(slot.issuers, companionTaskIssuer{
+		playerID: identity.PlayerID,
+		name:     "发令者",
+		position: [3]float32{0, 1, 0},
+	})
+	host.world.stepMu.Unlock()
+
+	// 推进直到缺陷任务终结且后继指令真正启动；死循环实现会在步数耗尽时
+	// 因缺少 TaskFailed 而失败。
+	collected := make([]network.ChatEvent, 0, 8)
+	for range 200 {
+		result := host.world.StepForTest()
+		collected = append(collected,
+			companionChatEvents(receiveCompanionChatTick(t, client, result.Tick))...)
+		sawFailed, sawNextStarted := false, false
+		for _, event := range collected {
+			if event.Kind == network.ChatEventTaskFailed && event.Command == "坏快照" {
+				sawFailed = true
+			}
+			if event.Kind == network.ChatEventTaskStarted && event.Command == "下一条" {
+				sawNextStarted = true
+			}
+		}
+		if sawFailed && sawNextStarted {
+			break
+		}
+	}
+
+	failed := make([]network.ChatEvent, 0, 1)
+	nextStarted := false
+	for _, event := range collected {
+		switch {
+		case event.Kind == network.ChatEventTaskFailed && event.Command == "坏快照":
+			failed = append(failed, event)
+		case event.Kind == network.ChatEventTaskStarted && event.Command == "下一条":
+			nextStarted = true
+		}
+	}
+	if len(failed) != 1 ||
+		network.TaskFailReason(failed[0].RejectReason) != network.TaskFailPlannerUnavailable {
+		t.Fatalf("坏快照 TaskFailed=%d（事件=%v），想要恰好 1 次 PlannerUnavailable"+
+			"——快照失败必须真实终结任务", len(failed), chatEventKinds(collected))
+	}
+	if !nextStarted {
+		t.Fatalf("缺陷任务终结后 FIFO 未推进：「下一条」始终未 TaskStarted（事件=%v）",
+			chatEventKinds(collected))
+	}
+	// 缺陷任务绝不抵达模型：唯一的模型请求属于「下一条」的规划。
+	if requests, _, _, _ := model.snapshotCounts(); requests != 1 {
+		t.Fatalf("模型请求数=%d，想要 1（坏快照必须失败于快照构造而非模型调用）", requests)
+	}
+	// 终结后再观察数 tick：缺陷任务不得重复失败（每 tick 重试的迹象）。
+	for range 3 {
+		result := host.world.StepForTest()
+		collected = append(collected,
+			companionChatEvents(receiveCompanionChatTick(t, client, result.Tick))...)
+	}
+	repeated := 0
+	for _, event := range collected {
+		if event.Kind == network.ChatEventTaskFailed && event.Command == "坏快照" {
+			repeated++
+		}
+	}
+	if repeated != 1 {
+		t.Fatalf("坏快照 TaskFailed=%d 次，快照失败路径仍在每 tick 重试", repeated)
+	}
+}
+
 func TestCompanionManagerPathBlockTableMatchesCollisionOracle(t *testing.T) {
 	table := companion.NewPathBlockTable(productionCompanionPassableBlocks())
 	if !table.PassableForTest(core.AirID) {

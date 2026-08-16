@@ -65,7 +65,9 @@ type companionTaskSlot struct {
 	// planningInFlight 表示该伙伴有一个规划请求在途；在途期间绝不发起第二个。
 	planningInFlight bool
 
-	// 路径执行状态（仅 Running 有效）。
+	// 路径执行状态（仅 Running 有效）。三连失败预算属于单个任务而非槽位：
+	// dispatchPlanning 消费新队首与 restoreQueue 成功恢复时都会把 policy
+	// 归零，前一个任务的失败计数绝不削减下一个任务的预算。
 	policy       companion.PathPolicy
 	path         *companion.PathResult
 	waypoint     int
@@ -436,8 +438,10 @@ func (m *companionManager) advanceRunners() {
 	}
 }
 
-// dispatchPlanning 为每个空闲槽位派发规划：取队首、构造快照、获取信号量后
-// 由 worker 发起模型请求。信号量满或伙伴未激活时任务保持 Queued 顺延。
+// dispatchPlanning 为每个空闲槽位派发规划：取队首、获取并发名额、迁移
+// Planning 后构造快照，再由 worker 发起模型请求。信号量满或伙伴未激活时
+// 任务保持 Queued 顺延；快照构造失败时任务以 PlannerUnavailable 真实终
+// 结（见函数内注释），FIFO 在下一 tick 推进。
 func (m *companionManager) dispatchPlanning() {
 	for _, id := range m.orderedIDs {
 		slot := m.slots[id]
@@ -453,6 +457,10 @@ func (m *companionManager) dispatchPlanning() {
 			if !slot.queue.BeginHead() {
 				continue
 			}
+			// 新任务从零开始计预算：三连失败上限约束「同一任务内」的连续
+			// 重算失败（pathfinding spec），前一个任务遗留的计数（含已耗尽
+			// 到 3 的终态计数）不得泄漏进新任务。
+			slot.policy = companion.PathPolicy{}
 			if len(slot.issuers) == 0 {
 				slog.Error("任务 FIFO 与发令者队列失配", "companion", id)
 				continue
@@ -466,14 +474,6 @@ func (m *companionManager) dispatchPlanning() {
 			// 伙伴尚未激活（出生扫描在途）：任务保持 Queued，等下一 tick。
 			continue
 		}
-		snapshot, err := m.buildPlanSnapshot(slot.definition, current.Command, slot.currentIssuer, body)
-		if err != nil {
-			// 快照构造失败是服务端缺陷：令任务失败并保留可诊断日志，
-			// 绝不让队列悬挂。
-			slog.Error("构造规划快照失败", "companion", id, "error", err)
-			m.applyQueueEvents(slot, slot.queue.FailPlanning(companion.TaskFailPlannerUnavailable))
-			continue
-		}
 		select {
 		case m.semaphore <- struct{}{}:
 		default:
@@ -481,6 +481,20 @@ func (m *companionManager) dispatchPlanning() {
 			continue
 		}
 		if !slot.queue.BeginPlanning() {
+			<-m.semaphore
+			continue
+		}
+		// 快照构造放在 BeginPlanning 成功之后：构造失败时任务已真实处于
+		// Planning 态，FailPlanning 能令其进入终态并清出当前槽位（下一
+		// tick 的 BeginHead 推进 FIFO），而不是在 Queued 态上被守卫拒绝、
+		// 每 tick 原地重试。快照是纯值操作、不发起模型请求，失败路径只需
+		// 归还刚占用的并发名额。
+		snapshot, err := m.buildPlanSnapshot(slot.definition, current.Command, slot.currentIssuer, body)
+		if err != nil {
+			// 快照构造失败是服务端缺陷：令任务失败并保留可诊断日志，
+			// 绝不让队列悬挂。
+			slog.Error("构造规划快照失败", "companion", id, "error", err)
+			m.applyQueueEvents(slot, slot.queue.FailPlanning(companion.TaskFailPlannerUnavailable))
 			<-m.semaphore
 			continue
 		}
@@ -645,6 +659,10 @@ func (m *companionManager) restoreQueue(slot *companionTaskSlot, queue storage.S
 		if slot.queue.RestoreCurrent(task) {
 			slot.currentIssuer = restoredIssuerIdentity
 			slot.currentCommand = task.Command
+			// 恢复的任务同样从零开始计预算：槽位此刻是新建零值，这里按
+			// 「预算属于任务」的同一不变量补一次显式归零，防止未来的恢复
+			// 时机变化把上一段运行期的计数带入恢复任务。
+			slot.policy = companion.PathPolicy{}
 		}
 	}
 	for _, command := range queue.Pending {

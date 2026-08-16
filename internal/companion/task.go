@@ -91,7 +91,12 @@ const (
 	TaskFailInvalidPlan
 	// TaskFailPathUnreachable 表示路径三连失败或目标不可达。
 	TaskFailPathUnreachable
-	// TaskFailWorldChanged 表示恢复后重验失败：世界已与计划落盘时不同。
+	// TaskFailWorldChanged 是预留失败原因：M5B 全仓没有任何代码路径产生它。
+	// 恢复任务的路径重验天然走重算与三连失败语义（终局为
+	// TaskFailPathUnreachable），不存在单独的「恢复后重验失败」判定。保留
+	// 枚举是为了失败原因分类学的稳定与 network wire 枚举（16..19）的一一
+	// 对齐；若 M5C 引入更细粒度的恢复重验语义（例如与计划落盘时的方块
+	// 快照比对），可在此落地而不破坏协议编号。
 	TaskFailWorldChanged
 )
 
