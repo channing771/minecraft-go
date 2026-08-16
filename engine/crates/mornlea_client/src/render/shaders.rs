@@ -16,6 +16,9 @@ pub const HIZ_BUILD: &str = include_str!("../../../../../internal/render/shader/
 pub const HIZ_COPY: &str = include_str!("../../../../../internal/render/shader/hiz_copy.wgsl");
 /// 实体 pass(avatar 与掉落物共用)。
 pub const AVATAR: &str = include_str!("../../../../../internal/render/shader/avatar.wgsl");
+/// 伤害红边全屏 pass。
+pub const DAMAGE_OVERLAY: &str =
+    include_str!("../../../../../internal/render/shader/damage_overlay.wgsl");
 
 #[cfg(test)]
 mod tests {
@@ -31,6 +34,7 @@ mod tests {
             ("hiz_build", HIZ_BUILD),
             ("hiz_copy", HIZ_COPY),
             ("avatar", AVATAR),
+            ("damage_overlay", DAMAGE_OVERLAY),
         ] {
             assert!(!source.trim().is_empty(), "{name} 为空");
             assert!(source.contains("fn "), "{name} 缺少入口函数");

@@ -16,7 +16,7 @@
 - [x] 2.1 avatar 与 item drop pass:顶点/索引缓冲、instance 消费与 indexed
       indirect,镜像 Go avatar.go/drop.go 的缓冲布局与管线状态;smoke 单测;
       验证:crate 单测。
-- [ ] 2.2 block outline 与 damage overlay pass:LessEqual 轮廓与全屏 alpha
+- [x] 2.2 block outline 与 damage overlay pass:LessEqual 轮廓与全屏 alpha
       blend 红边;smoke 单测;验证:crate 单测。
 - [ ] 2.3 name tag、HUD 与 debug panel pass:billboard 字形、屏幕空间顶点
       流与字形/HUD 图集采样,镜像各自 wgsl 的 bind 布局;pass 录制顺序

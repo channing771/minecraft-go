@@ -48,6 +48,16 @@ const CUBE_INDICES: [u32; 36] = [
     20, 21, 22, 20, 22, 23,
 ];
 
+/// 实体管线状态变体:avatar/drop 用不透明写深度,轮廓用透明只读深度
+/// (LessEqual),镜像 Go 各构造参数。
+#[derive(Clone, Copy)]
+pub enum EntityPipelineKind {
+    /// BlendReplace + 深度写 + Less。
+    Opaque,
+    /// BlendAlpha + 深度只读 + LessEqual(方块轮廓)。
+    OutlineTranslucent,
+}
+
 /// 一个实体 pass 的全部 GPU 资源。
 pub struct EntityPass {
     dynamic: wgpu::Buffer,
@@ -61,15 +71,27 @@ pub struct EntityPass {
 
 impl EntityPass {
     /// 创建 pass;`max_instances` 决定 dynamic 缓冲布局(镜像 Go 常量)。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         shader: &wgpu::ShaderModule,
         label: &str,
         max_instances: usize,
+        kind: EntityPipelineKind,
         color_format: wgpu::TextureFormat,
         depth_format: wgpu::TextureFormat,
     ) -> Self {
+        let (blend, depth_write, depth_compare) = match kind {
+            EntityPipelineKind::Opaque => {
+                (wgpu::BlendState::REPLACE, true, wgpu::CompareFunction::Less)
+            }
+            EntityPipelineKind::OutlineTranslucent => (
+                wgpu::BlendState::ALPHA_BLENDING,
+                false,
+                wgpu::CompareFunction::LessEqual,
+            ),
+        };
         let instance_size = max_instances * ENTITY_INSTANCE_BYTES;
         let indirect_offset = INSTANCE_OFFSET + instance_size;
         let upload_bytes = indirect_offset + INDIRECT_BYTES;
@@ -158,7 +180,7 @@ impl EntityPass {
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(blend),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -170,8 +192,8 @@ impl EntityPass {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: depth_format,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
+                depth_write_enabled: Some(depth_write),
+                depth_compare: Some(depth_compare),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),

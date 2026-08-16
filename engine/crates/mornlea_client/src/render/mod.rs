@@ -19,7 +19,7 @@ pub mod shaders;
 
 use std::collections::HashMap;
 
-use entity::EntityPass;
+use entity::{EntityPass, EntityPipelineKind};
 use pool::{Alloc, Pool};
 
 /// 离屏 color 格式,必须与 Go capture 的 `FormatBGRA8UnormSrgb` 一致。
@@ -370,6 +370,13 @@ pub struct OffscreenRenderer {
     avatar_pass: EntityPass,
     /// 掉落物 pass(800 实例容量,与 avatar 同 shader)。
     drop_pass: EntityPass,
+    /// 方块轮廓 pass(12 实例,透明只读深度)。
+    outline_pass: EntityPass,
+    /// 伤害红边 uniform(16B,strength@0)。
+    overlay_uniform: wgpu::Buffer,
+    /// 伤害红边全屏管线(无深度附件,alpha blend)。
+    overlay_pipeline: wgpu::RenderPipeline,
+    overlay_bind: wgpu::BindGroup,
 
     /// 字形图集(R8,增量矩形上传);内容全部来自 Go 光栅化 worker。
     glyph_atlas: wgpu::Texture,
@@ -645,6 +652,7 @@ impl OffscreenRenderer {
             &avatar_module,
             "avatar",
             entity::AVATAR_MAX_INSTANCES,
+            EntityPipelineKind::Opaque,
             COLOR_FORMAT,
             DEPTH_FORMAT,
         );
@@ -654,9 +662,80 @@ impl OffscreenRenderer {
             &avatar_module,
             "item drop",
             entity::DROP_MAX_INSTANCES,
+            EntityPipelineKind::Opaque,
             COLOR_FORMAT,
             DEPTH_FORMAT,
         );
+
+        let outline_pass = EntityPass::new(
+            &device,
+            &queue,
+            &avatar_module,
+            "block outline",
+            12,
+            EntityPipelineKind::OutlineTranslucent,
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+
+        // 伤害红边:无深度附件的全屏三角管线,镜像 Go damage_overlay.go。
+        let overlay_uniform = make_buffer(16, BU::UNIFORM | BU::COPY_DST, "damage overlay uniform");
+        let overlay_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("damage overlay layout"),
+            entries: &[buffer_layout_entry(
+                0,
+                wgpu::ShaderStages::FRAGMENT,
+                wgpu::BufferBindingType::Uniform,
+            )],
+        });
+        let overlay_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("damage overlay"),
+            source: wgpu::ShaderSource::Wgsl(shaders::DAMAGE_OVERLAY.into()),
+        });
+        let overlay_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[Some(&overlay_layout)],
+                immediate_size: 0,
+            });
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("damage overlay"),
+            layout: Some(&overlay_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &overlay_module,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &overlay_module,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let overlay_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("damage overlay resources"),
+            layout: &overlay_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: overlay_uniform.as_entire_binding(),
+            }],
+        });
 
         let glyph_atlas = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("glyph-atlas"),
@@ -717,6 +796,10 @@ impl OffscreenRenderer {
             hiz,
             avatar_pass,
             drop_pass,
+            outline_pass,
+            overlay_uniform,
+            overlay_pipeline,
+            overlay_bind,
             glyph_atlas,
             hud_atlas: None,
             pool: Pool::new(POOL_FACES),
@@ -1003,6 +1086,8 @@ impl OffscreenRenderer {
         // 语义校验先于任何 GPU 写入:非法 pass 段拒绝且不触碰 target。
         if !self.avatar_pass.instances_valid(&input.avatar_instances)
             || !self.drop_pass.instances_valid(&input.drop_instances)
+            || !self.outline_pass.instances_valid(&input.outline)
+            || input.overlay_strength.is_nan()
         {
             return false;
         }
@@ -1192,6 +1277,48 @@ impl OffscreenRenderer {
                 &self.depth_view,
                 "item drop pass",
             );
+        }
+        // 轮廓 pass(Go 顺序:drop 之后、名牌之前)。
+        if !input.outline.is_empty() {
+            self.outline_pass.upload(
+                &self.queue,
+                &input.view_proj,
+                input.daylight,
+                &input.outline,
+            );
+            self.outline_pass.record(
+                &mut encoder,
+                &self.color_view,
+                &self.depth_view,
+                "block outline pass",
+            );
+        }
+        // 伤害红边(Go 顺序:名牌之后、HUD 之前);strength 钳制到 1,
+        // 非正值跳过(镜像 Go)。
+        if input.overlay_strength > 0.0 {
+            let strength = input.overlay_strength.min(1.0);
+            let mut uniform = [0u8; 16];
+            uniform[0..4].copy_from_slice(&strength.to_le_bytes());
+            self.queue.write_buffer(&self.overlay_uniform, 0, &uniform);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("damage overlay pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.color_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_bind_group(0, &self.overlay_bind, &[]);
+            pass.draw(0..3, 0..1);
         }
         self.last_pos = input.pos;
         self.last_view_proj = input.view_proj;
@@ -1647,5 +1774,48 @@ mod entity_tests {
         let mut oversized = empty_frame_pub();
         oversized.avatar_instances = vec![0u8; (entity::AVATAR_MAX_INSTANCES + 1) * 80];
         assert!(!renderer.render_frame(&oversized));
+    }
+}
+
+#[cfg(test)]
+mod outline_overlay_tests {
+    use super::tests_support::*;
+
+    /// 轮廓实例与伤害红边都必须改变图像;NaN 强度拒绝且 target 不变。
+    #[test]
+    fn outline_and_overlay_render_and_reject() {
+        let Some(mut renderer) = renderer_or_skip_pub(64, 64) else {
+            return;
+        };
+        let empty = empty_frame_pub();
+        assert!(renderer.render_frame(&empty));
+        let mut base = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut base);
+
+        // identity 变换白色轮廓实例(alpha 0.86)。
+        let mut instance = [0u8; 80];
+        for i in 0..4 {
+            instance[(i * 4 + i) * 4..(i * 4 + i) * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        for c in 0..4 {
+            instance[64 + c * 4..68 + c * 4].copy_from_slice(&0.86f32.to_le_bytes());
+        }
+        let mut outline_frame = empty_frame_pub();
+        outline_frame.outline = instance.to_vec();
+        assert!(renderer.render_frame(&outline_frame));
+        let mut with_outline = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut with_outline);
+        assert_ne!(base, with_outline, "轮廓必须改变图像");
+
+        let mut overlay_frame = empty_frame_pub();
+        overlay_frame.overlay_strength = 1.0;
+        assert!(renderer.render_frame(&overlay_frame));
+        let mut with_overlay = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut with_overlay);
+        assert_ne!(base, with_overlay, "伤害红边必须改变图像");
+
+        let mut nan_frame = empty_frame_pub();
+        nan_frame.overlay_strength = f32::NAN;
+        assert!(!renderer.render_frame(&nan_frame), "NaN 强度必须拒绝");
     }
 }
