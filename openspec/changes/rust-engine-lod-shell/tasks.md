@@ -32,7 +32,7 @@
       (Memory 与 TCP 双传输);
       验证:`go test ./internal/network -race -count=1`。
 
-## 4. client ABI v5 远环 pass(Rust)
+## 4. client 远环 pass(Rust;ABI v4→v5,终审修复波随雾 setter 升 v6)
 
 - [x] 4.1 `mornlea_client`:`render_upload_lod_tile`/`render_drop_lod_tile`
       (tile 整体替换语义)、远环 pipeline(世界坐标大 quad)、距离雾
