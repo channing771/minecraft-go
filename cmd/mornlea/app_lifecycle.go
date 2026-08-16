@@ -31,50 +31,25 @@ func (a *application) Close() error {
 }
 
 func (a *application) releaseOwnedResources() {
-	if a.debugPanelRenderer != nil {
-		a.debugPanelRenderer.Release()
-	}
-	if a.damageOverlayRenderer != nil {
-		a.damageOverlayRenderer.Release()
-	}
-	if a.blockOutlineRenderer != nil {
-		a.blockOutlineRenderer.Release()
-	}
-	if a.itemDropRenderer != nil {
-		a.itemDropRenderer.Release()
-	}
+	// layouter(名牌/HUD/面板)与 Release 解耦:layout-only 变体无 GPU
+	// 资源;字形图集停 worker,渲染器句柄经 Close 归还 Rust。
 	if a.hotbarRenderer != nil {
 		a.hotbarRenderer.Release()
 	}
 	if a.nameTagRenderer != nil {
 		a.nameTagRenderer.Release()
 	}
+	if a.debugPanelRenderer != nil {
+		a.debugPanelRenderer.Release()
+	}
 	if a.glyphAtlas != nil {
 		a.glyphAtlas.Release()
-	}
-	if a.avatarRenderer != nil {
-		a.avatarRenderer.Release()
-	}
-	if a.renderer != nil {
-		a.renderer.Release()
 	}
 	if a.mesher != nil {
 		a.mesher.Close()
 	}
-	if a.depth != nil {
-		a.depth.Release()
-	}
-	if a.colorView != nil {
-		a.colorView.Release()
-	}
-	if a.color != nil {
-		a.color.Release()
-	}
-	if a.surface != nil {
-		a.surface.Release()
-	}
-	if a.dev != nil {
-		a.dev.Release()
+	if a.renderer != nil {
+		a.renderer.Close()
 	}
 	if a.window != nil {
 		a.window.Close()

@@ -525,9 +525,9 @@ func TestDualBackendFullFrameParity(t *testing.T) {
 		CloudMacroX:      cloud.MacroX,
 		CloudLocal:       cloud.Local,
 		Visible:          rustVisible,
-		AvatarInstances:  render.EncodeAvatarInstances(nil, avatars),
-		DropInstances:    render.EncodeItemDropInstances(nil, serverTick, drops),
-		OutlineInstances: render.EncodeBlockOutlineInstances(nil, outline),
+		AvatarInstances:  (&render.InstanceEncoder{}).EncodeAvatarInstances(nil, avatars),
+		DropInstances:    (&render.InstanceEncoder{}).EncodeItemDropInstances(nil, serverTick, drops),
+		OutlineInstances: (&render.InstanceEncoder{}).EncodeBlockOutlineInstances(nil, outline),
 		OverlayStrength:  overlayStrength,
 		NameTagSegment: client.EncodeQuadSegment(
 			render.EncodeBillboardCameraBytes(nil, billboard), ntBackgrounds, ntGlyphs, 64,

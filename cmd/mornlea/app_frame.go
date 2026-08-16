@@ -10,7 +10,9 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
+	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/mesh"
 	"github.com/channing771/mornlea/internal/render"
 	"github.com/channing771/mornlea/internal/render/hud"
 )
@@ -87,24 +89,22 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		return false, fmt.Errorf("准备实体呈现: %w", err)
 	}
 	a.blockTargetReset = false
-	if a.surface != nil && (uint32(width) != a.depth.width || uint32(height) != a.depth.height) {
-		a.surface.Resize(uint32(width), uint32(height))
-		a.depth.Release()
-		a.depth = newDepthTarget(a.dev, uint32(width), uint32(height))
-		a.renderer.Resize(uint32(width), uint32(height))
+	if a.window != nil && (width != a.frameWidth || height != a.frameHeight) {
+		a.renderer.Resize(width, height)
+		a.frameWidth, a.frameHeight = width, height
 		a.camera.Aspect = float32(width) / float32(height)
 	}
 
-	a.renderer.BeginFrame()
+	a.scheduler.BeginFrame()
 	a.mesher.Schedule(a.mirror, workMax)
 	for _, result := range a.mesher.Drain(a.mirror, workMax) {
 		if result.Dimension != core.Overworld {
 			continue
 		}
-		a.renderer.SetConnectivity(result.Pos, result.Conn)
-		a.renderer.QueueSection(result.Pos, result.Quads)
+		a.scheduler.SetConnectivity(result.Pos, result.Conn)
+		a.scheduler.QueueSection(result.Pos, result.Quads)
 	}
-	a.renderer.FlushUploads(a.center)
+	a.scheduler.FlushUploads(a.center)
 	renderTiming := a.multiplayerRenderTiming
 	var renderNow func() time.Time
 	var nameTagDuration time.Duration
@@ -114,11 +114,11 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 			renderNow = time.Now
 		}
 		started := renderNow()
-		if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
+		if err := a.nameTagRenderer.Prepare(tags, a.scheduler.UploadBudget()); err != nil {
 			return false, fmt.Errorf("准备世界名牌: %w", err)
 		}
 		nameTagDuration = renderNow().Sub(started)
-	} else if err := a.nameTagRenderer.Prepare(tags, a.renderer.UploadBudget()); err != nil {
+	} else if err := a.nameTagRenderer.Prepare(tags, a.scheduler.UploadBudget()); err != nil {
 		return false, fmt.Errorf("准备世界名牌: %w", err)
 	}
 	inventory, inventoryConfirmed := a.inventory.State()
@@ -145,7 +145,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		if err := a.hotbarRenderer.Prepare(
 			inventory, inventoryConfirmed, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
 			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health}, chatOverlay,
-			uint32(width), uint32(height), a.renderer.UploadBudget(),
+			uint32(width), uint32(height), a.scheduler.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
 		}
@@ -154,49 +154,39 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		readout, rows := a.panelFrameInput(time.Now())
 		if err := a.debugPanelRenderer.Prepare(
 			a.panel.visible, readout, rows,
-			uint32(width), uint32(height), a.renderer.UploadBudget(),
+			uint32(width), uint32(height), a.scheduler.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备调试面板: %w", err)
 		}
 	}
-	a.renderer.DropOutside(a.center, a.render.ViewDistance)
+	a.scheduler.DropOutside(a.center, a.render.ViewDistance)
 
-	target := a.colorView
-	if a.surface != nil {
-		target = a.surface.Acquire()
-		if target == nil {
-			return false, nil
-		}
-	}
-	encoder := a.dev.CreateCommandEncoder()
-	// 每帧只从最后确认的权威世界时间计算一次昼夜；ViewProj 及其逆矩阵同样只计算一次，
-	// terrain、avatar、item-drop、block-outline 与天空共用同一正向矩阵和 daylight。
+	// 每帧只从最后确认的权威世界时间计算一次昼夜;ViewProj 及其逆矩阵同样只计算一次。
 	dayNight := render.DayNightAt(a.worldTimeTicks)
+	cloud := render.CloudOffsetAt(a.worldTimeTicks)
 	viewProj := a.camera.ViewProj()
 	viewProjInv := viewProj.Inv()
-	a.renderer.Render(encoder, target, a.depth.view, render.Camera{
-		ViewProj:       viewProj,
-		ViewProjInv:    viewProjInv,
-		Pos:            a.camera.Pos,
-		CloudOffset:    render.CloudOffsetAt(a.worldTimeTicks),
-		SunDirection:   dayNight.SunDirection,
-		Daylight:       dayNight.Daylight,
-		StarVisibility: dayNight.StarVisibility,
-		SkyColor:       dayNight.ClearColor,
-	})
+
+	// 可见列表:BFS 连通性 + frustum,与旧 Go 渲染器同一算法与顺序。
+	a.visibleSections = mesh.VisibleSectionsInto(
+		a.visibleSections[:0], &a.visibleScratch,
+		cameraSectionPos(a.camera.Pos), 32,
+		core.FrustumFrom(viewProj), a.scheduler.Connectivity,
+	)
+	a.lastFrameStats = a.scheduler.FrameStats(a.visibleSections)
+	if cap(a.rustVisible) < len(a.visibleSections) {
+		a.rustVisible = make([][3]int32, 0, len(a.visibleSections))
+	}
+	a.rustVisible = a.rustVisible[:0]
+	for _, p := range a.visibleSections {
+		a.rustVisible = append(a.rustVisible, [3]int32{p.X, p.Y, p.Z})
+	}
+
 	var started time.Time
 	if renderTiming != nil {
 		started = renderNow()
 	}
-	entityCamera := render.Camera{
-		ViewProj: viewProj,
-		Pos:      a.camera.Pos,
-		Daylight: dayNight.Daylight,
-		SkyColor: dayNight.ClearColor,
-	}
-	if err := a.avatarRenderer.Render(encoder, target, a.depth.view, entityCamera, avatars); err != nil {
-		return false, fmt.Errorf("呈现实体 Avatar: %w", err)
-	}
+	a.avatarStream = a.entityEncoder.EncodeAvatarInstances(a.avatarStream, avatars)
 	if renderTiming != nil {
 		renderTiming.recordAvatar(renderNow().Sub(started))
 		started = renderNow()
@@ -204,39 +194,59 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	a.itemDropInstances = appendItemDropInstances(
 		a.itemDropInstances[:0], a.itemDrops.Presentations(),
 	)
-	a.itemDropRenderer.Render(
-		encoder, target, a.depth.view, entityCamera, a.serverTick, a.itemDropInstances,
-	)
-	a.blockOutlineRenderer.Render(
-		encoder, target, a.depth.view, entityCamera, blockOutline,
-	)
+	a.dropStream = a.entityEncoder.EncodeItemDropInstances(a.dropStream, a.serverTick, a.itemDropInstances)
+	a.outlineStream = a.entityEncoder.EncodeBlockOutlineInstances(a.outlineStream, blockOutline)
+
 	right := mgl32.Vec3{
 		float32(math.Cos(float64(a.camera.Yaw))),
 		0,
 		-float32(math.Sin(float64(a.camera.Yaw))),
 	}
-	a.nameTagRenderer.Render(encoder, target, a.depth.view, render.BillboardCamera{
+	billboard := render.BillboardCamera{
 		ViewProj: viewProj,
 		Right:    right,
 		Up:       right.Cross(a.camera.Forward()).Normalize(),
-	})
+	}
+	a.billboardBytes = render.EncodeBillboardCameraBytes(a.billboardBytes, billboard)
+	nameTagBackgrounds, nameTagGlyphs := a.nameTagRenderer.FrameStreams()
+	nameTagSegment := client.EncodeQuadSegment(
+		a.billboardBytes, nameTagBackgrounds, nameTagGlyphs, 64,
+	)
 	if renderTiming != nil {
 		renderTiming.recordNameTag(nameTagDuration + renderNow().Sub(started))
 	}
-	a.damageOverlayRenderer.Render(encoder, target, a.damageStrength)
-	// HUD 在全部世界 pass 与 damage overlay 之后绘制。
+	var hudSegment []byte
 	if hudVisible {
-		a.hotbarRenderer.Render(encoder, target)
+		hudViewport, hudQuads, hudGlyphs := a.hotbarRenderer.FrameStreams()
+		hudSegment = client.EncodeQuadSegment(hudViewport, hudQuads, hudGlyphs, 48)
 	}
-	// 调试面板是最上层：必须在 HUD 之后绘制，否则会被背包/容器界面盖住。
+	var debugSegment []byte
 	if a.debugPanelRenderer != nil {
-		a.debugPanelRenderer.Render(encoder, target)
+		panelViewport, panelQuads, panelGlyphs := a.debugPanelRenderer.FrameStreams()
+		debugSegment = client.EncodeQuadSegment(panelViewport, panelQuads, panelGlyphs, 48)
 	}
-	command := encoder.Finish()
-	a.dev.Submit(command)
-	command.Release()
-	if a.surface != nil {
-		a.surface.Present()
+
+	rendered := a.renderer.RenderFrame(client.RenderFrame{
+		ViewProj:         viewProj,
+		ViewProjInv:      viewProjInv,
+		Pos:              a.camera.Pos,
+		Daylight:         dayNight.Daylight,
+		SunDirection:     dayNight.SunDirection,
+		StarVisibility:   dayNight.StarVisibility,
+		SkyColor:         dayNight.ClearColor,
+		CloudMacroX:      cloud.MacroX,
+		CloudLocal:       cloud.Local,
+		Visible:          a.rustVisible,
+		AvatarInstances:  a.avatarStream,
+		DropInstances:    a.dropStream,
+		OutlineInstances: a.outlineStream,
+		OverlayStrength:  a.damageStrength,
+		NameTagSegment:   nameTagSegment,
+		HUDSegment:       hudSegment,
+		DebugSegment:     debugSegment,
+	})
+	if !rendered {
+		return false, nil
 	}
 	return true, nil
 }

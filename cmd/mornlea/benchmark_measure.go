@@ -111,7 +111,7 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 		if time.Now().After(deadline) {
 			return 0, fmt.Errorf("固定场景在 %s 内未完成加载：chunks=%d/%d mesher=%+v pending=%d",
 				timeout, len(app.loadedChunks), wantedChunks, app.mesher.Stats(),
-				app.renderer.PendingUploads())
+				app.scheduler.PendingUploads())
 		}
 		if app.window != nil {
 			app.window.Poll()
@@ -135,13 +135,13 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 			stats.InFlightJobs == 0 &&
 			stats.ReadyResults == 0 &&
 			stats.DirtySections == 0 &&
-			app.renderer.PendingUploads() == 0 {
+			app.scheduler.PendingUploads() == 0 {
 			return snapshotDuration, nil
 		}
 		if time.Since(lastLog) >= 5*time.Second {
 			fmt.Printf("加载中：chunks=%d/%d queued=%d active=%d ready=%d pending=%d\n",
 				len(app.loadedChunks), wantedChunks, stats.QueuedJobs, stats.InFlightJobs,
-				stats.ReadyResults, app.renderer.PendingUploads())
+				stats.ReadyResults, app.scheduler.PendingUploads())
 			lastLog = time.Now()
 		}
 	}
@@ -247,13 +247,13 @@ func measurePhase(
 		}
 		lastRendered = time.Now()
 		frameMS := float64(time.Since(frameStarted).Microseconds()) / 1000
-		stats := app.renderer.LastFrameStats()
+		stats := app.lastFrameStats
 		sampler.Add(client.FrameSample{
 			FrameMS:           frameMS,
 			CandidateSections: stats.CandidateSections,
 			CandidateBytes:    stats.CandidateBytes,
 			CandidateFaces:    stats.CandidateFaces,
-			PendingUploads:    app.renderer.PendingUploads(),
+			PendingUploads:    app.scheduler.PendingUploads(),
 		})
 		if time.Now().After(nextRSS) {
 			rss, err := client.ProcessRSSBytes()

@@ -514,7 +514,7 @@ func TestBlockLightRoomApplyResetsSharedPresentationState(t *testing.T) {
 }
 
 func TestCaptureSkylightTunnelUnsettledErrorNamesScene(t *testing.T) {
-	app, _ := newRemoteRenderApplication(t, &integrationGlyphSource{})
+	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	sections := make([]network.SectionData, core.SectionsPerChunk)
 	for y := range sections {
 		sections[y] = network.SectionData{

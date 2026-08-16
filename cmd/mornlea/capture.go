@@ -344,8 +344,8 @@ func runCapture(app *application, dir string, updateGolden bool) error {
 		return fmt.Errorf("capture framebuffer=%dx%d，要求精确 %dx%d",
 			width, height, captureWidth, captureHeight)
 	}
-	if app.color == nil {
-		return fmt.Errorf("capture 需要无头 offscreen 颜色纹理，当前为 nil")
+	if app.window != nil {
+		return fmt.Errorf("capture 需要无头 offscreen 渲染器,当前为窗口模式")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("创建抓帧输出目录 %s: %w", dir, err)
@@ -389,7 +389,7 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 		if _, err := app.renderFrame(captureDrainMax); err != nil {
 			return fmt.Errorf("场景收敛第 %d 帧: %w", i, err)
 		}
-		stats, pending := app.mesher.Stats(), app.renderer.PendingUploads()
+		stats, pending := app.mesher.Stats(), app.scheduler.PendingUploads()
 		if i+1 >= captureGlyphSettleFrames && captureSettled(stats, pending) {
 			break
 		}
@@ -408,7 +408,7 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 	if _, err := app.renderFrame(captureDrainMax); err != nil {
 		return fmt.Errorf("渲染抓帧: %w", err)
 	}
-	pixels := app.color.ReadLayer(0, 0)
+	pixels := app.renderer.Readback()
 	img := bgraToNRGBA(pixels, captureWidth, captureHeight)
 	// 无条件把场景图写进 dir——不管比对通不通过、要不要更新基线。
 	// spec 要求 dir 里必须为每个场景产出一份与场景名同名的图像文件；

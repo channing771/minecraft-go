@@ -4,34 +4,25 @@ package main
 
 import (
 	"context"
+	"errors"
 
-	"github.com/channing771/mornlea/internal/assets"
 	"github.com/channing771/mornlea/internal/client"
-	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
-	"github.com/channing771/mornlea/internal/render/hud"
 	"github.com/channing771/mornlea/internal/server"
 	"github.com/channing771/mornlea/internal/storage"
 )
 
 type applicationDependencies struct {
-	openStore                func(context.Context, applicationOptions) (storage.WorldStore, error)
-	dialTCP                  func(context.Context, string) (network.ClientPacketStream, error)
-	loginClient              func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
-	newHost                  func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
-	newMemoryStreamPair      func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
-	newWindow                func(int, int, string) (applicationWindow, error)
-	newDevice                func(gfx.NativeWindowHandle, uint32, uint32) (gfx.Device, gfx.Surface, error)
-	newHeadlessDevice        func() (gfx.Device, error)
-	newGlyphAtlas            func(gfx.Device) (*render.GlyphAtlas, error)
-	newAvatarRenderer        func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.AvatarRenderer, error)
-	newNameTagRenderer       func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat, render.GlyphSource) (*render.NameTagRenderer, error)
-	newHotbarRenderer        func(gfx.Device, gfx.TextureFormat, render.GlyphSource, *assets.Registry) (*hud.HotbarRenderer, error)
-	newItemDropRenderer      func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.ItemDropRenderer, error)
-	newBlockOutlineRenderer  func(gfx.Device, gfx.TextureFormat, gfx.TextureFormat) (*render.BlockOutlineRenderer, error)
-	newDamageOverlayRenderer func(gfx.Device, gfx.TextureFormat) (*render.DamageOverlayRenderer, error)
-	newDebugPanelRenderer    func(gfx.Device, gfx.TextureFormat, render.GlyphSource) (*render.DebugPanelRenderer, error)
+	openStore            func(context.Context, applicationOptions) (storage.WorldStore, error)
+	dialTCP              func(context.Context, string) (network.ClientPacketStream, error)
+	loginClient          func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, error)
+	newHost              func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error)
+	newMemoryStreamPair  func(int) (network.ClientPacketStream, network.ServerPacketStream, error)
+	newWindow            func(int, int, string) (applicationWindow, error)
+	newWindowedRenderer  func(applicationWindow) (*client.Renderer, error)
+	newOffscreenRenderer func(int, int) (*client.Renderer, error)
+	newGlyphAtlas        func(render.GlyphSink) (*render.GlyphAtlas, error)
 }
 
 func defaultApplicationDependencies() applicationDependencies {
@@ -58,7 +49,14 @@ func defaultApplicationDependencies() applicationDependencies {
 		newWindow: func(width, height int, title string) (applicationWindow, error) {
 			return client.NewWindow(width, height, title)
 		},
-		newDevice:         gfx.NewDevice,
-		newHeadlessDevice: gfx.NewHeadlessDevice,
+		newWindowedRenderer: func(window applicationWindow) (*client.Renderer, error) {
+			concrete, ok := window.(*client.Window)
+			if !ok {
+				return nil, errors.New("windowed 渲染器需要真实 client.Window")
+			}
+			return client.NewWindowedRenderer(concrete)
+		},
+		newOffscreenRenderer: client.NewRenderer,
+		newGlyphAtlas:        render.NewGlyphAtlasWithSink,
 	}
 }

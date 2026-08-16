@@ -24,7 +24,7 @@ type SectionScheduler struct {
 	budget       *UploadBudget
 	pending      map[core.SectionPos][]mesh.Quad
 	connectivity map[core.SectionPos]mesh.Connectivity
-	uploaded     map[core.SectionPos]struct{}
+	uploaded     map[core.SectionPos]int
 	keys         []core.SectionPos
 	packed       []byte
 }
@@ -36,7 +36,7 @@ func NewSectionScheduler(sink SectionSink, uploadPerFrame uint32) *SectionSchedu
 		budget:       NewUploadBudget(uploadPerFrame),
 		pending:      make(map[core.SectionPos][]mesh.Quad),
 		connectivity: make(map[core.SectionPos]mesh.Connectivity),
-		uploaded:     make(map[core.SectionPos]struct{}),
+		uploaded:     make(map[core.SectionPos]int),
 	}
 }
 
@@ -96,13 +96,29 @@ func (s *SectionScheduler) FlushUploads(center core.ChunkPos) {
 			}
 		}
 		s.sink.UploadSection(p.X, p.Y, p.Z, s.packed)
-		s.uploaded[p] = struct{}{}
+		s.uploaded[p] = len(quads)
 		delete(s.pending, p)
 	}
 }
 
 // PendingUploads 返回待冲刷的区段数,供测试与收敛循环。
 func (s *SectionScheduler) PendingUploads() int { return len(s.pending) }
+
+// FrameStats 按本帧可见列表计算候选统计(镜像旧渲染器 LastFrameStats:
+// 已上传且可见的 section 数、record 字节与面数)。
+func (s *SectionScheduler) FrameStats(visible []core.SectionPos) FrameStats {
+	stats := FrameStats{}
+	for _, p := range visible {
+		faces, ok := s.uploaded[p]
+		if !ok {
+			continue
+		}
+		stats.CandidateSections++
+		stats.CandidateBytes += 32
+		stats.CandidateFaces += faces
+	}
+	return stats
+}
 
 // DropOutside 丢弃视距外的 pending、connectivity 与已上传区段。
 func (s *SectionScheduler) DropOutside(center core.ChunkPos, radius int) {

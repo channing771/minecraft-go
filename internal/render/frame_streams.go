@@ -7,34 +7,40 @@ package render
 // 字节流暴露给平行 Rust 渲染器的帧装配。所有函数只是既有内部逻辑的
 // 复用出口,不改变任何渲染行为。
 
+// InstanceEncoder 持有实例编码的复用缓冲:热路径(每帧编码)零分配。
+type InstanceEncoder struct {
+	ordered []Avatar
+	parts   []avatarPart
+}
+
 // EncodeAvatarInstances 把插值后的 avatars 编码为 80 字节/实例的字节流,
 // 与 AvatarRenderer.Render 的内部编码逐字节一致。dst 会被重置复用。
-func EncodeAvatarInstances(dst []byte, avatars []Avatar) []byte {
-	ordered := orderedAvatarsInto(nil, avatars)
-	parts := buildOrderedAvatarParts(nil, ordered)
-	dst = growEncodeBuffer(dst, len(parts)*avatarInstanceBytes)
-	encodeAvatarPartsInto(dst, parts)
+func (e *InstanceEncoder) EncodeAvatarInstances(dst []byte, avatars []Avatar) []byte {
+	e.ordered = orderedAvatarsInto(e.ordered[:0], avatars)
+	e.parts = buildOrderedAvatarParts(e.parts[:0], e.ordered)
+	dst = growEncodeBuffer(dst, len(e.parts)*avatarInstanceBytes)
+	encodeAvatarPartsInto(dst, e.parts)
 	return dst
 }
 
 // EncodeItemDropInstances 把掉落物编码为 80 字节/实例的字节流,
 // 与 ItemDropRenderer.Render 的内部编码逐字节一致。
-func EncodeItemDropInstances(dst []byte, serverTick uint64, drops []ItemDrop) []byte {
-	parts := buildItemDropParts(nil, serverTick, drops)
-	dst = growEncodeBuffer(dst, len(parts)*avatarInstanceBytes)
-	encodeAvatarPartsInto(dst, parts)
+func (e *InstanceEncoder) EncodeItemDropInstances(dst []byte, serverTick uint64, drops []ItemDrop) []byte {
+	e.parts = buildItemDropParts(e.parts[:0], serverTick, drops)
+	dst = growEncodeBuffer(dst, len(e.parts)*avatarInstanceBytes)
+	encodeAvatarPartsInto(dst, e.parts)
 	return dst
 }
 
 // EncodeBlockOutlineInstances 把目标方块轮廓编码为 12×80 字节实例流;
 // 不可见时返回空。
-func EncodeBlockOutlineInstances(dst []byte, outline BlockOutline) []byte {
+func (e *InstanceEncoder) EncodeBlockOutlineInstances(dst []byte, outline BlockOutline) []byte {
 	if !outline.Visible {
 		return dst[:0]
 	}
-	parts := buildBlockOutlineParts(nil, outline.Position)
-	dst = growEncodeBuffer(dst, len(parts)*avatarInstanceBytes)
-	encodeAvatarPartsInto(dst, parts)
+	e.parts = buildBlockOutlineParts(e.parts[:0], outline.Position)
+	dst = growEncodeBuffer(dst, len(e.parts)*avatarInstanceBytes)
+	encodeAvatarPartsInto(dst, e.parts)
 	return dst
 }
 

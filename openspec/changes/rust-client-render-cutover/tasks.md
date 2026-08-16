@@ -15,7 +15,7 @@
       sink),生产 sink 适配 `client.Renderer.UploadGlyphRect`;HUD 图集经
       `UploadHUDAtlas` 上传;既有字形语义测试保持;
       验证:`go test ./internal/render ./internal/render/hud -race -count=1`。
-- [ ] 2.2 `cmd/mornlea` 帧循环切换:app 装配 RenderFrame(相机/可见列表/
+- [x] 2.2 `cmd/mornlea` 帧循环切换:app 装配 RenderFrame(相机/可见列表/
       pass 段)+ 每帧一次 RenderFrame,窗口模式接 windowed 渲染器,resize
       接 render_resize;capture/materials-showcase/ai-companion/benchmark/
       gfxspike 切离屏 `client.Renderer`;
