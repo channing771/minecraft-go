@@ -12,3 +12,7 @@ crate-type = ["rlib", "cdylib"]
 winit = "0.30"
 raw-window-handle = "0.6"
 objc2 = "0.6"
+# 渲染器:与 Go 绑定内嵌的 wgpu-native v29 同主版本线,降低跨后端行为差异。
+wgpu = "29"
+# wgpu 异步初始化的最小执行器。
+pollster = "0.4"

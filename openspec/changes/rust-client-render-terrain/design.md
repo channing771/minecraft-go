@@ -38,7 +38,8 @@ target);选择与 Go 绑定内嵌 wgpu-native 相同主版本线,降低跨后端
 ### ABI 入口族(均带校验,违约不触碰调用方缓冲)
 
 - `mornlea_client_render_create(abi, width, height, out_handle)`:离屏
-  color(RGBA8)+depth target 与全部 pipeline;
+  color(BGRA8UnormSrgb,与 Go capture 同格式)+depth(Depth32Float)target
+  与全部 pipeline;
 - `mornlea_client_render_upload_atlas(abi, handle, layers, layer_bytes)`:
   Go `assets.Registry` 导出的 layer 像素一次性上传(材质所有权留 Go,
   Rust 不重新生成);
@@ -48,7 +49,7 @@ target);选择与 Go 绑定内嵌 wgpu-native 相同主版本线,降低跨后端
 - `mornlea_client_render_frame(abi, handle, frame, frame_len)`:固定头
   (view/proj 矩阵、相机位置、日照时间、标志)+ 可见 section 列表
   (Go BFS+frustum 结果);一帧一次;
-- `mornlea_client_render_readback(abi, handle, out, out_len)`:回读 RGBA
+- `mornlea_client_render_readback(abi, handle, out, out_len)`:回读 BGRA
   (长度必须精确匹配),golden 对照专用。
 
 ### GPU 管线镜像 Go 实现

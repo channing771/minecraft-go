@@ -2,8 +2,8 @@
 
 ## 1. Rust 渲染器基建
 
-- [ ] 1.1 `mornlea_client` 新增 wgpu 依赖与 render 模块骨架:device/queue
-      初始化、离屏 color(RGBA8)+depth target、shader `include_str!` 单源
+- [x] 1.1 `mornlea_client` 新增 wgpu 依赖与 render 模块骨架:device/queue
+      初始化、离屏 color(BGRA8UnormSrgb,对齐 Go capture)+depth(Depth32Float)target、shader `include_str!` 单源
       内嵌(terrain/sky/cull/hiz_build/hiz_copy)与存在性单测;
       验证:`cd engine && cargo test -p mornlea_client && cargo clippy
       --all-targets -- -D warnings`。
