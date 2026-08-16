@@ -74,6 +74,15 @@ type companionTaskSlot struct {
 	pathInFlight bool
 	replanAtTick uint64
 	hasReplanAt  bool
+
+	// followGoal 是当前 follow 路径（或在途寻路请求）计算时的目标站立格。
+	// 它只在「当前步骤是 follow 且 slot.path 非空」时被漂移判定消费；路径
+	// 在别处被清空（终态/超时/停止）后残留的旧值不参与任何判定，下一次
+	// follow 寻路派发会整体覆写。目标玩家持续移动时 advanceRunners 以它
+	// 判定「终点漂移超出重算阈值」并丢弃既有路径，令 follow 复用 go_to 的
+	// 寻路/冷却/三连失败语义而不必每 tick 重算。
+	followGoal    companion.PathCell
+	hasFollowGoal bool
 }
 
 // plannerOutcome 是一次规划请求的结果，携带任务身份供过期判定。
@@ -108,6 +117,13 @@ type companionManager struct {
 	planner        companionPlanner
 	timeoutMinutes int
 	table          companion.PathBlockTable
+
+	// onlinePlayers 返回 tick 边界的在线玩家事实（稳定 ID + 权威位置，已按
+	// ID 升序去重归一），由 Server 在构造后注入——会话注册表归 Server 所有，
+	// manager 只消费这一权威源。规划快照的 OnlinePlayers 填充与 follow 目标
+	// 的在线性/位置解析共用它；nil 是防御缺省（视同无人在线）。调用方必须
+	// 持有 stepMu（与 manager 其余状态同一单写者边界）。
+	onlinePlayers func() []companion.PlanPlayer
 
 	slots      map[companion.ID]*companionTaskSlot
 	orderedIDs []companion.ID
@@ -424,12 +440,25 @@ func (m *companionManager) expireTasks() {
 }
 
 // advanceRunners 推进全部 Running 任务的执行：重验路径 revision、消费已到达
-// 的路径点并提交至多一个移动输入。
+// 的路径点并提交至多一个移动输入。follow 步骤先经 advanceFollowRunner 的
+// 在线性与距离裁决——持续跟随没有「步骤完成」语义，路径走尽或目标漂移只
+// 触发按既有冷却的重算，绝不推进步骤索引。
 func (m *companionManager) advanceRunners() {
 	for _, id := range m.orderedIDs {
 		slot := m.slots[id]
 		current, ok := slot.queue.Current()
-		if !ok || current.State != companion.TaskRunning || slot.path == nil {
+		if !ok || current.State != companion.TaskRunning {
+			continue
+		}
+		// follow 步骤每 tick 先做在线性与距离裁决；返回 false 表示任务已
+		// 终态（目标离线），本 tick 不再有可执行内容。
+		follow := followStepOf(current)
+		if follow != nil && !m.advanceFollowRunner(slot, id, *follow) {
+			continue
+		}
+		if slot.path == nil {
+			// follow 距离内（或路径尚未就绪）：不提交任何移动输入，伙伴在
+			// 权威物理作用下保持原地；普通任务缺少路径同样等待派发。
 			continue
 		}
 		body, active := m.body(id)
@@ -455,7 +484,12 @@ func (m *companionManager) advanceRunners() {
 		if slot.path == nil || slot.waypoint >= len(slot.path.Waypoints) {
 			slot.path = nil
 			slot.hasReplanAt = false
-			m.applyQueueEvents(slot, slot.queue.CompleteStep())
+			if follow == nil {
+				m.applyQueueEvents(slot, slot.queue.CompleteStep())
+			}
+			// follow：目标仍在距离外时路径才会走尽——清空路径等待
+			// dispatchPathRequests 按当前目标重算；绝不 CompleteStep（持续
+			// 语义，步骤索引不推进）。
 			continue
 		}
 		m.engine.EnqueueCompanionAction(sim.CompanionAction{
@@ -463,6 +497,123 @@ func (m *companionManager) advanceRunners() {
 			Kind:  sim.CompanionActionMove,
 			Input: movementInputToward(body.Position, slot.path.Waypoints[slot.waypoint]),
 		})
+	}
+}
+
+// companionFollowReplanDriftBlocks 是 follow 动态终点的重算漂移阈值（水平
+// 格距）：目标玩家的站立格相对上次寻路终点移动超过该距离才丢弃既有路径
+// 重算。取 2（跟随距离的一半）的权衡：阈值 ≤1 时玩家每走一两格就触发重算，
+// 寻路 worker 被位移噪声打满、既有冷却机制形同虚设；阈值 ≥ 跟随距离 4 时
+// 旧路径的尾段已明显落后目标，伙伴要先走完过时路径才更新方向，跟随滞后
+// 可感。2 格让重算频率由真实位移驱动（约每 2 格一次），旧路径仍保有朝向
+// 目标的可用前缀；世界变化造成的路径失效继续由既有 revision 重验承担，
+// 与漂移判定互不重叠。
+const companionFollowReplanDriftBlocks = 2
+
+// companionFollowDistanceSquared 是跟随距离边界的平方，预计算避免热路径
+// 每 tick 重复乘法。
+const companionFollowDistanceSquared = companion.CompanionFollowDistanceBlocks *
+	companion.CompanionFollowDistanceBlocks
+
+// followStepOf 返回任务当前执行步骤的 follow 形态；非 follow 步骤（或步骤
+// 索引越界的防御情形）返回 nil。
+func followStepOf(task companion.Task) *companion.PlanStep {
+	if task.StepIndex < 0 || task.StepIndex >= len(task.Plan.Steps) {
+		return nil
+	}
+	step := &task.Plan.Steps[task.StepIndex]
+	if step.Kind != companion.PlanStepFollow {
+		return nil
+	}
+	return step
+}
+
+// advanceFollowRunner 是持续跟随步骤的每 tick 裁决：先读目标在线性——离线
+// 立即以 TaskFailWorldChanged 失败并广播（FIFO 随终态在下一 tick 推进），
+// 新任务与恢复的 Running follow 共用这一先验，天然满足「恢复任务在下一
+// 动作前先验在线性」；在线则按水平距离裁决：距离内清空路径与重算意图并
+// 保持原地（不提交移动输入，物理照常），距离外以目标站立格为动态终点，
+// 终点漂移超出阈值时丢弃既有路径交由 dispatchPathRequests 重算。返回
+// false 表示任务已进入终态。
+func (m *companionManager) advanceFollowRunner(
+	slot *companionTaskSlot,
+	id companion.ID,
+	step companion.PlanStep,
+) bool {
+	target, online := m.followTarget(step.PlayerID)
+	if !online {
+		slot.path = nil
+		slot.hasReplanAt = false
+		slot.hasFollowGoal = false
+		m.applyQueueEvents(slot, slot.queue.FailRun(companion.TaskFailWorldChanged))
+		return false
+	}
+	body, active := m.body(id)
+	if !active {
+		// 身体尚未激活（出生扫描在途）：不裁决距离也不提交输入，等下一 tick。
+		return true
+	}
+	if withinFollowDistance(body.Position, target.Position) {
+		// 距离边界内：停止提交移动输入。清空既有路径与重算意图，防止
+		// dispatchPathRequests 在距离内反复发起寻路；已派发的在途寻路结果
+		// 落地后会被下一 tick 的本分支再次清空，最坏多一次寻路。
+		slot.path = nil
+		slot.hasReplanAt = false
+		slot.hasFollowGoal = false
+		return true
+	}
+	if slot.path != nil && slot.hasFollowGoal && followGoalDrifted(slot.followGoal, target.Position) {
+		// 目标漂移超出重算阈值：旧路径指向过时终点。清空路径令
+		// dispatchPathRequests 以当前目标重算；此刻必然没有失败冷却在身
+		//（冷却仅在 path 为 nil 时存在），重算立即发起。
+		slot.path = nil
+		slot.hasReplanAt = false
+		slot.hasFollowGoal = false
+	}
+	return true
+}
+
+// followTarget 从在线玩家集合解析 follow 目标的当前位置事实；找不到目标
+// （从未登录或已断开）即离线。这是持续跟随在线性判定的唯一权威源。
+func (m *companionManager) followTarget(playerID core.PlayerID) (companion.PlanPlayer, bool) {
+	if m.onlinePlayers == nil {
+		return companion.PlanPlayer{}, false
+	}
+	for _, player := range m.onlinePlayers() {
+		if player.ID == playerID {
+			return player, true
+		}
+	}
+	return companion.PlanPlayer{}, false
+}
+
+// withinFollowDistance 报告伙伴与目标玩家的水平距离是否落在跟随距离内。
+// 只用水平分量：垂直分离（跳跃/地形高差）由重力与寻路的 Y 语义处理，不
+// 参与停止判定，避免伙伴位于玩家头顶/脚下时因垂直差被误判为距离外而抖动。
+func withinFollowDistance(from, to [3]float32) bool {
+	dx := from[0] - to[0]
+	dz := from[2] - to[2]
+	return dx*dx+dz*dz <= companionFollowDistanceSquared
+}
+
+// followGoalDrifted 报告目标当前位置相对上次寻路终点的水平漂移是否超出
+// 重算阈值（平方比较避免开方）。基准取方块中心（+0.5）与站立格语义一致。
+func followGoalDrifted(goal companion.PathCell, targetPos [3]float32) bool {
+	dx := float32(goal.X) + 0.5 - targetPos[0]
+	dz := float32(goal.Z) + 0.5 - targetPos[2]
+	const limit = companionFollowReplanDriftBlocks * companionFollowReplanDriftBlocks
+	return dx*dx+dz*dz > limit
+}
+
+// standingCellOf 把一个位置归一为它占用的站立格（feet 格）：X/Z 取 floor、
+// Y 取 floor，与寻路网格的方块中心基准一致。玩家脚下格天然满足寻路端点的
+// 站立约束（feet/head 可通过、正下方支撑）；个别悬空/嵌墙瞬间由寻路失败
+// 与既有冷却重试语义兜底，不在此特判。
+func standingCellOf(position [3]float32) companion.PathCell {
+	return companion.PathCell{
+		X: int32(math.Floor(float64(position[0]))),
+		Y: int32(math.Floor(float64(position[1]))),
+		Z: int32(math.Floor(float64(position[2]))),
 	}
 }
 
@@ -574,7 +725,10 @@ func (m *companionManager) dispatchPathRequests() {
 }
 
 // submitPathRequest 在 tick 边界构造不可变网格并交给 worker 执行整数 A*。
-// 窗口区块未就绪时返回 false（下一 tick 重试，不计失败）。
+// go_to/mine/place 步骤以步骤坐标为固定终点；follow 步骤的终点是动态的——
+// 每次派发都以目标玩家的当前站立格为准（目标离线或已在跟随距离内时不发
+// 起，交由 advanceFollowRunner 的每 tick 先验裁决）。窗口区块未就绪时返回
+// false（下一 tick 重试，不计失败）。
 func (m *companionManager) submitPathRequest(
 	slot *companionTaskSlot,
 	id companion.ID,
@@ -589,19 +743,35 @@ func (m *companionManager) submitPathRequest(
 		Y: int32(math.Floor(float64(body.Position[1]))),
 		Z: int32(math.Floor(float64(body.Position[2]))),
 	}
-	grid, ok := m.buildPathGrid(body, companion.PathWindow{Center: center})
-	if !ok {
-		return
-	}
 	if current.StepIndex >= len(current.Plan.Steps) {
 		return
 	}
 	step := current.Plan.Steps[current.StepIndex]
+	goal := companion.PathCell{X: step.X, Y: step.Y, Z: step.Z}
+	if step.Kind == companion.PlanStepFollow {
+		// 先解析动态终点再构造网格：距离内/离线时避免一次无谓的区块深拷贝。
+		target, online := m.followTarget(step.PlayerID)
+		if !online {
+			// 目标离线：寻路无从发起。失败裁决由 advanceRunners 的在线性
+			// 先验统一产生（每 tick 必达），这里只静默跳过。
+			return
+		}
+		if withinFollowDistance(body.Position, target.Position) {
+			// 距离内无需路径：advanceFollowRunner 的距离分支先行裁决，
+			// 这里只防御「本 tick 内目标恰好走进边界」的窗口。
+			return
+		}
+		goal = standingCellOf(target.Position)
+		slot.followGoal = goal
+		slot.hasFollowGoal = true
+	}
+	grid, ok := m.buildPathGrid(body, companion.PathWindow{Center: center})
+	if !ok {
+		return
+	}
 	slot.pathInFlight = true
 	m.waitGroup.Add(1)
-	go m.pathWorker(id, slot.queue.Generation(), grid, center, companion.PathCell{
-		X: step.X, Y: step.Y, Z: step.Z,
-	})
+	go m.pathWorker(id, slot.queue.Generation(), grid, center, goal)
 }
 
 // pathWorker 在 worker goroutine 上执行确定性寻路并把结果回送 tick 边界。

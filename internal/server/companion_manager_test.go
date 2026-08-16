@@ -24,7 +24,9 @@ import (
 )
 
 // fakeCompanionModel 是 httptest 假模型：按配置返回固定 go_to 计划，可整体
-// 阻塞全部在途请求，并统计请求数、峰值并发与 context 取消次数。
+// 阻塞全部在途请求，并统计请求数、峰值并发与 context 取消次数。配置了
+// planScript 时改为逐请求返回脚本条目（耗尽后重复最后一条），供 follow 等
+// 需要按请求区分计划形态的测试使用。
 type fakeCompanionModel struct {
 	mu          sync.Mutex
 	requests    int
@@ -33,6 +35,8 @@ type fakeCompanionModel struct {
 	cancels     int
 	block       chan struct{}
 	steps       [][3]int32
+	script      []string
+	served      int
 	status      int
 	server      *httptest.Server
 	cancelOrder *shutdownOrderLog
@@ -46,6 +50,16 @@ func newFakeCompanionModel(t *testing.T, steps ...[3]int32) *fakeCompanionModel 
 	return model
 }
 
+// setPlanScript 配置逐请求计划脚本：第 N 次请求返回 script[N]（完整的计划
+// JSON 文本，不含 chat envelope），耗尽后重复最后一条；未配置时沿用 steps
+// 构造的固定 go_to 计划。脚本令同一假模型能对「首次 follow、后续 go_to」
+// 这类按请求变化的模型行为建模。
+func (model *fakeCompanionModel) setPlanScript(script ...string) {
+	model.mu.Lock()
+	model.script = script
+	model.mu.Unlock()
+}
+
 func (model *fakeCompanionModel) handle(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 1<<20))
 	model.mu.Lock()
@@ -57,6 +71,15 @@ func (model *fakeCompanionModel) handle(w http.ResponseWriter, r *http.Request) 
 	block := model.block
 	status := model.status
 	steps := model.steps
+	content := ""
+	if script := model.script; len(script) > 0 {
+		index := model.served
+		if index >= len(script) {
+			index = len(script) - 1
+		}
+		model.served++
+		content = script[index]
+	}
 	model.mu.Unlock()
 	defer func() {
 		model.mu.Lock()
@@ -81,7 +104,9 @@ func (model *fakeCompanionModel) handle(w http.ResponseWriter, r *http.Request) 
 		w.WriteHeader(status)
 		return
 	}
-	content := planContentJSON(steps)
+	if content == "" {
+		content = planContentJSON(steps)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"choices": []map[string]any{

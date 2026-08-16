@@ -123,8 +123,10 @@ func (q *TaskQueue) FailPlanning(reason TaskFailReason) []TaskEvent {
 }
 
 // FinishValidation 结束 Validating：计划结构校验失败令任务以 InvalidPlan 失败；
-// 校验通过则进入 Running——记录 StartTick 与 deadline（世界时间 + 超时分钟数）
-// 并产出唯一的 TaskStarted 事件事实。
+// 校验通过则进入 Running——记录 StartTick，普通任务同时记录 deadline（世界
+// 时间 + 超时分钟数）并产出唯一的 TaskStarted 事件事实。持续跟随（计划以
+// follow 收尾）没有自然终点：deadline 保持零值即豁免超时（Task.Expired 跳过
+// 零值），跟随只能经停止指令或目标离线终结。
 func (q *TaskQueue) FinishValidation(worldTimeTicks uint64, timeoutMinutes int) []TaskEvent {
 	if !q.hasCurrent || q.current.State != TaskValidating {
 		return nil
@@ -134,7 +136,9 @@ func (q *TaskQueue) FinishValidation(worldTimeTicks uint64, timeoutMinutes int) 
 	}
 	q.current.State = TaskRunning
 	q.current.StartTick = worldTimeTicks
-	q.current.DeadlineTicks = TaskDeadlineTicks(worldTimeTicks, timeoutMinutes)
+	if steps := q.current.Plan.Steps; len(steps) == 0 || steps[len(steps)-1].Kind != PlanStepFollow {
+		q.current.DeadlineTicks = TaskDeadlineTicks(worldTimeTicks, timeoutMinutes)
+	}
 	return []TaskEvent{{Kind: TaskEventStarted}}
 }
 

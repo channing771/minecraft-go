@@ -12,6 +12,14 @@ const MaxTaskQueueDepth = 16
 // 关服停摆期间世界时间不推进，因此不会消耗执行时长。
 const TicksPerMinute = 1200
 
+// CompanionFollowDistanceBlocks 是持续跟随的距离边界（水平格距）：目标玩家
+// 与伙伴的水平距离不大于该值时，Task Runner 停止提交移动输入并保持原地；
+// 超出后恢复向目标寻路。取 4 格的权衡：交互可达（玩家一眼可见、后续
+// mine/place 类指令仍可表达），又不过分贴脸（伙伴不挤占玩家的站立格，玩家
+// 转身活动不被阻挡）。垂直分量不参与判定——重力与碰撞语义已由权威物理
+// 裁决，跟随只关心水平贴近程度。
+const CompanionFollowDistanceBlocks = 4
+
 // TaskCommand 是一条已通过聊天寻址校验的玩家原始指令文本（不含 @伙伴名 前缀）。
 // 与网络聊天指令共用 1,024 字节上限：drain 边界已经过 network 的校验，这里的
 // 重复校验是防御性的——直接构造 TaskQueue 的调用方（测试、未来的恢复路径）
@@ -171,9 +179,11 @@ type Task struct {
 
 // Expired 报告世界时间是否已到达或越过本任务的 deadline。比较只依赖传入的
 // WorldTimeTicks——权威世界时间在服务端停止运行期间不推进，因此持久化与关服
-// 停摆天然不消耗执行时长（任务 7 依赖这一语义恢复任务）。
+// 停摆天然不消耗执行时长（任务 7 依赖这一语义恢复任务）。DeadlineTicks 零值
+// 表示未设置 deadline（持续跟随的豁免形态）：未设置的任务永不因执行时长
+// 转入 TimedOut，跟随只能经停止指令或目标离线终结。
 func (t Task) Expired(worldTimeTicks uint64) bool {
-	return worldTimeTicks >= t.DeadlineTicks
+	return t.DeadlineTicks != 0 && worldTimeTicks >= t.DeadlineTicks
 }
 
 // TaskDeadlineTicks 把进入 Running 时刻的世界时间与超时分钟数换算为 deadline。

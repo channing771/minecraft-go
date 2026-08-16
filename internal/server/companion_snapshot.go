@@ -201,9 +201,45 @@ func (m *companionManager) buildPlanSnapshot(
 		ExposedBlocks:  companion.BoundExposedBlocks(exposed),
 		Heights:        heights,
 		ChunkRevisions: view.readyRevisions(),
+		OnlinePlayers:  m.onlinePlanPlayers(),
 		WorldTimeTicks: m.engine.WorldTime(),
 	}
 	return snapshot, snapshot.Validate()
+}
+
+// onlinePlanPlayers 返回 tick 边界的在线玩家集合（已按 ID 升序去重、至多
+// MaxPlanOnlinePlayers 名）：经注入的会话注册表读取。注入缺失（防御路径，
+// 生产构造总会注入）时返回 nil——快照因此不含任何在线玩家，follow 计划
+// 会被解码层按「目标不在在线集合」拒绝，绝不凭空编造目标。
+func (m *companionManager) onlinePlanPlayers() []companion.PlanPlayer {
+	if m.onlinePlayers == nil {
+		return nil
+	}
+	return m.onlinePlayers()
+}
+
+// onlinePlanPlayersSnapshot 枚举 tick 边界的全部在线玩家并归一为快照事实：
+// 稳定 ID 来自会话注册表（playerSessions），位置与朝向取权威模拟；经
+// BoundOnlinePlayers 按 ID 升序去重并截断到 MaxPlanOnlinePlayers（会话上限
+// 同为八名，截断只是防御性内存界，正常路径永不触发）。调用方必须持有
+// stepMu——会话表与模拟状态的唯一写者是权威 tick。视线命中方块不在此采集：
+// follow 的目标校验只消费 ID 与位置，逐玩家 DDA 只会加大 tick 热路径成本
+// 而没有任何已交付的消费方。
+func (server *Server) onlinePlanPlayersSnapshot() []companion.PlanPlayer {
+	players := make([]companion.PlanPlayer, 0, len(server.playerSessions))
+	for playerID, sessionID := range server.playerSessions {
+		player, ok := server.engine.Player(sessionID)
+		if !ok {
+			continue
+		}
+		players = append(players, companion.PlanPlayer{
+			ID:       playerID,
+			Position: [3]float32(player.State.Position),
+			Yaw:      player.Yaw,
+			Pitch:    player.Pitch,
+		})
+	}
+	return companion.BoundOnlinePlayers(players)
 }
 
 // hasAirNeighbor 报告 (x,y,z) 的六邻域中是否存在空气。邻居越出世界竖直边界
