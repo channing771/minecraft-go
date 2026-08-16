@@ -2,7 +2,7 @@
 
 ## 1. 协议与图集
 
-- [ ] 1.1 frame v2 协议:Rust 解析器支持 layout v2 的 TLV pass 段(合法/
+- [x] 1.1 frame v2 协议:Rust 解析器支持 layout v2 的 TLV pass 段(合法/
       未知 tag/长度越界/重复段拒绝,违约不渲染不触碰 target),v1 输入按
       纯地形帧继续接受;单测覆盖解析矩阵;
       验证:`cd engine && cargo test -p mornlea_client && cargo clippy

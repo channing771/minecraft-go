@@ -51,6 +51,7 @@ pub enum RenderCreateError {
 
 /// 一帧渲染输入:相机、昼夜与 Go 侧算好的可见 section 列表。
 /// 字段语义与 Go `render.Camera` 一致。
+#[derive(Default)]
 pub struct FrameInput {
     /// 视图投影矩阵(列主序,与 mgl32 内存布局一致)。
     pub view_proj: [f32; 16],
@@ -72,6 +73,34 @@ pub struct FrameInput {
     pub cloud_local: f32,
     /// 可见 section 位置(BFS+frustum 结果),渲染按此构建候选 record。
     pub visible: Vec<(i32, i32, i32)>,
+    /// avatar instance 字节流(布局与 Go encodeAvatarPartsInto 一致);
+    /// 空表示本帧无 avatar。
+    pub avatar_instances: Vec<u8>,
+    /// 掉落物 instance 字节流(与 avatar 同布局);空表示本帧无掉落物。
+    pub drop_instances: Vec<u8>,
+    /// 目标方块轮廓参数字节;空表示本帧无轮廓。
+    pub outline: Vec<u8>,
+    /// 伤害红边强度(0 表示不绘制)。
+    pub overlay_strength: f32,
+    /// 名牌 billboard 顶点流;空表示本帧无名牌。
+    pub name_tag_vertices: Vec<u8>,
+    /// HUD 屏幕空间顶点流;空表示本帧无 HUD。
+    pub hud_vertices: Vec<u8>,
+    /// 调试面板顶点流;空表示本帧无面板。
+    pub debug_vertices: Vec<u8>,
+}
+
+impl FrameInput {
+    /// 纯地形帧(v1 语义):全部 pass 段为空。
+    pub fn empty_passes(&self) -> bool {
+        self.avatar_instances.is_empty()
+            && self.drop_instances.is_empty()
+            && self.outline.is_empty()
+            && self.overlay_strength == 0.0
+            && self.name_tag_vertices.is_empty()
+            && self.hud_vertices.is_empty()
+            && self.debug_vertices.is_empty()
+    }
 }
 
 /// 一个已上传 section:池内分配、origin 槽位与面数。
@@ -1262,6 +1291,7 @@ mod tests {
             cloud_macro_x: 0,
             cloud_local: 0.0,
             visible: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -1396,6 +1426,7 @@ pub(crate) mod tests_support {
             cloud_macro_x: 0,
             cloud_local: 0.0,
             visible: Vec::new(),
+            ..Default::default()
         }
     }
 }
