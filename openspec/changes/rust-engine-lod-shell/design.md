@@ -48,7 +48,10 @@ perm 播种字节(格式与 `mornlea_worldgen_chunk` 完全一致)+ tile 原点
 quad 字段,由渲染侧按世界坐标推导(与近环同源),在 client 远环任务中
 落实。status 复用 0..9:`ABI_VERSION`
 拒绝旧版本、`INVALID_ARGUMENT`/`INPUT` 拒绝非法步长与越界 tile、
-`SCRATCH`/`OUTPUT_OVERFLOW` 两段式探测(先报所需容量,扩容重试成功)、
+`OUTPUT_OVERFLOW` 两段式探测(出口无 caller-scratch 参数,随
+`mornlea_worldgen_chunk` 先例用内部缓冲——壳输出对固定 64×64 列 tile
+有界;先经 `*output_len` 报所需容量,扩容重试成功;`SCRATCH` 等其余
+status 对本出口结构性不可达,保留在 0..9 语义空间)、
 panic catch → 9。确定性契约:同 perm + 同 tile + 同步长 → 全平台逐位
 一致输出,与 worldgen 差分门禁同一标准。
 
