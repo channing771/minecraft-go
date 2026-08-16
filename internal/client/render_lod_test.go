@@ -5,6 +5,7 @@ package client
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -53,6 +54,50 @@ func TestUploadLodTileRejectsBadFace(t *testing.T) {
 		}
 	}()
 	renderer.UploadLodTile(0, 0, quad)
+}
+
+// TestSetLodFogRejectsInvalidParameters 不依赖 GPU:非法参数(start<=0、
+// full<=start、NaN)在句柄查找之前被 Rust 入口拒绝为 INVALID_ARGUMENT,
+// Go 侧表现为 check panic;参数合法但句柄未知则报 WINDOW(同样 panic,
+// 证明校验通过后到达句柄查找)。
+func TestSetLodFogRejectsInvalidParameters(t *testing.T) {
+	cases := []struct {
+		name       string
+		start, end float32
+	}{
+		{"start 为零", 0, 100},
+		{"start 为负", -1, 100},
+		{"start 为 NaN", float32(math.NaN()), 100},
+		{"full 等于 start", 100, 100},
+		{"full 小于 start", 200, 100},
+		{"full 为 NaN", 100, float32(math.NaN())},
+	}
+	for _, tc := range cases {
+		func() {
+			renderer := &Renderer{handle: 0xF00D}
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("%s:SetLodFog(%v,%v) 必须触发 panic", tc.name, tc.start, tc.end)
+				}
+			}()
+			renderer.SetLodFog(tc.start, tc.end)
+		}()
+	}
+}
+
+// TestSetLodFogAcceptsValidParametersOrSkip 在真实渲染器上走通合法参数
+// (与默认 768/1152 同值的重设)且不 panic;无 GPU 适配器时跳过。
+func TestSetLodFogAcceptsValidParametersOrSkip(t *testing.T) {
+	renderer, err := NewRenderer(16, 16)
+	if errors.Is(err, ErrNoGPUAdapter) {
+		t.Skip("无 GPU 适配器")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer renderer.Close()
+	renderer.SetLodFog(768, 1152)
+	renderer.SetLodFog(10, 40)
 }
 
 // TestRendererLodTileRoundtripOrSkip 走一遍 upload(替换)→drop(幂等)→
