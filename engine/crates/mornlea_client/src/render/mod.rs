@@ -823,6 +823,11 @@ impl OffscreenRenderer {
         }
     }
 
+    /// 输出图像的精确字节数(width×height×4),FFI 回读长度校验使用。
+    pub fn output_bytes(&self) -> usize {
+        (self.width * self.height * 4) as usize
+    }
+
     /// 已上传 section 的面总数,供测试断言。
     pub fn total_faces(&self) -> u64 {
         self.sections

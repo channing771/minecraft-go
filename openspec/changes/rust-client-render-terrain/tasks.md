@@ -19,7 +19,7 @@
 
 ## 2. ABI 与 Go 绑定
 
-- [ ] 2.1 client ABI 1→2:导出 render create/destroy、upload_atlas、
+- [x] 2.1 client ABI 1→2:导出 render create/destroy、upload_atlas、
       upload_section、drop_section、frame、readback,全部入口校验
       (版本/指针/长度/句柄/quad 对齐/列表越界)违约不触碰缓冲,含拒绝
       路径单测;同步 `mornlea_client.h`;验证:`make rust` + crate 单测。
