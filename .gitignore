@@ -36,3 +36,6 @@
 *.pprof
 cpu.prof
 mem.prof
+
+# SDD 工作区（子代理驱动开发的账本与评审包）
+/.superpowers/
