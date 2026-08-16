@@ -7,14 +7,14 @@
       内嵌(terrain/sky/cull/hiz_build/hiz_copy)与存在性单测;
       验证:`cd engine && cargo test -p mornlea_client && cargo clippy
       --all-targets -- -D warnings`。
-- [ ] 1.2 terrain pass 移植:atlas layer 纹理与 sampler、section 存储
+- [x] 1.2 terrain pass 移植:atlas layer 纹理与 sampler、section 存储
       (紧凑 Quad 缓冲 + origin/record 编码镜像 Go sectionRecordBytes)、
       实例化绘制与 uniform 布局对齐 Go;小场景离屏 smoke 单测(回读非全零、
       同输入两次渲染逐字节一致);验证:crate 单测。
-- [ ] 1.3 GPU culling + HiZ 移植:cull compute dispatch、indirect draw、
+- [x] 1.3 GPU culling + HiZ 移植:cull compute dispatch、indirect draw、
       hiz_build/hiz_copy mip 链,顺序与参数镜像 Go `cull.go`/`hiz.go`;
       遮挡场景单测(剔除后绘制计数下降且图像稳定);验证:crate 单测。
-- [ ] 1.4 sky/云 pass 移植与日照 uniform;昼夜两个时间点的 smoke 单测;
+- [x] 1.4 sky/云 pass 移植与日照 uniform;昼夜两个时间点的 smoke 单测;
       验证:crate 单测。
 
 ## 2. ABI 与 Go 绑定
