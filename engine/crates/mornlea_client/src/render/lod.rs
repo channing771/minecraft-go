@@ -27,13 +27,14 @@ pub const LOD_TILE_WORLD_BLOCKS: i32 = 64;
 
 /// tile 表容量上界。Go 调度(`internal/lod` 的 QueueRing/DropOutside)按
 /// **切比雪夫方环**(而非圆环)入队,容量必须覆盖最大合法配置的全方环:
-/// `lodFarMultiplier` 8 × `viewDistance` 32 chunk = 256 chunk 远环半径,
-/// 每 tile 4×4 chunk → tile 半径 256/4 = 64,全方环
-/// (2×64+1)² = 16641(即 (2×8×8+1)² = 129²;方环角块数远超同半径圆环
-/// π×64² ≈ 12.9k,按圆环论证的旧值 16384 装不下方环角区)。取 32768
-/// (对 16641 约 2 倍余量,同时保持 2 的幂);5.2 全方播种时峰值上传数
-/// 不触顶。超出仍视为编程错误,返回容量不足由 FFI 层转为 CAPACITY。
-pub const MAX_LOD_TILES: usize = 32768;
+/// viewDistance 合法上限 64 chunk × `lodFarMultiplier` 合法上限 8 =
+/// 512 chunk 远环半径,每 tile 4×4 chunk → tile 半径 512/4 = 128,全方环
+/// (2×128+1)² = 66049(即 257²;方环角块数远超同半径圆环
+/// π×128² ≈ 51.5k,按圆环论证会漏掉角区——终审第一段按 viewDistance=32
+/// 推导的旧值 32768 也因漏看合法上限 64 而不足)。取 131072(2^17,对
+/// 66049 约 2 倍余量,同时保持 2 的幂);5.2 全方播种时峰值上传数不触顶。
+/// 超出仍视为编程错误,返回容量不足由 FFI 层转为 CAPACITY。
+pub const MAX_LOD_TILES: usize = 131072;
 
 /// 单顶点字节数:world vec3f(12)| layer u32 | shade u32 | axis u32。
 const LOD_VERTEX_BYTES: usize = 24;
@@ -578,20 +579,20 @@ mod tests {
         u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap())
     }
 
-    /// 容量必须覆盖切比雪夫方环峰值(Ruling 13):Go 调度(internal/lod
+    /// 容量必须覆盖切比雪夫方环峰值(Ruling 13/18):Go 调度(internal/lod
     /// QueueRing/DropOutside)按切比雪夫方环入队,最大合法配置
-    /// multiplier=8 × viewDistance=32 chunk = 256 chunk 半径 = 64 tile,
-    /// 全方环 (2×64+1)² = 16641。5.2 全方播种时第 16642 次上传必须仍
+    /// multiplier=8 × viewDistance=64 chunk = 512 chunk 半径 = 128 tile,
+    /// 全方环 (2×128+1)² = 66049。5.2 全方播种时第 66049 次上传必须仍
     /// 在容量内,否则触发 CAPACITY → UploadLodTile 的 check panic。
     #[test]
     fn max_lod_tiles_covers_chebyshev_full_ring() {
         const MAX_MULTIPLIER: i32 = 8;
-        const VIEW_DISTANCE_CHUNKS: i32 = 32;
+        const VIEW_DISTANCE_CHUNKS: i32 = 64;
         const TILE_CHUNKS: i32 = 4;
         let tile_radius = MAX_MULTIPLIER * VIEW_DISTANCE_CHUNKS / TILE_CHUNKS;
         let full_ring = (2 * tile_radius + 1).pow(2);
-        assert_eq!(tile_radius, 64);
-        assert_eq!(full_ring, 16641, "(2×64+1)² = 129²");
+        assert_eq!(tile_radius, 128);
+        assert_eq!(full_ring, 66049, "(2×128+1)² = 257²");
         assert!(
             MAX_LOD_TILES >= full_ring as usize,
             "容量 {MAX_LOD_TILES} 必须覆盖切比雪夫方环峰值 {full_ring}"
