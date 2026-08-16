@@ -23,7 +23,7 @@
       upload_section、drop_section、frame、readback,全部入口校验
       (版本/指针/长度/句柄/quad 对齐/列表越界)违约不触碰缓冲,含拒绝
       路径单测;同步 `mornlea_client.h`;验证:`make rust` + crate 单测。
-- [ ] 2.2 `internal/client` 新增 render 绑定(错误状态转稳定中文文案)与
+- [x] 2.2 `internal/client` 新增 render 绑定(错误状态转稳定中文文案)与
       `assets.Registry` layer 像素导出;绑定层拒绝注入测试;
       验证:`go test ./internal/client ./internal/assets -race -count=1`。
 
