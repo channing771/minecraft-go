@@ -80,3 +80,29 @@ func growEncodeBuffer(dst []byte, size int) []byte {
 	}
 	return dst[:size]
 }
+
+// NewNameTagLayouter 创建 layout-only 的名牌 renderer:只支持 Prepare 与
+// FrameStreams,不创建任何 GPU 资源(生产切换后由 Rust 渲染器绘制)。
+func NewNameTagLayouter(atlas GlyphSource) *NameTagRenderer {
+	return &NameTagRenderer{
+		atlas:   atlas,
+		ordered: make([]NameTag, 0, maxNameTags),
+		upload:  make([]byte, nameTagUploadBytes),
+		layout: nameTagLayout{
+			glyphs:      make([]nameTagGlyph, 0, maxNameTagGlyphs),
+			backgrounds: make([]nameTagBackground, 0, maxNameTags),
+		},
+	}
+}
+
+// NewDebugPanelLayouter 创建 layout-only 的调试面板 renderer,同上。
+func NewDebugPanelLayouter(atlas GlyphSource) *DebugPanelRenderer {
+	return &DebugPanelRenderer{
+		atlas:  atlas,
+		upload: make([]byte, panelUploadBytes),
+		layout: panelLayout{
+			quads:  make([]panelInstance, 0, maxPanelQuads),
+			glyphs: make([]panelInstance, 0, maxPanelGlyphs),
+		},
+	}
+}

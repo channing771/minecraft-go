@@ -60,8 +60,24 @@ type glyphRasterizer interface {
 	Rasterize(font.Face, rune) (Glyph, []byte, bool, error)
 }
 
+// GlyphSink 接收字形图集的 R8 矩形写入。生产实现是 Rust 渲染器的
+// 上传入口;gfx 纹理 sink 供切换期的既有 Go renderer 与测试使用。
+type GlyphSink interface {
+	WriteGlyphRect(x, y, width, height uint32, pixels []byte)
+}
+
+// textureSink 把矩形写入适配到 gfx 纹理(切换期变体)。
+type textureSink struct{ texture gfx.Texture }
+
+// WriteGlyphRect 直写 gfx 纹理的对应区域。
+func (sink textureSink) WriteGlyphRect(x, y, width, height uint32, pixels []byte) {
+	sink.texture.WriteRegion(0, 0, x, y, width, height, pixels)
+}
+
 // GlyphAtlas owns a bounded 1024x1024 R8 texture split into 32x32 cells.
 type GlyphAtlas struct {
+	// sink 是唯一的图集写出口;texture/view 只在 gfx 变体存在。
+	sink          GlyphSink
 	texture       gfx.Texture
 	view          gfx.TextureView
 	pendingUpload *glyphResult
@@ -86,6 +102,12 @@ func NewGlyphAtlas(dev gfx.Device) (*GlyphAtlas, error) {
 	return newGlyphAtlasWith(dev, embeddedGlyphFaceFactory, opentypeGlyphRasterizer{})
 }
 
+// NewGlyphAtlasWithSink 创建无 gfx 纹理的图集变体:全部矩形写入经 sink
+// (生产路径 = Rust 渲染器上传入口)。TextureView/AtlasPixels 不可用。
+func NewGlyphAtlasWithSink(sink GlyphSink) (*GlyphAtlas, error) {
+	return newGlyphAtlasSink(sink, nil, nil, embeddedGlyphFaceFactory, opentypeGlyphRasterizer{})
+}
+
 func newGlyphAtlasWith(dev gfx.Device, factory glyphFaceFactory, rasterizer glyphRasterizer) (*GlyphAtlas, error) {
 	renderFace, workerFace, err := factory()
 	if err != nil {
@@ -107,10 +129,39 @@ func newGlyphAtlasWith(dev gfx.Device, factory glyphFaceFactory, rasterizer glyp
 		Usage: gfx.TextureUsageBinding | gfx.TextureUsageCopyDst | gfx.TextureUsageCopySrc,
 	})
 	view := texture.View(gfx.TextureViewDesc{Dimension: gfx.TextureViewDimension2D})
+	return assembleGlyphAtlas(textureSink{texture: texture}, texture, view, renderFace, workerFace, rasterizer)
+}
+
+// newGlyphAtlasSink 是 sink 变体的装配入口;texture/view 可为 nil。
+func newGlyphAtlasSink(
+	sink GlyphSink,
+	texture gfx.Texture,
+	view gfx.TextureView,
+	factory glyphFaceFactory,
+	rasterizer glyphRasterizer,
+) (*GlyphAtlas, error) {
+	renderFace, workerFace, err := factory()
+	if err != nil {
+		return nil, fmt.Errorf("render: create glyph faces: %w", err)
+	}
+	if renderFace == nil || workerFace == nil {
+		return nil, fmt.Errorf("render: glyph face factory returned nil face")
+	}
+	return assembleGlyphAtlas(sink, texture, view, renderFace, workerFace, rasterizer)
+}
+
+func assembleGlyphAtlas(
+	sink GlyphSink,
+	texture gfx.Texture,
+	view gfx.TextureView,
+	renderFace, workerFace font.Face,
+	rasterizer glyphRasterizer,
+) (*GlyphAtlas, error) {
 	tofu, pixels := tofuGlyph()
-	texture.WriteRegion(0, 0, 0, 0, glyphCellSize, glyphCellSize, pixels)
+	sink.WriteGlyphRect(0, 0, glyphCellSize, glyphCellSize, pixels)
 
 	atlas := &GlyphAtlas{
+		sink:        sink,
 		texture:     texture,
 		view:        view,
 		renderFace:  renderFace,
@@ -271,7 +322,7 @@ func (atlas *GlyphAtlas) FlushUploads(budget *UploadBudget) error {
 	slot := atlas.nextSlot
 	x := uint32(slot%32) * glyphCellSize
 	y := uint32(slot/32) * glyphCellSize
-	atlas.texture.WriteRegion(0, 0, x, y, glyphCellSize, glyphCellSize, pending.pixels)
+	atlas.sink.WriteGlyphRect(x, y, glyphCellSize, glyphCellSize, pending.pixels)
 	pending.glyph.Slot = slot
 	// UV 只覆盖 ink 本身，不覆盖整格。
 	//

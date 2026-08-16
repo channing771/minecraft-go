@@ -11,7 +11,7 @@
 
 ## 2. Go 切换段(Go 渲染栈保留为死代码)
 
-- [ ] 2.1 `GlyphAtlas` 改收 `GlyphSink` 接口(tofu 与 FlushUploads 写入走
+- [x] 2.1 `GlyphAtlas` 改收 `GlyphSink` 接口(tofu 与 FlushUploads 写入走
       sink),生产 sink 适配 `client.Renderer.UploadGlyphRect`;HUD 图集经
       `UploadHUDAtlas` 上传;既有字形语义测试保持;
       验证:`go test ./internal/render ./internal/render/hud -race -count=1`。
