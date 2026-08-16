@@ -174,7 +174,10 @@ func (h *Host) acceptStream(
 		h.finishStreamLifecycle(streamID, promoted)
 	}()
 
-	pending, err := network.BeginServerLogin(pendingCtx, stream)
+	// 世界种子以存档 metadata 为唯一权威（与 worldgen 播种同源），
+	// 单机内置服务端与 TCP 专用服务端都在这里汇入同一条登录路径。
+	metadata := h.world.store.Metadata()
+	pending, err := network.BeginServerLogin(pendingCtx, stream, uint64(metadata.Seed))
 	if err != nil {
 		return err
 	}
@@ -195,7 +198,7 @@ func (h *Host) acceptStream(
 		pending.Context(),
 		identity.PlayerID,
 		identity.DisplayName,
-		h.world.store.Metadata(),
+		metadata,
 	)
 	if err != nil {
 		code, message := hostPlayerLoadReject(err)

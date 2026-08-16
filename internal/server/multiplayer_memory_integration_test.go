@@ -265,7 +265,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 			transportClosers = append(transportClosers, closeTransport)
 			serverDone := make(chan error, 1)
 			go func(index int, identity network.Identity) {
-				pending, err := network.BeginServerLogin(loginCtx, serverStream)
+				pending, err := network.BeginServerLogin(loginCtx, serverStream, 0)
 				if err == nil && pending.Identity() != identity {
 					err = fmt.Errorf("identity=%+v, want %+v", pending.Identity(), identity)
 				}

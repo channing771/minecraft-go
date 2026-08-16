@@ -34,6 +34,9 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 		switch message := packet.(type) {
 		case LoginSuccess:
 			e.data = append(e.data, message.PlayerID[:]...)
+			// v23：种子恰好追加在 PlayerID 之后（little-endian uint64），
+			// 既有 M5B 及更早字段的位置与字节序保持不变。
+			e.u64(message.WorldSeed)
 		case LoginReject:
 			e.u8(uint8(message.Code))
 			e.string(message.Message, 256)
@@ -234,7 +237,11 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 			} else {
 				copy(id[:], data)
 			}
-			packet = LoginSuccess{PlayerID: id}
+			var worldSeed uint64
+			if err == nil {
+				worldSeed, err = d.u64()
+			}
+			packet = LoginSuccess{PlayerID: id, WorldSeed: worldSeed}
 		case 1:
 			var code uint8
 			var message string

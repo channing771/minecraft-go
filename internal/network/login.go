@@ -34,6 +34,7 @@ func (err *RemoteError) Error() string {
 type PendingLogin struct {
 	stream    ServerPacketStream
 	identity  Identity
+	worldSeed uint64
 	decided   atomic.Bool
 	login     context.Context
 	cancel    context.CancelFunc
@@ -44,7 +45,11 @@ type PendingLogin struct {
 	phaseDone chan struct{}
 }
 
-func BeginServerLogin(ctx context.Context, stream ServerPacketStream) (_ *PendingLogin, err error) {
+// BeginServerLogin 在 stream 上执行服务端握手与登录接收。worldSeed 是
+// 该服务端的权威世界种子：登录成功时应答（LoginSuccess.WorldSeed）把它
+// 原样下发，供客户端确定性生成远环壳；值在连接建立时固定，登录期间
+// 不可变更。
+func BeginServerLogin(ctx context.Context, stream ServerPacketStream, worldSeed uint64) (_ *PendingLogin, err error) {
 	if stream == nil {
 		return nil, errors.New("network: nil server packet stream")
 	}
@@ -98,6 +103,7 @@ func BeginServerLogin(ctx context.Context, stream ServerPacketStream) (_ *Pendin
 	pending := &PendingLogin{
 		stream:    stream,
 		identity:  Identity{PlayerID: start.PlayerID, DisplayName: canonicalName},
+		worldSeed: worldSeed,
 		login:     login,
 		cancel:    cancelLogin,
 		phaseDone: make(chan struct{}),
@@ -130,7 +136,7 @@ func (pending *PendingLogin) Accept(ctx context.Context, attach func(ServerEndpo
 		pending.close()
 		return err
 	}
-	if err := pending.send(ctx, LoginSuccess{PlayerID: pending.identity.PlayerID}); err != nil {
+	if err := pending.send(ctx, LoginSuccess{PlayerID: pending.identity.PlayerID, WorldSeed: pending.worldSeed}); err != nil {
 		endpoint.abort()
 		pending.finish()
 		pending.close()

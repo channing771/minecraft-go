@@ -116,7 +116,7 @@ func newApplicationWithDependencies(
 	if options.Benchmark {
 		running = server.NewWorld(config, worldgen.New(store.Metadata().Seed, options.FluidEnabled), store)
 		clientEndpoint, err = assembleBenchmarkObserverConnection(
-			ctx, running, options.BenchmarkTransport,
+			ctx, running, options.BenchmarkTransport, uint64(store.Metadata().Seed),
 			func(address string) (network.Listener, error) {
 				return network.ListenTCP(address)
 			},
@@ -270,10 +270,14 @@ func (sink rendererGlyphSink) WriteGlyphRect(x, y, width, height uint32, pixels 
 	sink.renderer.UploadGlyphRect(int(x), int(y), int(width), int(height), pixels)
 }
 
+// assembleBenchmarkObserverConnection 为 benchmark 观察者建立连接。内存
+// 传输走 AttachTrustedObserver 旁路；TCP 传输复用与真实客户端相同的登录
+// 状态机，worldSeed 与被观测世界同源，保证 LoginSuccess 与生产路径一致。
 func assembleBenchmarkObserverConnection(
 	ctx context.Context,
 	running *server.Server,
 	transport string,
+	worldSeed uint64,
 	listenTCP func(string) (network.Listener, error),
 	dialTCP func(context.Context, string) (network.ClientPacketStream, error),
 ) (network.ClientEndpoint, error) {
@@ -302,7 +306,7 @@ func assembleBenchmarkObserverConnection(
 			serverDone <- acceptErr
 			return
 		}
-		pending, loginErr := network.BeginServerLogin(acceptContext, stream)
+		pending, loginErr := network.BeginServerLogin(acceptContext, stream, worldSeed)
 		if loginErr == nil {
 			loginErr = pending.Accept(acceptContext, running.AttachTrustedObserver)
 		}

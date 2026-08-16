@@ -35,7 +35,7 @@ func TestBenchmarkTCPDialFailureClosesListenerBeforeWaitingForAccept(t *testing.
 	returned := make(chan result, 1)
 	go func() {
 		endpoint, err := assembleBenchmarkObserverConnection(
-			context.Background(), nil, "tcp",
+			context.Background(), nil, "tcp", 0,
 			func(string) (network.Listener, error) { return listener, nil },
 			dial,
 		)
