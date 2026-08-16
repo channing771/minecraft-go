@@ -80,3 +80,48 @@ func TestEncodeRenderFrameLayout(t *testing.T) {
 		t.Fatalf("visible[1].z=%d", z)
 	}
 }
+
+// TestEncodeRenderFrameV2Segments 锁定 v2 TLV 段编码:layout 版本、段序
+// 与 EncodeQuadSegment 计数。
+func TestEncodeRenderFrameV2Segments(t *testing.T) {
+	frame := RenderFrame{
+		AvatarInstances: make([]byte, 160),
+		OverlayStrength: 0.5,
+		HUDSegment:      EncodeQuadSegment(make([]byte, 16), make([]byte, 96), nil, 48),
+	}
+	out := EncodeRenderFrame(frame)
+	if got := out[188]; got != 2 {
+		t.Fatalf("layout=%d,想要 2", got)
+	}
+	cursor := renderFrameHeaderBytes
+	readU32 := func() uint32 {
+		v := uint32(out[cursor]) | uint32(out[cursor+1])<<8 |
+			uint32(out[cursor+2])<<16 | uint32(out[cursor+3])<<24
+		cursor += 4
+		return v
+	}
+	if tag, length := readU32(), readU32(); tag != 1 || length != 160 {
+		t.Fatalf("首段 tag=%d len=%d", tag, length)
+	}
+	cursor += 160
+	if tag, length := readU32(), readU32(); tag != 4 || length != 4 {
+		t.Fatalf("overlay 段 tag=%d len=%d", tag, length)
+	}
+	cursor += 4
+	if tag := readU32(); tag != 6 {
+		t.Fatalf("HUD 段 tag=%d", tag)
+	}
+	length := readU32()
+	if int(length) != 16+8+96 {
+		t.Fatalf("HUD 段 len=%d", length)
+	}
+	// EncodeQuadSegment 的计数字段:quad 2 个(96/48)、glyph 0。
+	if got := out[cursor+16]; got != 2 {
+		t.Fatalf("quad count=%d", got)
+	}
+	// 纯地形帧保持 layout 0。
+	plain := EncodeRenderFrame(RenderFrame{})
+	if plain[188] != 0 || len(plain) != renderFrameHeaderBytes {
+		t.Fatalf("纯地形帧 layout=%d len=%d", plain[188], len(plain))
+	}
+}

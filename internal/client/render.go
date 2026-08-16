@@ -22,6 +22,10 @@ package client
 #cgo nocallback mornlea_client_render_frame
 #cgo noescape mornlea_client_render_readback
 #cgo nocallback mornlea_client_render_readback
+#cgo noescape mornlea_client_render_upload_glyph_rect
+#cgo nocallback mornlea_client_render_upload_glyph_rect
+#cgo noescape mornlea_client_render_upload_hud_atlas
+#cgo nocallback mornlea_client_render_upload_hud_atlas
 #include "mornlea_client.h"
 */
 import "C"
@@ -65,6 +69,32 @@ type RenderFrame struct {
 	CloudLocal     float32
 	// Visible 是 Go BFS+frustum 算出的可见 section 位置(X, Y, Z)。
 	Visible [][3]int32
+	// 以下 pass 段为空表示该 pass 本帧缺席;任一非空时帧按 layout v2 编码。
+	// AvatarInstances 是 80 字节/实例的 avatar 字节流(render 包编码)。
+	AvatarInstances []byte
+	// DropInstances 是 80 字节/实例的掉落物字节流。
+	DropInstances []byte
+	// OutlineInstances 是 12×80 字节的目标方块轮廓实例流。
+	OutlineInstances []byte
+	// OverlayStrength 是伤害红边强度(>0 才绘制)。
+	OverlayStrength float32
+	// NameTagSegment/HUDSegment/DebugSegment 是各文本 pass 的
+	// [uniform][aCount][bCount][a][b] 段字节(EncodeQuadSegment 产物)。
+	NameTagSegment []byte
+	HUDSegment     []byte
+	DebugSegment   []byte
+}
+
+// EncodeQuadSegment 组装文本类 pass 段:[uniform][aCount u32][bCount u32]
+// [streamA][streamB];instanceBytes 用于从字节数推回实例数。
+func EncodeQuadSegment(uniform, streamA, streamB []byte, instanceBytes int) []byte {
+	out := make([]byte, 0, len(uniform)+8+len(streamA)+len(streamB))
+	out = append(out, uniform...)
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(streamA)/instanceBytes))
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(streamB)/instanceBytes))
+	out = append(out, streamA...)
+	out = append(out, streamB...)
+	return out
 }
 
 // NewRenderer 创建 Rust 离屏渲染器;无 GPU 适配器返回 ErrNoGPUAdapter。
@@ -122,7 +152,27 @@ func (r *Renderer) DropSection(x, y, z int32) {
 	)))
 }
 
-// EncodeRenderFrame 把帧输入编码为 render_frame 的 ABI 字节。
+// frame v2 的 TLV pass 段 tag,与 Rust 侧常量一致。
+const (
+	frameTagAvatar  = 1
+	frameTagDrop    = 2
+	frameTagOutline = 3
+	frameTagOverlay = 4
+	frameTagNameTag = 5
+	frameTagHUD     = 6
+	frameTagDebug   = 7
+)
+
+// hasPassSegments 报告本帧是否携带任一 pass 段(决定 layout 版本)。
+func (frame RenderFrame) hasPassSegments() bool {
+	return len(frame.AvatarInstances) > 0 || len(frame.DropInstances) > 0 ||
+		len(frame.OutlineInstances) > 0 || frame.OverlayStrength > 0 ||
+		len(frame.NameTagSegment) > 0 || len(frame.HUDSegment) > 0 ||
+		len(frame.DebugSegment) > 0
+}
+
+// EncodeRenderFrame 把帧输入编码为 render_frame 的 ABI 字节:无 pass 段时
+// 保持 layout 0(纯地形),否则 layout 2 并追加 TLV 段。
 func EncodeRenderFrame(frame RenderFrame) []byte {
 	out := make([]byte, renderFrameHeaderBytes+len(frame.Visible)*12)
 	for i, v := range frame.ViewProj {
@@ -151,6 +201,29 @@ func EncodeRenderFrame(frame RenderFrame) []byte {
 			binary.LittleEndian.PutUint32(out[offset+j*4:], uint32(v))
 		}
 	}
+	if !frame.hasPassSegments() {
+		return out
+	}
+	binary.LittleEndian.PutUint32(out[188:], 2)
+	appendTLV := func(tag uint32, payload []byte) {
+		if len(payload) == 0 {
+			return
+		}
+		out = binary.LittleEndian.AppendUint32(out, tag)
+		out = binary.LittleEndian.AppendUint32(out, uint32(len(payload)))
+		out = append(out, payload...)
+	}
+	appendTLV(frameTagAvatar, frame.AvatarInstances)
+	appendTLV(frameTagDrop, frame.DropInstances)
+	appendTLV(frameTagOutline, frame.OutlineInstances)
+	if frame.OverlayStrength > 0 {
+		var strength [4]byte
+		binary.LittleEndian.PutUint32(strength[:], math.Float32bits(frame.OverlayStrength))
+		appendTLV(frameTagOverlay, strength[:])
+	}
+	appendTLV(frameTagNameTag, frame.NameTagSegment)
+	appendTLV(frameTagHUD, frame.HUDSegment)
+	appendTLV(frameTagDebug, frame.DebugSegment)
 	return out
 }
 
@@ -169,6 +242,28 @@ func (r *Renderer) RenderFrame(frame RenderFrame) {
 		C.uint64_t(r.handle),
 		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(encoded))),
 		C.size_t(len(encoded)),
+	)))
+}
+
+// UploadGlyphRect 上传字形图集的一块 R8 矩形(与 Go GlyphAtlas 同字节)。
+func (r *Renderer) UploadGlyphRect(x, y, width, height int, pixels []byte) {
+	r.check("upload glyph rect", uint32(C.mornlea_client_render_upload_glyph_rect(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(r.handle),
+		C.uint32_t(x), C.uint32_t(y), C.uint32_t(width), C.uint32_t(height),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(pixels))),
+		C.size_t(len(pixels)),
+	)))
+}
+
+// UploadHUDAtlas 上传 HUD 图集(一次性 RGBA)。
+func (r *Renderer) UploadHUDAtlas(width, height int, pixels []byte) {
+	r.check("upload hud atlas", uint32(C.mornlea_client_render_upload_hud_atlas(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(r.handle),
+		C.uint32_t(width), C.uint32_t(height),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(pixels))),
+		C.size_t(len(pixels)),
 	)))
 }
 

@@ -16,7 +16,7 @@ use crate::input::SNAPSHOT_BYTES;
 use crate::window::ClientWindow;
 
 /// 当前 client ABI 版本。
-pub const CLIENT_ABI_VERSION: u32 = 2;
+pub const CLIENT_ABI_VERSION: u32 = 3;
 
 /// 调用成功。
 pub const MORNLEA_CLIENT_STATUS_OK: u32 = 0;
@@ -266,8 +266,8 @@ mod tests {
     // 校验拒绝路径:ABI 版本、参数校验与无效句柄。
 
     #[test]
-    fn abi_version_is_two() {
-        assert_eq!(mornlea_client_abi_version(), 2);
+    fn abi_version_is_three() {
+        assert_eq!(mornlea_client_abi_version(), 3);
     }
 
     #[test]
@@ -540,7 +540,20 @@ pub extern "C" fn mornlea_client_render_drop_section(
     })
 }
 
+/// frame v2 的 TLV pass 段 tag,每类至多出现一次。
+const FRAME_TAG_AVATAR: u32 = 1;
+const FRAME_TAG_DROP: u32 = 2;
+const FRAME_TAG_OUTLINE: u32 = 3;
+const FRAME_TAG_OVERLAY: u32 = 4;
+const FRAME_TAG_NAME_TAG: u32 = 5;
+const FRAME_TAG_HUD: u32 = 6;
+const FRAME_TAG_DEBUG: u32 = 7;
+
 /// 解析 render_frame 输入;违约返回 None。
+///
+/// header@188 是 layout version:0 为 v1(纯地形,精确长度),2 为 v2
+/// (可见列表之后跟 TLV pass 段序列:tag u32 + length u32 + bytes,
+/// length 4 对齐,未知 tag/越界/重复段拒绝)。
 fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
     if bytes.len() < FRAME_HEADER_BYTES {
         return None;
@@ -555,11 +568,16 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
         view_proj[i] = read_f32(i * 4);
         view_proj_inv[i] = read_f32(64 + i * 4);
     }
+    let layout = read_u32(188);
     let visible_count = read_u32(184) as usize;
-    if read_u32(188) != 0
-        || bytes.len() != FRAME_HEADER_BYTES + visible_count * 12
-        || visible_count > 128 * 1024
-    {
+    if !(layout == 0 || layout == 2) || visible_count > 128 * 1024 {
+        return None;
+    }
+    let sections_end = FRAME_HEADER_BYTES + visible_count * 12;
+    if layout == 0 && bytes.len() != sections_end {
+        return None;
+    }
+    if bytes.len() < sections_end {
         return None;
     }
     let mut visible = Vec::with_capacity(visible_count);
@@ -567,6 +585,51 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
         let offset = FRAME_HEADER_BYTES + index * 12;
         let read_i32 = |o: usize| i32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         visible.push((read_i32(offset), read_i32(offset + 4), read_i32(offset + 8)));
+    }
+    // v2:可见列表之后消费 TLV pass 段。
+    let mut avatar_instances = Vec::new();
+    let mut drop_instances = Vec::new();
+    let mut outline = Vec::new();
+    let mut overlay_strength = 0.0f32;
+    let mut name_tag_vertices = Vec::new();
+    let mut hud_vertices = Vec::new();
+    let mut debug_vertices = Vec::new();
+    if layout == 2 {
+        let mut cursor = sections_end;
+        let mut seen = [false; 8];
+        while cursor < bytes.len() {
+            if bytes.len() - cursor < 8 {
+                return None;
+            }
+            let tag = read_u32(cursor);
+            let length = read_u32(cursor + 4) as usize;
+            cursor += 8;
+            if !length.is_multiple_of(4) || bytes.len() - cursor < length {
+                return None;
+            }
+            let payload = &bytes[cursor..cursor + length];
+            cursor += length;
+            let index = tag as usize;
+            if !(1..=7).contains(&index) || seen[index] {
+                return None;
+            }
+            seen[index] = true;
+            match tag {
+                FRAME_TAG_AVATAR => avatar_instances = payload.to_vec(),
+                FRAME_TAG_DROP => drop_instances = payload.to_vec(),
+                FRAME_TAG_OUTLINE => outline = payload.to_vec(),
+                FRAME_TAG_OVERLAY => {
+                    if length != 4 {
+                        return None;
+                    }
+                    overlay_strength = f32::from_le_bytes(payload.try_into().unwrap());
+                }
+                FRAME_TAG_NAME_TAG => name_tag_vertices = payload.to_vec(),
+                FRAME_TAG_HUD => hud_vertices = payload.to_vec(),
+                FRAME_TAG_DEBUG => debug_vertices = payload.to_vec(),
+                _ => return None,
+            }
+        }
     }
     Some(FrameInput {
         view_proj,
@@ -579,6 +642,13 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
         cloud_macro_x: read_u32(176),
         cloud_local: read_f32(180),
         visible,
+        avatar_instances,
+        drop_instances,
+        outline,
+        overlay_strength,
+        name_tag_vertices,
+        hud_vertices,
+        debug_vertices,
     })
 }
 
@@ -603,8 +673,11 @@ pub unsafe extern "C" fn mornlea_client_render_frame(
             return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
         };
         with_renderer(handle, |renderer| {
-            renderer.render_frame(&input);
-            MORNLEA_CLIENT_STATUS_OK
+            if renderer.render_frame(&input) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+            }
         })
     })
 }
@@ -734,6 +807,292 @@ mod render_ffi_tests {
         assert_eq!(
             mornlea_client_render_destroy(CLIENT_ABI_VERSION, handle),
             MORNLEA_CLIENT_STATUS_WINDOW
+        );
+    }
+}
+
+#[cfg(test)]
+mod frame_v2_tests {
+    use super::*;
+
+    /// 构造 layout v2 帧:头 + 0 个可见 section + 给定 TLV 段字节。
+    fn v2_frame(passes: &[u8]) -> Vec<u8> {
+        let mut frame = vec![0u8; FRAME_HEADER_BYTES];
+        frame[188..192].copy_from_slice(&2u32.to_le_bytes());
+        frame.extend_from_slice(passes);
+        frame
+    }
+
+    fn tlv(tag: u32, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&tag.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    /// 经 render_frame 入口驱动解析:解析失败返回 INVALID_ARGUMENT,
+    /// 解析成功但句柄未知返回 WINDOW——以此区分接受与拒绝,无需 GPU。
+    fn parse_status(frame: &[u8]) -> u32 {
+        // SAFETY: 指针来自有效切片。
+        unsafe {
+            mornlea_client_render_frame(CLIENT_ABI_VERSION, 0xF00D, frame.as_ptr(), frame.len())
+        }
+    }
+
+    #[test]
+    fn v2_pass_segments_parse_matrix() {
+        // 合法:每类 tag 一次 + overlay 4 字节。
+        let mut passes = Vec::new();
+        passes.extend(tlv(FRAME_TAG_AVATAR, &[0u8; 8]));
+        passes.extend(tlv(FRAME_TAG_DROP, &[0u8; 4]));
+        passes.extend(tlv(FRAME_TAG_OUTLINE, &[0u8; 16]));
+        passes.extend(tlv(FRAME_TAG_OVERLAY, &0.5f32.to_le_bytes()));
+        passes.extend(tlv(FRAME_TAG_NAME_TAG, &[0u8; 32]));
+        passes.extend(tlv(FRAME_TAG_HUD, &[0u8; 32]));
+        passes.extend(tlv(FRAME_TAG_DEBUG, &[]));
+        assert_eq!(
+            parse_status(&v2_frame(&passes)),
+            MORNLEA_CLIENT_STATUS_WINDOW,
+            "合法 v2 帧应通过解析并因句柄未知被拒"
+        );
+
+        // 空 pass 段序列同样合法(v2 允许零段)。
+        assert_eq!(parse_status(&v2_frame(&[])), MORNLEA_CLIENT_STATUS_WINDOW);
+
+        // 未知 tag。
+        assert_eq!(
+            parse_status(&v2_frame(&tlv(9, &[0u8; 4]))),
+            MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+        // 重复段。
+        let mut dup = tlv(FRAME_TAG_HUD, &[0u8; 4]);
+        dup.extend(tlv(FRAME_TAG_HUD, &[0u8; 4]));
+        assert_eq!(
+            parse_status(&v2_frame(&dup)),
+            MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+        // 长度越界(声明超过剩余字节)。
+        let mut overflow = Vec::new();
+        overflow.extend_from_slice(&FRAME_TAG_AVATAR.to_le_bytes());
+        overflow.extend_from_slice(&64u32.to_le_bytes());
+        overflow.extend_from_slice(&[0u8; 8]);
+        assert_eq!(
+            parse_status(&v2_frame(&overflow)),
+            MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+        // 长度非 4 对齐。
+        assert_eq!(
+            parse_status(&v2_frame(&tlv(FRAME_TAG_NAME_TAG, &[0u8; 6]))),
+            MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+        // overlay 段长度必须为 4。
+        assert_eq!(
+            parse_status(&v2_frame(&tlv(FRAME_TAG_OVERLAY, &[0u8; 8]))),
+            MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+        // 截断的 TLV 头。
+        assert_eq!(
+            parse_status(&v2_frame(&[1, 0, 0])),
+            MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+        // 非法 layout version。
+        let mut bad_layout = vec![0u8; FRAME_HEADER_BYTES];
+        bad_layout[188..192].copy_from_slice(&1u32.to_le_bytes());
+        assert_eq!(
+            parse_status(&bad_layout),
+            MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+        // v1(layout 0)带尾随字节拒绝。
+        let mut v1_trailing = vec![0u8; FRAME_HEADER_BYTES + 4];
+        v1_trailing[188] = 0;
+        assert_eq!(
+            parse_status(&v1_trailing),
+            MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+        );
+    }
+}
+
+/// 上传字形图集矩形(R8);越界/长度不符拒绝且不写纹理。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_upload_glyph_rect(
+    abi_version: u32,
+    handle: u64,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    pixels: *const u8,
+    pixels_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if pixels.is_null() {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            // SAFETY: pixels 非空,调用方保证 pixels_len 字节可读。
+            let data = unsafe { std::slice::from_raw_parts(pixels, pixels_len) };
+            if renderer.upload_glyph_rect(x, y, width, height, data) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+            }
+        })
+    })
+}
+
+/// 上传 HUD 图集(RGBA,一次性;重复上传替换);长度不符拒绝。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_upload_hud_atlas(
+    abi_version: u32,
+    handle: u64,
+    width: u32,
+    height: u32,
+    pixels: *const u8,
+    pixels_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if pixels.is_null() {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            // SAFETY: pixels 非空,调用方保证 pixels_len 字节可读。
+            let data = unsafe { std::slice::from_raw_parts(pixels, pixels_len) };
+            if renderer.upload_hud_atlas(width, height, data) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+            }
+        })
+    })
+}
+
+#[cfg(test)]
+mod atlas_ffi_tests {
+    use super::*;
+
+    #[test]
+    fn atlas_entries_reject_bad_abi_arguments_and_handles() {
+        let pixels = [0u8; 16];
+        // SAFETY: 指针来自有效局部变量。
+        let wrong_abi = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION + 1,
+                1,
+                0,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(wrong_abi, MORNLEA_CLIENT_STATUS_ABI_VERSION);
+        // SAFETY: 同上;句柄未知(校验先于纹理写入,经 with_renderer)。
+        let unknown = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION,
+                0xF00D,
+                0,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(unknown, MORNLEA_CLIENT_STATUS_WINDOW);
+        // SAFETY: 同上。
+        let hud_unknown = unsafe {
+            mornlea_client_render_upload_hud_atlas(
+                CLIENT_ABI_VERSION,
+                0xF00D,
+                2,
+                2,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(hud_unknown, MORNLEA_CLIENT_STATUS_WINDOW);
+    }
+
+    #[test]
+    fn atlas_bounds_and_length_are_validated_on_live_renderer() {
+        let mut handle = 0u64;
+        // SAFETY: 指针来自有效局部变量。
+        let create =
+            unsafe { mornlea_client_render_create(CLIENT_ABI_VERSION, 16, 16, &mut handle) };
+        if create == MORNLEA_CLIENT_STATUS_ADAPTER {
+            return; // 无 GPU 环境跳过。
+        }
+        assert_eq!(create, MORNLEA_CLIENT_STATUS_OK);
+        let pixels = [0u8; 16];
+        // 越界矩形(x+w 超过 1024)。
+        // SAFETY: 同上。
+        let oob = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION,
+                handle,
+                1022,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(oob, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+        // 长度不符。
+        // SAFETY: 同上。
+        let short = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION,
+                handle,
+                0,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                8,
+            )
+        };
+        assert_eq!(short, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+        // 合法矩形与 HUD 图集。
+        // SAFETY: 同上。
+        let ok = unsafe {
+            mornlea_client_render_upload_glyph_rect(
+                CLIENT_ABI_VERSION,
+                handle,
+                0,
+                0,
+                4,
+                4,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(ok, MORNLEA_CLIENT_STATUS_OK);
+        // SAFETY: 同上。
+        let hud = unsafe {
+            mornlea_client_render_upload_hud_atlas(
+                CLIENT_ABI_VERSION,
+                handle,
+                2,
+                2,
+                pixels.as_ptr(),
+                pixels.len(),
+            )
+        };
+        assert_eq!(hud, MORNLEA_CLIENT_STATUS_OK);
+        assert_eq!(
+            mornlea_client_render_destroy(CLIENT_ABI_VERSION, handle),
+            MORNLEA_CLIENT_STATUS_OK
         );
     }
 }

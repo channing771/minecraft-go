@@ -19,8 +19,8 @@ func buildSnapshot(mutate func([]byte)) []byte {
 }
 
 func TestClientABIVersionMatchesHeader(t *testing.T) {
-	if got := ClientABIVersion(); got != 2 {
-		t.Fatalf("client ABI version=%d,想要 2", got)
+	if got := ClientABIVersion(); got != 3 {
+		t.Fatalf("client ABI version=%d,想要 3", got)
 	}
 }
 

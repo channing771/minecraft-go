@@ -13,12 +13,16 @@
 //! - mesh packed face 字节只在 section 变脏时过境一次;
 //! - 每帧一次 [`OffscreenRenderer::render_frame`],帧内无逐 pass FFI。
 
+pub mod entity;
 pub mod pool;
+pub mod quads;
 pub mod shaders;
 
 use std::collections::HashMap;
 
+use entity::{EntityPass, EntityPipelineKind};
 use pool::{Alloc, Pool};
+use quads::{QuadPass, QuadPassConfig};
 
 /// 离屏 color 格式,必须与 Go capture 的 `FormatBGRA8UnormSrgb` 一致。
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
@@ -39,6 +43,8 @@ pub const ATLAS_TEX_SIZE: u32 = 16;
 pub const ATLAS_MIPS: u32 = 5;
 /// section Y 槽位的世界基准:SectionPos.Y 从 0 起,世界 Y 从 core.MinY 起。
 const WORLD_MIN_Y: i32 = -64;
+/// 字形图集边长(像素,R8),与 Go `glyphAtlasSize` 一致。
+pub const GLYPH_ATLAS_SIZE: u32 = 1024;
 
 /// 渲染器创建失败的稳定原因,FFI 层转错误状态码。
 #[derive(Debug)]
@@ -51,6 +57,7 @@ pub enum RenderCreateError {
 
 /// 一帧渲染输入:相机、昼夜与 Go 侧算好的可见 section 列表。
 /// 字段语义与 Go `render.Camera` 一致。
+#[derive(Default)]
 pub struct FrameInput {
     /// 视图投影矩阵(列主序,与 mgl32 内存布局一致)。
     pub view_proj: [f32; 16],
@@ -72,6 +79,34 @@ pub struct FrameInput {
     pub cloud_local: f32,
     /// 可见 section 位置(BFS+frustum 结果),渲染按此构建候选 record。
     pub visible: Vec<(i32, i32, i32)>,
+    /// avatar instance 字节流(布局与 Go encodeAvatarPartsInto 一致);
+    /// 空表示本帧无 avatar。
+    pub avatar_instances: Vec<u8>,
+    /// 掉落物 instance 字节流(与 avatar 同布局);空表示本帧无掉落物。
+    pub drop_instances: Vec<u8>,
+    /// 目标方块轮廓参数字节;空表示本帧无轮廓。
+    pub outline: Vec<u8>,
+    /// 伤害红边强度(0 表示不绘制)。
+    pub overlay_strength: f32,
+    /// 名牌 billboard 顶点流;空表示本帧无名牌。
+    pub name_tag_vertices: Vec<u8>,
+    /// HUD 屏幕空间顶点流;空表示本帧无 HUD。
+    pub hud_vertices: Vec<u8>,
+    /// 调试面板顶点流;空表示本帧无面板。
+    pub debug_vertices: Vec<u8>,
+}
+
+impl FrameInput {
+    /// 纯地形帧(v1 语义):全部 pass 段为空。
+    pub fn empty_passes(&self) -> bool {
+        self.avatar_instances.is_empty()
+            && self.drop_instances.is_empty()
+            && self.outline.is_empty()
+            && self.overlay_strength == 0.0
+            && self.name_tag_vertices.is_empty()
+            && self.hud_vertices.is_empty()
+            && self.debug_vertices.is_empty()
+    }
 }
 
 /// 一个已上传 section:池内分配、origin 槽位与面数。
@@ -333,6 +368,32 @@ pub struct OffscreenRenderer {
 
     hiz: HiZ,
 
+    /// avatar pass(11 具身体 × 6 部件容量)。
+    avatar_pass: EntityPass,
+    /// 掉落物 pass(800 实例容量,与 avatar 同 shader)。
+    drop_pass: EntityPass,
+    /// 方块轮廓 pass(12 实例,透明只读深度)。
+    outline_pass: EntityPass,
+    /// 伤害红边 uniform(16B,strength@0)。
+    overlay_uniform: wgpu::Buffer,
+    /// 伤害红边全屏管线(无深度附件,alpha blend)。
+    overlay_pipeline: wgpu::RenderPipeline,
+    overlay_bind: wgpu::BindGroup,
+
+    /// 名牌 billboard pass(双流:背景 + 字形)。
+    name_tag_pass: QuadPass,
+    /// HUD pass(hotbar 家族;bind 在 HUD 图集上传后建立)。
+    hud_pass: QuadPass,
+    /// 调试面板 pass。
+    debug_pass: QuadPass,
+
+    /// 字形图集(R8,增量矩形上传);内容全部来自 Go 光栅化 worker。
+    glyph_atlas: wgpu::Texture,
+    /// 字形图集视图,供文本类 pass 共享。
+    glyph_view: wgpu::TextureView,
+    /// HUD 图集;None 表示尚未上传。
+    hud_atlas: Option<wgpu::Texture>,
+
     pool: Pool,
     sections: HashMap<(i32, i32, i32), SectionSlot>,
     next_origin: u32,
@@ -592,6 +653,190 @@ impl OffscreenRenderer {
         );
         let dummy_hiz_view = dummy_hiz.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let avatar_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("avatar"),
+            source: wgpu::ShaderSource::Wgsl(shaders::AVATAR.into()),
+        });
+        let avatar_pass = EntityPass::new(
+            &device,
+            &queue,
+            &avatar_module,
+            "avatar",
+            entity::AVATAR_MAX_INSTANCES,
+            EntityPipelineKind::Opaque,
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+        let drop_pass = EntityPass::new(
+            &device,
+            &queue,
+            &avatar_module,
+            "item drop",
+            entity::DROP_MAX_INSTANCES,
+            EntityPipelineKind::Opaque,
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+
+        let outline_pass = EntityPass::new(
+            &device,
+            &queue,
+            &avatar_module,
+            "block outline",
+            12,
+            EntityPipelineKind::OutlineTranslucent,
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+
+        // 伤害红边:无深度附件的全屏三角管线,镜像 Go damage_overlay.go。
+        let overlay_uniform = make_buffer(16, BU::UNIFORM | BU::COPY_DST, "damage overlay uniform");
+        let overlay_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("damage overlay layout"),
+            entries: &[buffer_layout_entry(
+                0,
+                wgpu::ShaderStages::FRAGMENT,
+                wgpu::BufferBindingType::Uniform,
+            )],
+        });
+        let overlay_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("damage overlay"),
+            source: wgpu::ShaderSource::Wgsl(shaders::DAMAGE_OVERLAY.into()),
+        });
+        let overlay_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[Some(&overlay_layout)],
+                immediate_size: 0,
+            });
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("damage overlay"),
+            layout: Some(&overlay_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &overlay_module,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &overlay_module,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let overlay_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("damage overlay resources"),
+            layout: &overlay_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: overlay_uniform.as_entire_binding(),
+            }],
+        });
+
+        let glyph_atlas = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("glyph-atlas"),
+            size: wgpu::Extent3d {
+                width: GLYPH_ATLAS_SIZE,
+                height: GLYPH_ATLAS_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let glyph_view = glyph_atlas.create_view(&wgpu::TextureViewDescriptor::default());
+        // 三个双流 quad pass;容量只作上界校验,不参与图像输出。
+        let name_tag_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("name-tag"),
+            source: wgpu::ShaderSource::Wgsl(shaders::NAME_TAG.into()),
+        });
+        let mut name_tag_pass = QuadPass::new(
+            &device,
+            &name_tag_module,
+            QuadPassConfig {
+                label: "name-tag pass",
+                uniform_bytes: 96,
+                instance_bytes: 64,
+                stream_a_cap: 12,
+                stream_b_cap: 12 * 32,
+                entry_a: ("background_vs", "background_fs"),
+                entry_b: ("glyph_vs", "glyph_fs"),
+                uses_depth: true,
+                second_texture: false,
+                nearest_sampler: false,
+                swap_streams: true,
+            },
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+        name_tag_pass.rebuild_bind(&device, &glyph_view, None);
+        let hud_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("hotbar"),
+            source: wgpu::ShaderSource::Wgsl(shaders::HUD_HOTBAR.into()),
+        });
+        let hud_pass = QuadPass::new(
+            &device,
+            &hud_module,
+            QuadPassConfig {
+                label: "hotbar pass",
+                uniform_bytes: 16,
+                instance_bytes: 48,
+                stream_a_cap: 4096,
+                stream_b_cap: 8192,
+                entry_a: ("quad_vs", "quad_fs"),
+                entry_b: ("glyph_vs", "glyph_fs"),
+                uses_depth: false,
+                second_texture: true,
+                nearest_sampler: true,
+                swap_streams: false,
+            },
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+        let debug_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("debug panel"),
+            source: wgpu::ShaderSource::Wgsl(shaders::DEBUG_PANEL.into()),
+        });
+        let mut debug_pass = QuadPass::new(
+            &device,
+            &debug_module,
+            QuadPassConfig {
+                label: "debug panel pass",
+                uniform_bytes: 16,
+                instance_bytes: 48,
+                stream_a_cap: 256,
+                stream_b_cap: 8192,
+                entry_a: ("quad_vs", "quad_fs"),
+                entry_b: ("glyph_vs", "glyph_fs"),
+                uses_depth: false,
+                second_texture: false,
+                nearest_sampler: false,
+                swap_streams: false,
+            },
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+        debug_pass.rebuild_bind(&device, &glyph_view, None);
+
         let hiz = HiZ::new(&device, &queue, width, height);
         let cull_bind = make_cull_bind(
             &device,
@@ -634,6 +879,18 @@ impl OffscreenRenderer {
             dummy_hiz_view,
             cull_uses_hiz: false,
             hiz,
+            avatar_pass,
+            drop_pass,
+            outline_pass,
+            name_tag_pass,
+            hud_pass,
+            debug_pass,
+            overlay_uniform,
+            overlay_pipeline,
+            overlay_bind,
+            glyph_atlas,
+            glyph_view,
+            hud_atlas: None,
             pool: Pool::new(POOL_FACES),
             sections: HashMap::new(),
             next_origin: 0,
@@ -823,6 +1080,84 @@ impl OffscreenRenderer {
         }
     }
 
+    /// 上传字形图集的一块 R8 矩形;越界或长度不符返回 false。
+    /// 内容必须与 Go `GlyphAtlas` 写入自身纹理的字节一致(单源约定)。
+    pub fn upload_glyph_rect(&mut self, x: u32, y: u32, w: u32, h: u32, pixels: &[u8]) -> bool {
+        if w == 0
+            || h == 0
+            || x.checked_add(w).is_none_or(|edge| edge > GLYPH_ATLAS_SIZE)
+            || y.checked_add(h).is_none_or(|edge| edge > GLYPH_ATLAS_SIZE)
+            || pixels.len() != (w * h) as usize
+        {
+            return false;
+        }
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.glyph_atlas,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        true
+    }
+
+    /// 上传 HUD 图集(一次性 RGBA;重复上传替换);长度不符返回 false。
+    pub fn upload_hud_atlas(&mut self, width: u32, height: u32, pixels: &[u8]) -> bool {
+        if width == 0 || height == 0 || pixels.len() != (width * height * 4) as usize {
+            return false;
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("hotbar texture atlas"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let hud_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.hud_pass
+            .rebuild_bind(&self.device, &self.glyph_view, Some(&hud_view));
+        self.hud_atlas = Some(texture);
+        true
+    }
+
     /// 输出图像的精确字节数(width×height×4),FFI 回读长度校验使用。
     pub fn output_bytes(&self) -> usize {
         (self.width * self.height * 4) as usize
@@ -839,7 +1174,40 @@ impl OffscreenRenderer {
     /// 渲染一帧,pass 顺序镜像 Go `Render`:
     /// 候选 record → uniform → 清零 indirect → cull(可选 HiZ)→
     /// render pass(clear 天空色 → sky → terrain indirect)→ HiZ build。
-    pub fn render_frame(&mut self, input: &FrameInput) {
+    pub fn render_frame(&mut self, input: &FrameInput) -> bool {
+        // 语义校验先于任何 GPU 写入:非法 pass 段拒绝且不触碰 target。
+        if !self.avatar_pass.instances_valid(&input.avatar_instances)
+            || !self.drop_pass.instances_valid(&input.drop_instances)
+            || !self.outline_pass.instances_valid(&input.outline)
+            || input.overlay_strength.is_nan()
+        {
+            return false;
+        }
+        // 文本类段:非空时必须能按各自布局解析,失败在任何 GPU 写入前拒绝。
+        let name_tag_segment = if input.name_tag_vertices.is_empty() {
+            None
+        } else {
+            match self.name_tag_pass.parse_segment(&input.name_tag_vertices) {
+                Some(parts) => Some(parts),
+                None => return false,
+            }
+        };
+        let hud_segment = if input.hud_vertices.is_empty() {
+            None
+        } else {
+            match self.hud_pass.parse_segment(&input.hud_vertices) {
+                Some(parts) => Some(parts),
+                None => return false,
+            }
+        };
+        let debug_segment = if input.debug_vertices.is_empty() {
+            None
+        } else {
+            match self.debug_pass.parse_segment(&input.debug_vertices) {
+                Some(parts) => Some(parts),
+                None => return false,
+            }
+        };
         // 构建候选 record(编码镜像 Go sectionRecords)。
         let mut records: Vec<u8> = Vec::with_capacity(input.visible.len() * SECTION_RECORD_BYTES);
         let mut candidates = 0u32;
@@ -998,10 +1366,117 @@ impl OffscreenRenderer {
             }
         }
         self.hiz.build(&self.device, &mut encoder, &self.depth_view);
+        // 实体 pass:顺序镜像 app_frame(avatar → item drop),空段跳过。
+        if !input.avatar_instances.is_empty() {
+            self.avatar_pass.upload(
+                &self.queue,
+                &input.view_proj,
+                input.daylight,
+                &input.avatar_instances,
+            );
+            self.avatar_pass.record(
+                &mut encoder,
+                &self.color_view,
+                &self.depth_view,
+                "avatar pass",
+            );
+        }
+        if !input.drop_instances.is_empty() {
+            self.drop_pass.upload(
+                &self.queue,
+                &input.view_proj,
+                input.daylight,
+                &input.drop_instances,
+            );
+            self.drop_pass.record(
+                &mut encoder,
+                &self.color_view,
+                &self.depth_view,
+                "item drop pass",
+            );
+        }
+        // 轮廓 pass(Go 顺序:drop 之后、名牌之前)。
+        if !input.outline.is_empty() {
+            self.outline_pass.upload(
+                &self.queue,
+                &input.view_proj,
+                input.daylight,
+                &input.outline,
+            );
+            self.outline_pass.record(
+                &mut encoder,
+                &self.color_view,
+                &self.depth_view,
+                "block outline pass",
+            );
+        }
+        // 名牌(Go 顺序:outline 之后、overlay 之前)。
+        if let Some((uniform, backgrounds, glyphs)) = name_tag_segment {
+            self.name_tag_pass.upload_and_record(
+                &self.queue,
+                &mut encoder,
+                &self.color_view,
+                Some(&self.depth_view),
+                uniform,
+                backgrounds,
+                glyphs,
+            );
+        }
+        // 伤害红边(Go 顺序:名牌之后、HUD 之前);strength 钳制到 1,
+        // 非正值跳过(镜像 Go)。
+        if input.overlay_strength > 0.0 {
+            let strength = input.overlay_strength.min(1.0);
+            let mut uniform = [0u8; 16];
+            uniform[0..4].copy_from_slice(&strength.to_le_bytes());
+            self.queue.write_buffer(&self.overlay_uniform, 0, &uniform);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("damage overlay pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.color_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_bind_group(0, &self.overlay_bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        // HUD 与调试面板(Go 顺序:overlay 之后,面板最后)。
+        if let Some((uniform, quads, glyphs)) = hud_segment {
+            self.hud_pass.upload_and_record(
+                &self.queue,
+                &mut encoder,
+                &self.color_view,
+                None,
+                uniform,
+                quads,
+                glyphs,
+            );
+        }
+        if let Some((uniform, quads, glyphs)) = debug_segment {
+            self.debug_pass.upload_and_record(
+                &self.queue,
+                &mut encoder,
+                &self.color_view,
+                None,
+                uniform,
+                quads,
+                glyphs,
+            );
+        }
         self.last_pos = input.pos;
         self.last_view_proj = input.view_proj;
         self.have_last_camera = true;
         self.queue.submit([encoder.finish()]);
+        true
     }
 
     /// 阻塞回读离屏 color(BGRA,逐行紧密拼接);`out` 长度必须恰为
@@ -1262,6 +1737,7 @@ mod tests {
             cloud_macro_x: 0,
             cloud_local: 0.0,
             visible: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -1396,6 +1872,148 @@ pub(crate) mod tests_support {
             cloud_macro_x: 0,
             cloud_local: 0.0,
             visible: Vec::new(),
+            ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod entity_tests {
+    use super::entity;
+    use super::tests_support::*;
+
+    /// 单个红色 avatar 实例(identity 变换)在 identity 相机下必然覆盖
+    /// 画面中心:实体 pass 输出必须改变图像,且非法 instance 段被拒绝。
+    #[test]
+    fn avatar_instances_render_and_invalid_lengths_reject() {
+        let Some(mut renderer) = renderer_or_skip_pub(64, 64) else {
+            return;
+        };
+        let empty = empty_frame_pub();
+        assert!(renderer.render_frame(&empty));
+        let mut base = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut base);
+
+        // identity mat4(列主序)+ 红色。
+        let mut instance = [0u8; 80];
+        for i in 0..4 {
+            instance[(i * 4 + i) * 4..(i * 4 + i) * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        instance[64..68].copy_from_slice(&1.0f32.to_le_bytes());
+        instance[76..80].copy_from_slice(&1.0f32.to_le_bytes());
+        let mut frame = empty_frame_pub();
+        frame.avatar_instances = instance.to_vec();
+        assert!(renderer.render_frame(&frame));
+        let mut with_avatar = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut with_avatar);
+        assert_ne!(base, with_avatar, "avatar 实例必须改变图像");
+
+        // 掉落物走同一路径:同一实例流经 drop 段也必须生效。
+        let mut drop_frame = empty_frame_pub();
+        drop_frame.drop_instances = instance.to_vec();
+        assert!(renderer.render_frame(&drop_frame));
+        let mut with_drop = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut with_drop);
+        assert_ne!(base, with_drop, "掉落物实例必须改变图像");
+
+        // 非 80 倍数与超容量拒绝,且 target 保持上一帧内容。
+        let mut bad = empty_frame_pub();
+        bad.avatar_instances = vec![0u8; 84];
+        assert!(!renderer.render_frame(&bad));
+        let mut after_bad = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut after_bad);
+        assert_eq!(with_drop, after_bad, "拒绝帧不得触碰 target");
+        let mut oversized = empty_frame_pub();
+        oversized.avatar_instances = vec![0u8; (entity::AVATAR_MAX_INSTANCES + 1) * 80];
+        assert!(!renderer.render_frame(&oversized));
+    }
+}
+
+#[cfg(test)]
+mod outline_overlay_tests {
+    use super::tests_support::*;
+
+    /// 轮廓实例与伤害红边都必须改变图像;NaN 强度拒绝且 target 不变。
+    #[test]
+    fn outline_and_overlay_render_and_reject() {
+        let Some(mut renderer) = renderer_or_skip_pub(64, 64) else {
+            return;
+        };
+        let empty = empty_frame_pub();
+        assert!(renderer.render_frame(&empty));
+        let mut base = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut base);
+
+        // identity 变换白色轮廓实例(alpha 0.86)。
+        let mut instance = [0u8; 80];
+        for i in 0..4 {
+            instance[(i * 4 + i) * 4..(i * 4 + i) * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        for c in 0..4 {
+            instance[64 + c * 4..68 + c * 4].copy_from_slice(&0.86f32.to_le_bytes());
+        }
+        let mut outline_frame = empty_frame_pub();
+        outline_frame.outline = instance.to_vec();
+        assert!(renderer.render_frame(&outline_frame));
+        let mut with_outline = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut with_outline);
+        assert_ne!(base, with_outline, "轮廓必须改变图像");
+
+        let mut overlay_frame = empty_frame_pub();
+        overlay_frame.overlay_strength = 1.0;
+        assert!(renderer.render_frame(&overlay_frame));
+        let mut with_overlay = vec![0u8; 64 * 64 * 4];
+        renderer.readback(&mut with_overlay);
+        assert_ne!(base, with_overlay, "伤害红边必须改变图像");
+
+        let mut nan_frame = empty_frame_pub();
+        nan_frame.overlay_strength = f32::NAN;
+        assert!(!renderer.render_frame(&nan_frame), "NaN 强度必须拒绝");
+    }
+}
+
+#[cfg(test)]
+mod text_pass_tests {
+    use super::tests_support::*;
+
+    /// 文本段的结构校验:合法段(含零实例)通过,布局违约在渲染前拒绝。
+    /// 视觉正确性由 Go 侧双后端整帧对照保证。
+    #[test]
+    fn text_segments_validate_before_render() {
+        let Some(mut renderer) = renderer_or_skip_pub(32, 32) else {
+            return;
+        };
+        // 名牌:96B 相机 + 1 背景 + 0 字形。
+        let mut name_tag = vec![0u8; 96];
+        name_tag.extend_from_slice(&1u32.to_le_bytes());
+        name_tag.extend_from_slice(&0u32.to_le_bytes());
+        name_tag.extend_from_slice(&[0u8; 64]);
+        let mut frame = empty_frame_pub();
+        frame.name_tag_vertices = name_tag;
+        assert!(renderer.render_frame(&frame), "合法名牌段必须通过");
+
+        // HUD:16B viewport + 1 quad + 1 glyph(HUD 图集未上传时跳过绘制,
+        // 但解析必须通过)。
+        let mut hud = vec![0u8; 16];
+        hud.extend_from_slice(&1u32.to_le_bytes());
+        hud.extend_from_slice(&1u32.to_le_bytes());
+        hud.extend_from_slice(&[0u8; 96]);
+        let mut hud_frame = empty_frame_pub();
+        hud_frame.hud_vertices = hud;
+        assert!(renderer.render_frame(&hud_frame), "合法 HUD 段必须通过");
+
+        // 面板:声明计数与字节不符必须拒绝。
+        let mut bad_debug = vec![0u8; 16];
+        bad_debug.extend_from_slice(&2u32.to_le_bytes());
+        bad_debug.extend_from_slice(&0u32.to_le_bytes());
+        bad_debug.extend_from_slice(&[0u8; 48]);
+        let mut bad_frame = empty_frame_pub();
+        bad_frame.debug_vertices = bad_debug;
+        assert!(!renderer.render_frame(&bad_frame), "计数与字节不符必须拒绝");
+
+        // 名牌段短于相机头必须拒绝。
+        let mut short_frame = empty_frame_pub();
+        short_frame.name_tag_vertices = vec![0u8; 40];
+        assert!(!renderer.render_frame(&short_frame));
     }
 }

@@ -24,4 +24,6 @@
 
 R2a(rust-client-render-terrain)在 `mornlea_client` 内交付纯离屏的 Rust wgpu 世界渲染器(terrain/sky/云/GPU culling/HiZ,client ABI v2),WGSL 与 Go 渲染器单源共享;oak grove 双后端对照门禁以零像素差异通过(最大通道差 0)。生产渲染仍由 Go `internal/render` 执行,golden 基线不变;渲染切换与实体/文本迁移属后续 R2b/R2c。
 
+R2b(rust-client-render-entities)把实体与文本 pass(avatar、掉落物、目标方块轮廓、名牌 billboard、伤害红边、HUD 家族、调试面板)补齐到 Rust 离屏渲染器:frame payload v2 以 TLV pass 段单次 FFI 过境全部帧数据,字形图集(R8 增量矩形)与 HUD 图集字节与 Go 同源(client ABI v3)。完整帧双后端对照(地形+实体+名牌+HUD+面板)以零像素差异通过;生产渲染仍由 Go 执行,golden 不变。剩余 R2c:surface 接线、入口切换与删除 Go 渲染栈。
+
 M5A 不包含 Planner、HTTP 模型调用、FIFO、移动、采掘、放置、跟随、persona 或摘要；这些能力仍属于后续 M5B–M5D 方向，开始真实变更前以新的 OpenSpec 为准。历史[设计](../superpowers/specs/2026-08-13-ai-native-companions-design.md)与[实施计划](../superpowers/plans/2026-08-13-m5a-companion-entity-chat.md)仅作决策背景。

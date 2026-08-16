@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MORNLEA_CLIENT_ABI_VERSION 2u
+#define MORNLEA_CLIENT_ABI_VERSION 3u
 
 #define MORNLEA_CLIENT_STATUS_OK 0u
 #define MORNLEA_CLIENT_STATUS_ABI_VERSION 1u
@@ -96,6 +96,24 @@ uint32_t mornlea_client_render_frame(
     uint64_t handle,
     const uint8_t *frame,
     size_t frame_len);
+
+uint32_t mornlea_client_render_upload_glyph_rect(
+    uint32_t abi_version,
+    uint64_t handle,
+    uint32_t x,
+    uint32_t y,
+    uint32_t width,
+    uint32_t height,
+    const uint8_t *pixels,
+    size_t pixels_len);
+
+uint32_t mornlea_client_render_upload_hud_atlas(
+    uint32_t abi_version,
+    uint64_t handle,
+    uint32_t width,
+    uint32_t height,
+    const uint8_t *pixels,
+    size_t pixels_len);
 
 uint32_t mornlea_client_render_readback(
     uint32_t abi_version,

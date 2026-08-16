@@ -14,6 +14,18 @@ pub const CULL: &str = include_str!("../../../../../internal/render/shader/cull.
 pub const HIZ_BUILD: &str = include_str!("../../../../../internal/render/shader/hiz_build.wgsl");
 /// HiZ 深度拷贝 compute。
 pub const HIZ_COPY: &str = include_str!("../../../../../internal/render/shader/hiz_copy.wgsl");
+/// 实体 pass(avatar 与掉落物共用)。
+pub const AVATAR: &str = include_str!("../../../../../internal/render/shader/avatar.wgsl");
+/// 伤害红边全屏 pass。
+pub const DAMAGE_OVERLAY: &str =
+    include_str!("../../../../../internal/render/shader/damage_overlay.wgsl");
+/// 名牌 billboard pass。
+pub const NAME_TAG: &str = include_str!("../../../../../internal/render/shader/name_tag.wgsl");
+/// 调试面板 pass。
+pub const DEBUG_PANEL: &str =
+    include_str!("../../../../../internal/render/shader/debug_panel.wgsl");
+/// HUD(hotbar 家族)pass。
+pub const HUD_HOTBAR: &str = include_str!("../../../../../internal/render/hud/shader/hotbar.wgsl");
 
 #[cfg(test)]
 mod tests {
@@ -28,6 +40,11 @@ mod tests {
             ("cull", CULL),
             ("hiz_build", HIZ_BUILD),
             ("hiz_copy", HIZ_COPY),
+            ("avatar", AVATAR),
+            ("damage_overlay", DAMAGE_OVERLAY),
+            ("name_tag", NAME_TAG),
+            ("debug_panel", DEBUG_PANEL),
+            ("hud_hotbar", HUD_HOTBAR),
         ] {
             assert!(!source.trim().is_empty(), "{name} 为空");
             assert!(source.contains("fn "), "{name} 缺少入口函数");
