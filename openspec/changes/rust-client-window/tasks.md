@@ -23,7 +23,7 @@
       错误状态转稳定中文 panic 文案;新增快照解码/缓存语义与
       `DrainTextInput` 有界语义单测(注入固定字节,不开真实窗口);
       验证:`go test ./internal/client -race -count=1`。
-- [ ] 2.2 `cmd/gfxspike` 切到 `client.NewWindow`;`go.mod`/`go.sum` 删除
+- [x] 2.2 `cmd/gfxspike` 切到 `client.NewWindow`;`go.mod`/`go.sum` 删除
       `go-gl/glfw`;确认生产源码零 GLFW 引用;
       验证:`go build ./... && grep -r go-gl/glfw --include='*.go' .` 无生产
       命中。
