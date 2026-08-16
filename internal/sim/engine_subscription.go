@@ -106,7 +106,7 @@ func (engine *Engine) wantedSnapshot() map[core.ChunkKey]struct{} {
 func (engine *Engine) addCompanionWanted(wanted map[core.ChunkKey]struct{}) {
 	for _, state := range engine.companions {
 		if state.active {
-			center := companionChunk(state.body.Position)
+			center := companionChunk(state.state.Position)
 			for dz := -companionInterestRadius; dz <= companionInterestRadius; dz++ {
 				for dx := -companionInterestRadius; dx <= companionInterestRadius; dx++ {
 					wanted[core.ChunkKey{
@@ -243,7 +243,7 @@ func companionSubscriptionDistanceSquared(
 		if key.Dimension != state.dimension {
 			return 0, false
 		}
-		center := companionChunk(state.body.Position)
+		center := companionChunk(state.state.Position)
 		if absChunkDelta(key.Pos.X, center.X) > companionInterestRadius ||
 			absChunkDelta(key.Pos.Z, center.Z) > companionInterestRadius {
 			return 0, false

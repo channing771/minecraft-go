@@ -378,29 +378,31 @@ func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
 		player: &playerState{
 			lifecycle: PlayerActive,
 			health:    10,
-			state: physics.State{
-				Position: mgl32.Vec3{1.25, -2.5, 3.75},
-				Velocity: mgl32.Vec3{-4.5, 5.25, -6.75},
-				OnGround: true,
-			},
-			yaw:   7.5,
-			pitch: -8.25,
-			input: physics.Input{
-				MoveX: -9,
-				MoveZ: 10,
-				Jump:  true,
-				Yaw:   11.5,
-			},
-			lastInputSequence: 0x1122334455667788,
-			inventory: core.Inventory{
-				Hotbar: core.Hotbar{
-					Selected: 6,
-					Slots: [core.HotbarSlots]core.ItemStack{
-						0: {Item: core.ItemStone, Count: 5},
-						4: {Item: core.ItemGrass, Count: core.MaxStackCount},
+			actorState: actorState{
+				state: physics.State{
+					Position: mgl32.Vec3{1.25, -2.5, 3.75},
+					Velocity: mgl32.Vec3{-4.5, 5.25, -6.75},
+					OnGround: true,
+				},
+				yaw:   7.5,
+				pitch: -8.25,
+				input: physics.Input{
+					MoveX: -9,
+					MoveZ: 10,
+					Jump:  true,
+					Yaw:   11.5,
+				},
+				inventory: core.Inventory{
+					Hotbar: core.Hotbar{
+						Selected: 6,
+						Slots: [core.HotbarSlots]core.ItemStack{
+							0: {Item: core.ItemStone, Count: 5},
+							4: {Item: core.ItemGrass, Count: core.MaxStackCount},
+						},
 					},
 				},
 			},
+			lastInputSequence: 0x1122334455667788,
 		},
 	}
 	got, ok := engine.PlayerHash(sessionID)

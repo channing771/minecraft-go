@@ -71,20 +71,19 @@ type restoreCandidate struct {
 }
 
 type playerState struct {
+	// actorState 内嵌玩家与伙伴共有的运动/朝向/背包状态，字段经提升访问；
+	// 生命周期、生命与输入序号等玩家专属语义留在本结构体。提取范围与动机
+	// 见 actor.go。
+	actorState
 	lifecycle         PlayerLifecycle
 	anchor            core.ChunkPos
-	state             physics.State
-	input             physics.Input
-	yaw, pitch        float32
 	lastInputSequence uint64
 	miningHeld        bool
 	mining            playerMiningState
 	reset             bool
 	// spawned 记录这名玩家是否至少出生过一次。出生之前权威状态与登录时恢复的
 	// 状态完全一致；出生之后两者就可能分岔，快照因而必须可被观察。见 persistable。
-	spawned        bool
-	inventory      core.Inventory
-	inventoryDirty bool
+	spawned bool
 	// health 是服务端单写者拥有的权威生命值，0..core.MaxHealth。
 	health uint8
 	// peakY 是离地后到达过的最高高度，瞬态字段，不持久化、不进入快照/哈希。
@@ -124,16 +123,15 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 	player := &playerState{
 		lifecycle: PlayerPendingSpawn,
 		anchor:    restore.SpawnAnchor,
-		state: physics.State{Position: mgl32.Vec3{
+		actorState: actorState{state: physics.State{Position: mgl32.Vec3{
 			float32(restore.SpawnAnchor.X)*core.SectionSize + 0.5,
 			core.MaxY + 1,
 			float32(restore.SpawnAnchor.Z)*core.SectionSize + 0.5,
 		}},
-		yaw:             restore.Yaw,
-		pitch:           restore.Pitch,
-		inventory:       restore.Inventory,
+			yaw: restore.Yaw, pitch: restore.Pitch,
+			inventory:      restore.Inventory,
+			inventoryDirty: true},
 		health:          health,
-		inventoryDirty:  true,
 		restoreWanted:   make(map[core.ChunkKey]struct{}),
 		candidates:      candidates,
 		candidateChunks: spawnCandidateChunks(candidates),
