@@ -24,7 +24,7 @@
 
 ### Requirement: 任务状态机与公开事件
 
-任务 SHALL 按 `Queued → Planning → Validating → Running → Completed/Failed/TimedOut` 推进，终态 MUST 只能从 `Running` 进入。任务进入 Running MUST 广播 `TaskStarted`，一个计划步骤完成 MUST 广播 `TaskProgress`，终态 MUST 分别广播 `TaskCompleted`、`TaskFailed` 或 `TaskTimedOut`，且每次状态迁移 MUST 标记 AI 存档 dirty。`TaskFailed` MUST 携带稳定的服务器侧失败原因枚举。Task Runner MUST NOT 改写计划、插入计划外行为或为失败任务自动降级；任一终态 MUST 产生事件并推进 FIFO 下一项。
+任务 SHALL 按 `Queued → Planning → Validating → Running → Completed/Failed/TimedOut` 推进，`Completed` 与 `TimedOut` MUST 只能从 `Running` 进入；`Failed` MAY 从 `Planning`、`Validating` 或 `Running` 进入——模型与校验失败必须能够终结尚未运行的任务。任务进入 Running MUST 广播 `TaskStarted`，一个计划步骤完成 MUST 广播 `TaskProgress`，终态 MUST 分别广播 `TaskCompleted`、`TaskFailed` 或 `TaskTimedOut`，且每次状态迁移 MUST 标记 AI 存档 dirty。`TaskFailed` MUST 携带稳定的服务器侧失败原因枚举。Task Runner MUST NOT 改写计划、插入计划外行为或为失败任务自动降级；任一终态 MUST 产生事件并推进 FIFO 下一项。
 
 #### Scenario: 完整生命周期事件序列
 
