@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"math"
 	"reflect"
 	"testing"
 
@@ -44,12 +45,12 @@ func TestCompanionActionAppliesInIDOrderAfterPlayers(t *testing.T) {
 		engine.Enqueue(Command{Session: sessionB, Sequence: 2, Kind: CommandPlayerInput, MoveZ: -1})
 		// 故意按逆 ID 序入队：处理顺序必须由 ID 字节序决定，而不是入队顺序。
 		if !engine.EnqueueCompanionAction(CompanionAction{
-			ID: companionB, Input: physics.Input{MoveZ: 1},
+			ID: companionB, Kind: CompanionActionMove, Input: physics.Input{MoveZ: 1},
 		}) {
 			t.Fatal("伙伴 B 的 action 未入队")
 		}
 		if !engine.EnqueueCompanionAction(CompanionAction{
-			ID: companionA, Input: physics.Input{MoveX: 1},
+			ID: companionA, Kind: CompanionActionMove, Input: physics.Input{MoveX: 1},
 		}) {
 			t.Fatal("伙伴 A 的 action 未入队")
 		}
@@ -117,7 +118,7 @@ func TestCompanionActionSharesPlayerPhysicsExit(t *testing.T) {
 			Session: session, Sequence: sequence, Kind: CommandPlayerInput, MoveX: 1,
 		})
 		if !engine.EnqueueCompanionAction(CompanionAction{
-			ID: id, Input: physics.Input{MoveX: 1},
+			ID: id, Kind: CompanionActionMove, Input: physics.Input{MoveX: 1},
 		}) {
 			t.Fatalf("tick %d action 未入队", tick)
 		}
@@ -175,7 +176,7 @@ func TestCompanionActionInboxBoundedAndSessionless(t *testing.T) {
 		before := engine.companions[id].state.Position
 
 		engine.EnqueueCompanionAction(CompanionAction{
-			ID: companionTestID(7), Input: physics.Input{MoveX: 1},
+			ID: companionTestID(7), Kind: CompanionActionMove, Input: physics.Input{MoveX: 1},
 		})
 		result := engine.Step()
 		if len(engine.sessions) != 0 || len(result.Forget) != 0 || len(result.Rejected) != 0 {
@@ -201,7 +202,7 @@ func TestCompanionActionInboxBoundedAndSessionless(t *testing.T) {
 		// 注册后立即入队：伙伴尚处待恢复状态，action 必须在本 tick 被丢弃且
 		// 不滞留到激活之后。首个 Step 只产生订阅请求，不会激活。
 		engine.EnqueueCompanionAction(CompanionAction{
-			ID: id, Input: physics.Input{MoveX: 1},
+			ID: id, Kind: CompanionActionMove, Input: physics.Input{MoveX: 1},
 		})
 		result := engine.Step()
 		if engine.companions[id].active {
@@ -224,8 +225,8 @@ func TestCompanionActionInboxBoundedAndSessionless(t *testing.T) {
 		loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
 		id := companionTestID(1)
 		activateCompanionAt(t, engine, id, mgl32.Vec3{0.5, 1, 0.5})
-		engine.EnqueueCompanionAction(CompanionAction{ID: id, Input: physics.Input{MoveX: 1}})
-		engine.EnqueueCompanionAction(CompanionAction{ID: id, Input: physics.Input{MoveX: -1}})
+		engine.EnqueueCompanionAction(CompanionAction{ID: id, Kind: CompanionActionMove, Input: physics.Input{MoveX: 1}})
+		engine.EnqueueCompanionAction(CompanionAction{ID: id, Kind: CompanionActionMove, Input: physics.Input{MoveX: -1}})
 
 		engine.Step()
 		if applied := engine.companions[id].input.MoveX; applied != 1 {
@@ -262,7 +263,7 @@ func TestCompanionInterestSlidesWithBody(t *testing.T) {
 	var final CompanionUpdate
 	for tick := 0; tick < 200; tick++ {
 		if !engine.EnqueueCompanionAction(CompanionAction{
-			ID: id, Input: physics.Input{MoveX: 1},
+			ID: id, Kind: CompanionActionMove, Input: physics.Input{MoveX: 1},
 		}) {
 			t.Fatalf("tick %d action 未入队", tick)
 		}
@@ -308,9 +309,10 @@ func TestCompanionInterestSlidesWithBody(t *testing.T) {
 }
 
 // TestActorStateExtractionKeepsPlayerBehavior 锁定 actorState 提取契约：玩家与
-// 伙伴的运动/朝向/背包字段必须经同一个内嵌 actorState 提升（不得在子结构体重复
-// 声明遮蔽），且提取后玩家的移动/采掘/背包序列重放逐 tick 产生完全一致的可观察
-// 结果。既有 sim 全量测试套件（含 oracle 差分）不改语义通过是另一道差分门禁。
+// 伙伴的运动/朝向/背包/采掘字段必须经同一个内嵌 actorState 提升（不得在子结构
+// 体重复声明遮蔽），且扩展后玩家的移动/采掘/放置/背包序列重放逐 tick 产生完全
+// 一致的可观察结果。既有 sim 全量测试套件（含 oracle 差分）不改语义通过是另一
+// 道差分门禁。
 func TestActorStateExtractionKeepsPlayerBehavior(t *testing.T) {
 	t.Run("运动字段经 actorState 内嵌提升", func(t *testing.T) {
 		player := &playerState{actorState: actorState{
@@ -327,9 +329,52 @@ func TestActorStateExtractionKeepsPlayerBehavior(t *testing.T) {
 		}
 	})
 
-	t.Run("移动采掘背包序列重放逐 tick 一致", func(t *testing.T) {
+	// M5C：采掘状态（按住意图 + 进度状态机）上移 actorState 后，两类 actor 必须
+	// 共用同一结构体类型与同一进度语义，子结构体不得重复声明遮蔽。
+	t.Run("采掘字段经 actorState 内嵌共享", func(t *testing.T) {
+		actorType := reflect.TypeOf(actorState{})
+		miningField, ok := actorType.FieldByName("mining")
+		if !ok || miningField.Type != reflect.TypeOf(miningState{}) {
+			t.Fatalf("actorState 缺少共有采掘进度字段: %+v", actorType)
+		}
+		heldField, ok := actorType.FieldByName("miningHeld")
+		if !ok || heldField.Type.Kind() != reflect.Bool {
+			t.Fatalf("actorState 缺少共有采掘意图字段: %+v", actorType)
+		}
+		for _, shadow := range []reflect.Type{
+			reflect.TypeOf(playerState{}), reflect.TypeOf(companionState{}),
+		} {
+			// 只检查直接字段：FieldByName 会沿内嵌提升找到 actorState 的字段，
+			// 遮蔽检查必须限定在子结构体自身声明的字段上。
+			for index := range shadow.NumField() {
+				field := shadow.Field(index)
+				if field.Name == "mining" || field.Name == "miningHeld" {
+					t.Fatalf("%s 重复声明遮蔽了共有字段 %s", shadow.Name(), field.Name)
+				}
+			}
+		}
+		player := &playerState{}
+		entry := &companionState{}
+		player.mining = miningState{target: core.BlockPos{X: 1}, progressTicks: 3, requiredTicks: 8}
+		entry.mining = player.mining
+		if player.mining != entry.mining {
+			t.Fatalf("两类 actor 的采掘进度不同型: %+v %+v", player.mining, entry.mining)
+		}
+	})
+
+	t.Run("移动采掘放置背包序列重放逐 tick 一致", func(t *testing.T) {
 		run := func() ([]PlayerUpdate, []Rejection) {
 			engine, session := readyMovementPlayer(t)
+			// 差分脚本覆盖移动/采掘/放置/背包全部命令族：放置需要玩家持有可放置
+			// 物品，并在视线方向放一个参照方块。
+			engine.sessions[session].player.inventory.Hotbar.Slots[2] = core.ItemStack{
+				Item: core.ItemOakPlanks, Count: 3,
+			}
+			// 视线方向放一面 4 格宽的参照墙：玩家在前几个 tick 会随输入小幅漂移，
+			// 加宽保证放置命令在重放中的任何漂移量下都命中同一面墙。
+			for dx := int32(0); dx < 4; dx++ {
+				engine.SetBlockForTest(core.BlockPos{X: dx, Y: 2, Z: 3}, core.StoneID)
+			}
 			script := [][]Command{
 				{{Session: session, Sequence: 2, Kind: CommandPlayerInput, MoveX: 1, Yaw: 0.25, Pitch: -0.1}},
 				nil,
@@ -339,6 +384,7 @@ func TestActorStateExtractionKeepsPlayerBehavior(t *testing.T) {
 				},
 				{{Session: session, Sequence: 5, Kind: CommandMoveInventoryStack, Slot: 0, ToSlot: 9}},
 				{{Session: session, Sequence: 6, Kind: CommandPlayerInput, MoveZ: 1, Yaw: -0.75}},
+				{{Session: session, Sequence: 7, Kind: CommandPlaceBlock, Slot: 2, Yaw: math.Pi, Pitch: 0}},
 			}
 			var updates []PlayerUpdate
 			var rejections []Rejection
@@ -361,6 +407,24 @@ func TestActorStateExtractionKeepsPlayerBehavior(t *testing.T) {
 		if len(firstRejections) != 1 ||
 			firstRejections[0].Reason != RejectInvalidInput {
 			t.Fatalf("空背包移动的确定性拒绝缺失: %+v", firstRejections)
+		}
+		// 放置命令必须真实成交，否则脚本没有覆盖放置路径。
+		placed := func() bool {
+			engine, session := readyMovementPlayer(t)
+			engine.sessions[session].player.inventory.Hotbar.Slots[2] = core.ItemStack{
+				Item: core.ItemOakPlanks, Count: 3,
+			}
+			for dx := int32(0); dx < 4; dx++ {
+				engine.SetBlockForTest(core.BlockPos{X: dx, Y: 2, Z: 3}, core.StoneID)
+			}
+			engine.Enqueue(Command{
+				Session: session, Sequence: 2, Kind: CommandPlaceBlock, Slot: 2, Yaw: math.Pi, Pitch: 0,
+			})
+			result := engine.Step()
+			return len(result.Changes) == 1 && len(result.Changes[0].Changes) == 1
+		}()
+		if !placed {
+			t.Fatal("差分脚本中的放置命令没有成交，放置路径未被覆盖")
 		}
 	})
 }

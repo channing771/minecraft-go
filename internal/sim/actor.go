@@ -5,14 +5,14 @@ import (
 	"github.com/channing771/mornlea/internal/physics"
 )
 
-// actorState 是玩家与伙伴两类 actor 共有的运动状态：物理体、本 tick 控制输入、
-// 朝向与背包。两者的身体记录本就同构，提取共有字段后，伙伴得以汇入与玩家完全
-// 相同的 Rust physics.Step 积分出口，而不需要第二套积分实现。
+// actorState 是玩家与伙伴两类 actor 共有的状态：物理体、本 tick 控制输入、
+// 朝向、背包与采掘进度。两者的身体记录本就同构，提取共有字段后，伙伴得以汇入
+// 与玩家完全相同的 Rust physics.Step 积分出口与 miningRule 采掘状态机，而不
+// 需要第二套积分或计时实现。
 //
-// 提取范围刻意最小化（M5B 只需要移动）：生命、重生与玩家输入序号留在
-// playerState，稳定 CompanionID 与激活状态留在 companionState；采掘与交互校验
-// 共享留给首次需要它们的里程碑。playerState 与 companionState 以匿名内嵌方式
-// 复用本结构体，字段经提升访问，禁止在子结构体重复声明遮蔽（由
+// 提取范围刻意最小化：生命、重生与玩家输入序号留在 playerState，稳定
+// CompanionID 与激活状态留在 companionState。playerState 与 companionState 以
+// 匿名内嵌方式复用本结构体，字段经提升访问，禁止在子结构体重复声明遮蔽（由
 // TestActorStateExtractionKeepsPlayerBehavior 锁定）。
 type actorState struct {
 	state physics.State
@@ -21,7 +21,14 @@ type actorState struct {
 	pitch float32
 	// inventory 与 inventoryDirty 是共有的权威背包。玩家侧由命令阶段写并逐 tick
 	// 发布；伙伴侧 M5B 尚无背包交互，仅随恢复/存档往返，但字段属于两类 actor
-	// 同构的身体记录，随提取一起上移。
+	// 同构的身体记录，随提取一起上移。M5C 采掘完成后伙伴产物直入此背包。
 	inventory      core.Inventory
 	inventoryDirty bool
+	// miningHeld 与 mining 是 M5C 上移的共有采掘状态：按住意图与进度状态机。
+	// 玩家的意图来自输入命令（Command.Mining），伙伴的意图来自 MineHold/
+	// MineRelease action（伙伴专属的意图目标记录在 companionState.miningTarget，
+	// 玩家目标由视线 raycast 逐 tick 派生，不需要持久化字段）；两者的进度语义
+	// 完全一致，由 stepMiningProgress 单点推进，完成分叉只差产物去向。
+	miningHeld bool
+	mining     miningState
 }

@@ -433,6 +433,7 @@ func (m *companionManager) advanceRunners() {
 		}
 		m.engine.EnqueueCompanionAction(sim.CompanionAction{
 			ID:    id,
+			Kind:  sim.CompanionActionMove,
 			Input: movementInputToward(body.Position, slot.path.Waypoints[slot.waypoint]),
 		})
 	}

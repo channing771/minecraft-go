@@ -2,17 +2,41 @@ package sim
 
 import (
 	"github.com/channing771/mornlea/internal/companion"
+	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/physics"
 )
 
-// CompanionAction 是 Task Runner 在 tick 边界提交的伙伴移动意图，按 CompanionID
+// CompanionActionKind 标识伙伴 action 的四种判别载荷之一。零值刻意不是合法
+// 载荷：未经初始化的 action 必须被确定性丢弃，而不是被当作移动静默应用。
+type CompanionActionKind uint8
+
+const (
+	// CompanionActionMove 是既有规范移动输入载荷。
+	CompanionActionMove CompanionActionKind = iota + 1
+	// CompanionActionMineHold 是采掘按住载荷，携带目标 BlockPos，语义与玩家
+	// Mining:true 输入一致：进度由 sim 依 miningRule 累积。
+	CompanionActionMineHold
+	// CompanionActionMineRelease 是采掘释放载荷，同 tick 清空采掘意图与进度。
+	CompanionActionMineRelease
+	// CompanionActionPlace 是放置载荷，携带目标 BlockPos 与方块；放置结算本体
+	// 属后续放置任务，当前只保留分派骨架与载荷校验。
+	CompanionActionPlace
+)
+
+// CompanionAction 是 Task Runner 在 tick 边界提交的伙伴意图，按 CompanionID
 // 寻址。action 刻意不携带 SessionID 或任何玩家会话身份——伙伴独立于玩家会话语义，
-// 这条约束由结构体的字段面（ID + 规范移动输入）在编译期保证，并由
+// 这条约束由结构体的字段面（ID + 判别载荷）在编译期保证，并由
 // TestCompanionActionInboxBoundedAndSessionless 反射锁定。go_to 等任务只能经由
-// 这里提交规范移动输入，实际位移永远由权威物理决定。
+// 这里提交规范移动输入或采掘/放置意图，实际位移与方块变更永远由权威模拟决定。
 type CompanionAction struct {
-	ID    companion.ID
+	ID   companion.ID
+	Kind CompanionActionKind
+	// Input 只在 Kind == CompanionActionMove 时有意义（规范移动输入）。
 	Input physics.Input
+	// Target 是 MineHold 与 Place 载荷的目标方块坐标。
+	Target core.BlockPos
+	// Block 是 Place 载荷要写入的方块。
+	Block core.BlockID
 }
 
 // EnqueueCompanionAction 可由 Task Runner 并发调用，把一个伙伴 action 投递进有界
@@ -48,41 +72,88 @@ func validCompanionActionInput(input physics.Input) bool {
 		finiteInputComponent(input.Yaw)
 }
 
+// validCompanionActionTarget 校验载荷目标坐标：X/Z 可以是任意有限列（跨区块
+// 目标由采掘推进的距离校验兜底），Y 必须落在世界高度范围内，越界目标确定性
+// 丢弃。
+func validCompanionActionTarget(target core.BlockPos) bool {
+	return target.Y >= core.MinY && target.Y < core.MaxY
+}
+
+// validCompanionAction 按判别载荷做防御校验：Move 校验移动输入，MineHold 校验
+// 目标坐标，MineRelease 无载荷约束，Place 额外要求方块已注册且不是空气
+// （放置空气没有意义，真实放置校验属后续放置任务）。
+func validCompanionAction(action CompanionAction) bool {
+	switch action.Kind {
+	case CompanionActionMove:
+		return validCompanionActionInput(action.Input)
+	case CompanionActionMineHold, CompanionActionPlace:
+		if !validCompanionActionTarget(action.Target) {
+			return false
+		}
+		if action.Kind == CompanionActionPlace {
+			return action.Block != core.AirID && core.RegisteredBlock(action.Block)
+		}
+		return true
+	case CompanionActionMineRelease:
+		return true
+	default:
+		return false
+	}
+}
+
 // applyCompanionActions 是权威 tick 的伙伴 action 阶段，必须位于玩家命令阶段
 // 之后、统一物理推进之前（由 stepPhaseObserver 顺序测试与突变验证锁定）。
 //
 // 每个 active 伙伴每 tick 至多应用一个 action：按入队顺序取该 ID 最早的一个合法
 // action，重复或非法 action 确定性丢弃；未知 ID 或未激活伙伴的 action 同样丢弃，
-// 不产生任何会话副作用。没有收到 action 的 active 伙伴写中性输入（仅保留当前
-// yaw），与玩家未按键时的步进语义一致：重力与碰撞照常生效，无任务伙伴在地面
-// 保持静止。中性输入每 tick 重写，伙伴输入因此不像玩家输入那样跨 tick 保持。
+// 不产生任何会话副作用。Move 写入本 tick 移动输入；MineHold/MineRelease 置/清
+// 共享的采掘意图（实际进度在物理阶段之后的 advanceMining 统一累积）；Place 保留
+// 分派骨架——放置结算本体属后续放置任务，当前绝不动世界与背包。非 Move 载荷与
+// 无 action 的伙伴一样写中性输入（仅保留当前 yaw）：重力与碰撞照常生效，无任务
+// 伙伴在地面保持静止。中性输入每 tick 重写，伙伴输入因此不像玩家输入那样跨
+// tick 保持；采掘意图例外——它与玩家的按住语义一致，跨 tick 保持直到 Release。
 func (engine *Engine) applyCompanionActions(actions []CompanionAction) {
-	var inputs map[companion.ID]physics.Input
+	var intents map[companion.ID]CompanionAction
 	if len(actions) != 0 {
 		// 容量上限是 companion.MaxActive，这里的临时表不在热路径上放大分配。
-		inputs = make(map[companion.ID]physics.Input, len(actions))
+		intents = make(map[companion.ID]CompanionAction, len(actions))
 		for _, action := range actions {
-			if _, duplicate := inputs[action.ID]; duplicate {
+			if _, duplicate := intents[action.ID]; duplicate {
 				continue
 			}
-			if !validCompanionActionInput(action.Input) {
+			if !validCompanionAction(action) {
 				continue
 			}
-			inputs[action.ID] = action.Input
+			intents[action.ID] = action
 		}
 	}
 	for _, id := range engine.activeCompanionIDs() {
 		entry := engine.companions[id]
-		if input, ok := inputs[id]; ok {
-			yaw := normalizeYaw(input.Yaw)
+		action, ok := intents[id]
+		if !ok {
+			entry.input = physics.Input{Yaw: entry.yaw}
+			continue
+		}
+		switch action.Kind {
+		case CompanionActionMove:
+			yaw := normalizeYaw(action.Input.Yaw)
 			entry.input = physics.Input{
-				MoveX: input.MoveX,
-				MoveZ: input.MoveZ,
-				Jump:  input.Jump,
+				MoveX: action.Input.MoveX,
+				MoveZ: action.Input.MoveZ,
+				Jump:  action.Input.Jump,
 				Yaw:   yaw,
 			}
 			entry.yaw = yaw
-		} else {
+		case CompanionActionMineHold:
+			entry.input = physics.Input{Yaw: entry.yaw}
+			entry.miningHeld = true
+			entry.miningTarget = action.Target
+		case CompanionActionMineRelease:
+			entry.input = physics.Input{Yaw: entry.yaw}
+			entry.miningHeld = false
+		case CompanionActionPlace:
+			// 放置分派骨架：载荷校验已在 validCompanionAction 完成，结算本体
+			// （放置校验 + 原子扣料写方块）属后续放置任务，这里只保持中性输入。
 			entry.input = physics.Input{Yaw: entry.yaw}
 		}
 	}
