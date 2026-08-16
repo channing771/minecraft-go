@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mornlea_engine"]
+members = ["crates/mornlea_engine", "crates/mornlea_client"]
 resolver = "3"
 
 [profile.release]

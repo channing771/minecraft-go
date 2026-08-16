@@ -10,12 +10,11 @@ import (
 	"log"
 	"log/slog"
 	"runtime"
-	"unsafe"
 
-	"github.com/go-gl/glfw/v3.3/glfw"
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/assets"
+	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/gfx"
 	"github.com/channing771/mornlea/internal/mesh"
@@ -29,20 +28,14 @@ func init() {
 }
 
 func main() {
-	if err := glfw.Init(); err != nil {
-		log.Fatalf("glfw 初始化失败: %v", err)
-	}
-	defer glfw.Terminate()
-
-	glfw.WindowHint(glfw.ClientAPI, glfw.NoAPI)
-	win, err := glfw.CreateWindow(1280, 720, "Mornlea — M1 terrain", nil, nil)
+	win, err := client.NewWindow(1280, 720, "Mornlea — M1 terrain")
 	if err != nil {
 		log.Fatalf("创建窗口失败: %v", err)
 	}
-	defer win.Destroy()
+	defer win.Close()
 
-	fbWidth, fbHeight := win.GetFramebufferSize()
-	dev, surface, err := gfx.NewDevice(cocoaHandle(win), uint32(fbWidth), uint32(fbHeight))
+	fbWidth, fbHeight := win.FramebufferSize()
+	dev, surface, err := gfx.NewDevice(win.NativeHandle(), uint32(fbWidth), uint32(fbHeight))
 	if err != nil {
 		log.Fatalf("创建 GPU 设备失败: %v", err)
 	}
@@ -62,9 +55,9 @@ func main() {
 	defer depth.Release()
 
 	for !win.ShouldClose() {
-		glfw.PollEvents()
+		win.Poll()
 
-		w, h := win.GetFramebufferSize()
+		w, h := win.FramebufferSize()
 		if w == 0 || h == 0 {
 			continue
 		}
@@ -170,12 +163,5 @@ func (d *depthTarget) Release() {
 	if d.texture != nil {
 		d.texture.Release()
 		d.texture = nil
-	}
-}
-
-func cocoaHandle(win *glfw.Window) gfx.NativeWindowHandle {
-	return gfx.NativeWindowHandle{
-		Kind:    gfx.HandleKindNSWindow,
-		Pointer: uintptr(unsafe.Pointer(win.GetCocoaWindow())),
 	}
 }
