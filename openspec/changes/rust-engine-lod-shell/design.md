@@ -65,7 +65,7 @@ golden wire 测试。版本不匹配沿用既有握手拒绝,不产生半兼容�
 **被否决的替代**:服务端按需下发远环几何/高度摘要——把"每客户端一次
 8 字节"变成持续带宽与协议面,且与确定性本地生成的成本优势相反。
 
-### client ABI 4→5 与远环 pass
+### client ABI 4→5→6 与远环 pass
 
 `render_upload_lod_tile(abi, x, z, quads, len)` / `render_drop_lod_tile`
 (整 tile 生命周期替换,复用近环 section 的覆盖语义:重复上传同 tile 即
@@ -74,7 +74,13 @@ section 网格编码;帧序 天空 → 远环 → 近环 → 实体/HUD,远环�
 近环自然覆盖。距离雾在远环 WGSL 内按相机距离向天空色 mix,外缘带
 (最外 25%)全雾;近环 v1 不雾化。雾色与昼夜 tint 同源(复用 day/night
 uniform,不新增状态)。剔除:v1 仅 tile 级视锥剔除(每帧 ≤ 数十 tile),
-不进 HiZ/GPU culling。
+不进 HiZ/GPU culling。终审修复波(Ruling 13/14)定版:`MAX_LOD_TILES`
+按切比雪夫方环定容(multiplier=8 全方环 (2×64+1)²=16641,取 32768 留
+2 倍余量);FOG_START/FOG_FULL 参数化为渲染器可设状态,新增
+`render_set_lod_fog(abi, start, full)` 出口(默认 768/1152 保持
+multiplier=3 行为),client ABI 随之 v5→v6(新增出口必 bump,同
+engine v3→v4 先例);5.2 接线按 `lodFarMultiplier` 推导雾距离并调用
+该出口(tasks.md 已列显式验收)。
 
 ### Go 编排:`internal/lod` 与独立预算
 
