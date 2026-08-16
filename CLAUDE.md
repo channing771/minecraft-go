@@ -41,6 +41,12 @@ Raycast 生产路径同样由 Rust `mornlea_engine` 独占 DDA 遍历；`interna
 - 自动测试不得启动或聚焦前台游戏窗口；只有用户明确要求人工验收时才运行交互式客户端。
 - `.codex/hooks.json` 与 `.claude/settings.json` 共用 `scripts/agent-hooks/guard.mjs`。Hook 失败时修复根因；不得关闭、改写或用 `MORNLEA_HOOKS_ALLOW_NO_SPEC=1` 绕过，除非用户明确批准例外。
 
+## 开发工作流
+
+- 所有开发任务（OpenSpec change 执行、多步骤修复与重构）必须以 `subagent-driven-development` 规范执行：每个任务派发全新的 implementer 子代理，任务 brief 是其唯一需求来源；任务完成后必须通过独立的任务评审（规格合规 + 代码质量双裁决）；评审发现进入修复循环，单任务最多 5 轮，超限逐条裁决并记录；全部任务完成后进行整分支终审。
+- 执行进度、评审结论与所有裁决（ruling）必须记录在 ledger 文件；控制会话只负责派发、协调与裁决，不得绕过子代理直接实现；implementer 子代理不得自行派生子代理或评审者。
+- 小型拼写修复、纯格式修改和一次性实验沿用「开始工作前」的直接修改豁免，不强制子代理流程，但仍须完成相称的验证。
+
 ## 验证
 
 按风险从小到大执行：
