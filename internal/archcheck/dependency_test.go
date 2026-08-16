@@ -36,6 +36,10 @@ var allowed = map[string][]string{
 	"internal/world":      {"internal/core"},
 	"internal/worldgen":   {"internal/core", "internal/world", "internal/nativeabi"},
 	"internal/mesh":       {"internal/core", "internal/world", "internal/nativeabi"},
+	// internal/lod 只做远环壳的请求编码、quad 解码与编排(依赖方向镜像
+	// worldgen/mesh:core 提供 ChunkPos 等领域类型,nativeabi 是唯一 engine
+	// ABI 入口);按 design 裁决不得依赖 render/sim/network。
+	"internal/lod": {"internal/core", "internal/nativeabi"},
 	"internal/assets":     {"internal/core", "internal/world", "internal/mesh", "internal/worldgen"},
 	"internal/render":     {"internal/core", "internal/world", "internal/mesh", "internal/assets"},
 	"internal/render/hud": {"internal/core", "internal/mesh", "internal/assets", "internal/render"},

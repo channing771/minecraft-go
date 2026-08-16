@@ -4,6 +4,7 @@ package nativeabi
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -93,6 +94,8 @@ func TestEngineCgoDirectivesArePresent(t *testing.T) {
 		"#cgo nocallback mornlea_worldgen_chunk",
 		"#cgo noescape mornlea_worldgen_probe",
 		"#cgo nocallback mornlea_worldgen_probe",
+		"#cgo noescape mornlea_lod_shell",
+		"#cgo nocallback mornlea_lod_shell",
 	} {
 		if !strings.Contains(string(contents), directive) {
 			t.Errorf("缺少 %s", directive)
@@ -645,10 +648,206 @@ func TestWorldgenStatusPanicTextIsStable(t *testing.T) {
 		{Status(200), "nativeabi: worldgen chunk 未知状态"},
 	} {
 		if got := worldgenStatusPanicText("chunk", test.status); got != test.want {
-			t.Fatalf("status=%d 文案=%q，想要 %q", test.status, got, test.want)
+			t.Fatalf("status %d 文案=%q，想要 %q", test.status, got, test.want)
 		}
 	}
 	if got := worldgenStatusPanicText("probe", StatusInput); got != "nativeabi: worldgen probe 输入非法" {
 		t.Fatalf("probe 文案=%q", got)
+	}
+}
+
+// testLodShellHeader 构造与 engine lod.rs 单测 lod_input 逐字节一致的
+// `MGW1` header:seed 42、恒等材料表 0..=12、恒等 perm。材料表取恒等
+// (而非 worldgen 测试的 1..=13)是为了与 engine golden fixture
+// `lod-shell-seed42-step4-v1.bin` 的输入严格同源。
+func testLodShellHeader() []byte {
+	header := make([]byte, 564)
+	copy(header[:4], "MGW1")
+	binary.LittleEndian.PutUint32(header[4:8], 1)
+	binary.LittleEndian.PutUint64(header[8:16], 42)
+	minY := int32(-64)
+	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
+	binary.LittleEndian.PutUint32(header[20:24], 320)
+	for index := uint16(0); index < 13; index++ {
+		binary.LittleEndian.PutUint16(header[24+2*int(index):26+2*int(index)], index)
+	}
+	for index := 0; index < 512; index++ {
+		header[52+index] = byte(index & 255)
+	}
+	return header
+}
+
+// testLodShellInput 构造合法 `mornlea_lod_shell` 输入:header(564)+
+// tile_x i32 + tile_z i32 + columns u32(必须 64)+ lod_step u32。
+func testLodShellInput(tileX, tileZ int32, columns, step uint32) []byte {
+	input := testLodShellHeader()
+	input = binary.LittleEndian.AppendUint32(input, uint32(tileX))
+	input = binary.LittleEndian.AppendUint32(input, uint32(tileZ))
+	input = binary.LittleEndian.AppendUint32(input, columns)
+	input = binary.LittleEndian.AppendUint32(input, step)
+	return input
+}
+
+func TestLodShellRawFailureAtomicity(t *testing.T) {
+	validInput := testLodShellInput(-3, 2, 64, 4)
+	badMagic := slices.Clone(validInput)
+	badMagic[0] = 'X'
+	badColumns := slices.Clone(validInput)
+	binary.LittleEndian.PutUint32(badColumns[572:576], 63)
+	badStep := slices.Clone(validInput)
+	binary.LittleEndian.PutUint32(badStep[576:580], 3)
+	tileOverflow := slices.Clone(validInput)
+	binary.LittleEndian.PutUint32(tileOverflow[564:568], uint32(math.MaxInt32))
+	shortInput := validInput[:len(validInput)-1]
+	longInput := append(slices.Clone(validInput), 0)
+	for _, test := range []struct {
+		name    string
+		version uint32
+		input   []byte
+		output  []byte
+		want    Status
+	}{
+		{name: "ABI version", version: ABIVersion + 1, input: validInput, output: make([]byte, 1), want: StatusABIVersion},
+		{name: "nil input", version: ABIVersion, output: make([]byte, 1), want: StatusInvalidArgument},
+		{name: "nil output", version: ABIVersion, input: validInput, want: StatusInvalidArgument},
+		{name: "short input", version: ABIVersion, input: shortInput, output: make([]byte, 1), want: StatusInput},
+		{name: "long input", version: ABIVersion, input: longInput, output: make([]byte, 1), want: StatusInput},
+		{name: "bad magic", version: ABIVersion, input: badMagic, output: make([]byte, 1), want: StatusInput},
+		{name: "bad columns", version: ABIVersion, input: badColumns, output: make([]byte, 1), want: StatusInput},
+		{name: "bad step", version: ABIVersion, input: badStep, output: make([]byte, 1), want: StatusInput},
+		{name: "tile overflow", version: ABIVersion, input: tileOverflow, output: make([]byte, 1), want: StatusInput},
+		{name: "input output overlap", version: ABIVersion, input: validInput[:580], output: validInput[560:561], want: StatusInvalidArgument},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := slices.Clone(test.output)
+			status, outputLen := lodShellVersion(test.version, test.input, test.output)
+			if status != test.want || outputLen != 0 {
+				t.Fatalf("status/len=%d/%d，想要 %d/0", status, outputLen, test.want)
+			}
+			if !slices.Equal(test.output, output) {
+				t.Fatal("失败调用修改了 caller-owned output")
+			}
+		})
+	}
+}
+
+func TestLodShellTwoPhaseCapacityProbeIsExact(t *testing.T) {
+	input := testLodShellInput(-3, 2, 64, 4)
+
+	// 第一段:容量 1 不足,报告所需字节数且不写输出缓冲。
+	tiny := make([]byte, 1)
+	status, needed := lodShellVersion(ABIVersion, input, tiny)
+	if status != StatusOutputOverflow || needed == 0 || needed%20 != 0 {
+		t.Fatalf("probe status/needed=%d/%d，想要 overflow/20 的倍数", status, needed)
+	}
+	if tiny[0] != 0 {
+		t.Fatal("overflow 探测写入了输出缓冲")
+	}
+
+	// 差 1 字节仍是 overflow,所需字节数保持不变。
+	status, again := lodShellVersion(ABIVersion, input, make([]byte, needed-1))
+	if status != StatusOutputOverflow || again != needed {
+		t.Fatalf("short status/needed=%d/%d，想要 overflow/%d", status, again, needed)
+	}
+
+	// 恰好容量即成功,写入字节数 == 所需。
+	exact := make([]byte, needed)
+	if status, written := lodShellVersion(ABIVersion, input, exact); status != StatusOK || written != needed {
+		t.Fatalf("exact status/written=%d/%d，想要 OK/%d", status, written, needed)
+	}
+
+	// 富余容量成功且尾部不被触碰。
+	padded := make([]byte, needed+8)
+	padded[needed] = 0xa5
+	if status, written := lodShellVersion(ABIVersion, input, padded); status != StatusOK || written != needed {
+		t.Fatalf("padded status/written=%d/%d，想要 OK/%d", status, written, needed)
+	}
+	if padded[needed] != 0xa5 {
+		t.Fatal("成功调用写出了实际输出边界")
+	}
+}
+
+func TestLodShellGenerateRetriesOverflow(t *testing.T) {
+	input := testLodShellInput(-3, 2, 64, 4)
+	// 初始缓冲只有 1 字节(模拟静态上界被超出),两段式扩容重试后必须
+	// 与一次性足量调用产出逐字节一致的壳流。
+	retried := lodShellGenerate(ABIVersion, input, make([]byte, 1))
+	once := LodShell(input)
+	if !slices.Equal(retried, once) {
+		t.Fatalf("重试输出 %d 字节 != 一次性输出 %d 字节", len(retried), len(once))
+	}
+}
+
+func TestLodShellHappyPathWithinStaticBound(t *testing.T) {
+	for _, step := range []uint32{2, 4, 8} {
+		t.Run(fmt.Sprintf("step%d", step), func(t *testing.T) {
+			input := testLodShellInput(-3, 2, 64, step)
+			first := LodShell(input)
+			second := LodShell(input)
+			if !slices.Equal(first, second) {
+				t.Fatal("同输入两次生成结果不同")
+			}
+			if len(first) == 0 || len(first)%20 != 0 {
+				t.Fatalf("输出长度 %d 非法", len(first))
+			}
+			bound, ok := LodShellOutputBoundBytes(step)
+			if !ok {
+				t.Fatalf("步长 %d 无静态上界", step)
+			}
+			if len(first) > bound {
+				t.Fatalf("输出 %d 字节超出静态上界 %d", len(first), bound)
+			}
+			// 输出编码契约抽查:face ∈ 0..4,shade ∈ {255, 204, 153}。
+			for offset := 16; offset < len(first); offset += 20 {
+				if face := first[offset]; face > 4 {
+					t.Fatalf("offset %d face=%d 非法", offset-16, face)
+				}
+				switch shade := first[offset+3]; shade {
+				case 255, 204, 153:
+				default:
+					t.Fatalf("offset %d shade=%d 非法", offset-16, shade)
+				}
+			}
+		})
+	}
+}
+
+func TestLodShellOutputBoundBytes(t *testing.T) {
+	// 最坏 quad 数 = 3N²+2N(N = 64/step):顶面 N² + 两向裙边各 N×(N+1)。
+	for _, test := range []struct {
+		step uint32
+		want int
+	}{
+		{2, 3136 * 20},
+		{4, 800 * 20},
+		{8, 208 * 20},
+	} {
+		got, ok := LodShellOutputBoundBytes(test.step)
+		if !ok || got != test.want {
+			t.Fatalf("step %d bound=%d/%v，想要 %d/true", test.step, got, ok, test.want)
+		}
+	}
+	for _, step := range []uint32{0, 1, 3, 16, 64} {
+		if got, ok := LodShellOutputBoundBytes(step); ok {
+			t.Fatalf("非法步长 %d 得到上界 %d", step, got)
+		}
+	}
+}
+
+func TestLodShellStatusPanicTextIsStable(t *testing.T) {
+	for _, test := range []struct {
+		status Status
+		want   string
+	}{
+		{StatusABIVersion, "nativeabi: lod shell ABI 版本不匹配"},
+		{StatusInvalidArgument, "nativeabi: lod shell 参数非法"},
+		{StatusInput, "nativeabi: lod shell 输入非法"},
+		{StatusOutputOverflow, "nativeabi: lod shell output 过短"},
+		{StatusPanic, "nativeabi: lod shell Rust panic"},
+		{StatusScratch, "nativeabi: lod shell 未知状态"},
+	} {
+		if got := lodShellStatusPanicText(test.status); got != test.want {
+			t.Fatalf("status %d 文案=%q，想要 %q", test.status, got, test.want)
+		}
 	}
 }
