@@ -7,6 +7,11 @@ import (
 )
 
 // allowed 列出每个内部包允许直接依赖的内部包。
+//
+// internal/server → internal/physics：M5B 任务编排（m5b-companion-planning-fifo）
+// 经 sim.CompanionAction 提交伙伴移动输入，该 API 的字段类型就是 physics.Input；
+// server 只消费物理的值类型与 ActiveTunables 快照（发令者射线的眼高），方向是
+// 编排层依赖领域值类型，与 sim→physics 同向，不引入反向耦合。
 var allowed = map[string][]string{
 	"internal/archcheck":  {},
 	"internal/companion":  {"internal/core"},
@@ -27,7 +32,7 @@ var allowed = map[string][]string{
 	"internal/assets":     {"internal/core", "internal/world", "internal/mesh", "internal/worldgen", "internal/gfx"},
 	"internal/render":     {"internal/core", "internal/world", "internal/mesh", "internal/assets", "internal/gfx"},
 	"internal/render/hud": {"internal/core", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
-	"internal/server":     {"internal/companion", "internal/core", "internal/network", "internal/world", "internal/worldgen", "internal/sim", "internal/storage"},
+	"internal/server":     {"internal/companion", "internal/core", "internal/network", "internal/physics", "internal/world", "internal/worldgen", "internal/sim", "internal/storage"},
 	"internal/client":     {"internal/companion", "internal/core", "internal/physics", "internal/network", "internal/world", "internal/mesh", "internal/assets", "internal/render", "internal/gfx"},
 }
 

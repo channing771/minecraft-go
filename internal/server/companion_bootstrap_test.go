@@ -228,7 +228,7 @@ func TestCompanionShutdownFlushFailureIsRetryable(t *testing.T) {
 		close(workerDone)
 	}()
 	latest := companionBootstrapBody(id, 9.5)
-	companions.Observe([]companion.Body{latest})
+	companions.Observe([]companion.Body{latest}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
 	err = host.Shutdown(ctx)
@@ -283,7 +283,7 @@ func TestCompanionShutdownOrdersSaveBeforeStoreSyncAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHost: %v", err)
 	}
-	host.world.companions.Observe([]companion.Body{companionBootstrapBody(id, 8.5)})
+	host.world.companions.Observe([]companion.Body{companionBootstrapBody(id, 8.5)}, nil)
 	shutdownCompanionBootstrapHost(t, host)
 	assertCompanionBootstrapEventOrder(t, store.eventsSnapshot())
 }

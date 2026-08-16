@@ -18,18 +18,21 @@ type companionPersistence struct {
 	mu           sync.Mutex
 	completionMu sync.Mutex
 	records      []companion.Body
-	persisted    uint64
-	dirty        bool
-	inFlight     bool
-	inFlightJob  companionSaveJob
-	retry        *companionSaveJob
-	jobs         chan companionSaveJob
-	completions  chan companionSaveCompletion
-	ctx          context.Context
-	cancel       context.CancelFunc
-	waitGroup    sync.WaitGroup
-	closed       bool
-	closeOnce    sync.Once
+	// tasks 是最近一次 Observe 的任务域观察输入；任务状态变化即令存档
+	// dirty。载荷编码与落盘由任务 7 扩展，本里程碑只保留 dirty 语义。
+	tasks       []companion.TaskQueueState
+	persisted   uint64
+	dirty       bool
+	inFlight    bool
+	inFlightJob companionSaveJob
+	retry       *companionSaveJob
+	jobs        chan companionSaveJob
+	completions chan companionSaveCompletion
+	ctx         context.Context
+	cancel      context.CancelFunc
+	waitGroup   sync.WaitGroup
+	closed      bool
+	closeOnce   sync.Once
 }
 
 type companionSaveJob struct {
@@ -64,7 +67,10 @@ func newCompanionPersistence(
 	return persistence
 }
 
-func (p *companionPersistence) Observe(active []companion.Body) {
+// Observe 合并权威身体与任务域观察输入：任一变化即标记存档 dirty。tasks
+// 与身体同批观察保证冻结快照（关服最终保存）里身体与任务状态属于同一
+// 权威 tick。
+func (p *companionPersistence) Observe(active []companion.Body, tasks []companion.TaskQueueState) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	byID := make(map[companion.ID]companion.Body, len(p.records)+len(active))
@@ -82,11 +88,70 @@ func (p *companionPersistence) Observe(active []companion.Body) {
 		records = append(records, body)
 	}
 	sortCompanionBodies(records)
-	if slices.Equal(records, p.records) {
+	tasksChanged := !equalTaskQueueStates(tasks, p.tasks)
+	if slices.Equal(records, p.records) && !tasksChanged {
 		return
 	}
 	p.records = records
+	p.tasks = cloneTaskQueueStates(tasks)
 	p.dirty = true
+}
+
+// equalTaskQueueStates 比较两份任务域观察输入是否逐字段相等（含计划步骤）。
+func equalTaskQueueStates(left, right []companion.TaskQueueState) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if !equalTaskQueueState(left[index], right[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalTaskQueueState(left, right companion.TaskQueueState) bool {
+	if left.ID != right.ID || left.HasCurrent != right.HasCurrent ||
+		!slices.Equal(left.Pending, right.Pending) {
+		return false
+	}
+	if !left.HasCurrent {
+		return true
+	}
+	return equalTask(left.Current, right.Current)
+}
+
+func equalTask(left, right companion.Task) bool {
+	return left.Generation == right.Generation &&
+		left.Command == right.Command &&
+		left.StepIndex == right.StepIndex &&
+		left.State == right.State &&
+		left.StartTick == right.StartTick &&
+		left.DeadlineTicks == right.DeadlineTicks &&
+		left.FailReason == right.FailReason &&
+		equalPlan(left.Plan, right.Plan)
+}
+
+func equalPlan(left, right companion.Plan) bool {
+	if left.Summary != right.Summary || len(left.Steps) != len(right.Steps) {
+		return false
+	}
+	for index := range left.Steps {
+		if left.Steps[index] != right.Steps[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// cloneTaskQueueStates 深拷贝任务域观察输入（Pending 切片独立于调用方）。
+func cloneTaskQueueStates(states []companion.TaskQueueState) []companion.TaskQueueState {
+	cloned := make([]companion.TaskQueueState, len(states))
+	for index := range states {
+		cloned[index] = states[index]
+		cloned[index].Pending = slices.Clone(states[index].Pending)
+	}
+	return cloned
 }
 
 func (p *companionPersistence) Poll(tick uint64) error {

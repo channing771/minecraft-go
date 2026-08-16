@@ -64,9 +64,18 @@ func (server *Server) Shutdown(ctx context.Context) error {
 		_ = server.drainIncomingChats()
 		server.drainAcquired()
 		server.drainGenerated()
+		// 关服顺序（spec：companion-task-queue）：聊天接受已随生命周期冻结与
+		// 会话拆除停止，这里取消在途模型请求，再冻结队列与 actor 状态并做
+		// 最终 AI 保存，最后才轮到世界存储的同步与关闭（见本函数末段）。
+		if server.companionManager != nil {
+			server.companionManager.beginShutdown()
+		}
 		server.engine.Step()
 		if server.companions != nil {
-			server.companions.Observe(server.engine.CompanionBodies())
+			server.companions.Observe(
+				server.engine.CompanionBodies(),
+				server.companionManagerTaskStates(),
+			)
 		}
 		if hasTrustedCenter {
 			server.appliedTrustedObserver = appliedTrustedObserverCenter{
@@ -126,6 +135,9 @@ func (server *Server) Shutdown(ctx context.Context) error {
 	}
 	if server.companions != nil {
 		server.companions.Close()
+	}
+	if server.companionManager != nil {
+		server.companionManager.close()
 	}
 	server.cancelSaves()
 	<-server.saveDone

@@ -84,9 +84,23 @@ func (server *Server) drainIncomingChats() []chatDelivery {
 		} else if definition, ok := server.companionsByName[name]; ok {
 			event.CompanionID = definition.ID
 			event.CompanionName = definition.Name
-			event.Kind = network.ChatEventAccepted
 			event.Command = command
-			recipient = 0
+			// 寻址成功即尝试进入该伙伴的任务 FIFO：满员同步拒绝且只回发令者，
+			// 绝不发起模型请求，也绝不影响既有队列内容。发令者事实在同一
+			// tick 边界冻结，指令的规划输入不随其后续移动漂移。
+			if server.companionManager != nil && !server.companionManager.enqueueCommand(
+				definition,
+				companion.TaskCommand(command),
+				server.companionManager.captureIssuer(
+					current.playerID, current.displayName, chat.sessionID,
+				),
+			) {
+				event.Kind = network.ChatEventRejected
+				event.RejectReason = network.ChatRejectQueueFull
+			} else {
+				event.Kind = network.ChatEventAccepted
+				recipient = 0
+			}
 		} else {
 			event.CompanionName = name
 			event.Kind = network.ChatEventRejected

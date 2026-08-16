@@ -43,6 +43,7 @@ type Server struct {
 	incomingChats    chan incomingChat
 	companionsByName map[string]companion.Definition
 	nextChatEventID  uint64
+	companionManager *companionManager
 	inputBoundary    atomic.Pointer[inputIngressBoundary]
 	jobs             chan chunkJob
 	acquired         chan sim.AcquiredChunk
@@ -162,6 +163,13 @@ func newWorld(
 			}
 			server.engine.RegisterCompanion(restore)
 		}
+		// 伙伴启用即装配任务编排。NewHost 已在存档加载前校验模型设置，
+		// 这里构造失败只可能是不可达的防御路径。
+		planner, err := companion.NewPlannerClient(config.AIModel, config.AIAPIKey, nil)
+		if err != nil {
+			panic("server: construct companion planner: " + err.Error())
+		}
+		server.companionManager = newCompanionManager(server.engine, config, planner)
 	}
 
 	server.workers.Add(config.Workers)
@@ -277,9 +285,15 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 	chatDeliveries := server.drainIncomingChats()
 	server.drainAcquired()
 	server.drainGenerated()
+	// 任务编排位于聊天 drain 之后（Accepted 指令刚入队即可同 tick 派发规划）、
+	// engine.Step 之前（伙伴移动输入必须先进 inbox 才能被本 tick 消费）。
+	taskDeliveries := server.advanceCompanionTasks()
 	result := server.engine.Step()
 	if server.companions != nil {
-		server.companions.Observe(server.engine.CompanionBodies())
+		server.companions.Observe(
+			server.engine.CompanionBodies(),
+			server.companionManagerTaskStates(),
+		)
 		if err := server.companions.Poll(result.Tick); err != nil {
 			slog.Warn("伙伴自动保存失败，保留重试", "error", err)
 		}
@@ -291,7 +305,7 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 			sequence:  trustedSequence,
 		}
 	}
-	server.publishWithChats(result, chatDeliveries)
+	server.publishWithChats(result, append(chatDeliveries, taskDeliveries...))
 	server.cancelUnwantedPending()
 	server.appendChunkRequests(chunkJobLoad, result.Acquire)
 	server.appendChunkRequests(chunkJobGenerate, result.Generate)

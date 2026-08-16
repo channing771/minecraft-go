@@ -125,6 +125,12 @@ func (t PathBlockTable) passable(id core.BlockID) bool {
 	return t.passableIDs[id]
 }
 
+// PassableForTest 报告编号是否可通过，供阻挡表与 collision oracle 的对齐
+// 测试验证生产映射（空气可通过、其余一切碰撞实体阻挡）。
+func (t PathBlockTable) PassableForTest(id core.BlockID) bool {
+	return t.passable(id)
+}
+
 // PathGrid 是寻路消费的不可变方块快照：构造时一次性拷贝窗口内全部方块，
 // 之后 FindPath/expand 只读内部切片，绝不回调世界读取。revisions 是窗口覆盖
 // 区块的（归一化后）内容版本，随结果透传给重验方。
