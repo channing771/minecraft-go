@@ -172,6 +172,24 @@ func (q *TaskQueue) Expire(worldTimeTicks uint64) []TaskEvent {
 	return q.finishState(TaskTimedOut, TaskFailNone)
 }
 
+// Stop 把当前 Running 的持续跟随任务转入 Stopped 终态，产出 TaskStopped 事件
+// 事实（reason None）并清空当前槽位。可停性三条件：存在当前任务、状态为
+// Running、计划的最后一步是 follow（持续跟随的判定基准——follow 执行器由
+// 后续任务交付，状态机只依据计划形状判定）。任一条件不满足时 no-op 并返回
+// 空事件：普通 go_to 或空闲伙伴的停止由编排层以 NotFollowing 同步拒绝，
+// 状态机绝不静默改写队列或任务状态。终态清槽后的 FIFO 推进与既有终态完全
+// 一致——下一次 BeginHead 立即开始原队首，pending 不清空也不重排。
+func (q *TaskQueue) Stop() []TaskEvent {
+	if !q.hasCurrent || q.current.State != TaskRunning {
+		return nil
+	}
+	steps := q.current.Plan.Steps
+	if len(steps) == 0 || steps[len(steps)-1].Kind != PlanStepFollow {
+		return nil
+	}
+	return q.finishState(TaskStopped, TaskFailNone)
+}
+
 // finishState 把当前任务置为指定终态并返回对应事件事实。终态任务保留在
 // 返回前的值里供 Snapshot 消费后即被清出槽位。
 func (q *TaskQueue) finishState(state TaskState, reason TaskFailReason) []TaskEvent {
@@ -196,6 +214,8 @@ func terminalEventKind(state TaskState) TaskEventKind {
 		return TaskEventFailed
 	case TaskTimedOut:
 		return TaskEventTimedOut
+	case TaskStopped:
+		return TaskEventStopped
 	default:
 		return TaskEventNone
 	}

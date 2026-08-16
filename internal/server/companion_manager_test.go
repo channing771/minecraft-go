@@ -1116,6 +1116,80 @@ func TestCompanionManagerSnapshotFailureTerminatesTaskAndAdvancesFIFO(t *testing
 	}
 }
 
+// TestCompanionManagerStopSameTickOrdering 验证同 tick 多条停止按聊天接收
+// 顺序处理：第一条作用于 Running 的持续跟随任务并广播 TaskStopped，第二条
+// 面对已被清空的当前槽（任务编排尚未提升原队首）按当前状态判定为 NotFollowing
+// 单播；队列只推进一次，每条客户端事件流的 EventID 严格递增。
+func TestCompanionManagerStopSameTickOrdering(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(1), Name: "阿木"}}
+	model := newFakeCompanionModel(t, [3]int32{0, 1, 0})
+	model.holdRequests()
+	host := newCompanionManagerHost(t, definitions, model, nil)
+	sender := openCompanionChatClient(t, host, "memory", integrationIdentity(0x8d, "停止者"))
+	observer := openCompanionChatClient(t, host, "memory", integrationIdentity(0x8e, "旁观者"))
+	clients := []network.ClientEndpoint{sender, observer}
+	waitForCompanionChatWorld(t, host, clients, 1)
+
+	issuerIdentity := integrationIdentity(0x8f, "原发令者")
+	injectRunningCompanionTask(t, host, definitions[0].ID, stopTestIssuer(issuerIdentity),
+		"跟着我", []companion.PlanStep{{Kind: companion.PlanStepFollow, PlayerID: issuerIdentity.PlayerID}},
+		"下一条")
+
+	// 同一会话顺序发送两条停止：单一读取 goroutine 保证 ingress 顺序与发送
+	// 顺序一致，第一条生效、第二条按清空后的槽位判定拒绝。
+	sendIntegration(t, sender, network.ChatCommand{Text: "@阿木 停止"})
+	sendIntegration(t, sender, network.ChatCommand{Text: "@阿木 停止"})
+	waitForIncomingChatDepth(t, host.world, 2)
+	result := host.world.StepForTest()
+	senderEvents := companionChatEvents(receiveCompanionChatTick(t, sender, result.Tick))
+	observerEvents := companionChatEvents(receiveCompanionChatTick(t, observer, result.Tick))
+
+	// 发令者：先收到第二条停止的 NotFollowing 单播（聊天投递先于任务事件
+	// 发布，与 Accepted→TaskStarted 的既有顺序一致），随后是第一条停止的
+	// TaskStopped 广播；旁观者只看到广播。
+	if len(senderEvents) != 2 {
+		t.Fatalf("发令者事件=%v，想要 NotFollowing+TaskStopped", chatEventKinds(senderEvents))
+	}
+	identity := integrationIdentity(0x8d, "停止者")
+	if senderEvents[0].Kind != network.ChatEventRejected ||
+		senderEvents[0].RejectReason != network.ChatRejectNotFollowing ||
+		senderEvents[0].Command != "停止" ||
+		senderEvents[0].PlayerID != identity.PlayerID ||
+		senderEvents[0].EventID != 1 {
+		t.Fatalf("第二条停止事件=%+v，想要 NotFollowing(EventID=1)", senderEvents[0])
+	}
+	if err := senderEvents[0].Validate(); err != nil {
+		t.Fatalf("NotFollowing Validate: %v", err)
+	}
+	stopped := eventsWithKind(senderEvents, network.ChatEventTaskStopped)
+	if len(stopped) != 1 || stopped[0].Command != "跟着我" ||
+		stopped[0].PlayerID != issuerIdentity.PlayerID ||
+		stopped[0].RejectReason != network.ChatRejectNone {
+		t.Fatalf("TaskStopped=%+v，想要唯一广播且携带被停任务事实", stopped)
+	}
+	if err := stopped[0].Validate(); err != nil {
+		t.Fatalf("TaskStopped Validate: %v", err)
+	}
+	if len(observerEvents) != 1 || observerEvents[0].Kind != network.ChatEventTaskStopped {
+		t.Fatalf("旁观者事件=%v，想要唯一 TaskStopped 广播", chatEventKinds(observerEvents))
+	}
+	if !reflect.DeepEqual(observerEvents[0], stopped[0]) {
+		t.Fatalf("广播不一致：observer=%+v sender=%+v", observerEvents[0], stopped[0])
+	}
+	assertStrictlyIncreasingEventIDs(t, senderEvents)
+
+	// 队列只推进一次：原队首被提升为当前任务并停留在在途规划（挂起模型），
+	// 不存在双重停止或双重提升。
+	host.world.stepMu.Lock()
+	snapshot := host.world.companionManager.slots[definitions[0].ID].queue.Snapshot()
+	host.world.stepMu.Unlock()
+	if !snapshot.HasCurrent || snapshot.Current.Command != companion.TaskCommand("下一条") ||
+		len(snapshot.Pending) != 0 {
+		t.Fatalf("同 tick 双停止后队列推进异常：current=%+v has=%v pending=%v",
+			snapshot.Current, snapshot.HasCurrent, snapshot.Pending)
+	}
+}
+
 func TestCompanionManagerPathBlockTableMatchesCollisionOracle(t *testing.T) {
 	table := companion.NewPathBlockTable(productionCompanionPassableBlocks())
 	if !table.PassableForTest(core.AirID) {

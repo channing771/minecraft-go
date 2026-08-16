@@ -180,6 +180,33 @@ func (m *companionManager) enqueueCommand(
 	return true
 }
 
+// stopCompanion 是停止旁路在 tick 边界的唯一入口（drainIncomingChats 调用，
+// 持有 stepMu）。当前任务可停（Running 且计划最后一步是 follow）时转入
+// Stopped 终态并累积 TaskStopped 广播事实（携带被停任务的原始指令与发令者
+// 身份，复用 applyQueueEvents 的既有组装）；返回 false 表示不可停（非跟随
+// 或空闲），由聊天层以 NotFollowing 只回发令者。移动清理沿用既有终态语义：
+// 丢弃在途路径与重算计划，runner 不再为终态任务提交任何移动输入，伙伴在
+// 权威物理作用下自然停下；在途寻路结果由既有世代/状态双重判定拦截。原队首
+// 的推进不在这里特判——终态清槽后本 tick 的 dispatchPlanning 按 FIFO 语义
+// 立即开始原队首，pending 不清空也不重排。
+func (m *companionManager) stopCompanion(definition companion.Definition) bool {
+	slot := m.slots[definition.ID]
+	if slot == nil {
+		// 与 enqueueCommand 的防御一致：配置缺陷按不可停处理并保留可诊断
+		// 日志，绝不伪装成停止成功。
+		slog.Error("停止指令找不到伙伴槽位", "companion", definition.ID)
+		return false
+	}
+	events := slot.queue.Stop()
+	if len(events) == 0 {
+		return false
+	}
+	slot.path = nil
+	slot.hasReplanAt = false
+	m.applyQueueEvents(slot, events)
+	return true
+}
+
 // captureIssuer 在入队 tick 冻结发令者事实：位置朝向来自权威玩家状态，
 // 视线命中方块用与交互一致的确定性射线（≤交互距离）。玩家尚未出生时保留
 // 有界缺省（有限坐标），指令本身仍然合法。
@@ -742,6 +769,8 @@ func taskEventKind(kind companion.TaskEventKind) network.ChatEventKind {
 		return network.ChatEventTaskFailed
 	case companion.TaskEventTimedOut:
 		return network.ChatEventTaskTimedOut
+	case companion.TaskEventStopped:
+		return network.ChatEventTaskStopped
 	default:
 		return network.ChatEventKind(0)
 	}

@@ -1,11 +1,13 @@
-// 任务 FIFO 与任务状态机的纯值域测试：容量、接收顺序、溢出拒绝、六态全路径、
-// 世代丢弃锚点与 deadline 的世界时间语义。全部用例不涉及 goroutine 或 I/O——
-// 并发与编排归 server 侧 Companion Manager（Task 6 阶段 B）。
+// 任务 FIFO 与任务状态机的纯值域测试：容量、接收顺序、溢出拒绝、七态全路径、
+// 停止迁移的三条件矩阵、世代丢弃锚点与 deadline 的世界时间语义。全部用例不
+// 涉及 goroutine 或 I/O——并发与编排归 server 侧 Companion Manager。
 package companion
 
 import (
 	"slices"
 	"testing"
+
+	"github.com/channing771/mornlea/internal/core"
 )
 
 // drivePlanningToRunning 把当前任务从 Queued 一路推进到 Running，是全路径表驱动
@@ -192,6 +194,25 @@ func TestTaskStateMachineFullPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("StoppedFromRunningFollow", func(t *testing.T) {
+		var queue TaskQueue
+		queue.Enqueue(TaskCommand("跟随"))
+		queue.BeginHead()
+		drivePlanningToRunning(t, &queue, stopFollowSteps())
+		events := queue.Stop()
+		if len(events) != 1 || events[0].Kind != TaskEventStopped ||
+			events[0].Reason != TaskFailNone {
+			t.Fatalf("停止事件=%v，想要唯一 TaskStopped(reason None)", events)
+		}
+		if _, ok := queue.Current(); ok {
+			t.Fatal("Stopped 后当前任务未清空")
+		}
+		// 终态清槽后重复停止是 no-op：第二次停止面对的是空槽。
+		if events := queue.Stop(); len(events) != 0 {
+			t.Fatalf("重复停止产出事件=%v，想要 no-op", events)
+		}
+	})
+
 	t.Run("IllegalTransitionsAreNoOps", func(t *testing.T) {
 		var queue TaskQueue
 		queue.Enqueue(TaskCommand("防御性"))
@@ -214,14 +235,125 @@ func TestTaskStateMachineFullPaths(t *testing.T) {
 		if events := queue.FailRun(TaskFailPathUnreachable); len(events) != 0 {
 			t.Fatalf("非 Running 失败产出事件=%v", events)
 		}
+		if events := queue.Stop(); len(events) != 0 {
+			t.Fatalf("Queued 态停止产出事件=%v", events)
+		}
 		if _, ok := queue.Current(); !ok {
 			t.Fatal("非法迁移清掉了当前任务")
 		}
 		// 无当前任务时全部迁移都是 no-op。
 		var idle TaskQueue
 		if idle.BeginPlanning() || idle.CompleteStep() != nil || idle.Expire(1) != nil ||
-			idle.FailRun(TaskFailPathUnreachable) != nil || idle.FailPlanning(TaskFailInvalidPlan) != nil {
+			idle.FailRun(TaskFailPathUnreachable) != nil || idle.FailPlanning(TaskFailInvalidPlan) != nil ||
+			idle.Stop() != nil {
 			t.Fatal("无当前任务的迁移不是 no-op")
+		}
+	})
+}
+
+// stopFollowSteps 构造「持续跟随任务」的计划步骤：go_to 前缀 + follow 尾步。
+// 可停性判定基准是计划的最后一步为 follow（执行器由后续任务交付），前缀
+// go_to 用于证明判定只看尾步而不是「计划里出现 follow」。
+func stopFollowSteps() []PlanStep {
+	target, err := core.ParsePlayerID(testPlayerUUID)
+	if err != nil {
+		panic("companion: 测试 follow 目标 ID 非法: " + err.Error())
+	}
+	return []PlanStep{
+		{Kind: PlanStepGoTo, X: 1, Y: 1, Z: 1},
+		{Kind: PlanStepFollow, PlayerID: target},
+	}
+}
+
+// TestTaskQueueStopGuardMatrix 锁定停止迁移的可停性三条件矩阵与终态事实：
+// 存在当前任务、状态为 Running、计划最后一步是 follow。任一条件不满足都
+// 必须是 no-op 并返回空事件——普通 go_to 或空闲伙伴的停止由编排层以
+// NotFollowing 同步拒绝，状态机绝不静默改写队列内容或任务状态。
+func TestTaskQueueStopGuardMatrix(t *testing.T) {
+	goToSteps := []PlanStep{{Kind: PlanStepGoTo, X: 1, Y: 1, Z: 1}}
+
+	t.Run("FollowTailSucceedsAndKeepsFIFO", func(t *testing.T) {
+		var queue TaskQueue
+		queue.Enqueue(TaskCommand("跟着我"))
+		queue.Enqueue(TaskCommand("下一条"))
+		queue.BeginHead()
+		drivePlanningToRunning(t, &queue, stopFollowSteps())
+		events := queue.Stop()
+		if len(events) != 1 || events[0].Kind != TaskEventStopped ||
+			events[0].Reason != TaskFailNone {
+			t.Fatalf("停止事件=%v，想要唯一 TaskStopped(reason None)", events)
+		}
+		if _, ok := queue.Current(); ok {
+			t.Fatal("Stopped 后当前任务未清空")
+		}
+		// 停止只清当前槽：pending 既不清空也不重排，原队首立即可被提升，
+		// 推进语义与既有终态完全一致。
+		if got := queue.Len(); got != 1 {
+			t.Fatalf("停止后 pending=%d，想要 1（队列不变）", got)
+		}
+		if !queue.BeginHead() {
+			t.Fatal("停止后 BeginHead 失败，原队首必须立即可开始")
+		}
+		current, _ := queue.Current()
+		if current.Command != TaskCommand("下一条") {
+			t.Fatalf("原队首=%q，想要 下一条", current.Command)
+		}
+	})
+
+	t.Run("NotRunningIsNoOp", func(t *testing.T) {
+		states := []struct {
+			name    string
+			prepare func(*TaskQueue)
+		}{
+			{"Queued", func(*TaskQueue) {}},
+			{"Planning", func(q *TaskQueue) { q.BeginPlanning() }},
+			{"Validating", func(q *TaskQueue) {
+				q.BeginPlanning()
+				q.AcceptPlan(Plan{Summary: "跟随计划", Steps: stopFollowSteps()})
+			}},
+		}
+		for _, state := range states {
+			var queue TaskQueue
+			queue.Enqueue(TaskCommand("未运行"))
+			queue.BeginHead()
+			state.prepare(&queue)
+			if events := queue.Stop(); len(events) != 0 {
+				t.Fatalf("%s 态停止产出事件=%v，想要 no-op", state.name, events)
+			}
+			current, ok := queue.Current()
+			if !ok || current.State == TaskStopped {
+				t.Fatalf("%s 态被停止改写：current=%+v ok=%v", state.name, current, ok)
+			}
+		}
+	})
+
+	t.Run("NonFollowTailIsNoOp", func(t *testing.T) {
+		var queue TaskQueue
+		queue.Enqueue(TaskCommand("普通移动"))
+		queue.BeginHead()
+		drivePlanningToRunning(t, &queue, goToSteps)
+		if events := queue.Stop(); len(events) != 0 {
+			t.Fatalf("普通 go_to 停止产出事件=%v，想要 no-op", events)
+		}
+		current, ok := queue.Current()
+		if !ok || current.State != TaskRunning {
+			t.Fatalf("普通任务被停止改写：current=%+v ok=%v", current, ok)
+		}
+	})
+
+	t.Run("NoCurrentIsNoOp", func(t *testing.T) {
+		var queue TaskQueue
+		if events := queue.Stop(); len(events) != 0 {
+			t.Fatalf("空闲队列停止产出事件=%v", events)
+		}
+	})
+
+	t.Run("StoppedIsTerminal", func(t *testing.T) {
+		if !TaskStopped.Terminal() {
+			t.Fatal("TaskStopped 必须是终态")
+		}
+		if got := TaskStopped.String(); got != "已停止" {
+			t.Fatalf("TaskStopped 中文短名=%q，想要 已停止", got)
 		}
 	})
 }

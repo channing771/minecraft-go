@@ -1,4 +1,4 @@
-// 本文件定义任务域的纯值类型：有界指令文本、六态任务状态、稳定失败原因、
+// 本文件定义任务域的纯值类型：有界指令文本、七态任务状态、稳定失败原因、
 // 事件事实与任务值。全部类型不含锁、goroutine 或 I/O——权威 tick 是唯一写者，
 // 并发串行化由 server 侧 Companion Manager 负责（见变更 design.md 的归属裁决）。
 package companion
@@ -25,10 +25,12 @@ func (c TaskCommand) Validate() error {
 	return validatePlanText("任务指令", string(c), MaxPlanCommandBytes, true)
 }
 
-// TaskState 是任务生命周期的六态枚举，推进方向固定为
-// Queued → Planning → Validating → Running → Completed/Failed/TimedOut。
+// TaskState 是任务生命周期的七态枚举，推进方向固定为
+// Queued → Planning → Validating → Running → Completed/Failed/TimedOut/Stopped。
 // Failed 可从 Planning/Validating/Running 进入（模型失败、非法计划与执行失败
-// 各自发生在不同阶段）；Completed 与 TimedOut 只能从 Running 进入。
+// 各自发生在不同阶段）；Completed 与 TimedOut 只能从 Running 进入；Stopped
+// 只能从 Running 的持续跟随任务（计划最后一步为 follow）经停止指令进入——
+// 主动停止是玩家的成功意图而不是失败，与 Failed 的稳定原因统计刻意分离。
 type TaskState uint8
 
 const (
@@ -46,11 +48,14 @@ const (
 	TaskFailed
 	// TaskTimedOut 是终态：世界时间越过 deadline。
 	TaskTimedOut
+	// TaskStopped 是终态：玩家经 `@伙伴名 停止` 旁路主动终止持续跟随任务。
+	TaskStopped
 )
 
 // Terminal 报告状态是否为终态。终态任务永远离开 FIFO 的当前槽位。
 func (s TaskState) Terminal() bool {
-	return s == TaskCompleted || s == TaskFailed || s == TaskTimedOut
+	return s == TaskCompleted || s == TaskFailed || s == TaskTimedOut ||
+		s == TaskStopped
 }
 
 // String 返回状态的中文短名，供日志与快照任务摘要使用。
@@ -70,6 +75,8 @@ func (s TaskState) String() string {
 		return "失败"
 	case TaskTimedOut:
 		return "已超时"
+	case TaskStopped:
+		return "已停止"
 	default:
 		return "未知状态"
 	}
@@ -136,6 +143,9 @@ const (
 	TaskEventFailed
 	// TaskEventTimedOut 对应世界时间超时的 TaskTimedOut 广播。
 	TaskEventTimedOut
+	// TaskEventStopped 对应玩家主动停止持续跟随任务的 TaskStopped 广播
+	//（reason 恒为 None——停止是成功意图，不是失败）。
+	TaskEventStopped
 )
 
 // TaskEvent 是一次迁移产出的待发布事件事实。事实只描述类别与原因；身份
