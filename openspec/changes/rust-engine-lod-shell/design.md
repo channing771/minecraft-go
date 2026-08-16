@@ -41,8 +41,12 @@ readOnly)同时是同步半径、保留半径与可见半径。worldgen 全量�
 perm 播种字节(格式与 `mornlea_worldgen_chunk` 完全一致)+ tile 原点
 (chunk 坐标,int32×2)+ 列数(固定 64)+ `lodStep`(合法值 2/4/8);
 输出 = 壳 quad 流,每 quad 字段:世界 X/Z(block,int32)、Y(int32)、
-宽/深(block,uint16)、面朝向(top/side)、材质 ID、着色权重(uint8),
-位布局在实现时定稿并写入头文件注释。status 复用 0..9:`ABI_VERSION`
+宽/深(block,uint16)、面朝向(顶面 top + 四向侧裙 side,四向承载断差
+方向与方向性着色)、材质 ID、着色权重(uint8)。位布局已由 `lod.rs` 的
+`encode_shell` 定稿(20 字节 LE,着色权重:顶面 255、±Z 204、±X 153),
+任务 2.1 的头文件注释 MUST 逐字沿用;顶面的世界坐标 terrain UV 不进入
+quad 字段,由渲染侧按世界坐标推导(与近环同源),在 client 远环任务中
+落实。status 复用 0..9:`ABI_VERSION`
 拒绝旧版本、`INVALID_ARGUMENT`/`INPUT` 拒绝非法步长与越界 tile、
 `SCRATCH`/`OUTPUT_OVERFLOW` 两段式探测(先报所需容量,扩容重试成功)、
 panic catch → 9。确定性契约:同 perm + 同 tile + 同步长 → 全平台逐位
