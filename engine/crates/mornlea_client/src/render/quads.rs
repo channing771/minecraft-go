@@ -25,6 +25,9 @@ pub struct QuadPassConfig {
     pub second_texture: bool,
     /// 采样器过滤:HUD 用 Nearest,名牌/面板用 Linear。
     pub nearest_sampler: bool,
+    /// 名牌的 bind 布局与 HUD/面板相反:binding 1 是字形流(B)、
+    /// binding 2 是背景流(A);为真时交换两个 storage 绑定。
+    pub swap_streams: bool,
 }
 
 /// 双流 quad pass 的 GPU 资源。
@@ -231,16 +234,32 @@ impl QuadPass {
                 binding: 1,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &self.dynamic,
-                    offset: self.stream_a_offset as u64,
-                    size: Some(a_size),
+                    offset: if self.config.swap_streams {
+                        self.stream_b_offset as u64
+                    } else {
+                        self.stream_a_offset as u64
+                    },
+                    size: Some(if self.config.swap_streams {
+                        b_size
+                    } else {
+                        a_size
+                    }),
                 }),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &self.dynamic,
-                    offset: self.stream_b_offset as u64,
-                    size: Some(b_size),
+                    offset: if self.config.swap_streams {
+                        self.stream_a_offset as u64
+                    } else {
+                        self.stream_b_offset as u64
+                    },
+                    size: Some(if self.config.swap_streams {
+                        a_size
+                    } else {
+                        b_size
+                    }),
                 }),
             },
             wgpu::BindGroupEntry {

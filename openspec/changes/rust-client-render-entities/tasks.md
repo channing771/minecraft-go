@@ -31,7 +31,7 @@
 
 ## 4. 双后端完整帧门禁
 
-- [ ] 4.1 对照测试升级:含 avatar+名牌+HUD+调试面板的完整场景帧双后端
+- [x] 4.1 对照测试升级:含 avatar+名牌+HUD+调试面板的完整场景帧双后端
       `diffThreshold` 内一致(含字形收敛 settle);调用计数断言(每帧
       1 次 render FFI、无变化 0 次上传);
       验证:`go test ./cmd/mornlea -race -count=1 -run DualBackend`。
