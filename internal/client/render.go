@@ -46,6 +46,10 @@ type Renderer struct {
 	width  int
 	height int
 	closed bool
+	// frameCalls 统计 RenderFrame 触发的 FFI 次数,供"每帧一次"断言。
+	frameCalls int
+	// uploadCalls 统计 section 上传 FFI 次数,供"无变化不上传"断言。
+	uploadCalls int
 }
 
 // RenderFrame 是一帧渲染输入,字段语义与 render.Camera 一致。
@@ -95,6 +99,7 @@ func (r *Renderer) UploadAtlas(layers int, pixels []byte) {
 
 // UploadSection 上传/替换一个 section 的 packed face 字节(空等价 drop)。
 func (r *Renderer) UploadSection(x, y, z int32, packed []byte) {
+	r.uploadCalls++
 	var ptr *C.uint8_t
 	if len(packed) > 0 {
 		ptr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(packed)))
@@ -149,8 +154,15 @@ func EncodeRenderFrame(frame RenderFrame) []byte {
 	return out
 }
 
+// FrameCalls 返回累计的 RenderFrame FFI 调用次数。
+func (r *Renderer) FrameCalls() int { return r.frameCalls }
+
+// UploadCalls 返回累计的 section 上传 FFI 调用次数。
+func (r *Renderer) UploadCalls() int { return r.uploadCalls }
+
 // RenderFrame 渲染一帧;每帧恰好一次 render FFI 调用。
 func (r *Renderer) RenderFrame(frame RenderFrame) {
+	r.frameCalls++
 	encoded := EncodeRenderFrame(frame)
 	r.check("frame", uint32(C.mornlea_client_render_frame(
 		C.MORNLEA_CLIENT_ABI_VERSION,

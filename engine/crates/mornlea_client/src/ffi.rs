@@ -388,16 +388,20 @@ pub const MORNLEA_CLIENT_STATUS_CAPACITY: u32 = 6;
 /// render_frame 输入的固定头部字节数;其后是 visible_count×12 的 section 列表。
 const FRAME_HEADER_BYTES: usize = 192;
 
-thread_local! {
-    /// 本线程的活动渲染器表;与窗口表同构,句柄天然绑定创建线程。
-    static RENDERERS: RefCell<HashMap<u64, OffscreenRenderer>> = RefCell::new(HashMap::new());
-}
+/// 全局渲染器表:与窗口不同,wgpu 对象 Send+Sync,渲染器不受 winit 的
+/// 主线程约束;Go 调用方 goroutine 会在 OS 线程间迁移,thread-local 会把
+/// 合法句柄误判为失效,因此这里用进程级 Mutex 表。
+static RENDERERS: std::sync::Mutex<Option<HashMap<u64, OffscreenRenderer>>> =
+    std::sync::Mutex::new(None);
+/// 渲染器句柄计数;独立于窗口句柄空间,0 保留为无效。
+static NEXT_RENDER_HANDLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 fn with_renderer(handle: u64, operation: impl FnOnce(&mut OffscreenRenderer) -> u32) -> u32 {
-    RENDERERS.with(|renderers| match renderers.borrow_mut().get_mut(&handle) {
+    let mut guard = RENDERERS.lock().expect("渲染器表锁中毒");
+    match guard.get_or_insert_with(HashMap::new).get_mut(&handle) {
         Some(renderer) => operation(renderer),
         None => MORNLEA_CLIENT_STATUS_WINDOW,
-    })
+    }
 }
 
 /// 创建离屏渲染器并写出句柄;无 GPU 适配器返回 ADAPTER 状态。
@@ -420,13 +424,12 @@ pub unsafe extern "C" fn mornlea_client_render_create(
             Err(RenderCreateError::Adapter) => return MORNLEA_CLIENT_STATUS_ADAPTER,
             Err(RenderCreateError::Device) => return MORNLEA_CLIENT_STATUS_WINDOW,
         };
-        let handle = NEXT_HANDLE.with(|next| {
-            let mut next = next.borrow_mut();
-            let handle = *next;
-            *next += 1;
-            handle
-        });
-        RENDERERS.with(|renderers| renderers.borrow_mut().insert(handle, renderer));
+        let handle = NEXT_RENDER_HANDLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        RENDERERS
+            .lock()
+            .expect("渲染器表锁中毒")
+            .get_or_insert_with(HashMap::new)
+            .insert(handle, renderer);
         // SAFETY: out_handle 已判非空,只在完整成功后写一次。
         unsafe { out_handle.write(handle) };
         MORNLEA_CLIENT_STATUS_OK
@@ -440,13 +443,18 @@ pub extern "C" fn mornlea_client_render_destroy(abi_version: u32, handle: u64) -
         return MORNLEA_CLIENT_STATUS_ABI_VERSION;
     }
     catch(|| {
-        RENDERERS.with(|renderers| match renderers.borrow_mut().remove(&handle) {
+        let removed = RENDERERS
+            .lock()
+            .expect("渲染器表锁中毒")
+            .get_or_insert_with(HashMap::new)
+            .remove(&handle);
+        match removed {
             Some(renderer) => {
                 drop(renderer);
                 MORNLEA_CLIENT_STATUS_OK
             }
             None => MORNLEA_CLIENT_STATUS_WINDOW,
-        })
+        }
     })
 }
 

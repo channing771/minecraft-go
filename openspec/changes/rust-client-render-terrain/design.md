@@ -71,8 +71,9 @@ capture 场景装配(世界、相机、日照)已在 cmd/mornlea;新增 darwin-o
 
 - 依赖方向:`internal/client` 仍是 client ABI 唯一接触点;cmd/mornlea 经
   client 包调用渲染绑定;archcheck 白名单不变(client 已在 cmd 依赖内)。
-- 线程:渲染器句柄限创建线程(thread-local 表,同窗口);Rust 侧不自建
-  线程;wgpu 内部线程不外泄状态。
+- 线程:渲染器句柄放进程级 Mutex 表(wgpu 对象 Send+Sync,且 Go 测试
+  goroutine 会在 OS 线程间迁移,thread-local 会误判合法句柄);窗口仍是
+  thread-local(winit 主线程约束)。Rust 侧不自建线程。
 - 生命周期:destroy 后句柄失效;readback 用完成同步(map + poll)阻塞至
   数据就绪,离屏路径无 surface 时序问题。
 

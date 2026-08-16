@@ -29,7 +29,7 @@
 
 ## 3. 双后端对照门禁
 
-- [ ] 3.1 `cmd/mornlea` 新增 darwin 对照测试:capture 地形场景(至少
+- [x] 3.1 `cmd/mornlea` 新增 darwin 对照测试:capture 地形场景(至少
       materials-showcase 地形帧与 oak grove)同数据驱动双后端,回读经
       `diffThreshold` 双阈值比较;帧循环调用计数断言(每帧 1 次 render
       FFI、无变化不 upload);验证:`go test ./cmd/mornlea -race -count=1
