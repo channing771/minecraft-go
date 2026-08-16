@@ -359,6 +359,20 @@ var captureScenes = []captureScene{
 		},
 	},
 	{
+		// far-horizon 是远环 LOD 的长期视觉门禁(spec delta「MUST 新增
+		// far-horizon 视觉场景」):相机钉在近环边缘 -z 内侧的高空,朝
+		// 地平线观察,单帧同时覆盖近景地形(画面底部)、远环壳带(地平线
+		// 下侧到全雾)、雾过渡带(0.5×far..0.75×far,默认几何 768..1152)
+		// 与天空(地平线上侧)。
+		//
+		// 排序协调(变基):water-underwater 的「MUST 排在场景表最后」由
+		// fluid 规格固定,故本场景插在其之前(倒数第二);它与前一场景的
+		// 呈现状态互相独立,不依赖场景表顺序。
+		Name:         "far-horizon",
+		WarmupFrames: 8,
+		Apply:        applyFarHorizonCaptureState,
+	},
+	{
 		// 水景二：水下视角。覆盖「水下视角」——相机与权威位置一起放进水体，
 		// 眼睛浸没标志因此为真，画面同时呈现水色叠加、被压低的可见半径、
 		// 天空光穿水衰减，以及未满的氧气条。
@@ -469,13 +483,30 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 		return fmt.Errorf("写出场景图 %s: %w", scene.Name, err)
 	}
 	if updateGolden {
+		// 近处不变断言(spec delta「golden 更新仅限远景带」的长期门禁):
+		// 覆盖旧基线之前,先与新帧在受保护行上做逐字节比对。LOD 只允许
+		// 改变远景带;近处内容若与旧基线不一致,说明本次改动误伤了近环
+		// 渲染,必须拒绝写盘而不是把回退固化成新基线。确属有意的近处
+		// 内容变更时,删除旧基线后重跑(显式动作),或同步修订本断言。
+		goldenPath := filepath.Join(captureGoldenDir, scene.Name+".png")
+		if old, err := readPNG(goldenPath); err == nil {
+			guard := newNearBandGuard(
+				app.camera, app.lodTileCenter,
+				lodNearTileRadius(app.render.ViewDistance), app.lodScheduler != nil,
+			)
+			if guardErr := guard.assertUnchanged(scene.Name, old, img); guardErr != nil {
+				return fmt.Errorf("拒绝更新基线 %s: %w", goldenPath, guardErr)
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("读取旧基线 %s: %w", goldenPath, err)
+		}
 		if err := os.MkdirAll(captureGoldenDir, 0o755); err != nil {
 			return fmt.Errorf("创建 golden 基线目录 %s: %w", captureGoldenDir, err)
 		}
-		if err := writePNG(filepath.Join(captureGoldenDir, scene.Name+".png"), img); err != nil {
+		if err := writePNG(goldenPath, img); err != nil {
 			return err
 		}
-		fmt.Printf("已抓取场景 %s（写入基线）\n", scene.Name)
+		fmt.Printf("已抓取场景 %s(写入基线,近处不变断言通过)\n", scene.Name)
 		return nil
 	}
 	diff, err := compareAgainstGolden(captureGoldenDir, dir, scene.Name, img, captureThresholds)

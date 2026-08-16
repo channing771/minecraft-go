@@ -66,7 +66,8 @@ type application struct {
 	// nil 检查)。生命周期随 application,Close 时先于渲染器释放。
 	lodScheduler *lod.Scheduler
 	// lodTileCenter 是最近一次已播种/增量入队的 tile 中心,用于跨 tile 边界
-	// 检测;初始值在 attachLodScheduler 全环播种时写入。
+	// 检测;初始值在 attachLodScheduler 的远环带播种(Ruling 19:近环内盘
+	// 不入队)时写入。
 	lodTileCenter lod.TilePos
 	// visibleScratch/visibleSections 是每帧可见性计算的复用缓冲。
 	visibleScratch  mesh.VisibilityScratch

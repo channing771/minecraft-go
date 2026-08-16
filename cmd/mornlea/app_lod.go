@@ -67,6 +67,20 @@ func lodFarTileRadius(viewDistance, farMultiplier int) int {
 	return int(radius)
 }
 
+// lodNearTileRadius 推导远环带的内半径(切比雪夫 tile 数,Ruling 19):
+// floor(viewDistance / 4) + 1。入队条件 d ≥ 该值使壳的最小覆盖块
+// d × 64 ≥ viewDistance × 16,即壳带严格在近 mesh 覆盖半径之外、与
+// 近 mesh 零重叠——壳的步长窗高取 max,系统性高于精细地表,一旦在
+// 近环内渲染就会 poke 出地表、以更近深度遮挡近处 mesh(capture
+// 「近处像素不变」门禁的构造性前提)。viewDistance ≤ 0 时防御性返回
+// 1(仍排除中心 tile),正常路径输入恒在 [2,64]。
+func lodNearTileRadius(viewDistance int) int {
+	if viewDistance <= 0 {
+		return 1
+	}
+	return viewDistance/lodTileChunks + 1
+}
+
 // lodRingTileCount 返回切比雪夫半径 radius 的全方环 tile 数 (2r+1)²。
 // 这是 QueueRing 播种的域规模,也是容量论证(Ruling 18)的峰值上传数。
 func lodRingTileCount(radius int) int {
@@ -75,6 +89,15 @@ func lodRingTileCount(radius int) int {
 	}
 	sides := 2*int64(radius) + 1
 	return int(sides * sides)
+}
+
+// lodBandTileCount 返回 [inner, outer] 带的 tile 数 = 全方环(outer) −
+// 内盘全方环(inner−1),供播种规模的精确断言(Ruling 19 带状域)。
+func lodBandTileCount(inner, outer int) int {
+	if inner <= 0 {
+		return lodRingTileCount(outer)
+	}
+	return lodRingTileCount(outer) - lodRingTileCount(inner-1)
 }
 
 // lodFogDistances 按 lodFarMultiplier 推导远环距离雾锚点(block):
@@ -106,12 +129,19 @@ func (sink rendererLodSink) DropLodTile(x, z int32) {
 
 // attachLodScheduler 在登录成功取得权威世界种子后接线远环 LOD(设计
 // 「Go 编排」的入队时机裁决):以登录种子构造与近环逐字节一致的
-// worldgen `MGW1` header,建 Scheduler 并立即以初始 tile 中心播种全环;
-// 同时按 lodFarMultiplier 推导雾距离并调用渲染器的雾设置出口(一次性
-// 渲染器状态,不进帧循环)。种子是运行时事实而非配置,只在参数间传递、
+// worldgen `MGW1` header,建 Scheduler 并立即以初始 tile 中心播种远环带
+// (Ruling 19:近环内盘不入队,壳与近 mesh 零重叠);同时按
+// lodFarMultiplier 推导雾距离并调用渲染器的雾设置出口(一次性渲染器
+// 状态,不进帧循环)。种子是运行时事实而非配置,只在参数间传递、
 // 不落 config。禁用路径零参与:直接返回,不建 Scheduler、不消费种子。
 // benchmark 观察者由调用方传入 benchmark=true 显式关闭。
-func (a *application) attachLodScheduler(worldSeed uint64, benchmark bool) error {
+//
+// fluidEnabled(变基整合)与近环权威世界的 worldgen.New 取同一来源
+// (applicationOptions.FluidEnabled):远环 header 必须与近环生成器逐字节
+// 一致,材料表里的 water 编号(关闭时为 air,见 fluid 门控 design D6)决定
+// 远环壳的海平面钳制语义是否生效。远程模式下近环世界由服务端权威决定,
+// 客户端以本地配置值生成远环——默认 true 与默认服务端一致。
+func (a *application) attachLodScheduler(worldSeed uint64, fluidEnabled, benchmark bool) error {
 	if !lodWiringEnabled(a.render, benchmark) {
 		return nil
 	}
@@ -121,7 +151,7 @@ func (a *application) attachLodScheduler(worldSeed uint64, benchmark bool) error
 	// 每帧 pumpLodFrame 的半径推导与装配时的播种半径永远同源。
 	render := a.render.NormalizeLOD()
 	a.render = render
-	generator := worldgen.New(int64(worldSeed))
+	generator := worldgen.New(int64(worldSeed), fluidEnabled)
 	scheduler, err := lod.NewScheduler(
 		rendererLodSink{renderer: a.renderer},
 		generator.Header(),
@@ -134,30 +164,36 @@ func (a *application) attachLodScheduler(worldSeed uint64, benchmark bool) error
 	}
 	a.lodScheduler = scheduler
 	a.lodTileCenter = lodTileFromChunk(a.center)
-	scheduler.QueueRing(a.lodTileCenter, lodFarTileRadius(render.ViewDistance, render.LodFarMultiplier))
+	scheduler.QueueRing(
+		a.lodTileCenter,
+		lodNearTileRadius(render.ViewDistance),
+		lodFarTileRadius(render.ViewDistance, render.LodFarMultiplier),
+	)
 	fogStart, fogFull := lodFogDistances(render.ViewDistance, render.LodFarMultiplier)
 	a.renderer.SetLodFog(fogStart, fogFull)
 	return nil
 }
 
 // pumpLodFrame 是帧循环的远环半部(每帧一次,全部非阻塞):玩家跨 tile
-// 边界时增量入队新进入范围的 tile(QueueRing 幂等,只补差额),随后
+// 边界时增量入队新进入远环带的 tile(QueueRing 幂等,只补差额),随后
 // BeginFrame 重置 LOD 帧预算、FlushUploads 冲刷就绪结果并按预算派发
-// pending、DropOutside 释放远环半径外的 pending 与已上传 tile。挂在
-// renderFrame 的近环 DropOutside 之后,镜像 SectionScheduler 的帧序。
-// 禁用时 lodScheduler 为 nil,本方法是纯 nil 检查即返回——帧循环零新增
-// 阻塞与分配。
+// pending、DropOutside 释放 [内半径, 外半径] 带外的 pending 与已上传
+// tile——内缘同样释放,保证移动后落入近 mesh 覆盖的 tile 让位,近环
+// 零重叠在移动下保持(Ruling 19)。挂在 renderFrame 的近环 DropOutside
+// 之后,镜像 SectionScheduler 的帧序。禁用时 lodScheduler 为 nil,本方法
+// 是纯 nil 检查即返回——帧循环零新增阻塞与分配。
 func (a *application) pumpLodFrame() {
 	if a.lodScheduler == nil {
 		return
 	}
+	inner := lodNearTileRadius(a.render.ViewDistance)
 	radius := lodFarTileRadius(a.render.ViewDistance, a.render.LodFarMultiplier)
 	tile := lodTileFromChunk(a.center)
 	if tile != a.lodTileCenter {
 		a.lodTileCenter = tile
-		a.lodScheduler.QueueRing(tile, radius)
+		a.lodScheduler.QueueRing(tile, inner, radius)
 	}
 	a.lodScheduler.BeginFrame()
 	a.lodScheduler.FlushUploads(tile)
-	a.lodScheduler.DropOutside(tile, radius)
+	a.lodScheduler.DropOutside(tile, inner, radius)
 }

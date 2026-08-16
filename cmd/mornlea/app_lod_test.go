@@ -93,6 +93,38 @@ func TestLodFarTileRadius(t *testing.T) {
 	})
 }
 
+// TestLodNearTileRadius 锁住 Ruling 19 的内半径推导:inner =
+// floor(viewDistance/4)+1,使壳的最小覆盖块 inner×64 ≥ 近 mesh 覆盖
+// 半径 viewDistance×16(带与近 mesh 零重叠、无缝衔接的代数保证)。
+func TestLodNearTileRadius(t *testing.T) {
+	cases := []struct {
+		viewDistance int
+		want         int
+	}{
+		{32, 9},
+		{2, 1},
+		{64, 17},
+		{5, 2},
+		{63, 16},
+	}
+	for _, testCase := range cases {
+		if got := lodNearTileRadius(testCase.viewDistance); got != testCase.want {
+			t.Fatalf("lodNearTileRadius(%d) = %d, want %d",
+				testCase.viewDistance, got, testCase.want)
+		}
+	}
+	for viewDistance := 2; viewDistance <= 64; viewDistance++ {
+		inner := lodNearTileRadius(viewDistance)
+		if inner*64 < viewDistance*16 {
+			t.Fatalf("viewDistance=%d 内半径 %d 的最小覆盖块 %d < 近 mesh 半径 %d(零重叠被破坏)",
+				viewDistance, inner, inner*64, viewDistance*16)
+		}
+	}
+	if got := lodNearTileRadius(0); got != 1 {
+		t.Fatalf("防御分支 lodNearTileRadius(0) = %d, want 1", got)
+	}
+}
+
 // TestLodTileFromChunkFloorSemantics 锁住 chunk→tile 换算的 floor 语义:
 // tile 覆盖 chunk [tile×4, tile×4+4),负坐标向负无穷取整(算术右移),
 // 西缘 block = tile_x×64。
@@ -227,12 +259,12 @@ func newLodConnectionTestApplication(
 	return app
 }
 
-// TestApplicationLodWiringEnabledSeedsFullRingFromLoginSeed 验证启用路径的
+// TestApplicationLodWiringEnabledSeedsBandFromLoginSeed 验证启用路径的
 // 登录种子→Scheduler 播种链路:登录成功取得 WorldSeed 后,装配点立即以
-// 初始 tile 中心播种全环(默认几何 32×3 → 半径 24 → (2×24+1)² = 2401 个
-// pending),且推导后的雾参数已下发给渲染器(非法推导会让 SetLodFog
-// panic,构造即失败)。
-func TestApplicationLodWiringEnabledSeedsFullRingFromLoginSeed(t *testing.T) {
+// 初始 tile 中心播种远环带(Ruling 19:默认几何 32×3 → 带 [9,24] →
+// (2×24+1)²−(2×8+1)² = 2112 个 pending,近环内盘不入队),且推导后的
+// 雾参数已下发给渲染器(非法推导会让 SetLodFog panic,构造即失败)。
+func TestApplicationLodWiringEnabledSeedsBandFromLoginSeed(t *testing.T) {
 	const loginSeed = uint64(0xC0FFEE)
 	app := newLodConnectionTestApplication(t, config.Defaults().Render, loginSeed)
 	defer func() {
@@ -243,8 +275,9 @@ func TestApplicationLodWiringEnabledSeedsFullRingFromLoginSeed(t *testing.T) {
 	if app.lodScheduler == nil {
 		t.Fatal("lodEnabled=true 时必须构造远环 Scheduler")
 	}
-	if got := app.lodScheduler.PendingUploads(); got != 2401 {
-		t.Fatalf("初始全环播种 pending = %d, want 2401((2×24+1)²)", got)
+	inner, outer := lodNearTileRadius(32), lodFarTileRadius(32, config.LodFarMultiplierDefault)
+	if got, want := app.lodScheduler.PendingUploads(), lodBandTileCount(inner, outer); got != want {
+		t.Fatalf("初始带状播种 pending = %d, want %d(带 [%d,%d])", got, want, inner, outer)
 	}
 	if app.lodTileCenter != (lod.TilePos{X: 0, Z: 0}) {
 		t.Fatalf("初始 tile 中心 = %v, want (0,0)", app.lodTileCenter)
@@ -255,8 +288,8 @@ func TestApplicationLodWiringEnabledSeedsFullRingFromLoginSeed(t *testing.T) {
 	}
 }
 
-// TestApplicationLodWiringNonDefaultGeometry 验证非默认倍率(64×8 的雾
-// 推导 + 半径 64 的全环)也能构造成功——雾锚点 4096/6144 违约会让
+// TestApplicationLodWiringNonDefaultGeometry 验证非默认倍率(32×8 的雾
+// 推导 + 带 [9,64])也能构造成功——雾锚点 4096/6144 违约会让
 // SetLodFog 在装配点 panic。
 func TestApplicationLodWiringNonDefaultGeometry(t *testing.T) {
 	render := config.Defaults().Render
@@ -270,9 +303,9 @@ func TestApplicationLodWiringNonDefaultGeometry(t *testing.T) {
 	if app.lodScheduler == nil {
 		t.Fatal("非默认倍率下启用路径必须构造远环 Scheduler")
 	}
-	const radius = 64
-	if got := app.lodScheduler.PendingUploads(); got != lodRingTileCount(radius) {
-		t.Fatalf("64×8 全环播种 pending = %d, want %d", got, lodRingTileCount(radius))
+	inner, outer := lodNearTileRadius(render.ViewDistance), lodFarTileRadius(render.ViewDistance, render.LodFarMultiplier)
+	if got, want := app.lodScheduler.PendingUploads(), lodBandTileCount(inner, outer); got != want {
+		t.Fatalf("32×8 带状播种 pending = %d, want %d(带 [%d,%d])", got, want, inner, outer)
 	}
 }
 

@@ -146,32 +146,77 @@ func TestNewSchedulerValidatesArguments(t *testing.T) {
 
 func TestQueueRingEnqueuesDiskIncrementally(t *testing.T) {
 	s, _ := newTestScheduler(t, 4<<20, fakeGenerate)
-	s.QueueRing(TilePos{X: 0, Z: 0}, 1)
+	s.QueueRing(TilePos{X: 0, Z: 0}, 0, 1)
 	if got := s.PendingUploads(); got != 9 {
 		t.Fatalf("半径 1 环形入队 %d 块,想要 9", got)
 	}
-	s.QueueRing(TilePos{X: 0, Z: 0}, 1) // 幂等:重复播种不重复入队
+	s.QueueRing(TilePos{X: 0, Z: 0}, 0, 1) // 幂等:重复播种不重复入队
 	if got := s.PendingUploads(); got != 9 {
 		t.Fatalf("重复环形入队后 pending=%d,想要 9", got)
 	}
-	s.QueueRing(TilePos{X: 1, Z: 0}, 1) // 跨 tile 边界:只增量入队新进入范围的 3 块
+	s.QueueRing(TilePos{X: 1, Z: 0}, 0, 1) // 跨 tile 边界:只增量入队新进入范围的 3 块
 	if got := s.PendingUploads(); got != 12 {
 		t.Fatalf("增量入队后 pending=%d,想要 12", got)
 	}
 	flushUntilIdle(t, s, TilePos{X: 1, Z: 0})
-	s.QueueRing(TilePos{X: 0, Z: 0}, 1) // 已上传 tile 不重复入队
+	s.QueueRing(TilePos{X: 0, Z: 0}, 0, 1) // 已上传 tile 不重复入队
 	if got := s.PendingUploads(); got != 0 {
 		t.Fatalf("已上传 tile 被重复入队: pending=%d", got)
 	}
 
 	s2, _ := newTestScheduler(t, 1024, fakeGenerate)
-	s2.QueueRing(TilePos{X: 5, Z: -7}, 0) // 半径 0 只入队中心
+	s2.QueueRing(TilePos{X: 5, Z: -7}, 0, 0) // 半径 0 只入队中心
 	if got := s2.PendingUploads(); got != 1 {
 		t.Fatalf("半径 0 入队 %d 块,想要 1", got)
 	}
-	s2.QueueRing(TilePos{X: 5, Z: -7}, -1) // 负半径不入队
+	s2.QueueRing(TilePos{X: 5, Z: -7}, 0, -1) // 负外半径不入队
 	if got := s2.PendingUploads(); got != 1 {
-		t.Fatalf("负半径入队后 pending=%d,想要 1", got)
+		t.Fatalf("负外半径入队后 pending=%d,想要 1", got)
+	}
+}
+
+// TestQueueRingBandSkipsInnerDisk 锁住 Ruling 19 的带状入队语义:近环
+// 之内的 tile(inner 半径内盘)不得入队——壳窗高取 max,系统性高于精细
+// 地表,若在近环内渲染会 poke 出地表遮挡近处 mesh(capture 近处像素
+// 不变门禁的构造性前提)。以默认几何 viewDistance=32 推导的 inner=9、
+// outer=24 为代表:入队域恰为 (2×24+1)²−(2×8+1)²,且入队 tile 的最小
+// 覆盖块 9×64=576 ≥ 近 mesh 覆盖半径 32×16=512,与近 mesh 零重叠。
+func TestQueueRingBandSkipsInnerDisk(t *testing.T) {
+	s, _ := newTestScheduler(t, 4<<20, fakeGenerate)
+	const inner, outer = 9, 24
+	s.QueueRing(TilePos{}, inner, outer)
+	if got := s.PendingUploads(); got != 2401-289 {
+		t.Fatalf("带状入队 %d 块,想要 %d((2×24+1)²−(2×8+1)²)", got, 2401-289)
+	}
+	for _, tile := range []TilePos{
+		{X: 0, Z: 0}, {X: 8, Z: 0}, {X: 0, Z: -8}, {X: -8, Z: 8}, {X: 8, Z: -8},
+	} {
+		if _, ok := s.pending[tile]; ok {
+			t.Fatalf("内盘 tile %v 被入队(近环零重叠被破坏)", tile)
+		}
+	}
+	for _, tile := range []TilePos{
+		{X: 9, Z: 0}, {X: 0, Z: -9}, {X: -9, Z: 9}, {X: 24, Z: 24}, {X: -24, Z: 0},
+	} {
+		if _, ok := s.pending[tile]; !ok {
+			t.Fatalf("带内 tile %v 未入队", tile)
+		}
+	}
+	if _, ok := s.pending[TilePos{X: 25, Z: 0}]; ok {
+		t.Fatal("外半径外的 tile (25,0) 被入队")
+	}
+
+	// 非法区间(inner<0、outer<inner)一律不入队;inner=0 退化为全盘
+	// (旧语义,QueueTile 直入的调用方仍可靠)。
+	s2, _ := newTestScheduler(t, 4<<20, fakeGenerate)
+	s2.QueueRing(TilePos{}, -1, 2)
+	s2.QueueRing(TilePos{}, 3, 2)
+	if got := s2.PendingUploads(); got != 0 {
+		t.Fatalf("非法区间入队 %d 块,想要 0", got)
+	}
+	s2.QueueRing(TilePos{}, 0, 2)
+	if got := s2.PendingUploads(); got != 25 {
+		t.Fatalf("inner=0 全盘入队 %d 块,想要 25", got)
 	}
 }
 
@@ -307,7 +352,7 @@ func TestDropOutsideReleasesPendingUploadedAndInflight(t *testing.T) {
 	if len(s.inflight) != 1 {
 		t.Fatalf("微型预算下在途 %d 块,想要 1", len(s.inflight))
 	}
-	s.DropOutside(TilePos{X: 100, Z: 100}, 0) // 中心移远:三块全部界外
+	s.DropOutside(TilePos{X: 100, Z: 100}, 0, 0) // 中心移远:三块全部界外
 	if got := s.PendingUploads(); got != 0 {
 		t.Fatalf("界外 pending 未释放: %d", got)
 	}
@@ -333,7 +378,7 @@ func TestDropOutsideReleasesPendingUploadedAndInflight(t *testing.T) {
 	if len(sink2.uploads) != 3 {
 		t.Fatalf("上传 %d 次,想要 3", len(sink2.uploads))
 	}
-	s2.DropOutside(TilePos{X: 0, Z: 0}, 0)
+	s2.DropOutside(TilePos{X: 0, Z: 0}, 0, 0)
 	if len(sink2.drops) != 2 {
 		t.Fatalf("界外已上传 tile 应触发 2 次 drop,得到 %v", sink2.drops)
 	}
@@ -345,6 +390,60 @@ func TestDropOutsideReleasesPendingUploadedAndInflight(t *testing.T) {
 	}
 	if _, ok := s2.uploaded[TilePos{X: 0, Z: 0}]; !ok {
 		t.Fatal("界内 tile (0,0) 被误删")
+	}
+}
+
+// TestDropOutsideBandMaintainsZeroOverlapUnderMovement 锁住带语义的
+// 内缘释放(Ruling 19 的移动不变量):玩家跨 tile 边界后,曾在外带、
+// 现已落入新中心内盘的 tile 必须连同 GPU 资源一起让位——否则内盘残留
+// 壳会在近 mesh 之上 poke 出地表,零重叠只在静止时成立。
+func TestDropOutsideBandMaintainsZeroOverlapUnderMovement(t *testing.T) {
+	s, sink := newTestScheduler(t, 4<<20, fakeGenerate)
+	s.QueueRing(TilePos{}, 1, 2) // 带 [1,2]:25−1=24 块
+	flushUntilIdle(t, s, TilePos{})
+	if len(sink.uploads) != 24 {
+		t.Fatalf("带状上传 %d 次,想要 24", len(sink.uploads))
+	}
+	// 中心移到 (1,0):tile (1,0) 的距离变为 0 < inner=1,必须释放;
+	// (-2,0) 距离 3 > outer=2,同样释放;(2,0)/(0,0) 之外的带内块保留。
+	s.DropOutside(TilePos{X: 1, Z: 0}, 1, 2)
+	if !slices.Contains(sink.drops, TilePos{X: 1, Z: 0}) {
+		t.Fatalf("移入内盘的 tile 未释放: %v", sink.drops)
+	}
+	if !slices.Contains(sink.drops, TilePos{X: -2, Z: 0}) {
+		t.Fatalf("移出外半径的 tile 未释放: %v", sink.drops)
+	}
+	if _, ok := s.uploaded[TilePos{X: 1, Z: 0}]; ok {
+		t.Fatal("内盘 tile 仍登记为 uploaded")
+	}
+	if _, ok := s.uploaded[TilePos{X: 2, Z: 0}]; !ok {
+		t.Fatal("带内 tile (2,0) 被误删")
+	}
+	// 跨界增量入队与内缘释放共用同一区间语义:以新中心重播带 [1,2],
+	// 只有新进入范围的 tile 被补入((0,0) 距新中心 1,属带内)。
+	s.QueueRing(TilePos{X: 1, Z: 0}, 1, 2)
+	if _, ok := s.pending[TilePos{X: 0, Z: 0}]; !ok {
+		t.Fatal("新进入外带的 tile (0,0) 未被增量入队")
+	}
+
+	// pending 形态的内缘丢弃:未冲刷的 pending 落入内盘同样直接消失。
+	s2, _ := newTestScheduler(t, 4<<20, fakeGenerate)
+	s2.QueueTile(TilePos{})
+	s2.DropOutside(TilePos{}, 1, 2)
+	if got := s2.PendingUploads(); got != 0 {
+		t.Fatalf("内盘 pending 未丢弃: %d", got)
+	}
+
+	// 防御钳制:负外半径与空区间(inner>outer)一律全释放(含中心),
+	// 与旧「负半径丢弃一切」语义一致,不误保留任何 tile。
+	s3, sink3 := newTestScheduler(t, 4<<20, fakeGenerate)
+	s3.QueueTile(TilePos{})
+	s3.QueueTile(TilePos{X: 1, Z: 0})
+	flushUntilIdle(t, s3, TilePos{})
+	s3.DropOutside(TilePos{}, 0, -1)
+	s3.DropOutside(TilePos{}, 3, 2)
+	if len(s3.uploaded) != 0 || len(sink3.drops) != 2 {
+		t.Fatalf("非法区间未全释放: uploaded=%d drops=%v", len(s3.uploaded), sink3.drops)
 	}
 }
 
@@ -511,7 +610,7 @@ func TestCloseIsIdempotentAndStopsWorker(t *testing.T) {
 	s.QueueTile(TilePos{X: 1, Z: 1}) // 关闭后全部安全 no-op
 	s.BeginFrame()
 	s.FlushUploads(TilePos{})
-	s.DropOutside(TilePos{}, 1)
+	s.DropOutside(TilePos{}, 0, 1)
 	if len(sink.uploads) != 0 || len(sink.drops) != 0 {
 		t.Fatalf("关闭后产生 sink 调用: %+v / %+v", sink.uploads, sink.drops)
 	}

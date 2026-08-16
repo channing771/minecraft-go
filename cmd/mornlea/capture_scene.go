@@ -568,3 +568,28 @@ func applyWaterUnderwaterCaptureState(app *application) error {
 	app.center = cameraChunk(app.camera.Pos)
 	return nil
 }
+
+// applyFarHorizonCaptureState 钉死 far-horizon 场景的全部呈现状态:前序场景
+// (ai-companion 及水景)留下的共享状态经 resetCapturePresentation 统一清空
+// (变基前该函数自带一份清理清单,fluid 系列把同样的清单沉淀成了公共 helper,
+// 变基后直接复用,不维护第二份)。几何依据:近环以出生 chunk (0,0) 为中心
+// (视距 32 chunk → 近 mesh 覆盖 block [-512, 528]²),远环带内半径 9 tile
+// (Ruling 19,floor(32/4)+1)→ 朝 -z 方向壳从 block -512 起(tile -9 覆盖
+// [-576,-512)),与近 mesh 边缘零缝衔接;相机 (8, 110, -352) 距近环 -z 边缘
+// 与壳起点都是 160 block,距全雾线(1152)与环外缘(1184)均留余量,画面上
+// 天空、雾过渡带、壳带、近景四段齐备。相机 y=110 保持在壳上界(112)之下,
+// 与近处不变断言的截止推导自洽。a.center 与 lodTileCenter 刻意不动:场景
+// 不得触发近环 DropOutside 或远环增量入队,收敛域与 terrain-noon 同源。
+func applyFarHorizonCaptureState(app *application) error {
+	if err := resetCapturePresentation(app); err != nil {
+		return err
+	}
+	app.worldTimeTicks = 6000
+	app.camera = client.Camera{
+		Pos: mgl32.Vec3{8, 110, -352}, Yaw: 0, Pitch: -0.25,
+		FovY: mgl32.DegToRad(70), Aspect: float32(captureWidth) / captureHeight,
+		Near: 0.1, Far: 2000,
+	}
+	app.blockTargetReset = false
+	return nil
+}

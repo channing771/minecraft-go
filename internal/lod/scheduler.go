@@ -43,10 +43,10 @@ const (
 // Scheduler 调度远环 tile 壳的生成与上传,语义镜像近环
 // render.SectionScheduler(该包不可 import,此处按其语义独立实现):
 // pending map 覆盖最新请求、按与中心的切比雪夫距离升序冲刷、
-// DropOutside 释放半径外的 pending 与已上传 tile;生成调用与上传共用
-// 一个独立 LOD 帧预算(绝不与近环共享)。壳生成在独立 worker goroutine
-// 内执行(镜像 render 字形 worker 模型),结果字节切片跨 goroutine 交接
-// 后视为不可变。
+// DropOutside 释放 [inner, outer] 带外的 pending 与已上传 tile;生成调用
+// 与上传共用一个独立 LOD 帧预算(绝不与近环共享)。壳生成在独立 worker
+// goroutine 内执行(镜像 render 字形 worker 模型),结果字节切片跨
+// goroutine 交接后视为不可变。
 //
 // 并发约束:pending/inflight/uploaded/budget 与全部公开调度方法只允许
 // 帧线程(渲染循环)调用;worker goroutine 只触碰 requests/results 两个
@@ -157,16 +157,28 @@ func (s *Scheduler) QueueTile(tile TilePos) {
 	s.pending[tile] = struct{}{}
 }
 
-// QueueRing 把以 center 为中心、切比雪夫距离 ≤ radius 的全部 tile 入队
-// (登录播种全环与跨 tile 边界的增量入队共用一个入口):已 pending /
-// inflight / uploaded 的 tile 跳过,天然幂等,重复调用只补新进入范围的
-// tile。radius < 0 不入队任何 tile。关闭后为安全 no-op。
-func (s *Scheduler) QueueRing(center TilePos, radius int) {
-	if s.closed.Load() || radius < 0 {
+// QueueRing 把以 center 为中心、切比雪夫距离在 [inner, outer] 闭区间的
+// 全部 tile 入队(登录播种远环带与跨 tile 边界的增量入队共用一个入口):
+// 已 pending / inflight / uploaded 的 tile 跳过,天然幂等,重复调用只补
+// 新进入范围的 tile。
+//
+// inner 是近环排除半径(Ruling 19):近 mesh 覆盖之内的 tile 不入队。
+// 原因是壳的步长窗高取 max,系统性高于精细地表,若在近环内渲染会
+// poke 出地表、以更近的深度遮挡近处 mesh——capture 的「近处像素不变」
+// 门禁因此在构造上依赖内盘排除。inner 由调用方按 viewDistance 推导
+// (cmd/mornlea 的 lodNearTileRadius,保证壳最小覆盖块 ≥ 近 mesh 覆盖
+// 半径、与近 mesh 零重叠);inner=0 退化为全盘入队(旧语义)。
+// inner < 0 或 outer < inner 不入队任何 tile。关闭后为安全 no-op。
+func (s *Scheduler) QueueRing(center TilePos, inner, outer int) {
+	if s.closed.Load() || inner < 0 || outer < inner {
 		return
 	}
-	for dz := -radius; dz <= radius; dz++ {
-		for dx := -radius; dx <= radius; dx++ {
+	for dz := -outer; dz <= outer; dz++ {
+		for dx := -outer; dx <= outer; dx++ {
+			// 切比雪夫距离 = max(|dx|, |dz|);内盘(距离 < inner)跳过。
+			if max(max(-dx, dx), max(-dz, dz)) < inner {
+				continue
+			}
 			tile := TilePos{X: center.X + int32(dx), Z: center.Z + int32(dz)}
 			if _, ok := s.inflight[tile]; ok {
 				continue
@@ -281,26 +293,40 @@ func (s *Scheduler) Busy() int {
 	return len(s.pending) + len(s.inflight) + len(s.results)
 }
 
-// DropOutside 丢弃 center 半径(切比雪夫)外的 pending 与已上传 tile
-// (已上传的触发 TileSink 的 DropLodTile 释放 GPU 资源),并把界外的
-// 在途生成从登记中移除——其结果到达冲刷时会被直接丢弃,不上传已放弃
-// 的 tile。关闭后为安全 no-op。
-func (s *Scheduler) DropOutside(center TilePos, radius int) {
+// DropOutside 丢弃不在 [inner, outer] 带内的 tile:切比雪夫距离 > outer
+// 或 < inner 的 pending 被丢弃、已上传的触发 TileSink 的 DropLodTile 释放
+// GPU 资源,并把带外的在途生成从登记中移除——其结果到达冲刷时会被直接
+// 丢弃,不上传已放弃的 tile。内半径语义与 QueueRing 对称(Ruling 19):
+// 玩家跨 tile 边界后,曾在外带、现已落入近 mesh 覆盖的 tile 必须连同
+// GPU 资源让位,否则内盘残留壳会在近 mesh 之上 poke 出地表,近环零
+// 重叠只在静止时成立。关闭后为安全 no-op。
+func (s *Scheduler) DropOutside(center TilePos, inner, outer int) {
 	if s.closed.Load() {
 		return
 	}
+	// inner/outer 均为调用方推导的非负值;防御性钳制让非法/空区间
+	// (含负外半径)退化为全释放,与旧语义「负半径丢弃一切」一致,不会
+	// 误保留任何 tile:lo=hi=−1 时切比雪夫距离(恒 ≥ 0)全部判定界外。
+	lo, hi := int64(inner), int64(outer)
+	if hi < lo {
+		lo, hi = -1, -1
+	}
+	outOfBand := func(tile TilePos) bool {
+		d := tileChebyshev(tile, center)
+		return d < lo || d > hi
+	}
 	for tile := range s.pending {
-		if tileChebyshev(tile, center) > int64(radius) {
+		if outOfBand(tile) {
 			delete(s.pending, tile)
 		}
 	}
 	for tile := range s.inflight {
-		if tileChebyshev(tile, center) > int64(radius) {
+		if outOfBand(tile) {
 			delete(s.inflight, tile)
 		}
 	}
 	for tile := range s.uploaded {
-		if tileChebyshev(tile, center) > int64(radius) {
+		if outOfBand(tile) {
 			delete(s.uploaded, tile)
 			s.sink.DropLodTile(tile.X, tile.Z)
 		}
