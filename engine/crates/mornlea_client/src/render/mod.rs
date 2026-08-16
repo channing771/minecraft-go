@@ -15,12 +15,14 @@
 
 pub mod entity;
 pub mod pool;
+pub mod quads;
 pub mod shaders;
 
 use std::collections::HashMap;
 
 use entity::{EntityPass, EntityPipelineKind};
 use pool::{Alloc, Pool};
+use quads::{QuadPass, QuadPassConfig};
 
 /// 离屏 color 格式,必须与 Go capture 的 `FormatBGRA8UnormSrgb` 一致。
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
@@ -378,8 +380,17 @@ pub struct OffscreenRenderer {
     overlay_pipeline: wgpu::RenderPipeline,
     overlay_bind: wgpu::BindGroup,
 
+    /// 名牌 billboard pass(双流:背景 + 字形)。
+    name_tag_pass: QuadPass,
+    /// HUD pass(hotbar 家族;bind 在 HUD 图集上传后建立)。
+    hud_pass: QuadPass,
+    /// 调试面板 pass。
+    debug_pass: QuadPass,
+
     /// 字形图集(R8,增量矩形上传);内容全部来自 Go 光栅化 worker。
     glyph_atlas: wgpu::Texture,
+    /// 字形图集视图,供文本类 pass 共享。
+    glyph_view: wgpu::TextureView,
     /// HUD 图集;None 表示尚未上传。
     hud_atlas: Option<wgpu::Texture>,
 
@@ -752,6 +763,77 @@ impl OffscreenRenderer {
             view_formats: &[],
         });
 
+        let glyph_view = glyph_atlas.create_view(&wgpu::TextureViewDescriptor::default());
+        // 三个双流 quad pass;容量只作上界校验,不参与图像输出。
+        let name_tag_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("name-tag"),
+            source: wgpu::ShaderSource::Wgsl(shaders::NAME_TAG.into()),
+        });
+        let mut name_tag_pass = QuadPass::new(
+            &device,
+            &name_tag_module,
+            QuadPassConfig {
+                label: "name-tag pass",
+                uniform_bytes: 96,
+                instance_bytes: 64,
+                stream_a_cap: 12,
+                stream_b_cap: 12 * 32,
+                entry_a: ("background_vs", "background_fs"),
+                entry_b: ("glyph_vs", "glyph_fs"),
+                uses_depth: true,
+                second_texture: false,
+                nearest_sampler: false,
+            },
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+        name_tag_pass.rebuild_bind(&device, &glyph_view, None);
+        let hud_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("hotbar"),
+            source: wgpu::ShaderSource::Wgsl(shaders::HUD_HOTBAR.into()),
+        });
+        let hud_pass = QuadPass::new(
+            &device,
+            &hud_module,
+            QuadPassConfig {
+                label: "hotbar pass",
+                uniform_bytes: 16,
+                instance_bytes: 48,
+                stream_a_cap: 4096,
+                stream_b_cap: 8192,
+                entry_a: ("quad_vs", "quad_fs"),
+                entry_b: ("glyph_vs", "glyph_fs"),
+                uses_depth: false,
+                second_texture: true,
+                nearest_sampler: true,
+            },
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+        let debug_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("debug panel"),
+            source: wgpu::ShaderSource::Wgsl(shaders::DEBUG_PANEL.into()),
+        });
+        let mut debug_pass = QuadPass::new(
+            &device,
+            &debug_module,
+            QuadPassConfig {
+                label: "debug panel pass",
+                uniform_bytes: 16,
+                instance_bytes: 48,
+                stream_a_cap: 256,
+                stream_b_cap: 8192,
+                entry_a: ("quad_vs", "quad_fs"),
+                entry_b: ("glyph_vs", "glyph_fs"),
+                uses_depth: false,
+                second_texture: false,
+                nearest_sampler: false,
+            },
+            COLOR_FORMAT,
+            DEPTH_FORMAT,
+        );
+        debug_pass.rebuild_bind(&device, &glyph_view, None);
+
         let hiz = HiZ::new(&device, &queue, width, height);
         let cull_bind = make_cull_bind(
             &device,
@@ -797,10 +879,14 @@ impl OffscreenRenderer {
             avatar_pass,
             drop_pass,
             outline_pass,
+            name_tag_pass,
+            hud_pass,
+            debug_pass,
             overlay_uniform,
             overlay_pipeline,
             overlay_bind,
             glyph_atlas,
+            glyph_view,
             hud_atlas: None,
             pool: Pool::new(POOL_FACES),
             sections: HashMap::new(),
@@ -1062,6 +1148,9 @@ impl OffscreenRenderer {
                 depth_or_array_layers: 1,
             },
         );
+        let hud_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.hud_pass
+            .rebuild_bind(&self.device, &self.glyph_view, Some(&hud_view));
         self.hud_atlas = Some(texture);
         true
     }
@@ -1091,6 +1180,31 @@ impl OffscreenRenderer {
         {
             return false;
         }
+        // 文本类段:非空时必须能按各自布局解析,失败在任何 GPU 写入前拒绝。
+        let name_tag_segment = if input.name_tag_vertices.is_empty() {
+            None
+        } else {
+            match self.name_tag_pass.parse_segment(&input.name_tag_vertices) {
+                Some(parts) => Some(parts),
+                None => return false,
+            }
+        };
+        let hud_segment = if input.hud_vertices.is_empty() {
+            None
+        } else {
+            match self.hud_pass.parse_segment(&input.hud_vertices) {
+                Some(parts) => Some(parts),
+                None => return false,
+            }
+        };
+        let debug_segment = if input.debug_vertices.is_empty() {
+            None
+        } else {
+            match self.debug_pass.parse_segment(&input.debug_vertices) {
+                Some(parts) => Some(parts),
+                None => return false,
+            }
+        };
         // 构建候选 record(编码镜像 Go sectionRecords)。
         let mut records: Vec<u8> = Vec::with_capacity(input.visible.len() * SECTION_RECORD_BYTES);
         let mut candidates = 0u32;
@@ -1293,6 +1407,18 @@ impl OffscreenRenderer {
                 "block outline pass",
             );
         }
+        // 名牌(Go 顺序:outline 之后、overlay 之前)。
+        if let Some((uniform, backgrounds, glyphs)) = name_tag_segment {
+            self.name_tag_pass.upload_and_record(
+                &self.queue,
+                &mut encoder,
+                &self.color_view,
+                Some(&self.depth_view),
+                uniform,
+                backgrounds,
+                glyphs,
+            );
+        }
         // 伤害红边(Go 顺序:名牌之后、HUD 之前);strength 钳制到 1,
         // 非正值跳过(镜像 Go)。
         if input.overlay_strength > 0.0 {
@@ -1319,6 +1445,29 @@ impl OffscreenRenderer {
             pass.set_pipeline(&self.overlay_pipeline);
             pass.set_bind_group(0, &self.overlay_bind, &[]);
             pass.draw(0..3, 0..1);
+        }
+        // HUD 与调试面板(Go 顺序:overlay 之后,面板最后)。
+        if let Some((uniform, quads, glyphs)) = hud_segment {
+            self.hud_pass.upload_and_record(
+                &self.queue,
+                &mut encoder,
+                &self.color_view,
+                None,
+                uniform,
+                quads,
+                glyphs,
+            );
+        }
+        if let Some((uniform, quads, glyphs)) = debug_segment {
+            self.debug_pass.upload_and_record(
+                &self.queue,
+                &mut encoder,
+                &self.color_view,
+                None,
+                uniform,
+                quads,
+                glyphs,
+            );
         }
         self.last_pos = input.pos;
         self.last_view_proj = input.view_proj;
@@ -1817,5 +1966,51 @@ mod outline_overlay_tests {
         let mut nan_frame = empty_frame_pub();
         nan_frame.overlay_strength = f32::NAN;
         assert!(!renderer.render_frame(&nan_frame), "NaN 强度必须拒绝");
+    }
+}
+
+#[cfg(test)]
+mod text_pass_tests {
+    use super::tests_support::*;
+
+    /// 文本段的结构校验:合法段(含零实例)通过,布局违约在渲染前拒绝。
+    /// 视觉正确性由 Go 侧双后端整帧对照保证。
+    #[test]
+    fn text_segments_validate_before_render() {
+        let Some(mut renderer) = renderer_or_skip_pub(32, 32) else {
+            return;
+        };
+        // 名牌:96B 相机 + 1 背景 + 0 字形。
+        let mut name_tag = vec![0u8; 96];
+        name_tag.extend_from_slice(&1u32.to_le_bytes());
+        name_tag.extend_from_slice(&0u32.to_le_bytes());
+        name_tag.extend_from_slice(&[0u8; 64]);
+        let mut frame = empty_frame_pub();
+        frame.name_tag_vertices = name_tag;
+        assert!(renderer.render_frame(&frame), "合法名牌段必须通过");
+
+        // HUD:16B viewport + 1 quad + 1 glyph(HUD 图集未上传时跳过绘制,
+        // 但解析必须通过)。
+        let mut hud = vec![0u8; 16];
+        hud.extend_from_slice(&1u32.to_le_bytes());
+        hud.extend_from_slice(&1u32.to_le_bytes());
+        hud.extend_from_slice(&[0u8; 96]);
+        let mut hud_frame = empty_frame_pub();
+        hud_frame.hud_vertices = hud;
+        assert!(renderer.render_frame(&hud_frame), "合法 HUD 段必须通过");
+
+        // 面板:声明计数与字节不符必须拒绝。
+        let mut bad_debug = vec![0u8; 16];
+        bad_debug.extend_from_slice(&2u32.to_le_bytes());
+        bad_debug.extend_from_slice(&0u32.to_le_bytes());
+        bad_debug.extend_from_slice(&[0u8; 48]);
+        let mut bad_frame = empty_frame_pub();
+        bad_frame.debug_vertices = bad_debug;
+        assert!(!renderer.render_frame(&bad_frame), "计数与字节不符必须拒绝");
+
+        // 名牌段短于相机头必须拒绝。
+        let mut short_frame = empty_frame_pub();
+        short_frame.name_tag_vertices = vec![0u8; 40];
+        assert!(!renderer.render_frame(&short_frame));
     }
 }
