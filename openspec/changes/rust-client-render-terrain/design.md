@@ -38,7 +38,8 @@ target);选择与 Go 绑定内嵌 wgpu-native 相同主版本线,降低跨后端
 ### ABI 入口族(均带校验,违约不触碰调用方缓冲)
 
 - `mornlea_client_render_create(abi, width, height, out_handle)`:离屏
-  color(RGBA8)+depth target 与全部 pipeline;
+  color(BGRA8UnormSrgb,与 Go capture 同格式)+depth(Depth32Float)target
+  与全部 pipeline;
 - `mornlea_client_render_upload_atlas(abi, handle, layers, layer_bytes)`:
   Go `assets.Registry` 导出的 layer 像素一次性上传(材质所有权留 Go,
   Rust 不重新生成);
@@ -48,7 +49,7 @@ target);选择与 Go 绑定内嵌 wgpu-native 相同主版本线,降低跨后端
 - `mornlea_client_render_frame(abi, handle, frame, frame_len)`:固定头
   (view/proj 矩阵、相机位置、日照时间、标志)+ 可见 section 列表
   (Go BFS+frustum 结果);一帧一次;
-- `mornlea_client_render_readback(abi, handle, out, out_len)`:回读 RGBA
+- `mornlea_client_render_readback(abi, handle, out, out_len)`:回读 BGRA
   (长度必须精确匹配),golden 对照专用。
 
 ### GPU 管线镜像 Go 实现
@@ -70,8 +71,9 @@ capture 场景装配(世界、相机、日照)已在 cmd/mornlea;新增 darwin-o
 
 - 依赖方向:`internal/client` 仍是 client ABI 唯一接触点;cmd/mornlea 经
   client 包调用渲染绑定;archcheck 白名单不变(client 已在 cmd 依赖内)。
-- 线程:渲染器句柄限创建线程(thread-local 表,同窗口);Rust 侧不自建
-  线程;wgpu 内部线程不外泄状态。
+- 线程:渲染器句柄放进程级 Mutex 表(wgpu 对象 Send+Sync,且 Go 测试
+  goroutine 会在 OS 线程间迁移,thread-local 会误判合法句柄);窗口仍是
+  thread-local(winit 主线程约束)。Rust 侧不自建线程。
 - 生命周期:destroy 后句柄失效;readback 用完成同步(map + poll)阻塞至
   数据就绪,离屏路径无 surface 时序问题。
 

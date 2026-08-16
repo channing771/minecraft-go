@@ -16,7 +16,7 @@ use crate::input::SNAPSHOT_BYTES;
 use crate::window::ClientWindow;
 
 /// 当前 client ABI 版本。
-pub const CLIENT_ABI_VERSION: u32 = 1;
+pub const CLIENT_ABI_VERSION: u32 = 2;
 
 /// 调用成功。
 pub const MORNLEA_CLIENT_STATUS_OK: u32 = 0;
@@ -266,26 +266,40 @@ mod tests {
     // 校验拒绝路径:ABI 版本、参数校验与无效句柄。
 
     #[test]
-    fn abi_version_is_one() {
-        assert_eq!(mornlea_client_abi_version(), 1);
+    fn abi_version_is_two() {
+        assert_eq!(mornlea_client_abi_version(), 2);
     }
 
     #[test]
     fn wrong_abi_version_is_rejected_everywhere() {
         let mut out_handle = 0u64;
         // SAFETY: 指针来自有效局部变量。
-        let create =
-            unsafe { mornlea_client_window_create(2, 100, 100, b"t".as_ptr(), 1, &mut out_handle) };
+        let create = unsafe {
+            mornlea_client_window_create(
+                CLIENT_ABI_VERSION + 1,
+                100,
+                100,
+                b"t".as_ptr(),
+                1,
+                &mut out_handle,
+            )
+        };
         assert_eq!(create, MORNLEA_CLIENT_STATUS_ABI_VERSION);
         assert_eq!(out_handle, 0);
         assert_eq!(
-            mornlea_client_window_destroy(2, 1),
+            mornlea_client_window_destroy(CLIENT_ABI_VERSION + 1, 1),
             MORNLEA_CLIENT_STATUS_ABI_VERSION
         );
         let mut snapshot = [0u8; SNAPSHOT_BYTES];
         // SAFETY: 同上。
-        let poll =
-            unsafe { mornlea_client_window_poll(2, 1, snapshot.as_mut_ptr(), snapshot.len()) };
+        let poll = unsafe {
+            mornlea_client_window_poll(
+                CLIENT_ABI_VERSION + 1,
+                1,
+                snapshot.as_mut_ptr(),
+                snapshot.len(),
+            )
+        };
         assert_eq!(poll, MORNLEA_CLIENT_STATUS_ABI_VERSION);
     }
 
@@ -294,15 +308,28 @@ mod tests {
         let mut out_handle = 42u64;
         // SAFETY: 除被测的空 title 外其余指针有效。
         let create = unsafe {
-            mornlea_client_window_create(1, 100, 100, std::ptr::null(), 0, &mut out_handle)
+            mornlea_client_window_create(
+                CLIENT_ABI_VERSION,
+                100,
+                100,
+                std::ptr::null(),
+                0,
+                &mut out_handle,
+            )
         };
         assert_eq!(create, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
         assert_eq!(out_handle, 42, "失败调用不得写 out_handle");
 
         let mut snapshot = [0xAAu8; SNAPSHOT_BYTES];
         // SAFETY: 长度刻意错一字节,入口必须在写入前拒绝。
-        let poll =
-            unsafe { mornlea_client_window_poll(1, 1, snapshot.as_mut_ptr(), snapshot.len() - 1) };
+        let poll = unsafe {
+            mornlea_client_window_poll(
+                CLIENT_ABI_VERSION,
+                1,
+                snapshot.as_mut_ptr(),
+                snapshot.len() - 1,
+            )
+        };
         assert_eq!(poll, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
         assert!(
             snapshot.iter().all(|&b| b == 0xAA),
@@ -310,11 +337,11 @@ mod tests {
         );
 
         assert_eq!(
-            mornlea_client_window_set_cursor_captured(1, 1, 2),
+            mornlea_client_window_set_cursor_captured(CLIENT_ABI_VERSION, 1, 2),
             MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
         );
         assert_eq!(
-            mornlea_client_window_set_content_size(1, 1, 0, 100),
+            mornlea_client_window_set_content_size(CLIENT_ABI_VERSION, 1, 0, 100),
             MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
         );
     }
@@ -323,21 +350,390 @@ mod tests {
     fn unknown_handle_is_rejected_as_window_error() {
         let mut snapshot = [0u8; SNAPSHOT_BYTES];
         // SAFETY: 指针有效,句柄在本线程表中不存在。
-        let poll =
-            unsafe { mornlea_client_window_poll(1, 0xDEAD, snapshot.as_mut_ptr(), snapshot.len()) };
+        let poll = unsafe {
+            mornlea_client_window_poll(
+                CLIENT_ABI_VERSION,
+                0xDEAD,
+                snapshot.as_mut_ptr(),
+                snapshot.len(),
+            )
+        };
         assert_eq!(poll, MORNLEA_CLIENT_STATUS_WINDOW);
         assert_eq!(
-            mornlea_client_window_destroy(1, 0xDEAD),
+            mornlea_client_window_destroy(CLIENT_ABI_VERSION, 0xDEAD),
             MORNLEA_CLIENT_STATUS_WINDOW
         );
         assert_eq!(
-            mornlea_client_window_focus(1, 0xDEAD),
+            mornlea_client_window_focus(CLIENT_ABI_VERSION, 0xDEAD),
             MORNLEA_CLIENT_STATUS_WINDOW
         );
         let mut ns_window = 7usize;
         // SAFETY: 同上。
-        let status = unsafe { mornlea_client_window_ns_window(1, 0xDEAD, &mut ns_window) };
+        let status =
+            unsafe { mornlea_client_window_ns_window(CLIENT_ABI_VERSION, 0xDEAD, &mut ns_window) };
         assert_eq!(status, MORNLEA_CLIENT_STATUS_WINDOW);
         assert_eq!(ns_window, 7, "失败调用不得写 ns_window 输出");
+    }
+}
+
+// ---- render 入口族(client ABI v2)----
+
+use crate::render::{FrameInput, OffscreenRenderer, RenderCreateError};
+
+/// 本机无可用 GPU 适配器;调用方(测试)应据此跳过而非失败。
+pub const MORNLEA_CLIENT_STATUS_ADAPTER: u32 = 5;
+/// 渲染资源容量不足(face 池或 origin 槽位耗尽)。
+pub const MORNLEA_CLIENT_STATUS_CAPACITY: u32 = 6;
+
+/// render_frame 输入的固定头部字节数;其后是 visible_count×12 的 section 列表。
+const FRAME_HEADER_BYTES: usize = 192;
+
+/// 全局渲染器表:与窗口不同,wgpu 对象 Send+Sync,渲染器不受 winit 的
+/// 主线程约束;Go 调用方 goroutine 会在 OS 线程间迁移,thread-local 会把
+/// 合法句柄误判为失效,因此这里用进程级 Mutex 表。
+static RENDERERS: std::sync::Mutex<Option<HashMap<u64, OffscreenRenderer>>> =
+    std::sync::Mutex::new(None);
+/// 渲染器句柄计数;独立于窗口句柄空间,0 保留为无效。
+static NEXT_RENDER_HANDLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn with_renderer(handle: u64, operation: impl FnOnce(&mut OffscreenRenderer) -> u32) -> u32 {
+    let mut guard = RENDERERS.lock().expect("渲染器表锁中毒");
+    match guard.get_or_insert_with(HashMap::new).get_mut(&handle) {
+        Some(renderer) => operation(renderer),
+        None => MORNLEA_CLIENT_STATUS_WINDOW,
+    }
+}
+
+/// 创建离屏渲染器并写出句柄;无 GPU 适配器返回 ADAPTER 状态。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_create(
+    abi_version: u32,
+    width: u32,
+    height: u32,
+    out_handle: *mut u64,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if out_handle.is_null() || width == 0 || height == 0 {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        let renderer = match OffscreenRenderer::new(width, height) {
+            Ok(renderer) => renderer,
+            Err(RenderCreateError::Adapter) => return MORNLEA_CLIENT_STATUS_ADAPTER,
+            Err(RenderCreateError::Device) => return MORNLEA_CLIENT_STATUS_WINDOW,
+        };
+        let handle = NEXT_RENDER_HANDLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        RENDERERS
+            .lock()
+            .expect("渲染器表锁中毒")
+            .get_or_insert_with(HashMap::new)
+            .insert(handle, renderer);
+        // SAFETY: out_handle 已判非空,只在完整成功后写一次。
+        unsafe { out_handle.write(handle) };
+        MORNLEA_CLIENT_STATUS_OK
+    })
+}
+
+/// 销毁渲染器;重复销毁返回 WINDOW 状态。
+#[unsafe(no_mangle)]
+pub extern "C" fn mornlea_client_render_destroy(abi_version: u32, handle: u64) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    catch(|| {
+        let removed = RENDERERS
+            .lock()
+            .expect("渲染器表锁中毒")
+            .get_or_insert_with(HashMap::new)
+            .remove(&handle);
+        match removed {
+            Some(renderer) => {
+                drop(renderer);
+                MORNLEA_CLIENT_STATUS_OK
+            }
+            None => MORNLEA_CLIENT_STATUS_WINDOW,
+        }
+    })
+}
+
+/// 上传材质 atlas(逐 layer、逐 mip 的 RGBA 字节,长度必须精确匹配)。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_upload_atlas(
+    abi_version: u32,
+    handle: u64,
+    layers: u32,
+    pixels: *const u8,
+    pixels_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if pixels.is_null() || layers == 0 {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            // SAFETY: pixels 非空,调用方保证 pixels_len 字节可读。
+            let data = unsafe { std::slice::from_raw_parts(pixels, pixels_len) };
+            if renderer.upload_atlas(layers, data) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+            }
+        })
+    })
+}
+
+/// 上传/替换一个 section 的 packed face 字节(8 的倍数;空等价 drop)。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_upload_section(
+    abi_version: u32,
+    handle: u64,
+    section_x: i32,
+    section_y: i32,
+    section_z: i32,
+    quads: *const u8,
+    quads_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if !quads_len.is_multiple_of(8) || (quads.is_null() && quads_len != 0) {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            let data = if quads_len == 0 {
+                &[][..]
+            } else {
+                // SAFETY: quads 非空,调用方保证 quads_len 字节可读。
+                unsafe { std::slice::from_raw_parts(quads, quads_len) }
+            };
+            if renderer.upload_section((section_x, section_y, section_z), data) {
+                MORNLEA_CLIENT_STATUS_OK
+            } else {
+                MORNLEA_CLIENT_STATUS_CAPACITY
+            }
+        })
+    })
+}
+
+/// 丢弃一个 section(幂等)。
+#[unsafe(no_mangle)]
+pub extern "C" fn mornlea_client_render_drop_section(
+    abi_version: u32,
+    handle: u64,
+    section_x: i32,
+    section_y: i32,
+    section_z: i32,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            renderer.drop_section((section_x, section_y, section_z));
+            MORNLEA_CLIENT_STATUS_OK
+        })
+    })
+}
+
+/// 解析 render_frame 输入;违约返回 None。
+fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
+    if bytes.len() < FRAME_HEADER_BYTES {
+        return None;
+    }
+    let read_f32 =
+        |offset: usize| f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+    let read_u32 =
+        |offset: usize| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+    let mut view_proj = [0f32; 16];
+    let mut view_proj_inv = [0f32; 16];
+    for i in 0..16 {
+        view_proj[i] = read_f32(i * 4);
+        view_proj_inv[i] = read_f32(64 + i * 4);
+    }
+    let visible_count = read_u32(184) as usize;
+    if read_u32(188) != 0
+        || bytes.len() != FRAME_HEADER_BYTES + visible_count * 12
+        || visible_count > 128 * 1024
+    {
+        return None;
+    }
+    let mut visible = Vec::with_capacity(visible_count);
+    for index in 0..visible_count {
+        let offset = FRAME_HEADER_BYTES + index * 12;
+        let read_i32 = |o: usize| i32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
+        visible.push((read_i32(offset), read_i32(offset + 4), read_i32(offset + 8)));
+    }
+    Some(FrameInput {
+        view_proj,
+        view_proj_inv,
+        pos: [read_f32(128), read_f32(132), read_f32(136)],
+        daylight: read_f32(140),
+        sun_direction: [read_f32(144), read_f32(148), read_f32(152)],
+        star_visibility: read_f32(156),
+        sky_color: [read_f32(160), read_f32(164), read_f32(168), read_f32(172)],
+        cloud_macro_x: read_u32(176),
+        cloud_local: read_f32(180),
+        visible,
+    })
+}
+
+/// 渲染一帧(每帧一次;帧输入为固定头 + 可见 section 列表)。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_frame(
+    abi_version: u32,
+    handle: u64,
+    frame: *const u8,
+    frame_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if frame.is_null() {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        // SAFETY: frame 非空,调用方保证 frame_len 字节可读。
+        let bytes = unsafe { std::slice::from_raw_parts(frame, frame_len) };
+        let Some(input) = parse_frame(bytes) else {
+            return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+        };
+        with_renderer(handle, |renderer| {
+            renderer.render_frame(&input);
+            MORNLEA_CLIENT_STATUS_OK
+        })
+    })
+}
+
+/// 阻塞回读离屏 BGRA 图像;`out_len` 必须恰为 width×height×4。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_readback(
+    abi_version: u32,
+    handle: u64,
+    out: *mut u8,
+    out_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if out.is_null() {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            if out_len != renderer.output_bytes() {
+                return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+            }
+            // SAFETY: out 非空且长度已校验,调用方保证可写。
+            let out = unsafe { std::slice::from_raw_parts_mut(out, out_len) };
+            renderer.readback(out);
+            MORNLEA_CLIENT_STATUS_OK
+        })
+    })
+}
+
+#[cfg(test)]
+mod render_ffi_tests {
+    use super::*;
+
+    #[test]
+    fn render_entries_reject_bad_abi_and_arguments() {
+        let mut handle = 7u64;
+        // SAFETY: 指针来自有效局部变量。
+        let create =
+            unsafe { mornlea_client_render_create(CLIENT_ABI_VERSION + 1, 64, 64, &mut handle) };
+        assert_eq!(create, MORNLEA_CLIENT_STATUS_ABI_VERSION);
+        assert_eq!(handle, 7, "失败调用不得写句柄");
+        // SAFETY: 同上;宽为零必须拒绝。
+        let zero = unsafe { mornlea_client_render_create(CLIENT_ABI_VERSION, 0, 64, &mut handle) };
+        assert_eq!(zero, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+
+        // quads 长度非 8 的倍数必须拒绝。
+        let quads = [0u8; 9];
+        // SAFETY: 同上。
+        let misaligned = unsafe {
+            mornlea_client_render_upload_section(
+                CLIENT_ABI_VERSION,
+                0xBEEF,
+                0,
+                0,
+                0,
+                quads.as_ptr(),
+                quads.len(),
+            )
+        };
+        assert_eq!(misaligned, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+
+        // 未知句柄一律 WINDOW。
+        assert_eq!(
+            mornlea_client_render_destroy(CLIENT_ABI_VERSION, 0xBEEF),
+            MORNLEA_CLIENT_STATUS_WINDOW
+        );
+        let frame = [0u8; FRAME_HEADER_BYTES];
+        // SAFETY: 同上。
+        let status = unsafe {
+            mornlea_client_render_frame(CLIENT_ABI_VERSION, 0xBEEF, frame.as_ptr(), frame.len())
+        };
+        assert_eq!(status, MORNLEA_CLIENT_STATUS_WINDOW);
+    }
+
+    #[test]
+    fn render_roundtrip_or_skip_without_adapter() {
+        let mut handle = 0u64;
+        // SAFETY: 指针来自有效局部变量。
+        let create =
+            unsafe { mornlea_client_render_create(CLIENT_ABI_VERSION, 32, 16, &mut handle) };
+        if create == MORNLEA_CLIENT_STATUS_ADAPTER {
+            return; // 无 GPU 环境跳过。
+        }
+        assert_eq!(create, MORNLEA_CLIENT_STATUS_OK);
+
+        let mut frame = [0u8; FRAME_HEADER_BYTES];
+        // 恒等矩阵 + daylight=1。
+        for i in 0..4 {
+            let one = 1.0f32.to_le_bytes();
+            frame[i * 16 + i * 4..i * 16 + i * 4 + 4].copy_from_slice(&one);
+            frame[64 + i * 16 + i * 4..64 + i * 16 + i * 4 + 4].copy_from_slice(&one);
+        }
+        // SAFETY: 同上。
+        let status = unsafe {
+            mornlea_client_render_frame(CLIENT_ABI_VERSION, handle, frame.as_ptr(), frame.len())
+        };
+        assert_eq!(status, MORNLEA_CLIENT_STATUS_OK);
+
+        let mut out = vec![0u8; 32 * 16 * 4];
+        // SAFETY: 同上。
+        let readback = unsafe {
+            mornlea_client_render_readback(CLIENT_ABI_VERSION, handle, out.as_mut_ptr(), out.len())
+        };
+        assert_eq!(readback, MORNLEA_CLIENT_STATUS_OK);
+        assert!(out.iter().any(|&b| b != 0));
+
+        // 回读缓冲长度不符必须拒绝且不触碰缓冲。
+        let mut short = vec![0xAAu8; 32 * 16 * 4 - 1];
+        // SAFETY: 同上。
+        let bad = unsafe {
+            mornlea_client_render_readback(
+                CLIENT_ABI_VERSION,
+                handle,
+                short.as_mut_ptr(),
+                short.len(),
+            )
+        };
+        assert_eq!(bad, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+        assert!(short.iter().all(|&b| b == 0xAA));
+
+        assert_eq!(
+            mornlea_client_render_destroy(CLIENT_ABI_VERSION, handle),
+            MORNLEA_CLIENT_STATUS_OK
+        );
+        assert_eq!(
+            mornlea_client_render_destroy(CLIENT_ABI_VERSION, handle),
+            MORNLEA_CLIENT_STATUS_WINDOW
+        );
     }
 }

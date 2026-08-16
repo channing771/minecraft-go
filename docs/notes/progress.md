@@ -22,4 +22,6 @@
 
 当前 darwin 客户端的窗口与事件循环由新的 Rust `mornlea_client` cdylib(winit,client ABI v1)独占生产;Go `internal/client` 保留 `Window` 领域 API、快照解码与帧内缓存,每帧一次 FFI 输入快照取代逐键轮询,`go-gl/glfw` 依赖已移除。client 库与 engine 库 ABI 互不耦合,Linux 专服不链接 client 库。这是"GPU 与窗口迁 Rust"路线图(R1 窗口→R2 渲染核心→R3 HUD 呈现)的第一步。
 
+R2a(rust-client-render-terrain)在 `mornlea_client` 内交付纯离屏的 Rust wgpu 世界渲染器(terrain/sky/云/GPU culling/HiZ,client ABI v2),WGSL 与 Go 渲染器单源共享;oak grove 双后端对照门禁以零像素差异通过(最大通道差 0)。生产渲染仍由 Go `internal/render` 执行,golden 基线不变;渲染切换与实体/文本迁移属后续 R2b/R2c。
+
 M5A 不包含 Planner、HTTP 模型调用、FIFO、移动、采掘、放置、跟随、persona 或摘要；这些能力仍属于后续 M5B–M5D 方向，开始真实变更前以新的 OpenSpec 为准。历史[设计](../superpowers/specs/2026-08-13-ai-native-companions-design.md)与[实施计划](../superpowers/plans/2026-08-13-m5a-companion-entity-chat.md)仅作决策背景。
