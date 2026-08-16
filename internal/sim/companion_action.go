@@ -18,8 +18,9 @@ const (
 	CompanionActionMineHold
 	// CompanionActionMineRelease 是采掘释放载荷，同 tick 清空采掘意图与进度。
 	CompanionActionMineRelease
-	// CompanionActionPlace 是放置载荷，携带目标 BlockPos 与方块；放置结算本体
-	// 属后续放置任务，当前只保留分派骨架与载荷校验。
+	// CompanionActionPlace 是放置载荷，携带目标 BlockPos 与方块；action 阶段
+	// 记录单次放置意图，结算本体（校验链 + 原子扣料写方块）在同一 tick 的
+	// settleCompanionPlacements 完成。
 	CompanionActionPlace
 )
 
@@ -107,13 +108,19 @@ func validCompanionAction(action CompanionAction) bool {
 // 每个 active 伙伴每 tick 至多应用一个 action：按入队顺序取该 ID 最早的一个合法
 // action，重复或非法 action 确定性丢弃；未知 ID 或未激活伙伴的 action 同样丢弃，
 // 不产生任何会话副作用。Move 写入本 tick 移动输入；MineHold/MineRelease 置/清
-// 共享的采掘意图（实际进度在物理阶段之后的 advanceMining 统一累积）；Place 保留
-// 分派骨架——放置结算本体属后续放置任务，当前绝不动世界与背包。非 Move 载荷与
-// 无 action 的伙伴一样写中性输入（仅保留当前 yaw）：重力与碰撞照常生效，无任务
-// 伙伴在地面保持静止。中性输入每 tick 重写，伙伴输入因此不像玩家输入那样跨
-// tick 保持；采掘意图例外——它与玩家的按住语义一致，跨 tick 保持直到 Release。
-func (engine *Engine) applyCompanionActions(actions []CompanionAction) {
+// 共享的采掘意图（实际进度在物理阶段之后的 advanceMining 统一累积）；Place 记录
+// 单次放置意图并交由 settleCompanionPlacements 在同一 tick 的区块写入区结算
+// （放置写方块必须晚于 reconcileSubscriptions，见那里的阶段顺序契约注释）。
+// 非 Move 载荷与无 action 的伙伴一样写中性输入（仅保留当前 yaw）：重力与碰撞照常
+// 生效，无任务伙伴在地面保持静止。中性输入每 tick 重写，伙伴输入因此不像玩家
+// 输入那样跨 tick 保持；采掘意图例外——它与玩家的按住语义一致，跨 tick 保持直到
+// Release；放置意图没有进度语义，只随本 tick 存活。
+//
+// 返回值是本 tick 收集的放置意图，按 CompanionID 字节序排列（active 快照本身
+// 有序），由 Step 在写入区结算后即丢弃。
+func (engine *Engine) applyCompanionActions(actions []CompanionAction) []companionPlaceIntent {
 	var intents map[companion.ID]CompanionAction
+	var placements []companionPlaceIntent
 	if len(actions) != 0 {
 		// 容量上限是 companion.MaxActive，这里的临时表不在热路径上放大分配。
 		intents = make(map[companion.ID]CompanionAction, len(actions))
@@ -152,11 +159,15 @@ func (engine *Engine) applyCompanionActions(actions []CompanionAction) {
 			entry.input = physics.Input{Yaw: entry.yaw}
 			entry.miningHeld = false
 		case CompanionActionPlace:
-			// 放置分派骨架：载荷校验已在 validCompanionAction 完成，结算本体
-			// （放置校验 + 原子扣料写方块）属后续放置任务，这里只保持中性输入。
+			// 放置没有进度语义：action 阶段只记录意图并保持中性输入，结算本体
+			// （校验链 + 原子扣料写方块）在 settleCompanionPlacements 完成。
 			entry.input = physics.Input{Yaw: entry.yaw}
+			placements = append(placements, companionPlaceIntent{
+				id: id, target: action.Target, block: action.Block,
+			})
 		}
 	}
+	return placements
 }
 
 // advanceActiveCompanions 把所有 active 伙伴汇入与玩家相同的 Rust physics.Step

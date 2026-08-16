@@ -250,7 +250,7 @@ func (engine *Engine) Step() TickResult {
 	// 伙伴 action 阶段：必须严格位于玩家命令之后、统一物理推进之前，为同一
 	// tick 建立固定顺序（见 applyCompanionActions 的顺序契约注释）。
 	engine.notifyStepPhase(phaseCompanionActions)
-	engine.applyCompanionActions(companionActions)
+	companionPlacements := engine.applyCompanionActions(companionActions)
 	var currentWanted map[core.ChunkKey]struct{}
 	if len(acquired) != 0 || len(generated) != 0 {
 		currentWanted = engine.wantedSnapshot()
@@ -282,6 +282,12 @@ func (engine *Engine) Step() TickResult {
 	// settleDeaths 同时必须早于本 tick 末尾的状态发布，外部才观察不到生命值为 0 的
 	// 中间状态。
 	engine.settleDeaths(pending)
+
+	// 伙伴放置结算：Place 意图在 action 阶段收集，世界写统一放在
+	// reconcileSubscriptions 之后的区块写入区（阶段顺序契约对一切区块写者成立，
+	// 玩家放置路径的 interactions 循环同样在收敛之后），扣料与写方块在同一
+	// 权威 tick 内原子成立，变更汇入同一份 pending。
+	engine.settleCompanionPlacements(companionPlacements, pending)
 
 	for _, command := range interactions {
 		switch command.Kind {
