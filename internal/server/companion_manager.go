@@ -557,8 +557,9 @@ func (m *companionManager) advancePathMovement(
 // 与漂移判定互不重叠。
 const companionFollowReplanDriftBlocks = 2
 
-// companionFollowDistanceSquared 是跟随距离边界的平方，预计算避免热路径
-// 每 tick 重复乘法。
+// companionFollowDistanceSquared 是跟随距离边界的平方。常量的价值在命名与
+// 语义单一来源（跟随距离平方只有一个定义点）；两次乘法编译期即可折叠，无
+// 性能含义。
 const companionFollowDistanceSquared = companion.CompanionFollowDistanceBlocks *
 	companion.CompanionFollowDistanceBlocks
 

@@ -17,7 +17,7 @@ M5B（已归档）交付了 `go_to` 闭环：FIFO、六态状态机、Planner（
 
 ### 状态机第五终态 Stopped 与 deadline 豁免
 
-`Stopped` 只能从 Running 的持续跟随任务经停止指令进入。deadline 豁免的实现天然免费：M5B 的 `DeadlineTicks == 0` 已表示未设置，超时检查跳过零值——follow 任务不写 deadline 即豁免，持久化层零值即"不保存 deadline"。
+`Stopped` 只能从 Running 的持续跟随任务经停止指令进入。deadline 豁免的实现成本低但并非免费：M5B 的 `Task.Expired` 对零值 deadline 恒真（从未触发只因 FinishValidation 必设值），M5C 补 `DeadlineTicks != 0` 守卫后，follow 任务不写 deadline 即豁免，持久化层零值即"不保存 deadline"。
 
 ### follow 执行：复用寻路与距离边界
 
