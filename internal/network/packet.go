@@ -7,8 +7,9 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// ProtocolVersion 是当前唯一支持的协议版本；v18 追加停止与容量枚举并拒绝 v17 及更早登录。
-const ProtocolVersion uint32 = 18
+// ProtocolVersion 是当前唯一支持的协议版本；v19 追加 CompanionSpeech 台词事件
+// 并拒绝 v18 及更早登录。
+const ProtocolVersion uint32 = 19
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8

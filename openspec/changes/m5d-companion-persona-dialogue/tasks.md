@@ -2,8 +2,8 @@
 
 ## D1 协议 v19 与 CompanionSpeech 线格式
 
-- [ ] D1.1 先写失败测试：`internal/network` 中 `ChatEventCompanionSpeech` kind 组合校验（伙伴身份 + 1..256 bytes 台词 + reason None 的合法/非法矩阵）、编码解码往返、ChatEvent 1326/1327/1328 边界保持、ProtocolVersion=18 登录被拒而 v19 通过
-- [ ] D1.2 最小实现：`ChatEventKind` 追加 `ChatEventCompanionSpeech = 9`、组合校验与编码分支、`ProtocolVersion` 升 19；更新既有协议 golden 字节
+- [x] D1.1 先写失败测试：`internal/network` 中 `ChatEventCompanionSpeech` kind 组合校验（伙伴身份 + 1..256 bytes 台词 + reason None 的合法/非法矩阵）、编码解码往返、ChatEvent 1326/1327/1328 边界保持、ProtocolVersion=18 登录被拒而 v19 通过
+- [x] D1.2 最小实现：`ChatEventKind` 追加 `ChatEventCompanionSpeech = 9`、组合校验与编码分支、`ProtocolVersion` 升 19；更新既有协议 golden 字节
 - [ ] 验证：`go test ./internal/network -race -count=1` 全绿，golden 更新仅限新增 kind
 
 ## D2 persona 配置解析

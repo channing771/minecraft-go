@@ -51,6 +51,12 @@ const (
 	// ChatEventTaskStopped 是 v18 追加的停止事件：服务端确认一条已被停止旁路终结的任务，
 	// 携带完整伙伴身份与被停止任务的原始指令；广播语义由服务端任务实现，本包只做组合校验。
 	ChatEventTaskStopped
+	// ChatEventCompanionSpeech 是 v19 追加的伙伴台词事件：Dialogue 表达平面产出的一句
+	// 符合人设的台词（1..256 bytes）。它是 ChatEvent 中唯一允许携带模型生成文本的 kind，
+	// 任务事实事件（Task*）仍只复述玩家原始指令。wire 上台词复用既有文本槽位并在本 kind
+	// 内收紧为 256-byte 上界，既有 kind 的 golden 字节因此保持不变；广播接收者语义由
+	// 服务端决定，本包只做组合校验。
+	ChatEventCompanionSpeech
 )
 
 // ChatRejectReason 标识聊天寻址被拒绝的原因。值 3 预留未分配，
@@ -94,6 +100,11 @@ type ChatEvent struct {
 	Kind          ChatEventKind
 	RejectReason  ChatRejectReason
 	Command       string
+	// Speech 是 CompanionSpeech 事件携带的伙伴台词（1..256 bytes，v19 追加）。
+	// 它与 Command 共用 wire 上唯一的文本槽位，编码按 kind 二选一写入，因此两者在
+	// 组合校验上互斥：非 Speech kind 携带台词、或 Speech kind 复述玩家指令，
+	// 都会在应用任何字段前被整条拒绝。
+	Speech string
 }
 
 func (ChatEvent) serverMessage() {}
@@ -103,12 +114,18 @@ func (ChatEvent) serverPacket()  {}
 //
 // 组合规则是原子的：任一字段不满足当前 kind/reason 的要求即整体拒绝。
 // 任务事件（Task*）必须携带完整伙伴身份与原始指令，且 MUST NOT 携带模型
-// 生成的自由文本——wire 形状上唯一的文本字段就是玩家原始指令 Command，
-// 因此该约束由组合校验结构性保证。QueueFull 与 NotFollowing 拒绝保留与
-// Accepted 相同的身份与指令要求，以便发令者能对应到具体被拒的指令。
+// 生成的自由文本——wire 上唯一的文本槽位按 kind 复用（Command 或 Speech），
+// CompanionSpeech 是唯一允许携带模型文本的 kind 且不复述指令，该互斥约束由
+// 组合校验结构性保证。QueueFull 与 NotFollowing 拒绝保留与 Accepted 相同的
+// 身份与指令要求，以便发令者能对应到具体被拒的指令。
 func (event ChatEvent) Validate() error {
 	if event.EventID == 0 || !event.PlayerID.Valid() || !validPlayerName(event.PlayerName) {
 		return errors.New("network: invalid chat event player identity")
+	}
+	// 台词字段只属于 CompanionSpeech：任何其他 kind（含任务事实与拒绝事件）
+	// 携带台词都必须在应用任何字段前整条拒绝。
+	if event.Kind != ChatEventCompanionSpeech && event.Speech != "" {
+		return errors.New("network: chat event kind carries companion speech")
 	}
 	switch event.Kind {
 	case ChatEventAccepted:
@@ -151,6 +168,14 @@ func (event ChatEvent) Validate() error {
 		if !validTaskFailReason(TaskFailReason(event.RejectReason)) || !event.CompanionID.Valid() ||
 			companion.ValidateName(event.CompanionName) != nil || validateCommandText(event.Command) != nil {
 			return errors.New("network: invalid failed task chat event")
+		}
+	case ChatEventCompanionSpeech:
+		// v19 台词事件：reason 必须为 None，不得复述玩家指令，且必须携带完整
+		// 伙伴身份与满足 1..256-byte 文本纪律的台词；台词是模型生成的有界表达。
+		if event.RejectReason != ChatRejectNone || event.Command != "" ||
+			!event.CompanionID.Valid() || companion.ValidateName(event.CompanionName) != nil ||
+			validateSpeechText(event.Speech) != nil {
+			return errors.New("network: invalid companion speech chat event")
 		}
 	default:
 		return errors.New("network: invalid chat event kind")
@@ -264,6 +289,21 @@ func validateCommandText(text string) error {
 	return nil
 }
 
+// validateSpeechText 验证伙伴台词文本：1..256 bytes、有效 UTF-8、无 NUL/Unicode
+// control 且无首尾空白。文本纪律与玩家指令同构，但上界从 1024 收紧为 256——
+// 台词是模型生成的有界表达，不是玩家输入通道。
+func validateSpeechText(text string) error {
+	if len(text) < 1 || len(text) > 256 || !utf8.ValidString(text) || strings.TrimSpace(text) != text {
+		return errors.New("network: invalid companion speech text")
+	}
+	for _, r := range text {
+		if r == 0 || unicode.IsControl(r) {
+			return errors.New("network: companion speech contains control character")
+		}
+	}
+	return nil
+}
+
 func validPlayerName(name string) bool {
 	canonical, err := core.NormalizeDisplayName(name)
 	return err == nil && canonical == name
@@ -281,7 +321,13 @@ func encodeChatEvent(e *byteEncoder, event ChatEvent) {
 	e.string(event.CompanionName, 128)
 	e.u8(uint8(event.Kind))
 	e.u8(uint8(event.RejectReason))
-	e.string(event.Command, 1024)
+	// 文本槽位按 kind 复用：CompanionSpeech 写入台词（编码层即收紧为 256-byte 上界），
+	// 其余 kind 保持既有 1024-byte 指令编码，既有 kind 的 wire 字节不受影响。
+	if event.Kind == ChatEventCompanionSpeech {
+		e.string(event.Speech, 256)
+	} else {
+		e.string(event.Command, 1024)
+	}
 }
 
 func encodeCompanionSpawn(e *byteEncoder, spawn CompanionSpawn) {
@@ -338,7 +384,13 @@ func decodeChatEvent(d *byteDecoder) (ServerPacket, error) {
 		event.RejectReason = ChatRejectReason(reason)
 	}
 	if err == nil {
-		event.Command, err = d.string(1024, 1024)
+		// 文本槽位按 kind 复用：解码时先读出 kind，再把槽位读入台词（超过 256-byte
+		// 直接拒绝）或玩家指令，随后 Validate 按 kind 施加完整文本纪律。
+		if event.Kind == ChatEventCompanionSpeech {
+			event.Speech, err = d.string(256, 256)
+		} else {
+			event.Command, err = d.string(1024, 1024)
+		}
 	}
 	if err != nil {
 		return nil, err
