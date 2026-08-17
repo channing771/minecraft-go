@@ -38,9 +38,9 @@
 
 ## D7 客户端台词呈现
 
-- [ ] D7.1 先写失败测试：`cmd/mornlea` Speech 事件生成 `名称：台词` 行、32 rune 截断、与任务事实行不混排、断线清空
-- [ ] D7.2 最小实现：`chat.go` Speech 分支
-- [ ] 验证：`go test ./cmd/mornlea -race -count=1`
+- [x] D7.1 先写失败测试：`cmd/mornlea` Speech 事件生成 `名称：台词` 行、32 rune 截断、与任务事实行不混排、断线清空
+- [x] D7.2 最小实现：`chat.go` Speech 分支
+- [x] 验证：`go test ./cmd/mornlea -race -count=1`
 
 ## D8 M5A–M5D 阶段总验收
 
