@@ -431,9 +431,10 @@ func TestApplicationRendersChatBeforeInventoryConfirmation(t *testing.T) {
 }
 
 // TestChatEventsTaskLifecycleFactLinesAreStableChinese 锁定任务生命周期事件与
-// QueueFull 拒绝的稳定中文事实行。ChatEvent wire 上唯一的文本字段就是玩家原始
-// 指令与身份名，不存在模型自由文本槽位；因此"模型文本不上屏"在本层的锁定方式
-// 是：事实行必须逐字节等于只由伙伴名、固定中文模板与指令摘要组成的固定串。
+// QueueFull/NotFollowing 拒绝的稳定中文事实行，含 v18 的 TaskStopped 终态与
+// TaskFailInventoryFull 容量失败原因。ChatEvent wire 上唯一的文本字段就是玩家
+// 原始指令与身份名，不存在模型自由文本槽位；因此"模型文本不上屏"在本层的锁定
+// 方式是：事实行必须逐字节等于只由伙伴名、固定中文模板与指令摘要组成的固定串。
 func TestChatEventsTaskLifecycleFactLinesAreStableChinese(t *testing.T) {
 	tests := []struct {
 		name string
@@ -453,25 +454,35 @@ func TestChatEventsTaskLifecycleFactLinesAreStableChinese(t *testing.T) {
 		{"task timed out", 5, func(id uint64) network.ChatEvent {
 			return taskChatEvent(id, network.ChatEventTaskTimedOut, network.ChatRejectNone)
 		}, "阿木 任务超时：去东边"},
-		{"task failed planner unavailable", 6, func(id uint64) network.ChatEvent {
+		{"task stopped", 6, func(id uint64) network.ChatEvent {
+			return taskChatEvent(id, network.ChatEventTaskStopped, network.ChatRejectNone)
+		}, "阿木 已停止：去东边"},
+		{"task failed planner unavailable", 7, func(id uint64) network.ChatEvent {
 			return taskChatEvent(id, network.ChatEventTaskFailed,
 				network.ChatRejectReason(network.TaskFailPlannerUnavailable))
 		}, "阿木 任务失败（规划器不可用）：去东边"},
-		{"task failed invalid plan", 7, func(id uint64) network.ChatEvent {
+		{"task failed invalid plan", 8, func(id uint64) network.ChatEvent {
 			return taskChatEvent(id, network.ChatEventTaskFailed,
 				network.ChatRejectReason(network.TaskFailInvalidPlan))
 		}, "阿木 任务失败（计划无效）：去东边"},
-		{"task failed path unreachable", 8, func(id uint64) network.ChatEvent {
+		{"task failed path unreachable", 9, func(id uint64) network.ChatEvent {
 			return taskChatEvent(id, network.ChatEventTaskFailed,
 				network.ChatRejectReason(network.TaskFailPathUnreachable))
 		}, "阿木 任务失败（路径不可达）：去东边"},
-		{"task failed world changed", 9, func(id uint64) network.ChatEvent {
+		{"task failed world changed", 10, func(id uint64) network.ChatEvent {
 			return taskChatEvent(id, network.ChatEventTaskFailed,
 				network.ChatRejectReason(network.TaskFailWorldChanged))
 		}, "阿木 任务失败（世界已变化）：去东边"},
-		{"queue full rejection", 10, func(id uint64) network.ChatEvent {
+		{"task failed inventory full", 11, func(id uint64) network.ChatEvent {
+			return taskChatEvent(id, network.ChatEventTaskFailed,
+				network.ChatRejectReason(network.TaskFailInventoryFull))
+		}, "阿木 任务失败（背包已满）：去东边"},
+		{"queue full rejection", 12, func(id uint64) network.ChatEvent {
 			return taskChatEvent(id, network.ChatEventRejected, network.ChatRejectQueueFull)
 		}, "系统：阿木 任务队列已满：去东边"},
+		{"not following rejection", 13, func(id uint64) network.ChatEvent {
+			return taskChatEvent(id, network.ChatEventRejected, network.ChatRejectNotFollowing)
+		}, "系统：阿木 没有可停止的持续任务：去东边"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -495,7 +506,9 @@ func TestChatEventsTaskLifecycleHUDLinesRespectBoundsAndExcludeModelText(t *test
 		taskChatEvent(5, network.ChatEventTaskFailed,
 			network.ChatRejectReason(network.TaskFailPlannerUnavailable)),
 		taskChatEvent(6, network.ChatEventTaskTimedOut, network.ChatRejectNone),
-		taskChatEvent(7, network.ChatEventRejected, network.ChatRejectQueueFull),
+		taskChatEvent(7, network.ChatEventTaskStopped, network.ChatRejectNone),
+		taskChatEvent(8, network.ChatEventRejected, network.ChatRejectQueueFull),
+		taskChatEvent(9, network.ChatEventRejected, network.ChatRejectNotFollowing),
 	}
 	for _, event := range events {
 		if err := app.chatEvents.Apply(event); err != nil {
@@ -503,14 +516,15 @@ func TestChatEventsTaskLifecycleHUDLinesRespectBoundsAndExcludeModelText(t *test
 		}
 	}
 	overlay := app.chatOverlay()
-	// 环内 7 条，HUD 只保留最近 6 行；最早一条 Accepted 被挤出显示但不离开事件环。
+	// 环内 9 条，HUD 只保留最近 6 行；最早三条被挤出显示但不离开事件环。
+	// TaskStopped 行必须是稳定事实行（v18 起替换 C1 期间的 Accepted 兜底格式）。
 	wantLines := []string{
-		"阿木 开始执行：去东边",
-		"阿木 正在执行：去东边",
 		"阿木 已完成：去东边",
 		"阿木 任务失败（规划器不可用）：去东边",
 		"阿木 任务超时：去东边",
+		"阿木 已停止：去东边",
 		"系统：阿木 任务队列已满：去东边",
+		"系统：阿木 没有可停止的持续任务：去东边",
 	}
 	if len(overlay.Lines) != len(wantLines) {
 		t.Fatalf("HUD 行数 = %d，want %d（lines=%q）", len(overlay.Lines), len(wantLines), overlay.Lines)
@@ -529,7 +543,7 @@ func TestChatEventsTaskLifecycleHUDLinesRespectBoundsAndExcludeModelText(t *test
 
 	// 长指令摘要经既有 32 rune 截断：第 32 个 rune 是省略号，完整指令不出现在行内。
 	longCommand := strings.Repeat("挖", 40)
-	long := taskChatEvent(8, network.ChatEventTaskStarted, network.ChatRejectNone)
+	long := taskChatEvent(10, network.ChatEventTaskStarted, network.ChatRejectNone)
 	long.Command = longCommand
 	if err := app.chatEvents.Apply(long); err != nil {
 		t.Fatal(err)

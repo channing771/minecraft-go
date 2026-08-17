@@ -69,7 +69,7 @@ func TestCompanionCodecV1RoundTripAndGolden(t *testing.T) {
 		t.Fatalf("v1 golden 携带任务域=%+v，想要空", got.Queues)
 	}
 
-	// 同一载荷的首次保存必须写出 v2：记录 = v1 身体 + flags 字节。
+	// 同一载荷的首次保存必须写出当前 schema（v3）：记录 = v1 身体 + flags 字节。
 	input := fixtureCompanionBodies()
 	before := append([]companion.Body(nil), input...)
 	encoded, err := encodeCompanions(CompanionSave{Revision: 19, Records: input})
@@ -91,7 +91,7 @@ func TestCompanionCodecV1RoundTripAndGolden(t *testing.T) {
 	}
 	if migrated.Revision != 19 || !reflect.DeepEqual(migrated.Records, wantRecords) ||
 		migrated.Queues != nil {
-		t.Fatalf("迁移写 v2 后 decode=%+v", migrated)
+		t.Fatalf("迁移写 v3 后 decode=%+v", migrated)
 	}
 }
 
