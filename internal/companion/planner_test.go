@@ -1,6 +1,7 @@
 package companion
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,12 +24,18 @@ import (
 const (
 	testPlayerUUID    = "0f2a3b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c"
 	testCompanionUUID = "1a2b3c4d-5e6f-4a7b-9c8d-0e1f2a3b4c5d"
+	// testSecondPlayerUUID 是快照在线集合里另一名玩家的合法 UUIDv4 文本。
+	testSecondPlayerUUID = "2b3c4d5e-6f70-4a81-9b2d-1f2a3b4c5d6e"
+	// testUnknownPlayerUUID 是格式合法但不在快照在线集合中的 UUIDv4 文本。
+	testUnknownPlayerUUID = "3c4d5e6f-7081-4a92-8b3e-2a3b4c5d6e7f"
 	// bodyLeakMarker 是嵌进恶意响应正文的唯一标记，用于断言错误文本不回显正文。
 	bodyLeakMarker = "LEAK-ME-NOT-0123456789"
 )
 
 // testSnapshot 返回一份字段全部合法的观察快照，供各测试在其上做变异。
 // 快照的权威构造（server 侧 tick 边界）属后续任务，这里只覆盖类型不变量。
+// 快照携带两名在线玩家（发令玩家 + 另一名玩家，按 ID 升序），伙伴快捷栏持有
+// oak_planks×3——两者共同支撑 follow/place 解码契约的合法与非法路径。
 func testSnapshot() PlanSnapshot {
 	issuer, err := core.ParsePlayerID(testPlayerUUID)
 	if err != nil {
@@ -38,23 +45,34 @@ func testSnapshot() PlanSnapshot {
 	if err != nil {
 		panic(err)
 	}
+	secondPlayer, err := core.ParsePlayerID(testSecondPlayerUUID)
+	if err != nil {
+		panic(err)
+	}
+	issuerPlayer := PlanPlayer{
+		ID:         issuer,
+		Position:   [3]float32{8.5, 65, -1.5},
+		Yaw:        0.25,
+		Pitch:      -0.1,
+		LookHit:    core.BlockPos{X: 9, Y: 64, Z: -1},
+		HasLookHit: true,
+	}
 	return PlanSnapshot{
 		Command: "去那棵橡树旁边",
-		Issuer: PlanPlayer{
-			ID:         issuer,
-			Position:   [3]float32{8.5, 65, -1.5},
-			Yaw:        0.25,
-			Pitch:      -0.1,
-			LookHit:    core.BlockPos{X: 9, Y: 64, Z: -1},
-			HasLookHit: true,
-		},
+		Issuer:  issuerPlayer,
 		Companion: PlanCompanion{
-			ID:         companionID,
-			Position:   [3]float32{6.5, 65, 0.5},
-			Yaw:        3,
-			Pitch:      0,
-			Inventory:  core.Inventory{},
+			ID:       companionID,
+			Position: [3]float32{6.5, 65, 0.5},
+			Yaw:      3,
+			Pitch:    0,
+			Inventory: core.Inventory{Hotbar: core.Hotbar{Slots: [core.HotbarSlots]core.ItemStack{
+				{Item: core.ItemOakPlanks, Count: 3},
+			}}},
 			TaskStatus: "空闲",
+		},
+		OnlinePlayers: []PlanPlayer{
+			issuerPlayer,
+			{ID: secondPlayer, Position: [3]float32{-3.5, 66, 12.25}, Yaw: 1.5, Pitch: 0},
 		},
 		ExposedBlocks: []PlanBlock{
 			{Pos: core.BlockPos{X: 8, Y: 63, Z: -2}, Block: core.GrassID},
@@ -575,9 +593,8 @@ func TestPlannerDecodeStrict(t *testing.T) {
 		{name: "summary 为空", content: `{"summary":"","steps":[` + validSteps + `]}`},
 		{name: "summary 纯空白", content: `{"summary":"   ","steps":[` + validSteps + `]}`},
 		{name: "summary 超长", content: planText(strings.Repeat("长", MaxPlanSummaryBytes/3+1), validSteps)},
-		{name: "kind follow", content: planText("跟随", `{"kind":"follow","x":1,"y":2,"z":3}`)},
-		{name: "kind mine", content: planText("挖掘", `{"kind":"mine","x":1,"y":2,"z":3}`)},
-		{name: "kind place", content: planText("放置", `{"kind":"place","x":1,"y":2,"z":3}`)},
+		{name: "kind swim 未交付", content: planText("游泳", `{"kind":"swim","x":1,"y":2,"z":3}`)},
+		{name: "kind attack 未交付", content: planText("攻击", `{"kind":"attack","x":1,"y":2,"z":3}`)},
 		{name: "kind 大小写敏感", content: planText("前进", `{"kind":"GO_TO","x":1,"y":2,"z":3}`)},
 		{name: "kind 缺席", content: `{"summary":"前进","steps":[{"x":1,"y":2,"z":3}]}`},
 		{name: "Y 等于 MaxY", content: planText("越界", `{"kind":"go_to","x":0,"y":320,"z":0}`)},
@@ -684,5 +701,287 @@ func TestPlannerRejectsInvalidSnapshot(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&requests); got != 0 {
 		t.Fatalf("非法快照仍发出请求: %d", got)
+	}
+}
+
+// TestPlanDecodeKindMatrix 覆盖 M5C 四 kind 步骤的解码契约矩阵：每 kind 的合法
+// 形态（含解码后归一的强类型载荷 BlockID/PlayerID）、kind 专属字段缺失/多余、
+// follow 非最后一步、follow 目标不在快照在线集合、mine 越界/容器/无单一掉落、
+// place 非注册表/未持有。全部非法用例按 InvalidPlan 失败且不重试。
+func TestPlanDecodeKindMatrix(t *testing.T) {
+	const validGoTo = `{"kind":"go_to","x":10,"y":64,"z":-5}`
+	// mine(8,63,-2) 命中快照 ExposedBlocks 中的 grass：窗口内且已列出。
+	const validMineListed = `{"kind":"mine","x":8,"y":63,"z":-2}`
+	// (6,64,0) 在伙伴观察窗口内但不在 ExposedBlocks：窗口数值界是唯一判定基准，
+	// 裁剪子集的成员资格不是必要条件（避免模型因快照裁剪被误拒）。
+	const validMineUnlisted = `{"kind":"mine","x":6,"y":64,"z":0}`
+	// 快照快捷栏持有 oak_planks×3。
+	const validPlace = `{"kind":"place","x":7,"y":65,"z":1,"block":"oak_planks"}`
+	const validFollowIssuer = `{"kind":"follow","player_id":"` + testPlayerUUID + `"}`
+	const validFollowSecond = `{"kind":"follow","player_id":"` + testSecondPlayerUUID + `"}`
+
+	issuerID, err := core.ParsePlayerID(testPlayerUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondID, err := core.ParsePlayerID(testSecondPlayerUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name   string
+		steps  string
+		mutate func(*PlanSnapshot)
+		valid  bool
+		want   []PlanStep
+	}{
+		{
+			name: "合法 go_to", steps: validGoTo, valid: true,
+			want: []PlanStep{{Kind: PlanStepGoTo, X: 10, Y: 64, Z: -5}},
+		},
+		{
+			name: "合法 mine 已列出目标", steps: validMineListed, valid: true,
+			want: []PlanStep{{Kind: PlanStepMine, X: 8, Y: 63, Z: -2}},
+		},
+		{
+			name: "合法 mine 窗口内未列出目标", steps: validMineUnlisted, valid: true,
+			want: []PlanStep{{Kind: PlanStepMine, X: 6, Y: 64, Z: 0}},
+		},
+		{
+			name: "合法 place 归一为 BlockID", steps: validPlace, valid: true,
+			want: []PlanStep{{Kind: PlanStepPlace, X: 7, Y: 65, Z: 1, Block: core.OakPlanksID}},
+		},
+		{
+			name: "合法 follow 单步即最后一步", steps: validFollowSecond, valid: true,
+			want: []PlanStep{{Kind: PlanStepFollow, PlayerID: secondID}},
+		},
+		{
+			name:  "合法四 kind 混排且 follow 收尾",
+			steps: validGoTo + "," + validMineUnlisted + "," + validPlace + "," + validFollowIssuer,
+			valid: true,
+			want: []PlanStep{
+				{Kind: PlanStepGoTo, X: 10, Y: 64, Z: -5},
+				{Kind: PlanStepMine, X: 6, Y: 64, Z: 0},
+				{Kind: PlanStepPlace, X: 7, Y: 65, Z: 1, Block: core.OakPlanksID},
+				{Kind: PlanStepFollow, PlayerID: issuerID},
+			},
+		},
+		{name: "follow 非最后一步", steps: validFollowIssuer + "," + validGoTo},
+		{name: "两条 follow", steps: validFollowIssuer + "," + validFollowSecond},
+		{
+			name:  "follow 目标不在在线集合",
+			steps: validGoTo + "," + `{"kind":"follow","player_id":"` + testUnknownPlayerUUID + `"}`,
+		},
+		{name: "follow player_id 非 UUID", steps: `{"kind":"follow","player_id":"阿尔法"}`},
+		{
+			name:  "follow player_id 大写非 canonical",
+			steps: `{"kind":"follow","player_id":"` + strings.ToUpper(testPlayerUUID) + `"}`,
+		},
+		{name: "follow 缺 player_id", steps: `{"kind":"follow"}`},
+		{
+			name:  "follow 携带坐标",
+			steps: `{"kind":"follow","player_id":"` + testPlayerUUID + `","x":1,"y":2,"z":3}`,
+		},
+		{name: "mine 水平越界", steps: `{"kind":"mine","x":40,"y":64,"z":0}`},
+		{name: "mine 垂直越界", steps: `{"kind":"mine","x":6,"y":80,"z":0}`},
+		{
+			name:   "mine 目标是箱子",
+			steps:  validMineListed,
+			mutate: func(s *PlanSnapshot) { s.ExposedBlocks[0].Block = core.ChestID },
+		},
+		{
+			name:   "mine 目标是熔炉",
+			steps:  validMineListed,
+			mutate: func(s *PlanSnapshot) { s.ExposedBlocks[0].Block = core.FurnaceID },
+		},
+		{
+			name:   "mine 目标无单一掉落",
+			steps:  validMineListed,
+			mutate: func(s *PlanSnapshot) { s.ExposedBlocks[0].Block = core.BedrockID },
+		},
+		{name: "mine 缺 z", steps: `{"kind":"mine","x":8,"y":63}`},
+		{
+			name:  "mine 携带 player_id",
+			steps: `{"kind":"mine","x":8,"y":63,"z":-2,"player_id":"` + testPlayerUUID + `"}`,
+		},
+		{name: "place 方块名不在注册表", steps: `{"kind":"place","x":7,"y":65,"z":1,"block":"diamond_ore"}`},
+		{name: "place 方块名大小写不匹配", steps: `{"kind":"place","x":7,"y":65,"z":1,"block":"Oak_Planks"}`},
+		{name: "place 背包未持有", steps: `{"kind":"place","x":7,"y":65,"z":1,"block":"stone"}`},
+		{name: "place 缺 block", steps: `{"kind":"place","x":7,"y":65,"z":1}`},
+		{name: "place Y 越界", steps: `{"kind":"place","x":7,"y":320,"z":1,"block":"oak_planks"}`},
+		{
+			name:  "place 携带 player_id",
+			steps: `{"kind":"place","x":7,"y":65,"z":1,"block":"oak_planks","player_id":"` + testPlayerUUID + `"}`,
+		},
+		{name: "go_to 携带 block", steps: `{"kind":"go_to","x":1,"y":2,"z":3,"block":"stone"}`},
+		{name: "未知 kind swim", steps: `{"kind":"swim","x":1,"y":2,"z":3}`},
+		{name: "未知 kind attack", steps: `{"kind":"attack","player_id":"` + testPlayerUUID + `"}`},
+	}
+
+	for _, testCase := range cases {
+		var requests int32
+		planner, _ := newTestPlanner(t, "", nil, countingHandler(&requests, func(w http.ResponseWriter) {
+			fmt.Fprint(w, chatCompletionsBody(t, planText("执行", testCase.steps)))
+		}))
+		snapshot := testSnapshot()
+		if testCase.mutate != nil {
+			testCase.mutate(&snapshot)
+		}
+		plan, err := planner.Plan(context.Background(), snapshot)
+		if !testCase.valid {
+			wantPlanError(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
+			if strings.Contains(err.Error(), bodyLeakMarker) {
+				t.Fatalf("%s: 错误泄漏正文标记", testCase.name)
+			}
+			if got := atomic.LoadInt32(&requests); got != 1 {
+				t.Fatalf("%s: 请求数 = %d，want 1（不重试）", testCase.name, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: 期望成功，got %v", testCase.name, err)
+		}
+		if len(plan.Steps) != len(testCase.want) {
+			t.Fatalf("%s: 步骤数 = %d，want %d", testCase.name, len(plan.Steps), len(testCase.want))
+		}
+		for index, expected := range testCase.want {
+			if plan.Steps[index] != expected {
+				t.Fatalf("%s: 步骤 %d = %+v，want %+v", testCase.name, index, plan.Steps[index], expected)
+			}
+		}
+	}
+}
+
+// testOnlinePlayer 构造第 index 名（0 起）在线玩家：ID 只靠首字节区分并固定
+// UUIDv4 版本与变体位，天然互异且按 index 升序，供快照集合边界测试使用。
+func testOnlinePlayer(index int) PlanPlayer {
+	var id core.PlayerID
+	id[0] = byte(index + 1)
+	id[6] = 0x40 // UUIDv4 版本位。
+	id[8] = 0x80 // RFC 4122 变体位。
+	return PlanPlayer{
+		ID:       id,
+		Position: [3]float32{float32(index), 65.5, 0},
+		Yaw:      0,
+		Pitch:    0,
+	}
+}
+
+// TestPlanSnapshotOnlinePlayers 覆盖快照在线玩家集合的边界：数量 ≤8、按 ID
+// 严格升序去重、身份与浮点与视线命中合法性；以及 BoundOnlinePlayers 的有界
+// 构造（任意输入顺序确定性归一、重复去重、>8 截断到 8、输入切片不被改动）。
+func TestPlanSnapshotOnlinePlayers(t *testing.T) {
+	snapshot := testSnapshot() // 基准快照携带两名已排序在线玩家。
+	if err := snapshot.Validate(); err != nil {
+		t.Fatalf("基准快照被拒绝: %v", err)
+	}
+
+	nine := make([]PlanPlayer, MaxPlanOnlinePlayers+1)
+	for index := range nine {
+		nine[index] = testOnlinePlayer(index)
+	}
+	duplicated := []PlanPlayer{testOnlinePlayer(0), testOnlinePlayer(1), testOnlinePlayer(0)}
+	shuffled := []PlanPlayer{testOnlinePlayer(2), testOnlinePlayer(0), testOnlinePlayer(3), testOnlinePlayer(1)}
+
+	for name, mutate := range map[string]func(*PlanSnapshot){
+		"玩家数超过 8":    func(s *PlanSnapshot) { s.OnlinePlayers = nine },
+		"玩家未按 ID 排序": func(s *PlanSnapshot) { s.OnlinePlayers = shuffled },
+		"玩家 ID 重复":   func(s *PlanSnapshot) { s.OnlinePlayers = duplicated },
+		"玩家 ID 无效":   func(s *PlanSnapshot) { s.OnlinePlayers[0].ID = core.PlayerID{} },
+		"玩家位置 NaN":   func(s *PlanSnapshot) { s.OnlinePlayers[0].Position = [3]float32{0, float32(math.NaN()), 0} },
+		"玩家视线命中 Y 越界": func(s *PlanSnapshot) {
+			s.OnlinePlayers[0].HasLookHit = true
+			s.OnlinePlayers[0].LookHit = core.BlockPos{X: 0, Y: core.MaxY, Z: 0}
+		},
+	} {
+		mutated := testSnapshot()
+		mutated.OnlinePlayers = append([]PlanPlayer(nil), mutated.OnlinePlayers...)
+		mutate(&mutated)
+		if err := mutated.Validate(); err == nil {
+			t.Errorf("%s 被接受", name)
+		}
+	}
+
+	// 有界构造：12 条乱序含重复输入归一为按 ID 严格升序的前 8 名，确定性可复现。
+	source := make([]PlanPlayer, 0, 12)
+	for index := 11; index >= 0; index-- {
+		source = append(source, testOnlinePlayer(index%10))
+	}
+	original := append([]PlanPlayer(nil), source...)
+	bounded := BoundOnlinePlayers(source)
+	if len(bounded) != MaxPlanOnlinePlayers {
+		t.Fatalf("有界构造保留 %d 名，want %d", len(bounded), MaxPlanOnlinePlayers)
+	}
+	for index := 1; index < len(bounded); index++ {
+		if bytes.Compare(bounded[index-1].ID[:], bounded[index].ID[:]) >= 0 {
+			t.Fatalf("有界构造结果未按 ID 严格升序: 位置 %d", index)
+		}
+	}
+	if again := BoundOnlinePlayers(original); len(again) != len(bounded) {
+		t.Fatalf("同一集合两次构造数量不一致: %d vs %d", len(again), len(bounded))
+	} else {
+		for index := range bounded {
+			if bounded[index] != again[index] {
+				t.Fatalf("构造结果不确定：位置 %d 得到 %+v 与 %+v", index, bounded[index], again[index])
+			}
+		}
+	}
+	for index := range source {
+		if source[index] != original[index] {
+			t.Fatalf("输入切片被改动：位置 %d", index)
+		}
+	}
+	// 重复 ID 输入被去重。
+	if got := BoundOnlinePlayers(duplicated); len(got) != 2 {
+		t.Fatalf("重复 ID 未去重: %d 名", len(got))
+	}
+	// 有界结果能通过完整快照校验。
+	withBounded := testSnapshot()
+	withBounded.OnlinePlayers = bounded
+	if err := withBounded.Validate(); err != nil {
+		t.Fatalf("有界构造结果被快照校验拒绝: %v", err)
+	}
+}
+
+// TestPlanDecodePlaceRegistryLock 把 place 方块名注册表与 core.ItemPlacement
+// 值域双向锁定：每个名字都能经注册物品放置出唯一方块（名字 ↔ 方块双射），
+// 且可放置方块一个不漏，防止注册表与 core 放置映射漂移。
+func TestPlanDecodePlaceRegistryLock(t *testing.T) {
+	blocks := make(map[core.BlockID]string, len(planPlaceItems))
+	for name, item := range planPlaceItems {
+		block, ok := core.ItemPlacement(item)
+		if !ok {
+			t.Fatalf("注册表名字 %s 的物品 %d 不可放置", name, item)
+		}
+		if other, exists := blocks[block]; exists {
+			t.Fatalf("方块 %d 同时映射到名字 %s 与 %s", block, other, name)
+		}
+		blocks[block] = name
+	}
+	for item := core.ItemID(0); item <= core.ItemMossyCobblestone; item++ {
+		block, ok := core.ItemPlacement(item)
+		if !ok {
+			continue
+		}
+		if _, covered := blocks[block]; !covered {
+			t.Fatalf("可放置方块 %d（物品 %d）缺少注册表名字", block, item)
+		}
+	}
+}
+
+// TestPlannerSystemPromptCoversKinds 锁定系统提示提及交付全集四 kind 的格式与
+// place 注册表的全部方块名：提示是按请求不变的固定文本，词表直接取自注册表，
+// 保证提示与解码白名单永不漂移。
+func TestPlannerSystemPromptCoversKinds(t *testing.T) {
+	for _, kind := range []string{"go_to", "mine", "place", "follow"} {
+		if !strings.Contains(plannerSystemPrompt, `"kind":"`+kind+`"`) {
+			t.Fatalf("系统提示缺少 kind %s 的格式说明", kind)
+		}
+	}
+	for name := range planPlaceItems {
+		if !strings.Contains(plannerSystemPrompt, name) {
+			t.Fatalf("系统提示缺少 place 方块名 %s", name)
+		}
 	}
 }

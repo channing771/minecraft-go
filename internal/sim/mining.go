@@ -7,7 +7,9 @@ import (
 	"github.com/channing771/mornlea/internal/world"
 )
 
-// MiningUpdate 是一名玩家本 tick 发布的规范权威采掘进度。
+// MiningUpdate 是一名玩家本 tick 发布的规范权威采掘进度。M5C 起同一结构也
+// 承载伙伴的采掘进度发布（CompanionUpdate.Mining），两类 actor 的进度语义
+// 完全一致，共用这一个载体。
 type MiningUpdate struct {
 	Active        bool
 	Target        core.BlockPos
@@ -16,7 +18,11 @@ type MiningUpdate struct {
 	Harvestable   bool
 }
 
-type playerMiningState struct {
+// miningState 是玩家与伙伴两类 actor 共有的权威采掘进度状态机（原
+// playerMiningState 整体上移 actorState）：记录目标、命中时的方块、持握工具
+// 与进度计数。同一 target/block/held 连续命中时进度递增，任一变化即从 1
+// 重新开始——这条"目标替换失效"语义由两类 actor 共用。
+type miningState struct {
 	target        core.BlockPos
 	block         core.BlockID
 	held          core.ItemID
@@ -25,7 +31,7 @@ type playerMiningState struct {
 	harvestable   bool
 }
 
-func (state playerMiningState) update() MiningUpdate {
+func (state miningState) update() MiningUpdate {
 	if state.requiredTicks == 0 {
 		return MiningUpdate{}
 	}
@@ -81,6 +87,77 @@ func miningRule(block core.BlockID, held core.ItemID) (uint16, bool) {
 	}
 }
 
+// stepMiningProgress 是两类 actor 共用的采掘进度状态机推进器：按 miningRule
+// 重新判定计时与可收获性，同一目标/方块/工具连续命中时递增进度，任一变化从
+// 1 重新开始（目标替换失效语义的唯一实现点）。调用方负责先完成交互距离、
+// Ready 区块与（伙伴侧的）容器防御校验。没有采掘规则的方块（如基岩）会把
+// 状态清零，调用方必须以 requiredTicks == 0 为准直接跳过完成判定——与既有
+// 玩家路径在规则为零时的提前 continue 语义逐字对齐。
+//
+// 递增在进度满格时饱和：唯一能让进度停在满格的是伙伴完成 tick 因背包无容量
+// 不结算——此时进度必须保持满格作为"就绪但无容量"的稳定可观察状态；玩家路径
+// 在完成 tick 总会清零状态，永远观察不到这一钳制，玩家行为逐 tick 不变。
+func stepMiningProgress(actor *actorState, target core.BlockPos, block core.BlockID) {
+	held := actor.inventory.Hotbar.Slots[actor.inventory.Hotbar.Selected].Item
+	required, harvestable := miningRule(block, held)
+	if required == 0 {
+		actor.mining = miningState{}
+		return
+	}
+	if actor.mining.target == target && actor.mining.block == block &&
+		actor.mining.held == held && actor.mining.requiredTicks != 0 {
+		if actor.mining.progressTicks < actor.mining.requiredTicks {
+			actor.mining.progressTicks++
+		}
+		return
+	}
+	actor.mining = miningState{
+		target:        target,
+		block:         block,
+		held:          held,
+		progressTicks: 1,
+		requiredTicks: required,
+		harvestable:   harvestable,
+	}
+}
+
+// blockRaycastSampler 返回玩家采掘/放置共用的射线采样回调：区块未就绪返回
+// ErrChunkNotReady，实心判定为非空气。M5C 起伙伴采掘的交互距离与 Ready 校验
+// 复用同一采样器与同一 InteractionReach，保证没有第二套规则实现。
+func blockRaycastSampler(dimension *Dimension) func(core.BlockPos) (bool, error) {
+	return func(position core.BlockPos) (bool, error) {
+		block, ready := dimension.BlockAt(position)
+		if !ready {
+			return false, ErrChunkNotReady
+		}
+		return block != core.AirID, nil
+	}
+}
+
+// companionMineableBlock 是伙伴采掘目标的防御清单：必须具有单一 BlockDrop 且
+// 不是箱子/熔炉——容器破坏会掉落本体加全部内容物的多份产物，超出"单一产物
+// 直入背包"的结算形状。Planner 契约之外，权威模拟在这里完成第二重拒绝。
+func companionMineableBlock(block core.BlockID) bool {
+	if block == core.ChestID || block == core.FurnaceID {
+		return false
+	}
+	_, ok := core.BlockDrop(block)
+	return ok
+}
+
+// blockCenterVec3 返回方块几何中心，用作伙伴采掘射线的方向锚点。
+func blockCenterVec3(target core.BlockPos) mgl32.Vec3 {
+	return mgl32.Vec3{
+		float32(target.X) + 0.5,
+		float32(target.Y) + 0.5,
+		float32(target.Z) + 0.5,
+	}
+}
+
+// advanceMining 是物理阶段之后的统一采掘推进：先按会话 ID 序处理玩家，再按
+// CompanionID 字节序处理 active 伙伴。两类 actor 共用 stepMiningProgress 的
+// 累积语义与完成判定，玩家与伙伴的差别只在完成 tick 的产物去向（玩家掉落物、
+// 伙伴直入背包）与进度发布载体（MiningUpdate/CompanionUpdate.Mining）。
 func (engine *Engine) advanceMining(
 	pending map[core.ChunkKey]*pendingChunkChanges,
 	result *TickResult,
@@ -107,12 +184,12 @@ func (engine *Engine) advanceMining(
 		session := engine.sessions[id]
 		player := session.player
 		if !player.miningHeld || player.reset || !session.hasView || session.viewContainer {
-			player.mining = playerMiningState{}
+			player.mining = miningState{}
 			continue
 		}
 		dimension := engine.dimensions[session.dimension]
 		if dimension == nil {
-			player.mining = playerMiningState{}
+			player.mining = miningState{}
 			continue
 		}
 		origin := player.state.Position.Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
@@ -120,45 +197,23 @@ func (engine *Engine) advanceMining(
 			origin,
 			LookDirection(player.yaw, player.pitch),
 			engine.tunables.InteractionReach,
-			func(position core.BlockPos) (bool, error) {
-				block, ready := dimension.BlockAt(position)
-				if !ready {
-					return false, ErrChunkNotReady
-				}
-				return block != core.AirID, nil
-			},
+			blockRaycastSampler(dimension),
 		)
 		if err != nil || !ok {
-			player.mining = playerMiningState{}
+			player.mining = miningState{}
 			continue
 		}
 		block, ready := dimension.BlockAt(hit.Block)
 		if !ready {
-			player.mining = playerMiningState{}
+			player.mining = miningState{}
 			continue
 		}
-		held := player.inventory.Hotbar.Slots[player.inventory.Hotbar.Selected].Item
-		required, harvestable := miningRule(block, held)
-		if required == 0 {
-			player.mining = playerMiningState{}
+		stepMiningProgress(&player.actorState, hit.Block, block)
+		if player.mining.requiredTicks == 0 ||
+			player.mining.progressTicks < player.mining.requiredTicks {
 			continue
 		}
-		if player.mining.target == hit.Block && player.mining.block == block &&
-			player.mining.held == held && player.mining.requiredTicks != 0 {
-			player.mining.progressTicks++
-		} else {
-			player.mining = playerMiningState{
-				target:        hit.Block,
-				block:         block,
-				held:          held,
-				progressTicks: 1,
-				requiredTicks: required,
-				harvestable:   harvestable,
-			}
-		}
-		if player.mining.progressTicks < player.mining.requiredTicks {
-			continue
-		}
+		// 完成分叉（玩家侧）：产物成为世界掉落物，语义与 M5C 之前逐字相同。
 		reason, rejected := engine.completeMining(
 			session.dimension,
 			player.mining.target,
@@ -166,37 +221,135 @@ func (engine *Engine) advanceMining(
 			player.mining.harvestable,
 			pending,
 		)
-		player.mining = playerMiningState{}
+		player.mining = miningState{}
 		if rejected {
 			result.Rejected = append(result.Rejected, Rejection{
 				Session: id, Sequence: player.lastInputSequence, Reason: reason,
 			})
 			continue
 		}
-		if consumeToolDurability(player) {
+		if consumeToolDurability(&player.actorState) {
 			player.inventoryDirty = true
 		}
 	}
+
+	// 无伙伴注册时保持既有玩家路径的零分配轮廓，不进入伙伴循环。
+	if len(engine.companions) == 0 {
+		return
+	}
+	for _, id := range engine.activeCompanionIDs() {
+		engine.advanceCompanionMining(engine.companions[id], pending)
+	}
+}
+
+// advanceCompanionMining 推进一个 active 伙伴的采掘。交互距离、Ready 区块与
+// 视线遮挡复用玩家的 core.RaycastBlocks + InteractionReach + blockRaycastSampler
+// 实现：射线从伙伴眼睛指向目标方块中心，命中必须恰好是目标本身（被遮挡、超距
+// 或区块未就绪都会清空进度，与玩家的无效目标语义一致）。容器与多掉落方块在
+// 进度累积之前就被防御拒绝。完成 tick 经 completeCompanionMining 分叉结算。
+func (engine *Engine) advanceCompanionMining(
+	entry *companionState,
+	pending map[core.ChunkKey]*pendingChunkChanges,
+) {
+	if !entry.miningHeld {
+		entry.mining = miningState{}
+		return
+	}
+	dimension := engine.dimensions[entry.dimension]
+	if dimension == nil {
+		entry.mining = miningState{}
+		return
+	}
+	target := entry.miningTarget
+	eye := entry.state.Position.Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
+	hit, ok, err := core.RaycastBlocks(
+		eye,
+		blockCenterVec3(target).Sub(eye),
+		engine.tunables.InteractionReach,
+		blockRaycastSampler(dimension),
+	)
+	if err != nil || !ok || hit.Block != target {
+		entry.mining = miningState{}
+		return
+	}
+	block, ready := dimension.BlockAt(target)
+	if !ready {
+		entry.mining = miningState{}
+		return
+	}
+	if !companionMineableBlock(block) {
+		entry.mining = miningState{}
+		return
+	}
+	stepMiningProgress(&entry.actorState, target, block)
+	if entry.mining.requiredTicks == 0 ||
+		entry.mining.progressTicks < entry.mining.requiredTicks {
+		return
+	}
+	// 完成分叉（伙伴侧）：产物直入背包，三方原子。
+	engine.completeCompanionMining(entry, pending)
+}
+
+// completeCompanionMining 在进度满格的 tick 结算伙伴采掘，三方必须原子成立：
+// 目标方块改为空气、按既有规则扣除工具耐久（含损坏形态）、可收获产物直入
+// 伙伴背包。容量前验先行——AddStack 在背包副本上预演，余量非空则该 tick 整体
+// 不结算：方块不变、耐久不变、背包不变、进度保持满格，Manager 由此观察到
+// "就绪但无容量"的稳定状态（"任务失败"的判定属于 Manager，不在这里）。
+// 预演通过后 SetBlock 与内存提交在单写者 tick 内不再有失败路径，三方在同一
+// tick 内同时成立。
+func (engine *Engine) completeCompanionMining(
+	entry *companionState,
+	pending map[core.ChunkKey]*pendingChunkChanges,
+) {
+	if !companionMineableBlock(entry.mining.block) {
+		entry.mining = miningState{}
+		return
+	}
+	item, _ := core.BlockDrop(entry.mining.block)
+	var staged core.Inventory
+	if entry.mining.harvestable {
+		var leftover core.ItemStack
+		staged, leftover = entry.inventory.AddStack(core.ItemStack{Item: item, Count: 1})
+		if leftover.Count != 0 {
+			return
+		}
+	}
+	_, changed, err := engine.dimensions[entry.dimension].SetBlock(entry.mining.target, core.AirID)
+	if err != nil || !changed {
+		// 区块失效或方块已被同 tick 更早的 actor 移除：对齐玩家 RejectNoTarget
+		// 语义，清零进度且不结算。
+		entry.mining = miningState{}
+		return
+	}
+	engine.recordChange(entry.dimension, entry.mining.target, core.AirID, pending)
+	if entry.mining.harvestable {
+		entry.inventory = staged
+		entry.inventoryDirty = true
+	}
+	if consumeToolDurability(&entry.actorState) {
+		entry.inventoryDirty = true
+	}
+	entry.mining = miningState{}
 }
 
 // consumeToolDurability 在成功破坏方块后扣减选中工具的耐久。
 // 耐久归零时把栏位整体替换为损坏形态。返回背包是否发生变化。
-func consumeToolDurability(player *playerState) bool {
-	selected := player.inventory.Hotbar.Selected
-	stack := player.inventory.Hotbar.Slots[selected]
+func consumeToolDurability(actor *actorState) bool {
+	selected := actor.inventory.Hotbar.Selected
+	stack := actor.inventory.Hotbar.Slots[selected]
 	if _, ok := core.ItemMaxDurability(stack.Item); !ok {
 		return false
 	}
 	if stack.Durability > 1 {
 		stack.Durability--
-		player.inventory.Hotbar.Slots[selected] = stack
+		actor.inventory.Hotbar.Slots[selected] = stack
 		return true
 	}
 	broken, ok := core.ItemBrokenForm(stack.Item)
 	if !ok {
 		return false
 	}
-	player.inventory.Hotbar.Slots[selected] = core.ItemStack{Item: broken, Count: 1}
+	actor.inventory.Hotbar.Slots[selected] = core.ItemStack{Item: broken, Count: 1}
 	return true
 }
 

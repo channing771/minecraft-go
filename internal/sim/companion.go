@@ -26,22 +26,29 @@ type CompanionRestore struct {
 }
 
 // CompanionUpdate 是一个已激活伙伴在当前权威 tick 的静态身体状态。
+// Mining 对齐玩家 MiningUpdate 语义承载本 tick 的采掘进度；这是 sim→server
+// 的内部结构，wire 上的 CompanionStates 形状不变。
 type CompanionUpdate struct {
 	ID         companion.ID
 	Dimension  core.DimensionID
 	State      physics.State
 	Yaw, Pitch float32
 	Reset      bool
+	Mining     MiningUpdate
 }
 
 type companionState struct {
-	// actorState 内嵌玩家与伙伴共有的运动/朝向/背包状态（物理体由提升的
+	// actorState 内嵌玩家与伙伴共有的运动/朝向/背包/采掘状态（物理体由提升的
 	// state 字段承载，等价于旧 body 字段）；稳定 CompanionID 与激活状态等
 	// 伙伴专属语义留在本结构体。提取范围与动机见 actor.go。
 	actorState
-	id                 companion.ID
-	dimension          core.DimensionID
-	active, reset      bool
+	id            companion.ID
+	dimension     core.DimensionID
+	active, reset bool
+	// miningTarget 是 MineHold action 携带、伙伴专属的采掘意图目标：玩家的目标
+	// 由视线 raycast 逐 tick 派生，不需要持久化；伙伴的目标由 Task Runner 显式
+	// 指定，跨 tick 保持（Manager 每个采掘 tick 重新提交同一目标）。
+	miningTarget       core.BlockPos
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
 	restoreWanted      map[core.ChunkKey]struct{}
@@ -212,6 +219,7 @@ func (engine *Engine) publishCompanions(result *TickResult) {
 		result.Companions = append(result.Companions, CompanionUpdate{
 			ID: id, Dimension: state.dimension, State: state.state,
 			Yaw: state.yaw, Pitch: state.pitch, Reset: state.reset,
+			Mining: state.mining.update(),
 		})
 		state.reset = false
 	}

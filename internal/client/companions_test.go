@@ -438,6 +438,40 @@ func companionTaskEvent(eventID uint64, kind network.ChatEventKind, reason netwo
 	return event
 }
 
+// TestChatEventsV18StoppedNotFollowingAndInventoryFullEnterRing 锁定协议 v18
+// 三个新值经 ChatEvents.Apply（network.Validate 组合校验）按序进入事件环：
+// TaskStopped 终态事件、NotFollowing 停止旁路拒绝与 TaskFailInventoryFull
+// 失败原因都携带完整身份与原始指令，客户端事件环无需 per-kind 分支即可接
+// 收并保持顺序；事实行的稳定中文格式由 cmd/mornlea 的 formatChatEvent 锁定
+// （模型自由文本在任何 kind 上都不存在 wire 槽位）。
+func TestChatEventsV18StoppedNotFollowingAndInventoryFullEnterRing(t *testing.T) {
+	var events client.ChatEvents
+	v18 := []network.ChatEvent{
+		companionTaskEvent(1, network.ChatEventTaskStopped, network.ChatRejectNone),
+		companionTaskEvent(2, network.ChatEventTaskFailed,
+			network.ChatRejectReason(network.TaskFailInventoryFull)),
+		companionTaskEvent(3, network.ChatEventRejected, network.ChatRejectNotFollowing),
+	}
+	for _, event := range v18 {
+		if err := events.Apply(event); err != nil {
+			t.Fatalf("Apply 事件 %d：%v", event.EventID, err)
+		}
+	}
+	got := events.Events(nil)
+	if len(got) != 3 ||
+		got[0].Kind != network.ChatEventTaskStopped || got[0].RejectReason != network.ChatRejectNone ||
+		got[1].Kind != network.ChatEventTaskFailed ||
+		got[1].RejectReason != network.ChatRejectReason(network.TaskFailInventoryFull) ||
+		got[2].Kind != network.ChatEventRejected || got[2].RejectReason != network.ChatRejectNotFollowing {
+		t.Fatalf("v18 事件环=%+v，想要按序保留三个新值", got)
+	}
+	for index, event := range got {
+		if event.EventID != uint64(index+1) {
+			t.Fatalf("v18 事件[%d] ID=%d，想要按序递增", index, event.EventID)
+		}
+	}
+}
+
 func companionSpawn(last byte, tick uint64, name string, position mgl32.Vec3) network.CompanionSpawn {
 	return network.CompanionSpawn{
 		ID: companionTestID(last), Name: name, Tick: tick,

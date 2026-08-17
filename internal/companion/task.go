@@ -1,4 +1,4 @@
-// 本文件定义任务域的纯值类型：有界指令文本、六态任务状态、稳定失败原因、
+// 本文件定义任务域的纯值类型：有界指令文本、七态任务状态、稳定失败原因、
 // 事件事实与任务值。全部类型不含锁、goroutine 或 I/O——权威 tick 是唯一写者，
 // 并发串行化由 server 侧 Companion Manager 负责（见变更 design.md 的归属裁决）。
 package companion
@@ -11,6 +11,14 @@ const MaxTaskQueueDepth = 16
 // 50ms（20 tps），一分钟恰好 1200 tick。deadline 全程使用 WorldTimeTicks，
 // 关服停摆期间世界时间不推进，因此不会消耗执行时长。
 const TicksPerMinute = 1200
+
+// CompanionFollowDistanceBlocks 是持续跟随的距离边界（水平格距）：目标玩家
+// 与伙伴的水平距离不大于该值时，Task Runner 停止提交移动输入并保持原地；
+// 超出后恢复向目标寻路。取 4 格的权衡：交互可达（玩家一眼可见、后续
+// mine/place 类指令仍可表达），又不过分贴脸（伙伴不挤占玩家的站立格，玩家
+// 转身活动不被阻挡）。垂直分量不参与判定——重力与碰撞语义已由权威物理
+// 裁决，跟随只关心水平贴近程度。
+const CompanionFollowDistanceBlocks = 4
 
 // TaskCommand 是一条已通过聊天寻址校验的玩家原始指令文本（不含 @伙伴名 前缀）。
 // 与网络聊天指令共用 1,024 字节上限：drain 边界已经过 network 的校验，这里的
@@ -25,10 +33,12 @@ func (c TaskCommand) Validate() error {
 	return validatePlanText("任务指令", string(c), MaxPlanCommandBytes, true)
 }
 
-// TaskState 是任务生命周期的六态枚举，推进方向固定为
-// Queued → Planning → Validating → Running → Completed/Failed/TimedOut。
+// TaskState 是任务生命周期的七态枚举，推进方向固定为
+// Queued → Planning → Validating → Running → Completed/Failed/TimedOut/Stopped。
 // Failed 可从 Planning/Validating/Running 进入（模型失败、非法计划与执行失败
-// 各自发生在不同阶段）；Completed 与 TimedOut 只能从 Running 进入。
+// 各自发生在不同阶段）；Completed 与 TimedOut 只能从 Running 进入；Stopped
+// 只能从 Running 的持续跟随任务（计划最后一步为 follow）经停止指令进入——
+// 主动停止是玩家的成功意图而不是失败，与 Failed 的稳定原因统计刻意分离。
 type TaskState uint8
 
 const (
@@ -46,11 +56,14 @@ const (
 	TaskFailed
 	// TaskTimedOut 是终态：世界时间越过 deadline。
 	TaskTimedOut
+	// TaskStopped 是终态：玩家经 `@伙伴名 停止` 旁路主动终止持续跟随任务。
+	TaskStopped
 )
 
 // Terminal 报告状态是否为终态。终态任务永远离开 FIFO 的当前槽位。
 func (s TaskState) Terminal() bool {
-	return s == TaskCompleted || s == TaskFailed || s == TaskTimedOut
+	return s == TaskCompleted || s == TaskFailed || s == TaskTimedOut ||
+		s == TaskStopped
 }
 
 // String 返回状态的中文短名，供日志与快照任务摘要使用。
@@ -70,6 +83,8 @@ func (s TaskState) String() string {
 		return "失败"
 	case TaskTimedOut:
 		return "已超时"
+	case TaskStopped:
+		return "已停止"
 	default:
 		return "未知状态"
 	}
@@ -96,8 +111,15 @@ const (
 	// TaskFailPathUnreachable），不存在单独的「恢复后重验失败」判定。保留
 	// 枚举是为了失败原因分类学的稳定与 network wire 枚举（16..19）的一一
 	// 对齐；若 M5C 引入更细粒度的恢复重验语义（例如与计划落盘时的方块
-	// 快照比对），可在此落地而不破坏协议编号。
+	// 快照比对），可在此落地而不破坏协议编号。M5C 起 mine/place 的目标
+	// 变化语义（采掘目标被其他 actor 替换、放置目标被占）以此为稳定原因。
 	TaskFailWorldChanged
+	// TaskFailInventoryFull 是 M5C 追加的容量失败原因：采掘产物在伙伴 36 格
+	// 背包无容量（sim 容量前验拒绝结算、进度保持满格的稳定状态），或放置
+	// 步骤执行时背包已无对应物品。语义域枚举与 network 的 wire 枚举
+	// TaskFailInventoryFull(20) 刻意分离——本枚举按 iota 顺序，wire 编号属于
+	// 协议层，二者由 server 侧的 taskEventRejectReason 显式映射。
+	TaskFailInventoryFull
 )
 
 // String 返回失败原因的中文短名。
@@ -113,6 +135,8 @@ func (r TaskFailReason) String() string {
 		return "路径不可达"
 	case TaskFailWorldChanged:
 		return "世界已变化"
+	case TaskFailInventoryFull:
+		return "背包已满"
 	default:
 		return "未知原因"
 	}
@@ -136,6 +160,9 @@ const (
 	TaskEventFailed
 	// TaskEventTimedOut 对应世界时间超时的 TaskTimedOut 广播。
 	TaskEventTimedOut
+	// TaskEventStopped 对应玩家主动停止持续跟随任务的 TaskStopped 广播
+	//（reason 恒为 None——停止是成功意图，不是失败）。
+	TaskEventStopped
 )
 
 // TaskEvent 是一次迁移产出的待发布事件事实。事实只描述类别与原因；身份
@@ -161,9 +188,11 @@ type Task struct {
 
 // Expired 报告世界时间是否已到达或越过本任务的 deadline。比较只依赖传入的
 // WorldTimeTicks——权威世界时间在服务端停止运行期间不推进，因此持久化与关服
-// 停摆天然不消耗执行时长（任务 7 依赖这一语义恢复任务）。
+// 停摆天然不消耗执行时长（任务 7 依赖这一语义恢复任务）。DeadlineTicks 零值
+// 表示未设置 deadline（持续跟随的豁免形态）：未设置的任务永不因执行时长
+// 转入 TimedOut，跟随只能经停止指令或目标离线终结。
 func (t Task) Expired(worldTimeTicks uint64) bool {
-	return worldTimeTicks >= t.DeadlineTicks
+	return t.DeadlineTicks != 0 && worldTimeTicks >= t.DeadlineTicks
 }
 
 // TaskDeadlineTicks 把进入 Running 时刻的世界时间与超时分钟数换算为 deadline。

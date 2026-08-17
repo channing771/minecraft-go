@@ -171,6 +171,9 @@ func newWorld(
 			panic("server: construct companion planner: " + err.Error())
 		}
 		server.companionManager = newCompanionManager(server.engine, config, planner)
+		// 注入在线玩家权威源：规划快照的 OnlinePlayers 填充与 follow 目标
+		// 的在线性/位置解析共用同一会话注册表读取路径。
+		server.companionManager.onlinePlayers = server.onlinePlanPlayersSnapshot
 		// 恢复接线：任务域载荷在首个 tick 之前回填槽位（Planning/
 		// Validating 归一为 Queued，Running 保留进度且路径留空待重算）。
 		server.companionManager.restoreQueues(loadedQueues)
@@ -293,6 +296,12 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 	// engine.Step 之前（伙伴移动输入必须先进 inbox 才能被本 tick 消费）。
 	taskDeliveries := server.advanceCompanionTasks()
 	result := server.engine.Step()
+	if server.companionManager != nil {
+		// 采掘进度只在 TickResult.Companions 发布（CompanionBodies 不含采掘
+		// 域）：tick 末回填缓存，下一 tick 的 advanceRunners 与 bodies 缓存
+		// 同截面消费。
+		server.companionManager.observeTickResult(result)
+	}
 	if server.companions != nil {
 		server.companions.Observe(
 			server.engine.CompanionBodies(),

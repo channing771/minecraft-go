@@ -48,6 +48,9 @@ const (
 	ChatEventTaskCompleted
 	ChatEventTaskFailed
 	ChatEventTaskTimedOut
+	// ChatEventTaskStopped 是 v18 追加的停止事件：服务端确认一条已被停止旁路终结的任务，
+	// 携带完整伙伴身份与被停止任务的原始指令；广播语义由服务端任务实现，本包只做组合校验。
+	ChatEventTaskStopped
 )
 
 // ChatRejectReason 标识聊天寻址被拒绝的原因。值 3 预留未分配，
@@ -60,6 +63,10 @@ const (
 	ChatRejectUnknownCompanion
 	_
 	ChatRejectQueueFull
+	// ChatRejectNotFollowing 是 v18 追加的停止旁路同步拒绝：目标伙伴当前没有可停止的
+	// 持续任务。它针对特定伙伴的当前任务状态，因此与 QueueFull 一样必须携带完整伙伴身份
+	// 与被拒指令，只回复发令者。
+	ChatRejectNotFollowing
 )
 
 // TaskFailReason 是 TaskFailed 事件携带的稳定失败原因枚举。
@@ -72,6 +79,9 @@ const (
 	TaskFailInvalidPlan
 	TaskFailPathUnreachable
 	TaskFailWorldChanged
+	// TaskFailInventoryFull 是 v18 追加的容量失败原因：采掘产物或放置物品在伙伴背包
+	// 无容量或已耗尽，任务因此终结。
+	TaskFailInventoryFull
 )
 
 // ChatEvent 是服务端在 tick 边界确认的聊天寻址事实。
@@ -94,8 +104,8 @@ func (ChatEvent) serverPacket()  {}
 // 组合规则是原子的：任一字段不满足当前 kind/reason 的要求即整体拒绝。
 // 任务事件（Task*）必须携带完整伙伴身份与原始指令，且 MUST NOT 携带模型
 // 生成的自由文本——wire 形状上唯一的文本字段就是玩家原始指令 Command，
-// 因此该约束由组合校验结构性保证。QueueFull 拒绝保留与 Accepted 相同的
-// 身份与指令要求，以便发令者能对应到具体未入队的指令。
+// 因此该约束由组合校验结构性保证。QueueFull 与 NotFollowing 拒绝保留与
+// Accepted 相同的身份与指令要求，以便发令者能对应到具体被拒的指令。
 func (event ChatEvent) Validate() error {
 	if event.EventID == 0 || !event.PlayerID.Valid() || !validPlayerName(event.PlayerName) {
 		return errors.New("network: invalid chat event player identity")
@@ -119,24 +129,25 @@ func (event ChatEvent) Validate() error {
 				companion.ValidateName(event.CompanionName) != nil {
 				return errors.New("network: unknown-companion chat event carries identity or command")
 			}
-		case ChatRejectQueueFull:
-			// 队列满必须让发令者能定位被拒指令，因此携带完整伙伴身份与合法指令。
+		case ChatRejectQueueFull, ChatRejectNotFollowing:
+			// QueueFull 与 NotFollowing 都针对特定伙伴的当前任务状态：
+			// 必须让发令者能定位被拒指令，因此携带完整伙伴身份与合法指令。
 			if !event.CompanionID.Valid() || companion.ValidateName(event.CompanionName) != nil ||
 				validateCommandText(event.Command) != nil {
-				return errors.New("network: queue-full chat event lacks companion identity or command")
+				return fmt.Errorf("network: chat rejection %d lacks companion identity or command", event.RejectReason)
 			}
 		default:
 			return errors.New("network: invalid chat rejection reason")
 		}
-	case ChatEventTaskStarted, ChatEventTaskProgress, ChatEventTaskCompleted, ChatEventTaskTimedOut:
-		// 任务推进事件只复述原始指令；reason 槽位必须保持 None，
+	case ChatEventTaskStarted, ChatEventTaskProgress, ChatEventTaskCompleted, ChatEventTaskTimedOut, ChatEventTaskStopped:
+		// 任务推进事件（含 v18 的停止事件）只复述原始指令；reason 槽位必须保持 None，
 		// 失败原因只允许出现在 TaskFailed 上。
 		if event.RejectReason != ChatRejectNone || !event.CompanionID.Valid() ||
 			companion.ValidateName(event.CompanionName) != nil || validateCommandText(event.Command) != nil {
 			return fmt.Errorf("network: invalid %d task chat event", event.Kind)
 		}
 	case ChatEventTaskFailed:
-		// TaskFailed 的 reason 槽位承载 TaskFailReason 固定枚举（16..19）。
+		// TaskFailed 的 reason 槽位承载 TaskFailReason 固定枚举（16..20）。
 		if !validTaskFailReason(TaskFailReason(event.RejectReason)) || !event.CompanionID.Valid() ||
 			companion.ValidateName(event.CompanionName) != nil || validateCommandText(event.Command) != nil {
 			return errors.New("network: invalid failed task chat event")
@@ -151,7 +162,8 @@ func (event ChatEvent) Validate() error {
 // 拒绝原因区间（0..15）与其他越界值都必须为假。
 func validTaskFailReason(reason TaskFailReason) bool {
 	switch reason {
-	case TaskFailPlannerUnavailable, TaskFailInvalidPlan, TaskFailPathUnreachable, TaskFailWorldChanged:
+	case TaskFailPlannerUnavailable, TaskFailInvalidPlan, TaskFailPathUnreachable,
+		TaskFailWorldChanged, TaskFailInventoryFull:
 		return true
 	default:
 		return false

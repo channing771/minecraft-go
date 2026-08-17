@@ -436,6 +436,305 @@ func TestChatCommandDoesNotMutateSimulationOrCreateCommand(t *testing.T) {
 	}
 }
 
+// injectRunningCompanionTask 在 stepMu 下把一条已进入 Running 的当前任务连同
+// 后续 pending 指令直接注入伙伴槽位（等价于 enqueueCommand → BeginHead →
+// BeginPlanning → AcceptPlan → FinishValidation 的手工前缀），供停止旁路测试
+// 构造「当前持续跟随任务」现场。发令者事实与 issuers 配对同步补齐，保证停止
+// 后 dispatchPlanning 提升原队首时能消费到配对条目；注入后不得再推进 tick，
+// 停止指令必须在本 tick 的聊天 drain 中先于任务编排被处理。
+func injectRunningCompanionTask(
+	t *testing.T,
+	host *Host,
+	id companion.ID,
+	issuer companionTaskIssuer,
+	command string,
+	steps []companion.PlanStep,
+	pending ...string,
+) {
+	t.Helper()
+	host.world.stepMu.Lock()
+	defer host.world.stepMu.Unlock()
+	slot := host.world.companionManager.slots[id]
+	if slot == nil {
+		t.Fatalf("伙伴 %s 没有任务槽位", id)
+	}
+	if !slot.queue.Enqueue(companion.TaskCommand(command)) || !slot.queue.BeginHead() ||
+		!slot.queue.BeginPlanning() {
+		t.Fatal("构造当前任务失败")
+	}
+	slot.queue.AcceptPlan(companion.Plan{Summary: "注入计划", Steps: steps})
+	events := slot.queue.FinishValidation(host.world.engine.WorldTime(), 10)
+	if len(events) != 1 || events[0].Kind != companion.TaskEventStarted {
+		t.Fatalf("注入任务未进入 Running：%v", events)
+	}
+	slot.currentCommand = companion.TaskCommand(command)
+	slot.currentIssuer = issuer
+	for _, text := range pending {
+		if !slot.queue.Enqueue(companion.TaskCommand(text)) {
+			t.Fatalf("构造 pending 指令 %q 失败", text)
+		}
+		slot.issuers = append(slot.issuers, issuer)
+	}
+}
+
+// stopTestIssuer 构造注入任务使用的有界发令者事实。
+func stopTestIssuer(identity network.Identity) companionTaskIssuer {
+	return companionTaskIssuer{
+		playerID: identity.PlayerID,
+		name:     identity.DisplayName,
+		position: [3]float32{0, 1, 0},
+	}
+}
+
+// TestChatCommandStopBypassOnRunningFollowTask 验证停止旁路的核心场景：当前
+// 任务是 Running 的持续跟随（follow 尾步）且 FIFO 还有待执行指令时，
+// `@伙伴名 停止` 不进入 FIFO、不产生 Accepted，而是广播唯一 TaskStopped
+// （reason None、携带被停任务的原始指令与发令者身份），随后原队首在同 tick
+// 立即开始、剩余队列保持不变。
+func TestChatCommandStopBypassOnRunningFollowTask(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(1), Name: "阿木"}}
+	// 假模型挂起全部请求：原队首被提升后停留在在途规划，避免模型噪声干扰
+	// 停止事实的断言窗口。
+	model := newFakeCompanionModel(t, [3]int32{0, 1, 0})
+	model.holdRequests()
+	host := newCompanionManagerHost(t, definitions, model, nil)
+	stopper := openCompanionChatClient(t, host, "memory", integrationIdentity(0x83, "停止者"))
+	observer := openCompanionChatClient(t, host, "memory", integrationIdentity(0x84, "旁观者"))
+	clients := []network.ClientEndpoint{stopper, observer}
+	waitForCompanionChatWorld(t, host, clients, 1)
+
+	issuerIdentity := integrationIdentity(0x85, "原发令者")
+	followTarget := issuerIdentity.PlayerID
+	injectRunningCompanionTask(t, host, definitions[0].ID, stopTestIssuer(issuerIdentity),
+		"跟着我", []companion.PlanStep{{Kind: companion.PlanStepFollow, PlayerID: followTarget}},
+		"下一条", "第三条")
+
+	sendIntegration(t, stopper, network.ChatCommand{Text: "@阿木 停止"})
+	waitForIncomingChatDepth(t, host.world, 1)
+	result := host.world.StepForTest()
+	stopperEvents := companionChatEvents(receiveCompanionChatTick(t, stopper, result.Tick))
+	observerEvents := companionChatEvents(receiveCompanionChatTick(t, observer, result.Tick))
+
+	if len(stopperEvents) != 1 || len(observerEvents) != 1 {
+		t.Fatalf("停止 tick 事件 sender=%v observer=%v，想要各 1 条 TaskStopped 广播",
+			chatEventKinds(stopperEvents), chatEventKinds(observerEvents))
+	}
+	want := network.ChatEvent{
+		EventID:       1,
+		PlayerID:      issuerIdentity.PlayerID,
+		PlayerName:    "原发令者",
+		CompanionID:   definitions[0].ID,
+		CompanionName: "阿木",
+		Kind:          network.ChatEventTaskStopped,
+		RejectReason:  network.ChatRejectNone,
+		Command:       "跟着我",
+	}
+	if !reflect.DeepEqual(stopperEvents[0], want) {
+		t.Fatalf("TaskStopped=%+v，想要 %+v", stopperEvents[0], want)
+	}
+	if !reflect.DeepEqual(observerEvents[0], want) {
+		t.Fatalf("广播事件不一致：observer=%+v", observerEvents[0])
+	}
+	if err := stopperEvents[0].Validate(); err != nil {
+		t.Fatalf("TaskStopped Validate: %v", err)
+	}
+
+	// 停止只终结当前任务：原队首在同 tick 的任务编排中被提升并派发规划
+	// （挂起模型令其停留在 Planning），剩余 pending 顺序与成员保持不变。
+	host.world.stepMu.Lock()
+	slot := host.world.companionManager.slots[definitions[0].ID]
+	snapshot := slot.queue.Snapshot()
+	inFlight := slot.planningInFlight
+	host.world.stepMu.Unlock()
+	if !snapshot.HasCurrent || snapshot.Current.Command != companion.TaskCommand("下一条") ||
+		snapshot.Current.State != companion.TaskPlanning {
+		t.Fatalf("停止后原队首未立即开始：current=%+v has=%v",
+			snapshot.Current, snapshot.HasCurrent)
+	}
+	if len(snapshot.Pending) != 1 || snapshot.Pending[0] != companion.TaskCommand("第三条") {
+		t.Fatalf("停止后队列被改动：pending=%v，想要 [第三条]", snapshot.Pending)
+	}
+	if !inFlight {
+		t.Fatal("原队首未被派发规划，未在同一 tick 开始处理")
+	}
+	// 停止本身绝不触碰模型：唯一请求属于「下一条」的规划（先等待它到达再核对
+	// 总数，避免与异步 worker 竞争）。
+	waitForModelRequests(t, model, 1)
+	if requests, _, _, _ := model.snapshotCounts(); requests != 1 {
+		t.Fatalf("模型请求数=%d，想要 1（停止旁路不得调用模型）", requests)
+	}
+}
+
+// TestChatCommandStopRejectsNonFollowAndIdle 验证停止旁路的同步拒绝矩阵：
+// 当前任务是普通 go_to（非持续跟随）或伙伴空闲时，`停止` 只向发令者单播
+// NotFollowing（携带完整伙伴身份与指令），当前任务继续执行、队列不变，
+// 绝不为停止创建 FIFO 任务。
+func TestChatCommandStopRejectsNonFollowAndIdle(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(1), Name: "阿木"}}
+
+	assertNotFollowing := func(t *testing.T, event network.ChatEvent, identity network.Identity) {
+		t.Helper()
+		want := network.ChatEvent{
+			EventID:       event.EventID,
+			PlayerID:      identity.PlayerID,
+			PlayerName:    identity.DisplayName,
+			CompanionID:   definitions[0].ID,
+			CompanionName: "阿木",
+			Kind:          network.ChatEventRejected,
+			RejectReason:  network.ChatRejectNotFollowing,
+			Command:       "停止",
+		}
+		if !reflect.DeepEqual(event, want) {
+			t.Fatalf("NotFollowing 事件=%+v，想要 %+v", event, want)
+		}
+		if err := event.Validate(); err != nil {
+			t.Fatalf("NotFollowing Validate: %v", err)
+		}
+	}
+
+	t.Run("NonFollowRunningTask", func(t *testing.T) {
+		model := newFakeCompanionModel(t, [3]int32{0, 1, 0})
+		model.holdRequests()
+		host := newCompanionManagerHost(t, definitions, model, nil)
+		sender := openCompanionChatClient(t, host, "memory", integrationIdentity(0x86, "发令者"))
+		observer := openCompanionChatClient(t, host, "memory", integrationIdentity(0x87, "旁观者"))
+		waitForCompanionChatWorld(t, host, []network.ClientEndpoint{sender, observer}, 1)
+
+		body := currentCompanionBody(t, host, definitions[0].ID)
+		issuerIdentity := integrationIdentity(0x88, "原发令者")
+		injectRunningCompanionTask(t, host, definitions[0].ID, stopTestIssuer(issuerIdentity),
+			"去那边", []companion.PlanStep{{
+				Kind: companion.PlanStepGoTo,
+				X:    int32(body.Position[0]) + 2,
+				Y:    1,
+				Z:    int32(body.Position[2]),
+			}})
+
+		sendIntegration(t, sender, network.ChatCommand{Text: "@阿木 停止"})
+		waitForIncomingChatDepth(t, host.world, 1)
+		result := host.world.StepForTest()
+		senderEvents := companionChatEvents(receiveCompanionChatTick(t, sender, result.Tick))
+		observerEvents := companionChatEvents(receiveCompanionChatTick(t, observer, result.Tick))
+
+		identity := integrationIdentity(0x86, "发令者")
+		if len(senderEvents) != 1 || senderEvents[0].EventID != 1 {
+			t.Fatalf("发令者事件=%+v，想要唯一 NotFollowing(EventID=1)", senderEvents)
+		}
+		assertNotFollowing(t, senderEvents[0], identity)
+		if len(observerEvents) != 0 {
+			t.Fatalf("NotFollowing 被广播：%v", chatEventKinds(observerEvents))
+		}
+		// 非跟随任务不受停止影响：保持 Running 继续执行，队列不变。
+		host.world.stepMu.Lock()
+		snapshot := host.world.companionManager.slots[definitions[0].ID].queue.Snapshot()
+		host.world.stepMu.Unlock()
+		if !snapshot.HasCurrent || snapshot.Current.State != companion.TaskRunning ||
+			snapshot.Current.Command != companion.TaskCommand("去那边") {
+			t.Fatalf("非跟随任务被停止改写：current=%+v has=%v",
+				snapshot.Current, snapshot.HasCurrent)
+		}
+		if len(snapshot.Pending) != 0 {
+			t.Fatalf("停止为非跟随任务改动队列：pending=%v", snapshot.Pending)
+		}
+	})
+
+	t.Run("IdleCompanion", func(t *testing.T) {
+		model := newFakeCompanionModel(t, [3]int32{0, 1, 0})
+		model.holdRequests()
+		host := newCompanionManagerHost(t, definitions, model, nil)
+		sender := openCompanionChatClient(t, host, "memory", integrationIdentity(0x89, "发令者"))
+		observer := openCompanionChatClient(t, host, "memory", integrationIdentity(0x8a, "旁观者"))
+		waitForCompanionChatWorld(t, host, []network.ClientEndpoint{sender, observer}, 1)
+
+		sendIntegration(t, sender, network.ChatCommand{Text: "@阿木 停止"})
+		waitForIncomingChatDepth(t, host.world, 1)
+		result := host.world.StepForTest()
+		senderEvents := companionChatEvents(receiveCompanionChatTick(t, sender, result.Tick))
+		observerEvents := companionChatEvents(receiveCompanionChatTick(t, observer, result.Tick))
+
+		identity := integrationIdentity(0x89, "发令者")
+		if len(senderEvents) != 1 || senderEvents[0].EventID != 1 {
+			t.Fatalf("发令者事件=%+v，想要唯一 NotFollowing(EventID=1)", senderEvents)
+		}
+		assertNotFollowing(t, senderEvents[0], identity)
+		if len(observerEvents) != 0 {
+			t.Fatalf("NotFollowing 被广播：%v", chatEventKinds(observerEvents))
+		}
+		// 空闲伙伴的停止绝不创建任务或改动队列。
+		host.world.stepMu.Lock()
+		snapshot := host.world.companionManager.slots[definitions[0].ID].queue.Snapshot()
+		host.world.stepMu.Unlock()
+		if snapshot.HasCurrent || len(snapshot.Pending) != 0 {
+			t.Fatalf("空闲伙伴被停止创建任务：has=%v pending=%v",
+				snapshot.HasCurrent, snapshot.Pending)
+		}
+		if requests, _, _, _ := model.snapshotCounts(); requests != 0 {
+			t.Fatalf("空闲停止触发模型请求=%d", requests)
+		}
+	})
+}
+
+// TestChatCommandStopNonExactTextEntersFIFO 验证非精确停止文本按普通指令进入
+// FIFO（广播 Accepted、创建任务），绝不触发停止旁路；而 trim 后恰好等于
+// 「停止」的寻址（多余分隔空白）仍走旁路——旁路判定基准与 Accepted 的指令
+// 字段共用同一 trim 后文本。
+func TestChatCommandStopNonExactTextEntersFIFO(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(1), Name: "阿木"}}
+	model := newFakeCompanionModel(t, [3]int32{0, 1, 0})
+	model.holdRequests()
+	host := newCompanionManagerHost(t, definitions, model, nil)
+	sender := openCompanionChatClient(t, host, "memory", integrationIdentity(0x8b, "发令者"))
+	observer := openCompanionChatClient(t, host, "memory", integrationIdentity(0x8c, "旁观者"))
+	waitForCompanionChatWorld(t, host, []network.ClientEndpoint{sender, observer}, 1)
+
+	// 前两条是非精确文本（带参数/英文），第三条 trim 后精确等于「停止」。
+	for _, text := range []string{"@阿木 停止移动", "@阿木 stop", "@阿木  停止"} {
+		sendIntegration(t, sender, network.ChatCommand{Text: text})
+	}
+	waitForIncomingChatDepth(t, host.world, 3)
+	result := host.world.StepForTest()
+	senderEvents := companionChatEvents(receiveCompanionChatTick(t, sender, result.Tick))
+	observerEvents := companionChatEvents(receiveCompanionChatTick(t, observer, result.Tick))
+
+	identity := integrationIdentity(0x8b, "发令者")
+	wantSender := []network.ChatEventKind{
+		network.ChatEventAccepted,
+		network.ChatEventAccepted,
+		network.ChatEventRejected,
+	}
+	if !reflect.DeepEqual(chatEventKinds(senderEvents), wantSender) {
+		t.Fatalf("发令者事件=%v，想要 %v", chatEventKinds(senderEvents), wantSender)
+	}
+	if !reflect.DeepEqual(chatEventKinds(observerEvents), wantSender[:2]) {
+		t.Fatalf("旁观者事件=%v，想要两条 Accepted 广播", chatEventKinds(observerEvents))
+	}
+	for index, event := range senderEvents[:2] {
+		if event.Kind != network.ChatEventAccepted || event.Command == "停止" {
+			t.Fatalf("非精确文本事件[%d]=%+v，想要 Accepted 且携带原指令", index, event)
+		}
+		if err := event.Validate(); err != nil {
+			t.Fatalf("Accepted[%d] Validate: %v", index, err)
+		}
+	}
+	notFollowing := senderEvents[2]
+	if notFollowing.RejectReason != network.ChatRejectNotFollowing ||
+		notFollowing.Command != "停止" || notFollowing.PlayerID != identity.PlayerID {
+		t.Fatalf("精确停止事件=%+v，想要 NotFollowing(停止)", notFollowing)
+	}
+	assertStrictlyIncreasingEventIDs(t, senderEvents)
+
+	// 队列事实：非精确文本按接收顺序进入 FIFO；队首已被提升并在途规划
+	//（挂起模型），「停止」本身不占任何槽位。
+	host.world.stepMu.Lock()
+	snapshot := host.world.companionManager.slots[definitions[0].ID].queue.Snapshot()
+	host.world.stepMu.Unlock()
+	if !snapshot.HasCurrent || snapshot.Current.Command != companion.TaskCommand("停止移动") ||
+		len(snapshot.Pending) != 1 || snapshot.Pending[0] != companion.TaskCommand("stop") {
+		t.Fatalf("FIFO 事实不符：current=%+v has=%v pending=%v",
+			snapshot.Current, snapshot.HasCurrent, snapshot.Pending)
+	}
+}
+
 func TestCompanionChatMemoryTCPParity(t *testing.T) {
 	results := make(map[string][]companionChatTranscriptEvent, 2)
 	for _, transport := range []string{"memory", "tcp"} {

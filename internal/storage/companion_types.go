@@ -45,14 +45,15 @@ type CompanionSave struct {
 	Queues   []StoredCompanionQueue
 }
 
-// StoredCompanionTask 是 v2 存档中一条当前任务的持久化载荷。Summary 与
+// StoredCompanionTask 是 v3 存档中一条当前任务的持久化载荷。Summary 与
 // Generation 刻意不落盘：模型自由文本不属于任务事实（M5D 前不上屏），
 // 世代只用于丢弃过时 worker 结果，重启后没有在途请求可丢弃。
 type StoredCompanionTask struct {
 	// Command 是玩家原始指令（不含 @伙伴名 前缀），≤MaxCompanionTaskCommandBytes。
 	Command string
-	// PlanSteps 是 go_to 计划步骤；只有 Running 任务携带（模型计划只在
-	// Validating 成功后落盘），≤MaxCompanionPlanSteps。
+	// PlanSteps 是计划步骤（交付全集四 kind，编码按 kind 变长）；只有
+	// Running 任务携带（模型计划只在 Validating 成功后落盘），
+	// ≤MaxCompanionPlanSteps。
 	PlanSteps []companion.PlanStep
 	// StepIndex 是下一个待执行步骤的索引；仅 Running 任务可非零。
 	StepIndex int
@@ -82,16 +83,17 @@ type CompanionStore interface {
 }
 
 // validateStoredCompanionTask 校验单条任务载荷的全部不变量：状态与失败
-// 原因的枚举与配对、指令文本边界、计划步骤的 go_to 合法性，以及
+// 原因的枚举与配对、指令文本边界、计划步骤按 schema 的结构合法性，以及
 // "计划只在 Running 落盘"的字段耦合（非 Running 必须无步骤、无进度、
-// 无计时）。编码与解码共用本函数，保证双向边界一致。
-func validateStoredCompanionTask(task StoredCompanionTask) error {
-	if task.State < companion.TaskQueued || task.State > companion.TaskTimedOut {
+// 无计时）。编码与解码共用本函数，保证双向边界一致；schema 只影响步骤
+// 集合（v2 只认 go_to、v3 认交付全集四 kind），其余不变量跨 schema 相同。
+func validateStoredCompanionTask(task StoredCompanionTask, schema uint32) error {
+	if task.State < companion.TaskQueued || task.State > companion.TaskStopped {
 		return fmt.Errorf("%w: companion task state %d outside enum", ErrCorrupt, task.State)
 	}
 	if task.State == companion.TaskFailed {
 		if task.FailReason <= companion.TaskFailNone ||
-			task.FailReason > companion.TaskFailWorldChanged {
+			task.FailReason > companion.TaskFailInventoryFull {
 			return fmt.Errorf("%w: companion task fail reason %d invalid", ErrCorrupt, task.FailReason)
 		}
 	} else if task.FailReason != companion.TaskFailNone {
@@ -101,8 +103,10 @@ func validateStoredCompanionTask(task StoredCompanionTask) error {
 		return fmt.Errorf("%w: companion task command: %v", ErrCorrupt, err)
 	}
 	if task.State == companion.TaskRunning {
-		// 步骤约束与 companion.Plan.Validate 的步骤校验保持一致（summary
-		// 不落盘，故不能复用整份计划校验）。
+		// 步骤约束与 companion 侧 validPlanSteps 的结构校验保持一致
+		//（summary 不落盘，故不能复用整份计划校验；place 方块的注册表
+		// 值域校验依赖 companion 的私有注册表，由恢复路径 RestoreCurrent
+		// → validPlanSteps 兜底，存档边界把 Block 当作有界不透明载荷）。
 		if len(task.PlanSteps) == 0 {
 			return fmt.Errorf("%w: running companion task has no plan steps", ErrCorrupt)
 		}
@@ -122,7 +126,37 @@ func validateStoredCompanionTask(task StoredCompanionTask) error {
 			"%w: companion task plan steps %d exceeds limit", ErrCorrupt, len(task.PlanSteps),
 		)
 	}
+	hasFollow := false
 	for index, step := range task.PlanSteps {
+		if err := validateStoredPlanStep(step, index, len(task.PlanSteps), schema); err != nil {
+			return err
+		}
+		if step.Kind == companion.PlanStepFollow {
+			hasFollow = true
+		}
+	}
+	// 持续跟随不保存 deadline：DeadlineTicks 零值即运行期超时豁免（Task.
+	// Expired 跳过零值），非零 deadline 的 follow 任务若被放行，恢复后将
+	// 错误地重新挂上超时。v2 载荷不含 follow 步骤，本校验天然不影响 v2
+	// 迁移；编码与解码共用同一道门。
+	if hasFollow && task.DeadlineTicks != 0 {
+		return fmt.Errorf(
+			"%w: companion follow task keeps deadline %d", ErrCorrupt, task.DeadlineTicks,
+		)
+	}
+	return nil
+}
+
+// validateStoredPlanStep 校验单个计划步骤的结构约束。v2 只写过 go_to：
+// 任何其他 kind 都是 v2 时代不可能出现的字节，按损坏拒绝（迁移读入后按
+// v3 重写）。v3 按交付全集四 kind 校验：坐标步骤的 Y 必须在世界竖直边界
+// 内、follow 的目标必须是有效 UUIDv4 且只能居末（follow 没有自然终点，
+// 排在其后的步骤无从执行——与 companion.validPlanSteps 的结构约束一致，
+// 存档边界提前拒绝，恢复路径无需再丢弃）。各 kind 未使用字段必须为零：
+// 变长编码只写 kind 专属字段，非零的未用字段会在编码时静默丢失，零值
+// 约束保证 round-trip 精确无损。
+func validateStoredPlanStep(step companion.PlanStep, index, total int, schema uint32) error {
+	if schema == companionSchemaV2 {
 		if step.Kind != companion.PlanStepGoTo {
 			return fmt.Errorf(
 				"%w: companion task plan step %d kind %d is not go_to", ErrCorrupt, index, step.Kind,
@@ -133,21 +167,66 @@ func validateStoredCompanionTask(task StoredCompanionTask) error {
 				"%w: companion task plan step %d Y=%d outside world", ErrCorrupt, index, step.Y,
 			)
 		}
+		return nil
+	}
+	switch step.Kind {
+	case companion.PlanStepGoTo, companion.PlanStepMine:
+		if step.Block != 0 || step.PlayerID != (core.PlayerID{}) {
+			return fmt.Errorf(
+				"%w: companion task plan step %d keeps unused payload", ErrCorrupt, index,
+			)
+		}
+	case companion.PlanStepPlace:
+		if step.PlayerID != (core.PlayerID{}) {
+			return fmt.Errorf(
+				"%w: companion task plan step %d keeps unused player payload", ErrCorrupt, index,
+			)
+		}
+	case companion.PlanStepFollow:
+		if step.X != 0 || step.Y != 0 || step.Z != 0 || step.Block != 0 {
+			return fmt.Errorf(
+				"%w: companion task plan step %d keeps unused coordinate payload", ErrCorrupt, index,
+			)
+		}
+		if !step.PlayerID.Valid() {
+			return fmt.Errorf(
+				"%w: companion task plan step %d follow target invalid", ErrCorrupt, index,
+			)
+		}
+		if index != total-1 {
+			return fmt.Errorf(
+				"%w: companion task plan step %d follow is not last", ErrCorrupt, index,
+			)
+		}
+	default:
+		return fmt.Errorf(
+			"%w: companion task plan step %d kind %d is not delivered", ErrCorrupt, index, step.Kind,
+		)
+	}
+	if step.Kind != companion.PlanStepFollow && (step.Y < core.MinY || step.Y >= core.MaxY) {
+		return fmt.Errorf(
+			"%w: companion task plan step %d Y=%d outside world", ErrCorrupt, index, step.Y,
+		)
 	}
 	return nil
 }
 
 // validateStoredCompanionQueues 校验一组任务载荷的结构不变量：非空、ID
 // 唯一、每条关联一条既有记录、当前任务与 FIFO 全部有界。records 是已按
-// ID 升序排好的保存记录；本函数只读，不修改任何输入切片。
-func validateStoredCompanionQueues(queues []StoredCompanionQueue, records []companion.Body) error {
+// ID 升序排好的保存记录；本函数只读，不修改任何输入切片。schema 决定
+// 步骤集合的校验口径——编码端恒为当前 schema（v3）。
+func validateStoredCompanionQueues(
+	queues []StoredCompanionQueue,
+	records []companion.Body,
+	schema uint32,
+) error {
 	known := make(map[companion.ID]struct{}, len(records))
 	for _, body := range records {
 		known[body.ID] = struct{}{}
 	}
 	seen := make(map[companion.ID]struct{}, len(queues))
 	for index, queue := range queues {
-		if err := validateStoredCompanionQueue(queue); err != nil {
+		if err := validateStoredCompanionQueue(queue, schema); err != nil {
 			return fmt.Errorf("companion queue %d: %w", index, err)
 		}
 		if _, duplicate := seen[queue.ID]; duplicate {
@@ -165,7 +244,7 @@ func validateStoredCompanionQueues(queues []StoredCompanionQueue, records []comp
 // 与 FIFO 每条指令的字节上界。HasCurrent 为假时 Current 不参与编码（任务
 // 区只随 flags bit0 落盘），因此必须整体为零值——非零的 Current 无法在
 // 磁盘上表达，放行它会静默丢数据，一律拒绝。
-func validateStoredCompanionQueue(queue StoredCompanionQueue) error {
+func validateStoredCompanionQueue(queue StoredCompanionQueue, schema uint32) error {
 	if !queue.HasCurrent && len(queue.Pending) == 0 {
 		return fmt.Errorf("%w: empty companion queue", ErrCorrupt)
 	}
@@ -173,7 +252,7 @@ func validateStoredCompanionQueue(queue StoredCompanionQueue) error {
 		return fmt.Errorf("%w: invalid companion queue ID", ErrCorrupt)
 	}
 	if queue.HasCurrent {
-		if err := validateStoredCompanionTask(queue.Current); err != nil {
+		if err := validateStoredCompanionTask(queue.Current, schema); err != nil {
 			return err
 		}
 	} else if !storedCompanionTaskIsZero(queue.Current) {

@@ -61,7 +61,8 @@ func (q *TaskQueue) BeginHead() bool {
 // v2 的恢复路径）。恢复纪律：
 //   - 状态必须非终态且失败原因为空；Planning/Validating 由调用方先归一为
 //     Queued（未通过验证的计划不落盘，重启后重新规划）；
-//   - Running 必须携带合法 go_to 步骤且 StepIndex 落在计划范围内；
+//   - Running 必须携带合法计划步骤（M5C 交付全集四 kind）且 StepIndex 落在
+//     计划范围内；
 //   - 非 Running 不得携带计划、进度与计时（持久化层的同一耦合约束）；
 //   - Generation 以当前队列计数重新盖戳——重启后没有在途 worker 结果，
 //     盖戳只为保持“当前任务世代恒新”的不变量。
@@ -122,8 +123,10 @@ func (q *TaskQueue) FailPlanning(reason TaskFailReason) []TaskEvent {
 }
 
 // FinishValidation 结束 Validating：计划结构校验失败令任务以 InvalidPlan 失败；
-// 校验通过则进入 Running——记录 StartTick 与 deadline（世界时间 + 超时分钟数）
-// 并产出唯一的 TaskStarted 事件事实。
+// 校验通过则进入 Running——记录 StartTick，普通任务同时记录 deadline（世界
+// 时间 + 超时分钟数）并产出唯一的 TaskStarted 事件事实。持续跟随（计划以
+// follow 收尾）没有自然终点：deadline 保持零值即豁免超时（Task.Expired 跳过
+// 零值），跟随只能经停止指令或目标离线终结。
 func (q *TaskQueue) FinishValidation(worldTimeTicks uint64, timeoutMinutes int) []TaskEvent {
 	if !q.hasCurrent || q.current.State != TaskValidating {
 		return nil
@@ -133,7 +136,9 @@ func (q *TaskQueue) FinishValidation(worldTimeTicks uint64, timeoutMinutes int) 
 	}
 	q.current.State = TaskRunning
 	q.current.StartTick = worldTimeTicks
-	q.current.DeadlineTicks = TaskDeadlineTicks(worldTimeTicks, timeoutMinutes)
+	if steps := q.current.Plan.Steps; len(steps) == 0 || steps[len(steps)-1].Kind != PlanStepFollow {
+		q.current.DeadlineTicks = TaskDeadlineTicks(worldTimeTicks, timeoutMinutes)
+	}
 	return []TaskEvent{{Kind: TaskEventStarted}}
 }
 
@@ -171,6 +176,24 @@ func (q *TaskQueue) Expire(worldTimeTicks uint64) []TaskEvent {
 	return q.finishState(TaskTimedOut, TaskFailNone)
 }
 
+// Stop 把当前 Running 的持续跟随任务转入 Stopped 终态，产出 TaskStopped 事件
+// 事实（reason None）并清空当前槽位。可停性三条件：存在当前任务、状态为
+// Running、计划的最后一步是 follow（持续跟随的判定基准——follow 执行器由
+// 后续任务交付，状态机只依据计划形状判定）。任一条件不满足时 no-op 并返回
+// 空事件：普通 go_to 或空闲伙伴的停止由编排层以 NotFollowing 同步拒绝，
+// 状态机绝不静默改写队列或任务状态。终态清槽后的 FIFO 推进与既有终态完全
+// 一致——下一次 BeginHead 立即开始原队首，pending 不清空也不重排。
+func (q *TaskQueue) Stop() []TaskEvent {
+	if !q.hasCurrent || q.current.State != TaskRunning {
+		return nil
+	}
+	steps := q.current.Plan.Steps
+	if len(steps) == 0 || steps[len(steps)-1].Kind != PlanStepFollow {
+		return nil
+	}
+	return q.finishState(TaskStopped, TaskFailNone)
+}
+
 // finishState 把当前任务置为指定终态并返回对应事件事实。终态任务保留在
 // 返回前的值里供 Snapshot 消费后即被清出槽位。
 func (q *TaskQueue) finishState(state TaskState, reason TaskFailReason) []TaskEvent {
@@ -195,6 +218,8 @@ func terminalEventKind(state TaskState) TaskEventKind {
 		return TaskEventFailed
 	case TaskTimedOut:
 		return TaskEventTimedOut
+	case TaskStopped:
+		return TaskEventStopped
 	default:
 		return TaskEventNone
 	}

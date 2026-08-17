@@ -123,6 +123,10 @@ func formatChatEvent(event network.ChatEvent) string {
 		return event.CompanionName + " 已完成：" + event.Command
 	case network.ChatEventTaskTimedOut:
 		return event.CompanionName + " 任务超时：" + event.Command
+	case network.ChatEventTaskStopped:
+		// v18 的停止终态是玩家的成功意图：与失败/超时刻意分离，行文对齐
+		// 已完成/任务超时的事实短语模板（替换 C1 期间的 Accepted 兜底格式）。
+		return event.CompanionName + " 已停止：" + event.Command
 	case network.ChatEventTaskFailed:
 		return event.CompanionName + " 任务失败（" + taskFailReasonText(event.RejectReason) + "）：" + event.Command
 	}
@@ -133,6 +137,10 @@ func formatChatEvent(event network.ChatEvent) string {
 		return "系统：未找到伙伴 " + event.CompanionName
 	case network.ChatRejectQueueFull:
 		return "系统：" + event.CompanionName + " 任务队列已满：" + event.Command
+	case network.ChatRejectNotFollowing:
+		// v18 的停止旁路同步拒绝：目标伙伴当前没有可停止的持续任务，
+		// 携带完整身份与被拒指令供发令者核对。
+		return "系统：" + event.CompanionName + " 没有可停止的持续任务：" + event.Command
 	default:
 		return event.PlayerName + " → " + event.CompanionName + "：" + event.Command
 	}
@@ -150,6 +158,8 @@ func taskFailReasonText(reason network.ChatRejectReason) string {
 		return "路径不可达"
 	case network.TaskFailWorldChanged:
 		return "世界已变化"
+	case network.TaskFailInventoryFull:
+		return "背包已满"
 	default:
 		return "未知原因"
 	}

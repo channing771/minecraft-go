@@ -37,6 +37,9 @@ func FuzzCompanionMessageCodec(f *testing.F) {
 		taskChatEvent(5, ChatEventTaskFailed, ChatRejectReason(TaskFailPlannerUnavailable)),
 		taskChatEvent(6, ChatEventTaskTimedOut, ChatRejectNone),
 		taskChatEvent(7, ChatEventRejected, ChatRejectQueueFull),
+		taskChatEvent(8, ChatEventTaskStopped, ChatRejectNone),
+		taskChatEvent(9, ChatEventTaskFailed, ChatRejectReason(TaskFailInventoryFull)),
+		taskChatEvent(10, ChatEventRejected, ChatRejectNotFollowing),
 		CompanionSpawn{ID: testCompanionID(1), Name: "A"},
 		CompanionStates{States: []CompanionState{{ID: testCompanionID(1)}}},
 		CompanionDespawn{ID: testCompanionID(1)},
@@ -49,11 +52,13 @@ func FuzzCompanionMessageCodec(f *testing.F) {
 	}
 	f.Add(uint8(0), uint32(12), []byte{0xff, 0xff, 0xff, 0xff, 0x0f})
 	f.Add(uint8(1), uint32(18), append(make([]byte, 8), 0xff, 0xff, 0xff, 0xff, 0x0f))
-	// 非法 kind/reason 组合种子：任务 kind 带拒绝原因、TaskFailed 带越界原因、未知 kind。
+	// 非法 kind/reason 组合种子：任务 kind 带拒绝原因、TaskStopped 带停止拒绝原因、
+	// TaskFailed 带越界原因（21）、未知 kind 9。
 	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventTaskStarted, byte(ChatRejectInvalidFormat)))
+	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventTaskStopped, byte(ChatRejectNotFollowing)))
 	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventTaskFailed, 15))
-	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventTaskFailed, 20))
-	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventKind(8), 0))
+	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventTaskFailed, 21))
+	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventKind(9), 0))
 
 	f.Fuzz(func(t *testing.T, direction uint8, packetID uint32, payload []byte) {
 		if direction&1 == 0 {

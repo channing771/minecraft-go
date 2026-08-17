@@ -110,7 +110,7 @@ func TestMiningReleaseClearsSameTick(t *testing.T) {
 	player := engine.sessions[sessions[0]].player
 	player.miningHeld = false
 	advanceMiningOnce(engine)
-	if player.mining != (playerMiningState{}) {
+	if player.mining != (miningState{}) {
 		t.Fatalf("松键后 mining=%+v，想要零值", player.mining)
 	}
 }
@@ -216,7 +216,7 @@ func TestMiningInvalidTargetsClearWithoutRejection(t *testing.T) {
 			session := engine.sessions[sessions[0]]
 			test.mutate(engine, session, targets[0])
 			result := advanceMiningOnce(engine)
-			if session.player.mining != (playerMiningState{}) {
+			if session.player.mining != (miningState{}) {
 				t.Fatalf("无效目标后 mining=%+v，想要零值", session.player.mining)
 			}
 			if len(result.Rejected) != 0 {
@@ -232,7 +232,7 @@ func TestMiningLifecyclePathsClearIntentAndProgress(t *testing.T) {
 		advanceMiningOnce(engine)
 		player := engine.sessions[sessions[0]].player
 		player.beginReset()
-		if player.miningHeld || player.mining != (playerMiningState{}) {
+		if player.miningHeld || player.mining != (miningState{}) {
 			t.Fatalf("beginReset 后 held=%v mining=%+v", player.miningHeld, player.mining)
 		}
 	})
@@ -247,7 +247,7 @@ func TestMiningLifecyclePathsClearIntentAndProgress(t *testing.T) {
 		})
 		result := engine.Step()
 		player := engine.sessions[session].player
-		if player.miningHeld || player.mining != (playerMiningState{}) {
+		if player.miningHeld || player.mining != (miningState{}) {
 			t.Fatalf("非法输入后 held=%v mining=%+v", player.miningHeld, player.mining)
 		}
 		if len(result.Rejected) != 1 || result.Rejected[0].Reason != RejectInvalidInput {
@@ -265,7 +265,7 @@ func TestMiningLifecyclePathsClearIntentAndProgress(t *testing.T) {
 			Session: session, Sequence: 102, Kind: CommandPlayerInput, Mining: true,
 		})
 		result := engine.Step()
-		if player.miningHeld || player.mining != (playerMiningState{}) {
+		if player.miningHeld || player.mining != (miningState{}) {
 			t.Fatalf("未就绪输入后 held=%v mining=%+v", player.miningHeld, player.mining)
 		}
 		if len(result.Rejected) != 1 || result.Rejected[0].Reason != RejectPlayerNotReady {
@@ -703,7 +703,7 @@ func TestMiningHarvestableCapacityFailureIsAtomicRejectsOnceAndPreservesDurabili
 	if got := record.Chunk.DropsHash(); got != beforeDropsHash {
 		t.Fatalf("容量失败修改了掉落槽: drops=%x/%x", got, beforeDropsHash)
 	}
-	if engine.sessions[session].player.mining != (playerMiningState{}) {
+	if engine.sessions[session].player.mining != (miningState{}) {
 		t.Fatalf("容量失败后 mining=%+v，想要清零", engine.sessions[session].player.mining)
 	}
 	if got := player.inventory.Hotbar.Slots[0]; got != beforeTool {
@@ -862,7 +862,7 @@ func TestMiningTwoSessionsCompleteOneTargetOnce(t *testing.T) {
 	if drops := miningDropTotals(record.Chunk); drops[core.ItemStone] != 1 || len(drops) != 1 {
 		t.Fatalf("竞争完成掉落=%+v，想要一个石头", drops)
 	}
-	if engine.sessions[sessions[1]].player.mining != (playerMiningState{}) {
+	if engine.sessions[sessions[1]].player.mining != (miningState{}) {
 		t.Fatalf("后处理会话未看到空气并清零: %+v", engine.sessions[sessions[1]].player.mining)
 	}
 	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
@@ -880,14 +880,14 @@ func TestAuthoritativeMiningEightPlayersDoesNotAllocate(t *testing.T) {
 	result := TickResult{}
 	engine.advanceMining(pending, &result)
 	for _, session := range engine.sessions {
-		session.player.mining = playerMiningState{}
+		session.player.mining = miningState{}
 	}
 
 	allocations := testing.AllocsPerRun(1000, func() {
 		result.Rejected = result.Rejected[:0]
 		engine.advanceMining(pending, &result)
 		for _, session := range engine.sessions {
-			session.player.mining = playerMiningState{}
+			session.player.mining = miningState{}
 		}
 	})
 	if allocations != 0 {
@@ -908,7 +908,7 @@ func BenchmarkAuthoritativeMiningEightPlayers(b *testing.B) {
 	result := TickResult{}
 	engine.advanceMining(pending, &result)
 	for _, session := range engine.sessions {
-		session.player.mining = playerMiningState{}
+		session.player.mining = miningState{}
 	}
 
 	b.ReportAllocs()
@@ -917,7 +917,7 @@ func BenchmarkAuthoritativeMiningEightPlayers(b *testing.B) {
 		result.Rejected = result.Rejected[:0]
 		engine.advanceMining(pending, &result)
 		for _, session := range engine.sessions {
-			session.player.mining = playerMiningState{}
+			session.player.mining = miningState{}
 		}
 	}
 }

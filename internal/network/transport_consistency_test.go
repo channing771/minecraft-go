@@ -183,8 +183,8 @@ func TestCommonBlockMaterialPlayTranscriptMatchesMemoryAndTCP(t *testing.T) {
 }
 
 func TestProtocolOutdatedHandshakeRejectMatchesMemoryAndTCP(t *testing.T) {
-	// v15 与 v16 都是过时版本：Memory 与 TCP 必须产生相同的 v17 版本不匹配拒绝。
-	for _, version := range []uint32{15, 16} {
+	// v15、v16 与 v17 都是过时版本：Memory 与 TCP 必须产生相同的 v18 版本不匹配拒绝。
+	for _, version := range []uint32{15, 16, 17} {
 		for _, open := range transportOpeners {
 			t.Run(fmt.Sprintf("v%d/%s", version, open.name), func(t *testing.T) {
 				client, server := open.open(t)
@@ -198,8 +198,8 @@ func TestProtocolOutdatedHandshakeRejectMatchesMemoryAndTCP(t *testing.T) {
 				sendProtocolVersionHello(t, client, version)
 				packet, err := client.Recv(context.Background(), StateHandshake)
 				reject, ok := packet.(HandshakeReject)
-				if err != nil || !ok || reject.Code != HandshakeVersionMismatch || reject.ServerProtocolVersion != 17 {
-					t.Fatalf("v%d 拒绝 = (%#v, %v)，想要服务端 v17 HandshakeVersionMismatch", version, packet, err)
+				if err != nil || !ok || reject.Code != HandshakeVersionMismatch || reject.ServerProtocolVersion != ProtocolVersion {
+					t.Fatalf("v%d 拒绝 = (%#v, %v)，想要服务端 v%d HandshakeVersionMismatch", version, packet, err, ProtocolVersion)
 				}
 				if err := <-serverDone; err == nil {
 					t.Fatalf("v%d 握手意外进入登录", version)

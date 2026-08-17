@@ -71,15 +71,13 @@ type restoreCandidate struct {
 }
 
 type playerState struct {
-	// actorState 内嵌玩家与伙伴共有的运动/朝向/背包状态，字段经提升访问；
+	// actorState 内嵌玩家与伙伴共有的运动/朝向/背包/采掘状态，字段经提升访问；
 	// 生命周期、生命与输入序号等玩家专属语义留在本结构体。提取范围与动机
 	// 见 actor.go。
 	actorState
 	lifecycle         PlayerLifecycle
 	anchor            core.ChunkPos
 	lastInputSequence uint64
-	miningHeld        bool
-	mining            playerMiningState
 	reset             bool
 	// spawned 记录这名玩家是否至少出生过一次。出生之前权威状态与登录时恢复的
 	// 状态完全一致；出生之后两者就可能分岔，快照因而必须可被观察。见 persistable。
@@ -536,7 +534,7 @@ func (player *playerState) beginReset() {
 	player.peakY = player.state.Position.Y()
 	player.input = physics.Input{}
 	player.miningHeld = false
-	player.mining = playerMiningState{}
+	player.mining = miningState{}
 	player.reset = false
 	player.inventoryDirty = true
 	player.nextCandidate = 0
