@@ -23,6 +23,8 @@ func TestValidatePersona(t *testing.T) {
 		{name: "4096字节多字节接受", persona: multibyteBoundary, wantErr: false},
 		{name: "4097字节拒绝", persona: strings.Repeat("A", MaxPersonaBytes+1), wantErr: true},
 		{name: "含NUL拒绝", persona: "山\x00民", wantErr: true},
+		// 非法 UTF-8 分支只服务外部文件来源与本函数直调：内联来源经
+		// encoding/json 解码恒为有效 UTF-8（无效字节被替换为 U+FFFD）。
 		{name: "非法UTF8拒绝", persona: "山\xff\xfe民", wantErr: true},
 	}
 	for _, testCase := range cases {

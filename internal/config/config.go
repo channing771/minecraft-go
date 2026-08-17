@@ -526,9 +526,14 @@ func applyAI(cfg *Config, raw json.RawMessage, configPath string) error {
 	return nil
 }
 
-// resolvePersonas 在启动加载配置时为每个伙伴定义就地解析最终人设：内联
-// ai.companions[].persona 优先，其次读取配置文件所在目录下
-// personas/<canonical 名称>.txt，两者皆无则为空人设。
+// resolvePersonas 在启动加载配置时为每个伙伴定义解析生效人设并写入
+// ResolvedPersona：内联 ai.companions[].persona 优先，其次读取配置文件所在
+// 目录下 personas/<canonical 名称>.txt，两者皆无则为空人设。
+//
+// 只写 ResolvedPersona、绝不改写 Persona：后者是磁盘镜像（内联原文，含越界
+// 原文），Save 与旧配置迁移会全量序列化它——若把生效值（文件全文或降级后
+// 的空串）写回去，外部文件内容会被静默吸收为内联、越界原文会被从磁盘
+// 清除，两者都是对用户数据的静默篡改。
 //
 // 宽松纪律：任何人设问题（内联或文件越界、损坏、不可读）都只 slog.Warn 后
 // 降级为空人设，绝不阻止启动；告警只引用字段路径或文件路径与原因，绝不
@@ -538,14 +543,14 @@ func applyAI(cfg *Config, raw json.RawMessage, configPath string) error {
 func resolvePersonas(configPath string, definitions []companion.Definition) {
 	personasDir := filepath.Join(filepath.Dir(configPath), "personas")
 	for index := range definitions {
-		definitions[index].Persona = resolveDefinitionPersona(personasDir, index, definitions[index])
+		definitions[index].ResolvedPersona = resolveDefinitionPersona(personasDir, index, definitions[index])
 	}
 }
 
-// resolveDefinitionPersona 解析单个伙伴的最终人设，优先级与降级规则见
-// resolvePersonas 的说明。内联为空串表示字段缺席或显式空——两种情形都让
-// 外部文件有机会生效；内联存在（即使内容越界被降级）则不再读文件，双源
-// 语义保持"内联优先、降级不回退文件"。
+// resolveDefinitionPersona 解析单个伙伴的生效人设（ResolvedPersona），优先级
+// 与降级规则见 resolvePersonas 的说明。内联为空串表示字段缺席或显式空——
+// 两种情形都让外部文件有机会生效；内联存在（即使内容越界被降级）则不再读
+// 文件，双源语义保持"内联优先、降级不回退文件"。
 func resolveDefinitionPersona(personasDir string, index int, definition companion.Definition) string {
 	if definition.Persona != "" {
 		if err := companion.ValidatePersona(definition.Persona); err != nil {
@@ -691,6 +696,8 @@ func warnUnknownTopLevel(top map[string]json.RawMessage) {
 }
 
 // CompanionDefinitions 返回当前配置中的伙伴定义；缺失或禁用时返回 nil。
+// 消费方（后续 Dialogue 等）应读取 Definition.ResolvedPersona（生效人设）；
+// Definition.Persona 只是磁盘内联原文镜像，可能越界，不作运行期人设使用。
 func (c Config) CompanionDefinitions() []companion.Definition {
 	if c.AI == nil {
 		return nil
