@@ -40,27 +40,24 @@ const (
 // 状态、FIFO 或任何世界事实。
 var ErrDialogueInvalidResponse = errors.New("companion: dialogue 输出或输入非法")
 
-// dialogueResponseWire 是台词响应正文的解码中间形。两个字段都用 *string 以
-// 区分「字段缺席」与「空串」：终态必须有 summary（缺席即非法）、非终态不得
-// 出现 summary（出现即非法）、line 在两种形态下都必须出现，三条规则都依赖
-// 缺席语义，值校验（长度、编码、控制字符）在其后单独裁决。
-type dialogueResponseWire struct {
-	Line    *string `json:"line"`
-	Summary *string `json:"summary"`
-}
-
 // DecodeDialogueResponse 把台词响应正文严格解码为 (line, summary)。
 //
 // 严格性契约（spec：companion-dialogue「台词与摘要响应严格解码」）：
 //   - 正文先做 MaxDialogueResponseBytes 长度检查，超限直接拒绝；
-//   - json.Decoder + DisallowUnknownFields 解码为单一 JSON object，未知字段
-//     拒绝；object 之后的任何尾随数据（合法第二个 JSON 值或非 JSON 垃圾）
-//     拒绝——More() 检出合法后续值，第二次 Decode 必须 io.EOF 兜住垃圾后缀；
-//   - line 必须出现且是 1..MaxDialogueLineBytes 字节的有效 UTF-8，不含 NUL
-//     或任何 Unicode control，首尾不得有空白；
-//   - terminal=true 时 summary 必须出现且不超过 MaxDialogueSummaryBytes
-//     字节、有效 UTF-8、无 NUL（允许空串，等价于清空记忆）；terminal=false
-//     时 summary 字段一旦出现即非法。
+//   - json.Decoder 解码为单一 JSON object（解到 map[string]json.RawMessage，
+//     顶层不是 object 即失败），键白名单只有 line 与 summary，其余键按未知
+//     字段拒绝；object 之后的任何尾随数据（合法第二个 JSON 值或非 JSON
+//     垃圾）拒绝——More() 检出合法后续值，第二次 Decode 必须 io.EOF 兜住
+//     垃圾后缀；
+//   - null 的成员语义按规格字面裁决为「字段出现」：line 为 null 视为缺少
+//     有效台词，拒绝；terminal=false 时 summary 键一旦存在（含 null）即
+//     非法；terminal=true 时 summary 为 null 视为缺席（缺 summary）拒绝，
+//     空串则合法（等价于清空记忆）。结构体 + *string 方案会把 null 与缺席
+//     折叠成同一 nil、无法表达这一区分，因此这里用 map 解码；
+//   - line 必须是 JSON 字符串且为 1..MaxDialogueLineBytes 字节的有效
+//     UTF-8，不含 NUL 或任何 Unicode control，首尾不得有空白；
+//   - terminal=true 时 summary 必须是 JSON 字符串且不超过
+//     MaxDialogueSummaryBytes 字节、有效 UTF-8、无 NUL。
 //
 // 解码成功的文本经 strings.Clone 复制为服务端拥有的值：不保留对响应缓冲或
 // 解码中间态的任何引用，调用方可以安全复用或释放 body。任何失败都包装
@@ -71,9 +68,11 @@ func DecodeDialogueResponse(body []byte, terminal bool) (line string, summary st
 			len(body), MaxDialogueResponseBytes, ErrDialogueInvalidResponse)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	var wire dialogueResponseWire
-	if err := decoder.Decode(&wire); err != nil {
+	// 解码到 map[string]json.RawMessage：map 保留「键出现」语义（值为 null
+	// 时键仍在），使 null 与缺席可以分别裁决；值本身保持原始 JSON 文本，
+	// 由白名单与逐字段 Unmarshal 在其后施加完整约束。
+	var fields map[string]json.RawMessage
+	if err := decoder.Decode(&fields); err != nil {
 		return "", "", fmt.Errorf("companion: dialogue 响应不是合法 JSON object: %w: %w",
 			ErrDialogueInvalidResponse, err)
 	}
@@ -89,33 +88,63 @@ func DecodeDialogueResponse(body []byte, terminal bool) (line string, summary st
 		return "", "", fmt.Errorf("companion: dialogue 响应 JSON 之后存在尾随数据: %w",
 			ErrDialogueInvalidResponse)
 	}
-
-	if wire.Line == nil {
-		return "", "", fmt.Errorf("companion: dialogue 响应缺少 line 字段: %w", ErrDialogueInvalidResponse)
+	// 未知字段拒绝：map 解码没有 DisallowUnknownFields 可施加，这里以键白
+	// 名单手动等价实现——只有 line 与 summary 是已交付字段。
+	for name := range fields {
+		switch name {
+		case "line", "summary":
+		default:
+			return "", "", fmt.Errorf("companion: dialogue 响应含未知字段 %q: %w",
+				name, ErrDialogueInvalidResponse)
+		}
 	}
-	if err := validateDialogueLine(*wire.Line); err != nil {
+
+	rawLine, hasLine := fields["line"]
+	if !hasLine || isJSONNull(rawLine) {
+		return "", "", fmt.Errorf("companion: dialogue 响应缺少有效 line 字段（缺席或 null）: %w",
+			ErrDialogueInvalidResponse)
+	}
+	var lineText string
+	if err := json.Unmarshal(rawLine, &lineText); err != nil {
+		return "", "", fmt.Errorf("companion: dialogue 响应 line 不是字符串: %w: %w",
+			ErrDialogueInvalidResponse, err)
+	}
+	if err := validateDialogueLine(lineText); err != nil {
 		return "", "", fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidResponse, err)
 	}
+	rawSummary, hasSummary := fields["summary"]
 	if terminal {
-		if wire.Summary == nil {
-			return "", "", fmt.Errorf("companion: 终态 dialogue 响应缺少 summary 字段: %w",
+		if !hasSummary || isJSONNull(rawSummary) {
+			return "", "", fmt.Errorf("companion: 终态 dialogue 响应缺少有效 summary 字段（缺席或 null）: %w",
 				ErrDialogueInvalidResponse)
 		}
-		if err := validateDialogueSummary(*wire.Summary); err != nil {
+		var summaryText string
+		if err := json.Unmarshal(rawSummary, &summaryText); err != nil {
+			return "", "", fmt.Errorf("companion: dialogue 响应 summary 不是字符串: %w: %w",
+				ErrDialogueInvalidResponse, err)
+		}
+		if err := validateDialogueSummary(summaryText); err != nil {
 			return "", "", fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidResponse, err)
 		}
-	} else if wire.Summary != nil {
+		// strings.Clone 显式复制：虽然 JSON 解码到 string 字段已是新分配，这里
+		// 把「服务端拥有值」写成显式契约，防止未来重构（例如复用解码缓冲）
+		// 无声破坏不可变假设。
+		return strings.Clone(lineText), strings.Clone(summaryText), nil
+	}
+	if hasSummary {
+		// null 也算「出现」：非终态任何形态的 summary（null、空串、文本）都
+		// 违反「非终态只包含 line 字段」。
 		return "", "", fmt.Errorf("companion: 非终态 dialogue 响应不得携带 summary 字段: %w",
 			ErrDialogueInvalidResponse)
 	}
-	// strings.Clone 显式复制：虽然 JSON 解码到 string 字段已是新分配，这里把
-	// 「服务端拥有值」写成显式契约，防止未来重构（例如复用解码缓冲）无声
-	// 破坏不可变假设。
-	line = strings.Clone(*wire.Line)
-	if terminal {
-		return line, strings.Clone(*wire.Summary), nil
-	}
-	return line, "", nil
+	return strings.Clone(lineText), "", nil
+}
+
+// isJSONNull 报告原始 JSON 值是否为字面 null。TrimSpace 兜住解码器可能保留
+// 的值前后的空白字节；「null」字面之外的一切（含 "null" 字符串）都返回
+// false，走正常的字符串解码路径。
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
 }
 
 // validateDialogueLine 校验单句台词：1..MaxDialogueLineBytes 字节、有效
@@ -229,7 +258,11 @@ type DialogueRequest struct {
 	Summary string
 	// Node 是当前台词触发节点的事实身份（类型与载荷见 dialogue_nodes.go）。
 	Node DialogueNode
-	// Env 是极小附近环境摘要。
+	// Env 是极小附近环境摘要。两个切片与调用方传入的底层数组共享存储：
+	// 构造器刻意不做防御性拷贝（环境摘要最多 256+1089 条，拷贝只增加 tick
+	// 边界的分配），因此请求构造后调用方 MUST NOT 再改动这两个切片或其底
+	// 层数组——D5 的 worker goroutine 会在请求在途期间并发只读它们（共享
+	// 只读数据跨 goroutine 发送后视为不可变的仓库纪律）。
 	Env DialogueEnvDigest
 }
 

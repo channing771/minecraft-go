@@ -61,13 +61,14 @@ func TestDecodeDialogueResponseTerminalValid(t *testing.T) {
 
 func TestDecodeDialogueResponseRejectsMalformedBodies(t *testing.T) {
 	cases := map[string][]byte{
-		"空正文":       {},
-		"非法 JSON":   []byte(`{`),
-		"顶层是数组":     []byte(`["我出发了"]`),
-		"顶层是字符串":    []byte(`"我出发了"`),
-		"line 非字符串": dialogueBody(`"line":123`),
-		"空 object":  dialogueBody(),
-		"缺 line 字段": dialogueBody(`"summary":"只有摘要"`),
+		"空正文":         {},
+		"非法 JSON":     []byte(`{`),
+		"顶层是数组":       []byte(`["我出发了"]`),
+		"顶层是字符串":      []byte(`"我出发了"`),
+		"line 非字符串":   dialogueBody(`"line":123`),
+		"line 为 null": dialogueBody(`"line":null`),
+		"空 object":    dialogueBody(),
+		"缺 line 字段":   dialogueBody(`"summary":"只有摘要"`),
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -132,16 +133,19 @@ func TestDecodeDialogueResponseLineByteBounds(t *testing.T) {
 }
 
 func TestDecodeDialogueResponseLineForbiddenContent(t *testing.T) {
+	// 用例值是 JSON 字符串字面量原文（含 \u0000 等转义序列）：控制字符必须
+	// 以合法转义进入正文，才能穿过 JSON 语法层真实到达 validateDialogueLine
+	// 的校验分支——嵌原始控制字节只会在语法层被拒，覆盖不到校验逻辑。
 	cases := map[string]string{
-		"含 NUL":      "你好\x00世界",
-		"含换行":        "你好\n世界",
-		"含制表符":       "你好\t世界",
-		"含 DEL 控制字符": "你好\u007f世界",
-		"含 C1 区控制字符": "你好\u0085世界",
-		"首部空白":       " 你好",
-		"尾部空白":       "你好 ",
-		"首部换行转义":     "\n你好",
-		"全角首部空白也算空白": "\u3000你好",
+		"含 NUL":      `你好\u0000世界`,
+		"含换行":        `你好\n世界`,
+		"含制表符":       `你好\t世界`,
+		"含 DEL 控制字符": `你好\u007f世界`,
+		"含 C1 区控制字符": `你好\u0085世界`,
+		"首部空白":       ` 你好`,
+		"尾部空白":       `你好 `,
+		"首部换行转义":     `\n你好`,
+		"全角首部空白也算空白": `\u3000你好`,
 	}
 	for name, line := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -157,6 +161,13 @@ func TestDecodeDialogueResponseSummaryRules(t *testing.T) {
 	// 非终态出现 summary 即非法（即使值为空串——字段出现本身就是非法）。
 	wantDialogueError(t, mustDecodeErr(t,
 		dialogueBody(`"line":"进行中"`, `"summary":""`), false))
+	// null 的成员语义裁决（规格字面优先）：JSON null 视为「字段出现」——非终态
+	// 携带 summary:null 必须拒绝；终态 summary:null 视为缺席（缺 summary）
+	// 同样拒绝。失败模式良性：只跳过一句台词。
+	wantDialogueError(t, mustDecodeErr(t,
+		dialogueBody(`"line":"进行中"`, `"summary":null`), false))
+	wantDialogueError(t, mustDecodeErr(t,
+		dialogueBody(`"line":"完成"`, `"summary":null`), true))
 	// 终态 summary 恰好 2,048 字节合法。
 	if _, summary, err := DecodeDialogueResponse(
 		dialogueBody(`"line":"完成"`, `"summary":`+quotedJSON(strings.Repeat("a", MaxDialogueSummaryBytes))), true); err != nil {
