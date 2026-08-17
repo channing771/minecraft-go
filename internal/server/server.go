@@ -296,6 +296,12 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 	// engine.Step 之前（伙伴移动输入必须先进 inbox 才能被本 tick 消费）。
 	taskDeliveries := server.advanceCompanionTasks()
 	result := server.engine.Step()
+	if server.companionManager != nil {
+		// 采掘进度只在 TickResult.Companions 发布（CompanionBodies 不含采掘
+		// 域）：tick 末回填缓存，下一 tick 的 advanceRunners 与 bodies 缓存
+		// 同截面消费。
+		server.companionManager.observeTickResult(result)
+	}
 	if server.companions != nil {
 		server.companions.Observe(
 			server.engine.CompanionBodies(),

@@ -111,8 +111,15 @@ const (
 	// TaskFailPathUnreachable），不存在单独的「恢复后重验失败」判定。保留
 	// 枚举是为了失败原因分类学的稳定与 network wire 枚举（16..19）的一一
 	// 对齐；若 M5C 引入更细粒度的恢复重验语义（例如与计划落盘时的方块
-	// 快照比对），可在此落地而不破坏协议编号。
+	// 快照比对），可在此落地而不破坏协议编号。M5C 起 mine/place 的目标
+	// 变化语义（采掘目标被其他 actor 替换、放置目标被占）以此为稳定原因。
 	TaskFailWorldChanged
+	// TaskFailInventoryFull 是 M5C 追加的容量失败原因：采掘产物在伙伴 36 格
+	// 背包无容量（sim 容量前验拒绝结算、进度保持满格的稳定状态），或放置
+	// 步骤执行时背包已无对应物品。语义域枚举与 network 的 wire 枚举
+	// TaskFailInventoryFull(20) 刻意分离——本枚举按 iota 顺序，wire 编号属于
+	// 协议层，二者由 server 侧的 taskEventRejectReason 显式映射。
+	TaskFailInventoryFull
 )
 
 // String 返回失败原因的中文短名。
@@ -128,6 +135,8 @@ func (r TaskFailReason) String() string {
 		return "路径不可达"
 	case TaskFailWorldChanged:
 		return "世界已变化"
+	case TaskFailInventoryFull:
+		return "背包已满"
 	default:
 		return "未知原因"
 	}
