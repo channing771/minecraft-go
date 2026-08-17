@@ -311,6 +311,7 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 		server.companions.Observe(
 			server.engine.CompanionBodies(),
 			server.companionManagerTaskStates(),
+			server.companionManagerSummaries(),
 		)
 		if err := server.companions.Poll(result.Tick); err != nil {
 			slog.Warn("伙伴自动保存失败，保留重试", "error", err)

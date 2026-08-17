@@ -72,6 +72,30 @@ type companionTaskSlot struct {
 	// applyDialogueOutcome 清除）读写。
 	dialogueInFlight bool
 
+	// 以下三个字段是台词触发节点的任务域状态（D6）。全部属于「当前任务」
+	// 而非槽位：dispatchPlanning 的 BeginHead 分支与 restoreQueue 都按任务
+	// 边界重置/重导出；预算计数刻意不持久化（design.md「触发节点确定性
+	// 算法」的裁决——限流是运行期资源约束，不是事实平面状态）。
+	//
+	// progressSteps 是本任务预计算的进展台词节点步骤索引集合：进入 Running
+	// 时由 companion.SelectProgressSteps(len(plan.Steps)) 一次性导出（计划
+	// 校验成功后计划不再变化，集合确定性稳定）；follow 尾步任务恒为空集
+	//（持续跟随没有步骤完成事实，只有首次到达节点）。
+	progressSteps []int
+	// followArrivalSpoken 表示 follow 任务的「首次到达跟随距离」节点已经
+	// 消费（发起或被跳过均置位——跳过即放弃，绝不补发）。目标此后反复进出
+	// 跟随距离不产生新的台词请求。
+	followArrivalSpoken bool
+	// dialogueRequests 是本任务本进程已发起的台词请求数，上限
+	// companion.MaxDialogueRequestsPerTask；结构上 1+≤6+1 恒不越界，计数是
+	// 对未来接线缺陷的防御性封顶。
+	dialogueRequests int
+
+	// summary 是该伙伴的最近对话摘要（终态 Dialogue 响应写入，≤2,048 bytes）。
+	// 与上面三个任务域字段不同，摘要属于伙伴而非任务：任务边界不重置，
+	// 重启经 restoreQueue 恢复，落盘走 StoredCompanionQueue.Summary。
+	summary string
+
 	// 路径执行状态（仅 Running 有效）。三连失败预算属于单个任务而非槽位：
 	// dispatchPlanning 消费新队首与 restoreQueue 成功恢复时都会把 policy
 	// 归零，前一个任务的失败计数绝不削减下一个任务的预算。
@@ -128,12 +152,15 @@ type pathOutcome struct {
 }
 
 // taskEventFact 是一次状态机迁移产出的待发布事件事实：编排层补齐身份后
-// 由 Server 转成 ChatEvent 广播。
+// 由 Server 转成 ChatEvent 广播。speech 非空表示这是一条台词事实（D6）：
+// event/command 保持零值，taskEventDeliveries 按 CompanionSpeech 组装广播
+// （伙伴台词是 ChatEvent 中唯一携带模型生成文本的 kind）。
 type taskEventFact struct {
 	issuer     companionTaskIssuer
 	definition companion.Definition
 	command    companion.TaskCommand
 	event      companion.TaskEvent
+	speech     string
 }
 
 // companionManager 编排全部伙伴的任务执行。零值不可用，经 newCompanionManager
@@ -360,17 +387,93 @@ func (m *companionManager) takeEventFacts() []taskEventFact {
 	return facts
 }
 
-// applyQueueEvents 把状态机迁移产出的事件事实补上任务身份后累积。
-// currentCommand/currentIssuer 在任务占据当前槽位的全程有效，终态清槽后
+// applyQueueEvents 把状态机迁移产出的事件事实补上任务身份后累积，同时在
+// 迁移点即时评估台词触发节点（dispatchDialogueNode——D6 的唯一任务域接线
+// 点）。currentCommand/currentIssuer 在任务占据当前槽位的全程有效，终态清槽后
 // 不再产生事件。
 func (m *companionManager) applyQueueEvents(slot *companionTaskSlot, events []companion.TaskEvent) {
 	for _, event := range events {
+		m.dispatchDialogueNode(slot, event)
 		m.events = append(m.events, taskEventFact{
 			issuer:     slot.currentIssuer,
 			definition: slot.definition,
 			command:    slot.currentCommand,
 			event:      event,
 		})
+	}
+}
+
+// dispatchDialogueNode 在状态机迁移点评估台词触发节点（持有 stepMu 的 tick
+// 路径，调用点唯一：applyQueueEvents）：
+//   - TaskStarted：任务进入 Running。预计算进展节点集合（follow 尾步任务为
+//     空集），并派发开始节点；
+//   - TaskProgress：一个中间计划步骤完成（CompleteStep 已推进 StepIndex，
+//     刚完成的步骤索引即 StepIndex-1）。仅当该索引在预计算集合中时派发进展
+//     节点（携带完成步骤的 kind）；最后一步的完成迁移产出 TaskCompleted 而
+//     非 TaskProgress，其「完成表达」由终止台词承载（dialogue_nodes.go
+//     「末段永远被覆盖」的语义）；
+//   - 终态事件（Completed/Failed/TimedOut/Stopped）：派发终止节点（携带终态
+//     与稳定失败原因）。时序约束：本调用发生在终态迁移的同一 tick、FIFO
+//     提升（dispatchPlanning 的 BeginHead）之前，结果因此携带正确世代。
+//
+// 台词派发受 requestDialogue 的全部守卫约束（在途/槽满/未激活/预算即跳过），
+// 跳过绝不改变迁移本身——表达平面与事实平面在这里结构分离。
+func (m *companionManager) dispatchDialogueNode(slot *companionTaskSlot, event companion.TaskEvent) {
+	switch event.Kind {
+	case companion.TaskEventStarted:
+		current, ok := slot.queue.Current()
+		if !ok || current.State != companion.TaskRunning || len(current.Plan.Steps) == 0 {
+			// 空/非 Running 是状态机缺陷：防御性跳过台词，不影响事实事件。
+			return
+		}
+		if steps := current.Plan.Steps; steps[len(steps)-1].Kind != companion.PlanStepFollow {
+			slot.progressSteps = companion.SelectProgressSteps(len(steps))
+		} else {
+			// follow 尾步任务（含混合计划）：持续跟随没有步骤完成事实，
+			// 进展集合恒空，节点全集是开始/首次到达/终止。
+			slot.progressSteps = nil
+		}
+		m.requestDialogue(slot.definition.ID, companion.DialogueNode{Kind: companion.DialogueNodeStart})
+	case companion.TaskEventProgress:
+		current, ok := slot.queue.Current()
+		if !ok || current.StepIndex <= 0 || current.StepIndex-1 >= len(current.Plan.Steps) {
+			return
+		}
+		completed := current.StepIndex - 1
+		for _, selected := range slot.progressSteps {
+			if selected == completed {
+				m.requestDialogue(slot.definition.ID, companion.DialogueNode{
+					Kind:     companion.DialogueNodeProgress,
+					StepKind: current.Plan.Steps[completed].Kind,
+				})
+				return
+			}
+		}
+	default:
+		if state, terminal := taskEventTerminalState(event.Kind); terminal {
+			m.requestDialogue(slot.definition.ID, companion.DialogueNode{
+				Kind:   companion.DialogueNodeTerminal,
+				State:  state,
+				Reason: event.Reason,
+			})
+		}
+	}
+}
+
+// taskEventTerminalState 把终态事件类别映射回 TaskState（终止节点载荷）；
+// 非终态事件返回 false，调用方跳过。
+func taskEventTerminalState(kind companion.TaskEventKind) (companion.TaskState, bool) {
+	switch kind {
+	case companion.TaskEventCompleted:
+		return companion.TaskCompleted, true
+	case companion.TaskEventFailed:
+		return companion.TaskFailed, true
+	case companion.TaskEventTimedOut:
+		return companion.TaskTimedOut, true
+	case companion.TaskEventStopped:
+		return companion.TaskStopped, true
+	default:
+		return 0, false
 	}
 }
 
@@ -632,6 +735,14 @@ func (m *companionManager) advanceFollowRunner(
 		slot.path = nil
 		slot.hasReplanAt = false
 		slot.hasFollowGoal = false
+		// 首次到达跟随距离是 follow 任务的第二个台词节点（持续跟随没有
+		// 步骤完成事实，这是唯一的「中途」节点）：仅首次消费，此后目标
+		// 反复进出边界不再触发。跳过（在途/槽满）同样置位——跳过即放弃，
+		// 绝不补发。
+		if !slot.followArrivalSpoken {
+			slot.followArrivalSpoken = true
+			m.requestDialogue(id, companion.DialogueNode{Kind: companion.DialogueNodeFirstArrival})
+		}
 		return true
 	}
 	if slot.path != nil && slot.hasFollowGoal && followGoalDrifted(slot.followGoal, target.Position) {
@@ -711,9 +822,14 @@ func (m *companionManager) dispatchPlanning() {
 			// 新任务从零开始计预算：三连失败上限约束「同一任务内」的连续
 			// 重算失败（pathfinding spec），前一个任务遗留的计数（含已耗尽
 			// 到 3 的终态计数）不得泄漏进新任务。交互状态同理归零——上一
-			// 任务的就绪标记与采掘进度记忆不属于新任务。
+			// 任务的就绪标记与采掘进度记忆不属于新任务。台词节点状态同理：
+			// 进展集合将在新任务进入 Running 时重导出，follow 首达标志与
+			// 台词预算按「属于任务」重新计（design.md 裁决预算不持久化）。
 			slot.policy = companion.PathPolicy{}
 			slot.resetInteraction()
+			slot.progressSteps = nil
+			slot.followArrivalSpoken = false
+			slot.dialogueRequests = 0
 			if len(slot.issuers) == 0 {
 				slog.Error("任务 FIFO 与发令者队列失配", "companion", id)
 				continue
@@ -915,12 +1031,17 @@ func (m *companionManager) restoreQueues(queues []storage.StoredCompanionQueue) 
 	}
 }
 
-// restoreQueue 恢复单个槽位的任务域：当前任务与 FIFO 指令按存档顺序回填。
-// 归一纪律（恢复侧）：Planning/Validating 按 Queued 恢复并保留原始指令，
-// 重启后重新发起规划；Running 保留步骤索引与 deadline，但路径绝不落盘，
-// 恢复后 slot.path 为 nil——首个动作前必须经 dispatchPathRequests 按当前
-// 权威世界重算，天然满足「恢复任务在下一动作前重验」的规格约束。
+// restoreQueue 恢复单个槽位的任务域：当前任务与 FIFO 指令按存档顺序回填，
+// 最近对话摘要进入 manager 状态（属于伙伴而非任务，无队列载荷时同样恢复
+// summary-only 存档）。归一纪律（恢复侧）：Planning/Validating 按 Queued
+// 恢复并保留原始指令，重启后重新发起规划；Running 保留步骤索引与 deadline，
+// 但路径绝不落盘，恢复后 slot.path 为 nil——首个动作前必须经
+// dispatchPathRequests 按当前权威世界重算，天然满足「恢复任务在下一动作前
+// 重验」的规格约束。恢复的 Running 任务没有 Started 事件可依赖，进展节点
+// 集合在这里按「计划校验成功后一次性预计算」的同一规则重导出；台词预算从
+// 零开始（不持久化，重启松弛 ≤8 次属可接受上界——design.md 裁决）。
 func (m *companionManager) restoreQueue(slot *companionTaskSlot, queue storage.StoredCompanionQueue) {
+	slot.summary = queue.Summary
 	if queue.HasCurrent {
 		task := companion.Task{
 			Command:       companion.TaskCommand(queue.Current.Command),
@@ -946,6 +1067,17 @@ func (m *companionManager) restoreQueue(slot *companionTaskSlot, queue storage.S
 			// 任务边界归零（恢复的 Running mine/place 任务从走近段重新开始）。
 			slot.policy = companion.PathPolicy{}
 			slot.resetInteraction()
+			slot.progressSteps = nil
+			slot.followArrivalSpoken = false
+			slot.dialogueRequests = 0
+			// 恢复的 Running 任务直接重导出进展节点集合（计划已通过校验
+			// 落盘，集合确定性稳定）；Planning/Validating 已归一为 Queued，
+			// 集合留待重新进入 Running 时导出。
+			if task.State == companion.TaskRunning && len(task.Plan.Steps) != 0 {
+				if steps := task.Plan.Steps; steps[len(steps)-1].Kind != companion.PlanStepFollow {
+					slot.progressSteps = companion.SelectProgressSteps(len(steps))
+				}
+			}
 		}
 	}
 	for _, command := range queue.Pending {
@@ -977,9 +1109,33 @@ func (server *Server) companionManagerTaskStates() []companion.TaskQueueState {
 	return server.companionManager.taskStates()
 }
 
-// taskEventDeliveries 把事件事实转成可发布的 ChatEvent 投递。任务事件全部
-// 广播（recipient 0）；EventID 沿用聊天事件的同一权威计数器，保持全服严格
-// 递增。构造出的非法事件（服务端缺陷）跳过并记录，绝不发布半成品。
+// companionSummaries 返回全部持有非空摘要的 active 伙伴的观察输入，按
+// orderedIDs（ID 字节序）排列，供 Observe 参与 dirty 判定并随保存载荷落盘
+// （调用方必须持有 stepMu，与 taskStates 同一单写者边界）。inactive 伙伴没有
+// 槽位，天然不出现——「inactive 记录不保存摘要」由队列载荷只覆盖 active
+// 伙伴结构性保证。
+func (m *companionManager) companionSummaries() []companionSummaryState {
+	summaries := make([]companionSummaryState, 0, len(m.orderedIDs))
+	for _, id := range m.orderedIDs {
+		if summary := m.slots[id].summary; summary != "" {
+			summaries = append(summaries, companionSummaryState{ID: id, Summary: summary})
+		}
+	}
+	return summaries
+}
+
+// companionManagerSummaries 是 Observe 调用的空值安全包装。
+func (server *Server) companionManagerSummaries() []companionSummaryState {
+	if server.companionManager == nil {
+		return nil
+	}
+	return server.companionManager.companionSummaries()
+}
+
+// taskEventDeliveries 把事件事实转成可发布的 ChatEvent 投递。任务事件与
+// 台词事实共用同一 EventID 计数器循环，保持全服严格递增且分配顺序确定
+// （事实按 tick 内产生顺序排列）。任务事件与台词事件全部广播（recipient 0）；
+// 构造出的非法事件（服务端缺陷）跳过并记录，绝不发布半成品。
 func (server *Server) taskEventDeliveries(facts []taskEventFact) []chatDelivery {
 	if len(facts) == 0 {
 		return nil
@@ -998,9 +1154,16 @@ func (server *Server) taskEventDeliveries(facts []taskEventFact) []chatDelivery 
 			PlayerName:    fact.issuer.name,
 			CompanionID:   fact.definition.ID,
 			CompanionName: fact.definition.Name,
-			Kind:          taskEventKind(fact.event.Kind),
-			RejectReason:  taskEventRejectReason(fact.event),
-			Command:       string(fact.command),
+		}
+		if fact.speech != "" {
+			// 台词事实：kind CompanionSpeech、reason None、不复述指令，
+			// 文本槽携带台词（D6 表达平面广播）。
+			event.Kind = network.ChatEventCompanionSpeech
+			event.Speech = fact.speech
+		} else {
+			event.Kind = taskEventKind(fact.event.Kind)
+			event.RejectReason = taskEventRejectReason(fact.event)
+			event.Command = string(fact.command)
 		}
 		if err := event.Validate(); err != nil {
 			slog.Error("任务事件非法", "companion", fact.definition.ID, "error", err)

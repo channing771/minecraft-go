@@ -52,7 +52,7 @@ func TestCompanionPersistenceSavePayloadNormalizesPlanningAndValidating(t *testi
 	states := []companion.TaskQueueState{running, planning, validating}
 	p.Observe([]companion.Body{
 		companionBody(1, 10), companionBody(2, 20), companionBody(3, 30),
-	}, states)
+	}, states, nil)
 	// Observe 之后修改调用方切片：深拷贝必须保护载荷（含 Plan.Steps 与 FIFO）。
 	states[0].Current.Plan.Steps[0].X = 999
 	states[0].Pending[0] = "被篡改"

@@ -43,6 +43,11 @@ const (
 	// DialogueNodeTerminal 是任务进入终态时的一次性节点，携带具体终态与
 	// 稳定原因。
 	DialogueNodeTerminal
+	// DialogueNodeFirstArrival 是持续跟随任务首次到达跟随距离时的一次性
+	// 节点。它不是「步骤完成」——follow 是无终点的持续步骤，没有完成事实，
+	// 因此不携带步骤类型，与 Progress 携带 follow（D3 锁定非法）严格区分；
+	// 「首次」的判定基准（距离边界的第一次进入）由 manager 侧接线持有。
+	DialogueNodeFirstArrival
 )
 
 // DialogueNode 是一次台词请求携带的当前事实节点：类别 + 类别专属载荷。
@@ -103,6 +108,13 @@ func (n DialogueNode) Validate() error {
 		}
 		if n.Reason != TaskFailNone {
 			return fmt.Errorf("companion: 非失败终止台词节点不得携带原因")
+		}
+		return nil
+	case DialogueNodeFirstArrival:
+		// 首次到达与开始节点同为零载荷形态：持续性事实没有可携带的枚举
+		// 载荷，节点身份由类别唯一表达。
+		if n.StepKind != 0 || n.State != 0 || n.Reason != TaskFailNone {
+			return fmt.Errorf("companion: 首次到达台词节点不得携带载荷")
 		}
 		return nil
 	default:

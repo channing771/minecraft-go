@@ -32,9 +32,9 @@
 
 ## D6 触发节点接线与事件广播
 
-- [ ] D6.1 先写失败测试：开始/进展/终态节点各触发一次且总数 ≤8、终态含 Stopped、follow 仅三节点、CompanionSpeech 广播全部在线玩家、Memory/TCP 事件序一致、摘要更新标记 dirty、任务事实序列与 M5C 完全一致（无台词对照）
-- [ ] D6.2 最小实现：`companion_manager.go` 节点评估、结果应用、事件发布、摘要持有
-- [ ] 验证：`go test ./internal/server -race -count=1`
+- [x] D6.1 先写失败测试：开始/进展/终态节点各触发一次且总数 ≤8、终态含 Stopped、follow 仅三节点、CompanionSpeech 广播全部在线玩家、Memory/TCP 事件序一致、摘要更新标记 dirty、任务事实序列与 M5C 完全一致（无台词对照）
+- [x] D6.2 最小实现：`companion_manager.go` 节点评估、结果应用、事件发布、摘要持有
+- [x] 验证：`go test ./internal/server -race -count=1`
 
 ## D7 客户端台词呈现
 

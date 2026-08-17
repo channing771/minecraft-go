@@ -19,10 +19,20 @@ import (
 	"github.com/channing771/mornlea/internal/network"
 )
 
+// dialogueRequestRecord 是假台词模型观察到的一次请求输入事实：节点类别的
+// 稳定 wire 文本（start/progress/first_arrival/terminal）与人设、最近对话
+// 摘要（D6 接线断言用：触发节点序列、persona 透传与摘要生命周期）。
+type dialogueRequestRecord struct {
+	NodeKind string
+	Persona  string
+	Summary  string
+}
+
 // fakeDialogueModel 是 httptest 假台词模型：默认返回固定合法台词 JSON，可整
 // 体阻塞全部在途请求（关服取消观察）、按请求持续失败，并统计请求数、在途数
 // 与 context 取消数。终态请求的判定依据是用户消息里的固定节点类别文本
-// （companion 包的稳定 wire 枚举 "terminal"）。
+// （companion 包的稳定 wire 枚举 "terminal"）；每次请求的输入事实按到达顺序
+// 记录进 records（snapshotDialogueRequests 读取）。
 type fakeDialogueModel struct {
 	mu       sync.Mutex
 	requests int
@@ -30,6 +40,7 @@ type fakeDialogueModel struct {
 	cancels  int
 	block    chan struct{}
 	status   int
+	records  []dialogueRequestRecord
 	server   *httptest.Server
 }
 
@@ -55,9 +66,29 @@ func (model *fakeDialogueModel) handle(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &outer); err == nil && len(outer.Messages) == 2 {
 		userContent = outer.Messages[1].Content
 	}
+	// 输入事实按 dialogueUserPayload 的固定形态解出：节点 kind 是稳定英文
+	// wire 文本，persona 与摘要是请求输入的两类有界数据。
+	record := dialogueRequestRecord{}
+	if userContent != "" {
+		var payload struct {
+			Persona string `json:"persona"`
+			Summary string `json:"summary"`
+			Node    struct {
+				Kind string `json:"kind"`
+			} `json:"node"`
+		}
+		if err := json.Unmarshal([]byte(userContent), &payload); err == nil {
+			record = dialogueRequestRecord{
+				NodeKind: payload.Node.Kind,
+				Persona:  payload.Persona,
+				Summary:  payload.Summary,
+			}
+		}
+	}
 	model.mu.Lock()
 	model.requests++
 	model.inFlight++
+	model.records = append(model.records, record)
 	block := model.block
 	status := model.status
 	model.mu.Unlock()
@@ -122,6 +153,22 @@ func (model *fakeDialogueModel) snapshotCounts() (requests, inFlight, cancels in
 	return model.requests, model.inFlight, model.cancels
 }
 
+// snapshotDialogueRequests 返回按到达顺序记录的请求输入事实快照。
+func (model *fakeDialogueModel) snapshotDialogueRequests() []dialogueRequestRecord {
+	model.mu.Lock()
+	defer model.mu.Unlock()
+	return append([]dialogueRequestRecord(nil), model.records...)
+}
+
+// dialogueRequestKinds 把请求记录投影为节点类别序列（失败信息用）。
+func dialogueRequestKinds(records []dialogueRequestRecord) []string {
+	kinds := make([]string, len(records))
+	for index := range records {
+		kinds[index] = records[index].NodeKind
+	}
+	return kinds
+}
+
 func waitForDialogueRequests(t *testing.T, model *fakeDialogueModel, want int) {
 	t.Helper()
 	waitIntegrationCondition(t, "假台词模型请求数", func() bool {
@@ -183,10 +230,12 @@ func TestCompanionDialogueSkippedWhenModelSlotsFull(t *testing.T) {
 	receiveCompanionChatTick(t, sender, result.Tick)
 	waitForModelRequests(t, planner, len(definitions))
 
-	// 四个共享槽全部被 Planner 占据：开始节点台词被跳过，不排队、不置在途。
+	// 四个共享槽全部被 Planner 占据：首个到达节点台词被跳过，不排队、不置
+	// 在途。选用 FirstArrival 节点做哨兵：这些伙伴没有 follow 任务，自动
+	// 接线永远不会派发该类别——释放后若它再次出现即证明「跳过被补发」。
 	host.world.stepMu.Lock()
 	host.world.companionManager.requestDialogue(
-		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart}, false)
+		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeFirstArrival})
 	host.world.stepMu.Unlock()
 	if requests, _, _ := dialogue.snapshotCounts(); requests != 0 {
 		t.Fatalf("槽满时台词请求数=%d，想要 0（不得排队等槽）", requests)
@@ -205,10 +254,20 @@ func TestCompanionDialogueSkippedWhenModelSlotsFull(t *testing.T) {
 		t.Fatalf("槽满期间任务推进受阻：TaskStarted=%d，想要 %d（事件=%v）",
 			got, len(definitions), chatEventKinds(events))
 	}
-	// 槽位释放后再观察一段：被跳过的台词节点绝不补发。
-	stepCollectingChatEvents(t, host, sender, 20, nil)
-	if requests, _, _ := dialogue.snapshotCounts(); requests != 0 {
-		t.Fatalf("槽位释放后补发了台词请求=%d，想要 0（跳过即丢弃该节点）", requests)
+	// 槽位释放后观察一段：被跳过的台词节点绝不补发。D6 接线后四个任务各自
+	// 进入 Running 并发起自动 start 节点（单步计划目标极近，终止节点可能被
+	// 开始台词在途挤掉——「跳过即放弃」的规格语义，终止节点的正常路径由
+	// TerminalCoversFourTerminalStates 锁定）；手动哨兵（FirstArrival）没有
+	// 任何自动接线来源，释放后再次出现即证明跳过被补发。
+	stepCollectingChatEvents(t, host, sender, 40, nil)
+	if requests, _, _ := dialogue.snapshotCounts(); requests < len(definitions) {
+		t.Fatalf("槽位释放后台词请求数=%d，想要至少 %d（自动 start 节点照常发起）",
+			requests, len(definitions))
+	}
+	for _, record := range dialogue.snapshotDialogueRequests() {
+		if record.NodeKind == "first_arrival" {
+			t.Fatalf("槽满期间跳过的节点被补发：%+v", record)
+		}
 	}
 }
 
@@ -233,14 +292,14 @@ func TestCompanionDialogueOneInFlightPerCompanion(t *testing.T) {
 
 	host.world.stepMu.Lock()
 	host.world.companionManager.requestDialogue(
-		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart}, false)
+		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart})
 	host.world.stepMu.Unlock()
 	waitForDialogueRequests(t, dialogue, 1)
 
 	// 在途期间第二个节点（进展）到来：直接跳过，不取消在途请求。
 	host.world.stepMu.Lock()
 	host.world.companionManager.requestDialogue(definitions[0].ID, companion.DialogueNode{
-		Kind: companion.DialogueNodeProgress, StepKind: companion.PlanStepGoTo}, false)
+		Kind: companion.DialogueNodeProgress, StepKind: companion.PlanStepGoTo})
 	host.world.stepMu.Unlock()
 	result := host.world.StepForTest()
 	receiveCompanionChatTick(t, client, result.Tick)
@@ -275,14 +334,17 @@ func TestCompanionDialogueOneInFlightPerCompanion(t *testing.T) {
 	// 在途清除后新节点可以再次发起。
 	host.world.stepMu.Lock()
 	host.world.companionManager.requestDialogue(definitions[0].ID, companion.DialogueNode{
-		Kind: companion.DialogueNodeProgress, StepKind: companion.PlanStepGoTo}, false)
+		Kind: companion.DialogueNodeProgress, StepKind: companion.PlanStepGoTo})
 	host.world.stepMu.Unlock()
 	waitForDialogueRequests(t, dialogue, 2)
 	dialogue.releaseRequests()
 }
 
-// TestCompanionDialogueStaleOutcomeDiscarded 验证世代变化后的过时结果被丢弃：
-// 不进入 applyDialogueEffect（哨兵计数为 0）、在途标记照常清除、不触发新请求。
+// TestCompanionDialogueStaleOutcomeDiscarded 验证任务终态后到达的开始节点
+// 结果被第二级过时判定丢弃：不进入 applyDialogueEffect（哨兵计数为 0）、
+// 在途标记照常清除、不触发新请求。D6 起构造方式改为「任务终态但不提升
+// 队首」——不留 pending 指令，dispatchPlanning 无从开始新任务，世代保持
+// 不变，从而把「开始/进展节点要求任务仍在 Running」的判定独立隔离出来。
 func TestCompanionDialogueStaleOutcomeDiscarded(t *testing.T) {
 	definitions := []companion.Definition{{ID: chatTestCompanionID(1), Name: "阿木"}}
 	host, client, _ := companionManagerHostReady(t, definitions, nil)
@@ -291,25 +353,23 @@ func TestCompanionDialogueStaleOutcomeDiscarded(t *testing.T) {
 	host.world.companionManager.replaceDialogueForTest(t, dialogue)
 	issuerIdentity := integrationIdentity(0x71, "发令者")
 	injectRunningCompanionTask(t, host, definitions[0].ID, stopTestIssuer(issuerIdentity),
-		"跟着我", []companion.PlanStep{{Kind: companion.PlanStepFollow, PlayerID: issuerIdentity.PlayerID}},
-		"下一条")
+		"跟着我", []companion.PlanStep{{Kind: companion.PlanStepFollow, PlayerID: issuerIdentity.PlayerID}})
 	// 同 T2：让身体缓存先于派发就绪。
 	warmup := host.world.StepForTest()
 	receiveCompanionChatTick(t, client, warmup.Tick)
 
 	host.world.stepMu.Lock()
 	host.world.companionManager.requestDialogue(
-		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart}, false)
+		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart})
 	host.world.stepMu.Unlock()
 	waitForDialogueRequests(t, dialogue, 1)
 
-	// 结果在途期间世代变化：当前任务失败 + 队首提升（世代 +1）。
+	// 结果在途期间任务进入终态（清槽、世代不变且无队首可提升）。
 	host.world.stepMu.Lock()
 	slot := host.world.companionManager.slots[definitions[0].ID]
-	slot.queue.FailRun(companion.TaskFailPathUnreachable)
-	if !slot.queue.BeginHead() {
+	if len(slot.queue.FailRun(companion.TaskFailPathUnreachable)) != 1 {
 		host.world.stepMu.Unlock()
-		t.Fatal("构造世代变化失败：BeginHead 未提升队首")
+		t.Fatal("构造任务终态失败：FailRun 未产生事件")
 	}
 	host.world.stepMu.Unlock()
 
@@ -331,8 +391,9 @@ func TestCompanionDialogueStaleOutcomeDiscarded(t *testing.T) {
 }
 
 // TestCompanionDialogueFailureSkipsOnlyLine 验证台词模型持续失败（5xx）只跳过
-// 台词：同一任务场景在有/无台词请求两条运行下，任务事实 ChatEvent 序列完全
-// 一致。
+// 台词：同一任务场景在有/无台词两条运行下，任务事实 ChatEvent 序列完全一致。
+// D6 起触发节点由 manager 自动接线（进入 Running、选中步骤完成、终态），
+// 不再依赖测试手动派发。
 func TestCompanionDialogueFailureSkipsOnlyLine(t *testing.T) {
 	runScenario := func(withDialogue bool) []network.ChatEvent {
 		definitions := []companion.Definition{{ID: chatTestCompanionID(1), Name: "阿木"}}
@@ -357,13 +418,6 @@ func TestCompanionDialogueFailureSkipsOnlyLine(t *testing.T) {
 			result := host.world.StepForTest()
 			events = append(events,
 				companionChatEvents(receiveCompanionChatTick(t, client, result.Tick))...)
-			if withDialogue {
-				// 每 tick 尝试派发开始节点：失败结果只清除在途，任务照常推进。
-				host.world.stepMu.Lock()
-				host.world.companionManager.requestDialogue(
-					definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart}, false)
-				host.world.stepMu.Unlock()
-			}
 			if countKind(events, network.ChatEventTaskCompleted) == 1 {
 				break
 			}
@@ -421,7 +475,7 @@ func TestCompanionDialogueSlowModelDoesNotBlockTicks(t *testing.T) {
 	host.world.stepMu.Lock()
 	for _, definition := range definitions {
 		host.world.companionManager.requestDialogue(
-			definition.ID, companion.DialogueNode{Kind: companion.DialogueNodeStart}, false)
+			definition.ID, companion.DialogueNode{Kind: companion.DialogueNodeStart})
 	}
 	host.world.stepMu.Unlock()
 	waitForDialogueRequests(t, dialogue, len(definitions))
@@ -475,7 +529,7 @@ func TestCompanionDialogueShutdownCancelsInFlight(t *testing.T) {
 
 	host.world.stepMu.Lock()
 	host.world.companionManager.requestDialogue(
-		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart}, false)
+		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart})
 	host.world.stepMu.Unlock()
 	waitForDialogueRequests(t, dialogue, 1)
 
@@ -507,7 +561,7 @@ func TestCompanionDialogueDispatchRejectsUnknownSlot(t *testing.T) {
 
 	host.world.stepMu.Lock()
 	host.world.companionManager.requestDialogue(
-		companion.ID{}, companion.DialogueNode{Kind: companion.DialogueNodeStart}, false)
+		companion.ID{}, companion.DialogueNode{Kind: companion.DialogueNodeStart})
 	host.world.stepMu.Unlock()
 	result := host.world.StepForTest()
 	receiveCompanionChatTick(t, client, result.Tick)

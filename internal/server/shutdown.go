@@ -75,6 +75,7 @@ func (server *Server) Shutdown(ctx context.Context) error {
 			server.companions.Observe(
 				server.engine.CompanionBodies(),
 				server.companionManagerTaskStates(),
+				server.companionManagerSummaries(),
 			)
 		}
 		if hasTrustedCenter {
