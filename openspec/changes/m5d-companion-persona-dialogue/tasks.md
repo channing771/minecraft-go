@@ -8,9 +8,9 @@
 
 ## D2 persona 配置解析
 
-- [ ] D2.1 先写失败测试：`internal/config` 内联 persona 4,096/4,097 边界、NUL/非法 UTF-8 告警降级、`personas/<canonical 名称>.txt` 读取、内联优先 + 双源告警、文件损坏降级、目录不存在静默空人设、无 persona 不告警
-- [ ] D2.2 最小实现：`Definition` 增加 Persona 字段、`applyAI` 识别 persona、`resolvePersonas` 外部文件解析；确认未知字段纪律不再覆盖 persona
-- [ ] 验证：`go test ./internal/config -race -count=1`
+- [x] D2.1 先写失败测试：`internal/config` 内联 persona 4,096/4,097 边界、NUL/非法 UTF-8 告警降级、`personas/<canonical 名称>.txt` 读取、内联优先 + 双源告警、文件损坏降级、目录不存在静默空人设、无 persona 不告警
+- [x] D2.2 最小实现：`Definition` 增加 Persona 字段、`applyAI` 识别 persona、`resolvePersonas` 外部文件解析；确认未知字段纪律不再覆盖 persona
+- [x] 验证：`go test ./internal/config -race -count=1`
 
 ## D3 Dialogue 类型与严格解码
 

@@ -63,6 +63,12 @@ func (id *ID) UnmarshalText(text []byte) error {
 type Definition struct {
 	ID   ID     `json:"id"`
 	Name string `json:"name"`
+	// Persona 是该伙伴的人设自由文本（约束见 ValidatePersona；空串=空人设）。
+	// 由 config 在加载时从内联 ai.companions[].persona（优先）或配置目录
+	// personas/<canonical 名称>.txt 解析并完成校验降级，是后续 Dialogue 输入
+	// 的唯一人设来源，绝不进入 Planner 输入。omitempty 保证空人设的配置在
+	// Save 往返时不落 "persona": "" 键。
+	Persona string `json:"persona,omitempty"`
 }
 
 // Body 是伙伴可持久化的权威身体状态。
