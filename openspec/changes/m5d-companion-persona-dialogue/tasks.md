@@ -44,8 +44,8 @@
 
 ## D8 M5A–M5D 阶段总验收
 
-- [ ] D8.1 端到端集成测试（httptest 假模型）：persona 文件配置 → `@指令` → 四 kind 计划 → 台词事件序列（开始/进展/终态）→ 终态摘要落盘 → 重启恢复 → 摘要进入下一次 Dialogue 请求输入；Memory/TCP parity；全程无前台窗口
-- [ ] 验证：`go test ./internal/server -race -count=1 -run 集成场景命名`
+- [x] D8.1 端到端集成测试（httptest 假模型）：persona 文件配置 → `@指令` → 四 kind 计划 → 台词事件序列（开始/进展/终态）→ 终态摘要落盘 → 重启恢复 → 摘要进入下一次 Dialogue 请求输入；Memory/TCP parity；全程无前台窗口
+- [x] 验证：`go test ./internal/server -race -count=1 -run 集成场景命名`
 
 ## D9 收尾门禁
 

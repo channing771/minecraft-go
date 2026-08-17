@@ -20,10 +20,13 @@ import (
 )
 
 // dialogueRequestRecord 是假台词模型观察到的一次请求输入事实：节点类别的
-// 稳定 wire 文本（start/progress/first_arrival/terminal）与人设、最近对话
-// 摘要（D6 接线断言用：触发节点序列、persona 透传与摘要生命周期）。
+// 稳定 wire 文本（start/progress/first_arrival/terminal）、进展节点完成的
+// 步骤类别（step_kind，D8 阶段验收断言「进展节点与计划步骤一一对应」用）、
+// 人设与最近对话摘要（D6 接线断言用：触发节点序列、persona 透传与摘要
+// 生命周期）。
 type dialogueRequestRecord struct {
 	NodeKind string
+	StepKind string
 	Persona  string
 	Summary  string
 }
@@ -74,12 +77,14 @@ func (model *fakeDialogueModel) handle(w http.ResponseWriter, r *http.Request) {
 			Persona string `json:"persona"`
 			Summary string `json:"summary"`
 			Node    struct {
-				Kind string `json:"kind"`
+				Kind     string `json:"kind"`
+				StepKind string `json:"step_kind"`
 			} `json:"node"`
 		}
 		if err := json.Unmarshal([]byte(userContent), &payload); err == nil {
 			record = dialogueRequestRecord{
 				NodeKind: payload.Node.Kind,
+				StepKind: payload.Node.StepKind,
 				Persona:  payload.Persona,
 				Summary:  payload.Summary,
 			}
