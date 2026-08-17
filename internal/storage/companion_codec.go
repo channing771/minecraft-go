@@ -26,11 +26,16 @@ const (
 	// 要区，v3 文件的摘要位（flags bit2）仍是保留位。迁移读入后按 v4 重
 	// 写（摘要为空）；v3 字节永不再生。
 	companionSchemaV3 uint32 = 3
+	// companionSchemaV4 是 M5D 引入摘要区的最低 schema：v4 及以上版本的
+	// 记录 flags 才允许 summary 位。独立于 currentCompanionSchema 存在，
+	// 未来 v5 成为 current 时 v4 迁移文件的摘要位仍按合法解析，而不是被
+	// 误判为保留位损坏。
+	companionSchemaV4 uint32 = 4
 	// currentCompanionSchema 是当前写出的 schema：记录 = 身体 + 可选任务
 	// 区与 FIFO 区（仅 active 记录携带）+ 可选摘要区（仅 active 且有摘要
 	// 时写入），任务区步骤按 kind 变长（见 companionPlanStepWireLength）。
 	// 编码端只写当前版本。
-	currentCompanionSchema uint32 = 4
+	currentCompanionSchema uint32 = companionSchemaV4
 	companionHeaderLength         = 32
 	companionRecordLength         = 221
 	// maxCompanionFileLength 是物理文件字节上界（spec：438,280）。推导：
@@ -300,7 +305,7 @@ func decodeCompanionQueueSections(decoder *byteDecoder, schema uint32) (StoredCo
 		return StoredCompanionQueue{}, corrupt("companion record flags", err)
 	}
 	allowed := companionFlagHasTask | companionFlagHasFIFO
-	if schema == currentCompanionSchema {
+	if schema >= companionSchemaV4 {
 		allowed |= companionFlagHasSummary
 	}
 	if flags&^allowed != 0 {

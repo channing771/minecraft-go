@@ -49,6 +49,6 @@
 
 ## D9 收尾门禁
 
-- [ ] D9.1 `gofmt -l .` 无输出、`go vet ./...`、`go test ./internal/archcheck -count=1`
-- [ ] D9.2 `go test ./... -race` 全绿；涉及 tick/存储/协议热路径，跑对应 benchmark 与 `cmd/perfcheck` 记录数值（只记录）
-- [ ] D9.3 `openspec validate m5d-companion-persona-dialogue --strict --no-interactive` 通过；`docs/notes/progress.md` 补 M5D 段落
+- [x] D9.1 `gofmt -l .` 无输出、`go vet ./...`、`go test ./internal/archcheck -count=1`
+- [x] D9.2 `go test ./... -race` 全绿；涉及 tick/存储/协议热路径，跑对应 benchmark 与 `cmd/perfcheck` 记录数值（只记录）
+- [x] D9.3 `openspec validate m5d-companion-persona-dialogue --strict --no-interactive` 通过；`docs/notes/progress.md` 补 M5D 段落

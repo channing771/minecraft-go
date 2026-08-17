@@ -18,7 +18,10 @@ const (
 	//
 	// 1 秒档归这里而不是 shortWaitDeadline：它有 95 处、是本包最紧
 	// 也最密集的一档，只抬到 5s 仅 5× 余量，覆盖不住共享 runner 的减速。
-	waitDeadline = 30 * time.Second
+	// 30s 曾足够，但 `go test ./... -race` 全仓并行时机器高负载会把亚秒级
+	// 异步链拖过 30s 造成假失败；90s 仍是早退式上界（正常负载毫秒-秒级
+	// 返回），只是让挂死检测在极端负载下不误报。
+	waitDeadline = 90 * time.Second
 	// longWaitDeadline 用于关服屏障、磁盘重启、八人会话等复合等待（原 10s–30s）。
 	longWaitDeadline = 60 * time.Second
 )
