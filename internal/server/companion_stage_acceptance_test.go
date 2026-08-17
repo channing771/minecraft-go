@@ -117,7 +117,10 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 
 		// openLifetime 打开同一磁盘存档的一段宿主生命周期；Host.Shutdown 会
 		// Flush 伙伴持久层并关闭 store，因此每段生命周期重新 OpenDisk。
-		openLifetime := func() *Host {
+		// closeHost 经 t.Cleanup 兜底且幂等（Host.Shutdown 幂等）：中途
+		// t.Fatalf 时也必须回收 world goroutine 与磁盘 store 句柄，否则会
+		// 污染后续测试的 goroutine 基线断言（D6 已裁决的教训）。
+		openLifetime := func() (*Host, func()) {
 			store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{})
 			if err != nil {
 				t.Fatalf("OpenDisk: %v", err)
@@ -128,18 +131,28 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 			config.OutboxCapacity = 4096
 			config.HeartbeatInterval = time.Hour
 			config.HeartbeatTimeout = time.Hour
-			return mustNewHost(t, config, flatTestGenerator{}, store)
-		}
-		closeLifetime := func(host *Host) {
-			ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
-			defer cancel()
-			if err := host.Shutdown(ctx); err != nil {
-				t.Fatalf("Host.Shutdown: %v", err)
+			host := mustNewHost(t, config, flatTestGenerator{}, store)
+			closed := false
+			closeHost := func() {
+				if closed {
+					return
+				}
+				closed = true
+				ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
+				defer cancel()
+				if err := host.Shutdown(ctx); err != nil {
+					t.Errorf("Host.Shutdown: %v", err)
+				}
 			}
+			t.Cleanup(closeHost)
+			return host, closeHost
+		}
+		closeLifetime := func(closeHost func()) {
+			closeHost()
 		}
 
 		// ---------- 生命周期 1：四 kind 计划 + 台词事件序列 ----------
-		host := openLifetime()
+		host, closeHost := openLifetime()
 		issuer := integrationIdentity(0x71, "发令者")
 		client := openCompanionChatClient(t, host, transport, issuer)
 		stepUntilCompanionManagerReady(t, host, []network.ClientEndpoint{client}, id)
@@ -262,7 +275,7 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 		if summary := companionDialogueSlotSummary(t, host, id); summary != stageAcceptanceSummary {
 			t.Fatalf("[%s] 终态摘要未写入 manager：summary=%q", transport, summary)
 		}
-		closeLifetime(host)
+		closeLifetime(closeHost)
 
 		// ---------- 磁盘断言：schema v4 + summary-only 载荷 ----------
 		// companions.ai 头部 32 字节：magic[0:4] "MCAI" + envelope 版本 u32
@@ -301,6 +314,20 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 		config2.HeartbeatInterval = time.Hour
 		config2.HeartbeatTimeout = time.Hour
 		host2 := mustNewHost(t, config2, flatTestGenerator{}, reopened)
+		// 第二段生命周期同样注册幂等 cleanup 兜底（理由同 openLifetime）。
+		closed2 := false
+		closeHost2 := func() {
+			if closed2 {
+				return
+			}
+			closed2 = true
+			ctx, cancel := context.WithTimeout(context.Background(), longWaitDeadline)
+			defer cancel()
+			if err := host2.Shutdown(ctx); err != nil {
+				t.Errorf("第二段 Host.Shutdown: %v", err)
+			}
+		}
+		t.Cleanup(closeHost2)
 		client2 := openCompanionChatClient(t, host2, transport, issuer)
 		body2 := stepUntilCompanionManagerReady(t, host2, []network.ClientEndpoint{client2}, id)
 		if summary := companionDialogueSlotSummary(t, host2, id); summary != stageAcceptanceSummary {
@@ -377,7 +404,7 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 					transport, index, record.Persona)
 			}
 		}
-		closeLifetime(host2)
+		closeLifetime(closeHost2)
 
 		return stageAcceptanceResult{
 			speechTexts:     append(firstSpeechTexts, secondSpeechTexts...),
