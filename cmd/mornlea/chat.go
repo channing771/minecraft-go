@@ -114,7 +114,7 @@ func (a *application) clearFormattedChatLines() {
 // 任务生命周期事件（Task*）只复述伙伴名、固定中文模板与玩家原始指令摘要，
 // 不显示任何模型生成的自由文本；每行最终经 truncateChatLine 截断到 32 rune。
 // 唯一例外是 v19 的 CompanionSpeech：它是客户端唯一显示模型文本的位置，
-// 仅以「伙伴名：台词原文」一行呈现，台词原样上屏、不改写、清洗或加引号。
+// 仅以「伙伴名：台词原文」一行呈现，台词原样上屏，不改写、不清洗、不加引号。
 func formatChatEvent(event network.ChatEvent) string {
 	switch event.Kind {
 	case network.ChatEventCompanionSpeech:
