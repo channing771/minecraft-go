@@ -12,7 +12,8 @@
 // channel 容量论证：plannerResults 与 pathResults 容量 4——在途上限由
 // “每伙伴 ≤1 规划 + 每伙伴 ≤1 寻路、伙伴数 ≤ companion.MaxActive=4”封顶，
 // 满容量时 worker 经 ctx.Done 退出，绝不阻塞；结果每 tick 全量排空，容量
-// 恰好覆盖峰值。
+// 恰好覆盖峰值。dialogueResults 同容量 4（每伙伴 ≤1 台词，见
+// companion_dialogue.go）。
 package server
 
 import (
@@ -64,6 +65,12 @@ type companionTaskSlot struct {
 
 	// planningInFlight 表示该伙伴有一个规划请求在途；在途期间绝不发起第二个。
 	planningInFlight bool
+
+	// dialogueInFlight 表示该伙伴有一个台词请求在途；在途期间新台词节点
+	// 直接跳过（不取消、不替换在途请求），对齐 planningInFlight 的每伙伴
+	// 单在途纪律。标记只在 tick 边界（requestDialogue 置位、
+	// applyDialogueOutcome 清除）读写。
+	dialogueInFlight bool
 
 	// 路径执行状态（仅 Running 有效）。三连失败预算属于单个任务而非槽位：
 	// dispatchPlanning 消费新队首与 restoreQueue 成功恢复时都会把 policy
@@ -155,6 +162,18 @@ type companionManager struct {
 	semaphore      chan struct{}
 	plannerResults chan plannerOutcome
 	pathResults    chan pathOutcome
+	// dialogueResults 是台词 worker 的结果回送通道，容量 MaxActive=4：
+	// 在途台词 ≤ 每伙伴 1 × 伙伴数 ≤ MaxActive，结果每 tick 全量排空，
+	// 容量恰好覆盖峰值；关服 cancel 后 worker 经 ctx.Done 放弃结果退出。
+	dialogueResults chan dialogueOutcome
+	// dialogue 是台词模型依赖面（D5 机制；触发节点接线属 D6）。nil 不会出现
+	// 于生产构造（server.go 与 Planner 同源构造），防御缺省下 requestDialogue
+	// 不应被调用——D6 接线前没有任何生产调用方。
+	dialogue companionDialogue
+	// dialogueEffects 是有效台词结果进入 applyDialogueEffect 的次数（D5 的
+	// 测试观察哨兵；D6 替换为 CompanionSpeech 广播与摘要更新后由事件断言
+	// 接管）。只在 tick 边界（持有 stepMu）读写。
+	dialogueEffects int
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -165,27 +184,31 @@ type companionManager struct {
 }
 
 // newCompanionManager 构造 Companion Manager。config 必须已含校验过的
-// AIModel 与伙伴定义（NewHost 的第二道边界保证）。
+// AIModel 与伙伴定义（NewHost 的第二道边界保证）；dialogue 是台词模型依赖
+// 面，与 planner 共用同一 AIModel 设置构造。
 func newCompanionManager(
 	engine *sim.Engine,
 	config Config,
 	planner companionPlanner,
+	dialogue companionDialogue,
 ) *companionManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &companionManager{
-		engine:         engine,
-		planner:        planner,
-		timeoutMinutes: config.AIModel.TaskTimeout(),
-		table:          companion.NewPathBlockTable(productionCompanionPassableBlocks()),
-		slots:          make(map[companion.ID]*companionTaskSlot, len(config.Companions)),
-		orderedIDs:     make([]companion.ID, 0, len(config.Companions)),
-		bodies:         make(map[companion.ID]companion.Body, companion.MaxActive),
-		mining:         make(map[companion.ID]sim.MiningUpdate, companion.MaxActive),
-		semaphore:      make(chan struct{}, companion.MaxActive),
-		plannerResults: make(chan plannerOutcome, companion.MaxActive),
-		pathResults:    make(chan pathOutcome, companion.MaxActive),
-		ctx:            ctx,
-		cancel:         cancel,
+		engine:          engine,
+		planner:         planner,
+		dialogue:        dialogue,
+		timeoutMinutes:  config.AIModel.TaskTimeout(),
+		table:           companion.NewPathBlockTable(productionCompanionPassableBlocks()),
+		slots:           make(map[companion.ID]*companionTaskSlot, len(config.Companions)),
+		orderedIDs:      make([]companion.ID, 0, len(config.Companions)),
+		bodies:          make(map[companion.ID]companion.Body, companion.MaxActive),
+		mining:          make(map[companion.ID]sim.MiningUpdate, companion.MaxActive),
+		semaphore:       make(chan struct{}, companion.MaxActive),
+		plannerResults:  make(chan plannerOutcome, companion.MaxActive),
+		pathResults:     make(chan pathOutcome, companion.MaxActive),
+		dialogueResults: make(chan dialogueOutcome, companion.MaxActive),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 	for _, definition := range config.Companions {
 		manager.slots[definition.ID] = &companionTaskSlot{definition: definition}
@@ -309,6 +332,7 @@ func (server *Server) advanceCompanionTasks() []chatDelivery {
 	manager.refreshBodies()
 	manager.applyPlannerOutcomes()
 	manager.applyPathOutcomes()
+	manager.applyDialogueOutcomes()
 	manager.expireTasks()
 	manager.advanceRunners()
 	manager.dispatchPlanning()

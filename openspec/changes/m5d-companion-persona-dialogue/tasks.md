@@ -26,9 +26,9 @@
 
 ## D5 Dialogue worker 与共享模型槽
 
-- [ ] D5.1 先写失败测试：`internal/server` try-acquire 无槽即跳过且不排队、每伙伴 1 在途（新节点跳过）、结果过时丢弃（任务终态后）、30 秒超时不重试、失败只跳过台词不改任务状态、4 伙伴在途不阻塞权威 tick、关服取消在途请求
-- [ ] D5.2 最小实现：模型槽改造为共享 gateway（Planner 等待 / Dialogue try）、`companion_dialogue.go` worker
-- [ ] 验证：`go test ./internal/server -race -count=1`
+- [x] D5.1 先写失败测试：`internal/server` try-acquire 无槽即跳过且不排队、每伙伴 1 在途（新节点跳过）、结果过时丢弃（任务终态后）、30 秒超时不重试、失败只跳过台词不改任务状态、4 伙伴在途不阻塞权威 tick、关服取消在途请求
+- [x] D5.2 最小实现：模型槽改造为共享 gateway（Planner 等待 / Dialogue try）、`companion_dialogue.go` worker
+- [x] 验证：`go test ./internal/server -race -count=1`
 
 ## D6 触发节点接线与事件广播
 
