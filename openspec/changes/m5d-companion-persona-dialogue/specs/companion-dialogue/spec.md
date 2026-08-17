@@ -26,7 +26,7 @@ Dialogue worker SHALL 复用 `companion-identity-configuration` 定义的 endpoi
 
 - **GIVEN** 一个包含十二个步骤的普通任务全部成功完成
 - **WHEN** 任务从 Running 推进到 Completed
-- **THEN** 台词请求次数 MUST 恰好为一加所选步骤数加终态一次且不超过八次，所选步骤集合 MUST 与按计划长度确定性均匀选择的集合一致
+- **THEN** 台词请求次数 MUST 恰好为一加可触发的进展节点数加终态一次（末个选中步骤的完成迁移产出 `TaskCompleted` 而非 `TaskProgress`，其完成表达折入终止节点；十二步任务为一加五加一即七次）且不超过八次，进展节点的选中步骤集合 MUST 与按计划长度确定性均匀选择的集合一致
 
 #### Scenario: 终态节点覆盖四种终态
 

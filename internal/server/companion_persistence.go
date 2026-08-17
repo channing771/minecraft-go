@@ -519,7 +519,8 @@ func companionQueuesForSave(
 		}
 	}
 	// summary-only 条目：持有摘要但没有任何任务事实（states 不含）的 active
-	// 伙伴。summaries 本身按 ID 字节序构造，追加保持输出整体有序。
+	// 伙伴。states 与 summaries 各自按 ID 字节序构造，两组拼接不保证全局
+	// 有序（编码器按记录 ID 关联队列，只要求队列 ID 唯一）。
 	for _, summary := range summaries {
 		if _, exists := inStates[summary.ID]; exists {
 			continue

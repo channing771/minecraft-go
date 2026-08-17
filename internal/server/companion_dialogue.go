@@ -16,7 +16,6 @@ import (
 	"log/slog"
 
 	"github.com/channing771/mornlea/internal/companion"
-	"github.com/channing771/mornlea/internal/network"
 )
 
 // companionDialogue 是台词模型依赖面：生产实现是 companion.DialogueClient，
@@ -231,25 +230,4 @@ func (m *companionManager) buildDialogueEnvDigest(body companion.Body) companion
 		ExposedBlocks: companion.BoundExposedBlocks(exposed),
 		Heights:       heights,
 	}
-}
-
-// speechEventValidated 构造并校验一条 CompanionSpeech 协议事件。台词文本已
-// 在解码边界通过 1..256-byte 文本纪律，这里 Validate 是组装侧的第二道防线
-// （非法组装是服务端缺陷，调用方跳过并记录，绝不发布半成品）。
-func speechEventValidated(
-	eventID uint64,
-	issuer companionTaskIssuer,
-	definition companion.Definition,
-	line string,
-) (network.ChatEvent, error) {
-	event := network.ChatEvent{
-		EventID:       eventID,
-		PlayerID:      issuer.playerID,
-		PlayerName:    issuer.name,
-		CompanionID:   definition.ID,
-		CompanionName: definition.Name,
-		Kind:          network.ChatEventCompanionSpeech,
-		Speech:        line,
-	}
-	return event, event.Validate()
 }

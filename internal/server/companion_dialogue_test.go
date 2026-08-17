@@ -390,6 +390,69 @@ func TestCompanionDialogueStaleOutcomeDiscarded(t *testing.T) {
 	}
 }
 
+// TestCompanionDialogueGenerationBumpDiscardsOutcome 验证第一级过时判定：
+// 结果在途期间 FIFO 队首被提升（BeginHead 递增世代），迟到结果按世代不匹配
+// 丢弃——不广播、不写摘要（对话效果哨兵为 0）、在途标记照常清除。与
+// TestCompanionDialogueStaleOutcomeDiscarded（第二级「终态后丢弃」）互补，
+// 共同覆盖两级过时判定。新任务挂在阻塞的假 planner 上（规划在途、不会
+// 产生额外台词节点），隔离世代这一唯一变量。
+func TestCompanionDialogueGenerationBumpDiscardsOutcome(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(1), Name: "阿木"}}
+	host, client, _ := companionManagerHostReady(t, definitions, nil)
+	planner := newFakeCompanionModel(t)
+	planner.holdRequests()
+	host.world.companionManager.replacePlannerForTest(t, planner)
+	dialogue := newFakeDialogueModel(t)
+	dialogue.holdRequests()
+	host.world.companionManager.replaceDialogueForTest(t, dialogue)
+	issuerIdentity := integrationIdentity(0x71, "发令者")
+	issuer := stopTestIssuer(issuerIdentity)
+	injectRunningCompanionTask(t, host, definitions[0].ID, issuer,
+		"跟着我", []companion.PlanStep{{Kind: companion.PlanStepFollow, PlayerID: issuerIdentity.PlayerID}})
+	// 与 StaleOutcomeDiscarded 相同：让身体缓存先于派发就绪。
+	warmup := host.world.StepForTest()
+	receiveCompanionChatTick(t, client, warmup.Tick)
+
+	host.world.stepMu.Lock()
+	host.world.companionManager.requestDialogue(
+		definitions[0].ID, companion.DialogueNode{Kind: companion.DialogueNodeStart})
+	host.world.stepMu.Unlock()
+	waitForDialogueRequests(t, dialogue, 1)
+
+	// 结果在途期间：任务终态清槽（终态节点因在途被跳过）、FIFO 入队下一条
+	// 并提升队首——世代递增是本场景的唯一受控变量。
+	host.world.stepMu.Lock()
+	slot := host.world.companionManager.slots[definitions[0].ID]
+	if len(slot.queue.FailRun(companion.TaskFailPathUnreachable)) != 1 {
+		host.world.stepMu.Unlock()
+		t.Fatal("构造任务终态失败：FailRun 未产生事件")
+	}
+	if !slot.queue.Enqueue(companion.TaskCommand("下一个任务")) {
+		host.world.stepMu.Unlock()
+		t.Fatal("构造待执行指令失败")
+	}
+	if !slot.queue.BeginHead() {
+		host.world.stepMu.Unlock()
+		t.Fatal("队首提升失败")
+	}
+	host.world.stepMu.Unlock()
+
+	dialogue.releaseRequests()
+	for range 10 {
+		result := host.world.StepForTest()
+		receiveCompanionChatTick(t, client, result.Tick)
+	}
+	effects, inFlight := dialogueEffectCount(t, host, definitions[0].ID)
+	if effects != 0 {
+		t.Fatalf("世代不匹配的结果产生了副作用：effects=%d，想要 0", effects)
+	}
+	if inFlight {
+		t.Fatal("世代不匹配的结果未清除在途标记")
+	}
+	// 释放挂起的规划请求，让关服路径干净收敛。
+	planner.releaseRequests()
+}
+
 // TestCompanionDialogueFailureSkipsOnlyLine 验证台词模型持续失败（5xx）只跳过
 // 台词：同一任务场景在有/无台词两条运行下，任务事实 ChatEvent 序列完全一致。
 // D6 起触发节点由 manager 自动接线（进入 Running、选中步骤完成、终态），
