@@ -30,7 +30,7 @@
 - **WHEN** 服务端验证配置
 - **THEN** 0 与 61 MUST 被拒绝，1 与 60 MUST 被接受，缺省值 MUST 为 10
 
-#### Scenario: 未交付字段不提前启用
+#### Scenario: 后续字段不提前启用
 
 - **GIVEN** 一个伙伴定义或 `ai` 组包含 persona 等未交付字段
 - **WHEN** M5B 读取该配置

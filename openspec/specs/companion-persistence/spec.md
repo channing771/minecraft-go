@@ -3,28 +3,10 @@
 ## Purpose
 
 以单一有界、可校验且原子替换的世界文件保存伙伴身体，同时保留暂时移出配置的记录，避免配置失误、存档损坏或运行期 I/O 失败造成静默数据丢失。
-
 ## Requirements
-
-### Requirement: companions.ai schema v1 只保存伙伴身体
-
-世界目录 SHALL 使用单一 `companions.ai` 文件和 companion schema v1。文件 MUST 保存聚合 revision，以及每条记录的 `CompanionID`、维度、位置、yaw、pitch、36 格背包及 selected slot；名称、persona、原始指令、任务、FIFO、计划和摘要 MUST NOT 写入 v1。玩家 schema v6、区块 schema v8 与世界 metadata v2 MUST 保持不变。
-
-#### Scenario: 身体状态往返且名称来自配置
-
-- **GIVEN** 两个伙伴具有不同身体、工具耐久与背包内容，配置同时提供名称
-- **WHEN** schema v1 保存后重启恢复
-- **THEN** 身体和背包 MUST 精确恢复，名称 MUST 重新取自当前配置，文件 MUST 不含名称或任务字段
-
-#### Scenario: 后续任务状态不能写入 v1
-
-- **GIVEN** M5A 运行期间成功寻址了一条聊天指令
-- **WHEN** 服务端保存 `companions.ai`
-- **THEN** schema MUST 仍为 v1，文件 MUST 只包含身体记录，聊天文本、任务和 FIFO MUST 不存在
-
 ### Requirement: 存档格式有界且损坏不可静默覆盖
 
-`companions.ai` MUST 使用 magic `MCAI`、envelope v1、schema v1、聚合 revision、记录数、payload 长度与覆盖 schema header 和 payload 的 CRC32C。记录 MUST 按 `CompanionID` 严格升序且不重复，active+inactive 总数 MUST 不超过 64，物理文件最大长度 MUST 为 14,176 bytes。未来版本、CRC 错误、截断、超长、非法数值或非法背包 MUST 被拒绝；保存 MUST NOT 覆盖已损坏或未来版本的正式文件。
+`companions.ai` MUST 使用 magic `MCAI`、envelope v1、schema v2、聚合 revision、记录数、payload 长度与覆盖 schema header 和 payload 的 CRC32C。记录 MUST 按 `CompanionID` 严格升序且不重复，active+inactive 总数 MUST 不超过 64。单条记录任务字段 MUST 有界：原始指令与 FIFO 每条指令不超过 1,024 bytes，计划步骤数不超过 5,000，FIFO 不超过 16 条。物理文件最大长度 MUST 为 350,208 bytes，解码 MUST 在分配前拒绝超长。未来版本、CRC 错误、截断、超长、非法数值、非法任务状态或非法背包 MUST 被拒绝；保存 MUST NOT 覆盖已损坏或未来版本的正式文件。
 
 #### Scenario: 第六十五个身份被拒绝且旧记录保留
 
@@ -40,11 +22,11 @@
 
 ### Requirement: 配置合并保留 inactive 记录
 
-AI 启用时，服务端 SHALL 先验证配置再加载存档：已存且仍配置的 ID MUST 恢复身体；新配置 ID MUST 从世界出生点创建空背包身体；已存但不再配置的 ID MUST 保留为 inactive 且不得注册到模拟。配置为空时 AI MUST 关闭，服务端 MUST NOT 加载、保存或改写已有 `companions.ai`。
+AI 启用时，服务端 SHALL 先验证配置再加载存档：已存且仍配置的 ID MUST 恢复身体与其任务/FIFO 状态；新配置 ID MUST 从世界出生点创建空背包、无任务身体；已存但不再配置的 ID MUST 保留为 inactive（仅身体字段）且不得注册到模拟。配置为空时 AI MUST 关闭，服务端 MUST NOT 加载、保存或改写已有 `companions.ai`。
 
 #### Scenario: 暂时移除配置不会删除身体
 
-- **GIVEN** 存档含一个伙伴身体，但当前非空配置没有该 ID
+- **GIVEN** 存档含一个带任务的伙伴记录，但当前非空配置没有该 ID
 - **WHEN** 服务端启动、运行并保存其他 active 伙伴
 - **THEN** 该记录 MUST 作为 inactive 保留在聚合文件中，且不得出现在权威模拟或客户端
 
@@ -56,7 +38,7 @@ AI 启用时，服务端 SHALL 先验证配置再加载存档：已存且仍配�
 
 ### Requirement: 运行期保存异步、可重试且关服可靠
 
-伙伴身体变化 SHALL 在权威 tick 边界进入待保存状态，磁盘 I/O MUST NOT 阻塞权威 tick。任一时刻 MUST 最多执行一次聚合保存；运行期失败 MUST 保留旧正式文件与最新未保存状态，并按既有 tick 调度重试。安全关服 MUST 在世界存储完成持久同步与关闭前保存最后一次权威 step 后的最新身体；失败 MUST 返回错误并允许再次关服重试。
+伙伴身体与任务/FIFO 状态变化 SHALL 在权威 tick 边界进入待保存状态，磁盘 I/O MUST NOT 阻塞权威 tick。任一时刻 MUST 最多执行一次聚合保存；运行期失败 MUST 保留旧正式文件与最新未保存状态，并按既有 tick 调度重试。安全关服 MUST 在世界存储完成持久同步与关闭前保存最后一次权威 step 后的最新状态；失败 MUST 返回错误并允许再次关服重试。
 
 #### Scenario: 保存失败保留未保存状态后重试
 
@@ -66,6 +48,39 @@ AI 启用时，服务端 SHALL 先验证配置再加载存档：已存且仍配�
 
 #### Scenario: 关服顺序防止最后状态丢失
 
-- **GIVEN** 关服 drain 的最后一次权威 step 创建或更新了伙伴身体
+- **GIVEN** 关服 drain 的最后一次权威 step 更新了伙伴身体或任务状态
 - **WHEN** 服务端执行安全关服
 - **THEN** 可观察持久化顺序 MUST 是伙伴保存、世界存储持久同步、世界存储关闭；伙伴保存失败时 MUST 保持可重试状态且不得继续关闭世界存储
+
+### Requirement: companions.ai schema v2 保存身体与任务状态
+
+世界目录 SHALL 继续使用单一 `companions.ai` 文件，companion schema 升级到 v2。v2 每条记录 MUST 保存 v1 的全部身体字段（`CompanionID`、维度、位置、yaw、pitch、36 格背包及 selected slot），active 记录 MUST 额外保存当前任务（原始指令、`go_to` 计划步骤、步骤索引、状态、开始 tick 与 deadline）与最多 16 条 FIFO 指令；inactive 记录 MUST 只保存身体字段。名称与 persona MUST NOT 写入文件，名称 MUST 继续取自当前配置。模型计划 MUST 只在 `Validating` 成功后落盘；关服时仍处 `Planning` 或 `Validating` 的任务 MUST 以 `Queued` 状态与原始指令一并保存。玩家 schema v6、区块 schema v8 与世界 metadata v2 MUST 保持不变。
+
+#### Scenario: 任务与 FIFO 跨重启精确恢复
+
+- **GIVEN** 一个伙伴有一个 Running 的多步 `go_to` 任务与两条待执行 FIFO 指令
+- **WHEN** schema v2 保存后重启恢复
+- **THEN** 当前任务的指令、计划、步骤索引、状态、开始 tick 与 deadline 以及 FIFO 顺序 MUST 精确恢复，身体与背包 MUST 与 v1 语义一致
+
+#### Scenario: 规划中任务按 Queued 恢复
+
+- **GIVEN** 服务端在任务 Planning 阶段安全关服
+- **WHEN** 存档保存并随后恢复
+- **THEN** 该任务 MUST 以 `Queued` 状态恢复并保留原始指令，重启后 MUST 重新发起规划
+
+#### Scenario: v1 文件只读迁移
+
+- **GIVEN** 一个仅包含身体记录的 schema v1 `companions.ai`
+- **WHEN** M5B 服务端启动加载
+- **THEN** 全部身体记录 MUST 按既有规则恢复，所有任务与 FIFO MUST 为空，首次保存 MUST 写出 schema v2
+
+### Requirement: 恢复任务在下一动作前重验
+
+恢复的 `Running` 任务在提交下一个移动动作前 MUST 按当前权威状态重新校验目标与路径点合法性；校验失败 MUST 令任务以既有失败语义终止，MUST NOT 从旧路径点继续盲走。恢复的 FIFO MUST 保持顺序并从前一个任务之后继续执行。
+
+#### Scenario: 世界已变化的恢复任务失败而不盲走
+
+- **GIVEN** 关服前一条已验证路径，重启后目标站立点已被方块占据
+- **WHEN** 恢复的任务尝试继续执行
+- **THEN** 任务 MUST 先重验并按路径不可达或重算语义处理，MUST NOT 沿旧路径点产生任何移动
+
