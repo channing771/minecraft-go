@@ -14,9 +14,9 @@
 
 ## D3 Dialogue 类型与严格解码
 
-- [ ] D3.1 先写失败测试：`internal/companion` 响应矩阵（未知字段、尾随数据、>64 KiB、line 256/257、line 含 control、终态缺 summary、非终态带 summary）、`SelectProgressSteps` 确定性（n≤6 全选、n=12 等距 ≤6、去重）、follow 三节点常量、请求构造只含四类有界输入
-- [ ] D3.2 最小实现：`persona.go`、`dialogue_types.go`、`dialogue_nodes.go`
-- [ ] 验证：`go test ./internal/companion -race -count=1`
+- [x] D3.1 先写失败测试：`internal/companion` 响应矩阵（未知字段、尾随数据、>64 KiB、line 256/257、line 含 control、终态缺 summary、非终态带 summary）、`SelectProgressSteps` 确定性（n≤6 全选、n=12 等距 ≤6、去重）、follow 三节点常量、请求构造只含四类有界输入
+- [x] D3.2 最小实现：`persona.go`、`dialogue_types.go`、`dialogue_nodes.go`
+- [x] 验证：`go test ./internal/companion -race -count=1`
 
 ## D4 schema v4 摘要持久化
 
