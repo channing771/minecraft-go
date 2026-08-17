@@ -31,7 +31,7 @@ M5D 在 M5C 的任务闭环之上加一层完全旁路的「表达平面」：�
 
 - 共享模型槽：现有 Planner 4 槽并发闸改造为 `modelGateway`（命名以实现为准）：`acquire(ctx)`（阻塞等待，Planner 用）与 `tryAcquire()`（非阻塞，Dialogue 用）。关服 cancel 同时唤醒两者。
 - Dialogue worker 池与 Planner 相同的扇入模式：每个请求一个 goroutine？不——每伙伴至多一个在途由 manager 侧 `dialogueInFlight map[ID]struct{}` 在 tick 边界保证（新节点到来时若在途即跳过，不取消在途）。worker 只处理已接受的请求。
-- 结果 channel 有界（容量 = 伙伴上限 4），满时丢弃最旧结果（结果本就可能过时，丢弃语义与过时丢弃一致）。
+- 结果 channel 有界（容量 = 伙伴上限 4）：在途上限由「每伙伴 ≤1 台词在途 × 伙伴 ≤4」结构性封顶，worker 永不因发送阻塞；ctx 取消时放弃发送并释放槽（结果本就可能过时，与过时丢弃语义一致）。
 - 台词文本在 tick 边界复制进 ChatEvent 后广播；摘要写入 manager 持有的 `summaries map[ID][]byte` 并标记 dirty。
 
 ## 兼容与迁移
