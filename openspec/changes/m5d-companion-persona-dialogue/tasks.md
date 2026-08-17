@@ -20,9 +20,9 @@
 
 ## D4 schema v4 摘要持久化
 
-- [ ] D4.1 先写失败测试：v4 编码解码往返（含摘要记录与无摘要记录混排）、438,280 上界拒绝、非法摘要长度拒绝、v3/v2/v1 只读迁移（摘要为空、首存 v4）、inactive 丢弃摘要、golden `companions-v4.bin`、fuzz 断言
-- [ ] D4.2 最小实现：`companion_types.go` 摘要字段、`companion_codec.go` v4 编码与迁移
-- [ ] 验证：`go test ./internal/storage -race -count=1`（含 fuzz 种子语料）
+- [x] D4.1 先写失败测试：v4 编码解码往返（含摘要记录与无摘要记录混排）、438,280 上界拒绝、非法摘要长度拒绝、v3/v2/v1 只读迁移（摘要为空、首存 v4）、inactive 丢弃摘要、golden `companions-v4.bin`、fuzz 断言
+- [x] D4.2 最小实现：`companion_types.go` 摘要字段、`companion_codec.go` v4 编码与迁移
+- [x] 验证：`go test ./internal/storage -race -count=1`（含 fuzz 种子语料）
 
 ## D5 Dialogue worker 与共享模型槽
 

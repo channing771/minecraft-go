@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
@@ -26,6 +28,11 @@ const (
 	// MaxCompanionFIFOEntries 是单伙伴 FIFO 的持久化条数上界，与运行期
 	// TaskQueue 的容量一致。
 	MaxCompanionFIFOEntries = companion.MaxTaskQueueDepth
+	// MaxCompanionSummaryBytes 是单条记录最近对话摘要的持久化字节上界，
+	// 与 Dialogue 请求输入/终态响应的摘要上界同源（companion.
+	// MaxDialogueSummaryBytes）：同一常量保证「能被写进请求的摘要」与
+	// 「能被存档保留的摘要」两条边界不可能漂移。
+	MaxCompanionSummaryBytes = companion.MaxDialogueSummaryBytes
 )
 
 // StoredCompanions 是从聚合存档恢复的伙伴身体快照与任务域载荷。Queues
@@ -45,9 +52,12 @@ type CompanionSave struct {
 	Queues   []StoredCompanionQueue
 }
 
-// StoredCompanionTask 是 v3 存档中一条当前任务的持久化载荷。Summary 与
-// Generation 刻意不落盘：模型自由文本不属于任务事实（M5D 前不上屏），
-// 世代只用于丢弃过时 worker 结果，重启后没有在途请求可丢弃。
+// StoredCompanionTask 是存档中一条当前任务的持久化载荷。任务计划自带的
+// 模型 summary 与 Generation 刻意不落盘：计划摘要是模型对计划的自由文本
+// 描述，不属于任务事实（M5C/M5D 的任务事件不携带模型自由文本），世代只
+// 用于丢弃过时 worker 结果，重启后没有在途请求可丢弃。注意与记录级的最
+// 近对话摘要（StoredCompanionQueue.Summary，v4 起持久化）区分：后者是
+// Dialogue 表达平面的近期记忆，不是任务事实。
 type StoredCompanionTask struct {
 	// Command 是玩家原始指令（不含 @伙伴名 前缀），≤MaxCompanionTaskCommandBytes。
 	Command string
@@ -67,13 +77,22 @@ type StoredCompanionTask struct {
 	FailReason companion.TaskFailReason
 }
 
-// StoredCompanionQueue 是一个伙伴任务域的持久化载荷：当前任务（若有）与
-// 按接收顺序排列的 FIFO 指令。空载荷（无当前任务且 FIFO 为空）不可保存。
+// StoredCompanionQueue 是一个伙伴任务域的持久化载荷：当前任务（若有）、
+// 按接收顺序排列的 FIFO 指令与最近对话摘要（v4 起）。空载荷（无当前任务、
+// FIFO 为空且摘要为空）不可保存。队列载荷同时是记录的 active 信号：调用方
+// 只为当前配置的 active 伙伴提供队列——inactive 记录不提供队列（含摘要），
+// 编码即无摘要区，去激活由此天然丢弃摘要（spec：inactive 记录 MUST NOT
+// 保存摘要）。
 type StoredCompanionQueue struct {
 	ID         companion.ID
 	HasCurrent bool
 	Current    StoredCompanionTask
 	Pending    []string
+	// Summary 是该伙伴的最近对话摘要（Dialogue 终态响应捎带写入）：
+	// ≤MaxCompanionSummaryBytes 字节、有效 UTF-8、不含 NUL；空串等价于
+	// 「无摘要」——编码不写摘要区，解码读到的 v3/v2/v1 迁移记录恒为空。
+	// 摘要只喂后续 Dialogue 请求，绝不进入 Planner 输入。
+	Summary string
 }
 
 // CompanionStore 定义伙伴聚合存档的加载与保存边界。
@@ -214,7 +233,7 @@ func validateStoredPlanStep(step companion.PlanStep, index, total int, schema ui
 // validateStoredCompanionQueues 校验一组任务载荷的结构不变量：非空、ID
 // 唯一、每条关联一条既有记录、当前任务与 FIFO 全部有界。records 是已按
 // ID 升序排好的保存记录；本函数只读，不修改任何输入切片。schema 决定
-// 步骤集合的校验口径——编码端恒为当前 schema（v3）。
+// 步骤集合的校验口径——编码端恒为当前 schema（v4）。
 func validateStoredCompanionQueues(
 	queues []StoredCompanionQueue,
 	records []companion.Body,
@@ -241,11 +260,12 @@ func validateStoredCompanionQueues(
 }
 
 // validateStoredCompanionQueue 校验单条队列载荷：非空、ID 有效、当前任务
-// 与 FIFO 每条指令的字节上界。HasCurrent 为假时 Current 不参与编码（任务
-// 区只随 flags bit0 落盘），因此必须整体为零值——非零的 Current 无法在
-// 磁盘上表达，放行它会静默丢数据，一律拒绝。
+// 与 FIFO 每条指令的字节上界、最近对话摘要的文本边界。HasCurrent 为假时
+// Current 不参与编码（任务区只随 flags bit0 落盘），因此必须整体为零值——
+// 非零的 Current 无法在磁盘上表达，放行它会静默丢数据，一律拒绝。摘要按
+// v4 语义校验（v3/v2/v1 迁移读入的载荷摘要恒为空，天然通过）。
 func validateStoredCompanionQueue(queue StoredCompanionQueue, schema uint32) error {
-	if !queue.HasCurrent && len(queue.Pending) == 0 {
+	if !queue.HasCurrent && len(queue.Pending) == 0 && queue.Summary == "" {
 		return fmt.Errorf("%w: empty companion queue", ErrCorrupt)
 	}
 	if !queue.ID.Valid() {
@@ -267,6 +287,29 @@ func validateStoredCompanionQueue(queue StoredCompanionQueue, schema uint32) err
 		if err := companion.TaskCommand(command).Validate(); err != nil {
 			return fmt.Errorf("companion FIFO entry %d: %w: %v", index, ErrCorrupt, err)
 		}
+	}
+	if err := validateStoredCompanionSummary(queue.Summary); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateStoredCompanionSummary 校验最近对话摘要的持久化边界：不超过
+// MaxCompanionSummaryBytes 字节、有效 UTF-8、不含 NUL。与 companion 侧
+// validateDialogueSummary 同一规则（字节上界、编码与无 NUL），但存档边界
+// 不设非空约束——空串等价于「无摘要」，是摘要被清空后的合法持久状态。
+// 编码与解码共用本函数，保证双向边界一致。
+func validateStoredCompanionSummary(summary string) error {
+	if len(summary) > MaxCompanionSummaryBytes {
+		return fmt.Errorf(
+			"%w: companion summary %d bytes exceeds limit", ErrCorrupt, len(summary),
+		)
+	}
+	if !utf8.ValidString(summary) {
+		return fmt.Errorf("%w: companion summary is not valid UTF-8", ErrCorrupt)
+	}
+	if strings.ContainsRune(summary, 0) {
+		return fmt.Errorf("%w: companion summary contains NUL", ErrCorrupt)
 	}
 	return nil
 }
