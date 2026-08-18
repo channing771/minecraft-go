@@ -2,22 +2,23 @@
 
 ## E1 planWireStep 显式 null 契约收紧
 
-- [ ] E1.1 先写失败测试：`internal/companion` 排他矩阵 null 负向全集（`follow`+`"x":null`、`go_to`+`"block":null`/`"player_id":null`、`mine`+`"block":null`/`"player_id":null`、`place`+`"player_id":null`/坐标 null），既有 `"x":null` 用例保持
-- [ ] E1.2 最小实现：`planWireStep` 区分缺席与显式 null（map 中间形或自定义 `UnmarshalJSON`，与 dialogue 的 isJSONNull 同构），`decodePlanStep` GoDoc 校准
-- [ ] 验证：`go test ./internal/companion -race -count=1` 全绿；`openspec validate m5e-backlog-hardening --strict` 通过（delta 已随 change 创建）
+- [x] E1.1 先写失败测试：`internal/companion` 排他矩阵 null 负向全集（`follow`+`"x":null`、`go_to`+`"block":null`/`"player_id":null`、`mine`+`"block":null`/`"player_id":null`、`place`+`"player_id":null`/坐标 null），既有 `"x":null` 用例保持
+- [x] E1.2 最小实现：`planWireStep` 区分缺席与显式 null（map 中间形或自定义 `UnmarshalJSON`，与 dialogue 的 isJSONNull 同构），`decodePlanStep` GoDoc 校准
+- [x\] 验证：`go test ./internal/companion -race -count=1` 全绿；`openspec validate m5e-backlog-hardening --strict` 通过（delta 已随 change 创建）
 
 ## E2 双实现交叉锁与物品穷举守护
 
-- [ ] E2.1 先写失败测试：`internal/companion` 对 `buildPlanPlaceBlocks()` 全集逐条断言 `BlockDrop(B) == (I, true)`；`internal/core` `ItemIDMax` 哨兵 + planner_test 穷举界改哨兵并加「枚举末项守护」断言
-- [ ] E2.2 最小实现：`core/item.go` 引入 `ItemIDMax`，`planner_test.go:962` 穷举界改用哨兵
-- [ ] 验证：`go test ./internal/companion ./internal/core -race -count=1`
+- [x] E2.1 先写失败测试：`internal/companion` 对 `buildPlanPlaceBlocks()` 全集逐条断言 `BlockDrop(B) == (I, true)`；`internal/core` `ItemIDMax` 哨兵 + planner_test 穷举界改哨兵并加「枚举末项守护」断言
+- [x] E2.2 最小实现：`core/item.go` 引入 `ItemIDMax`，`planner_test.go:962` 穷举界改用哨兵
+- [x] 验证：`go test ./internal/companion ./internal/core -race -count=1`
 
 ## E3 sim/companion 注释与常量清理（A1、A2、A3、A5、A8、A9）
 
 - [ ] E3.1 `companion_action.go:85` + `companion_action_test.go:441`：去 M5B 骨架期措辞、测试更名 `...DefensiveBoundary`；`companion_action.go:44` 容量注释改全局口径并注明饿死后果
 - [ ] E3.2 `actor.go:23-24` 背包注释改现状；`companion_mining_test.go:77、155` 删两处 `entry.pitch = 0` 死赋值
 - [ ] E3.3 `planner.go:68` Y 域改 `core.MinY`/`core.MaxY-1` 拼接；`pathfind.go:22` ↔ `plan_types.go:33` 半径共用常量
-- [ ] 验证：`go test ./internal/companion ./internal/sim -race -count=1` 全绿；diff 复核零行为变化
+- [ ] E3.4 `internal/render/hud/atlas.go:15,23` 物品穷举界统一改 `core.ItemIDMax`（E2 评审发现的同型脆弱穷举，今日行为等值、追加物品时守护一致；控制会话裁决并入）
+- [ ] 验证：`go test ./internal/companion ./internal/sim -race -count=1` 全绿；`go test ./internal/render/... -race -count=1`；diff 复核零行为变化
 
 ## E4 跨测试 helper 去重（A6、A7、C8）
 
