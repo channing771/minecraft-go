@@ -38,6 +38,13 @@ const (
 	ItemClay
 	ItemSnowBlock
 	ItemMossyCobblestone
+	// ItemIDMax 是合法物品编号的独占上界（最后一个合法 ItemID + 1），本身不是
+	// 物品枚举成员。它供测试以「item < ItemIDMax」穷举全部物品，替代依赖
+	//「某个具体物品恰为枚举末项」的脆弱写法；放在 core 是因为物品注册表归属
+	// core。新物品只能追加在本哨兵之前（哨兵始终保持紧随末项），否则以哨兵
+	// 为界的穷举测试会静默漏掉新物品——item_test.go 的枚举末项守护断言负责
+	// 在追加时报警。
+	ItemIDMax
 )
 
 const (

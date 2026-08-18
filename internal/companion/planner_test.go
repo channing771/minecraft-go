@@ -977,13 +977,35 @@ func TestPlanDecodePlaceRegistryLock(t *testing.T) {
 		}
 		blocks[block] = name
 	}
-	for item := core.ItemID(0); item <= core.ItemMossyCobblestone; item++ {
+	// 穷举界用 core.ItemIDMax 独占哨兵而不是「<= 枚举末项」：core 的枚举末项
+	// 守护断言保证追加新物品时断言变红，迫使开发者同步审视本穷举的覆盖认知，
+	// 而不是让本测试静默漏掉新物品。
+	for item := core.ItemID(0); item < core.ItemIDMax; item++ {
 		block, ok := core.ItemPlacement(item)
 		if !ok {
 			continue
 		}
 		if _, covered := blocks[block]; !covered {
 			t.Fatalf("可放置方块 %d（物品 %d）缺少注册表名字", block, item)
+		}
+	}
+}
+
+// TestPlaceBlocksAndDropsRoundTrip 把 place 注册表的方块→物品索引与
+// core.BlockDrop 掉落表交叉锁定：buildPlanPlaceBlocks() 的每个 (B, I) 都必须
+// 满足 BlockDrop(B) == (I, true)。两张表独立维护——place 表是 place 步骤的
+// 扣料依据，掉落表是 mine 步骤的产物依据——任何漂移都意味着「放置消耗物品 X、
+// 采掘同一方块却产出物品 Y」的复制/丢失类缺陷，本测试让漂移立即失败。
+func TestPlaceBlocksAndDropsRoundTrip(t *testing.T) {
+	placed := buildPlanPlaceBlocks()
+	if len(placed) == 0 {
+		t.Fatal("place 方块→物品索引为空")
+	}
+	for block, item := range placed {
+		drop, ok := core.BlockDrop(block)
+		if !ok || drop != item {
+			t.Fatalf("方块 %d 的放置物品 %d 与掉落物 (%d, %v) 不一致",
+				block, item, drop, ok)
 		}
 	}
 }

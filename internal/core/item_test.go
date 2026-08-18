@@ -20,6 +20,25 @@ func TestCanonicalItemIDsStayStable(t *testing.T) {
 	}
 }
 
+// TestItemIDMaxGuardsExhaustiveEnumeration 锁定 ItemIDMax 独占哨兵与枚举末项的
+// 关系：当前最后一个合法物品必须是 ItemMossyCobblestone。物品演进纪律是只能在
+// 哨兵之前追加；将来追加新物品时第一个断言变红，迫使开发者同步审视全部以
+// 「item < ItemIDMax」为穷举界的测试（例如 companion 的 place 注册表覆盖测试），
+// 而不是让穷举测试静默失去对新物品的覆盖。
+func TestItemIDMaxGuardsExhaustiveEnumeration(t *testing.T) {
+	if core.ItemMossyCobblestone != core.ItemIDMax-1 {
+		t.Fatalf("ItemID 枚举末项不再是 ItemMossyCobblestone（ItemIDMax-1 = %d）；"+
+			"新增物品必须同步审视全部以 ItemIDMax 为穷举界的测试", core.ItemIDMax-1)
+	}
+	// 哨兵之外不得再出现已注册物品：若有人把新物品追加在哨兵之后，穷举界会
+	// 静默漏掉它，这里用有界前瞻扫描兜底报警。扫描宽度只作绊线不是完备证明。
+	for item := core.ItemIDMax; item < core.ItemIDMax+64; item++ {
+		if core.RegisteredItem(item) {
+			t.Fatalf("物品 %d 注册在 ItemIDMax 哨兵之外，独占穷举界失效", item)
+		}
+	}
+}
+
 func TestCommonBlockMaterialsAreFixedAndRoundTrip(t *testing.T) {
 	tests := []struct {
 		block core.BlockID
