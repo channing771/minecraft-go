@@ -64,6 +64,12 @@ func FuzzCompanionMessageCodec(f *testing.F) {
 	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventCompanionSpeech, byte(ChatRejectQueueFull)))
 	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventKind(9), 0))
 	f.Add(uint8(1), uint32(16), taskCombinationSeed(ChatEventKind(10), 0))
+	// 无效 UTF-8 文本槽位种子（F-4 定界突变）：台词与指令槽位的裸 0xFF 0xFE
+	// 与截断多字节序列——解码必须在 string 原语层拒绝，fuzz 从这些定界点
+	// 向外探索同类字节。wire 由 chatEventWireWithRawTextSlot 手工拼出。
+	f.Add(uint8(1), uint32(16), chatEventWireWithRawTextSlot(ChatEventCompanionSpeech, []byte{0xFF, 0xFE}))
+	f.Add(uint8(1), uint32(16), chatEventWireWithRawTextSlot(ChatEventCompanionSpeech, []byte{0xE5, 0x8F}))
+	f.Add(uint8(1), uint32(16), chatEventWireWithRawTextSlot(ChatEventAccepted, []byte{0xFF, 0xFE}))
 
 	f.Fuzz(func(t *testing.T, direction uint8, packetID uint32, payload []byte) {
 		if direction&1 == 0 {
