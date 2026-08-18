@@ -44,9 +44,9 @@
 
 ## E8 存档前瞻与测试名（C1、C3）
 
-- [ ] E8.1 `companion_codec.go:223` 白名单显式列 `companionSchemaV4`，以 v5 假想 schema 单测锁定前瞻口径（v4 文件不被入口误拒）
-- [ ] E8.2 `companion_restore_test.go:329` 测试名/doc V3 → V4
-- [ ] 验证：`go test ./internal/storage -race -count=1` 全绿；golden shasum 不变
+- [x] E8.1 `companion_codec.go:223` 白名单显式列 `companionSchemaV4`，以 v5 假想 schema 单测锁定前瞻口径（v4 文件不被入口误拒）
+- [x] E8.2 `companion_restore_test.go:329` 测试名/doc V3 → V4
+- [x] 验证：`go test ./internal/storage -race -count=1` 全绿；golden shasum 不变
 
 ## E9 客户端呈现批（C2、C4、C6、C9）
 
