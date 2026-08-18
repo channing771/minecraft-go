@@ -126,6 +126,55 @@ func TestCompanionBodyHasNoFutureFields(t *testing.T) {
 	}
 }
 
+// TestDefinitionPersonaTagsAreFrozen 用反射锁定 Definition 两个人设字段的
+// json tag 分工（F-2）：Persona 是磁盘镜像字段（persona,omitempty），保存
+// 内联原文且无内联人设时不落空键；ResolvedPersona 是进程内派生的生效值
+// （json:"-"），永不进入任何 JSON 序列化。M5D D2 已在行为级锁定「内联人设
+// 原样落盘、生效值不落盘」，本测试把分工钉在结构 tag 层——未来任何人给
+// ResolvedPersona 换上可序列化 tag 或去掉 Persona 的 omitempty，都会先在
+// 这里变红，而不是等到存档往返静默篡改用户磁盘数据时才暴露。
+func TestDefinitionPersonaTagsAreFrozen(t *testing.T) {
+	wantTags := map[string]string{
+		"Persona":         "persona,omitempty",
+		"ResolvedPersona": "-",
+	}
+	typeOfDefinition := reflect.TypeOf(Definition{})
+	for name, want := range wantTags {
+		field, ok := typeOfDefinition.FieldByName(name)
+		if !ok {
+			t.Fatalf("Definition 缺少字段 %s", name)
+		}
+		if got := field.Tag.Get("json"); got != want {
+			t.Fatalf("Definition.%s 的 json tag = %q，want %q", name, got, want)
+		}
+	}
+}
+
+// TestDefinitionMarshalsResolvedPersonaNowhere 值级锁定 ResolvedPersona 永不
+// 进入 JSON 输出（F-2）：构造 ResolvedPersona 非空而 Persona 为空的
+// Definition，Marshal 后输出既无 resolvedPersona 键、也无生效人设值的任何
+// 字节——生效人设是 config.Load 解析出的进程内事实，落盘会破坏 Persona 的
+// 磁盘镜像语义（外部 personas/ 文件内容会被静默吸收为内联，见 identity.go
+// 的字段注释）。反射 tag 锁（上一测试）钉结构分工，本测试钉序列化结果，
+// 两层互为冗余防线。
+func TestDefinitionMarshalsResolvedPersonaNowhere(t *testing.T) {
+	resolved := "生效人设文本：沉稳寡言的老向导，说话简短。"
+	encoded, err := json.Marshal(Definition{
+		ID:              mustParseID(t, "00112233-4455-4677-8899-aabbccddeeff"),
+		Name:            "阿木",
+		ResolvedPersona: resolved,
+	})
+	if err != nil {
+		t.Fatalf("Marshal Definition: %v", err)
+	}
+	if strings.Contains(string(encoded), "resolvedPersona") {
+		t.Fatalf("Marshal 输出出现 resolvedPersona 键: %s", encoded)
+	}
+	if strings.Contains(string(encoded), resolved) {
+		t.Fatalf("Marshal 输出泄漏生效人设值: %s", encoded)
+	}
+}
+
 func mustParseID(t *testing.T, text string) ID {
 	t.Helper()
 	id, err := ParseID(text)
