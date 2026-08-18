@@ -74,7 +74,6 @@ func readyCompanionMining(
 	target := core.BlockPos{X: 4, Y: 1, Z: 5}
 	engine.SetBlockForTest(target, block)
 	entry := engine.companions[id]
-	entry.pitch = 0
 	if tool == core.ItemNone {
 		entry.inventory.Hotbar.Slots[0] = core.ItemStack{}
 	} else {
@@ -152,7 +151,8 @@ func TestCompanionMiningMatchesPlayerRuleAndTiming(t *testing.T) {
 	setMiningHeldItem(player, core.ItemStonePickaxe)
 
 	entry := engine.companions[id]
-	entry.pitch = 0
+	// 伙伴采掘不看朝向：射线方向由目标方块中心决定（见 mining.go），不像玩家
+	// 那样需要用 pitch 把视线对准目标，这里只装配工具与意图。
 	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
 	entry.inventory.Hotbar.Slots[0] = core.ItemStack{
 		Item: core.ItemStonePickaxe, Count: 1, Durability: full,
@@ -438,10 +438,12 @@ func TestCompanionActionMiningPayloadsSetAndClearIntent(t *testing.T) {
 	}
 }
 
-// TestCompanionActionPlacePayloadSkeletonIsDefensiveOnly 锁定 Place 载荷的防御
+// TestCompanionActionPlacePayloadDefensiveBoundary 锁定 Place 载荷的防御
 // 边界：目标越界或方块未注册/空气的 Place action 被确定性丢弃，世界与背包都
-// 不变。合法 Place 的放置结算本体属后续放置任务，此处不断言其结算结果。
-func TestCompanionActionPlacePayloadSkeletonIsDefensiveOnly(t *testing.T) {
+// 不变。合法 Place 的结算本体（校验链 + 原子扣料写方块）在同一 tick 的
+// settleCompanionPlacements 完成，其行为由 companion_placement_test.go 锁定，
+// 此处只断言防御边界不产生副作用。
+func TestCompanionActionPlacePayloadDefensiveBoundary(t *testing.T) {
 	fixture := readyCompanionMiningViaActions(t, core.StoneID, core.ItemNone)
 	entry := fixture.entry
 	entry.inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStone, Count: 4}

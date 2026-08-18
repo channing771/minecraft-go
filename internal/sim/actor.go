@@ -20,8 +20,8 @@ type actorState struct {
 	yaw   float32
 	pitch float32
 	// inventory 与 inventoryDirty 是共有的权威背包。玩家侧由命令阶段写并逐 tick
-	// 发布；伙伴侧 M5B 尚无背包交互，仅随恢复/存档往返，但字段属于两类 actor
-	// 同构的身体记录，随提取一起上移。M5C 采掘完成后伙伴产物直入此背包。
+	// 发布；伙伴侧由 MineHold 采掘完成（产物直入）与 Place 结算（扣一件并写
+	// 方块）写入并置 inventoryDirty，其余时刻仅随恢复/存档往返。
 	inventory      core.Inventory
 	inventoryDirty bool
 	// miningHeld 与 mining 是 M5C 上移的共有采掘状态：按住意图与进度状态机。

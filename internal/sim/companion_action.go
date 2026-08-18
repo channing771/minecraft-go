@@ -41,9 +41,12 @@ type CompanionAction struct {
 }
 
 // EnqueueCompanionAction 可由 Task Runner 并发调用，把一个伙伴 action 投递进有界
-// inbox。容量按 companion.MaxActive（每 tick 每伙伴最多一个 action）定容，满员时
-// 立即丢弃并返回 false，绝不阻塞权威 tick，也不像玩家命令 inbox 一样无界累积——
-// 丢弃是安全的：位置始终权威，下一 tick 重新提交即可。
+// inbox。容量按全局计：每 tick 至多 companion.MaxActive 条（active 伙伴至多
+// MaxActive 个、每伙伴每 tick 至多应用一条 action），满员时立即丢弃并返回
+// false，绝不阻塞权威 tick，也不像玩家命令 inbox 一样无界累积——丢弃是安全
+// 的：位置始终权威，下一 tick 重新提交即可。注意同一伙伴重复提交的 action
+// 同样占用全局名额，极端情况下可占满 inbox 并饿死其他伙伴本 tick 的 action
+// （权威侧按 ID 去重后每个伙伴只消费最早一条合法 action）。
 func (engine *Engine) EnqueueCompanionAction(action CompanionAction) bool {
 	engine.inboxMu.Lock()
 	defer engine.inboxMu.Unlock()
@@ -82,7 +85,9 @@ func validCompanionActionTarget(target core.BlockPos) bool {
 
 // validCompanionAction 按判别载荷做防御校验：Move 校验移动输入，MineHold 校验
 // 目标坐标，MineRelease 无载荷约束，Place 额外要求方块已注册且不是空气
-// （放置空气没有意义，真实放置校验属后续放置任务）。
+// （放置空气没有意义；可放置性、目标为空气、碰撞判定与扣料等真实放置校验链
+// 在同一 tick 的 settleCompanionPlacements/completeCompanionPlacement 完成，
+// 其行为由 companion_placement_test.go 锁定）。
 func validCompanionAction(action CompanionAction) bool {
 	switch action.Kind {
 	case CompanionActionMove:
