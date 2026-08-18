@@ -380,9 +380,9 @@ func TestCompanionDecodeSchemaWhitelistListsLiteralV4(t *testing.T) {
 	}
 }
 
-// TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV3 锁定 v1→v3 迁移：
-// v1 golden（仅身体）无损读入，首次保存直接写当前 schema v3。
-func TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV3(t *testing.T) {
+// TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV4 锁定 v1→v4 迁移：
+// v1 golden（仅身体）无损读入，首次保存直接写当前 schema v4。
+func TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV4(t *testing.T) {
 	v1, err := os.ReadFile(filepath.Join("testdata", "companions-v1.bin"))
 	if err != nil {
 		t.Fatal(err)
