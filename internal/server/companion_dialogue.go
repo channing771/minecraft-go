@@ -176,8 +176,9 @@ func (m *companionManager) applyDialogueOutcome(outcome dialogueOutcome) {
 		return
 	}
 	if outcome.err != nil {
-		// 失败只跳过台词：错误来自客户端的两类哨兵（传输层/输出非法），
-		// 客户端已保证错误文本不含密钥与响应正文原文。
+		// 失败只跳过台词：错误来自客户端的三类哨兵（传输层/请求构造/输出
+		// 解码，F-3 拆分后请求与输出各有独立哨兵），客户端已保证错误文本
+		// 不含密钥与响应正文原文。
 		slog.Debug("台词请求失败，跳过该台词",
 			"companion", outcome.id, "node", uint8(outcome.node.Kind), "error", outcome.err)
 		return
