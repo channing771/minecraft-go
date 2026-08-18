@@ -197,6 +197,19 @@ func companionFIFOEncodedLength(pending []string) int {
 	return length
 }
 
+// companionSchemaReadable 判断存档 schema 是否在解码入口白名单内。成员
+// 显式列出 v1/v2/v3/v4 的字面常量，绝不退化成 currentCompanionSchema
+// 引用：未来 v5 成为 current 时，schema=4 的合法迁移文件仍必须在入口被
+// 放行，才能到达 decodeCompanionQueueSections 的 `schema >=
+// companionSchemaV4` 摘要位前瞻检查——若用 current 引用，v4 文件会在入口
+// 被误判 ErrCorrupt，永远到不了前瞻检查，companionSchemaV4 独立常量的
+// 设计意图随之落空。新增 schema 版本时在此显式追加成员，并同步白名单
+// 锁测试（TestCompanionDecodeSchemaWhitelistListsLiteralV4）。
+func companionSchemaReadable(schema uint32) bool {
+	return schema == companionSchemaV1 || schema == companionSchemaV2 ||
+		schema == companionSchemaV3 || schema == companionSchemaV4
+}
+
 func decodeCompanions(data []byte) (StoredCompanions, error) {
 	// 分配前门禁：任何超过物理上界的输入在解析前拒绝。
 	if len(data) > maxCompanionFileLength {
@@ -220,8 +233,10 @@ func decodeCompanions(data []byte) (StoredCompanions, error) {
 	if err != nil {
 		return StoredCompanions{}, corrupt("companion schema", err)
 	}
-	if schema != companionSchemaV1 && schema != companionSchemaV2 &&
-		schema != companionSchemaV3 && schema != currentCompanionSchema {
+	if !companionSchemaReadable(schema) {
+		// 拒绝路径的错误分类仍以 current 为界：比当前更新的版本是明确的
+		// 前瞻信号（ErrFutureVersion）；白名单成员资格本身只看字面版本
+		// （companionSchemaReadable），与 current 的取值解耦。
 		if schema > currentCompanionSchema {
 			return StoredCompanions{}, fmt.Errorf("%w: companion schema %d", ErrFutureVersion, schema)
 		}
