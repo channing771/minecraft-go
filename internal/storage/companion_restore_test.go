@@ -333,7 +333,8 @@ func TestCompanionCodecV2RoundTripAndGolden(t *testing.T) {
 // 放行，才能到达摘要位的 `schema >= companionSchemaV4` 前瞻检查
 // （decodeCompanionQueueSections），这正是 companionSchemaV4 独立常量存在的
 // 意图。分层断言：白盒成员锁（恰为 {1,2,3,4}，0 与假想 v5/v6 不在内——
-// 上调 current 而忘记显式扩白名单会在此变红）；v5 假想文件（合法 v4 编码
+// 断言 0 不在白名单今日即封死「惰性写成 <= current」的退化形态，上调
+// current 而忘记显式扩白名单也会在此变红）；v5 假想文件（合法 v4 编码
 // 只改 schema 字节为字面 5，其余字节按 v4 语义原样保留）今天必须被明确拒
 // 绝为 ErrFutureVersion，本测试不引入任何 v5 解码支持；对照同一 v4 编码
 // 原样解码成功，证明拒绝来自白名单判定而非文件本身。schema 检查先于
