@@ -27,9 +27,9 @@
 
 ## E5 server 注释与死代码（B1、B2、B4、B5、B6、B7、B8、B10）
 
-- [ ] E5.1 注释批：16..20 枚举（B1）、issuer 魔法字节出处（B2）、任务 7 引用（B4）、Accepted 取舍补全（B6）、mining 生命周期（B7）、dialogueEffects 现状（B8）
-- [ ] E5.2 代码批：删 `companion_chat.go:60-63` clamp 死防御（B5，先白盒断言从未生效）；`sortCompanionBodies` 统一 `slices.SortFunc`（B10）
-- [ ] 验证：`go test ./internal/server -race -count=1` 全绿
+- [x] E5.1 注释批：16..20 枚举（B1）、issuer 魔法字节出处（B2）、任务 7 引用（B4）、Accepted 取舍补全（B6）、mining 生命周期（B7）、dialogueEffects 现状（B8）
+- [x] E5.2 代码批：删 `companion_chat.go:60-63` clamp 死防御（B5，先白盒断言从未生效）；`sortCompanionBodies` 统一 `slices.SortFunc`（B10）
+- [x] 验证：`go test ./internal/server -race -count=1` 全绿
 
 ## E6 server 防御与复用（B3、B9）
 
