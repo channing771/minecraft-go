@@ -22,8 +22,8 @@
 
 ## E4 跨测试 helper 去重（A6、A7、C8）
 
-- [ ] E4.1 `wantPlanError`/`wantPathError` 合并单 helper；`companion_mining_test.go` 抽 `newCompanionMiningScene`；`message_companion_test.go` 三处 kind 偏移提取 `chatEventKindOffset`
-- [ ] 验证：`go test ./internal/companion ./internal/sim ./internal/network -race -count=1` 全绿（断言全集保持）
+- [x] E4.1 `wantPlanError`/`wantPathError` 合并单 helper；`companion_mining_test.go` 抽 `newCompanionMiningScene`；`message_companion_test.go` 三处 kind 偏移提取 `chatEventKindOffset`
+- [x] 验证：`go test ./internal/companion ./internal/sim ./internal/network -race -count=1` 全绿（断言全集保持）
 
 ## E5 server 注释与死代码（B1、B2、B4、B5、B6、B7、B8、B10）
 
