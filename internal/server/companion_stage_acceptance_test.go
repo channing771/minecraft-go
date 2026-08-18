@@ -74,6 +74,73 @@ type stageAcceptanceResult struct {
 	secondFactKinds []network.ChatEventKind
 }
 
+// stageAcceptanceHostConfig 返回两段宿主生命周期共用的 Host 配置。占位值
+// 的用意集中在此说明（F-6 哑参数审计）：MaxPlayers=2 容纳发令者单人登录；
+// OutboxCapacity 放大是长闭环事件广播的余量；心跳间隔与超时拉到一小时——
+// 在测试时间尺度内永不触发，避免长闭环被心跳超时打断。两段生命周期经同
+// 一构造取配置，不可能漂移。
+func stageAcceptanceHostConfig(definitions []companion.Definition) Config {
+	config := hostTestConfig()
+	config.Companions = append([]companion.Definition(nil), definitions...)
+	config.MaxPlayers = 2
+	config.OutboxCapacity = 4096
+	config.HeartbeatInterval = time.Hour
+	config.HeartbeatTimeout = time.Hour
+	return config
+}
+
+// 两段生命周期的对话事件收集 tick 预算（F-6 哑参数命名化）：第一段走完
+// 6 格间距的混合计划加四次台词往返需要更长窗口，第二段两步 go_to 较短。
+const (
+	firstLifetimeTickBudget  = 2000
+	secondLifetimeTickBudget = 800
+)
+
+// assertStageFactKindSequence 断言一段生命周期的事实事件类别序列逐项等于
+// want。两段生命周期共用同一投影断言（F-6：长度与逐项比较只写一处，
+// 两侧不可能漂移）。
+func assertStageFactKindSequence(t *testing.T, transport, phase string, got, want []network.ChatEventKind) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("[%s] %s事实序列=%v，想要 %v", transport, phase, got, want)
+	}
+	for index, kind := range got {
+		if kind != want[index] {
+			t.Fatalf("[%s] %s事实序列=%v，想要 %v", transport, phase, got, want)
+		}
+	}
+}
+
+// assertStageSequenceParity 断言 Memory 与 TCP 两侧的观察序列逐条一致
+// （长度一致 + 逐项相等）。台词文本与两段事实类别三组比较共用同一投影
+// （F-6：消除三段手写循环的漂移空间）；泛型同时承载 string 与
+// ChatEventKind 两种元素。
+func assertStageSequenceParity[T comparable](t *testing.T, label string, memory, tcp []T) {
+	t.Helper()
+	if len(memory) != len(tcp) {
+		t.Fatalf("%s序列不一致 memory=%v tcp=%v", label, memory, tcp)
+	}
+	for index := range memory {
+		if memory[index] != tcp[index] {
+			t.Fatalf("%s %d 不一致 memory=%v tcp=%v（序列=%v/%v）",
+				label, index, memory[index], tcp[index], memory, tcp)
+		}
+	}
+}
+
+// assertStageAcceptanceParity 断言 Memory 与 TCP 两次完整闭环的观察结果
+// 一致：两段生命周期拼接的台词文本序列与各自的事实事件类别序列（EventID
+// 绝对值不跨传输断言，见 parity 投影的既有纪律）。
+func assertStageAcceptanceParity(t *testing.T, memory, tcp stageAcceptanceResult) {
+	t.Helper()
+	if len(memory.speechTexts) == 0 {
+		t.Fatal("Memory 传输没有任何台词事件")
+	}
+	assertStageSequenceParity(t, "台词", memory.speechTexts, tcp.speechTexts)
+	assertStageSequenceParity(t, "第一段事实", memory.firstFactKinds, tcp.firstFactKinds)
+	assertStageSequenceParity(t, "第二段事实", memory.secondFactKinds, tcp.secondFactKinds)
+}
+
 // TestM5StageAcceptancePersonaDialogueEndToEnd 是 M5A–M5D 的阶段总验收：
 // 见文件头注释的链路清单。两段生命周期共享同一磁盘存档目录与同一伙伴定义
 // （internal/server 侧的「同一 config/personas」等价物：定义在两次 NewHost
@@ -116,22 +183,17 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 		}
 
 		// openLifetime 打开同一磁盘存档的一段宿主生命周期；Host.Shutdown 会
-		// Flush 伙伴持久层并关闭 store，因此每段生命周期重新 OpenDisk。
-		// closeHost 经 t.Cleanup 兜底且幂等（Host.Shutdown 幂等）：中途
-		// t.Fatalf 时也必须回收 world goroutine 与磁盘 store 句柄，否则会
-		// 污染后续测试的 goroutine 基线断言（D6 已裁决的教训）。
+		// Flush 伙伴持久层并关闭 store，因此每段生命周期重新 OpenDisk（零值
+		// OpenOptions 即「打开既有存档、不建新档」）。closeHost 经 t.Cleanup
+		// 兜底且幂等（Host.Shutdown 幂等）：中途 t.Fatalf 时也必须回收
+		// world goroutine 与磁盘 store 句柄，否则会污染后续测试的 goroutine
+		// 基线断言（D6 已裁决的教训）。
 		openLifetime := func() (*Host, func()) {
 			store, err := storage.OpenDisk(context.Background(), root, storage.OpenOptions{})
 			if err != nil {
 				t.Fatalf("OpenDisk: %v", err)
 			}
-			config := hostTestConfig()
-			config.Companions = append([]companion.Definition(nil), definitions...)
-			config.MaxPlayers = 2
-			config.OutboxCapacity = 4096
-			config.HeartbeatInterval = time.Hour
-			config.HeartbeatTimeout = time.Hour
-			host := mustNewHost(t, config, flatTestGenerator{}, store)
+			host := mustNewHost(t, stageAcceptanceHostConfig(definitions), flatTestGenerator{}, store)
 			closed := false
 			closeHost := func() {
 				if closed {
@@ -147,9 +209,6 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 			t.Cleanup(closeHost)
 			return host, closeHost
 		}
-		closeLifetime := func(closeHost func()) {
-			closeHost()
-		}
 
 		// ---------- 生命周期 1：四 kind 计划 + 台词事件序列 ----------
 		host, closeHost := openLifetime()
@@ -157,6 +216,8 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 		client := openCompanionChatClient(t, host, transport, issuer)
 		stepUntilCompanionManagerReady(t, host, []network.ClientEndpoint{client}, id)
 
+		// 假规划模型不传 go_to 目标（变参为空）：混合计划正文随后经
+		// setPlanScript 整体注入，占位目标只服务两步 go_to 的第二段任务。
 		planner := newFakeCompanionModel(t)
 		planner.setPlanScript(stageAcceptancePlanJSON(
 			core.BlockPos{X: 2, Y: 1, Z: 4},
@@ -173,7 +234,7 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 		waitForIncomingChatDepth(t, host.world, 1)
 		// 三步计划的台词节点全集 = 开始 + 2 个进展（SelectProgressSteps(3)
 		// 全选 [0,1,2]，末步完成迁移产出 Completed、其表达由终态台词承载）+ 终态。
-		events := collectDialogueEvents(t, host, client, 2000, func(events []network.ChatEvent) bool {
+		events := collectDialogueEvents(t, host, client, firstLifetimeTickBudget, func(events []network.ChatEvent) bool {
 			return countKind(events, network.ChatEventTaskCompleted) == 1 &&
 				countKind(events, network.ChatEventCompanionSpeech) == 4
 		})
@@ -188,15 +249,8 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 			network.ChatEventTaskProgress, network.ChatEventTaskProgress,
 			network.ChatEventTaskCompleted,
 		}
-		if got := chatEventKinds(firstTaskEvents); len(got) != len(wantFirstFacts) {
-			t.Fatalf("[%s] 事实事件序列=%v，想要 %v", transport, got, wantFirstFacts)
-		} else {
-			for index, kind := range got {
-				if kind != wantFirstFacts[index] {
-					t.Fatalf("[%s] 事实事件序列=%v，想要 %v", transport, got, wantFirstFacts)
-				}
-			}
-		}
+		assertStageFactKindSequence(t, transport, "第一段",
+			chatEventKinds(firstTaskEvents), wantFirstFacts)
 		// 事实与台词共用全服 EventID 计数器：整段生命周期内严格递增。
 		assertStrictlyIncreasingEventIDs(t, events)
 
@@ -275,7 +329,8 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 		if summary := companionDialogueSlotSummary(t, host, id); summary != stageAcceptanceSummary {
 			t.Fatalf("[%s] 终态摘要未写入 manager：summary=%q", transport, summary)
 		}
-		closeLifetime(closeHost)
+		// 结束生命周期 1（幂等，t.Cleanup 兜底）：Shutdown 内 Flush 把摘要落盘。
+		closeHost()
 
 		// ---------- 磁盘断言：schema v4 + summary-only 载荷 ----------
 		// companions.ai 头部 32 字节：magic[0:4] "MCAI" + envelope 版本 u32
@@ -307,13 +362,8 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 		}
 
 		// ---------- 生命周期 2：同一磁盘存档重启恢复 + 摘要复用 ----------
-		config2 := hostTestConfig()
-		config2.Companions = append([]companion.Definition(nil), definitions...)
-		config2.MaxPlayers = 2
-		config2.OutboxCapacity = 4096
-		config2.HeartbeatInterval = time.Hour
-		config2.HeartbeatTimeout = time.Hour
-		host2 := mustNewHost(t, config2, flatTestGenerator{}, reopened)
+		// 与第一段共用同一 Host 配置构造（哑值说明见 stageAcceptanceHostConfig）。
+		host2 := mustNewHost(t, stageAcceptanceHostConfig(definitions), flatTestGenerator{}, reopened)
 		// 第二段生命周期同样注册幂等 cleanup 兜底（理由同 openLifetime）。
 		closed2 := false
 		closeHost2 := func() {
@@ -349,7 +399,7 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 
 		sendIntegration(t, client2, network.ChatCommand{Text: "@阿木 再走两步"})
 		waitForIncomingChatDepth(t, host2.world, 1)
-		events2 := collectDialogueEvents(t, host2, client2, 800, func(events []network.ChatEvent) bool {
+		events2 := collectDialogueEvents(t, host2, client2, secondLifetimeTickBudget, func(events []network.ChatEvent) bool {
 			return countKind(events, network.ChatEventTaskCompleted) == 1 &&
 				countKind(events, network.ChatEventCompanionSpeech) == 3
 		})
@@ -361,15 +411,8 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 			network.ChatEventAccepted, network.ChatEventTaskStarted,
 			network.ChatEventTaskProgress, network.ChatEventTaskCompleted,
 		}
-		if got := chatEventKinds(secondTaskEvents); len(got) != len(wantSecondFacts) {
-			t.Fatalf("[%s] 第二段事实序列=%v，想要 %v", transport, got, wantSecondFacts)
-		} else {
-			for index, kind := range got {
-				if kind != wantSecondFacts[index] {
-					t.Fatalf("[%s] 第二段事实序列=%v，想要 %v", transport, got, wantSecondFacts)
-				}
-			}
-		}
+		assertStageFactKindSequence(t, transport, "第二段",
+			chatEventKinds(secondTaskEvents), wantSecondFacts)
 		assertStrictlyIncreasingEventIDs(t, events2)
 		secondSpeeches := eventsWithKind(events2, network.ChatEventCompanionSpeech)
 		if len(secondSpeeches) != 3 {
@@ -404,7 +447,8 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 					transport, index, record.Persona)
 			}
 		}
-		closeLifetime(closeHost2)
+		// 结束生命周期 2（幂等，t.Cleanup 兜底），镜像第一段的关闭序列。
+		closeHost2()
 
 		return stageAcceptanceResult{
 			speechTexts:     append(firstSpeechTexts, secondSpeechTexts...),
@@ -417,30 +461,7 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 	tcp := runTransport("tcp")
 
 	// Memory/TCP parity：两传输的台词序列（两段生命周期拼接）与事实事件
-	// 类别序列逐条一致（EventID 绝对值不跨传输断言，见 parity 投影的既有纪律）。
-	if len(memory.speechTexts) == 0 {
-		t.Fatal("Memory 传输没有任何台词事件")
-	}
-	if len(memory.speechTexts) != len(tcp.speechTexts) {
-		t.Fatalf("台词序列不一致 memory=%v tcp=%v", memory.speechTexts, tcp.speechTexts)
-	}
-	for index := range memory.speechTexts {
-		if memory.speechTexts[index] != tcp.speechTexts[index] {
-			t.Fatalf("台词 %d 不一致 memory=%q tcp=%q（序列=%v/%v）",
-				index, memory.speechTexts[index], tcp.speechTexts[index],
-				memory.speechTexts, tcp.speechTexts)
-		}
-	}
-	for index, kind := range memory.firstFactKinds {
-		if kind != tcp.firstFactKinds[index] {
-			t.Fatalf("第一段事实序列 %d 不一致 memory=%v tcp=%v",
-				index, memory.firstFactKinds, tcp.firstFactKinds)
-		}
-	}
-	for index, kind := range memory.secondFactKinds {
-		if kind != tcp.secondFactKinds[index] {
-			t.Fatalf("第二段事实序列 %d 不一致 memory=%v tcp=%v",
-				index, memory.secondFactKinds, tcp.secondFactKinds)
-		}
-	}
+	// 类别序列逐条一致（EventID 绝对值不跨传输断言，见 parity 投影的既有
+	// 纪律）。三组序列经同一投影 helper 比对（F-6）。
+	assertStageAcceptanceParity(t, memory, tcp)
 }
