@@ -50,9 +50,9 @@
 
 ## E9 客户端呈现批（C2、C4、C6、C9）
 
-- [ ] E9.1 `chat.go` `ChatEventAccepted` 显式 case + default 防御兜底注释（C2）；`taskFailReasonText` 签名改 `network.TaskFailReason`（C4）；`truncateChatLine` 补中文 doc（C6）
-- [ ] E9.2 `internal/client` 导出容量常量，`cmd/mornlea` 复用消 `[32]` 字面；`chatLines [6]string` 补 6 出处注释（C9）
-- [ ] 验证：`go test ./cmd/mornlea ./internal/client -race -count=1` 全绿
+- [x] E9.1 `chat.go` `ChatEventAccepted` 显式 case + default 防御兜底注释（C2）；`taskFailReasonText` 签名改 `network.TaskFailReason`（C4）；`truncateChatLine` 补中文 doc（C6）
+- [x] E9.2 `internal/client` 导出容量常量，`cmd/mornlea` 复用消 `[32]` 字面；`chatLines [6]string` 补 6 出处注释（C9）
+- [x] 验证：`go test ./cmd/mornlea ./internal/client -race -count=1` 全绿
 
 ## E10 M5D 延期五项（F-2..F-6）
 
