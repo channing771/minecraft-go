@@ -57,10 +57,9 @@ func (server *Server) enqueueIncomingChat(sessionCtx context.Context, chat incom
 
 // drainIncomingChats 在持有 stepMu 的 tick 边界调用。
 func (server *Server) drainIncomingChats() []chatDelivery {
+	// len(chan) 语言级恒不超过 cap(chan)，而 incomingChats 全部构造点的
+	// 缓冲恰为 inputCapacity，本值天然以 inputCapacity 为上界。
 	pending := len(server.incomingChats)
-	if pending > inputCapacity {
-		pending = inputCapacity
-	}
 	deliveries := make([]chatDelivery, 0, pending)
 	for range pending {
 		chat := <-server.incomingChats

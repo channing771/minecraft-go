@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"sort"
 	"sync"
 
 	"github.com/channing771/mornlea/internal/companion"
@@ -573,8 +572,11 @@ func cloneAndSortCompanionBodies(records []companion.Body) []companion.Body {
 	return clone
 }
 
+// sortCompanionBodies 就地把身体记录按伙伴 ID 字节序升序排列，与
+// companionManager.orderedIDs 使用同一确定性次序；ID 唯一，无并列元素，
+// 排序稳定性不参与结果。
 func sortCompanionBodies(records []companion.Body) {
-	sort.Slice(records, func(left, right int) bool {
-		return bytes.Compare(records[left].ID[:], records[right].ID[:]) < 0
+	slices.SortFunc(records, func(left, right companion.Body) int {
+		return bytes.Compare(left.ID[:], right.ID[:])
 	})
 }
