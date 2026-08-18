@@ -64,7 +64,7 @@
 
 - [x] E11.1 TestScenarioV7 race-skip：`//go:build race` 辅助文件 + 测试开头 skip；非 race 门禁原样
 - [x] E11.2 `waitIntegrationCondition` 热轮询改 sleep 退避；`waitForIncomingChatDepth` 改 `>=`
-- [ ] E11.3 修复评审发现的既有负载敏感窗口：`TestCompanionDialogueTerminalCoversFourTerminalStates/TimedOut` 先等伙伴激活再泵过期迁移，消除「终态派发被出生扫描守卫永久跳过→60s 假超时」（E11 评审新发现，tasks.md 增补）
+- [x] E11.3 修复评审发现的既有负载敏感窗口：`TestCompanionDialogueTerminalCoversFourTerminalStates/TimedOut` 先等伙伴激活再泵过期迁移，消除「终态派发被出生扫描守卫永久跳过→60s 假超时」（E11 评审新发现，tasks.md 增补）
 - [x] 验证：`go test ./cmd/mornlea -race -count=1 -run TestScenarioV7`（skip 生效）；`go test ./internal/server -race -count=1`；一次全仓 `-race` 无新 flake
 
 ## E12 收尾门禁与流程沉淀
