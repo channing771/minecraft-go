@@ -32,4 +32,20 @@ M5B/M5C/M5D 三个里程碑的终审各遗留一批 minor 级打磨项（M5D led
 
 ## 延期与放弃
 
-归档前把执行期新增的延期/放弃项全文誊入本节。当前状态：考古清单 29 项全部纳入本变更执行，无先行放弃项。
+按本 change 确立的 backlog 沉淀纪律，执行期产生的未决项全文誊录于此（ledger 只做执行记录）。考古清单 29 项与既定 10 项全部执行完毕，以下为执行期新产生的递延/放弃项：
+
+**递延（后续里程碑候选）**：
+
+1. `internal/companion/planner.go` 排他矩阵中 `follow`+`player_id:null`、`place`+`block:null` 两个拒绝分支兼是 nil 解引用防 panic 屏障，但无直接用例锁定（E1 评审 Minor-1；误删分支时现有测试不变红）。
+2. `cmd/mornlea/interactive.go:33` 的 `[1024]rune` 输入缓冲与指令字节上限存在巧合耦合（今日 rune ≥ byte 恒不先触发；上限增大时才需收敛）（E7 评审）。
+3. `cmd/mornlea` 的 `formatChatEvent` 防御兜底「未知事件」契约可补直接构造未知 kind 的单测锁定（E9 评审 Minor-2）。
+4. `cmd/mornlea/capture_scene.go:52`、`capture_ai_companion_test.go:185` 的 `[32]network.ChatEvent` 字面（编译器类型匹配结构性锁定；彻底消字面留后续）（E9 concern）。
+5. `internal/network/codec_client.go:73/:238` ChatCommand 编解码的 1024 字面与 `:88` 错误文案（E7 锁测试已行为级覆盖；字面同源化留后续 change 收敛）。
+6. `internal/server/companion_stage_acceptance_test.go:45,65` 两处 `x, _ :=` 忽略返回值风格（E10 评审 Minor-2，风格备注）。
+7. `internal/companion/planner.go` 系统提示头段「水平 16 格、垂直 8 格」仍为文本手抄数字，与 A5 合并后的代码常量无关联（E3 评审观察；窗口常量参数化时连带清理）。
+
+**放弃（带理由）**：
+
+1. planWireStep map 中间形的错误文本在「未知字段+类型错误并存」时因 map 迭代序二选一非确定——错误类别（ErrPlannerInvalidPlan）与全部门禁不受影响，接受现状（E1 评审 Minor-2）。
+2. 注释内嵌散文数字（如 "1..256/1024 bytes"）在常量演进时会过时——由常量同源化后的引用式注释逐步替代，不批量回改（E7 评审观察）。
+3. E2 评审的「位次锁测试单独不区分新旧 issuers 守卫条件」——完整覆盖由位次锁+空闲态回归锁两条测试组合承担，属设计取舍（E6 复审 Minor）。

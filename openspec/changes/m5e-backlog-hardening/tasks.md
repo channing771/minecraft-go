@@ -69,6 +69,6 @@
 
 ## E12 收尾门禁与流程沉淀
 
-- [ ] E12.1 全量门禁：`go test ./... -race -count=1`、`go test ./internal/archcheck`、`go vet ./...`、`gofmt -l .` 零输出、`openspec validate --all --strict`
-- [ ] E12.2 `docs/notes/progress.md` 补 M5E 段落；AGENTS.md 基线核对（无协议/schema 变化，预计仅进度引用）
-- [ ] E12.3 backlog 沉淀纪律执行：ledger 未决项全文誊入 proposal.md「延期与放弃」节
+- [x] E12.1 全量门禁：`go test ./... -race -count=1`、`go test ./internal/archcheck`、`go vet ./...`、`gofmt -l .` 零输出、`openspec validate --all --strict`
+- [x] E12.2 `docs/notes/progress.md` 补 M5E 段落；AGENTS.md 基线核对（无协议/schema 变化，预计仅进度引用）
+- [x] E12.3 backlog 沉淀纪律执行：ledger 未决项全文誊入 proposal.md「延期与放弃」节
