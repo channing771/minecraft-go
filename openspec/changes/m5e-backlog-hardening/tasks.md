@@ -33,8 +33,8 @@
 
 ## E6 server 防御与复用（B3、B9）
 
-- [ ] E6.1 `submitPathRequest` 改复用 `standingCellOf`（B3）；issuers 空失配检查前移到 `BeginHead()` 之前（B9），安全论证入注释
-- [ ] 验证：`go test ./internal/server -race -count=1` 全绿；评审确认行为等价推理
+- [x] E6.1 `submitPathRequest` 改复用 `standingCellOf`（B3）；issuers 空失配检查前移到 `BeginHead()` 之前（B9），安全论证入注释
+- [x] 验证：`go test ./internal/server -race -count=1` 全绿；评审确认行为等价推理
 
 ## E7 上限常量同源化（A10、C5、C7）
 
