@@ -1,9 +1,9 @@
 // companions.ai schema v3 的任务区/FIFO 持久化与恢复测试：v3 变长步骤
-// round-trip 与 golden（四 kind 覆盖）、v2/v1 只读迁移且首次保存写 v3、
-// 任务与 FIFO 跨重启精确恢复、损坏矩阵（CRC/future/截断/超 430,080
-// bytes/非法任务状态/变长步长错位/follow 携带 deadline）与 5,000 步骤、
-// 16 条 FIFO 边界。全部用例不触盘（除显式 DiskStore 用例），失败注入均为
-// 字节级或载荷级构造。
+// round-trip 与冻结 golden 迁移（四 kind 覆盖）、v2/v1 只读迁移且首次保存
+// 写 v4、任务与 FIFO 跨重启精确恢复、损坏矩阵（CRC/future/截断/超
+// 438,280 bytes/非法任务状态/变长步长错位/follow 携带 deadline）与
+// 5,000 步骤、16 条 FIFO 边界。全部用例不触盘（除显式 DiskStore 用例），
+// 失败注入均为字节级或载荷级构造。
 package storage
 
 import (
@@ -100,12 +100,14 @@ func fixtureCompanionV3Queues() []StoredCompanionQueue {
 	return []StoredCompanionQueue{queue}
 }
 
-// TestCompanionCodecV3RoundTripAndGolden 锁定 schema v3 变长步骤编码：四 kind
-// 步骤按 13/13/15/17 落盘（follow 只携带玩家 ID、place 追加 block uint16）、
-// round-trip 精确保留、golden 字节稳定，以及文件上界常量 430,080。
+// TestCompanionCodecV3RoundTripAndGolden 锁定 v3 载荷经当前编码器的 round-trip
+// 与冻结 v3 golden 的只读迁移：四 kind 步骤按 13/13/15/17 落盘（follow 只携带
+// 玩家 ID、place 追加 block uint16）、round-trip 精确保留、golden 字节零改动，
+// 以及文件上界常量 438,280。v4 时代编码端只写 v4（无摘要载荷与 v3 位形同形），
+// v3 golden 自此是冻结的历史字节（同 v1/v2 纪律），不再由本测试重生成。
 func TestCompanionCodecV3RoundTripAndGolden(t *testing.T) {
-	if maxCompanionFileLength != 430080 {
-		t.Fatalf("max companion file length=%d，想要 430080", maxCompanionFileLength)
+	if maxCompanionFileLength != 438280 {
+		t.Fatalf("max companion file length=%d，想要 438280", maxCompanionFileLength)
 	}
 	input := fixtureCompanionBodies()
 	queues := fixtureCompanionV3Queues()
@@ -118,11 +120,11 @@ func TestCompanionCodecV3RoundTripAndGolden(t *testing.T) {
 	if !reflect.DeepEqual(input, bodiesSnapshot) || !reflect.DeepEqual(queues, queuesSnapshot) {
 		t.Fatalf("编码修改调用者载荷：records=%+v queues=%+v", input, queues)
 	}
-	if currentCompanionSchema != 3 {
-		t.Fatalf("current companion schema=%d，想要 3", currentCompanionSchema)
+	if currentCompanionSchema != 4 {
+		t.Fatalf("current companion schema=%d，想要 4", currentCompanionSchema)
 	}
-	if schema := binary.LittleEndian.Uint32(encoded[8:12]); schema != 3 {
-		t.Fatalf("schema=%d，想要 3", schema)
+	if schema := binary.LittleEndian.Uint32(encoded[8:12]); schema != 4 {
+		t.Fatalf("schema=%d，想要 4", schema)
 	}
 
 	// 文件总长按第一性原理核算：envelope 32 + active 记录（221 身体 + 1
@@ -130,7 +132,8 @@ func TestCompanionCodecV3RoundTripAndGolden(t *testing.T) {
 	// 区 = 指令前缀 2 + 指令字节 + 步骤数 2 + (13+13+15+17) + 步骤索引 4 +
 	// 状态 1 + 失败原因 1 + 开始 tick 8 + deadline 8；FIFO 区 = 计数 2 +
 	// 每条（前缀 2 + 字节）。place 相对 go_to 基长 +2、follow 用 kind+16-byte
-	// 玩家 ID 共 17——变长布局由本断言逐字节锁定。
+	// 玩家 ID 共 17——变长布局由本断言逐字节锁定。载荷无摘要 → 不写摘要区，
+	// 记录字节与 v3 位形完全一致。
 	taskArea := 2 + len("去橡树旁挖一格垫一块再跟着我") + 2 + (13 + 13 + 15 + 17) + 4 + 1 + 1 + 8 + 8
 	fifoArea := 2
 	for index := range queuesSnapshot[0].Pending {
@@ -138,7 +141,7 @@ func TestCompanionCodecV3RoundTripAndGolden(t *testing.T) {
 	}
 	wantLength := 32 + (companionRecordLength + 1 + taskArea + fifoArea) + (companionRecordLength + 1)
 	if len(encoded) != wantLength {
-		t.Fatalf("v3 文件长度=%d，想要 %d", len(encoded), wantLength)
+		t.Fatalf("v3 载荷文件长度=%d，想要 %d", len(encoded), wantLength)
 	}
 
 	got, err := decodeCompanions(encoded)
@@ -159,18 +162,23 @@ func TestCompanionCodecV3RoundTripAndGolden(t *testing.T) {
 		t.Fatalf("v3 任务字段=%+v，想要变长载荷精确保留且 follow 零 deadline", current)
 	}
 
+	// 冻结 v3 golden 的只读迁移：schema 字节恒为 3，无损读入且摘要为空
+	//（v3 布局没有摘要区）。编码端只写 v4，golden 字节永不再生。
 	path := filepath.Join("testdata", "companions-v3.bin")
-	if *updateStorageFixtures {
-		if err := os.WriteFile(path, encoded, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
 	want, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(want, encoded) {
-		t.Fatal("companions v3 fixture drift；需要显式 -update-storage-fixtures 重生成并评审字节")
+	if schema := binary.LittleEndian.Uint32(want[8:12]); schema != 3 {
+		t.Fatalf("v3 golden schema=%d，想要 3（字节冻结零改动）", schema)
+	}
+	v3Decoded, err := decodeCompanions(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v3Decoded.Revision != 43 || !reflect.DeepEqual(v3Decoded.Records, wantRecords) ||
+		!reflect.DeepEqual(v3Decoded.Queues, queuesSnapshot) {
+		t.Fatalf("v3 golden 迁移 decode=%+v，想要与 round-trip 同一载荷", v3Decoded)
 	}
 	clear(encoded)
 	if !reflect.DeepEqual(got.Queues, queuesSnapshot) {
@@ -178,10 +186,10 @@ func TestCompanionCodecV3RoundTripAndGolden(t *testing.T) {
 	}
 }
 
-// TestCompanionRestoreV2ReadOnlyMigrationAndV3Rewrite 锁定 v2 只读迁移：既有
-// golden（go_to 固定 13B 布局）无损读入，首次保存只写 v3，v2→v3 重写后载荷
-// 不漂移；磁盘路径与内存路径同一套编解码。
-func TestCompanionRestoreV2ReadOnlyMigrationAndV3Rewrite(t *testing.T) {
+// TestCompanionRestoreV2ReadOnlyMigrationAndV4Rewrite 锁定 v2 只读迁移：既有
+// golden（go_to 固定 13B 布局）无损读入，首次保存只写当前 schema（v4），重写
+// 后载荷不漂移；磁盘路径与内存路径同一套编解码。
+func TestCompanionRestoreV2ReadOnlyMigrationAndV4Rewrite(t *testing.T) {
 	golden, err := os.ReadFile(filepath.Join("testdata", "companions-v2.bin"))
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +205,7 @@ func TestCompanionRestoreV2ReadOnlyMigrationAndV3Rewrite(t *testing.T) {
 	if got.Revision != 41 || !reflect.DeepEqual(got.Queues, wantQueues) {
 		t.Fatalf("v2 迁移 decode=%+v，想要 revision=41 无损载荷 %+v", got, wantQueues)
 	}
-	// 规范重编码只写 v3：go_to 步骤 13B 布局在 v3 中原样保留。
+	// 规范重编码只写 v4：go_to 步骤 13B 布局在 v4 中原样保留。
 	encoded, err := encodeCompanions(CompanionSave{
 		Revision: got.Revision,
 		Records:  got.Records,
@@ -206,8 +214,8 @@ func TestCompanionRestoreV2ReadOnlyMigrationAndV3Rewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if schema := binary.LittleEndian.Uint32(encoded[8:12]); schema != 3 {
-		t.Fatalf("重编码 schema=%d，想要 3", schema)
+	if schema := binary.LittleEndian.Uint32(encoded[8:12]); schema != currentCompanionSchema {
+		t.Fatalf("重编码 schema=%d，想要 %d", schema, currentCompanionSchema)
 	}
 	migrated, err := decodeCompanions(encoded)
 	if err != nil {
@@ -215,7 +223,7 @@ func TestCompanionRestoreV2ReadOnlyMigrationAndV3Rewrite(t *testing.T) {
 	}
 	if migrated.Revision != 41 || !reflect.DeepEqual(migrated.Records, got.Records) ||
 		!reflect.DeepEqual(migrated.Queues, wantQueues) {
-		t.Fatalf("v2→v3 重写后载荷漂移：%+v", migrated)
+		t.Fatalf("v2→v4 重写后载荷漂移：%+v", migrated)
 	}
 
 	root := t.TempDir()
@@ -242,8 +250,8 @@ func TestCompanionRestoreV2ReadOnlyMigrationAndV3Rewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if schema := binary.LittleEndian.Uint32(after[8:12]); schema != 3 {
-		t.Fatalf("首次保存 schema=%d，想要写 v3", schema)
+	if schema := binary.LittleEndian.Uint32(after[8:12]); schema != currentCompanionSchema {
+		t.Fatalf("首次保存 schema=%d，想要写 v4", schema)
 	}
 	reloaded, err := store.LoadCompanions(context.Background())
 	if err != nil {
@@ -256,7 +264,7 @@ func TestCompanionRestoreV2ReadOnlyMigrationAndV3Rewrite(t *testing.T) {
 
 // TestCompanionCodecV2RoundTripAndGolden 锁定 v2 时代载荷（全部 go_to 步骤）
 // 经当前编码器的 round-trip：v2 golden 文件是冻结的只读迁移输入（字节零
-// 改动），编码端只写 v3；同一 go_to 载荷在 v3 中按相同 13B 布局到达。
+// 改动），编码端只写 v4；同一 go_to 载荷在 v4 中按相同 13B 布局到达。
 func TestCompanionCodecV2RoundTripAndGolden(t *testing.T) {
 	input := fixtureCompanionBodies()
 	queues := fixtureCompanionQueues()
@@ -365,7 +373,7 @@ func TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV3(t *testing.T) {
 		t.Fatal(err)
 	}
 	if schema := binary.LittleEndian.Uint32(after[8:12]); schema != currentCompanionSchema {
-		t.Fatalf("首次保存 schema=%d，想要写 v3", schema)
+		t.Fatalf("首次保存 schema=%d，想要写 v4", schema)
 	}
 	reloaded, err := store.LoadCompanions(context.Background())
 	if err != nil {
@@ -747,7 +755,7 @@ func TestCompanionRestoreRejectsCorruptTaskPayloads(t *testing.T) {
 		t.Fatalf("v2 非 go_to 步骤 decode error=%v，想要 ErrCorrupt", err)
 	}
 
-	// 超 430,080 bytes 的文件必须在任何解析与分配之前被拒绝。
+	// 超 438,280 bytes 的文件必须在任何解析与分配之前被拒绝。
 	oversized := bytes.Repeat([]byte{0x5a}, maxCompanionFileLength+1)
 	if _, err := decodeCompanions(oversized); !errors.Is(err, ErrCorrupt) ||
 		!strings.Contains(err.Error(), "exceeds limit") {

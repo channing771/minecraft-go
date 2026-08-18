@@ -165,12 +165,17 @@ func newWorld(
 			server.engine.RegisterCompanion(restore)
 		}
 		// 伙伴启用即装配任务编排。NewHost 已在存档加载前校验模型设置，
-		// 这里构造失败只可能是不可达的防御路径。
+		// 这里构造失败只可能是不可达的防御路径。Dialogue 客户端与 Planner
+		// 共用同一 AIModel 设置与密钥，独立构造（提示与输入互不共享）。
 		planner, err := companion.NewPlannerClient(config.AIModel, config.AIAPIKey, nil)
 		if err != nil {
 			panic("server: construct companion planner: " + err.Error())
 		}
-		server.companionManager = newCompanionManager(server.engine, config, planner)
+		dialogue, err := companion.NewDialogueClient(config.AIModel, config.AIAPIKey, nil)
+		if err != nil {
+			panic("server: construct companion dialogue client: " + err.Error())
+		}
+		server.companionManager = newCompanionManager(server.engine, config, planner, dialogue)
 		// 注入在线玩家权威源：规划快照的 OnlinePlayers 填充与 follow 目标
 		// 的在线性/位置解析共用同一会话注册表读取路径。
 		server.companionManager.onlinePlayers = server.onlinePlanPlayersSnapshot
@@ -306,6 +311,7 @@ func (server *Server) step(scheduled time.Time) sim.TickResult {
 		server.companions.Observe(
 			server.engine.CompanionBodies(),
 			server.companionManagerTaskStates(),
+			server.companionManagerSummaries(),
 		)
 		if err := server.companions.Poll(result.Tick); err != nil {
 			slog.Warn("伙伴自动保存失败，保留重试", "error", err)

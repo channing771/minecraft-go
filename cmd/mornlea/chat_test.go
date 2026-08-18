@@ -559,6 +559,100 @@ func TestChatEventsTaskLifecycleHUDLinesRespectBoundsAndExcludeModelText(t *test
 	}
 }
 
+// TestChatEventCompanionSpeechRendersAsPrefixedLine 锁定 v19 台词事件的核心呈现事实：
+// CompanionSpeech 是 ChatEvent 中唯一携带模型生成文本的 kind，客户端对它的唯一处理是
+// 「伙伴名：台词原文」一行——不改写、清洗或加引号；短台词必须逐 rune 原样进入 HUD。
+func TestChatEventCompanionSpeechRendersAsPrefixedLine(t *testing.T) {
+	speech := speechChatEvent(1, "我们先把工具修好。")
+	if got, want := formatChatEvent(speech), "阿木：我们先把工具修好。"; got != want {
+		t.Fatalf("formatChatEvent = %q, want %q", got, want)
+	}
+	app := &application{chatEvents: &client.ChatEvents{}}
+	if err := app.chatEvents.Apply(speech); err != nil {
+		t.Fatal(err)
+	}
+	overlay := app.chatOverlay()
+	if len(overlay.Lines) != 1 || overlay.Lines[0] != "阿木：我们先把工具修好。" {
+		t.Fatalf("overlay lines=%q", overlay.Lines)
+	}
+}
+
+// TestChatEventCompanionSpeechLineTruncatedAt32RunesWithPrefix 锁定台词行宽度纪律：
+// 伙伴名前缀与台词共用既有事实行的 32 rune 行上限（前缀计入），超长时第 32 个 rune
+// 是既有截断省略号，而不是为台词行另设上限或整行丢弃。
+func TestChatEventCompanionSpeechLineTruncatedAt32RunesWithPrefix(t *testing.T) {
+	app := &application{chatEvents: &client.ChatEvents{}}
+	if err := app.chatEvents.Apply(speechChatEvent(1, strings.Repeat("话", 40))); err != nil {
+		t.Fatal(err)
+	}
+	overlay := app.chatOverlay()
+	if len(overlay.Lines) != 1 {
+		t.Fatalf("overlay lines=%q", overlay.Lines)
+	}
+	runes := []rune(overlay.Lines[0])
+	if len(runes) != 32 || runes[31] != '…' {
+		t.Fatalf("speech line = %q（%d rune），want 32 rune 且以 … 结尾", overlay.Lines[0], len(runes))
+	}
+	if !strings.HasPrefix(overlay.Lines[0], "阿木：") {
+		t.Fatalf("speech line lost companion prefix: %q", overlay.Lines[0])
+	}
+	if strings.Contains(overlay.Lines[0], strings.Repeat("话", 30)) {
+		t.Fatalf("speech line not truncated at 32 rune: %q", overlay.Lines[0])
+	}
+}
+
+// TestChatEventCompanionSpeechOccupiesOwnLineAmongTaskFacts 锁定混排纪律：台词行与
+// 任务事实行在同一个 EventID 环内各占一行、顺序保持，不存在把台词并入事实行或
+// 整行吞掉的路径。
+func TestChatEventCompanionSpeechOccupiesOwnLineAmongTaskFacts(t *testing.T) {
+	app := &application{chatEvents: &client.ChatEvents{}}
+	events := []network.ChatEvent{
+		acceptedChatEvent(1),
+		taskChatEvent(2, network.ChatEventTaskStarted, network.ChatRejectNone),
+		speechChatEvent(3, "收到，这就去。"),
+		taskChatEvent(4, network.ChatEventTaskCompleted, network.ChatRejectNone),
+	}
+	for _, event := range events {
+		if err := app.chatEvents.Apply(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	overlay := app.chatOverlay()
+	want := []string{
+		"Chen → 阿木：挖石头",
+		"阿木 开始执行：去东边",
+		"阿木：收到，这就去。",
+		"阿木 已完成：去东边",
+	}
+	if len(overlay.Lines) != len(want) {
+		t.Fatalf("HUD 行数 = %d，want %d（lines=%q）", len(overlay.Lines), len(want), overlay.Lines)
+	}
+	for index, line := range want {
+		if got := overlay.Lines[index]; got != line {
+			t.Fatalf("HUD 行 %d = %q, want %q", index, got, line)
+		}
+	}
+}
+
+// TestCompanionSpeechLinesResetOnDisconnect 确认断线清空路径对台词事件同样生效：
+// 清空逻辑作用于整个 ChatEvent 环与格式化行缓存，没有按 kind 过滤的白名单。
+// 本用例不打开聊天输入，因此不断言光标重捕获（那由 chatWasOpen 分支负责）。
+func TestCompanionSpeechLinesResetOnDisconnect(t *testing.T) {
+	app, _ := newInteractiveTestApplication(t)
+	app.window = &fakeInteractiveWindow{}
+	app.chatEvents = &client.ChatEvents{}
+	if err := app.chatEvents.Apply(speechChatEvent(1, "我们先把工具修好。")); err != nil {
+		t.Fatal(err)
+	}
+	if overlay := app.chatOverlay(); len(overlay.Lines) != 1 || overlay.Lines[0] != "阿木：我们先把工具修好。" {
+		t.Fatalf("warm overlay=%+v", overlay)
+	}
+	app.closeClientSession(nil)
+	if overlay := app.chatOverlay(); overlay.Open || overlay.Input != "" || len(overlay.Lines) != 0 {
+		t.Fatalf("closed overlay=%+v", overlay)
+	}
+}
+
 func taskChatEvent(id uint64, kind network.ChatEventKind, reason network.ChatRejectReason) network.ChatEvent {
 	return network.ChatEvent{
 		EventID:       id,
@@ -688,6 +782,20 @@ func acceptedChatEvent(id uint64) network.ChatEvent {
 		CompanionName: "阿木",
 		Kind:          network.ChatEventAccepted,
 		Command:       "挖石头",
+	}
+}
+
+// speechChatEvent 构造一条合法的 v19 台词事件：携带完整玩家与伙伴身份，
+// 文本槽位只写 Speech（与 Command 互斥），供客户端呈现测试复用。
+func speechChatEvent(id uint64, speech string) network.ChatEvent {
+	return network.ChatEvent{
+		EventID:       id,
+		PlayerID:      core.PlayerID{0: 0x12, 6: 0x40, 8: 0x80, 15: 1},
+		PlayerName:    "Chen",
+		CompanionID:   companion.ID{0: 0x12, 6: 0x40, 8: 0x80, 15: 2},
+		CompanionName: "阿木",
+		Kind:          network.ChatEventCompanionSpeech,
+		Speech:        speech,
 	}
 }
 

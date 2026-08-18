@@ -153,6 +153,16 @@ func runCompanionInteractionParity(t *testing.T, transport string) interactionPa
 	id := chatTestCompanionID(1)
 	model := newFakeCompanionModel(t)
 	host := newInteractionParityHost(t, id, model)
+	// 台词平面在本 parity 场景保持静默：为 dialogue 客户端接入持续 5xx 的
+	// 独立假台词模型。规划与台词共用 endpoint 配置，若不分离，台词请求会
+	// 消耗假模型的逐请求计划脚本并污染 ModelRequests 计数；而成功台词的
+	// CompanionSpeech 事件到达 tick 取决于 HTTP 时序，会破坏下方硬编码
+	// transcript 的精确 EventID。静默模式下事实 transcript 与 M5C 基线
+	// 逐字节一致（顺带锁定「台词失败只跳过、事实平面不变」），台词自身的
+	// Memory/TCP parity 由 TestCompanionDialogueSpeechMemoryTCPParity 锁定。
+	silentDialogue := newFakeDialogueModel(t)
+	silentDialogue.setStatus(500)
+	host.world.companionManager.replaceDialogueForTest(t, silentDialogue)
 	firstIdentity := integrationIdentity(0xb1, "玩家甲")
 	secondIdentity := integrationIdentity(0xb2, "玩家乙")
 	first := openCompanionChatClient(t, host, transport, firstIdentity)

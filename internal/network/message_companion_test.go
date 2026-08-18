@@ -73,7 +73,8 @@ func TestCompanionMessageIDsAreAppendOnly(t *testing.T) {
 }
 
 func TestChatEventTaskEnumsAreFrozen(t *testing.T) {
-	// v17 在既有 kind 1..2 之后追加任务生命周期 kind 3..7，v18 追加停止 kind 8；未知 kind 9 仍非法。
+	// v17 在既有 kind 1..2 之后追加任务生命周期 kind 3..7，v18 追加停止 kind 8，
+	// v19 追加伙伴台词 kind 9；未知 kind 10 仍非法。
 	kinds := []struct {
 		name string
 		got  ChatEventKind
@@ -87,6 +88,7 @@ func TestChatEventTaskEnumsAreFrozen(t *testing.T) {
 		{"task failed", ChatEventTaskFailed, 6},
 		{"task timed out", ChatEventTaskTimedOut, 7},
 		{"task stopped", ChatEventTaskStopped, 8},
+		{"companion speech", ChatEventCompanionSpeech, 9},
 	}
 	for _, kind := range kinds {
 		if uint8(kind.got) != kind.want {
@@ -228,7 +230,7 @@ func TestChatEventTaskLifecycleCombinationsAreRejectedAtomically(t *testing.T) {
 		}),
 		// 未知 kind 保持非法。
 		ChatEvent{EventID: 1, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
-			CompanionID: testCompanionID(1), CompanionName: "A", Kind: ChatEventKind(9),
+			CompanionID: testCompanionID(1), CompanionName: "A", Kind: ChatEventKind(10),
 			RejectReason: ChatRejectNone, Command: "x"},
 	}
 	for _, message := range invalid {
@@ -257,7 +259,7 @@ func TestChatEventTaskDecoderRejectsInvalidKindReasonCombinations(t *testing.T) 
 		offset int
 		value  byte
 	}{
-		{"unknown kind", kindOffset, 9},
+		{"unknown kind", kindOffset, 10},
 		{"task kind with rejection reason", kindOffset + 1, byte(ChatRejectInvalidFormat)},
 		{"task kind with queue full reason", kindOffset + 1, byte(ChatRejectQueueFull)},
 		{"task kind with task fail reason", kindOffset + 1, byte(TaskFailPlannerUnavailable)},
@@ -270,7 +272,7 @@ func TestChatEventTaskDecoderRejectsInvalidKindReasonCombinations(t *testing.T) 
 	}
 
 	// TaskStopped wire 的 reason 槽位只接受 None：携带拒绝原因或失败原因都必须整体拒绝，
-	// 未知 kind 9 也保持非法。
+	// 未知 kind 10 也保持非法。
 	stopped := taskChatEvent(1, ChatEventTaskStopped, ChatRejectNone)
 	_, stoppedWire, err := encodeServerControlPayload(StatePlay, stopped)
 	if err != nil {
@@ -284,9 +286,9 @@ func TestChatEventTaskDecoderRejectsInvalidKindReasonCombinations(t *testing.T) 
 		}
 	}
 	unknownKind := append([]byte(nil), stoppedWire...)
-	unknownKind[kindOffset] = 9
+	unknownKind[kindOffset] = 10
 	if packet, err := decodeServerControlPayload(StatePlay, 16, unknownKind); err == nil || packet != nil {
-		t.Fatalf("未知 kind 9 wire 解码为 %#v, %v", packet, err)
+		t.Fatalf("未知 kind 10 wire 解码为 %#v, %v", packet, err)
 	}
 
 	// TaskFailed 的 reason 槽位只接受 16..20；15/21 与拒绝原因 4 都必须被拒。
@@ -338,6 +340,126 @@ func TestChatEventTaskDecoderRejectsInvalidKindReasonCombinations(t *testing.T) 
 	}
 }
 
+func TestChatEventCompanionSpeechCombinationsValidateAndRoundTrip(t *testing.T) {
+	// v19 追加的 CompanionSpeech 是 ChatEvent 中唯一允许携带模型生成文本的 kind：
+	// 必须携带合法 event ID、完整玩家与伙伴身份、1..256 bytes 合法台词与 None reason，
+	// 且不得复述玩家指令。256-byte 单字节与多字节混合台词都是合法上界。
+	multibyteMax := strings.Repeat("台", 85) + "a"
+	if len(multibyteMax) != 256 {
+		t.Fatalf("多字节台词夹具 = %d bytes，想要 256", len(multibyteMax))
+	}
+	valid := []ChatEvent{
+		companionSpeechEvent(1, "开始干活。"),
+		companionSpeechEvent(2, strings.Repeat("x", 256)),
+		companionSpeechEvent(3, multibyteMax),
+	}
+	for _, event := range valid {
+		if err := event.Validate(); err != nil {
+			t.Fatalf("合法台词事件 %d 被拒绝: %v", event.EventID, err)
+		}
+		packetID, payload, err := encodeServerControlPayload(StatePlay, event)
+		if err != nil || packetID != 16 {
+			t.Fatalf("台词事件编码 = (%d,%d,%v)", packetID, len(payload), err)
+		}
+		decoded, err := decodeServerControlPayload(StatePlay, packetID, payload)
+		if err != nil || !reflect.DeepEqual(decoded, event) {
+			t.Fatalf("台词事件往返 = %#v, %v，想要 %#v", decoded, err, event)
+		}
+	}
+}
+
+func TestChatEventCompanionSpeechCombinationsAreRejectedAtomically(t *testing.T) {
+	// 任一字段不满足 Speech 的组合要求即整体拒绝，且不得进入 wire。
+	invalid := []interface{ Validate() error }{
+		// 台词长度与文本纪律：空台词、257-byte、首尾空白（含全角空格与不换行空格）。
+		companionSpeechEvent(1, ""),
+		companionSpeechEvent(1, strings.Repeat("x", 257)),
+		companionSpeechEvent(1, " 台词"),
+		companionSpeechEvent(1, "台词 "),
+		companionSpeechEvent(1, "\u3000台词"),
+		companionSpeechEvent(1, "台词\u00a0"),
+		// 台词不得包含 NUL 或任何 Unicode control。
+		companionSpeechEvent(1, "台\x00词"),
+		companionSpeechEvent(1, "台\n词"),
+		// 台词必须是有效 UTF-8。
+		companionSpeechEvent(1, string([]byte{0xff})),
+		// reason 必须为 None：拒绝原因与任务失败原因都不允许出现在台词事件上。
+		mutateTaskEvent(companionSpeechEvent(1, "台词"), func(e *ChatEvent) { e.RejectReason = ChatRejectInvalidFormat }),
+		mutateTaskEvent(companionSpeechEvent(1, "台词"), func(e *ChatEvent) { e.RejectReason = ChatRejectQueueFull }),
+		mutateTaskEvent(companionSpeechEvent(1, "台词"), func(e *ChatEvent) { e.RejectReason = ChatRejectNotFollowing }),
+		mutateTaskEvent(companionSpeechEvent(1, "台词"), func(e *ChatEvent) { e.RejectReason = ChatRejectReason(TaskFailInventoryFull) }),
+		// 台词事件不得携带玩家指令字段：它只表达台词，不复述触发指令。
+		mutateTaskEvent(companionSpeechEvent(1, "台词"), func(e *ChatEvent) { e.Command = "x" }),
+		// 伙伴身份必须完整。
+		mutateTaskEvent(companionSpeechEvent(1, "台词"), func(e *ChatEvent) { e.CompanionID = companion.ID{} }),
+		mutateTaskEvent(companionSpeechEvent(1, "台词"), func(e *ChatEvent) { e.CompanionName = "" }),
+		mutateTaskEvent(companionSpeechEvent(1, "台词"), func(e *ChatEvent) { e.CompanionName = " A" }),
+		// 台词字段只属于 Speech kind：事实与拒绝 kind 携带台词都必须整条拒绝。
+		mutateTaskEvent(validAcceptedChatEvent(), func(e *ChatEvent) { e.Speech = "台词" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskStarted, ChatRejectNone), func(e *ChatEvent) { e.Speech = "台词" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskFailed, ChatRejectReason(TaskFailPlannerUnavailable)), func(e *ChatEvent) { e.Speech = "台词" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventTaskStopped, ChatRejectNone), func(e *ChatEvent) { e.Speech = "台词" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventRejected, ChatRejectInvalidFormat), func(e *ChatEvent) { e.Speech = "台词" }),
+		mutateTaskEvent(taskChatEvent(1, ChatEventRejected, ChatRejectQueueFull), func(e *ChatEvent) { e.Speech = "台词" }),
+	}
+	for _, message := range invalid {
+		if err := message.Validate(); err == nil {
+			t.Fatalf("非法台词组合被接受: %+v", message)
+		}
+		if event, ok := message.(ChatEvent); ok {
+			if _, _, err := encodeServerControlPayload(StatePlay, event); err == nil {
+				t.Fatalf("非法台词组合被编码: %+v", event)
+			}
+		}
+	}
+}
+
+func TestChatEventCompanionSpeechDecoderRejectsInvalidWire(t *testing.T) {
+	// 从合法台词 wire 出发做定向突变：未知 kind、非 None reason 与台词文本纪律
+	// 违例都必须在解码层整体拒绝，不得产生部分应用的事件。
+	event := companionSpeechEvent(1, "台词")
+	_, wire, err := encodeServerControlPayload(StatePlay, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kindOffset := 8 + 16 + 1 + len(event.PlayerName) + 16 + 1 + len(event.CompanionName)
+	for _, mutation := range []struct {
+		name   string
+		mutate func([]byte)
+	}{
+		{"unknown kind", func(p []byte) { p[kindOffset] = 10 }},
+		{"reject reason", func(p []byte) { p[kindOffset+1] = byte(ChatRejectQueueFull) }},
+		{"fail reason", func(p []byte) { p[kindOffset+1] = byte(TaskFailInventoryFull) }},
+		{"speech NUL", func(p []byte) { p[kindOffset+3] = 0 }},
+		{"speech control", func(p []byte) { p[kindOffset+3] = '\n' }},
+		{"leading space", func(p []byte) { p[kindOffset+3] = ' ' }},
+		{"trailing space", func(p []byte) { p[kindOffset+8] = ' ' }},
+	} {
+		payload := append([]byte(nil), wire...)
+		mutation.mutate(payload)
+		if packet, err := decodeServerControlPayload(StatePlay, 16, payload); err == nil || packet != nil {
+			t.Fatalf("%s wire 解码为 %#v, %v", mutation.name, packet, err)
+		}
+	}
+
+	// 编码器无法产出非法台词，wire 层的长度边界需要手工构造：
+	// 空台词与 257/300-byte 台词槽位都必须被解码器拒绝。
+	for _, speech := range []string{"", strings.Repeat("x", 257), strings.Repeat("x", 300)} {
+		var encoder byteEncoder
+		encoder.u64(1)
+		encoder.data = append(encoder.data, event.PlayerID[:]...)
+		encoder.string(event.PlayerName, 128)
+		encoder.data = append(encoder.data, event.CompanionID[:]...)
+		encoder.string(event.CompanionName, 128)
+		encoder.u8(uint8(ChatEventCompanionSpeech))
+		encoder.u8(uint8(ChatRejectNone))
+		encoder.string(speech, 1024)
+		if packet, err := decodeServerControlPayload(StatePlay, 16, encoder.data); err == nil || packet != nil {
+			t.Fatalf("%d-byte 台词 wire 解码为 %#v, %v", len(speech), packet, err)
+		}
+	}
+}
+
 func TestCompanionMessageGolden(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -377,6 +499,10 @@ func TestCompanionMessageGolden(t *testing.T) {
 		{"ChatEventTaskFailInventoryFull", nil, taskChatEvent(15, ChatEventTaskFailed, ChatRejectReason(TaskFailInventoryFull)), 16,
 			"0f00000000000000" + "10000000000040008000000000000009" + "044368656e" +
 				"10000000000040008000000000000001" + "0141" + "0614" + "0178"},
+		// v19 台词事件：kind 9、reason 0，台词复用既有文本槽位（此处为 6-byte "台词"）。
+		{"ChatEventCompanionSpeech", nil, companionSpeechEvent(16, "台词"), 16,
+			"1000000000000000" + "10000000000040008000000000000009" + "044368656e" +
+				"10000000000040008000000000000001" + "0141" + "0900" + "06e58fb0e8af8d"},
 		{"CompanionSpawn", nil, CompanionSpawn{ID: testCompanionID(1), Name: "A", Tick: 1}, 17,
 			"10000000000040008000000000000001" + "0141" + "0100000000000000" +
 				"00000000" + "000000000000000000000000" + "0000000000000000"},
@@ -502,7 +628,7 @@ func TestCompanionSpawnAndChatEventStringBoundaries(t *testing.T) {
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: "Chen", CompanionID: id,
 			CompanionName: "A", Kind: ChatEventAccepted, RejectReason: ChatRejectInvalidFormat, Command: "x"},
 		ChatEvent{EventID: 1, PlayerID: playerID, PlayerName: "Chen", CompanionID: id,
-			CompanionName: "A", Kind: ChatEventKind(9), RejectReason: ChatRejectNone, Command: "x"},
+			CompanionName: "A", Kind: ChatEventKind(10), RejectReason: ChatRejectNone, Command: "x"},
 	}
 	for _, message := range invalid {
 		if err := message.Validate(); err == nil {
@@ -624,6 +750,15 @@ func TestCompanionMessagesHaveFixedMaximumWireLengths(t *testing.T) {
 				RejectReason: ChatRejectNotFollowing, Command: maxCommand})
 			return payload, err
 		}},
+		// v19 的 CompanionSpeech 复用既有文本槽位：256-byte 台词 + 最长身份的事件
+		// 只有 560 bytes，固定上限 1328 bytes 不变。
+		{"ChatEventCompanionSpeech", 560, func() ([]byte, error) {
+			_, payload, err := encodeServerControlPayload(StatePlay, ChatEvent{EventID: 1,
+				PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: maxName, CompanionID: id,
+				CompanionName: maxName, Kind: ChatEventCompanionSpeech,
+				RejectReason: ChatRejectNone, Speech: strings.Repeat("x", 256)})
+			return payload, err
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -632,6 +767,25 @@ func TestCompanionMessagesHaveFixedMaximumWireLengths(t *testing.T) {
 				t.Fatalf("wire length=%d error=%v, 想要 %d", len(payload), err, test.want)
 			}
 		})
+	}
+	// 既有指令文本边界不回归：1022/1023/1024-byte 指令对应 1326/1327/1328-byte wire，
+	// 1328 仍是 ChatEvent 的固定上限。
+	for _, boundary := range []struct {
+		commandBytes int
+		wantWire     int
+	}{
+		{1022, 1326},
+		{1023, 1327},
+		{1024, 1328},
+	} {
+		_, payload, err := encodeServerControlPayload(StatePlay, ChatEvent{EventID: 1,
+			PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: maxName, CompanionID: id,
+			CompanionName: maxName, Kind: ChatEventAccepted, RejectReason: ChatRejectNone,
+			Command: strings.Repeat("x", boundary.commandBytes)})
+		if err != nil || len(payload) != boundary.wantWire {
+			t.Fatalf("%d-byte 指令事件 wire length=%d error=%v, 想要 %d",
+				boundary.commandBytes, len(payload), err, boundary.wantWire)
+		}
 	}
 	if packet, err := decodeClientPacketPayload(StatePlay, 12, make([]byte, 1027)); err == nil || packet != nil {
 		t.Fatalf("超长 ChatCommand 解码为 %#v, %v", packet, err)
@@ -706,7 +860,7 @@ func TestCompanionDecoderRejectsInvalidIDsEnumsNumbersAndDimensions(t *testing.T
 	}
 	kindOffset := 8 + 16 + 1 + len(accepted.PlayerName) + 16 + 1 + len(accepted.CompanionName)
 	for _, mutation := range []func([]byte){
-		func(payload []byte) { payload[kindOffset] = 9 },
+		func(payload []byte) { payload[kindOffset] = 10 },
 		func(payload []byte) { payload[kindOffset+1] = byte(ChatRejectInvalidFormat) },
 		func(payload []byte) { clear(payload[8 : 8+16]) },
 	} {
@@ -801,6 +955,16 @@ func taskChatEvent(id uint64, kind ChatEventKind, reason ChatRejectReason) ChatE
 		EventID: id, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
 		CompanionID: testCompanionID(1), CompanionName: "A",
 		Kind: kind, RejectReason: reason, Command: "x",
+	}
+}
+
+// companionSpeechEvent 构造一条 v19 伙伴台词事件：携带完整玩家与伙伴身份、
+// 合法台词与 None reason，且不复述玩家指令。
+func companionSpeechEvent(id uint64, speech string) ChatEvent {
+	return ChatEvent{
+		EventID: id, PlayerID: core.PlayerID(testCompanionID(9)), PlayerName: "Chen",
+		CompanionID: testCompanionID(1), CompanionName: "A",
+		Kind: ChatEventCompanionSpeech, RejectReason: ChatRejectNone, Speech: speech,
 	}
 }
 

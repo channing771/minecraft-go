@@ -17,7 +17,7 @@ func TestCompanionPersistenceCoalescesToOneInflightAggregate(t *testing.T) {
 	store := newControllableCompanionStore()
 	p := newCompanionPersistence(store, storage.StoredCompanions{Revision: 7}, companionPersistenceTestConfig())
 	t.Cleanup(p.Close)
-	p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 	if err := p.Poll(10); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestCompanionPersistenceCoalescesToOneInflightAggregate(t *testing.T) {
 	if first.Revision != 8 || first.Records[0].Position[0] != 10 {
 		t.Fatalf("first save=%+v", first)
 	}
-	p.Observe([]companion.Body{companionBody(1, 20)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 20)}, nil, nil)
 	if err := p.Poll(20); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestCompanionPersistencePreservesInactiveRecords(t *testing.T) {
 		Records:  []companion.Body{companionBody(2, 2), companionBody(1, 1)},
 	}, companionPersistenceTestConfig())
 	t.Cleanup(p.Close)
-	p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 	if err := p.Poll(10); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestCompanionPersistenceSaveFailureRetainsDirtyAndRetriesAtTick(t *testing.
 	store := newControllableCompanionStore()
 	p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
 	t.Cleanup(p.Close)
-	p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 	_ = p.Poll(10)
 	first := receiveCompanionSave(t, store)
 	store.complete(errors.New("disk full"))
@@ -87,7 +87,7 @@ func TestCompanionPersistenceFlushFailureCanBeRetried(t *testing.T) {
 	store := newControllableCompanionStore()
 	p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
 	t.Cleanup(p.Close)
-	p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 	firstDone := make(chan error, 1)
 	go func() { firstDone <- p.Flush(context.Background()) }()
 	first := receiveCompanionSave(t, store)
@@ -102,7 +102,7 @@ func TestCompanionPersistenceFlushFailureCanBeRetried(t *testing.T) {
 	if !reflect.DeepEqual(retry, first) {
 		t.Fatalf("Flush retry=%+v, want %+v", retry, first)
 	}
-	p.Observe([]companion.Body{companionBody(1, 20)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 20)}, nil, nil)
 	store.complete(nil)
 	latest := receiveCompanionSaveBeforeFlushReturns(t, store, secondDone)
 	if latest.Revision != 2 || latest.Records[0].Position[0] != 20 {
@@ -127,7 +127,7 @@ func TestCompanionPersistenceDoesNotHoldMutexDuringStoreSave(t *testing.T) {
 		}
 		mutexFree <- free
 	})
-	p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 	if err := p.Poll(10); err != nil {
 		t.Fatal(err)
 	}
@@ -143,10 +143,10 @@ func TestCompanionPersistenceChangeDuringInflightRemainsDirty(t *testing.T) {
 	store := newControllableCompanionStore()
 	p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
 	t.Cleanup(p.Close)
-	p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 	_ = p.Poll(10)
 	_ = receiveCompanionSave(t, store)
-	p.Observe([]companion.Body{companionBody(1, 20)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 20)}, nil, nil)
 	store.complete(nil)
 	pollCompanionPersistenceUntil(t, p, 11, func() bool {
 		p.mu.Lock()
@@ -160,7 +160,7 @@ func TestCompanionPersistenceRetryDoesNotAliasStoreSaveInput(t *testing.T) {
 	store.mutateNextSave()
 	p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
 	t.Cleanup(p.Close)
-	p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 	_ = p.Poll(10)
 	mutated := receiveCompanionSave(t, store)
 	if mutated.Records[0].Position[0] != 999 {
@@ -188,7 +188,7 @@ func TestCompanionPersistenceFlushWaitsForInflightAndWritesLatestOnce(t *testing
 			store := newControllableCompanionStore()
 			p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
 			t.Cleanup(p.Close)
-			p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+			p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 			flushed := make(chan error, 1)
 			if test.inherited {
 				if err := p.Poll(10); err != nil {
@@ -204,13 +204,13 @@ func TestCompanionPersistenceFlushWaitsForInflightAndWritesLatestOnce(t *testing
 				}
 			}
 
-			p.Observe([]companion.Body{companionBody(1, 20)}, nil)
+			p.Observe([]companion.Body{companionBody(1, 20)}, nil, nil)
 			store.complete(nil)
 			followup := receiveCompanionSaveBeforeFlushReturns(t, store, flushed)
 			if followup.Revision != 2 || followup.Records[0].Position[0] != 20 {
 				t.Fatalf("follow-up save=%+v, want revision 2 body 20", followup)
 			}
-			p.Observe([]companion.Body{companionBody(1, 30)}, nil)
+			p.Observe([]companion.Body{companionBody(1, 30)}, nil, nil)
 			store.complete(nil)
 			select {
 			case save := <-store.started:
@@ -247,7 +247,7 @@ func TestCompanionPersistenceFlushCancellationKeepsWorkerAndRetry(t *testing.T) 
 	store := newControllableCompanionStore()
 	p := newCompanionPersistence(store, storage.StoredCompanions{}, companionPersistenceTestConfig())
 	t.Cleanup(p.Close)
-	p.Observe([]companion.Body{companionBody(1, 10)}, nil)
+	p.Observe([]companion.Body{companionBody(1, 10)}, nil, nil)
 	if err := p.Poll(10); err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestCompanionPersistenceDefersQueueWithoutBodyRecordUntilActivation(t *test
 		ID:      companionBody(9, 90).ID,
 		Pending: []companion.TaskCommand{"出生前的指令"},
 	}
-	p.Observe(nil, []companion.TaskQueueState{pending})
+	p.Observe(nil, []companion.TaskQueueState{pending}, nil)
 	if err := p.Poll(10); err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestCompanionPersistenceDefersQueueWithoutBodyRecordUntilActivation(t *test
 
 	// 身体激活前 dirty 保持（排队指令尚未落盘），期间可能重复保存无队列
 	// 载荷；激活后逐个收尾，直到出现包含排队指令的保存。
-	p.Observe([]companion.Body{companionBody(9, 90)}, []companion.TaskQueueState{pending})
+	p.Observe([]companion.Body{companionBody(9, 90)}, []companion.TaskQueueState{pending}, nil)
 	var withQueue storage.CompanionSave
 	deadline := time.Now().Add(waitDeadline)
 	for time.Now().Before(deadline) {
@@ -369,7 +369,7 @@ func TestCompanionPersistenceFIFOOnlyQueueSurvivesRealStoreRoundTrip(t *testing.
 		ID:      companionBody(1, 10).ID,
 		Pending: []companion.TaskCommand{"仅排队甲", "仅排队乙"},
 	}
-	p.Observe([]companion.Body{companionBody(1, 10)}, []companion.TaskQueueState{pending})
+	p.Observe([]companion.Body{companionBody(1, 10)}, []companion.TaskQueueState{pending}, nil)
 	if err := p.Flush(context.Background()); err != nil {
 		t.Fatalf("Flush: %v", err)
 	}

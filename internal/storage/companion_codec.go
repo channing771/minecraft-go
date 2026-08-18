@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 	"math"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
@@ -18,25 +19,38 @@ const (
 	companionSchemaV1 uint32 = 1
 	// companionSchemaV2 是 M5B 的只读迁移 schema：记录 = 身体 + flags +
 	// 可选任务区与 FIFO 区，任务区步骤固定 13-byte 且只写过 go_to。
-	// 迁移读入后按 v3 重写；v2 字节永不再生。
+	// 迁移读入后按当前 schema 重写；v2 字节永不再生。
 	companionSchemaV2 uint32 = 2
+	// companionSchemaV3 是 M5C 的只读迁移 schema：记录 = 身体 + 可选任务
+	// 区与 FIFO 区，任务区步骤按 kind 变长。v4 起记录尾部还可携带可选摘
+	// 要区，v3 文件的摘要位（flags bit2）仍是保留位。迁移读入后按 v4 重
+	// 写（摘要为空）；v3 字节永不再生。
+	companionSchemaV3 uint32 = 3
+	// companionSchemaV4 是 M5D 引入摘要区的最低 schema：v4 及以上版本的
+	// 记录 flags 才允许 summary 位。独立于 currentCompanionSchema 存在，
+	// 未来 v5 成为 current 时 v4 迁移文件的摘要位仍按合法解析，而不是被
+	// 误判为保留位损坏。
+	companionSchemaV4 uint32 = 4
 	// currentCompanionSchema 是当前写出的 schema：记录 = 身体 + 可选任务
-	// 区与 FIFO 区（仅 active 记录携带），任务区步骤按 kind 变长（见
-	// companionPlanStepWireLength）。编码端只写当前版本。
-	currentCompanionSchema uint32 = 3
+	// 区与 FIFO 区（仅 active 记录携带）+ 可选摘要区（仅 active 且有摘要
+	// 时写入），任务区步骤按 kind 变长（见 companionPlanStepWireLength）。
+	// 编码端只写当前版本。
+	currentCompanionSchema uint32 = companionSchemaV4
 	companionHeaderLength         = 32
 	companionRecordLength         = 221
-	// maxCompanionFileLength 是物理文件字节上界（spec：430,080 = 420 KiB）。
-	// 推导（design.md「schema v3」一节）：单条 active 记录 ≤ 221 身体 +
-	// 1 flags + 任务区 86,050（指令前缀 2 + 1,024、步骤数 2 + 5,000×17、
-	// 步骤索引 4、状态 1、失败原因 1、开始 tick 8、deadline 8）+ FIFO 区
-	// 2 + 16×(2+1,024) = 16,418，共 102,690；4 条 active ≈ 410,760；60 条
+	// maxCompanionFileLength 是物理文件字节上界（spec：438,280）。推导：
+	// v3 上界 430,080（单条 active 记录 ≤ 221 身体 + 1 flags + 任务区
+	// 86,050 + FIFO 区 16,418 共 102,690；4 条 active ≈ 410,760；60 条
 	// inactive 记录各 222 共 13,320；+ envelope 32 ≈ 424,112，取整上界
-	// 430,080。v2 时代的 350,208（步骤固定 13B）随变长步骤作废。解码在
+	// 430,080）之上，v4 为 4 条 active 记录各追加一个摘要区（u16 前缀
+	// 2 + 2,048 摘要文本 = 2,050）：430,080 + 4×2,050 = 438,280。解码在
 	// 任何解析与分配之前按本常量拒绝超长。
-	maxCompanionFileLength = 430080
+	maxCompanionFileLength = 438280
 	// companionTaskCommandPrefixLength 是任务区指令的 u16 长度前缀。
 	companionTaskCommandPrefixLength = 2
+	// companionSummaryPrefixLength 是摘要区的 u16 长度前缀：摘要区只在
+	// 有摘要时写入（空摘要不写区），前缀值因此恒为 1..2,048。
+	companionSummaryPrefixLength = 2
 	// companionPlanStepLength 是 go_to/mine 步骤的编码长度（kind 1 +
 	// 坐标 3×int32）。v2 时代全部步骤固定为本长度；v3 起 place 在其上追加
 	// block uint16（15 bytes），follow 以 16-byte 目标玩家 ID 取代坐标
@@ -44,11 +58,14 @@ const (
 	companionPlanStepLength = 13
 )
 
-// v2 记录尾部的 flags 位：bit0 携带任务区、bit1 携带 FIFO 区；其余位保留
-// 且必须为零——保留位非零一律按损坏拒绝，为未来 schema 演进留出空间。
+// v2 起记录尾部的 flags 位：bit0 携带任务区、bit1 携带 FIFO 区；其余位在
+// 对应 schema 中保留且必须为零——保留位非零一律按损坏拒绝，为未来 schema
+// 演进留出空间。bit2（摘要区）只在 v4 及之后合法：v3/v2 文件的 bit2 仍是
+// 保留位（其布局没有摘要字节可读）。
 const (
-	companionFlagHasTask uint8 = 1 << 0
-	companionFlagHasFIFO uint8 = 1 << 1
+	companionFlagHasTask    uint8 = 1 << 0
+	companionFlagHasFIFO    uint8 = 1 << 1
+	companionFlagHasSummary uint8 = 1 << 2
 )
 
 var (
@@ -93,6 +110,9 @@ func encodeCompanions(save CompanionSave) ([]byte, error) {
 			if len(queue.Pending) != 0 {
 				payloadLength += companionFIFOEncodedLength(queue.Pending)
 			}
+			if queue.Summary != "" {
+				payloadLength += companionSummaryPrefixLength + len(queue.Summary)
+			}
 		}
 	}
 	encoded := make([]byte, 0, companionHeaderLength+payloadLength)
@@ -113,12 +133,21 @@ func encodeCompanions(save CompanionSave) ([]byte, error) {
 		if exists && len(queue.Pending) != 0 {
 			flags |= companionFlagHasFIFO
 		}
+		if exists && queue.Summary != "" {
+			flags |= companionFlagHasSummary
+		}
 		encoded = append(encoded, flags)
 		if flags&companionFlagHasTask != 0 {
 			encoded = appendCompanionTask(encoded, queue.Current)
 		}
 		if flags&companionFlagHasFIFO != 0 {
 			encoded = appendCompanionFIFO(encoded, queue.Pending)
+		}
+		// 摘要区追加在记录尾部：active 且有摘要才写；无摘要的 active 记录
+		// 与 inactive 记录都不写——记录字节位形与 v3 完全对齐，便于审读
+		// 与 v3 golden 对照。
+		if flags&companionFlagHasSummary != 0 {
+			encoded = appendCompanionSummary(encoded, queue.Summary)
 		}
 	}
 	// 长度门禁的编码侧镜像：产出必须能被解码端接受，超上界（输入违反
@@ -191,7 +220,8 @@ func decodeCompanions(data []byte) (StoredCompanions, error) {
 	if err != nil {
 		return StoredCompanions{}, corrupt("companion schema", err)
 	}
-	if schema != companionSchemaV1 && schema != companionSchemaV2 && schema != currentCompanionSchema {
+	if schema != companionSchemaV1 && schema != companionSchemaV2 &&
+		schema != companionSchemaV3 && schema != currentCompanionSchema {
 		if schema > currentCompanionSchema {
 			return StoredCompanions{}, fmt.Errorf("%w: companion schema %d", ErrFutureVersion, schema)
 		}
@@ -248,23 +278,37 @@ func decodeCompanions(data []byte) (StoredCompanions, error) {
 		if err != nil {
 			return StoredCompanions{}, fmt.Errorf("companion record %d: %w", index, err)
 		}
-		if queue.HasCurrent || len(queue.Pending) != 0 {
+		if queue.HasCurrent || len(queue.Pending) != 0 || queue.Summary != "" {
 			queue.ID = body.ID
 			queues = append(queues, queue)
 		}
 	}
+	// 全部记录消费完毕后 payload 必须恰好读空：头部声明的 payload 长度已
+	// 与文件长度核对，这里的检查封死「变长区长度被改小后残留字节」的错位
+	// 形态——任何区段（指令、步骤、FIFO 条目、摘要）的前缀被缩短都会留下
+	// 未消费字节，静默接受它们等于接受非规范文件（重编码字节必然不同）。
+	if header.remaining() != 0 {
+		return StoredCompanions{}, fmt.Errorf(
+			"%w: companion payload has %d trailing bytes", ErrCorrupt, header.remaining(),
+		)
+	}
 	return StoredCompanions{Revision: revision, Records: records, Queues: queues}, nil
 }
 
-// decodeCompanionQueueSections 解码 v2/v3 记录尾部的 flags 与可选任务区、
-// FIFO 区。flags 为零时返回空载荷；保留位非零按损坏拒绝。schema 决定任务
-// 区步骤的解码布局（v2 固定 13B / v3 按 kind 变长）。
+// decodeCompanionQueueSections 解码 v2 起记录尾部的 flags 与可选任务区、
+// FIFO 区、摘要区。flags 为零时返回空载荷；保留位非零按损坏拒绝——摘要
+// 位（bit2）只在 v4 合法，v3/v2 文件置位即损坏。schema 决定任务区步骤的
+// 解码布局（v2 固定 13B / v3 起按 kind 变长）。
 func decodeCompanionQueueSections(decoder *byteDecoder, schema uint32) (StoredCompanionQueue, error) {
 	flags, err := decoder.u8()
 	if err != nil {
 		return StoredCompanionQueue{}, corrupt("companion record flags", err)
 	}
-	if flags & ^(companionFlagHasTask|companionFlagHasFIFO) != 0 {
+	allowed := companionFlagHasTask | companionFlagHasFIFO
+	if schema >= companionSchemaV4 {
+		allowed |= companionFlagHasSummary
+	}
+	if flags&^allowed != 0 {
 		return StoredCompanionQueue{}, fmt.Errorf("%w: companion record flags %#x reserved", ErrCorrupt, flags)
 	}
 	var queue StoredCompanionQueue
@@ -282,7 +326,51 @@ func decodeCompanionQueueSections(decoder *byteDecoder, schema uint32) (StoredCo
 		}
 		queue.Pending = pending
 	}
+	if flags&companionFlagHasSummary != 0 {
+		if queue.Summary, err = decodeCompanionSummary(decoder); err != nil {
+			return StoredCompanionQueue{}, err
+		}
+	}
 	return queue, nil
+}
+
+// appendCompanionSummary 追加 v4 记录尾部的摘要区：u16 长度前缀 + 文本
+// 字节。调用前必须已通过 validateStoredCompanionSummary（长度、UTF-8 与
+// 无 NUL），且摘要非空——空摘要不写区（flags 不置位），保证磁盘上不存在
+// 零长摘要区这一非规范位形。
+func appendCompanionSummary(dst []byte, summary string) []byte {
+	dst = binary.LittleEndian.AppendUint16(dst, uint16(len(summary)))
+	return append(dst, summary...)
+}
+
+// decodeCompanionSummary 解码 v4 摘要区：u16 长度前缀 + 文本字节。长度
+// 超过 MaxCompanionSummaryBytes、零长（编码端永不产出，非规范位形）、含
+// NUL 或非法 UTF-8 一律按损坏拒绝——摘要是模型产出的自由文本，持久层不
+// 猜测、不清洗、不截断。
+func decodeCompanionSummary(decoder *byteDecoder) (string, error) {
+	length, err := decoder.u16()
+	if err != nil {
+		return "", corrupt("companion summary length", err)
+	}
+	if length > MaxCompanionSummaryBytes {
+		return "", fmt.Errorf(
+			"%w: companion summary length %d exceeds limit", ErrCorrupt, length,
+		)
+	}
+	if length == 0 {
+		return "", fmt.Errorf("%w: companion summary section without text", ErrCorrupt)
+	}
+	text, err := decoder.take(int(length))
+	if err != nil {
+		return "", corrupt("companion summary", err)
+	}
+	if !utf8.Valid(text) {
+		return "", fmt.Errorf("%w: companion summary is not valid UTF-8", ErrCorrupt)
+	}
+	if bytes.IndexByte(text, 0) >= 0 {
+		return "", fmt.Errorf("%w: companion summary contains NUL", ErrCorrupt)
+	}
+	return string(text), nil
 }
 
 // appendCompanionTask 追加任务区：指令（u16 长度前缀 + 字节）、步骤数

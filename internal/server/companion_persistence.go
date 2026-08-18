@@ -22,6 +22,10 @@ type companionPersistence struct {
 	// dirty。latestJobLocked 在投递保存前把它转换为 storage 载荷（含
 	// Planning/Validating→Queued 的保存侧归一）。
 	tasks []companion.TaskQueueState
+	// summaries 是最近一次 Observe 的最近对话摘要观察输入（D6）：终态
+	// Dialogue 响应写入 manager 后随 Observe 进入这里，摘要变化即令存档
+	// dirty，落盘时并入 StoredCompanionQueue.Summary（含 summary-only 条目）。
+	summaries []companionSummaryState
 	// loadedQueues 是启动加载时存档携带的任务域载荷，构造后不变；newWorld
 	// 在构造 Companion Manager 后读取一次用于恢复接线。
 	loadedQueues []storage.StoredCompanionQueue
@@ -72,10 +76,22 @@ func newCompanionPersistence(
 	return persistence
 }
 
-// Observe 合并权威身体与任务域观察输入：任一变化即标记存档 dirty。tasks
-// 与身体同批观察保证冻结快照（关服最终保存）里身体与任务状态属于同一
-// 权威 tick。
-func (p *companionPersistence) Observe(active []companion.Body, tasks []companion.TaskQueueState) {
+// companionSummaryState 是一个 active 伙伴的最近对话摘要观察输入：manager
+// 在 tick 边界产出（按 ID 字节序），Observe 参与dirty 判定，保存时并入
+// StoredCompanionQueue.Summary。空摘要不出现在观察输入中（等价于无摘要）。
+type companionSummaryState struct {
+	ID      companion.ID
+	Summary string
+}
+
+// Observe 合并权威身体、任务域与摘要观察输入：任一变化即标记存档 dirty。
+// tasks、summaries 与身体同批观察保证冻结快照（关服最终保存）里身体、任务
+// 状态与摘要属于同一权威 tick。
+func (p *companionPersistence) Observe(
+	active []companion.Body,
+	tasks []companion.TaskQueueState,
+	summaries []companionSummaryState,
+) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	byID := make(map[companion.ID]companion.Body, len(p.records)+len(active))
@@ -94,12 +110,35 @@ func (p *companionPersistence) Observe(active []companion.Body, tasks []companio
 	}
 	sortCompanionBodies(records)
 	tasksChanged := !equalTaskQueueStates(tasks, p.tasks)
-	if slices.Equal(records, p.records) && !tasksChanged {
+	summariesChanged := !equalCompanionSummaries(summaries, p.summaries)
+	if slices.Equal(records, p.records) && !tasksChanged && !summariesChanged {
 		return
 	}
 	p.records = records
 	p.tasks = cloneTaskQueueStates(tasks)
+	p.summaries = cloneCompanionSummaries(summaries)
 	p.dirty = true
+}
+
+// equalCompanionSummaries 比较两份摘要观察输入是否逐条相等（ID 与文本）。
+func equalCompanionSummaries(left, right []companionSummaryState) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// cloneCompanionSummaries 深拷贝摘要观察输入，Observe 之后的任何调用方修改
+// 都不影响已冻结的快照。
+func cloneCompanionSummaries(summaries []companionSummaryState) []companionSummaryState {
+	cloned := make([]companionSummaryState, len(summaries))
+	copy(cloned, summaries)
+	return cloned
 }
 
 // equalTaskQueueStates 比较两份任务域观察输入是否逐字段相等（含计划步骤）。
@@ -361,10 +400,10 @@ func (p *companionPersistence) applyCompletionLocked(
 	}
 	p.persisted = completion.Job.Save.Revision
 	p.retry = nil
-	// 任务域的 dirty 重判使用「未激活丢弃」口径：身体记录尚未出现的队列
-	// 无法落盘（编码要求队列关联记录），保持 dirty 让激活后的首次保存
-	// 补上完整载荷，窗口内的排队指令不会静默丢失。
-	currentQueues, droppedPending := companionQueuesForSave(p.tasks, p.records)
+	// 任务域与摘要的 dirty 重判使用「未激活丢弃」口径：身体记录尚未出现的
+	// 队列无法落盘（编码要求队列关联记录），保持 dirty 让激活后的首次保存
+	// 补上完整载荷，窗口内的排队指令与摘要不会静默丢失。
+	currentQueues, droppedPending := companionQueuesForSave(p.tasks, p.records, p.summaries)
 	p.dirty = !slices.Equal(p.records, completion.Job.Save.Records) ||
 		droppedPending ||
 		!equalStoredQueues(currentQueues, completion.Job.Save.Queues)
@@ -372,7 +411,7 @@ func (p *companionPersistence) applyCompletionLocked(
 }
 
 func (p *companionPersistence) latestJobLocked() companionSaveJob {
-	queues, _ := companionQueuesForSave(p.tasks, p.records)
+	queues, _ := companionQueuesForSave(p.tasks, p.records, p.summaries)
 	return companionSaveJob{
 		Save: storage.CompanionSave{
 			Revision: p.persisted + 1,
@@ -415,22 +454,33 @@ func cloneStoredQueues(queues []storage.StoredCompanionQueue) []storage.StoredCo
 // deadline；终态快照（防御路径，正常快照不会出现）不落当前任务。records
 // 是当前已知身体记录：队列必须关联记录才能编码，身体尚未激活（出生扫描
 // 在途）的伙伴的队列被丢弃并经 dropped 报告——调用方保持 dirty，激活后的
-// 首次保存补上完整载荷。返回值深拷贝自输入，与调用方切片完全独立。
+// 首次保存补上完整载荷。summaries 是 manager 的最近对话摘要观察输入：逐条
+// 并入对应伙伴的队列载荷；只持有摘要而无任务无 FIFO 的 active 伙伴也产出
+// summary-only 条目（守卫不得丢弃摘要），inactive 伙伴不提供队列（含摘要），
+// 去激活由此天然丢弃摘要（D4 语义）。返回值深拷贝自输入，与调用方切片完全
+// 独立。
 func companionQueuesForSave(
 	states []companion.TaskQueueState,
 	records []companion.Body,
+	summaries []companionSummaryState,
 ) (queues []storage.StoredCompanionQueue, dropped bool) {
 	known := make(map[companion.ID]struct{}, len(records))
 	for _, body := range records {
 		known[body.ID] = struct{}{}
 	}
-	queues = make([]storage.StoredCompanionQueue, 0, len(states))
+	summaryByID := make(map[companion.ID]string, len(summaries))
+	for _, summary := range summaries {
+		summaryByID[summary.ID] = summary.Summary
+	}
+	queues = make([]storage.StoredCompanionQueue, 0, len(states)+len(summaries))
+	inStates := make(map[companion.ID]struct{}, len(states))
 	for _, state := range states {
 		if _, exists := known[state.ID]; !exists {
 			dropped = true
 			continue
 		}
-		queue := storage.StoredCompanionQueue{ID: state.ID}
+		inStates[state.ID] = struct{}{}
+		queue := storage.StoredCompanionQueue{ID: state.ID, Summary: summaryByID[state.ID]}
 		if state.HasCurrent {
 			current := state.Current
 			switch {
@@ -462,22 +512,42 @@ func companionQueuesForSave(
 				queue.Pending[index] = string(command)
 			}
 		}
-		if queue.HasCurrent || len(queue.Pending) != 0 {
+		// 守卫含非空摘要：无任务无 FIFO 但有摘要的 active 伙伴不能丢摘要
+		//（spec：终态摘要持久，重新激活前不能凭空消失）。
+		if queue.HasCurrent || len(queue.Pending) != 0 || queue.Summary != "" {
 			queues = append(queues, queue)
 		}
+	}
+	// summary-only 条目：持有摘要但没有任何任务事实（states 不含）的 active
+	// 伙伴。states 与 summaries 各自按 ID 字节序构造，两组拼接不保证全局
+	// 有序（编码器按记录 ID 关联队列，只要求队列 ID 唯一）。
+	for _, summary := range summaries {
+		if _, exists := inStates[summary.ID]; exists {
+			continue
+		}
+		if _, knownBody := known[summary.ID]; !knownBody {
+			dropped = true
+			continue
+		}
+		queues = append(queues, storage.StoredCompanionQueue{
+			ID:      summary.ID,
+			Summary: summary.Summary,
+		})
 	}
 	return queues, dropped
 }
 
-// equalStoredQueues 逐字段比较两份存档载荷（含计划步骤与 FIFO 顺序），
-// 供保存完成后的 dirty 重判使用。
+// equalStoredQueues 逐字段比较两份存档载荷（含计划步骤、FIFO 顺序与最近
+// 对话摘要——摘要差异不得被判 clean，否则摘要变化后的保存会被跳过），供
+// 保存完成后的 dirty 重判使用。
 func equalStoredQueues(left, right []storage.StoredCompanionQueue) bool {
 	if len(left) != len(right) {
 		return false
 	}
 	for index := range left {
 		a, b := left[index], right[index]
-		if a.ID != b.ID || a.HasCurrent != b.HasCurrent || !slices.Equal(a.Pending, b.Pending) {
+		if a.ID != b.ID || a.HasCurrent != b.HasCurrent || a.Summary != b.Summary ||
+			!slices.Equal(a.Pending, b.Pending) {
 			return false
 		}
 		if a.HasCurrent && !equalStoredCompanionTask(a.Current, b.Current) {

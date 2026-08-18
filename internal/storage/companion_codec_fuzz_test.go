@@ -43,6 +43,18 @@ func FuzzDecodeCompanions(f *testing.F) {
 			f.Add(bytes.Clone(fixture[:length]))
 		}
 	}
+	// v3/v4 golden 的前缀截断种子：v3 是冻结的只读迁移 schema（位形与
+	// v4 无摘要记录一致），v4 是当前 schema（canonical 重编码断言全程生效）。
+	if fixture, err := os.ReadFile(filepath.Join("testdata", "companions-v3.bin")); err == nil {
+		for length := range len(fixture) + 1 {
+			f.Add(bytes.Clone(fixture[:length]))
+		}
+	}
+	if fixture, err := os.ReadFile(filepath.Join("testdata", "companions-v4.bin")); err == nil {
+		for length := range len(fixture) + 1 {
+			f.Add(bytes.Clone(fixture[:length]))
+		}
+	}
 	records := make([]companion.Body, companion.MaxStored)
 	for index := range records {
 		records[index].ID = fixtureCompanionID(byte(index))
@@ -140,6 +152,44 @@ func FuzzDecodeCompanions(f *testing.F) {
 	binary.LittleEndian.PutUint64(followDeadlineSet[fuzzV3DeadlineOffset:], 1200)
 	repairCompanionCRC(followDeadlineSet)
 	f.Add(followDeadlineSet)
+	// v4 摘要种子：summary-only 载荷（flags 仅摘要位）驱动摘要区解码路径；
+	// 非法摘要长度（超 2,048、零长、缩小错位）、摘要含 NUL 与非法 UTF-8
+	// 五个补丁种子深入摘要级校验。缩小错位种子把长度减去整整一个 rune
+	//（3 bytes），剩余文本仍合法——必须由「payload 读空」门禁拒绝残留
+	// 字节，而不是静默接受非规范文件。
+	summaryOnly, err := encodeCompanions(CompanionSave{
+		Revision: 8,
+		Records:  fixtureCompanionBodies()[:1],
+		Queues: []StoredCompanionQueue{{
+			ID:      fixtureCompanionID(2),
+			Summary: "阿木的近期记忆",
+		}},
+	})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(summaryOnly)
+	summaryPrefixOffset := companionHeaderLength + companionRecordLength + 1
+	summaryLengthOver := bytes.Clone(summaryOnly)
+	binary.LittleEndian.PutUint16(summaryLengthOver[summaryPrefixOffset:], MaxCompanionSummaryBytes+1)
+	repairCompanionCRC(summaryLengthOver)
+	f.Add(summaryLengthOver)
+	summaryLengthZero := bytes.Clone(summaryOnly)
+	binary.LittleEndian.PutUint16(summaryLengthZero[summaryPrefixOffset:], 0)
+	repairCompanionCRC(summaryLengthZero)
+	f.Add(summaryLengthZero)
+	summaryLengthShrunk := bytes.Clone(summaryOnly)
+	binary.LittleEndian.PutUint16(summaryLengthShrunk[summaryPrefixOffset:], uint16(len("阿木的近期记忆")-3))
+	repairCompanionCRC(summaryLengthShrunk)
+	f.Add(summaryLengthShrunk)
+	summaryNUL := bytes.Clone(summaryOnly)
+	summaryNUL[summaryPrefixOffset+2] = 0
+	repairCompanionCRC(summaryNUL)
+	f.Add(summaryNUL)
+	summaryInvalidUTF8 := bytes.Clone(summaryOnly)
+	summaryInvalidUTF8[summaryPrefixOffset+2] = 0xff
+	repairCompanionCRC(summaryInvalidUTF8)
+	f.Add(summaryInvalidUTF8)
 	oversized := make([]byte, 32)
 	copy(oversized, "MCAI")
 	binary.LittleEndian.PutUint32(oversized[4:], 1)
@@ -165,12 +215,13 @@ func FuzzDecodeCompanions(f *testing.F) {
 		for _, queue := range got.Queues {
 			if _, duplicate := seen[queue.ID]; duplicate ||
 				len(queue.Pending) > MaxCompanionFIFOEntries ||
-				len(queue.Current.PlanSteps) > MaxCompanionPlanSteps {
+				len(queue.Current.PlanSteps) > MaxCompanionPlanSteps ||
+				len(queue.Summary) > MaxCompanionSummaryBytes {
 				t.Fatalf("successful decode escaped task bounds: %+v", got.Queues)
 			}
 			seen[queue.ID] = struct{}{}
 		}
-		// v1/v2 是只读迁移 schema：解码成功即可；规范重编码只写 v3，
+		// v1/v2/v3 是只读迁移 schema：解码成功即可；规范重编码只写 v4，
 		// 字节不可比对。
 		if schema := binary.LittleEndian.Uint32(payload[8:12]); schema != currentCompanionSchema {
 			return

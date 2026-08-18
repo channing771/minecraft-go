@@ -169,8 +169,9 @@ func TestConfigAICompanionUnknownFieldsWarnAndIgnore(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&records, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	// M5B 起 ai.endpoint/ai.model 是已识别字段：用合法模型字段（loopback http
-	// 免密钥）构造配置，未知字段告警断言保留 persona/task 两项。
+	// M5B 起 ai.endpoint/ai.model 是已识别字段；M5D 起 companions[].persona
+	// 也已识别并解析进 Definition（不再告警）。用合法模型字段（loopback http
+	// 免密钥）构造配置，未知字段告警断言只保留 task 一项。
 	path := writeConfig(t, `{"version":1,"ai":{"endpoint":"http://127.0.0.1:1/v1","model":"test-model","companions":[`+
 		`{"id":"00112233-4455-4677-8899-aabbccddeeff","name":"阿木","persona":"later","task":"later"}]}}`)
 	loaded, err := config.Load(path)
@@ -181,10 +182,16 @@ func TestConfigAICompanionUnknownFieldsWarnAndIgnore(t *testing.T) {
 	if len(definitions) != 1 || definitions[0].Name != "阿木" || definitions[0].ID.String() != "00112233-4455-4677-8899-aabbccddeeff" {
 		t.Fatalf("CompanionDefinitions = %+v", definitions)
 	}
-	for _, path := range []string{"ai.companions[0].persona", "ai.companions[0].task"} {
+	if definitions[0].Persona != "later" {
+		t.Fatalf("persona 已是已识别字段，应解析进定义：got %q", definitions[0].Persona)
+	}
+	for _, path := range []string{"ai.companions[0].task"} {
 		if !strings.Contains(records.String(), `"field":"`+path+`"`) {
 			t.Errorf("未知字段日志 %q 缺少精确路径 %q", records.String(), path)
 		}
+	}
+	if strings.Contains(records.String(), `"field":"ai.companions[0].persona"`) {
+		t.Errorf("persona 不应再触发未知字段告警: %s", records.String())
 	}
 }
 

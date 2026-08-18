@@ -160,7 +160,7 @@ func decodeConfig(path string, contents []byte) (Config, error) {
 		}
 	}
 	if raw, ok := lookupCaseInsensitive(top, "ai"); ok {
-		if err := applyAI(&cfg, raw); err != nil {
+		if err := applyAI(&cfg, raw, path); err != nil {
 			return Config{}, fmt.Errorf("config: 解析 ai 字段: %w", err)
 		}
 	}
@@ -397,7 +397,8 @@ func applyLogging(cfg *Config, raw json.RawMessage) error {
 }
 
 // knownAIFieldKeys 是 ai 分组已识别的键（大小写不敏感）。未列出的键按既有
-// 未知字段纪律告警后忽略——persona 等未交付字段继续走这条路径。
+// 未知字段纪律告警后忽略。伙伴条目内的已识别键（id/name/persona）见
+// applyAI 的条目级检查。
 var knownAIFieldKeys = []string{
 	"companions",
 	"endpoint",
@@ -416,8 +417,9 @@ func knownAIField(key string) bool {
 	return false
 }
 
-// applyAI 解析 ai 分组：M5A 的 companions[].id/name 与 M5B 的四个模型运行时
-// 字段（endpoint/model/apiKeyEnv/taskTimeoutMinutes，均大小写不敏感）。
+// applyAI 解析 ai 分组：M5A 的 companions[].id/name、M5B 的四个模型运行时
+// 字段（endpoint/model/apiKeyEnv/taskTimeoutMinutes）与 M5D 的可选
+// companions[].persona（均大小写不敏感）。
 //
 // 模型字段只要出现就立即校验语法（endpoint 形态、超时区间），错误带
 // ai.endpoint 等精确路径，让配置问题在读文件时暴露而不是等到启动；而
@@ -425,7 +427,10 @@ func knownAIField(key string) bool {
 // apiKeyEnv）在确认伙伴列表非空后才检查——AI 关闭时孤立的模型字段只做语法
 // 校验、不启用 AI，也不要求任何模型字段。密钥值永远不进配置文件，这里只
 // 处理环境变量名。
-func applyAI(cfg *Config, raw json.RawMessage) error {
+//
+// persona 只做 JSON 形状解析，内容校验与外部文件优先级在 resolvePersonas
+// 中按宽松纪律完成（告警降级，不阻止启动）。
+func applyAI(cfg *Config, raw json.RawMessage, configPath string) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
@@ -484,7 +489,8 @@ func applyAI(cfg *Config, raw json.RawMessage) error {
 			return fmt.Errorf("解析 ai.companions[%d]: %w", index, err)
 		}
 		for key := range definitionFields {
-			if !strings.EqualFold(key, "id") && !strings.EqualFold(key, "name") {
+			if !strings.EqualFold(key, "id") && !strings.EqualFold(key, "name") &&
+				!strings.EqualFold(key, "persona") {
 				slog.Warn("配置项未知字段已忽略", "field", fmt.Sprintf("ai.companions[%d].%s", index, key))
 			}
 		}
@@ -498,6 +504,14 @@ func applyAI(cfg *Config, raw json.RawMessage) error {
 				return fmt.Errorf("解析 ai.companions[%d].name: %w", index, err)
 			}
 		}
+		// persona 形状错误（如数字）与 id/name 一样按解析错误拒绝；内容越界
+		// （超长/NUL/非法 UTF-8）则留给 resolvePersonas 按宽松纪律告警降级。
+		// JSON null 与字段缺席等价：Unmarshal 保持零值空串=无内联人设。
+		if value, exists := lookupCaseInsensitive(definitionFields, "persona"); exists {
+			if err := json.Unmarshal(value, &definitions[index].Persona); err != nil {
+				return fmt.Errorf("解析 ai.companions[%d].persona: %w", index, err)
+			}
+		}
 	}
 	// 先验证伙伴定义（M5A 语义），再检查模型设置完整性：重复名称等定义错误
 	// 优先暴露，与既有错误路径保持一致。
@@ -507,8 +521,95 @@ func applyAI(cfg *Config, raw json.RawMessage) error {
 	if err := settings.Validate(); err != nil {
 		return fmt.Errorf("ai: %w", err)
 	}
+	resolvePersonas(configPath, definitions)
 	cfg.AI = &AI{ModelSettings: settings, Companions: definitions}
 	return nil
+}
+
+// resolvePersonas 在启动加载配置时为每个伙伴定义解析生效人设并写入
+// ResolvedPersona：内联 ai.companions[].persona 优先，其次读取配置文件所在
+// 目录下 personas/<canonical 名称>.txt，两者皆无则为空人设。
+//
+// 只写 ResolvedPersona、绝不改写 Persona：后者是磁盘镜像（内联原文，含越界
+// 原文），Save 与旧配置迁移会全量序列化它——若把生效值（文件全文或降级后
+// 的空串）写回去，外部文件内容会被静默吸收为内联、越界原文会被从磁盘
+// 清除，两者都是对用户数据的静默篡改。
+//
+// 宽松纪律：任何人设问题（内联或文件越界、损坏、不可读）都只 slog.Warn 后
+// 降级为空人设，绝不阻止启动；告警只引用字段路径或文件路径与原因，绝不
+// 回显人设文本（persona 不外泄原则）。本函数只在 Load 时随 applyAI 执行
+// 一次，运行期不做热更新。configPath 为配置文件本身的路径，外部文件相对
+// 它定位；调用前定义已通过 ValidateDefinitions（canonical 名称、无空白）。
+func resolvePersonas(configPath string, definitions []companion.Definition) {
+	personasDir := filepath.Join(filepath.Dir(configPath), "personas")
+	for index := range definitions {
+		definitions[index].ResolvedPersona = resolveDefinitionPersona(personasDir, index, definitions[index])
+	}
+}
+
+// resolveDefinitionPersona 解析单个伙伴的生效人设（ResolvedPersona），优先级
+// 与降级规则见 resolvePersonas 的说明。内联为空串表示字段缺席或显式空——
+// 两种情形都让外部文件有机会生效；内联存在（即使内容越界被降级）则不再读
+// 文件，双源语义保持"内联优先、降级不回退文件"。
+func resolveDefinitionPersona(personasDir string, index int, definition companion.Definition) string {
+	if definition.Persona != "" {
+		if err := companion.ValidatePersona(definition.Persona); err != nil {
+			slog.Warn("伙伴内联人设无效，已按空人设处理",
+				"field", fmt.Sprintf("ai.companions[%d].persona", index),
+				"companion", definition.Name,
+				"reason", err.Error())
+			return ""
+		}
+		if path := personaFilePath(personasDir, definition.Name); path != "" {
+			if _, err := os.Stat(path); err == nil {
+				slog.Warn("内联 persona 优先生效，已忽略外部人设文件",
+					"path", path, "companion", definition.Name)
+			}
+		}
+		return definition.Persona
+	}
+	path := personaFilePath(personasDir, definition.Name)
+	if path == "" {
+		return ""
+	}
+	// 先按 Stat 预检大小再读：人设文件上界只有 4 KiB，预检避免误放的巨型
+	// 文件在启动时造成无界内存分配。Stat 失败（含不存在）交给 ReadFile 统一
+	// 裁决，避免两套存在性判断漂移。
+	if info, err := os.Stat(path); err == nil && info.Size() > companion.MaxPersonaBytes {
+		slog.Warn("外部人设文件超过大小上限，已按空人设处理",
+			"path", path, "companion", definition.Name,
+			"reason", fmt.Sprintf("文件 %d 字节超过上限 %d", info.Size(), companion.MaxPersonaBytes))
+		return ""
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "" // 文件不存在是常态：静默空人设，不告警。
+		}
+		slog.Warn("外部人设文件不可读，已按空人设处理",
+			"path", path, "companion", definition.Name, "reason", err.Error())
+		return ""
+	}
+	if err := companion.ValidatePersona(string(contents)); err != nil {
+		slog.Warn("外部人设文件内容无效，已按空人设处理",
+			"path", path, "companion", definition.Name, "reason", err.Error())
+		return ""
+	}
+	return string(contents)
+}
+
+// personaFilePath 返回 canonical 名称对应的外部人设文件路径。
+//
+// 安全边界：ValidateName 只保证 canonical 与无空白，并不拒绝名称中的路径
+// 分隔符（"../sneaky" 是合法伙伴名），直接拼接会拼出逃出 personas/ 的路径。
+// 因此含分隔符（含 Windows 的反斜杠，防跨平台误用）或空名称一律返回空串，
+// 调用方按"无外部文件"静默处理——文件名约定是平面单文件，无法映射的名称
+// 没有外部文件语义，也绝不构成路径穿越面。
+func personaFilePath(personasDir, name string) string {
+	if name == "" || strings.ContainsAny(name, `/\`) {
+		return ""
+	}
+	return filepath.Join(personasDir, name+".txt")
 }
 
 // applyGroups 把 physics/sim/render 三个分组的原始 JSON 应用到 cfg。
@@ -595,6 +696,8 @@ func warnUnknownTopLevel(top map[string]json.RawMessage) {
 }
 
 // CompanionDefinitions 返回当前配置中的伙伴定义；缺失或禁用时返回 nil。
+// 消费方（后续 Dialogue 等）应读取 Definition.ResolvedPersona（生效人设）；
+// Definition.Persona 只是磁盘内联原文镜像，可能越界，不作运行期人设使用。
 func (c Config) CompanionDefinitions() []companion.Definition {
 	if c.AI == nil {
 		return nil

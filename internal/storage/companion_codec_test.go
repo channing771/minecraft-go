@@ -44,8 +44,8 @@ func fixtureCompanionBodies() []companion.Body {
 }
 
 func TestCompanionCodecV1RoundTripAndGolden(t *testing.T) {
-	// v1 golden 字节零改动：编码端只写 v2，v1 路径由冻结的 golden 驱动
-	// 只读迁移验证。
+	// v1 golden 字节零改动：编码端只写当前 schema（v4），v1 路径由冻结的
+	// golden 驱动只读迁移验证。
 	path := filepath.Join("testdata", "companions-v1.bin")
 	golden, err := os.ReadFile(path)
 	if err != nil {
@@ -69,7 +69,7 @@ func TestCompanionCodecV1RoundTripAndGolden(t *testing.T) {
 		t.Fatalf("v1 golden 携带任务域=%+v，想要空", got.Queues)
 	}
 
-	// 同一载荷的首次保存必须写出当前 schema（v3）：记录 = v1 身体 + flags 字节。
+	// 同一载荷的首次保存必须写出当前 schema（v4）：记录 = v1 身体 + flags 字节。
 	input := fixtureCompanionBodies()
 	before := append([]companion.Body(nil), input...)
 	encoded, err := encodeCompanions(CompanionSave{Revision: 19, Records: input})
@@ -91,7 +91,7 @@ func TestCompanionCodecV1RoundTripAndGolden(t *testing.T) {
 	}
 	if migrated.Revision != 19 || !reflect.DeepEqual(migrated.Records, wantRecords) ||
 		migrated.Queues != nil {
-		t.Fatalf("迁移写 v3 后 decode=%+v", migrated)
+		t.Fatalf("迁移写 v4 后 decode=%+v", migrated)
 	}
 }
 

@@ -112,9 +112,16 @@ func (a *application) clearFormattedChatLines() {
 
 // formatChatEvent 将服务器确认的聊天事实格式化为稳定中文事实行。
 // 任务生命周期事件（Task*）只复述伙伴名、固定中文模板与玩家原始指令摘要，
-// 不存在也不显示任何模型生成的自由文本；每行最终经 truncateChatLine 截断到 32 rune。
+// 不显示任何模型生成的自由文本；每行最终经 truncateChatLine 截断到 32 rune。
+// 唯一例外是 v19 的 CompanionSpeech：它是客户端唯一显示模型文本的位置，
+// 仅以「伙伴名：台词原文」一行呈现，台词原样上屏，不改写、不清洗、不加引号。
 func formatChatEvent(event network.ChatEvent) string {
 	switch event.Kind {
+	case network.ChatEventCompanionSpeech:
+		// wire 校验已保证台词是 1..256 bytes 的有效 UTF-8 且不含控制字符，
+		// 因此这里不做任何二次清洗；行宽沿用与事实行相同的 truncateChatLine
+		// 截断（伙伴名前缀计入 32 rune 上限），台词行与任务事实行各占一行。
+		return event.CompanionName + "：" + event.Speech
 	case network.ChatEventTaskStarted:
 		return event.CompanionName + " 开始执行：" + event.Command
 	case network.ChatEventTaskProgress:

@@ -128,29 +128,22 @@ func productionCompanionPassableBlocks() map[core.BlockID]bool {
 	return map[core.BlockID]bool{core.AirID: true}
 }
 
-// buildPlanSnapshot 在 tick 边界构造一次规划的不可变观察快照：
-//   - 发令者事实在入队时刻冻结（captureIssuer），同一指令的规划输入不随
-//     发令者后续移动而漂移；
-//   - 环境摘要是伙伴周围水平 ±16、垂直 ±4 窗口内的暴露方块（≤256，按
-//     (X,Y,Z) 确定性排序）与每列地表高度（高度表 O(1) 读取）；
-//   - 相关区块 revision 与世界时间取当前权威值。
-//
-// 全部工作有界：窗口 33×33×9 格的常数扫描，不随世界规模增长。
-func (m *companionManager) buildPlanSnapshot(
-	definition companion.Definition,
-	command companion.TaskCommand,
-	issuer companionTaskIssuer,
+// scanEnvObservation 扫描伙伴周围水平 ±16、垂直 ±4 窗口内的环境观察：每列
+// 地表高度样本（高度表 O(1) 读取）与暴露方块（非空气且六邻域中存在空气邻居
+// 的可见表面；邻居落在未加载区块时不视为暴露——宁可少报也不猜测未见过的
+// 地形）。规划快照（buildPlanSnapshot）与 Dialogue 环境摘要
+// （buildDialogueEnvDigest）共用这一有界扫描：窗口 33×33×9 格的常数扫描，
+// 输出 ≤256 暴露方块（经 BoundExposedBlocks 归一）与 1089 高度样本，不随
+// 世界规模增长。返回的视图供规划快照继续读取 revision，台词侧忽略它。
+func (m *companionManager) scanEnvObservation(
 	body companion.Body,
-) (companion.PlanSnapshot, error) {
-	view := m.chunkViewAt(body.Dimension, body.Position)
+) (view companionChunkView, exposed []companion.PlanBlock, heights []companion.PlanHeight) {
+	view = m.chunkViewAt(body.Dimension, body.Position)
 	centerX := int32(math.Floor(float64(body.Position[0])))
 	centerY := int32(math.Floor(float64(body.Position[1])))
 	centerZ := int32(math.Floor(float64(body.Position[2])))
-
-	exposed := make([]companion.PlanBlock, 0, companion.MaxPlanExposedBlocks)
-	heights := make([]companion.PlanHeight, 0, companion.MaxPlanHeightSamples)
-	// 暴露方块：非空气且六邻域中存在空气邻居（可见表面）。邻居落在未加载
-	// 区块时不视为暴露——宁可少报也不猜测未见过的地形。
+	exposed = make([]companion.PlanBlock, 0, companion.MaxPlanExposedBlocks)
+	heights = make([]companion.PlanHeight, 0, companion.MaxPlanHeightSamples)
 	lowY := max(centerY-companion.PathWindowVerticalRadius, core.MinY)
 	highY := min(centerY+companion.PathWindowVerticalRadius, core.MaxY-1)
 	for x := centerX - 16; x <= centerX+16; x++ {
@@ -179,6 +172,24 @@ func (m *companionManager) buildPlanSnapshot(
 			}
 		}
 	}
+	return view, exposed, heights
+}
+
+// buildPlanSnapshot 在 tick 边界构造一次规划的不可变观察快照：
+//   - 发令者事实在入队时刻冻结（captureIssuer），同一指令的规划输入不随
+//     发令者后续移动而漂移；
+//   - 环境摘要是伙伴周围水平 ±16、垂直 ±4 窗口内的暴露方块（≤256，按
+//     (X,Y,Z) 确定性排序）与每列地表高度（高度表 O(1) 读取）；
+//   - 相关区块 revision 与世界时间取当前权威值。
+//
+// 全部工作有界：窗口 33×33×9 格的常数扫描，不随世界规模增长。
+func (m *companionManager) buildPlanSnapshot(
+	definition companion.Definition,
+	command companion.TaskCommand,
+	issuer companionTaskIssuer,
+	body companion.Body,
+) (companion.PlanSnapshot, error) {
+	view, exposed, heights := m.scanEnvObservation(body)
 
 	snapshot := companion.PlanSnapshot{
 		Command: string(command),

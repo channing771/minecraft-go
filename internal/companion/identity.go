@@ -63,6 +63,19 @@ func (id *ID) UnmarshalText(text []byte) error {
 type Definition struct {
 	ID   ID     `json:"id"`
 	Name string `json:"name"`
+	// Persona 是磁盘镜像字段：配置文件里 ai.companions[].persona 的原始内联
+	// 值，原样保留、不做任何校验降级——包括越界（>4,096 字节）原文。Save 与
+	// 旧配置迁移全量序列化本字段，因此它绝不能承载"解析后的生效值"，否则
+	// 外部 personas/ 文件内容会被静默吸收为内联、越界原文会被降级清除，
+	// 两者都是对用户磁盘数据的静默篡改。omitempty 保证无内联人设的配置在
+	// Save 往返时不落 "persona": "" 键。
+	Persona string `json:"persona,omitempty"`
+	// ResolvedPersona 是生效人设（内联优先，其次配置目录 personas/<canonical
+	// 名称>.txt，两者皆无为空串），由 config 在 Load 时解析并完成宽松降级
+	// （越界/损坏告警后为空，不阻止启动）。它是后续 Dialogue 输入的唯一人设
+	// 来源，绝不进入 Planner 输入。json:"-" 使之永不序列化：生效值是进程内
+	// 的派生事实，落盘会破坏 Persona 的磁盘镜像语义（见上）。
+	ResolvedPersona string `json:"-"`
 }
 
 // Body 是伙伴可持久化的权威身体状态。
