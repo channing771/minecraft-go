@@ -707,7 +707,9 @@ func TestPlannerRejectsInvalidSnapshot(t *testing.T) {
 // TestPlanDecodeKindMatrix 覆盖 M5C 四 kind 步骤的解码契约矩阵：每 kind 的合法
 // 形态（含解码后归一的强类型载荷 BlockID/PlayerID）、kind 专属字段缺失/多余、
 // follow 非最后一步、follow 目标不在快照在线集合、mine 越界/容器/无单一掉落、
-// place 非注册表/未持有。全部非法用例按 InvalidPlan 失败且不重试。
+// place 非注册表/未持有。M5E 起还覆盖排他矩阵的显式 null 负向全集：专属外字段
+// 携带 JSON null 与携带非法值拒绝语义一致（null 与缺席不等价）。全部非法用例
+// 按 InvalidPlan 失败且不重试。
 func TestPlanDecodeKindMatrix(t *testing.T) {
 	const validGoTo = `{"kind":"go_to","x":10,"y":64,"z":-5}`
 	// mine(8,63,-2) 命中快照 ExposedBlocks 中的 grass：窗口内且已列出。
@@ -817,6 +819,22 @@ func TestPlanDecodeKindMatrix(t *testing.T) {
 		{name: "go_to 携带 block", steps: `{"kind":"go_to","x":1,"y":2,"z":3,"block":"stone"}`},
 		{name: "未知 kind swim", steps: `{"kind":"swim","x":1,"y":2,"z":3}`},
 		{name: "未知 kind attack", steps: `{"kind":"attack","player_id":"` + testPlayerUUID + `"}`},
+		// M5E null 契约收紧的负向全集：显式 JSON null 一律视为「字段出现」，
+		// 与上方携带非 null 非法值的「携带 block/player_id/坐标」用例一一对应。
+		// 每条都用合法坐标与合法载荷——确保指针折叠 bug 存在时整份计划会被
+		// 完整接受（而不是被快照约束偶然拒绝），使收紧前的基线真实转红。
+		{name: "follow 携带 x null", steps: `{"kind":"follow","player_id":"` + testPlayerUUID + `","x":null}`},
+		{name: "go_to 携带 block null", steps: `{"kind":"go_to","x":1,"y":2,"z":3,"block":null}`},
+		{name: "go_to 携带 player_id null", steps: `{"kind":"go_to","x":1,"y":2,"z":3,"player_id":null}`},
+		{name: "mine 携带 block null", steps: `{"kind":"mine","x":6,"y":64,"z":0,"block":null}`},
+		{name: "mine 携带 player_id null", steps: `{"kind":"mine","x":6,"y":64,"z":0,"player_id":null}`},
+		{
+			name:  "place 携带 player_id null",
+			steps: `{"kind":"place","x":7,"y":65,"z":1,"block":"oak_planks","player_id":null}`,
+		},
+		// 必填字段携带 null：与缺席同被拒绝（坐标 null 不是有限整数），
+		// 锁定收紧后必填路径不因 null 判定出现回归。
+		{name: "place 坐标 null", steps: `{"kind":"place","x":null,"y":65,"z":1,"block":"oak_planks"}`},
 	}
 
 	for _, testCase := range cases {

@@ -112,17 +112,91 @@ type chatEnvelope struct {
 	} `json:"choices"`
 }
 
-// planWireStep 是计划步骤的解码中间形。坐标用 *int32 是为了让 JSON null
-// （例如 "x":null）显式失败，而不是被静默解码成 0；block/player_id 用
-// *string 是为了区分字段缺席与空串——kind 专属字段矩阵对两者分别给出精确
-// 拒绝理由（缺席＝缺字段，空串/非法值＝载荷非法）。
+// planWireStep 是计划步骤的解码中间形。
+//
+// 解码不走普通 struct 反射路径，而是自定义 UnmarshalJSON 先解到
+// map[string]json.RawMessage 中间形（与 dialogue_types.go 的 map+isJSONNull
+// 方案同构）。为什么必须如此：指针字段只能表达「值合法解出」与「未解出」，
+// 而 encoding/json 把「字段缺席」与「字段出现且值为显式 JSON null」同样解成
+// nil 指针——排他矩阵会把 null 与缺席折叠，让 follow+x:null、go_to+block:null
+// 这类「专属外字段出现且为 null」的非法步骤被静默接受。M5E 契约收紧后显式
+// null 一律视为「字段出现」，与 M5D summary:null 裁决同心智：出现事实由
+// appeared 记录，与指针值（null 时为 nil）正交。
 type planWireStep struct {
-	Kind     string  `json:"kind"`
-	X        *int32  `json:"x"`
-	Y        *int32  `json:"y"`
-	Z        *int32  `json:"z"`
-	Block    *string `json:"block"`
-	PlayerID *string `json:"player_id"`
+	Kind     string
+	X        *int32
+	Y        *int32
+	Z        *int32
+	Block    *string
+	PlayerID *string
+	// appeared 记录步骤 JSON 对象中真实出现的键（值为显式 null 也算出现）。
+	// appeared 命中且指针非 nil 表示「出现且值合法」；命中而指针为 nil 表示
+	// 「出现为显式 null」；未命中表示「字段缺席」。排他矩阵以 appeared 判定
+	// 字段出现，不再从指针推断。
+	appeared map[string]struct{}
+}
+
+// has 报告字段是否在步骤 JSON 中出现。显式 null 同样算出现——null 与缺席
+// 不等价是 M5E null 契约收紧的核心语义，排他矩阵据此把「专属外字段为 null」
+// 与「专属外字段携带非法值」归入同一拒绝路径。
+func (s planWireStep) has(field string) bool {
+	_, ok := s.appeared[field]
+	return ok
+}
+
+// UnmarshalJSON 把单个步骤对象严格解码为中间形：先解到键→原始值的 map，
+// 再逐键处理。键白名单（kind/x/y/z/block/player_id）之外的键一律拒绝——
+// 自定义解码接管步骤内部后，外层 json.Decoder 的 DisallowUnknownFields 不再
+// 覆盖步骤对象，未知键拒绝必须在此手工等价保留，既有严格性不降。显式 null
+// 只记入 appeared、不填指针（值非法由 decodePlanStep 拒绝）；非 null 值按
+// 强类型严格解码，类型不符（如 "x":"1"）在此失败，语义与原先的 struct
+// 反射解码一致。
+func (s *planWireStep) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	appeared := make(map[string]struct{}, len(fields))
+	for name, raw := range fields {
+		appeared[name] = struct{}{}
+		var err error
+		switch name {
+		case "kind":
+			// null 是 no-op（Kind 保持 ""），由 decodePlanStep 按 kind 未交付拒绝。
+			err = json.Unmarshal(raw, &s.Kind)
+		case "x":
+			s.X, err = decodeWireValue[int32](raw)
+		case "y":
+			s.Y, err = decodeWireValue[int32](raw)
+		case "z":
+			s.Z, err = decodeWireValue[int32](raw)
+		case "block":
+			s.Block, err = decodeWireValue[string](raw)
+		case "player_id":
+			s.PlayerID, err = decodeWireValue[string](raw)
+		default:
+			return fmt.Errorf("步骤含未知字段 %q", name)
+		}
+		if err != nil {
+			return fmt.Errorf("字段 %s 解码失败: %w", name, err)
+		}
+	}
+	s.appeared = appeared
+	return nil
+}
+
+// decodeWireValue 把步骤字段的原始 JSON 值解成强类型指针：显式 null 返回
+// nil 指针（字段出现、值非法，由排他矩阵或必填校验拒绝），非 null 值按 T
+// 严格解码，类型不符在此失败。
+func decodeWireValue[T any](raw json.RawMessage) (*T, error) {
+	if isJSONNull(raw) {
+		return nil, nil
+	}
+	var value T
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
 }
 
 // planWire 是计划文本的解码中间形；缺字段由解码后的显式校验兜底。
@@ -289,13 +363,20 @@ func decodePlanResponse(body []byte, snapshot PlanSnapshot) (Plan, error) {
 // x/y/z/block 且不得携带 player_id；follow 必须只携带 player_id。kind 必须
 // 逐字等于交付全集之一（大小写敏感）；block 名查固定注册表归一为 BlockID，
 // player_id 按 canonical UUIDv4 文本解析为 PlayerID。
+//
+// null 与缺席不等价（M5E 契约收紧）：显式 JSON null 一律视为「字段出现」，
+// 专属外字段携带 null 与携带非法值的拒绝语义完全一致——排他判定看 has()
+// 记录的出现事实而不是指针是否非 nil。必填字段（x/y/z、block、player_id）
+// 携带 null 与缺席同样被拒绝，但拒绝理由分立：null 是出现的非法载荷，不是
+// 缺字段。
 func decodePlanStep(index int, step planWireStep) (PlanStep, error) {
 	switch step.Kind {
 	case "go_to", "mine":
-		if step.Block != nil || step.PlayerID != nil {
+		if step.has("block") || step.has("player_id") {
 			return PlanStep{}, fmt.Errorf("计划 steps[%d] kind %s 携带专属外字段 block/player_id", index, step.Kind)
 		}
-		// 指针为 nil 覆盖字段缺席与 JSON null 两种情形，二者都不是有限整数。
+		// 缺席与显式 null 都不构成有限整数坐标，同因拒绝；二者的区别只体现在
+		// 上方的排他矩阵（null 算出现）。
 		if step.X == nil || step.Y == nil || step.Z == nil {
 			return PlanStep{}, fmt.Errorf("计划 steps[%d] 坐标不是整数", index)
 		}
@@ -305,14 +386,18 @@ func decodePlanStep(index int, step planWireStep) (PlanStep, error) {
 		}
 		return PlanStep{Kind: kind, X: *step.X, Y: *step.Y, Z: *step.Z}, nil
 	case "place":
-		if step.PlayerID != nil {
+		if step.has("player_id") {
 			return PlanStep{}, fmt.Errorf("计划 steps[%d] kind place 携带专属外字段 player_id", index)
 		}
 		if step.X == nil || step.Y == nil || step.Z == nil {
 			return PlanStep{}, fmt.Errorf("计划 steps[%d] 坐标不是整数", index)
 		}
-		if step.Block == nil {
+		if !step.has("block") {
 			return PlanStep{}, fmt.Errorf("计划 steps[%d] 缺少 block 字段", index)
+		}
+		if step.Block == nil {
+			// 走到这里 block 已出现且为显式 null：与缺席分立拒绝（见函数 GoDoc）。
+			return PlanStep{}, fmt.Errorf("计划 steps[%d] block 字段是显式 null", index)
 		}
 		item, ok := planPlaceItems[*step.Block]
 		if !ok {
@@ -326,11 +411,15 @@ func decodePlanStep(index int, step planWireStep) (PlanStep, error) {
 		}
 		return PlanStep{Kind: PlanStepPlace, X: *step.X, Y: *step.Y, Z: *step.Z, Block: block}, nil
 	case "follow":
-		if step.X != nil || step.Y != nil || step.Z != nil || step.Block != nil {
+		if step.has("x") || step.has("y") || step.has("z") || step.has("block") {
 			return PlanStep{}, fmt.Errorf("计划 steps[%d] kind follow 携带专属外字段 x/y/z/block", index)
 		}
-		if step.PlayerID == nil {
+		if !step.has("player_id") {
 			return PlanStep{}, fmt.Errorf("计划 steps[%d] 缺少 player_id 字段", index)
+		}
+		if step.PlayerID == nil {
+			// 走到这里 player_id 已出现且为显式 null：与缺席分立拒绝。
+			return PlanStep{}, fmt.Errorf("计划 steps[%d] player_id 字段是显式 null", index)
 		}
 		playerID, err := core.ParsePlayerID(*step.PlayerID)
 		if err != nil {
