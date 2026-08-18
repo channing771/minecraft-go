@@ -29,19 +29,8 @@ func mustPathGrid(t *testing.T, build func() (PathGrid, error)) PathGrid {
 	return grid
 }
 
-// wantPathError 断言 err 命中期望的寻路哨兵类别且不同时命中另一类别。
-func wantPathError(t *testing.T, err error, want, other error) {
-	t.Helper()
-	if err == nil {
-		t.Fatalf("期望错误 %v，got nil", want)
-	}
-	if !errors.Is(err, want) {
-		t.Fatalf("错误类别错误: %v，want %v", err, want)
-	}
-	if errors.Is(err, other) {
-		t.Fatalf("错误同时命中另一类别: %v", err)
-	}
-}
+// 哨兵错误断言 helper wantErrorIs 的定义位于 planner_test.go：本文件原本与
+// planner 测试各持一份逐字相同的副本，按并集语义合并后由两个文件共用。
 
 // assertPathCells 断言坐标序列逐点相等。
 func assertPathCells(t *testing.T, got, want []PathCell) {
@@ -256,7 +245,7 @@ func TestPathfindReplayDeterministic(t *testing.T) {
 	})
 	for attempt := 0; attempt < 3; attempt++ {
 		_, err := FindPath(blockedGrid, start, goal)
-		wantPathError(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
+		wantErrorIs(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
 	}
 }
 
@@ -383,7 +372,7 @@ func TestPathfindGapCross(t *testing.T) {
 			pathTestTable, gapFloor(func(x int32) bool { return x == 0 || x == 3 }), nil)
 	})
 	_, err = FindPath(twoGap, PathCell{X: 0, Y: 64, Z: 0}, PathCell{X: 3, Y: 64, Z: 0})
-	wantPathError(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
+	wantErrorIs(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
 
 	// 中格 head 被堵时不可跨越。
 	blockedHead := mustPathGrid(t, func() (PathGrid, error) {
@@ -396,7 +385,7 @@ func TestPathfindGapCross(t *testing.T) {
 			}, nil)
 	})
 	_, err = FindPath(blockedHead, PathCell{X: 0, Y: 64, Z: 0}, PathCell{X: 2, Y: 64, Z: 0})
-	wantPathError(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
+	wantErrorIs(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
 }
 
 // TestPathfindJumpUpOneAndFallOne 验证跳上一格（要求当前 head 上方一格可通过）
@@ -429,7 +418,7 @@ func TestPathfindJumpUpOneAndFallOne(t *testing.T) {
 			}, nil)
 	})
 	_, err = FindPath(blockedClearance, PathCell{X: 0, Y: 64, Z: 0}, PathCell{X: 1, Y: 65, Z: 0})
-	wantPathError(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
+	wantErrorIs(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
 
 	// 下落一格：高台 x=0（站 y=65）落向 x=1（站 y=64）。
 	descent := mustPathGrid(t, func() (PathGrid, error) {
@@ -458,7 +447,7 @@ func TestPathfindJumpUpOneAndFallOne(t *testing.T) {
 			}, nil)
 	})
 	_, err = FindPath(descentTwo, PathCell{X: 0, Y: 66, Z: 0}, PathCell{X: 1, Y: 64, Z: 0})
-	wantPathError(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
+	wantErrorIs(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
 }
 
 // TestPathfindBudgetBoundaryExact 是预算上限的突变敏感锚点：一格宽直走廊迫使
@@ -481,7 +470,7 @@ func TestPathfindBudgetBoundaryExact(t *testing.T) {
 		})
 	}
 	_, err := FindPath(corridor(4097), PathCell{X: 0, Y: 64, Z: 0}, PathCell{X: 4096, Y: 64, Z: 0})
-	wantPathError(t, err, ErrPathBudgetExceeded, ErrPathUnreachable)
+	wantErrorIs(t, err, ErrPathBudgetExceeded, ErrPathUnreachable)
 
 	result, err := FindPath(corridor(4095), PathCell{X: 0, Y: 64, Z: 0}, PathCell{X: 4094, Y: 64, Z: 0})
 	if err != nil {
@@ -506,7 +495,7 @@ func TestPathfindBudgetHaltsUnbounded(t *testing.T) {
 			}, nil)
 	})
 	_, err := FindPath(grid, PathCell{X: 0, Y: 64, Z: 0}, PathCell{X: 94, Y: 64, Z: 94})
-	wantPathError(t, err, ErrPathBudgetExceeded, ErrPathUnreachable)
+	wantErrorIs(t, err, ErrPathBudgetExceeded, ErrPathUnreachable)
 }
 
 // TestPathfindUnreachable 验证窗口内无路：两格宽护城河围住的目标塔在预算内
@@ -529,12 +518,12 @@ func TestPathfindUnreachable(t *testing.T) {
 			}, pathLegend, nil)
 	})
 	_, err := FindPath(walled, PathCell{X: 0, Y: 64, Z: 0}, PathCell{X: 3, Y: 64, Z: 3})
-	wantPathError(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
+	wantErrorIs(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
 
 	_, err = FindPath(walled, PathCell{X: 99, Y: 64, Z: 0}, PathCell{X: 3, Y: 64, Z: 3})
-	wantPathError(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
+	wantErrorIs(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
 	_, err = FindPath(walled, PathCell{X: 0, Y: 64, Z: 0}, PathCell{X: 1, Y: 64, Z: 1})
-	wantPathError(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
+	wantErrorIs(t, err, ErrPathUnreachable, ErrPathBudgetExceeded)
 }
 
 // TestPathfindPolicyReplanCooldown 验证路径点重验与固定冷却：revision 全部一致

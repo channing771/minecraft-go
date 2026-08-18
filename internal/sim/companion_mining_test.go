@@ -59,60 +59,62 @@ func fillCompanionInventory(entry *companionState, item core.ItemID) {
 	}
 }
 
-// readyCompanionMining 构造一个手握指定工具、面向目标方块、已置采掘意图的
-// 伙伴采掘场景。
+// newCompanionMiningScene 构造两个采掘入口共用的公共场景：平地 3x3 区块上
+// 一个已激活的伙伴站在 (4.5, 1, 8.5)，目标方块固定在 (4, 1, 5)，两者水平距离
+// 约 3 格、视线无遮挡，位于默认 InteractionReach 之内。伙伴手握指定工具
+// （hotbar 栏位 0 选中）。采掘意图不在场景内建立，差异留给两个入口补齐：
+// 直接写共享 actorState 字段的 readyCompanionMining 与经完整 Step/MineHold
+// action 建立意图的 readyCompanionMiningViaActions。
+func newCompanionMiningScene(
+	t *testing.T,
+	block core.BlockID,
+	tool core.ItemID,
+) companionMiningFixture {
+	t.Helper()
+	engine := NewEngine(0, 0)
+	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
+	id := companionTestID(1)
+	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})
+	target := core.BlockPos{X: 4, Y: 1, Z: 5}
+	engine.SetBlockForTest(target, block)
+	entry := engine.companions[id]
+	if tool == core.ItemNone {
+		entry.inventory.Hotbar.Slots[0] = core.ItemStack{}
+	} else {
+		full, _ := core.ItemMaxDurability(tool)
+		entry.inventory.Hotbar.Slots[0] = core.ItemStack{
+			Item: tool, Count: 1, Durability: full,
+		}
+	}
+	entry.inventory.Hotbar.Selected = 0
+	return companionMiningFixture{engine: engine, id: id, entry: entry, target: target}
+}
+
+// readyCompanionMining 在公共场景上直接写入采掘意图（miningHeld/miningTarget），
+// 构造一个已置采掘意图的伙伴采掘场景——与既有玩家采掘测试直接写
+// player.miningHeld 完全对称。
 func readyCompanionMining(
 	t *testing.T,
 	block core.BlockID,
 	tool core.ItemID,
 ) companionMiningFixture {
 	t.Helper()
-	engine := NewEngine(0, 0)
-	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
-	id := companionTestID(1)
-	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})
-	target := core.BlockPos{X: 4, Y: 1, Z: 5}
-	engine.SetBlockForTest(target, block)
-	entry := engine.companions[id]
-	if tool == core.ItemNone {
-		entry.inventory.Hotbar.Slots[0] = core.ItemStack{}
-	} else {
-		full, _ := core.ItemMaxDurability(tool)
-		entry.inventory.Hotbar.Slots[0] = core.ItemStack{
-			Item: tool, Count: 1, Durability: full,
-		}
-	}
-	entry.inventory.Hotbar.Selected = 0
-	entry.miningHeld = true
-	entry.miningTarget = target
-	return companionMiningFixture{engine: engine, id: id, entry: entry, target: target}
+	fixture := newCompanionMiningScene(t, block, tool)
+	fixture.entry.miningHeld = true
+	fixture.entry.miningTarget = fixture.target
+	return fixture
 }
 
-// readyCompanionMiningAtTarget 与 readyCompanionMining 相同，但经完整 Step 与
-// MineHold action 建立采掘意图，用于验证 action 载荷与 CompanionUpdate 发布。
+// readyCompanionMiningViaActions 返回不带采掘意图的公共场景，采掘意图由测试
+// 经完整 Step 与 MineHold action 建立，用于验证 action 载荷分派与
+// CompanionUpdate 发布（见 holdCompanionMineAction）。
 func readyCompanionMiningViaActions(
 	t *testing.T,
 	block core.BlockID,
 	tool core.ItemID,
 ) companionMiningFixture {
 	t.Helper()
-	engine := NewEngine(0, 0)
-	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
-	id := companionTestID(1)
-	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})
-	target := core.BlockPos{X: 4, Y: 1, Z: 5}
-	engine.SetBlockForTest(target, block)
-	entry := engine.companions[id]
-	if tool == core.ItemNone {
-		entry.inventory.Hotbar.Slots[0] = core.ItemStack{}
-	} else {
-		full, _ := core.ItemMaxDurability(tool)
-		entry.inventory.Hotbar.Slots[0] = core.ItemStack{
-			Item: tool, Count: 1, Durability: full,
-		}
-	}
-	entry.inventory.Hotbar.Selected = 0
-	return companionMiningFixture{engine: engine, id: id, entry: entry, target: target}
+	return newCompanionMiningScene(t, block, tool)
 }
 
 // holdCompanionMineAction 提交一个 MineHold action 并步进一个完整 tick。

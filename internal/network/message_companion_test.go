@@ -253,7 +253,7 @@ func TestChatEventTaskDecoderRejectsInvalidKindReasonCombinations(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	kindOffset := 8 + 16 + 1 + len(started.PlayerName) + 16 + 1 + len(started.CompanionName)
+	kindOffset := chatEventKindOffset(started)
 	for _, mutation := range []struct {
 		name   string
 		offset int
@@ -422,7 +422,7 @@ func TestChatEventCompanionSpeechDecoderRejectsInvalidWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kindOffset := 8 + 16 + 1 + len(event.PlayerName) + 16 + 1 + len(event.CompanionName)
+	kindOffset := chatEventKindOffset(event)
 	for _, mutation := range []struct {
 		name   string
 		mutate func([]byte)
@@ -858,7 +858,7 @@ func TestCompanionDecoderRejectsInvalidIDsEnumsNumbersAndDimensions(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	kindOffset := 8 + 16 + 1 + len(accepted.PlayerName) + 16 + 1 + len(accepted.CompanionName)
+	kindOffset := chatEventKindOffset(accepted)
 	for _, mutation := range []func([]byte){
 		func(payload []byte) { payload[kindOffset] = 10 },
 		func(payload []byte) { payload[kindOffset+1] = byte(ChatRejectInvalidFormat) },
@@ -946,6 +946,14 @@ func validAcceptedChatEvent() ChatEvent {
 		CompanionID: testCompanionID(1), CompanionName: "A",
 		Kind: ChatEventAccepted, RejectReason: ChatRejectNone, Command: "x",
 	}
+}
+
+// chatEventKindOffset 返回 ChatEvent wire 载荷中 kind 字节的偏移。头部布局与
+// wire 编码一致：8 bytes 前缀（event ID）+ 16 玩家 ID + 1 名称长度 + 玩家名 +
+// 16 伙伴 ID + 1 名称长度 + 伙伴名，随后即是 1 byte kind（再后 1 byte 是
+// reason 槽位）。wire 突变测试据此定位 kind 与 reason 字节。
+func chatEventKindOffset(event ChatEvent) int {
+	return 8 + 16 + 1 + len(event.PlayerName) + 16 + 1 + len(event.CompanionName)
 }
 
 // taskChatEvent 构造一条携带完整伙伴身份与原始指令的任务生命周期事件；

@@ -85,8 +85,11 @@ func testSnapshot() PlanSnapshot {
 	}
 }
 
-// wantPlanError 断言错误属于期望的哨兵类别且不同时命中另一类别。
-func wantPlanError(t *testing.T, err error, want, other error) {
+// wantErrorIs 断言错误属于期望的哨兵类别且不同时命中另一类别。planner 与
+// pathfind 测试原本各持一份逐字相同的副本（wantPlanError/wantPathError），
+// 合并为包内唯一 helper：nil 检查、命中 want 哨兵、不命中 other 哨兵三段
+// 断言与两份原实现完全一致。
+func wantErrorIs(t *testing.T, err error, want, other error) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("期望错误 %v，got nil", want)
@@ -460,7 +463,7 @@ func TestPlannerTimeoutFailsWithoutRetry(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 600*time.Millisecond {
 		t.Fatalf("超时返回过慢: %v", elapsed)
 	}
-	wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+	wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 	if got := atomic.LoadInt32(&requests); got != 1 {
 		t.Fatalf("超时后请求数 = %d，want 1（不得自动重试）", got)
 	}
@@ -494,7 +497,7 @@ func TestPlannerContextCancelReturnsCleanly(t *testing.T) {
 	cancel()
 	select {
 	case err := <-result:
-		wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+		wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 	case <-time.After(2 * time.Second):
 		t.Fatal("context 取消后 Plan 未返回")
 	}
@@ -514,7 +517,7 @@ func TestPlannerHTTPStatusFailsNoBodyLeak(t *testing.T) {
 			fmt.Fprintf(w, "upstream exploded %s", bodyLeakMarker)
 		}))
 		_, err := planner.Plan(context.Background(), testSnapshot())
-		wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+		wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 		if got := atomic.LoadInt32(&requests); got != 1 {
 			t.Fatalf("状态 %d 请求数 = %d，want 1", status, got)
 		}
@@ -558,7 +561,7 @@ func TestPlannerOversizedBodyRejected(t *testing.T) {
 	markerBody := strings.Replace(buildBody((64<<10)+1), "padding\":\"a", "padding\":\""+bodyLeakMarker, 1)
 	response.Store(markerBody)
 	_, err := planner.Plan(context.Background(), testSnapshot())
-	wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+	wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 	if strings.Contains(err.Error(), bodyLeakMarker) {
 		t.Fatalf("超限错误泄漏响应正文: %v", err)
 	}
@@ -623,7 +626,7 @@ func TestPlannerDecodeStrict(t *testing.T) {
 			}
 			continue
 		}
-		wantPlanError(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
+		wantErrorIs(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
 		if strings.Contains(err.Error(), bodyLeakMarker) {
 			t.Fatalf("%s: 错误泄漏正文标记", testCase.name)
 		}
@@ -653,7 +656,7 @@ func TestPlannerEnvelopeStrict(t *testing.T) {
 			fmt.Fprint(w, body)
 		}))
 		_, err := planner.Plan(context.Background(), testSnapshot())
-		wantPlanError(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
+		wantErrorIs(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
 		if got := atomic.LoadInt32(&requests); got != 1 {
 			t.Fatalf("%s: 请求数 = %d，want 1", name, got)
 		}
@@ -669,7 +672,7 @@ func TestPlannerUnreachableEndpoint(t *testing.T) {
 		t.Fatalf("NewPlannerClient 失败: %v", err)
 	}
 	_, err = planner.Plan(context.Background(), testSnapshot())
-	wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+	wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 }
 
 // TestPlannerRejectsInvalidSettings 验证构造器拒绝非法模型设置。
@@ -848,7 +851,7 @@ func TestPlanDecodeKindMatrix(t *testing.T) {
 		}
 		plan, err := planner.Plan(context.Background(), snapshot)
 		if !testCase.valid {
-			wantPlanError(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
+			wantErrorIs(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
 			if strings.Contains(err.Error(), bodyLeakMarker) {
 				t.Fatalf("%s: 错误泄漏正文标记", testCase.name)
 			}
