@@ -825,17 +825,21 @@ func (m *companionManager) dispatchPlanning() {
 			continue
 		}
 		if !hasCurrent {
-			// 发令者失配检查位于 BeginHead 之前。issuers 与 queue.pending
+			// 发令者失配检查位于 BeginHead 之前。失配的准确定义是
+			// 「pending 非空而 issuers 为空」：issuers 与 queue.pending
 			// 在 Enqueue/restore 时一一配对追加、仅在下方的消费点成对变
 			// 化，且本函数从检查点到 BeginHead 之间没有任何 issuers 写者
-			//（全部写点都在权威 tick 串行执行），失配只可能是入队或恢复
-			// 路径的缺陷，正常不可达。若放在 BeginHead 之后，队列已把队首
-			// 提升为当前任务而 issuers 为空，防御分支触发时任务以 Queued
-			// 滞留、槽位残留上一任务的 currentIssuer（或零值——零值
-			// PlayerID 过不了 ChatEvent.Validate，后续事件将被静默丢弃），
-			// 次生行为未定义；前移使缺陷态下队列从未占用槽位。检查只读，
-			// 正常路径（issuers 非空）的控制流与后继语句零变化。
-			if len(slot.issuers) == 0 {
+			//（全部写点都在权威 tick 串行执行），该失配只可能是入队或恢
+			// 复路径的配对缺陷，正常不可达。空闲态（pending 与 issuers 同
+			// 空）是每伙伴的正常状态，不属失配，绝不打日志——守卫因此必
+			// 须同时检查 pending 非空。若把失配处理放在 BeginHead 之后，
+			// 队列已把队首提升为当前任务而 issuers 为空，防御分支触发时
+			// 任务以 Queued 滞留、槽位残留上一任务的 currentIssuer（或零
+			// 值——零值 PlayerID 过不了 ChatEvent.Validate，后续事件将被
+			// 静默丢弃），次生行为未定义；前移使缺陷态下队列从未占用槽
+			// 位。检查只读，正常路径（issuers 配对非空）的控制流与后继
+			// 语句零变化。
+			if slot.queue.Len() > 0 && len(slot.issuers) == 0 {
 				slog.Error("任务 FIFO 与发令者队列失配", "companion", id)
 				continue
 			}

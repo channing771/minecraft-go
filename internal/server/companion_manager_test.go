@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -1284,5 +1285,64 @@ func TestCompanionManagerIssuerMismatchSkipsBeforeBeginHead(t *testing.T) {
 	if slot.queue.Generation() != generation {
 		t.Fatalf("generation=%d，失配防御不得推进世代（BeginHead 未执行）",
 			slot.queue.Generation())
+	}
+}
+
+// mismatchLogCapture 收集经全局 slog 输出的消息文本，供空闲态回归锁断言
+// 「不产生失配日志」。只比对 message、不格式化属性，避免断言耦合日志排版。
+type mismatchLogCapture struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (capture *mismatchLogCapture) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (capture *mismatchLogCapture) Handle(_ context.Context, record slog.Record) error {
+	capture.mu.Lock()
+	capture.messages = append(capture.messages, record.Message)
+	capture.mu.Unlock()
+	return nil
+}
+
+func (capture *mismatchLogCapture) WithAttrs([]slog.Attr) slog.Handler { return capture }
+func (capture *mismatchLogCapture) WithGroup(string) slog.Handler      { return capture }
+
+// mismatchLogs 返回捕获到的「任务 FIFO 与发令者队列失配」条数。
+func (capture *mismatchLogCapture) mismatchLogs() int {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	count := 0
+	for _, message := range capture.messages {
+		if message == "任务 FIFO 与发令者队列失配" {
+			count++
+		}
+	}
+	return count
+}
+
+// TestCompanionManagerIdleSlotNoMismatchLog 锁定失配守卫的空闲态回归：空闲
+// 槽位（无 current、pending 与 issuers 同空）是每伙伴的正常状态，步进若干
+// tick 绝不产生「任务 FIFO 与发令者队列失配」日志。失配的准确条件是
+// 「pending 非空而 issuers 为空」；若守卫退化成只查 issuers 为空（丢掉
+// pending 非空前提），空闲态每 tick 误报、本测试以日志洪泛的形式变红。
+func TestCompanionManagerIdleSlotNoMismatchLog(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(1), Name: "阿木"}}
+	host := newCompanionManagerHost(t, definitions, nil, nil)
+	capture := &mismatchLogCapture{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(capture))
+	defer slog.SetDefault(previous)
+	// 步进真实权威 tick：覆盖伙伴出生扫描在途与激活后的两种空闲形态；
+	// 恢复 logger 的 defer 先于 t.Cleanup 的 Shutdown 执行，关服日志不受
+	// 捕获影响。
+	const idleTicks = 32
+	for range idleTicks {
+		host.world.StepForTest()
+	}
+	if count := capture.mismatchLogs(); count != 0 {
+		t.Fatalf("空闲槽位 %d 个 tick 产生 %d 条失配日志，空闲态不属失配",
+			idleTicks, count)
 	}
 }
