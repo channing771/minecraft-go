@@ -13,9 +13,10 @@ import (
 // companionMiningFixture 是一组伙伴采掘用例的公共场景：平地 3x3 区块上一个
 // 已激活的伙伴站在 (4.5, 1, 8.5)，目标方块固定在 (4, 1, 5)，两者水平距离约
 // 3 格、视线无遮挡，位于默认 InteractionReach 之内。伙伴手握指定工具
-// （hotbar 栏位 0 选中），采掘意图直接写入共享的 actorState 字段——与既有
-// 玩家采掘测试直接写 player.miningHeld 完全对称，action 载荷分派另行由
-// TestCompanionActionMiningPayloadsSetAndClearIntent 与发布用例经完整 Step 覆盖。
+// （hotbar 栏位 0 选中）。场景本身不写入采掘意图：直写路径由
+// readyCompanionMining 在场景上补 miningHeld/miningTarget（与既有玩家采掘
+// 测试直接写 player.miningHeld 完全对称），action 载荷分派由
+// readyCompanionMiningViaActions 经完整 action 链路与发布用例经 Step 覆盖。
 type companionMiningFixture struct {
 	engine *Engine
 	id     companion.ID
