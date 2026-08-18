@@ -42,7 +42,9 @@ func newTestDialogueClient(
 	return dialogue, server
 }
 
-// wantDialogueUnavailable 断言错误属于传输层类别且不同时命中输出非法类别。
+// wantDialogueUnavailable 断言错误属于传输层类别且不同时命中其余两类
+// 哨兵（F-3 拆分后请求构造与响应解码各有独立哨兵，传输层失败与两者都
+// 必须互斥）。
 func wantDialogueUnavailable(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
@@ -52,7 +54,10 @@ func wantDialogueUnavailable(t *testing.T, err error) {
 		t.Fatalf("错误类别错误: %v，want %v", err, ErrDialogueUnavailable)
 	}
 	if errors.Is(err, ErrDialogueInvalidResponse) {
-		t.Fatalf("错误同时命中另一类别: %v", err)
+		t.Fatalf("错误同时命中响应解码类别: %v", err)
+	}
+	if errors.Is(err, ErrDialogueInvalidRequest) {
+		t.Fatalf("错误同时命中请求构造类别: %v", err)
 	}
 }
 
@@ -447,11 +452,12 @@ func TestDialogueClientRejectsInvalidRequest(t *testing.T) {
 	dialogue, _ := newTestDialogueClient(t, "", nil, countingHandler(&requests, func(w http.ResponseWriter) {
 		_, _ = io.WriteString(w, chatCompletionsBody(t, `{"line":"不应到达"}`))
 	}))
-	// 绕过构造器直造越界请求，验证 Do 入口的第二层防御。
+	// 绕过构造器直造越界请求，验证 Do 入口的第二层防御；错误经
+	// req.Validate → NewDialogueRequest 归请求构造哨兵（F-3 拆分）。
 	invalid := testDialogueRequest(t)
 	invalid.Persona = strings.Repeat("a", MaxPersonaBytes+1)
 	_, _, err := dialogue.Do(context.Background(), invalid, false)
-	wantDialogueError(t, err)
+	wantDialogueRequestError(t, err)
 	if got := atomic.LoadInt32(&requests); got != 0 {
 		t.Fatalf("越界请求仍发出请求: %d", got)
 	}

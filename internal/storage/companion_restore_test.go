@@ -1,6 +1,7 @@
 // companions.ai schema v3 的任务区/FIFO 持久化与恢复测试：v3 变长步骤
 // round-trip 与冻结 golden 迁移（四 kind 覆盖）、v2/v1 只读迁移且首次保存
-// 写 v4、任务与 FIFO 跨重启精确恢复、损坏矩阵（CRC/future/截断/超
+// 写 v4、入口 schema 白名单前瞻锁（字面 v1..v4 成员、v5 假想文件拒绝）、
+// 任务与 FIFO 跨重启精确恢复、损坏矩阵（CRC/future/截断/超
 // 438,280 bytes/非法任务状态/变长步长错位/follow 携带 deadline）与
 // 5,000 步骤、16 条 FIFO 边界。全部用例不触盘（除显式 DiskStore 用例），
 // 失败注入均为字节级或载荷级构造。
@@ -326,9 +327,63 @@ func TestCompanionCodecV2RoundTripAndGolden(t *testing.T) {
 	}
 }
 
-// TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV3 锁定 v1→v3 迁移：
-// v1 golden（仅身体）无损读入，首次保存直接写当前 schema v3。
-func TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV3(t *testing.T) {
+// TestCompanionDecodeSchemaWhitelistListsLiteralV4 锁定解码入口 schema 白
+// 名单的前瞻口径：成员显式为 v1/v2/v3/v4 字面常量而非 currentCompanionSchema
+// 引用——未来 v5 成为 current 时，schema=4 的合法迁移文件仍必须在入口被
+// 放行，才能到达摘要位的 `schema >= companionSchemaV4` 前瞻检查
+// （decodeCompanionQueueSections），这正是 companionSchemaV4 独立常量存在的
+// 意图。分层断言：白盒成员锁（恰为 {1,2,3,4}，0 与假想 v5/v6 不在内——
+// 断言 0 不在白名单今日即封死「惰性写成 <= current」的退化形态，上调
+// current 而忘记显式扩白名单也会在此变红）；v5 假想文件（合法 v4 编码
+// 只改 schema 字节为字面 5，其余字节按 v4 语义原样保留）今天必须被明确拒
+// 绝为 ErrFutureVersion，本测试不引入任何 v5 解码支持；对照同一 v4 编码
+// 原样解码成功，证明拒绝来自白名单判定而非文件本身。schema 检查先于
+// CRC 校验，假想文件无需修复校验和。
+func TestCompanionDecodeSchemaWhitelistListsLiteralV4(t *testing.T) {
+	for _, schema := range []uint32{
+		companionSchemaV1, companionSchemaV2, companionSchemaV3, companionSchemaV4,
+	} {
+		if !companionSchemaReadable(schema) {
+			t.Fatalf("schema=%d 必须在解码白名单内", schema)
+		}
+	}
+	for _, schema := range []uint32{0, 5, 6} {
+		if companionSchemaReadable(schema) {
+			t.Fatalf("schema=%d 必须不在解码白名单内（今天未交付）", schema)
+		}
+	}
+
+	// v5 假想文件：带摘要的合法 v4 编码（摘要区是 v4 起才可能的载荷）只改
+	// schema 字节，其余字节按 v4 语义原样保留。
+	queues := fixtureCompanionV4Queues()
+	queuesSnapshot := cloneStoredQueuesForTest(queues)
+	encoded, err := encodeCompanions(CompanionSave{
+		Revision: 9,
+		Records:  fixtureCompanionBodies(),
+		Queues:   queues,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hypothetical := bytes.Clone(encoded)
+	binary.LittleEndian.PutUint32(hypothetical[8:], 5)
+	if _, err := decodeCompanions(hypothetical); !errors.Is(err, ErrFutureVersion) {
+		t.Fatalf("schema=5 decode error=%v，想要 ErrFutureVersion（v5 今天被明确拒绝）", err)
+	}
+	// 对照：同一 v4 编码原样通过，摘要精确保留——拒绝 v5 是白名单判定，
+	// 不是文件本身的问题。
+	got, err := decodeCompanions(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Revision != 9 || !reflect.DeepEqual(got.Queues, queuesSnapshot) {
+		t.Fatalf("schema=4 合法文件 decode=%+v，想要原样通过 %+v", got, queuesSnapshot)
+	}
+}
+
+// TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV4 锁定 v1→v4 迁移：
+// v1 golden（仅身体）无损读入，首次保存直接写当前 schema v4。
+func TestCompanionRestoreV1ReadOnlyMigrationAndFirstSaveWritesV4(t *testing.T) {
 	v1, err := os.ReadFile(filepath.Join("testdata", "companions-v1.bin"))
 	if err != nil {
 		t.Fatal(err)

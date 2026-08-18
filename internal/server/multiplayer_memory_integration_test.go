@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -326,7 +325,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		if err := warmCtx.Err(); err != nil {
 			t.Fatalf("%s warm-up: %v\n%s", transport, err, multiplayerDiagnosticsMany(clients))
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 	for _, connected := range clients {
 		connected.transcript = nil
@@ -370,7 +369,7 @@ func runEightManualMultiplayer(t *testing.T, transport string, ticks uint64) mul
 		}
 		barrierCtx, barrierCancel := context.WithTimeout(context.Background(), waitDeadline)
 		for len(running.incoming) != expected && barrierCtx.Err() == nil {
-			runtime.Gosched()
+			time.Sleep(integrationPollInterval)
 		}
 		barrierErr := barrierCtx.Err()
 		barrierCancel()
@@ -741,7 +740,7 @@ func drainMultiplayerClientsToTick(t *testing.T, ctx context.Context, transport 
 			t.Fatalf("%s drain to tick %d: %v\n%s", transport, tick, err, multiplayerDiagnosticsMany(clients))
 		}
 		if !progressed {
-			runtime.Gosched()
+			time.Sleep(integrationPollInterval)
 		}
 	}
 }

@@ -13,9 +13,10 @@ import (
 // companionMiningFixture 是一组伙伴采掘用例的公共场景：平地 3x3 区块上一个
 // 已激活的伙伴站在 (4.5, 1, 8.5)，目标方块固定在 (4, 1, 5)，两者水平距离约
 // 3 格、视线无遮挡，位于默认 InteractionReach 之内。伙伴手握指定工具
-// （hotbar 栏位 0 选中），采掘意图直接写入共享的 actorState 字段——与既有
-// 玩家采掘测试直接写 player.miningHeld 完全对称，action 载荷分派另行由
-// TestCompanionActionMiningPayloadsSetAndClearIntent 与发布用例经完整 Step 覆盖。
+// （hotbar 栏位 0 选中）。场景本身不写入采掘意图：直写路径由
+// readyCompanionMining 在场景上补 miningHeld/miningTarget（与既有玩家采掘
+// 测试直接写 player.miningHeld 完全对称），action 载荷分派由
+// readyCompanionMiningViaActions 经完整 action 链路与发布用例经 Step 覆盖。
 type companionMiningFixture struct {
 	engine *Engine
 	id     companion.ID
@@ -59,61 +60,62 @@ func fillCompanionInventory(entry *companionState, item core.ItemID) {
 	}
 }
 
-// readyCompanionMining 构造一个手握指定工具、面向目标方块、已置采掘意图的
-// 伙伴采掘场景。
+// newCompanionMiningScene 构造两个采掘入口共用的公共场景：平地 3x3 区块上
+// 一个已激活的伙伴站在 (4.5, 1, 8.5)，目标方块固定在 (4, 1, 5)，两者水平距离
+// 约 3 格、视线无遮挡，位于默认 InteractionReach 之内。伙伴手握指定工具
+// （hotbar 栏位 0 选中）。采掘意图不在场景内建立，差异留给两个入口补齐：
+// 直接写共享 actorState 字段的 readyCompanionMining 与经完整 Step/MineHold
+// action 建立意图的 readyCompanionMiningViaActions。
+func newCompanionMiningScene(
+	t *testing.T,
+	block core.BlockID,
+	tool core.ItemID,
+) companionMiningFixture {
+	t.Helper()
+	engine := NewEngine(0, 0)
+	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
+	id := companionTestID(1)
+	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})
+	target := core.BlockPos{X: 4, Y: 1, Z: 5}
+	engine.SetBlockForTest(target, block)
+	entry := engine.companions[id]
+	if tool == core.ItemNone {
+		entry.inventory.Hotbar.Slots[0] = core.ItemStack{}
+	} else {
+		full, _ := core.ItemMaxDurability(tool)
+		entry.inventory.Hotbar.Slots[0] = core.ItemStack{
+			Item: tool, Count: 1, Durability: full,
+		}
+	}
+	entry.inventory.Hotbar.Selected = 0
+	return companionMiningFixture{engine: engine, id: id, entry: entry, target: target}
+}
+
+// readyCompanionMining 在公共场景上直接写入采掘意图（miningHeld/miningTarget），
+// 构造一个已置采掘意图的伙伴采掘场景——与既有玩家采掘测试直接写
+// player.miningHeld 完全对称。
 func readyCompanionMining(
 	t *testing.T,
 	block core.BlockID,
 	tool core.ItemID,
 ) companionMiningFixture {
 	t.Helper()
-	engine := NewEngine(0, 0)
-	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
-	id := companionTestID(1)
-	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})
-	target := core.BlockPos{X: 4, Y: 1, Z: 5}
-	engine.SetBlockForTest(target, block)
-	entry := engine.companions[id]
-	entry.pitch = 0
-	if tool == core.ItemNone {
-		entry.inventory.Hotbar.Slots[0] = core.ItemStack{}
-	} else {
-		full, _ := core.ItemMaxDurability(tool)
-		entry.inventory.Hotbar.Slots[0] = core.ItemStack{
-			Item: tool, Count: 1, Durability: full,
-		}
-	}
-	entry.inventory.Hotbar.Selected = 0
-	entry.miningHeld = true
-	entry.miningTarget = target
-	return companionMiningFixture{engine: engine, id: id, entry: entry, target: target}
+	fixture := newCompanionMiningScene(t, block, tool)
+	fixture.entry.miningHeld = true
+	fixture.entry.miningTarget = fixture.target
+	return fixture
 }
 
-// readyCompanionMiningAtTarget 与 readyCompanionMining 相同，但经完整 Step 与
-// MineHold action 建立采掘意图，用于验证 action 载荷与 CompanionUpdate 发布。
+// readyCompanionMiningViaActions 返回不带采掘意图的公共场景，采掘意图由测试
+// 经完整 Step 与 MineHold action 建立，用于验证 action 载荷分派与
+// CompanionUpdate 发布（见 holdCompanionMineAction）。
 func readyCompanionMiningViaActions(
 	t *testing.T,
 	block core.BlockID,
 	tool core.ItemID,
 ) companionMiningFixture {
 	t.Helper()
-	engine := NewEngine(0, 0)
-	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
-	id := companionTestID(1)
-	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})
-	target := core.BlockPos{X: 4, Y: 1, Z: 5}
-	engine.SetBlockForTest(target, block)
-	entry := engine.companions[id]
-	if tool == core.ItemNone {
-		entry.inventory.Hotbar.Slots[0] = core.ItemStack{}
-	} else {
-		full, _ := core.ItemMaxDurability(tool)
-		entry.inventory.Hotbar.Slots[0] = core.ItemStack{
-			Item: tool, Count: 1, Durability: full,
-		}
-	}
-	entry.inventory.Hotbar.Selected = 0
-	return companionMiningFixture{engine: engine, id: id, entry: entry, target: target}
+	return newCompanionMiningScene(t, block, tool)
 }
 
 // holdCompanionMineAction 提交一个 MineHold action 并步进一个完整 tick。
@@ -152,7 +154,8 @@ func TestCompanionMiningMatchesPlayerRuleAndTiming(t *testing.T) {
 	setMiningHeldItem(player, core.ItemStonePickaxe)
 
 	entry := engine.companions[id]
-	entry.pitch = 0
+	// 伙伴采掘不看朝向：射线方向由目标方块中心决定（见 mining.go），不像玩家
+	// 那样需要用 pitch 把视线对准目标，这里只装配工具与意图。
 	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
 	entry.inventory.Hotbar.Slots[0] = core.ItemStack{
 		Item: core.ItemStonePickaxe, Count: 1, Durability: full,
@@ -438,10 +441,12 @@ func TestCompanionActionMiningPayloadsSetAndClearIntent(t *testing.T) {
 	}
 }
 
-// TestCompanionActionPlacePayloadSkeletonIsDefensiveOnly 锁定 Place 载荷的防御
+// TestCompanionActionPlacePayloadDefensiveBoundary 锁定 Place 载荷的防御
 // 边界：目标越界或方块未注册/空气的 Place action 被确定性丢弃，世界与背包都
-// 不变。合法 Place 的放置结算本体属后续放置任务，此处不断言其结算结果。
-func TestCompanionActionPlacePayloadSkeletonIsDefensiveOnly(t *testing.T) {
+// 不变。合法 Place 的结算本体（校验链 + 原子扣料写方块）在同一 tick 的
+// settleCompanionPlacements 完成，其行为由 companion_placement_test.go 锁定，
+// 此处只断言防御边界不产生副作用。
+func TestCompanionActionPlacePayloadDefensiveBoundary(t *testing.T) {
 	fixture := readyCompanionMiningViaActions(t, core.StoneID, core.ItemNone)
 	entry := fixture.entry
 	entry.inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemStone, Count: 4}

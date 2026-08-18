@@ -197,9 +197,12 @@ type companionManager struct {
 	// 于生产构造（server.go 与 Planner 同源构造），防御缺省下 requestDialogue
 	// 不应被调用——D6 接线前没有任何生产调用方。
 	dialogue companionDialogue
-	// dialogueEffects 是有效台词结果进入 applyDialogueEffect 的次数（D5 的
-	// 测试观察哨兵；D6 替换为 CompanionSpeech 广播与摘要更新后由事件断言
-	// 接管）。只在 tick 边界（持有 stepMu）读写。
+	// dialogueEffects 是有效台词结果进入 applyDialogueEffect 的次数。D6
+	// 交付后该方法的可观察真身已是 CompanionSpeech 广播事实与摘要写入，
+	// 生产路径只递增不读取；计数存活至今的原因是 companion_dialogue_test
+	// 的 dialogueEffectCount 仍以它为断言输入（stepMu 下与 dialogueInFlight
+	// 一起判定台词结果落地或被跳过），事件级断言并未完全接管。只在 tick
+	// 边界（持有 stepMu）读写。
 	dialogueEffects int
 
 	ctx       context.Context
@@ -258,8 +261,14 @@ func (m *companionManager) enqueueCommand(
 ) bool {
 	slot := m.slots[definition.ID]
 	if slot == nil {
-		// companionsByName 与 slots 同源构造，这里只是防御：未知槽位按接受
-		// 处理但不入队，避免把配置缺陷伪装成队列满。
+		// companionsByName 与 slots 同源构造（同一份 config.Companions），
+		// 寻址成功后槽位仍缺失只可能是构造缺陷，生产不可达。这里按接受
+		// 处理但不入队，代价是调用方会广播 ChatEventAccepted——全体玩家
+		// 看到任务被接受而它永不执行；换取的是不把配置缺陷伪装成队列满
+		//（返回 false 会以 QueueFull 同步拒绝发令者，谎报一个并不存在的
+		// 满员事实）。协议没有「服务端配置缺陷」的拒绝原因，两条路都
+		// 无法如实表达，取舍偏向不产生虚假拒绝、由 Error 日志承担可诊
+		// 断性。
 		slog.Error("任务入队找不到伙伴槽位", "companion", definition.ID)
 		return true
 	}
@@ -816,6 +825,24 @@ func (m *companionManager) dispatchPlanning() {
 			continue
 		}
 		if !hasCurrent {
+			// 发令者失配检查位于 BeginHead 之前。失配的准确定义是
+			// 「pending 非空而 issuers 为空」：issuers 与 queue.pending
+			// 在 Enqueue/restore 时一一配对追加、仅在下方的消费点成对变
+			// 化，且本函数从检查点到 BeginHead 之间没有任何 issuers 写者
+			//（全部写点都在权威 tick 串行执行），该失配只可能是入队或恢
+			// 复路径的配对缺陷，正常不可达。空闲态（pending 与 issuers 同
+			// 空）是每伙伴的正常状态，不属失配，绝不打日志——守卫因此必
+			// 须同时检查 pending 非空。若把失配处理放在 BeginHead 之后，
+			// 队列已把队首提升为当前任务而 issuers 为空，防御分支触发时
+			// 任务以 Queued 滞留、槽位残留上一任务的 currentIssuer（或零
+			// 值——零值 PlayerID 过不了 ChatEvent.Validate，后续事件将被
+			// 静默丢弃），次生行为未定义；前移使缺陷态下队列从未占用槽
+			// 位。检查只读，正常路径（issuers 配对非空）的控制流与后继
+			// 语句零变化。
+			if slot.queue.Len() > 0 && len(slot.issuers) == 0 {
+				slog.Error("任务 FIFO 与发令者队列失配", "companion", id)
+				continue
+			}
 			if !slot.queue.BeginHead() {
 				continue
 			}
@@ -830,10 +857,6 @@ func (m *companionManager) dispatchPlanning() {
 			slot.progressSteps = nil
 			slot.followArrivalSpoken = false
 			slot.dialogueRequests = 0
-			if len(slot.issuers) == 0 {
-				slog.Error("任务 FIFO 与发令者队列失配", "companion", id)
-				continue
-			}
 			slot.currentIssuer, slot.issuers = slot.issuers[0], slot.issuers[1:]
 			current, _ = slot.queue.Current()
 		}
@@ -934,11 +957,10 @@ func (m *companionManager) submitPathRequest(
 	if slot.pathInFlight {
 		return
 	}
-	center := companion.PathCell{
-		X: int32(math.Floor(float64(body.Position[0]))),
-		Y: int32(math.Floor(float64(body.Position[1]))),
-		Z: int32(math.Floor(float64(body.Position[2]))),
-	}
+	// 寻路窗口中心取伙伴当前站立格：与 standingCellOf 的逐分量 floor 归一
+	// 完全同构（X/Y/Z 各自 float32→float64→Floor→int32），复用同一实现
+	// 保证寻路起点与 follow 动态终点使用同一套格坐标语义。
+	center := standingCellOf(body.Position)
 	if current.StepIndex >= len(current.Plan.Steps) {
 		return
 	}
@@ -1012,6 +1034,12 @@ func (m *companionManager) taskStates() []companion.TaskQueueState {
 // （玩家 ID/名称/位置）不落盘，重启后无法回溯；任务事件又必须携带合法
 // 玩家身份才能通过 ChatEvent.Validate 发布，因此使用固定的「未知发令者」
 // 身份。位置沿用 captureIssuer 的有界缺省。
+//
+// playerID 的两个非零字节是满足 core.PlayerID.Valid() 的最小合成形态：
+// 该不变量要求 ID 非全零、byte[6] 的高半字节为 4（UUIDv4 version 位）且
+// byte[8] 的高两位为 10（variant 位），0x40 与 0x80 恰好各自点亮一处
+// 判定所需的位、不携带任何多余信息；其余字节保持全零，明示这不是任何
+// 真实玩家的身份，仅作为事件校验的通行证。
 var restoredIssuerIdentity = companionTaskIssuer{
 	playerID: core.PlayerID{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 0},
 	name:     "未知发令者",
@@ -1095,7 +1123,9 @@ func (m *companionManager) beginShutdown() {
 }
 
 // close 等待全部 worker 退出。结果 channel 中未被 drain 的结果直接放弃——
-// 冻结后的任务状态已由 Observe 捕获，重启恢复语义由任务 7 落地。
+// 冻结后的任务状态已由 Observe 捕获并随最终 AI 保存落盘，重启后由
+// restoreQueues 从存档恢复任务域（含 Planning/Validating→Queued 归一），
+// 被放弃的在途结果无需也无法补救。
 func (m *companionManager) close() {
 	m.cancel()
 	m.waitGroup.Wait()
@@ -1194,8 +1224,9 @@ func taskEventKind(kind companion.TaskEventKind) network.ChatEventKind {
 	}
 }
 
-// taskEventRejectReason 把失败原因映射到 ChatEvent 的 reason 槽位（16..19 的
-// wire 枚举）；非失败事件保持 None。
+// taskEventRejectReason 把失败原因映射到 ChatEvent 的 reason 槽位
+// （network.TaskFailReason 的 wire 枚举 16..20，其中 TaskFailInventoryFull=20
+// 是 v18 追加的容量失败原因）；非失败事件保持 None。
 func taskEventRejectReason(event companion.TaskEvent) network.ChatRejectReason {
 	if event.Kind != companion.TaskEventFailed {
 		return network.ChatRejectNone

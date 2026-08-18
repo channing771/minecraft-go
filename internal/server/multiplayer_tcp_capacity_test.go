@@ -203,7 +203,7 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 			readyCancel()
 			t.Fatalf("eight TCP clients ready/roster: %v\n%s", err, multiplayerDiagnosticsMany(clients))
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 	readyCancel()
 	stableGoroutines := runtime.NumGoroutine()
@@ -276,7 +276,7 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 			fallCancel()
 			t.Fatalf("queues did not return to zero: %v sample=%+v\n%s", err, sample, multiplayerDiagnosticsMany(clients))
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 	fallCancel()
 	drainAllMultiplayerAvailable(t, clients)
@@ -293,7 +293,7 @@ func runEightTCPClientsSoakIsBounded(t *testing.T) {
 	}
 	goroutineCtx, goroutineCancel := context.WithTimeout(context.Background(), waitDeadline)
 	for runtime.NumGoroutine() > baseline+4 && goroutineCtx.Err() == nil {
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 	remaining := runtime.NumGoroutine()
 	goroutineCancel()

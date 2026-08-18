@@ -1,7 +1,6 @@
 package client
 
 import (
-	"runtime"
 	"testing"
 	"time"
 
@@ -269,7 +268,10 @@ func waitForMesherBackpressureTest(t *testing.T, ready func() bool) {
 		if time.Now().After(deadline) {
 			t.Fatal("5 秒内条件未满足")
 		}
-		runtime.Gosched()
+		// 热轮询（runtime.Gosched）改为固定 sleep 退避：饱和并行 race 测试中
+		// 空转等待抢核拖慢条件生产者并施压邻居测试（与 internal/server 测试
+		// 同型治理保持一致）。
+		time.Sleep(500 * time.Microsecond)
 	}
 }
 

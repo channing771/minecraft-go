@@ -228,12 +228,15 @@ func NewDialogueClient(settings ModelSettings, apiKey string, client *http.Clien
 // Do 把台词请求发送给模型并返回严格解码后的 (line, summary)。
 //
 // terminal 决定响应契约：非终态只允许 line 字段；终态必须附带 summary。
-// 失败语义分两类（均可用 errors.Is 判别）：传输层失败（HTTP 错误、超时、取消、
-// 超限）包装 ErrDialogueUnavailable；模型输出不符合 schema（envelope 非法或
-// content 不满足 line/summary 白名单）包装 ErrDialogueInvalidResponse。两类
-// 错误都不重试；错误文本只含阶段、状态码与类别，绝不含密钥或响应正文原文
-// （stdlib JSON 语法错误可能携带单字符上下文，属可接受残留）。越界请求值在
-// 发起请求前即被拒绝（复用 D3 的防御校验），不产生任何网络流量。
+// 失败语义分三类（均可用 errors.Is 判别）：传输层失败（HTTP 错误、超时、
+// 取消、超限，以及 HTTP chatRequest envelope 序列化失败——与 Planner 侧
+// 同类失败归 ErrPlannerUnavailable 的惯例一致）包装 ErrDialogueUnavailable；
+// 请求构造侧失败（越界输入、发往模型的 user payload 序列化）包装
+// ErrDialogueInvalidRequest；模型输出不符合 schema（envelope
+// 非法或 content 不满足 line/summary 白名单）包装 ErrDialogueInvalidResponse。
+// 三类错误都不重试；错误文本只含阶段、状态码与类别，绝不含密钥或响应正文
+// 原文（stdlib JSON 语法错误可能携带单字符上下文，属可接受残留）。越界请求
+// 值在发起请求前即被拒绝（复用 D3 的防御校验），不产生任何网络流量。
 func (d *DialogueClient) Do(ctx context.Context, req DialogueRequest, terminal bool) (line string, summary string, err error) {
 	// 第二层防御：上游构造已保证边界，这里拦截绕过 NewDialogueRequest 的
 	// 直造值，保证请求正文的有界性不依赖调用方纪律。
@@ -242,8 +245,10 @@ func (d *DialogueClient) Do(ctx context.Context, req DialogueRequest, terminal b
 	}
 	userJSON, err := json.Marshal(buildDialogueUserPayload(req))
 	if err != nil {
+		// 序列化失败属请求构造侧（F-3 拆分后归 ErrDialogueInvalidRequest）：
+		// 校验通过的请求字段都是 JSON 安全类型，这里是防御性兜底。
 		return "", "", fmt.Errorf("companion: dialogue 序列化请求: %w: %w",
-			ErrDialogueInvalidResponse, err)
+			ErrDialogueInvalidRequest, err)
 	}
 	requestBody, err := json.Marshal(chatRequest{
 		Model: d.settings.Model,

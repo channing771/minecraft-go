@@ -14,11 +14,15 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// 寻路窗口几何：以伙伴为中心水平 ±16（含）、垂直 ±4（含）。水平半径覆盖
-// Planner 观察快照的同级范围，垂直半径更小——寻路只关心站立面附近的地形，
-// 放大垂直窗口只会增加无效节点预算消耗。
+// 寻路窗口几何：以伙伴为中心水平 ±16（含）、垂直 ±4（含）。水平半径与
+// Planner 观察快照共用同一常量（寻路窗口与观察快照必须保持同级范围，模型在
+// 快照里看得见的目标都要落在可寻路窗口内），垂直半径更小——寻路只关心站立
+// 面附近的地形，放大垂直窗口只会增加无效节点预算消耗。
 const (
-	// PathWindowHorizontalRadius 是寻路窗口的水平半径（含），单位格。
+	// PathWindowHorizontalRadius 是寻路窗口的水平半径（含），单位格。它同时
+	// 是 Planner 观察快照的水平半径（plan_types.go 的 planEnvRadiusBlocks 引用
+	// 同一常量）：这是单一常量定义的刻意耦合，改一个值会同时改变两处语义，
+	// 不允许再各自抄写一个数字。
 	PathWindowHorizontalRadius = 16
 	// PathWindowVerticalRadius 是寻路窗口的垂直半径（含），单位格。
 	PathWindowVerticalRadius = 4

@@ -35,10 +35,18 @@ const (
 )
 
 // ErrDialogueInvalidResponse 表示台词响应不符合受限 schema（非法 JSON、未知
-// 字段、尾随数据、超限、缺字段或文本违例）或请求构造输入越界。上层把它映射
-// 为「跳过该台词」——台词是尽力而为的表达平面输出，任何失败都不改变任务
-// 状态、FIFO 或任何世界事实。
-var ErrDialogueInvalidResponse = errors.New("companion: dialogue 输出或输入非法")
+// 字段、尾随数据、超限、缺字段或文本违例）。它只辖「模型输出解码」一侧的
+// 失败，绝不因请求构造输入触发。上层把它映射为「跳过该台词」——台词是
+// 尽力而为的表达平面输出，任何失败都不改变任务状态、FIFO 或任何世界事实。
+var ErrDialogueInvalidResponse = errors.New("companion: dialogue 输出非法")
+
+// ErrDialogueInvalidRequest 表示台词请求构造输入越界（persona、最近对话
+// 摘要、事实节点或环境摘要任一不满足有界校验），含请求序列化失败。它与
+// ErrDialogueInvalidResponse 分辖失败链路的两端：本哨兵只覆盖「进入模型
+// 之前」的请求侧，模型输出一侧永远由 ErrDialogueInvalidResponse 承载，
+// 两个哨兵互不重叠。上层语义与响应侧一致：拒绝该请求且绝不重试，不改变
+// 任务状态、FIFO 或任何世界事实。
+var ErrDialogueInvalidRequest = errors.New("companion: dialogue 请求非法")
 
 // DecodeDialogueResponse 把台词响应正文严格解码为 (line, summary)。
 //
@@ -268,20 +276,21 @@ type DialogueRequest struct {
 
 // NewDialogueRequest 构造并校验一份台词请求：persona 复用 ValidatePersona、
 // summary 与 env 各自校验、node 校验稳定事实组合。任何越界输入返回包装
-// ErrDialogueInvalidResponse 的错误，错误文本只描述违例类别与长度，不回显
-// 文本内容——人设与摘要是不可信数据，不能随错误进入日志。
+// ErrDialogueInvalidRequest 的错误（请求构造侧哨兵，见其 GoDoc），错误文本
+// 只描述违例类别与长度，不回显文本内容——人设与摘要是不可信数据，不能随
+// 错误进入日志。
 func NewDialogueRequest(persona, summary string, node DialogueNode, env DialogueEnvDigest) (DialogueRequest, error) {
 	if err := ValidatePersona(persona); err != nil {
-		return DialogueRequest{}, fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidResponse, err)
+		return DialogueRequest{}, fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidRequest, err)
 	}
 	if err := validateDialogueSummary(summary); err != nil {
-		return DialogueRequest{}, fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidResponse, err)
+		return DialogueRequest{}, fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidRequest, err)
 	}
 	if err := node.Validate(); err != nil {
-		return DialogueRequest{}, fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidResponse, err)
+		return DialogueRequest{}, fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidRequest, err)
 	}
 	if err := env.Validate(); err != nil {
-		return DialogueRequest{}, fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidResponse, err)
+		return DialogueRequest{}, fmt.Errorf("companion: dialogue %w: %w", ErrDialogueInvalidRequest, err)
 	}
 	return DialogueRequest{Persona: persona, Summary: summary, Node: node, Env: env}, nil
 }

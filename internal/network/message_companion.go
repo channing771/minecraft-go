@@ -16,11 +16,35 @@ import (
 )
 
 const (
-	chatCommandMaxWireBytes     = 1026
-	chatEventMaxWireBytes       = 1328
-	companionSpawnMaxWireBytes  = 178
-	companionStateWireBytes     = 41
-	maxCompanionStates          = companion.MaxActive
+	// chatCommandMaxWireBytes 是 ChatCommand 载荷的固定 wire 上限。推导：
+	// uvarint 长度前缀 2 bytes（文本长度 128..16383 时 uvarint 占 2 bytes）+
+	// 文本 ≤ companion.MaxPlanCommandBytes（1024）= 1026。文本上限与 companion
+	// 常量同源（E7）：Planner 指令上限变化时本 wire 上限自动随动，不再依赖
+	// 裸字面量与注释约定。数值当前冻结为 1026。
+	chatCommandMaxWireBytes = companion.MaxPlanCommandBytes + 2
+	// chatEventMaxWireBytes 是 ChatEvent 载荷的固定 wire 上限。推导：8 event
+	// ID（u64）+ 16 玩家 ID + 130 玩家名（128-byte 名称上限 + 2-byte uvarint
+	// 前缀）+ 16 伙伴 ID + 130 伙伴名 + 1 kind + 1 reason + 文本槽位
+	// （= chatCommandMaxWireBytes）= 1328。文本槽位按 kind 复用：指令槽位
+	// ≤ 1024+2 决定上界，台词槽位 ≤ 256+2=258 更小。指令槽位与 companion
+	// 常量同源（E7），名称上限当前冻结为 128 bytes。数值当前冻结为 1328。
+	chatEventMaxWireBytes = 8 + 16 + 130 + 16 + 130 + 1 + 1 + chatCommandMaxWireBytes
+	// companionSpawnMaxWireBytes 是 CompanionSpawn 载荷的固定 wire 上限。
+	// 推导：16 伙伴 ID + 130 伙伴名（128-byte 名称上限 + 2-byte uvarint 前缀）
+	// + 8 tick（u64）+ 4 维度（i32）+ 12 位置（3×f32）+ 4 yaw（f32）+
+	// 4 pitch（f32）= 178。数值当前冻结为 178。
+	companionSpawnMaxWireBytes = 178
+	// companionStateWireBytes 是 CompanionStates 批次内单个伙伴状态的固定编码
+	// 长度。推导：16 伙伴 ID + 4 维度（i32）+ 12 位置（3×f32）+ 4 yaw（f32）
+	// + 4 pitch（f32）+ 1 reset bool = 41。解码端按「剩余字节数 == count×41」
+	// 整批校验（见 decodeCompanionStates），任何字段变宽都会在这里先失配。
+	// 数值当前冻结为 41。
+	companionStateWireBytes = 41
+	maxCompanionStates      = companion.MaxActive
+	// companionStatesMaxWireBytes 是 CompanionStates 载荷的固定 wire 上限。
+	// 推导：8 tick（u64）+ 1 count uvarint（状态数 ≤ companion.MaxActive=4，
+	// 单字节）+ 每状态 companionStateWireBytes（41）bytes = 173。数值当前
+	// 冻结为 173。
 	companionStatesMaxWireBytes = 8 + 1 + maxCompanionStates*companionStateWireBytes
 )
 
@@ -277,8 +301,13 @@ func (despawn CompanionDespawn) Validate() error {
 	return nil
 }
 
+// validateCommandText 验证聊天指令文本：1..companion.MaxPlanCommandBytes 字节、
+// 有效 UTF-8、无 NUL/Unicode control 且无首尾空白。上限与 Planner 快照指令
+// （companion.MaxPlanCommandBytes，plan_types.go）同源（E7）：玩家能发出的
+// 每条指令必须总能进入权威规划输入，两侧由同一常量保证不漂移；行为级锁测试
+// （message_companion_limit_lock_test.go）在任一侧漂移时变红。
 func validateCommandText(text string) error {
-	if len(text) < 1 || len(text) > 1024 || !utf8.ValidString(text) || strings.TrimSpace(text) != text {
+	if len(text) < 1 || len(text) > companion.MaxPlanCommandBytes || !utf8.ValidString(text) || strings.TrimSpace(text) != text {
 		return errors.New("network: invalid chat command text")
 	}
 	for _, r := range text {
@@ -289,11 +318,13 @@ func validateCommandText(text string) error {
 	return nil
 }
 
-// validateSpeechText 验证伙伴台词文本：1..256 bytes、有效 UTF-8、无 NUL/Unicode
-// control 且无首尾空白。文本纪律与玩家指令同构，但上界从 1024 收紧为 256——
-// 台词是模型生成的有界表达，不是玩家输入通道。
+// validateSpeechText 验证伙伴台词文本：1..companion.MaxDialogueLineBytes 字节、
+// 有效 UTF-8、无 NUL/Unicode control 且无首尾空白。文本纪律与玩家指令同构，
+// 但上界从指令的 MaxPlanCommandBytes 收紧为 MaxDialogueLineBytes——台词是
+// 模型生成的有界表达，不是玩家输入通道。上界与 Dialogue 表达平面的解码边界
+// （companion/dialogue_types.go）共用同一常量（E7），两侧不可能漂移。
 func validateSpeechText(text string) error {
-	if len(text) < 1 || len(text) > 256 || !utf8.ValidString(text) || strings.TrimSpace(text) != text {
+	if len(text) < 1 || len(text) > companion.MaxDialogueLineBytes || !utf8.ValidString(text) || strings.TrimSpace(text) != text {
 		return errors.New("network: invalid companion speech text")
 	}
 	for _, r := range text {
@@ -321,12 +352,13 @@ func encodeChatEvent(e *byteEncoder, event ChatEvent) {
 	e.string(event.CompanionName, 128)
 	e.u8(uint8(event.Kind))
 	e.u8(uint8(event.RejectReason))
-	// 文本槽位按 kind 复用：CompanionSpeech 写入台词（编码层即收紧为 256-byte 上界），
-	// 其余 kind 保持既有 1024-byte 指令编码，既有 kind 的 wire 字节不受影响。
+	// 文本槽位按 kind 复用：CompanionSpeech 写入台词（编码层即收紧为
+	// companion.MaxDialogueLineBytes 上界），其余 kind 保持
+	// companion.MaxPlanCommandBytes 指令编码，既有 kind 的 wire 字节不受影响。
 	if event.Kind == ChatEventCompanionSpeech {
-		e.string(event.Speech, 256)
+		e.string(event.Speech, companion.MaxDialogueLineBytes)
 	} else {
-		e.string(event.Command, 1024)
+		e.string(event.Command, companion.MaxPlanCommandBytes)
 	}
 }
 
@@ -384,12 +416,13 @@ func decodeChatEvent(d *byteDecoder) (ServerPacket, error) {
 		event.RejectReason = ChatRejectReason(reason)
 	}
 	if err == nil {
-		// 文本槽位按 kind 复用：解码时先读出 kind，再把槽位读入台词（超过 256-byte
-		// 直接拒绝）或玩家指令，随后 Validate 按 kind 施加完整文本纪律。
+		// 文本槽位按 kind 复用：解码时先读出 kind，再把槽位读入台词（超过
+		// companion.MaxDialogueLineBytes 直接拒绝）或玩家指令，随后 Validate
+		// 按 kind 施加完整文本纪律。
 		if event.Kind == ChatEventCompanionSpeech {
-			event.Speech, err = d.string(256, 256)
+			event.Speech, err = d.string(companion.MaxDialogueLineBytes, companion.MaxDialogueLineBytes)
 		} else {
-			event.Command, err = d.string(1024, 1024)
+			event.Command, err = d.string(companion.MaxPlanCommandBytes, companion.MaxPlanCommandBytes)
 		}
 	}
 	if err != nil {

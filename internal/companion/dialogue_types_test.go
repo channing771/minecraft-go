@@ -20,8 +20,10 @@ func quotedJSON(s string) string {
 	return `"` + s + `"`
 }
 
-// wantDialogueError 断言解码/构造返回错误且属于 ErrDialogueInvalidResponse
-// 哨兵类别（拥有值矩阵里另有正面断言，这里只关心拒绝事实）。
+// wantDialogueError 断言响应解码返回错误且属于 ErrDialogueInvalidResponse
+// 哨兵类别（响应解码侧；拥有值矩阵里另有正面断言，这里只关心拒绝事实）。
+// F-3 拆分后请求构造侧由 wantDialogueRequestError 承载，两个哨兵互斥——
+// 解码失败同时命中请求哨兵即说明辖域回归。
 func wantDialogueError(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
@@ -29,6 +31,25 @@ func wantDialogueError(t *testing.T, err error) {
 	}
 	if !errors.Is(err, ErrDialogueInvalidResponse) {
 		t.Fatalf("错误类别错误: %v，want ErrDialogueInvalidResponse", err)
+	}
+	if errors.Is(err, ErrDialogueInvalidRequest) {
+		t.Fatalf("响应解码错误同时命中请求构造哨兵: %v", err)
+	}
+}
+
+// wantDialogueRequestError 断言请求构造返回错误且属于 ErrDialogueInvalidRequest
+// 哨兵类别（请求构造侧），且不命中响应解码哨兵——两个哨兵分辖进入模型
+// 之前与模型输出之后的两端，互斥性在此钉住。
+func wantDialogueRequestError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("期望返回 ErrDialogueInvalidRequest 类错误，got nil")
+	}
+	if !errors.Is(err, ErrDialogueInvalidRequest) {
+		t.Fatalf("错误类别错误: %v，want ErrDialogueInvalidRequest", err)
+	}
+	if errors.Is(err, ErrDialogueInvalidResponse) {
+		t.Fatalf("请求构造错误同时命中响应解码哨兵: %v", err)
 	}
 }
 
@@ -268,7 +289,7 @@ func TestNewDialogueRequestRejectsOversizeText(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewDialogueRequest(tc.persona, tc.summary, testDialogueNode(), testDialogueEnv())
-			wantDialogueError(t, err)
+			wantDialogueRequestError(t, err)
 		})
 	}
 	// 恰好等于上界的输入合法（边界另一侧）。
@@ -302,7 +323,7 @@ func TestNewDialogueRequestRejectsBadEnv(t *testing.T) {
 	for name, env := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewDialogueRequest("", "", testDialogueNode(), env)
-			wantDialogueError(t, err)
+			wantDialogueRequestError(t, err)
 		})
 	}
 }

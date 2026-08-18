@@ -81,6 +81,49 @@ func TestChatOverflowRemainsInvalidAfterBackspaceAndNeverSendsTruncatedPrefix(t 
 	}
 }
 
+// TestChatInputBoundaryLocksToCompanionMaxPlanCommandBytes 锁定客户端聊天输入
+// 上限与 companion.MaxPlanCommandBytes 同源（E7 同源化锁）：边界夹具由 companion
+// 常量构造（340 个三字节 rune + 4 个 ASCII，覆盖多字节字节计数路径），恰好填满
+// 上限时不得置 overflow 且 Submit 产出能通过 network 校验的 ChatCommand；再追加
+// 一字节即进入 sticky overflow。companion 常量或客户端输入上限任何一侧漂移，
+// 本测试都会变红。
+func TestChatInputBoundaryLocksToCompanionMaxPlanCommandBytes(t *testing.T) {
+	// (MaxPlanCommandBytes-4) 必须能被 3 整除（1024-4=1020），否则夹具断言先失败。
+	text := strings.Repeat("界", (companion.MaxPlanCommandBytes-4)/3) + "abcd"
+	if len(text) != companion.MaxPlanCommandBytes {
+		t.Fatalf("边界夹具 = %d bytes，想要 %d", len(text), companion.MaxPlanCommandBytes)
+	}
+
+	var accepted chatInput
+	accepted.Open()
+	for _, char := range text {
+		accepted.Append(char)
+	}
+	if accepted.bytes != companion.MaxPlanCommandBytes || accepted.overflow {
+		t.Fatalf("边界输入状态=%+v", accepted)
+	}
+	command, ok := accepted.Submit()
+	if !ok || len(command.Text) != companion.MaxPlanCommandBytes {
+		t.Fatalf("边界 Submit=(%d,%v)", len(command.Text), ok)
+	}
+	if err := command.Validate(); err != nil {
+		t.Fatalf("边界指令未通过 network 校验: %v", err)
+	}
+
+	var rejected chatInput
+	rejected.Open()
+	for _, char := range text {
+		rejected.Append(char)
+	}
+	rejected.Append('x')
+	if !rejected.overflow {
+		t.Fatal("超出一字节未触发 sticky overflow")
+	}
+	if _, ok := rejected.Submit(); ok {
+		t.Fatal("sticky overflow Submit 被放行")
+	}
+}
+
 func TestChatSubmitTrimsOuterWhitespaceBeforeValidation(t *testing.T) {
 	var input chatInput
 	input.Open()
@@ -541,7 +584,9 @@ func TestChatEventsTaskLifecycleHUDLinesRespectBoundsAndExcludeModelText(t *test
 		t.Fatalf("无新事件时的 HUD 刷新 allocations=%v want=0", allocations)
 	}
 
-	// 长指令摘要经既有 32 rune 截断：第 32 个 rune 是省略号，完整指令不出现在行内。
+	// 长指令摘要经既有 32 rune 截断：完整行 8 rune 模板 + 40 rune 指令 = 48
+	// rune，截断输出恰好 32 rune——第 32 rune 是省略号、前 31 rune 与原文逐
+	// rune 一致（F-5 收紧：精确到前缀逐项相等，取代只排除长原文子串的松断言）。
 	longCommand := strings.Repeat("挖", 40)
 	long := taskChatEvent(10, network.ChatEventTaskStarted, network.ChatRejectNone)
 	long.Command = longCommand
@@ -553,6 +598,11 @@ func TestChatEventsTaskLifecycleHUDLinesRespectBoundsAndExcludeModelText(t *test
 	runes := []rune(gotLine)
 	if len(runes) != 32 || runes[31] != '…' {
 		t.Fatalf("长指令行 = %q（%d rune），want 32 rune 且以 … 结尾", gotLine, len(runes))
+	}
+	fullLine := []rune("阿木 开始执行：" + longCommand)
+	if string(runes[:31]) != string(fullLine[:31]) {
+		t.Fatalf("长指令行前 31 rune = %q，want 与原文前 31 rune %q 一致",
+			string(runes[:31]), string(fullLine[:31]))
 	}
 	if strings.Contains(gotLine, strings.Repeat("挖", 26)) {
 		t.Fatalf("长指令行未按 32 rune 截断：%q", gotLine)
@@ -579,7 +629,10 @@ func TestChatEventCompanionSpeechRendersAsPrefixedLine(t *testing.T) {
 
 // TestChatEventCompanionSpeechLineTruncatedAt32RunesWithPrefix 锁定台词行宽度纪律：
 // 伙伴名前缀与台词共用既有事实行的 32 rune 行上限（前缀计入），超长时第 32 个 rune
-// 是既有截断省略号，而不是为台词行另设上限或整行丢弃。
+// 是既有截断省略号，而不是为台词行另设上限或整行丢弃。F-5 收紧：超长行断言
+// 精确到「恰好 32 rune、第 32 rune 为 …、前 31 rune 与原文逐 rune 一致」；
+// 29 rune 台词 + 3 rune 前缀恰好 32 rune，是不触发截断的上界邻近值，必须整行
+// 逐 rune 原样输出（第 32 rune 是原文台词而非省略号）。
 func TestChatEventCompanionSpeechLineTruncatedAt32RunesWithPrefix(t *testing.T) {
 	app := &application{chatEvents: &client.ChatEvents{}}
 	if err := app.chatEvents.Apply(speechChatEvent(1, strings.Repeat("话", 40))); err != nil {
@@ -596,8 +649,26 @@ func TestChatEventCompanionSpeechLineTruncatedAt32RunesWithPrefix(t *testing.T) 
 	if !strings.HasPrefix(overlay.Lines[0], "阿木：") {
 		t.Fatalf("speech line lost companion prefix: %q", overlay.Lines[0])
 	}
-	if strings.Contains(overlay.Lines[0], strings.Repeat("话", 30)) {
-		t.Fatalf("speech line not truncated at 32 rune: %q", overlay.Lines[0])
+	fullLine := []rune("阿木：" + strings.Repeat("话", 40))
+	if string(runes[:31]) != string(fullLine[:31]) {
+		t.Fatalf("超长台词行前 31 rune = %q，want 与原文前 31 rune %q 一致",
+			string(runes[:31]), string(fullLine[:31]))
+	}
+
+	// 29 rune 台词是不触发截断的上界邻近值：3 rune 前缀 + 29 rune 台词恰好
+	// 32 rune，整行原样输出，第 32 rune 仍是原文（而非省略号）。
+	boundary := speechChatEvent(2, strings.Repeat("话", 29))
+	if err := app.chatEvents.Apply(boundary); err != nil {
+		t.Fatal(err)
+	}
+	overlay = app.chatOverlay()
+	if len(overlay.Lines) != 2 {
+		t.Fatalf("overlay lines=%q", overlay.Lines)
+	}
+	boundaryRunes := []rune(overlay.Lines[1])
+	if want := "阿木：" + strings.Repeat("话", 29); string(boundaryRunes) != want {
+		t.Fatalf("29 rune 台词行 = %q（%d rune），want 原样输出 %q（%d rune）",
+			overlay.Lines[1], len(boundaryRunes), want, len([]rune(want)))
 	}
 }
 

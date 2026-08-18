@@ -85,8 +85,11 @@ func testSnapshot() PlanSnapshot {
 	}
 }
 
-// wantPlanError 断言错误属于期望的哨兵类别且不同时命中另一类别。
-func wantPlanError(t *testing.T, err error, want, other error) {
+// wantErrorIs 断言错误属于期望的哨兵类别且不同时命中另一类别。planner 与
+// pathfind 测试原本各持一份逐字相同的副本（wantPlanError/wantPathError），
+// 合并为包内唯一 helper：nil 检查、命中 want 哨兵、不命中 other 哨兵三段
+// 断言与两份原实现完全一致。
+func wantErrorIs(t *testing.T, err error, want, other error) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("期望错误 %v，got nil", want)
@@ -460,7 +463,7 @@ func TestPlannerTimeoutFailsWithoutRetry(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 600*time.Millisecond {
 		t.Fatalf("超时返回过慢: %v", elapsed)
 	}
-	wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+	wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 	if got := atomic.LoadInt32(&requests); got != 1 {
 		t.Fatalf("超时后请求数 = %d，want 1（不得自动重试）", got)
 	}
@@ -494,7 +497,7 @@ func TestPlannerContextCancelReturnsCleanly(t *testing.T) {
 	cancel()
 	select {
 	case err := <-result:
-		wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+		wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 	case <-time.After(2 * time.Second):
 		t.Fatal("context 取消后 Plan 未返回")
 	}
@@ -514,7 +517,7 @@ func TestPlannerHTTPStatusFailsNoBodyLeak(t *testing.T) {
 			fmt.Fprintf(w, "upstream exploded %s", bodyLeakMarker)
 		}))
 		_, err := planner.Plan(context.Background(), testSnapshot())
-		wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+		wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 		if got := atomic.LoadInt32(&requests); got != 1 {
 			t.Fatalf("状态 %d 请求数 = %d，want 1", status, got)
 		}
@@ -558,7 +561,7 @@ func TestPlannerOversizedBodyRejected(t *testing.T) {
 	markerBody := strings.Replace(buildBody((64<<10)+1), "padding\":\"a", "padding\":\""+bodyLeakMarker, 1)
 	response.Store(markerBody)
 	_, err := planner.Plan(context.Background(), testSnapshot())
-	wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+	wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 	if strings.Contains(err.Error(), bodyLeakMarker) {
 		t.Fatalf("超限错误泄漏响应正文: %v", err)
 	}
@@ -623,7 +626,7 @@ func TestPlannerDecodeStrict(t *testing.T) {
 			}
 			continue
 		}
-		wantPlanError(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
+		wantErrorIs(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
 		if strings.Contains(err.Error(), bodyLeakMarker) {
 			t.Fatalf("%s: 错误泄漏正文标记", testCase.name)
 		}
@@ -653,7 +656,7 @@ func TestPlannerEnvelopeStrict(t *testing.T) {
 			fmt.Fprint(w, body)
 		}))
 		_, err := planner.Plan(context.Background(), testSnapshot())
-		wantPlanError(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
+		wantErrorIs(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
 		if got := atomic.LoadInt32(&requests); got != 1 {
 			t.Fatalf("%s: 请求数 = %d，want 1", name, got)
 		}
@@ -669,7 +672,7 @@ func TestPlannerUnreachableEndpoint(t *testing.T) {
 		t.Fatalf("NewPlannerClient 失败: %v", err)
 	}
 	_, err = planner.Plan(context.Background(), testSnapshot())
-	wantPlanError(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
+	wantErrorIs(t, err, ErrPlannerUnavailable, ErrPlannerInvalidPlan)
 }
 
 // TestPlannerRejectsInvalidSettings 验证构造器拒绝非法模型设置。
@@ -707,7 +710,9 @@ func TestPlannerRejectsInvalidSnapshot(t *testing.T) {
 // TestPlanDecodeKindMatrix 覆盖 M5C 四 kind 步骤的解码契约矩阵：每 kind 的合法
 // 形态（含解码后归一的强类型载荷 BlockID/PlayerID）、kind 专属字段缺失/多余、
 // follow 非最后一步、follow 目标不在快照在线集合、mine 越界/容器/无单一掉落、
-// place 非注册表/未持有。全部非法用例按 InvalidPlan 失败且不重试。
+// place 非注册表/未持有。M5E 起还覆盖排他矩阵的显式 null 负向全集：专属外字段
+// 携带 JSON null 与携带非法值拒绝语义一致（null 与缺席不等价）。全部非法用例
+// 按 InvalidPlan 失败且不重试。
 func TestPlanDecodeKindMatrix(t *testing.T) {
 	const validGoTo = `{"kind":"go_to","x":10,"y":64,"z":-5}`
 	// mine(8,63,-2) 命中快照 ExposedBlocks 中的 grass：窗口内且已列出。
@@ -817,6 +822,22 @@ func TestPlanDecodeKindMatrix(t *testing.T) {
 		{name: "go_to 携带 block", steps: `{"kind":"go_to","x":1,"y":2,"z":3,"block":"stone"}`},
 		{name: "未知 kind swim", steps: `{"kind":"swim","x":1,"y":2,"z":3}`},
 		{name: "未知 kind attack", steps: `{"kind":"attack","player_id":"` + testPlayerUUID + `"}`},
+		// M5E null 契约收紧的负向全集：显式 JSON null 一律视为「字段出现」，
+		// 与上方携带非 null 非法值的「携带 block/player_id/坐标」用例一一对应。
+		// 每条都用合法坐标与合法载荷——确保指针折叠 bug 存在时整份计划会被
+		// 完整接受（而不是被快照约束偶然拒绝），使收紧前的基线真实转红。
+		{name: "follow 携带 x null", steps: `{"kind":"follow","player_id":"` + testPlayerUUID + `","x":null}`},
+		{name: "go_to 携带 block null", steps: `{"kind":"go_to","x":1,"y":2,"z":3,"block":null}`},
+		{name: "go_to 携带 player_id null", steps: `{"kind":"go_to","x":1,"y":2,"z":3,"player_id":null}`},
+		{name: "mine 携带 block null", steps: `{"kind":"mine","x":6,"y":64,"z":0,"block":null}`},
+		{name: "mine 携带 player_id null", steps: `{"kind":"mine","x":6,"y":64,"z":0,"player_id":null}`},
+		{
+			name:  "place 携带 player_id null",
+			steps: `{"kind":"place","x":7,"y":65,"z":1,"block":"oak_planks","player_id":null}`,
+		},
+		// 必填字段携带 null：与缺席同被拒绝（坐标 null 不是有限整数），
+		// 锁定收紧后必填路径不因 null 判定出现回归。
+		{name: "place 坐标 null", steps: `{"kind":"place","x":null,"y":65,"z":1,"block":"oak_planks"}`},
 	}
 
 	for _, testCase := range cases {
@@ -830,7 +851,7 @@ func TestPlanDecodeKindMatrix(t *testing.T) {
 		}
 		plan, err := planner.Plan(context.Background(), snapshot)
 		if !testCase.valid {
-			wantPlanError(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
+			wantErrorIs(t, err, ErrPlannerInvalidPlan, ErrPlannerUnavailable)
 			if strings.Contains(err.Error(), bodyLeakMarker) {
 				t.Fatalf("%s: 错误泄漏正文标记", testCase.name)
 			}
@@ -959,13 +980,35 @@ func TestPlanDecodePlaceRegistryLock(t *testing.T) {
 		}
 		blocks[block] = name
 	}
-	for item := core.ItemID(0); item <= core.ItemMossyCobblestone; item++ {
+	// 穷举界用 core.ItemIDMax 独占哨兵而不是「<= 枚举末项」：core 的枚举末项
+	// 守护断言保证追加新物品时断言变红，迫使开发者同步审视本穷举的覆盖认知，
+	// 而不是让本测试静默漏掉新物品。
+	for item := core.ItemID(0); item < core.ItemIDMax; item++ {
 		block, ok := core.ItemPlacement(item)
 		if !ok {
 			continue
 		}
 		if _, covered := blocks[block]; !covered {
 			t.Fatalf("可放置方块 %d（物品 %d）缺少注册表名字", block, item)
+		}
+	}
+}
+
+// TestPlaceBlocksAndDropsRoundTrip 把 place 注册表的方块→物品索引与
+// core.BlockDrop 掉落表交叉锁定：buildPlanPlaceBlocks() 的每个 (B, I) 都必须
+// 满足 BlockDrop(B) == (I, true)。两张表独立维护——place 表是 place 步骤的
+// 扣料依据，掉落表是 mine 步骤的产物依据——任何漂移都意味着「放置消耗物品 X、
+// 采掘同一方块却产出物品 Y」的复制/丢失类缺陷，本测试让漂移立即失败。
+func TestPlaceBlocksAndDropsRoundTrip(t *testing.T) {
+	placed := buildPlanPlaceBlocks()
+	if len(placed) == 0 {
+		t.Fatal("place 方块→物品索引为空")
+	}
+	for block, item := range placed {
+		drop, ok := core.BlockDrop(block)
+		if !ok || drop != item {
+			t.Fatalf("方块 %d 的放置物品 %d 与掉落物 (%d, %v) 不一致",
+				block, item, drop, ok)
 		}
 	}
 }

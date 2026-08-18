@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -311,7 +311,7 @@ func waitRestartClientsReady(t *testing.T, clients []*multiplayerTCPClient) {
 		if err := ctx.Err(); err != nil {
 			t.Fatalf("restart clients ready: %v\n%s", err, multiplayerDiagnosticsMany(clients))
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 }
 
@@ -332,7 +332,7 @@ func waitRestartMirrorRevision(t *testing.T, clients []*multiplayerTCPClient, ch
 		if err := ctx.Err(); err != nil {
 			t.Fatalf("mirror revision %d: %v\n%s", revision, err, multiplayerDiagnosticsMany(clients))
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 }
 
@@ -352,7 +352,7 @@ func waitRestartTick(t *testing.T, clients []*multiplayerTCPClient, tick uint64)
 		if err := ctx.Err(); err != nil {
 			t.Fatalf("wait restart tick %d: %v\n%s", tick, err, multiplayerDiagnosticsMany(clients))
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 }
 
@@ -372,7 +372,7 @@ func waitRestartSequences(t *testing.T, clients []*multiplayerTCPClient, sequenc
 		if err := ctx.Err(); err != nil {
 			t.Fatalf("wait restart sequences %v: %v\n%s", sequences, err, multiplayerDiagnosticsMany(clients))
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 }
 
@@ -432,7 +432,7 @@ func waitRestartSnapshotsPersisted(
 		if err := ctx.Err(); err != nil {
 			t.Fatalf("final snapshots were not persisted before client close: %v\nlast=%+v\nerrors=%+v", err, last, lastErr)
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 }
 

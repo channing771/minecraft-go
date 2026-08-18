@@ -330,7 +330,9 @@ func TestPersistentShutdownReturnsAllGoroutinesWithinSharedDeadline(t *testing.T
 		if !containsPersistentServerGoroutine(dump) {
 			return
 		}
-		runtime.Gosched()
+		// 热轮询（runtime.Gosched）改为固定 sleep 退避；本文件属外部测试包，
+		// 用与 server 包 integrationPollInterval 同值的字面量。
+		time.Sleep(500 * time.Microsecond)
 	}
 	t.Fatalf("runtime/session/save goroutine 未在共享 deadline 内退出\n%s", persistentGoroutineDump())
 }
@@ -546,7 +548,8 @@ func (h *persistentHarness) stepUntil(done func() bool) {
 				h.generator.calledPositions(),
 			)
 		}
-		runtime.Gosched()
+		// 同上：sleep 退避取代热轮询，泵循环每次迭代仍推进权威 step。
+		time.Sleep(500 * time.Microsecond)
 	}
 }
 

@@ -259,11 +259,22 @@ func TestCompanionDialogueSkippedWhenModelSlotsFull(t *testing.T) {
 		t.Fatalf("槽满期间任务推进受阻：TaskStarted=%d，想要 %d（事件=%v）",
 			got, len(definitions), chatEventKinds(events))
 	}
-	// 槽位释放后观察一段：被跳过的台词节点绝不补发。D6 接线后四个任务各自
-	// 进入 Running 并发起自动 start 节点（单步计划目标极近，终止节点可能被
-	// 开始台词在途挤掉——「跳过即放弃」的规格语义，终止节点的正常路径由
-	// TerminalCoversFourTerminalStates 锁定）；手动哨兵（FirstArrival）没有
-	// 任何自动接线来源，释放后再次出现即证明跳过被补发。
+	// 槽位释放后分两段确定性观察：先等异步到达，再观察不补发。D6 接线后
+	// 四个任务各自进入 Running 并发起自动 start 节点（单步计划目标极近，
+	// 终止节点可能被开始台词在途挤掉——「跳过即放弃」的规格语义，终止节点
+	// 的正常路径由 TerminalCoversFourTerminalStates 锁定）。
+	// 第一段必须等到达：start 节点的派发发生在 Running 迁移的 tick 内（同步、
+	// 确定性），但假模型统计的请求数要等 worker goroutine 的异步 HTTP 真正
+	// 到达 handler——那是墙钟事件，慢 runner + race 下可能滞后于任意多个纯
+	// 计算 tick（CI 曾在 40 个同步 tick 后只采到 1/4），因此用 deadline 式
+	// 等待补齐墙钟部分，而不是靠固定数量的 tick 碰运气。
+	waitIntegrationCondition(t, "自动 start 节点照常发起", func() bool {
+		requests, _, _ := dialogue.snapshotCounts()
+		return requests >= len(definitions)
+	})
+	// 第二段观察不补发：到达齐后再泵 40 个同步 tick，被跳过的台词节点绝不
+	// 补发。手动哨兵（FirstArrival）没有任何自动接线来源，释放后再次出现
+	// 即证明跳过被补发。
 	stepCollectingChatEvents(t, host, sender, 40, nil)
 	if requests, _, _ := dialogue.snapshotCounts(); requests < len(definitions) {
 		t.Fatalf("槽位释放后台词请求数=%d，想要至少 %d（自动 start 节点照常发起）",

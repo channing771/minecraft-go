@@ -289,6 +289,16 @@ func (m *companionManager) releaseFinishedMining() {
 // 不含采掘域），这是 sim→Manager 的唯一采掘进度通道；调用点（server.step
 // 在 engine.Step 之后）持有 stepMu，缓存与 bodies 同属「上一 tick 末」的
 // 一致观察截面——两者的世界时间基准严格一致，进度判定不会跨截面错配。
+//
+// 生命周期刻意与 refreshBodies 的每 tick clear 重建不对称：这里只覆写、
+// 不删除，条目可能比激活状态存活更久。刻意不清理的原因：sim 的
+// publishCompanions 与 CompanionBodies 同源遍历激活集合，TickResult 对每个
+// 已激活伙伴必然携带其最新采掘事实；唯一读点 holdCompanionMining 的调用链
+// 先经 advanceInteractionRunner 的 m.body 激活 gate——gate 放行即意味着
+// 条目来自与 body 同一 tick 末快照的覆写，陈旧条目只会在伙伴离开激活集合
+// 后残留，而那正是 gate 拦截的情形（当前引擎的 activate 单向、没有去激活
+// 路径，残留仅是面向未来语义的结构余量）；条目总数又受注册伙伴上限封顶，
+// 逐 tick 清理换不来任何可观察正确性。
 func (m *companionManager) observeTickResult(result sim.TickResult) {
 	for _, update := range result.Companions {
 		m.mining[update.ID] = update.Mining

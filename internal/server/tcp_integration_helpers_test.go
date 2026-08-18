@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"runtime"
 	"testing"
 	"time"
 
@@ -15,6 +14,14 @@ import (
 	"github.com/channing771/mornlea/internal/storage"
 	"github.com/channing771/mornlea/internal/world"
 )
+
+// integrationPollInterval 是本包测试条件等待循环统一的固定退避间隔。这些
+// 循环原先用 runtime.Gosched() 热轮询（无 sleep）：在 GOMAXPROCS 饱和的
+// 全仓并行 race 测试中，空转的等待循环既是加害者也是受害者——抢占核心
+// 拖慢条件生产者，又向邻居测试施压，放大全局 flake。改为固定 sleep 退避
+// 让出核心；500µs 比所有等待 deadline（>= 1s）小三个数量级以上，不会改变
+// 任何等待语义或引入新的超时风险。
+const integrationPollInterval = 500 * time.Microsecond
 
 type integrationHost struct {
 	Host *Host
@@ -251,7 +258,10 @@ func waitIntegrationCondition(t *testing.T, label string, condition func() bool)
 				return
 			default:
 			}
-			runtime.Gosched()
+			// 热轮询（runtime.Gosched）改为固定 sleep 退避：本 helper 被全包
+			// 数十个集成测试共享，是负载放大链路的中心节点，理由见
+			// integrationPollInterval 注释。
+			time.Sleep(integrationPollInterval)
 		}
 	}()
 	select {

@@ -295,6 +295,14 @@ func TestCanonicalCountingServerStreamFreezesMeasurementAtSendStart(t *testing.T
 }
 
 func TestScenarioV7EightSessionServerProbeIsRealAndBounded(t *testing.T) {
+	// race 构建下跳过：本测试起真实 Host + 8 客户端跑 200 个 50ms measured
+	// tick 的纯实时窗口，测量 goroutine 必须在「信号发布+50ms」前完成工作；
+	// race 检测开销（5-20x）叠加全仓并行争核时，被晾过 50ms 是机器负载而非
+	// 产品行为（CI 稳定性文档 §4 实测四次假失败）。门禁本身在非 race 构建下
+	// 原样执行，不做任何放宽。
+	if raceEnabled {
+		t.Skip("-race 构建 tag 下 50ms 实时调度门禁测机器负载而非产品行为；非 race 路径门禁原样保留")
+	}
 	// 收集预算而非阈值。measureMultiplayerServerProbe 要求 >= 10s，此前恰好
 	// 传 10s，预算等于被调用方下限是不健康的构造，因此放宽到 30s；放宽不动
 	// 下面任何一条界限断言。

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render/hud"
 )
@@ -71,7 +72,9 @@ func (a *application) closeClientSession(cause error) {
 		chatWasOpen := a.chatInput.open
 		a.chatInput.Cancel()
 		a.clearFormattedChatLines()
-		a.chatEventBuffer = [32]network.ChatEvent{}
+		// 容量与 client.ChatEventCapacity 同源（E9/C9）：与 application 字段声明
+		// 共用同一常量，断线重置不会因字面量漂移而改变缓冲长度。
+		a.chatEventBuffer = [client.ChatEventCapacity]network.ChatEvent{}
 		if chatWasOpen && a.window != nil {
 			a.window.SetCursorCaptured(true)
 		}

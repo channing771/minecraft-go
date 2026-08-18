@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"math"
 	"reflect"
 	"strings"
@@ -253,7 +254,7 @@ func TestChatEventTaskDecoderRejectsInvalidKindReasonCombinations(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	kindOffset := 8 + 16 + 1 + len(started.PlayerName) + 16 + 1 + len(started.CompanionName)
+	kindOffset := chatEventKindOffset(started)
 	for _, mutation := range []struct {
 		name   string
 		offset int
@@ -422,7 +423,7 @@ func TestChatEventCompanionSpeechDecoderRejectsInvalidWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kindOffset := 8 + 16 + 1 + len(event.PlayerName) + 16 + 1 + len(event.CompanionName)
+	kindOffset := chatEventKindOffset(event)
 	for _, mutation := range []struct {
 		name   string
 		mutate func([]byte)
@@ -456,6 +457,85 @@ func TestChatEventCompanionSpeechDecoderRejectsInvalidWire(t *testing.T) {
 		encoder.string(speech, 1024)
 		if packet, err := decodeServerControlPayload(StatePlay, 16, encoder.data); err == nil || packet != nil {
 			t.Fatalf("%d-byte 台词 wire 解码为 %#v, %v", len(speech), packet, err)
+		}
+	}
+}
+
+// TestChatEventDecoderRejectsInvalidUTF8TextSlot 显式钉住共享文本槽位的无效
+// UTF-8 wire 突变（F-4）：Speech 与 Command 共用 wire 上唯一的文本槽位，把
+// 合法事件的槽位字节替换为无效 UTF-8 序列（裸 0xFF 0xFE 前导、孤立 0xFF、
+// 截断的多字节序列）必须在解码层整体拒绝，错误类别与既有非法文本一致——
+// 都来自 string 原语的 errInvalidString（codec_primitives 的 utf8.Valid
+// 检查），而不是穿过解码后才被 Validate 拒绝。fuzz 已探索过此类输入，本
+// 矩阵把定界用例钉进显式测试并在 FuzzCompanionMessageCodec 补对应 seed。
+func TestChatEventDecoderRejectsInvalidUTF8TextSlot(t *testing.T) {
+	// 台词槽位（kind=CompanionSpeech）：从合法 wire 出发做定向字节突变。
+	speech := companionSpeechEvent(1, "台词")
+	_, speechWire, err := encodeServerControlPayload(StatePlay, speech)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kindOffset := chatEventKindOffset(speech)
+	// 槽位布局：kind+1 是 reason、kind+2 是 uvarint 长度前缀（6 < 128 占
+	// 1 字节）、kind+3 起是 6 字节台词正文（"台词" = E5 8F B0 E8 AF 8D）。
+	speechMutations := []struct {
+		name   string
+		mutate func([]byte)
+	}{
+		{"台词前两字节换裸 0xFF 0xFE", func(p []byte) { p[kindOffset+3], p[kindOffset+4] = 0xFF, 0xFE }},
+		{"台词首字节换孤立 0xFF", func(p []byte) { p[kindOffset+3] = 0xFF }},
+		{"台词尾字节截断多字节序列", func(p []byte) {
+			// 把 "词"（E8 AF 8D）的最后一个续字节换成 ASCII：lead byte 仍
+			// 期待两个续字节，构成截断的多字节序列。
+			p[kindOffset+3+5] = 'x'
+		}},
+	}
+	for _, mutation := range speechMutations {
+		payload := append([]byte(nil), speechWire...)
+		mutation.mutate(payload)
+		packet, err := decodeServerControlPayload(StatePlay, 16, payload)
+		if err == nil || packet != nil {
+			t.Fatalf("%s wire 解码为 %#v, %v", mutation.name, packet, err)
+		}
+		if !errors.Is(err, errInvalidString) {
+			t.Fatalf("%s 错误类别 = %v，want errInvalidString（与既有非法文本一致）", mutation.name, err)
+		}
+	}
+
+	// 指令槽位（kind=TaskStarted）：同一文本槽位在非 Speech kind 上承载
+	// 玩家指令，无效 UTF-8 同样必须在解码层拒绝。
+	started := taskChatEvent(1, ChatEventTaskStarted, ChatRejectNone)
+	_, startedWire, err := encodeServerControlPayload(StatePlay, started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedPayload := append([]byte(nil), startedWire...)
+	startedPayload[chatEventKindOffset(started)+3] = 0xFF
+	if packet, err := decodeServerControlPayload(StatePlay, 16, startedPayload); err == nil || packet != nil {
+		t.Fatalf("指令字节换 0xFF wire 解码为 %#v, %v", packet, err)
+	} else if !errors.Is(err, errInvalidString) {
+		t.Fatalf("指令字节换 0xFF 错误类别 = %v，want errInvalidString", err)
+	}
+
+	// 编码器无法产出无效 UTF-8 文本（e.string 自身校验并失败），只保留
+	// lead 字节的截断序列必须绕过编码器手工拼 wire：台词侧长度前缀如实
+	// 写 2、正文只给 "台"（E5 8F B0）的前两个字节。
+	for _, raw := range []struct {
+		name string
+		kind ChatEventKind
+		text []byte
+	}{
+		{"台词槽位截断 lead 序列", ChatEventCompanionSpeech, []byte{0xE5, 0x8F}},
+		{"台词槽位裸 0xFF 0xFE", ChatEventCompanionSpeech, []byte{0xFF, 0xFE}},
+		{"指令槽位裸 0xFF 0xFE", ChatEventAccepted, []byte{0xFF, 0xFE}},
+	} {
+		payload := chatEventWireWithRawTextSlot(raw.kind, raw.text)
+		packet, err := decodeServerControlPayload(StatePlay, 16, payload)
+		if err == nil || packet != nil {
+			t.Fatalf("%s wire 解码为 %#v, %v", raw.name, packet, err)
+		}
+		if !errors.Is(err, errInvalidString) {
+			t.Fatalf("%s 错误类别 = %v，want errInvalidString", raw.name, err)
 		}
 	}
 }
@@ -858,7 +938,7 @@ func TestCompanionDecoderRejectsInvalidIDsEnumsNumbersAndDimensions(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	kindOffset := 8 + 16 + 1 + len(accepted.PlayerName) + 16 + 1 + len(accepted.CompanionName)
+	kindOffset := chatEventKindOffset(accepted)
 	for _, mutation := range []func([]byte){
 		func(payload []byte) { payload[kindOffset] = 10 },
 		func(payload []byte) { payload[kindOffset+1] = byte(ChatRejectInvalidFormat) },
@@ -946,6 +1026,35 @@ func validAcceptedChatEvent() ChatEvent {
 		CompanionID: testCompanionID(1), CompanionName: "A",
 		Kind: ChatEventAccepted, RejectReason: ChatRejectNone, Command: "x",
 	}
+}
+
+// chatEventKindOffset 返回 ChatEvent wire 载荷中 kind 字节的偏移。头部布局与
+// wire 编码一致：8 bytes 前缀（event ID）+ 16 玩家 ID + 1 名称长度 + 玩家名 +
+// 16 伙伴 ID + 1 名称长度 + 伙伴名，随后即是 1 byte kind（再后 1 byte 是
+// reason 槽位）。wire 突变测试据此定位 kind 与 reason 字节。
+func chatEventKindOffset(event ChatEvent) int {
+	return 8 + 16 + 1 + len(event.PlayerName) + 16 + 1 + len(event.CompanionName)
+}
+
+// chatEventWireWithRawTextSlot 手工拼一份文本槽位为任意原始字节的
+// ChatEvent wire：编码器只能写出合法 UTF-8 文本（e.string 自身校验），
+// 无效 UTF-8 槽位的定界突变（裸 0xFF 0xFE、截断多字节序列）必须绕过
+// 编码器直接落字节。身份头部与 taskCombinationSeed 同一夹具，长度前缀
+// 如实写 len(text)。
+func chatEventWireWithRawTextSlot(kind ChatEventKind, text []byte) []byte {
+	playerID := core.PlayerID(testCompanionID(9))
+	companionID := testCompanionID(1)
+	var encoder byteEncoder
+	encoder.u64(1)
+	encoder.data = append(encoder.data, playerID[:]...)
+	encoder.string("Chen", 128)
+	encoder.data = append(encoder.data, companionID[:]...)
+	encoder.string("A", 128)
+	encoder.u8(uint8(kind))
+	encoder.u8(uint8(ChatRejectNone))
+	encoder.uvarint(uint32(len(text)))
+	encoder.data = append(encoder.data, text...)
+	return encoder.data
 }
 
 // taskChatEvent 构造一条携带完整伙伴身份与原始指令的任务生命周期事件；

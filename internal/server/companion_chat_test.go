@@ -933,7 +933,12 @@ func receiveCompanionChatTick(
 func waitForIncomingChatDepth(t *testing.T, server *Server, want int) {
 	t.Helper()
 	waitIntegrationCondition(t, "chat ingress depth", func() bool {
-		return len(server.incomingChats) == want
+		// 条件用 >= 而非 ==：入队来自多个会话 reader goroutine，等待循环
+		// 两次观察之间可能有多条同时入队，使深度直接越过 want，== 会错过
+		// 该瞬态直到下一次 tick 边界 drain 才可能重逢，纯靠运气。drain 侧
+		// （drainIncomingChats 先快照 pending 再逐条取出）与 >= 完全兼容，
+		// 且全部调用点的语义都是「至少 want 条已到达」。
+		return len(server.incomingChats) >= want
 	})
 }
 

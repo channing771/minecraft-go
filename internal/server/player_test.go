@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"runtime"
 	"testing"
 	"time"
 
@@ -513,7 +512,7 @@ func waitForQueuedPlayerCommand(t *testing.T, running *Server) {
 	t.Helper()
 	deadline := time.Now().Add(waitDeadline)
 	for len(running.incoming) == 0 && time.Now().Before(deadline) {
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 	if len(running.incoming) == 0 {
 		t.Fatal("endpoint reader 未翻译玩家命令")

@@ -30,7 +30,10 @@ const (
 	// 256 个按坐标排序的方块条目）。
 	MaxPlanExposedBlocks = 256
 	// planEnvRadiusBlocks 是环境摘要的水平半径（spec：伙伴周围水平 16 格）。
-	planEnvRadiusBlocks = 16
+	// 它不是独立数字，而是直接引用 PathWindowHorizontalRadius：寻路窗口与
+	// Planner 观察快照是同级范围，两处半径必须一起变化，由单一常量定义保证
+	// 不漂移（耦合语义见 pathfind.go 的常量注释）。
+	planEnvRadiusBlocks = PathWindowHorizontalRadius
 	// planEnvVerticalBlocks 是环境摘要的垂直半径（spec：伙伴周围垂直 8 格）。
 	// 它同时是 mine 步骤观察窗口判定的垂直 ±8 数值界（见
 	// planInObservationWindow）。

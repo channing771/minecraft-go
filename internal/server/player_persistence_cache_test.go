@@ -552,7 +552,7 @@ func waitForAbortLoadWait(t *testing.T) {
 				return
 			}
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 	t.Fatal("Abort did not begin waiting on the original loading placeholder")
 }

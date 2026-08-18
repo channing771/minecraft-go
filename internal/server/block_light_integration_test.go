@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
 	"testing"
 	"time"
 
@@ -349,7 +348,7 @@ func awaitStaticBlockLight(
 		if time.Now().After(deadline) {
 			t.Fatalf("等待%s网格超时: key=%+v revision=%d stats=%+v", stage, key, revision, mesher.Stats())
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 }
 
