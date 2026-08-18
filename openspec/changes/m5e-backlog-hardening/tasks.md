@@ -4,7 +4,7 @@
 
 - [x] E1.1 先写失败测试：`internal/companion` 排他矩阵 null 负向全集（`follow`+`"x":null`、`go_to`+`"block":null`/`"player_id":null`、`mine`+`"block":null`/`"player_id":null`、`place`+`"player_id":null`/坐标 null），既有 `"x":null` 用例保持
 - [x] E1.2 最小实现：`planWireStep` 区分缺席与显式 null（map 中间形或自定义 `UnmarshalJSON`，与 dialogue 的 isJSONNull 同构），`decodePlanStep` GoDoc 校准
-- [x\] 验证：`go test ./internal/companion -race -count=1` 全绿；`openspec validate m5e-backlog-hardening --strict` 通过（delta 已随 change 创建）
+- [x] 验证：`go test ./internal/companion -race -count=1` 全绿；`openspec validate m5e-backlog-hardening --strict` 通过（delta 已随 change 创建）
 
 ## E2 双实现交叉锁与物品穷举守护
 

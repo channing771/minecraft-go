@@ -67,7 +67,7 @@
 ### 2.5 E：负载 flake 治理（2 项，只改测试）
 
 - `cmd/mornlea/benchmark_server_test.go:297` TestScenarioV7（darwin-only）：新增 `//go:build race` 辅助文件定义 `raceEnabled=true`（无 tag 文件 false），测试开头 race 下 `t.Skip`；非 race 门禁原样。
-- `internal/server/tcp_integration_helpers_test.go:236` `waitIntegrationCondition`：`runtime.Gosched()` 热轮询改 `time.Sleep(100µs~1ms)` 退避（47 调用点受益）；`waitForIncomingChatDepth` 条件改 `>= want`；60s 窗不抬。
+- `internal/server/tcp_integration_helpers_test.go:236` `waitIntegrationCondition`：`runtime.Gosched()` 热轮询改 `time.Sleep(500µs)` 固定退避（该 helper 21 个调用点受益，`waitForIncomingChatDepth` 另有 26 个调用点经其同享；E11 评审勘误 brief 的 47 计数）；`waitForIncomingChatDepth` 条件改 `>= want`；60s 窗不抬。
 
 ### 2.6 F：已知精确项（6 项）
 
