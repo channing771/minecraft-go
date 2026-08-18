@@ -6,7 +6,7 @@
 ## Requirements
 ### Requirement: AI 伙伴配置可选且数量有界
 
-配置 schema SHALL 保持 v1，并 MAY 包含可选的 `ai` 组与 `ai.companions`。缺少 `ai`、`ai` 为 `null`、缺少 `companions` 或伙伴列表为空时，AI MUST 关闭，且 MUST NOT 要求 endpoint、model、key 或 timeout；非空列表 MUST 包含 `1..4` 个有效定义。M5B 起 `ai` 组 SHALL 识别 `endpoint`、`model`、`apiKeyEnv` 与 `taskTimeoutMinutes`：非空伙伴配置缺少 `endpoint` 或 `model`，或远程 `https` endpoint 缺少 `apiKeyEnv` 或对应环境变量为空时，内置服务端与专用服务端 MUST 启动失败。`taskTimeoutMinutes` MUST 是 `1..60` 的整数，缺省为 10。尚未交付的字段（如 persona）MUST 按既有未知字段纪律告警后忽略。
+配置 schema SHALL 保持 v1，并 MAY 包含可选的 `ai` 组与 `ai.companions`。缺少 `ai`、`ai` 为 `null`、缺少 `companions` 或伙伴列表为空时，AI MUST 关闭，且 MUST NOT 要求 endpoint、model、key 或 timeout；非空列表 MUST 包含 `1..4` 个有效定义。M5B 起 `ai` 组 SHALL 识别 `endpoint`、`model`、`apiKeyEnv` 与 `taskTimeoutMinutes`：非空伙伴配置缺少 `endpoint` 或 `model`，或远程 `https` endpoint 缺少 `apiKeyEnv` 或对应环境变量为空时，内置服务端与专用服务端 MUST 启动失败。`taskTimeoutMinutes` MUST 是 `1..60` 的整数，缺省为 10。M5D 起 `ai.companions[]` SHALL 识别可选 `persona` 字段，其有界性、外部文件读取与用途约束由 `companion-persona` 规格定义。尚未交付的其他字段 MUST 按既有未知字段纪律告警后忽略。
 
 #### Scenario: 旧配置保持 AI 关闭
 
@@ -34,9 +34,9 @@
 
 #### Scenario: 后续字段不提前启用
 
-- **GIVEN** 一个伙伴定义或 `ai` 组包含 persona 等未交付字段
-- **WHEN** M5B 读取该配置
-- **THEN** 系统 MUST 对精确字段路径告警并忽略这些字段，且有效结果 MUST 不变
+- **GIVEN** 一个伙伴定义或 `ai` 组包含 persona 之外的其他未交付字段
+- **WHEN** 读取该配置
+- **THEN** 系统 MUST 对精确字段路径告警并忽略这些字段，且有效结果 MUST 不变；`persona` 字段 MUST 按 `companion-persona` 规则解析而不再被忽略
 
 ### Requirement: CompanionID 是独立规范身份
 
