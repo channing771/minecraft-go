@@ -7,15 +7,18 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render/hud"
 )
 
-const maxChatCommandBytes = 1024
-
+// chatInput 的字节上限直接复用 companion.MaxPlanCommandBytes（E7 同源化）：
+// 客户端能输入的每条指令必须总能通过 network 校验并进入权威 Planner 快照，
+// 三个边界由同一常量保证不漂移，取代原 `const maxChatCommandBytes = 1024`
+// 裸字面量；行为级锁测试（chat_test.go 的 BoundaryLocks 测试）在漂移时变红。
 type chatInput struct {
 	open     bool
-	runes    [maxChatCommandBytes]rune
+	runes    [companion.MaxPlanCommandBytes]rune
 	count    int
 	bytes    int
 	overflow bool
@@ -35,7 +38,7 @@ func (input *chatInput) Append(char rune) {
 		return
 	}
 	size := utf8.RuneLen(char)
-	if size < 0 || unicode.IsControl(char) || input.count == len(input.runes) || input.bytes+size > maxChatCommandBytes {
+	if size < 0 || unicode.IsControl(char) || input.count == len(input.runes) || input.bytes+size > companion.MaxPlanCommandBytes {
 		input.overflow = true
 		return
 	}
