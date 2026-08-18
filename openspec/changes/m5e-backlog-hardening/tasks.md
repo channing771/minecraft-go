@@ -56,9 +56,9 @@
 
 ## E10 M5D 延期五项（F-2..F-6）
 
-- [ ] E10.1 先写失败测试：`ResolvedPersona` `json:"-"` 反射级 tag 锁（F-2，先红）
-- [ ] E10.2 `ErrDialogueInvalidResponse` 拆分为请求构造/响应解码两哨兵并迁移调用方（F-3）；ChatEvent decode 补无效 UTF-8 wire 突变用例（F-4）；chat 呈现负向断言收紧 29 rune（F-5）；阶段验收哑参数风格 + parity 投影复用（F-6）
-- [ ] 验证：`go test ./internal/companion ./internal/network ./cmd/mornlea ./internal/server -race -count=1` 全绿
+- [x] E10.1 先写失败测试：`ResolvedPersona` `json:"-"` 反射级 tag 锁（F-2，先红）
+- [x] E10.2 `ErrDialogueInvalidResponse` 拆分为请求构造/响应解码两哨兵并迁移调用方（F-3）；ChatEvent decode 补无效 UTF-8 wire 突变用例（F-4）；chat 呈现负向断言收紧 29 rune（F-5）；阶段验收哑参数风格 + parity 投影复用（F-6）
+- [x] 验证：`go test ./internal/companion ./internal/network ./cmd/mornlea ./internal/server -race -count=1` 全绿
 
 ## E11 负载 flake 治理（只改测试）
 
