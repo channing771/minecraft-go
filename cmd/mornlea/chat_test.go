@@ -81,6 +81,49 @@ func TestChatOverflowRemainsInvalidAfterBackspaceAndNeverSendsTruncatedPrefix(t 
 	}
 }
 
+// TestChatInputBoundaryLocksToCompanionMaxPlanCommandBytes 锁定客户端聊天输入
+// 上限与 companion.MaxPlanCommandBytes 同源（E7 同源化锁）：边界夹具由 companion
+// 常量构造（340 个三字节 rune + 4 个 ASCII，覆盖多字节字节计数路径），恰好填满
+// 上限时不得置 overflow 且 Submit 产出能通过 network 校验的 ChatCommand；再追加
+// 一字节即进入 sticky overflow。companion 常量或客户端输入上限任何一侧漂移，
+// 本测试都会变红。
+func TestChatInputBoundaryLocksToCompanionMaxPlanCommandBytes(t *testing.T) {
+	// (MaxPlanCommandBytes-4) 必须能被 3 整除（1024-4=1020），否则夹具断言先失败。
+	text := strings.Repeat("界", (companion.MaxPlanCommandBytes-4)/3) + "abcd"
+	if len(text) != companion.MaxPlanCommandBytes {
+		t.Fatalf("边界夹具 = %d bytes，想要 %d", len(text), companion.MaxPlanCommandBytes)
+	}
+
+	var accepted chatInput
+	accepted.Open()
+	for _, char := range text {
+		accepted.Append(char)
+	}
+	if accepted.bytes != companion.MaxPlanCommandBytes || accepted.overflow {
+		t.Fatalf("边界输入状态=%+v", accepted)
+	}
+	command, ok := accepted.Submit()
+	if !ok || len(command.Text) != companion.MaxPlanCommandBytes {
+		t.Fatalf("边界 Submit=(%d,%v)", len(command.Text), ok)
+	}
+	if err := command.Validate(); err != nil {
+		t.Fatalf("边界指令未通过 network 校验: %v", err)
+	}
+
+	var rejected chatInput
+	rejected.Open()
+	for _, char := range text {
+		rejected.Append(char)
+	}
+	rejected.Append('x')
+	if !rejected.overflow {
+		t.Fatal("超出一字节未触发 sticky overflow")
+	}
+	if _, ok := rejected.Submit(); ok {
+		t.Fatal("sticky overflow Submit 被放行")
+	}
+}
+
 func TestChatSubmitTrimsOuterWhitespaceBeforeValidation(t *testing.T) {
 	var input chatInput
 	input.Open()
