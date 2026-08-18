@@ -43,6 +43,7 @@ M5B/M5C/M5D 三个里程碑的终审各遗留一批 minor 级打磨项（M5D led
 5. `internal/network/codec_client.go:73/:238` ChatCommand 编解码的 1024 字面与 `:88` 错误文案（E7 锁测试已行为级覆盖；字面同源化留后续 change 收敛）。
 6. `internal/server/companion_stage_acceptance_test.go:45,65` 两处 `x, _ :=` 忽略返回值风格（E10 评审 Minor-2，风格备注）。
 7. `internal/companion/planner.go` 系统提示头段「水平 16 格、垂直 8 格」仍为文本手抄数字，与 A5 合并后的代码常量无关联（E3 评审观察；窗口常量参数化时连带清理）。
+8. `TestCompanionDialogueSkippedWhenModelSlotsFull` 两段式等待的确定性依赖「planner 令牌释放先于 tick 线程 try-acquire」这一非同步的调度事实（`plannerWorker` 先发 channel 后 defer 释放令牌，两者间无屏障）——ns 级残余竞争窗口，未复现（CI 修复评审 Minor-1）；复发时加固方向为「边泵 tick 边等」或生产侧令牌释放前移到 channel send 之前。
 
 **放弃（带理由）**：
 
