@@ -1256,3 +1256,33 @@ func blockPosAfterForSort(pos, previous core.BlockPos) bool {
 	}
 	return pos.Z > previous.Z
 }
+
+// TestCompanionManagerIssuerMismatchSkipsBeforeBeginHead 锁定 dispatchPlanning
+// 发令者失配防御的位次：检查必须先于 BeginHead 触发，缺陷态下队列不得占用
+// 当前槽位。「pending 非空而 issuers 为空」正常不可达（Enqueue/restore 保证
+// 一一配对），这里直接注入失配态做白盒等价锁——若失配检查被移回 BeginHead
+// 之后，队列将提升队首并残留未定义的 currentIssuer 次生态，本测试随之失败。
+func TestCompanionManagerIssuerMismatchSkipsBeforeBeginHead(t *testing.T) {
+	definitions := []companion.Definition{{ID: chatTestCompanionID(9), Name: "阿玖"}}
+	host := newCompanionManagerHost(t, definitions, nil, nil)
+	manager := host.world.companionManager
+	slot := manager.slots[definitions[0].ID]
+	// 注入失配缺陷态：pending 入队但不追加配对的 issuers 条目。
+	if !slot.queue.Enqueue(companion.TaskCommand("白盒失配指令")) {
+		t.Fatalf("注入 pending 指令失败")
+	}
+	generation := slot.queue.Generation()
+	// 不经 tick 编排直接调用：失配分支在任何模型/寻路派发之前返回，
+	// 不会产生在途 worker 或网络请求。
+	manager.dispatchPlanning()
+	if _, hasCurrent := slot.queue.Current(); hasCurrent {
+		t.Fatalf("失配防御必须先于 BeginHead：当前槽位被占用")
+	}
+	if slot.queue.Len() != 1 {
+		t.Fatalf("pending=%d，失配防御不得消费队列", slot.queue.Len())
+	}
+	if slot.queue.Generation() != generation {
+		t.Fatalf("generation=%d，失配防御不得推进世代（BeginHead 未执行）",
+			slot.queue.Generation())
+	}
+}

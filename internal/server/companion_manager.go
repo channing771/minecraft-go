@@ -825,6 +825,20 @@ func (m *companionManager) dispatchPlanning() {
 			continue
 		}
 		if !hasCurrent {
+			// 发令者失配检查位于 BeginHead 之前。issuers 与 queue.pending
+			// 在 Enqueue/restore 时一一配对追加、仅在下方的消费点成对变
+			// 化，且本函数从检查点到 BeginHead 之间没有任何 issuers 写者
+			//（全部写点都在权威 tick 串行执行），失配只可能是入队或恢复
+			// 路径的缺陷，正常不可达。若放在 BeginHead 之后，队列已把队首
+			// 提升为当前任务而 issuers 为空，防御分支触发时任务以 Queued
+			// 滞留、槽位残留上一任务的 currentIssuer（或零值——零值
+			// PlayerID 过不了 ChatEvent.Validate，后续事件将被静默丢弃），
+			// 次生行为未定义；前移使缺陷态下队列从未占用槽位。检查只读，
+			// 正常路径（issuers 非空）的控制流与后继语句零变化。
+			if len(slot.issuers) == 0 {
+				slog.Error("任务 FIFO 与发令者队列失配", "companion", id)
+				continue
+			}
 			if !slot.queue.BeginHead() {
 				continue
 			}
@@ -839,10 +853,6 @@ func (m *companionManager) dispatchPlanning() {
 			slot.progressSteps = nil
 			slot.followArrivalSpoken = false
 			slot.dialogueRequests = 0
-			if len(slot.issuers) == 0 {
-				slog.Error("任务 FIFO 与发令者队列失配", "companion", id)
-				continue
-			}
 			slot.currentIssuer, slot.issuers = slot.issuers[0], slot.issuers[1:]
 			current, _ = slot.queue.Current()
 		}
@@ -943,11 +953,10 @@ func (m *companionManager) submitPathRequest(
 	if slot.pathInFlight {
 		return
 	}
-	center := companion.PathCell{
-		X: int32(math.Floor(float64(body.Position[0]))),
-		Y: int32(math.Floor(float64(body.Position[1]))),
-		Z: int32(math.Floor(float64(body.Position[2]))),
-	}
+	// 寻路窗口中心取伙伴当前站立格：与 standingCellOf 的逐分量 floor 归一
+	// 完全同构（X/Y/Z 各自 float32→float64→Floor→int32），复用同一实现
+	// 保证寻路起点与 follow 动态终点使用同一套格坐标语义。
+	center := standingCellOf(body.Position)
 	if current.StepIndex >= len(current.Plan.Steps) {
 		return
 	}
