@@ -229,8 +229,10 @@ func NewDialogueClient(settings ModelSettings, apiKey string, client *http.Clien
 //
 // terminal 决定响应契约：非终态只允许 line 字段；终态必须附带 summary。
 // 失败语义分三类（均可用 errors.Is 判别）：传输层失败（HTTP 错误、超时、
-// 取消、超限）包装 ErrDialogueUnavailable；请求构造侧失败（越界输入、请求
-// 序列化）包装 ErrDialogueInvalidRequest；模型输出不符合 schema（envelope
+// 取消、超限，以及 HTTP chatRequest envelope 序列化失败——与 Planner 侧
+// 同类失败归 ErrPlannerUnavailable 的惯例一致）包装 ErrDialogueUnavailable；
+// 请求构造侧失败（越界输入、发往模型的 user payload 序列化）包装
+// ErrDialogueInvalidRequest；模型输出不符合 schema（envelope
 // 非法或 content 不满足 line/summary 白名单）包装 ErrDialogueInvalidResponse。
 // 三类错误都不重试；错误文本只含阶段、状态码与类别，绝不含密钥或响应正文
 // 原文（stdlib JSON 语法错误可能携带单字符上下文，属可接受残留）。越界请求
