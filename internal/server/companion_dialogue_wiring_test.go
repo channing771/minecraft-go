@@ -204,6 +204,17 @@ func TestCompanionDialogueTerminalCoversFourTerminalStates(t *testing.T) {
 		//（异步区块生成 + 扫描）远慢于几个权威 tick，任务在世界时间到达
 		// deadline 时过期——expireTasks 不依赖伙伴身体，TimedOut 先于任何
 		// 执行动作发生，终止节点是该任务的第一个也是唯一一个台词请求。
+		//
+		// 但 terminal 派发本身依赖激活：requestDialogue 对未激活伙伴（出生
+		// 扫描在途）按守卫跳过该节点、等下一个触发节点，而终态没有下一个
+		// 触发节点——派发会被永久跳过（生产守卫是 M5D 裁决的正确语义，
+		// 只能由测试侧保证派发时机）。deadline 是绝对世界 tick（=5），冷启动
+		// WorldTime=0，进入时 WorldTime>=5 的那一步（第 6 次 step）才触发
+		// 过期迁移，因此激活必须发生在 step 1..5 内；原泵每 tick 只留 2ms
+		// 墙钟（合计约 10ms），race + 全仓并行下冷启动区块生成极易赌输，
+		// TaskTimedOut 事件已发布而台词请求恒 0，waitDialogueRequests 等满
+		// 60s 必假超时。这里在过期 tick 前的 step 预算内每步先给足区块生成
+		// 墙钟并确认激活，使 terminal 派发必然发生在已激活状态。
 		id := definitions[0].ID
 		queue := storage.StoredCompanionQueue{
 			ID:         id,
@@ -222,6 +233,24 @@ func TestCompanionDialogueTerminalCoversFourTerminalStates(t *testing.T) {
 		dialogue := newFakeDialogueModel(t)
 		host.world.companionManager.replaceDialogueForTest(t, dialogue)
 		client := openCompanionChatClient(t, host, "memory", integrationIdentity(0x71, "发令者"))
+		companionActivated := func() bool {
+			for _, body := range host.world.engine.CompanionBodies() {
+				if body.ID == id {
+					return true
+				}
+			}
+			return false
+		}
+		// 激活只发生在 engine step 内的 advancePendingCompanion，且需 restore
+		// 点周围区块先 ready（异步、吃墙钟）；每步尝试前给 25ms（5 次机会
+		// 合计 125ms，远大于原先 10ms 的赌注），激活后立即退出预泵。
+		for host.world.engine.WorldTime() < queue.Current.DeadlineTicks && !companionActivated() {
+			time.Sleep(25 * time.Millisecond)
+			stepDialogueTick(t, host, []network.ClientEndpoint{client})
+		}
+		if !companionActivated() {
+			t.Fatalf("过期 tick 前伙伴 %s 未激活，terminal 派发会被未激活守卫永久跳过", id)
+		}
 		events := collectDialogueEvents(t, host, client, 2000, func(events []network.ChatEvent) bool {
 			return countKind(events, network.ChatEventTaskTimedOut) == 1
 		})
