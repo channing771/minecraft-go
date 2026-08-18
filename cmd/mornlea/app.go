@@ -57,20 +57,24 @@ type application struct {
 	frameWidth  int
 	frameHeight int
 	// visibleScratch/visibleSections 是每帧可见性计算的复用缓冲。
-	visibleScratch         mesh.VisibilityScratch
-	visibleSections        []core.SectionPos
-	rustVisible            [][3]int32
-	avatarStream           []byte
-	dropStream             []byte
-	outlineStream          []byte
-	billboardBytes         []byte
-	entityEncoder          render.InstanceEncoder
-	lastFrameStats         render.FrameStats
-	remotePlayers          *client.RemotePlayers
-	companions             *client.Companions
-	chatEvents             *client.ChatEvents
-	chatInput              chatInput
-	chatEventBuffer        [32]network.ChatEvent
+	visibleScratch  mesh.VisibilityScratch
+	visibleSections []core.SectionPos
+	rustVisible     [][3]int32
+	avatarStream    []byte
+	dropStream      []byte
+	outlineStream   []byte
+	billboardBytes  []byte
+	entityEncoder   render.InstanceEncoder
+	lastFrameStats  render.FrameStats
+	remotePlayers   *client.RemotePlayers
+	companions      *client.Companions
+	chatEvents      *client.ChatEvents
+	chatInput       chatInput
+	// chatEventBuffer 是 refreshChatLines 的复用缓冲，容量与 client.ChatEventCapacity
+	// 同源（E9/C9）：事件环最多回放 32 条，缓冲按同一常量分配保证零扩容刷新。
+	chatEventBuffer [client.ChatEventCapacity]network.ChatEvent
+	// chatLines 的 6 是 HUD 聊天显示行数：openspec companion-client-presentation
+	// 规格「HUD 显示最近最多 6 条」，与 internal/render/hud/chat.go 的 maxChatLines 同值。
 	chatLines              [6]string
 	chatLineCount          int
 	formattedChatEventID   uint64
