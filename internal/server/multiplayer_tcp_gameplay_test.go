@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -265,7 +265,7 @@ func TestDropSelectedItemOverTCPConvergesAndCapacityFailureIsIsolated(t *testing
 		case <-rejectCtx.Done():
 			t.Fatalf("等待 TCP 容量拒绝: %v\n%s", rejectCtx.Err(), multiplayerDiagnostics(first, second))
 		default:
-			runtime.Gosched()
+			time.Sleep(integrationPollInterval)
 		}
 	}
 
@@ -433,7 +433,7 @@ func (connected *multiplayerTCPClient) drainUntil(ctx context.Context, done func
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			runtime.Gosched()
+			time.Sleep(integrationPollInterval)
 		}
 	}
 	return nil
@@ -512,7 +512,7 @@ func mustDrainMultiplayer(
 		case <-ctx.Done():
 			t.Fatalf("%s: %v\n%s", label, ctx.Err(), multiplayerDiagnostics(first, second))
 		default:
-			runtime.Gosched()
+			time.Sleep(integrationPollInterval)
 		}
 	}
 }

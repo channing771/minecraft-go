@@ -269,7 +269,7 @@ func (h *delayedPlayerHarness) waitReady() {
 			)
 		}
 		h.finishTick(0, 0)
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 }
 
@@ -413,7 +413,7 @@ func (h *delayedPlayerHarness) waitForIncoming(want int) {
 				want,
 			)
 		}
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 }
 
@@ -689,7 +689,12 @@ func (h *delayedPlayerHarness) closeAndAssertNoGoroutineLeak(timeout time.Durati
 			return !serverLeak && runtime.NumGoroutine() <= h.goroutines
 		},
 		time.Now,
-		runtime.Gosched,
+		func() {
+			// 泄漏等待循环的 yield 步骤：固定 sleep 退避取代热轮询，理由见
+			// integrationPollInterval 注释；sleep 让出核心反而能让被观测的
+			// 泄漏目标 goroutine 更快退出。
+			time.Sleep(integrationPollInterval)
+		},
 	)
 	switch result {
 	case delayedCloseWaitOK:

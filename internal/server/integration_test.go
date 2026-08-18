@@ -3,7 +3,6 @@ package server_test
 import (
 	"context"
 	"errors"
-	"runtime"
 	"testing"
 	"time"
 
@@ -496,7 +495,10 @@ func waitForMesherStats(
 		if time.Now().After(deadline) {
 			t.Fatalf("等待 Mesher 状态超时: %+v", stats)
 		}
-		runtime.Gosched()
+		// 热轮询（runtime.Gosched）改为固定 sleep 退避：饱和并行 race 下空转
+		// 等待会抢核拖慢生产者并施压邻居测试（server 包内同型 helper 统一
+		// 治理，本文件属外部测试包故用同值字面量）。
+		time.Sleep(500 * time.Microsecond)
 	}
 }
 

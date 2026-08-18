@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -445,7 +444,10 @@ func TestTCPAcceptOwnerWaitHonorsDeadline(t *testing.T) {
 			_ = listener.Close()
 			t.Fatal("first Accept did not acquire accept owner")
 		}
-		runtime.Gosched()
+		// 热轮询（runtime.Gosched）改为固定 sleep 退避：饱和并行 race 测试中
+		// 空转等待抢核拖慢条件生产者并施压邻居测试（与 internal/server 测试
+		// 同型治理保持一致）。
+		time.Sleep(500 * time.Microsecond)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)

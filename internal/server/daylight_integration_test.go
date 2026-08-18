@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"context"
-	"runtime"
 	"testing"
 	"time"
 
@@ -108,7 +107,9 @@ func awaitMeshedSection(
 		if time.Now().After(deadline) {
 			t.Fatalf("等待区段 %+v 的 revision %d 网格超时；stats=%+v", key, revision, mesher.Stats())
 		}
-		runtime.Gosched()
+		// 热轮询（runtime.Gosched）改为固定 sleep 退避，理由同 server 包内
+		// integrationPollInterval 治理；本文件属外部测试包故用同值字面量。
+		time.Sleep(500 * time.Microsecond)
 	}
 }
 
@@ -138,7 +139,9 @@ func drainMesher(t *testing.T, mesher *client.Mesher, mirror *client.Mirror) {
 		if time.Now().After(deadline) {
 			t.Fatalf("等待 Mesher 收敛超时: %+v", stats)
 		}
-		runtime.Gosched()
+		// 同上：sleep 退避取代热轮询，泵循环每次迭代仍执行 Schedule+Drain
+		// 推进收敛，500µs 只影响两次泵之间的间隔。
+		time.Sleep(500 * time.Microsecond)
 	}
 }
 

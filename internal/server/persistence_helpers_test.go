@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"reflect"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -295,7 +294,7 @@ func waitCompletionQueued(t *testing.T, running *Server) {
 	t.Helper()
 	deadline := time.Now().Add(waitDeadline)
 	for len(running.saveCompletions) == 0 && time.Now().Before(deadline) {
-		runtime.Gosched()
+		time.Sleep(integrationPollInterval)
 	}
 	if len(running.saveCompletions) == 0 {
 		t.Fatal("save completion was not queued")
