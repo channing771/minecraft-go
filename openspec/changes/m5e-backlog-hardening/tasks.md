@@ -38,9 +38,9 @@
 
 ## E7 上限常量同源化（A10、C5、C7）
 
-- [ ] E7.1 先写失败测试：跨包常量相等断言（network 聊天上限 == `companion.MaxPlanCommandBytes`/`MaxDialogueLineBytes` 对应项）
-- [ ] E7.2 最小实现：network 与 `cmd/mornlea/chat.go` 复用 companion 导出常量（archcheck 否决则退交叉锁形态）；`message_companion.go:18-25` 五常量补字节构成推导注释（C7）
-- [ ] 验证：`go test ./internal/network ./cmd/mornlea -race -count=1`；`go test ./internal/archcheck -count=1`
+- [x] E7.1 先写失败测试：跨包常量相等断言（network 聊天上限 == `companion.MaxPlanCommandBytes`/`MaxDialogueLineBytes` 对应项）
+- [x] E7.2 最小实现：network 与 `cmd/mornlea/chat.go` 复用 companion 导出常量（archcheck 否决则退交叉锁形态）；`message_companion.go:18-25` 五常量补字节构成推导注释（C7）
+- [x] 验证：`go test ./internal/network ./cmd/mornlea -race -count=1`；`go test ./internal/archcheck -count=1`
 
 ## E8 存档前瞻与测试名（C1、C3）
 
