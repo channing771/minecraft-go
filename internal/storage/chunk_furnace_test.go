@@ -68,8 +68,8 @@ func TestChunkCodecRoundTripsFurnaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 8 || got.Revision != 19 {
-		t.Fatalf("schema/revision = %d/%d，想要 8/19", got.Schema, got.Revision)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 9 || got.Revision != 19 {
+		t.Fatalf("schema/revision = %d/%d，想要 9/19", got.Schema, got.Revision)
 	}
 	for slot := range core.FurnacesPerChunk {
 		if got.Chunk.Furnace(slot) != want.Furnace(slot) {

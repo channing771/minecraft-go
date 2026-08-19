@@ -48,8 +48,8 @@ func TestChunkCodecRoundTripsChests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != currentChunkSchema || currentChunkSchema != 8 {
-		t.Fatalf("schema = %d，想要 8", got.Schema)
+	if got.Schema != currentChunkSchema || currentChunkSchema != 9 {
+		t.Fatalf("schema = %d，想要 9", got.Schema)
 	}
 	for slot := range core.ChestsPerChunk {
 		if got.Chunk.Chest(slot) != want.Chest(slot) {
@@ -158,16 +158,16 @@ func TestChunkV6FixtureMigratesLosslessly(t *testing.T) {
 	}
 }
 
-// TestChunkV8Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
-func TestChunkV8Fixture(t *testing.T) {
+// TestChunkV9Fixture 冻结当前 schema 的编码结果，防止字节布局无声漂移。
+// 夹具含全部 8 个流体编号，因此 golden 同时覆盖含流体的区块。
+func TestChunkV9Fixture(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
-	encoded, err := encodeChunkPayload(ChunkSave{
-		Key: key, Revision: 19, Chunk: chestFixtureChunk(t, key.Pos),
-	})
+	chunk := fluidFixtureChunk(t, key.Pos)
+	encoded, err := encodeChunkPayload(ChunkSave{Key: key, Revision: 19, Chunk: chunk})
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "chunk-v8.bin")
+	path := filepath.Join("testdata", "chunk-v9.bin")
 	if *updateStorageFixtures {
 		if err := os.WriteFile(path, encoded, 0o644); err != nil {
 			t.Fatal(err)
@@ -178,7 +178,11 @@ func TestChunkV8Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(want, encoded) {
-		t.Fatal("v8 fixture drift; change schema version")
+		t.Fatal("v9 fixture drift; change schema version")
+	}
+	// 夹具前提守卫排在真实断言之后：golden 必须真的含流体，否则它不覆盖 v9 的新语义。
+	if fluids := countFluidCells(chunk); fluids != len(fluidBlockIDs) {
+		t.Fatalf("v9 golden 流体格数 = %d，想要 %d（夹具失效）", fluids, len(fluidBlockIDs))
 	}
 }
 

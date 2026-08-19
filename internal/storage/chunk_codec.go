@@ -10,7 +10,9 @@ import (
 )
 
 const (
-	currentChunkSchema uint32 = 8
+	// currentChunkSchema 为 v9：追加 8 个流体方块编号。payload 布局与 v8 完全相同，
+	// 版本号只用于让旧程序拒绝含流体的记录。
+	currentChunkSchema uint32 = 9
 	maxCompressedChunk        = 1 << 20
 	maxDecodedChunk           = 2 << 20
 

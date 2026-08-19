@@ -50,6 +50,14 @@ var chunkMigrations = map[uint32]chunkMigration{
 	6: func(dto chunkDTO) (chunkDTO, error) { return dto, nil },
 	// v8 与 v7 的 payload 布局相同，只追加常见材料注册表。
 	7: func(dto chunkDTO) (chunkDTO, error) { return dto, nil },
+	// v9 与 v8 的 payload 布局相同，只追加流体方块编号，因此是恒等迁移：
+	// 不改写任何方块数据，只抬升版本并让调用方置 Migrated。
+	//
+	// 为什么不顺便给旧区块注水（design.md D7）：注水需要重新判定「哪些格原本是
+	// air 且低于海平面」，而这些格可能已被玩家改动，无法区分「天然空腔」与
+	// 「玩家挖出的地下室」——盲目注水会淹掉玩家建筑。已接受的代价是新旧区块
+	// 之间出现干湿边界。
+	8: func(dto chunkDTO) (chunkDTO, error) { return dto, nil },
 }
 
 // fillFullDurability 把没有耐久的旧工具补为满耐久，非工具保持零值。

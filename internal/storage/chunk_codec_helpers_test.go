@@ -2,6 +2,9 @@ package storage
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
+	"testing"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -107,4 +110,14 @@ func setFixtureBlock(chunk *world.Chunk, section, index int, id core.BlockID) {
 	z := index >> core.SectionShift & core.SectionMask
 	y := index >> (2 * core.SectionShift)
 	chunk.SetBlock(x, int32(core.MinY+section*core.SectionSize+y), z, id)
+}
+
+// readChunkFixture 读取 testdata 下的冻结区块 golden 字节。
+func readChunkFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

@@ -37,7 +37,7 @@ func TestChunkPayloadRoundTripsDeterministically(t *testing.T) {
 	}
 }
 
-func TestChunkSchemaV8RoundTripsCommonBlockMaterialPalette(t *testing.T) {
+func TestChunkSchemaV9RoundTripsCommonBlockMaterialPalette(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	chunk := world.NewChunk(key.Pos)
 	want := []core.BlockID{
@@ -57,8 +57,8 @@ func TestChunkSchemaV8RoundTripsCommonBlockMaterialPalette(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if currentChunkSchema != 8 || got.Schema != 8 || got.Migrated {
-		t.Fatalf("区块 schema=%d decoded=%d migrated=%v，想要 8/8/false", currentChunkSchema, got.Schema, got.Migrated)
+	if currentChunkSchema != 9 || got.Schema != 9 || got.Migrated {
+		t.Fatalf("区块 schema=%d decoded=%d migrated=%v，想要 9/9/false", currentChunkSchema, got.Schema, got.Migrated)
 	}
 	for index, id := range want {
 		x := index & core.SectionMask
