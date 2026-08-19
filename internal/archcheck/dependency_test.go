@@ -12,17 +12,26 @@ import (
 // 经 sim.CompanionAction 提交伙伴移动输入，该 API 的字段类型就是 physics.Input；
 // server 只消费物理的值类型与 ActiveTunables 快照（发令者射线的眼高），方向是
 // 编排层依赖领域值类型，与 sim→physics 同向，不引入反向耦合。
+//
+// internal/sim → internal/fluid（变更 authoritative-fluid，design D2）：流动的调度
+// 算法（待更新队列、全序排序、封闭盆地上的不动点收敛）被拆成独立包，使其能脱离权威
+// 引擎被穷举性质测试；流动的数据所有权仍在权威模拟的 sim，fluid 只暴露
+// Advance(now, FluidWorld, budget) 这样的无状态纯函数入口，不持有世界。
+// fluid 只允许依赖 internal/core（当前实现未依赖 internal/world，即便设计意图允许，
+// 也不预先登记未使用的边）；fluid MUST NOT 反向依赖 sim/network/render/storage，
+// 否则它会退化成 sim 的内部实现，丧失独立测试的意义。
 var allowed = map[string][]string{
 	"internal/archcheck":  {},
 	"internal/companion":  {"internal/core"},
 	"internal/core":       {"internal/nativeabi"},
 	"internal/nativeabi":  {},
 	"internal/config":     {"internal/companion", "internal/core", "internal/physics", "internal/sim", "internal/logging"},
+	"internal/fluid":      {"internal/core"},
 	"internal/physics":    {"internal/core", "internal/nativeabi"},
 	"internal/logging":    {},
 	"internal/network":    {"internal/companion", "internal/core"},
 	"internal/profile":    {"internal/core"},
-	"internal/sim":        {"internal/companion", "internal/core", "internal/physics", "internal/world"},
+	"internal/sim":        {"internal/companion", "internal/core", "internal/fluid", "internal/physics", "internal/world"},
 	"internal/storage":    {"internal/companion", "internal/core", "internal/world"},
 	"internal/world":      {"internal/core"},
 	"internal/worldgen":   {"internal/core", "internal/world", "internal/nativeabi"},

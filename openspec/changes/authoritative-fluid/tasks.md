@@ -60,7 +60,7 @@
 
 ## 9. 架构门禁
 
-- [ ] 9.1 `internal/archcheck/dependency_test.go` 登记 `internal/fluid`：允许依赖 `core`、`world`；禁止依赖 `sim`、`network`、`render`、`storage`。验证：`go test ./internal/archcheck -count=1`
+- [x] 9.1 `internal/archcheck/dependency_test.go` 登记 `internal/fluid`：允许依赖 `core`、`world`；禁止依赖 `sim`、`network`、`render`、`storage`。验证：`go test ./internal/archcheck -count=1`
 
 ## 10. 收尾门禁
 
