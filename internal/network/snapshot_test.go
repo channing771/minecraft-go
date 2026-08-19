@@ -115,7 +115,9 @@ func TestChunkSnapshotRejectsMalformedSections(t *testing.T) {
 }
 
 func TestSectionDataRejectsUnknownBlockEveryStorage(t *testing.T) {
-	unknown := core.MossyCobblestoneID + 1
+	// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体），真正越界的
+	// 未知方块编号改为 WaterLevel7ID+1。
+	unknown := core.WaterLevel7ID + 1
 	tests := []struct {
 		name    string
 		section network.SectionData
@@ -207,7 +209,8 @@ func TestBlockChangesValidateRevisionPositionAndOrder(t *testing.T) {
 		{
 			name: "unregistered block ID",
 			mutate: func(changes *network.BlockChanges) {
-				changes.Changes[0].Block = core.MossyCobblestoneID + 1
+				// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体）。
+				changes.Changes[0].Block = core.WaterLevel7ID + 1
 			},
 		},
 		{

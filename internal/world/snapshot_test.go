@@ -233,7 +233,9 @@ func TestContainerSnapshotRejectsMalformedData(t *testing.T) {
 }
 
 func TestContainerSnapshotRejectsUnknownBlockEveryStorage(t *testing.T) {
-	unknown := core.MossyCobblestoneID + 1
+	// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体），真正越界的
+	// 未知方块编号改为 WaterLevel7ID+1。
+	unknown := core.WaterLevel7ID + 1
 	tests := []struct {
 		name     string
 		snapshot world.ContainerSnapshot
