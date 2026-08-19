@@ -8,11 +8,11 @@
 
 ## 2. 流动规则与调度器（新包 `internal/fluid`）
 
-- [ ] 2.1 先写失败测试：在 `internal/fluid` 定义 `FluidWorld` 单格读写接口与内存测试替身，覆盖「可替换判定」（空气可替换、更大 level 的流动水可替换、源与实心不可替换）。验证：`go test ./internal/fluid -race -count=1`
-- [ ] 2.2 实现单格流动规则求值：源存活、流动存活（上方是水或存在 level 更小的水平邻居）、垂直优先、水平传播递减、level 7 停止。逐条对应 spec 场景写测试。验证：`go test ./internal/fluid -race -count=1`
-- [ ] 2.3 实现待更新队列：项为 `(core.BlockPos, dueTick)`，入队按 `FluidFlowDelayTicks` 写 `dueTick`，去重可用 map 但**处理前必须按 `(dueTick, ChunkKey, y, z, x)` 全序排序**。测试断言排序全序性与去重后不丢项。验证：`go test ./internal/fluid -race -count=1`
-- [ ] 2.4 实现 `Advance(now uint64, w FluidWorld, budget int) []core.BlockPos`：本 tick 读取的存活判定只看 tick 起始状态，写入一次性提交；超预算项按原序保留。验证：`go test ./internal/fluid -race -count=1`
-- [ ] 2.5 写「源沿平整地面铺开恰好 7 格、第 8 格为空气」的端到端规则测试。验证：`go test ./internal/fluid -race -count=1`
+- [x] 2.1 先写失败测试：在 `internal/fluid` 定义 `FluidWorld` 单格读写接口与内存测试替身，覆盖「可替换判定」（空气可替换、更大 level 的流动水可替换、源与实心不可替换）。验证：`go test ./internal/fluid -race -count=1`
+- [x] 2.2 实现单格流动规则求值：源存活、流动存活（上方是水或存在 level 更小的水平邻居）、垂直优先、水平传播递减、level 7 停止。逐条对应 spec 场景写测试。验证：`go test ./internal/fluid -race -count=1`
+- [x] 2.3 实现待更新队列：项为 `(core.BlockPos, dueTick)`，入队按 `FluidFlowDelayTicks` 写 `dueTick`，去重可用 map 但**处理前必须按 `(dueTick, ChunkKey, y, z, x)` 全序排序**。测试断言排序全序性与去重后不丢项。验证：`go test ./internal/fluid -race -count=1`
+- [x] 2.4 实现 `Advance(now uint64, w FluidWorld, budget int) []core.BlockPos`：本 tick 读取的存活判定只看 tick 起始状态，写入一次性提交；超预算项按原序保留。验证：`go test ./internal/fluid -race -count=1`
+- [x] 2.5 写「源沿平整地面铺开恰好 7 格、第 8 格为空气」的端到端规则测试。验证：`go test ./internal/fluid -race -count=1`
 
 ## 3. 决策验证关口（D5 成立与否在此裁决）
 
