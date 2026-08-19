@@ -120,10 +120,14 @@ func (p *oraclePerlin) fbm(x, z float64, octaves int, lacunarity, gain float64) 
 type oracleGenerator struct {
 	noise *oraclePerlin
 	seed  int64
+	// fluidEnabled 镜像生产侧的注水门控。
+	fluidEnabled bool
 }
 
-func newOracleGenerator(seed int64) *oracleGenerator {
-	return &oracleGenerator{noise: newOraclePerlin(seed), seed: seed}
+// newOracleGenerator 构造 oracle。fluidEnabled 与生产 worldgen.New 的同名
+// 参数语义一致:开启时海平面及以下最终仍是空气的格取 WaterSourceID。
+func newOracleGenerator(seed int64, fluidEnabled bool) *oracleGenerator {
+	return &oracleGenerator{noise: newOraclePerlin(seed), seed: seed, fluidEnabled: fluidEnabled}
 }
 
 func (g *oracleGenerator) heightAt(wx, wz int32) int32 {
@@ -289,13 +293,29 @@ func (g *oracleGenerator) treeBlockAt(pos core.BlockPos) core.BlockID {
 	return core.AirID
 }
 
-// baseBlockAt 是 BaseBlockAt 语义的 oracle:地形优先,空气处叠加橡树。
+// baseBlockAt 是 BaseBlockAt 语义的 oracle:地形优先,空气处叠加橡树,
+// 仍为空气时叠加海水。
+//
+// 注水排在最后一层,与生产实现"注水在 applyOakTrees 之后"的顺序对应:
+// 只有最终仍是空气的格才注水,分层、矿石与橡树的结果因此完全不受影响。
 func (g *oracleGenerator) baseBlockAt(pos core.BlockPos) core.BlockID {
 	base := g.terrainBlockAt(pos)
 	if base != core.AirID {
 		return base
 	}
-	return g.treeBlockAt(pos)
+	if tree := g.treeBlockAt(pos); tree != core.AirID {
+		return tree
+	}
+	return g.seaBlockAt(pos.Y)
+}
+
+// seaBlockAt 是海平面注水的 oracle:门控开启、Y 在世界范围内且不高于
+// 海平面时为源方块,否则为空气。
+func (g *oracleGenerator) seaBlockAt(y int32) core.BlockID {
+	if g.fluidEnabled && y >= core.MinY && y <= oracleSeaLevel {
+		return core.WaterSourceID
+	}
+	return core.AirID
 }
 
 func oracleAbs(value int32) int32 {
@@ -313,24 +333,34 @@ var oracleDiffChunks = []core.ChunkPos{
 }
 
 // TestOracleMatchesProduction 逐位比较生产 GenerateChunk 与 pointwise oracle。
+//
+// 门控两态各跑一遍:关闭态锁住"与基线一致",开启态锁住注水规则本身也跨实现一致。
 func TestOracleMatchesProduction(t *testing.T) {
-	for _, seed := range oracleDiffSeeds {
-		production := worldgen.New(seed, false)
-		oracle := newOracleGenerator(seed)
-		for _, pos := range oracleDiffChunks {
-			chunk := production.GenerateChunk(pos)
-			baseX := pos.X << core.SectionShift
-			baseZ := pos.Z << core.SectionShift
-			for y := int32(core.MinY); y < core.MaxY; y++ {
-				for z := 0; z < core.SectionSize; z++ {
-					for x := 0; x < core.SectionSize; x++ {
-						world := core.BlockPos{X: baseX + int32(x), Y: y, Z: baseZ + int32(z)}
-						got := chunk.BlockAt(x, y, z)
-						want := oracle.baseBlockAt(world)
-						if got != want {
-							t.Fatalf("seed=%d chunk=%+v (%d,%d,%d): 生产=%d oracle=%d",
-								seed, pos, world.X, y, world.Z, got, want)
-						}
+	for _, fluidEnabled := range []bool{false, true} {
+		for _, seed := range oracleDiffSeeds {
+			runOracleChunkDiff(t, seed, fluidEnabled)
+		}
+	}
+}
+
+// runOracleChunkDiff 在给定门控态下逐位比较生产与 oracle 的整块生成结果。
+func runOracleChunkDiff(t *testing.T, seed int64, fluidEnabled bool) {
+	t.Helper()
+	production := worldgen.New(seed, fluidEnabled)
+	oracle := newOracleGenerator(seed, fluidEnabled)
+	for _, pos := range oracleDiffChunks {
+		chunk := production.GenerateChunk(pos)
+		baseX := pos.X << core.SectionShift
+		baseZ := pos.Z << core.SectionShift
+		for y := int32(core.MinY); y < core.MaxY; y++ {
+			for z := 0; z < core.SectionSize; z++ {
+				for x := 0; x < core.SectionSize; x++ {
+					world := core.BlockPos{X: baseX + int32(x), Y: y, Z: baseZ + int32(z)}
+					got := chunk.BlockAt(x, y, z)
+					want := oracle.baseBlockAt(world)
+					if got != want {
+						t.Fatalf("seed=%d fluid=%t chunk=%+v (%d,%d,%d): 生产=%d oracle=%d",
+							seed, fluidEnabled, pos, world.X, y, world.Z, got, want)
 					}
 				}
 			}
@@ -340,22 +370,30 @@ func TestOracleMatchesProduction(t *testing.T) {
 
 // TestOraclePointQueriesMatchProduction 差分单点入口:HeightAt/TerrainBlockAt/BaseBlockAt。
 func TestOraclePointQueriesMatchProduction(t *testing.T) {
-	for _, seed := range oracleDiffSeeds {
-		production := worldgen.New(seed, false)
-		oracle := newOracleGenerator(seed)
-		for wx := int32(-24); wx <= 24; wx += 3 {
-			for wz := int32(-24); wz <= 24; wz += 3 {
-				if got, want := production.HeightAt(wx, wz), oracle.heightAt(wx, wz); got != want {
-					t.Fatalf("seed=%d HeightAt(%d,%d): 生产=%d oracle=%d", seed, wx, wz, got, want)
+	for _, fluidEnabled := range []bool{false, true} {
+		for _, seed := range oracleDiffSeeds {
+			runOraclePointDiff(t, seed, fluidEnabled)
+		}
+	}
+}
+
+// runOraclePointDiff 在给定门控态下比较三个单点入口。
+func runOraclePointDiff(t *testing.T, seed int64, fluidEnabled bool) {
+	t.Helper()
+	production := worldgen.New(seed, fluidEnabled)
+	oracle := newOracleGenerator(seed, fluidEnabled)
+	for wx := int32(-24); wx <= 24; wx += 3 {
+		for wz := int32(-24); wz <= 24; wz += 3 {
+			if got, want := production.HeightAt(wx, wz), oracle.heightAt(wx, wz); got != want {
+				t.Fatalf("seed=%d HeightAt(%d,%d): 生产=%d oracle=%d", seed, wx, wz, got, want)
+			}
+			for _, y := range []int32{core.MinY - 1, core.MinY, -20, 0, 63, 64, 90, core.MaxY - 1, core.MaxY} {
+				pos := core.BlockPos{X: wx, Y: y, Z: wz}
+				if got, want := production.TerrainBlockAt(pos), oracle.terrainBlockAt(pos); got != want {
+					t.Fatalf("seed=%d fluid=%t TerrainBlockAt(%+v): 生产=%d oracle=%d", seed, fluidEnabled, pos, got, want)
 				}
-				for _, y := range []int32{core.MinY - 1, core.MinY, -20, 0, 63, 64, 90, core.MaxY - 1, core.MaxY} {
-					pos := core.BlockPos{X: wx, Y: y, Z: wz}
-					if got, want := production.TerrainBlockAt(pos), oracle.terrainBlockAt(pos); got != want {
-						t.Fatalf("seed=%d TerrainBlockAt(%+v): 生产=%d oracle=%d", seed, pos, got, want)
-					}
-					if got, want := production.BaseBlockAt(pos), oracle.baseBlockAt(pos); got != want {
-						t.Fatalf("seed=%d BaseBlockAt(%+v): 生产=%d oracle=%d", seed, pos, got, want)
-					}
+				if got, want := production.BaseBlockAt(pos), oracle.baseBlockAt(pos); got != want {
+					t.Fatalf("seed=%d fluid=%t BaseBlockAt(%+v): 生产=%d oracle=%d", seed, fluidEnabled, pos, got, want)
 				}
 			}
 		}

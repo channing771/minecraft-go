@@ -17,7 +17,7 @@ import (
 // TestOakTreeHashSelectorUsesLowBitAndHalfGate 锁定候选选择器,而非把地表
 // 或树干过滤误当成 parity 拒绝。若反转 hash&1 选择器,此测试必须失败。
 func TestOakTreeHashSelectorUsesLowBitAndHalfGate(t *testing.T) {
-	oracle := newOracleGenerator(42)
+	oracle := newOracleGenerator(42, false)
 	tests := []struct {
 		name         string
 		cellX, cellZ int32
@@ -60,7 +60,7 @@ func TestOakTreeHashSelectorUsesLowBitAndHalfGate(t *testing.T) {
 }
 
 func TestOakTreeCandidateIsStable(t *testing.T) {
-	oracle := newOracleGenerator(42)
+	oracle := newOracleGenerator(42, false)
 	tests := []struct {
 		name         string
 		cellX, cellZ int32
@@ -95,7 +95,7 @@ func TestOakTreeCandidateIsStable(t *testing.T) {
 // TestOakTreeCandidateUsesFullHalfGateAndMinimumHeight 锁定两个实际能生成的
 // 草地候选。若把 50% selector 收窄为 hash&3,或删掉高度 4,此测试必须失败。
 func TestOakTreeCandidateUsesFullHalfGateAndMinimumHeight(t *testing.T) {
-	oracle := newOracleGenerator(42)
+	oracle := newOracleGenerator(42, false)
 	tests := []struct {
 		name         string
 		cellX, cellZ int32
