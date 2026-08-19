@@ -25,11 +25,11 @@
 
 ## 4. 权威模拟集成
 
-- [ ] 4.1 在 `internal/sim` 新增 `advanceFluids(pending map[core.ChunkKey]*pendingChunkChanges)`，仿 `advanceFurnaces` 的形状：只遍历 `activeInterestKeys()` 的 `ChunkReady` 区块，变更经 `touchChunk` 汇入。验证：`go test ./internal/sim -race -count=1`
-- [ ] 4.2 在 `internal/sim/engine_step.go` 的 `Step` 中把 `engine.advanceFluids(pending)` 插在 `advanceFurnaces` 之后、`containerMoves` 之前；为阶段顺序补 `stepPhase` 探针断言。验证：`go test ./internal/sim -race -count=1`
-- [ ] 4.3 接上入队点：方块放置、方块采掘写入后把该格及其六邻入队；区块进入 `ChunkReady` 时执行一次边界重扫入队。验证：`go test ./internal/sim -race -count=1`
-- [ ] 4.4 测试「兴趣范围外不推进」与「区块重新进入兴趣范围后继续收敛」两个 spec 场景。验证：`go test ./internal/sim -race -count=1`
-- [ ] 4.5 测试流体变更经既有区块变更通道广播，客户端只读镜像逐格一致（不新增消息类型）。验证：`go test ./internal/sim ./internal/server -race -count=1`
+- [x] 4.1 在 `internal/sim` 新增 `advanceFluids(pending map[core.ChunkKey]*pendingChunkChanges)`，仿 `advanceFurnaces` 的形状：只遍历 `activeInterestKeys()` 的 `ChunkReady` 区块，变更经 `touchChunk` 汇入。验证：`go test ./internal/sim -race -count=1`
+- [x] 4.2 在 `internal/sim/engine_step.go` 的 `Step` 中把 `engine.advanceFluids(pending)` 插在 `advanceFurnaces` 之后、`containerMoves` 之前；为阶段顺序补 `stepPhase` 探针断言。验证：`go test ./internal/sim -race -count=1`
+- [x] 4.3 接上入队点：方块放置、方块采掘写入后把该格及其六邻入队；区块进入 `ChunkReady` 时执行一次边界重扫入队。验证：`go test ./internal/sim -race -count=1`
+- [x] 4.4 测试「兴趣范围外不推进」与「区块重新进入兴趣范围后继续收敛」两个 spec 场景。验证：`go test ./internal/sim -race -count=1`
+- [x] 4.5 测试流体变更经既有区块变更通道广播，客户端只读镜像逐格一致（不新增消息类型）。验证：`go test ./internal/sim ./internal/server -race -count=1`
 
 ## 5. 世界生成注水
 
