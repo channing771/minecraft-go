@@ -21,6 +21,7 @@ import (
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
+	"github.com/channing771/mornlea/internal/physics"
 	"github.com/channing771/mornlea/internal/storage"
 )
 
@@ -1216,14 +1217,37 @@ func TestCompanionManagerStopSameTickOrdering(t *testing.T) {
 	}
 }
 
+// TestCompanionManagerPathBlockTableMatchesCollisionOracle 把伙伴寻路阻挡表逐
+// 编号对齐到 collision oracle（physics.BlockCollisionBoxes）：零碰撞体的编号
+// 必须可通过，有碰撞体的编号必须阻挡。
+//
+// 循环上界必须始终是「当前最后一个已注册编号」。历史上这里写的是
+// MossyCobblestoneID——它当时恰好是末位，因此看起来等价于全域；流体编号追加
+// 到它之后以后，这个上界就静默退化成了子集，新编号全程不受门禁覆盖。新增方块
+// 编号时必须同步推进这个上界。
 func TestCompanionManagerPathBlockTableMatchesCollisionOracle(t *testing.T) {
 	table := companion.NewPathBlockTable(productionCompanionPassableBlocks())
 	if !table.PassableForTest(core.AirID) {
 		t.Fatal("空气必须可通过")
 	}
-	for id := core.BlockID(1); id <= core.MossyCobblestoneID; id++ {
-		if table.PassableForTest(id) {
-			t.Fatalf("方块 %d 是碰撞实体（physics.BlockCollisionBoxes 全格阻挡），不得通过", id)
+	for id := core.BlockID(1); id <= core.WaterLevel7ID; id++ {
+		if core.IsFluid(id) {
+			// 流体的显式豁免：流体在 oracle 下是零碰撞体（实体可自由穿行），
+			// 按上面的对齐规则本应可通过；但伙伴寻路刻意继续把它当阻挡。
+			// 为什么：在游泳/浸没物理交付之前，伙伴没有任何浮力、屏息或溺水
+			// 处理，一旦把水面当平地纳入路径，它会直接走进水里沉底并卡死。
+			// 宁可让伙伴绕开水域，也不产生无法自救的路径。
+			// 退出条件：后续变更交付浸没物理（伙伴可游泳并有溺水判定）后，
+			// 删除本豁免分支，让流体回到与 oracle 一致的可通过判定。
+			if table.PassableForTest(id) {
+				t.Fatalf("流体方块 %d 在浸没物理交付前必须对伙伴寻路保持不可通过", id)
+			}
+			continue
+		}
+		boxes := physics.BlockCollisionBoxes(id, true)
+		if table.PassableForTest(id) != (boxes.Count == 0) {
+			t.Fatalf("方块 %d 可通过=%v，而 collision oracle 的碰撞体数=%d，两者必须一致",
+				id, table.PassableForTest(id), boxes.Count)
 		}
 	}
 }

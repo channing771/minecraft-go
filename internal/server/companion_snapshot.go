@@ -121,9 +121,15 @@ func (v companionChunkView) revisionAt(chunkX, chunkZ int32) uint64 {
 }
 
 // productionCompanionPassableBlocks 返回寻路阻挡表的生产映射：只有空气可
-// 通过，其余一切注册方块阻挡。该判定与 collision oracle（physics.
-// BlockCollisionBoxes）逐一对齐——除空气外每个已加载方块都是整格碰撞体，
+// 通过，其余一切注册方块阻挡。除流体外，该判定与 collision oracle（physics.
+// BlockCollisionBoxes）逐一对齐——每个已加载的非空气固体方块都是整格碰撞体，
 // 玻璃与树叶也不例外；未注册编号由 NewPathBlockTable 缺省视为阻挡。
+//
+// 流体是刻意的例外：它在 oracle 下是零碰撞体（实体可自由穿行），却仍在本表里
+// 阻挡。原因是伙伴尚无浮力、屏息或溺水处理，把水面纳入路径会让它走进水里沉底
+// 卡死；宁可绕开水域。退出条件是后续变更交付浸没物理，届时应连同
+// TestCompanionManagerPathBlockTableMatchesCollisionOracle 里的豁免分支一并
+// 移除。
 func productionCompanionPassableBlocks() map[core.BlockID]bool {
 	return map[core.BlockID]bool{core.AirID: true}
 }
