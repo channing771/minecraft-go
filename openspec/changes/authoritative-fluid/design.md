@@ -154,6 +154,29 @@ point 差分在开启态下锁定，不会静默漂移。
 - **[流体方块在渲染上按不透明方块处理]** → 本变更不改渲染。缓解：`fluidEnabled` 默认关闭，默认配置下世界中不会出现流体；开启开关属于开发者显式操作，后续变更 `fluid-presentation-survival` 交付正确呈现。
 - **[新方块编号一旦发布即不可重排]** → 与既有物品/方块编号约定一致。缓解：8 个编号一次性追加在末尾，并由「枚举末项守护」断言在将来追加时报警。
 
+## 后续变更（fluid-presentation-survival）必须承接的待办
+
+本变更只交付权威侧流体。下列五项是执行期间**显式裁决延期**的项，不是遗漏；每项都已在代码或本文档
+留档，集中列在这里以免随执行记录一起散失。
+
+1. **mesh registry 条目上限**：Rust `MAX_REGISTRY_ENTRIES`（`engine/crates/mornlea_engine/src/input.rs`，
+   当前 27）与 Go `nativeMaxRegistryEntries`、`maxNativeInputBytes` 必须同批扩容，流体纳入
+   `assets.NewRegistry()` 的快照 ids，并**删除** `assets.FaceVisible` 的两处 `core.IsFluid` 补偿分支。
+   注意：`assets.Opaque` 的流体排除是**永久事实**（另有 `internal/mesh/visibility.go` 直接对活体
+   Section 数据调用的路径），**不得删**。另注意 `input.rs` 的 `BLOCKS_BYTES = 27*4096*2` 里的 27
+   是 3×3×3 邻域区段数，与条目上限只是数字巧合，不得一起改。
+   未做的后果：开启 `fluidEnabled` 时水体周围地形面不出几何，看穿到虚空。
+2. **列顶与天空光**：`internal/world/height.go` 的 `updateHeight` 把任意非空气当列顶，客户端天空光
+   从 `heights` 派生，故水下全黑。应按 F2 的光衰减设计统一处理（水衰减而非阻断）。
+3. **raycast 目标判定**：八处 `core.RaycastBlocks` 调用点的 solid 谓词一律是 `block != core.AirID`，
+   开启态下玩家泡在水里会立刻命中眼前水格，无法瞄准/采掘/开箱，向水面放置也会贴着水放。
+   需区分流体。
+4. **出生点选取**：`internal/sim/spawn.go` 用 `physics.BlockCollisionBoxes` 找落脚点，流体零碰撞体后
+   海平面以下的地表会被判为可站立。当前无溺水故无害，交付浸没物理时必须一并处理。
+5. **伙伴寻路对流体的豁免**：`productionCompanionPassableBlocks` 当前**刻意**让流体不可通过
+   （伙伴没有浮力与溺水处理），该豁免在 `internal/server/companion_manager_test.go` 中有显式分支与
+   退出条件注释；交付浸没/游泳物理时重新评估。
+
 ## Migration Plan
 
 1. **存档**：区块 schema v8 → v9，v8 只读兼容并按恒等语义迁移，读到时置 `Migrated`、下次保存改写。schema 高于 v9 的记录按既有 `ErrFutureVersion` 拒绝。
