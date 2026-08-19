@@ -43,15 +43,15 @@
 
 ## 6. 存档演进
 
-- [ ] 6.1 `internal/storage/chunk_codec.go`：`currentChunkSchema` 8 → 9，`migrateChunk` 新增 8 → 9 恒等分支（不改方块数据，置 `Migrated`）。验证：`go test ./internal/storage -race -count=1`
-- [ ] 6.2 测试流体跨保存/加载逐格保真、旧 v8 区块按恒等迁移加载且不含流体、schema > 9 按 `ErrFutureVersion` 拒绝。验证：`go test ./internal/storage -race -count=1`
-- [ ] 6.3 扩展既有区块编解码 golden 与 fuzz 覆盖到含流体的区块。验证：`go test ./internal/storage -race -count=1 -run Fuzz -fuzztime=30s`
+- [x] 6.1 `internal/storage/chunk_codec.go`：`currentChunkSchema` 8 → 9，`migrateChunk` 新增 8 → 9 恒等分支（不改方块数据，置 `Migrated`）。验证：`go test ./internal/storage -race -count=1`
+- [x] 6.2 测试流体跨保存/加载逐格保真、旧 v8 区块按恒等迁移加载且不含流体、schema > 9 按 `ErrFutureVersion` 拒绝。验证：`go test ./internal/storage -race -count=1`
+- [x] 6.3 扩展既有区块编解码 golden 与 fuzz 覆盖到含流体的区块。验证：`go test ./internal/storage -race -count=1 -run Fuzz -fuzztime=30s`
 
 ## 7. 协议演进
 
-- [ ] 7.1 `internal/network` 协议版本 v19 → v20；确认 wire 形状与长度上限不变（本次唯一变化是方块 ID 集合扩展）。验证：`go test ./internal/network -race -count=1`
-- [ ] 7.2 测试旧版本客户端登录被拒绝并给出版本不匹配原因；扩展 wire golden 到含流体方块的区块 payload。验证：`go test ./internal/network -race -count=1`
-- [ ] 7.3 Memory/TCP 双传输 parity：同一次溃坝在两种传输下每 tick 广播的方块变更逐格一致。验证：`go test ./internal/server -race -count=1`
+- [x] 7.1 `internal/network` 协议版本 v19 → v20；确认 wire 形状与长度上限不变（本次唯一变化是方块 ID 集合扩展）。验证：`go test ./internal/network -race -count=1`
+- [x] 7.2 测试旧版本客户端登录被拒绝并给出版本不匹配原因；扩展 wire golden 到含流体方块的区块 payload。验证：`go test ./internal/network -race -count=1`
+- [x] 7.3 Memory/TCP 双传输 parity：同一次溃坝在两种传输下每 tick 广播的方块变更逐格一致。验证：`go test ./internal/server -race -count=1`
 
 ## 8. 配置与 tunables
 
