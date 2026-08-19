@@ -64,7 +64,11 @@ func TestMemoryTCPFluidDamBreakBroadcastParity(t *testing.T) {
 	memory := recordDamParity(t, "memory")
 	tcp := recordDamParity(t, "tcp")
 	if !reflect.DeepEqual(tcp, memory) {
-		t.Fatalf("溃坝广播 Memory/TCP 不一致\nmemory=%+v\ntcp=%+v", memory, tcp)
+		// 只定位并打印第一个不等的 tick：两份完整录像有数百 KB，全量打印会把
+		// 真正的差异埋掉，读者还得自己 diff。
+		index, memoryTick, tcpTick := firstDamParityMismatch(memory, tcp)
+		t.Fatalf("溃坝广播 Memory/TCP 在第 %d 个 tick 起不一致\nmemory=%v\ntcp=%v",
+			index, memoryTick, tcpTick)
 	}
 
 	// 夹具前提守卫排在真实断言之后：真实的传输差异必须先报出自己的诊断，
@@ -73,7 +77,7 @@ func TestMemoryTCPFluidDamBreakBroadcastParity(t *testing.T) {
 	for _, tick := range memory.Ticks {
 		for _, entry := range tick {
 			changes++
-			if isFluidParityEntry(entry) {
+			if isFluidParityEntry(t, entry) {
 				fluids++
 			}
 		}
@@ -144,7 +148,11 @@ func damParityEntry(changes network.BlockChanges, change network.BlockChange) st
 }
 
 // isFluidParityEntry 报告一条录像条目写入的是否是流体方块编号。
-func isFluidParityEntry(entry string) bool {
+//
+// 解析失败即当场 t.Fatalf：这里的格式串必须与 damParityEntry 保持一致，静默
+// 返回 false 会让格式串的任何改动伪装成「夹具没水」，把真实故障错报成夹具失效。
+func isFluidParityEntry(t *testing.T, entry string) bool {
+	t.Helper()
 	var chunkX, chunkZ int32
 	var base, next uint64
 	var x, y, z int32
@@ -153,7 +161,26 @@ func isFluidParityEntry(entry string) bool {
 		entry, "chunk(%d,%d)@%d->%d %d,%d,%d=%d",
 		&chunkX, &chunkZ, &base, &next, &x, &y, &z, &block,
 	); err != nil {
-		return false
+		t.Fatalf("录像条目 %q 无法按 damParityEntry 的格式解析：%v", entry, err)
 	}
 	return core.IsFluid(core.BlockID(block))
+}
+
+// firstDamParityMismatch 返回两份录像第一个不等的 tick 下标及该 tick 的两个
+// 切片；tick 数不同时，短的一侧返回 nil。两份完全相等时返回 (-1, nil, nil)，
+// 调用方只在 DeepEqual 已判不等时使用，因此这种情况不可达。
+func firstDamParityMismatch(memory, tcp damParityRecord) (int, []string, []string) {
+	for i := range max(len(memory.Ticks), len(tcp.Ticks)) {
+		var memoryTick, tcpTick []string
+		if i < len(memory.Ticks) {
+			memoryTick = memory.Ticks[i]
+		}
+		if i < len(tcp.Ticks) {
+			tcpTick = tcp.Ticks[i]
+		}
+		if !reflect.DeepEqual(memoryTick, tcpTick) {
+			return i, memoryTick, tcpTick
+		}
+	}
+	return -1, nil, nil
 }
