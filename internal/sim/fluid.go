@@ -291,6 +291,7 @@ var fluidSealedSourceOffsets = [5][3]int32{
 // 流体"这类**正向**条件，一旦沿用第 4 点的单向性就不再安全（读数偏实心会把
 // "会消失"误判成"不动"）。而流动水在一个平衡水体里只出现在表面与边缘，数量本
 // 就是 O(表面)，不值得为它把论证复杂化。
+//
 // section 与 localX/localY/localZ 是 position 所在区段及其区段内局部坐标：邻格
 // 仍落在同一区段内时直接读区段（这是绝大多数情况），避开 dimension.records 的
 // map 查找；只有跨区段/跨区块的邻格才走 fluidRescanBlockAt。两条路径读的是同一
@@ -395,7 +396,13 @@ func enqueueChunkFluids(
 		section := chunk.Section(sectionIndex)
 		if id, uniform := section.Blocks.IsUniform(); uniform {
 			if !core.IsFluid(id) {
-				// 整段跳过只做了一次 IsUniform，按 1 格额度记账。
+				// 整段跳过按 1 格额度记账。这是个刻意的低估：非流体区段确实
+				// 只做了一次 IsUniform，但下面水源区段那条要做 5 次 map 查找
+				// 加 5 次 IsUniform，成本约是一次逐格检查的 4 倍，按 1 格记会
+				// 把预算实际对应的耗时低估同样的倍数。之所以仍然这样记：
+				// 单区块的区段单位数有硬上界（5 个平面 × 24 个区段 = 120），
+				// 低估是有界的常数倍而不是无界的，最坏情况仍落在 tick 预算内；
+				// 换来的是记账规则简单到一眼可验。
 				spent++
 				continue
 			}

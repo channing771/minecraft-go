@@ -57,7 +57,8 @@ type Tunables struct {
 	// 同一格在延迟窗口内被重复标记只会合并成一次到期处理。internal/fluid
 	// 本身不读取这个值（archcheck 禁止 fluid 依赖 sim），本字段只是快照源，
 	// 由 sim 侧在 tick 入口读出后作为调用参数传给 fluid.Queue.Advance——
-	// 该接线由后续任务组（4.1）交付，本字段目前没有消费方。
+	// 该接线由 internal/sim/fluid.go 的 fluidClock 在 tick 入口读出后传给
+	// fluid.Queue.Advance（任务组 4 已交付）。
 	FluidFlowDelayTicks uint32 `json:"fluidFlowDelayTicks"`
 	// FluidUpdatesPerTick 是单个权威 tick 内允许处理的流体格数上限
 	// （变更 authoritative-fluid，internal/fluid.Queue.Advance 的 budget 参数）。
@@ -72,7 +73,8 @@ type Tunables struct {
 	// 更快也可能更慢，取决于水体形状与处理顺序如何与合并窗口相互作用——
 	// 实测部分随机形状在 budget=512 下 118 tick 收敛，不受限反而要 126 tick。
 	// 因此收敛 tick 数不得被当作性能指标使用，也不能假设调大预算必然让水
-	// 更快静止。同 fluid 一样，本字段目前没有消费方，接线由任务组 4.1 交付。
+	// 更快静止。消费方是 internal/sim/fluid.go 的 advanceFluids（任务组 4 已
+	// 交付）。
 	FluidUpdatesPerTick uint32 `json:"fluidUpdatesPerTick"`
 	// FluidRescanCellsPerTick 是单个权威 tick 内允许用于**边界重扫**的格数
 	// 预算（变更 authoritative-fluid，internal/sim/fluid.go 的 advanceFluids）。
@@ -99,9 +101,10 @@ type Tunables struct {
 	FluidRescanCellsPerTick uint32 `json:"fluidRescanCellsPerTick"`
 }
 
-// defaultFluidFlowDelayTicks 与 defaultFluidUpdatesPerTick 是流体两个 tunable
-// 的编译期默认值。两者暂无专属消费方文件（接线由任务组 4.1 交付），因此就近
-// 定义在这里，而不是像 defaultRegenDelayTicks 等常量那样放在各自的消费方文件。
+// 以下是流体三个 tunable 的编译期默认值。它们的消费方都在
+// internal/sim/fluid.go 一个文件里（fluidClock 读延迟，advanceFluids 读两条
+// 预算），没有各自独立的消费方文件，因此集中定义在这里，而不是像
+// defaultRegenDelayTicks 等常量那样分散到各自的消费方文件。
 const (
 	// defaultFluidFlowDelayTicks 见 Tunables.FluidFlowDelayTicks 的字段说明。
 	defaultFluidFlowDelayTicks = 5

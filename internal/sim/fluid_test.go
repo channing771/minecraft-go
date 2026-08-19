@@ -382,33 +382,90 @@ func TestBlockRemovalEnqueuesNeighbouringFluid(t *testing.T) {
 	}
 }
 
-// fluidBasinDimension 造一个 2×2 区块的封闭盆地，供重扫捷径的等价性测试使用：
-// 底部 y<=0 是石头，y=1..20 灌满水源，另外刻意留两处不平衡——底板上开一个通到
-// y=-8 的竖井，水体内部挖一个空气泡。四周没有相邻区块，按 fluidWorld 的约定读作
-// core.BarrierID，盆地因此是封闭的（internal/fluid 收敛结论的前提）。
+// fluidBasinPocket 描述一处「只朝单一水平方向开口」的石头内凹槽：source 处放一个
+// 水源，它的 +offset 方向那一格是空气，其余五个邻格都是石头。
+//
+// 这类凹槽的存在是为了让 fluidSourceIsFixedPoint 的**四个水平偏移各自独立承重**。
+// 若只用「水体内部的气泡」当夹具，四个水平方向互为冗余——去掉其中任何一个，
+// 剩下三个方向的水仍会把气泡填满，最终世界不变，判据被改坏也测不出来。
+type fluidBasinPocket struct {
+	source core.BlockPos
+	offset [3]int32
+}
+
+// fluidBasinPockets 是四个方向各一处的单向凹槽，全部埋在区块 {0,1} 的石头里
+// （y=-20 落在区段 2，四周被石头封死，互不连通）。
+var fluidBasinPockets = [4]fluidBasinPocket{
+	{source: core.BlockPos{X: 2, Y: -20, Z: 17}, offset: [3]int32{1, 0, 0}},
+	{source: core.BlockPos{X: 7, Y: -20, Z: 17}, offset: [3]int32{-1, 0, 0}},
+	{source: core.BlockPos{X: 2, Y: -20, Z: 23}, offset: [3]int32{0, 0, 1}},
+	{source: core.BlockPos{X: 7, Y: -20, Z: 23}, offset: [3]int32{0, 0, -1}},
+}
+
+// fluidBasinDimension 造一个 2×2 区块的封闭盆地，供重扫捷径的等价性测试使用。
+// 四周没有相邻区块，按 fluidWorld 的约定读作 core.BarrierID，盆地因此是封闭的
+// （internal/fluid 收敛结论的前提）。
+//
+// 夹具的每一处形状都对应捷径里的一条待钉死的分支，别随手简化：
+//
+//   - **水位 y=1..47**（而不是只到 20）：让区段 6（y=32..47）成为**均匀水源区段**，
+//     且它下方的区段 5 也是均匀水源，于是 fluidSectionIsFixedPoint 的 O(1) 区段级
+//     快路径**真的会被执行到**。水位只到 20 时水体横跨区段 4/5 却没有任何一个均匀
+//     水源区段，那条承担本次修复主要收益的快路径一行都跑不到。
+//   - **区块 {1,1} 的底板小孔**：该区块的石头顶面压到 y=-1，使区段 4（y=0..15）也是
+//     均匀水源区段，而它下方的区段 3 因为一个小孔变成混杂区段。于是
+//     fluidSectionIsFixedPoint 对区段 4 必须返回 **false**、退回逐格路径，孔口那一格
+//     才会入队。这一处专门钉死「区段级判据恒真」这类改坏。
+//   - **四处单向凹槽**（fluidBasinPockets）：分别钉死四个水平偏移。
+//   - **竖井与气泡**（区块 {0,0}）：钉死「下方」偏移与水体内部的普通不平衡。
 func fluidBasinDimension() (*Dimension, []core.ChunkPos) {
 	dimension := NewDimension(core.Overworld)
 	positions := make([]core.ChunkPos, 0, 4)
+	holeChunk := core.ChunkPos{X: 1, Z: 1}
 	for x := int32(0); x < 2; x++ {
 		for z := int32(0); z < 2; z++ {
 			pos := core.ChunkPos{X: x, Z: z}
 			chunk := world.NewChunk(pos)
+			// 石头顶面：{1,1} 压到 y=-1，让 y=0..15 整段是水源。
+			floorTop := int32(0)
+			if pos == holeChunk {
+				floorTop = -1
+			}
 			for lx := range core.SectionSize {
 				for lz := range core.SectionSize {
-					for y := int32(core.MinY); y <= 0; y++ {
+					for y := int32(core.MinY); y <= floorTop; y++ {
 						chunk.SetBlock(lx, y, lz, core.StoneID)
 					}
-					for y := int32(1); y <= 20; y++ {
+					for y := floorTop + 1; y <= 47; y++ {
 						chunk.SetBlock(lx, y, lz, core.WaterSourceID)
 					}
 				}
 			}
-			if pos == (core.ChunkPos{}) {
+			switch pos {
+			case core.ChunkPos{}:
+				// 通到 y=-8 的竖井 + 水体内部的空气泡。
 				for y := int32(-8); y <= 0; y++ {
 					chunk.SetBlock(3, y, 3, core.AirID)
 				}
 				for y := int32(6); y <= 9; y++ {
 					chunk.SetBlock(11, y, 12, core.AirID)
+				}
+			case core.ChunkPos{X: 0, Z: 1}:
+				for _, pocket := range fluidBasinPockets {
+					sx, _, sz := pocket.source.Local()
+					chunk.SetBlock(sx, pocket.source.Y, sz, core.WaterSourceID)
+					air := core.BlockPos{
+						X: pocket.source.X + pocket.offset[0],
+						Y: pocket.source.Y + pocket.offset[1],
+						Z: pocket.source.Z + pocket.offset[2],
+					}
+					ax, _, az := air.Local()
+					chunk.SetBlock(ax, air.Y, az, core.AirID)
+				}
+			case holeChunk:
+				// 底板小孔：让区段 3 变成混杂区段，区段 4 的整段跳过因此必须被否决。
+				for y := int32(-8); y <= -1; y++ {
+					chunk.SetBlock(8, y, 8, core.AirID)
 				}
 			}
 			chunk.Compact()
@@ -479,9 +536,16 @@ func dimensionHashes(dimension *Dimension, positions []core.ChunkPos) map[core.C
 // 这条重扫捷径的正确性：跳过可证不动点的内部水源之后，重扫驱动出来的最终世界
 // 必须与「把每一个流体格都入队」的朴素重扫**逐块字节一致**。
 //
-// 捷径若判错（把会产生写入的格当成不动点跳过），竖井与气泡这两处不平衡就会
-// 停在半路，两个世界的哈希立刻分叉。测试同时断言捷径确实生效（入队量显著低于
-// 朴素实现），否则捷径失效时本测试会退化成一条恒真断言。
+// 捷径若判错（把会产生写入的格当成不动点跳过），夹具里那几处刻意留下的不平衡
+// 就会停在半路，两个世界的哈希立刻分叉。测试同时断言捷径确实生效（入队量显著
+// 低于朴素实现），否则捷径失效时本测试会退化成一条恒真断言。
+//
+// **它同时是不动点判据的机械门禁。** 对照组 enqueueEveryFluidCell 完全不使用
+// 判据，因此任何让判据不再成立的改动都会被自动抓到——不只是判据本身写错，也
+// 包括**改动 internal/fluid 的 evalCell / Replaceable 规则**或**新增流体种类**
+// （例如岩浆）导致「五邻不可替换的水源必是不动点」这条论证失效的情形。
+// fluidSourceIsFixedPoint 的注释里写了完整推导，但注释不会变红；规则一旦变了，
+// 是这条测试负责报警。因此夹具的形状不能随手简化，见 fluidBasinDimension。
 func TestFluidRescanFixedPointSkipMatchesFullRescan(t *testing.T) {
 	fastDimension, positions := fluidBasinDimension()
 	fastQueue := fluid.NewQueue()
