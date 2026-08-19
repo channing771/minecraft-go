@@ -192,6 +192,11 @@ func newBasin(x0, z0, x1, z1, floorY, topY int32) *memWorld {
 type fluidFixture struct {
 	name  string
 	build func() *memWorld
+	// expectEmptyEquilibrium 声明该形状的平衡态应当**不含任何流体格**
+	// （例如整片无支撑的悬空水最终全部消失）。3.1 用它替代按形状名字符串
+	// 做例外分支——名字是展示用的，改名不该静默削弱断言；而且这个字段是
+	// 双向断言的：声明为 false 却真的流干、声明为 true 却还剩水，都会失败。
+	expectEmptyEquilibrium bool
 }
 
 // standardFixtures 返回覆盖 task-3-brief 要求的各类形状的固定测试水体：
@@ -220,7 +225,8 @@ func standardFixtures() []fluidFixture {
 			},
 		},
 		{
-			name: "悬空无支撑流动水",
+			name:                   "悬空无支撑流动水",
+			expectEmptyEquilibrium: true,
 			build: func() *memWorld {
 				// 一批凭空放置、没有任何源支撑的流动水：按「流动方块失去支撑
 				// 后消失」应当全部消失，是"生灭"路径的最小样本。
@@ -279,10 +285,10 @@ func seedFromFluid(w *memWorld, q *Queue, now, delay uint64) {
 // 全部性质测试共用的推进参数。delay 取 5、budget 取 512 与 sim 的默认
 // tunable 一致（design.md D3/D4），但本包不读取它们，一律显式传入。
 const (
-	testDelay      uint64 = 5
-	testBudget            = 512
-	unboundedBudge        = 1 << 24
-	testMaxTicks          = 20000
+	testDelay       uint64 = 5
+	testBudget             = 512
+	unboundedBudget        = 1 << 24
+	testMaxTicks           = 20000
 )
 
 // ---------------------------------------------------------------------------
@@ -307,16 +313,18 @@ func TestRescanFixedPoint_EquilibriumProducesNoChanges(t *testing.T) {
 				t.Fatalf("测试地形不含任何流体格，断言会空转")
 			}
 
-			now, ticks := advanceToFixedPoint(t, q, w, 1, unboundedBudge, testDelay, testMaxTicks)
+			now, ticks := advanceToFixedPoint(t, q, w, 1, unboundedBudget, testDelay, testMaxTicks)
 			assertAllRegistered(t, w, "平衡态")
 			before := snapshot(w)
 			fluidCount := len(fluidPositions(w))
-			if fluidCount == 0 {
-				// 「悬空无支撑流动水」形状本就应当全部消失；其余形状必须留下
-				// 水体，否则后续重扫无从入手，断言空转。
-				if fx.name != "悬空无支撑流动水" {
-					t.Fatalf("平衡态不含任何流体格，重扫断言会空转")
-				}
+			// 双向核对形状声明：只有显式声明会流干的形状才允许平衡态无水
+			// （否则后续重扫无从入手，断言空转）；声明了会流干却仍剩水，
+			// 同样说明形状或规则跑偏了。
+			if fluidCount == 0 && !fx.expectEmptyEquilibrium {
+				t.Fatalf("平衡态不含任何流体格，重扫断言会空转")
+			}
+			if fluidCount != 0 && fx.expectEmptyEquilibrium {
+				t.Fatalf("形状声明平衡态应当流干，实际仍有 %d 个流体格", fluidCount)
 			}
 			t.Logf("形状 %s：%d tick 到达平衡态，流体格 %d 个", fx.name, ticks, fluidCount)
 
@@ -333,10 +341,10 @@ func TestRescanFixedPoint_EquilibriumProducesNoChanges(t *testing.T) {
 			}
 			t.Logf("形状 %s：重扫入队 %d 项", fx.name, enqueued)
 
-			// 重扫后的推进必须一格都不改。用 unboundedBudge 保证一次 Advance
+			// 重扫后的推进必须一格都不改。用 unboundedBudget 保证一次 Advance
 			// 就能把全部重扫项处理掉，任何变更都会立刻暴露。
 			for i := 0; i < testMaxTicks && q.Len() > 0; i++ {
-				changed := q.Advance(now, w, unboundedBudge, testDelay)
+				changed := q.Advance(now, w, unboundedBudget, testDelay)
 				now++
 				if len(changed) != 0 {
 					t.Fatalf("重扫后第 %d 次推进产生了 %d 处变更（平衡态不是重扫的不动点）：%v",
@@ -372,12 +380,17 @@ func TestRescanMidFlight_ConvergesToSameEquilibrium(t *testing.T) {
 			base := fx.build()
 			baseQ := NewQueue()
 			seedFromFluid(base, baseQ, 0, 0)
-			advanceToFixedPoint(t, baseQ, base, 1, unboundedBudge, testDelay, testMaxTicks)
+			advanceToFixedPoint(t, baseQ, base, 1, unboundedBudget, testDelay, testMaxTicks)
 			want := snapshot(base)
 
-			// sawUnbalanced 记录是否至少有一个切点真的落在"未平衡"处：切点
-			// 全部落在平衡之后的话，本测试就退化成 3.1，必须显式失败。
-			sawUnbalanced := false
+			// nonTrivialCuts 统计**非零**切点里真正落在未平衡处的个数。
+			//
+			// 刻意排除 cut=0：那一刀恒定落在未平衡处（一个 tick 都没跑，队列
+			// 必然满、状态必然不等于平衡态），把它计入会让守卫恒被满足，从而
+			// 失去它被写出来的目的——将来有人改动形状、让 cut=1..28 全部落到
+			// 平衡之后时，守卫必须报警。cut=0 本身是有意义的用例（世界刚加载
+			// 就重启），保留参与断言，只是不计入这个计数。
+			nonTrivialCuts := 0
 
 			for _, cut := range cuts {
 				w := fx.build()
@@ -386,23 +399,23 @@ func TestRescanMidFlight_ConvergesToSameEquilibrium(t *testing.T) {
 
 				now := uint64(1)
 				for i := 0; i < cut; i++ {
-					q.Advance(now, w, unboundedBudge, testDelay)
+					q.Advance(now, w, unboundedBudget, testDelay)
 					now++
 				}
 
 				pendingBefore := q.Len()
 				midDiffers := len(diffWorlds(snapshot(w), want)) != 0
-				if pendingBefore > 0 && midDiffers {
+				if cut > 0 && pendingBefore > 0 && midDiffers {
 					// 队列里还有真实待办、且当前状态确实不是最终平衡态——
 					// 这一刀切在了未平衡处，丢弃的是真正会影响结果的工作。
-					sawUnbalanced = true
+					nonTrivialCuts++
 				}
 
 				// 模拟在未平衡时重启：队列全丢，只剩方块本身。
 				q.Clear()
 				rescanEnqueue(w, q, now, 0)
 
-				advanceToFixedPoint(t, q, w, now, unboundedBudge, testDelay, testMaxTicks)
+				advanceToFixedPoint(t, q, w, now, unboundedBudget, testDelay, testMaxTicks)
 				assertAllRegistered(t, w, fmt.Sprintf("切点 %d 的重扫平衡态", cut))
 
 				if diffs := diffWorlds(want, snapshot(w)); len(diffs) != 0 {
@@ -411,9 +424,14 @@ func TestRescanMidFlight_ConvergesToSameEquilibrium(t *testing.T) {
 				}
 			}
 
-			if !sawUnbalanced {
-				t.Fatalf("所有切点都落在平衡态之后，本测试未真正验证「未平衡态重启」")
+			// 要求至少 3 个非零切点落在未平衡处：1 个太容易被形状的细微调整
+			// 蒙混过去，3 个意味着该形状的瞬态确实横跨了多个切点。
+			const minNonTrivialCuts = 3
+			if nonTrivialCuts < minNonTrivialCuts {
+				t.Fatalf("只有 %d 个非零切点落在未平衡处（要求至少 %d 个），本测试未真正验证「未平衡态重启」",
+					nonTrivialCuts, minNonTrivialCuts)
 			}
+			t.Logf("形状 %s：%d/%d 个非零切点落在未平衡处", fx.name, nonTrivialCuts, len(cuts)-1)
 		})
 	}
 }
@@ -439,7 +457,7 @@ func TestBudgetEquivalence_DamBreakSameFinalState(t *testing.T) {
 	ref := build()
 	refQ := NewQueue()
 	seedFromFluid(ref, refQ, 0, 0)
-	_, refTicks := advanceToFixedPoint(t, refQ, ref, 1, unboundedBudge, testDelay, testMaxTicks)
+	_, refTicks := advanceToFixedPoint(t, refQ, ref, 1, unboundedBudget, testDelay, testMaxTicks)
 	want := snapshot(ref)
 	assertAllRegistered(t, ref, "不受限预算平衡态")
 	t.Logf("不受限预算：%d tick 到达平衡态，流体格 %d 个", refTicks, len(fluidPositions(ref)))
@@ -495,7 +513,9 @@ func TestOrderIndependence_PerTickChangesMatch(t *testing.T) {
 			}
 
 			// 三种入队顺序：全序升序、全序降序、固定种子洗牌。三者的集合完全
-			// 相同，只有 Enqueue 的调用次序不同。
+			// 相同，只有 Enqueue 的调用次序不同。另外把升序再跑一遍，用来直接
+			// 断言 spec Scenario「重复运行结果一致」——它此前只由「不同入队
+			// 顺序结果一致」间接蕴含，没有字面覆盖。
 			orders := map[string][]core.BlockPos{}
 			asc := append([]core.BlockPos(nil), seeds...)
 			orders["升序"] = asc
@@ -510,6 +530,7 @@ func TestOrderIndependence_PerTickChangesMatch(t *testing.T) {
 			rng := rand.New(rand.NewSource(0x5EED))
 			rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 			orders["固定种子洗牌"] = shuffled
+			orders["升序·复跑"] = asc
 
 			run := func(order []core.BlockPos) ([][]changedCell, map[core.BlockPos]core.BlockID, int) {
 				w := fx.build()
@@ -561,7 +582,7 @@ func TestOrderIndependence_PerTickChangesMatch(t *testing.T) {
 			t.Logf("形状 %s：单 tick 最大到期项 %d（预算 %d）", fx.name, refMaxDue, orderBudget)
 			t.Logf("形状 %s：%d tick 共 %d 处变更", fx.name, orderTicks, total)
 
-			for _, name := range []string{"降序", "固定种子洗牌"} {
+			for _, name := range []string{"降序", "固定种子洗牌", "升序·复跑"} {
 				gotTicks, gotState, _ := run(orders[name])
 				if len(gotTicks) != len(refTicks) {
 					t.Fatalf("入队顺序 %s：tick 数不一致 %d vs %d", name, len(gotTicks), len(refTicks))
@@ -628,11 +649,10 @@ func randomWaterBody(seed int64) *memWorld {
 	// 环状连通：中央实心柱。
 	fillBox(w, 6, floorY+1, 6, 7, floorY+3, 7, core.StoneID)
 
-	// 窄缝：一道内墙，只在随机一格开缝。
+	// 窄缝用的两个随机量在这里抽取，保持随机序列与形状构造顺序解耦；
+	// 内墙本身放到最后再砌（理由见下）。
 	wallZ := z0 + 2 + int32(rng.Intn(3))
 	gapX := x0 + int32(rng.Intn(int(x1-x0+1)))
-	fillBox(w, x0, floorY+1, wallZ, x1, floorY+int32(interiorH)/2, wallZ, core.StoneID)
-	w.SetBlock(core.BlockPos{X: gapX, Y: floorY + 1, Z: wallZ}, core.AirID)
 
 	// 随机实心方块：制造不规则地形、窄通道与死角。
 	for i := 0; i < 60; i++ {
@@ -660,11 +680,22 @@ func randomWaterBody(seed int64) *memWorld {
 			Y: floorY + 1 + int32(rng.Intn(interiorH)),
 			Z: z0 + int32(rng.Intn(int(z1-z0+1))),
 		}
-		if core.IsFluid(w.BlockAt(pos)) {
+		// 只往**空气**里放：悬空水的语义就是"浮在空中、没有支撑"，覆写实心
+		// 方块会一并把地形挖出洞来，让形状与注释不符（早期版本正是如此，
+		// 内墙上会被随机挖出好几个缺口）。
+		if w.BlockAt(pos) != core.AirID {
 			continue
 		}
 		w.SetBlock(pos, core.WaterLevel1ID+core.BlockID(rng.Intn(7)))
 	}
+
+	// 窄缝：最后砌一道从底面直通盆地顶的实心内墙，只在 gapX 处留一格缝。
+	//
+	// 放在全部随机撒点之后砌，是为了让"只有一格缝"这句话真的成立：随机源
+	// 方块会覆写实心方块，先砌墙的话会被随机撒点在墙上打出额外的开口。墙高
+	// 取到 topY 而不是半高，否则水直接从墙顶越过，窄缝拓扑形同虚设。
+	fillBox(w, x0, floorY+1, wallZ, x1, topY, wallZ, core.StoneID)
+	w.SetBlock(core.BlockPos{X: gapX, Y: floorY + 1, Z: wallZ}, core.AirID)
 	return w
 }
 
@@ -683,7 +714,7 @@ func TestConvergeRandomWaterBodiesReachFixedPoint(t *testing.T) {
 	// 推进一代，1500 tick 相当于 300 代，远超任何非振荡形状所需。
 	const convergeMaxTicks = 1500
 
-	for _, budget := range []int{unboundedBudge, testBudget} {
+	for _, budget := range []int{unboundedBudget, testBudget} {
 		for _, seed := range seeds {
 			t.Run(fmt.Sprintf("seed=%d/budget=%d", seed, budget), func(t *testing.T) {
 				w := randomWaterBody(seed)
@@ -704,7 +735,7 @@ func TestConvergeRandomWaterBodiesReachFixedPoint(t *testing.T) {
 				q.Clear()
 				rescanEnqueue(w, q, now, 0)
 				for i := 0; i < convergeMaxTicks && q.Len() > 0; i++ {
-					if changed := q.Advance(now, w, unboundedBudge, testDelay); len(changed) != 0 {
+					if changed := q.Advance(now, w, unboundedBudget, testDelay); len(changed) != 0 {
 						t.Fatalf("seed=%d：随机形状的平衡态不是重扫的不动点，第 %d 次推进产生 %d 处变更：%v",
 							seed, i+1, len(changed), changed[:min(len(changed), 10)])
 					}
