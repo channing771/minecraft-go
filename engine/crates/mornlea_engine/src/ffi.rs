@@ -2533,7 +2533,7 @@ mod tests {
             // 材料表刻意避开 0:air=1 便于区分“输出缓冲原样”与“生成的空气”。
             bytes[24 + index * 2..26 + index * 2].copy_from_slice(&id.to_le_bytes());
         }
-        for (index, entry) in bytes[54..WORLDGEN_HEADER_BYTES].iter_mut().enumerate() {
+        for (index, entry) in bytes[52..WORLDGEN_HEADER_BYTES].iter_mut().enumerate() {
             *entry = (index & 255) as u8;
         }
         bytes

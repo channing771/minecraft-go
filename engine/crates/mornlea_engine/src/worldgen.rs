@@ -498,19 +498,24 @@ pub(crate) fn dense_index(lx: i32, y: i32, lz: i32) -> usize {
 
 // ---- ABI 编码常量与解析 ----
 //
-// 两个 worldgen 入口共用 magic `MGW1` 的 566 字节 header:
+// 两个 worldgen 入口共用 magic `MGW1` 的 564 字节 header:
 // magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
-// 材料表 14×u16(28) + reserved u16(2) + perm 512×u8(512)。
-// engine ABI v4 把材料表从 13 项扩到 14 项(末项 water),新增的 u16 占用 v3
-// 预留的 reserved 槽(偏移 50),并在其后补回一个新的 reserved 槽(偏移 52)
-// ——reserved 的作用就是让下一次扩字段不必挪动 perm,用掉了就要补上。
-// 因此 header 总长 564 → 566、perm 偏移 52 → 54,**布局确实变了**:
-// layout version 随之 1 → 2,作为独立于 ABI 版本号的带内第二道混装防线。
+// 材料表 14×u16(28) + perm 512×u8(512)。
+//
+// engine ABI v4 把材料表从 13 项扩到 14 项(末项 water),新增的 u16 正当占用
+// v3 预留的 reserved 槽(偏移 50):该偏移的语义由"保留、必须为 0"变成"water
+// 的方块编号",header 总长与 perm 偏移不变,但**布局语义确实变了**,因此
+// layout version 1 → 2——它是独立于 ABI 版本号的带内第二道混装防线。
+//
+// **不再保留空槽是刻意选择,不是漏了**:新增一个 reserved 槽本身就要把 perm
+// 往后挪,而 reserved 的意义是推迟这个代价、不是提前支付;何况下一次扩字段
+// 必然同样改动材料表布局、必然升 ABI 版本,而 ABI 版本号每次调用都校验,
+// 混装在那一步就被挡住。空槽在一个本来就不兼容的版本里买不到兼容性。
 // chunk 入口追加 chunk_x/chunk_z(8);probe 入口追加 record_count(4) 与
 // 每条 16 字节的查询记录(mode + wx/wy/wz)。
 
 /// 共用 header 字节数。
-pub(crate) const WORLDGEN_HEADER_BYTES: usize = 566;
+pub(crate) const WORLDGEN_HEADER_BYTES: usize = 564;
 /// chunk 入口输入总字节数:header + chunk_x/chunk_z。
 pub(crate) const WORLDGEN_CHUNK_INPUT_BYTES: usize = WORLDGEN_HEADER_BYTES + 8;
 /// chunk 入口输出字节数:98304 个 u16 LE。
@@ -541,8 +546,11 @@ fn read_i64(bytes: &[u8], offset: usize) -> i64 {
 /// 解析并校验共用 header;任何违约返回 None(FFI 层转为 StatusInput)。
 ///
 /// 校验项:magic/layout 精确匹配、Y 范围必须与内核常量一致(防止 Go/Rust
-/// 世界高度漂移)、reserved 必须为零、材料表 14 项两两互异(air 是哨兵,
-/// 重复 ID 会破坏与 Go 语义的对应关系)。perm 为 u8,取值域即合法域。
+/// 世界高度漂移)、材料表 14 项两两互异(air 是哨兵,重复 ID 会破坏与 Go
+/// 语义的对应关系)。perm 为 u8,取值域即合法域。
+///
+/// v3 的 `reserved != 0` 校验随字段一起消失:偏移 50 已被 water 正当占用,
+/// 校验对象不复存在。混装由 ABI 版本号与 layout version 两道拦截。
 ///
 /// 互异性的**唯一豁免**是 `water == air`:这是 Go 侧 `fluidEnabled` 关闭时
 /// 的门控编码(design D6),water 只被写入、从不参与等值比较,取 air 编号
@@ -554,7 +562,6 @@ pub(crate) fn parse_header(bytes: &[u8]) -> Option<WorldgenParams> {
         || read_u32(bytes, 4) != 2
         || read_i32(bytes, 16) != WORLD_MIN_Y
         || read_i32(bytes, 20) != WORLD_MAX_Y
-        || read_u16(bytes, 52) != 0
     {
         return None;
     }
@@ -587,7 +594,7 @@ pub(crate) fn parse_header(bytes: &[u8]) -> Option<WorldgenParams> {
         }
     }
     let mut perm = [0u8; 512];
-    perm.copy_from_slice(&bytes[54..WORLDGEN_HEADER_BYTES]);
+    perm.copy_from_slice(&bytes[52..WORLDGEN_HEADER_BYTES]);
     Some(WorldgenParams {
         seed,
         materials,

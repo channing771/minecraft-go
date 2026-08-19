@@ -19,16 +19,20 @@ import (
 
 // `MGW1` ABI 编码常量,必须与 engine `worldgen.rs` 的布局逐字一致:
 // header = magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
-// 材料表 14×u16(28) + reserved u16(2) + perm 512×u8(512)。
-// engine ABI v4 起材料表末项是 water,它占用 v3 预留的 reserved 槽(偏移 50),
-// 并在其后补回一个新的 reserved 槽(偏移 52)——reserved 的作用就是让下一次扩
-// 字段不必挪动 perm,用掉了就要补上。布局因此确实变了(564 → 566,perm 偏移
-// 52 → 54),layout version 随之 1 → 2,作为独立于 ABI 版本号的带内第二道
-// 混装防线。
+// 材料表 14×u16(28) + perm 512×u8(512)。
+//
+// engine ABI v4 起材料表末项是 water,它正当占用 v3 预留的 reserved 槽
+// (偏移 50):该偏移的语义由"保留、必须为 0"变成"water 的方块编号",header
+// 总长与 perm 偏移不变,但布局语义确实变了,因此 layout version 1 → 2
+// ——它是独立于 ABI 版本号的带内第二道混装防线。
+//
+// 不再保留空槽是刻意选择,不是漏了:新增一个 reserved 槽本身就要把 perm 往后
+// 挪,而 reserved 的意义是推迟这个代价、不是提前支付;何况下一次扩字段必然
+// 同样改动材料表布局、必然升 ABI 版本,混装在版本号校验那一步就被挡住。
 const (
 	worldgenMagic       = "MGW1"
 	worldgenLayout      = 2
-	worldgenHeaderBytes = 566
+	worldgenHeaderBytes = 564
 	// worldgenChunkOutputBytes 是 dense `[y−min_y][lz][lx]` 布局的
 	// 16×16×(MaxY−MinY) 个 u16。
 	worldgenChunkOutputBytes = core.SectionSize * core.SectionSize * (core.MaxY - core.MinY) * 2
@@ -46,7 +50,7 @@ const (
 //
 // New 之后 header 只读共享,每次调用使用独立缓冲,可并发调用。
 type Generator struct {
-	// header 是预编码的 566 字节 `MGW1` 公共 header(seed、材料表、perm)。
+	// header 是预编码的 564 字节 `MGW1` 公共 header(seed、材料表、perm)。
 	header []byte
 }
 
@@ -82,8 +86,9 @@ func New(seed int64, fluidEnabled bool) *Generator {
 		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(id))
 	}
 	perm := permTable(seed)
-	// perm 从偏移 54 开始:24..52 是 14 项材料表,52..54 是 reserved(保持零值)。
-	copy(header[54:], perm[:])
+	// perm 从偏移 52 开始:24..52 恰好是 14 项材料表,末项 water 占 50..52
+	// (v3 的 reserved 槽)。
+	copy(header[52:], perm[:])
 	return &Generator{header: header}
 }
 

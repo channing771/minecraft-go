@@ -463,7 +463,7 @@ func testValidCollisionInput() []byte {
 }
 
 // testValidWorldgenHeader 构造合法 `MGW1` header:layout 2、seed 42、
-// 互异材料表 1..=14(engine ABI v4 起末项是 water)、reserved 保持零、恒等 perm。
+// 互异材料表 1..=14(engine ABI v4 起末项 water 占用 v3 的 reserved 槽)、恒等 perm。
 func testValidWorldgenHeader() []byte {
 	header := make([]byte, worldgenHeaderBytes)
 	copy(header[:4], "MGW1")
@@ -476,7 +476,7 @@ func testValidWorldgenHeader() []byte {
 		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(index+1))
 	}
 	for index := 0; index < 512; index++ {
-		header[54+index] = byte(index & 255)
+		header[52+index] = byte(index & 255)
 	}
 	return header
 }
@@ -497,7 +497,7 @@ func testValidWorldgenProbeInput() []byte {
 
 // worldgenHeaderBytes 是 `MGW1` 公共 header 的字节数,必须与 engine
 // `WORLDGEN_HEADER_BYTES` 和 internal/worldgen 的同名常量一致。
-const worldgenHeaderBytes = 566
+const worldgenHeaderBytes = 564
 
 const worldgenChunkOutputBytes = 16 * 16 * 384 * 2
 
@@ -514,9 +514,6 @@ func TestWorldgenChunkRawFailureAtomicity(t *testing.T) {
 	// layout version 是独立于 ABI 版本号的带内混装防线:header 布局一变它就要变,
 	// engine 侧对不上必须拒绝。
 	binary.LittleEndian.PutUint32(badLayout[4:8], 1)
-	badReserved := slices.Clone(validInput)
-	// reserved 槽(偏移 52)必须为零:非零多半是 Go 侧写偏了字段。
-	binary.LittleEndian.PutUint16(badReserved[52:54], 1)
 	wrongMinY := slices.Clone(validInput)
 	badMinY := int32(-32)
 	binary.LittleEndian.PutUint32(wrongMinY[16:20], uint32(badMinY))
@@ -532,7 +529,6 @@ func TestWorldgenChunkRawFailureAtomicity(t *testing.T) {
 		{name: "bad magic", version: ABIVersion, input: badMagic, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "duplicate material", version: ABIVersion, input: duplicateMaterial, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "bad layout", version: ABIVersion, input: badLayout, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
-		{name: "non-zero reserved", version: ABIVersion, input: badReserved, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "wrong min y", version: ABIVersion, input: wrongMinY, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "short input", version: ABIVersion, input: validInput[:len(validInput)-1], output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "short output", version: ABIVersion, input: validInput, output: make([]byte, worldgenChunkOutputBytes-1), want: StatusOutputOverflow},
