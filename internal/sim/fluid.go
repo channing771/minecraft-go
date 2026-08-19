@@ -166,12 +166,16 @@ var fluidBoundaryPlanes = [4]fluidBoundaryPlane{
 
 // rescanChunkFluids 对一个刚进入流体推进范围的区块执行一次边界重扫入队。
 //
-// 硬约束：**重扫必须覆盖全部流体格，包括相邻区块贴着本区块那一侧的流体格。**
-// design.md D5「队列不持久化、重启靠重扫恢复」的全部依据是「平衡态是重扫的
-// 不动点」，而该性质依赖重扫的完整性：evalCell 对非流体格恒产出空写入，所以
-// 「能产生写入的格」恰好就是「全部流体格」。spec 与 design 里写的重扫集合是
+// 硬约束：**重扫必须覆盖全部可能产生写入的格，包括相邻区块贴着本区块那一侧
+// 的流体格。** design.md D5「队列不持久化、重启靠重扫恢复」的全部依据是「平衡态
+// 是重扫的不动点」，而该性质依赖重扫的完整性：evalCell 对非流体格恒产出空写入，
+// 所以「能产生写入的格」是「全部流体格」的子集。spec 与 design 里写的重扫集合是
 // 「流体格及其空气邻居」，其中空气邻居那一半在当前规则集下是纯冗余，漏掉无害；
-// 真正承重的是每一个流体格都被入队。
+// 真正承重的是每一个**可能产生写入的**流体格都被入队。
+//
+// enqueueChunkFluids 在此基础上进一步排除了可证的不动点水源（详见
+// fluidSourceIsFixedPoint 的论证）。那是对「能产生写入的格」这个集合的精确刻画，
+// 不是对完整性的放宽：被排除的格 evalCell 必然返回空写入集合。
 //
 // 只扫本区块内部就会漏掉接缝另一侧：邻块的水在本区块还没进范围时把本区块读作
 // 实心（见 fluidWorld）而静止并从队列中排空，本区块进来之后没有任何东西会重新
@@ -187,7 +191,10 @@ func (engine *Engine) rescanChunkFluids(
 	if record == nil || record.Chunk == nil {
 		return
 	}
-	enqueueChunkFluids(queue, record.Chunk, pos, 0, core.SectionMask, 0, core.SectionMask, now, delay)
+	enqueueChunkFluids(
+		queue, dimension, record.Chunk, pos,
+		0, core.SectionMask, 0, core.SectionMask, now, delay,
+	)
 	for _, plane := range fluidBoundaryPlanes {
 		neighborPos := core.ChunkPos{X: pos.X + plane.dx, Z: pos.Z + plane.dz}
 		neighbor := dimension.records[neighborPos]
@@ -195,21 +202,159 @@ func (engine *Engine) rescanChunkFluids(
 			continue
 		}
 		enqueueChunkFluids(
-			queue, neighbor.Chunk, neighborPos,
+			queue, dimension, neighbor.Chunk, neighborPos,
 			plane.x0, plane.x1, plane.z0, plane.z1, now, delay,
 		)
 	}
 }
 
-// enqueueChunkFluids 把 chunk 中局部 x∈[x0,x1]、z∈[z0,z1] 这一段整列内的全部
-// 流体格入队；x0..z1 用区段内局部坐标 0..15，y 恒覆盖世界全高。
+// fluidRescanBlockAt 按 fluidWorld 的边界约定读取 dimension 中的单格：世界高度
+// 之外、未加载、未就绪的格一律读作 core.BarrierID。
 //
-// 逐区段先看 IsUniform：单值态且该值不是流体的区段整段跳过。一次整块重扫名义
-// 上是 16×16×384 格，但绝大多数区段是纯空气或纯石头，这条捷径把读取量压到只
-// 剩真正混杂的少数区段——重扫发生在权威 tick 内（区块进入推进范围的那一 tick），
-// 不能按全高全宽硬扫。它只是性能捷径，不影响入队集合的正确性。
+// 它与 fluidWorld.BlockAt 的差别只有一处——不看本 tick 的推进范围（scope）。
+// 这个差别的方向是安全的：fluidWorld 对「已就绪但不在 scope 内」的区块读作
+// BarrierID，而 BarrierID 是最"实心"的读数（非空气、非流体，Replaceable 恒假）。
+// 因此本函数读出的结果绝不会比 fluidWorld 更实心，凡是本函数判定为「不可替换」
+// 的格，fluidWorld 在同一 tick 内也一定判定为「不可替换」。下面两个不动点判据
+// 全都建立在这条单向性上。
+func fluidRescanBlockAt(dimension *Dimension, position core.BlockPos) core.BlockID {
+	if position.Y < core.MinY || position.Y >= core.MaxY {
+		return core.BarrierID
+	}
+	record := dimension.records[position.Chunk()]
+	if record == nil || record.State != ChunkReady || record.Chunk == nil {
+		return core.BarrierID
+	}
+	x, _, z := position.Local()
+	return record.Chunk.BlockAt(x, position.Y, z)
+}
+
+// fluidSealedSourceOffsets 是水源不动点判据要检查的五个邻格偏移：下方与四个
+// 水平方向。上方**刻意不在其中**——见 fluidSourceIsFixedPoint 的论证。
+var fluidSealedSourceOffsets = [5][3]int32{
+	{0, -1, 0},
+	{1, 0, 0},
+	{-1, 0, 0},
+	{0, 0, 1},
+	{0, 0, -1},
+}
+
+// fluidSourceIsFixedPoint 报告 position 上的**水源**是否可证是重扫的不动点，
+// 即 internal/fluid 的 evalCell 对它必然产出空写入集合，因而把它排除出重扫入队
+// 集合不会改变任何结果。
+//
+// # 为什么这条捷径是安全的（这是本函数存在的全部理由）
+//
+// 逐条对齐 evalCell 的三段逻辑：
+//
+//  1. 存活判定。evalCell 只对**非源**流动格做 flowingSurvives；源方块走
+//     「源永不自然消失」这条规则，直接跳过存活判定。所以对水源来说，上方邻格
+//     读到什么都与结果无关——这就是 fluidSealedSourceOffsets 不含上方的原因，
+//     也让本判据完全不依赖任何"读到流体才成立"的正向条件（见第 4 点）。
+//  2. 垂直传播。源要向下写等级 1 的流动水，当且仅当 Replaceable(below, 1)。
+//  3. 水平传播。源的等级读作 0，nextLevel = 1，因此向某个水平邻格写入当且仅当
+//     Replaceable(neighbor, 1)。
+//
+// 三段合起来：水源产生写入 ⟺ 下方或四个水平邻格中至少有一个可被等级 1 替换。
+// 全部五个邻格都不可替换时，evalCell 返回空 map，本格是不动点。
+//
+//  4. 判据只在「读到不可替换」时才跳过，而 fluidRescanBlockAt 的读数绝不会比
+//     Advance 时 fluidWorld 的读数更实心（见该函数注释）。因此本函数说"不可
+//     替换"时，Advance 时也一定不可替换——误差只可能落在"本函数保守地判定成
+//     可替换、于是多入一次队"这一侧，多入队永远无害。
+//  5. 被跳过的格不会静默睡死。任何让邻格变得可替换的事件都是一次权威方块写入，
+//     而全部方块写入汇聚在 recordChange → enqueueFluidUpdate，后者把改动格
+//     **及其六个面邻格**重新入队，本格必在其中。区块重新进入推进范围则由
+//     advanceFluids 的重扫兜住。
+//
+// 判据只覆盖水源，不覆盖流动水：流动水的存活依赖"上方或某个更强的水平邻格是
+// 流体"这类**正向**条件，一旦沿用第 4 点的单向性就不再安全（读数偏实心会把
+// "会消失"误判成"不动"）。而流动水在一个平衡水体里只出现在表面与边缘，数量本
+// 就是 O(表面)，不值得为它把论证复杂化。
+// section 与 localX/localY/localZ 是 position 所在区段及其区段内局部坐标：邻格
+// 仍落在同一区段内时直接读区段（这是绝大多数情况），避开 dimension.records 的
+// map 查找；只有跨区段/跨区块的邻格才走 fluidRescanBlockAt。两条路径读的是同一
+// 份数据，只是快慢不同。
+func fluidSourceIsFixedPoint(
+	dimension *Dimension,
+	section *world.Section,
+	localX, localY, localZ int,
+	position core.BlockPos,
+) bool {
+	for _, offset := range fluidSealedSourceOffsets {
+		nx, ny, nz := localX+int(offset[0]), localY+int(offset[1]), localZ+int(offset[2])
+		var neighbor core.BlockID
+		if uint(nx) < core.SectionSize && uint(ny) < core.SectionSize && uint(nz) < core.SectionSize {
+			neighbor = section.Blocks.Get(nx, ny, nz)
+		} else {
+			neighbor = fluidRescanBlockAt(dimension, core.BlockPos{
+				X: position.X + offset[0],
+				Y: position.Y + offset[1],
+				Z: position.Z + offset[2],
+			})
+		}
+		if fluid.Replaceable(neighbor, 1) {
+			return false
+		}
+	}
+	return true
+}
+
+// fluidSectionUnreplaceable 报告 (pos, sectionIndex) 这一整个区段是否都不可被
+// 等级 1 的流动水替换。区段索引越出世界上下界、区块未加载或未就绪时按
+// fluidRescanBlockAt 的同一条约定读作 core.BarrierID，同样不可替换。
+//
+// 只承认 IsUniform 的区段：混杂区段逐格判断的成本正是这条捷径要省掉的，
+// 判不出来就返回 false 让调用方退回逐格路径，方向仍然是保守的。
+func fluidSectionUnreplaceable(dimension *Dimension, pos core.ChunkPos, sectionIndex int) bool {
+	if sectionIndex < 0 || sectionIndex >= core.SectionsPerChunk {
+		return true
+	}
+	record := dimension.records[pos]
+	if record == nil || record.State != ChunkReady || record.Chunk == nil {
+		return true
+	}
+	id, uniform := record.Chunk.Section(sectionIndex).Blocks.IsUniform()
+	return uniform && !fluid.Replaceable(id, 1)
+}
+
+// fluidSectionIsFixedPoint 是 fluidSourceIsFixedPoint 的区段级 O(1) 快路径：
+// 当整个区段是均匀水源、且「下方区段」与「四个水平邻块的同索引区段」都整段
+// 不可被等级 1 替换时，该区段的 4096 格全部满足 fluidSourceIsFixedPoint 的
+// 五邻条件（区段内部的邻格就是水源自身，跨面的邻格由这五次 IsUniform 覆盖），
+// 于是整段跳过。
+//
+// 这条快路径承担的正是本次修复的主要收益：海洋内部的均匀水源区段从「4096 次
+// 入队」降到「5 次 IsUniform」，重扫量由 O(体积) 变成 O(表面)。
+func fluidSectionIsFixedPoint(dimension *Dimension, pos core.ChunkPos, sectionIndex int) bool {
+	if !fluidSectionUnreplaceable(dimension, pos, sectionIndex-1) {
+		return false
+	}
+	for _, plane := range fluidBoundaryPlanes {
+		neighborPos := core.ChunkPos{X: pos.X + plane.dx, Z: pos.Z + plane.dz}
+		if !fluidSectionUnreplaceable(dimension, neighborPos, sectionIndex) {
+			return false
+		}
+	}
+	return true
+}
+
+// enqueueChunkFluids 把 chunk 中局部 x∈[x0,x1]、z∈[z0,z1] 这一段整列内**可能
+// 产生写入的**流体格入队；x0..z1 用区段内局部坐标 0..15，y 恒覆盖世界全高。
+//
+// 两级捷径，都只跳过可证的不动点，不改变入队集合的语义：
+//
+//   - 区段级：单值态且该值不是流体的区段整段跳过（evalCell 对非流体格恒产出
+//     空写入）；单值态水源区段满足 fluidSectionIsFixedPoint 时也整段跳过。
+//   - 逐格级：水源格满足 fluidSourceIsFixedPoint 时跳过。
+//
+// 水源不动点这一层是必需的而不是锦上添花：一个谷地区块（SEA_LEVEL=64、
+// TERRAIN_AMP=48，地形高度可低至 16）单列最多约 44 层满格水，整块约 1.1 万格；
+// 若按体积全量入队，八名玩家的最坏兴趣范围（约 200 区块）会在权威 tick 上产生
+// 二百多万次入队，远超 20 TPS 的 50 ms 预算。跳过内部水格后入队量降到 O(表面)。
 func enqueueChunkFluids(
 	queue *fluid.Queue,
+	dimension *Dimension,
 	chunk *world.Chunk,
 	pos core.ChunkPos,
 	x0, x1, z0, z1 int,
@@ -219,21 +364,33 @@ func enqueueChunkFluids(
 	baseZ := pos.Z << core.SectionShift
 	for sectionIndex := range core.SectionsPerChunk {
 		section := chunk.Section(sectionIndex)
-		if id, uniform := section.Blocks.IsUniform(); uniform && !core.IsFluid(id) {
-			continue
+		if id, uniform := section.Blocks.IsUniform(); uniform {
+			if !core.IsFluid(id) {
+				continue
+			}
+			if id == core.WaterSourceID && fluidSectionIsFixedPoint(dimension, pos, sectionIndex) {
+				continue
+			}
 		}
 		baseY := int32(sectionIndex<<core.SectionShift) + core.MinY
 		for localY := range core.SectionSize {
 			for localZ := z0; localZ <= z1; localZ++ {
 				for localX := x0; localX <= x1; localX++ {
-					if !core.IsFluid(section.Blocks.Get(localX, localY, localZ)) {
+					id := section.Blocks.Get(localX, localY, localZ)
+					if !core.IsFluid(id) {
 						continue
 					}
-					queue.Enqueue(core.BlockPos{
+					position := core.BlockPos{
 						X: baseX + int32(localX),
 						Y: baseY + int32(localY),
 						Z: baseZ + int32(localZ),
-					}, now, delay)
+					}
+					if id == core.WaterSourceID && fluidSourceIsFixedPoint(
+						dimension, section, localX, localY, localZ, position,
+					) {
+						continue
+					}
+					queue.Enqueue(position, now, delay)
 				}
 			}
 		}

@@ -381,3 +381,134 @@ func TestBlockRemovalEnqueuesNeighbouringFluid(t *testing.T) {
 		t.Fatalf("水源背面 %+v=%d，想要 %d", behind, got, core.WaterLevel1ID)
 	}
 }
+
+// fluidBasinDimension 造一个 2×2 区块的封闭盆地，供重扫捷径的等价性测试使用：
+// 底部 y<=0 是石头，y=1..20 灌满水源，另外刻意留两处不平衡——底板上开一个通到
+// y=-8 的竖井，水体内部挖一个空气泡。四周没有相邻区块，按 fluidWorld 的约定读作
+// core.BarrierID，盆地因此是封闭的（internal/fluid 收敛结论的前提）。
+func fluidBasinDimension() (*Dimension, []core.ChunkPos) {
+	dimension := NewDimension(core.Overworld)
+	positions := make([]core.ChunkPos, 0, 4)
+	for x := int32(0); x < 2; x++ {
+		for z := int32(0); z < 2; z++ {
+			pos := core.ChunkPos{X: x, Z: z}
+			chunk := world.NewChunk(pos)
+			for lx := range core.SectionSize {
+				for lz := range core.SectionSize {
+					for y := int32(core.MinY); y <= 0; y++ {
+						chunk.SetBlock(lx, y, lz, core.StoneID)
+					}
+					for y := int32(1); y <= 20; y++ {
+						chunk.SetBlock(lx, y, lz, core.WaterSourceID)
+					}
+				}
+			}
+			if pos == (core.ChunkPos{}) {
+				for y := int32(-8); y <= 0; y++ {
+					chunk.SetBlock(3, y, 3, core.AirID)
+				}
+				for y := int32(6); y <= 9; y++ {
+					chunk.SetBlock(11, y, 12, core.AirID)
+				}
+			}
+			chunk.Compact()
+			dimension.records[pos] = &ChunkRecord{State: ChunkReady, Chunk: chunk}
+			positions = append(positions, pos)
+		}
+	}
+	return dimension, positions
+}
+
+// enqueueEveryFluidCell 是重扫的朴素参照实现：不做任何不动点判断，把维度内全部
+// 流体格原样入队。它是 fluidSourceIsFixedPoint 捷径的对照组。
+func enqueueEveryFluidCell(queue *fluid.Queue, dimension *Dimension, now, delay uint64) {
+	for pos, record := range dimension.records {
+		for y := int32(core.MinY); y < core.MaxY; y++ {
+			for lx := range core.SectionSize {
+				for lz := range core.SectionSize {
+					if !core.IsFluid(record.Chunk.BlockAt(lx, y, lz)) {
+						continue
+					}
+					queue.Enqueue(core.BlockPos{
+						X: pos.X<<core.SectionShift + int32(lx),
+						Y: y,
+						Z: pos.Z<<core.SectionShift + int32(lz),
+					}, now, delay)
+				}
+			}
+		}
+	}
+}
+
+// settleFluids 反复推进队列直到排空，返回消耗的 tick 数；超过上限直接失败，
+// 避免测试在不收敛时挂死。
+func settleFluids(t *testing.T, queue *fluid.Queue, dimension *Dimension, positions []core.ChunkPos) {
+	t.Helper()
+	engine := NewEngine(0, 0)
+	// recordChange 会经 engine.dimensions 定位区块 revision，这里把被测维度挂上去。
+	engine.dimensions[core.Overworld] = dimension
+	scope := make(map[core.ChunkKey]struct{}, len(positions))
+	for _, pos := range positions {
+		scope[core.ChunkKey{Dimension: core.Overworld, Pos: pos}] = struct{}{}
+	}
+	for tick := uint64(1); tick <= 2000; tick++ {
+		if queue.Len() == 0 {
+			return
+		}
+		queue.Advance(tick, &fluidWorld{
+			engine:    engine,
+			id:        core.Overworld,
+			dimension: dimension,
+			scope:     scope,
+			pending:   map[core.ChunkKey]*pendingChunkChanges{},
+		}, 1<<20, 1)
+	}
+	t.Fatalf("流体在 2000 tick 内没有排空，剩余 %d 项", queue.Len())
+}
+
+// dimensionHashes 返回每个区块的内容哈希，用于逐块比较两次模拟的最终世界。
+func dimensionHashes(dimension *Dimension, positions []core.ChunkPos) map[core.ChunkPos][32]byte {
+	hashes := make(map[core.ChunkPos][32]byte, len(positions))
+	for _, pos := range positions {
+		hashes[pos] = dimension.records[pos].Chunk.Hash()
+	}
+	return hashes
+}
+
+// TestFluidRescanFixedPointSkipMatchesFullRescan 锁定 fluidSourceIsFixedPoint
+// 这条重扫捷径的正确性：跳过可证不动点的内部水源之后，重扫驱动出来的最终世界
+// 必须与「把每一个流体格都入队」的朴素重扫**逐块字节一致**。
+//
+// 捷径若判错（把会产生写入的格当成不动点跳过），竖井与气泡这两处不平衡就会
+// 停在半路，两个世界的哈希立刻分叉。测试同时断言捷径确实生效（入队量显著低于
+// 朴素实现），否则捷径失效时本测试会退化成一条恒真断言。
+func TestFluidRescanFixedPointSkipMatchesFullRescan(t *testing.T) {
+	fastDimension, positions := fluidBasinDimension()
+	fastQueue := fluid.NewQueue()
+	fastEngine := NewEngine(0, 0)
+	for _, pos := range positions {
+		fastEngine.rescanChunkFluids(fastQueue, fastDimension, pos, 0, 1)
+	}
+	fastEnqueued := fastQueue.Len()
+
+	fullDimension, _ := fluidBasinDimension()
+	fullQueue := fluid.NewQueue()
+	enqueueEveryFluidCell(fullQueue, fullDimension, 0, 1)
+	fullEnqueued := fullQueue.Len()
+
+	if fastEnqueued*4 >= fullEnqueued {
+		t.Fatalf("重扫捷径几乎没有生效：捷径入队 %d，朴素入队 %d", fastEnqueued, fullEnqueued)
+	}
+
+	settleFluids(t, fastQueue, fastDimension, positions)
+	settleFluids(t, fullQueue, fullDimension, positions)
+
+	fast := dimensionHashes(fastDimension, positions)
+	full := dimensionHashes(fullDimension, positions)
+	for _, pos := range positions {
+		if fast[pos] != full[pos] {
+			t.Fatalf("区块 %+v 的最终世界与朴素重扫不一致：捷径 %x，朴素 %x",
+				pos, fast[pos], full[pos])
+		}
+	}
+}
