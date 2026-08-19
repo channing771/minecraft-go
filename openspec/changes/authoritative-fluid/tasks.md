@@ -25,9 +25,9 @@
 
 ## 4. 权威模拟集成
 
-- [x] 4.1 在 `internal/sim` 新增 `advanceFluids(pending map[core.ChunkKey]*pendingChunkChanges)`，仿 `advanceFurnaces` 的形状：只遍历 `activeInterestKeys()` 的 `ChunkReady` 区块，变更经 `touchChunk` 汇入。验证：`go test ./internal/sim -race -count=1`
+- [x] 4.1 在 `internal/sim` 新增 `advanceFluids(pending map[core.ChunkKey]*pendingChunkChanges)`，仿 `advanceFurnaces` 的形状：只遍历 `activeInterestKeys()` 的 `ChunkReady` 区块，变更经 **`recordChange`** 汇入（初稿写 `touchChunk` 是错的——它构造的 changes map 恒为空，只推 revision barrier，携带不了方块变更）。验证：`go test ./internal/sim -race -count=1`
 - [x] 4.2 在 `internal/sim/engine_step.go` 的 `Step` 中把 `engine.advanceFluids(pending)` 插在 `advanceFurnaces` 之后、`containerMoves` 之前；为阶段顺序补 `stepPhase` 探针断言。验证：`go test ./internal/sim -race -count=1`
-- [x] 4.3 接上入队点：方块放置、方块采掘写入后把该格及其六邻入队；区块进入 `ChunkReady` 时执行一次边界重扫入队。验证：`go test ./internal/sim -race -count=1`
+- [x] 4.3 接上入队点：方块放置、方块采掘写入后把该格及其六邻入队；区块**新进入推进范围**时执行一次边界重扫入队（严格宽于初稿的「进入 `ChunkReady` 时」：范围外的待更新项会被 `Advance` 取出后静默删除，只在 ChunkReady 边沿重扫会让「重新进入兴趣范围后恢复推进」失效）。验证：`go test ./internal/sim -race -count=1`
 - [x] 4.4 测试「兴趣范围外不推进」与「区块重新进入兴趣范围后继续收敛」两个 spec 场景。验证：`go test ./internal/sim -race -count=1`
 - [x] 4.5 测试流体变更经既有区块变更通道广播，客户端只读镜像逐格一致（不新增消息类型）。验证：`go test ./internal/sim ./internal/server -race -count=1`
 
@@ -56,7 +56,7 @@
 ## 8. 配置与 tunables
 
 - [x] 8.1 `internal/config` 新增 `fluidEnabled`（默认 `false`），config version 保持 1；补默认值与非法值测试。验证：`go test ./internal/config -race -count=1`
-- [x] 8.2 `internal/sim/tunables.go` 新增 `FluidFlowDelayTicks`（默认 5）与 `FluidUpdatesPerTick`（默认 512），按既有 tunable 约定接入快照。验证：`go test ./internal/sim -race -count=1`
+- [x] 8.2 `internal/sim/tunables.go` 新增 `FluidFlowDelayTicks`（默认 5）、`FluidUpdatesPerTick`（默认 512）与 `FluidRescanCellsPerTick`（默认 65536，任务组 4 修复 C-1 时引入，见 design D4），按既有 tunable 约定接入快照。验证：`go test ./internal/sim -race -count=1`
 
 ## 9. 架构门禁
 

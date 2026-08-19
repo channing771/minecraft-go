@@ -27,7 +27,7 @@
 
 ## Impact
 
-- **受影响包**：`internal/core`（方块编码与流体查询）、`internal/fluid`（新建）、`internal/sim`（Step 阶段与入队点）、`internal/world`（方块写入触发入队）、`internal/worldgen`（材料表编码与测试 oracle）、`internal/nativeabi`（engine ABI v4 绑定）、`internal/storage`（chunk schema v9）、`internal/network`（协议 v20）、`internal/config`（`fluidEnabled`）、`internal/mesh`（新方块的 registry 条目，`Opaque=false`）、`internal/archcheck`（登记新包）、`engine/crates/mornlea_engine`（worldgen 注水 + Materials 表）、`engine/include`（engine 头文件）。
+- **受影响包**：`internal/core`（方块编码与流体查询）、`internal/fluid`（新建）、`internal/sim`（Step 阶段与入队点，钩子挂在 `recordChange` 单点）、`internal/physics`（流体不提供碰撞体）、`internal/worldgen`（材料表编码与测试 oracle）、`internal/nativeabi`（engine ABI v4 绑定）、`internal/storage`（chunk schema v9）、`internal/network`（协议 v20）、`internal/config`（`fluidEnabled` 与三个 tunable 的 `Fields()` 条目）、`internal/assets`（`Opaque`/`FaceVisible` 排除流体——流体**刻意未纳入** mesh registry 快照，见非目标）、`internal/archcheck`（登记新包）、`engine/crates/mornlea_engine`（worldgen 注水 + Materials 表）、`engine/include`（engine 头文件）。
 - **兼容性**：协议 v19 → v20；区块 schema v8 → v9（恒等迁移，v8 只读兼容）；engine ABI v3 → v4。玩家 schema v6、`companions.ai` schema v4、世界 metadata v2、client ABI v4 均不变。benchmark scenario 保持 v16，M2 v15 / M5 v14 基线保持原字节。
 - **并发**：流体推进在单写者权威 tick 内串行执行，与掉落物、熔炉同构，不引入新的 goroutine 或锁。
 - **性能**：流动受每 tick 预算硬约束，溃坝无法打出 tick 尖峰；代价是大水体收敛变慢，这是刻意取舍。benchmark 与 `perfcheck` 数值只记录。

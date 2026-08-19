@@ -42,14 +42,17 @@
 
 **落地修正**：本节初稿写的是 `fluid` → `core` / `world`，但实现只需要 `core`（`FluidWorld` 只暴露单格读写，世界数据结构由调用方持有，见下文「包的形状」）。archcheck 按 `go list` 的实际依赖登记 `core` 一条——白名单里多一条未使用的边，就是少一道防护。
 
-**包的形状**：`fluid` 不持有世界。对外接口是 `Advance(now uint64, w FluidWorld, budget int) []core.BlockPos`，`FluidWorld` 只暴露单格读写。这样调度逻辑可独立单测，也让「重扫不动点」这类性质测试不需要装配整个 `sim.Engine`。
+**包的形状**：`fluid` 不持有世界。对外接口是 `Advance(now uint64, w FluidWorld, budget int, delay uint64) []core.BlockPos`（`delay` 也是调用参数：变化格重新入队需要它，而包内不得读 `sim` 的 tunable），`FluidWorld` 只暴露单格读写。这样调度逻辑可独立单测，也让「重扫不动点」这类性质测试不需要装配整个 `sim.Engine`。
 
 **否决 · 直接写在 `sim` 内部**：流动规则与调度是本变更最需要密集性质测试的部分，独立包让它能脱离权威引擎被穷举测试；`advanceFurnaces` 那种「规则简单、状态在区块槽位里」的形状不适用于流体。
 
 ### D3：显式待更新队列 + 全序排序，而非扫描或 map 遍历
 
 - 队列项为 `(core.BlockPos, dueTick)`。
-- **入队点**四个：方块放置、方块采掘、流动自身写入的格及其六邻、区块加载时的边界重扫。
+- **入队点**四个：方块放置、方块采掘、流动自身写入的格及其六邻、区块**新进入推进范围**时的边界重扫。
+  （落地修正：初稿写的是「区块加载时」，实际触发条件是「新进入推进范围」，严格更宽。原因是
+  `Advance` 取出待更新项后**无条件**将其从队列删除，范围外的格读到哨兵产出空写入、不再入队而静默
+  消失；只在 ChunkReady 边沿重扫会让「区块重新进入兴趣范围后恢复推进」失效。）
 - 每 tick 取出 `dueTick <= now` 的全部项，按 **`(dueTick, ChunkKey, y, z, x)` 全序**排序后处理。
 
 **理由**：全扫描的成本见 Context。而 Go map 的遍历顺序是随机的，直接用 map 集合去重再遍历会让每 tick 的处理顺序不可复现，破坏 Memory/TCP parity 与存档可复现性。去重仍可用 map，但**处理前必须落到全序**。
@@ -131,7 +134,14 @@ point 差分在开启态下锁定，不会静默漂移。
 
 ### D8：不新增协议消息，流体变更走既有区块变更通道
 
-流动写入的格经 `touchChunk(key, pending)` 汇入 `pendingChunkChanges`，与放置、采掘、掉落物、熔炉共用同一批变更的广播与存盘。协议 v20 的唯一变化是**方块 ID 集合扩展**，wire 形状与长度上限不变。
+流动写入的格经 `recordChange` 汇入 `pendingChunkChanges`，与放置、采掘、掉落物、熔炉共用同一批变更的广播与存盘。
+
+**落地修正**：本节初稿写的是 `touchChunk`，那是错的。`touchChunk` 构造的 `changes` map **恒为空**，
+它的用途是给「只有掉落物变了」的区块推一次 revision barrier，没有任何形参能携带方块变更；
+用它汇入流体写入会让客户端只涨 revision、拿不到方块，spec 的「流体方块同步到客户端」直接失效。
+`recordChange` 构造的是同一个 `pendingChunkChanges` 结构体，再把 `BlockChange` 塞进 `changes`。
+入队钩子也挂在 `recordChange` 这个唯一汇聚点上，因此「新增方块写者忘了触发流体入队」这类静默
+缺陷从可能变成不可能。协议 v20 的唯一变化是**方块 ID 集合扩展**，wire 形状与长度上限不变。
 
 **理由**：流体变更在语义上就是普通方块变更，没有任何理由单开通道。复用还顺带保证了流体变更与同 tick 内其他方块变更的**原子性与顺序一致**。
 
