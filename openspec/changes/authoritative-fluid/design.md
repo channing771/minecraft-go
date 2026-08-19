@@ -38,7 +38,9 @@
 
 **理由**：Rust `mornlea_engine` 当前的全部导出（mesh、light、collision、raycast、step、worldgen）都是**无状态纯函数**。流动推进需要跨 tick 的待更新队列与区块写回，把它放进 engine 会破坏这个模型，并让 engine 反向依赖世界数据所有权。权威模拟的数据所有权在 Go `sim`，流动是权威模拟的一部分。
 
-**依赖方向**：`sim` → `fluid` → `core` / `world`。`fluid` MUST NOT 依赖 `sim`、`network`、`render`，由 `archcheck` 登记锁定。
+**依赖方向**：`sim` → `fluid` → `core`。`fluid` MUST NOT 依赖 `sim`、`network`、`render`、`storage`，由 `archcheck` 登记锁定。
+
+**落地修正**：本节初稿写的是 `fluid` → `core` / `world`，但实现只需要 `core`（`FluidWorld` 只暴露单格读写，世界数据结构由调用方持有，见下文「包的形状」）。archcheck 按 `go list` 的实际依赖登记 `core` 一条——白名单里多一条未使用的边，就是少一道防护。
 
 **包的形状**：`fluid` 不持有世界。对外接口是 `Advance(now uint64, w FluidWorld, budget int) []core.BlockPos`，`FluidWorld` 只暴露单格读写。这样调度逻辑可独立单测，也让「重扫不动点」这类性质测试不需要装配整个 `sim.Engine`。
 

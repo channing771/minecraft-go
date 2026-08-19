@@ -60,7 +60,7 @@
 
 ## 9. 架构门禁
 
-- [x] 9.1 `internal/archcheck/dependency_test.go` 登记 `internal/fluid`：允许依赖 `core`、`world`；禁止依赖 `sim`、`network`、`render`、`storage`。验证：`go test ./internal/archcheck -count=1`
+- [x] 9.1 `internal/archcheck/dependency_test.go` 登记 `internal/fluid`：**按实际依赖登记 `core`**（`go list` 核实 `internal/fluid` 只 import `internal/core`，未用 `world`；白名单多登记一条未使用的边就是少一道防护），并新增允许边 `internal/sim` → `internal/fluid`；禁止 `internal/fluid` 依赖 `sim`、`network`、`render`、`storage`。**本项被 Stop hook 强制从第 9 位提前执行**：新包引入即产生红态，archcheck 登记本应与新包同批完成。验证：`go test ./internal/archcheck -count=1`
 
 ## 10. 收尾门禁
 
