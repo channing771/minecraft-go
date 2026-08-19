@@ -64,9 +64,9 @@
 
 ## 10. 收尾门禁
 
-- [ ] 10.1 `make rust` 后运行 `go test ./... -race -count=1`，确认无回归。
-- [ ] 10.2 运行 `go vet ./...` 与 `gofmt -l .`（后者应无输出）。
-- [ ] 10.3 确认 benchmark scenario 保持 v16 且默认配置下工作负载未变：运行 `go run ./cmd/perfcheck` 相关基线比对，性能数值只记录，报告完整性/真实 overflow/数据丢失仍是门禁。
-- [ ] 10.4 确认全部视觉 capture golden 字节不变（`fluidEnabled` 默认关闭，世界内容与基线一致）。
-- [ ] 10.5 运行 `openspec validate --all --strict --no-interactive`。
-- [ ] 10.6 核对 `tasks.md` 全部勾选、实现与 `specs/authoritative-fluid/spec.md` 一致；若实现过程中偏离规格，先修订 OpenSpec 产物再收尾。
+- [x] 10.1 `make rust` 后运行 `go test ./... -race -count=1`，确认无回归。
+- [x] 10.2 运行 `go vet ./...` 与 `gofmt -l .`（后者应无输出）。
+- [x] 10.3 确认 benchmark scenario 保持 v16 且默认配置下工作负载未变：运行 `go run ./cmd/perfcheck` 相关基线比对，性能数值只记录，报告完整性/真实 overflow/数据丢失仍是门禁。
+- [x] 10.4 确认全部视觉 capture golden 字节不变（`fluidEnabled` 默认关闭，世界内容与基线一致）。
+- [x] 10.5 运行 `openspec validate --all --strict --no-interactive`。
+- [x] 10.6 核对 `tasks.md` 全部勾选、实现与 `specs/authoritative-fluid/spec.md` 一致；若实现过程中偏离规格，先修订 OpenSpec 产物再收尾。
