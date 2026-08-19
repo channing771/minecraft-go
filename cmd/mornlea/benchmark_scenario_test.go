@@ -98,7 +98,7 @@ func TestScenarioV8GPUCompletionStopsWhenTransportCloseFails(t *testing.T) {
 			config.TrustedObserver = true
 			running := server.NewWorld(
 				config,
-				worldgen.New(benchmarkSeed),
+				worldgen.New(benchmarkSeed, false),
 				storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: benchmarkSeed, SpawnDimension: core.Overworld}),
 			)
 			t.Cleanup(func() {
@@ -155,7 +155,7 @@ func TestScenarioV8GPUCompletionStartsAfterTransportTeardown(t *testing.T) {
 	config.SaveWorkers = 1
 	running := server.NewWorld(
 		config,
-		worldgen.New(benchmarkSeed),
+		worldgen.New(benchmarkSeed, false),
 		storage.NewMemory(storage.Metadata{
 			FormatVersion:  2,
 			Seed:           benchmarkSeed,

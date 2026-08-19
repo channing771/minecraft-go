@@ -462,7 +462,8 @@ func testValidCollisionInput() []byte {
 	return input
 }
 
-// testValidWorldgenHeader 构造合法 `MGW1` header:seed 42、互异材料表 1..=13、恒等 perm。
+// testValidWorldgenHeader 构造合法 `MGW1` header:seed 42、互异材料表 1..=14
+// (engine ABI v4 起末项是 water,占用 v3 的 reserved 槽)、恒等 perm。
 func testValidWorldgenHeader() []byte {
 	header := make([]byte, 564)
 	copy(header[:4], "MGW1")
@@ -471,7 +472,7 @@ func testValidWorldgenHeader() []byte {
 	minY := int32(-64)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
 	binary.LittleEndian.PutUint32(header[20:24], 320)
-	for index := 0; index < 13; index++ {
+	for index := 0; index < 14; index++ {
 		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(index+1))
 	}
 	for index := 0; index < 512; index++ {
@@ -502,6 +503,8 @@ func TestWorldgenChunkRawFailureAtomicity(t *testing.T) {
 	badMagic[0] = 'X'
 	duplicateMaterial := slices.Clone(validInput)
 	// dirt 改为与 stone 相同,触发材料表互异性校验。
+	// 注意不能用 water == air 做这个用例:那一对是 fluidEnabled 关闭时的
+	// 门控编码,engine 侧刻意豁免。
 	binary.LittleEndian.PutUint16(duplicateMaterial[26:28], 1)
 	wrongMinY := slices.Clone(validInput)
 	badMinY := int32(-32)

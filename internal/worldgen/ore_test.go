@@ -19,8 +19,8 @@ func oreSamplePositions() []core.BlockPos {
 }
 
 func TestOreGenerationIsDeterministicForSameSeed(t *testing.T) {
-	first := worldgen.New(42)
-	second := worldgen.New(42)
+	first := worldgen.New(42, false)
+	second := worldgen.New(42, false)
 	for _, pos := range oreSamplePositions() {
 		if first.BaseBlockAt(pos) != second.BaseBlockAt(pos) {
 			t.Fatalf("同种子在 %+v 结果不一致", pos)
@@ -29,8 +29,8 @@ func TestOreGenerationIsDeterministicForSameSeed(t *testing.T) {
 }
 
 func TestOreGenerationDiffersAcrossSeeds(t *testing.T) {
-	first := worldgen.New(42)
-	second := worldgen.New(43)
+	first := worldgen.New(42, false)
+	second := worldgen.New(43, false)
 	for _, pos := range oreSamplePositions() {
 		if first.BaseBlockAt(pos) != second.BaseBlockAt(pos) {
 			return
@@ -40,7 +40,7 @@ func TestOreGenerationDiffersAcrossSeeds(t *testing.T) {
 }
 
 func TestOreOnlyReplacesStoneWithinHeightLimits(t *testing.T) {
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	coalSeen, ironSeen := false, false
 	for x := int32(-64); x < 64; x++ {
 		for z := int32(-64); z < 64; z++ {
@@ -69,7 +69,7 @@ func TestOreOnlyReplacesStoneWithinHeightLimits(t *testing.T) {
 
 func TestOreNeverReplacesNonStone(t *testing.T) {
 	// 同一坐标在没有矿石规则时的基础方块必须是石头，才允许出现矿石。
-	generator := worldgen.New(7)
+	generator := worldgen.New(7, false)
 	for x := int32(-40); x < 40; x++ {
 		for z := int32(-40); z < 40; z++ {
 			height := generator.HeightAt(x, z)
@@ -87,13 +87,13 @@ func TestOreNeverReplacesNonStone(t *testing.T) {
 
 func TestOreNeverReplacesNaturalGravel(t *testing.T) {
 	pos := core.BlockPos{X: -256, Y: 54, Z: -200}
-	if got := worldgen.New(42).BaseBlockAt(pos); got != core.GravelID {
+	if got := worldgen.New(42, false).BaseBlockAt(pos); got != core.GravelID {
 		t.Fatalf("自然砾石 %+v 被矿石覆盖为 %d", pos, got)
 	}
 }
 
 func TestBaseBlockAtMatchesGeneratedChunkWithOre(t *testing.T) {
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	for _, chunkPos := range []core.ChunkPos{{}, {X: -3, Z: 7}, {X: 5, Z: -2}} {
 		chunk := generator.GenerateChunk(chunkPos)
 		baseX := chunkPos.X << core.SectionShift

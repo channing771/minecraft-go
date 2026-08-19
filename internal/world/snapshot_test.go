@@ -275,7 +275,7 @@ func TestContainerSnapshotRejectsUnknownBlockEveryStorage(t *testing.T) {
 }
 
 func BenchmarkExportChunkSnapshot(b *testing.B) {
-	chunk := worldgen.New(42).GenerateChunk(core.ChunkPos{X: 3, Z: -7})
+	chunk := worldgen.New(42, false).GenerateChunk(core.ChunkPos{X: 3, Z: -7})
 	b.ReportAllocs()
 	for b.Loop() {
 		for i := 0; i < core.SectionsPerChunk; i++ {
@@ -285,7 +285,7 @@ func BenchmarkExportChunkSnapshot(b *testing.B) {
 }
 
 func BenchmarkImportChunkSnapshot(b *testing.B) {
-	chunk := worldgen.New(42).GenerateChunk(core.ChunkPos{X: 3, Z: -7})
+	chunk := worldgen.New(42, false).GenerateChunk(core.ChunkPos{X: 3, Z: -7})
 	snapshots := make([]world.ContainerSnapshot, core.SectionsPerChunk)
 	for i := range snapshots {
 		snapshots[i] = chunk.Section(i).Blocks.Snapshot()

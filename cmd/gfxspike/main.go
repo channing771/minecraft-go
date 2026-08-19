@@ -81,7 +81,8 @@ func main() {
 }
 
 func generateTerrain() map[core.ChunkPos]*world.Chunk {
-	gen := worldgen.New(42)
+	// 图形 spike 与流体无关,固定关闭注水。
+	gen := worldgen.New(42, false)
 	chunks := make(map[core.ChunkPos]*world.Chunk, 8*8)
 	for cx := int32(0); cx < 8; cx++ {
 		for cz := int32(0); cz < 8; cz++ {

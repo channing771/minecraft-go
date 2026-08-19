@@ -17,7 +17,7 @@ import (
 var update = flag.Bool("update", false, "重写黄金文件")
 
 func TestGenerateChunkGolden(t *testing.T) {
-	g := worldgen.New(42)
+	g := worldgen.New(42, false)
 
 	var b strings.Builder
 	for _, pos := range []core.ChunkPos{
@@ -60,8 +60,8 @@ func TestGenerateChunkGolden(t *testing.T) {
 
 func TestGenerateChunkIsDeterministic(t *testing.T) {
 	pos := core.ChunkPos{X: 5, Z: -3}
-	a := worldgen.New(1234).GenerateChunk(pos)
-	b := worldgen.New(1234).GenerateChunk(pos)
+	a := worldgen.New(1234, false).GenerateChunk(pos)
+	b := worldgen.New(1234, false).GenerateChunk(pos)
 	for y := int32(core.MinY); y < core.MaxY; y++ {
 		for z := 0; z < core.SectionSize; z++ {
 			for x := 0; x < core.SectionSize; x++ {
@@ -74,7 +74,7 @@ func TestGenerateChunkIsDeterministic(t *testing.T) {
 }
 
 func TestBaseBlockAtMatchesGeneratedChunk(t *testing.T) {
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	for _, horizontal := range []core.BlockPos{
 		{X: 15, Z: -17},
 		{X: 16, Z: -16},
@@ -107,7 +107,7 @@ func TestBaseBlockAtMatchesGeneratedChunk(t *testing.T) {
 }
 
 func TestGenerateChunkIsSeamlessAcrossBorders(t *testing.T) {
-	g := worldgen.New(99)
+	g := worldgen.New(99, false)
 	for wz := int32(-40); wz < 40; wz++ {
 		h0 := g.HeightAt(15, wz)
 		h1 := g.HeightAt(16, wz)
@@ -118,7 +118,7 @@ func TestGenerateChunkIsSeamlessAcrossBorders(t *testing.T) {
 }
 
 func TestGeneratedChunkCompresses(t *testing.T) {
-	c := worldgen.New(7).GenerateChunk(core.ChunkPos{X: 0, Z: 0})
+	c := worldgen.New(7, false).GenerateChunk(core.ChunkPos{X: 0, Z: 0})
 	c.Compact()
 
 	total := 0
@@ -141,6 +141,6 @@ func TestGeneratedChunkCompresses(t *testing.T) {
 func BenchmarkGenerateChunkWithOakTrees(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		worldgen.New(42).GenerateChunk(core.ChunkPos{X: -1, Z: -1})
+		worldgen.New(42, false).GenerateChunk(core.ChunkPos{X: -1, Z: -1})
 	}
 }

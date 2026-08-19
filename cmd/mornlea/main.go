@@ -89,6 +89,7 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 	options.Application.Dev = (options.Dev || options.CaptureDir != "") &&
 		!options.Application.Benchmark
 	options.Application.Render = effective.Render
+	options.Application.FluidEnabled = effective.FluidEnabled
 	// 面板 F5 保存需要落盘路径；benchmark 与抓帧路径不进交互循环，不需要它。
 	if !options.Application.Benchmark && options.CaptureDir == "" {
 		configPath, err := resolveConfigPath(options)

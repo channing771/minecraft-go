@@ -15,7 +15,7 @@ import (
 // assertChunkMatchesOracle 逐位比较生产 GenerateChunk 与 pointwise oracle。
 func assertChunkMatchesOracle(t *testing.T, seed int64, pos core.ChunkPos) {
 	t.Helper()
-	production := worldgen.New(seed)
+	production := worldgen.New(seed, false)
 	oracle := newOracleGenerator(seed)
 	chunk := production.GenerateChunk(pos)
 	baseX := pos.X << core.SectionShift
@@ -55,7 +55,7 @@ func FuzzWorldgenOracleParity(f *testing.F) {
 	f.Add(int64(987654321), int32(2147480000), int32(319), int32(-2147480000))
 	f.Add(int64(0), int32(16), int32(88), int32(-16))
 	f.Fuzz(func(t *testing.T, seed int64, wx, wy, wz int32) {
-		production := worldgen.New(seed)
+		production := worldgen.New(seed, false)
 		oracle := newOracleGenerator(seed)
 		if got, want := production.HeightAt(wx, wz), oracle.heightAt(wx, wz); got != want {
 			t.Fatalf("HeightAt(%d,%d)=%d，oracle=%d", wx, wz, got, want)
@@ -85,7 +85,7 @@ func TestOakTreeSpansChunkBorderConsistently(t *testing.T) {
 		t.Fatalf("候选树 root=%+v,语料前提失效", tree.root)
 	}
 
-	production := worldgen.New(seed)
+	production := worldgen.New(seed, false)
 	left := production.GenerateChunk(core.ChunkPos{X: 0, Z: 1})
 	right := production.GenerateChunk(core.ChunkPos{X: 1, Z: 1})
 	chunks := map[core.ChunkPos]interface {

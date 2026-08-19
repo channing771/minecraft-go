@@ -33,5 +33,5 @@ func newMemoryAttachedWorldForTest(config Config, endpoint network.ServerEndpoin
 func newEmbeddedAttachedWorldForTest(config Config, endpoint network.ServerEndpoint, store storage.Store) *Server {
 	metadata := store.Metadata()
 	config.Seed, config.SpawnDimension, config.SpawnAnchor = metadata.Seed, metadata.SpawnDimension, metadata.SpawnAnchor
-	return newAttachedWorldForTest(config, endpoint, worldgen.New(metadata.Seed), store)
+	return newAttachedWorldForTest(config, endpoint, worldgen.New(metadata.Seed, false), store)
 }

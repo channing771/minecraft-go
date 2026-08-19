@@ -15,7 +15,8 @@ const captureOakGroveSeed int64 = 42
 
 // prepareOakGrove 把固定 3×3 生成区块经既有网络快照和 mirror 路径装入。
 func prepareOakGrove(app *application) error {
-	generator := worldgen.New(captureOakGroveSeed)
+	// 视觉 capture golden 固定在关闭注水的基线世界上。
+	generator := worldgen.New(captureOakGroveSeed, false)
 	for z := int32(-1); z <= 1; z++ {
 		for x := int32(-1); x <= 1; x++ {
 			chunk := generator.GenerateChunk(core.ChunkPos{X: x, Z: z})

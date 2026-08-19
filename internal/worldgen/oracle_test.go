@@ -315,7 +315,7 @@ var oracleDiffChunks = []core.ChunkPos{
 // TestOracleMatchesProduction 逐位比较生产 GenerateChunk 与 pointwise oracle。
 func TestOracleMatchesProduction(t *testing.T) {
 	for _, seed := range oracleDiffSeeds {
-		production := worldgen.New(seed)
+		production := worldgen.New(seed, false)
 		oracle := newOracleGenerator(seed)
 		for _, pos := range oracleDiffChunks {
 			chunk := production.GenerateChunk(pos)
@@ -341,7 +341,7 @@ func TestOracleMatchesProduction(t *testing.T) {
 // TestOraclePointQueriesMatchProduction 差分单点入口:HeightAt/TerrainBlockAt/BaseBlockAt。
 func TestOraclePointQueriesMatchProduction(t *testing.T) {
 	for _, seed := range oracleDiffSeeds {
-		production := worldgen.New(seed)
+		production := worldgen.New(seed, false)
 		oracle := newOracleGenerator(seed)
 		for wx := int32(-24); wx <= 24; wx += 3 {
 			for wz := int32(-24); wz <= 24; wz += 3 {

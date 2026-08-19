@@ -19,7 +19,9 @@ import (
 
 // `MGW1` ABI 编码常量,必须与 engine `worldgen.rs` 的布局逐字一致:
 // header = magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
-// 材料表 13×u16(26) + reserved u16(2) + perm 512×u8(512)。
+// 材料表 14×u16(28) + perm 512×u8(512)。
+// engine ABI v4 起材料表末项是 water,它占用 v3 预留的 reserved 槽(偏移 50),
+// 因此 header 总长与 perm 偏移不变;两个版本的字节布局不可混装。
 const (
 	worldgenMagic       = "MGW1"
 	worldgenLayout      = 1
@@ -49,7 +51,12 @@ type Generator struct {
 //
 // perm 表播种保持 Go `math/rand` 语义:这是既有世界的确定性来源,
 // 不迁入 Rust,保证相同 seed 在迁移前后产生相同世界。
-func New(seed int64) *Generator {
+//
+// fluidEnabled 是配置 `fluidEnabled` 的取值,门控海平面注水。门控在 Go 侧
+// 以"材料表 water 字段填什么编号"的形式实现(design D6):关闭时填 core.AirID,
+// engine 的注水步就退化为把空气写回空气,生成结果与未引入流体的基线逐位一致;
+// engine 侧因此没有任何开关分支。
+func New(seed int64, fluidEnabled bool) *Generator {
 	header := make([]byte, worldgenHeaderBytes)
 	copy(header[:4], worldgenMagic)
 	binary.LittleEndian.PutUint32(header[4:8], worldgenLayout)
@@ -57,11 +64,17 @@ func New(seed int64) *Generator {
 	minY, maxY := int32(core.MinY), int32(core.MaxY)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
 	binary.LittleEndian.PutUint32(header[20:24], uint32(maxY))
+	// 门控编码:关闭时 water 取 air 编号,engine 侧注水随之成为空操作。
+	water := core.AirID
+	if fluidEnabled {
+		water = core.WaterSourceID
+	}
 	// 材料表编码顺序与 engine `Materials` 字段顺序逐字对应。
-	for index, id := range [13]core.BlockID{
+	for index, id := range [14]core.BlockID{
 		core.AirID, core.StoneID, core.DirtID, core.GrassID, core.BedrockID,
 		core.SnowBlockID, core.SandID, core.ClayID, core.GravelID,
 		core.IronOreID, core.CoalOreID, core.OakLogID, core.LeavesID,
+		water,
 	} {
 		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(id))
 	}

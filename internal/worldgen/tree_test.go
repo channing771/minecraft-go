@@ -210,7 +210,7 @@ func TestGeneratedChunkKeepsIntersectingLogs(t *testing.T) {
 		t.Fatalf("log tree at intersection=%d，想要 OakLogID", got)
 	}
 
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	chunk := generator.GenerateChunk(intersection.Chunk())
 	lx, _, lz := intersection.Local()
 	if got := chunk.BlockAt(lx, intersection.Y, lz); got != core.OakLogID {
@@ -222,7 +222,7 @@ func TestGeneratedChunkKeepsIntersectingLogs(t *testing.T) {
 }
 
 func TestBaseBlockAtMatchesGeneratedChunkWithOakTrees(t *testing.T) {
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	for _, chunkPos := range []core.ChunkPos{{X: -1, Z: -1}, {X: 0, Z: -1}, {X: 0, Z: 0}, {X: 1, Z: 0}, {X: 0, Z: 1}, {X: 1, Z: 1}} {
 		chunk := generator.GenerateChunk(chunkPos)
 		baseX := chunkPos.X << core.SectionShift

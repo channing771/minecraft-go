@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildChunkSnapshotOwnsDataAndValidates(t *testing.T) {
-	source := worldgen.New(42).GenerateChunk(core.ChunkPos{X: -2, Z: 3})
+	source := worldgen.New(42, false).GenerateChunk(core.ChunkPos{X: -2, Z: 3})
 	wantHash := source.Hash()
 	message, err := buildChunkSnapshot(core.Overworld, source, 7)
 	if err != nil {

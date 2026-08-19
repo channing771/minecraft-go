@@ -165,7 +165,7 @@ func run(ctx context.Context, args []string, injected dependencies) error {
 		config.AIAPIKey = resolveAIAPIKey(config.AIModel)
 	}
 	config.MaxPlayers = options.MaxPlayers
-	host, err := dependencies.newHost(ctx, config, worldgen.New(metadata.Seed), store)
+	host, err := dependencies.newHost(ctx, config, worldgen.New(metadata.Seed, effective.FluidEnabled), store)
 	if err != nil {
 		return errors.Join(
 			fmt.Errorf("创建服务端 Host: %w", err),
