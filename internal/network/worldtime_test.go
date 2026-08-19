@@ -7,14 +7,15 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-func TestProtocolVersionIsNineteen(t *testing.T) {
-	if ProtocolVersion != 19 {
-		t.Fatalf("协议版本=%d，想要 19", ProtocolVersion)
+func TestProtocolVersionIsTwenty(t *testing.T) {
+	if ProtocolVersion != 20 {
+		t.Fatalf("协议版本=%d，想要 20", ProtocolVersion)
 	}
 }
 
-func TestProtocolV19RejectsPriorVersionsBeforePlay(t *testing.T) {
-	// v18 是上一版本，必须和 v17 及更早版本一样在 Handshake 阶段稳定拒绝。
+func TestProtocolV20RejectsPriorVersionsBeforePlay(t *testing.T) {
+	// v19 是上一版本，必须和 v18 及更早版本一样在 Handshake 阶段稳定拒绝，
+	// 并给出版本不匹配原因。
 	for version := uint32(1); version < ProtocolVersion; version++ {
 		stream := &staticClientHelloStream{version: version}
 		if _, err := BeginServerLogin(t.Context(), stream); err == nil {
@@ -28,8 +29,8 @@ func TestProtocolV19RejectsPriorVersionsBeforePlay(t *testing.T) {
 	}
 }
 
-func TestProtocolV19HandshakeAcceptsCurrentVersion(t *testing.T) {
-	// 当前版本 v19 的 ClientHello 必须通过握手：服务端读取后以同版本 ServerHello
+func TestProtocolV20HandshakeAcceptsCurrentVersion(t *testing.T) {
+	// 当前版本 v20 的 ClientHello 必须通过握手：服务端读取后以同版本 ServerHello
 	// 回应，而不是版本不匹配拒绝。
 	client, server := NewMemoryStreamPair(4)
 	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
@@ -38,14 +39,14 @@ func TestProtocolV19HandshakeAcceptsCurrentVersion(t *testing.T) {
 	}
 	hello, err := server.Recv(t.Context(), StateHandshake)
 	if err != nil || hello != (ClientHello{ProtocolVersion: ProtocolVersion}) {
-		t.Fatalf("v19 ClientHello = (%#v,%v)", hello, err)
+		t.Fatalf("v20 ClientHello = (%#v,%v)", hello, err)
 	}
 	if err := server.Send(t.Context(), StateHandshake, ServerHello{ProtocolVersion: ProtocolVersion}); err != nil {
 		t.Fatal(err)
 	}
 	greeting, err := client.Recv(t.Context(), StateHandshake)
 	if err != nil || greeting != (ServerHello{ProtocolVersion: ProtocolVersion}) {
-		t.Fatalf("v19 ServerHello = (%#v,%v)", greeting, err)
+		t.Fatalf("v20 ServerHello = (%#v,%v)", greeting, err)
 	}
 }
 
