@@ -19,13 +19,16 @@ import (
 
 // `MGW1` ABI 编码常量,必须与 engine `worldgen.rs` 的布局逐字一致:
 // header = magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
-// 材料表 14×u16(28) + perm 512×u8(512)。
+// 材料表 14×u16(28) + reserved u16(2) + perm 512×u8(512)。
 // engine ABI v4 起材料表末项是 water,它占用 v3 预留的 reserved 槽(偏移 50),
-// 因此 header 总长与 perm 偏移不变;两个版本的字节布局不可混装。
+// 并在其后补回一个新的 reserved 槽(偏移 52)——reserved 的作用就是让下一次扩
+// 字段不必挪动 perm,用掉了就要补上。布局因此确实变了(564 → 566,perm 偏移
+// 52 → 54),layout version 随之 1 → 2,作为独立于 ABI 版本号的带内第二道
+// 混装防线。
 const (
 	worldgenMagic       = "MGW1"
-	worldgenLayout      = 1
-	worldgenHeaderBytes = 564
+	worldgenLayout      = 2
+	worldgenHeaderBytes = 566
 	// worldgenChunkOutputBytes 是 dense `[y−min_y][lz][lx]` 布局的
 	// 16×16×(MaxY−MinY) 个 u16。
 	worldgenChunkOutputBytes = core.SectionSize * core.SectionSize * (core.MaxY - core.MinY) * 2
@@ -43,7 +46,7 @@ const (
 //
 // New 之后 header 只读共享,每次调用使用独立缓冲,可并发调用。
 type Generator struct {
-	// header 是预编码的 564 字节 `MGW1` 公共 header(seed、材料表、perm)。
+	// header 是预编码的 566 字节 `MGW1` 公共 header(seed、材料表、perm)。
 	header []byte
 }
 
@@ -79,7 +82,8 @@ func New(seed int64, fluidEnabled bool) *Generator {
 		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(id))
 	}
 	perm := permTable(seed)
-	copy(header[52:], perm[:])
+	// perm 从偏移 54 开始:24..52 是 14 项材料表,52..54 是 reserved(保持零值)。
+	copy(header[54:], perm[:])
 	return &Generator{header: header}
 }
 
@@ -122,12 +126,21 @@ func (g *Generator) HeightAt(wx, wz int32) int32 {
 }
 
 // TerrainBlockAt 返回不叠加橡树结构时指定世界位置的确定性地形方块。
+//
+// 它保持纯地形语义：即使 fluidEnabled 开启，海平面以下的空气格在这里仍返回
+// core.AirID，注水只作用于 BaseBlockAt 与 GenerateChunk。这个不对称是必需的
+// ——BaseBlockAt 以"地形非空即早返回"的方式叠加橡树，若地形层就把空气改写成
+// 水，早返回会吞掉橡树分支，海平面以下的树会整棵消失。
 func (g *Generator) TerrainBlockAt(pos core.BlockPos) core.BlockID {
 	output := g.probe(probeModeTerrain, pos.X, pos.Y, pos.Z)
 	return core.BlockID(binary.LittleEndian.Uint16(output[4:6]))
 }
 
 // BaseBlockAt 返回不应用会话修改时指定世界位置的确定性方块。
+//
+// 它是含注水的完整生成语义，与 GenerateChunk 逐格一致：地形 → 橡树 → 海水
+// 三层，fluidEnabled 开启时海平面及其以下最终仍为空气的格返回
+// core.WaterSourceID。需要纯地形结果的调用方用 TerrainBlockAt。
 func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
 	output := g.probe(probeModeBase, pos.X, pos.Y, pos.Z)
 	return core.BlockID(binary.LittleEndian.Uint16(output[4:6]))

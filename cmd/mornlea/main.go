@@ -89,7 +89,13 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 	options.Application.Dev = (options.Dev || options.CaptureDir != "") &&
 		!options.Application.Benchmark
 	options.Application.Render = effective.Render
-	options.Application.FluidEnabled = effective.FluidEnabled
+	// 注水门控只对普通游玩世界跟随用户配置：benchmark 是固定工作负载、抓帧是
+	// 视觉基线，两者的世界内容都必须与用户配置解耦，否则同一份 golden 或同一条
+	// 性能基线在不同人的机器上会生成不同的世界。进程内 benchmark 走本地世界分支
+	// （app_startup.go），与 multiplayer_benchmark_server.go 里钉死的 false 保持
+	// 同一套策略。
+	options.Application.FluidEnabled = effective.FluidEnabled &&
+		!options.Application.Benchmark && options.CaptureDir == ""
 	// 面板 F5 保存需要落盘路径；benchmark 与抓帧路径不进交互循环，不需要它。
 	if !options.Application.Benchmark && options.CaptureDir == "" {
 		configPath, err := resolveConfigPath(options)

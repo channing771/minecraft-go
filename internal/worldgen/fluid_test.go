@@ -75,10 +75,11 @@ func TestFluidGateOnFillsSeaLevel(t *testing.T) {
 						}
 						filled++
 					default:
-						// 其余格(含海平面以上的空气)不得出现流体。
-						if core.IsFluid(after) {
-							t.Fatalf("chunk=%+v (%d,%d,%d) 不该注水却是流体 %d(关闭态为 %d)",
-								pos, x, y, z, after, before)
+						// 其余格(含海平面以上的空气)必须原样保留——不只是
+						// "不是流体":把它改写成任意别的方块同样是注水越界。
+						if after != before {
+							t.Fatalf("chunk=%+v (%d,%d,%d) 不该注水却被改写: 关闭=%d 开启=%d",
+								pos, x, y, z, before, after)
 						}
 					}
 				}

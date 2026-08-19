@@ -2525,7 +2525,7 @@ mod tests {
     fn worldgen_header() -> Vec<u8> {
         let mut bytes = vec![0u8; WORLDGEN_HEADER_BYTES];
         bytes[0..4].copy_from_slice(b"MGW1");
-        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
         bytes[8..16].copy_from_slice(&42i64.to_le_bytes());
         bytes[16..20].copy_from_slice(&(-64i32).to_le_bytes());
         bytes[20..24].copy_from_slice(&320i32.to_le_bytes());
@@ -2533,7 +2533,7 @@ mod tests {
             // 材料表刻意避开 0:air=1 便于区分“输出缓冲原样”与“生成的空气”。
             bytes[24 + index * 2..26 + index * 2].copy_from_slice(&id.to_le_bytes());
         }
-        for (index, entry) in bytes[52..WORLDGEN_HEADER_BYTES].iter_mut().enumerate() {
+        for (index, entry) in bytes[54..WORLDGEN_HEADER_BYTES].iter_mut().enumerate() {
             *entry = (index & 255) as u8;
         }
         bytes

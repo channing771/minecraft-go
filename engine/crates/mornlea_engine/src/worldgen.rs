@@ -498,17 +498,19 @@ pub(crate) fn dense_index(lx: i32, y: i32, lz: i32) -> usize {
 
 // ---- ABI 编码常量与解析 ----
 //
-// 两个 worldgen 入口共用 magic `MGW1` 的 564 字节 header:
+// 两个 worldgen 入口共用 magic `MGW1` 的 566 字节 header:
 // magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
-// 材料表 14×u16(28) + perm 512×u8(512)。
-// engine ABI v4 把材料表从 13 项扩到 14 项(末项 water),新增的 u16 正好
-// 占用 v3 预留的 reserved 槽(偏移 50),因此 header 总长与 perm 偏移不变;
-// v3 与 v4 的字节布局不可混装,由 ABI 版本号拦截。
+// 材料表 14×u16(28) + reserved u16(2) + perm 512×u8(512)。
+// engine ABI v4 把材料表从 13 项扩到 14 项(末项 water),新增的 u16 占用 v3
+// 预留的 reserved 槽(偏移 50),并在其后补回一个新的 reserved 槽(偏移 52)
+// ——reserved 的作用就是让下一次扩字段不必挪动 perm,用掉了就要补上。
+// 因此 header 总长 564 → 566、perm 偏移 52 → 54,**布局确实变了**:
+// layout version 随之 1 → 2,作为独立于 ABI 版本号的带内第二道混装防线。
 // chunk 入口追加 chunk_x/chunk_z(8);probe 入口追加 record_count(4) 与
 // 每条 16 字节的查询记录(mode + wx/wy/wz)。
 
 /// 共用 header 字节数。
-pub(crate) const WORLDGEN_HEADER_BYTES: usize = 564;
+pub(crate) const WORLDGEN_HEADER_BYTES: usize = 566;
 /// chunk 入口输入总字节数:header + chunk_x/chunk_z。
 pub(crate) const WORLDGEN_CHUNK_INPUT_BYTES: usize = WORLDGEN_HEADER_BYTES + 8;
 /// chunk 入口输出字节数:98304 个 u16 LE。
@@ -539,8 +541,8 @@ fn read_i64(bytes: &[u8], offset: usize) -> i64 {
 /// 解析并校验共用 header;任何违约返回 None(FFI 层转为 StatusInput)。
 ///
 /// 校验项:magic/layout 精确匹配、Y 范围必须与内核常量一致(防止 Go/Rust
-/// 世界高度漂移)、材料表 14 项两两互异(air 是哨兵,重复 ID 会破坏与 Go
-/// 语义的对应关系)。perm 为 u8,取值域即合法域。
+/// 世界高度漂移)、reserved 必须为零、材料表 14 项两两互异(air 是哨兵,
+/// 重复 ID 会破坏与 Go 语义的对应关系)。perm 为 u8,取值域即合法域。
 ///
 /// 互异性的**唯一豁免**是 `water == air`:这是 Go 侧 `fluidEnabled` 关闭时
 /// 的门控编码(design D6),water 只被写入、从不参与等值比较,取 air 编号
@@ -549,9 +551,10 @@ fn read_i64(bytes: &[u8], offset: usize) -> i64 {
 pub(crate) fn parse_header(bytes: &[u8]) -> Option<WorldgenParams> {
     if bytes.len() < WORLDGEN_HEADER_BYTES
         || &bytes[0..4] != b"MGW1"
-        || read_u32(bytes, 4) != 1
+        || read_u32(bytes, 4) != 2
         || read_i32(bytes, 16) != WORLD_MIN_Y
         || read_i32(bytes, 20) != WORLD_MAX_Y
+        || read_u16(bytes, 52) != 0
     {
         return None;
     }
@@ -584,7 +587,7 @@ pub(crate) fn parse_header(bytes: &[u8]) -> Option<WorldgenParams> {
         }
     }
     let mut perm = [0u8; 512];
-    perm.copy_from_slice(&bytes[52..WORLDGEN_HEADER_BYTES]);
+    perm.copy_from_slice(&bytes[54..WORLDGEN_HEADER_BYTES]);
     Some(WorldgenParams {
         seed,
         materials,
@@ -867,12 +870,27 @@ mod tests {
     }
 
     #[test]
-    fn gate_off_generation_contains_no_water() {
-        // 门控关闭(water = air)时,输出里不允许出现 13 号方块,
-        // 且 dense 与"注水前"的写入集合一致:所有空气格仍是空气。
-        let (dry, _, _) = dry_and_wet(42, 3, -5);
-        assert!(!dry.contains(&13));
-        assert!(dry.contains(&0), "夹具失效:关闭态下该区块应仍有空气格");
+    fn gate_off_leaves_every_floodable_cell_as_air() {
+        // 门控关闭(water = air)时,注水必须整体退化为空操作:开启态被注水的
+        // **每一格**在关闭态都必须仍是空气,且输出里不允许出现 13 号方块。
+        //
+        // 这条断言的对象是"内核是否老老实实用 materials.water 写入":一旦
+        // flood_sea_level 绕过材料表硬编码水的编号,Go 侧的门控(water 填 air)
+        // 就被架空,关闭态会长出水,本测试立刻变红。
+        let (dry, wet, changed) = dry_and_wet(42, 3, -5);
+        // 先断言"关闭态没有水",再断言夹具非空:顺序如此是为了让内核硬编码
+        // 水编号这类真实故障报出"关闭态出现了水",而不是被后面的夹具守卫
+        // 抢先报成"夹具失效"(硬编码会让两态输出相同,changed 归零)。
+        assert!(!dry.contains(&13), "门控关闭时输出里出现了水");
+        assert!(changed > 0, "夹具失效:该区块没有可注水的格");
+        let mut checked = 0;
+        for (index, &block) in wet.iter().enumerate() {
+            if block == 13 {
+                assert_eq!(dry[index], 0, "门控关闭时 index={index} 本应仍是空气");
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, changed, "两态差异应当恰好是被注水的格");
     }
 
     #[test]
@@ -903,7 +921,7 @@ mod tests {
         // 门控关闭时 Go 侧把 water 填成 air 编号,header 必须接受。
         let mut bytes = vec![0u8; WORLDGEN_HEADER_BYTES];
         bytes[0..4].copy_from_slice(b"MGW1");
-        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
         bytes[16..20].copy_from_slice(&WORLD_MIN_Y.to_le_bytes());
         bytes[20..24].copy_from_slice(&WORLD_MAX_Y.to_le_bytes());
         for index in 0..13usize {
