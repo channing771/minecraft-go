@@ -11,7 +11,7 @@
 - **调度器**：新建 `internal/fluid`，以显式待更新队列（`(BlockPos, dueTick)`）推进流动，全扫描不可行。每 tick 按 `(dueTick, ChunkKey, y, z, x)` 全序排序处理，受 `FluidUpdatesPerTick` 预算约束，超预算项按序留到下一 tick。队列**不持久化**，重启后对已加载区块做一次流体边界重扫收敛回同一平衡态。
 - **权威集成**：`sim.Engine.Step` 在 `advanceFurnaces` 之后新增 `advanceFluids` 阶段，只推进活动兴趣范围内的区块，变更经既有 `touchChunk` 汇入同一批 `pendingChunkChanges`，复用现成的区块广播与存盘路径。
 - **worldgen 注水**：Rust `Materials` 表 13 → 14 项（追加 `water`），`y <= SEA_LEVEL` 且按现有分层判定为 air 的格写入 `WaterSourceID`。地表分层、矿石与橡树逻辑不变。**BREAKING**：engine ABI v3 → v4（header 布局变化）。
-- **配置**：新增 `fluidEnabled`（默认 `false`）门控 worldgen 注水；新增 tunable `FluidFlowDelayTicks`（默认 5）与 `FluidUpdatesPerTick`（默认 512）。config version 保持 1。
+- **配置**：新增 `fluidEnabled`（默认 `false`）门控 worldgen 注水；新增 tunable `FluidFlowDelayTicks`（默认 5）、`FluidUpdatesPerTick`（默认 512）与 `FluidRescanCellsPerTick`（默认 65536，见 design D4）。config version 保持 1。
 - **协议**：v19 → v20，方块 ID 集合扩展 8 项。wire 形状与长度上限不变。
 - **存档**：区块 schema v8 → v9。v8 → v9 是**恒等迁移**——旧区块结构合法，只是不含流体格。已生成的旧区块保持干燥，不做迁移注水。
 
