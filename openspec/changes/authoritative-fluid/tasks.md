@@ -33,13 +33,13 @@
 
 ## 5. 世界生成注水
 
-- [ ] 5.1 Rust：`engine/crates/mornlea_engine/src/worldgen.rs` 的 `Materials` 追加 `water` 字段，`as_array` 改为 14 项，FFI header 解析与互异性校验同步更新；补中文 doc comment。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
-- [ ] 5.2 Rust：在分层判定后加注水——`y <= SEA_LEVEL` 且该格判定为 air 时写 `materials.water`；断言矿石、树木、地表分层结果不受影响。验证：`cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
-- [ ] 5.3 `engine/include` 更新 engine 头文件，ABI 版本 v3 → v4；`internal/nativeabi` 同步材料表编码与版本常量。验证：`make rust && go test ./internal/nativeabi -race -count=1`
-- [ ] 5.4 Go 侧 `internal/worldgen`：材料表编码追加 `water`；门控实现为 **`fluidEnabled=false` 时 `water` 字段传 air 编号**（Rust 侧无分支）。验证：`go test ./internal/worldgen -race -count=1`
-- [ ] 5.5 旧 Go 生成实现（测试 oracle）同步加注水规则，保持与 Rust 的逐位交叉锁。验证：`go test ./internal/worldgen -race -count=1`
-- [ ] 5.6 测试「开关关闭时同种子世界与当前基线逐格一致」——这是关闭路径退化为现状的证明。验证：`go test ./internal/worldgen -race -count=1`
-- [ ] 5.7 测试「开关开启时海平面及以下原 air 格全为源方块」与「非空气非流体格在开关两态下逐格一致」。验证：`go test ./internal/worldgen -race -count=1`
+- [x] 5.1 Rust：`engine/crates/mornlea_engine/src/worldgen.rs` 的 `Materials` 追加 `water` 字段，`as_array` 改为 14 项，FFI header 解析与互异性校验同步更新；补中文 doc comment。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
+- [x] 5.2 Rust：在分层判定后加注水——`y <= SEA_LEVEL` 且该格判定为 air 时写 `materials.water`；断言矿石、树木、地表分层结果不受影响。验证：`cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
+- [x] 5.3 `engine/include` 更新 engine 头文件，ABI 版本 v3 → v4；`internal/nativeabi` 同步材料表编码与版本常量。验证：`make rust && go test ./internal/nativeabi -race -count=1`
+- [x] 5.4 Go 侧 `internal/worldgen`：材料表编码追加 `water`；门控实现为 **`fluidEnabled=false` 时 `water` 字段传 air 编号**（Rust 侧无分支）。验证：`go test ./internal/worldgen -race -count=1`
+- [x] 5.5 旧 Go 生成实现（测试 oracle）同步加注水规则，保持与 Rust 的逐位交叉锁。验证：`go test ./internal/worldgen -race -count=1`
+- [x] 5.6 测试「开关关闭时同种子世界与当前基线逐格一致」——这是关闭路径退化为现状的证明。验证：`go test ./internal/worldgen -race -count=1`
+- [x] 5.7 测试「开关开启时海平面及以下原 air 格全为源方块」与「非空气非流体格在开关两态下逐格一致」。验证：`go test ./internal/worldgen -race -count=1`
 
 ## 6. 存档演进
 
