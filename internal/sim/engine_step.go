@@ -8,14 +8,19 @@ import (
 )
 
 // stepPhase 标识 Step 内部的固定处理阶段。权威 tick 的阶段顺序是规格契约：
-// 玩家命令 → 伙伴 action → 统一物理与世界变更；三个阶段写互不相交的状态，
-// 无法从外部结果观察先后，因此用 stepPhaseObserver 探针显式锁定。
+// 玩家命令 → 伙伴 action → 统一物理与世界变更 → 流体推进；各阶段写互不相交
+// 的状态，无法从外部结果观察先后，因此用 stepPhaseObserver 探针显式锁定。
 type stepPhase uint8
 
 const (
 	phasePlayerCommands stepPhase = iota + 1
 	phaseCompanionActions
 	phasePhysicsAdvance
+	// phaseFluidAdvance 位于熔炉推进之后、容器移动之前。流体必须排在本 tick
+	// 全部方块写者（放置、采掘、伙伴放置）之后，才能看到它们刚写下的方块并在
+	// 同一 tick 内对其入队；又必须排在 finishChanges 之前，流动写入才能与其他
+	// 方块变更共用同一批 revision、广播与存盘（design.md D8）。
+	phaseFluidAdvance
 )
 
 // notifyStepPhase 把阶段进入事件上报给测试探针；生产环境探针恒为 nil。
@@ -317,6 +322,8 @@ func (engine *Engine) Step() TickResult {
 	}
 	engine.advanceDrops(pending)
 	engine.advanceFurnaces(pending)
+	engine.notifyStepPhase(phaseFluidAdvance)
+	engine.advanceFluids(pending)
 	for _, command := range containerMoves {
 		if reason, rejected := engine.applyContainerMove(command.Session, command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{

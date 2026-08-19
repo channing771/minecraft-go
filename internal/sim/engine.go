@@ -7,6 +7,7 @@ import (
 
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/fluid"
 	"github.com/channing771/mornlea/internal/physics"
 	"github.com/channing771/mornlea/internal/world"
 )
@@ -54,6 +55,18 @@ type Engine struct {
 	wanted             map[core.ChunkKey]struct{}
 	inFlightSaves      map[core.ChunkKey]persistenceInFlight
 	subscriptionsDirty bool
+
+	// fluidQueues 是流体待更新队列，**按维度各持一个实例**（原因见
+	// fluidQueue 的注释：internal/fluid 的处理全序不含维度）。队列不持久化，
+	// 重启与区块进入推进范围时由 advanceFluids 的边界重扫恢复（design.md D5）。
+	fluidQueues map[core.DimensionID]*fluid.Queue
+	// fluidScope 是上一 tick 的流体推进范围，fluidScopeNext 是构建本 tick 范围
+	// 用的复用 scratch；两者每 tick 交换，用来识别「本 tick 新进入范围」的区块
+	// 并对其重扫。
+	fluidScope     map[core.ChunkKey]struct{}
+	fluidScopeNext map[core.ChunkKey]struct{}
+	// fluidDimensionScratch 是维度排序的复用缓冲。
+	fluidDimensionScratch []core.DimensionID
 
 	// 掉落物 tick 的复用 scratch，避免每 tick 分配固定上限集合。
 	dropKeySeen            map[core.ChunkKey]struct{}
