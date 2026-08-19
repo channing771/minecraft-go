@@ -476,6 +476,135 @@ func fluidBasinDimension() (*Dimension, []core.ChunkPos) {
 	return dimension, positions
 }
 
+// sectionHasLiveSource 报告 section 里是否存在「会产生写入」的水源格，即
+// fluidSourceIsFixedPoint 判定为否的格。见 assertFluidBasinPremises 的第 1 条。
+func sectionHasLiveSource(
+	dimension *Dimension,
+	section *world.Section,
+	pos core.ChunkPos,
+	sectionIndex int,
+) bool {
+	baseX := pos.X << core.SectionShift
+	baseZ := pos.Z << core.SectionShift
+	baseY := int32(sectionIndex<<core.SectionShift) + core.MinY
+	for localY := range core.SectionSize {
+		for localZ := range core.SectionSize {
+			for localX := range core.SectionSize {
+				position := core.BlockPos{
+					X: baseX + int32(localX),
+					Y: baseY + int32(localY),
+					Z: baseZ + int32(localZ),
+				}
+				if !fluidSourceIsFixedPoint(dimension, section, localX, localY, localZ, position) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// assertFluidBasinPremises 断言 fluidBasinDimension 的**夹具前提**仍然成立。
+//
+// 存在的理由：等价性测试的约束力完全取决于夹具形状，而夹具形状此前只由注释
+// 约束——把水位调回一个较低的值、或者填掉某处凹槽，测试照样全绿，只是悄悄
+// 失去了对某条分支的覆盖（本变更在这个形状上已经栽过多次，注释不会变红）。
+// 这里把「夹具必须具备哪些形状」写成可执行断言，削弱夹具的人当场看到红灯，
+// 并从失败信息里知道自己让哪条分支失去了覆盖。同 internal/fluid 性质测试里的
+// minNonTrivialCuts 守卫是同一个模式。
+//
+// 覆盖两组前提：
+//
+//  1. **区段级快路径的两个分支都要被走到**：既要有「均匀水源区段且判定为不动点、
+//     整段跳过」的（否则 fluidSectionIsFixedPoint 的收益路径零覆盖），也要有
+//     「均匀水源区段但判定为**否**、且段内确实存在会产生写入的格」的。后半句是
+//     承重的：只要求"判定为否"不够——一个整段都是不动点的区段即使被误判成可跳过
+//     也不改变结果，把判据改成恒真照样测不出来。必须有一格真的会写。
+//  2. **fluidSealedSourceOffsets 的每个偏移各自承重**：对每个偏移都必须存在一处
+//     「单向开口」——一个空气格，它六个邻格里**唯一**的流体是某个水源，且该水源
+//     正好在这个偏移的反方向。这样的空气格只能从这一个方向被填充，判据里去掉
+//     该偏移就会让那个水源被误跳过、开口永远填不上，最终世界必然分叉。
+//     「唯一」这个限定是承重的：水体内部气泡四面都是水，去掉任一水平偏移后
+//     其余方向仍会把它填满，最终世界不变——那样的形状约束不住任何东西。
+func assertFluidBasinPremises(t *testing.T, dimension *Dimension, positions []core.ChunkPos) {
+	t.Helper()
+
+	uniformSkipped, uniformDeclined := 0, 0
+	for _, pos := range positions {
+		chunk := dimension.records[pos].Chunk
+		for sectionIndex := range core.SectionsPerChunk {
+			section := chunk.Section(sectionIndex)
+			id, uniform := section.Blocks.IsUniform()
+			if !uniform || id != core.WaterSourceID {
+				continue
+			}
+			if fluidSectionIsFixedPoint(dimension, pos, sectionIndex) {
+				uniformSkipped++
+				continue
+			}
+			if sectionHasLiveSource(dimension, section, pos, sectionIndex) {
+				uniformDeclined++
+			}
+		}
+	}
+	if uniformSkipped == 0 {
+		t.Fatal("夹具被削弱：没有任何「均匀水源区段且判定为不动点」的区段，" +
+			"fluidSectionIsFixedPoint 的整段跳过路径将零覆盖。" +
+			"请恢复一个整段是水源、且其下方区段与四个水平邻块同索引区段都整段不可替换的区段。")
+	}
+	if uniformDeclined == 0 {
+		t.Fatal("夹具被削弱：没有任何「均匀水源区段、判定为否、且段内确实有会产生写入的格」的区段，" +
+			"把 fluidSectionIsFixedPoint 改成恒返回 true 也不会被抓到" +
+			"（整段都是不动点的区段被误跳过并不改变结果，因此不算数）。" +
+			"请恢复一个整段是水源、但下方区段混杂且水真的会漏下去的区段（例如底板上开个小孔）。")
+	}
+
+	var singleOpening [len(fluidSealedSourceOffsets)]int
+	for _, pos := range positions {
+		chunk := dimension.records[pos].Chunk
+		baseX := pos.X << core.SectionShift
+		baseZ := pos.Z << core.SectionShift
+		for y := int32(core.MinY); y < core.MaxY; y++ {
+			for lx := range core.SectionSize {
+				for lz := range core.SectionSize {
+					if chunk.BlockAt(lx, y, lz) != core.AirID {
+						continue
+					}
+					air := core.BlockPos{X: baseX + int32(lx), Y: y, Z: baseZ + int32(lz)}
+					fluidCount, source := 0, core.BlockPos{}
+					for _, neighbor := range fluidNeighbors(air) {
+						if core.IsFluid(fluidRescanBlockAt(dimension, neighbor)) {
+							fluidCount++
+							source = neighbor
+						}
+					}
+					if fluidCount != 1 || fluidRescanBlockAt(dimension, source) != core.WaterSourceID {
+						continue
+					}
+					// air 相对该水源的方向，就是判据里必须检查的那个偏移。
+					// 反方向（水源在 air 下方）对应判据刻意不检查的「上方」，跳过。
+					for i, offset := range fluidSealedSourceOffsets {
+						if source.X+offset[0] == air.X &&
+							source.Y+offset[1] == air.Y &&
+							source.Z+offset[2] == air.Z {
+							singleOpening[i]++
+						}
+					}
+				}
+			}
+		}
+	}
+	for i, offset := range fluidSealedSourceOffsets {
+		if singleOpening[i] == 0 {
+			t.Fatalf("夹具被削弱：偏移 %v 没有任何单向开口，"+
+				"从 fluidSealedSourceOffsets 里去掉它也不会被抓到。"+
+				"请恢复一处「水源 + 该方向一格空气 + 其余五邻不可替换」的形状"+
+				"（水体内部的气泡不算：它四面都是水，去掉一个方向仍会被填满）。",
+				offset)
+		}
+	}
+}
+
 // enqueueEveryFluidCell 是重扫的朴素参照实现：不做任何不动点判断，把维度内全部
 // 流体格原样入队。它是 fluidSourceIsFixedPoint 捷径的对照组。
 func enqueueEveryFluidCell(queue *fluid.Queue, dimension *Dimension, now, delay uint64) {
@@ -575,6 +704,13 @@ func TestFluidRescanFixedPointSkipMatchesFullRescan(t *testing.T) {
 				pos, fast[pos], full[pos])
 		}
 	}
+
+	// 夹具前提放在等价比对**之后**：判据真被改坏时先报"世界不一致"（正确的诊断），
+	// 只有在判据正确、两个世界仍然一致时，才轮到"夹具是不是已经不约束任何东西"
+	// 这个问题。前提检查本身要用到判据，放在前面会把代码坏掉误报成夹具坏掉。
+	// 用一份全新的夹具：上面两次 settleFluids 已经把 fastDimension 推到平衡态了。
+	premiseDimension, premisePositions := fluidBasinDimension()
+	assertFluidBasinPremises(t, premiseDimension, premisePositions)
 }
 
 // fluidRescanEngine 构造一个只用于重扫状态机测试的引擎：挂上被测维度、把全部
