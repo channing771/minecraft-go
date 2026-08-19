@@ -12,13 +12,32 @@ const (
 	nativeNeighborhoodSections = 3 * 3 * 3
 	nativeHeightColumns        = 3 * 3
 	nativeRegistryEntryBytes   = 2 + 1 + 1 + 6*2
-	nativeMaxRegistryEntries   = int(core.MossyCobblestoneID) + 1
-	nativeMaxRegistryWords     = (nativeMaxRegistryEntries + 63) / 64
-	nativeLightVolume          = 48 * 48 * 48
-	nativeScratchPadding       = (4 - nativeLightVolume%4) % 4
-	nativeScratchBytes         = nativeLightVolume + nativeScratchPadding + nativeLightVolume*4
-	maxNativeQuads             = 6 * core.BlocksPerSection
-	maxNativeInputBytes        = 16 +
+	// nativeMaxRegistryEntries 必须与 Rust 端硬编码的
+	// engine/crates/mornlea_engine/src/input.rs:5 的 MAX_REGISTRY_ENTRIES
+	// (=27) 保持一致——两侧各自独立定义，没有共享常量或生成步骤，全靠人
+	// 手动同步。当前用 `int(core.MossyCobblestoneID)+1` 推导出 27，恰好与
+	// Rust 侧一致，但这只是巧合：MossyCobblestoneID 是「流体加入前最后一个
+	// 已注册方块」，而 Rust 常量是「原生 registry 条目表的容量上限」，二者
+	// 概念不同。流体编号追加后 core.RegisteredBlock 的上界已经变成
+	// WaterLevel7ID，但 internal/assets.NewRegistry() 仍刻意只把
+	// AirID..MossyCobblestoneID 纳入 mesh snapshot 的 ids 范围（见
+	// internal/assets/blocks.go 的 Opaque/FaceVisible 注释），snapshot 条目
+	// 数因此仍是 27，这里维持用 MossyCobblestoneID 推导没有问题。
+	// **不得**顺手把它改成 `int(core.WaterLevel7ID)+1`——那会让 Go 端允许
+	// 35 条 registry 记录，而 Rust 端仍然只接受 27 条，一旦真的喂进 35 条，
+	// Rust 侧的 registry_count > MAX_REGISTRY_ENTRIES 校验会直接拒绝整次
+	// mesh 调用。真要扩容，必须先改 Rust 常量、重新编译 mornlea_engine（这
+	// 是一次 engine ABI 跨语言变更），再回来同步改这里，两侧永远一起动。
+	// 顺带一提：input.rs:1 的 BLOCKS_BYTES = 27*4096*2 里也有一个 27，但那
+	// 是 3×3×3 邻域区段数，跟这里的 registry 条目数上限只是数字撞了，两者
+	// 无关，改一个不需要牵动另一个。
+	nativeMaxRegistryEntries = int(core.MossyCobblestoneID) + 1
+	nativeMaxRegistryWords   = (nativeMaxRegistryEntries + 63) / 64
+	nativeLightVolume        = 48 * 48 * 48
+	nativeScratchPadding     = (4 - nativeLightVolume%4) % 4
+	nativeScratchBytes       = nativeLightVolume + nativeScratchPadding + nativeLightVolume*4
+	maxNativeQuads           = 6 * core.BlocksPerSection
+	maxNativeInputBytes      = 16 +
 		nativeNeighborhoodSections*core.BlocksPerSection*2 +
 		nativeHeightColumns + nativeHeightColumns*core.SectionSize*core.SectionSize*2 +
 		nativeMaxRegistryEntries*nativeRegistryEntryBytes +

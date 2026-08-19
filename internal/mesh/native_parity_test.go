@@ -86,7 +86,9 @@ func TestNativeOracleParityFixedCorpus(t *testing.T) {
 		}},
 		{"unknown-id", func(*testing.T) (*world.Neighborhood, mesh.Registry) {
 			center := world.NewSection()
-			center.Blocks.Set(8, 8, 8, core.MossyCobblestoneID+1)
+			// MossyCobblestoneID+1 现在是已注册的流体 WaterSourceID，不再是
+			// 未知方块；真正越界、未注册的编号是 WaterLevel7ID+1。
+			center.Blocks.Set(8, 8, 8, core.WaterLevel7ID+1)
 			return solidNeighbors(center), assetRegistry
 		}},
 		{"sky-edge", func(t *testing.T) (*world.Neighborhood, mesh.Registry) {
@@ -141,7 +143,14 @@ func TestNativeOracleParityDeterministicRandomizedCorpus(t *testing.T) {
 		core.GlassID,
 		core.LeavesID,
 		core.LightBlockID,
-		core.MossyCobblestoneID + 1,
+		// WaterLevel7ID+1 是真正越界、未注册的编号：覆盖「registry 里完全不
+		// 存在」这条路径。
+		core.WaterLevel7ID + 1,
+		// WaterSourceID 是已注册流体，但没有被纳入 assets.NewRegistry() 构建
+		// mesh snapshot 时使用的 ids 范围（仍止于 MossyCobblestoneID），所以
+		// 从 snapshot 的角度看同样是「缺条目」：覆盖「已注册但不在 snapshot
+		// 里」这条独立路径，与上面的 WaterLevel7ID+1 分开断言。
+		core.WaterSourceID,
 	}
 
 	for caseIndex := range 64 {
