@@ -76,7 +76,9 @@ func TestCommonBlockMaterialsAreFixedAndRoundTrip(t *testing.T) {
 			t.Fatalf("ItemStackLimit(%d)=(%d,%v)，想要 (64,true)", tc.item, limit, ok)
 		}
 	}
-	if core.RegisteredBlock(core.MossyCobblestoneID + 1) {
+	// MossyCobblestoneID+1 现在是 WaterSourceID（流体方块编号紧随其后追加），
+	// 已注册；真正越界的未知方块编号是 WaterLevel7ID+1。
+	if core.RegisteredBlock(core.WaterLevel7ID + 1) {
 		t.Fatal("未知方块被注册")
 	}
 }
@@ -318,6 +320,24 @@ func TestHotbarConsumeRejectsEmptyOrInvalidSlot(t *testing.T) {
 		}
 		if got != h {
 			t.Fatalf("Consume(%d) 失败时快捷栏必须保持不变", slot)
+		}
+	}
+}
+
+// TestFluidBlocksDoNotProduceItems 锁定「流体不进物品表」：全部 8 个流体编号
+// 采掘不产出任何物品，且合法物品编号上界 ItemIDMax 不因流体的引入而变化——
+// 流体只追加在 BlockID 枚举，不新增任何 ItemID。
+func TestFluidBlocksDoNotProduceItems(t *testing.T) {
+	if core.ItemIDMax != core.ItemMossyCobblestone+1 {
+		t.Fatalf("ItemIDMax = %d，想要保持 ItemMossyCobblestone+1 (%d) 不变",
+			core.ItemIDMax, core.ItemMossyCobblestone+1)
+	}
+	for _, block := range []core.BlockID{
+		core.WaterSourceID, core.WaterLevel1ID, core.WaterLevel2ID, core.WaterLevel3ID,
+		core.WaterLevel4ID, core.WaterLevel5ID, core.WaterLevel6ID, core.WaterLevel7ID,
+	} {
+		if item, ok := core.BlockDrop(block); ok || item != core.ItemNone {
+			t.Fatalf("BlockDrop(%d) = (%d,%v)，想要 (ItemNone,false)：流体不应产出物品", block, item, ok)
 		}
 	}
 }
