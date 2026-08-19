@@ -102,7 +102,8 @@ func (q *Queue) Len() int {
 	return len(q.pending)
 }
 
-// Advance 推进一个 tick 的流体，返回本 tick 实际发生变化的格（按处理次序）。
+// Advance 推进一个 tick 的流体，返回本 tick 实际发生变化的格（按 lessPos
+// 定义的位置全序，与处理次序无关，见下面第 4/5 点）。
 //
 // 语义：
 //  1. 从队列里挑出 dueTick<=now 的项，按 sortItems 的全序排序。
@@ -114,10 +115,13 @@ func (q *Queue) Len() int {
 //     一次写入被后续求值读到，从而让处理次序影响结果（design.md 提到的
 //     振荡风险）。
 //  4. 若同一 tick 内多个来源（不同待更新格的传播）都想写同一目标格，取
-//     处理次序中较晚的一次生效。处理次序本身只由 sortItems 的全序决定、
-//     与入队顺序无关，因此这条合并规则不会破坏「入队顺序无关」。
+//     流体等级最小（最强）者生效（spec.md「同 tick 冲突写入取最强者」）；
+//     合并用 strongerWrite 实现，是可交换、可结合的运算，结果只取决于
+//     参与合并的候选值集合本身，与这些候选值被枚举/合并的次序无关——不管
+//     process 的处理次序、不管 evalCell 内部 map 的遍历次序。
 //  5. 因本 tick 变化（包括消失为空气）的格，其自身与六个面邻格以
-//     dueTick=now+delay 重新入队，供后续 tick 继续推进。
+//     dueTick=now+delay 重新入队，供后续 tick 继续推进。返回值按 lessPos
+//     排序而非处理次序，与提交顺序、广播顺序保持同一套确定性排序口径。
 //
 // delay（流动延迟）与 budget（每 tick 预算）都是调用参数，本包不读取任何
 // 包内 tunable——这两个值归 sim 所有（design.md D2）。
@@ -142,17 +146,41 @@ func (q *Queue) Advance(now uint64, w FluidWorld, budget int, delay uint64) []co
 	}
 
 	// 阶段一：只读求值，把全部候选写入合并进 pendingWrites。
+	//
+	// 同一目标格可能被多个不同的待更新格同 tick 写入（比如两股水从不同方向
+	// 汇合到同一格）：spec.md「同 tick 冲突写入取最强者」要求取流体等级
+	// 最小（最强）者，且结果不依赖参与合并的源格之间的遍历顺序——用
+	// strongerWrite 合并，它可交换、可结合，天然满足这一点，不需要依赖
+	// process 已经按全序排好这件事。
+	//
+	// 「一格自身消亡写 Air」与「某邻居同 tick 向该格写水」这两类写入不会
+	// 冲突：evalCell 的自我消亡分支只在 flowingSurvives 判否时触发，而
+	// flowingSurvives 判否恰好意味着「上方不是流体」且「不存在等级更小的
+	// 水平邻居」；反过来，任何能把水写进该格的邻居 B——不论是 B 在其正上方
+	// 做垂直传播（此时 B 本身就是「上方是流体」的见证），还是 B 做水平传播
+	// 且 nextLevel < 本格等级（此时 B 本身就是「等级更小的水平邻居」）——都
+	// 恰好构成该格的存活支撑，使 flowingSurvives 判真、自我消亡分支根本不会
+	// 触发。两者在当前规则集下不可达同 tick 冲突，strongerWrite 里让流体
+	// 优先于空气纯粹是防御性兜底（万一将来规则变化打破这条论证），不是当前
+	// 规则下真的会走到的分支。
 	pendingWrites := make(map[core.BlockPos]core.BlockID)
 	for _, it := range process {
 		delete(q.pending, it.pos) // 该项本 tick 已被取出处理，从队列移除。
 		for pos, id := range evalCell(it.pos, w) {
-			pendingWrites[pos] = id // 全序中较晚处理的项覆盖较早的，语义见函数注释。
+			if existing, ok := pendingWrites[pos]; ok {
+				pendingWrites[pos] = strongerWrite(existing, id)
+			} else {
+				pendingWrites[pos] = id
+			}
 		}
 	}
 
 	// 阶段二：一次性提交，并只把「值真的变了」的格计入本 tick 的变化集合。
 	// pendingWrites 是 map，遍历顺序随机；先按 lessPos 排序目标格再遍历，
-	// 使返回的变化集合与提交顺序都不依赖 map 的随机遍历顺序。
+	// 使返回的变化集合与提交顺序都不依赖 map 的随机遍历顺序。只在值真的
+	// 变化时才调用 w.SetBlock：调用方（未来的 sim 适配器）的 SetBlock 很可能
+	// 附带 dirty 标记与区块变更广播，无变化的写入会产生纯噪声的存档改写与
+	// 网络广播，因此不能无条件调用。
 	targets := make([]core.BlockPos, 0, len(pendingWrites))
 	for pos := range pendingWrites {
 		targets = append(targets, pos)
@@ -164,8 +192,8 @@ func (q *Queue) Advance(now uint64, w FluidWorld, budget int, delay uint64) []co
 		id := pendingWrites[pos]
 		if w.BlockAt(pos) != id {
 			changed = append(changed, pos)
+			w.SetBlock(pos, id)
 		}
-		w.SetBlock(pos, id)
 	}
 
 	for _, pos := range changed {

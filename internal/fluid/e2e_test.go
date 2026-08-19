@@ -49,16 +49,25 @@ func TestEndToEnd_SourceSpreadsExactlySevenOnFlatGround(t *testing.T) {
 		t.Fatalf("推进 %d tick 后队列仍非空（未到平衡态），Len()=%d", maxTicks, q.Len())
 	}
 
+	// 按等级 1..7 显式列出具名常量，而不是用 core.WaterSourceID+N 现算：
+	// rules.go 里 evalCell 的水平传播产出恰好也是用同一个算式算出目标编号
+	// 的（依赖「源与 1..7 号连续排布」这一 internal/core/block.go 的稳定
+	// 约定，见该处注释），若这里也用同一算式，方块编号排布一旦调整，测试
+	// 期望值会跟着实现一起错，测不出问题——用具名常量断开这层同义反复。
+	levels := [7]core.BlockID{
+		core.WaterLevel1ID, core.WaterLevel2ID, core.WaterLevel3ID, core.WaterLevel4ID,
+		core.WaterLevel5ID, core.WaterLevel6ID, core.WaterLevel7ID,
+	}
 	for x := int32(1); x <= 7; x++ {
 		pos := core.BlockPos{X: x, Y: 10, Z: 0}
-		want := core.WaterSourceID + core.BlockID(x)
+		want := levels[x-1]
 		if got := w.BlockAt(pos); got != want {
 			t.Fatalf("+X 方向第 %d 格应为等级 %d 的流动水，got %v want %v", x, x, got, want)
 		}
 	}
 	for x := int32(-1); x >= -7; x-- {
 		pos := core.BlockPos{X: x, Y: 10, Z: 0}
-		want := core.WaterSourceID + core.BlockID(-x)
+		want := levels[-x-1]
 		if got := w.BlockAt(pos); got != want {
 			t.Fatalf("-X 方向第 %d 格应为等级 %d 的流动水，got %v want %v", -x, -x, got, want)
 		}

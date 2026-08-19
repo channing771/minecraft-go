@@ -167,42 +167,56 @@ func TestAdvance_ChangedCellsAndNeighborsRequeued(t *testing.T) {
 	}
 }
 
-// TestAdvance_ConflictingWritesResolveDeterministically 断言同一 tick 内
-// 若多个来源写同一目标格，结果与哪个来源先被枚举无关（不依赖 evalCell 内部
-// map 遍历顺序），只依赖 Advance 定义的处理次序。
-func TestAdvance_ConflictingWritesResolveDeterministically(t *testing.T) {
-	w := newMemWorld()
-	// 两个源分别在 x=0 与 x=2，中间 x=1 是它们共同的水平邻居，下方均实心。
-	left := core.BlockPos{X: 0, Y: 10, Z: 0}
-	mid := core.BlockPos{X: 1, Y: 10, Z: 0}
-	right := core.BlockPos{X: 2, Y: 10, Z: 0}
-	w.SetBlock(left, core.WaterSourceID)
-	w.SetBlock(right, core.WaterSourceID)
-	for _, p := range []core.BlockPos{left, mid, right} {
-		w.SetBlock(core.BlockPos{X: p.X, Y: p.Y - 1, Z: p.Z}, core.StoneID)
+// TestAdvance_ConflictingWritesResolveToStrongest 覆盖 spec.md「同 tick
+// 冲突写入取最强者」（评审 Ruling 7 补入）：mid 格同 tick 被两个不同强度的
+// 传播源争抢——source(x=0) 传播出的等级 1，与 L2(x=2) 传播出的等级 3——必须
+// 取更强（等级更小）的等级 1，而不是「处理次序中较晚者胜」。
+//
+// 地形（评审给出）：
+//
+//	source(x=0) | 空气(x=1,mid) | WaterLevel2(x=2) | WaterLevel1(x=3) | source(x=4)
+//
+// 全部下方实心，四个非空气格同 tick 到期。此前的版本（TestAdvance_
+// ConflictingWritesResolveDeterministically）用两个产出同等级的源做冲突，
+// 冲突双方值相同，合并策略无论「取最强」还是「较晚者胜」结果都一样，测不出
+// C-1 那个 bug——这里换成等级不同的冲突，让两种策略产生可观测的差异。
+func TestAdvance_ConflictingWritesResolveToStrongest(t *testing.T) {
+	build := func() (w *memWorld, s0, mid, l2, l1, s4 core.BlockPos) {
+		w = newMemWorld()
+		s0 = core.BlockPos{X: 0, Y: 10, Z: 0}
+		mid = core.BlockPos{X: 1, Y: 10, Z: 0}
+		l2 = core.BlockPos{X: 2, Y: 10, Z: 0}
+		l1 = core.BlockPos{X: 3, Y: 10, Z: 0}
+		s4 = core.BlockPos{X: 4, Y: 10, Z: 0}
+		w.SetBlock(s0, core.WaterSourceID)
+		w.SetBlock(l2, core.WaterLevel2ID)
+		w.SetBlock(l1, core.WaterLevel1ID)
+		w.SetBlock(s4, core.WaterSourceID)
+		for x := int32(0); x <= 4; x++ {
+			w.SetBlock(core.BlockPos{X: x, Y: 9, Z: 0}, core.StoneID)
+		}
+		return
 	}
 
-	run := func() core.BlockID {
-		w2 := newMemWorld()
-		w2.SetBlock(left, core.WaterSourceID)
-		w2.SetBlock(right, core.WaterSourceID)
-		for _, p := range []core.BlockPos{left, mid, right} {
-			w2.SetBlock(core.BlockPos{X: p.X, Y: p.Y - 1, Z: p.Z}, core.StoneID)
-		}
+	// run 用给定的入队顺序（对 [s0, l2, l1, s4] 的下标排列）跑一遍推进，
+	// 返回 mid 的最终方块编号——用来验证结果与源格相对入队次序无关。
+	run := func(order []int) core.BlockID {
+		w, s0, mid, l2, l1, s4 := build()
+		positions := []core.BlockPos{s0, l2, l1, s4}
 		q := NewQueue()
-		q.Enqueue(left, 0, 0)
-		q.Enqueue(right, 0, 0)
-		q.Advance(0, w2, 100, 5)
-		return w2.BlockAt(mid)
+		for _, i := range order {
+			q.Enqueue(positions[i], 0, 0)
+		}
+		q.Advance(0, w, 100, 5)
+		return w.BlockAt(mid)
 	}
 
-	want := run()
-	for i := 0; i < 5; i++ {
-		if got := run(); got != want {
-			t.Fatalf("重复运行结果应一致，got %v want %v", got, want)
-		}
+	forward := run([]int{0, 1, 2, 3})
+	if forward != core.WaterLevel1ID {
+		t.Fatalf("mid 应取更强的等级 1（来自 source），got %v", forward)
 	}
-	if want != core.WaterLevel1ID {
-		t.Fatalf("两个源的共同水平邻居应为等级 1，got %v", want)
+	reversed := run([]int{3, 2, 1, 0})
+	if reversed != forward {
+		t.Fatalf("入队顺序不应影响结果：正序=%v 逆序=%v", forward, reversed)
 	}
 }

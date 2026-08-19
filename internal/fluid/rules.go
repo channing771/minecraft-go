@@ -33,6 +33,38 @@ func Replaceable(target core.BlockID, newLevel uint8) bool {
 	return core.FluidLevel(target) > newLevel
 }
 
+// strongerWrite 在同一 tick 内合并两个写往同一目标格的候选值，返回应当生效
+// 的一个：流体候选优先于空气候选；两者都是流体时取流体等级更小（更强）的
+// 一个（spec.md「同 tick 冲突写入取最强者」）。
+//
+// core.FluidLevel 对 core.AirID 也返回 0（见 internal/core/fluid.go），
+// 若不先用 IsFluid 分流，裸比较 FluidLevel 会让空气被误判成「等级 0，最强」
+// 而赢——因此这里显式分两步比较，不能只写一行 FluidLevel 比大小。
+//
+// 本函数是可交换、可结合的（strongerWrite(a,b)==strongerWrite(b,a)，且对
+// 一组候选值反复两两合并的结果与合并次序无关），调用方可以按任意次序把一组
+// 候选值两两 fold 到一起，结果确定——这是 Advance 用它合并同 tick 冲突写入
+// 时不必关心处理次序的原因。
+func strongerWrite(a, b core.BlockID) core.BlockID {
+	aFluid, bFluid := core.IsFluid(a), core.IsFluid(b)
+	if aFluid != bFluid {
+		if aFluid {
+			return a
+		}
+		return b
+	}
+	if !aFluid {
+		// 两者都不是流体：在 Advance 当前的写入来源下只会是 AirID 与
+		// AirID（evalCell 从不产出非流体、非空气的写入值），值相同，
+		// 返回哪个都一样。
+		return a
+	}
+	if core.FluidLevel(a) <= core.FluidLevel(b) {
+		return a
+	}
+	return b
+}
+
 // horizontalNeighbors 返回 pos 的四个水平相邻格（不含上下）。
 func horizontalNeighbors(pos core.BlockPos) [4]core.BlockPos {
 	return [4]core.BlockPos{
@@ -116,6 +148,11 @@ func evalCell(pos core.BlockPos, w FluidWorld) map[core.BlockPos]core.BlockID {
 		// 等级 7 已是传播下界，世界中不得出现等级 > 7 的流体方块。
 		return writes
 	}
+	// 用算式而非 switch/查表算出目标编号，依赖 internal/core/block.go 里
+	// WaterSourceID..WaterLevel7ID 这 8 个编号连续排布、且 WaterLevelN ==
+	// WaterSourceID+N 这一稳定约定（该文件注释里明确写了这些编号只能追加、
+	// 不能重排，所以这条依赖是安全的）。测试侧（e2e_test.go）刻意不复用
+	// 同一算式，改用具名常量数组断言，避免两边用同一条算式互相"对齐出错"。
 	nextID := core.WaterSourceID + core.BlockID(nextLevel)
 	for _, n := range horizontalNeighbors(pos) {
 		if Replaceable(w.BlockAt(n), nextLevel) {
