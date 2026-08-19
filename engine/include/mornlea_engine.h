@@ -4,7 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MORNLEA_ENGINE_ABI_VERSION 3u
+/* ABI v4:worldgen `MGW1` header 的材料表由 13 项扩到 14 项(末项 water,
+ * 占用 v3 的 reserved 槽,header 总长仍为 564 字节)。engine 与 Go 侧是同一
+ * 不可跨版本混装的 release unit。 */
+#define MORNLEA_ENGINE_ABI_VERSION 4u
 
 #define MORNLEA_STATUS_OK 0u
 #define MORNLEA_STATUS_ABI_VERSION 1u

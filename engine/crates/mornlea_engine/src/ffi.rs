@@ -14,7 +14,7 @@ use crate::worldgen::{
     parse_chunk_input, parse_probe_input, run_probe,
 };
 
-pub(crate) const ABI_VERSION: u32 = 3;
+pub(crate) const ABI_VERSION: u32 = 4;
 
 // 输入长度校验委托给 step::step_input_is_valid（内部使用 STEP_HEADER_BYTES），此常量保留供 ABI 文档对齐。
 #[allow(dead_code)]
@@ -820,8 +820,9 @@ mod mesh_tests {
     use super::*;
 
     #[test]
-    fn exported_version_is_three() {
-        assert_eq!(mornlea_engine_abi_version(), 3);
+    fn exported_version_is_four() {
+        // engine ABI v4:worldgen 材料表 13 → 14(末项 water)。
+        assert_eq!(mornlea_engine_abi_version(), 4);
     }
 }
 #[cfg(test)]
@@ -2520,7 +2521,7 @@ mod tests {
         WORLDGEN_CHUNK_INPUT_BYTES, WORLDGEN_HEADER_BYTES, WORLDGEN_PROBE_RECORD_BYTES,
     };
 
-    /// 构造一个合法的 worldgen header:seed 42、互异材料表 1..=13、恒等 perm。
+    /// 构造一个合法的 worldgen header:seed 42、互异材料表 1..=14(末项 water)、恒等 perm。
     fn worldgen_header() -> Vec<u8> {
         let mut bytes = vec![0u8; WORLDGEN_HEADER_BYTES];
         bytes[0..4].copy_from_slice(b"MGW1");
@@ -2528,7 +2529,7 @@ mod tests {
         bytes[8..16].copy_from_slice(&42i64.to_le_bytes());
         bytes[16..20].copy_from_slice(&(-64i32).to_le_bytes());
         bytes[20..24].copy_from_slice(&320i32.to_le_bytes());
-        for (index, id) in (1u16..=13).enumerate() {
+        for (index, id) in (1u16..=14).enumerate() {
             // 材料表刻意避开 0:air=1 便于区分“输出缓冲原样”与“生成的空气”。
             bytes[24 + index * 2..26 + index * 2].copy_from_slice(&id.to_le_bytes());
         }

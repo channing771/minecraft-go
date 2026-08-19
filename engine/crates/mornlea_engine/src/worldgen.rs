@@ -24,6 +24,10 @@ pub(crate) const CHUNK_VOLUME: usize =
 
 // 地形常量,与 Go 版逐字一致。
 const SEA_LEVEL: f64 = 64.0;
+/// 海平面的整数 Y 值,注水判定用。单独写成 i32 常量而不是由 `SEA_LEVEL`
+/// 转换,是为了避免在常量上下文里做浮点转换;`sea_level_constants_agree`
+/// 测试钉死两者一致。
+const SEA_LEVEL_Y: i32 = 64;
 const TERRAIN_AMP: f64 = 48.0;
 const TERRAIN_SCALE: f64 = 1.0 / 256.0;
 const OCTAVES: usize = 5;
@@ -55,8 +59,14 @@ const OAK_TREE_SALT: u64 = 0xA24B_AED4_963E_E407;
 
 /// 调用方传入的方块材料表;engine 不硬编码任何 BlockID。
 ///
-/// 13 项必须两两互异:air 是空判定哨兵,其余 ID 在分层/矿石/树逻辑中
-/// 参与等值比较,重复 ID 会破坏与 Go 语义的对应关系,由 FFI 层拒绝。
+/// 14 项必须两两互异,**唯一例外是 `water` 允许等于 `air`**:air 是空判定
+/// 哨兵,其余 ID 在分层/矿石/树逻辑中参与等值比较,重复 ID 会破坏与 Go
+/// 语义的对应关系,由 FFI 层拒绝。
+///
+/// `water == air` 是 Go 侧 `fluidEnabled` 关闭时的门控编码(design D6):
+/// water 只被写入、从不参与等值比较,填 air 编号即让注水步退化为把空气
+/// 写回空气,生成结果与未引入流体的基线逐位一致,Rust 侧因此不需要任何
+/// 开关分支。
 #[derive(Clone, Copy)]
 pub(crate) struct Materials {
     pub air: u16,
@@ -72,11 +82,13 @@ pub(crate) struct Materials {
     pub coal_ore: u16,
     pub oak_log: u16,
     pub leaves: u16,
+    /// 海平面注水写入的方块;等于 `air` 时注水整体退化为空操作。
+    pub water: u16,
 }
 
 impl Materials {
     /// 按 header 编码顺序展开为数组,供互异性校验使用。
-    pub(crate) fn as_array(&self) -> [u16; 13] {
+    pub(crate) fn as_array(&self) -> [u16; 14] {
         [
             self.air,
             self.stone,
@@ -91,6 +103,7 @@ impl Materials {
             self.coal_ore,
             self.oak_log,
             self.leaves,
+            self.water,
         ]
     }
 }
@@ -251,13 +264,31 @@ impl WorldgenParams {
         self.generated_block_at(x, y, z, height)
     }
 
-    /// 单点基础方块查询,与 Go `BaseBlockAt` 一致:地形非空优先,空气处叠加橡树。
+    /// 单点基础方块查询:地形非空优先,空气处叠加橡树,仍为空气时叠加海水。
+    ///
+    /// 注水排在最后一层,与 `generate_chunk` 里"注水在 apply_oak_trees 之后"
+    /// 的顺序对应:只有最终仍是空气的格才注水,因此地表分层、矿石与橡树的
+    /// 结果完全不受影响。
     pub(crate) fn base_block_at(&self, x: i32, y: i32, z: i32) -> u16 {
         let base = self.terrain_block_at(x, y, z);
         if base != self.materials.air {
             return base;
         }
-        self.tree_block_at(x, y, z)
+        let tree = self.tree_block_at(x, y, z);
+        if tree != self.materials.air {
+            return tree;
+        }
+        self.sea_block_at(y)
+    }
+
+    /// 海平面注水的单点形式:世界高度范围内且 `y <= SEA_LEVEL_Y` 时为 water,
+    /// 否则为 air。Y 界外不注水,与 `generate_chunk` 只写 `[MIN_Y, MAX_Y)` 一致。
+    fn sea_block_at(&self, y: i32) -> u16 {
+        if (WORLD_MIN_Y..=SEA_LEVEL_Y).contains(&y) {
+            self.materials.water
+        } else {
+            self.materials.air
+        }
     }
 
     /// 返回固定候选格中的有效橡树,与 Go `oakTreeForCell` 一致。
@@ -340,6 +371,27 @@ impl WorldgenParams {
             }
         }
         self.apply_oak_trees(chunk_x, chunk_z, dense);
+        self.flood_sea_level(dense);
+    }
+
+    /// 海平面注水:把海平面及以下**仍为空气**的格改写为 `materials.water`。
+    ///
+    /// 必须排在 `apply_oak_trees` 之后:注水只填最终空气格,不参与任何分层、
+    /// 矿石或树木判定,因此这三者的生成结果逐位不变。
+    ///
+    /// 无门控分支:Go 侧关闭 `fluidEnabled` 时 `materials.water == materials.air`,
+    /// 本步逐格把空气写回空气,输出与未引入流体的基线逐位一致(design D6)。
+    fn flood_sea_level(&self, dense: &mut [u16]) {
+        let m = self.materials;
+        const LAYER_CELLS: usize = (SECTION_SIZE as usize) * (SECTION_SIZE as usize);
+        for y in WORLD_MIN_Y..=SEA_LEVEL_Y {
+            let layer = (y - WORLD_MIN_Y) as usize * LAYER_CELLS;
+            for cell in &mut dense[layer..layer + LAYER_CELLS] {
+                if *cell == m.air {
+                    *cell = m.water;
+                }
+            }
+        }
     }
 
     /// 把覆盖当前区块的有效候选树写入 dense 数组,与 Go `applyOakTrees` 一致:
@@ -448,7 +500,10 @@ pub(crate) fn dense_index(lx: i32, y: i32, lz: i32) -> usize {
 //
 // 两个 worldgen 入口共用 magic `MGW1` 的 564 字节 header:
 // magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
-// 材料表 13×u16(26) + reserved u16(2) + perm 512×u8(512)。
+// 材料表 14×u16(28) + perm 512×u8(512)。
+// engine ABI v4 把材料表从 13 项扩到 14 项(末项 water),新增的 u16 正好
+// 占用 v3 预留的 reserved 槽(偏移 50),因此 header 总长与 perm 偏移不变;
+// v3 与 v4 的字节布局不可混装,由 ABI 版本号拦截。
 // chunk 入口追加 chunk_x/chunk_z(8);probe 入口追加 record_count(4) 与
 // 每条 16 字节的查询记录(mode + wx/wy/wz)。
 
@@ -484,15 +539,19 @@ fn read_i64(bytes: &[u8], offset: usize) -> i64 {
 /// 解析并校验共用 header;任何违约返回 None(FFI 层转为 StatusInput)。
 ///
 /// 校验项:magic/layout 精确匹配、Y 范围必须与内核常量一致(防止 Go/Rust
-/// 世界高度漂移)、reserved 必须为零、材料表 13 项两两互异(air 是哨兵,
-/// 重复 ID 会破坏与 Go 语义的对应关系)。perm 为 u8,取值域即合法域。
+/// 世界高度漂移)、材料表 14 项两两互异(air 是哨兵,重复 ID 会破坏与 Go
+/// 语义的对应关系)。perm 为 u8,取值域即合法域。
+///
+/// 互异性的**唯一豁免**是 `water == air`:这是 Go 侧 `fluidEnabled` 关闭时
+/// 的门控编码(design D6),water 只被写入、从不参与等值比较,取 air 编号
+/// 即让注水退化为空操作。water 与其余 12 项重复仍然拒绝——那只可能是
+/// Go/Rust 材料表漂移。
 pub(crate) fn parse_header(bytes: &[u8]) -> Option<WorldgenParams> {
     if bytes.len() < WORLDGEN_HEADER_BYTES
         || &bytes[0..4] != b"MGW1"
         || read_u32(bytes, 4) != 1
         || read_i32(bytes, 16) != WORLD_MIN_Y
         || read_i32(bytes, 20) != WORLD_MAX_Y
-        || read_u16(bytes, 50) != 0
     {
         return None;
     }
@@ -511,11 +570,15 @@ pub(crate) fn parse_header(bytes: &[u8]) -> Option<WorldgenParams> {
         coal_ore: read_u16(bytes, 44),
         oak_log: read_u16(bytes, 46),
         leaves: read_u16(bytes, 48),
+        water: read_u16(bytes, 50),
     };
     let ids = materials.as_array();
+    // as_array 的顺序:0 = air,13 = water。(0, 13) 这一对是门控豁免。
+    const AIR_INDEX: usize = 0;
+    const WATER_INDEX: usize = 13;
     for i in 0..ids.len() {
         for j in i + 1..ids.len() {
-            if ids[i] == ids[j] {
+            if ids[i] == ids[j] && !(i == AIR_INDEX && j == WATER_INDEX) {
                 return None;
             }
         }
@@ -609,7 +672,13 @@ mod tests {
     use super::*;
 
     /// 测试材料表:取值互异即可,具体数值不影响结构断言。
+    /// water 取 13(与 air 不同)代表门控开启态。
     fn materials() -> Materials {
+        materials_with_water(13)
+    }
+
+    /// 指定 water 编号的测试材料表:传 0(= air)即门控关闭态。
+    fn materials_with_water(water: u16) -> Materials {
         Materials {
             air: 0,
             stone: 1,
@@ -624,6 +693,7 @@ mod tests {
             coal_ore: 10,
             oak_log: 11,
             leaves: 12,
+            water,
         }
     }
 
@@ -637,6 +707,31 @@ mod tests {
             seed,
             materials: materials(),
             perm,
+        }
+    }
+
+    /// 打乱的 perm 表。恒等 perm 在整数格点噪声恒为 0,地形近乎平面、
+    /// 海平面以下没有空气格,注水断言会退化成空断言;这里用确定性的
+    /// LCG 洗牌造出真实起伏的地形。
+    fn shuffled_perm(seed: u64) -> [u8; 512] {
+        let mut base: [u8; 256] = std::array::from_fn(|i| i as u8);
+        let mut state = seed | 1;
+        for i in (1..256usize).rev() {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let j = (state >> 33) as usize % (i + 1);
+            base.swap(i, j);
+        }
+        std::array::from_fn(|i| base[i & 255])
+    }
+
+    /// 起伏地形 + 指定 water 编号的参数;注水相关测试统一用它。
+    fn params_water(seed: i64, water: u16) -> WorldgenParams {
+        WorldgenParams {
+            seed,
+            materials: materials_with_water(water),
+            perm: shuffled_perm(seed as u64),
         }
     }
 
@@ -713,5 +808,116 @@ mod tests {
         assert_eq!(oak_tree_block_at(&tree, &m, 1, 104, 1), m.air);
         assert_eq!(oak_tree_block_at(&tree, &m, 2, 102, 2), m.air);
         assert_eq!(oak_tree_block_at(&tree, &m, 2, 102, 1), m.leaves);
+    }
+    #[test]
+    fn sea_level_constants_agree() {
+        // SEA_LEVEL_Y 是 SEA_LEVEL 的整数副本,漂移会让注水高度与地形高度脱节。
+        assert_eq!(f64::from(SEA_LEVEL_Y), SEA_LEVEL);
+    }
+
+    /// 生成"干"(water = air,门控关闭)与"湿"(water = 13,门控开启)两份
+    /// 同种子同区块 dense,并返回被注水改写的格数。
+    fn dry_and_wet(seed: i64, cx: i32, cz: i32) -> (Vec<u16>, Vec<u16>, usize) {
+        let mut dry = vec![0u16; CHUNK_VOLUME];
+        let mut wet = vec![0u16; CHUNK_VOLUME];
+        params_water(seed, 0).generate_chunk(cx, cz, &mut dry);
+        params_water(seed, 13).generate_chunk(cx, cz, &mut wet);
+        let changed = dry.iter().zip(&wet).filter(|(a, b)| a != b).count();
+        (dry, wet, changed)
+    }
+
+    #[test]
+    fn flooding_only_replaces_air_at_or_below_sea_level() {
+        let (dry, wet, changed) = dry_and_wet(42, 3, -5);
+        // 夹具前提:这个区块必须真的有海平面以下的空气格,否则下面全是空断言。
+        assert!(changed > 0, "夹具失效:该区块没有可注水的格");
+        for y in WORLD_MIN_Y..WORLD_MAX_Y {
+            for lz in 0..SECTION_SIZE {
+                for lx in 0..SECTION_SIZE {
+                    let index = dense_index(lx, y, lz);
+                    let expected = if dry[index] == 0 && y <= SEA_LEVEL_Y {
+                        13
+                    } else {
+                        dry[index]
+                    };
+                    assert_eq!(wet[index], expected, "({lx},{y},{lz})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn flooding_preserves_terrain_ore_and_trees() {
+        let (dry, wet, changed) = dry_and_wet(42, 3, -5);
+        assert!(changed > 0, "夹具失效:该区块没有可注水的格");
+        // 分层(石/土/草/基岩/雪/沙/黏土/砂砾)、矿石与树木的每一格都必须原样保留。
+        let mut seen_ore = false;
+        let mut seen_tree = false;
+        for (index, &block) in dry.iter().enumerate() {
+            if block == 0 {
+                continue;
+            }
+            assert_eq!(wet[index], block, "注水改写了非空气格 index={index}");
+            seen_ore |= block == 9 || block == 10;
+            seen_tree |= block == 11 || block == 12;
+        }
+        // 夹具前提:该区块必须真的含矿石与树木,否则"不受影响"是空断言。
+        assert!(seen_ore, "夹具失效:该区块没有矿石");
+        assert!(seen_tree, "夹具失效:该区块没有树木");
+    }
+
+    #[test]
+    fn gate_off_generation_contains_no_water() {
+        // 门控关闭(water = air)时,输出里不允许出现 13 号方块,
+        // 且 dense 与"注水前"的写入集合一致:所有空气格仍是空气。
+        let (dry, _, _) = dry_and_wet(42, 3, -5);
+        assert!(!dry.contains(&13));
+        assert!(dry.contains(&0), "夹具失效:关闭态下该区块应仍有空气格");
+    }
+
+    #[test]
+    fn chunk_and_pointwise_agree_on_water() {
+        let p = params_water(7, 13);
+        let mut dense = vec![0u16; CHUNK_VOLUME];
+        p.generate_chunk(1, -1, &mut dense);
+        let mut water_cells = 0;
+        for y in WORLD_MIN_Y..WORLD_MAX_Y {
+            for lz in 0..SECTION_SIZE {
+                for lx in 0..SECTION_SIZE {
+                    let wx = (1 << SECTION_SHIFT) + lx;
+                    let wz = (-1 << SECTION_SHIFT) + lz;
+                    let block = dense[dense_index(lx, y, lz)];
+                    assert_eq!(block, p.base_block_at(wx, y, wz), "({wx},{y},{wz})");
+                    if block == 13 {
+                        water_cells += 1;
+                        assert!(y <= SEA_LEVEL_Y, "海平面以上出现水 ({wx},{y},{wz})");
+                    }
+                }
+            }
+        }
+        assert!(water_cells > 0, "夹具失效:该区块没有水");
+    }
+
+    #[test]
+    fn header_allows_water_equal_to_air_but_rejects_other_duplicates() {
+        // 门控关闭时 Go 侧把 water 填成 air 编号,header 必须接受。
+        let mut bytes = vec![0u8; WORLDGEN_HEADER_BYTES];
+        bytes[0..4].copy_from_slice(b"MGW1");
+        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        bytes[16..20].copy_from_slice(&WORLD_MIN_Y.to_le_bytes());
+        bytes[20..24].copy_from_slice(&WORLD_MAX_Y.to_le_bytes());
+        for index in 0..13usize {
+            let id = (index as u16) + 1;
+            bytes[24 + index * 2..26 + index * 2].copy_from_slice(&id.to_le_bytes());
+        }
+        // air = 1,water = 1:门控关闭态,必须通过。
+        bytes[50..52].copy_from_slice(&1u16.to_le_bytes());
+        assert!(parse_header(&bytes).is_some());
+        // water = 14:门控开启态,必须通过。
+        bytes[50..52].copy_from_slice(&14u16.to_le_bytes());
+        assert!(parse_header(&bytes).is_some());
+        // water = stone(2):这只可能是材料表漂移,必须拒绝。
+        bytes[50..52].copy_from_slice(&2u16.to_le_bytes());
+        assert!(parse_header(&bytes).is_none());
     }
 }
