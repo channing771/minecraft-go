@@ -90,6 +90,11 @@ func NewRegistry() *Registry {
 // Opaque 返回方块是否完全不透明。实现 mesh.Registry。
 // 流体（IsFluid）与玻璃、树叶一样是透明方块：本任务组只登记流体的方块属性，
 // 不新增流体材质与渲染 pass，流体沿用既有的透明方块判定路径。
+// 何时删：本行的 `!core.IsFluid(id)` 与下面 FaceVisible 里的补偿分支性质
+// 不同、不必联动删除——它不是在补偿"流体不在 snapshot ids 范围里"这件事，
+// 而是在陈述一个与该范围无关、恒成立的事实：流体本来就不是不透明方块（与
+// 玻璃、树叶同类）。即使后续变更把流体纳入 NewRegistry 的 ids 范围，这行
+// 判定依然正确，可以继续保留。
 func (r *Registry) Opaque(id world.BlockID) bool {
 	return core.RegisteredBlock(id) && id != core.AirID && id != core.GlassID &&
 		id != core.LeavesID && !core.IsFluid(id)
@@ -104,6 +109,14 @@ func (r *Registry) Opaque(id world.BlockID) bool {
 // 这里对 id 和 adjacent 两侧都显式排除流体，与 Rust 的「缺条目即不出面」
 // 保持一致，否则 native_parity_test.go 会因 Go/Rust 对流体邻格的判定分歧而
 // 报告 quad 数不一致。
+// 何时删：`core.IsFluid(id)` 与 `core.IsFluid(adjacent)` 这两处是补偿分支，
+// 绑定的是"流体不在 snapshot ids 范围里"这件事本身——一旦后续变更把流体纳入
+// NewRegistry 的 ids 范围（此时流体在 Visibility 位图里有了真实条目），
+// 必须同步删掉这两处判定。这个函数只在 BuildRegistrySnapshot 构建阶段被
+// 调用一次来烘焙 Visibility 位图（见 internal/mesh/registry.go:65），不是
+// 每帧路径；若照惯性把这两处特判留着，流体在 snapshot 里的每一对
+// (id,adjacent) 都会被烘焙成永久不可见，水将永远画不出来，而且因为没有
+// 测试断言"流体应当可见"，全部既有测试仍会保持全绿、不会报警。
 func (r *Registry) FaceVisible(id, adjacent world.BlockID) bool {
 	if !core.RegisteredBlock(id) || id == core.AirID || core.IsFluid(id) ||
 		!core.RegisteredBlock(adjacent) || core.IsFluid(adjacent) || r.Opaque(adjacent) {
