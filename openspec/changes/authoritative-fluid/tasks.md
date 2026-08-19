@@ -55,8 +55,8 @@
 
 ## 8. 配置与 tunables
 
-- [ ] 8.1 `internal/config` 新增 `fluidEnabled`（默认 `false`），config version 保持 1；补默认值与非法值测试。验证：`go test ./internal/config -race -count=1`
-- [ ] 8.2 `internal/sim/tunables.go` 新增 `FluidFlowDelayTicks`（默认 5）与 `FluidUpdatesPerTick`（默认 512），按既有 tunable 约定接入快照。验证：`go test ./internal/sim -race -count=1`
+- [x] 8.1 `internal/config` 新增 `fluidEnabled`（默认 `false`），config version 保持 1；补默认值与非法值测试。验证：`go test ./internal/config -race -count=1`
+- [x] 8.2 `internal/sim/tunables.go` 新增 `FluidFlowDelayTicks`（默认 5）与 `FluidUpdatesPerTick`（默认 512），按既有 tunable 约定接入快照。验证：`go test ./internal/sim -race -count=1`
 
 ## 9. 架构门禁
 

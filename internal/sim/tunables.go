@@ -50,7 +50,41 @@ type Tunables struct {
 	// world.FurnaceSlot.Valid() 用编译期常量 core.FurnaceBurnTicks 校验 BurnTicks，
 	// 超过会导致该熔炉槽存盘失败。
 	FurnaceBurnTicks uint16 `json:"furnaceBurnTicks"`
+	// FluidFlowDelayTicks 是流体待更新项从入队到可被处理的延迟 tick 数
+	// （变更 authoritative-fluid，internal/fluid.Queue.Advance 的 delay 参数）。
+	//
+	// 它同时是"水看起来在流动而不是瞬移"的观感来源，也是天然的合并窗口——
+	// 同一格在延迟窗口内被重复标记只会合并成一次到期处理。internal/fluid
+	// 本身不读取这个值（archcheck 禁止 fluid 依赖 sim），本字段只是快照源，
+	// 由 sim 侧在 tick 入口读出后作为调用参数传给 fluid.Queue.Advance——
+	// 该接线由后续任务组（4.1）交付，本字段目前没有消费方。
+	FluidFlowDelayTicks uint32 `json:"fluidFlowDelayTicks"`
+	// FluidUpdatesPerTick 是单个权威 tick 内允许处理的流体格数上限
+	// （变更 authoritative-fluid，internal/fluid.Queue.Advance 的 budget 参数）。
+	//
+	// 这是一条硬上界，不是软限流：超出预算的待更新项按 internal/fluid 既定
+	// 的全序（lessPos）原样保留到后续 tick 继续处理，绝不丢弃——这正是规格
+	// "预算不改变平衡态"（受限预算下最终收敛到与不受限预算相同的平衡态）
+	// 这条保证成立的前提。若未来任何改动让超额项被丢弃而不是顺延，平衡态
+	// 保证就不再成立。
+	//
+	// 收敛所需的 tick 数不单调于本预算：受限预算下的收敛速度可能比不受限
+	// 更快也可能更慢，取决于水体形状与处理顺序如何与合并窗口相互作用——
+	// 实测部分随机形状在 budget=512 下 118 tick 收敛，不受限反而要 126 tick。
+	// 因此收敛 tick 数不得被当作性能指标使用，也不能假设调大预算必然让水
+	// 更快静止。同 fluid 一样，本字段目前没有消费方，接线由任务组 4.1 交付。
+	FluidUpdatesPerTick uint32 `json:"fluidUpdatesPerTick"`
 }
+
+// defaultFluidFlowDelayTicks 与 defaultFluidUpdatesPerTick 是流体两个 tunable
+// 的编译期默认值。两者暂无专属消费方文件（接线由任务组 4.1 交付），因此就近
+// 定义在这里，而不是像 defaultRegenDelayTicks 等常量那样放在各自的消费方文件。
+const (
+	// defaultFluidFlowDelayTicks 见 Tunables.FluidFlowDelayTicks 的字段说明。
+	defaultFluidFlowDelayTicks = 5
+	// defaultFluidUpdatesPerTick 见 Tunables.FluidUpdatesPerTick 的字段说明。
+	defaultFluidUpdatesPerTick = 512
+)
 
 // DefaultTunables 返回编译期默认参数。它是配置文件缺省时的取值，
 // 也是调试面板“重置”的目标值。
@@ -66,6 +100,8 @@ func DefaultTunables() Tunables {
 		SpawnRadius:                defaultSpawnRadius,
 		FurnaceSmeltTicks:          core.FurnaceSmeltTicks,
 		FurnaceBurnTicks:           core.FurnaceBurnTicks,
+		FluidFlowDelayTicks:        defaultFluidFlowDelayTicks,
+		FluidUpdatesPerTick:        defaultFluidUpdatesPerTick,
 	}
 }
 
