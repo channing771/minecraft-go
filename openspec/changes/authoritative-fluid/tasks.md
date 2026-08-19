@@ -16,12 +16,12 @@
 
 ## 3. 决策验证关口（D5 成立与否在此裁决）
 
-- [ ] 3.1 **重扫不动点**：水体推进至无变更 → 清空队列 → 边界重扫（流体格及其空气邻居入队）→ 断言后续推进零变更。这是「队列不持久化」决策的唯一依据。验证：`go test ./internal/fluid -race -count=1 -run Rescan`
-- [ ] 3.2 **未平衡态重启收敛**：未到平衡时清空队列并重扫，断言最终平衡态与不清空时逐格一致。验证：`go test ./internal/fluid -race -count=1 -run Rescan`
-- [ ] 3.3 **预算等价**：同一溃坝在 `budget=512` 与不受限预算下推进至无变更，断言最终状态逐格一致。验证：`go test ./internal/fluid -race -count=1 -run Budget`
-- [ ] 3.4 **入队序无关**：同一组待更新格以两种不同入队顺序推进，断言每 tick 变更集与最终状态逐格一致。验证：`go test ./internal/fluid -race -count=1 -run Order`
-- [ ] 3.5 **有限收敛**：随机初始水体（固定种子）在有限 tick 内到达不动点，断言无振荡。验证：`go test ./internal/fluid -race -count=1 -run Converge`
-- [ ] 3.6 关口裁决：若 3.1 或 3.2 不成立，**停止后续任务**，回头修订 `design.md` 的 D5 与 `specs/authoritative-fluid/spec.md` 的对应场景（改为持久化队列），不得弱化测试。
+- [x] 3.1 **重扫不动点**：水体推进至无变更 → 清空队列 → 边界重扫（流体格及其空气邻居入队）→ 断言后续推进零变更。这是「队列不持久化」决策的唯一依据。验证：`go test ./internal/fluid -race -count=1 -run Rescan`
+- [x] 3.2 **未平衡态重启收敛**：未到平衡时清空队列并重扫，断言最终平衡态与不清空时逐格一致。验证：`go test ./internal/fluid -race -count=1 -run Rescan`
+- [x] 3.3 **预算等价**：同一溃坝在 `budget=512` 与不受限预算下推进至无变更，断言最终状态逐格一致。验证：`go test ./internal/fluid -race -count=1 -run Budget`
+- [x] 3.4 **入队序无关**：同一组待更新格以两种不同入队顺序推进，断言每 tick 变更集与最终状态逐格一致。验证：`go test ./internal/fluid -race -count=1 -run Order`
+- [x] 3.5 **有限收敛**：随机初始水体（固定种子）在有限 tick 内到达不动点，断言无振荡。验证：`go test ./internal/fluid -race -count=1 -run Converge`
+- [x] 3.6 关口裁决：若 3.1 或 3.2 不成立，**停止后续任务**，回头修订 `design.md` 的 D5 与 `specs/authoritative-fluid/spec.md` 的对应场景（改为持久化队列），不得弱化测试。
 
 ## 4. 权威模拟集成
 
