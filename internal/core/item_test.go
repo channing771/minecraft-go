@@ -342,6 +342,18 @@ func TestFluidBlocksDoNotProduceItems(t *testing.T) {
 	}
 }
 
+// TestNoItemPlacesAsFluid 是 spec Scenario「流体不可放置」的穷举守护：当前没有
+// 任何物品能放置为流体方块（因为没有任何物品映射到流体 BlockID），这条断言
+// 锁住这个事实，将来有人加"水桶"一类物品让 ItemPlacement 映射到流体编号时，
+// 这里会第一个报警。
+func TestNoItemPlacesAsFluid(t *testing.T) {
+	for item := core.ItemID(0); item < core.ItemIDMax; item++ {
+		if block, ok := core.ItemPlacement(item); ok && core.IsFluid(block) {
+			t.Fatalf("物品 %d 可放置为流体方块 %d", item, block)
+		}
+	}
+}
+
 func TestBlockDropMapping(t *testing.T) {
 	cases := []struct {
 		block core.BlockID
