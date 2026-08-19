@@ -117,9 +117,24 @@ func TestFluidChangesBroadcastOverExistingChunkChannel(t *testing.T) {
 		t.Fatalf("镜像中第 8 格 %+v=%d，想要空气", beyond, block)
 	}
 
+	// 先确认水确实越过了 x=0 这条区块边界，否则下面的跨区块哈希比对会退化成
+	// "比了两块一模一样的草地"。
+	acrossChunkSeam := core.BlockPos{X: fluidPublicationSource.X - 7, Y: 1, Z: fluidPublicationSource.Z}
+	if block, ok := mirror.BlockAt(core.Overworld, acrossChunkSeam); !ok || block != core.WaterLevel7ID {
+		t.Fatalf("镜像中越过区块边界的一格 %+v=%d，想要 %d", acrossChunkSeam, block, core.WaterLevel7ID)
+	}
+	if acrossChunkSeam.Chunk() == fluidPublicationSource.Chunk() {
+		t.Fatalf("%+v 与水源同属区块 %+v，没有跨区块", acrossChunkSeam, acrossChunkSeam.Chunk())
+	}
+
 	// 逐格一致：镜像区块与权威区块的整块哈希与 revision 必须完全相同。
+	//
+	// 这两个区块必须**跨区块边界**，比对才有意义：水源在 (0,1,-5)，向四个水平
+	// 方向各铺 7 格，因此水同时落在区块 {0,-1}（水源自身与 -Z 方向）与区块
+	// {-1,-1}（-X 方向越过 x=0 边界的那几格）。fluidPublicationSource.Chunk()
+	// 与 farthest.Chunk() 都是 {0,-1}，写成那样等于把同一块比了两次。
 	for _, position := range []core.ChunkPos{
-		fluidPublicationSource.Chunk(), farthest.Chunk(),
+		{X: 0, Z: -1}, {X: -1, Z: -1},
 	} {
 		authorityHash, authorityRevision, ok := host.world.ChunkHash(core.Overworld, position)
 		if !ok {

@@ -625,3 +625,39 @@ func TestFluidRescanDropsChunkThatLeavesScope(t *testing.T) {
 		t.Fatalf("重新进入后入队 %d 项，完整重扫应为 %d 项", got, reference.Len())
 	}
 }
+
+// TestFluidRescanUsesQueueOfItsOwnDimension 锁定硬约束 1 在**重扫路径**上的落实：
+// runFluidRescans 必须按 key.Dimension 取队列。
+//
+// TestFluidQueuesArePerDimension 只证明 fluidQueue 会按维度分桶，挡不住调用点
+// 手滑写成 fluidQueue(core.Overworld)——那种写法下全部单维度测试仍然全绿，多维度
+// 时静默混桶，处理全序退化成偏序（internal/fluid 的比较键不含维度）。这里让被测
+// 维度**不是** core.Overworld，混桶就会立刻暴露：水会进错队列。
+func TestFluidRescanUsesQueueOfItsOwnDimension(t *testing.T) {
+	const other = core.Overworld + 1
+	dimension, positions := fluidBasinDimension()
+	dimension.id = other
+	engine := NewEngine(0, 0)
+	engine.tunables = DefaultTunables()
+	engine.tunables.FluidRescanCellsPerTick = 1 << 20
+	engine.dimensions[other] = dimension
+	engine.fluidScope = make(map[core.ChunkKey]struct{}, len(positions))
+	for _, pos := range positions {
+		key := core.ChunkKey{Dimension: other, Pos: pos}
+		engine.fluidScope[key] = struct{}{}
+		engine.fluidRescan.enqueueChunk(key)
+	}
+	for range len(positions) {
+		engine.runFluidRescans(0, 1)
+	}
+	if len(engine.fluidRescan.pending) != 0 {
+		t.Fatalf("重扫未完成，待办剩 %d 项", len(engine.fluidRescan.pending))
+	}
+	if got := engine.fluidQueues[other]; got == nil || got.Len() == 0 {
+		t.Fatal("维度 other 的队列是空的：重扫没有把水放进它自己维度的队列")
+	}
+	if overworld := engine.fluidQueues[core.Overworld]; overworld != nil && overworld.Len() != 0 {
+		t.Fatalf("主世界队列被污染，Len=%d：重扫取队列时没有按 key.Dimension 分桶",
+			overworld.Len())
+	}
+}

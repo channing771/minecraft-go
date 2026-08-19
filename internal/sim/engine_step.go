@@ -16,10 +16,16 @@ const (
 	phasePlayerCommands stepPhase = iota + 1
 	phaseCompanionActions
 	phasePhysicsAdvance
-	// phaseFluidAdvance 位于熔炉推进之后、容器移动之前。流体必须排在本 tick
-	// 全部方块写者（放置、采掘、伙伴放置）之后，才能看到它们刚写下的方块并在
-	// 同一 tick 内对其入队；又必须排在 finishChanges 之前，流动写入才能与其他
-	// 方块变更共用同一批 revision、广播与存盘（design.md D8）。
+	// phaseFluidAdvance 位于熔炉推进之后、容器移动之前。
+	//
+	// 它在 Step 内相对其他方块写者（放置、采掘、伙伴放置）的先后**对结果没有
+	// 影响**：入队项的 dueTick = now + FluidFlowDelayTicks，delay >= 1 时本 tick
+	// 入队的项最早在 now+delay 才可能被取出，因此本 tick 的写入先于还是后于
+	// advanceFluids 都不改变本 tick 的流体处理集合。（事实上 advanceMining 就排在
+	// advanceFluids 之后。）
+	//
+	// 唯一承重的约束是必须早于 finishChanges：流动写入要与其他方块变更共用同一批
+	// revision、广播与存盘（design.md D8）。
 	phaseFluidAdvance
 )
 
