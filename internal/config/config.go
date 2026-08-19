@@ -818,6 +818,9 @@ type Field struct {
 //   - sim.fluidUpdatesPerTick 下限为 1：0 会让流体待更新队列永远不推进，
 //     internal/fluid.Queue.Advance 本身会把负预算钳到 0 但不会把 0 拒绝为
 //     错误，这里在配置层面挡住"预算=0 等于永久卡死"这个几乎必错的取值。
+//   - sim.fluidRescanCellsPerTick 下限同样为 1：重扫预算在区段边界检查，
+//     取 1 也保证每 tick 至少推进一个区段，但取 0 会让待重扫队列永远排不空，
+//     刚进入推进范围的区块里的水永远不会被唤醒。
 func Fields() []Field {
 	return []Field{
 		{Group: "physics", Name: "eyeHeight", Min: 1, Max: 2.2, Step: 0.01},
@@ -842,6 +845,7 @@ func Fields() []Field {
 		{Group: "sim", Name: "furnaceBurnTicks", Min: 1, Max: float64(core.FurnaceBurnTicks), Step: 1},
 		{Group: "sim", Name: "fluidFlowDelayTicks", Min: 0, Max: 2000, Step: 1},
 		{Group: "sim", Name: "fluidUpdatesPerTick", Min: 1, Max: 65536, Step: 1},
+		{Group: "sim", Name: "fluidRescanCellsPerTick", Min: 1, Max: 1048576, Step: 1024},
 
 		{Group: "render", Name: "viewDistance", Min: 2, Max: 64, Step: 1, ReadOnly: true},
 		{Group: "render", Name: "fovDegrees", Min: 30, Max: 110, Step: 1},

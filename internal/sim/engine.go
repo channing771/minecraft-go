@@ -67,6 +67,8 @@ type Engine struct {
 	fluidScopeNext map[core.ChunkKey]struct{}
 	// fluidDimensionScratch 是维度排序的复用缓冲。
 	fluidDimensionScratch []core.DimensionID
+	// fluidRescan 是跨 tick 的边界重扫待办，见 fluidRescanState。
+	fluidRescan fluidRescanState
 
 	// 掉落物 tick 的复用 scratch，避免每 tick 分配固定上限集合。
 	dropKeySeen            map[core.ChunkKey]struct{}

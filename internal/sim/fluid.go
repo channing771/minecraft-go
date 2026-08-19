@@ -181,31 +181,51 @@ var fluidBoundaryPlanes = [4]fluidBoundaryPlane{
 // 实心（见 fluidWorld）而静止并从队列中排空，本区块进来之后没有任何东西会重新
 // 唤醒它们，水面就永久卡死在区块边界上。邻块未就绪时不必处理——它自己进入范围
 // 时会做对称的一次重扫，把本区块边界平面上的流体格入队。
+// 重扫是可中断的：它按 engine.fluidRescan 记录的游标（第几个平面、第几个区段）
+// 续扫，最多花掉 budget 格的检查额度，返回实际花掉的额度与本区块是否已扫完。
+// 未扫完时游标原样保留，下一 tick 从断点继续（见 fluidRescanState）。
 func (engine *Engine) rescanChunkFluids(
 	queue *fluid.Queue,
 	dimension *Dimension,
 	pos core.ChunkPos,
 	now, delay uint64,
-) {
+	budget int,
+) (spent int, done bool) {
 	record := dimension.records[pos]
 	if record == nil || record.Chunk == nil {
-		return
+		engine.fluidRescan.resetCursor()
+		return 0, true
 	}
-	enqueueChunkFluids(
-		queue, dimension, record.Chunk, pos,
-		0, core.SectionMask, 0, core.SectionMask, now, delay,
-	)
-	for _, plane := range fluidBoundaryPlanes {
-		neighborPos := core.ChunkPos{X: pos.X + plane.dx, Z: pos.Z + plane.dz}
-		neighbor := dimension.records[neighborPos]
-		if neighbor == nil || neighbor.State != ChunkReady || neighbor.Chunk == nil {
-			continue
+	state := &engine.fluidRescan
+	// plane == 0 是本区块整块；plane 1..4 依次是四个水平邻块的边界平面。
+	for state.plane <= len(fluidBoundaryPlanes) {
+		chunk, chunkPos := record.Chunk, pos
+		x0, x1, z0, z1 := 0, core.SectionMask, 0, core.SectionMask
+		if state.plane > 0 {
+			plane := fluidBoundaryPlanes[state.plane-1]
+			chunkPos = core.ChunkPos{X: pos.X + plane.dx, Z: pos.Z + plane.dz}
+			neighbor := dimension.records[chunkPos]
+			if neighbor == nil || neighbor.State != ChunkReady || neighbor.Chunk == nil {
+				state.plane++
+				state.section = 0
+				continue
+			}
+			chunk = neighbor.Chunk
+			x0, x1, z0, z1 = plane.x0, plane.x1, plane.z0, plane.z1
 		}
-		enqueueChunkFluids(
-			queue, dimension, neighbor.Chunk, neighborPos,
-			plane.x0, plane.x1, plane.z0, plane.z1, now, delay,
+		used, finished := enqueueChunkFluids(
+			queue, dimension, chunk, chunkPos,
+			x0, x1, z0, z1, now, delay, budget-spent, &state.section,
 		)
+		spent += used
+		if !finished {
+			return spent, false
+		}
+		state.plane++
+		state.section = 0
 	}
+	state.resetCursor()
+	return spent, true
 }
 
 // fluidRescanBlockAt 按 fluidWorld 的边界约定读取 dimension 中的单格：世界高度
@@ -352,6 +372,9 @@ func fluidSectionIsFixedPoint(dimension *Dimension, pos core.ChunkPos, sectionIn
 // TERRAIN_AMP=48，地形高度可低至 16）单列最多约 44 层满格水，整块约 1.1 万格；
 // 若按体积全量入队，八名玩家的最坏兴趣范围（约 200 区块）会在权威 tick 上产生
 // 二百多万次入队，远超 20 TPS 的 50 ms 预算。跳过内部水格后入队量降到 O(表面)。
+// 预算与续扫：section 是「下一个要扫的区段索引」的读写游标，函数在**每个区段
+// 开始前**检查剩余额度，因此单次调用最多超支一个区段。返回实际花掉的额度与
+// 本次调用是否把 x0..z1 这一段的全部区段扫完；未扫完时 *section 停在断点。
 func enqueueChunkFluids(
 	queue *fluid.Queue,
 	dimension *Dimension,
@@ -359,16 +382,25 @@ func enqueueChunkFluids(
 	pos core.ChunkPos,
 	x0, x1, z0, z1 int,
 	now, delay uint64,
-) {
+	budget int,
+	section_ *int,
+) (spent int, done bool) {
 	baseX := pos.X << core.SectionShift
 	baseZ := pos.Z << core.SectionShift
-	for sectionIndex := range core.SectionsPerChunk {
+	for ; *section_ < core.SectionsPerChunk; *section_++ {
+		if spent >= budget {
+			return spent, false
+		}
+		sectionIndex := *section_
 		section := chunk.Section(sectionIndex)
 		if id, uniform := section.Blocks.IsUniform(); uniform {
 			if !core.IsFluid(id) {
+				// 整段跳过只做了一次 IsUniform，按 1 格额度记账。
+				spent++
 				continue
 			}
 			if id == core.WaterSourceID && fluidSectionIsFixedPoint(dimension, pos, sectionIndex) {
+				spent++
 				continue
 			}
 		}
@@ -376,6 +408,7 @@ func enqueueChunkFluids(
 		for localY := range core.SectionSize {
 			for localZ := z0; localZ <= z1; localZ++ {
 				for localX := x0; localX <= x1; localX++ {
+					spent++
 					id := section.Blocks.Get(localX, localY, localZ)
 					if !core.IsFluid(id) {
 						continue
@@ -395,6 +428,106 @@ func enqueueChunkFluids(
 			}
 		}
 	}
+	*section_ = 0
+	return spent, true
+}
+
+// fluidRescanState 是跨 tick 的边界重扫待办。
+//
+// 为什么重扫必须分摊到多个 tick：一个区块进入推进范围时的重扫工作量正比于该
+// 区块（及四个邻块边界平面）里的方块数，与 FluidUpdatesPerTick 无关——那个
+// tunable 只截断「处理队列里已有的项」，截不住「把格放进队列」这一步。评审
+// 实测八名玩家的最坏兴趣范围一次性进入时，单 tick 要花 204 ms 做入队，而 20
+// TPS 的 tick 预算只有 50 ms。因此重扫本身也必须有预算并跨 tick 续做。
+//
+// 为什么延后重扫是安全的：design.md D5 的不动点性质只要求重扫**最终**发生在
+// 该区块处于推进范围内的某个 tick，不要求发生在它进入范围的那一 tick。晚几个
+// tick 唤醒的后果只是水晚一点开始流，没有正确性后果。
+//
+// 为什么离开范围要整条丢弃而不是保留游标：重扫到一半的区块，已入队的那部分
+// 会在区块离开范围后被 Advance 取出、读到 core.BarrierID、产出空写入并从队列
+// 移除；若此时保留游标、等区块回来只补扫剩下的一半，先扫的那一半就永远没人
+// 唤醒了。丢弃后重新进入时从头重扫，代价是重复一次扫描，换来的是完整性。
+type fluidRescanState struct {
+	// pending 是待重扫区块，按进入推进范围的先后排列（同一 tick 内按
+	// activeInterestKeys 的稳定序），先进先扫。
+	pending []core.ChunkKey
+	// queued 与 pending 同集合，用来 O(1) 去重：区块反复进出范围时不能在
+	// pending 里堆出多份。
+	queued map[core.ChunkKey]struct{}
+	// plane/section 是 pending[0] 的续扫游标：plane 0 表示本区块整块，
+	// 1..4 表示 fluidBoundaryPlanes 的第 plane-1 个邻块边界平面；section 是
+	// 该平面里下一个要扫的区段索引。
+	plane   int
+	section int
+}
+
+// resetCursor 把续扫游标复位到「从本区块第 0 个区段重新开始」。
+func (state *fluidRescanState) resetCursor() {
+	state.plane = 0
+	state.section = 0
+}
+
+// enqueueChunk 把 key 登记为待重扫；已在待办里时不重复登记。
+func (state *fluidRescanState) enqueueChunk(key core.ChunkKey) {
+	if state.queued == nil {
+		state.queued = make(map[core.ChunkKey]struct{})
+	}
+	if _, exists := state.queued[key]; exists {
+		return
+	}
+	state.queued[key] = struct{}{}
+	state.pending = append(state.pending, key)
+}
+
+// dropOutOfScope 丢弃已经离开推进范围的待重扫区块。队首被丢弃时游标一并复位，
+// 因为游标只对当时的队首有意义。
+func (state *fluidRescanState) dropOutOfScope(scope map[core.ChunkKey]struct{}) {
+	if len(state.pending) == 0 {
+		return
+	}
+	head := state.pending[0]
+	kept := state.pending[:0]
+	for _, key := range state.pending {
+		if _, inScope := scope[key]; !inScope {
+			delete(state.queued, key)
+			continue
+		}
+		kept = append(kept, key)
+	}
+	state.pending = kept
+	if len(kept) == 0 || kept[0] != head {
+		state.resetCursor()
+	}
+}
+
+// runFluidRescans 在本 tick 的重扫额度内推进待办队列。
+//
+// 额度用完（或待办排空）就停下，未扫完的区块留在队首、游标保留，下一 tick 续扫。
+func (engine *Engine) runFluidRescans(now, delay uint64) {
+	state := &engine.fluidRescan
+	state.dropOutOfScope(engine.fluidScope)
+	budget := int(engine.tunables.FluidRescanCellsPerTick)
+	for budget > 0 && len(state.pending) > 0 {
+		key := state.pending[0]
+		dimension := engine.dimensions[key.Dimension]
+		if dimension == nil {
+			// 维度消失（正常运行里不会发生）：丢弃这条待办，不能让它卡住队首。
+			state.resetCursor()
+			delete(state.queued, key)
+			state.pending = append(state.pending[:0], state.pending[1:]...)
+			continue
+		}
+		spent, done := engine.rescanChunkFluids(
+			engine.fluidQueue(key.Dimension), dimension, key.Pos, now, delay, budget,
+		)
+		budget -= spent
+		if !done {
+			return
+		}
+		delete(state.queued, key)
+		state.pending = append(state.pending[:0], state.pending[1:]...)
+	}
 }
 
 // advanceFluids 在单写者权威 tick 中推进活动兴趣范围内的流体。
@@ -408,11 +541,16 @@ func enqueueChunkFluids(
 // scope 强制，而不是靠「逐区块调用」实现——一格的求值要读它的六个邻格，其中
 // 可能有邻块的格。
 //
-// 推进范围的进出由重扫兜住：任何本 tick 新进入范围的区块都先做一次边界重扫。
-// 这一条同时覆盖了两件事——区块刚变成 ChunkReady（此前它根本不在范围内），
-// 以及一个早已就绪的区块因玩家移动重新进入范围（spec「区块重新进入兴趣范围后
-// 恢复推进」）。后者必须靠重扫恢复：范围外的待更新项仍会被 Advance 取出，读到
-// core.BarrierID 后产出空写入并从队列中移除，若不重扫就再也没有东西唤醒它们。
+// 推进范围的进出由重扫兜住：任何新进入范围的区块都会被登记进 fluidRescan 待办
+// 并在额度允许的 tick 里做一次边界重扫。这一条同时覆盖了两件事——区块刚变成
+// ChunkReady（此前它根本不在范围内），以及一个早已就绪的区块因玩家移动重新进入
+// 范围（spec「区块重新进入兴趣范围后恢复推进」）。后者必须靠重扫恢复：范围外的
+// 待更新项仍会被 Advance 取出，读到 core.BarrierID 后产出空写入并从队列中移除，
+// 若不重扫就再也没有东西唤醒它们。
+//
+// 重扫本身有独立预算并跨 tick 分摊（fluidRescanState / FluidRescanCellsPerTick）：
+// 它的工作量正比于新进入范围的方块数，与 FluidUpdatesPerTick 无关，不分摊会在
+// 大批区块同时进入范围时直接击穿 tick 预算。
 func (engine *Engine) advanceFluids(pending map[core.ChunkKey]*pendingChunkChanges) {
 	now, delay := engine.fluidClock()
 	budget := int(engine.tunables.FluidUpdatesPerTick)
@@ -434,7 +572,7 @@ func (engine *Engine) advanceFluids(pending map[core.ChunkKey]*pendingChunkChang
 		}
 		engine.fluidScopeNext[key] = struct{}{}
 	}
-	// activeInterestKeys 已按 chunkKeyLess 排好序，重扫因此按稳定顺序发生。
+	// activeInterestKeys 已按 chunkKeyLess 排好序，重扫待办因此按稳定顺序登记。
 	for _, key := range keys {
 		if _, inScope := engine.fluidScopeNext[key]; !inScope {
 			continue
@@ -442,13 +580,10 @@ func (engine *Engine) advanceFluids(pending map[core.ChunkKey]*pendingChunkChang
 		if _, wasInScope := engine.fluidScope[key]; wasInScope {
 			continue
 		}
-		engine.rescanChunkFluids(
-			engine.fluidQueue(key.Dimension),
-			engine.dimensions[key.Dimension],
-			key.Pos, now, delay,
-		)
+		engine.fluidRescan.enqueueChunk(key)
 	}
 	engine.fluidScope, engine.fluidScopeNext = engine.fluidScopeNext, engine.fluidScope
+	engine.runFluidRescans(now, delay)
 
 	for _, id := range engine.sortedFluidDimensions() {
 		queue := engine.fluidQueues[id]

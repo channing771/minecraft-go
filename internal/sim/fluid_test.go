@@ -487,7 +487,7 @@ func TestFluidRescanFixedPointSkipMatchesFullRescan(t *testing.T) {
 	fastQueue := fluid.NewQueue()
 	fastEngine := NewEngine(0, 0)
 	for _, pos := range positions {
-		fastEngine.rescanChunkFluids(fastQueue, fastDimension, pos, 0, 1)
+		fastEngine.rescanChunkFluids(fastQueue, fastDimension, pos, 0, 1, 1<<30)
 	}
 	fastEnqueued := fastQueue.Len()
 
@@ -510,5 +510,118 @@ func TestFluidRescanFixedPointSkipMatchesFullRescan(t *testing.T) {
 			t.Fatalf("区块 %+v 的最终世界与朴素重扫不一致：捷径 %x，朴素 %x",
 				pos, fast[pos], full[pos])
 		}
+	}
+}
+
+// fluidRescanEngine 构造一个只用于重扫状态机测试的引擎：挂上被测维度、把全部
+// 区块放进推进范围，并把重扫预算设成 budget。
+func fluidRescanEngine(dimension *Dimension, positions []core.ChunkPos, budget uint32) *Engine {
+	engine := NewEngine(0, 0)
+	engine.tunables = DefaultTunables()
+	engine.tunables.FluidRescanCellsPerTick = budget
+	engine.dimensions[core.Overworld] = dimension
+	engine.fluidScope = make(map[core.ChunkKey]struct{}, len(positions))
+	for _, pos := range positions {
+		engine.fluidScope[core.ChunkKey{Dimension: core.Overworld, Pos: pos}] = struct{}{}
+	}
+	return engine
+}
+
+// TestFluidRescanSpreadsAcrossTicksAndStaysComplete 锁定重扫预算的两条性质：
+// 预算真的把一次重扫拆到多个 tick（不是摆设），而拆开之后的结果与一次性重扫
+// **完全等价**——同样的入队量，推进到静止后同样的世界。
+//
+// 这条等价性正是 design.md D5 允许延后重扫的依据：不动点性质只要求重扫最终
+// 发生在该区块处于推进范围内的某个 tick，不要求发生在它进入范围的那一 tick。
+func TestFluidRescanSpreadsAcrossTicksAndStaysComplete(t *testing.T) {
+	referenceDimension, positions := fluidBasinDimension()
+	referenceQueue := fluid.NewQueue()
+	referenceEngine := NewEngine(0, 0)
+	for _, pos := range positions {
+		referenceEngine.rescanChunkFluids(referenceQueue, referenceDimension, pos, 0, 1, 1<<30)
+	}
+
+	dimension, _ := fluidBasinDimension()
+	engine := fluidRescanEngine(dimension, positions, 4096)
+	for _, pos := range positions {
+		engine.fluidRescan.enqueueChunk(core.ChunkKey{Dimension: core.Overworld, Pos: pos})
+	}
+	queue := engine.fluidQueue(core.Overworld)
+	ticks := 0
+	for len(engine.fluidRescan.pending) > 0 {
+		ticks++
+		if ticks > 1000 {
+			t.Fatalf("重扫在 1000 tick 内没有排空，剩余 %d 个待重扫区块", len(engine.fluidRescan.pending))
+		}
+		engine.runFluidRescans(0, 1)
+	}
+	if ticks < 2 {
+		t.Fatalf("重扫只用了 %d 个 tick，预算没有起到分摊作用", ticks)
+	}
+	if queue.Len() != referenceQueue.Len() {
+		t.Fatalf("分摊重扫入队 %d 项，一次性重扫入队 %d 项，两者必须一致",
+			queue.Len(), referenceQueue.Len())
+	}
+
+	settleFluids(t, queue, dimension, positions)
+	settleFluids(t, referenceQueue, referenceDimension, positions)
+	spread := dimensionHashes(dimension, positions)
+	oneShot := dimensionHashes(referenceDimension, positions)
+	for _, pos := range positions {
+		if spread[pos] != oneShot[pos] {
+			t.Fatalf("区块 %+v 的最终世界与一次性重扫不一致：分摊 %x，一次性 %x",
+				pos, spread[pos], oneShot[pos])
+		}
+	}
+}
+
+// TestFluidRescanDropsChunkThatLeavesScope 锁定「重扫到一半的区块离开推进范围
+// 时整条丢弃、游标复位」。
+//
+// 不能保留半截游标等区块回来再补扫剩下的一半：先扫的那一半已经入队的项会在
+// 区块离开范围后被 Advance 取出、读到 core.BarrierID、产出空写入并从队列移除，
+// 之后再也没有东西唤醒它们。只有从头重扫才能恢复重扫的完整性。
+func TestFluidRescanDropsChunkThatLeavesScope(t *testing.T) {
+	dimension, positions := fluidBasinDimension()
+	// 预算 1 保证一个 tick 最多推进一个区段，重扫必然停在半路。
+	engine := fluidRescanEngine(dimension, positions, 1)
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: positions[0]}
+	engine.fluidRescan.enqueueChunk(key)
+
+	engine.runFluidRescans(0, 1)
+	if len(engine.fluidRescan.pending) != 1 {
+		t.Fatalf("重扫应当还没做完，待办剩 %d 项", len(engine.fluidRescan.pending))
+	}
+	if engine.fluidRescan.plane == 0 && engine.fluidRescan.section == 0 {
+		t.Fatal("重扫停在半路却没有留下续扫游标")
+	}
+
+	delete(engine.fluidScope, key)
+	engine.runFluidRescans(0, 1)
+	if len(engine.fluidRescan.pending) != 0 {
+		t.Fatalf("离开推进范围的区块没有被丢弃，待办剩 %d 项", len(engine.fluidRescan.pending))
+	}
+	if _, stillQueued := engine.fluidRescan.queued[key]; stillQueued {
+		t.Fatal("离开推进范围的区块仍留在去重集合里，重新进入时将无法再次登记")
+	}
+	if engine.fluidRescan.plane != 0 || engine.fluidRescan.section != 0 {
+		t.Fatalf("队首被丢弃后游标没有复位：plane=%d section=%d",
+			engine.fluidRescan.plane, engine.fluidRescan.section)
+	}
+
+	// 重新进入范围：必须能重新登记，并从头扫完整块。
+	engine.fluidScope[key] = struct{}{}
+	engine.fluidRescan.enqueueChunk(key)
+	engine.tunables.FluidRescanCellsPerTick = 1 << 20
+	engine.runFluidRescans(0, 1)
+	if len(engine.fluidRescan.pending) != 0 {
+		t.Fatal("重新进入范围后的重扫没有完成")
+	}
+
+	reference := fluid.NewQueue()
+	referenceEngine := NewEngine(0, 0)
+	referenceEngine.rescanChunkFluids(reference, dimension, positions[0], 0, 1, 1<<30)
+	if got := engine.fluidQueue(core.Overworld).Len(); got != reference.Len() {
+		t.Fatalf("重新进入后入队 %d 项，完整重扫应为 %d 项", got, reference.Len())
 	}
 }
