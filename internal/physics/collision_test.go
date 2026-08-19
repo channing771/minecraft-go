@@ -90,6 +90,51 @@ func TestCutoutBlocksUseFullCollision(t *testing.T) {
 	}
 }
 
+// TestFluidBlocksHaveNoCollision 锁定 spec Scenario「流体不阻挡通行与光照」：
+// 8 个流体编号与空气同形状——已加载但零碰撞体。
+func TestFluidBlocksHaveNoCollision(t *testing.T) {
+	for id := core.WaterSourceID; id <= core.WaterLevel7ID; id++ {
+		boxes := physics.BlockCollisionBoxes(id, true)
+		if !boxes.Loaded || boxes.Count != 0 {
+			t.Fatalf("BlockCollisionBoxes(%d, true) = %+v，想要 (Loaded:true, Count:0)", id, boxes)
+		}
+	}
+}
+
+// idSource 按方块 ID 而非直接给碰撞体建模一个只读世界，经
+// physics.BlockCollisionBoxes 转换——用来在 Step 级别端到端验证「实体的碰撞体
+// 与流体格重叠时可自由穿行」。
+type idSource map[core.BlockPos]core.BlockID
+
+func (s idSource) CollisionBoxes(position core.BlockPos) physics.CollisionBoxSet {
+	return physics.BlockCollisionBoxes(s[position], true)
+}
+
+// TestEntityPassesThroughFluidBlock 端到端验证：同一堵墙，石头会挡住实体，
+// 换成流体（水源）则实体可自由穿行——覆盖 spec Scenario「流体不阻挡通行与
+// 光照」的「实体的碰撞体与流体格重叠时可自由穿行」这一半。
+func TestEntityPassesThroughFluidBlock(t *testing.T) {
+	stoneWorld := idSource{{X: 1, Y: 1, Z: 0}: core.StoneID}
+	blocked := physics.Step(physics.State{
+		Position: mgl32.Vec3{0.5, 1, 0.5},
+		Velocity: mgl32.Vec3{10, 0, 0},
+		OnGround: true,
+	}, physics.Input{}, stoneWorld).State
+	if blocked.Position.X() > 0.7+1e-5 {
+		t.Fatalf("石头墙未阻挡实体: %+v", blocked)
+	}
+
+	waterWorld := idSource{{X: 1, Y: 1, Z: 0}: core.WaterSourceID}
+	passed := physics.Step(physics.State{
+		Position: mgl32.Vec3{0.5, 1, 0.5},
+		Velocity: mgl32.Vec3{10, 0, 0},
+		OnGround: true,
+	}, physics.Input{}, waterWorld).State
+	if passed.Position.X() <= 0.7+1e-5 {
+		t.Fatalf("流体阻挡了实体穿行: %+v", passed)
+	}
+}
+
 func TestWalkingOffLedgeClearsGroundInSameStep(t *testing.T) {
 	world := boxes(block(0, 0, 0, fullCube))
 	got := physics.Step(physics.State{
