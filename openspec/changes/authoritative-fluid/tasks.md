@@ -1,9 +1,9 @@
 ## 1. 流体方块编码
 
-- [ ] 1.1 在 `internal/core/block.go` 末尾追加 `WaterSourceID` 与 `WaterLevel1ID`..`WaterLevel7ID`，扩展 `RegisteredBlock` 上界；补中文注释说明编号不可重排。验证：`go test ./internal/core -race -count=1`
-- [ ] 1.2 在 `internal/core` 新增纯查询 `IsFluid(BlockID) bool` 与 `FluidLevel(BlockID) uint8`（源为 0，`WaterLevelN` 为 N），并为二者写穷举测试（对 `BlockID` 全域断言分类正确）。验证：`go test ./internal/core -race -count=1`
-- [ ] 1.3 断言流体不进物品表：`BlockToItem` 对全部流体编号返回 false，`ItemIDMax` 数值不变；补枚举末项守护断言。验证：`go test ./internal/core -race -count=1`
-- [ ] 1.4 在 `internal/mesh` 的方块属性注册表补齐 8 个流体编号（`Opaque=false`、`Emission=0`），确保 mesh 输入构造遇到流体不报错。验证：`go test ./internal/mesh -race -count=1`
+- [x] 1.1 在 `internal/core/block.go` 末尾追加 `WaterSourceID` 与 `WaterLevel1ID`..`WaterLevel7ID`，扩展 `RegisteredBlock` 上界；补中文注释说明编号不可重排。验证：`go test ./internal/core -race -count=1`
+- [x] 1.2 在 `internal/core` 新增纯查询 `IsFluid(BlockID) bool` 与 `FluidLevel(BlockID) uint8`（源为 0，`WaterLevelN` 为 N），并为二者写穷举测试（对 `BlockID` 全域断言分类正确）。验证：`go test ./internal/core -race -count=1`
+- [x] 1.3 断言流体不进物品表：`BlockToItem` 对全部流体编号返回 false，`ItemIDMax` 数值不变；补枚举末项守护断言。验证：`go test ./internal/core -race -count=1`
+- [x] 1.4 在 `internal/mesh` 的方块属性注册表补齐 8 个流体编号（`Opaque=false`、`Emission=0`），确保 mesh 输入构造遇到流体不报错。验证：`go test ./internal/mesh -race -count=1`
 
 ## 2. 流动规则与调度器（新包 `internal/fluid`）
 

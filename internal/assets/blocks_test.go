@@ -17,9 +17,15 @@ func TestRegistryFaceVisible(t *testing.T) {
 		want         bool
 	}{
 		{"空气不出面", core.AirID, core.AirID, false},
-		{"未知当前方块不出面", core.MossyCobblestoneID + 1, core.AirID, false},
+		// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体），真正越界的
+		// 未知方块编号改为 WaterLevel7ID+1。
+		{"未知当前方块不出面", core.WaterLevel7ID + 1, core.AirID, false},
 		{"石头面向空气", core.StoneID, core.AirID, true},
-		{"石头面向未知方块关闭", core.StoneID, core.MossyCobblestoneID + 1, false},
+		{"石头面向未知方块关闭", core.StoneID, core.WaterLevel7ID + 1, false},
+		// 流体已注册但未纳入 mesh snapshot 的 ids 范围，与「未知方块」一样
+		// 应当不出面：id 侧和 adjacent 侧都要覆盖到。
+		{"流体当前方块不出面", core.WaterSourceID, core.AirID, false},
+		{"石头面向流体关闭", core.StoneID, core.WaterLevel1ID, false},
 		{"石头被石头遮住", core.StoneID, core.StoneID, false},
 		{"石头面向玻璃保留", core.StoneID, core.GlassID, true},
 		{"玻璃被石头遮住", core.GlassID, core.StoneID, false},
@@ -34,6 +40,21 @@ func TestRegistryFaceVisible(t *testing.T) {
 				t.Fatalf("FaceVisible(%d, %d) = %v，想要 %v", tt.id, tt.adjacent, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestFluidBlocksAreTransparentAndDark 锁定「mesh 注册表登记流体」：8 个流体
+// 编号 Opaque 一律为 false（沿用既有透明方块路径，不被当作不透明遮挡体），
+// Emission 一律为 0（不发光）。
+func TestFluidBlocksAreTransparentAndDark(t *testing.T) {
+	registry := assets.NewRegistry()
+	for id := core.WaterSourceID; id <= core.WaterLevel7ID; id++ {
+		if registry.Opaque(id) {
+			t.Fatalf("流体方块 %d 的 Opaque 应为 false", id)
+		}
+		if got := registry.Emission(id); got != 0 {
+			t.Fatalf("流体方块 %d 的 Emission = %d，想要 0", id, got)
+		}
 	}
 }
 

@@ -53,11 +53,23 @@ const (
 	ClayID
 	SnowBlockID
 	MossyCobblestoneID
+	// 以下 8 个是流体方块编号，只能追加在 MossyCobblestoneID 之后：方块 ID 是
+	// 协议稳定值，重排会破坏既有存档与线上字节。WaterSourceID 是水的源方块
+	// （满格，流动规则下永不自然消失）；WaterLevel1ID..WaterLevel7ID 是流动水，
+	// 数字越小水量越强（1 最强、7 最弱），符合 Minecraft 系水流传统语义。
+	WaterSourceID
+	WaterLevel1ID
+	WaterLevel2ID
+	WaterLevel3ID
+	WaterLevel4ID
+	WaterLevel5ID
+	WaterLevel6ID
+	WaterLevel7ID
 )
 
 // RegisteredBlock 报告 id 是否是已注册的稳定方块编号。
 func RegisteredBlock(id BlockID) bool {
-	return id <= MossyCobblestoneID
+	return id <= WaterLevel7ID
 }
 
 const (

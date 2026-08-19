@@ -88,13 +88,25 @@ func NewRegistry() *Registry {
 }
 
 // Opaque 返回方块是否完全不透明。实现 mesh.Registry。
+// 流体（IsFluid）与玻璃、树叶一样是透明方块：本任务组只登记流体的方块属性，
+// 不新增流体材质与渲染 pass，流体沿用既有的透明方块判定路径。
 func (r *Registry) Opaque(id world.BlockID) bool {
-	return core.RegisteredBlock(id) && id != core.AirID && id != core.GlassID && id != core.LeavesID
+	return core.RegisteredBlock(id) && id != core.AirID && id != core.GlassID &&
+		id != core.LeavesID && !core.IsFluid(id)
 }
 
 // FaceVisible 返回当前方块朝向相邻方块的面是否可绘制。实现 mesh.Registry。
+// 流体编号虽然已注册（core.RegisteredBlock），但本任务组没有把它们纳入
+// NewRegistry 构建 mesh snapshot 时使用的 ids 范围（仍止于
+// MossyCobblestoneID），因此原生 Rust 侧的 registry 条目表里没有流体条目。
+// Rust 的 face_visible 只要 id 或 adjacent 任一方不在条目表里就直接判不可见
+// （engine/crates/mornlea_engine/src/input.rs 的 RegistryView::face_visible），
+// 这里对 id 和 adjacent 两侧都显式排除流体，与 Rust 的「缺条目即不出面」
+// 保持一致，否则 native_parity_test.go 会因 Go/Rust 对流体邻格的判定分歧而
+// 报告 quad 数不一致。
 func (r *Registry) FaceVisible(id, adjacent world.BlockID) bool {
-	if !core.RegisteredBlock(id) || id == core.AirID || !core.RegisteredBlock(adjacent) || r.Opaque(adjacent) {
+	if !core.RegisteredBlock(id) || id == core.AirID || core.IsFluid(id) ||
+		!core.RegisteredBlock(adjacent) || core.IsFluid(adjacent) || r.Opaque(adjacent) {
 		return false
 	}
 	if adjacent == core.AirID {
