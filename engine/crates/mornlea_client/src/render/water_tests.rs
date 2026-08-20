@@ -23,6 +23,8 @@ const FULL: [u8; 4] = [15; 4];
 const ATLAS_LAYER_BYTES: usize = (256 + 64 + 16 + 4 + 1) * 4;
 /// 离屏画面边长。
 const VIEW: u32 = 64;
+/// 默认相机位置：区段正上方。
+const DEFAULT_CAMERA: [f32; 3] = [8.0, 100.0, 8.0];
 
 /// pack_quad 复刻 `mornlea_engine::quad::Quad::pack` 的位布局。
 ///
@@ -148,6 +150,19 @@ struct SectionData {
 /// 每次都新建渲染器：首帧 `have_last_camera` 为假，HiZ 必然停用，图像因此只
 /// 取决于本用例的输入。无 GPU 适配器时返回 None（调用方跳过，与既有约定一致）。
 fn render_once(view_proj: [f32; 16], sections: &[SectionData]) -> Option<Vec<u8>> {
+    render_from(DEFAULT_CAMERA, view_proj, sections)
+}
+
+/// 与 [`render_once`] 相同，但相机位置可指定。
+///
+/// 投影矩阵与 `FrameInput::pos` 是**解耦**的：`top_down_view_proj` 只由世界坐标
+/// 决定屏幕位置与深度，完全不含相机位置。于是只改 `pos` 就能在画面不变的前提下
+/// 翻转「谁远谁近」，这正是 water pass 排序**方向**唯一的可观察入口。
+fn render_from(
+    camera_pos: [f32; 3],
+    view_proj: [f32; 16],
+    sections: &[SectionData],
+) -> Option<Vec<u8>> {
     let mut renderer = OffscreenRenderer::new(VIEW, VIEW).ok()?;
     let colors = [
         [200u8, 60, 60, 255], // 层 0：不透明红
@@ -171,7 +186,7 @@ fn render_once(view_proj: [f32; 16], sections: &[SectionData]) -> Option<Vec<u8>
     let frame = FrameInput {
         view_proj,
         view_proj_inv: identity,
-        pos: [8.0, 100.0, 8.0],
+        pos: camera_pos,
         daylight: 1.0,
         sun_direction: [0.0, 1.0, 0.0],
         star_visibility: 0.0,
@@ -191,6 +206,24 @@ fn render_once(view_proj: [f32; 16], sections: &[SectionData]) -> Option<Vec<u8>
 fn pixel(image: &[u8], x: u32, row: u32) -> [u8; 3] {
     let i = ((row * VIEW + x) * 4) as usize;
     [image[i + 2], image[i + 1], image[i]]
+}
+
+/// image_diff 返回 `(不同像素数, 首个不同像素坐标)`；两幅完全相同时返回 None。
+///
+/// 断言消息里**不得**直接放整幅图像：64×64 BGRA 是 16 KiB，`assert_eq!` 会打出
+/// 约 160 KB 的字节数组，排障完全靠不上。
+fn image_diff(a: &[u8], b: &[u8]) -> Option<(usize, (u32, u32))> {
+    let mut count = 0usize;
+    let mut first = None;
+    for row in 0..VIEW {
+        for x in 0..VIEW {
+            if pixel(a, x, row) != pixel(b, x, row) {
+                count += 1;
+                first.get_or_insert((x, row));
+            }
+        }
+    }
+    first.map(|at| (count, at))
 }
 
 /// 俯视相机下方块 `(bx, bz)` 的中心像素。
@@ -401,9 +434,9 @@ fn sorting_granularity_is_the_section() {
         return;
     };
     let far_first = same_section([dim, bright]).expect("首个场景已成功建过渲染器");
-    assert_ne!(
-        near_first, far_first,
-        "区段内不得逐面排序：交换上传顺序必须改变画面"
+    assert!(
+        image_diff(&near_first, &far_first).is_some(),
+        "区段内不得逐面排序：交换上传顺序必须改变画面（两幅画面逐像素相同）"
     );
 
     // 拆进两个区段：(0,5,0) 的水面（世界 y=17）离相机更近，(0,4,0) 的更远。
@@ -435,24 +468,74 @@ fn sorting_granularity_is_the_section() {
     .expect("首个场景已成功建过渲染器");
     let listed_far_first =
         render_once(top_down_view_proj(), &[far_section, near_section]).expect("同上");
-    assert_eq!(
-        listed_near_first, listed_far_first,
-        "跨区段必须按距离由远及近绘制，与 visible 列表的次序无关"
-    );
+    if let Some((count, at)) = image_diff(&listed_near_first, &listed_far_first) {
+        panic!(
+            "跨区段的绘制次序不得取决于 visible 列表：{count} 个像素不同，\
+             首个在 (x={}, row={})",
+            at.0, at.1
+        );
+    }
 }
 
 /// water pass 是系统里唯一新增的半透明阶段。
 ///
-/// 用源码清单钉住：`render_frame` 里出现的 render pass 标签必须与这份名单
-/// 逐条相等。任何人再加一个 pass 都要来改这份名单，从而被迫回答
+/// 两条互补的源码清单，覆盖范围是 `src/render/` 下**全部生产 `.rs`**（排除
+/// `*_tests.rs`）——`render_frame` 会调进 `entity.rs` 与 `quads.rs` 的
+/// `begin_render_pass`，只扫 `mod.rs` 会漏掉在那两个文件里新增透明 pass 的情形：
+///
+///  1. 全目录的 `begin_render_pass` 调用点总数固定；
+///  2. `mod.rs` 里以字面量标注的 pass 名单固定（`entity.rs`/`quads.rs` 的标签是
+///     调用方传进来的变量，枚举不到，由第 1 条兜底）。
+///
+/// 任何人再加一个 pass 都要来改这份清单，从而被迫回答
 /// 「`voxel-visual-presentation` 只放宽了**恰好一个**额外半透明阶段」这件事。
 #[test]
 fn water_is_the_only_added_render_pass() {
-    let source = include_str!("mod.rs");
-    let labels: Vec<&str> = source
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/render");
+    let mut sources: Vec<(String, String)> = std::fs::read_dir(&dir)
+        .expect("读取 src/render 目录")
+        .map(|entry| entry.expect("目录项").path())
+        .filter(|path| {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            name.ends_with(".rs") && !name.ends_with("_tests.rs")
+        })
+        .map(|path| {
+            let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+            (name, std::fs::read_to_string(&path).expect("读取源文件"))
+        })
+        .collect();
+    sources.sort();
+    assert!(
+        sources.len() >= 4,
+        "src/render 下的生产源文件只找到 {} 个，扫描范围可能失效",
+        sources.len()
+    );
+
+    let total: usize = sources
+        .iter()
+        .map(|(_, text)| text.matches("begin_render_pass").count())
+        .sum();
+    let per_file: Vec<String> = sources
+        .iter()
+        .map(|(name, text)| format!("{name}={}", text.matches("begin_render_pass").count()))
+        .collect();
+    assert_eq!(
+        total,
+        5,
+        "src/render 下的 render pass 调用点总数变了（{}）：新增额外的半透明阶段\
+         需要先修订 voxel-visual-presentation 的边界",
+        per_file.join(" ")
+    );
+
+    let module = &sources
+        .iter()
+        .find(|(name, _)| name == "mod.rs")
+        .expect("mod.rs 必须在扫描范围内")
+        .1;
+    let labels: Vec<&str> = module
         .match_indices("begin_render_pass(&wgpu::RenderPassDescriptor {")
         .filter_map(|(at, _)| {
-            let tail = &source[at..];
+            let tail = &module[at..];
             let start = tail.find("label: Some(\"")? + "label: Some(\"".len();
             let end = start + tail[start..].find('"')?;
             Some(&tail[start..end])
@@ -461,7 +544,151 @@ fn water_is_the_only_added_render_pass() {
     assert_eq!(
         labels,
         vec!["terrain pass", "water pass", "damage overlay pass"],
-        "render_frame 的 render pass 名单变了：新增额外的半透明阶段需要先修订 \
-         voxel-visual-presentation 的边界"
+        "mod.rs 的 render pass 名单变了"
     );
+}
+
+/// Scenario「按由远及近的顺序绘制」——锁的是**方向**，不只是「排过序」。
+///
+/// 既有的 `sorting_granularity_is_the_section` 只比较「交换 `visible` 次序后画面
+/// 相同」，两次渲染用的是**同一个比较器**，方向被整体抵消：把比较器反成由近及远，
+/// 那条断言照样绿。方向只有换一个「谁远谁近」的答案才能看见，而投影与 `pos`
+/// 解耦，于是同一场景渲两遍、只改相机位置即可。
+///
+/// 场景：亮水在上（世界 y=17）、暗水在下（世界 y=3），屏幕上完全重叠。
+/// alpha blend 下**最后画的那层主导**：
+///
+/// - 相机在上 → 暗水更远 → 先画暗、后画亮 → 蓝色强；
+/// - 相机在下 → 亮水更远 → 先画亮、后画暗 → 蓝色弱。
+///
+/// 两片水的 shade 相差 12.5 倍（light 0xFF vs 0x00），末层贡献 62.7%，
+/// 背景（本场景是天空，随相机位置略有不同）只经两层衰减剩 13.9%，
+/// 信号远大于背景抖动。
+///
+/// 该断言对「完全不排序」同样红：不排序时两遍都按 `visible` 次序绘制，画面相同。
+#[test]
+fn water_sections_are_drawn_far_to_near() {
+    // 不放地面：背面剔除用的是 `input.pos`，地面顶面从下方看会被剔掉，
+    // 那会让两遍的背景差一整块不透明面，白白引入干扰。
+    let scene = || {
+        vec![
+            SectionData {
+                pos: (0, 5, 0),
+                opaque: vec![],
+                water: vec![water_cell(8, 0, 8, 0xFF)],
+            },
+            SectionData {
+                pos: (0, 4, 0),
+                opaque: vec![],
+                water: vec![water_cell(8, 2, 8, 0x00)],
+            },
+        ]
+    };
+    let Some(above) = render_from(DEFAULT_CAMERA, top_down_view_proj(), &scene()) else {
+        return;
+    };
+    let below = render_from([8.0, 0.0, 8.0], top_down_view_proj(), &scene())
+        .expect("首个场景已成功建过渲染器");
+    let (top, bottom) = (cell_pixel(&above, 8, 8), cell_pixel(&below, 8, 8));
+    assert!(
+        top[2] > bottom[2],
+        "必须由远及近绘制：相机在上时亮水最后画、蓝色应更强，\
+         实测 above={top:?} below={bottom:?}"
+    );
+}
+
+/// 计数分配器：测试二进制内全局生效，只在 `System` 之上加一个计数。
+///
+/// Rust 没有 Go 的 `testing.AllocsPerRun`，要让「预热后 MUST 不产生每帧堆分配」
+/// 这条边界在 Rust 半边可测，只能自己挂 `global_allocator`。计数放在**线程局部**
+/// 而非全局原子：cargo 默认并行跑用例，全局计数会被别的用例的分配污染。
+/// TLS 用 `const` 初始化，没有惰性分配、没有析构，因此在分配器内部访问是安全的。
+struct CountingAllocator;
+
+thread_local! {
+    static ALLOCATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// 本线程迄今的分配次数。
+fn allocation_count() -> usize {
+    ALLOCATIONS.with(|counter| counter.get())
+}
+
+fn bump() {
+    // try_with：线程析构阶段 TLS 可能已失效，那时静默跳过即可。
+    let _ = ALLOCATIONS.try_with(|counter| counter.set(counter.get() + 1));
+}
+
+// SAFETY: 只在 System 分配器之上叠加计数，指针语义与对齐要求全部原样转交。
+unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        bump();
+        // SAFETY: layout 由调用方保证合法，直接转交 System。
+        unsafe { std::alloc::System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        // SAFETY: ptr/layout 由调用方保证来自本分配器，直接转交 System。
+        unsafe { std::alloc::System.dealloc(ptr, layout) }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+        bump();
+        // SAFETY: 同 alloc。
+        unsafe { std::alloc::System.alloc_zeroed(layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new: usize) -> *mut u8 {
+        bump();
+        // SAFETY: 同 dealloc，new 由调用方保证不溢出。
+        unsafe { std::alloc::System.realloc(ptr, layout, new) }
+    }
+}
+
+#[global_allocator]
+static COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator;
+
+/// water pass 的排序不得产生堆分配，且方向与并列次序都必须确定。
+///
+/// 这条补的是 `voxel-visual-presentation` MODIFIED 的「预热后 MUST 不产生每帧
+/// 动态资源创建或堆分配」在 **Rust 半边**的覆盖——此前它唯一的测试在 Go 侧
+/// （`TestFlushUploadsDoesNotAllocatePerFrame`），结构上看不见 Rust 的任何分配。
+///
+/// 断言直接打在排序上而不是 `render_frame` 上：wgpu 的命令编码本身每帧就要分配，
+/// 在那一层做绝对断言不可能成立，做「有水/无水」对照又会因绘制调用数不同而失真。
+///
+/// 4096 条远超稳定排序开始申请临时缓冲的阈值（实测约几百条即触发一次）。
+#[test]
+fn water_draw_sort_does_not_allocate() {
+    let mut draws: Vec<(f32, Alloc, u32)> = (0..4096u32)
+        .map(|i| {
+            (
+                ((i * 37) % 97) as f32,
+                Alloc {
+                    offset: i,
+                    size: 1,
+                },
+                1,
+            )
+        })
+        .collect();
+
+    let before = allocation_count();
+    sort_water_draws(&mut draws);
+    let allocated = allocation_count() - before;
+    assert_eq!(allocated, 0, "水面绘制表排序不得产生堆分配（实测 {allocated} 次）");
+
+    assert!(
+        draws.windows(2).all(|w| w[0].0 >= w[1].0),
+        "排序方向必须是由远及近（距离平方降序）"
+    );
+    assert!(
+        draws
+            .windows(2)
+            .all(|w| w[0].0 > w[1].0 || w[0].1.offset < w[1].1.offset),
+        "等距区段必须按池内 offset 兜底定序，否则不稳定排序会让 capture 抖动"
+    );
+    // 夹具前提守卫排在真实断言之后：真实失效不应先被误报成「夹具没有并列项」。
+    let ties = draws.windows(2).filter(|w| w[0].0 == w[1].0).count();
+    assert!(ties > 0, "夹具里没有等距区段，兜底比较那条断言与它无关");
 }

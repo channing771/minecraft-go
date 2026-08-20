@@ -404,6 +404,24 @@ impl HiZ {
     }
 }
 
+/// sort_water_draws 把本帧的水面绘制表排成**由远及近**。
+///
+/// 三个约束都在这一行里:
+///
+/// - **方向**:`b` 在前、`a` 在后,即距离平方**降序**。alpha blend 下最后画的那层
+///   主导,由远及近才能让近处的水覆在远处之上;反过来排会直接违反
+///   `fluid-presentation` 的「MUST 按由远及近的顺序绘制」。
+/// - **不分配**:必须是 `sort_unstable_by`。稳定排序(driftsort)在几百条以上会申请
+///   一次临时缓冲,而 `voxel-visual-presentation` MODIFIED 写死了「预热后 MUST 不
+///   产生每帧动态资源创建或堆分配」。守卫见 `water_draw_sort_does_not_allocate`。
+/// - **确定性**:不稳定排序不保证等价元素的相对次序,因此用池内 `offset` 兜底比较。
+///   等距区段的绘制次序于是仍然固定,capture golden 不会在两次运行之间抖动。
+///
+/// `total_cmp` 是 f32 上的全序,不会因 NaN 触发排序 panic。
+fn sort_water_draws(draws: &mut [(f32, Alloc, u32)]) {
+    draws.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.offset.cmp(&b.1.offset)));
+}
+
 /// 离屏世界渲染器。
 pub struct OffscreenRenderer {
     device: wgpu::Device,
@@ -1656,8 +1674,7 @@ impl OffscreenRenderer {
             draws.push((distance2, alloc, slot.water_count));
         }
         if let (Some(bind), false) = (&self.water_bind, draws.is_empty()) {
-            // 由远及近;total_cmp 是全序,不会因 NaN 触发排序 panic。
-            draws.sort_by(|a, b| b.0.total_cmp(&a.0));
+            sort_water_draws(&mut draws);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("water pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

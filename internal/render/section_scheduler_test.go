@@ -201,7 +201,8 @@ func TestFlushUploadsDoesNotAllocatePerFrame(t *testing.T) {
 		}
 		quads = append(quads, stoneQuad(uint8(i%16), 0, 0))
 	}
-	scheduler := render.NewSectionScheduler(&countingSink{}, 1<<20)
+	sink := &countingSink{}
+	scheduler := render.NewSectionScheduler(sink, 1<<20)
 	pos := core.SectionPos{}
 	queueOnly := func() { scheduler.QueueSection(pos, quads) }
 	queueAndFlush := func() {
@@ -220,9 +221,14 @@ func TestFlushUploadsDoesNotAllocatePerFrame(t *testing.T) {
 		t.Fatalf("排队 + 冲刷分配 %.1f 次,只排队 %.1f 次:冲刷一帧必须零分配",
 			withFlush, baseline)
 	}
-	// 夹具前提守卫排在真实断言之后:真实失效不应先被误报成「夹具没有水」。
+	// 两条夹具前提守卫排在真实断言之后:真实失效不应先被误报成夹具问题。
 	if waters == 0 {
 		t.Fatal("夹具里没有水面 quad,这条断言与水面阶段无关")
+	}
+	// 「都没分配」也可能是因为冲刷根本没做事(预算早退、去重跳过之类),
+	// 那时两侧同为 1.0、断言会静默转绿。
+	if sink.uploads == 0 {
+		t.Fatal("冲刷一次都没有真正上传,零分配这件事无从谈起")
 	}
 }
 
