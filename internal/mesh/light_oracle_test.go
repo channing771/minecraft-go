@@ -66,7 +66,11 @@ func (s *goLightScratch) buildSky(n *world.Neighborhood, reg mesh.Registry) {
 	for x := lightMin; x < lightMin+lightSide; x++ {
 		for y := lightMin; y < lightMin+lightSide; y++ {
 			for z := lightMin; z < lightMin+lightSide; z++ {
-				if n.SkyLight(x, y, z) != 15 || reg.Opaque(n.At(x, y, z)) {
+				// 直射起点只认「零衰减」的透光格：流体虽然透光，但列顶判定已忽略
+				// 流体，水下每一格的 SkyLight 都是 15；若照旧当直射起点，整根水柱
+				// 会齐读 15，竖直向下穿水就是无损的。与 Rust build_sky 同规则。
+				id := n.At(x, y, z)
+				if n.SkyLight(x, y, z) != 15 || reg.Opaque(id) || reg.LightAttenuation(id) != 0 {
 					continue
 				}
 				index := lightIndex(x, y, z)
@@ -87,7 +91,8 @@ func (s *goLightScratch) buildSky(n *world.Neighborhood, reg mesh.Registry) {
 		if current <= 1 {
 			continue
 		}
-		candidate := current - 1
+		// best 是本格能给出的最好结果（扣减恰好为 1），先拿它剪枝再查表。
+		best := current - 1
 		for _, direction := range lightDirections {
 			nx, ny, nz := x+direction.x, y+direction.y, z+direction.z
 			if nx < lightMin || nx >= lightMin+lightSide ||
@@ -96,7 +101,20 @@ func (s *goLightScratch) buildSky(n *world.Neighborhood, reg mesh.Registry) {
 				continue
 			}
 			next := lightIndex(nx, ny, nz)
-			if s.levels[next]>>4 >= candidate || reg.Opaque(n.At(nx, ny, nz)) {
+			if s.levels[next]>>4 >= best {
+				continue
+			}
+			id := n.At(nx, ny, nz)
+			if reg.Opaque(id) {
+				continue
+			}
+			// 每格扣减 = 固定的 1 + 目标方块的额外衰减，六个方向同一公式。
+			step := 1 + reg.LightAttenuation(id)
+			if current <= step {
+				continue
+			}
+			candidate := current - step
+			if s.levels[next]>>4 >= candidate {
 				continue
 			}
 			s.levels[next] = s.levels[next]&blockMask | candidate<<4

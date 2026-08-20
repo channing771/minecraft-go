@@ -85,7 +85,16 @@ fn build_sky(
     for x in LIGHT_MIN..end {
         for y in LIGHT_MIN..end {
             for z in LIGHT_MIN..end {
-                if input.sky_light(x, y, z) != 15 || registry.opaque(input.block(x, y, z)) {
+                let id = input.block(x, y, z);
+                // 直射起点只认「零衰减」的透光格。流体虽然透光，但它是一种要付出
+                // 衰减才能进入的介质：列顶判定已经忽略流体（见 world.toppedByColumn），
+                // 水面之下的每一格都严格高于列顶、sky_light 都是 15，若照旧当成直射
+                // 起点，整根水柱会齐刷刷读到 15，**竖直向下穿过流体就是无损的**。
+                // 排除它们之后，水下的光只能由上方空气经 BFS 逐格付费送进来。
+                if input.sky_light(x, y, z) != 15
+                    || registry.opaque(id)
+                    || registry.light_attenuation(id) != 0
+                {
                     continue;
                 }
                 let index = light_index(x, y, z);
@@ -103,17 +112,35 @@ fn build_sky(
         let y = (index % LIGHT_SIDE) as i32 + LIGHT_MIN;
         let x = (index / LIGHT_SIDE) as i32 + LIGHT_MIN;
         let current = scratch.at(x, y, z) >> 4;
+        // 最小可能扣减是 1，所以 current<=1 时任何邻居都拿不到正的光照。
         if current <= 1 {
             continue;
         }
-        let candidate = current - 1;
+        // best 是本格能给出的**最好**结果（扣减恰好为 1）。先拿它剪枝，已经不低于
+        // best 的邻居连查表都不必做——这既省掉热路径上的两次二分查找，也保住了
+        // 「稳定输入不再采样已定型邻居」这条既有性质。
+        let best = current - 1;
         for (dx, dy, dz) in DIRECTIONS {
             let (nx, ny, nz) = (x + dx, y + dy, z + dz);
             if !inside(nx, ny, nz) {
                 continue;
             }
             let next = light_index(nx, ny, nz);
-            if scratch.levels[next] >> 4 >= candidate || registry.opaque(input.block(nx, ny, nz)) {
+            if scratch.levels[next] >> 4 >= best {
+                continue;
+            }
+            let id = input.block(nx, ny, nz);
+            if registry.opaque(id) {
+                continue;
+            }
+            // 每格扣减 = 固定的 1 + 目标方块查表得到的额外衰减。六个方向共用同一个
+            // 公式，竖直向下没有任何特例：水的额外衰减是 1，于是每下沉一格扣 2。
+            let step = 1 + registry.light_attenuation(id);
+            if current <= step {
+                continue;
+            }
+            let candidate = current - step;
+            if scratch.levels[next] >> 4 >= candidate {
                 continue;
             }
             scratch.levels[next] = (scratch.levels[next] & BLOCK_MASK) | (candidate << 4);
@@ -364,6 +391,58 @@ mod tests {
         assert_eq!(storage.light.at(10, 8, 8) & 0x0f, 0);
     }
 
+    /// 天空光穿过流体时每格额外衰减：固定的 1 加上查表得到的 `light_attenuation`。
+    ///
+    /// 水的 `light_attenuation = 1`，所以每下沉一格扣 2：15 → 13 → 11 → … → 1 → 0。
+    /// **竖直向下不再无损**：流体格即使严格高于列顶也不再是直射起点，光只能从上方的
+    /// 空气逐格付费进入。
+    #[test]
+    fn sky_light_dims_by_two_per_fluid_cell() {
+        let water = open_water_fixture(LIGHT_ID);
+        let mut storage = ScratchFixture::new();
+        build_light(&water.mesh, &water.mesh.registry, &mut storage.light).unwrap();
+
+        // 水面之上的空气仍然是满亮直射起点。
+        assert_eq!(storage.light.at(8, 8, 8) >> 4, 15);
+        // 紧邻水面之下必须大于 0，且逐格严格变暗，足够深处到 0。
+        let want = [13, 11, 9, 7, 5, 3, 1, 0];
+        for (depth, expected) in want.into_iter().enumerate() {
+            let y = 7 - depth as i32;
+            assert_eq!(
+                storage.light.at(8, y, 8) >> 4,
+                expected,
+                "水下第 {} 格（y={y}）的天空光不符",
+                depth + 1,
+            );
+        }
+
+        // 防空转守卫排在真实断言之后：把水换成空气后同样八格必须全是 15。
+        // 若对照组也变暗，说明变暗来自夹具被封顶之类的原因，而不是流体衰减，
+        // 上面那串读数就不再证明任何事。
+        let air = open_water_fixture(0);
+        let mut control = ScratchFixture::new();
+        build_light(&air.mesh, &air.mesh.registry, &mut control.light).unwrap();
+        for y in 0..8 {
+            assert_eq!(
+                control.light.at(8, y, 8) >> 4,
+                15,
+                "空气对照组 y={y} 不是满亮，夹具本身就是暗的"
+            );
+        }
+    }
+
+    /// 流体透光：水下的光来自 BFS 逐格付费，而不是「被流体完全阻断」。
+    /// 与 `opaque_cell_blocks_sky_propagation` 成对——不透明格是 0，流体格不是。
+    #[test]
+    fn fluid_attenuates_instead_of_blocking() {
+        let water = open_water_fixture(LIGHT_ID);
+        let mut storage = ScratchFixture::new();
+        build_light(&water.mesh, &water.mesh.registry, &mut storage.light).unwrap();
+
+        assert!(storage.light.at(8, 7, 8) >> 4 > 0);
+        assert!(storage.light.at(8, 7, 8) >> 4 < 15);
+    }
+
     fn fixture_with_light_block(x: i32, y: i32, z: i32) -> InputFixture {
         let mut bytes = base_input(15);
         set_block(&mut bytes, x, y, z, LIGHT_ID);
@@ -425,14 +504,43 @@ mod tests {
     }
 
     fn darken_height_section(bytes: &mut [u8], x: i32, z: i32) {
+        fill_height_section(bytes, x, z, 31);
+    }
+
+    /// fill_height_section 把 (x,z) 所在整个 16×16 区段列的列顶统一设成 highest。
+    fn fill_height_section(bytes: &mut [u8], x: i32, z: i32, highest: i16) {
         let (cx, _) = neighbor_cell(x);
         let (cz, _) = neighbor_cell(z);
         let column = cx * 3 + cz;
         bytes[HEIGHTS_PRESENT_OFFSET + column] = 1;
         for cell in 0..256 {
             let offset = HEIGHTS_OFFSET + (column * 256 + cell) * 2;
-            bytes[offset..offset + 2].copy_from_slice(&31_i16.to_le_bytes());
+            bytes[offset..offset + 2].copy_from_slice(&highest.to_le_bytes());
         }
+    }
+
+    /// open_water_fixture 造一片**露天水体**：中心 16×16 区段列的列顶全部低于水面
+    /// （`highest = -1`，即 y >= 0 的每一格都在列顶之上、拿得到直射天空光），
+    /// `fill` 铺满 y=0..=7 八格，其上是空气。
+    ///
+    /// `fill` 传 `LIGHT_ID` 时就是水：在 `base_input(0)` 下它正好是一块「非不透明、
+    /// 不发光、`light_attenuation = 1`」的方块。传 `0`（空气）就是同一夹具的对照组。
+    ///
+    /// 夹具刻意做成整段 16×16 满铺八格深：**单列水柱是测不出衰减的**——旁边的空气
+    /// 会以每格 1 的代价把光送到同样深度再横向灌进来，读数被空气路径而不是水路径
+    /// 决定。满铺之后中心列 (8,·,8) 的每个横向邻居都是同深度的水，唯一路径是竖直
+    /// 穿水。八格深也是刻意的：一格深时「衰减 1」与「衰减 0」会给出同一批读数。
+    fn open_water_fixture(fill: u16) -> InputFixture {
+        let mut bytes = base_input(0);
+        fill_height_section(&mut bytes, 8, 8, -1);
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in 0..8 {
+                    set_block(&mut bytes, x, y, z, fill);
+                }
+            }
+        }
+        parse_fixture(bytes)
     }
 
     fn neighbor_cell(value: i32) -> (usize, usize) {
