@@ -400,6 +400,11 @@ func (engine *Engine) advanceActivePlayers() {
 		input := player.input
 		input.BodyInFluid, input.EyeInFluid = physics.SubmersionFlags(player.state.Position, source)
 		wasOnGround := player.state.OnGround
+		// 步首这次重置在「玩家自己游进水里」的路径上是冗余的：步末那次每 tick
+		// 无条件执行，而本 tick 的步首位置恒等于上 tick 的步末位置。它唯一还能
+		// 独立生效的窗口是**流体在两次玩家步之间流进玩家所在格**——advanceFluids
+		// 与玩家推进同在一个权威 tick 里，这个窗口是真实存在的，不是假想，
+		// 所以保留。
 		if wasOnGround || input.BodyInFluid {
 			player.peakY = player.state.Position.Y()
 		}
