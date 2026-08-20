@@ -25,6 +25,7 @@ func (renderer *HotbarRenderer) Prepare(
 	chest *ChestOverlay,
 	mining MiningOverlay,
 	health HealthOverlay,
+	oxygen OxygenOverlay,
 	chat ChatOverlay,
 	width, height uint32,
 	budget *render.UploadBudget,
@@ -52,6 +53,7 @@ func (renderer *HotbarRenderer) Prepare(
 		renderer.layout.open = open
 	}
 	appendHealthBar(&renderer.layout, renderer.atlas, health, float32(width), float32(height))
+	appendOxygenBar(&renderer.layout, oxygen, float32(width), float32(height))
 	appendChatOverlay(&renderer.layout, renderer.atlas, chat, float32(width), float32(height))
 	encodeHotbarViewport(
 		renderer.upload[hotbarViewportOffset:hotbarViewportOffset+hotbarViewportBytes],

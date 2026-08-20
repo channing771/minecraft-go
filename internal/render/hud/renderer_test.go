@@ -30,13 +30,16 @@ func TestHotbarPrepareReusesLayoutAndUploadStorage(t *testing.T) {
 	}
 	inventory := fullTestInventory()
 	health := HealthOverlay{Confirmed: true, Value: 7}
+	// 氧气取未满值：只有这样预热路径才会真的走到氧气条，"零每帧分配、零新上传缓冲"
+	// 这条断言才对它成立。传零值（未确认）会让氧气条整条被跳过、断言退化成空转。
+	oxygen := OxygenOverlay{Confirmed: true, Value: 120}
 	budget := render.NewUploadBudget(1024)
-	if err := renderer.Prepare(inventory, true, true, 3, nil, nil, MiningOverlay{}, health, ChatOverlay{}, 1280, 720, budget); err != nil {
+	if err := renderer.Prepare(inventory, true, true, 3, nil, nil, MiningOverlay{}, health, oxygen, ChatOverlay{}, 1280, 720, budget); err != nil {
 		t.Fatalf("warm Prepare: %v", err)
 	}
 	allocations := testing.AllocsPerRun(1000, func() {
 		source.requestCount = 0
-		if err := renderer.Prepare(inventory, true, true, 3, nil, nil, MiningOverlay{}, health, ChatOverlay{}, 1280, 720, budget); err != nil {
+		if err := renderer.Prepare(inventory, true, true, 3, nil, nil, MiningOverlay{}, health, oxygen, ChatOverlay{}, 1280, 720, budget); err != nil {
 			panic(err)
 		}
 	})

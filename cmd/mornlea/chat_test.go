@@ -440,7 +440,9 @@ func TestApplicationRendersHealthBeforeInventoryConfirmation(t *testing.T) {
 	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	if err := app.predictor.Begin(network.PlayerState{
 		ServerTick: 1, Dimension: core.Overworld,
+		// 氧气给满值：本用例只关心生命条的爱心实例数，未满氧气会额外画出氧气条。
 		Position: mgl32.Vec3{0.5, 10, 0.5}, Ready: true, Health: 12,
+		Oxygen: core.MaxOxygenTicks,
 	}); err != nil {
 		t.Fatal(err)
 	}
