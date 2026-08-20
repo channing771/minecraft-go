@@ -35,6 +35,11 @@ const (
 	LayerSnowTop
 	LayerSnowSide
 	LayerMossyCobblestone
+	// LayerWater 是 8 个流体编号共用的材质层。它必须独立于任何固体层：
+	// 上传路径正是按 material 把水面 quad 分流到半透明 water pass 的
+	// （见 internal/render.SectionScheduler），共用石头层等于水面被画进
+	// 不透明 terrain pass。
+	LayerWater
 	layerCount
 )
 
@@ -75,6 +80,7 @@ func NewRegistry() *Registry {
 	r.layers[LayerSnowTop] = snowTopTexture()
 	r.layers[LayerSnowSide] = snowSideTexture()
 	r.layers[LayerMossyCobblestone] = mossyCobblestoneTexture()
+	r.layers[LayerWater] = waterTexture()
 	// ids 覆盖 core 的全部已注册方块编号（含 8 个流体编号，上界即
 	// WaterLevel7ID）。流体必须在快照里，Rust 侧的 RegistryView::face_visible
 	// 只做位图查表、缺条目一律判不可见，漏掉流体就等于水永远不出面。
@@ -204,6 +210,11 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 			return LayerGrassSide
 		}
 	default:
+		// 8 个流体编号共用同一个水材质层：mesh 的 registry 条目每方块只有
+		// 6 个 material，塞不下等级；等级信息走独立的 FluidHeight 字段。
+		if core.IsFluid(id) {
+			return LayerWater
+		}
 		return LayerStone
 	}
 }

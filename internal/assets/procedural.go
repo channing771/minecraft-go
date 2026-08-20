@@ -211,6 +211,33 @@ func glassTexture() []byte {
 	return px
 }
 
+// waterAlpha 是水材质层的固定 alpha。
+//
+// 取 160/255：足够低使水底地形透过水面可见，又足够高让水面本身呈现可辨识
+// 的水色。水面走 alpha blend 而非 cutout，因此这里**不能**是 0 或 255——
+// 前者让整片水消失，后者让水变成不透明蓝方块。
+const waterAlpha = 160
+
+// waterTexture 生成半透明的蓝色水面材质。
+//
+// 结构：以噪声给出细碎的深浅变化（避免大面积同色带来的塑料感），再叠两条
+// 错开的亮色波纹让水面在世界坐标 UV 下有可辨认的流向。全部像素共用
+// waterAlpha，逐像素蓝色主导（B 严格大于 R 与 G），守卫见
+// TestWaterTextureIsTranslucentBlue。
+func waterTexture() []byte {
+	px := noisyTexture(rgb{R: 42, G: 96, B: 186}, 12, 0x57A2)
+	for _, point := range [][2]int{
+		{1, 3}, {2, 3}, {3, 4}, {4, 4}, {5, 3}, {6, 3},
+		{9, 10}, {10, 10}, {11, 11}, {12, 11}, {13, 10}, {14, 10},
+	} {
+		paint(px, point[0], point[1], rgb{R: 96, G: 158, B: 226})
+	}
+	for i := 3; i < len(px); i += 4 {
+		px[i] = waterAlpha
+	}
+	return px
+}
+
 func cobblestoneTexture() []byte {
 	px := noisyTexture(rgb{R: 116, G: 118, B: 120}, 10, 0xC0B1)
 	seam := rgb{R: 70, G: 72, B: 74}

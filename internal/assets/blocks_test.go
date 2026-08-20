@@ -300,3 +300,38 @@ func TestFluidFaceVisibilityRules(t *testing.T) {
 			fluidToFluid, fluidToAir, fluidToOpaque, opaqueToFluid)
 	}
 }
+
+// TestFluidBlocksUseDedicatedWaterMaterialLayer 锁定「流体有独立材质层」：
+// 8 个流体编号的全部 6 个面都必须返回 assets.LayerWater，且该层不得与任何
+// 非流体方块的任何面共用。
+//
+// 这条断言承重在于：流体曾经落在 Material 的 `default: return LayerStone`，
+// 于是水面会顶着石头纹理混进**不透明** terrain pass。上传路径按 material
+// 分流水面 quad，没有独立材质层就没有分流依据。
+func TestFluidBlocksUseDedicatedWaterMaterialLayer(t *testing.T) {
+	registry := assets.NewRegistry()
+	faces := []mesh.Face{
+		mesh.FaceNegX, mesh.FacePosX, mesh.FaceNegY,
+		mesh.FacePosY, mesh.FaceNegZ, mesh.FacePosZ,
+	}
+	for id := core.WaterSourceID; id <= core.WaterLevel7ID; id++ {
+		for _, face := range faces {
+			if got := registry.Material(id, face); got != assets.LayerWater {
+				t.Fatalf("Material(%d, face=%d) = %d，想要 LayerWater(%d)",
+					id, face, got, assets.LayerWater)
+			}
+		}
+	}
+	// 反向守卫：任何非流体的已注册方块都不得落到水层，否则「按 material
+	// 分流」会把不透明几何一起拖进半透明 pass。
+	for id := core.AirID; id <= core.MossyCobblestoneID; id++ {
+		if core.IsFluid(id) {
+			continue
+		}
+		for _, face := range faces {
+			if registry.Material(id, face) == assets.LayerWater {
+				t.Fatalf("非流体方块 %d 的 face=%d 落到了水材质层", id, face)
+			}
+		}
+	}
+}
