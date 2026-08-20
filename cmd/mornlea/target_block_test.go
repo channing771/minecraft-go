@@ -80,7 +80,9 @@ func TestCurrentBlockTargetRejectsInvalidTargetsAndUI(t *testing.T) {
 			name: "未知方块阻断路径",
 			setup: func(t *testing.T) *application {
 				app := newTargetBlockApplication(t, true, core.ChunkPos{}, core.ChunkPos{Z: -1})
-				setTargetMirrorBlock(t, app.mirror, core.BlockPos{X: 0, Y: 3, Z: 0}, core.MossyCobblestoneID+1)
+				// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体），真正
+				// 越界的未知方块编号改为 WaterLevel7ID+1。
+				setTargetMirrorBlock(t, app.mirror, core.BlockPos{X: 0, Y: 3, Z: 0}, core.WaterLevel7ID+1)
 				setTargetMirrorBlock(t, app.mirror, core.BlockPos{X: 0, Y: 3, Z: -1}, core.BrickID)
 				return app
 			},

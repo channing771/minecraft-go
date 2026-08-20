@@ -8,14 +8,27 @@ import (
 )
 
 // stepPhase 标识 Step 内部的固定处理阶段。权威 tick 的阶段顺序是规格契约：
-// 玩家命令 → 伙伴 action → 统一物理与世界变更；三个阶段写互不相交的状态，
-// 无法从外部结果观察先后，因此用 stepPhaseObserver 探针显式锁定。
+// 玩家命令 → 伙伴 action → 统一物理与世界变更 → 流体推进；各阶段写互不相交
+// 的状态，无法从外部结果观察先后，因此用 stepPhaseObserver 探针显式锁定。
 type stepPhase uint8
 
 const (
 	phasePlayerCommands stepPhase = iota + 1
 	phaseCompanionActions
 	phasePhysicsAdvance
+	// phaseFluidAdvance 位于熔炉推进之后、容器移动之前。
+	//
+	// **在 FluidFlowDelayTicks >= 1 时**，它在 Step 内相对其他方块写者（放置、
+	// 采掘、伙伴放置）的先后对结果没有影响：入队项的 dueTick = now + delay，
+	// delay >= 1 时本 tick 入队的项最早在 now+delay 才可能被取出，因此本 tick 的
+	// 写入先于还是后于 advanceFluids 都不改变本 tick 的流体处理集合。（事实上
+	// advanceMining 就排在 advanceFluids 之后。）该 tunable 的配置下限是 0，
+	// delay == 0 时本 tick 入队的项当 tick 即到期，阶段先后会让处理时机差一个
+	// tick——那是延迟为 0 的固有后果，不影响下面这条真正承重的约束。
+	//
+	// 唯一承重的约束是必须早于 finishChanges：流动写入要与其他方块变更共用同一批
+	// revision、广播与存盘（design.md D8）。
+	phaseFluidAdvance
 )
 
 // notifyStepPhase 把阶段进入事件上报给测试探针；生产环境探针恒为 nil。
@@ -317,6 +330,8 @@ func (engine *Engine) Step() TickResult {
 	}
 	engine.advanceDrops(pending)
 	engine.advanceFurnaces(pending)
+	engine.notifyStepPhase(phaseFluidAdvance)
+	engine.advanceFluids(pending)
 	for _, command := range containerMoves {
 		if reason, rejected := engine.applyContainerMove(command.Session, command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{

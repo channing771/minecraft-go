@@ -462,16 +462,17 @@ func testValidCollisionInput() []byte {
 	return input
 }
 
-// testValidWorldgenHeader 构造合法 `MGW1` header:seed 42、互异材料表 1..=13、恒等 perm。
+// testValidWorldgenHeader 构造合法 `MGW1` header:layout 2、seed 42、
+// 互异材料表 1..=14(engine ABI v4 起末项 water 占用 v3 的 reserved 槽)、恒等 perm。
 func testValidWorldgenHeader() []byte {
-	header := make([]byte, 564)
+	header := make([]byte, worldgenHeaderBytes)
 	copy(header[:4], "MGW1")
-	binary.LittleEndian.PutUint32(header[4:8], 1)
+	binary.LittleEndian.PutUint32(header[4:8], 2)
 	binary.LittleEndian.PutUint64(header[8:16], 42)
 	minY := int32(-64)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
 	binary.LittleEndian.PutUint32(header[20:24], 320)
-	for index := 0; index < 13; index++ {
+	for index := 0; index < 14; index++ {
 		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(index+1))
 	}
 	for index := 0; index < 512; index++ {
@@ -494,6 +495,10 @@ func testValidWorldgenProbeInput() []byte {
 	return input
 }
 
+// worldgenHeaderBytes 是 `MGW1` 公共 header 的字节数,必须与 engine
+// `WORLDGEN_HEADER_BYTES` 和 internal/worldgen 的同名常量一致。
+const worldgenHeaderBytes = 564
+
 const worldgenChunkOutputBytes = 16 * 16 * 384 * 2
 
 func TestWorldgenChunkRawFailureAtomicity(t *testing.T) {
@@ -502,7 +507,13 @@ func TestWorldgenChunkRawFailureAtomicity(t *testing.T) {
 	badMagic[0] = 'X'
 	duplicateMaterial := slices.Clone(validInput)
 	// dirt 改为与 stone 相同,触发材料表互异性校验。
+	// 注意不能用 water == air 做这个用例:那一对是 fluidEnabled 关闭时的
+	// 门控编码,engine 侧刻意豁免。
 	binary.LittleEndian.PutUint16(duplicateMaterial[26:28], 1)
+	badLayout := slices.Clone(validInput)
+	// layout version 是独立于 ABI 版本号的带内混装防线:header 布局一变它就要变,
+	// engine 侧对不上必须拒绝。
+	binary.LittleEndian.PutUint32(badLayout[4:8], 1)
 	wrongMinY := slices.Clone(validInput)
 	badMinY := int32(-32)
 	binary.LittleEndian.PutUint32(wrongMinY[16:20], uint32(badMinY))
@@ -517,6 +528,7 @@ func TestWorldgenChunkRawFailureAtomicity(t *testing.T) {
 		{name: "nil input", version: ABIVersion, output: make([]byte, worldgenChunkOutputBytes), want: StatusInvalidArgument},
 		{name: "bad magic", version: ABIVersion, input: badMagic, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "duplicate material", version: ABIVersion, input: duplicateMaterial, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
+		{name: "bad layout", version: ABIVersion, input: badLayout, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "wrong min y", version: ABIVersion, input: wrongMinY, output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "short input", version: ABIVersion, input: validInput[:len(validInput)-1], output: make([]byte, worldgenChunkOutputBytes), want: StatusInput},
 		{name: "short output", version: ABIVersion, input: validInput, output: make([]byte, worldgenChunkOutputBytes-1), want: StatusOutputOverflow},
@@ -555,9 +567,9 @@ func TestWorldgenChunkHappyPathIsDeterministic(t *testing.T) {
 func TestWorldgenProbeRawFailureAtomicity(t *testing.T) {
 	validInput := testValidWorldgenProbeInput()
 	badMode := slices.Clone(validInput)
-	binary.LittleEndian.PutUint32(badMode[564+4:564+8], 3)
-	zeroCount := slices.Clone(validInput[:564+4])
-	binary.LittleEndian.PutUint32(zeroCount[564:568], 0)
+	binary.LittleEndian.PutUint32(badMode[worldgenHeaderBytes+4:worldgenHeaderBytes+8], 3)
+	zeroCount := slices.Clone(validInput[:worldgenHeaderBytes+4])
+	binary.LittleEndian.PutUint32(zeroCount[worldgenHeaderBytes:worldgenHeaderBytes+4], 0)
 	for _, test := range []struct {
 		name    string
 		version uint32

@@ -216,7 +216,7 @@ func measureMultiplayerServerProbe(duration time.Duration) (
 		duration+benchmarkServerWarmupTicks*50*time.Millisecond+15*time.Second,
 	)
 	defer cancelRun()
-	host, err := server.NewHost(runCtx, config, worldgen.New(benchmarkSeed), store)
+	host, err := server.NewHost(runCtx, config, worldgen.New(benchmarkSeed, false), store)
 	if err != nil {
 		return client.MultiplayerSummary{}, client.PhaseSummary{}, errors.Join(
 			fmt.Errorf("创建多人 benchmark Host: %w", err),

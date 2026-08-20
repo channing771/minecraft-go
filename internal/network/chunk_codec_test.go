@@ -48,6 +48,40 @@ func TestChunkSnapshotV1Fixture(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(round, snapshot) {
 		t.Fatalf("round=%+v err=%v", round, err)
 	}
+	// 夹具前提守卫排在真实断言之后：golden 必须真的携带全部 8 个流体编号，
+	// 否则它就没有覆盖 v20 唯一的协议变化（方块 ID 集合扩展）。
+	if missing := missingFluidIDs(round.(ChunkSnapshot)); len(missing) != 0 {
+		t.Fatalf("snapshot golden 缺少流体编号 %v（夹具失效）", missing)
+	}
+}
+
+// missingFluidIDs 返回 snapshot 未携带的流体方块编号。
+func missingFluidIDs(snapshot ChunkSnapshot) []core.BlockID {
+	seen := make(map[core.BlockID]bool)
+	for _, section := range snapshot.Sections {
+		switch section.Storage {
+		case SectionSingle:
+			seen[section.Single] = true
+		case SectionIndexed:
+			for index := 0; index < core.BlocksPerSection; index++ {
+				palette := readSectionPacked(section.Packed, section.Bits, index)
+				if int(palette) < len(section.Palette) {
+					seen[section.Palette[palette]] = true
+				}
+			}
+		case SectionDirect:
+			for index := 0; index < core.BlocksPerSection; index++ {
+				seen[core.BlockID(readSectionPacked(section.Packed, section.Bits, index))] = true
+			}
+		}
+	}
+	var missing []core.BlockID
+	for id := core.WaterSourceID; id <= core.WaterLevel7ID; id++ {
+		if !seen[id] {
+			missing = append(missing, id)
+		}
+	}
+	return missing
 }
 
 func TestChunkSnapshotLogicalWireCoversAllStorages(t *testing.T) {
@@ -97,7 +131,7 @@ func TestLogicalSnapshotSizeMatchesWire(t *testing.T) {
 		{"all 8-bit indexed palette 25", indexed(8, 25), 99669},
 		{"all 8-bit indexed palette 26", indexed(8, 26), 99717},
 		{"direct", direct, 8310},
-		{"all storages", fixtureSnapshot(core.ChunkPos{X: -3, Z: 7}, 19), 86271},
+		{"all storages", fixtureSnapshot(core.ChunkPos{X: -3, Z: 7}, 19), 86295},
 		{"worst legal", worstLegalBenchmarkSnapshot(), 196749},
 	}
 	for _, tc := range tests {
@@ -396,10 +430,15 @@ func fixtureSnapshot(pos core.ChunkPos, revision uint64) ChunkSnapshot {
 			palette := []core.BlockID{core.AirID, core.StoneID, core.DirtID}
 			sections[y] = SectionData{Y: int32(y), Storage: SectionIndexed, Bits: 4, Palette: palette, Packed: testPacked(4, len(palette), y)}
 		case 2:
-			palette := []core.BlockID{core.AirID, core.BarrierID, core.StoneID, core.DirtID, core.GrassID, core.BedrockID}
+			// 调色板里带上流体源方块与最弱流动等级，让 golden 的 palette 路径也覆盖流体编号。
+			palette := []core.BlockID{
+				core.AirID, core.BarrierID, core.StoneID, core.DirtID, core.GrassID, core.BedrockID,
+				core.WaterSourceID, core.WaterLevel7ID,
+			}
 			sections[y] = SectionData{Y: int32(y), Storage: SectionIndexed, Bits: 8, Palette: palette, Packed: testPacked(8, len(palette), y)}
 		case 3:
-			sections[y] = SectionData{Y: int32(y), Storage: SectionDirect, Bits: 15, Packed: testPacked(15, int(core.MossyCobblestoneID)+1, y)}
+			// direct 路径的取值域覆盖到 WaterLevel7ID，使 golden 含全部 8 个流体编号。
+			sections[y] = SectionData{Y: int32(y), Storage: SectionDirect, Bits: 15, Packed: testPacked(15, int(core.WaterLevel7ID)+1, y)}
 		}
 	}
 	return ChunkSnapshot{Dimension: core.Overworld, Chunk: pos, Revision: revision, Sections: sections}

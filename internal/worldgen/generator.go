@@ -19,10 +19,19 @@ import (
 
 // `MGW1` ABI 编码常量,必须与 engine `worldgen.rs` 的布局逐字一致:
 // header = magic(4) + layout version(4) + seed(8) + min_y(4) + max_y(4) +
-// 材料表 13×u16(26) + reserved u16(2) + perm 512×u8(512)。
+// 材料表 14×u16(28) + perm 512×u8(512)。
+//
+// engine ABI v4 起材料表末项是 water,它正当占用 v3 预留的 reserved 槽
+// (偏移 50):该偏移的语义由"保留、必须为 0"变成"water 的方块编号",header
+// 总长与 perm 偏移不变,但布局语义确实变了,因此 layout version 1 → 2
+// ——它是独立于 ABI 版本号的带内第二道混装防线。
+//
+// 不再保留空槽是刻意选择,不是漏了:新增一个 reserved 槽本身就要把 perm 往后
+// 挪,而 reserved 的意义是推迟这个代价、不是提前支付;何况下一次扩字段必然
+// 同样改动材料表布局、必然升 ABI 版本,混装在版本号校验那一步就被挡住。
 const (
 	worldgenMagic       = "MGW1"
-	worldgenLayout      = 1
+	worldgenLayout      = 2
 	worldgenHeaderBytes = 564
 	// worldgenChunkOutputBytes 是 dense `[y−min_y][lz][lx]` 布局的
 	// 16×16×(MaxY−MinY) 个 u16。
@@ -49,7 +58,12 @@ type Generator struct {
 //
 // perm 表播种保持 Go `math/rand` 语义:这是既有世界的确定性来源,
 // 不迁入 Rust,保证相同 seed 在迁移前后产生相同世界。
-func New(seed int64) *Generator {
+//
+// fluidEnabled 是配置 `fluidEnabled` 的取值,门控海平面注水。门控在 Go 侧
+// 以"材料表 water 字段填什么编号"的形式实现(design D6):关闭时填 core.AirID,
+// engine 的注水步就退化为把空气写回空气,生成结果与未引入流体的基线逐位一致;
+// engine 侧因此没有任何开关分支。
+func New(seed int64, fluidEnabled bool) *Generator {
 	header := make([]byte, worldgenHeaderBytes)
 	copy(header[:4], worldgenMagic)
 	binary.LittleEndian.PutUint32(header[4:8], worldgenLayout)
@@ -57,15 +71,23 @@ func New(seed int64) *Generator {
 	minY, maxY := int32(core.MinY), int32(core.MaxY)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
 	binary.LittleEndian.PutUint32(header[20:24], uint32(maxY))
+	// 门控编码:关闭时 water 取 air 编号,engine 侧注水随之成为空操作。
+	water := core.AirID
+	if fluidEnabled {
+		water = core.WaterSourceID
+	}
 	// 材料表编码顺序与 engine `Materials` 字段顺序逐字对应。
-	for index, id := range [13]core.BlockID{
+	for index, id := range [14]core.BlockID{
 		core.AirID, core.StoneID, core.DirtID, core.GrassID, core.BedrockID,
 		core.SnowBlockID, core.SandID, core.ClayID, core.GravelID,
 		core.IronOreID, core.CoalOreID, core.OakLogID, core.LeavesID,
+		water,
 	} {
 		binary.LittleEndian.PutUint16(header[24+index*2:26+index*2], uint16(id))
 	}
 	perm := permTable(seed)
+	// perm 从偏移 52 开始:24..52 恰好是 14 项材料表,末项 water 占 50..52
+	// (v3 的 reserved 槽)。
 	copy(header[52:], perm[:])
 	return &Generator{header: header}
 }
@@ -109,12 +131,21 @@ func (g *Generator) HeightAt(wx, wz int32) int32 {
 }
 
 // TerrainBlockAt 返回不叠加橡树结构时指定世界位置的确定性地形方块。
+//
+// 它保持纯地形语义：即使 fluidEnabled 开启，海平面以下的空气格在这里仍返回
+// core.AirID，注水只作用于 BaseBlockAt 与 GenerateChunk。这个不对称是必需的
+// ——BaseBlockAt 以"地形非空即早返回"的方式叠加橡树，若地形层就把空气改写成
+// 水，早返回会吞掉橡树分支，海平面以下的树会整棵消失。
 func (g *Generator) TerrainBlockAt(pos core.BlockPos) core.BlockID {
 	output := g.probe(probeModeTerrain, pos.X, pos.Y, pos.Z)
 	return core.BlockID(binary.LittleEndian.Uint16(output[4:6]))
 }
 
 // BaseBlockAt 返回不应用会话修改时指定世界位置的确定性方块。
+//
+// 它是含注水的完整生成语义，与 GenerateChunk 逐格一致：地形 → 橡树 → 海水
+// 三层，fluidEnabled 开启时海平面及其以下最终仍为空气的格返回
+// core.WaterSourceID。需要纯地形结果的调用方用 TerrainBlockAt。
 func (g *Generator) BaseBlockAt(pos core.BlockPos) core.BlockID {
 	output := g.probe(probeModeBase, pos.X, pos.Y, pos.Z)
 	return core.BlockID(binary.LittleEndian.Uint16(output[4:6]))

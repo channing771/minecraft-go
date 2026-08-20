@@ -37,6 +37,10 @@ func (engine *Engine) recordChange(
 		Block:    block,
 	}
 	changeSet.dirty[position.SectionIndex()] = struct{}{}
+	// 权威 tick 内「方块真的变了」的唯一汇聚点，因此也是流体入队的唯一挂点：
+	// 放置、采掘、伙伴放置、伙伴采掘乃至流体自身的写入全部经由这里，挂一次
+	// 就没有写者会漏掉入队（详见 enqueueFluidUpdate 的注释）。
+	engine.enqueueFluidUpdate(dimensionID, position)
 }
 
 func (engine *Engine) finishChanges(

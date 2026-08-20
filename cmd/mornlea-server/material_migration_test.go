@@ -18,7 +18,7 @@ import (
 )
 
 func TestMigrateNaturalMaterialsDoesNotIntroduceOakTrees(t *testing.T) {
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	root := core.BlockPos{X: -4, Y: 65, Z: -4}
 	if got := generator.BaseBlockAt(root); got != core.OakLogID {
 		t.Fatalf("测试夹具树根 = %v，期望 %v", got, core.OakLogID)
@@ -112,7 +112,7 @@ func TestMigrateNaturalMaterialsPreservesOtherBlocksAndPayloads(t *testing.T) {
 
 	inputBefore := chunk.Clone()
 	want := chunk.Clone()
-	generator := worldgen.New(seed)
+	generator := worldgen.New(seed, false)
 	for index := range natural {
 		position := blockPosition(key.Pos, index, core.MinY, 0)
 		want.SetBlock(index, core.MinY, 0, generator.TerrainBlockAt(position))
@@ -140,7 +140,7 @@ func TestMigrateNaturalMaterialsPreservesOtherBlocksAndPayloads(t *testing.T) {
 
 func TestMigrateNaturalMaterialsKeepsRevisionWhenUnchanged(t *testing.T) {
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 1, Z: -1}}
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	chunk := generator.GenerateChunk(key.Pos)
 
 	candidate, changed, err := migrateNaturalMaterials(generator, storage.StoredChunk{
@@ -165,7 +165,7 @@ func TestMaterialMigrationRealDiskRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	worldPath := filepath.Join(root, "world")
 	backupPath := filepath.Join(root, "world-before-materials")
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	changedKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 2, Z: 3}}
 	unchangedKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: -2}}
 	otherDimensionKey := core.ChunkKey{Dimension: 1, Pos: core.ChunkPos{X: -4, Z: 5}}
@@ -255,7 +255,7 @@ func TestMaterialMigrationRealDiskRetriesProgressFailureWithoutSecondRevision(t 
 		t.Fatalf("进度失败后不应有正式状态，Stat 错误: %v", err)
 	}
 	want := chunk.Clone()
-	want.SetBlock(0, core.MinY, 0, worldgen.New(42).TerrainBlockAt(blockPosition(key.Pos, 0, core.MinY, 0)))
+	want.SetBlock(0, core.MinY, 0, worldgen.New(42, false).TerrainBlockAt(blockPosition(key.Pos, 0, core.MinY, 0)))
 	assertMaterialMigrationDiskChunk(t, worldPath, key, 6, want)
 
 	if err := migrateMaterials(ctx, worldPath, backupPath); err != nil {

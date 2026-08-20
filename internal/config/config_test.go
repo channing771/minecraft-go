@@ -268,6 +268,45 @@ func TestUnknownVersionFails(t *testing.T) {
 	}
 }
 
+// TestFluidEnabledDefaultsToFalse 钉住 fluidEnabled 的编译期默认值：本变更
+// （authoritative-fluid）不交付流体呈现，默认必须关闭，否则普通玩家会看到
+// 穿透到虚空的地形洞。
+func TestFluidEnabledDefaultsToFalse(t *testing.T) {
+	if config.Defaults().FluidEnabled {
+		t.Fatal("fluidEnabled 的编译期默认值必须是 false")
+	}
+}
+
+// TestFluidEnabledLoadsFromFile 证明字段缺席时保留默认值、出现时读取生效值，
+// 与包内其他顶层/分组字段的"缺席=默认、出现=覆盖"约定一致。
+func TestFluidEnabledLoadsFromFile(t *testing.T) {
+	absent, err := config.Load(writeConfig(t, `{"version":1}`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if absent.FluidEnabled {
+		t.Fatal("fluidEnabled 缺席时必须保持默认值 false")
+	}
+
+	present, err := config.Load(writeConfig(t, `{"version":1,"fluidEnabled":true}`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !present.FluidEnabled {
+		t.Fatal("fluidEnabled 显式写 true 时必须生效")
+	}
+}
+
+// TestFluidEnabledRejectsNonBoolValue 证明类型不合法（非 JSON 布尔）时按硬
+// 错误处理，与 version、ai.endpoint 等顶层/分组字段的类型错误处理一致——
+// 不静默降级为默认值。
+func TestFluidEnabledRejectsNonBoolValue(t *testing.T) {
+	path := writeConfig(t, `{"version":1,"fluidEnabled":"yes"}`)
+	if _, err := config.Load(path); err == nil {
+		t.Fatal("fluidEnabled 非布尔值必须报错")
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	want := config.Defaults()

@@ -75,6 +75,8 @@ Codex:       $openspec-apply-change
 
 实现阶段遵循 `tasks.md`，每个行为先写失败测试，再完成最小实现。只有验证通过后才勾选任务。
 
+实现执行必须采用 `subagent-driven-development` 规范：每个任务派发独立的 implementer 子代理并以任务 brief 为唯一需求来源；任务完成后经规格合规与代码质量双裁决的任务评审，评审发现进入修复循环（单任务最多 5 轮）；全部任务完成后进行整分支终审。执行进度、评审结论与裁决记录在 ledger；控制会话只做协调与裁决，不直接写实现。
+
 如果开发中发现需求、边界或技术方案变化，先修改对应的 proposal/spec/design/tasks，再继续实现。长时间运行的 change 若需要提前把 delta 合入主规格，可使用：
 
 ```text

@@ -18,8 +18,12 @@ type TerrainProbe struct {
 	generator *worldgen.Generator
 }
 
+// NewTerrainProbe 创建只查询地表高度的探针。
+//
+// 固定传 fluidEnabled=false:探针只用 HeightAt,而高度图由地形噪声决定,
+// 与海平面注水无关,传 false 可避免它依赖调用方的配置。
 func NewTerrainProbe(seed int64) *TerrainProbe {
-	return &TerrainProbe{generator: worldgen.New(seed)}
+	return &TerrainProbe{generator: worldgen.New(seed, false)}
 }
 
 func (probe *TerrainProbe) HeightAt(x, z int32) int32 {

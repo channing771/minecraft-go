@@ -7,9 +7,12 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// ProtocolVersion 是当前唯一支持的协议版本；v19 追加 CompanionSpeech 台词事件
-// 并拒绝 v18 及更早登录。
-const ProtocolVersion uint32 = 19
+// ProtocolVersion 是当前唯一支持的协议版本；v20 追加 8 个流体方块编号并拒绝
+// v19 及更早登录。
+//
+// v20 的唯一变化是方块 ID 集合扩展：wire 形状、字段布局与全部长度上限都不变。
+// 流体变更不新增消息类型，走既有区块变更通道（design.md D8）。
+const ProtocolVersion uint32 = 20
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8

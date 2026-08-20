@@ -325,8 +325,8 @@ func TestCraftingSurvivesV2DiskRestartAndReconnectOrder(t *testing.T) {
 	}
 	firstHost.WaitPlayerReleased(t, secondIdentity.PlayerID)
 	firstHost.Shutdown(t)
-	if schema := integrationStoredChunkSchema(t, root, key); schema != 8 {
-		t.Fatalf("正常刷新后的区块 schema=%d，想要 8", schema)
+	if schema := integrationStoredChunkSchema(t, root, key); schema != 9 {
+		t.Fatalf("正常刷新后的区块 schema=%d，想要 9", schema)
 	}
 
 	secondHost := startDiskHost(t, root, "127.0.0.1:0", flatGenerator{})

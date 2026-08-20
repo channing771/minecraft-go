@@ -8,7 +8,7 @@ import (
 )
 
 func TestNaturalMaterialBoundaries(t *testing.T) {
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	tests := []struct {
 		name string
 		pos  core.BlockPos
@@ -29,7 +29,7 @@ func TestNaturalMaterialBoundaries(t *testing.T) {
 }
 
 func TestNaturalMaterialsAppearInContinuousAreas(t *testing.T) {
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	seen := make(map[core.BlockID]int)
 	seenNegative := make(map[core.BlockID]bool)
 	adjacent := make(map[core.BlockID]bool)

@@ -114,7 +114,7 @@ func newApplicationWithDependencies(
 		}
 	}
 	if options.Benchmark {
-		running = server.NewWorld(config, worldgen.New(store.Metadata().Seed), store)
+		running = server.NewWorld(config, worldgen.New(store.Metadata().Seed, options.FluidEnabled), store)
 		clientEndpoint, err = assembleBenchmarkObserverConnection(
 			ctx, running, options.BenchmarkTransport,
 			func(address string) (network.Listener, error) {
@@ -138,7 +138,7 @@ func newApplicationWithDependencies(
 		clientEndpoint, host, serverCancel, serverDone, err = assembleLocalApplicationConnection(
 			ctx,
 			config,
-			worldgen.New(store.Metadata().Seed),
+			worldgen.New(store.Metadata().Seed, options.FluidEnabled),
 			store,
 			*options.Identity,
 			dependencies,

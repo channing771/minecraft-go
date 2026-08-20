@@ -9,7 +9,7 @@ import (
 	"github.com/channing771/mornlea/internal/world"
 )
 
-func TestChunkV6MigratesToV8WithoutChangingPayloadSemantics(t *testing.T) {
+func TestChunkV6MigratesToV9WithoutChangingPayloadSemantics(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "chunk-v6.bin"))
 	if err != nil {
 		t.Fatal(err)
@@ -24,9 +24,9 @@ func TestChunkV6MigratesToV8WithoutChangingPayloadSemantics(t *testing.T) {
 	}
 }
 
-func TestChunkV7FixtureMigratesToV8WithLightBlockAndDrop(t *testing.T) {
-	if currentChunkSchema != 8 {
-		t.Fatalf("区块 schema=%d，想要 8", currentChunkSchema)
+func TestChunkV7FixtureMigratesToV9WithLightBlockAndDrop(t *testing.T) {
+	if currentChunkSchema != 9 {
+		t.Fatalf("区块 schema=%d，想要 9", currentChunkSchema)
 	}
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 7}}
 	want := world.NewChunk(key.Pos)

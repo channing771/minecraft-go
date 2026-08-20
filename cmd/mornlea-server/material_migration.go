@@ -163,7 +163,9 @@ func runMaterialMigration(
 		pending = append(pending, key)
 	}
 
-	generator := worldgen.New(metadata.Seed)
+	// 材料迁移只查询 TerrainBlockAt(不叠加树与海水),与注水门控无关,
+	// 固定传 false 以免迁移结果随配置漂移。
+	generator := worldgen.New(metadata.Seed, false)
 	for start := 0; start < len(pending); start += materialMigrationBatchSize {
 		if err := ctx.Err(); err != nil {
 			return err

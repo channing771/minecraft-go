@@ -77,6 +77,11 @@ func TestBuildRegistrySnapshotCopiesAndFreezesProperties(t *testing.T) {
 	if !slices.Equal(snapshot.Visibility, []uint64{0, 1, 0}) {
 		t.Fatalf("snapshot visibility=%v，想要 [0 1 0]", snapshot.Visibility)
 	}
+	// 这里用 MossyCobblestoneID+1（=WaterSourceID）不依赖它是否已注册：
+	// 本用例的 snapshot 只装了 {Stone,Air,Glass} 三项，MossyCobblestoneID+1
+	// 无论现在是否已注册为流体，始终不在这个 snapshot 的 Blocks 列表里，
+	// RegistrySnapshot.FaceVisible 只按「是否在列表里」判定，与
+	// core.RegisteredBlock 无关，「缺失 ID 不应有可见面」的断言依然成立。
 	if snapshot.FaceVisible(core.MossyCobblestoneID+1, core.AirID) ||
 		snapshot.FaceVisible(core.StoneID, core.MossyCobblestoneID+1) {
 		t.Fatal("缺失 ID 不应有可见面")

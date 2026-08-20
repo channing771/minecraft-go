@@ -50,7 +50,75 @@ type Tunables struct {
 	// world.FurnaceSlot.Valid() 用编译期常量 core.FurnaceBurnTicks 校验 BurnTicks，
 	// 超过会导致该熔炉槽存盘失败。
 	FurnaceBurnTicks uint16 `json:"furnaceBurnTicks"`
+	// FluidFlowDelayTicks 是流体待更新项从入队到可被处理的延迟 tick 数
+	// （变更 authoritative-fluid，internal/fluid.Queue.Advance 的 delay 参数）。
+	//
+	// 它同时是"水看起来在流动而不是瞬移"的观感来源，也是天然的合并窗口——
+	// 同一格在延迟窗口内被重复标记只会合并成一次到期处理。internal/fluid
+	// 本身不读取这个值（archcheck 禁止 fluid 依赖 sim），本字段只是快照源，
+	// 由 sim 侧在 tick 入口读出后作为调用参数传给 fluid.Queue.Advance——
+	// 该接线由 internal/sim/fluid.go 的 fluidClock 在 tick 入口读出后传给
+	// fluid.Queue.Advance（任务组 4 已交付）。
+	FluidFlowDelayTicks uint32 `json:"fluidFlowDelayTicks"`
+	// FluidUpdatesPerTick 是单个权威 tick 内允许处理的流体格数上限
+	// （变更 authoritative-fluid，internal/fluid.Queue.Advance 的 budget 参数）。
+	//
+	// 这是一条硬上界，不是软限流：超出预算的待更新项按 internal/fluid 既定
+	// 的全序（lessPos）原样保留到后续 tick 继续处理，绝不丢弃——这正是规格
+	// "预算不改变平衡态"（受限预算下最终收敛到与不受限预算相同的平衡态）
+	// 这条保证成立的前提。若未来任何改动让超额项被丢弃而不是顺延，平衡态
+	// 保证就不再成立。
+	//
+	// 收敛所需的 tick 数不单调于本预算：受限预算下的收敛速度可能比不受限
+	// 更快也可能更慢，取决于水体形状与处理顺序如何与合并窗口相互作用——
+	// 实测部分随机形状在 budget=512 下 118 tick 收敛，不受限反而要 126 tick。
+	// 因此收敛 tick 数不得被当作性能指标使用，也不能假设调大预算必然让水
+	// 更快静止。消费方是 internal/sim/fluid.go 的 advanceFluids（任务组 4 已
+	// 交付）。
+	FluidUpdatesPerTick uint32 `json:"fluidUpdatesPerTick"`
+	// FluidRescanCellsPerTick 是单个权威 tick 内允许用于**边界重扫**的格数
+	// 预算（变更 authoritative-fluid，internal/sim/fluid.go 的 advanceFluids）。
+	//
+	// 它与 FluidUpdatesPerTick 管的是两件不同的事，不能互相替代：
+	// FluidUpdatesPerTick 截断的是「处理已在队列里的项」，而区块进入推进范围时
+	// 的一次性重扫要先把格**放进**队列，那部分工作完全不受它约束。评审实测过
+	// 无预算重扫的后果：八名玩家最坏兴趣范围一次性进入时，单 tick 花 204 ms 做
+	// 入队，20 TPS 的 50 ms 预算被直接击穿。
+	//
+	// 计量单位是「检查过的格数」而不是「入过队的格数」：跳过可证不动点之后，
+	// 常态是扫了几千格却一格都没入队（见 fluidSourceIsFixedPoint），按入队数
+	// 记账等于不记账。区段级快路径整段跳过时按 1 格记，因为它确实只做 5 次
+	// IsUniform。
+	//
+	// 预算在**区段边界**检查，因此单 tick 最多超支一个区段（4096 格）；换来的
+	// 是续扫游标只需记录「第几个平面、第几个区段」两个小整数。
+	//
+	// 调小它只会让重扫铺开到更多 tick，不会丢掉任何重扫：待重扫区块记在
+	// engine.fluidRescan 里跨 tick 保留。这条安全性来自 design.md D5——不动点
+	// 性质只要求重扫**最终**发生在该区块处于推进范围内的某个 tick，不要求发生
+	// 在它进入范围的那一 tick。区块在重扫完成前离开范围会被整条丢弃并在重新
+	// 进入时从头重扫，因此也不会留下"只扫了一半"的区块。
+	FluidRescanCellsPerTick uint32 `json:"fluidRescanCellsPerTick"`
 }
+
+// 以下是流体三个 tunable 的编译期默认值。它们的消费方都在
+// internal/sim/fluid.go 一个文件里（fluidClock 读延迟，advanceFluids 读两条
+// 预算），没有各自独立的消费方文件，因此集中定义在这里，而不是像
+// defaultRegenDelayTicks 等常量那样分散到各自的消费方文件。
+const (
+	// defaultFluidFlowDelayTicks 见 Tunables.FluidFlowDelayTicks 的字段说明。
+	defaultFluidFlowDelayTicks = 5
+	// defaultFluidUpdatesPerTick 见 Tunables.FluidUpdatesPerTick 的字段说明。
+	defaultFluidUpdatesPerTick = 512
+	// defaultFluidRescanCellsPerTick 见 Tunables.FluidRescanCellsPerTick 的
+	// 字段说明。取 65536（16 个满区段）的依据是实测：跳过不动点后逐格检查一格
+	// 约 24 ns，65536 格约合 1.6 ms，在 20 TPS 的 50 ms tick 预算里占约 3%，
+	// 与流体处理本身（budget=512）叠加后仍留出充足余量；同时它足以让日常路径
+	// 一 tick 扫完——走路跨一次区块边界新进入约 5 个区块，满水时合计约 5 万格。
+	// 最坏情况（八名玩家兴趣范围一次性进入，约 200 区块、约 230 万格）需要约
+	// 35 tick（1.7 秒）扫完，期间水只是晚一点开始流动，没有正确性后果。
+	defaultFluidRescanCellsPerTick = 65536
+)
 
 // DefaultTunables 返回编译期默认参数。它是配置文件缺省时的取值，
 // 也是调试面板“重置”的目标值。
@@ -66,6 +134,9 @@ func DefaultTunables() Tunables {
 		SpawnRadius:                defaultSpawnRadius,
 		FurnaceSmeltTicks:          core.FurnaceSmeltTicks,
 		FurnaceBurnTicks:           core.FurnaceBurnTicks,
+		FluidFlowDelayTicks:        defaultFluidFlowDelayTicks,
+		FluidUpdatesPerTick:        defaultFluidUpdatesPerTick,
+		FluidRescanCellsPerTick:    defaultFluidRescanCellsPerTick,
 	}
 }
 

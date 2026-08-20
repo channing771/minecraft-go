@@ -62,6 +62,17 @@ type Config struct {
 	Sim     sim.Tunables     `json:"sim"`
 	Render  Render           `json:"render"`
 	AI      *AI              `json:"ai,omitempty"`
+
+	// FluidEnabled 控制世界生成是否在海平面及其以下注水（权威流体，变更
+	// authoritative-fluid）。它是独立顶层布尔开关，不进 Fields()/physics/sim
+	// 那套数值分组与钳制机制——那套机制只认 float64 可钳制的数值字段。
+	//
+	// 启用后世界生成会在海平面及其以下注水，但本变更（authoritative-fluid）
+	// 不交付流体的任何呈现：水在渲染上没有专属处理，且由于流体暂未纳入
+	// mesh registry 快照，水体周围的地形面不会生成几何——看上去是穿透到
+	// 虚空的洞，而不是"水不可见"。正确呈现由后续变更
+	// fluid-presentation-survival 交付。本开关面向开发者，默认关闭。
+	FluidEnabled bool `json:"fluidEnabled"`
 }
 
 // Defaults 返回全部字段取编译期默认值的配置。它是配置文件缺省或字段缺失时的
@@ -80,6 +91,9 @@ func Defaults() Config {
 			FovDegrees:       70,
 			MouseSensitivity: 1,
 		},
+		// 默认关闭：本变更未交付流体呈现，开启后地形会在水体周围出现洞，
+		// 面向普通玩家的默认体验必须是关闭状态，见字段 GoDoc。
+		FluidEnabled: false,
 	}
 }
 
@@ -162,6 +176,15 @@ func decodeConfig(path string, contents []byte) (Config, error) {
 	if raw, ok := lookupCaseInsensitive(top, "ai"); ok {
 		if err := applyAI(&cfg, raw, path); err != nil {
 			return Config{}, fmt.Errorf("config: 解析 ai 字段: %w", err)
+		}
+	}
+	// fluidEnabled 是独立顶层布尔字段，不经 applyGroups 的数值钳制路径：
+	// 类型错误（如写成字符串）与 version 字段一样直接报错，不做静默降级——
+	// 这是一个门控生成行为的开关，写错类型多半是配置文件手误，应该在加载
+	// 时暴露而不是悄悄回落默认值。
+	if raw, ok := lookupCaseInsensitive(top, "fluidEnabled"); ok {
+		if err := json.Unmarshal(raw, &cfg.FluidEnabled); err != nil {
+			return Config{}, fmt.Errorf("config: 解析 fluidEnabled 字段: %w", err)
 		}
 	}
 	if err := applyGroups(&cfg, top); err != nil {
@@ -687,7 +710,7 @@ func applyGroups(cfg *Config, top map[string]json.RawMessage) error {
 
 // warnUnknownTopLevel 对不认识的顶层分组名 slog.Warn。
 func warnUnknownTopLevel(top map[string]json.RawMessage) {
-	known := map[string]bool{"version": true, "logging": true, "physics": true, "sim": true, "render": true, "ai": true}
+	known := map[string]bool{"version": true, "logging": true, "physics": true, "sim": true, "render": true, "ai": true, "fluidenabled": true}
 	for key := range top {
 		if !known[strings.ToLower(key)] {
 			slog.Warn("配置项未知字段已忽略", "field", key)
@@ -788,6 +811,16 @@ type Field struct {
 //     不钳制会触发巨额分配。
 //   - sim.dropPickupDelayTicks 与 sim.playerDropPickupDelayTicks 上限为 255：
 //     由持久化的 1 字节字段 world.DropSlot.PickupDelayTicks 决定。
+//
+// 以下两项的区间不是安全约束，只是没有存盘/panic 风险时的合理操作区间，可
+// 随实测调整（变更 authoritative-fluid 的 design.md D4 明确预算是估计值）：
+//   - sim.fluidFlowDelayTicks 下限为 0（允许立即处理，不强制观感延迟）。
+//   - sim.fluidUpdatesPerTick 下限为 1：0 会让流体待更新队列永远不推进，
+//     internal/fluid.Queue.Advance 本身会把负预算钳到 0 但不会把 0 拒绝为
+//     错误，这里在配置层面挡住"预算=0 等于永久卡死"这个几乎必错的取值。
+//   - sim.fluidRescanCellsPerTick 下限同样为 1：重扫预算在区段边界检查，
+//     取 1 也保证每 tick 至少推进一个区段，但取 0 会让待重扫队列永远排不空，
+//     刚进入推进范围的区块里的水永远不会被唤醒。
 func Fields() []Field {
 	return []Field{
 		{Group: "physics", Name: "eyeHeight", Min: 1, Max: 2.2, Step: 0.01},
@@ -810,6 +843,9 @@ func Fields() []Field {
 		{Group: "sim", Name: "spawnRadius", Min: 1, Max: 64, Step: 1},
 		{Group: "sim", Name: "furnaceSmeltTicks", Min: 1, Max: float64(core.FurnaceSmeltTicks), Step: 1},
 		{Group: "sim", Name: "furnaceBurnTicks", Min: 1, Max: float64(core.FurnaceBurnTicks), Step: 1},
+		{Group: "sim", Name: "fluidFlowDelayTicks", Min: 0, Max: 2000, Step: 1},
+		{Group: "sim", Name: "fluidUpdatesPerTick", Min: 1, Max: 65536, Step: 1},
+		{Group: "sim", Name: "fluidRescanCellsPerTick", Min: 1, Max: 1048576, Step: 1024},
 
 		{Group: "render", Name: "viewDistance", Min: 2, Max: 64, Step: 1, ReadOnly: true},
 		{Group: "render", Name: "fovDegrees", Min: 30, Max: 110, Step: 1},

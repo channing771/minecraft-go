@@ -30,7 +30,7 @@ func TestCaptureOakGroveFindsSceneByName(t *testing.T) {
 		t.Fatalf("准备 oak-grove: %v", err)
 	}
 
-	generator := worldgen.New(42)
+	generator := worldgen.New(42, false)
 	counts := map[core.BlockID]int{}
 	for z := int32(-1); z <= 1; z++ {
 		for x := int32(-1); x <= 1; x++ {

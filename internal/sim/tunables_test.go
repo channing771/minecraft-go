@@ -22,6 +22,8 @@ func TestDefaultTunablesMatchLegacyConstants(t *testing.T) {
 		{"SpawnRadius", float64(tunables.SpawnRadius), 16},
 		{"FurnaceSmeltTicks", float64(tunables.FurnaceSmeltTicks), float64(core.FurnaceSmeltTicks)},
 		{"FurnaceBurnTicks", float64(tunables.FurnaceBurnTicks), float64(core.FurnaceBurnTicks)},
+		{"FluidFlowDelayTicks", float64(tunables.FluidFlowDelayTicks), 5},
+		{"FluidUpdatesPerTick", float64(tunables.FluidUpdatesPerTick), 512},
 	} {
 		if check.got != check.want {
 			t.Errorf("%s = %v，want %v", check.name, check.got, check.want)
@@ -59,6 +61,26 @@ func TestSetTunablesClampsAuthorityTickInvariants(t *testing.T) {
 	SetTunables(unsafe)
 	if got := ActiveTunables().SpawnRadius; got != minSpawnRadius {
 		t.Errorf("SpawnRadius = %d，必须钳到下界 %d", got, minSpawnRadius)
+	}
+}
+
+// TestSetTunablesRoundTripsFluidFields 证明 FluidFlowDelayTicks 与
+// FluidUpdatesPerTick 已按既有 tunable 约定接入 SetTunables/ActiveTunables
+// 快照机制——本组只定义这两个值，尚无消费方读取它们（见字段 GoDoc），但快照
+// 写入与读出本身必须已经生效，供后续任务组（4.1）直接消费。
+func TestSetTunablesRoundTripsFluidFields(t *testing.T) {
+	t.Cleanup(func() { SetTunables(DefaultTunables()) })
+
+	custom := DefaultTunables()
+	custom.FluidFlowDelayTicks = 9
+	custom.FluidUpdatesPerTick = 1024
+	SetTunables(custom)
+
+	if got := ActiveTunables().FluidFlowDelayTicks; got != 9 {
+		t.Errorf("FluidFlowDelayTicks = %d，want 9", got)
+	}
+	if got := ActiveTunables().FluidUpdatesPerTick; got != 1024 {
+		t.Errorf("FluidUpdatesPerTick = %d，want 1024", got)
 	}
 }
 

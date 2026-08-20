@@ -76,7 +76,9 @@ func TestCommonBlockMaterialsAreFixedAndRoundTrip(t *testing.T) {
 			t.Fatalf("ItemStackLimit(%d)=(%d,%v)，想要 (64,true)", tc.item, limit, ok)
 		}
 	}
-	if core.RegisteredBlock(core.MossyCobblestoneID + 1) {
+	// MossyCobblestoneID+1 现在是 WaterSourceID（流体方块编号紧随其后追加），
+	// 已注册；真正越界的未知方块编号是 WaterLevel7ID+1。
+	if core.RegisteredBlock(core.WaterLevel7ID + 1) {
 		t.Fatal("未知方块被注册")
 	}
 }
@@ -318,6 +320,36 @@ func TestHotbarConsumeRejectsEmptyOrInvalidSlot(t *testing.T) {
 		}
 		if got != h {
 			t.Fatalf("Consume(%d) 失败时快捷栏必须保持不变", slot)
+		}
+	}
+}
+
+// TestFluidBlocksDoNotProduceItems 锁定「流体不进物品表」：全部 8 个流体编号
+// 采掘不产出任何物品，且合法物品编号上界 ItemIDMax 不因流体的引入而变化——
+// 流体只追加在 BlockID 枚举，不新增任何 ItemID。
+func TestFluidBlocksDoNotProduceItems(t *testing.T) {
+	if core.ItemIDMax != core.ItemMossyCobblestone+1 {
+		t.Fatalf("ItemIDMax = %d，想要保持 ItemMossyCobblestone+1 (%d) 不变",
+			core.ItemIDMax, core.ItemMossyCobblestone+1)
+	}
+	for _, block := range []core.BlockID{
+		core.WaterSourceID, core.WaterLevel1ID, core.WaterLevel2ID, core.WaterLevel3ID,
+		core.WaterLevel4ID, core.WaterLevel5ID, core.WaterLevel6ID, core.WaterLevel7ID,
+	} {
+		if item, ok := core.BlockDrop(block); ok || item != core.ItemNone {
+			t.Fatalf("BlockDrop(%d) = (%d,%v)，想要 (ItemNone,false)：流体不应产出物品", block, item, ok)
+		}
+	}
+}
+
+// TestNoItemPlacesAsFluid 是 spec Scenario「流体不可放置」的穷举守护：当前没有
+// 任何物品能放置为流体方块（因为没有任何物品映射到流体 BlockID），这条断言
+// 锁住这个事实，将来有人加"水桶"一类物品让 ItemPlacement 映射到流体编号时，
+// 这里会第一个报警。
+func TestNoItemPlacesAsFluid(t *testing.T) {
+	for item := core.ItemID(0); item < core.ItemIDMax; item++ {
+		if block, ok := core.ItemPlacement(item); ok && core.IsFluid(block) {
+			t.Fatalf("物品 %d 可放置为流体方块 %d", item, block)
 		}
 	}
 }

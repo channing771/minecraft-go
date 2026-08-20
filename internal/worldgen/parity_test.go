@@ -13,10 +13,12 @@ import (
 )
 
 // assertChunkMatchesOracle 逐位比较生产 GenerateChunk 与 pointwise oracle。
-func assertChunkMatchesOracle(t *testing.T, seed int64, pos core.ChunkPos) {
+//
+// fluidEnabled 同时传给生产与 oracle:跨实现一致性必须在门控两态下都成立。
+func assertChunkMatchesOracle(t *testing.T, seed int64, pos core.ChunkPos, fluidEnabled bool) {
 	t.Helper()
-	production := worldgen.New(seed)
-	oracle := newOracleGenerator(seed)
+	production := worldgen.New(seed, fluidEnabled)
+	oracle := newOracleGenerator(seed, fluidEnabled)
 	chunk := production.GenerateChunk(pos)
 	baseX := pos.X << core.SectionShift
 	baseZ := pos.Z << core.SectionShift
@@ -25,8 +27,8 @@ func assertChunkMatchesOracle(t *testing.T, seed int64, pos core.ChunkPos) {
 			for x := 0; x < core.SectionSize; x++ {
 				world := core.BlockPos{X: baseX + int32(x), Y: y, Z: baseZ + int32(z)}
 				if got, want := chunk.BlockAt(x, y, z), oracle.baseBlockAt(world); got != want {
-					t.Fatalf("seed=%d chunk=%+v (%d,%d,%d): 生产=%d oracle=%d",
-						seed, pos, world.X, y, world.Z, got, want)
+					t.Fatalf("seed=%d fluid=%t chunk=%+v (%d,%d,%d): 生产=%d oracle=%d",
+						seed, fluidEnabled, pos, world.X, y, world.Z, got, want)
 				}
 			}
 		}
@@ -43,7 +45,9 @@ func TestRandomSeedChunkParity(t *testing.T) {
 			X: int32(rng.Intn(4096) - 2048),
 			Z: int32(rng.Intn(4096) - 2048),
 		}
-		assertChunkMatchesOracle(t, seed, pos)
+		for _, fluidEnabled := range []bool{false, true} {
+			assertChunkMatchesOracle(t, seed, pos, fluidEnabled)
+		}
 	}
 }
 
@@ -55,17 +59,20 @@ func FuzzWorldgenOracleParity(f *testing.F) {
 	f.Add(int64(987654321), int32(2147480000), int32(319), int32(-2147480000))
 	f.Add(int64(0), int32(16), int32(88), int32(-16))
 	f.Fuzz(func(t *testing.T, seed int64, wx, wy, wz int32) {
-		production := worldgen.New(seed)
-		oracle := newOracleGenerator(seed)
-		if got, want := production.HeightAt(wx, wz), oracle.heightAt(wx, wz); got != want {
-			t.Fatalf("HeightAt(%d,%d)=%d，oracle=%d", wx, wz, got, want)
-		}
-		pos := core.BlockPos{X: wx, Y: wy, Z: wz}
-		if got, want := production.TerrainBlockAt(pos), oracle.terrainBlockAt(pos); got != want {
-			t.Fatalf("TerrainBlockAt(%+v)=%d，oracle=%d", pos, got, want)
-		}
-		if got, want := production.BaseBlockAt(pos), oracle.baseBlockAt(pos); got != want {
-			t.Fatalf("BaseBlockAt(%+v)=%d，oracle=%d", pos, got, want)
+		// 门控两态都要跨实现一致:关闭态锁基线,开启态锁注水规则。
+		for _, fluidEnabled := range []bool{false, true} {
+			production := worldgen.New(seed, fluidEnabled)
+			oracle := newOracleGenerator(seed, fluidEnabled)
+			if got, want := production.HeightAt(wx, wz), oracle.heightAt(wx, wz); got != want {
+				t.Fatalf("fluid=%t HeightAt(%d,%d)=%d，oracle=%d", fluidEnabled, wx, wz, got, want)
+			}
+			pos := core.BlockPos{X: wx, Y: wy, Z: wz}
+			if got, want := production.TerrainBlockAt(pos), oracle.terrainBlockAt(pos); got != want {
+				t.Fatalf("fluid=%t TerrainBlockAt(%+v)=%d，oracle=%d", fluidEnabled, pos, got, want)
+			}
+			if got, want := production.BaseBlockAt(pos), oracle.baseBlockAt(pos); got != want {
+				t.Fatalf("fluid=%t BaseBlockAt(%+v)=%d，oracle=%d", fluidEnabled, pos, got, want)
+			}
 		}
 	})
 }
@@ -76,7 +83,7 @@ func FuzzWorldgenOracleParity(f *testing.F) {
 // 必须与 oracle 一致,且两侧都必须真实落下树块。
 func TestOakTreeSpansChunkBorderConsistently(t *testing.T) {
 	const seed = 42
-	oracle := newOracleGenerator(seed)
+	oracle := newOracleGenerator(seed, false)
 	tree, ok := oracle.oakTreeForCell(2, 2)
 	if !ok {
 		t.Fatal("seed 42 cell (2,2) 应有橡树")
@@ -85,7 +92,7 @@ func TestOakTreeSpansChunkBorderConsistently(t *testing.T) {
 		t.Fatalf("候选树 root=%+v,语料前提失效", tree.root)
 	}
 
-	production := worldgen.New(seed)
+	production := worldgen.New(seed, false)
 	left := production.GenerateChunk(core.ChunkPos{X: 0, Z: 1})
 	right := production.GenerateChunk(core.ChunkPos{X: 1, Z: 1})
 	chunks := map[core.ChunkPos]interface {

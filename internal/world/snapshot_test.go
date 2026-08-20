@@ -233,7 +233,9 @@ func TestContainerSnapshotRejectsMalformedData(t *testing.T) {
 }
 
 func TestContainerSnapshotRejectsUnknownBlockEveryStorage(t *testing.T) {
-	unknown := core.MossyCobblestoneID + 1
+	// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体），真正越界的
+	// 未知方块编号改为 WaterLevel7ID+1。
+	unknown := core.WaterLevel7ID + 1
 	tests := []struct {
 		name     string
 		snapshot world.ContainerSnapshot
@@ -273,7 +275,7 @@ func TestContainerSnapshotRejectsUnknownBlockEveryStorage(t *testing.T) {
 }
 
 func BenchmarkExportChunkSnapshot(b *testing.B) {
-	chunk := worldgen.New(42).GenerateChunk(core.ChunkPos{X: 3, Z: -7})
+	chunk := worldgen.New(42, false).GenerateChunk(core.ChunkPos{X: 3, Z: -7})
 	b.ReportAllocs()
 	for b.Loop() {
 		for i := 0; i < core.SectionsPerChunk; i++ {
@@ -283,7 +285,7 @@ func BenchmarkExportChunkSnapshot(b *testing.B) {
 }
 
 func BenchmarkImportChunkSnapshot(b *testing.B) {
-	chunk := worldgen.New(42).GenerateChunk(core.ChunkPos{X: 3, Z: -7})
+	chunk := worldgen.New(42, false).GenerateChunk(core.ChunkPos{X: 3, Z: -7})
 	snapshots := make([]world.ContainerSnapshot, core.SectionsPerChunk)
 	for i := range snapshots {
 		snapshots[i] = chunk.Section(i).Blocks.Snapshot()

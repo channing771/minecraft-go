@@ -89,11 +89,13 @@ func PlayerBounds(position mgl32.Vec3) core.AABB {
 }
 
 // BlockCollisionBoxes 返回当前方块的局部碰撞体。
+// 流体（core.IsFluid）与空气同形状——已加载但零碰撞体：spec Requirement
+// 「流体方块编码」要求流体 MUST NOT 提供碰撞体，实体必须能自由穿行。
 func BlockCollisionBoxes(id core.BlockID, loaded bool) CollisionBoxSet {
 	if !loaded {
 		return CollisionBoxSet{}
 	}
-	if id == core.AirID {
+	if id == core.AirID || core.IsFluid(id) {
 		return CollisionBoxSet{Loaded: true}
 	}
 	return CollisionBoxSet{

@@ -38,6 +38,7 @@ operations:
       - 实现前重新读取 proposal、delta specs、design 和 tasks，以这些产物约束范围
       - 遵循 red-green-refactor，保留用户已有和无关的工作区改动，只在验证通过后勾选任务
       - 实现发现规格或设计不成立时，先同步修改对应 OpenSpec 产物，再继续编码
+      - change 的实现必须以 subagent-driven-development 规范执行：每任务派发独立 implementer 子代理（任务 brief 为唯一需求来源），任务评审做规格合规与代码质量双裁决，修复循环单任务最多 5 轮，收尾做整分支终审；进度、评审结论与裁决记录在 ledger，控制会话不得绕过子代理直接实现
   archive:
     guidance:
       - 归档前确认任务状态、实现与 delta specs 一致，并运行 openspec validate --all --strict --no-interactive
