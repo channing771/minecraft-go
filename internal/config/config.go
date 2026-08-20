@@ -67,11 +67,12 @@ type Config struct {
 	// authoritative-fluid）。它是独立顶层布尔开关，不进 Fields()/physics/sim
 	// 那套数值分组与钳制机制——那套机制只认 float64 可钳制的数值字段。
 	//
-	// 启用后世界生成会在海平面及其以下注水，但本变更（authoritative-fluid）
-	// 不交付流体的任何呈现：水在渲染上没有专属处理，且由于流体暂未纳入
-	// mesh registry 快照，水体周围的地形面不会生成几何——看上去是穿透到
-	// 虚空的洞，而不是"水不可见"。正确呈现由后续变更
-	// fluid-presentation-survival 交付。本开关面向开发者，默认关闭。
+	// 变更 fluid-presentation-survival 已补齐流体的呈现与生存：斜水面几何、
+	// 半透明 water pass、天空光穿水衰减、浸没物理与水中移动、溺水与氧气、
+	// 水下可瞄准与采掘放置。原先阻止默认开启的三条后果（水下全黑、水体周围
+	// 地形不出几何、水下无法交互）均已消除，故默认值改为开启。
+	//
+	// 显式写 false 仍然有效，用来生成不含水的世界（例如复现旧存档的地形）。
 	FluidEnabled bool `json:"fluidEnabled"`
 }
 
@@ -91,9 +92,9 @@ func Defaults() Config {
 			FovDegrees:       70,
 			MouseSensitivity: 1,
 		},
-		// 默认关闭：本变更未交付流体呈现，开启后地形会在水体周围出现洞，
-		// 面向普通玩家的默认体验必须是关闭状态，见字段 GoDoc。
-		FluidEnabled: false,
+		// 默认开启：fluid-presentation-survival 交付呈现与生存后，水已是
+		// 面向普通玩家的正常世界内容，见字段 GoDoc。
+		FluidEnabled: true,
 	}
 }
 
