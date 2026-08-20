@@ -43,3 +43,4 @@ operations:
     guidance:
       - 归档前确认任务状态、实现与 delta specs 一致，并运行 openspec validate --all --strict --no-interactive
       - 把可复用的行为契约合入主规格；项目级工作习惯应更新 AGENTS.md 或 openspec/config.yaml
+      - 同步更新 CLAUDE.md「项目定位」的基线版本号与能力描述，以及 docs/notes/progress.md 的里程碑段落（版本号一侧由 internal/archcheck 的 TestBaselineVersionsMatchCode 兜底，能力描述一侧仍靠人工核对）

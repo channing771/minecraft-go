@@ -38,6 +38,7 @@ Raycast 生产路径同样由 Rust `mornlea_engine` 独占 DDA 遍历；`interna
 - 注释必须丰富且有信息量：Go 的每个导出标识符都应有中文 GoDoc，Rust 的每个导出项都应有中文 doc comment（`///`）；关键算法、复杂逻辑、边界条件、并发约束、unsafe/FFI 边界、magic 数值和"为什么这么做"的设计决策必须配中文注释。注释应解释意图与权衡，而不是机械复述代码。
 - 文档、测试说明和开发者可读文本优先使用中文；Go 标识符、wire magic 和约定俗成的技术术语保留英文。
 - 涉及协议、存档格式或基准输出的变更必须说明兼容性与迁移策略，并保留 golden/fuzz/故障注入覆盖。
+- 长期基线文档（本文件的「项目定位」）只陈述**当前存在的能力与契约版本**。「本变更不做 X」是单个 OpenSpec change 的非目标，写在该 change 的 `proposal.md` 里并随它一起归档，不要写进这里：这类否定式断言在别处新增能力时会静默变假且现场没有任何信号——本文件就曾因此留着「伙伴不创建 Planner/FIFO/路径/persona/摘要」达四个里程碑，而那些能力早已交付。稳定的架构事实（「不追求兼容官方 Minecraft」「TCP 没有认证或加密」「没有生产 Go fallback」）是设计边界而非能力缺口，不在此列。契约版本号一侧由 `internal/archcheck` 的 `TestBaselineVersionsMatchCode` 兜底。
 - 自动测试不得启动或聚焦前台游戏窗口；只有用户明确要求人工验收时才运行交互式客户端。
 - `.codex/hooks.json` 与 `.claude/settings.json` 共用 `scripts/agent-hooks/guard.mjs`。Hook 失败时修复根因；不得关闭、改写或用 `MORNLEA_HOOKS_ALLOW_NO_SPEC=1` 绕过，除非用户明确批准例外。
 
