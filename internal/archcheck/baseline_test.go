@@ -36,7 +36,7 @@ type baselineVersionMapping struct {
 var baselineVersionMappings = []baselineVersionMapping{
 	{
 		name:        "协议版本",
-		docPattern:  `协议 v(\d+)`,
+		docPattern:  `已经包含协议 v(\d+)`,
 		sourcePath:  filepath.Join("internal", "network", "packet.go"),
 		codePattern: `const\s+ProtocolVersion\s+uint32\s*=\s*(\w+)`,
 		why:         "ProtocolVersion 是握手与全部 packet 编解码唯一支持的版本号，wire 兼容性以它为准。",
@@ -57,7 +57,7 @@ var baselineVersionMappings = []baselineVersionMapping{
 	},
 	{
 		name:        "companions.ai schema",
-		docPattern:  "`companions\\.ai` schema v(\\d+)",
+		docPattern:  "独立 `companions\\.ai` schema v(\\d+)",
 		sourcePath:  filepath.Join("internal", "storage", "companion_codec.go"),
 		codePattern: `currentCompanionSchema\s+uint32\s*=\s*(\w+)`,
 		why:         "currentCompanionSchema 是 companions.ai 写出时落盘的 schema 号；它以 companionSchemaVN 间接定义，需解析到最终数值。",
@@ -102,14 +102,61 @@ var baselineVersionMappings = []baselineVersionMapping{
 //     把下一个人引向错误方向。
 func TestBaselineVersionsMatchCode(t *testing.T) {
 	root := moduleRoot(t)
-	guidePath := filepath.Join(root, "CLAUDE.md")
-	guide, err := os.ReadFile(guidePath)
+	// 两份基线文档必须逐字节相同（见 TestBaselineDocsAreIdentical），这里仍然各校验一遍：
+	// 一致性测试若将来被删或被跳过，版本号一侧不应随之失去防护。
+	for _, name := range baselineDocNames {
+		t.Run(name, func(t *testing.T) {
+			assertBaselineVersions(t, root, name)
+		})
+	}
+}
+
+// baselineDocNames 是两份必须保持逐字节相同的长期基线文档。
+var baselineDocNames = []string{"AGENTS.md", "CLAUDE.md"}
+
+// TestBaselineDocsAreIdentical 锁定 `AGENTS.md` 与 `CLAUDE.md` 逐字节相同。
+//
+// 二者曾因归档时只更新其中一份而分叉：`AGENTS.md` 维护到了 M5E，`CLAUDE.md` 停在 M5A，
+// 基线描述滞后四个里程碑且无人察觉。孪生文件的真实失效模式是"只改了一份"，
+// 所以这条一致性断言比任何单文件检查都更贴根因。
+func TestBaselineDocsAreIdentical(t *testing.T) {
+	root := moduleRoot(t)
+	if len(baselineDocNames) < 2 {
+		t.Fatalf("基线文档只登记了 %d 份，一致性断言无从谈起", len(baselineDocNames))
+	}
+	reference := baselineDocNames[0]
+	referenceText := readBaselineDoc(t, root, reference)
+	for _, name := range baselineDocNames[1:] {
+		text := readBaselineDoc(t, root, name)
+		if text == referenceText {
+			continue
+		}
+		t.Errorf("%s 与 %s 内容不同：两份长期基线文档必须逐字节相同，改任何一份都要同步另一份"+
+			"（%s %d 字节，%s %d 字节）",
+			reference, name, reference, len(referenceText), name, len(text))
+	}
+}
+
+// readBaselineDoc 读取一份基线文档，并拒绝空文件——本门禁两侧都靠读文件，
+// 空文件会让所有断言静默消失。
+func readBaselineDoc(t *testing.T, root, name string) string {
+	t.Helper()
+	path := filepath.Join(root, name)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("读取 %s: %v", guidePath, err)
+		t.Fatalf("读取 %s: %v", path, err)
 	}
-	if len(guide) == 0 {
-		t.Fatalf("%s 为空：本门禁两侧都靠读文件，空文件会让所有断言静默消失", guidePath)
+	if len(data) == 0 {
+		t.Fatalf("%s 为空：本门禁两侧都靠读文件，空文件会让所有断言静默消失", path)
 	}
+	return string(data)
+}
+
+// assertBaselineVersions 校验一份基线文档里的契约版本号与代码常量一致。
+func assertBaselineVersions(t *testing.T, root, name string) {
+	t.Helper()
+	guidePath := filepath.Join(root, name)
+	guide := readBaselineDoc(t, root, name)
 	// 映射表本身也是承重件：删掉一行同样能让门禁静默变松，因此固定条数。
 	const expectedMappingCount = 8
 	if len(baselineVersionMappings) != expectedMappingCount {
@@ -131,7 +178,7 @@ func TestBaselineVersionsMatchCode(t *testing.T) {
 			continue
 		}
 
-		docValues := regexp.MustCompile(mapping.docPattern).FindAllStringSubmatch(string(guide), -1)
+		docValues := regexp.MustCompile(mapping.docPattern).FindAllStringSubmatch(guide, -1)
 		if len(docValues) == 0 {
 			// 先记下，循环结束后统一报错，保证真实的版本不匹配先于"未找到"出现。
 			missing = append(missing, fmt.Sprintf("%s（正则 %q）", mapping.name, mapping.docPattern))
