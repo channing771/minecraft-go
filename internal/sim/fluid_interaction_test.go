@@ -70,7 +70,8 @@ func TestMiningRaycastLooksThroughFluid(t *testing.T) {
 	}
 }
 
-// fluidChannelZ 是放置测试用的一格宽水渠：x=0、y=1、z∈[1,9]，水源在 z=9，
+// fluidChannelSourceZ 与 fluidChannelMinZ 界定放置测试用的一格宽水渠：
+// x=0、y=1、z∈[fluidChannelMinZ, fluidChannelSourceZ]，水源在 z=9，
 // 向 -Z 逐级流出 1..7 级流动水。
 //
 // 渠壁：x=-1 与 z=-1 属于区块 {-1,0}/{0,-1}，它们不在推进范围内，fluidWorld

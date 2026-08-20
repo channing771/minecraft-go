@@ -410,7 +410,7 @@ func (f *spawnFallback) consider(position mgl32.Vec3, tier spawnTier) {
 // advanceFluids 灌水都可能让那一格变样。这里**刻意不重新复算**，两种陈旧后果
 // 都已有归宿：
 //
-//   - **那一格被填实**：玩家出生后 advancePlayers 的 tryUnstick 先尝试逐 1/16
+//   - **那一格被填实**：玩家出生后 advanceActivePlayers 的 tryUnstick 先尝试逐 1/16
 //     格抬升，抬不出来就 beginReset 回到 PendingSpawn，用当时的世界重新扫一遍
 //     完整的出生流程。代价是多一个重生周期，不是状态损坏。伙伴侧沿用既有裁决
 //     （卡入方块的解除属玩家生命周期语义，M5B 伙伴保持最小实现）。
