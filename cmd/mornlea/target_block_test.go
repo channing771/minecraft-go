@@ -40,10 +40,25 @@ func TestCurrentBlockTargetLooksThroughFluid(t *testing.T) {
 		t.Fatalf("穿水瞄准 currentBlockTarget() = %+v, %v，想要 %+v, true", got, ok, want)
 	}
 
-	// 夹具承重守卫排在真实断言之后。
-	id, loaded := app.mirror.BlockAt(core.Overworld, fluid)
-	if !loaded || !core.IsFluid(id) {
-		t.Fatalf("夹具失效：射线路径上的 %+v=%d loaded=%v，不是流体", fluid, id, loaded)
+	// 夹具承重守卫排在真实断言之后。守卫必须证明水**挡在相机与砖块之间**，
+	// 而不只是"世界里某处有水"：后者在把水随手挪出射线路径后依然成立，改坏
+	// 实现也照样全绿。用修复前的旧谓词（流体也算实心）重打同一条射线，命中
+	// 必须恰好是那格水。
+	hit, found, err := core.RaycastBlocks(
+		app.camera.Pos,
+		app.camera.Forward(),
+		6,
+		func(position core.BlockPos) (bool, error) {
+			id, loaded := app.mirror.BlockAt(core.Overworld, position)
+			return loaded && id != core.AirID, nil
+		},
+	)
+	if err != nil || !found || hit.Block != fluid {
+		t.Fatalf("夹具失效：水 %+v 不挡在相机与砖块之间（旧谓词命中 %+v found=%v err=%v）",
+			fluid, hit.Block, found, err)
+	}
+	if id, loaded := app.mirror.BlockAt(core.Overworld, fluid); !loaded || !core.IsFluid(id) {
+		t.Fatalf("夹具失效：%+v=%d loaded=%v，不是流体", fluid, id, loaded)
 	}
 }
 
