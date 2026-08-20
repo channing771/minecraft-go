@@ -77,6 +77,10 @@ func BuildRegistrySnapshot(ids []world.BlockID, reader RegistryReader) (Registry
 		if block.FluidHeight > 14 {
 			return RegistrySnapshot{}, fmt.Errorf("mesh: block %d fluidHeight=%d 超过 14", id, block.FluidHeight)
 		}
+		// 天空光值域是 0..15，任何衰减语义下 > 15 都无意义；Rust 侧同口径拒绝。
+		if block.LightAttenuation > 15 {
+			return RegistrySnapshot{}, fmt.Errorf("mesh: block %d lightAttenuation=%d 超过 15", id, block.LightAttenuation)
+		}
 		for face := Face(0); face < 6; face++ {
 			block.Materials[face] = reader.Material(id, face)
 		}

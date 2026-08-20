@@ -72,6 +72,17 @@ func TestQuadPackRoundTripCarriesCornerHeights(t *testing.T) {
 	}
 }
 
+// TestQuadPackRejectsOutOfRangeCorner 锁定 Go 与 Rust 的 pack 断言对称：
+// 角高度只有 4 bit，越界值会串进相邻字段，两侧都必须当场炸而不是静默写坏。
+func TestQuadPackRejectsOutOfRangeCorner(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("角高度 16 未被拒绝")
+		}
+	}()
+	mesh.Quad{X: 1, Y: 1, Z: 1, W: 1, H: 1, Corners: [4]uint8{0, 0, 16, 0}}.Pack()
+}
+
 func TestQuadPackFitsIn55Bits(t *testing.T) {
 	full := mesh.Quad{
 		X: 15, Y: 15, Z: 15, W: 16, H: 16,

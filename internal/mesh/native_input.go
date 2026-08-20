@@ -64,6 +64,9 @@ func encodeNativeInput(dst []byte, n *world.Neighborhood, snapshot RegistrySnaps
 		if block.FluidHeight > 14 {
 			return 0, fmt.Errorf("mesh: 方块流体高度原值超过 14")
 		}
+		if block.LightAttenuation > 15 {
+			return 0, fmt.Errorf("mesh: 方块光衰减超过 15")
+		}
 		air = air || block.ID == core.AirID
 		barrier = barrier || block.ID == core.BarrierID
 	}

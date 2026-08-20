@@ -632,35 +632,77 @@ mod tests {
         assert_eq!(top_face(&quads, 8, 9, 8).corners, [7; 4]);
     }
 
-    /// 相邻不同水位之间连续过渡：共享边两侧顶面高度相等，且位于两格孤立高度之间。
+    /// 相邻不同水位之间连续过渡：共享边两侧顶面高度相等，且落在
+    /// `较低的孤立高度 <= shared < 较高的孤立高度`。
     ///
-    /// 夹具刻意只让这两格是水（共享顶点的另外两列留空气），使「介于两者之间」
-    /// 成为确定事实：整数平均落在参与格的最小与最大之间。
+    /// 夹具让整个区段只有这两格是水，满足 spec 里「共享边两端点周围只有这两格是
+    /// 流体」的 WHEN；并对**全部 56 组有序等级对**遍历，不依赖任何单一取值。
+    ///
+    /// 上界为什么必须严格：`floor((a+b)/2) < max(a,b)`（`a != b`）对全部等级对成立，
+    /// 而 design D2 明文否决的 max 规则会让 `shared` 等于 `strong`——**上界严格是
+    /// max 唯一过不去的那道门**。下界只能取非严格：`shared = weak + floor(d/2)`，
+    /// 等级只差 1 时 `shared` 恰好等于较弱格的孤立高度（真实水体里最常见的构型），
+    /// 写成严格大于就是一条假的普遍规律。
     #[test]
     fn adjacent_levels_share_one_continuous_edge_height() {
-        let mut bytes = water_input();
-        set_block(&mut bytes, 8, 8, 8, water_id(0));
-        set_block(&mut bytes, 9, 8, 8, water_id(7));
-        let quads = mesh_water(bytes);
+        let mut checked = 0;
+        let mut strictly_above_weak = 0;
+        for a in 0..8_u8 {
+            for b in 0..8_u8 {
+                if a == b {
+                    continue;
+                }
+                let mut bytes = water_input();
+                set_block(&mut bytes, 8, 8, 8, water_id(a));
+                set_block(&mut bytes, 9, 8, 8, water_id(b));
+                let quads = mesh_water(bytes);
 
-        let left = top_face(&quads, 8, 8, 8);
-        let right = top_face(&quads, 9, 8, 8);
-        // 顶面 axis=1 时 u=z、v=x，四个角 (du,dv) 依次映射到 (dz,dx) =
-        // (0,0) (1,0) (1,1) (0,1)。dx=1 的 index 2、3 落在左格的 x+1 边界，
-        // 也就是右格 dx=0 的 index 1、0——它们是同一条共享边的同两个端点。
-        assert_eq!(left.corners[3], right.corners[0], "共享边两端点必须同高");
-        assert_eq!(left.corners[2], right.corners[1], "共享边两端点必须同高");
+                let left = top_face(&quads, 8, 8, 8);
+                let right = top_face(&quads, 9, 8, 8);
+                // 顶面 axis=1 时 u=z、v=x，四个角 (du,dv) 依次映射到 (dz,dx) =
+                // (0,0) (1,0) (1,1) (0,1)。dx=1 的 index 2、3 落在左格的 x+1 边界，
+                // 也就是右格 dx=0 的 index 1、0——它们是同一条共享边的同两个端点。
+                assert_eq!(
+                    left.corners[3], right.corners[0],
+                    "共享边端点必须同高 (a={a}, b={b})"
+                );
+                assert_eq!(
+                    left.corners[2], right.corners[1],
+                    "共享边端点必须同高 (a={a}, b={b})"
+                );
 
-        let shared = left.corners[3];
-        let (weak, strong) = (water_raw(7), water_raw(0));
-        assert!(
-            shared > weak && shared < strong,
-            "共享边高度 {shared} 必须严格位于两格孤立高度 {weak}..{strong} 之间"
+                let shared = left.corners[3];
+                let (weak, strong) = (
+                    water_raw(a).min(water_raw(b)),
+                    water_raw(a).max(water_raw(b)),
+                );
+                assert!(
+                    shared >= weak,
+                    "共享边高度 {shared} 低于较低的孤立高度 {weak} (a={a}, b={b})"
+                );
+                assert!(
+                    shared < strong,
+                    "共享边高度 {shared} 未严格低于较高的孤立高度 {strong} (a={a}, b={b})"
+                );
+                // 远离共享边的一侧仍保留各自的孤立高度：这确实是一段斜面，
+                // 而不是把两格整体抬平到同一高度。
+                assert_eq!(left.corners[0], water_raw(a), "(a={a}, b={b})");
+                assert_eq!(right.corners[2], water_raw(b), "(a={a}, b={b})");
+
+                checked += 1;
+                if shared > weak {
+                    strictly_above_weak += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 56, "必须遍历全部有序等级对");
+        // 防空转守卫排在真实故障断言之后：若每一对都恰好 shared == weak，下界的
+        // `>=` 就退化成恒等、失去分辨力。等级差 >= 2 的 42 组必须严格高于较低值，
+        // 等级差 == 1 的 14 组必须恰好相等——这两个数字把整条分布钉死。
+        assert_eq!(
+            strictly_above_weak, 42,
+            "严格高于较低孤立高度的等级对数不对，斜面分布已退化"
         );
-        // 远离共享边的一侧仍保留各自的孤立高度，证明这确实是一段**斜面**而非
-        // 整体抬平：若把整数平均换成取最大值，这两条断言里的 shared 会等于 strong。
-        assert_eq!(left.corners[0], strong);
-        assert_eq!(right.corners[2], weak);
     }
 
     /// 等级越弱高度越低：等级更大的格顶面高度 MUST NOT 高于等级更小的，源最高。

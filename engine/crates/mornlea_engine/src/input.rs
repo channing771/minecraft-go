@@ -195,6 +195,12 @@ impl RegistryView<'_> {
             if self.entries[offset + 16] > 14 {
                 return Err(InputError::Registry);
             }
+            // light_attenuation 的语义留给光照实现，但天空光值域是 0..15，任何
+            // 衰减语义下 > 15 都无意义；拒绝它是为了让 registry 的每个字节都有
+            // 校验分支，而不预设具体语义。
+            if self.entries[offset + 17] > 15 {
+                return Err(InputError::Registry);
+            }
             has_air |= id == air_id;
             has_barrier |= id == barrier_id;
             previous = Some(id);
@@ -472,6 +478,14 @@ pub(crate) mod tests {
         fluid_height[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 16] = 15;
         assert_eq!(
             MeshInput::parse(&fluid_height).unwrap_err(),
+            InputError::Registry
+        );
+
+        // light_attenuation 不预设语义，但天空光值域是 0..15，> 15 一律拒绝。
+        let mut attenuation = valid_input();
+        attenuation[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 17] = 16;
+        assert_eq!(
+            MeshInput::parse(&attenuation).unwrap_err(),
             InputError::Registry
         );
 

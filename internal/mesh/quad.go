@@ -64,6 +64,13 @@ func (q Quad) Pack() uint64 {
 		if q.W != 1 || q.H != 1 {
 			panic("mesh: 带角高度的 quad 必须是 1×1")
 		}
+		// 每个角只有 4 bit：越界值会串进 bit 16/20/59/63，静默破坏相邻字段。
+		// 与 engine quad.rs 的 pack 断言同口径。
+		for _, corner := range q.Corners {
+			if corner > 15 {
+				panic("mesh: 角高度超过 15")
+			}
+		}
 		low = uint64(q.Corners[0])<<shiftW | uint64(q.Corners[1])<<shiftH
 		high = uint64(q.Corners[2])<<shiftCorner2 | uint64(q.Corners[3])<<shiftCorner3
 	}

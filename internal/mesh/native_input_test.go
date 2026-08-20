@@ -269,6 +269,7 @@ func TestEncodeNativeInputRejectsInvalidInputs(t *testing.T) {
 		{"bad visibility size", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: valid.Blocks, Visibility: []uint64{0}}},
 		{"overbright emission", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, Emission: 16}}, Visibility: []uint64{0, 0}}},
 		{"fluid height above 14", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, FluidHeight: 15}}, Visibility: []uint64{0, 0}}},
+		{"light attenuation above 15", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, LightAttenuation: 16}}, Visibility: []uint64{0, 0}}},
 		{"short destination", make([]byte, 16), fullyLoadedAirNeighborhood(), valid},
 	}
 	for _, tt := range tests {
