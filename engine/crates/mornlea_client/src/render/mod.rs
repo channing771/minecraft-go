@@ -33,11 +33,21 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 // 容量与 Go 渲染器默认值一致(pool 面数、origin 槽位)。
 const POOL_FACES: u32 = 4_500_000;
-/// 水面实例池容量(条)。水面不贪心合并、按 1×1 出面,一个区段的水面上界是
-/// 6×256 = 1536 条,但真实水体远达不到;取 512Ki 条 = 8 MiB 固定显存,足够
-/// 覆盖整个视距的水体,且**一次性**创建——water pass MUST NOT 引入每帧动态
-/// 资源(`voxel-visual-presentation` MODIFIED 写死的边界)。
-const WATER_POOL_INSTANCES: u32 = 512 * 1024;
+/// 水面实例池容量(条)。水面不贪心合并、按 1×1 出面,主导项是海面的顶面:
+/// 视距 32 → 视半径 33 → (2×33+1)² = 4489 个区块,每区块 16×16 = 256 列,
+/// 全海世界的顶面上界 4489×256 ≈ 1.15M 条;岸线与水下地形边缘再贡献侧面。
+/// 取 2Mi 条 = 32 MiB 固定显存,约为该上界的 1.8 倍。
+///
+/// 这个值曾是 512Ki,依据是"一个区段的水面上界 6×256 = 1536 条"——那个算式
+/// 错了(区段有 16³ = 4096 格,不是 256 格),而且区段上界本来就推不出整视距的
+/// 总量。fluidEnabled 默认打开后,默认世界的实测峰值就在 50 万条上方、恰好
+/// 越过 512Ki,抓帧在加载阶段直接以 STATUS_CAPACITY 崩溃。
+///
+/// 池仍是**一次性**创建的固定容量——water pass MUST NOT 引入每帧动态资源
+/// (`voxel-visual-presentation` MODIFIED 写死的边界);上限本身是硬约束,
+/// 超出时 upload_section 返回 false 并由调用方以 STATUS_CAPACITY 报错,
+/// 不做静默截断。
+const WATER_POOL_INSTANCES: u32 = 2 * 1024 * 1024;
 const ORIGIN_SLOTS: u32 = 128 * 1024;
 /// 每个 pool face 8 字节(packed u64);cull 后每个可见实例 16 字节。
 const BYTES_PER_POOL_FACE: u64 = 8;
@@ -2236,6 +2246,33 @@ mod tests {
             visible: Vec::new(),
             ..Default::default()
         }
+    }
+
+    /// 水面实例池必须覆盖"最大视距下全海世界的顶面"这一主导上界。
+    ///
+    /// 这条断言承的重是**位置性**而非存在性:它不是在问"常量存在吗",而是把
+    /// 常量与一个独立算出的几何上界比大小。曾用的 512Ki 会让本测试变红——
+    /// fluidEnabled 默认打开后,默认世界的实测峰值就越过了它,抓帧在加载阶段
+    /// 以 STATUS_CAPACITY 崩溃。
+    #[test]
+    fn water_pool_covers_full_ocean_top_faces() {
+        // 视距 32(config.Render.ViewDistance 默认值)→ 视半径 33 区块。
+        const VIEW_RADIUS_CHUNKS: u32 = 33;
+        const CHUNK_COLUMNS: u32 = 16 * 16;
+        let chunks = (2 * VIEW_RADIUS_CHUNKS + 1).pow(2);
+        let top_faces = chunks * CHUNK_COLUMNS;
+        assert!(
+            WATER_POOL_INSTANCES >= top_faces,
+            "水面实例池 {} 条覆盖不了全海顶面上界 {} 条",
+            WATER_POOL_INSTANCES,
+            top_faces
+        );
+        // 同时钉住 wgpu 的 max_storage_buffer_binding_size(128 MiB)硬上限:
+        // 实测超出会在 create_bind_group 阶段直接 validation error。
+        assert!(
+            u64::from(WATER_POOL_INSTANCES) * BYTES_PER_VISIBLE_FACE <= 128 * 1024 * 1024,
+            "水面实例缓冲超出 128 MiB 绑定上限"
+        );
     }
 
     #[test]
