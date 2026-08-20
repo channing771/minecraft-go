@@ -95,9 +95,61 @@ fn build_sky(
         }
     }
 
-    while scratch.head < scratch.tail {
-        let mut index = scratch.queue[scratch.head] as usize;
-        scratch.head += 1;
+    // 按亮度降序分桶推进，每个桶再分两相位。刚扫出的全部满亮格就是 15 号桶。
+    //
+    // **为什么不能再用朴素 FIFO**：每步扣减改成按方块查表的 1 或 2 之后，FIFO 里的值
+    // 不再单调不增，同一格可以先被 2 代价路径够到、再被 1 代价路径改进并重复入队。
+    // 而队列容量是恰好 LIGHT_VOLUME（见 ffi.rs），溢出会一路变成 Go 侧渲染热路径上的
+    // panic。固定扣减 1 的年代「每格至多入队一次」是显然的，这里必须把它挣回来。
+    //
+    // **为什么这样就够**：设正在处理亮度 L 的桶。相位 A 只放松零衰减邻居（一律产出
+    // L-1），相位 B 只放松有衰减邻居（一律产出 <= L-2）。于是：
+    //
+    //   1. 相位 A 跑完时，所有本轮能拿到 L-1 的格子都已经定在 L-1；相位 B 递上来的
+    //      L-2 对它们不是改进，被 `>= candidate` 挡掉，不会造成第二次入队；
+    //   2. 只在相位 B 拿到 L-2 的格子，此后再无人能给它更高的值——L-1 只可能由 L 桶的
+    //      相位 A 产生，而那一相位已经结束，更低的桶只会产出 <= L-2。
+    //
+    // 两条合起来：每格恰好在它的**最终**亮度上入队一次，容量 LIGHT_VOLUME 因此够用，
+    // 也不存在需要跳过的陈旧队列项。守卫见 sky_queue_enqueues_each_cell_at_most_once_in_mixed_media。
+    //
+    // 桶在队列里天然连续：写入顺序是 A(L+1)→L、B(L+1)→L-1、A(L)→L-1、B(L)→L-2……
+    // 所以 L-1 号桶正好是 B(L+1) 段紧接 A(L) 段，用 start/end 两个下标就能划出来。
+    let mut start = 0;
+    let mut end = scratch.tail;
+    while start < scratch.tail {
+        let deferred = spread(input, registry, scratch, start..end, false)?;
+        let next_end = scratch.tail;
+        // 没有任何有衰减的邻居被推迟时整个相位 B 是空转，直接跳过：这让不含流体的
+        // 世界维持与固定扣减时代逐格相同的工作量。
+        if deferred {
+            spread(input, registry, scratch, start..end, true)?;
+        }
+        // 空桶会自愈：start 不动、end 前移到当前 tail，下一轮自然落到再下一个桶。
+        start = end;
+        end = next_end;
+    }
+    Ok(())
+}
+
+/// spread 把 `queue[slots]` 这一个桶里的格子向六邻放松一轮，返回是否**推迟**过邻居。
+///
+/// `attenuating` 选择本轮处理哪一类邻居：`false` 只处理 `light_attenuation == 0` 的
+/// 邻居（扣减恰好 1），`true` 只处理有衰减的邻居（扣减至少 2）。同一个桶跑两遍、
+/// 零衰减那遍在先，是「每格至多入队一次」的关键，推导见 `build_sky`。
+///
+/// 返回值只在 `attenuating == false` 时有意义：为真表示本轮至少跳过了一个有衰减的
+/// 邻居，调用方据此决定要不要真的跑相位 B。
+fn spread(
+    input: &MeshInput<'_>,
+    registry: &RegistryView<'_>,
+    scratch: &mut LightScratch<'_>,
+    slots: std::ops::Range<usize>,
+    attenuating: bool,
+) -> Result<bool, MeshError> {
+    let mut deferred = false;
+    for slot in slots {
+        let mut index = scratch.queue[slot] as usize;
         let z = (index % LIGHT_SIDE) as i32 + LIGHT_MIN;
         index /= LIGHT_SIDE;
         let y = (index % LIGHT_SIDE) as i32 + LIGHT_MIN;
@@ -124,9 +176,14 @@ fn build_sky(
             if registry.opaque(id) {
                 continue;
             }
+            let attenuation = registry.light_attenuation(id);
+            if (attenuation != 0) != attenuating {
+                deferred |= !attenuating;
+                continue;
+            }
             // 每格扣减 = 固定的 1 + 目标方块查表得到的额外衰减。六个方向共用同一个
             // 公式，竖直向下没有任何特例：水的额外衰减是 1，于是每下沉一格扣 2。
-            let step = 1 + registry.light_attenuation(id);
+            let step = 1 + attenuation;
             if current <= step {
                 continue;
             }
@@ -138,7 +195,7 @@ fn build_sky(
             scratch.enqueue(next)?;
         }
     }
-    Ok(())
+    Ok(deferred)
 }
 
 fn build_block(
@@ -436,6 +493,81 @@ mod tests {
 
         assert!(storage.light.at(8, 7, 8) >> 4 > 0);
         assert!(storage.light.at(8, 7, 8) >> 4 < 15);
+    }
+
+    /// mixed_media_fixture 造一份**队列压力最大**的天空光输入：
+    ///
+    /// - 8 个外围区段列的列顶压到 `-17`（低于整个光照体积），于是它们的每一格都是
+    ///   满亮直射种子；中心区段列加一层 `roof` 高的顶盖，那 16×16 区域全靠 BFS 侧向灌入；
+    /// - 方块按 4×4 的**水柱／空气柱棋盘**交替铺满全高。
+    ///
+    /// 这两件事合起来正是重复入队的温床：中心暗区的同一格会先被穿水的 2 代价路径够到、
+    /// 再被绕行的 1 代价路径改进一次。而整个 48³ 体积恰好全部有光，队列一格不剩，
+    /// **任何一次重复入队都立刻溢出**。
+    fn mixed_media_fixture() -> InputFixture {
+        let mut bytes = base_input(0);
+        for cx in [-16_i32, 0, 16] {
+            for cz in [-16_i32, 0, 16] {
+                let highest = if cx == 0 && cz == 0 { 31 } else { -17 };
+                fill_height_section(&mut bytes, cx, cz, highest);
+            }
+        }
+        for x in -16_i32..32 {
+            for z in -16_i32..32 {
+                if (x.div_euclid(4) + z.div_euclid(4)).rem_euclid(2) != 0 {
+                    continue;
+                }
+                for y in -16_i32..32 {
+                    set_block(&mut bytes, x, y, z, LIGHT_ID);
+                }
+            }
+        }
+        parse_fixture(bytes)
+    }
+
+    /// 天空光队列容量的承重守卫：**每格至多入队一次**，因此恰好 `LIGHT_VOLUME` 够用。
+    ///
+    /// 这条不变量在「每步扣减固定为 1」的年代是显然的（BFS 值严格单调不增，一格被改进
+    /// 之后不可能再被改进）。扣减改成按方块查表的 1 或 2 之后它**不再显然**：FIFO 里的值
+    /// 不再单调，同一格可以先被 2 代价路径够到、再被 1 代价路径改进并重复入队。
+    /// `build_sky` 因此改成按亮度降序分桶、每桶先放松零衰减邻居再放松有衰减邻居，
+    /// 重新把「至多一次」变成可证的（推导见 `build_sky` 的注释）。
+    ///
+    /// 队列容量是 `ffi.rs` 里写死的 `LIGHT_VOLUME`，溢出会一路变成 Go 侧
+    /// `internal/mesh/native.go` 在渲染热路径上的 panic，所以这条必须钉死。
+    /// 本夹具下整个体积恰好全部有光，队列一格不剩：不变量一破就是真溢出，不是余量问题。
+    #[test]
+    fn sky_queue_enqueues_each_cell_at_most_once_in_mixed_media() {
+        let input = mixed_media_fixture();
+        let levels = Box::leak(vec![0; LIGHT_VOLUME].into_boxed_slice());
+        let queue = Box::leak(vec![0; LIGHT_VOLUME].into_boxed_slice());
+        let mut light = LightScratch::new(levels, queue);
+
+        super::build_sky(&input.mesh, &input.mesh.registry, &mut light)
+            .expect("天空光队列溢出：每格至多入队一次的不变量已被破坏");
+
+        let mut lit = 0;
+        for x in -16..32 {
+            for y in -16..32 {
+                for z in -16..32 {
+                    if light.at(x, y, z) >> 4 > 0 {
+                        lit += 1;
+                    }
+                }
+            }
+        }
+        // 夹具前提守卫排在真实断言之后：整个体积必须真的全部有光，否则队列还有余量，
+        // 上面那句 expect 就不再是「一次重复入队即溢出」的严格判据。
+        assert_eq!(
+            light.tail(),
+            lit,
+            "入队 {} 次但只有 {lit} 格有光：存在重复入队",
+            light.tail(),
+        );
+        assert_eq!(
+            lit, LIGHT_VOLUME,
+            "夹具没有把整个光照体积点亮，队列仍有余量"
+        );
     }
 
     fn fixture_with_light_block(x: i32, y: i32, z: i32) -> InputFixture {
