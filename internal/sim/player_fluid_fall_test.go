@@ -25,7 +25,7 @@ func TestFallIntoFluidCancelsFallDamage(t *testing.T) {
 	for y := int32(1); y <= 4; y++ {
 		pool[core.BlockPos{X: 0, Y: y, Z: 0}] = core.WaterSourceID
 	}
-	engine, session := readyFlatPlayerWithTarget(t, pool)
+	engine, session := readyFlatPlayerPool(t, pool)
 	dropPlayer(t, engine, session, 10)
 	assertPlayerHealth(t, engine, session, core.MaxHealth)
 
@@ -36,7 +36,7 @@ func TestFallIntoFluidCancelsFallDamage(t *testing.T) {
 	shallow := map[core.BlockPos]core.BlockID{{X: 0, Y: 1, Z: 0}: core.WaterSourceID}
 	crossings := 0
 	for height := float32(5); height <= 12; height++ {
-		shallowEngine, shallowSession := readyFlatPlayerWithTarget(t, shallow)
+		shallowEngine, shallowSession := readyFlatPlayerPool(t, shallow)
 		if dropCrossesSurfaceWithinOneStep(t, shallowEngine, shallowSession, height, testPoolFluid(shallow)) {
 			crossings++
 		}
@@ -97,4 +97,23 @@ func dropCrossesSurfaceWithinOneStep(
 	}
 	t.Fatalf("玩家在 400 tick 内未落地: height=%v", height)
 	return false
+}
+
+// readyFlatPlayerPool 先在无水的平坦世界里让玩家出生，再把水池写进世界。
+//
+// 出生点选取会跳过身体浸没的候选列（任务 7.2「不把流体判为落脚点」），水池若
+// 在区块生成时就压在出生列上，玩家根本不会在那里出生。本用例要的是「从高处
+// 落进池子」，水池位置必须与下落列一致，因此水改在出生之后写入。
+// SetBlockForTest 绕过 recordChange，池水不会被入队流动，与原先烘进区块的
+// 静态池子逐格等价。
+func readyFlatPlayerPool(
+	t *testing.T,
+	pool map[core.BlockPos]core.BlockID,
+) (*sim.Engine, sim.SessionID) {
+	t.Helper()
+	engine, session := readyFlatPlayer(t)
+	for position, block := range pool {
+		engine.SetBlockForTest(position, block)
+	}
+	return engine, session
 }

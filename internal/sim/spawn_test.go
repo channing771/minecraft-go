@@ -201,3 +201,51 @@ func spawnTestChunk(pos core.ChunkPos, support core.BlockPos) *world.Chunk {
 	chunk.SetBlock(x, support.Y, z, core.GrassID)
 	return chunk
 }
+
+// TestSpawnSkipsSubmergedColumn 钉死「水下地表不是落脚点」。
+//
+// 夹具必须让候选列真的淹在水里：首候选 (0,0) 的地面在 y=0，其上 y=1..3 灌满
+// 水源；玩家站在 (0.5,1,0.5) 时身体 AABB（y∈[1,2.8]）与这些水格正相交，是
+// 组 6 溺水结算认定的浸没态。次近候选 (-1,0) 的地面同样在 y=0 但头顶无水，
+// 出生点必须落到那里。
+//
+// 流体零碰撞体，因此 playerBoundsAreFree 对两列的读数完全相同——「改对改错
+// 读数相同」的空转在这里靠水的存在与否本身区分，不是靠碰撞体。
+func TestSpawnSkipsSubmergedColumn(t *testing.T) {
+	engine := NewEngine(0, 0)
+	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
+	dimension := engine.dimensions[core.Overworld]
+
+	chunk := world.NewChunk(core.ChunkPos{})
+	chunk.SetBlock(0, 0, 0, core.GrassID)
+	for y := int32(1); y <= 3; y++ {
+		chunk.SetBlock(0, y, 0, core.WaterSourceID)
+	}
+	loadSpawnTestChunk(t, dimension, chunk)
+	negative := world.NewChunk(core.ChunkPos{X: -1})
+	negative.SetBlock(15, 0, 0, core.GrassID)
+	loadSpawnTestChunk(t, dimension, negative)
+
+	player := onlyInternalPlayer(t, engine.Step())
+	if !player.Ready {
+		t.Fatalf("玩家未 Ready: %+v", player)
+	}
+	if got := player.State.Position; got != (mgl32.Vec3{-0.5, 1, 0.5}) {
+		t.Fatalf("出生点=%v，想要跳过水下的 (0.5,1,0.5) 落到 (-0.5,1,0.5)", got)
+	}
+
+	// 夹具承重守卫排在真实断言之后：被跳过那一列必须真的有水，且水下地表在
+	// 碰撞意义上确实"可站立"（否则跳过的原因是别的，本用例就没测到流体）。
+	for y := int32(1); y <= 3; y++ {
+		position := core.BlockPos{X: 0, Y: y, Z: 0}
+		block, ready := dimension.BlockAt(position)
+		if !ready || !core.IsFluid(block) {
+			t.Fatalf("夹具失效：%+v=%d ready=%v，不是流体", position, block, ready)
+		}
+	}
+	source := dimensionCollisionSource{dimension: dimension}
+	free, ready := playerBoundsAreFree(mgl32.Vec3{0.5, 1, 0.5}, source)
+	if !ready || !free {
+		t.Fatalf("夹具失效：水下候选 free=%v ready=%v，想要碰撞判定认为可站立", free, ready)
+	}
+}

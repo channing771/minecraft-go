@@ -355,9 +355,23 @@ func findSpawnInColumn(
 		if !neighborsReady {
 			return mgl32.Vec3{}, false, false
 		}
-		if free {
-			return position, true, true
+		if !free {
+			continue
 		}
+		// 出生点不得选在水下：流体零碰撞体，playerBoundsAreFree 因此把海平面
+		// 以下的地表也读成"可站立"，玩家会在登录那一刻直接开始消耗氧气并溺水。
+		// 判定复用 physics.SubmersionFlags 这唯一一份浸没规则（与权威 tick、
+		// 客户端预测同一个函数），不在这里另写一套逐格流体扫描——两套实现
+		// "一起写错"不会被任何 parity 断言抓到。
+		//
+		// 用 bodyInFluid 而不是 eyeInFluid：身体入水就已进入水中积分，站在
+		// 齐胸深的水里虽然当下不掉氧，也不是一个可接受的出生落脚点。判否只
+		// continue，继续向下找同一列更低的落脚点（更低处只会更深，实际会很快
+		// 耗尽该列并换下一列），不整列放弃。
+		if bodyInFluid, _ := physics.SubmersionFlags(position, source); bodyInFluid {
+			continue
+		}
+		return position, true, true
 	}
 	return mgl32.Vec3{}, false, true
 }
