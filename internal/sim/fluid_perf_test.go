@@ -19,8 +19,9 @@ import (
 //     允许为了让数字好看去调 FluidUpdatesPerTick / FluidRescanCellsPerTick 等
 //     tunable——那是一条上报项，不是一次修改。
 //  2. **每个耗时数字必须附带规模坐标。**一次「测了但没测到风险区间」的测量与
-//     不测等价，而它看起来像测过了。所以每条样本都记录该 tick 的 q.pending
-//     规模，报告里同时打印峰值规模，供与 F1 记录的 20 万项风险区间对照。
+//     不测等价，而它看起来像测过了。所以每条样本都记录该 tick 的队列规模
+//     （fluid.Queue.Len()），报告里同时打印峰值规模，供与 F1 记录的 20 万项
+//     风险区间对照。
 //  3. **默认跳过。**这些用例会构造 25 个区块的满水世界并跑数百个 tick，耗时
 //     远超常规单测；只有显式设置环境变量 MORNLEA_FLUID_PERF=1 时才运行，
 //     常规 `go test ./...` 不受影响。
@@ -153,13 +154,14 @@ func fluidPerfAdapter(engine *Engine) *fluidWorld {
 type fluidTickSample struct {
 	// tick 是本样本对应的权威 tick 序号。
 	tick uint64
-	// queueBefore / queueAfter 是 Step 前后的 q.pending 项数。
+	// queueBefore / queueAfter 是 Step 前后的队列项数（fluid.Queue.Len()）。
 	queueBefore int
 	queueAfter  int
 	// scan / scanSort 是两个只读探针，都以 budget=0 调 Advance（既不写世界也
 	// 不改队列）。**它们量的是 fluid-presentation-survival 任务组 10b 之前的
-	// 那版实现**：那时 Advance 每 tick 无条件遍历整张 q.pending（scan，用
-	// now=0 调，delay>=1 保证一项都不到期），再收集全部到期项并按全序排序
+	// 那版实现**：那时队列内容存放在一张以位置为键的 map 里，Advance 每 tick
+	// 无条件遍历它（scan，用 now=0 调，delay>=1 保证一项都不到期），再收集全部
+	// 到期项并按全序排序
 	// （scanSort，用当前 tick 调），两者相减即得排序自身的开销。
 	//
 	// 10b 把取批换成最小堆之后，budget=0 意味着取批循环**一次都不执行**，两个

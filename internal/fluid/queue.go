@@ -95,13 +95,19 @@ func lessPos(a, b core.BlockPos) bool {
 // order 中至多一条记录，因此「与 index 不符的残留条目」在结构上无法产生——
 // 不是「实际不会发生」，是「表示里没有地方放它」。
 //
-// 由此，Advance 每 tick 弹出的条目全部是真实待更新项，探视数恒为
-// budget + 至多 1 次未到期堆顶探视，与 len(order) 无关，也与任何 tunable
-// 怎么调无关。
+// 由此，Advance 每 tick 弹出的条目全部是真实待更新项，**探视数 <= budget**，
+// 与 len(order) 无关，也与任何 tunable 怎么调无关。
+//
+// 上界为什么正好是 budget 而不是 budget+1：取批循环每迭代一次恰好把
+// lastAdvanceExamined 加一，而这一次迭代要么弹出一条（processed 随之加一），
+// 要么因堆顶未到期而 break。也就是说「未到期堆顶探视」**替代**了一次弹出，
+// 不是在 budget 次弹出之外再加一次；而 processed<budget 这个循环条件保证弹出
+// 至多 budget 次，于是迭代次数、也即探视数至多 budget。
+// （测试断言写的是 <= budget+1，刻意留一格余量，见 queue_bounded_test.go。）
 //
 // # 单 tick 成本正比于什么
 //
-// 单 tick 触及的条目数 ≤ budget + 1，每次取出付 O(log len(order))；提交阶段
+// 单 tick 触及的条目数 ≤ budget，每次取出付 O(log len(order))；提交阶段
 // 排序的目标格数 ≤ 4*budget。没有任何一项正比于队列规模。budget 的上界由调用
 // 方的 FluidUpdatesPerTick 保证。
 type Queue struct {
@@ -258,6 +264,11 @@ func (q *Queue) Len() int {
 // 溢出防御：budget 由调用方传入（测试里出现过 1<<24 这样的“不受限预算”），
 // 2*budget 在极端取值下会翻负，翻负后 lastAdvanceExamined>=limit 会立刻为真、
 // 一项都不处理——那是静默的功能失效而不是报错，所以这里显式饱和到 MaxInt。
+//
+// **给写变异实验的人的提醒**：这条溢出防御会让「只把第一行改小」的变异自我
+// 失效——比如把 limit 改成 budget/2，if limit < budget 立刻成立、直接返回
+// MaxInt，上界反而变得永不触发，实验看起来"没红"其实根本没生效。手工调小上界
+// 时必须**替换整个函数体**（连同这个 if 一起改），而不是只动第一行。
 func advanceExamineLimit(budget int) int {
 	limit := 2 * budget
 	if limit < budget {
@@ -271,10 +282,10 @@ func advanceExamineLimit(budget int) int {
 //
 // 语义：
 //  1. 按 lessItem 全序，从队列里取出最小的、且 dueTick<=now 的项。取用最小堆
-//     完成，**不遍历 pending、也不对整批到期项排序**：本 tick 触及的条目数由
-//     budget 封顶，与 len(pending) 无关（论证见 Queue 的类型注释）。
-//  2. 最多处理 budget 个；超出的项保持在队列里、dueTick 不变（既没从 pending
-//     删除，也没从 order 弹出），按原全序顺延到后续 Advance 调用——不会被丢弃
+//     完成，**不遍历整张队列内容、也不对整批到期项排序**：本 tick 触及的条目
+//     数由 budget 封顶，与队列规模 len(order) 无关（论证见 Queue 的类型注释）。
+//  2. 最多处理 budget 个；超出的项保持在队列里、dueTick 不变（既没从 order
+//     弹出，也没从 index 删除），按原全序顺延到后续 Advance 调用——不会被丢弃
 //     （spec.md「预算不改变平衡态」）。除 budget 外还有一条无条件的探视上界
 //     advanceExamineLimit，用来在过时条目堆积时封顶本 tick 的工作量；触发它的
 //     效果与「本 tick 预算更小」完全一致，同样不丢项，见 Queue 的类型注释。
@@ -325,7 +336,7 @@ func (q *Queue) Advance(now uint64, w FluidWorld, budget int, delay uint64) []co
 	for processed := 0; processed < budget && len(q.order) > 0; {
 		if q.lastAdvanceExamined >= examineLimit {
 			// 改成索引堆之后这条**应当永不触发**：每次弹出都消耗一格预算，
-			// processed<budget 自己就把探视数封在 budget+1 以内。保留它作为
+			// processed<budget 自己就把探视数封在 budget 以内。保留它作为
 			// 廉价的不变量守卫——万一将来有人重新引入「弹出后跳过、不消耗
 			// 预算」的分支，有界性不至于跟着一起丢。
 			// 它不再是有界性的依据，依据是双射不变量。
@@ -365,7 +376,7 @@ func (q *Queue) Advance(now uint64, w FluidWorld, budget int, delay uint64) []co
 	// 网络广播，因此不能无条件调用。
 	//
 	// 这里的排序规模由 budget 封顶（至多 budget 次 evalCell，每次至多 4 个
-	// 目标格），同样与 len(pending) 无关。
+	// 目标格），同样与队列规模 len(order) 无关。
 	targets := make([]core.BlockPos, 0, len(pendingWrites))
 	for pos := range pendingWrites {
 		targets = append(targets, pos)

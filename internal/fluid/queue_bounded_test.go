@@ -10,7 +10,7 @@ import (
 
 // sortItems 就地按全序排序 items。
 //
-// 它曾经是 Queue.Advance 的生产实现（每 tick 遍历整张 pending、收集全部到期项
+// 它曾经是 Queue.Advance 的生产实现（每 tick 遍历整张队列内容、收集全部到期项
 // 再整体排序），任务组 10b 把取批换成最小堆之后，生产路径不再需要它。这里刻意
 // 把它保留在**测试侧**：它是 lessItem 全序的一份与最小堆完全独立的第二实现，
 // queue_test.go 用它检查 lessItem 本身，本文件用它当「Advance 到底该取哪
@@ -46,11 +46,11 @@ func boundedPos(i int) core.BlockPos {
 }
 
 // TestAdvanceExaminedItemsIndependentOfQueueSize 是任务组 10b 的核心断言：
-// **单 tick 触及的项数不随 len(pending) 增长**。
+// **单 tick 触及的项数不随队列规模增长**。
 //
 // 这是一条结构性属性，不是性能数值——它不问「比原来快多少」，只问「成本正比于
-// 什么」。旧实现每 tick 无条件遍历整张 pending 并排序全部到期项，触及项数恒等于
-// len(pending)；换成最小堆后只从堆顶取至多 budget 项，触及项数恒等于 budget。
+// 什么」。旧实现每 tick 无条件遍历整张队列内容并排序全部到期项，触及项数恒等于
+// 队列项数；换成最小堆后只从堆顶取至多 budget 项，触及项数恒等于 budget。
 //
 // 用两条互相独立的证据同时钉住，避免「自己写的计数器自己恒真」：
 //
@@ -271,7 +271,7 @@ func TestAdvanceExaminedBoundedWhenDelayLowered(t *testing.T) {
 // 编辑项（Min 0 / Max 2000），下调它就会让同一位置以更早的 dueTick 再次入队。
 //
 // 夹具：同一批位置各以 delay=5 与 delay=0 入队一次，两种调用次序**得到完全相同
-// 的 pending**（每个位置 dueTick 都是 0，因为 Enqueue 保留更早者），只有 Enqueue
+// 的队列内容**（每个位置 dueTick 都是 0，因为 Enqueue 保留更早者），只有 Enqueue
 // 的先后不同。随后以相同预算推进相同 tick 数，逐 tick 比较变更集合。
 //
 // 断言的是**位置性**：每一个 tick 的变更集合逐格一致，而不是「最终状态一致」——
@@ -309,7 +309,7 @@ func TestOrderIndependenceSurvivesDelayLowering(t *testing.T) {
 	for tick := range a {
 		if len(a[tick]) != len(b[tick]) {
 			t.Fatalf("第 %d tick 变更数不一致：先 delay=5 得 %d 处，先 delay=0 得 %d 处——"+
-				"两次运行的 pending 集合完全相同，推进顺序却依赖了 Enqueue 的调用次序",
+				"两次运行的队列内容完全相同，推进顺序却依赖了 Enqueue 的调用次序",
 				tick, len(a[tick]), len(b[tick]))
 		}
 		for i := range a[tick] {
