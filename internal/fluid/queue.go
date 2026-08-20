@@ -57,118 +57,94 @@ func lessPos(a, b core.BlockPos) bool {
 // Queue 不持久化（design.md D5）：它只是通往平衡态的中间态，重启后由调用方
 // 对已加载区块执行边界重扫（对每个流体格及其空气邻居调用 Enqueue）来恢复。
 //
-// # 结构与不变量
+// # 结构：索引最小堆
 //
-// 队列由两部分组成，职责严格分开：
+// 队列由两份互为镜像的数据组成：
 //
-//   - pending 是队列内容的**唯一真相来源**：一个位置在队列中，当且仅当它是
-//     pending 的键；它排定的到期 tick 就是对应的值。Len、去重、「取出即删除」
-//     全部只看 pending。
-//   - order 是按 lessItem 组织的二叉最小堆，只回答「下一批取谁」这一个问题。
-//     它是**索引**，不是真相：里面允许存在过时条目。
+//   - order 是按 lessItem 组织的二叉最小堆，**它本身就是队列内容**，每个排队
+//     位置在里面恰好占一条记录；
+//   - index 是 order 的完全反查表，把位置映射到它当前所在的下标。
 //
-// 三条不变量（任何改动都必须同时保住）：
+// 两条不变量（任何改动都必须同时保住）：
 //
-//  1. 覆盖性：对 pending 里的每个 (pos, due)，order 中至少存在一条与之完全
-//     相等的 item{pos, due}。Enqueue 是 pending 的唯一写入点，且每次真正写入
-//     都紧跟一次 pushOrder，因此这条不变量成立。
-//  2. 过时条目可丢弃：order 中若有 item 满足「pending 里没有该 pos」或
-//     「pending[pos] != item.dueTick」，它一定是被更早的一次 Enqueue 覆盖过
-//     或已被处理删除，直接丢弃不会丢任何真实待更新项——因为不变量 1 保证真实
-//     项在 order 里另有一条精确匹配的条目。
-//  3. 堆序：order 满足最小堆性质，堆顶恒为全序 lessItem 下的最小条目。
+//  1. **双射**：len(index) == len(order)，且对每个下标 i 都有
+//     index[order[i].pos] == i。等价地说：一个位置在队列中当且仅当它是 index
+//     的键，而它的 dueTick 只有 order[index[pos]] 这一个存放处。
+//  2. **堆序**：order 满足最小堆性质，堆顶恒为 lessItem 全序下的最小条目。
 //
-// # 为什么这个结构能让单 tick 成本与 len(pending) 解耦
+// 维护方式：所有元素移动都经 swapOrder，它在交换两条记录的同时更新两者的
+// index，因此不变量 1 在 siftUp/siftDown 的每一步中间态都成立；pushOrder 与
+// popOrder 各自在末尾维护自己那一条 index 的增删。
 //
-// 旧实现每 tick 都要遍历整张 pending 并对全部到期项排序，成本 Θ(len(pending))
-// 与 Θ(D log D)，与本 tick 实际能处理多少项完全无关——预算只截断处理循环，
-// 截断不掉这两步。改成最小堆之后，Advance 只做「看堆顶、取堆顶」：
+// # 为什么索引堆使「过时条目」不可能存在
 //
-//   - 堆顶未到期就立刻停（O(1)），一项都不看；
-//   - 到期就弹出，代价 O(log len(order))，取够 budget 项即停。
+// 上一版用的是惰性删除堆：没有 index，Enqueue 把一个已在队的位置改到更早的
+// dueTick 时只能**再压一条**，旧那条就成了「过时条目」，只能等它浮到堆顶再
+// 弹出丢弃。那带来两个问题，都已在实测中兑现：
 //
-// 于是单 tick 触及的**项数**由 advanceExamineLimit 无条件封顶（2*budget），
-// 与 len(pending) 无关；单 tick 的**时间**正比于这个项数乘以 log len(order)。
+//   - 过时条目不消耗预算，单个 Advance 会一口气弹掉几万条（delay 从 100 下调
+//     到 0 的实测：5 万条）；
+//   - 更严重的是，**过时条目的条数依赖 Enqueue 的调用次序**（同一位置先以
+//     delay=5 再以 delay=0 入队会留下一条过时条目，反过来则一条都不留，而两者
+//     得到的队列内容完全相同）。一旦有任何按「本 tick 处理了多少条」分叉的
+//     逻辑，推进结果就依赖了入队次序——这直接违反 spec.md 那条无条件 MUST
+//     「推进顺序 MUST NOT 依赖待更新项的入队顺序或任何哈希遍历顺序」。
 //
-// # 为什么探视上界必须是无条件的
+// 索引堆从根上消掉这个类：有了 index，Enqueue 命中已在队的位置时**就地改写**
+// 那唯一一条记录的 dueTick 再上浮，绝不新增第二条。由不变量 1，任一位置在
+// order 中至多一条记录，因此「与 index 不符的残留条目」在结构上无法产生——
+// 不是「实际不会发生」，是「表示里没有地方放它」。
 //
-// 过时条目只在 Enqueue 把一个**已在队列中**的位置的 dueTick **提前**时产生
-// （Enqueue 对不提前的重复入队直接早返回，不推堆）。曾经有一版注释把有界性挂在
-// 「生产路径上 delay 取自同一 tick 的快照，故提前入队不会发生」这条前提上——
-// **那条前提是错的，而且没有任何东西强制它**：真正需要的是「delay 跨 tick 不
-// 下调」，而 sim.FluidFlowDelayTicks 是 internal/config 里的实时可编辑项
-// （Min 0 / Max 2000），调试面板运行中改小它就会让整张队列重新入队、把旧条目
-// 全部变成过时条目。实测：delay=100 排入 5 万项后下调到 0，堆里积下 5 万条过时
-// 条目；由于过时条目走 continue 不消耗预算，processed<budget 这个条件**拦不住
-// 它们**，单 tick 会一口气弹掉 5 万条。
+// 由此，Advance 每 tick 弹出的条目全部是真实待更新项，探视数恒为
+// budget + 至多 1 次未到期堆顶探视，与 len(order) 无关，也与任何 tunable
+// 怎么调无关。
 //
-// 因此有界性不能挂在任何「某个 tunable 不会被这样调」的前提上，必须是结构性的：
-// 取批循环用 lastAdvanceExamined 对**探视总数**（真实项 + 过时条目 + 那一次未
-// 到期堆顶探视）设无条件上界，超限即 break。
+// # 单 tick 成本正比于什么
 //
-// 提前 break 的正确性：
-//
-//   - **不丢任何待更新项。**pending 是队列内容的唯一真相来源，break 只是少弹几
-//     条；真实项仍在 pending 与 order 里，dueTick 不变，顺延到后续 Advance。
-//     被弹掉的过时条目本就不是队列内容（Len 不数它们），丢弃它们不改变 Len。
-//   - **等价于「这个 tick 的预算更小」。**取批始终按全序从堆顶依次取，break 只
-//     是提早停止，不会跳过某个更小的真实项去取更大的。因此本 tick 的效果与
-//     「budget 取了一个更小的值」完全一致，而 spec.md 的「预算不改变平衡态」正
-//     是说任意预算都收敛到同一平衡态。
-//   - **不会饿死。**popOrder 是真删除：被弹掉的过时条目**永久离开堆**，不会在
-//     后续 tick 重新出现。过时条目总数被「提前入队次数」压住（每次提前入队至多
-//     制造一条），而每 tick 至少清掉 advanceExamineLimit 条，故必定在有限个 tick
-//     内排空，真实项随后正常推进。
-//
-// 一处必须写下的诚实边界：评审给出的论证「过时条目的 dueTick 严格晚于它所替代
-// 的真实条目，故真实条目先出堆」**只在过时条目刚产生时成立**。一旦那条真实项被
-// 处理并从 pending 删除，该位置之后可以以更晚的 dueTick 重新入队，此时残留的过
-// 时条目反而排在新真实项**之前**。上面三条论证不依赖这个次序关系，只依赖
-// 「popOrder 真删除」与「pending 是真相来源」，因此结论仍然成立。
+// 单 tick 触及的条目数 ≤ budget + 1，每次取出付 O(log len(order))；提交阶段
+// 排序的目标格数 ≤ 4*budget。没有任何一项正比于队列规模。budget 的上界由调用
+// 方的 FluidUpdatesPerTick 保证。
 type Queue struct {
-	// pending 以位置去重，值是该位置当前排定的 dueTick。Go 的 map 遍历顺序
-	// 是随机的，任何依赖处理次序的逻辑都绝不能直接遍历本 map——次序一律由
-	// order 堆按 lessItem 给出。
-	pending map[core.BlockPos]uint64
-	// order 是 lessItem 全序下的二叉最小堆，见类型注释的三条不变量。
+	// order 见类型注释：按 lessItem 组织的最小堆，每个排队位置恰好一条记录。
 	order []item
+	// index 是 order 的反查表（pos -> order 下标），与 order 严格双射。
+	index map[core.BlockPos]int
 	// lastAdvanceExamined 记录最近一次 Advance 从 order 里取出/探视的条目数。
-	// 它是「单 tick 成本与 len(pending) 解耦」这条结构性属性的可观测量，供
+	// 它是「单 tick 成本与队列规模解耦」这条结构性属性的可观测量，供
 	// queue_bounded_test.go 直接断言；生产路径不读它。
 	lastAdvanceExamined int
 }
 
 // NewQueue 构造一个空的待更新队列。
 func NewQueue() *Queue {
-	return &Queue{pending: make(map[core.BlockPos]uint64)}
+	return &Queue{index: make(map[core.BlockPos]int)}
 }
 
-// pushOrder 把 it 压入最小堆并上浮到位，代价 O(log len(order))。
-func (q *Queue) pushOrder(it item) {
-	q.order = append(q.order, it)
-	child := len(q.order) - 1
+// swapOrder 交换堆里两条记录，并同步两者的 index。
+//
+// 堆的所有元素移动都必须走这里：index 与 order 的双射不变量正是靠「移动即同步」
+// 在每一步中间态保持成立的，任何直接对 q.order 做赋值的捷径都会把它悄悄破坏，
+// 而破坏之后队列仍然「看起来能用」——只是某些位置永远取不出来。
+func (q *Queue) swapOrder(i, j int) {
+	q.order[i], q.order[j] = q.order[j], q.order[i]
+	q.index[q.order[i].pos] = i
+	q.index[q.order[j].pos] = j
+}
+
+// siftUp 把下标 child 处的记录上浮到满足堆序的位置。
+func (q *Queue) siftUp(child int) {
 	for child > 0 {
 		parent := (child - 1) / 2
 		if !lessItem(q.order[child], q.order[parent]) {
-			break
+			return
 		}
-		q.order[child], q.order[parent] = q.order[parent], q.order[child]
+		q.swapOrder(child, parent)
 		child = parent
 	}
 }
 
-// popOrder 弹出并返回全序最小的条目，代价 O(log len(order))。
-// 调用方必须先确认 len(q.order) > 0。
-func (q *Queue) popOrder() item {
-	top := q.order[0]
-	last := len(q.order) - 1
-	q.order[0] = q.order[last]
-	// 清掉尾槽再截断：item 不含指针，这一步不为 GC，而是避免截断后的备用
-	// 容量里残留一份看起来合法的旧条目，误导调试。
-	q.order[last] = item{}
-	q.order = q.order[:last]
-
-	parent := 0
+// siftDown 把下标 parent 处的记录下沉到满足堆序的位置。
+func (q *Queue) siftDown(parent int) {
 	for {
 		left, right := 2*parent+1, 2*parent+2
 		smallest := parent
@@ -179,10 +155,34 @@ func (q *Queue) popOrder() item {
 			smallest = right
 		}
 		if smallest == parent {
-			break
+			return
 		}
-		q.order[parent], q.order[smallest] = q.order[smallest], q.order[parent]
+		q.swapOrder(parent, smallest)
 		parent = smallest
+	}
+}
+
+// pushOrder 把一条**新位置**的记录压入堆，代价 O(log len(order))。
+// 调用方必须先确认 it.pos 不在 index 里，否则会破坏双射不变量。
+func (q *Queue) pushOrder(it item) {
+	q.order = append(q.order, it)
+	q.index[it.pos] = len(q.order) - 1
+	q.siftUp(len(q.order) - 1)
+}
+
+// popOrder 弹出并返回全序最小的记录，代价 O(log len(order))。
+// 调用方必须先确认 len(q.order) > 0。
+func (q *Queue) popOrder() item {
+	last := len(q.order) - 1
+	q.swapOrder(0, last)
+	top := q.order[last]
+	// 清掉尾槽再截断：item 不含指针，这一步不为 GC，而是避免截断后的备用
+	// 容量里残留一份看起来合法的旧记录，误导调试。
+	q.order[last] = item{}
+	q.order = q.order[:last]
+	delete(q.index, top.pos)
+	if last > 0 {
+		q.siftDown(0)
 	}
 	return top
 }
@@ -196,15 +196,19 @@ func (q *Queue) popOrder() item {
 // 流动传播同时把同一格标记为「自身变化」与「某邻居变化的邻居」）不应该把
 // 已排定的更新往后推迟。
 //
-// 早返回的那一支**不推堆**：这既是去重（同一位置在堆里不会因重复入队无限
-// 膨胀），也是「生产路径上过时条目恒为 0」这条论证的落点，见 Queue 的类型
-// 注释。
+// 命中已在队的位置时是**就地改写那唯一一条记录**再上浮，绝不新增第二条——
+// 这正是「过时条目在结构上不可能存在」的落点，见 Queue 的类型注释。
+// dueTick 只可能变小，全序 lessItem 的首要键随之变小，因此只需上浮不需下沉。
 func (q *Queue) Enqueue(pos core.BlockPos, now, delay uint64) {
 	due := now + delay
-	if existing, ok := q.pending[pos]; ok && existing <= due {
+	if i, ok := q.index[pos]; ok {
+		if q.order[i].dueTick <= due {
+			return
+		}
+		q.order[i].dueTick = due
+		q.siftUp(i)
 		return
 	}
-	q.pending[pos] = due
 	q.pushOrder(item{pos: pos, dueTick: due})
 }
 
@@ -213,27 +217,27 @@ func (q *Queue) Enqueue(pos core.BlockPos, now, delay uint64) {
 // 提供给调用方在重启/区块重新进入活动兴趣范围时，先清空再执行边界重扫——
 // 队列不持久化，重扫是唯一的恢复路径（design.md D5）。
 //
-// pending 与 order 必须一起清：只清其中一个会让堆里全是过时条目（或让
-// pending 里的项在堆中无对应条目而永远取不出来），破坏覆盖性不变量。
+// order 与 index 必须一起清：只清其中一个会直接打破双射不变量。
 func (q *Queue) Clear() {
-	clear(q.pending)
+	clear(q.index)
 	q.order = q.order[:0]
 }
 
 // Len 返回当前排队的待更新项数。主要供测试与可观测性使用。
 //
-// 以 pending 为准而不是 len(q.order)：order 允许含过时条目，只有 pending 才是
-// 队列内容的真相来源。
+// 由双射不变量，len(index) 与 len(order) 恒等，取哪个都一样；这里取 index，
+// 因为「一个位置在队列中当且仅当它是 index 的键」是这个类型对外的语义。
 func (q *Queue) Len() int {
-	return len(q.pending)
+	return len(q.index)
 }
 
 // advanceExamineLimit 返回单次 Advance 允许探视的条目总数上界。
 //
-// 取 2*budget：预算内的真实项占 budget，另留同样多的额度用来清理过时条目，
-// 使「有过时条目要清」的 tick 不至于一项真实工作都做不成，同时把最坏情况钉死在
-// 与 budget 同阶、与 len(pending) 无关的常数倍上。这个倍数只影响过时条目的排空
-// 速度，不影响任何流体规则，也不是 tunable。
+// 索引堆下这条上界**应当永不触发**（每次弹出都消耗一格预算，探视数自然封在
+// budget+1 以内），它只是防止「有界性再次悄悄依赖某个前提」的廉价守卫。取
+// 2*budget 而不是贴着 budget+1，是为了留出余量：贴太紧的话，任何将来正当的
+// 微调都会让它变成一条静默截断处理量的暗雷，而不是守卫。它不是 tunable，
+// 也不影响任何流体规则。
 //
 // 溢出防御：budget 由调用方传入（测试里出现过 1<<24 这样的“不受限预算”），
 // 2*budget 在极端取值下会翻负，翻负后 lastAdvanceExamined>=limit 会立刻为真、
@@ -304,9 +308,11 @@ func (q *Queue) Advance(now uint64, w FluidWorld, budget int, delay uint64) []co
 	examineLimit := advanceExamineLimit(budget)
 	for processed := 0; processed < budget && len(q.order) > 0; {
 		if q.lastAdvanceExamined >= examineLimit {
-			// 无条件探视上界：过时条目走下面的 continue 不消耗预算，
-			// processed<budget 拦不住它们，只有这条能。见 Queue 的类型注释
-			// 「为什么探视上界必须是无条件的」。
+			// 改成索引堆之后这条**应当永不触发**：每次弹出都消耗一格预算，
+			// processed<budget 自己就把探视数封在 budget+1 以内。保留它作为
+			// 廉价的不变量守卫——万一将来有人重新引入「弹出后跳过、不消耗
+			// 预算」的分支，有界性不至于跟着一起丢。
+			// 它不再是有界性的依据，依据是双射不变量。
 			break
 		}
 		if q.order[0].dueTick > now {
@@ -315,14 +321,11 @@ func (q *Queue) Advance(now uint64, w FluidWorld, budget int, delay uint64) []co
 			q.lastAdvanceExamined++
 			break
 		}
+		// popOrder 已经把该位置从 index 里删掉，即「取出即出队」。
+		// 由双射不变量，弹出的每一条都是真实待更新项，不存在需要跳过的
+		// 过时条目（见 Queue 的类型注释）。
 		it := q.popOrder()
 		q.lastAdvanceExamined++
-		if due, ok := q.pending[it.pos]; !ok || due != it.dueTick {
-			// 过时条目（见 Queue 类型注释的不变量 2）：真实待更新项在堆里
-			// 另有一条精确匹配的条目，丢弃它不丢任何东西，也不消耗预算。
-			continue
-		}
-		delete(q.pending, it.pos) // 该项本 tick 已被取出处理，从队列移除。
 		processed++
 		for pos, id := range evalCell(it.pos, w) {
 			if existing, ok := pendingWrites[pos]; ok {

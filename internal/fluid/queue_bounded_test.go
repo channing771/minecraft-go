@@ -20,6 +20,20 @@ func sortItems(items []item) {
 	sort.Slice(items, func(i, j int) bool { return lessItem(items[i], items[j]) })
 }
 
+// queuedDueTick 读出 pos 当前排定的 dueTick，是**表示层**的测试助手。
+//
+// 任务组 10b 修复轮 2 之前，队列内容存放在 Queue.pending（map[BlockPos]uint64），
+// 测试直接写 q.pending[pos] 就能拿到 dueTick。改成索引最小堆之后，dueTick 的唯一
+// 存放处变成 q.order[q.index[pos]].dueTick——所有既有白盒断言想问的还是同一个问题
+// 「这个位置排定在哪个 tick」，只是问法要跟着表示走，故统一收敛到这个助手。
+func queuedDueTick(q *Queue, pos core.BlockPos) (uint64, bool) {
+	i, ok := q.index[pos]
+	if !ok {
+		return 0, false
+	}
+	return q.order[i].dueTick, true
+}
+
 // boundedPos 把下标 i 映射到互不相同、跨多个区块分布的方块坐标。
 // (x, y, z) 三个分量分别取 i 的不同位段，因此该映射是单射：不同的 i 一定得到
 // 不同的坐标，队列规模才真的等于入队次数。
@@ -154,13 +168,13 @@ func TestAdvanceTakesGloballySmallestDueItemsAtScale(t *testing.T) {
 		t.Fatalf("本 tick 应恰好取走 %d 项，实际队列 %d→%d", budget, before, q.Len())
 	}
 	for i, it := range want {
-		if _, still := q.pending[it.pos]; still {
+		if _, still := queuedDueTick(q, it.pos); still {
 			t.Fatalf("全序第 %d 小的到期项 %+v(due=%d) 没有被取走", i, it.pos, it.dueTick)
 		}
 	}
 	// 反向：预算之外的到期项必须原样留在队列里、dueTick 不变。
 	for _, it := range due[budget:] {
-		got, still := q.pending[it.pos]
+		got, still := queuedDueTick(q, it.pos)
 		if !still {
 			t.Fatalf("超出预算的到期项 %+v 被丢弃了", it.pos)
 		}
@@ -181,80 +195,137 @@ func TestAdvanceTakesGloballySmallestDueItemsAtScale(t *testing.T) {
 	}
 }
 
-// TestAdvanceExaminedBoundedWhenDelayLowered 钉住 Advance 的**无条件探视上界**。
+// TestAdvanceExaminedBoundedWhenDelayLowered 钉住「下调 delay 不再产生过时条目」。
 //
-// 这条测试的存在理由是一条被证伪的前提：改动之初把有界性挂在「生产路径上不会出现
-// 提前入队，故过时条目恒为 0」上，而 `sim.FluidFlowDelayTicks` 是 internal/config
-// 里的实时可编辑项（Min 0 / Max 2000），运行中调小它就会让整张队列以更早的 dueTick
-// 重新入队，把旧条目全部变成过时条目。过时条目在取批循环里走 continue、**不消耗
-// 预算**，因此 processed<budget 这个条件拦不住它们。
+// 这条测试的历史：10b 初版用惰性删除堆，Enqueue 把已在队的位置改到更早的 dueTick
+// 时只能再压一条，旧那条成为过时条目。评审建的反例是 sim.FluidFlowDelayTicks
+// （internal/config 的实时可编辑项，Min 0 / Max 2000）被调小——delay=100 排入
+// 5 万项后下调，堆里积下 5 万条过时条目，单个 Advance 会一口气把它们全弹掉。
+// 修复轮 2 换成索引最小堆后，过时条目在**表示上就不存在**，本测试守这一点。
 //
-// 夹具精确复现那个形态：
+// 两条真实故障断言，都是**位置性**的：
 //
-//  1. 以 delay=100 排入 5 万项（dueTick=100）；
-//  2. 以 delay=1 对同样 5 万个位置重新入队（dueTick=1），旧的 5 万条 dueTick=100
-//     条目全部变成过时条目，堆里此刻有 10 万条而队列只有 5 万项；
-//  3. 用一个大预算把 5 万条真实项一次处理干净（全空气世界，无变更、无重新入队），
-//     pending 清空，堆里只剩那 5 万条过时条目；
-//  4. 推进到 now=100，此时那 5 万条过时条目**全部到期**，且没有任何真实项与它们
-//     争预算——没有上界的话，单个 Advance 会一口气把它们全弹掉。
+//  1. 结构：下调 delay 之后，堆里的记录数必须恰好等于队列项数。惰性删除堆在这里
+//     是 2 倍（10 万 vs 5 万）。
+//  2. 行为：把队列一路推进到**堆**排空，每一个 tick 的探视数都不得超过
+//     budget+1。惰性删除堆在旧 dueTick 到期后会连续多个 tick 只弹过时条目，
+//     探视数顶到探视上界 2*budget。
 //
-// 断言的是**位置性**：单 tick 的探视数落在 2*budget 这个常数内，而不是「有上界就行」。
-// 同时断言过时条目会被**逐 tick 排空**（popOrder 是真删除，不会饿死），以及排空
-// 过程中真实队列内容一项不少。
+// 循环条件刻意用 len(q.order)>0 而不是 q.Len()>0：前者才能把「队列已空但堆里还
+// 压着一堆记录」这种状态暴露出来，后者会在那之前就退出，让断言空转。
 func TestAdvanceExaminedBoundedWhenDelayLowered(t *testing.T) {
-	const stalePositions = 50_000
+	const positions = 50_000
 	const budget = 8
 
 	w := newMemWorld()
 	q := NewQueue()
-	for i := range stalePositions {
-		q.Enqueue(boundedPos(i), 0, 100) // dueTick=100，稍后被降级为过时条目
+	for i := range positions {
+		q.Enqueue(boundedPos(i), 0, 100) // dueTick=100
 	}
-	for i := range stalePositions {
-		q.Enqueue(boundedPos(i), 0, 1) // dueTick=1，delay 被调小的那一刻
-	}
-	heapAfterLowering := len(q.order)
-
-	// 把真实项全部处理掉，只留过时条目。
-	q.Advance(1, w, stalePositions, 1)
-	staleLeft := len(q.order)
-	realLeft := q.Len()
-
-	// 真实故障断言：过时条目全部到期的那个 tick，探视数必须落在常数上界内。
-	q.Advance(100, w, budget, 1)
-	if got, limit := q.lastAdvanceExamined, 2*budget; got > limit {
-		t.Fatalf("过时条目堆积时单 tick 探视 %d 项，超过无条件上界 %d（堆里还有 %d 条）",
-			got, limit, staleLeft)
+	for i := range positions {
+		q.Enqueue(boundedPos(i), 0, 1) // delay 被调小的那一刻：dueTick 改到 1
 	}
 
-	// 过时条目必须被逐 tick 真删除、有限步排空，不会饿死后续真实项。
-	ticks := 0
+	if heapEntries, queued := len(q.order), q.Len(); heapEntries != queued {
+		t.Fatalf("下调 delay 在堆里留下了多余记录：堆 %d 条、队列 %d 项——过时条目又回来了",
+			heapEntries, queued)
+	}
+
+	worst, ticks := 0, 0
 	for len(q.order) > 0 {
-		q.Advance(100, w, budget, 1)
+		q.Advance(uint64(1+ticks), w, budget, 1)
+		if q.lastAdvanceExamined > worst {
+			worst = q.lastAdvanceExamined
+		}
 		ticks++
-		if ticks > stalePositions {
-			t.Fatalf("过时条目在 %d 个 tick 内没有排空，剩余 %d 条：popOrder 可能不是真删除",
-				ticks, len(q.order))
+		if ticks > 4*positions {
+			t.Fatalf("队列在 %d 个 tick 内没有排空，堆里还剩 %d 条", ticks, len(q.order))
 		}
 	}
+	if limit := budget + 1; worst > limit {
+		t.Fatalf("排空过程中单 tick 最大探视 %d 项，超过 budget+1=%d", worst, limit)
+	}
 	if q.Len() != 0 {
-		t.Fatalf("排空过时条目的过程中队列内容被改动：Len=%d，want 0", q.Len())
+		t.Fatalf("堆已空但 index 还剩 %d 项：双射不变量被破坏", q.Len())
 	}
 
 	// 夹具前提守卫排在真实断言之后。
-	if heapAfterLowering != 2*stalePositions {
-		t.Fatalf("下调 delay 没有产生预期的过时条目：堆 %d 条，want %d（Enqueue 的提前分支可能没走到）",
-			heapAfterLowering, 2*stalePositions)
+	if positions <= budget+1 {
+		t.Fatalf("夹具只有 %d 项，不超过 budget+1=%d，上界断言是空转", positions, budget+1)
 	}
-	if realLeft != 0 || staleLeft < stalePositions {
-		t.Fatalf("夹具没进入「只剩过时条目」的状态：真实项 %d（want 0）、堆 %d 条（want ≥%d）",
-			realLeft, staleLeft, stalePositions)
+	if ticks < positions/budget {
+		t.Fatalf("只用了 %d 个 tick 就排空 %d 项（预算 %d），夹具没真正走完预算受限的推进",
+			ticks, positions, budget)
 	}
-	if staleLeft <= 2*budget {
-		t.Fatalf("过时条目只有 %d 条，不超过上界 %d，上界没被真正触发",
-			staleLeft, 2*budget)
+	t.Logf("下调 delay 后堆 %d 条 == 队列 %d 项；%d 个 tick 排空，单 tick 最大探视 %d 项（上界 %d）",
+		positions, positions, ticks, worst, budget+1)
+}
+
+// TestOrderIndependenceSurvivesDelayLowering 把 spec.md
+// 「推进顺序 MUST NOT 依赖待更新项的入队顺序」这条**无条件** MUST 钉在
+// 「delay 跨 tick 被下调」这个角落里。
+//
+// 为什么需要单独一条：既有的 TestOrderIndependence_PerTickChangesMatch 全程用
+// 同一个 delay，任何「同一位置先后以不同 delay 入队」的路径都不会被走到，因此
+// 它对本角落什么也没说。而 sim.FluidFlowDelayTicks 是 internal/config 的实时可
+// 编辑项（Min 0 / Max 2000），下调它就会让同一位置以更早的 dueTick 再次入队。
+//
+// 夹具：同一批位置各以 delay=5 与 delay=0 入队一次，两种调用次序**得到完全相同
+// 的 pending**（每个位置 dueTick 都是 0，因为 Enqueue 保留更早者），只有 Enqueue
+// 的先后不同。随后以相同预算推进相同 tick 数，逐 tick 比较变更集合。
+//
+// 断言的是**位置性**：每一个 tick 的变更集合逐格一致，而不是「最终状态一致」——
+// 后者在推进次序被打乱时仍可能靠收敛性蒙混过关。
+func TestOrderIndependenceSurvivesDelayLowering(t *testing.T) {
+	const budget = 64
+	const ticks = 200
+
+	run := func(lowerFirst bool) [][]core.BlockPos {
+		w := newBasin(0, 0, 19, 19, 0, 16)
+		fillBox(w, 0, 1, 0, 4, 12, 19, core.WaterSourceID)
+		q := NewQueue()
+		seeds := fluidPositions(w)
+		enqueueAll := func(delay uint64) {
+			for _, pos := range seeds {
+				q.Enqueue(pos, 0, delay)
+			}
+		}
+		if lowerFirst {
+			enqueueAll(0)
+			enqueueAll(5)
+		} else {
+			enqueueAll(5)
+			enqueueAll(0)
+		}
+		out := make([][]core.BlockPos, 0, ticks)
+		for now := uint64(0); now < ticks; now++ {
+			changed := q.Advance(now, w, budget, 0)
+			out = append(out, append([]core.BlockPos(nil), changed...))
+		}
+		return out
 	}
-	t.Logf("过时条目 %d 条，单 tick 探视 %d 项（上界 %d），%d 个 tick 排空",
-		staleLeft, q.lastAdvanceExamined, 2*budget, ticks)
+
+	a, b := run(false), run(true)
+	for tick := range a {
+		if len(a[tick]) != len(b[tick]) {
+			t.Fatalf("第 %d tick 变更数不一致：先 delay=5 得 %d 处，先 delay=0 得 %d 处——"+
+				"两次运行的 pending 集合完全相同，推进顺序却依赖了 Enqueue 的调用次序",
+				tick, len(a[tick]), len(b[tick]))
+		}
+		for i := range a[tick] {
+			if a[tick][i] != b[tick][i] {
+				t.Fatalf("第 %d tick 第 %d 项变更不一致：%+v vs %+v", tick, i, a[tick][i], b[tick][i])
+			}
+		}
+	}
+
+	// 夹具前提守卫排在真实断言之后。
+	total := 0
+	for _, changed := range a {
+		total += len(changed)
+	}
+	if total == 0 {
+		t.Fatalf("%d tick 内没有任何变更，逐 tick 断言是空转", ticks)
+	}
+	t.Logf("%d tick 共 %d 处变更，两种入队次序逐 tick 一致", ticks, total)
 }

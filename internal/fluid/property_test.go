@@ -108,13 +108,17 @@ func rescanEnqueue(w *memWorld, q *Queue, now, delay uint64) int {
 	return q.Len()
 }
 
-// dueCount 返回队列中 dueTick <= now 的项数，即本 tick 会进入 due 列表、且受
-// 预算截断的项数。只供测试判定「预算是否真的成为了约束」，避免用
-// len(changed) 做代理（变更数远小于处理数）。
+// dueCount 返回队列中 dueTick <= now 的项数，即本 tick 到期、且受预算截断的
+// 项数。只供测试判定「预算是否真的成为了约束」，避免用 len(changed) 做代理
+// （变更数远小于处理数）。
+//
+// 遍历 q.order 而不是从前的 q.pending：任务组 10b 修复轮 2 把队列内容的存放处
+// 从 map[BlockPos]uint64 换成了索引最小堆，order 就是队列内容本身（每个排队位置
+// 恰好一条记录），因此这个计数与从前逐字等价——问的仍是「有多少项到期」。
 func dueCount(q *Queue, now uint64) int {
 	n := 0
-	for _, dueTick := range q.pending {
-		if dueTick <= now {
+	for _, it := range q.order {
+		if it.dueTick <= now {
 			n++
 		}
 	}

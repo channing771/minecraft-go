@@ -157,11 +157,11 @@ func TestAdvance_ChangedCellsAndNeighborsRequeued(t *testing.T) {
 		t.Fatalf("本 tick 应只有 below 发生变化，got %v", changed)
 	}
 	wantDue := uint64(0 + 5)
-	if got, ok := q.pending[below]; !ok || got != wantDue {
+	if got, ok := queuedDueTick(q, below); !ok || got != wantDue {
 		t.Fatalf("变化格自身应重新入队，dueTick=%d，got ok=%v got=%d", wantDue, ok, got)
 	}
 	for _, n := range sixNeighbors(below) {
-		if got, ok := q.pending[n]; !ok || got != wantDue {
+		if got, ok := queuedDueTick(q, n); !ok || got != wantDue {
 			t.Fatalf("变化格的六邻应重新入队: %v, ok=%v got=%d", n, ok, got)
 		}
 	}
