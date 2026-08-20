@@ -50,6 +50,7 @@ func (p *Predictor) ApplyPlayerState(
 	p.current = authority
 	p.previous = authority
 	p.health = message.Health
+	p.oxygen = message.Oxygen
 	if p.suspended {
 		p.history = p.history[:0]
 		p.accumulator = 0
@@ -120,6 +121,9 @@ func validatePlayerState(message network.PlayerState, maxSentInput uint64) (phys
 	}
 	if !core.ValidHealth(message.Health) {
 		return physics.State{}, errors.New("client: player state has out-of-range health")
+	}
+	if !core.ValidOxygen(message.Oxygen) {
+		return physics.State{}, errors.New("client: player state has out-of-range oxygen")
 	}
 	const maxPitch = float32(math.Pi/2 - 0.01)
 	if message.Pitch < -maxPitch || message.Pitch > maxPitch {

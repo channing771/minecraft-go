@@ -53,6 +53,7 @@ type Predictor struct {
 	displayOffset       mgl32.Vec3
 	correctionRemaining time.Duration
 	health              uint8
+	oxygen              uint16
 }
 
 // NewPredictor 创建具有固定历史容量的未就绪预测器。
@@ -79,6 +80,9 @@ func (p *Predictor) Begin(message network.PlayerState) error {
 	if !core.ValidHealth(message.Health) {
 		return errors.New("client: cannot begin prediction from invalid health")
 	}
+	if !core.ValidOxygen(message.Oxygen) {
+		return errors.New("client: cannot begin prediction from invalid oxygen")
+	}
 
 	p.ready = true
 	p.dimension = message.Dimension
@@ -94,6 +98,7 @@ func (p *Predictor) Begin(message network.PlayerState) error {
 	p.displayOffset = mgl32.Vec3{}
 	p.correctionRemaining = 0
 	p.health = message.Health
+	p.oxygen = message.Oxygen
 	return nil
 }
 
@@ -106,6 +111,13 @@ func (p *Predictor) State() (physics.State, bool) {
 // 生命值只接受服务端确认值，客户端不对其做任何预测。
 func (p *Predictor) Health() (uint8, bool) {
 	return p.health, p.ready
+}
+
+// Oxygen 返回只读镜像持有的权威氧气以及预测器是否已就绪。
+// 同生命值：氧气是权威值，客户端只镜像不推算——本地即便算得出眼睛浸没标志，
+// 也绝不据此自行增减氧气，否则界面会显示一个服务端并不认可的数值。
+func (p *Predictor) Oxygen() (uint16, bool) {
+	return p.oxygen, p.ready
 }
 
 // HistoryLen 返回尚未被权威状态确认的输入数量。
