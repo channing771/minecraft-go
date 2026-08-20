@@ -348,11 +348,13 @@ func applyCaptureMirror(app *application, message network.ServerMessage) error {
 const captureWaterBasinChunkRadius = 1
 
 // prepareWaterBasin 装入水景夹具：一座石质水池，池底有可辨识的水下地形，
-// 水体顶层沿 −Z 方向由源方块递减到 7 级流动水，形成一段连续的斜水面。
+// 水体顶层沿 **+Z** 方向（即由池深处向岸边）从源方块递减到 7 级流动水，
+// 形成一段连续的斜水面：z 越大等级越弱、`h_raw = 14 - level` 越低。
 //
 // 三件事同时被这一份夹具覆盖，与视觉门禁要求的三点对应：
-//   - **水面斜坡**：顶层 y=4 沿 z 递减 WaterSourceID → WaterLevel1..7ID，
-//     角高度按 `h_raw = 14 - level` 插值，渲染出连续下降的斜面而不是台阶。
+//   - **水面斜坡**：顶层 y=4 沿 z 增大依次是 WaterSourceID → WaterLevel1..7ID
+//     （见下方 `slope[z+10]`：z=−10 取 1 级、z=−4 取 7 级），角高度按
+//     `h_raw = 14 - level` 插值，渲染出沿 +Z 连续下降的斜面而不是台阶。
 //   - **水下视角**：水体足够深且四周留有余量，相机放进去就是眼睛浸没态。
 //   - **水面之下的地形**：池底铺了沙丘、砾石带与一处露出水面的圆石堆，
 //     三种材质在水下的可辨识度是「水下变暗但不立刻归零」的直接证据。
@@ -411,7 +413,7 @@ func prepareWaterBasin(app *application) error {
 			setBlock(core.BlockPos{X: x, Y: 0, Z: z}, core.GrassID)
 		}
 	}
-	// 水体。y=1..3 是满格水源；y=4 是顶层，沿 −Z 递减出斜面。
+	// 水体。y=1..3 是满格水源；y=4 是顶层，沿 +Z（z 增大）递减出斜面。
 	// 顺序在固体之后写，但只写尚未被固体占据的格——池底地形优先。
 	slope := [...]core.BlockID{
 		core.WaterLevel1ID, core.WaterLevel2ID, core.WaterLevel3ID, core.WaterLevel4ID,

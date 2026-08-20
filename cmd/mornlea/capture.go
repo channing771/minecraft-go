@@ -333,7 +333,7 @@ var captureScenes = []captureScene{
 	},
 	{
 		// 水景一：水面之上俯瞰。覆盖「水面斜坡」与「水面之下的地形」——
-		// 顶层水沿 −Z 由源方块递减到 7 级，角高度插值成连续斜面；
+		// 顶层水沿 +Z（由池深处向岸边）由源方块递减到 7 级，角高度插值成连续斜面；
 		// 池底的沙丘、砾石带与露出水面的圆石堆透过水面可见。
 		Name:         "water-surface-slope",
 		WarmupFrames: 8,
@@ -343,7 +343,7 @@ var captureScenes = []captureScene{
 				return err
 			}
 			app.worldTimeTicks = 6000
-			// 3/4 角俯视：斜水面的梯度沿 −Z，从侧后方看过去，水面高度差
+			// 3/4 角俯视：斜水面的梯度沿 z 轴，从侧后方看过去，水面高度差
 			// 在画面里是一条明显倾斜的水线，正视（yaw=0）反而只能看到它退远。
 			app.camera.Pos = mgl32.Vec3{7.5, 6.4, 4.5}
 			app.camera.Yaw = 0.6

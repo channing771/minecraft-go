@@ -249,8 +249,9 @@ func (r *Registry) FluidHeight(id world.BlockID) uint8 {
 
 // LightAttenuation 返回天空光穿过该方块时的额外衰减。实现 mesh.Registry。
 //
-// 流体额外衰减 1、其余方块 0。本变更只负责把值送过 ABI 边界，真正的衰减行为由
-// Rust 光照 BFS 在后续任务中消费。
+// 流体额外衰减 1、其余方块 0。值经 registry 快照送过 ABI 边界，由 Rust 的天空光
+// BFS 逐步查表扣减——竖直向下穿过流体因此不再无损。方块光模型不消费本值：水与
+// 玻璃一样直接阻断。
 func (r *Registry) LightAttenuation(id world.BlockID) uint8 {
 	if core.IsFluid(id) {
 		return 1

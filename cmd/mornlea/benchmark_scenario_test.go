@@ -21,7 +21,7 @@ import (
 	"github.com/channing771/mornlea/internal/worldgen"
 )
 
-func TestScenarioV16ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+func TestScenarioV17ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 	if scenarioVersion != 17 {
 		t.Fatalf("scenarioVersion=%d, want 17", scenarioVersion)
 	}
@@ -61,7 +61,7 @@ func TestScenarioV16ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 	}
 }
 
-func TestBenchmarkScenarioV16AccountsForCompanionRendererUploadLayout(t *testing.T) {
+func TestBenchmarkScenarioV17AccountsForCompanionRendererUploadLayout(t *testing.T) {
 	if scenarioVersion != 17 {
 		t.Fatalf("scenarioVersion=%d，想要 17", scenarioVersion)
 	}
