@@ -7,6 +7,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // eyeBlockOf 返回玩家眼睛所在的方块坐标，与权威射线的起点取同一个 EyeHeight。
@@ -147,4 +148,170 @@ func TestPlaceBlockThroughFluidReplacesFluidAndRewakesNeighbours(t *testing.T) {
 	if !core.IsFluid(beforeDownstream) {
 		t.Fatalf("夹具失效：下游 %+v 放置前是 %d，不是流体", downstream, beforeDownstream)
 	}
+}
+
+// fluidLookDown 是近乎垂直向下的 pitch（留 0.01 弧度避免退化成极点）。
+const fluidLookDown = -float32(math.Pi)/2 + 0.01
+
+// fluidRayPathCells 用**生产 DDA** 枚举射线在交互距离内经过的全部方块格
+// （谓词恒假，因此射线不会提前停下），供用例把水精确地灌在射线路径上。
+//
+// 为什么不手算路径格：路径依赖 EyeHeight 与 InteractionReach 两个 tunable，
+// 手算的常量在它们变化后会静默失真，「穿水交互」就退化成「水根本不在路上」
+// 的恒真断言——而这正是本文件其余守卫要排除的失效模式。
+func fluidRayPathCells(
+	t *testing.T,
+	engine *Engine,
+	origin, direction mgl32.Vec3,
+) []core.BlockPos {
+	t.Helper()
+	var cells []core.BlockPos
+	_, _, err := core.RaycastBlocks(
+		origin,
+		direction,
+		engine.tunables.InteractionReach,
+		func(position core.BlockPos) (bool, error) {
+			cells = append(cells, position)
+			return false, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("枚举射线路径失败：%v", err)
+	}
+	return cells
+}
+
+// floodRayPathWithWater 把射线路径上除 target 之外的**空气**格全部写成水源，
+// 返回实际灌水的格。用水源而非流动水是刻意的：源是流动规则的不动点，整个
+// 用例期间不会自行消失；SetBlockForTest 又绕过 recordChange，因此这些格连
+// 入队都不会发生，断言不受流动影响。
+func floodRayPathWithWater(
+	t *testing.T,
+	engine *Engine,
+	origin, direction mgl32.Vec3,
+	target core.BlockPos,
+) []core.BlockPos {
+	t.Helper()
+	var water []core.BlockPos
+	for _, cell := range fluidRayPathCells(t, engine, origin, direction) {
+		if cell == target || fluidBlockAt(t, engine, cell) != core.AirID {
+			continue
+		}
+		engine.SetBlockForTest(cell, core.WaterSourceID)
+		water = append(water, cell)
+	}
+	if len(water) == 0 {
+		t.Fatal("夹具失效：射线路径上没有任何可灌水的空气格")
+	}
+	return water
+}
+
+// assertWaterIsLoadBearing 是两条水下交互用例共用的夹具承重守卫：用「非空气
+// 即命中」这个**不区分流体**的谓词跑同一条射线，它必须停在水格而不是 target。
+//
+// 这一条守卫同时证明两件事：水确实落在射线路径上，且生产谓词把水判为可穿透
+// 是被真实测量的行为。少了它，即便水被放到了射线旁边，主断言也会照样通过。
+func assertWaterIsLoadBearing(
+	t *testing.T,
+	engine *Engine,
+	origin, direction mgl32.Vec3,
+	target core.BlockPos,
+	water []core.BlockPos,
+) {
+	t.Helper()
+	for _, position := range water {
+		if got := fluidBlockAt(t, engine, position); !core.IsFluid(got) {
+			t.Fatalf("夹具失效：射线路径上的 %+v=%d 已不是流体", position, got)
+		}
+	}
+	dimension := engine.dimensions[core.Overworld]
+	hit, ok, err := core.RaycastBlocks(
+		origin,
+		direction,
+		engine.tunables.InteractionReach,
+		func(position core.BlockPos) (bool, error) {
+			block, ready := dimension.BlockAt(position)
+			if !ready {
+				return false, ErrChunkNotReady
+			}
+			return block != core.AirID, nil
+		},
+	)
+	if err != nil || !ok {
+		t.Fatalf("夹具失效：不区分流体的射线没有命中任何方块（err=%v ok=%v）", err, ok)
+	}
+	if hit.Block == target {
+		t.Fatalf("夹具失效：不区分流体的射线也命中了目标 %+v，水没有落在射线路径上", target)
+	}
+	if !core.IsFluid(fluidBlockAt(t, engine, hit.Block)) {
+		t.Fatalf("夹具失效：不区分流体的射线停在非流体格 %+v，途中另有遮挡", hit.Block)
+	}
+}
+
+// TestOpenContainerRaycastLooksThroughFluid 覆盖 spec fluid-survival 的 Scenario
+// 「浸没时仍能开启容器」：视线经过流体格后指向交互距离内的熔炉，打开请求必须
+// 被受理，MUST NOT 因为途中的流体被判为无目标。
+//
+// 本用例与 TestMiningRaycastLooksThroughFluid 走同一个 blockRaycastSampler，
+// 但**共用是当前的实现事实，不是契约**：只要采掘那一条有用例，任何人把
+// container.go 的采样器重新内联成一份不区分流体的谓词，都不会让任何测试变红。
+// 这条 Scenario 因此需要自己的钉子。
+func TestOpenContainerRaycastLooksThroughFluid(t *testing.T) {
+	engine, session := readyMovementPlayer(t)
+	// 玩家出生在 (0.5,1,0.5) 的平地上，眼睛在 y = 1 + EyeHeight；lookDown 近乎
+	// 垂直向下，因此把熔炉放在脚下那格，射线必须穿过身体所在的空气格才够得着。
+	furnace := core.BlockPos{}
+	engine.SetBlockForTest(furnace, core.FurnaceID)
+	index, indexed := world.ChunkBlockIndex(furnace)
+	if !indexed {
+		t.Fatal("熔炉没有区块索引")
+	}
+	engine.SetChunkFurnaceForTest(core.ChunkKey{Dimension: core.Overworld}, 0,
+		world.FurnaceSlot{Generation: 1, Active: true, BlockIndex: index})
+
+	origin := engine.sessions[session].player.state.Position.
+		Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
+	direction := LookDirection(0, fluidLookDown)
+	water := floodRayPathWithWater(t, engine, origin, direction, furnace)
+
+	engine.Enqueue(Command{
+		Session: session, Sequence: 2, Kind: CommandOpenFurnace, Pitch: fluidLookDown,
+	})
+	result := engine.Step()
+	if len(result.Rejected) != 0 {
+		t.Fatalf("穿水打开熔炉被拒绝：%+v", result.Rejected)
+	}
+	if len(result.Furnaces) != 1 || result.Furnaces[0].Session != session {
+		t.Fatalf("穿水打开后未发布熔炉状态：%+v", result.Furnaces)
+	}
+
+	// 夹具承重守卫排在真实断言之后：真实故障不应先被守卫报成「夹具失效」。
+	assertWaterIsLoadBearing(t, engine, origin, direction, furnace, water)
+}
+
+// TestCompanionMiningLineOfSightLooksThroughFluid 覆盖 spec fluid-survival 的
+// Scenario「流体不遮挡伙伴视线」：伙伴与采掘目标之间只隔着流体时，视线遮挡
+// 校验 MUST NOT 因为流体判定目标被遮挡。
+//
+// 伙伴采掘不看朝向，射线方向由目标方块中心决定（mining.go）；遮挡一旦成立，
+// advanceCompanionMining 会把进度清零，因此「进度逐 tick 累积」就是「视线没有
+// 被水挡住」的可判定证据。
+func TestCompanionMiningLineOfSightLooksThroughFluid(t *testing.T) {
+	fixture := readyCompanionMining(t, core.StoneID, core.ItemStonePickaxe)
+	engine, entry, target := fixture.engine, fixture.entry, fixture.target
+
+	origin := entry.state.Position.
+		Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
+	direction := blockCenterVec3(target).Sub(origin)
+	water := floodRayPathWithWater(t, engine, origin, direction, target)
+
+	for tick := 1; tick <= 3; tick++ {
+		advanceMiningOnce(engine)
+		if got := entry.mining.progressTicks; got != uint16(tick) {
+			t.Fatalf("tick %d 伙伴进度=%d，想要 %d——水把视线挡住了", tick, got, tick)
+		}
+	}
+
+	// 夹具承重守卫排在真实断言之后。
+	assertWaterIsLoadBearing(t, engine, origin, direction, target, water)
 }
