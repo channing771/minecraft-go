@@ -404,6 +404,22 @@ func (f *spawnFallback) consider(position mgl32.Vec3, tier spawnTier) {
 }
 
 // take 取出记录并清空；没有任何降级候选时返回 false。
+//
+// **取出的位置是 consider 当时校验的，不是本 tick 重新校验的。** 两者之间可能
+// 隔着若干 tick（候选列碰到未就绪区块会中途返回等待），期间他人放置或
+// advanceFluids 灌水都可能让那一格变样。这里**刻意不重新复算**，两种陈旧后果
+// 都已有归宿：
+//
+//   - **那一格被填实**：玩家出生后 advancePlayers 的 tryUnstick 先尝试逐 1/16
+//     格抬升，抬不出来就 beginReset 回到 PendingSpawn，用当时的世界重新扫一遍
+//     完整的出生流程。代价是多一个重生周期，不是状态损坏。伙伴侧沿用既有裁决
+//     （卡入方块的解除属玩家生命周期语义，M5B 伙伴保持最小实现）。
+//   - **那一格仍空但灌了水**：档位变差而已，等价于本来就只有更低那一档；玩家
+//     有浮力可以自己游上来，正是 spawnTierSubmerged 已经接受的结局。
+//
+// 既有自愈路径已被证明有界，在这里再加一次复算等于为已解决的问题再付一次代价
+// （且复算失败后仍要回退到同一条自愈路径）。写下这段是因为读者会自然以为取出
+// 的位置是当 tick 校验过的。
 func (f *spawnFallback) take() (mgl32.Vec3, bool) {
 	if f.tier == spawnTierNone {
 		return mgl32.Vec3{}, false
