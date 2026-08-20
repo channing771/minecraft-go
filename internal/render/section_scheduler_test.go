@@ -3,6 +3,7 @@
 package render_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/channing771/mornlea/internal/assets"
@@ -18,18 +19,16 @@ type recordingSink struct {
 }
 
 type sinkUpload struct {
-	pos          core.SectionPos
-	opaque       []byte
-	water        []byte
-	uploadNumber int
+	pos    core.SectionPos
+	opaque []byte
+	water  []byte
 }
 
 func (s *recordingSink) UploadSection(x, y, z int32, opaque, water []byte) {
 	s.uploads = append(s.uploads, sinkUpload{
-		pos:          core.SectionPos{X: x, Y: y, Z: z},
-		opaque:       append([]byte(nil), opaque...),
-		water:        append([]byte(nil), water...),
-		uploadNumber: len(s.uploads),
+		pos:    core.SectionPos{X: x, Y: y, Z: z},
+		opaque: append([]byte(nil), opaque...),
+		water:  append([]byte(nil), water...),
 	})
 }
 
@@ -172,5 +171,107 @@ func TestFlushUploadsBudgetCountsBothStreams(t *testing.T) {
 	}
 	if scheduler.PendingUploads() != 1 {
 		t.Fatalf("待冲刷区段 = %d,想要 1", scheduler.PendingUploads())
+	}
+}
+
+// countingSink 只记数,不复制字节——它自己绝不能分配,否则会污染
+// AllocsPerRun 的读数。
+type countingSink struct{ uploads int }
+
+func (s *countingSink) UploadSection(int32, int32, int32, []byte, []byte) { s.uploads++ }
+func (s *countingSink) DropSection(int32, int32, int32)                   {}
+
+// allocsPerFlush 测量「排队一个区段 + 冲刷一帧」的稳态分配次数。
+func allocsPerFlush(quads []mesh.Quad) float64 {
+	scheduler := render.NewSectionScheduler(&countingSink{}, 1<<20)
+	pos := core.SectionPos{}
+	run := func() {
+		scheduler.QueueSection(pos, quads)
+		scheduler.BeginFrame()
+		scheduler.FlushUploads(core.ChunkPos{})
+	}
+	// 预热:两条打包 scratch 都在首次冲刷时按最坏情况扩容到位。
+	run()
+	run()
+	return testing.AllocsPerRun(200, run)
+}
+
+// TestWaterPartitionAddsNoPerFrameAllocations 锁定 voxel-visual-presentation
+// MODIFIED 的「预热后 MUST 不产生每帧动态资源创建或堆分配」在 Go 上传侧的部分:
+// 含水与不含水的同规模区段,稳态分配次数必须**完全相同**。
+//
+// 这条断言选的是「相等」而不是「小于某个常数」:常数阈值会随无关改动漂移,
+// 而相等直接钉住「分流本身不额外分配」。若实现每帧新建水面缓冲(而不是复用
+// 跨帧 scratch),含水那一侧的读数会立刻高出来。
+func TestWaterPartitionAddsNoPerFrameAllocations(t *testing.T) {
+	const count = 64
+	opaqueOnly := make([]mesh.Quad, 0, count)
+	mixed := make([]mesh.Quad, 0, count)
+	for i := 0; i < count; i++ {
+		opaqueOnly = append(opaqueOnly, stoneQuad(uint8(i%16), 0, 0))
+		if i%2 == 0 {
+			mixed = append(mixed, waterQuad(uint8(i%16), 5, 0))
+		} else {
+			mixed = append(mixed, stoneQuad(uint8(i%16), 0, 0))
+		}
+	}
+	withoutWater := allocsPerFlush(opaqueOnly)
+	withWater := allocsPerFlush(mixed)
+	if withWater != withoutWater {
+		t.Fatalf("含水区段每帧分配 %.1f 次,不含水 %.1f 次:分流不得引入每帧分配",
+			withWater, withoutWater)
+	}
+}
+
+// TestWaterQuadInstanceStaysEightBytes 锁定「水面 quad 实例 MUST 保持 8 字节」。
+//
+// 带四个角高度的水面 quad 打包后仍是一个 u64,上传流长度恰好是 quad 数 × 8,
+// 且解包后角高度逐个还原、W/H 回到 1。角高度借的是 W/H 与 bit 55..62 的空闲位,
+// 任何「加一个字段就好了」的改法都会在这里变红。
+func TestWaterQuadInstanceStaysEightBytes(t *testing.T) {
+	sink := &recordingSink{}
+	scheduler := render.NewSectionScheduler(sink, 1<<20)
+	quads := []mesh.Quad{
+		{X: 1, Y: 2, Z: 3, W: 1, H: 1, Face: mesh.FacePosY, Mat: assets.LayerWater,
+			AO: 0x5A, Light: 0xA5, Corners: [4]uint8{15, 14, 13, 7}},
+		{X: 4, Y: 5, Z: 6, W: 1, H: 1, Face: mesh.FacePosX, Mat: assets.LayerWater,
+			Corners: [4]uint8{0, 15, 15, 0}},
+	}
+	scheduler.QueueSection(core.SectionPos{}, quads)
+	scheduler.BeginFrame()
+	scheduler.FlushUploads(core.ChunkPos{})
+
+	if len(sink.uploads) != 1 {
+		t.Fatalf("上传次数 = %d,想要 1", len(sink.uploads))
+	}
+	stream := sink.uploads[0].water
+	if len(stream) != len(quads)*8 {
+		t.Fatalf("water 流 %d 字节,想要 %d(每条实例 8 字节)", len(stream), len(quads)*8)
+	}
+	for i, got := range unpackStream(t, "water", stream) {
+		if got != quads[i] {
+			t.Fatalf("第 %d 条往返后 = %+v,想要 %+v", i, got, quads[i])
+		}
+	}
+}
+
+// TestSectionSinkExposesExactlyOneExtraStream 锁定「只允许恰好一个额外的
+// 半透明阶段」在上传契约上的投影:SectionSink 只暴露 opaque 与 water 两条流。
+//
+// 再加一个透明 pass 必然需要第三条上传流(每个 pass 都要有自己的实例来源),
+// 于是这里会变红,改动者被迫先去修订 voxel-visual-presentation 的边界。
+func TestSectionSinkExposesExactlyOneExtraStream(t *testing.T) {
+	method, ok := reflect.TypeOf((*render.SectionSink)(nil)).Elem().MethodByName("UploadSection")
+	if !ok {
+		t.Fatal("SectionSink 没有 UploadSection 方法")
+	}
+	streams := 0
+	for i := 0; i < method.Type.NumIn(); i++ {
+		if method.Type.In(i) == reflect.TypeOf([]byte(nil)) {
+			streams++
+		}
+	}
+	if streams != 2 {
+		t.Fatalf("UploadSection 有 %d 条字节流,想要 2(不透明 + 唯一的水面阶段)", streams)
 	}
 }
