@@ -18,12 +18,12 @@
 
 ## 3. water pass（client）
 
-- [ ] 3.0 **给流体分配独立材质层**：`internal/assets` 现在对流体走 `Material` 的 `default: return LayerStone`，水面会以石头纹理出现在**不透明** terrain pass 里。新增水材质层与其程序化纹理，`Material` 对 8 个流体编号返回该层。**这是 3.1 的前提**——按 material 分流需要水有自己的 material。**本项为任务组 1 评审发现的计划缺口补入**：原计划从未分配水材质层。验证：`go test ./internal/assets ./internal/mesh -race -count=1`
-- [ ] 3.1 Go 上传路径按 material 把水 quad 分流到独立 buffer（mesh quad 流格式不变）。验证：`go test ./internal/mesh ./internal/render -race -count=1`
-- [ ] 3.2 `mornlea_client` 新增 water pass 与 `water.wgsl`：alpha blend、深度测试开、**深度写关**、排在 terrain pass 之后 HiZ build 之前、按 section 距离由远及近、**不接 GPU culling**（普通 `draw_indexed`）。顶点着色器按 material 与 face 解出角高度并下移顶点。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_client/Cargo.toml`
-- [ ] 3.3 client ABI v4 → v5，头文件与 `internal/client` 绑定同批一致。验证：`make rust && go test ./internal/client -race -count=1`
-- [ ] 3.4 覆盖 spec 的「水面不遮挡其后的水面」「水面被不透明方块正确遮挡」「水面之下的地形可见」「排序粒度不细于区段」四个 Scenario。验证：离屏对照测试
-- [ ] 3.5 覆盖 `voxel-visual-presentation` MODIFIED 的「水面阶段不突破实例格式与资源边界」：quad 仍 8 字节、预热后零每帧动态资源、无第二个额外透明 pass。验证：`go test ./internal/render -race -count=1`
+- [x] 3.0 **给流体分配独立材质层**：`internal/assets` 现在对流体走 `Material` 的 `default: return LayerStone`，水面会以石头纹理出现在**不透明** terrain pass 里。新增水材质层与其程序化纹理，`Material` 对 8 个流体编号返回该层。**这是 3.1 的前提**——按 material 分流需要水有自己的 material。**本项为任务组 1 评审发现的计划缺口补入**：原计划从未分配水材质层。验证：`go test ./internal/assets ./internal/mesh -race -count=1`
+- [x] 3.1 Go 上传路径按 material 把水 quad 分流到独立 buffer（mesh quad 流格式不变）。验证：`go test ./internal/mesh ./internal/render -race -count=1`
+- [x] 3.2 `mornlea_client` 新增 water pass 与 `water.wgsl`：alpha blend、深度测试开、**深度写关**、排在 terrain pass 之后 HiZ build 之前、按 section 距离由远及近、**不接 GPU culling**（普通 `draw_indexed`）。顶点着色器按 material 与 face 解出角高度并下移顶点。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_client/Cargo.toml`
+- [x] 3.3 client ABI v4 → v5，头文件与 `internal/client` 绑定同批一致。验证：`make rust && go test ./internal/client -race -count=1`
+- [x] 3.4 覆盖 spec 的「水面不遮挡其后的水面」「水面被不透明方块正确遮挡」「水面之下的地形可见」「排序粒度不细于区段」四个 Scenario。验证：离屏对照测试
+- [x] 3.5 覆盖 `voxel-visual-presentation` MODIFIED 的「水面阶段不突破实例格式与资源边界」：quad 仍 8 字节、预热后零每帧动态资源、无第二个额外透明 pass。验证：`go test ./internal/render -race -count=1`
 
 ## 4. 天空光衰减与列顶语义
 
