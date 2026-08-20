@@ -32,7 +32,7 @@
 - `authoritative-fluid`：`fluidEnabled` 默认值改为 `true`；流体方块从「未纳入 mesh registry 快照」改为「纳入」。
 - `authoritative-daylight`：**天空光的两处硬约束必须放宽**。现规格写「每个世界 X/Z 列严格高于**最高非空气方块**的空气单元 MUST 是亮度 15 的直射起点」且「不透明方块 MUST 阻断传播；**当前版本空气仍是唯一透光方块**」——水既抬高列顶又不是空气，两条合起来正是「水下全黑」的根因。改为：列顶判定忽略流体；流体透光但每格额外衰减，竖直向下也不再无损。
 - `voxel-visual-presentation`：**现规格明确禁止本变更要做的事**——「quad 实例格式 MUST 保持 `8` 字节，**不得增加第二个透明 pass、透明排序**或每帧材质资源创建」。water pass 正是第二个透明 pass 加按 section 距离的排序，必须显式放宽，并把放宽的边界写死（只允许这一个额外透明 pass、排序粒度只到 section、不得引入每帧动态资源、quad 实例仍 MUST 保持 8 字节）。
-- `bounded-benchmark-workload`：`fluidEnabled` 默认开启后固定工作负载的世界内容改变，benchmark scenario v16 → v17（新增显式迁移 `16:17`）。
+- `bounded-benchmark-workload`：被测进程因流体呈现与生存而改变（registry 条目加宽、quad 位布局、光照衰减查表、water pass、`StepInput` 头版本），benchmark scenario v16 → v17（新增显式迁移 `16:17`）；benchmark 的世界内容仍与注水默认值解耦，其注水门控被钉死为关闭。
 
 **不修改 `static-block-light`**：其现规格写「光在六个轴向上 MUST 仅向 `AirID` 相邻格传播……任何其他方块即使未来被标记为透明也 MUST 阻断方块光」。水阻断方块光与既有模型**一致**（玻璃同样阻断），因此本变更不动它——水下在夜间没有直射天空光时仍然是暗的，与玻璃后方的现有行为同构。
 

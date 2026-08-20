@@ -81,7 +81,9 @@
 
 ## 11. 收尾门禁
 
-- [ ] 11.1 `make rust` 后运行 `go test ./... -race -count=1`。
-- [ ] 11.2 `go vet ./...` 与 `gofmt -l .`（后者应无输出）。
-- [ ] 11.3 `openspec validate --all --strict --no-interactive`。
-- [ ] 11.4 核对 `tasks.md` 全部勾选、实现与六个 delta spec 一致；偏离时先修订 OpenSpec 产物。
+- [x] 11.1 `make rust` 后运行 `go test ./... -race -count=1`。
+- [x] 11.2 `go vet ./...` 与 `gofmt -l .`（后者应无输出）。
+- [x] 11.3 `openspec validate --all --strict --no-interactive`。
+- [x] 11.4 核对 `tasks.md` 全部勾选、实现与六个 delta spec 一致；偏离时先修订 OpenSpec 产物。**发现一处偏离并已修订产物**：`bounded-benchmark-workload` 的 delta spec 与 proposal.md 称 v17 与 v16 的差异是「注水默认开启带来的世界内容」，但 `cmd/mornlea/main.go:103` 把 benchmark 路径的注水门控钉死为关闭（`TestFluidGatePerRunPath` 四个子用例锁定），benchmark 的被测世界与 v16 逐格一致。已改写该 requirement 与其 scenario，改为「被测进程自身的变化」，并补一条「benchmark 世界内容不随注水默认值漂移」的 scenario。
+- [x] 11.5 `docs/notes/progress.md`：追加本变更的里程碑条目；把七处以「当前」开头的编年条目改成它们各自的里程碑前缀（`M5A`、`rust-engine-collision-raycast-ci-stability` 的三个阶段、`rust-engine-physics-step`、`rust-engine-worldgen`、`R1(rust-client-window)`）。
+- [x] 11.6 `design.md`：把 F1 遗留风险条目里的**估算**升级为**实测**（Ruling 57），并补一节「本变更遗留的残余风险与待办」逐条记录七项。
