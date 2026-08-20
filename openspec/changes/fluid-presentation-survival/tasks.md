@@ -41,11 +41,11 @@
 
 ## 6. 溺水、氧气与 HUD
 
-- [ ] 6.1 `internal/sim` 新增权威 `oxygen`（满值 `MaxOxygenTicks = 300`）：`EyeInFluid` 时每 tick −1，归零后每 `DrownDamageIntervalTicks`（默认 20）扣 1 血并**走既有伤害入口**（重置回血计时），出水立即回满。**不入存档**。验证：`go test ./internal/sim -race -count=1`
-- [ ] 6.2 协议 v20 → v21：`PlayerState` 追加 `Oxygen`。wire golden 与 fuzz 同步扩展。验证：`go test ./internal/network -race -count=1`
-- [ ] 6.3 `internal/render/hud` 增加氧气条，写进现有 hotbar 布局、画在生命值条上方，复用同一 HUD 图集与 pass，**零新 pipeline**；仅在未满时出现。验证：`go test ./internal/render/hud -race -count=1`
-- [ ] 6.4 覆盖 `fluid-survival` 的氧气五个 Scenario（含「溺水可致死并走既有死亡结算」与「氧气不跨重启保留」）与同步两个 Scenario。验证：`go test ./internal/sim ./internal/server ./internal/render/hud -race -count=1`
-- [ ] 6.5 水下视觉：相机在流体格时叠水色 tint 并压低远处可见度，**判定复用同一个 `EyeInFluid`**，不得另起一套。覆盖「视觉与溺水判定一致」Scenario。验证：`go test ./internal/render ./internal/client -race -count=1`
+- [x] 6.1 `internal/sim` 新增权威 `oxygen`（满值 `MaxOxygenTicks = 300`）：`EyeInFluid` 时每 tick −1，归零后每 `DrownDamageIntervalTicks`（默认 20）扣 1 血并**走既有伤害入口**（重置回血计时），出水立即回满。**不入存档**。验证：`go test ./internal/sim -race -count=1`
+- [x] 6.2 协议 v20 → v21：`PlayerState` 追加 `Oxygen`。wire golden 与 fuzz 同步扩展。验证：`go test ./internal/network -race -count=1`
+- [x] 6.3 `internal/render/hud` 增加氧气条，写进现有 hotbar 布局、画在生命值条上方，复用同一 HUD 图集与 pass，**零新 pipeline**；仅在未满时出现。验证：`go test ./internal/render/hud -race -count=1`
+- [x] 6.4 覆盖 `fluid-survival` 的氧气五个 Scenario（含「溺水可致死并走既有死亡结算」与「氧气不跨重启保留」）与同步两个 Scenario。验证：`go test ./internal/sim ./internal/server ./internal/render/hud -race -count=1`
+- [x] 6.5 水下视觉：相机在流体格时叠水色 tint 并压低远处可见度，**判定复用同一个 `EyeInFluid`**，不得另起一套。覆盖「视觉与溺水判定一致」Scenario。验证：`go test ./internal/render ./internal/client -race -count=1`
 
 ## 7. 清偿 F1 剩余待办
 
