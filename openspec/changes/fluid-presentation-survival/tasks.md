@@ -28,7 +28,7 @@
 ## 4. 天空光衰减与列顶语义
 
 - [x] 4.2 `RegistryView` 增加 `light_attenuation`；BFS 结构不变，每步扣减改为按方块查表；流体额外衰减 1，竖直向下穿过流体不再无损。**方块光模型不动**（水与玻璃一样阻断）。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
-- [x] 4.3 覆盖 `authoritative-daylight` MODIFIED 的「水面之下随深度变暗但不立刻归零」与「流体不作为直射起点的遮挡」两个 Scenario，以及 `fluid-presentation` 的三条光照 Scenario。验证：`go test ./internal/mesh -race -count=1`
+- [x] 4.3 覆盖 `authoritative-daylight` MODIFIED 的「水面之下随深度变暗但不立刻归零」，以及 `fluid-presentation` 的「水下随深度变暗」「浅水下方仍然可见」两条光照 Scenario。（原文另列的「流体不作为直射起点的遮挡」与「流体不再抬高直射起点」已随任务 4.1 的回退从 delta spec 删除——`openspec validate` 不交叉校验任务描述，故此处需人工同步。）验证：`go test ./internal/mesh -race -count=1`
 - [x] 4.4 **回归守卫**：断言 `static-block-light` 的既有行为未变——方块光仍只经 `AirID` 传播，水与玻璃同样阻断。验证：`go test ./internal/mesh -race -count=1`
 
 ## 5. 浸没标志与水中物理
