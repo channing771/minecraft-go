@@ -25,7 +25,7 @@
 - [x] 3.4 覆盖 spec 的「水面不遮挡其后的水面」「水面被不透明方块正确遮挡」「水面之下的地形可见」「排序粒度不细于区段」四个 Scenario。验证：离屏对照测试
 - [x] 3.5 覆盖 `voxel-visual-presentation` MODIFIED 的「水面阶段不突破实例格式与资源边界」：quad 仍 8 字节、预热后零每帧动态资源、无第二个额外透明 pass。验证：`go test ./internal/render -race -count=1`
 
-## 4. 天空光衰减与列顶语义
+## 4. 天空光穿过流体时衰减（原定的「列顶语义」经任务组 4 评审实测为误诊并已回退，见 4.3）
 
 - [x] 4.2 `RegistryView` 增加 `light_attenuation`；BFS 结构不变，每步扣减改为按方块查表；流体额外衰减 1，竖直向下穿过流体不再无损。**方块光模型不动**（水与玻璃一样阻断）。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
 - [x] 4.3 覆盖 `authoritative-daylight` MODIFIED 的「水面之下随深度变暗但不立刻归零」，以及 `fluid-presentation` 的「水下随深度变暗」「浅水下方仍然可见」两条光照 Scenario。（原文另列的「流体不作为直射起点的遮挡」与「流体不再抬高直射起点」已随任务 4.1 的回退从 delta spec 删除——`openspec validate` 不交叉校验任务描述，故此处需人工同步。）验证：`go test ./internal/mesh -race -count=1`
