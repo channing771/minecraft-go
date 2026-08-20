@@ -8,13 +8,13 @@
 
 ## 2. 斜水面几何（engine）
 
-- [ ] 2.0 **registry 条目扩两个每方块字节**：`REGISTRY_ENTRY_BYTES` 16 → 18，追加 `fluid_height`（流体格的 `h_raw`，非流体用哨兵）与 `light_attenuation`（任务 4.2 用）。二者与既有 `Emission` 同形状（每方块一字节），`BlockProperties` 同步加字段。**这是 2.1/2.2 的前提**：Rust 的 mesher 目前**没有任何途径**从 block id 知道「是不是流体、是第几级」——ABI 条目只有 id/opaque/emission/6×material，而 8 个流体编号共用一个 material（任务 3.0），material 只能当「是不是水」的判别位、推不出 0..7。把 `h_raw` 直接做成每方块属性，Rust 就不必知道 level，等级→高度的映射留在 Go 一处。**在 Ruling 2 预留的「同一个 v5 内扩 ABI 面」额度内完成，不再升版**。**本项为任务组 1 评审发现的计划缺口补入**。验证：`make rust && go test ./internal/nativeabi ./internal/mesh ./internal/assets -race -count=1`
-- [ ] 2.0b 修正 `internal/mesh/native_parity_test.go` 的 doc comment：现注释称「只要两者对『水面是否出面』给出不同答案，parity 就变红」，但对**规则类**变异这不可能发生——Go oracle 与 Rust 位图同源于 `assets.FaceVisible`，规则一起坏、差值恒等。真正承重的是其后的计数守卫。改成如实描述，免得后人以为 parity 断言在守规则、从而放心删掉守卫。验证：`go test ./internal/mesh -race -count=1`
-- [ ] 2.1 先写失败测试：`h_raw(level) = 14 - level`、上方为流体取 15 的单格高度纯函数，对 8 个流体编号穷举断言。验证：`cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
-- [ ] 2.2 角高度：该角相邻四格中流体格 `h_raw` 的整数平均（向下取整），任一参与格上方为流体则取 15。**全整数运算，不得引入浮点**。用 `MeshInput.block()` 的既有 3×3×3 邻域读跨 section 邻居。验证：同上
-- [ ] 2.3 水的顶面/侧面按 1×1 出面（不贪心合并），角高度打进 `w`/`h` 释放的 8 bit 加现有 9 个空闲位。**quad 仍 MUST 是 `u64` / 8 字节**。补 pack/unpack 往返测试，对 level 组合穷举。验证：同上
+- [x] 2.0 **registry 条目扩两个每方块字节**：`REGISTRY_ENTRY_BYTES` 16 → 18，追加 `fluid_height`（流体格的 `h_raw`，非流体用哨兵）与 `light_attenuation`（任务 4.2 用）。二者与既有 `Emission` 同形状（每方块一字节），`BlockProperties` 同步加字段。**这是 2.1/2.2 的前提**：Rust 的 mesher 目前**没有任何途径**从 block id 知道「是不是流体、是第几级」——ABI 条目只有 id/opaque/emission/6×material，而 8 个流体编号共用一个 material（任务 3.0），material 只能当「是不是水」的判别位、推不出 0..7。把 `h_raw` 直接做成每方块属性，Rust 就不必知道 level，等级→高度的映射留在 Go 一处。**在 Ruling 2 预留的「同一个 v5 内扩 ABI 面」额度内完成，不再升版**。**本项为任务组 1 评审发现的计划缺口补入**。验证：`make rust && go test ./internal/nativeabi ./internal/mesh ./internal/assets -race -count=1`
+- [x] 2.0b 修正 `internal/mesh/native_parity_test.go` 的 doc comment：现注释称「只要两者对『水面是否出面』给出不同答案，parity 就变红」，但对**规则类**变异这不可能发生——Go oracle 与 Rust 位图同源于 `assets.FaceVisible`，规则一起坏、差值恒等。真正承重的是其后的计数守卫。改成如实描述，免得后人以为 parity 断言在守规则、从而放心删掉守卫。验证：`go test ./internal/mesh -race -count=1`
+- [x] 2.1 先写失败测试：`h_raw(level) = 14 - level`、上方为流体取 15 的单格高度纯函数，对 8 个流体编号穷举断言。验证：`cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
+- [x] 2.2 角高度：该角相邻四格中流体格 `h_raw` 的整数平均（向下取整），任一参与格上方为流体则取 15。**全整数运算，不得引入浮点**。用 `MeshInput.block()` 的既有 3×3×3 邻域读跨 section 邻居。验证：同上
+- [x] 2.3 水的顶面/侧面按 1×1 出面（不贪心合并），角高度打进 `w`/`h` 释放的 8 bit 加现有 9 个空闲位。**quad 仍 MUST 是 `u64` / 8 字节**。补 pack/unpack 往返测试，对 level 组合穷举。验证：同上
 - [x] 2.4 流体出面规则：同为流体的相邻面不可见、流体对空气可见、流体在实心方块下方的面不可见。穷举测试。**规则的落点是 `assets.FaceVisible`**——Rust 的 `RegistryView::face_visible` 只对 Go 烘焙的 Visibility 位图查表、自身不含规则，也拿不到「哪些编号是流体」的信息；在 Rust 里另写一套会制造第二个真值源。验证：`go test ./internal/assets ./internal/mesh -race -count=1`（含跨语言 parity 夹具 `TestNativeOracleParityWaterSurface`）
-- [ ] 2.5 覆盖 spec `fluid-presentation` 的「相邻不同水位之间连续过渡」「水柱内部没有斜面」「等级越弱高度越低」「高度派生是确定的」四个 Scenario。验证：同上
+- [x] 2.5 覆盖 spec `fluid-presentation` 的「相邻不同水位之间连续过渡」「水柱内部没有斜面」「等级越弱高度越低」「高度派生是确定的」四个 Scenario。验证：同上
 
 ## 3. water pass（client）
 
