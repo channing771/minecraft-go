@@ -15,7 +15,7 @@ import (
 // ApplyPlayerState 应用更新的权威玩家状态并重放尚未确认的输入。
 func (p *Predictor) ApplyPlayerState(
 	message network.PlayerState,
-	source physics.CollisionSource,
+	source physics.WorldSource,
 ) (ReconcileResult, error) {
 	if message.ServerTick <= p.lastServerTick {
 		return ReconcileResult{}, nil
@@ -60,7 +60,7 @@ func (p *Predictor) ApplyPlayerState(
 		p.dropAcknowledged(message.LastInputSequence)
 		for _, entry := range p.history {
 			p.previous = p.current
-			p.current = physics.Step(p.current, entry.input, source).State
+			p.current = stepWithSubmersion(p.current, entry.input, source)
 		}
 	}
 	p.lastServerTick = message.ServerTick

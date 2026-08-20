@@ -19,6 +19,13 @@ type FluidSource interface {
 	IsFluidAt(core.BlockPos) bool
 }
 
+// WorldSource 同时提供碰撞几何与流体判定，是「推进一个固定步」所需的完整方块
+// 视图。服务端 Dimension 与客户端 Mirror 都实现它。
+type WorldSource interface {
+	CollisionSource
+	FluidSource
+}
+
 // SubmersionFlags 计算玩家的两个浸没标志：
 //
 //   - bodyInFluid：玩家 AABB 与任意流体格有正体积相交；

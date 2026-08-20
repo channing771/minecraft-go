@@ -13,7 +13,7 @@ import (
 func (p *Predictor) Advance(
 	elapsed time.Duration,
 	control Control,
-	source physics.CollisionSource,
+	source physics.WorldSource,
 	nextSequence func() uint64,
 	send func(network.PlayerInput) error,
 ) error {
@@ -81,11 +81,7 @@ func (p *Predictor) Advance(
 			},
 		})
 		p.previous = p.current
-		p.current = physics.Step(
-			p.current,
-			p.history[len(p.history)-1].input,
-			source,
-		).State
+		p.current = stepWithSubmersion(p.current, p.history[len(p.history)-1].input, source)
 		p.accumulator -= physics.FixedDelta
 	}
 	if dropRemainder {
@@ -138,4 +134,18 @@ func validateControl(control Control) error {
 
 func finiteFloat32(value float32) bool {
 	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
+}
+
+// stepWithSubmersion 先按当前位置算好两个浸没标志，再推进一个固定步。
+//
+// 标志刻意不写回 predictedInput：权威侧每个 tick 都按「本 tick 开始时的位置」
+// 重算，重放时若沿用记录当时的旧值，重放起点已经换成权威位置、标志却还是旧的，
+// 两侧就会在水面附近分叉。重算的输入是位置与方块镜像，与权威侧同源。
+func stepWithSubmersion(
+	state physics.State,
+	input physics.Input,
+	source physics.WorldSource,
+) physics.State {
+	input.BodyInFluid, input.EyeInFluid = physics.SubmersionFlags(state.Position, source)
+	return physics.Step(state, input, source).State
 }

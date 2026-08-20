@@ -85,6 +85,7 @@ type playerState struct {
 	// health 是服务端单写者拥有的权威生命值，0..core.MaxHealth。
 	health uint8
 	// peakY 是离地后到达过的最高高度，瞬态字段，不持久化、不进入快照/哈希。
+	// 身体浸没时它被逐 tick 重置到当前高度，因此水中不会累积出摔落伤害。
 	// 落地、传送、重生、维度 reset 都会把它重置为当前高度。
 	peakY float32
 	// ticksSinceDamage 是自最后一次受伤以来连续未受伤的 tick 数，瞬态字段，
@@ -393,16 +394,22 @@ func (engine *Engine) advanceActivePlayers() {
 			engine.subscriptionsDirty = true
 			continue
 		}
+		source := dimensionCollisionSource{dimension: engine.dimensions[session.dimension]}
+		// 浸没标志由权威侧在 tick 边界用共享纯函数从自己的方块镜像算出，
+		// 再随 Input 传进物理步——流体没有碰撞盒，prism 里区分不出水与空气。
+		input := player.input
+		input.BodyInFluid, input.EyeInFluid = physics.SubmersionFlags(player.state.Position, source)
 		wasOnGround := player.state.OnGround
-		if wasOnGround {
+		if wasOnGround || input.BodyInFluid {
 			player.peakY = player.state.Position.Y()
 		}
-		step := physics.Step(
-			player.state,
-			player.input,
-			dimensionCollisionSource{dimension: engine.dimensions[session.dimension]},
-		)
+		step := physics.Step(player.state, input, source)
 		player.state = step.State
+		// 落点也要判一次：水浅、下落又快时，本步开始时玩家还在水面之上、结束
+		// 时已经踩到水底，只看步首标志会让这一跤照旧结算摔落伤害。
+		if landedInFluid, _ := physics.SubmersionFlags(player.state.Position, source); landedInFluid {
+			player.peakY = player.state.Position.Y()
+		}
 		if player.state.OnGround {
 			if !wasOnGround {
 				player.applyFallDamage()

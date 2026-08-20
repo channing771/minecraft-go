@@ -18,6 +18,8 @@ func (loadedAirSource) CollisionBoxes(core.BlockPos) physics.CollisionBoxSet {
 	return physics.CollisionBoxSet{Loaded: true}
 }
 
+func (loadedAirSource) IsFluidAt(core.BlockPos) bool { return false }
+
 type flatClientWorld struct{}
 
 func (flatClientWorld) CollisionBoxes(position core.BlockPos) physics.CollisionBoxSet {
@@ -26,6 +28,8 @@ func (flatClientWorld) CollisionBoxes(position core.BlockPos) physics.CollisionB
 	}
 	return physics.BlockCollisionBoxes(core.AirID, true)
 }
+
+func (flatClientWorld) IsFluidAt(core.BlockPos) bool { return false }
 
 func advanceSteps(t *testing.T, p *Predictor, count int, control Control) {
 	t.Helper()
@@ -158,7 +162,7 @@ func advanceOneStep(
 	t *testing.T,
 	p *Predictor,
 	control Control,
-	source physics.CollisionSource,
+	source physics.WorldSource,
 ) {
 	t.Helper()
 	sequence := uint64(0)
