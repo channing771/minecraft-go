@@ -284,4 +284,25 @@ func TestNativeOracleParityWaterSurface(t *testing.T) {
 		t.Fatalf("水版 quad=%d，空气对照组 quad=%d：水没有贡献任何几何，"+
 			"上面的一致性断言已退化为「两侧都不出面」的恒真", len(water), len(air))
 	}
+
+	// 水面必须真的带上角高度且按 1×1 出面。角高度经 Rust 打包、Go 解包、
+	// 上传前再打包，任一环节丢位都会让这里读到零角高度。
+	tops := 0
+	for _, quad := range water {
+		if quad.Face != mesh.FacePosY || quad.Corners == ([4]uint8{}) {
+			continue
+		}
+		tops++
+		if quad.W != 1 || quad.H != 1 {
+			t.Fatalf("水面顶面 %+v 被贪心合并成 %dx%d", quad, quad.W, quad.H)
+		}
+		for i, corner := range quad.Corners {
+			if corner < 7 || corner > 15 {
+				t.Fatalf("水面顶面 %+v 的角 %d 高度=%d，合法域是 7..15", quad, i, corner)
+			}
+		}
+	}
+	if tops == 0 {
+		t.Fatal("没有任何带角高度的水面顶面：斜面几何整体缺失")
+	}
 }
