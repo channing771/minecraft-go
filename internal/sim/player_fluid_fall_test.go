@@ -66,7 +66,8 @@ func TestFallIntoFluidCancelsFallDamage(t *testing.T) {
 }
 
 // dropCrossesSurfaceWithinOneStep 把玩家丢到地面之上 height 格处并推进到落地，
-// 报告途中是否存在「某一 tick 开始时身体还没浸没、结束时已经浸没」的那一步。
+// 报告落地的那一 tick 是否恰好也是「开始时身体还没浸没、结束时已经浸没」的那一步
+// ——只有这种对齐才会真正走到权威侧步末的那次摔落峰值重置。
 //
 // 判定用的是用例自己的方块表与共享的 physics.SubmersionFlags，观察量只有权威
 // 广播出来的逐 tick 位置；「上一 tick 的步末位置」恒等于「这一 tick 的步首位置」，
@@ -81,16 +82,16 @@ func dropCrossesSurfaceWithinOneStep(
 	t.Helper()
 	previous := mgl32.Vec3{0.5, 1 + height, 0.5}
 	engine.SetPlayerPositionForTest(session, previous)
-	crossed := false
 	for range 400 {
 		update := onlyPlayer(t, engine.Step())
 		startWet, _ := physics.SubmersionFlags(previous, source)
 		endWet, _ := physics.SubmersionFlags(update.State.Position, source)
-		if !startWet && endWet {
-			crossed = true
-		}
 		if update.State.OnGround {
-			return crossed
+			// 只有「跨过水面」与「落地」发生在同一 tick 时，步末那次重置才是
+			// 唯一还能救下这一跤的东西：任何更早的入水都会被下一 tick 的步首
+			// 重置接管。dry→wet 的转变每次下落都恰好发生一次，单看它会把每个
+			// 高度都算进来，那样守卫恒真、等于没写。
+			return !startWet && endWet
 		}
 		previous = update.State.Position
 	}
