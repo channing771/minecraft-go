@@ -3,6 +3,8 @@
 
 /// 地形 pass(实例化紧凑 quad)。
 pub const TERRAIN: &str = include_str!("../../shaders/terrain.wgsl");
+/// 水面 pass(半透明,与 terrain 共享 atlas 与世界坐标 UV)。
+pub const WATER: &str = include_str!("../../shaders/water.wgsl");
 /// 天空与程序化方块云 pass。
 pub const SKY: &str = include_str!("../../shaders/sky.wgsl");
 /// GPU culling compute。
@@ -31,6 +33,7 @@ mod tests {
     fn shaders_are_nonempty_and_have_entry_points() {
         for (name, source) in [
             ("terrain", TERRAIN),
+            ("water", WATER),
             ("sky", SKY),
             ("cull", CULL),
             ("hiz_build", HIZ_BUILD),

@@ -17,6 +17,8 @@ pub mod entity;
 pub mod pool;
 pub mod quads;
 pub mod shaders;
+#[cfg(test)]
+mod water_tests;
 
 use std::collections::HashMap;
 
@@ -426,6 +428,11 @@ pub struct OffscreenRenderer {
     terrain_layout: wgpu::BindGroupLayout,
     terrain_pipeline: wgpu::RenderPipeline,
     terrain_bind: Option<wgpu::BindGroup>,
+    /// water pass 管线:alpha blend、深度测试开、深度写关。
+    water_pipeline: wgpu::RenderPipeline,
+    /// water pass 的 bind group(与 terrain 同 layout,实例缓冲换成
+    /// water_instances);None 表示 atlas 尚未上传。
+    water_bind: Option<wgpu::BindGroup>,
     sampler: wgpu::Sampler,
     sky_pipeline: wgpu::RenderPipeline,
     sky_bind: wgpu::BindGroup,
@@ -675,8 +682,28 @@ impl OffscreenRenderer {
             label: Some("terrain"),
             source: wgpu::ShaderSource::Wgsl(shaders::TERRAIN.into()),
         });
-        let terrain_pipeline =
-            make_render_pipeline(&device, "terrain", &terrain_module, &terrain_layout, true);
+        let terrain_pipeline = make_render_pipeline(
+            &device,
+            "terrain",
+            &terrain_module,
+            &terrain_layout,
+            true,
+            wgpu::BlendState::REPLACE,
+        );
+        // water pass 复用 terrain 的 bind group layout(camera / 实例 / origin /
+        // atlas / sampler 五项完全相同),只换实例缓冲与管线状态。
+        let water_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("water"),
+            source: wgpu::ShaderSource::Wgsl(shaders::WATER.into()),
+        });
+        let water_pipeline = make_render_pipeline(
+            &device,
+            "water",
+            &water_module,
+            &terrain_layout,
+            false,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
         // 采样器参数与 Go `block-sampler` 一致。
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("block-sampler"),
@@ -702,7 +729,14 @@ impl OffscreenRenderer {
             label: Some("sky"),
             source: wgpu::ShaderSource::Wgsl(shaders::SKY.into()),
         });
-        let sky_pipeline = make_render_pipeline(&device, "sky", &sky_module, &sky_layout, false);
+        let sky_pipeline = make_render_pipeline(
+            &device,
+            "sky",
+            &sky_module,
+            &sky_layout,
+            false,
+            wgpu::BlendState::REPLACE,
+        );
         let sky_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sky resources"),
             layout: &sky_layout,
@@ -1012,6 +1046,8 @@ impl OffscreenRenderer {
             terrain_layout,
             terrain_pipeline,
             terrain_bind: None,
+            water_pipeline,
+            water_bind: None,
             sampler,
             sky_pipeline,
             sky_bind,
@@ -1135,6 +1171,35 @@ impl OffscreenRenderer {
                 },
             ],
         }));
+        // water bind 与 terrain 同 layout、同 atlas,只把 binding 1 的实例缓冲
+        // 换成 water_instances。两者在 atlas 上传时一次性建好,帧内不再创建
+        // 任何绑定资源。
+        self.water_bind = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("water resources"),
+            layout: &self.terrain_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.camera.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.water_instances.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.origins.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        }));
         true
     }
 
@@ -1196,7 +1261,8 @@ impl OffscreenRenderer {
                 .reserve(water.len() / 8 * BYTES_PER_VISIBLE_FACE as usize);
             for quad in water.chunks_exact(8) {
                 self.water_scratch.extend_from_slice(quad);
-                self.water_scratch.extend_from_slice(&origin_idx.to_le_bytes());
+                self.water_scratch
+                    .extend_from_slice(&origin_idx.to_le_bytes());
                 self.water_scratch.extend_from_slice(&0u32.to_le_bytes());
             }
             self.queue.write_buffer(
@@ -1559,6 +1625,72 @@ impl OffscreenRenderer {
                 pass.draw_indexed_indirect(&self.indirect, 0);
             }
         }
+        // water pass:排在 terrain pass 之后、HiZ build 之前(design D3)。
+        //
+        // 三条状态由管线固定:alpha blend、深度测试开、**深度写关**。深度写关是
+        // 为了让视线上前后两片水面都可见——互相 depth-cull 会留下明显空洞。
+        //
+        // 排序粒度**止于区段**:按区段中心到相机的距离平方由远及近,区段内部按
+        // 上传顺序绘制,MUST NOT 逐面排序(逐面排序是每帧的动态工作,与"预热后
+        // 零分配"冲突)。water 不接 GPU culling,走普通 draw_indexed。
+        //
+        // water_draws 跨帧复用(take/放回只是为了避开 self 的借用冲突),预热后
+        // 不再有堆分配。
+        let mut draws = std::mem::take(&mut self.water_draws);
+        draws.clear();
+        for pos in &input.visible {
+            let Some(slot) = self.sections.get(pos) else {
+                continue;
+            };
+            let (Some(alloc), true) = (slot.water, slot.water_count > 0) else {
+                continue;
+            };
+            let origin = section_origin(*pos);
+            let center = [
+                origin[0] as f32 + 8.0,
+                origin[1] as f32 + 8.0,
+                origin[2] as f32 + 8.0,
+            ];
+            let offset = sub3(center, input.pos);
+            let distance2 = offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2];
+            draws.push((distance2, alloc, slot.water_count));
+        }
+        if let (Some(bind), false) = (&self.water_bind, draws.is_empty()) {
+            // 由远及近;total_cmp 是全序,不会因 NaN 触发排序 panic。
+            draws.sort_by(|a, b| b.0.total_cmp(&a.0));
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("water pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &frame_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.water_pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_index_buffer(self.index.slice(..), wgpu::IndexFormat::Uint32);
+            for &(_, alloc, count) in &draws {
+                // first_instance 直接就是实例在水面池中的起始下标:WebGPU 的
+                // `@builtin(instance_index)` 从 firstInstance 起算。
+                pass.draw_indexed(0..6, 0, alloc.offset..alloc.offset + count);
+            }
+        }
+        self.water_draws = draws;
         self.hiz.build(&self.device, &mut encoder, &self.depth_view);
         // 实体 pass:顺序镜像 app_frame(avatar → item drop),空段跳过。
         if !input.avatar_instances.is_empty() {
@@ -1828,13 +1960,18 @@ fn buffer_layout_entry(
 }
 
 /// 渲染管线构造,状态镜像 Go `CreateRenderPipeline` 缺省语义:
-/// TriangleList、CCW、无背面剔除、BlendReplace、depth compare Less。
+/// TriangleList、CCW、无背面剔除、depth compare Less。
+///
+/// `blend` 是唯一按 pass 变化的颜色状态:terrain/sky 用 REPLACE,water pass 用
+/// ALPHA_BLENDING。water 另以 `depth_write = false` 关闭深度写——两片水面若互相
+/// depth-cull 会在画面上留下明显空洞(design D3)。
 fn make_render_pipeline(
     device: &wgpu::Device,
     label: &str,
     module: &wgpu::ShaderModule,
     layout: &wgpu::BindGroupLayout,
     depth_write: bool,
+    blend: wgpu::BlendState,
 ) -> wgpu::RenderPipeline {
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
@@ -1856,7 +1993,7 @@ fn make_render_pipeline(
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: COLOR_FORMAT,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
