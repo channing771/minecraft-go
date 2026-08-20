@@ -661,22 +661,16 @@ static COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator;
 #[test]
 fn water_draw_sort_does_not_allocate() {
     let mut draws: Vec<(f32, Alloc, u32)> = (0..4096u32)
-        .map(|i| {
-            (
-                ((i * 37) % 97) as f32,
-                Alloc {
-                    offset: i,
-                    size: 1,
-                },
-                1,
-            )
-        })
+        .map(|i| (((i * 37) % 97) as f32, Alloc { offset: i, size: 1 }, 1))
         .collect();
 
     let before = allocation_count();
     sort_water_draws(&mut draws);
     let allocated = allocation_count() - before;
-    assert_eq!(allocated, 0, "水面绘制表排序不得产生堆分配（实测 {allocated} 次）");
+    assert_eq!(
+        allocated, 0,
+        "水面绘制表排序不得产生堆分配（实测 {allocated} 次）"
+    );
 
     assert!(
         draws.windows(2).all(|w| w[0].0 >= w[1].0),
