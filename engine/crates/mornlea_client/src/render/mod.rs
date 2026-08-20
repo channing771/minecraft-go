@@ -31,6 +31,11 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 // 容量与 Go 渲染器默认值一致(pool 面数、origin 槽位)。
 const POOL_FACES: u32 = 4_500_000;
+/// 水面实例池容量(条)。水面不贪心合并、按 1×1 出面,一个区段的水面上界是
+/// 6×256 = 1536 条,但真实水体远达不到;取 512Ki 条 = 8 MiB 固定显存,足够
+/// 覆盖整个视距的水体,且**一次性**创建——water pass MUST NOT 引入每帧动态
+/// 资源(`voxel-visual-presentation` MODIFIED 写死的边界)。
+const WATER_POOL_INSTANCES: u32 = 512 * 1024;
 const ORIGIN_SLOTS: u32 = 128 * 1024;
 /// 每个 pool face 8 字节(packed u64);cull 后每个可见实例 16 字节。
 const BYTES_PER_POOL_FACE: u64 = 8;
@@ -136,11 +141,49 @@ impl FrameInput {
     }
 }
 
-/// 一个已上传 section:池内分配、origin 槽位与面数。
+/// 一个已上传 section:两条流各自的池内分配、共用的 origin 槽位与条数。
+///
+/// 不透明面与水面分属两个池:前者接 GPU culling 走单次 indirect draw,后者
+/// 走独立的半透明 water pass。任一侧可以为空——只有水面的区段(地形在相邻
+/// 区段)完全正常,不得被当成空区段丢弃。
 struct SectionSlot {
-    alloc: Alloc,
+    /// 不透明面在 `faces` 池中的分配;只有水面的区段为 None。
+    alloc: Option<Alloc>,
     origin_idx: u32,
     face_count: u32,
+    /// 水面实例在 `water_instances` 池中的分配;无水面为 None。
+    water: Option<Alloc>,
+    water_count: u32,
+}
+
+/// reallocate 在一个池上为区段的新数据挑选分配,策略与既有 `upload_section`
+/// 逐步等价:
+///
+/// - `required == 0` → 归还旧块并返回 `Some(None)`(该侧本次没有数据);
+/// - 旧块够大 → 原地复用,不动池;
+/// - 旧块不够 → 先尝试在**不归还**旧块的情况下分配(避免碎片化时白白丢块),
+///   失败再归还旧块重试。
+///
+/// 返回 `None` 表示池容量确实不足,此时旧块已归还,调用方需回收 origin 槽位。
+fn reallocate(pool: &mut Pool, old: Option<Alloc>, required: u32) -> Option<Option<Alloc>> {
+    if required == 0 {
+        if let Some(old) = old {
+            pool.free(old);
+        }
+        return Some(None);
+    }
+    let Some(old) = old else {
+        return pool.alloc(required).map(Some);
+    };
+    if required <= old.size {
+        return Some(Some(old));
+    }
+    if let Some(fresh) = pool.alloc(required) {
+        pool.free(old);
+        return Some(Some(fresh));
+    }
+    pool.free(old);
+    pool.alloc(required).map(Some)
 }
 
 /// HiZ 金字塔,镜像 Go `hiz.go`。
@@ -370,6 +413,9 @@ pub struct OffscreenRenderer {
 
     faces: wgpu::Buffer,
     instances: wgpu::Buffer,
+    /// 水面实例缓冲(16 字节/条,布局与 cull 输出的 visible 实例一致:
+    /// `vec4u(lo, hi, origin_idx, 0)`),由 CPU 在上传时一次写入。
+    water_instances: wgpu::Buffer,
     origins: wgpu::Buffer,
     camera: wgpu::Buffer,
     sky_camera: wgpu::Buffer,
@@ -421,6 +467,13 @@ pub struct OffscreenRenderer {
     hud_atlas: Option<wgpu::Texture>,
 
     pool: Pool,
+    /// 水面实例池;与 `pool` 同一分配器,单位是实例条数。
+    water_pool: Pool,
+    /// 水面实例编码 scratch,跨上传复用以避免逐次堆分配。
+    water_scratch: Vec<u8>,
+    /// 本帧参与 water pass 的区段(距离平方,水面分配,条数),按由远及近排序;
+    /// 跨帧复用,预热后不再分配。
+    water_draws: Vec<(f32, Alloc, u32)>,
     sections: HashMap<(i32, i32, i32), SectionSlot>,
     next_origin: u32,
     free_origins: Vec<u32>,
@@ -554,6 +607,11 @@ impl OffscreenRenderer {
             u64::from(POOL_FACES) * BYTES_PER_VISIBLE_FACE,
             BU::STORAGE | BU::COPY_DST,
             "terrain visible instances",
+        );
+        let water_instances = make_buffer(
+            u64::from(WATER_POOL_INSTANCES) * BYTES_PER_VISIBLE_FACE,
+            BU::STORAGE | BU::COPY_DST,
+            "water surface instances",
         );
         let origins = make_buffer(
             u64::from(ORIGIN_SLOTS) * 16,
@@ -944,6 +1002,7 @@ impl OffscreenRenderer {
             depth_view,
             faces,
             instances,
+            water_instances,
             origins,
             camera,
             sky_camera,
@@ -977,6 +1036,9 @@ impl OffscreenRenderer {
             glyph_view,
             hud_atlas: None,
             pool: Pool::new(POOL_FACES),
+            water_pool: Pool::new(WATER_POOL_INSTANCES),
+            water_scratch: Vec::new(),
+            water_draws: Vec::new(),
             sections: HashMap::new(),
             next_origin: 0,
             free_origins: Vec::new(),
@@ -1076,57 +1138,73 @@ impl OffscreenRenderer {
         true
     }
 
-    /// 上传/替换一个 section 的 packed face 字节(8 字节/面,已 Pack);
-    /// 空数据等价于 drop。返回 false 表示池或 origin 槽位不足。
-    /// 分配策略镜像 Go `uploadOne`。
-    pub fn upload_section(&mut self, pos: (i32, i32, i32), packed: &[u8]) -> bool {
-        debug_assert_eq!(packed.len() % 8, 0);
-        if packed.is_empty() {
+    /// 上传/替换一个 section 的两条 packed face 流(均为 8 字节/面,已 Pack):
+    /// `opaque` 走 GPU culling 与单次 indirect terrain draw,`water` 走独立的
+    /// 半透明 water pass。两条都为空等价于 drop。
+    ///
+    /// 返回 false 表示某个池或 origin 槽位不足;此时该区段已完全退回未上传态,
+    /// 不留半条流。
+    pub fn upload_section(&mut self, pos: (i32, i32, i32), opaque: &[u8], water: &[u8]) -> bool {
+        debug_assert_eq!(opaque.len() % 8, 0);
+        debug_assert_eq!(water.len() % 8, 0);
+        if opaque.is_empty() && water.is_empty() {
             self.drop_section(pos);
             return true;
         }
-        let required = (packed.len() / 8) as u32;
-        let old = self
-            .sections
-            .get(&pos)
-            .map(|slot| (slot.origin_idx, slot.alloc));
-        let (alloc, origin_idx) = match old {
-            Some((origin_idx, old_alloc)) if required <= old_alloc.size => (old_alloc, origin_idx),
-            Some((origin_idx, old_alloc)) => match self.pool.alloc(required) {
-                Some(alloc) => {
-                    self.pool.free(old_alloc);
-                    (alloc, origin_idx)
-                }
-                None => {
-                    self.pool.free(old_alloc);
-                    self.sections.remove(&pos);
-                    match self.pool.alloc(required) {
-                        Some(alloc) => (alloc, origin_idx),
-                        None => {
-                            self.free_origins.push(origin_idx);
-                            return false;
-                        }
-                    }
-                }
+        let need_opaque = (opaque.len() / 8) as u32;
+        let need_water = (water.len() / 8) as u32;
+        // 先摘出旧记录:两条流各自 realloc,任一失败都要把另一条也回滚。
+        let previous = self.sections.remove(&pos);
+        let origin_idx = match &previous {
+            Some(slot) => slot.origin_idx,
+            None => match self.take_origin() {
+                Some(idx) => idx,
+                None => return false,
             },
-            None => {
-                let Some(alloc) = self.pool.alloc(required) else {
-                    return false;
-                };
-                match self.take_origin() {
-                    Some(origin_idx) => (alloc, origin_idx),
-                    None => {
-                        self.pool.free(alloc);
-                        return false;
-                    }
-                }
-            }
         };
-        self.queue.write_buffer(
-            &self.faces,
-            u64::from(alloc.offset) * BYTES_PER_POOL_FACE,
-            packed,
-        );
+        let old_opaque = previous.as_ref().and_then(|slot| slot.alloc);
+        let old_water = previous.as_ref().and_then(|slot| slot.water);
+        let Some(alloc) = reallocate(&mut self.pool, old_opaque, need_opaque) else {
+            if let Some(old) = old_water {
+                self.water_pool.free(old);
+            }
+            self.free_origins.push(origin_idx);
+            return false;
+        };
+        let Some(water_alloc) = reallocate(&mut self.water_pool, old_water, need_water) else {
+            if let Some(new) = alloc {
+                self.pool.free(new);
+            }
+            self.free_origins.push(origin_idx);
+            return false;
+        };
+
+        if let Some(alloc) = alloc {
+            self.queue.write_buffer(
+                &self.faces,
+                u64::from(alloc.offset) * BYTES_PER_POOL_FACE,
+                opaque,
+            );
+        }
+        if let Some(alloc) = water_alloc {
+            // water pass 不接 culling,没有 cull compute 替它展开 origin,
+            // 因此这里就把 8 字节的 quad 补成与 cull 输出同布局的 16 字节实例:
+            // `vec4u(lo, hi, origin_idx, 0)`。水面几何只在区段重新网格化时变,
+            // 这份展开随之只做一次,帧内零工作。
+            self.water_scratch.clear();
+            self.water_scratch
+                .reserve(water.len() / 8 * BYTES_PER_VISIBLE_FACE as usize);
+            for quad in water.chunks_exact(8) {
+                self.water_scratch.extend_from_slice(quad);
+                self.water_scratch.extend_from_slice(&origin_idx.to_le_bytes());
+                self.water_scratch.extend_from_slice(&0u32.to_le_bytes());
+            }
+            self.queue.write_buffer(
+                &self.water_instances,
+                u64::from(alloc.offset) * BYTES_PER_VISIBLE_FACE,
+                &self.water_scratch,
+            );
+        }
         let origin = section_origin(pos);
         let mut origin_bytes = [0u8; 16];
         for (i, v) in origin.iter().enumerate() {
@@ -1139,7 +1217,9 @@ impl OffscreenRenderer {
             SectionSlot {
                 alloc,
                 origin_idx,
-                face_count: required,
+                face_count: need_opaque,
+                water: water_alloc,
+                water_count: need_water,
             },
         );
         true
@@ -1157,10 +1237,15 @@ impl OffscreenRenderer {
         Some(idx)
     }
 
-    /// 丢弃一个 section;不存在时为幂等空操作。
+    /// 丢弃一个 section;不存在时为幂等空操作。两条流的分配都要归还。
     pub fn drop_section(&mut self, pos: (i32, i32, i32)) {
         if let Some(slot) = self.sections.remove(&pos) {
-            self.pool.free(slot.alloc);
+            if let Some(alloc) = slot.alloc {
+                self.pool.free(alloc);
+            }
+            if let Some(alloc) = slot.water {
+                self.water_pool.free(alloc);
+            }
             self.free_origins.push(slot.origin_idx);
         }
     }
@@ -1320,10 +1405,14 @@ impl OffscreenRenderer {
             let Some(slot) = self.sections.get(pos) else {
                 continue;
             };
+            // 只有水面的区段对不透明 draw 没有贡献,不进候选 record。
+            let Some(alloc) = slot.alloc else {
+                continue;
+            };
             for v in section_origin(*pos) {
                 records.extend_from_slice(&v.to_le_bytes());
             }
-            records.extend_from_slice(&slot.alloc.offset.to_le_bytes());
+            records.extend_from_slice(&alloc.offset.to_le_bytes());
             records.extend_from_slice(&slot.face_count.to_le_bytes());
             records.extend_from_slice(&slot.origin_idx.to_le_bytes());
             records.extend_from_slice(&0u32.to_le_bytes());
@@ -1933,14 +2022,14 @@ mod tests {
         let Some(mut renderer) = renderer_or_skip(16, 16) else {
             return;
         };
-        assert!(renderer.upload_section((0, 4, 0), &[0u8; 16]));
-        assert!(renderer.upload_section((0, 5, 0), &[0u8; 8]));
+        assert!(renderer.upload_section((0, 4, 0), &[0u8; 16], &[]));
+        assert!(renderer.upload_section((0, 5, 0), &[0u8; 8], &[]));
         assert_eq!(renderer.total_faces(), 3);
         // 覆盖上传复用旧槽。
-        assert!(renderer.upload_section((0, 4, 0), &[0u8; 8]));
+        assert!(renderer.upload_section((0, 4, 0), &[0u8; 8], &[]));
         assert_eq!(renderer.total_faces(), 2);
         // 空数据等价 drop;未知位置 drop 幂等。
-        assert!(renderer.upload_section((0, 5, 0), &[]));
+        assert!(renderer.upload_section((0, 5, 0), &[], &[]));
         renderer.drop_section((9, 9, 9));
         assert_eq!(renderer.total_faces(), 1);
     }
@@ -1975,7 +2064,7 @@ mod tests {
         assert!(renderer.upload_atlas(1, &vec![128u8; bytes_per_layer]));
         // 一个 section、若干 packed face(全零 face 也会经过 cull 与绘制
         // 路径,验证管线兼容性;图像正确性由 Go 侧双后端对照保证)。
-        assert!(renderer.upload_section((0, 5, 0), &[0u8; 64]));
+        assert!(renderer.upload_section((0, 5, 0), &[0u8; 64], &[]));
         let mut frame = empty_frame();
         frame.visible = vec![(0, 5, 0), (9, 9, 9)];
         renderer.render_frame(&frame);

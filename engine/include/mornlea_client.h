@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MORNLEA_CLIENT_ABI_VERSION 4u
+#define MORNLEA_CLIENT_ABI_VERSION 5u
 
 #define MORNLEA_CLIENT_STATUS_OK 0u
 #define MORNLEA_CLIENT_STATUS_ABI_VERSION 1u
@@ -83,7 +83,9 @@ uint32_t mornlea_client_render_upload_section(
     int32_t section_y,
     int32_t section_z,
     const uint8_t *quads,
-    size_t quads_len);
+    size_t quads_len,
+    const uint8_t *water_quads,
+    size_t water_quads_len);
 
 uint32_t mornlea_client_render_drop_section(
     uint32_t abi_version,

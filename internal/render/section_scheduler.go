@@ -6,13 +6,18 @@ import (
 	"math"
 	"sort"
 
+	"github.com/channing771/mornlea/internal/assets"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/mesh"
 )
 
 // SectionSink 接收已打包的 section face 字节(Rust 渲染器上传入口的抽象)。
+//
+// 两条流按 material 分开:opaque 走接 GPU culling 的单次 indirect terrain
+// draw,water 走独立的半透明 water pass。两条流的元素格式完全相同(8 字节
+// packed quad),分流只是分组,不改动任何一条 quad。
 type SectionSink interface {
-	UploadSection(x, y, z int32, packed []byte)
+	UploadSection(x, y, z int32, opaque, water []byte)
 	DropSection(x, y, z int32)
 }
 
@@ -27,6 +32,9 @@ type SectionScheduler struct {
 	uploaded     map[core.SectionPos]int
 	keys         []core.SectionPos
 	packed       []byte
+	// water 是水面 quad 的独立打包缓冲,与 packed 同为跨帧复用的 scratch,
+	// 保证预热后逐帧零分配。
+	water []byte
 }
 
 // NewSectionScheduler 创建调度器;budget 与旧渲染器同为每帧字节预算。
@@ -85,17 +93,29 @@ func (s *SectionScheduler) FlushUploads(center core.ChunkPos) {
 		if bytes > math.MaxUint32 || !s.budget.TryConsume(uint32(bytes)) {
 			continue
 		}
+		// 两条 scratch 都按最坏情况(整段全是同一类)预留,避免分流后
+		// 因比例波动反复扩容。
 		if cap(s.packed) < len(quads)*8 {
 			s.packed = make([]byte, 0, len(quads)*8)
 		}
-		s.packed = s.packed[:0]
+		if cap(s.water) < len(quads)*8 {
+			s.water = make([]byte, 0, len(quads)*8)
+		}
+		s.packed, s.water = s.packed[:0], s.water[:0]
 		for _, q := range quads {
+			// 按 material 分流:水面 quad 进 water 流。判别只看材质层,
+			// 不看角高度——水的**底面**不带角高度(四角全 0),靠角高度
+			// 判别会把它漏回不透明 pass。
+			target := &s.packed
+			if q.Mat == assets.LayerWater {
+				target = &s.water
+			}
 			value := q.Pack()
 			for i := 0; i < 8; i++ {
-				s.packed = append(s.packed, byte(value>>(8*i)))
+				*target = append(*target, byte(value>>(8*i)))
 			}
 		}
-		s.sink.UploadSection(p.X, p.Y, p.Z, s.packed)
+		s.sink.UploadSection(p.X, p.Y, p.Z, s.packed, s.water)
 		s.uploaded[p] = len(quads)
 		delete(s.pending, p)
 	}

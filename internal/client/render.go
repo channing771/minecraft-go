@@ -163,19 +163,28 @@ func (r *Renderer) UploadAtlas(layers int, pixels []byte) {
 	)))
 }
 
-// UploadSection 上传/替换一个 section 的 packed face 字节(空等价 drop)。
-func (r *Renderer) UploadSection(x, y, z int32, packed []byte) {
+// UploadSection 上传/替换一个 section 的两条 packed face 字节流(两条都空
+// 等价 drop)。
+//
+// client ABI v5 起按 material 分流:opaque 是不透明与 cutout 面,water 是水面。
+// 两条流的元素格式相同(8 字节 packed quad),分流只决定它们进哪条绘制路径。
+func (r *Renderer) UploadSection(x, y, z int32, opaque, water []byte) {
 	r.uploadCalls++
-	var ptr *C.uint8_t
-	if len(packed) > 0 {
-		ptr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(packed)))
+	var opaquePtr, waterPtr *C.uint8_t
+	if len(opaque) > 0 {
+		opaquePtr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(opaque)))
+	}
+	if len(water) > 0 {
+		waterPtr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(water)))
 	}
 	r.check("upload section", uint32(C.mornlea_client_render_upload_section(
 		C.MORNLEA_CLIENT_ABI_VERSION,
 		C.uint64_t(r.handle),
 		C.int32_t(x), C.int32_t(y), C.int32_t(z),
-		ptr,
-		C.size_t(len(packed)),
+		opaquePtr,
+		C.size_t(len(opaque)),
+		waterPtr,
+		C.size_t(len(water)),
 	)))
 }
 

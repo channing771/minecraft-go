@@ -25,7 +25,7 @@ func TestRendererRoundtripOrSkip(t *testing.T) {
 		perLayer += size * size * 4
 	}
 	renderer.UploadAtlas(1, make([]byte, perLayer))
-	renderer.UploadSection(0, 5, 0, make([]byte, 32))
+	renderer.UploadSection(0, 5, 0, make([]byte, 32), make([]byte, 16))
 	renderer.DropSection(9, 9, 9)
 
 	frame := RenderFrame{Daylight: 1, SkyColor: [4]float32{0.2, 0.4, 1, 1}}
