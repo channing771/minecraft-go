@@ -119,8 +119,13 @@ func TestOxygenIsNotPersistedAcrossDiskRestart(t *testing.T) {
 // 「玩家存档 MUST NOT 包含氧气字段」。
 //
 // 上一条用例证明的是"读回来是满值"，这条证明的是"根本没地方存"——只有两条都
-// 成立，玩家 schema 保持 v6 才是真的。反射逐字段扫描，而不是比对某个具体长度：
+// 成立，玩家 schema 保持 v6 才是真的。反射扫字段名，而不是比对某个具体长度：
 // 后者会在无关字段增删时误报，也挡不住"换个名字塞进去"。
+//
+// 覆盖面如实说明：**只扫顶层字段**，把氧气藏进 Current / Safe / Inventory 这类
+// 嵌套结构体里不会被它发现。没做成递归是因为真实的失效模式是"顺手在 PlayerSave
+// 上加一个字段"，而嵌套结构体各自另有存档契约与用例；等真出现"氧气被塞进嵌套
+// 类型"这种情况再改成递归也不迟。
 func TestPlayerSaveHasNoOxygenField(t *testing.T) {
 	saveType := reflect.TypeOf(storage.PlayerSave{})
 	if saveType.NumField() == 0 {

@@ -211,6 +211,38 @@ fn render_with_screen_tint(
     overlay_strength: f32,
     sections: &[SectionData],
 ) -> Option<Vec<u8>> {
+    render_with_sky(
+        water_tint,
+        overlay_strength,
+        SkyLook {
+            color: [0.25, 0.5, 1.0, 1.0],
+            sun_direction: [0.0, 1.0, 0.0],
+            star_visibility: 0.0,
+        },
+        sections,
+    )
+}
+
+/// 天空外观的一组输入。刻意把 clear 色与天空 pass 的两个参数打包在一起：
+/// clear 色单独变化在有天空 pass 时**看不见**（三角把整幅画面盖掉了），
+/// 只有连着改天空 pass 的参数才是一个真正有效的差分入口。
+#[derive(Clone, Copy)]
+struct SkyLook {
+    color: [f32; 4],
+    sun_direction: [f32; 3],
+    star_visibility: f32,
+}
+
+/// 与 [`render_with_screen_tint`] 相同，但天空外观可指定。
+///
+/// 浸没时天空外观 MUST NOT 影响画面任何一个像素（天空 pass 被跳过、clear 色
+/// 换成水色），不浸没时它 MUST 决定没有地形的那些像素。
+fn render_with_sky(
+    water_tint: [f32; 4],
+    overlay_strength: f32,
+    sky: SkyLook,
+    sections: &[SectionData],
+) -> Option<Vec<u8>> {
     let mut renderer = OffscreenRenderer::new(VIEW, VIEW).ok()?;
     let colors = [
         [200u8, 60, 60, 255],
@@ -236,9 +268,9 @@ fn render_with_screen_tint(
         view_proj_inv: identity,
         pos: DEFAULT_CAMERA,
         daylight: 1.0,
-        sun_direction: [0.0, 1.0, 0.0],
-        star_visibility: 0.0,
-        sky_color: [0.25, 0.5, 1.0, 1.0],
+        sun_direction: sky.sun_direction,
+        star_visibility: sky.star_visibility,
+        sky_color: sky.color,
         cloud_macro_x: 0,
         cloud_local: 0.0,
         visible,
@@ -786,4 +818,71 @@ fn water_draw_sort_does_not_allocate() {
     // 夹具前提守卫排在真实断言之后：真实失效不应先被误报成「夹具没有并列项」。
     let ties = draws.windows(2).filter(|w| w[0].0 == w[1].0).count();
     assert!(ties > 0, "夹具里没有等距区段，兜底比较那条断言与它无关");
+}
+
+/// 水下时被可见半径裁掉的区域**必须**是水色，而不是天空。
+///
+/// 这条是任务组 6 评审发现 1 的回归锁。原实现里 terrain pass 先 `Clear(天空色)`
+/// 再画整块天空三角，而水下可见半径被压到几个区段，于是裁掉的地方露出的是晴空、
+/// 云、太阳与夜里的星星——一条明晃晃的硬边。实测（64×64 离屏、真实草地基色
+/// `(88,140,60)`、tint `(0.12,0.34,0.52)` a=0.45）：
+///
+/// - 修复前：切边外侧 `[179,204,225]`，比地形侧 `[136,180,162]` 每个通道都更亮，
+///   最大通道差 **63**——读起来就是"一个通往天空的洞"。
+/// - 修复后：切边外侧 `[97,158,191]`，与地形侧同色系，最大通道差 **39**，
+///   且不再是"处处更亮"，读起来是"更远处的水更浑"。
+///
+/// 判据取"**换一套天空外观，水下画面逐像素不变**"，而不是"切边外侧等于某个参照帧"。
+/// 后者是本用例的第一版，它恒真：参照帧与被测帧的背景会**一起**变回天空，差值
+/// 恒等，把修复整个撤掉照样 PASS（实测过）。天空色则是一个只对一侧成立的输入。
+#[test]
+fn underwater_ignores_sky_color_entirely() {
+    let tint = [0.12f32, 0.34, 0.52, 0.45];
+    // 世界 x 6..8 铺地形（屏幕左半），x 8..10 空着，模拟被可见半径裁掉的区域。
+    let mut floor = Vec::new();
+    for bx in 6..8u8 {
+        for bz in 6..10u8 {
+            floor.push(floor_cell(bx, bz, MAT_RED));
+        }
+    }
+    let scene = vec![SectionData {
+        pos: (0, 0, 0),
+        opaque: floor,
+        water: vec![],
+    }];
+    let day = SkyLook {
+        color: [0.42, 0.68, 0.92, 1.0],
+        sun_direction: [0.0, 1.0, 0.0],
+        star_visibility: 0.0,
+    };
+    let night = SkyLook {
+        color: [0.02, 0.03, 0.08, 1.0],
+        sun_direction: [0.0, -1.0, 0.0],
+        star_visibility: 1.0,
+    };
+
+    let Some(under_day) = render_with_sky(tint, 0.0, day, &scene) else {
+        return;
+    };
+    let under_night = render_with_sky(tint, 0.0, night, &scene).expect("首个场景已成功建过渲染器");
+    if let Some((count, at)) = image_diff(&under_day, &under_night) {
+        panic!(
+            "浸没时换天空外观改变了 {count} 个像素（首个在 x={}, row={}）：\
+             天空 pass 没有被跳过，或 clear 色仍是天空色，被裁掉的区域会露出天空",
+            at.0, at.1
+        );
+    }
+
+    // 夹具承重守卫排在真实断言之后：**不浸没**时同样两个天空色必须给出不同画面，
+    // 否则上面那条断言只是在陈述"这个渲染器根本不用 sky_color"。
+    let dry_day = render_with_sky([0.0; 4], 0.0, day, &scene).expect("同上");
+    let dry_night = render_with_sky([0.0; 4], 0.0, night, &scene).expect("同上");
+    if image_diff(&dry_day, &dry_night).is_none() {
+        panic!("夹具无效：不浸没时换天空外观也毫无变化，它不是有效的差分入口");
+    }
+    // 地形侧必须仍然画着地形（而不是被水色糊掉），否则"切边"根本不存在。
+    let (inside, outside) = ((16u32, 32u32), (48u32, 32u32));
+    if pixel(&under_day, inside.0, inside.1) == pixel(&under_day, outside.0, outside.1) {
+        panic!("夹具无效：地形侧与切边外侧像素相同，画面里没有切边可谈");
+    }
 }

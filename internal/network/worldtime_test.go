@@ -158,20 +158,16 @@ func TestProtocolV14PlayerStateRejectsOutOfRangeHealth(t *testing.T) {
 	}
 	// 守卫排在真实断言之后：改写的必须确实是生命值字节，否则上面那条断言可能
 	// 是被别的字段越界顶掉的（v21 就真实发生过一次）。
-	if corrupted[healthOffset-1] != payload[healthOffset-1] ||
-		decodedHealth(t, id, payload) != core.MaxHealth {
-		t.Fatal("夹具无效：healthOffset 没有指向生命值字节")
+	//
+	// 判据是"未改写的原始载荷在该偏移处正好是这份夹具编码进去的生命值"。这条
+	// 断言的第一版写成了对比 corrupted 与 payload 的**相邻**字节、再解一次合法
+	// 载荷的生命值：前者恒为 false（改写的是 healthOffset 那一字节，相邻字节
+	// 当然没动），后者与偏移无关（只是重复了夹具编码了满血这件事）。两个子句
+	// 都不看 healthOffset 指向哪里，因而恒真——把偏移改回错值照样 PASS，实测过。
+	if payload[healthOffset] != core.MaxHealth {
+		t.Fatalf("夹具无效：healthOffset 处是 %d，不是生命值 %d",
+			payload[healthOffset], core.MaxHealth)
 	}
-}
-
-// decodedHealth 解出一份合法 wire 载荷里的生命值，供偏移守卫使用。
-func decodedHealth(t *testing.T, id uint32, payload []byte) uint8 {
-	t.Helper()
-	packet, err := decodeServerControlPayload(StatePlay, id, payload)
-	if err != nil {
-		t.Fatalf("解码合法载荷失败：%v", err)
-	}
-	return packet.(PlayerState).Health
 }
 
 // TestProtocolV21PlayerStateCarriesOxygen 覆盖 v21 追加的权威氧气：

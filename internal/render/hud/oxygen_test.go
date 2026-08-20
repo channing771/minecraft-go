@@ -63,11 +63,15 @@ func TestOxygenBarPresentationTracksAuthoritativeValue(t *testing.T) {
 			t.Fatalf("氧气 %d：quads=%d，想要 %d", value, len(quads), oxygenQuads)
 		}
 		background, fill := quads[0], quads[1]
-		if background.Width != oxygenBarWidth || background.Height != oxygenBarHeight {
-			t.Fatalf("氧气 %d：背景 %v×%v，想要 %v×%v",
-				value, background.Width, background.Height, oxygenBarWidth, oxygenBarHeight)
+		scale := hudScale(false, width, height)
+		if background.Width != oxygenBarWidth*scale || background.Height != oxygenBarHeight*scale {
+			t.Fatalf("氧气 %d：背景 %v×%v，想要 %v×%v", value,
+				background.Width, background.Height, oxygenBarWidth*scale, oxygenBarHeight*scale)
 		}
-		want := oxygenBarWidth * float32(value) / float32(core.MaxOxygenTicks)
+		// 期望值显式经过同一个 scale 函数：写死"1280×720 下 scale 恰为 1"会让
+		// HUD 缩放规则一改就以"填充宽度不对"这种误导性诊断变红。
+		want := oxygenBarWidth * hudScale(false, width, height) *
+			float32(value) / float32(core.MaxOxygenTicks)
 		if fill.Width != want {
 			t.Fatalf("氧气 %d：填充宽度=%v，想要 %v", value, fill.Width, want)
 		}

@@ -1628,6 +1628,30 @@ impl OffscreenRenderer {
             pass.set_bind_group(0, &self.cull_bind, &[]);
             pass.dispatch_workgroups(candidates, 1, 1);
         }
+        // 相机浸没时的背景替换:天空 pass 整个跳过,terrain pass 的 clear 色由
+        // 天空色换成水色。water_visible 同时决定后面那层全屏水色叠加是否绘制,
+        // 两处**必须**是同一个布尔:背景换成水色却不叠加(或反过来)都会让画面
+        // 出现前后不一致的色偏。
+        //
+        // 这是"压低远处可见度"能读成**浑浊**而不是**一堵墙**的关键。可见半径在
+        // 水下被压到几个区段,被裁掉的地方不画任何地形;而 clear 色原本是天空色、
+        // 其上还盖着一整块天空三角,于是水下抬头看到的是晴空、云、太阳和星星,
+        // 切边成为一条硬边。换成水色之后,裁掉的区域与远景水色连成一片,切边只
+        // 剩"地形与水色之间的残余对比",由随后那层全屏水色叠加继续压低。
+        //
+        // 代价:浸没时看不到水面之上的天空(浅水抬头也是一片水色)。这是刻意接受
+        // 的——水下能见度低本来就意味着看不见远处,而保留天空就必然保留那条硬边。
+        let water_visible = input.water_tint[3] > 0.0;
+        let clear_color = if water_visible {
+            [
+                input.water_tint[0],
+                input.water_tint[1],
+                input.water_tint[2],
+                1.0,
+            ]
+        } else {
+            input.sky_color
+        };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain pass"),
@@ -1637,10 +1661,10 @@ impl OffscreenRenderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: f64::from(input.sky_color[0]),
-                            g: f64::from(input.sky_color[1]),
-                            b: f64::from(input.sky_color[2]),
-                            a: f64::from(input.sky_color[3]),
+                            r: f64::from(clear_color[0]),
+                            g: f64::from(clear_color[1]),
+                            b: f64::from(clear_color[2]),
+                            a: f64::from(clear_color[3]),
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -1657,9 +1681,11 @@ impl OffscreenRenderer {
                 timestamp_writes: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.sky_pipeline);
-            pass.set_bind_group(0, &self.sky_bind, &[]);
-            pass.draw(0..3, 0..1);
+            if !water_visible {
+                pass.set_pipeline(&self.sky_pipeline);
+                pass.set_bind_group(0, &self.sky_bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
             if let Some(bind) = &self.terrain_bind {
                 pass.set_pipeline(&self.terrain_pipeline);
                 pass.set_bind_group(0, bind, &[]);
@@ -1794,7 +1820,6 @@ impl OffscreenRenderer {
         //
         // 绘制次序是「先水色、后红边」:水色是环境效果,必须垫在受伤反馈下面,
         // 否则红边会被水色冲淡。
-        let water_visible = input.water_tint[3] > 0.0;
         let damage_visible = input.overlay_strength > 0.0;
         if water_visible || damage_visible {
             if water_visible {
