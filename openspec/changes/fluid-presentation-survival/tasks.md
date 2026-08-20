@@ -1,17 +1,17 @@
 ## 1. registry 上限扩容与补偿分支回收
 
-- [ ] 1.1 Rust：`engine/crates/mornlea_engine/src/input.rs` 的 `MAX_REGISTRY_ENTRIES` 27 → 35。**不得**同时改同文件 `BLOCKS_BYTES = 27*4096*2` 里的 27——那是 3×3×3 邻域区段数，与条目上限只是数字巧合（design D6）。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
-- [ ] 1.2 Go：`internal/mesh/native_input.go` 的 `nativeMaxRegistryEntries` 与 `maxNativeInputBytes` 随之扩容，注释同步更新绑定关系。验证：`go test ./internal/mesh -race -count=1`
-- [ ] 1.3 `internal/assets/blocks.go` 的快照 ids 上界扩到 `core.WaterLevel7ID`，流体纳入 mesh registry 快照。验证：`go test ./internal/assets ./internal/mesh -race -count=1`
-- [ ] 1.4 **删除** `assets.FaceVisible` 的两处 `core.IsFluid` 补偿分支（它们只为「流体不在快照里」存在，纳入后会让水永远不出面且测试仍绿）。**保留** `assets.Opaque` 的流体排除——`internal/mesh/visibility.go` 另有直接对活体 Section 数据调用的路径，与快照范围无关。验证：`go test ./internal/assets ./internal/mesh -race -count=1`
-- [ ] 1.5 **变异验证**：临时删掉 `assets.Opaque` 的流体排除，确认 `internal/mesh` 的活体路径测试变红；恢复。报告里写明改坏了什么、是否如期失败。验证：`go test ./internal/mesh -race -count=1`
+- [x] 1.1 Rust：`engine/crates/mornlea_engine/src/input.rs` 的 `MAX_REGISTRY_ENTRIES` 27 → 35。**不得**同时改同文件 `BLOCKS_BYTES = 27*4096*2` 里的 27——那是 3×3×3 邻域区段数，与条目上限只是数字巧合（design D6）。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
+- [x] 1.2 Go：`internal/mesh/native_input.go` 的 `nativeMaxRegistryEntries` 与 `maxNativeInputBytes` 随之扩容，注释同步更新绑定关系。验证：`go test ./internal/mesh -race -count=1`
+- [x] 1.3 `internal/assets/blocks.go` 的快照 ids 上界扩到 `core.WaterLevel7ID`，流体纳入 mesh registry 快照。验证：`go test ./internal/assets ./internal/mesh -race -count=1`
+- [x] 1.4 **删除** `assets.FaceVisible` 的两处 `core.IsFluid` 补偿分支（它们只为「流体不在快照里」存在，纳入后会让水永远不出面且测试仍绿）。**保留** `assets.Opaque` 的流体排除——`internal/mesh/visibility.go` 另有直接对活体 Section 数据调用的路径，与快照范围无关。验证：`go test ./internal/assets ./internal/mesh -race -count=1`
+- [x] 1.5 **变异验证**：临时删掉 `assets.Opaque` 的流体排除，确认 `internal/mesh` 的活体路径测试变红；恢复。报告里写明改坏了什么、是否如期失败。验证：`go test ./internal/mesh -race -count=1`
 
 ## 2. 斜水面几何（engine）
 
 - [ ] 2.1 先写失败测试：`h_raw(level) = 14 - level`、上方为流体取 15 的单格高度纯函数，对 8 个流体编号穷举断言。验证：`cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
 - [ ] 2.2 角高度：该角相邻四格中流体格 `h_raw` 的整数平均（向下取整），任一参与格上方为流体则取 15。**全整数运算，不得引入浮点**。用 `MeshInput.block()` 的既有 3×3×3 邻域读跨 section 邻居。验证：同上
 - [ ] 2.3 水的顶面/侧面按 1×1 出面（不贪心合并），角高度打进 `w`/`h` 释放的 8 bit 加现有 9 个空闲位。**quad 仍 MUST 是 `u64` / 8 字节**。补 pack/unpack 往返测试，对 level 组合穷举。验证：同上
-- [ ] 2.4 `face_visible` 增加流体规则：同为流体的相邻面不可见、流体对空气可见、流体在实心方块下方的面不可见。穷举测试。验证：同上
+- [x] 2.4 流体出面规则：同为流体的相邻面不可见、流体对空气可见、流体在实心方块下方的面不可见。穷举测试。**规则的落点是 `assets.FaceVisible`**——Rust 的 `RegistryView::face_visible` 只对 Go 烘焙的 Visibility 位图查表、自身不含规则，也拿不到「哪些编号是流体」的信息；在 Rust 里另写一套会制造第二个真值源。验证：`go test ./internal/assets ./internal/mesh -race -count=1`（含跨语言 parity 夹具 `TestNativeOracleParityWaterSurface`）
 - [ ] 2.5 覆盖 spec `fluid-presentation` 的「相邻不同水位之间连续过渡」「水柱内部没有斜面」「等级越弱高度越低」「高度派生是确定的」四个 Scenario。验证：同上
 
 ## 3. water pass（client）
