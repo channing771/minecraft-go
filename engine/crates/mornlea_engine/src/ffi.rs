@@ -14,7 +14,7 @@ use crate::worldgen::{
     parse_chunk_input, parse_probe_input, run_probe,
 };
 
-pub(crate) const ABI_VERSION: u32 = 4;
+pub(crate) const ABI_VERSION: u32 = 5;
 
 // 输入长度校验委托给 step::step_input_is_valid（内部使用 STEP_HEADER_BYTES），此常量保留供 ABI 文档对齐。
 #[allow(dead_code)]
@@ -820,9 +820,9 @@ mod mesh_tests {
     use super::*;
 
     #[test]
-    fn exported_version_is_four() {
-        // engine ABI v4:worldgen 材料表 13 → 14(末项 water)。
-        assert_eq!(mornlea_engine_abi_version(), 4);
+    fn exported_version_is_five() {
+        // engine ABI v5:mesh registry 条目上限 27 → 35(流体进入 registry 快照)。
+        assert_eq!(mornlea_engine_abi_version(), 5);
     }
 }
 #[cfg(test)]

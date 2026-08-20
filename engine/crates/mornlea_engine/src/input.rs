@@ -2,7 +2,16 @@ const BLOCKS_BYTES: usize = 27 * 4096 * 2;
 const HEIGHTS_PRESENT_BYTES: usize = 9;
 const HEIGHTS_BYTES: usize = 9 * 256 * 2;
 const REGISTRY_ENTRY_BYTES: usize = 16;
-const MAX_REGISTRY_ENTRIES: usize = 27;
+/// registry 条目表的容量上限。
+///
+/// 35 = Go 侧 `core.AirID..=core.WaterLevel7ID` 的方块编号总数，也就是
+/// `internal/assets.NewRegistry()` 烘焙进 mesh snapshot 的条目数；Go 侧对应的
+/// `internal/mesh.nativeMaxRegistryEntries` 必须与本常量一起改，两侧各自独立
+/// 定义、没有共享常量或生成步骤，只能人手同步（一次跨语言 engine ABI 变更）。
+///
+/// **注意**：本文件开头 `BLOCKS_BYTES = 27 * 4096 * 2` 里的 27 是 3×3×3 邻域的
+/// 区段数，与本常量只是数字撞了，两者语义无关，改一个绝不能牵动另一个。
+const MAX_REGISTRY_ENTRIES: usize = 35;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InputError {
@@ -300,6 +309,37 @@ pub(crate) mod tests {
             input[offset..offset + 8].copy_from_slice(&word.to_le_bytes());
         }
         input
+    }
+
+    /// input_with_registry_entries 造一份除条目数外一切合法的输入,用来把
+    /// MAX_REGISTRY_ENTRIES 这个纯数字常量钉在可执行断言上——否则它被改动时
+    /// 没有任何测试会变红。
+    fn input_with_registry_entries(count: usize) -> Vec<u8> {
+        let words_per_row = count.div_ceil(64);
+        let mut input = vec![0; REGISTRY_OFFSET + count * 16 + count * words_per_row * 8];
+        input[0..4].copy_from_slice(b"MGM1");
+        input[8..10].copy_from_slice(&(count as u16).to_le_bytes());
+        input[10..12].copy_from_slice(&(words_per_row as u16).to_le_bytes());
+        // air=0、barrier=1,条目 id 取 0..count 保证严格递增。
+        input[12..14].copy_from_slice(&0_u16.to_le_bytes());
+        input[14..16].copy_from_slice(&1_u16.to_le_bytes());
+        for index in 0..count {
+            let entry = REGISTRY_OFFSET + index * 16;
+            input[entry..entry + 2].copy_from_slice(&(index as u16).to_le_bytes());
+        }
+        input
+    }
+
+    /// registry 条目上限必须正好容下 Go 侧 `core.AirID..=core.WaterLevel7ID` 的
+    /// 35 个方块编号:少一条,流体就进不了 mesh snapshot、水永远不出面;多一条,
+    /// 两侧对输入长度与条目上限的期望就会分叉。
+    #[test]
+    fn accepts_exactly_thirty_five_registry_entries() {
+        assert!(MeshInput::parse(&input_with_registry_entries(35)).is_ok());
+        assert_eq!(
+            MeshInput::parse(&input_with_registry_entries(36)).unwrap_err(),
+            InputError::Registry
+        );
     }
 
     #[test]
