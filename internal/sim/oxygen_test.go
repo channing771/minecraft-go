@@ -289,3 +289,53 @@ func playerSubmersion(engine *Engine, id SessionID) (bodyInFluid, eyeInFluid boo
 	source := dimensionCollisionSource{dimension: engine.dimensions[session.dimension]}
 	return physics.SubmersionFlags(session.player.state.Position, source)
 }
+
+// waistDeepPlayerColumn 只把玩家所在列的 y=1 那一格写成水源，构造「身体浸没
+// 但眼睛在空气中」——drownColumn 的 y=1..2 双格写法做不到这个区分。
+//
+// 默认眼高 1.62 让眼睛落在 y=2 格（干），身体 AABB 自脚下 y=1 起向上覆盖，
+// 因此与 y=1 的水相交。写入同样直接落在区块上、不经方块变更入口，那一格不会
+// 被登记进流体待更新队列，水源本身也不会消失。
+func waistDeepPlayerColumn(t *testing.T, engine *Engine, position mgl32.Vec3) {
+	t.Helper()
+	base := core.BlockPos{
+		X: int32(math.Floor(float64(position.X()))),
+		Y: 1,
+		Z: int32(math.Floor(float64(position.Z()))),
+	}
+	record := engine.dimensions[core.Overworld].records[base.Chunk()]
+	if record == nil || record.Chunk == nil {
+		t.Fatalf("列 %+v 所在区块未就绪", base)
+	}
+	x, _, z := base.Local()
+	record.Chunk.SetBlock(x, base.Y, z, core.WaterSourceID)
+}
+
+// TestOxygenIgnoresBodySubmersionWithDryEye 钉住 advanceOxygen 收的是**眼睛**
+// 的浸没标志而不是身体的。
+//
+// 为什么必须单独写一条：其余全部氧气用例共用 drownColumn（身体与眼睛同时浸没），
+// 在那种夹具下两个标志恒等，把 player.go 传给 advanceOxygen 的 input.EyeInFluid
+// 换成 input.BodyInFluid 不会让任何断言变化——差值恒等，那些用例**结构上**覆盖
+// 不到这条接线。spec 里「齐腰深水只触发身体浸没」这个区分性场景一直存在，
+// 只是从没被接到氧气上；本用例就是把它接上。
+func TestOxygenIgnoresBodySubmersionWithDryEye(t *testing.T) {
+	const id = SessionID(26)
+	engine := readyRegenPlayer(t, id, 10)
+	waistDeepPlayerColumn(t, engine, drownColumn)
+	player := engine.sessions[id].player
+
+	stepRegen(t, engine, id, 50)
+	if player.oxygen != core.MaxOxygenTicks {
+		t.Fatalf("齐腰深水中 oxygen=%d，想要保持满值 %d——氧气误接了身体浸没标志",
+			player.oxygen, core.MaxOxygenTicks)
+	}
+
+	// 夹具承重守卫排在真实断言之后：这一列必须真的做到「身体浸没、眼睛不浸没」，
+	// 否则上面只是在验证「不在水里的玩家氧气满」，把 advanceOxygen 整个删掉也绿。
+	bodyInFluid, eyeInFluid := playerSubmersion(engine, id)
+	if !bodyInFluid || eyeInFluid {
+		t.Fatalf("夹具无效：body=%v eye=%v，想要 body=true、eye=false",
+			bodyInFluid, eyeInFluid)
+	}
+}
