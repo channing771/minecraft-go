@@ -75,9 +75,9 @@
 
 任务 10.1 实测：瀑布场景最坏单 tick **107.38 ms**（50 ms 预算的 2.15 倍），队列峰值 501,587 项，越界持续数百 tick，且为单玩家普通场景；其中排序 98.23 ms、真正处理仅 3.73 ms。结构性无界独立成立（`queue.go:130` 全量遍历 Θ(len(pending))、`:135` 排序 Θ(D log D)，`budget` 只截断处理循环；填入:排出 ≈ 200:1）。组 8.1 翻开默认值后该路径落在每个玩家必经路径上，故在本变更内修复。
 
-- [ ] 10b.1 让 `Queue.Advance` 的单 tick 成本与 `len(q.pending)` 解耦：只取全序下最小的 `budget` 项，不得每 tick 全量遍历并排序。**不改流体规则**。验证：`go test ./internal/fluid -race -count=1`
-- [ ] 10b.2 F1 既有四条不变量必须逐条仍绿且**不得修改这些测试**：确定性全序、预算不改变平衡态、同 tick 冲突取最小等级、入队顺序无关。验证：`go test ./internal/fluid ./internal/sim -race -count=1`
-- [ ] 10b.3 复测 10.1 的两个场景，报告修复前后的最坏单 tick 与队列峰值规模。**不得调任何 tunable 默认值。** 验证：`MORNLEA_FLUID_PERF=1 go test ./internal/sim -run TestFluidPerf`
+- [x] 10b.1 让 `Queue.Advance` 的单 tick 成本与 `len(q.pending)` 解耦：只取全序下最小的 `budget` 项，不得每 tick 全量遍历并排序。**不改流体规则**。验证：`go test ./internal/fluid -race -count=1`
+- [x] 10b.2 F1 既有四条不变量必须逐条仍绿且**不得修改这些测试**：确定性全序、预算不改变平衡态、同 tick 冲突取最小等级、入队顺序无关。验证：`go test ./internal/fluid ./internal/sim -race -count=1`
+- [x] 10b.3 复测 10.1 的两个场景，报告修复前后的最坏单 tick 与队列峰值规模。**不得调任何 tunable 默认值。** 验证：`MORNLEA_FLUID_PERF=1 go test ./internal/sim -run TestFluidPerf`
 
 ## 11. 收尾门禁
 
