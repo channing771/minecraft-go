@@ -49,9 +49,9 @@
 
 ## 7. 清偿 F1 剩余待办
 
-- [ ] 7.1 raycast 目标判定：八处 `core.RaycastBlocks` 调用点的 solid 谓词区分流体，使水下可以瞄准、采掘、开箱与正常放置。验证：`go test ./internal/sim ./internal/server ./cmd/mornlea -race -count=1`
-- [ ] 7.2 出生点选取：`internal/sim/spawn.go` 不得把流体格判为可站立落脚点。验证：`go test ./internal/sim -race -count=1`
-- [ ] 7.3 伙伴寻路对流体的豁免复核：`productionCompanionPassableBlocks` 当前刻意让流体不可通过；本变更交付浸没物理后重新评估并更新 `internal/server/companion_manager_test.go` 的显式豁免分支与其退出条件注释。验证：`go test ./internal/server -race -count=1`
+- [x] 7.1 raycast 目标判定：八处 `core.RaycastBlocks` 调用点的 solid 谓词区分流体，使水下可以瞄准、采掘、开箱与正常放置。验证：`go test ./internal/sim ./internal/server ./cmd/mornlea -race -count=1`
+- [x] 7.2 出生点选取：`internal/sim/spawn.go` 不得把流体格判为可站立落脚点。验证：`go test ./internal/sim -race -count=1`
+- [x] 7.3 伙伴寻路对流体的豁免复核：`productionCompanionPassableBlocks` 当前刻意让流体不可通过；本变更交付浸没物理后重新评估并更新 `internal/server/companion_manager_test.go` 的显式豁免分支与其退出条件注释。验证：`go test ./internal/server -race -count=1`
 
 ## 8. 配置、场景与基线
 
