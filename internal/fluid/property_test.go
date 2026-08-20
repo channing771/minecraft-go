@@ -492,16 +492,18 @@ func TestBudgetEquivalence_DamBreakSameFinalState(t *testing.T) {
 // 预算，**每一个 tick** 产生的变更集合逐格一致，最终状态也逐格一致。
 //
 // 关于本测试的证据强度，必须说清楚：Queue.pending 是以位置为键的 map，入队
-// 顺序在进入 Advance 之前就已经被结构性抹除；Advance 每 tick 又用 sortItems
-// 按 (dueTick, lessPos) 重排一次。因此入队顺序**根本到不了合并步骤**，本测试
-// 几乎必然通过——它属于「设计正确所以平凡为真」，**不是**确定性的主要论据。
+// 顺序在进入 Advance 之前就已经被结构性抹除；Advance 每 tick 又从 Queue 内部
+// 那个按 lessItem 组织的最小堆里，按 (dueTick, lessPos) 全序取出下一批。因此
+// 入队顺序**根本到不了合并步骤**，本测试几乎必然通过——它属于「设计正确所以
+// 平凡为真」，**不是**确定性的主要论据。
 //
-// 它真正守住的回归面是：将来有人删掉或改坏 sortItems（改成直接遍历 pending
-// map）时立刻报警。为了让这个回归面真的被覆盖，测试刻意用**受限预算**推进：
-// 只有预算切断 due 列表时，"处理哪些项"才依赖排序结果，map 遍历顺序的随机性
-// 才会体现为可观测的差异。用不受限预算测这条性质是测不出 sortItems 的。
+// 它真正守住的回归面是：将来有人删掉或改坏「按全序取批」这件事（比如改成直接
+// 遍历 pending map）时立刻报警。为了让这个回归面真的被覆盖，测试刻意用
+// **受限预算**推进：只有预算截断本 tick 的到期项时，"处理哪些项"才依赖全序，
+// map 遍历顺序的随机性才会体现为可观测的差异。用不受限预算测这条性质，是测不出
+// 全序取批的。
 func TestOrderIndependence_PerTickChangesMatch(t *testing.T) {
-	// 受限预算：让 due 列表的截断点依赖排序结果。
+	// 受限预算：让本 tick 到期项的截断点依赖全序取批的结果。
 	const orderBudget = 37
 	const orderTicks = 400
 
@@ -571,12 +573,12 @@ func TestOrderIndependence_PerTickChangesMatch(t *testing.T) {
 				t.Fatalf("参考运行 %d tick 内没有任何变更，逐 tick 断言是空转", orderTicks)
 			}
 			// 非空转守卫二：必须真的有某个 tick 的到期项数超过预算——只有
-			// 那时 due 列表才会被截断，「处理哪些项」才取决于 sortItems 的结果，
-			// 本测试才真的盖住了「删掉 sortItems」这个回归面。注意不能用
+			// 那时取批才会被预算截断，「处理哪些项」才取决于全序，本测试才真的
+			// 盖住了「取批不按全序」这个回归面。注意不能用
 			// len(changed) 做代理：预算限制的是处理项数，而变更数只是其中
 			// 真改变了值的子集，两者差一个数量级。
 			if refMaxDue <= orderBudget {
-				t.Fatalf("参考运行单 tick 最大到期项数 %d 未超过预算 %d，sortItems 的截断路径未被覆盖",
+				t.Fatalf("参考运行单 tick 最大到期项数 %d 未超过预算 %d，全序取批的截断路径未被覆盖",
 					refMaxDue, orderBudget)
 			}
 			t.Logf("形状 %s：单 tick 最大到期项 %d（预算 %d）", fx.name, refMaxDue, orderBudget)
