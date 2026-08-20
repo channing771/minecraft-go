@@ -71,6 +71,14 @@
 - [x] 10.2 若 10.1 显示越界，先上报数字与根因，由控制会话裁决是否扩范围修 `Queue.Advance` 的分桶——**不得自行调 tunable 默认值让数字好看**。
   - **已上报，待控制会话裁决。**10.1 实测越界（瀑布场景最坏单 tick 107.38 ms，为 50 ms 预算的 2.15 倍，该 tick 队列 485,254 项 = F1 记录的 20 万项风险区间的 242.6%），且结构性判定为**无界**：`internal/fluid/queue.go:130` 的全量 map 遍历与 `:135` 的全量排序成本正比于 `len(q.pending)`，`budget` 只截断 `:144` 之后的处理循环；`q.pending` 每 tick 填入上限约 10 万项（重扫 65,536 + 写入挂钩与重新入队各约 17,920）而排出恰好 ≤ 512 项，唯一天花板是推进范围内的不同位置数（八玩家约 2.0×10⁷）。按 brief 要求**只上报、未自行修** `Queue.Advance`，未改任何 tunable 默认值。完整数字、规模坐标与修法方向见 `.superpowers/sdd/fluid-presentation-survival/task-10-report.md`。
 
+## 10b. 有界化 `Queue.Advance`（Ruling 56 扩范围）
+
+任务 10.1 实测：瀑布场景最坏单 tick **107.38 ms**（50 ms 预算的 2.15 倍），队列峰值 501,587 项，越界持续数百 tick，且为单玩家普通场景；其中排序 98.23 ms、真正处理仅 3.73 ms。结构性无界独立成立（`queue.go:130` 全量遍历 Θ(len(pending))、`:135` 排序 Θ(D log D)，`budget` 只截断处理循环；填入:排出 ≈ 200:1）。组 8.1 翻开默认值后该路径落在每个玩家必经路径上，故在本变更内修复。
+
+- [ ] 10b.1 让 `Queue.Advance` 的单 tick 成本与 `len(q.pending)` 解耦：只取全序下最小的 `budget` 项，不得每 tick 全量遍历并排序。**不改流体规则**。验证：`go test ./internal/fluid -race -count=1`
+- [ ] 10b.2 F1 既有四条不变量必须逐条仍绿且**不得修改这些测试**：确定性全序、预算不改变平衡态、同 tick 冲突取最小等级、入队顺序无关。验证：`go test ./internal/fluid ./internal/sim -race -count=1`
+- [ ] 10b.3 复测 10.1 的两个场景，报告修复前后的最坏单 tick 与队列峰值规模。**不得调任何 tunable 默认值。** 验证：`MORNLEA_FLUID_PERF=1 go test ./internal/sim -run TestFluidPerf`
+
 ## 11. 收尾门禁
 
 - [ ] 11.1 `make rust` 后运行 `go test ./... -race -count=1`。
