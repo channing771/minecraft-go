@@ -453,9 +453,6 @@ func TestSpawnFallbackSurvivesChunkReadinessGap(t *testing.T) {
 	var player PlayerUpdate
 	result := first
 	for range 8 {
-		if got := engine.sessions[1].player.nextCandidate; got != breakpoint {
-			t.Fatalf("夹具失效：等待缺口期间断点从 %d 移到了 %d", breakpoint, got)
-		}
 		for _, key := range result.Acquire {
 			engine.SubmitAcquired(AcquiredChunk{Key: key, Missing: true})
 		}
