@@ -55,15 +55,15 @@
 
 ## 8. 配置、场景与基线
 
-- [ ] 8.1 `internal/config` 的 `fluidEnabled` 默认值 `false` → `true`；更新其文档注释（原文描述的三条后果已被本变更消除）。验证：`go test ./internal/config -race -count=1`
+- [x] 8.1 `internal/config` 的 `fluidEnabled` 默认值 `false` → `true`；更新其文档注释（原文描述的三条后果已被本变更消除）。验证：`go test ./internal/config -race -count=1`
 - [ ] 8.2 benchmark scenario v16 → v17，新增唯一显式迁移 `16:17`，历史 `15:16` 退为归档证据。验证：`go test ./cmd/perfcheck ./cmd/mornlea -race -count=1`
 - [ ] 8.3 更新 `AGENTS.md` 与 `CLAUDE.md` 的基线版本与能力描述（协议 v21、engine/client ABI v5、scenario v17、流体已有呈现与生存）。**两份必须逐字节相同**。验证：`go test ./internal/archcheck -count=1`
 
 ## 9. 视觉门禁
 
 - [x] 9.1 **先在 `fluidEnabled=false` 下确认全部 capture golden 逐字节不变**——这是「非流体路径无回归」的证明，必须在重生成之前做。验证：`go run ./cmd/mornlea --capture ...` 比对
-- [ ] 9.2 翻开开关后重新生成全部 capture golden，并新增水景场景（含水面斜坡、水下视角、水面之下的地形）。验证：同上
-- [ ] 9.3 记录哪些 golden 因水入画而变化、哪些因水下变暗而变化，逐场景说明差异来源。
+- [x] 9.2 翻开开关后重新生成全部 capture golden，并新增水景场景（含水面斜坡、水下视角、水面之下的地形）。验证：同上
+- [x] 9.3 记录哪些 golden 因水入画而变化、哪些因水下变暗而变化，逐场景说明差异来源。
 
 ## 10. 性能复测
 
