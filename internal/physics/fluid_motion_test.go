@@ -43,6 +43,15 @@ func TestFluidSinkIsSlowerThanAirFreeFall(t *testing.T) {
 		if water.Velocity.Y() < -tunables.FluidSinkSpeed {
 			t.Fatalf("tick %d：水中垂直速度 %f 越过终端值 %f", tick, water.Velocity.Y(), -tunables.FluidSinkSpeed)
 		}
+		if tick == 0 {
+			// 首个 tick 两边都还没触到各自的终端速度，垂直速度就是各自的
+			// gravity*dt——只有在这里才能把「重力衰减」与「终端速度压低」分开
+			// 观察。少了这一条，把水中重力改回空气重力仍然会因终端速度而全绿。
+			if water.Velocity.Y() <= air.Velocity.Y() {
+				t.Fatalf("首 tick 水中垂直速度 %f 未快于空气中 %f：水中重力没有衰减",
+					water.Velocity.Y(), air.Velocity.Y())
+			}
+		}
 	}
 	if water.Velocity.Y() != -tunables.FluidSinkSpeed {
 		t.Fatalf("水中垂直速度=%f，想要收敛到 %f", water.Velocity.Y(), -tunables.FluidSinkSpeed)
