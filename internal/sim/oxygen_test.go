@@ -19,6 +19,11 @@ var drownColumn = mgl32.Vec3{2.5, 1, 0.5}
 //
 // 它刻意在玩家已经 Ready 之后调用：出生/恢复校验只认碰撞几何，而流体没有碰撞盒，
 // 提前放水不会改变校验结果，但放在之后能让用例与出生路径完全解耦。
+//
+// 写入直接落在区块上、不经引擎的方块变更入口，因此这两格不会被登记进流体待更新
+// 队列（advanceFluids 无条件运行，与 fluidEnabled 无关——那个开关只门控 worldgen
+// 注水）。水源本身不会消失，铺开出去的流动水也不会流回一个没被重新入队的格，
+// 所以 drainPlayerColumn 之后的下一 tick 观察到的一定是"眼睛出了水"。
 func submergePlayerColumn(t *testing.T, engine *Engine, position mgl32.Vec3) {
 	t.Helper()
 	setColumn(t, engine, position, core.WaterSourceID)
