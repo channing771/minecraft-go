@@ -235,11 +235,13 @@ func measureFluidTicks(t *testing.T, engine *Engine, ticks int) []fluidTickSampl
 	return samples
 }
 
-// reportFluidSamples 打印场景的规模坐标与最坏 tick 的耗时构成。
+// reportFluidSamples 打印场景的规模坐标与最坏 tick 的耗时构成，并返回队列规模
+// 最大的那条样本，供调用方做夹具有效性守卫。
 //
 // 报告三条不同口径的「最坏」：整 tick 最慢、流体段最慢、队列最大。三者常常不是
-// 同一个 tick，只报其中一条会掩盖另外两条。
-func reportFluidSamples(t *testing.T, name string, samples []fluidTickSample) {
+// 同一个 tick，只报其中一条会掩盖另外两条——本次复测里「整 tick 最慢」与「队列
+// 最大」就落在相差近两千 tick 的两个位置上。
+func reportFluidSamples(t *testing.T, name string, samples []fluidTickSample) fluidTickSample {
 	t.Helper()
 	if len(samples) == 0 {
 		t.Fatalf("%s: 没有采到任何样本", name)
@@ -258,7 +260,7 @@ func reportFluidSamples(t *testing.T, name string, samples []fluidTickSample) {
 	}
 	t.Logf("[%s] 采样 %d 个 tick；队列峰值 %d 项（相对 F1 记录的 20 万项风险区间：%.1f%%）",
 		name, len(samples), peakQueue.queueBefore,
-		float64(peakQueue.queueBefore)/2000.0)
+		100*float64(peakQueue.queueBefore)/float64(fluidRiskScale))
 	for _, item := range []struct {
 		label  string
 		sample fluidTickSample
@@ -268,10 +270,38 @@ func reportFluidSamples(t *testing.T, name string, samples []fluidTickSample) {
 		{"队列最大", peakQueue},
 	} {
 		s := item.sample
-		sortOnly := s.scanSort - s.scan
+		// 两个只读探针与真实 Advance 是三次独立的墙钟测量，差值在处理成本
+		// 低于测量噪声时可能为负；按 0 记并如实标注，不倒填一个好看的正数。
 		t.Logf("[%s] %s: tick=%d 队列 %d→%d 项 | Step=%v 流体段=%v | 遍历 map=%v 排序=%v 处理及其余=%v",
 			name, item.label, s.tick, s.queueBefore, s.queueAfter,
-			s.step, s.fluidTail, s.scan, sortOnly, s.fluidTail-s.scanSort)
+			s.step, s.fluidTail, s.scan,
+			clampNonNegative(s.scanSort-s.scan), clampNonNegative(s.fluidTail-s.scanSort))
+	}
+	return peakQueue
+}
+
+// clampNonNegative 把差值测量里的负数噪声归零。
+func clampNonNegative(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// fluidRiskScale 是 F1（归档变更 authoritative-fluid）记录的残余风险规模：
+// 队列约 20 万项时 Queue.Advance 单独就能吃满 20 TPS 的 50 ms tick 预算。
+//
+// 它是本组全部测量的**规模坐标原点**：一个够不到这个规模的场景对该风险区间
+// 什么也没说，而它的报告读起来像做过了。
+const fluidRiskScale = 200_000
+
+// requireRiskScale 是夹具有效性守卫：场景没把队列撑进风险区间就直接判失败，
+// 而不是安静地报一个「很快」的数字。
+func requireRiskScale(t *testing.T, name string, peak fluidTickSample) {
+	t.Helper()
+	if peak.queueBefore < fluidRiskScale {
+		t.Fatalf("%s: 队列峰值只有 %d 项，够不到 %d 项的风险区间，本次测量对该区间无效",
+			name, peak.queueBefore, fluidRiskScale)
 	}
 }
 
@@ -298,7 +328,10 @@ func TestFluidPerfDamBreak(t *testing.T) {
 	}
 	t.Logf("破坝写入 %d 格，入队后队列 %d 项", int(span)*damWallTop, queue.Len())
 
-	reportFluidSamples(t, "大坝溃决", measureFluidTicks(t, engine, 600))
+	// 与瀑布同样采样 12000 tick：本场景的水体是恒定水源，下游只能被铺到距
+	// 开口 7 格（等级 1..7）就停下，因此前沿有明确终点、队列会收敛。采样窗口
+	// 取同一长度，是为了让「大坝收敛、瀑布不收敛」这个对比出自同一口径。
+	reportFluidSamples(t, "大坝溃决", measureFluidTicks(t, engine, 12000))
 }
 
 // TestFluidPerfWaterfall 场景二：注水世界里的瀑布。
@@ -314,7 +347,10 @@ func TestFluidPerfWaterfall(t *testing.T) {
 	}
 	t.Logf("重扫排空后队列 %d 项（悬崖边缘前沿）", queue.Len())
 
-	reportFluidSamples(t, "瀑布", measureFluidTicks(t, engine, 600))
+	// 12000 tick 不是随手取的：600 tick 时队列只到约 1.7 万项（风险区间的
+	// 8.7%），那是一次「测了但没测到风险区间」的空转测量。队列要到约 5700
+	// tick 才爬到峰值，因此采样窗口必须覆盖到那里，下面的守卫把这一点钉死。
+	requireRiskScale(t, "瀑布", reportFluidSamples(t, "瀑布", measureFluidTicks(t, engine, 12000)))
 }
 
 // TestFluidPerfSyntheticRiskScale 合成场景：直接把队列撑到 F1 记录的 20 万项
@@ -324,8 +360,6 @@ func TestFluidPerfWaterfall(t *testing.T) {
 // （那由 10.2 的结构性判定回答），只回答「一旦堆到 20 万，权威 tick 要付多少」。
 func TestFluidPerfSyntheticRiskScale(t *testing.T) {
 	requireFluidPerf(t)
-	const riskScale = 200_000
-
 	engine := fluidPerfEngine(t, damChunk)
 	queue := engine.fluidQueue(core.Overworld)
 	now, delay := engine.fluidClock()
@@ -334,20 +368,17 @@ func TestFluidPerfSyntheticRiskScale(t *testing.T) {
 	// 选空气格是刻意的：它让处理阶段（evalCell 对非流体格恒产出空写入）尽可能
 	// 便宜，从而把测出来的成本尽量归因到「遍历 + 排序」这段无预算约束的工作上。
 	const span = (2*DropInterestRadius + 1) * core.SectionSize
-	for y := int32(damWallTop + 1); queue.Len() < riskScale && y < core.MaxY; y++ {
-		for z := int32(-span / 2); z < span/2 && queue.Len() < riskScale; z++ {
-			for x := int32(-span / 2); x < span/2 && queue.Len() < riskScale; x++ {
+	for y := int32(damWallTop + 1); queue.Len() < fluidRiskScale && y < core.MaxY; y++ {
+		for z := int32(-span / 2); z < span/2 && queue.Len() < fluidRiskScale; z++ {
+			for x := int32(-span / 2); x < span/2 && queue.Len() < fluidRiskScale; x++ {
 				queue.Enqueue(core.BlockPos{X: x, Y: y, Z: z}, now, delay)
 			}
 		}
 	}
-	// 夹具有效性守卫：够不到风险规模的测量对 20 万项这个区间什么也没说。
-	if got := queue.Len(); got < riskScale {
-		t.Fatalf("合成队列只堆到 %d 项，够不到 %d 项的风险区间，测量无效", got, riskScale)
-	}
-	t.Logf("合成队列 %d 项（风险区间 %d 项）", queue.Len(), riskScale)
+	t.Logf("合成队列 %d 项（风险区间 %d 项）", queue.Len(), fluidRiskScale)
 
 	// 只测 delay 个 tick：到期项要等 delay 之后才可处理，而每 tick 只消化
 	// FluidUpdatesPerTick 项，队列规模在这段窗口里基本不变。
-	reportFluidSamples(t, "合成 20 万项", measureFluidTicks(t, engine, int(delay)+5))
+	requireRiskScale(t, "合成 20 万项",
+		reportFluidSamples(t, "合成 20 万项", measureFluidTicks(t, engine, int(delay)+5)))
 }
