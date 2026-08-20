@@ -139,18 +139,21 @@ func (engine *Engine) advancePendingPlayer(id SessionID, session *sessionState) 
 		player.exhausted = false
 		player.exhaustedRevisions = nil
 		player.nextCandidate = 0
+		// 世界已经变了，上一轮记下的降级候选不再可信，整轮重来。
+		player.spawnFallback = spawnFallback{}
 	}
 
 	source := dimensionCollisionSource{dimension: dimension}
 	for player.nextCandidate < len(player.candidates) {
 		candidate := player.candidates[player.nextCandidate]
 		engine.retainSpawnChunk(session, (core.BlockPos{X: candidate.X, Z: candidate.Z}).Chunk())
-		position, valid, ready := findSpawnInColumn(candidate, dimension, source)
+		position, tier, ready := findSpawnInColumn(candidate, dimension, source)
 		if !ready {
 			engine.retryFailedSpawnChunk(session, (core.BlockPos{X: candidate.X, Z: candidate.Z}).Chunk())
 			return
 		}
-		if valid {
+		if tier == spawnTierDry {
+			player.spawnFallback = spawnFallback{}
 			player.activate(session, PlayerLocation{
 				Dimension: session.dimension,
 				Position:  position,
@@ -158,7 +161,19 @@ func (engine *Engine) advancePendingPlayer(id SessionID, session *sessionState) 
 			engine.subscriptionsDirty = true
 			return
 		}
+		player.spawnFallback.consider(position, tier)
 		player.nextCandidate++
+	}
+
+	// 候选列全部走完仍没有干地：用记录里最优的降级候选出生，绝不以"永久
+	// PendingSpawn"为终态（见 spawnTier 的说明）。
+	if position, ok := player.spawnFallback.take(); ok {
+		player.activate(session, PlayerLocation{
+			Dimension: session.dimension,
+			Position:  position,
+		}, true)
+		engine.subscriptionsDirty = true
+		return
 	}
 
 	player.exhausted = true
@@ -335,16 +350,97 @@ func (engine *Engine) retryFailedSpawnChunk(
 	}
 }
 
+// spawnTier 是出生点降级阶梯的档位，**数值越小越优先**。
+//
+// 为什么需要阶梯而不是"不浸没就是唯一标准"：出生扫描半径只有 16 格
+// （spawnRadius，共 33×33 列），而一片海的直径远超它。真实 worldgen 下
+// （seed 42、锚点 {8,0}、开启流体）1089 个候选列可以全部浸没，此时"只接受
+// 不浸没"的实现会走到 exhausted 并永久停在 PendingSpawn——玩家永远登录不上。
+//
+// "永远无法登录"比"出生在水里"严重得多，而后者**可自救**：玩家有浮力与持续
+// 上浮（组 5）、氧气 300 tick（组 6），浮出水面绰绰有余。所以宁可降档也不
+// 拒绝出生。
+type spawnTier uint8
+
+const (
+	// spawnTierNone 表示该列没有任何可站立的落脚点，不是一个可用档位。
+	spawnTierNone spawnTier = iota
+	// spawnTierDry：身体完全不浸没，走陆地积分，理想档。
+	spawnTierDry
+	// spawnTierEyeDry：身体入水但眼睛在水面之上（齐腰水）。会走水中积分，
+	// 但眼睛没入水就不消耗氧气，不会溺水。
+	spawnTierEyeDry
+	// spawnTierSubmerged：连眼睛也在水下。玩家登录即开始掉氧，但有浮力可以
+	// 自己游上来；这是"能登录"与"永远登录不了"之间的兜底。
+	spawnTierSubmerged
+)
+
+// spawnFallback 记录一轮候选列扫描中迄今最优的**降级**候选（第 2/3 档）。
+//
+// 为什么要把它做成跨 tick 的状态而不是"第一档扫完再扫第二档"：后者是三倍的
+// 全量扫描开销。这里只做**一次**遍历——每列照旧自上而下扫一遍、扫到第 1 档
+// 立即出生（与加阶梯之前逐字相同的快路径），否则把该列的最优档位记下来继续
+// 换列；候选列全部走完仍没有第 1 档时，才拿出记录里最优的那个出生。
+// 单次遍历的额外开销只有每个"可站立且不被阻挡"的落脚点上多一次
+// physics.SubmersionFlags（每列通常 1 次）加 O(1) 状态，不新增任何一遍扫描。
+//
+// 之所以必须跨 tick 保留：候选列碰到未就绪区块时整轮扫描会中途返回等待，
+// 而 nextCandidate/spawnIndex 不回退，下一 tick 从断点继续——把记录放在栈上
+// 会让断点之前那些列的降级候选静默丢失，海洋世界又退回永久 PendingSpawn。
+type spawnFallback struct {
+	position mgl32.Vec3
+	tier     spawnTier
+}
+
+// consider 用一个新候选更新记录，只在严格更优时替换（同档位保留先到的那个，
+// 因为候选列本身已按"离锚点由近及远"排好序）。
+func (f *spawnFallback) consider(position mgl32.Vec3, tier spawnTier) {
+	if tier == spawnTierNone {
+		return
+	}
+	if f.tier == spawnTierNone || tier < f.tier {
+		f.position, f.tier = position, tier
+	}
+}
+
+// take 取出记录并清空；没有任何降级候选时返回 false。
+func (f *spawnFallback) take() (mgl32.Vec3, bool) {
+	if f.tier == spawnTierNone {
+		return mgl32.Vec3{}, false
+	}
+	position := f.position
+	*f = spawnFallback{}
+	return position, true
+}
+
+// findSpawnInColumn 自上而下扫一列，返回该列最优的落脚点及其档位，以及该列
+// 涉及的区块是否全部就绪。
+//
+// **玩家出生与伙伴出生共用本函数**（advancePendingPlayer 与
+// advancePendingCompanion），流体判定因此对两者同时生效。这与伙伴寻路把流体
+// 当阻挡（见 internal/server 的 productionCompanionPassableBlocks 豁免）方向
+// 一致：伙伴同样不该被放进水里。
+//
+// 阶梯对伙伴的含义与对玩家**不同**，改这里时必须一并想到：伙伴没有浮力、
+// 没有氧气也没有溺水结算（其 physics.Input 的 BodyInFluid 恒为零值），第 3 档
+// 对伙伴意味着"站在水底且寻路走不出来"，而不是"游上来"。即便如此仍然共用同一
+// 条阶梯：伙伴的替代结局是**永远不出生**，那比站在水底更糟，且伙伴可以由玩家
+// 用指令重新调度。给伙伴接水中物理属 M5 系列范围。
+//
+// 扫到第 1 档立即返回（快路径与加阶梯之前逐字相同）；否则记住本列最优档位
+// 继续向下找——同一列更低处通常更深，但"水下石台上方还有个气穴"这种形状确实
+// 存在，继续扫不额外读任何方块。
 func findSpawnInColumn(
 	candidate spawnColumn,
 	dimension *Dimension,
 	source dimensionCollisionSource,
-) (mgl32.Vec3, bool, bool) {
+) (mgl32.Vec3, spawnTier, bool) {
+	var best spawnFallback
 	for y := int32(core.MaxY - 1); y >= core.MinY; y-- {
 		blockPosition := core.BlockPos{X: candidate.X, Y: y, Z: candidate.Z}
 		block, ready := dimension.BlockAt(blockPosition)
 		if !ready {
-			return mgl32.Vec3{}, false, false
+			return mgl32.Vec3{}, spawnTierNone, false
 		}
 		boxes := physics.BlockCollisionBoxes(block, true)
 		if block == core.AirID || boxes.Count == 0 {
@@ -353,27 +449,35 @@ func findSpawnInColumn(
 		position := mgl32.Vec3{float32(candidate.X) + 0.5, float32(y) + 1, float32(candidate.Z) + 0.5}
 		free, neighborsReady := playerBoundsAreFree(position, source)
 		if !neighborsReady {
-			return mgl32.Vec3{}, false, false
+			return mgl32.Vec3{}, spawnTierNone, false
 		}
 		if !free {
 			continue
 		}
-		// 出生点不得选在水下：流体零碰撞体，playerBoundsAreFree 因此把海平面
-		// 以下的地表也读成"可站立"，玩家会在登录那一刻直接开始消耗氧气并溺水。
-		// 判定复用 physics.SubmersionFlags 这唯一一份浸没规则（与权威 tick、
-		// 客户端预测同一个函数），不在这里另写一套逐格流体扫描——两套实现
-		// "一起写错"不会被任何 parity 断言抓到。
-		//
-		// 用 bodyInFluid 而不是 eyeInFluid：身体入水就已进入水中积分，站在
-		// 齐胸深的水里虽然当下不掉氧，也不是一个可接受的出生落脚点。判否只
-		// continue，继续向下找同一列更低的落脚点（更低处只会更深，实际会很快
-		// 耗尽该列并换下一列），不整列放弃。
-		if bodyInFluid, _ := physics.SubmersionFlags(position, source); bodyInFluid {
-			continue
+		tier := spawnTierOf(position, source)
+		if tier == spawnTierDry {
+			return position, spawnTierDry, true
 		}
-		return position, true, true
+		best.consider(position, tier)
 	}
-	return mgl32.Vec3{}, false, true
+	return best.position, best.tier, true
+}
+
+// spawnTierOf 判定一个落脚点的档位。
+//
+// 浸没判定复用 physics.SubmersionFlags 这唯一一份浸没规则（与权威 tick、
+// 客户端预测同一个函数），不在这里另写一套逐格流体扫描——两套实现"一起写错"
+// 不会被任何 parity 断言抓到。流体零碰撞体，因此 playerBoundsAreFree 会把
+// 海平面以下的地表也读成"可站立"，档位判定是唯一能把它们区分开的东西。
+func spawnTierOf(position mgl32.Vec3, source dimensionCollisionSource) spawnTier {
+	bodyInFluid, eyeInFluid := physics.SubmersionFlags(position, source)
+	switch {
+	case eyeInFluid:
+		return spawnTierSubmerged
+	case bodyInFluid:
+		return spawnTierEyeDry
+	}
+	return spawnTierDry
 }
 
 func playerBoundsAreFree(

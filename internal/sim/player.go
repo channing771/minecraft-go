@@ -102,13 +102,16 @@ type playerState struct {
 	// 语义同 ticksSinceDamage。见 oxygen.go。
 	drownTicks uint32
 
-	restoreCandidates  []restoreCandidate
-	nextRestore        int
-	restoreWanted      map[core.ChunkKey]struct{}
-	safe               *PlayerLocation
-	candidates         []spawnColumn
-	candidateChunks    []core.ChunkPos
-	nextCandidate      int
+	restoreCandidates []restoreCandidate
+	nextRestore       int
+	restoreWanted     map[core.ChunkKey]struct{}
+	safe              *PlayerLocation
+	candidates        []spawnColumn
+	candidateChunks   []core.ChunkPos
+	nextCandidate     int
+	// spawnFallback 是本轮候选扫描中最优的降级出生点，跨 tick 保留（见
+	// internal/sim/spawn.go 的 spawnFallback）。
+	spawnFallback      spawnFallback
 	spawnWanted        map[core.ChunkPos]struct{}
 	exhausted          bool
 	exhaustedRevisions []uint64
@@ -582,6 +585,7 @@ func (player *playerState) beginReset() {
 	player.reset = false
 	player.inventoryDirty = true
 	player.nextCandidate = 0
+	player.spawnFallback = spawnFallback{}
 	player.exhausted = false
 	player.exhaustedRevisions = nil
 	player.spawnWanted[player.anchor] = struct{}{}
