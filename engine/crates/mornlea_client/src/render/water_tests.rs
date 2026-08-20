@@ -215,6 +215,8 @@ fn comparison_scene() -> Option<Vec<u8>> {
         floor_cell(9, 6, MAT_RED),
         floor_cell(6, 7, MAT_RED),
         floor_cell(7, 7, MAT_RED),
+        floor_cell(8, 7, MAT_RED),
+        floor_cell(9, 7, MAT_RED),
         lid_cell(9, 6),
         lid_cell(6, 7),
     ];
@@ -307,11 +309,15 @@ fn water_surface_covers_only_its_own_cell() {
     let Some(image) = comparison_scene() else {
         return;
     };
-    let bare = cell_pixel(&image, 6, 6);
-    assert!(
-        bare[0] > bare[2],
-        "裸地面格必须保持红色主导（未被邻格水面覆盖）：bare={bare:?}"
-    );
+    // (8,7) 与 (9,7) 特意摆在「巨型石板」的覆盖范围内：水面 quad 一旦按
+    // w/h 展开成 16×16，它们会被 (7,6) 那片水盖住。
+    for (bx, bz) in [(6u32, 6u32), (8, 7), (9, 7)] {
+        let bare = cell_pixel(&image, bx, bz);
+        assert!(
+            bare[0] > bare[2],
+            "裸地面格 ({bx},{bz}) 必须保持红色主导（未被邻格水面覆盖）：bare={bare:?}"
+        );
+    }
 }
 
 /// 角高度必须真的抬高/压低水面顶点，且幅度对得上位布局。
