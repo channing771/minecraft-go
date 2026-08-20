@@ -42,7 +42,7 @@ func (*snapshotTestReader) FluidHeight(id world.BlockID) uint8 {
 
 func (*snapshotTestReader) LightAttenuation(id world.BlockID) uint8 {
 	if id == core.GlassID {
-		return 3
+		return 1
 	}
 	return 0
 }
@@ -61,6 +61,50 @@ func TestBuildRegistrySnapshotSortsAndFreezesVisibility(t *testing.T) {
 	if !snapshot.FaceVisible(core.StoneID, core.AirID) {
 		t.Fatal("stone -> air 应可见")
 	}
+}
+
+// TestBuildRegistrySnapshotRejectsLightAttenuationAboveOne 把「衰减 >= 2 进不了快照」钉住。
+//
+// 上界 1 是 Rust light::build_sky 分桶推进的**算法前提**（每格扣减只可能是 1 或 2），
+// 不是天空光值域 0..15——两个数字碰巧都在附近，很容易被后人当成笔误放宽。放宽的代价是
+// 桶不再单亮度、「每格至多入队一次」失效，光照队列（容量恰好 LIGHT_VOLUME）在客户端
+// 渲染热路径上溢出成 panic。所以这条守的是那个前提本身，而不是某个具体读数。
+func TestBuildRegistrySnapshotRejectsLightAttenuationAboveOne(t *testing.T) {
+	if _, err := BuildRegistrySnapshot(
+		[]world.BlockID{core.AirID, core.BarrierID},
+		attenuationRegistry(2),
+	); err == nil {
+		t.Fatal("lightAttenuation=2 未被拒绝")
+	}
+	// 1 仍然合法：上面那条不是把整个字段一起否掉（今天的水就是 1）。
+	if _, err := BuildRegistrySnapshot(
+		[]world.BlockID{core.AirID, core.BarrierID},
+		attenuationRegistry(1),
+	); err != nil {
+		t.Fatalf("lightAttenuation=1 被拒绝：%v", err)
+	}
+}
+
+// attenuationRegistry 返回一个除 LightAttenuation 恒为 value 外与 internalTestRegistry
+// 完全一致的 reader。
+type attenuationRegistry uint8
+
+func (attenuationRegistry) Opaque(id world.BlockID) bool { return internalTestRegistry{}.Opaque(id) }
+func (attenuationRegistry) FaceVisible(id, adjacent world.BlockID) bool {
+	return internalTestRegistry{}.FaceVisible(id, adjacent)
+}
+func (attenuationRegistry) Material(id world.BlockID, f Face) uint16 {
+	return internalTestRegistry{}.Material(id, f)
+}
+func (attenuationRegistry) Emission(id world.BlockID) uint8 {
+	return internalTestRegistry{}.Emission(id)
+}
+func (attenuationRegistry) FluidHeight(id world.BlockID) uint8 {
+	return internalTestRegistry{}.FluidHeight(id)
+}
+func (r attenuationRegistry) LightAttenuation(world.BlockID) uint8 { return uint8(r) }
+func (attenuationRegistry) MeshSnapshot() RegistrySnapshot {
+	panic("attenuationRegistry.MeshSnapshot 不应被调用")
 }
 
 func TestBuildRegistrySnapshotRejectsDuplicateIDs(t *testing.T) {
@@ -85,7 +129,7 @@ func TestBuildRegistrySnapshotCopiesAndFreezesProperties(t *testing.T) {
 	wantBlocks := []BlockProperties{
 		{ID: core.AirID, Materials: [6]uint16{0, 1, 2, 3, 4, 5}},
 		{ID: core.StoneID, Opaque: true, Materials: [6]uint16{200, 201, 202, 203, 204, 205}},
-		{ID: core.GlassID, Emission: 7, FluidHeight: 9, LightAttenuation: 3, Materials: [6]uint16{2000, 2001, 2002, 2003, 2004, 2005}},
+		{ID: core.GlassID, Emission: 7, FluidHeight: 9, LightAttenuation: 1, Materials: [6]uint16{2000, 2001, 2002, 2003, 2004, 2005}},
 	}
 	if !reflect.DeepEqual(snapshot.Blocks, wantBlocks) {
 		t.Fatalf("snapshot blocks=%+v，想要 %+v", snapshot.Blocks, wantBlocks)
@@ -269,7 +313,7 @@ func TestEncodeNativeInputRejectsInvalidInputs(t *testing.T) {
 		{"bad visibility size", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: valid.Blocks, Visibility: []uint64{0}}},
 		{"overbright emission", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, Emission: 16}}, Visibility: []uint64{0, 0}}},
 		{"fluid height above 14", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, FluidHeight: 15}}, Visibility: []uint64{0, 0}}},
-		{"light attenuation above 15", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, LightAttenuation: 16}}, Visibility: []uint64{0, 0}}},
+		{"light attenuation above 1", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, LightAttenuation: 2}}, Visibility: []uint64{0, 0}}},
 		{"short destination", make([]byte, 16), fullyLoadedAirNeighborhood(), valid},
 	}
 	for _, tt := range tests {

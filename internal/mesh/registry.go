@@ -77,9 +77,12 @@ func BuildRegistrySnapshot(ids []world.BlockID, reader RegistryReader) (Registry
 		if block.FluidHeight > 14 {
 			return RegistrySnapshot{}, fmt.Errorf("mesh: block %d fluidHeight=%d 超过 14", id, block.FluidHeight)
 		}
-		// 天空光值域是 0..15，任何衰减语义下 > 15 都无意义；Rust 侧同口径拒绝。
-		if block.LightAttenuation > 15 {
-			return RegistrySnapshot{}, fmt.Errorf("mesh: block %d lightAttenuation=%d 超过 15", id, block.LightAttenuation)
+		// 合法域是 0..=1。这个 1 不是天空光值域（那是 0..15，数字碰巧相近），而是
+		// Rust light::build_sky 分桶推进的算法前提：证明依赖「每格扣减只可能是 1 或 2」，
+		// 衰减到 2 会让桶不再单亮度、「每格至多入队一次」失效，队列溢出成渲染热路径
+		// 上的 panic。Rust 侧 RegistryView::validate 同口径拒绝，这里提前给可读错误。
+		if block.LightAttenuation > 1 {
+			return RegistrySnapshot{}, fmt.Errorf("mesh: block %d lightAttenuation=%d 超过 1", id, block.LightAttenuation)
 		}
 		for face := Face(0); face < 6; face++ {
 			block.Materials[face] = reader.Material(id, face)

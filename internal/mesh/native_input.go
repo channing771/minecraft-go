@@ -64,8 +64,10 @@ func encodeNativeInput(dst []byte, n *world.Neighborhood, snapshot RegistrySnaps
 		if block.FluidHeight > 14 {
 			return 0, fmt.Errorf("mesh: 方块流体高度原值超过 14")
 		}
-		if block.LightAttenuation > 15 {
-			return 0, fmt.Errorf("mesh: 方块光衰减超过 15")
+		// 上界 1 来自 Rust light::build_sky 的分桶证明（每格扣减只能是 1 或 2），
+		// 不是天空光值域；详见 registry.go 同名校验与 build_sky 的注释。
+		if block.LightAttenuation > 1 {
+			return 0, fmt.Errorf("mesh: 方块光衰减超过 1")
 		}
 		air = air || block.ID == core.AirID
 		barrier = barrier || block.ID == core.BarrierID

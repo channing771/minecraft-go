@@ -15,7 +15,8 @@ const HEIGHTS_BYTES: usize = 9 * 256 * 2;
 ///   Rust 侧只消费这个数，**不知道也不需要知道流体等级**——等级→高度的映射是 Go 的
 ///   单一真值源（`internal/assets.Registry.FluidHeight`）。
 /// - `light_attenuation`：天空光穿过该方块时的额外衰减，由 `light::build_sky` 消费
-///   （每格扣减 = 1 + 本值）。方块光不读它。
+///   （每格扣减 = 1 + 本值）。合法域只有 `0..=1`，上界来自 `build_sky` 的分桶证明
+///   而不是天空光值域，见 `RegistryView::validate`。方块光不读它。
 const REGISTRY_ENTRY_BYTES: usize = 18;
 /// registry 条目表的容量上限。
 ///
@@ -195,10 +196,18 @@ impl RegistryView<'_> {
             if self.entries[offset + 16] > 14 {
                 return Err(InputError::Registry);
             }
-            // light_attenuation 的语义留给光照实现，但天空光值域是 0..15，任何
-            // 衰减语义下 > 15 都无意义；拒绝它是为了让 registry 的每个字节都有
-            // 校验分支，而不预设具体语义。
-            if self.entries[offset + 17] > 15 {
+            // light_attenuation 的合法域是 **0..=1**。
+            //
+            // 这个 1 **不是**天空光值域（那是 0..15，两个数字碰巧都在附近，别看混）：
+            // 它是 `light::build_sky` 分桶推进的**算法前提**。那里的证明依赖「每格扣减
+            // 只可能是 1 或 2」，于是一个桶只装一种亮度、相位 A 产出的 L-1 与相位 B
+            // 产出的 L-2 落进不同桶段。衰减一旦到 2，扣减就有 1/2/3 三种，`B(L+1)` 的
+            // L-2 会和 `A(L)` 的 L-1 落进同一个桶段、桶不再单亮度，「每格至多入队一次」
+            // 随之失效，队列（容量恰好 LIGHT_VOLUME）就会溢出成渲染热路径上的 panic。
+            //
+            // 所以这里必须挡在最前面：真要支持 >= 2 的衰减，是一次独立变更——去把分桶
+            // 泛化成每个 step 一个桶，而不是放宽这条校验。
+            if self.entries[offset + 17] > 1 {
                 return Err(InputError::Registry);
             }
             has_air |= id == air_id;
@@ -481,13 +490,18 @@ pub(crate) mod tests {
             InputError::Registry
         );
 
-        // light_attenuation 不预设语义，但天空光值域是 0..15，> 15 一律拒绝。
+        // light_attenuation 的合法域是 0..=1，2 就要被拒——这是 light::build_sky 分桶
+        // 证明的前提（桶宽 = 1），不是天空光值域。挡在校验层，越界条目根本进不了 BFS。
         let mut attenuation = valid_input();
-        attenuation[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 17] = 16;
+        attenuation[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 17] = 2;
         assert_eq!(
             MeshInput::parse(&attenuation).unwrap_err(),
             InputError::Registry
         );
+        // 1 仍然合法：上面那条不是把整个字段一起否掉。
+        let mut attenuation_one = valid_input();
+        attenuation_one[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 17] = 1;
+        assert!(MeshInput::parse(&attenuation_one).is_ok());
 
         let mut same_air_and_barrier = valid_input();
         same_air_and_barrier[14..16].copy_from_slice(&0_u16.to_le_bytes());
