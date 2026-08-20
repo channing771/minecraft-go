@@ -23,3 +23,19 @@ func (source MirrorCollisionSource) CollisionBoxes(position core.BlockPos) physi
 	x, _, z := position.Local()
 	return physics.BlockCollisionBoxes(chunk.Chunk.BlockAt(x, position.Y, z), true)
 }
+
+// IsFluidAt 让客户端镜像充当 physics.FluidSource：与权威侧
+// dimensionCollisionSource.IsFluidAt 逐条对应——缺失或已失同步的区块返回
+// false，超出世界高度的格视为空气。判定规则本身不在这里，而在两侧共用的
+// physics.SubmersionFlags。
+func (source MirrorCollisionSource) IsFluidAt(position core.BlockPos) bool {
+	if position.Y < core.MinY || position.Y >= core.MaxY {
+		return false
+	}
+	chunk, loaded := source.Mirror.Chunk(source.Dimension, position.Chunk())
+	if !loaded || chunk.Desynced {
+		return false
+	}
+	x, _, z := position.Local()
+	return core.IsFluid(chunk.Chunk.BlockAt(x, position.Y, z))
+}

@@ -89,6 +89,15 @@ func (source dimensionCollisionSource) CollisionBoxes(
 	return physics.BlockCollisionBoxes(block, ready)
 }
 
+// IsFluidAt 让权威维度充当 physics.FluidSource：浸没判定的规则全部在
+// physics.SubmersionFlags 里，这里只交付「这一格是不是流体」这一份方块视图，
+// 与客户端 Mirror 的同名方法逐条对应。未就绪的区块返回 false——权威侧宁可
+// 漏判也不能凭空造水。
+func (source dimensionCollisionSource) IsFluidAt(position core.BlockPos) bool {
+	block, ready := source.dimension.BlockAt(position)
+	return ready && core.IsFluid(block)
+}
+
 func (engine *Engine) advancePendingPlayers() {
 	sessions := make([]SessionID, 0, len(engine.sessions))
 	for id, session := range engine.sessions {

@@ -95,3 +95,12 @@ func putCollisionVec3(output []byte, value mgl32.Vec3) {
 func putCollisionFloat(output []byte, value float32) {
 	binary.LittleEndian.PutUint32(output, math.Float32bits(value))
 }
+
+// collisionCheckedCeil 是 collisionCheckedFloor 的向上取整对偶，取值范围守卫相同。
+func collisionCheckedCeil(value float32) int32 {
+	ceiling := math.Ceil(float64(value))
+	if math.IsNaN(ceiling) || math.IsInf(ceiling, 0) || ceiling < -1<<31 || ceiling > 1<<31-1 {
+		panic("physics: collision prism 坐标不可表示")
+	}
+	return int32(ceiling)
+}
