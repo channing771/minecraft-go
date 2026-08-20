@@ -125,6 +125,23 @@ func dueCount(q *Queue, now uint64) int {
 	return n
 }
 
+// requireNoExamineLimitHits 断言 q 从构造到现在，Advance 里那条探视上界守卫
+// （advanceExamineLimit）一次都没触发过。
+//
+// 索引堆下它**应当恒为 0**：每次弹出都消耗一格预算，探视数天然封在 budget+1
+// 以内。这条断言存在的意义不是「验证现在是 0」，而是给那条守卫一个**信号**——
+// 守卫本身在生产路径上只 break 不 panic（权威 tick 上硬失败比轻微吞吐下降糟得多），
+// 若没有人断言这个计数，它触发时现场只会表现为一声不响的吞吐损失。放在大场景
+// 测试里而不是只放在新写的小用例里，是为了让真实规模的推进路径也覆盖到。
+func requireNoExamineLimitHits(t *testing.T, q *Queue, name string) {
+	t.Helper()
+	if q.advanceExamineLimitHits != 0 {
+		t.Fatalf("%s：Advance 的探视上界守卫触发了 %d 次——它本应永不触发，"+
+			"说明 Queue 的双射不变量已被破坏（弹出的条目没有消耗预算）",
+			name, q.advanceExamineLimitHits)
+	}
+}
+
 // advanceToFixedPoint 反复推进直到不动点：某个 tick 既不产生任何变更、队列又
 // 为空。返回到达不动点后的下一个 tick 编号与消耗的 tick 数。
 //
@@ -362,6 +379,8 @@ func TestRescanFixedPoint_EquilibriumProducesNoChanges(t *testing.T) {
 			if diffs := diffWorlds(before, snapshot(w)); len(diffs) != 0 {
 				t.Fatalf("重扫后世界状态发生变化：%s", reportDiff(diffs))
 			}
+
+			requireNoExamineLimitHits(t, q, "形状 "+fx.name+" 的重扫不动点推进")
 		})
 	}
 }
@@ -426,7 +445,10 @@ func TestRescanMidFlight_ConvergesToSameEquilibrium(t *testing.T) {
 					t.Fatalf("在第 %d tick 清空队列并重扫后到达的平衡态与基线不一致（丢弃前队列 %d 项）：%s",
 						cut, pendingBefore, reportDiff(diffs))
 				}
+
+				requireNoExamineLimitHits(t, q, fmt.Sprintf("形状 %s 切点 %d 的重扫推进", fx.name, cut))
 			}
+			requireNoExamineLimitHits(t, baseQ, "形状 "+fx.name+" 的基线推进")
 
 			// 要求至少 3 个非零切点落在未平衡处：1 个太容易被形状的细微调整
 			// 蒙混过去，3 个意味着该形状的瞬态确实横跨了多个切点。
@@ -750,6 +772,8 @@ func TestConvergeRandomWaterBodiesReachFixedPoint(t *testing.T) {
 				if diffs := diffWorlds(before, snapshot(w)); len(diffs) != 0 {
 					t.Fatalf("seed=%d：重扫后世界状态发生变化：%s", seed, reportDiff(diffs))
 				}
+
+				requireNoExamineLimitHits(t, q, fmt.Sprintf("seed=%d budget=%d 的随机水体推进", seed, budget))
 			})
 		}
 	}
