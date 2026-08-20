@@ -3,8 +3,9 @@
 package render
 
 import (
+	"cmp"
 	"math"
-	"sort"
+	"slices"
 
 	"github.com/channing771/mornlea/internal/assets"
 	"github.com/channing771/mornlea/internal/core"
@@ -84,8 +85,10 @@ func (s *SectionScheduler) FlushUploads(center core.ChunkPos) {
 	for p := range s.pending {
 		s.keys = append(s.keys, p)
 	}
-	sort.Slice(s.keys, func(i, j int) bool {
-		return schedulerDistance2(s.keys[i], center) < schedulerDistance2(s.keys[j], center)
+	// 用 slices.SortFunc 而非 sort.Slice:后者要为 reflect swapper 逃逸一次闭包,
+	// 每帧一次堆分配;而 water pass 的边界写死了「预热后不产生每帧堆分配」。
+	slices.SortFunc(s.keys, func(a, b core.SectionPos) int {
+		return cmp.Compare(schedulerDistance2(a, center), schedulerDistance2(b, center))
 	})
 	for _, p := range s.keys {
 		quads := s.pending[p]

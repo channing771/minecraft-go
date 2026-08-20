@@ -181,45 +181,48 @@ type countingSink struct{ uploads int }
 func (s *countingSink) UploadSection(int32, int32, int32, []byte, []byte) { s.uploads++ }
 func (s *countingSink) DropSection(int32, int32, int32)                   {}
 
-// allocsPerFlush 测量「排队一个区段 + 冲刷一帧」的稳态分配次数。
-func allocsPerFlush(quads []mesh.Quad) float64 {
+// TestFlushUploadsDoesNotAllocatePerFrame 锁定 voxel-visual-presentation
+// MODIFIED 的「预热后 MUST 不产生每帧动态资源创建或堆分配」在 Go 上传侧的部分:
+// **冲刷一帧本身零分配**——含水区段的排队 + 冲刷,与只排队不冲刷,分配次数相同。
+//
+// 这里刻意不写「两种区段的分配次数相等」那种对照:分流代码对含水与不含水的
+// 区段走同一条语句,任何无条件的每帧分配(例如每帧新建水面缓冲)会在两侧同时
+// 出现、被对照法整个抵消掉,测试全绿而边界已破。用「减去排队开销后必须为零」
+// 才真正钉住这条 MUST。
+func TestFlushUploadsDoesNotAllocatePerFrame(t *testing.T) {
+	const count = 64
+	quads := make([]mesh.Quad, 0, count)
+	waters := 0
+	for i := 0; i < count; i++ {
+		if i%2 == 0 {
+			quads = append(quads, waterQuad(uint8(i%16), 5, 0))
+			waters++
+			continue
+		}
+		quads = append(quads, stoneQuad(uint8(i%16), 0, 0))
+	}
 	scheduler := render.NewSectionScheduler(&countingSink{}, 1<<20)
 	pos := core.SectionPos{}
-	run := func() {
+	queueOnly := func() { scheduler.QueueSection(pos, quads) }
+	queueAndFlush := func() {
 		scheduler.QueueSection(pos, quads)
 		scheduler.BeginFrame()
 		scheduler.FlushUploads(core.ChunkPos{})
 	}
 	// 预热:两条打包 scratch 都在首次冲刷时按最坏情况扩容到位。
-	run()
-	run()
-	return testing.AllocsPerRun(200, run)
-}
-
-// TestWaterPartitionAddsNoPerFrameAllocations 锁定 voxel-visual-presentation
-// MODIFIED 的「预热后 MUST 不产生每帧动态资源创建或堆分配」在 Go 上传侧的部分:
-// 含水与不含水的同规模区段,稳态分配次数必须**完全相同**。
-//
-// 这条断言选的是「相等」而不是「小于某个常数」:常数阈值会随无关改动漂移,
-// 而相等直接钉住「分流本身不额外分配」。若实现每帧新建水面缓冲(而不是复用
-// 跨帧 scratch),含水那一侧的读数会立刻高出来。
-func TestWaterPartitionAddsNoPerFrameAllocations(t *testing.T) {
-	const count = 64
-	opaqueOnly := make([]mesh.Quad, 0, count)
-	mixed := make([]mesh.Quad, 0, count)
-	for i := 0; i < count; i++ {
-		opaqueOnly = append(opaqueOnly, stoneQuad(uint8(i%16), 0, 0))
-		if i%2 == 0 {
-			mixed = append(mixed, waterQuad(uint8(i%16), 5, 0))
-		} else {
-			mixed = append(mixed, stoneQuad(uint8(i%16), 0, 0))
-		}
+	queueAndFlush()
+	queueAndFlush()
+	withFlush := testing.AllocsPerRun(200, queueAndFlush)
+	// 排队一次以清掉上一轮留下的 pending,再单测排队自身的开销。
+	queueAndFlush()
+	baseline := testing.AllocsPerRun(200, queueOnly)
+	if withFlush != baseline {
+		t.Fatalf("排队 + 冲刷分配 %.1f 次,只排队 %.1f 次:冲刷一帧必须零分配",
+			withFlush, baseline)
 	}
-	withoutWater := allocsPerFlush(opaqueOnly)
-	withWater := allocsPerFlush(mixed)
-	if withWater != withoutWater {
-		t.Fatalf("含水区段每帧分配 %.1f 次,不含水 %.1f 次:分流不得引入每帧分配",
-			withWater, withoutWater)
+	// 夹具前提守卫排在真实断言之后:真实失效不应先被误报成「夹具没有水」。
+	if waters == 0 {
+		t.Fatal("夹具里没有水面 quad,这条断言与水面阶段无关")
 	}
 }
 
