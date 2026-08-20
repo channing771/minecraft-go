@@ -3,6 +3,7 @@ package mesh_test
 import (
 	"testing"
 
+	"github.com/channing771/mornlea/internal/assets"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/mesh"
 	"github.com/channing771/mornlea/internal/world"
@@ -118,4 +119,22 @@ func filledSection(id world.BlockID) *world.Section {
 		}
 	}
 	return s
+}
+
+// TestConnectivityTreatsFluidAsTransparentOnLiveSectionData 守卫 assets.Opaque 对流体的排除。
+//
+// 这条路径**不经** mesh registry 快照：ComputeConnectivity 的洪水填充直接对活体
+// Section 的方块数据调用 Registry.Opaque（见 visibility.go），与「哪些方块被纳入
+// BuildRegistrySnapshot 的 ids 范围」完全无关。因此「流体不是不透明方块」必须由
+// assets.Opaque 自身恒久保证，删掉那处 !core.IsFluid(id) 会让整片水变成实心遮挡体，
+// 洪水填充一格都走不通、六个面两两不可达，本测试立即变红。
+//
+// 石头那半边是反向对照：它证明本测试的注册表并非对一切方块都返回「不遮挡」，
+// 否则「水不遮挡」这条断言会被恒真条件吸收而对任何变异都不可能失败。
+func TestConnectivityTreatsFluidAsTransparentOnLiveSectionData(t *testing.T) {
+	registry := assets.NewRegistry()
+	for id := core.WaterSourceID; id <= core.WaterLevel7ID; id++ {
+		allFacePairs(t, mesh.ComputeConnectivity(filledSection(id), registry), true)
+	}
+	allFacePairs(t, mesh.ComputeConnectivity(filledSection(core.StoneID), registry), false)
 }

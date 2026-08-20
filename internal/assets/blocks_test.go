@@ -22,10 +22,10 @@ func TestRegistryFaceVisible(t *testing.T) {
 		{"未知当前方块不出面", core.WaterLevel7ID + 1, core.AirID, false},
 		{"石头面向空气", core.StoneID, core.AirID, true},
 		{"石头面向未知方块关闭", core.StoneID, core.WaterLevel7ID + 1, false},
-		// 流体已注册但未纳入 mesh snapshot 的 ids 范围，与「未知方块」一样
-		// 应当不出面：id 侧和 adjacent 侧都要覆盖到。
-		{"流体当前方块不出面", core.WaterSourceID, core.AirID, false},
-		{"石头面向流体关闭", core.StoneID, core.WaterLevel1ID, false},
+		// 流体已纳入 mesh snapshot 的 ids 范围：水面对空气出面，水下地形
+		// 也要透过水出面。id 侧和 adjacent 侧都要覆盖到。
+		{"流体面向空气出面", core.WaterSourceID, core.AirID, true},
+		{"石头面向流体出面", core.StoneID, core.WaterLevel1ID, true},
 		{"石头被石头遮住", core.StoneID, core.StoneID, false},
 		{"石头面向玻璃保留", core.StoneID, core.GlassID, true},
 		{"玻璃被石头遮住", core.GlassID, core.StoneID, false},
@@ -61,10 +61,10 @@ func TestFluidBlocksAreTransparentAndDark(t *testing.T) {
 func TestRegistryMeshSnapshotMatchesRegistry(t *testing.T) {
 	registry := assets.NewRegistry()
 	snapshot := registry.MeshSnapshot()
-	if got, want := len(snapshot.Blocks), int(core.MossyCobblestoneID)+1; got != want {
+	if got, want := len(snapshot.Blocks), int(core.WaterLevel7ID)+1; got != want {
 		t.Fatalf("snapshot block 数=%d，想要 %d", got, want)
 	}
-	for id := core.AirID; id <= core.MossyCobblestoneID; id++ {
+	for id := core.AirID; id <= core.WaterLevel7ID; id++ {
 		block := snapshot.Blocks[int(id)]
 		if block.ID != id || block.Opaque != registry.Opaque(id) || block.Emission != registry.Emission(id) {
 			t.Fatalf("block %d snapshot=%+v", id, block)
@@ -74,7 +74,7 @@ func TestRegistryMeshSnapshotMatchesRegistry(t *testing.T) {
 				t.Fatalf("block %d face %d material=%d，想要 %d", id, face, got, want)
 			}
 		}
-		for adjacent := core.AirID; adjacent <= core.MossyCobblestoneID; adjacent++ {
+		for adjacent := core.AirID; adjacent <= core.WaterLevel7ID; adjacent++ {
 			if got, want := snapshot.FaceVisible(id, adjacent), registry.FaceVisible(id, adjacent); got != want {
 				t.Fatalf("FaceVisible(%d, %d)=%v，想要 %v", id, adjacent, got, want)
 			}
@@ -217,5 +217,54 @@ func TestLightBlockUsesIndependentLayerAndFixedEmission(t *testing.T) {
 		if got := registry.Emission(id); got != 0 {
 			t.Fatalf("非光源 %d Emission=%d，想要 0", id, got)
 		}
+	}
+}
+
+// TestFluidFaceVisibilityRules 穷举流体与全部已注册方块的两个方向组合，锁定三条
+// 流体出面规则。它们是 Rust 侧 `RegistryView::face_visible` 实际生效的规则来源：
+// Rust 只做位图查表，位图由 BuildRegistrySnapshot 用本函数烘焙，所以规则写在这里、
+// 只能在这里被验证。
+//
+//   - 同为流体的相邻面不可见（水体内部不产生面）；
+//   - 流体对空气可见（水面出几何）；
+//   - 流体紧邻不透明方块的面不可见（含「流体在实心方块下方」）；
+//   - 反方向：不透明方块朝向流体的面可见（水下地形不会消失）。
+func TestFluidFaceVisibilityRules(t *testing.T) {
+	registry := assets.NewRegistry()
+	// 计数用于最后的防空转守卫：三类结论各自都必须真的被走到过。
+	var fluidToFluid, fluidToAir, fluidToOpaque, opaqueToFluid int
+	for id := core.WaterSourceID; id <= core.WaterLevel7ID; id++ {
+		for adjacent := core.AirID; adjacent <= core.WaterLevel7ID; adjacent++ {
+			got := registry.FaceVisible(id, adjacent)
+			switch {
+			case core.IsFluid(adjacent):
+				if got {
+					t.Fatalf("流体 %d 朝向流体 %d 出面了：水体内部不得产生面", id, adjacent)
+				}
+				fluidToFluid++
+			case adjacent == core.AirID:
+				if !got {
+					t.Fatalf("流体 %d 朝向空气没有出面：水面画不出来", id)
+				}
+				fluidToAir++
+			case registry.Opaque(adjacent):
+				if got {
+					t.Fatalf("流体 %d 朝向不透明方块 %d 出面了：该面被完全遮住", id, adjacent)
+				}
+				fluidToOpaque++
+				// 反方向必须可见，否则水下地形整片消失。
+				if !registry.FaceVisible(adjacent, id) {
+					t.Fatalf("不透明方块 %d 朝向流体 %d 没有出面：水下地形会消失", adjacent, id)
+				}
+				opaqueToFluid++
+			}
+		}
+	}
+	// 防空转守卫排在真实故障断言之后：若某一类组合一次都没走到，上面的断言
+	// 对该类规则就是恒真的，此时红的应当是这里。
+	if fluidToFluid != 8*8 || fluidToAir != 8 || fluidToOpaque == 0 || opaqueToFluid == 0 {
+		t.Fatalf("覆盖不足：流体-流体=%d（想要 64）、流体-空气=%d（想要 8）、"+
+			"流体-不透明=%d、不透明-流体=%d（后两者均须大于 0）",
+			fluidToFluid, fluidToAir, fluidToOpaque, opaqueToFluid)
 	}
 }

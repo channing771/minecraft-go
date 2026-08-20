@@ -175,15 +175,19 @@ func TestEncodeNativeInputUsesExactLittleEndianLayout(t *testing.T) {
 	}
 }
 
-func TestEncodeNativeInputAcceptsTwentySevenArbitraryIDs(t *testing.T) {
-	blocks := make([]BlockProperties, 27)
-	for i := range 26 {
+// TestEncodeNativeInputAcceptsRegistryAtCapacity 断言编码器接受正好装满
+// nativeMaxRegistryEntries 的快照，且末位 ID 允许远离连续区间（不假设 ID 连续）。
+// 上限本身与 Rust 的 MAX_REGISTRY_ENTRIES 是否一致，由跨语言的 native parity
+// 测试兜底：那里真的把 35 条 assets 快照喂进 Rust，两侧对不上会被直接拒绝。
+func TestEncodeNativeInputAcceptsRegistryAtCapacity(t *testing.T) {
+	blocks := make([]BlockProperties, nativeMaxRegistryEntries)
+	for i := range nativeMaxRegistryEntries - 1 {
 		blocks[i].ID = world.BlockID(i)
 	}
-	blocks[26].ID = 40000
-	snapshot := RegistrySnapshot{Blocks: blocks, Visibility: make([]uint64, 27)}
+	blocks[nativeMaxRegistryEntries-1].ID = 40000
+	snapshot := RegistrySnapshot{Blocks: blocks, Visibility: make([]uint64, nativeMaxRegistryEntries)}
 	if _, err := encodeNativeInput(make([]byte, 300000), fullyLoadedAirNeighborhood(), snapshot); err != nil {
-		t.Fatalf("27-entry snapshot 被拒绝: %v", err)
+		t.Fatalf("装满 %d 条的 snapshot 被拒绝: %v", nativeMaxRegistryEntries, err)
 	}
 }
 
@@ -211,7 +215,7 @@ func TestEncodeNativeInputRejectsInvalidInputs(t *testing.T) {
 		Blocks:     []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID}},
 		Visibility: []uint64{0, 0},
 	}
-	tooMany := make([]BlockProperties, 28)
+	tooMany := make([]BlockProperties, nativeMaxRegistryEntries+1)
 	for i := range tooMany {
 		tooMany[i].ID = world.BlockID(i)
 	}
@@ -230,7 +234,7 @@ func TestEncodeNativeInputRejectsInvalidInputs(t *testing.T) {
 		{"missing barrier", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}}, Visibility: []uint64{0}}},
 		{"unsorted registry", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.BarrierID}, {ID: core.AirID}}, Visibility: []uint64{0, 0}}},
 		{"duplicate registry", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.AirID}, {ID: core.BarrierID}}, Visibility: []uint64{0, 0, 0}}},
-		{"too many registry entries", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: tooMany, Visibility: make([]uint64, 28)}},
+		{"too many registry entries", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: tooMany, Visibility: make([]uint64, nativeMaxRegistryEntries+1)}},
 		{"bad visibility size", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: valid.Blocks, Visibility: []uint64{0}}},
 		{"overbright emission", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, Emission: 16}}, Visibility: []uint64{0, 0}}},
 		{"short destination", make([]byte, 16), fullyLoadedAirNeighborhood(), valid},

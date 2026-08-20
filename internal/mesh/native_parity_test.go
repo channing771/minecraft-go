@@ -146,11 +146,11 @@ func TestNativeOracleParityDeterministicRandomizedCorpus(t *testing.T) {
 		// WaterLevel7ID+1 是真正越界、未注册的编号：覆盖「registry 里完全不
 		// 存在」这条路径。
 		core.WaterLevel7ID + 1,
-		// WaterSourceID 是已注册流体，但没有被纳入 assets.NewRegistry() 构建
-		// mesh snapshot 时使用的 ids 范围（仍止于 MossyCobblestoneID），所以
-		// 从 snapshot 的角度看同样是「缺条目」：覆盖「已注册但不在 snapshot
-		// 里」这条独立路径，与上面的 WaterLevel7ID+1 分开断言。
+		// 流体已纳入 assets.NewRegistry() 的 snapshot ids 范围，会真的产生
+		// 几何。放两个不同等级，让「流体—流体」「流体—固体」「流体—空气」
+		// 三类相邻都出现在随机语料里。
 		core.WaterSourceID,
+		core.WaterLevel5ID,
 	}
 
 	for caseIndex := range 64 {
@@ -234,5 +234,49 @@ func TestNativeOracleParityConcurrentIndependentScratch(t *testing.T) {
 	close(failures)
 	for failure := range failures {
 		t.Error(failure)
+	}
+}
+
+// TestNativeOracleParityWaterSurface 覆盖流体纳入 mesh registry 快照之后的 Go/Rust 一致性。
+//
+// 两侧的信息来源刻意不同：Go oracle 每格现算 assets.Registry.FaceVisible，Rust 读的是
+// BuildRegistrySnapshot 事先烘焙进 Visibility 位图、再经 encodeNativeInput 送过去的那一份。
+// 只要两者对「水面是否出面」给出不同答案，assertNativeOracleParity 就以 quad 数或 quad
+// 字节不一致变红。
+//
+// 夹具里水面之上单独放了一块石头，用来覆盖「流体紧邻不透明方块的面不可见」与其反方向
+// 「不透明方块朝向流体的面可见」两条规则。
+func TestNativeOracleParityWaterSurface(t *testing.T) {
+	// build 造一个下半部为 fill、上方 (3,8,3) 放一块石头的中心区段，邻居全实心。
+	// fill 传 AirID 时就是同一夹具的「无水对照组」。
+	build := func(fill world.BlockID) *world.Neighborhood {
+		center := world.NewSection()
+		for y := range 8 {
+			for z := range core.SectionSize {
+				for x := range core.SectionSize {
+					id := fill
+					// 掺入不同等级的流动水，让「流体—流体」相邻也进入判定，
+					// 而不是只覆盖单一编号。
+					if core.IsFluid(fill) && x >= core.SectionSize/2 {
+						id = core.WaterLevel3ID
+					}
+					center.Blocks.Set(x, y, z, id)
+				}
+			}
+		}
+		center.Blocks.Set(3, 8, 3, core.StoneID)
+		return solidNeighbors(center)
+	}
+
+	registry := assets.NewRegistry()
+	water := assertNativeOracleParity(t, build(core.WaterSourceID), registry)
+	air := assertNativeOracleParity(t, build(core.AirID), registry)
+
+	// 防空转守卫排在真实故障断言之后：一致性断言在「两侧都不给水出面」时同样成立，
+	// 所以必须另外证明水**确实**贡献了几何。把水换成空气后 quad 只会更少（水面顶面
+	// 全部消失，只剩那块孤立石头），若水版不严格多于空气版，说明水仍然画不出来。
+	if len(water) <= len(air) {
+		t.Fatalf("水版 quad=%d，空气对照组 quad=%d：水没有贡献任何几何，"+
+			"上面的一致性断言已退化为「两侧都不出面」的恒真", len(water), len(air))
 	}
 }
