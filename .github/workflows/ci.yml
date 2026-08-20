@@ -12,6 +12,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          # Go 的构建缓存不追踪 cgo `#include` 进来的 C 头文件，而 setup-go 默认只用
+          # go.sum 做缓存 key。engine ABI 升版只改头文件、不动 go.sum，于是缓存会命中
+          # 上一个 ABI 版本编译出的 internal/nativeabi 目标文件：运行时库报新版本、
+          # 编译进 Go 的常量仍是旧版本，表现为 ABI 版本不匹配，且因缓存命中有竞态而
+          # 时红时绿。把头文件纳入 key，ABI 变更即强制冷编译。
+          cache-dependency-path: |
+            go.sum
+            engine/include/mornlea_engine.h
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -69,6 +77,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          # Go 的构建缓存不追踪 cgo `#include` 进来的 C 头文件，而 setup-go 默认只用
+          # go.sum 做缓存 key。engine ABI 升版只改头文件、不动 go.sum，于是缓存会命中
+          # 上一个 ABI 版本编译出的 internal/nativeabi 目标文件：运行时库报新版本、
+          # 编译进 Go 的常量仍是旧版本，表现为 ABI 版本不匹配，且因缓存命中有竞态而
+          # 时红时绿。把头文件纳入 key，ABI 变更即强制冷编译。
+          cache-dependency-path: |
+            go.sum
+            engine/include/mornlea_engine.h
 
       - name: Rust 工具链身份
         run: |
