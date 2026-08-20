@@ -202,6 +202,103 @@ fn render_from(
     Some(image)
 }
 
+/// 与 [`render_from`] 相同，但额外指定全屏叠加参数（水下水色与伤害红边）。
+///
+/// 两者共用同一条 pass 与同一条管线，因此必须能在同一个入口里分别打开，
+/// 用例才能观察"同一条管线在两组 uniform 下给出两种明显不同的覆盖形状"。
+fn render_with_screen_tint(
+    water_tint: [f32; 4],
+    overlay_strength: f32,
+    sections: &[SectionData],
+) -> Option<Vec<u8>> {
+    let mut renderer = OffscreenRenderer::new(VIEW, VIEW).ok()?;
+    let colors = [
+        [200u8, 60, 60, 255],
+        [40u8, 90, 200, 160],
+        [60u8, 200, 60, 255],
+    ];
+    assert!(renderer.upload_atlas(colors.len() as u32, &atlas_bytes(&colors)));
+    let mut visible = Vec::new();
+    for section in sections {
+        assert!(renderer.upload_section(
+            section.pos,
+            &quad_bytes(&section.opaque),
+            &quad_bytes(&section.water),
+        ));
+        visible.push(section.pos);
+    }
+    let mut identity = [0.0f32; 16];
+    for i in 0..4 {
+        identity[i * 4 + i] = 1.0;
+    }
+    let frame = FrameInput {
+        view_proj: top_down_view_proj(),
+        view_proj_inv: identity,
+        pos: DEFAULT_CAMERA,
+        daylight: 1.0,
+        sun_direction: [0.0, 1.0, 0.0],
+        star_visibility: 0.0,
+        sky_color: [0.25, 0.5, 1.0, 1.0],
+        cloud_macro_x: 0,
+        cloud_local: 0.0,
+        visible,
+        water_tint,
+        overlay_strength,
+        ..Default::default()
+    };
+    assert_eq!(renderer.render_frame(&frame), FrameResult::Rendered);
+    let mut image = vec![0u8; (VIEW * VIEW * 4) as usize];
+    assert!(renderer.readback(&mut image));
+    Some(image)
+}
+
+/// Scenario「入水与出水切换视觉」在渲染侧的落点：水色叠加**全屏**生效、
+/// 不叠加时画面与本变更之前逐位一致，而共用同一条管线的伤害红边仍然只影响边缘。
+///
+/// 三幅对照刻意落在两组 uniform 明显分歧的地方——**画面中心是否改变**：
+/// 水色改中心，红边不改中心。若两者被写成同一种覆盖形状（例如水色也走边缘渐变，
+/// 或红边被改成全屏），三幅图的差值会同时成立/同时不成立，断言就成了空转。
+#[test]
+fn water_tint_covers_the_whole_screen_while_damage_stays_on_the_edges() {
+    let scene = vec![SectionData {
+        pos: (0, 0, 0),
+        opaque: vec![floor_cell(8, 8, MAT_RED)],
+        water: vec![],
+    }];
+    let Some(plain) = render_with_screen_tint([0.0; 4], 0.0, &scene) else {
+        return;
+    };
+    let tinted = render_with_screen_tint([0.12, 0.34, 0.52, 0.45], 0.0, &scene)
+        .expect("首个场景已成功建过渲染器");
+    let damaged = render_with_screen_tint([0.0; 4], 1.0, &scene).expect("首个场景已成功建过渲染器");
+
+    let center = (VIEW / 2, VIEW / 2);
+    if pixel(&plain, center.0, center.1) == pixel(&tinted, center.0, center.1) {
+        panic!("水色叠加没有改变画面中心：它必须是全屏覆盖，而不是边缘渐变");
+    }
+    if pixel(&plain, center.0, center.1) != pixel(&damaged, center.0, center.1) {
+        panic!("伤害红边改变了画面中心：共用管线之后它必须仍然只影响边缘");
+    }
+    // 全屏覆盖的正面证据：逐像素扫一遍，一个都不能与未叠加时相同。
+    let mut unchanged = 0usize;
+    for row in 0..VIEW {
+        for x in 0..VIEW {
+            if pixel(&plain, x, row) == pixel(&tinted, x, row) {
+                unchanged += 1;
+            }
+        }
+    }
+    assert_eq!(
+        unchanged, 0,
+        "水色叠加漏掉了 {unchanged} 个像素：全屏覆盖必须逐像素生效"
+    );
+    // 夹具承重守卫排在真实断言之后：红边本身必须真的画出来过，否则上面那条
+    // 「红边不改中心」只是在陈述「什么都没画」。
+    if image_diff(&plain, &damaged).is_none() {
+        panic!("夹具无效：伤害红边一个像素都没改，「只影响边缘」无从谈起");
+    }
+}
+
 /// 取一个像素，返回 `[r, g, b]`（回读是 BGRA）。
 fn pixel(image: &[u8], x: u32, row: u32) -> [u8; 3] {
     let i = ((row * VIEW + x) * 4) as usize;
@@ -489,6 +586,10 @@ fn sorting_granularity_is_the_section() {
 ///
 /// 任何人再加一个 pass 都要来改这份清单，从而被迫回答
 /// 「`voxel-visual-presentation` 只放宽了**恰好一个**额外半透明阶段」这件事。
+///
+/// "screen tint pass" 是历史上的 "damage overlay pass" 改名而来：水下水色与伤害
+/// 红边共用同一条 pass 与同一条全屏三角管线（uniform 的 edge 位区分两者），
+/// 因此 `fluid-presentation-survival` 的水下视觉没有消费这份额度。
 #[test]
 fn water_is_the_only_added_render_pass() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/render");
@@ -543,7 +644,7 @@ fn water_is_the_only_added_render_pass() {
         .collect();
     assert_eq!(
         labels,
-        vec!["terrain pass", "water pass", "damage overlay pass"],
+        vec!["terrain pass", "water pass", "screen tint pass"],
         "mod.rs 的 render pass 名单变了"
     );
 }

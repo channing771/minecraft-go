@@ -122,6 +122,11 @@ pub struct FrameInput {
     pub outline: Vec<u8>,
     /// 伤害红边强度(0 表示不绘制)。
     pub overlay_strength: f32,
+    /// 相机浸没时的全屏水色叠加 RGBA(A <= 0 表示不绘制)。
+    ///
+    /// 它与 `overlay_strength` 共用同一条全屏三角管线,只是 uniform 的 edge 位
+    /// 不同(水色全屏均匀,红边走边缘渐变),因此不新增任何绘制管线。
+    pub water_tint: [f32; 4],
     /// 名牌 billboard 顶点流;空表示本帧无名牌。
     pub name_tag_vertices: Vec<u8>,
     /// HUD 屏幕空间顶点流;空表示本帧无 HUD。
@@ -137,6 +142,7 @@ impl FrameInput {
             && self.drop_instances.is_empty()
             && self.outline.is_empty()
             && self.overlay_strength == 0.0
+            && self.water_tint[3] == 0.0
             && self.name_tag_vertices.is_empty()
             && self.hud_vertices.is_empty()
             && self.debug_vertices.is_empty()
@@ -473,9 +479,11 @@ pub struct OffscreenRenderer {
     outline_pass: EntityPass,
     /// 伤害红边 uniform(16B,strength@0)。
     overlay_uniform: wgpu::Buffer,
+    water_tint_uniform: wgpu::Buffer,
     /// 伤害红边全屏管线(无深度附件,alpha blend)。
     overlay_pipeline: wgpu::RenderPipeline,
     overlay_bind: wgpu::BindGroup,
+    water_tint_bind: wgpu::BindGroup,
 
     /// 名牌 billboard pass(双流:背景 + 字形)。
     name_tag_pass: QuadPass,
@@ -885,10 +893,15 @@ impl OffscreenRenderer {
             DEPTH_FORMAT,
         );
 
-        // 伤害红边:无深度附件的全屏三角管线,镜像 Go damage_overlay.go。
-        let overlay_uniform = make_buffer(16, BU::UNIFORM | BU::COPY_DST, "damage overlay uniform");
+        // 全屏叠加:无深度附件的全屏三角管线,镜像 Go damage_overlay.go。
+        // 伤害红边与水下水色共用这一条管线与这一份 layout,各自持有一块 32 字节
+        // uniform(vec4 颜色 + edge 位 + 三个 pad):同一帧里两者可能都要画,
+        // 而一次提交内对同一块 buffer 的两次 write_buffer 只有最后一次生效,
+        // 所以必须是两块 buffer,不是两条管线。
+        let overlay_uniform = make_buffer(32, BU::UNIFORM | BU::COPY_DST, "screen tint uniform");
+        let water_tint_uniform = make_buffer(32, BU::UNIFORM | BU::COPY_DST, "water tint uniform");
         let overlay_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("damage overlay layout"),
+            label: Some("screen tint layout"),
             entries: &[buffer_layout_entry(
                 0,
                 wgpu::ShaderStages::FRAGMENT,
@@ -941,6 +954,14 @@ impl OffscreenRenderer {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: overlay_uniform.as_entire_binding(),
+            }],
+        });
+        let water_tint_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("water tint resources"),
+            layout: &overlay_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: water_tint_uniform.as_entire_binding(),
             }],
         });
 
@@ -1084,8 +1105,10 @@ impl OffscreenRenderer {
             hud_pass,
             debug_pass,
             overlay_uniform,
+            water_tint_uniform,
             overlay_pipeline,
             overlay_bind,
+            water_tint_bind,
             glyph_atlas,
             glyph_view,
             hud_atlas: None,
@@ -1434,6 +1457,7 @@ impl OffscreenRenderer {
             || !self.drop_pass.instances_valid(&input.drop_instances)
             || !self.outline_pass.instances_valid(&input.outline)
             || input.overlay_strength.is_nan()
+            || input.water_tint.iter().any(|value| value.is_nan())
         {
             return FrameResult::Invalid;
         }
@@ -1761,15 +1785,42 @@ impl OffscreenRenderer {
                 glyphs,
             );
         }
-        // 伤害红边(Go 顺序:名牌之后、HUD 之前);strength 钳制到 1,
-        // 非正值跳过(镜像 Go)。
-        if input.overlay_strength > 0.0 {
-            let strength = input.overlay_strength.min(1.0);
-            let mut uniform = [0u8; 16];
-            uniform[0..4].copy_from_slice(&strength.to_le_bytes());
-            self.queue.write_buffer(&self.overlay_uniform, 0, &uniform);
+        // 全屏叠加(Go 顺序:名牌之后、HUD 之前):水下水色与伤害红边**共用一条
+        // render pass 与一条管线**,只是各自的 uniform 不同。
+        //
+        // 两者合并成一个 pass 是有意的:src/render 下的 render pass 起始调用点
+        // 总数是 water_tests 的一条硬门禁(voxel-visual-presentation 只放宽了恰好
+        // 一个额外的半透明阶段),水下视觉不该消费那份额度。
+        //
+        // 绘制次序是「先水色、后红边」:水色是环境效果,必须垫在受伤反馈下面,
+        // 否则红边会被水色冲淡。
+        let water_visible = input.water_tint[3] > 0.0;
+        let damage_visible = input.overlay_strength > 0.0;
+        if water_visible || damage_visible {
+            if water_visible {
+                let mut uniform = [0u8; 32];
+                for (index, value) in input.water_tint.iter().enumerate() {
+                    let clamped = value.clamp(0.0, 1.0);
+                    uniform[index * 4..index * 4 + 4].copy_from_slice(&clamped.to_le_bytes());
+                }
+                // edge = 0:全屏均匀覆盖,不走边缘渐变。
+                uniform[16..20].copy_from_slice(&0.0f32.to_le_bytes());
+                self.queue
+                    .write_buffer(&self.water_tint_uniform, 0, &uniform);
+            }
+            if damage_visible {
+                // 固定红色、0.30 上限与 edge = 1 的边缘渐变:与本文件历史行为逐位
+                // 一致,只是颜色与 edge 位从 shader 常量搬进了 uniform。
+                // strength 钳制到 1(镜像 Go)。
+                let strength = input.overlay_strength.min(1.0);
+                let mut uniform = [0u8; 32];
+                uniform[0..4].copy_from_slice(&0.65f32.to_le_bytes());
+                uniform[12..16].copy_from_slice(&(0.30f32 * strength).to_le_bytes());
+                uniform[16..20].copy_from_slice(&1.0f32.to_le_bytes());
+                self.queue.write_buffer(&self.overlay_uniform, 0, &uniform);
+            }
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("damage overlay pass"),
+                label: Some("screen tint pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &frame_view,
                     depth_slice: None,
@@ -1785,8 +1836,14 @@ impl OffscreenRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.overlay_pipeline);
-            pass.set_bind_group(0, &self.overlay_bind, &[]);
-            pass.draw(0..3, 0..1);
+            if water_visible {
+                pass.set_bind_group(0, &self.water_tint_bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            if damage_visible {
+                pass.set_bind_group(0, &self.overlay_bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
         }
         // HUD 与调试面板(Go 顺序:overlay 之后,面板最后)。
         if let Some((uniform, quads, glyphs)) = hud_segment {

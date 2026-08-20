@@ -3,7 +3,9 @@
 package client
 
 import (
+	"encoding/binary"
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -123,5 +125,47 @@ func TestEncodeRenderFrameV2Segments(t *testing.T) {
 	plain := EncodeRenderFrame(RenderFrame{})
 	if plain[188] != 0 || len(plain) != renderFrameHeaderBytes {
 		t.Fatalf("纯地形帧 layout=%d len=%d", plain[188], len(plain))
+	}
+}
+
+// TestEncodeRenderFrameWaterTintSegment 锁定 v21 水下视觉的帧编码：
+// alpha 为 0 时整段缺席且帧与本变更之前逐位一致（纯地形帧仍是 layout 0），
+// alpha 大于 0 时追加 tag 8 的 16 字节 RGBA 段。
+//
+// 两侧对照落在**帧长度与 layout 版本**上：如果水色被写成"总是追加一段全零"，
+// 关闭态的帧字节就会变，纯地形帧那条断言当场变红。
+func TestEncodeRenderFrameWaterTintSegment(t *testing.T) {
+	dry := EncodeRenderFrame(RenderFrame{})
+	if dry[188] != 0 || len(dry) != renderFrameHeaderBytes {
+		t.Fatalf("不叠加水色时 layout=%d len=%d，想要纯地形帧", dry[188], len(dry))
+	}
+	// alpha 为 0 的水色同样不得触发 layout 2：RGB 有值但完全透明等于不叠加。
+	transparent := EncodeRenderFrame(RenderFrame{WaterTint: [4]float32{0.1, 0.2, 0.3, 0}})
+	if len(transparent) != len(dry) {
+		t.Fatalf("alpha=0 的水色改变了帧长度：%d vs %d", len(transparent), len(dry))
+	}
+
+	tint := [4]float32{0.12, 0.34, 0.52, 0.45}
+	out := EncodeRenderFrame(RenderFrame{WaterTint: tint})
+	if out[188] != 2 {
+		t.Fatalf("叠加水色时 layout=%d，想要 2", out[188])
+	}
+	if len(out) != renderFrameHeaderBytes+8+16 {
+		t.Fatalf("帧长度=%d，想要头部 + 一个 8 字节 TLV 头 + 16 字节负载", len(out))
+	}
+	cursor := renderFrameHeaderBytes
+	readU32 := func() uint32 {
+		value := binary.LittleEndian.Uint32(out[cursor:])
+		cursor += 4
+		return value
+	}
+	if tag, length := readU32(), readU32(); tag != frameTagWater || length != 16 {
+		t.Fatalf("水色段 tag=%d len=%d，想要 %d/16", tag, length, frameTagWater)
+	}
+	for index, want := range tint {
+		got := math.Float32frombits(binary.LittleEndian.Uint32(out[cursor+index*4:]))
+		if got != want {
+			t.Fatalf("水色分量 %d = %v，想要 %v", index, got, want)
+		}
 	}
 }

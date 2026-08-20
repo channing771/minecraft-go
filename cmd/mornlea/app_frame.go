@@ -17,6 +17,10 @@ import (
 	"github.com/channing771/mornlea/internal/render/hud"
 )
 
+// baseVisibleRadius 是相机不在流体时的可见 section 搜索半径（区段），
+// 与本变更之前硬编码在 VisibleSectionsInto 调用处的 32 是同一个值。
+const baseVisibleRadius = 32
+
 func (a *application) updateCenter() {
 	center := cameraChunk(a.camera.Pos)
 	if center == a.center {
@@ -169,10 +173,16 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	viewProj := a.camera.ViewProj()
 	viewProjInv := viewProj.Inv()
 
+	// 水下视觉:判定复用 Predictor 最近一次 physics.SubmersionFlags 算出的那一个
+	// 眼睛浸没标志——与服务端氧气结算同源,不另起一套(spec fluid-presentation
+	// 「视觉与溺水判定一致」)。
+	underwater := render.UnderwaterViewFor(a.predictor.EyeInFluid(), baseVisibleRadius)
+
 	// 可见列表:BFS 连通性 + frustum,与旧 Go 渲染器同一算法与顺序。
+	// 半径在水下被压低,是"压低远处可见度"的落点。
 	a.visibleSections = mesh.VisibleSectionsInto(
 		a.visibleSections[:0], &a.visibleScratch,
-		cameraSectionPos(a.camera.Pos), 32,
+		cameraSectionPos(a.camera.Pos), underwater.VisibleRadius,
 		core.FrustumFrom(viewProj), a.scheduler.Connectivity,
 	)
 	a.lastFrameStats = a.scheduler.FrameStats(a.visibleSections)
@@ -243,6 +253,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		DropInstances:    a.dropStream,
 		OutlineInstances: a.outlineStream,
 		OverlayStrength:  a.damageStrength,
+		WaterTint:        underwater.Tint,
 		NameTagSegment:   nameTagSegment,
 		HUDSegment:       hudSegment,
 		DebugSegment:     debugSegment,

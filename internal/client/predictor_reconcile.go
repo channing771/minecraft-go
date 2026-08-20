@@ -49,6 +49,9 @@ func (p *Predictor) ApplyPlayerState(
 	oldCorrectionRemaining := p.correctionRemaining
 	p.current = authority
 	p.previous = authority
+	// 权威位置到手后立刻按它重算一次浸没标志：历史为空（刚同步、或挂起后清空）
+	// 时下面的重放循环一步都不会跑，水下视觉不能因此停在上一次预测位置的旧标志上。
+	_, p.eyeInFluid = physics.SubmersionFlags(authority.Position, source)
 	p.health = message.Health
 	p.oxygen = message.Oxygen
 	if p.suspended {
@@ -61,7 +64,7 @@ func (p *Predictor) ApplyPlayerState(
 		p.dropAcknowledged(message.LastInputSequence)
 		for _, entry := range p.history {
 			p.previous = p.current
-			p.current = stepWithSubmersion(p.current, entry.input, source)
+			p.current = p.stepWithSubmersion(p.current, entry.input, source)
 		}
 	}
 	p.lastServerTick = message.ServerTick

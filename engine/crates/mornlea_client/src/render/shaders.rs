@@ -15,7 +15,7 @@ pub const HIZ_BUILD: &str = include_str!("../../shaders/hiz_build.wgsl");
 pub const HIZ_COPY: &str = include_str!("../../shaders/hiz_copy.wgsl");
 /// 实体 pass(avatar 与掉落物共用)。
 pub const AVATAR: &str = include_str!("../../shaders/avatar.wgsl");
-/// 伤害红边全屏 pass。
+/// 全屏叠加 pass：伤害红边与水下水色共用（uniform 的 edge 位区分两者）。
 pub const DAMAGE_OVERLAY: &str = include_str!("../../shaders/damage_overlay.wgsl");
 /// 名牌 billboard pass。
 pub const NAME_TAG: &str = include_str!("../../shaders/name_tag.wgsl");

@@ -84,6 +84,10 @@ type RenderFrame struct {
 	OutlineInstances []byte
 	// OverlayStrength 是伤害红边强度(>0 才绘制)。
 	OverlayStrength float32
+	// WaterTint 是相机浸没时的全屏水色叠加(RGBA)。A <= 0 表示本帧不叠加,
+	// 帧字节与本变更之前逐位一致。它与 OverlayStrength 共用同一条全屏三角
+	// 管线,只是 uniform 不同——不新增任何绘制管线。
+	WaterTint [4]float32
 	// NameTagSegment/HUDSegment/DebugSegment 是各文本 pass 的
 	// [uniform][aCount][bCount][a][b] 段字节(EncodeQuadSegment 产物)。
 	NameTagSegment []byte
@@ -206,12 +210,15 @@ const (
 	frameTagNameTag = 5
 	frameTagHUD     = 6
 	frameTagDebug   = 7
+	// frameTagWater 是水下水色叠加段(4 个 f32:RGBA),client ABI v5 内的追加
+	// TLV tag,不升 ABI 版本。
+	frameTagWater = 8
 )
 
 // hasPassSegments 报告本帧是否携带任一 pass 段(决定 layout 版本)。
 func (frame RenderFrame) hasPassSegments() bool {
 	return len(frame.AvatarInstances) > 0 || len(frame.DropInstances) > 0 ||
-		len(frame.OutlineInstances) > 0 || frame.OverlayStrength > 0 ||
+		len(frame.OutlineInstances) > 0 || frame.OverlayStrength > 0 || frame.WaterTint[3] > 0 ||
 		len(frame.NameTagSegment) > 0 || len(frame.HUDSegment) > 0 ||
 		len(frame.DebugSegment) > 0
 }
@@ -269,6 +276,13 @@ func EncodeRenderFrame(frame RenderFrame) []byte {
 	appendTLV(frameTagNameTag, frame.NameTagSegment)
 	appendTLV(frameTagHUD, frame.HUDSegment)
 	appendTLV(frameTagDebug, frame.DebugSegment)
+	if frame.WaterTint[3] > 0 {
+		var tint [16]byte
+		for index, value := range frame.WaterTint {
+			binary.LittleEndian.PutUint32(tint[index*4:], math.Float32bits(value))
+		}
+		appendTLV(frameTagWater, tint[:])
+	}
 	return out
 }
 

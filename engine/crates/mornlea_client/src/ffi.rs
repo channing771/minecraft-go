@@ -572,6 +572,8 @@ const FRAME_TAG_OVERLAY: u32 = 4;
 const FRAME_TAG_NAME_TAG: u32 = 5;
 const FRAME_TAG_HUD: u32 = 6;
 const FRAME_TAG_DEBUG: u32 = 7;
+/// 水下水色叠加段(4 个 f32:RGBA)。client ABI v5 内的追加 tag,不升 ABI 版本。
+const FRAME_TAG_WATER: u32 = 8;
 
 /// 解析 render_frame 输入;违约返回 None。
 ///
@@ -615,12 +617,13 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
     let mut drop_instances = Vec::new();
     let mut outline = Vec::new();
     let mut overlay_strength = 0.0f32;
+    let mut water_tint = [0.0f32; 4];
     let mut name_tag_vertices = Vec::new();
     let mut hud_vertices = Vec::new();
     let mut debug_vertices = Vec::new();
     if layout == 2 {
         let mut cursor = sections_end;
-        let mut seen = [false; 8];
+        let mut seen = [false; 9];
         while cursor < bytes.len() {
             if bytes.len() - cursor < 8 {
                 return None;
@@ -634,7 +637,7 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
             let payload = &bytes[cursor..cursor + length];
             cursor += length;
             let index = tag as usize;
-            if !(1..=7).contains(&index) || seen[index] {
+            if !(1..=8).contains(&index) || seen[index] {
                 return None;
             }
             seen[index] = true;
@@ -651,6 +654,16 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
                 FRAME_TAG_NAME_TAG => name_tag_vertices = payload.to_vec(),
                 FRAME_TAG_HUD => hud_vertices = payload.to_vec(),
                 FRAME_TAG_DEBUG => debug_vertices = payload.to_vec(),
+                FRAME_TAG_WATER => {
+                    if length != 16 {
+                        return None;
+                    }
+                    for (index, slot) in water_tint.iter_mut().enumerate() {
+                        *slot = f32::from_le_bytes(
+                            payload[index * 4..index * 4 + 4].try_into().unwrap(),
+                        );
+                    }
+                }
                 _ => return None,
             }
         }
@@ -670,6 +683,7 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
         drop_instances,
         outline,
         overlay_strength,
+        water_tint,
         name_tag_vertices,
         hud_vertices,
         debug_vertices,

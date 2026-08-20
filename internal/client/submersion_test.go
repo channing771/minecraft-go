@@ -87,3 +87,56 @@ func TestPredictionUsesFluidPhysicsInsideWater(t *testing.T) {
 		t.Fatalf("空气中悬空按住上升键位移=%f，想要下落", air)
 	}
 }
+
+// TestUnderwaterVisualUsesTheSameEyeFlagAsDrowning 覆盖 spec Scenario
+// 「视觉与溺水判定一致」：驱动水下视觉的标志，就是驱动水中物理、并与服务端氧气
+// 结算同源的那一个眼睛浸没标志，不存在第二套判定。
+//
+// 对照落在两个规则明显分歧的世界上——满水与纯空气：一侧必须为真、另一侧必须为假。
+// 只在一侧断言会让"永远返回 true"这种变异全绿。逐 tick 与共享判定函数的独立
+// 重算比对，则把"标志被缓存成陈旧值"也一并挡住。
+func TestUnderwaterVisualUsesTheSameEyeFlagAsDrowning(t *testing.T) {
+	advance := func(source physics.WorldSource) *Predictor {
+		t.Helper()
+		p := NewPredictor()
+		if err := p.Begin(network.PlayerState{
+			ServerTick: 7,
+			Dimension:  core.Overworld,
+			Position:   mgl32.Vec3{0.5, 4, 0.5},
+			Ready:      true,
+		}); err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		sequence := uint64(0)
+		for range 5 {
+			if err := p.Advance(physics.FixedDelta, Control{}, source,
+				func() uint64 { sequence++; return sequence },
+				func(network.PlayerInput) error { return nil },
+			); err != nil {
+				t.Fatalf("Advance: %v", err)
+			}
+			// 每一步之后都比对：预测器报出的标志必须与用同一份镜像、同一个共享
+			// 判定函数在**当前**位置独立重算的结果逐位相同。
+			_, want := physics.SubmersionFlags(p.current.Position, source)
+			if got := p.EyeInFluid(); got != want {
+				t.Fatalf("位置 %v：EyeInFluid=%v，共享判定给出 %v",
+					p.current.Position, got, want)
+			}
+		}
+		return p
+	}
+
+	water := advance(MirrorCollisionSource{Mirror: waterColumnMirror(t), Dimension: core.Overworld})
+	air := advance(loadedAirSource{})
+	if !water.EyeInFluid() {
+		t.Fatal("满水世界里 EyeInFluid=false：水下视觉不会被触发")
+	}
+	if air.EyeInFluid() {
+		t.Fatal("纯空气世界里 EyeInFluid=true：水下视觉会凭空触发")
+	}
+
+	// 未就绪的预测器没有相机位置可谈，必须恒为假，否则登录前会闪一帧水色。
+	if NewPredictor().EyeInFluid() {
+		t.Fatal("未就绪的预测器报告 EyeInFluid=true")
+	}
+}
