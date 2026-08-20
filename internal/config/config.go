@@ -832,6 +832,13 @@ func Fields() []Field {
 		{Group: "physics", Name: "jumpSpeed", Min: 1, Max: 30, Step: 0.1},
 		{Group: "physics", Name: "gravity", Min: 1, Max: 100, Step: 1},
 		{Group: "physics", Name: "terminalFallSpeed", Min: 1, Max: 200, Step: 1},
+		// 以下四项只在身体浸没时生效。区间不是安全约束，只是合理操作区间：
+		// fluidHorizontalDrag 上界钳到 1，因为 >1 会把水中水平速度放大到超过
+		// 陆地行走速度，直接违反 fluid-survival 的「水中水平移动更慢」。
+		{Group: "physics", Name: "fluidGravity", Min: 0, Max: 100, Step: 0.1},
+		{Group: "physics", Name: "fluidSinkSpeed", Min: 0, Max: 200, Step: 0.1},
+		{Group: "physics", Name: "fluidAscendSpeed", Min: 0, Max: 30, Step: 0.1},
+		{Group: "physics", Name: "fluidHorizontalDrag", Min: 0, Max: 1, Step: 0.05},
 
 		{Group: "sim", Name: "interactionReach", Min: 1, Max: 32, Step: 0.5},
 		{Group: "sim", Name: "regenDelayTicks", Min: 0, Max: 2000, Step: 1},

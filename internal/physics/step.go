@@ -11,10 +11,17 @@ import (
 )
 
 const (
-	stepHeaderBytes  = 128
+	// stepHeaderBytes 是 StepInput header v2 的长度：v1 的 128 字节已被排满，
+	// 浸没标志与四个水中 tunable 需要新的字节，故扩到 160（仍是 32 的整数倍）。
+	// 这是同一个 engine ABI v5 内的 header 扩展，不再升 ABI 版本。
+	stepHeaderBytes  = 160
 	stepOutputBytes  = 32
 	stepRegularCells = 135
 	stepRegularBytes = stepHeaderBytes + stepRegularCells*collisionCellBytes
+
+	// stepLayoutVersion 是 StepInput header 的布局版本。v1 → v2 的唯一差异是
+	// 追加浸没标志与四个水中 tunable；Rust 侧只接受当前版本，混装立即报错。
+	stepLayoutVersion = 2
 )
 
 // Step 推进一个固定步：校验与编码在 Go，积分 + 碰撞解析 + 速度裁剪在 Rust engine。
@@ -71,6 +78,9 @@ func stepSweepBounds(state State, input Input, tunables Tunables, yawSin, yawCos
 			horizontal = horizontal.Normalize().Mul(tunables.WalkSpeed)
 		}
 	}
+	if input.BodyInFluid {
+		horizontal = horizontal.Mul(tunables.FluidHorizontalDrag)
+	}
 	vx, vz := state.Velocity.X(), state.Velocity.Z()
 	tx, tz := horizontal.X(), horizontal.Z()
 	dt := FixedDeltaSeconds
@@ -80,16 +90,26 @@ func stepSweepBounds(state State, input Input, tunables Tunables, yawSin, yawCos
 	minimum[2] = min3(0, vz, tz) * dt
 	maximum[2] = max3(0, vz, tz) * dt
 	vy := state.Velocity.Y()
-	if state.OnGround && input.Jump {
+	gravity, terminal := tunables.Gravity, tunables.TerminalFallSpeed
+	if input.BodyInFluid {
+		gravity, terminal = tunables.FluidGravity, tunables.FluidSinkSpeed
+	}
+	switch {
+	case input.BodyInFluid && input.Jump:
+		// 水中上升是「每 tick 直接赋值」的持续上浮，不看 OnGround，也不是一次
+		// 性冲量，因此位移恒为 FluidAscendSpeed*dt。
+		minimum[1] = min(0, tunables.FluidAscendSpeed*dt)
+		maximum[1] = max(0, tunables.FluidAscendSpeed*dt)
+	case state.OnGround && input.Jump:
 		maximum[1] = tunables.JumpSpeed * dt
-	} else {
-		fallen := vy - tunables.Gravity*dt
-		if fallen >= -tunables.TerminalFallSpeed {
+	default:
+		fallen := vy - gravity*dt
+		if fallen >= -terminal {
 			minimum[1] = min3(0, vy, fallen) * dt
 			maximum[1] = max3(0, vy, fallen) * dt
 		} else {
-			minimum[1] = min3(0, vy, -tunables.TerminalFallSpeed) * dt
-			maximum[1] = max3(0, vy, -tunables.TerminalFallSpeed) * dt
+			minimum[1] = min3(0, vy, -terminal) * dt
+			maximum[1] = max3(0, vy, -terminal) * dt
 		}
 	}
 	return minimum, maximum
@@ -113,7 +133,7 @@ func encodeStepInput(
 	}
 	clear(bytes)
 	copy(bytes[:4], "MGP1")
-	binary.LittleEndian.PutUint32(bytes[4:8], 1)
+	binary.LittleEndian.PutUint32(bytes[4:8], stepLayoutVersion)
 	putCollisionVec3(bytes[8:20], state.Position)
 	putCollisionVec3(bytes[20:32], state.Velocity)
 	if state.OnGround {
@@ -145,6 +165,18 @@ func encodeStepInput(
 	}
 	for index, value := range prism.dimensions {
 		binary.LittleEndian.PutUint32(bytes[116+index*4:120+index*4], value)
+	}
+	// v2 新增区：128 是身体浸没标志，129..132 保留为 0；132..148 是四个水中
+	// tunable；148..160 同样保留为 0。保留字节由上面的 clear 置零，Rust 侧
+	// 逐字节要求为 0，未来扩字段时会立刻暴露版本不匹配。
+	if input.BodyInFluid {
+		bytes[128] = 1
+	}
+	for index, value := range [...]float32{
+		tunables.FluidGravity, tunables.FluidSinkSpeed,
+		tunables.FluidAscendSpeed, tunables.FluidHorizontalDrag,
+	} {
+		putCollisionFloat(bytes[132+index*4:136+index*4], value)
 	}
 
 	offset := stepHeaderBytes

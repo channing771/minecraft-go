@@ -23,7 +23,8 @@ func TestTunableConstantsAreNotExported(t *testing.T) {
 		filepath.Join("internal", "physics"): {
 			"EyeHeight", "StepHeight", "WalkSpeed", "GroundAcceleration",
 			"GroundDeceleration", "AirAcceleration", "JumpSpeed", "Gravity",
-			"TerminalFallSpeed",
+			"TerminalFallSpeed", "FluidGravity", "FluidSinkSpeed",
+			"FluidAscendSpeed", "FluidHorizontalDrag",
 		},
 		filepath.Join("internal", "sim"): {
 			"RegenDelayTicks", "RegenIntervalTicks", "DropPickupDelayTicks",

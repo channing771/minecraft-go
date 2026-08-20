@@ -29,6 +29,21 @@ const (
 	defaultJumpSpeed          = float32(8.4)
 	defaultGravity            = float32(32)
 	defaultTerminalFallSpeed  = float32(78.4)
+
+	// 以下四项是身体浸没时替换掉空气常量的水中积分参数。取值理由：
+	//   - defaultFluidGravity 取空气重力 32 的 1/5：水的浮力抵消掉大部分重力，
+	//     玩家仍会下沉但加速度明显更小。
+	//   - defaultFluidSinkSpeed 是水中垂直终端速度，约为空气 78.4 的 1/26：
+	//     入水后不到半秒即收敛，观感是「缓慢下沉」而不是继续加速。
+	//   - defaultFluidAscendSpeed 取得比下沉终端速度略大，保证持续按住上升键
+	//     一定能净上升并浮出水面，而不是与下沉打平停在水中。
+	//   - defaultFluidHorizontalDrag 是每 tick 乘在水平速度上的阻力系数。0.8
+	//     配合地面加速度得到约 3.44 m/s 的稳态（空气中是 4.3），配合空中加速度
+	//     得到约 1.6 m/s；两者都严格低于陆地行走速度，且仍留有可操控的机动性。
+	defaultFluidGravity        = float32(6.4)
+	defaultFluidSinkSpeed      = float32(3)
+	defaultFluidAscendSpeed    = float32(4)
+	defaultFluidHorizontalDrag = float32(0.8)
 )
 
 // State 是玩家在固定步开始时的物理状态；位置表示脚底中心。
@@ -52,12 +67,24 @@ func validStateComponent(value float32) bool {
 	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
 }
 
-// Input 是单个固定步的玩家控制意图。
+// Input 是单个固定步的玩家控制意图，外加本步开始时的两个浸没标志。
+//
+// 浸没标志不是「意图」，但它与意图同属「一步的外部输入」：流体没有碰撞盒，
+// prism 只携带碰撞几何，Rust 因此无法自行区分水与空气。由调用方用
+// SubmersionFlags 从各自的方块镜像算好传入，比在 prism 里塞一份逐格流体数组
+// 便宜得多，也不会让 prism 的语义从「碰撞几何」滑向「通用方块视图」
+// （见 change fluid-presentation-survival 的 design D4）。
 type Input struct {
 	MoveX int8
 	MoveZ int8
 	Jump  bool
 	Yaw   float32
+	// BodyInFluid 为真时本步走水中积分：重力衰减、垂直终端速度压低、
+	// 水平速度乘阻力、Jump 变为持续上浮。
+	BodyInFluid bool
+	// EyeInFluid 只供调用方（水下视觉与氧气结算）使用，不影响积分，
+	// 因此刻意不进入 StepInput 编码——ABI 里不放 Rust 永远不读的字节。
+	EyeInFluid bool
 }
 
 // CollisionBoxSet 是一个方块局部坐标内的碰撞体集合。
