@@ -1,6 +1,7 @@
 package fluid
 
 import (
+	"math"
 	"sort"
 
 	"github.com/channing771/mornlea/internal/core"
@@ -86,16 +87,44 @@ func lessPos(a, b core.BlockPos) bool {
 //   - 堆顶未到期就立刻停（O(1)），一项都不看；
 //   - 到期就弹出，代价 O(log len(order))，取够 budget 项即停。
 //
-// 于是单 tick 触及的**项数**为 budget + 1（最后那一次未到期的堆顶探视）加上
-// 本 tick 顺带丢弃的过时条目数，与 len(pending) 无关；单 tick 的**时间**正比于
-// 这个项数乘以 log len(order)。
+// 于是单 tick 触及的**项数**由 advanceExamineLimit 无条件封顶（2*budget），
+// 与 len(pending) 无关；单 tick 的**时间**正比于这个项数乘以 log len(order)。
 //
-// 过时条目的上界：它只在 Enqueue 把一个**已在队列中**的位置的 dueTick **提前**
-// 时产生（Enqueue 对不提前的重复入队直接早返回，不推堆）。生产路径上 now 单调
-// 不减、delay 取自同一 tick 的 tunable 快照，因此已有条目的 due 恒不大于新算出
-// 的 due，Enqueue 永远走早返回分支，过时条目数恒为 0。即便将来出现提前入队，
-// 过时条目总数也被「提前入队次数」摊还压住：每一次提前入队至多制造一条过时
-// 条目，每条至多被弹出丢弃一次。
+// # 为什么探视上界必须是无条件的
+//
+// 过时条目只在 Enqueue 把一个**已在队列中**的位置的 dueTick **提前**时产生
+// （Enqueue 对不提前的重复入队直接早返回，不推堆）。曾经有一版注释把有界性挂在
+// 「生产路径上 delay 取自同一 tick 的快照，故提前入队不会发生」这条前提上——
+// **那条前提是错的，而且没有任何东西强制它**：真正需要的是「delay 跨 tick 不
+// 下调」，而 sim.FluidFlowDelayTicks 是 internal/config 里的实时可编辑项
+// （Min 0 / Max 2000），调试面板运行中改小它就会让整张队列重新入队、把旧条目
+// 全部变成过时条目。实测：delay=100 排入 5 万项后下调到 0，堆里积下 5 万条过时
+// 条目；由于过时条目走 continue 不消耗预算，processed<budget 这个条件**拦不住
+// 它们**，单 tick 会一口气弹掉 5 万条。
+//
+// 因此有界性不能挂在任何「某个 tunable 不会被这样调」的前提上，必须是结构性的：
+// 取批循环用 lastAdvanceExamined 对**探视总数**（真实项 + 过时条目 + 那一次未
+// 到期堆顶探视）设无条件上界，超限即 break。
+//
+// 提前 break 的正确性：
+//
+//   - **不丢任何待更新项。**pending 是队列内容的唯一真相来源，break 只是少弹几
+//     条；真实项仍在 pending 与 order 里，dueTick 不变，顺延到后续 Advance。
+//     被弹掉的过时条目本就不是队列内容（Len 不数它们），丢弃它们不改变 Len。
+//   - **等价于「这个 tick 的预算更小」。**取批始终按全序从堆顶依次取，break 只
+//     是提早停止，不会跳过某个更小的真实项去取更大的。因此本 tick 的效果与
+//     「budget 取了一个更小的值」完全一致，而 spec.md 的「预算不改变平衡态」正
+//     是说任意预算都收敛到同一平衡态。
+//   - **不会饿死。**popOrder 是真删除：被弹掉的过时条目**永久离开堆**，不会在
+//     后续 tick 重新出现。过时条目总数被「提前入队次数」压住（每次提前入队至多
+//     制造一条），而每 tick 至少清掉 advanceExamineLimit 条，故必定在有限个 tick
+//     内排空，真实项随后正常推进。
+//
+// 一处必须写下的诚实边界：评审给出的论证「过时条目的 dueTick 严格晚于它所替代
+// 的真实条目，故真实条目先出堆」**只在过时条目刚产生时成立**。一旦那条真实项被
+// 处理并从 pending 删除，该位置之后可以以更晚的 dueTick 重新入队，此时残留的过
+// 时条目反而排在新真实项**之前**。上面三条论证不依赖这个次序关系，只依赖
+// 「popOrder 真删除」与「pending 是真相来源」，因此结论仍然成立。
 type Queue struct {
 	// pending 以位置去重，值是该位置当前排定的 dueTick。Go 的 map 遍历顺序
 	// 是随机的，任何依赖处理次序的逻辑都绝不能直接遍历本 map——次序一律由
@@ -199,6 +228,24 @@ func (q *Queue) Len() int {
 	return len(q.pending)
 }
 
+// advanceExamineLimit 返回单次 Advance 允许探视的条目总数上界。
+//
+// 取 2*budget：预算内的真实项占 budget，另留同样多的额度用来清理过时条目，
+// 使「有过时条目要清」的 tick 不至于一项真实工作都做不成，同时把最坏情况钉死在
+// 与 budget 同阶、与 len(pending) 无关的常数倍上。这个倍数只影响过时条目的排空
+// 速度，不影响任何流体规则，也不是 tunable。
+//
+// 溢出防御：budget 由调用方传入（测试里出现过 1<<24 这样的“不受限预算”），
+// 2*budget 在极端取值下会翻负，翻负后 lastAdvanceExamined>=limit 会立刻为真、
+// 一项都不处理——那是静默的功能失效而不是报错，所以这里显式饱和到 MaxInt。
+func advanceExamineLimit(budget int) int {
+	limit := 2 * budget
+	if limit < budget {
+		return math.MaxInt
+	}
+	return limit
+}
+
 // Advance 推进一个 tick 的流体，返回本 tick 实际发生变化的格（按 lessPos
 // 定义的位置全序，与处理次序无关，见下面第 4/5 点）。
 //
@@ -208,7 +255,9 @@ func (q *Queue) Len() int {
 //     budget 封顶，与 len(pending) 无关（论证见 Queue 的类型注释）。
 //  2. 最多处理 budget 个；超出的项保持在队列里、dueTick 不变（既没从 pending
 //     删除，也没从 order 弹出），按原全序顺延到后续 Advance 调用——不会被丢弃
-//     （spec.md「预算不改变平衡态」）。
+//     （spec.md「预算不改变平衡态」）。除 budget 外还有一条无条件的探视上界
+//     advanceExamineLimit，用来在过时条目堆积时封顶本 tick 的工作量；触发它的
+//     效果与「本 tick 预算更小」完全一致，同样不丢项，见 Queue 的类型注释。
 //  3. 存活/替换判定只读取 w 在本次 Advance 调用开始时的状态：evalCell 只
 //     读不写，本函数在整个处理循环期间不调用 w.SetBlock，全部候选写入先
 //     收集到 pendingWrites，循环结束后才一次性提交。这避免了同一 tick 内
@@ -252,7 +301,14 @@ func (q *Queue) Advance(now uint64, w FluidWorld, budget int, delay uint64) []co
 	// 优先于空气纯粹是防御性兜底（万一将来规则变化打破这条论证），不是当前
 	// 规则下真的会走到的分支。
 	pendingWrites := make(map[core.BlockPos]core.BlockID)
+	examineLimit := advanceExamineLimit(budget)
 	for processed := 0; processed < budget && len(q.order) > 0; {
+		if q.lastAdvanceExamined >= examineLimit {
+			// 无条件探视上界：过时条目走下面的 continue 不消耗预算，
+			// processed<budget 拦不住它们，只有这条能。见 Queue 的类型注释
+			// 「为什么探视上界必须是无条件的」。
+			break
+		}
 		if q.order[0].dueTick > now {
 			// 堆顶是全序最小项，它都没到期，后面的更不会到期：本 tick 到此
 			// 为止。这一步是 O(1)，与队列里还压着多少项无关。

@@ -180,3 +180,81 @@ func TestAdvanceTakesGloballySmallestDueItemsAtScale(t *testing.T) {
 		t.Fatalf("夹具队列只有 %d 项，太小，区分不出复杂度行为", queueSize)
 	}
 }
+
+// TestAdvanceExaminedBoundedWhenDelayLowered 钉住 Advance 的**无条件探视上界**。
+//
+// 这条测试的存在理由是一条被证伪的前提：改动之初把有界性挂在「生产路径上不会出现
+// 提前入队，故过时条目恒为 0」上，而 `sim.FluidFlowDelayTicks` 是 internal/config
+// 里的实时可编辑项（Min 0 / Max 2000），运行中调小它就会让整张队列以更早的 dueTick
+// 重新入队，把旧条目全部变成过时条目。过时条目在取批循环里走 continue、**不消耗
+// 预算**，因此 processed<budget 这个条件拦不住它们。
+//
+// 夹具精确复现那个形态：
+//
+//  1. 以 delay=100 排入 5 万项（dueTick=100）；
+//  2. 以 delay=1 对同样 5 万个位置重新入队（dueTick=1），旧的 5 万条 dueTick=100
+//     条目全部变成过时条目，堆里此刻有 10 万条而队列只有 5 万项；
+//  3. 用一个大预算把 5 万条真实项一次处理干净（全空气世界，无变更、无重新入队），
+//     pending 清空，堆里只剩那 5 万条过时条目；
+//  4. 推进到 now=100，此时那 5 万条过时条目**全部到期**，且没有任何真实项与它们
+//     争预算——没有上界的话，单个 Advance 会一口气把它们全弹掉。
+//
+// 断言的是**位置性**：单 tick 的探视数落在 2*budget 这个常数内，而不是「有上界就行」。
+// 同时断言过时条目会被**逐 tick 排空**（popOrder 是真删除，不会饿死），以及排空
+// 过程中真实队列内容一项不少。
+func TestAdvanceExaminedBoundedWhenDelayLowered(t *testing.T) {
+	const stalePositions = 50_000
+	const budget = 8
+
+	w := newMemWorld()
+	q := NewQueue()
+	for i := range stalePositions {
+		q.Enqueue(boundedPos(i), 0, 100) // dueTick=100，稍后被降级为过时条目
+	}
+	for i := range stalePositions {
+		q.Enqueue(boundedPos(i), 0, 1) // dueTick=1，delay 被调小的那一刻
+	}
+	heapAfterLowering := len(q.order)
+
+	// 把真实项全部处理掉，只留过时条目。
+	q.Advance(1, w, stalePositions, 1)
+	staleLeft := len(q.order)
+	realLeft := q.Len()
+
+	// 真实故障断言：过时条目全部到期的那个 tick，探视数必须落在常数上界内。
+	q.Advance(100, w, budget, 1)
+	if got, limit := q.lastAdvanceExamined, 2*budget; got > limit {
+		t.Fatalf("过时条目堆积时单 tick 探视 %d 项，超过无条件上界 %d（堆里还有 %d 条）",
+			got, limit, staleLeft)
+	}
+
+	// 过时条目必须被逐 tick 真删除、有限步排空，不会饿死后续真实项。
+	ticks := 0
+	for len(q.order) > 0 {
+		q.Advance(100, w, budget, 1)
+		ticks++
+		if ticks > stalePositions {
+			t.Fatalf("过时条目在 %d 个 tick 内没有排空，剩余 %d 条：popOrder 可能不是真删除",
+				ticks, len(q.order))
+		}
+	}
+	if q.Len() != 0 {
+		t.Fatalf("排空过时条目的过程中队列内容被改动：Len=%d，want 0", q.Len())
+	}
+
+	// 夹具前提守卫排在真实断言之后。
+	if heapAfterLowering != 2*stalePositions {
+		t.Fatalf("下调 delay 没有产生预期的过时条目：堆 %d 条，want %d（Enqueue 的提前分支可能没走到）",
+			heapAfterLowering, 2*stalePositions)
+	}
+	if realLeft != 0 || staleLeft < stalePositions {
+		t.Fatalf("夹具没进入「只剩过时条目」的状态：真实项 %d（want 0）、堆 %d 条（want ≥%d）",
+			realLeft, staleLeft, stalePositions)
+	}
+	if staleLeft <= 2*budget {
+		t.Fatalf("过时条目只有 %d 条，不超过上界 %d，上界没被真正触发",
+			staleLeft, 2*budget)
+	}
+	t.Logf("过时条目 %d 条，单 tick 探视 %d 项（上界 %d），%d 个 tick 排空",
+		staleLeft, q.lastAdvanceExamined, 2*budget, ticks)
+}
