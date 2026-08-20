@@ -135,3 +135,44 @@ func TestHeightMapUsesFixed512Bytes(t *testing.T) {
 		t.Fatalf("高度表字节数 = %d，想要 512", got)
 	}
 }
+
+// TestChunkHeightsIgnoreFluid 守住「列顶忽略流体」这条语义。
+//
+// 列顶是直射天空光起点的判据（见 authoritative-daylight 主规格）。若水面被算作列顶，
+// 水下的每一格都落在列顶之下，直射起点被压在水面以下，整片水体连同其下方地形全黑。
+// 因此流体既不得抬高列顶，也不得在把列顶方块换成流体之后仍然被算作列顶。
+func TestChunkHeightsIgnoreFluid(t *testing.T) {
+	c := world.NewChunk(core.ChunkPos{})
+	c.SetBlock(5, 64, 5, core.StoneID)
+	for y := int32(65); y <= 70; y++ {
+		c.SetBlock(5, y, 5, core.WaterSourceID)
+	}
+	if got := c.HighestOpaque(5, 5); got != 64 {
+		t.Fatalf("水面之下的列顶 = %d，想要最高非空气且非流体方块 64", got)
+	}
+
+	// 流动水（非水源）走同一条规则。
+	c.SetBlock(6, 64, 6, core.StoneID)
+	c.SetBlock(6, 65, 6, core.WaterLevel3ID)
+	if got := c.HighestOpaque(6, 6); got != 64 {
+		t.Fatalf("流动水之下的列顶 = %d，想要 64", got)
+	}
+
+	// 把列顶石头本身换成水：列顶必须下沉，而不是停在原地。
+	c.SetBlock(5, 64, 5, core.WaterSourceID)
+	if got := c.HighestOpaque(5, 5); got != emptyColumn {
+		t.Fatalf("整列只剩流体时列顶 = %d，想要空列哨兵 %d", got, emptyColumn)
+	}
+
+	// 整表重建必须与增量维护给出同一答案。
+	direct := world.NewChunk(core.ChunkPos{})
+	for y := int32(65); y <= 70; y++ {
+		si := int(y-core.MinY) >> core.SectionShift
+		ly := int(y-core.MinY) & core.SectionMask
+		direct.Section(si).Blocks.Set(5, ly, 5, core.WaterSourceID)
+	}
+	direct.RebuildHeights()
+	if got := direct.HighestOpaque(5, 5); got != emptyColumn {
+		t.Fatalf("重建后整列只剩流体的列顶 = %d，想要空列哨兵 %d", got, emptyColumn)
+	}
+}
