@@ -58,6 +58,35 @@ func TestFluidBlocksAreTransparentAndDark(t *testing.T) {
 	}
 }
 
+// TestFluidHeightMapsLevelToRawHeightExhaustively 对 8 个流体编号穷举断言
+// h_raw(level) = 14 - level：源方块 14（即 15/16），最弱的 level 7 得 7（即
+// 半格），并断言 0 这个「非流体」哨兵在全部已注册非流体编号上成立——这是
+// 「0 不会与合法流体高度冲突」这条位布局前提的可执行守卫。
+func TestFluidHeightMapsLevelToRawHeightExhaustively(t *testing.T) {
+	registry := assets.NewRegistry()
+	for level := uint8(0); level <= 7; level++ {
+		id := core.WaterSourceID + world.BlockID(level)
+		if got, want := registry.FluidHeight(id), 14-level; got != want {
+			t.Fatalf("FluidHeight(level=%d) = %d，想要 %d", level, got, want)
+		}
+		if got := registry.LightAttenuation(id); got != 1 {
+			t.Fatalf("LightAttenuation(level=%d) = %d，想要 1", level, got)
+		}
+	}
+	// 高度必须严格随等级递减，且最弱等级仍有半格（7 即 8/16），不会退化成零面。
+	if got, want := registry.FluidHeight(core.WaterLevel7ID), uint8(7); got != want {
+		t.Fatalf("最弱流体 FluidHeight=%d，想要 %d", got, want)
+	}
+	for id := core.AirID; id < core.WaterSourceID; id++ {
+		if got := registry.FluidHeight(id); got != 0 {
+			t.Fatalf("非流体 %d 的 FluidHeight=%d，想要哨兵 0", id, got)
+		}
+		if got := registry.LightAttenuation(id); got != 0 {
+			t.Fatalf("非流体 %d 的 LightAttenuation=%d，想要 0", id, got)
+		}
+	}
+}
+
 func TestRegistryMeshSnapshotMatchesRegistry(t *testing.T) {
 	registry := assets.NewRegistry()
 	snapshot := registry.MeshSnapshot()
@@ -66,6 +95,9 @@ func TestRegistryMeshSnapshotMatchesRegistry(t *testing.T) {
 	}
 	for id := core.AirID; id <= core.WaterLevel7ID; id++ {
 		block := snapshot.Blocks[int(id)]
+		if block.FluidHeight != registry.FluidHeight(id) || block.LightAttenuation != registry.LightAttenuation(id) {
+			t.Fatalf("block %d snapshot 的流体/衰减字段=%+v", id, block)
+		}
 		if block.ID != id || block.Opaque != registry.Opaque(id) || block.Emission != registry.Emission(id) {
 			t.Fatalf("block %d snapshot=%+v", id, block)
 		}

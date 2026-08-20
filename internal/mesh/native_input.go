@@ -11,7 +11,11 @@ import (
 const (
 	nativeNeighborhoodSections = 3 * 3 * 3
 	nativeHeightColumns        = 3 * 3
-	nativeRegistryEntryBytes   = 2 + 1 + 1 + 6*2
+	// nativeRegistryEntryBytes 与 Rust 的 REGISTRY_ENTRY_BYTES 逐字节对应：
+	// id(u16) + opaque(u8) + emission(u8) + material[6](u16) + fluidHeight(u8)
+	// + lightAttenuation(u8) = 18。两侧各自硬编码，改动即构成一次 engine ABI
+	// 变更（本次扩容仍在 v5 内完成）。
+	nativeRegistryEntryBytes = 2 + 1 + 1 + 6*2 + 1 + 1
 	// nativeMaxRegistryEntries 必须与 Rust 端硬编码的
 	// engine/crates/mornlea_engine/src/input.rs 的 MAX_REGISTRY_ENTRIES
 	// (=35) 保持一致——两侧各自独立定义，没有共享常量或生成步骤，全靠人
@@ -56,6 +60,9 @@ func encodeNativeInput(dst []byte, n *world.Neighborhood, snapshot RegistrySnaps
 		}
 		if block.Emission > 15 {
 			return 0, fmt.Errorf("mesh: 方块发光等级超过 15")
+		}
+		if block.FluidHeight > 14 {
+			return 0, fmt.Errorf("mesh: 方块流体高度原值超过 14")
 		}
 		air = air || block.ID == core.AirID
 		barrier = barrier || block.ID == core.BarrierID
@@ -141,6 +148,9 @@ func encodeNativeInput(dst []byte, n *world.Neighborhood, snapshot RegistrySnaps
 			binary.LittleEndian.PutUint16(dst[offset:offset+2], material)
 			offset += 2
 		}
+		dst[offset] = block.FluidHeight
+		dst[offset+1] = block.LightAttenuation
+		offset += 2
 	}
 	for _, word := range snapshot.Visibility {
 		binary.LittleEndian.PutUint64(dst[offset:offset+8], word)

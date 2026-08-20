@@ -196,6 +196,7 @@ mod tests {
     const HEIGHTS_PRESENT_OFFSET: usize = BLOCKS_OFFSET + BLOCKS_BYTES;
     const HEIGHTS_OFFSET: usize = HEIGHTS_PRESENT_OFFSET + 9;
     const REGISTRY_OFFSET: usize = HEIGHTS_OFFSET + 9 * 256 * 2;
+    const ENTRY_BYTES: usize = crate::input::tests::ENTRY_BYTES;
     const LIGHT_ID: u16 = 40000;
 
     struct InputFixture {
@@ -351,7 +352,7 @@ mod tests {
         for block in bytes[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].chunks_exact_mut(2) {
             block.copy_from_slice(&1_u16.to_le_bytes());
         }
-        bytes[REGISTRY_OFFSET + 16 + 2] = 0;
+        bytes[REGISTRY_OFFSET + ENTRY_BYTES + 2] = 0;
         set_block(&mut bytes, 8, 8, 8, LIGHT_ID);
         set_block(&mut bytes, 10, 8, 8, 0);
         let input = parse_fixture(bytes);
@@ -399,7 +400,8 @@ mod tests {
         bytes[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].fill(0);
         bytes[HEIGHTS_PRESENT_OFFSET..HEIGHTS_PRESENT_OFFSET + 9].fill(0);
         bytes[HEIGHTS_OFFSET..REGISTRY_OFFSET].fill(0);
-        bytes[REGISTRY_OFFSET + 2 * 16 + 3] = emission;
+        bytes[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 3] = emission;
+        bytes[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 16] = 0;
         bytes
     }
 

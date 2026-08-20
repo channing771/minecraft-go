@@ -168,6 +168,9 @@ func (r *oracleCountingRegistry) Emission(world.BlockID) uint8 {
 	r.emissionQueries++
 	return 0
 }
+func (*oracleCountingRegistry) FluidHeight(world.BlockID) uint8      { return 0 }
+func (*oracleCountingRegistry) LightAttenuation(world.BlockID) uint8 { return 0 }
+
 func (*oracleCountingRegistry) MeshSnapshot() mesh.RegistrySnapshot {
 	panic("oracleCountingRegistry.MeshSnapshot 不应被调用")
 }

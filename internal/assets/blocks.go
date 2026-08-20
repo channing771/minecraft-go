@@ -216,6 +216,37 @@ func (r *Registry) Emission(id world.BlockID) uint8 {
 	return 0
 }
 
+// fluidSourceHeightRaw 是源方块（level 0）的 4-bit 高度原值。
+//
+// 取 14 而非 15：实际高度是 (h_raw+1)/16，14 即 15/16，让源方块的水面比方块顶面
+// 略低一线，水柱内部再由「上方是流体则取满格 15」补齐（见 mesh 的角高度推导）。
+// 于是 h_raw(level) = 14 - level，最弱的 level 7 仍有 7 即半格高度，不会退化成
+// 零面积的水面。
+const fluidSourceHeightRaw = 14
+
+// FluidHeight 返回方块孤立时的 4-bit 流体高度原值 h_raw。实现 mesh.Registry。
+//
+// 非流体返回 0 这个哨兵值——真流体的 h_raw 恒在 7..=14，0 不会与之冲突。
+// 本函数是「流体等级 → 高度」映射的**唯一**真值源：它被烘焙进 mesh registry
+// 快照送给 Rust，Rust 只消费高度、不知道等级。
+func (r *Registry) FluidHeight(id world.BlockID) uint8 {
+	if !core.IsFluid(id) {
+		return 0
+	}
+	return fluidSourceHeightRaw - core.FluidLevel(id)
+}
+
+// LightAttenuation 返回天空光穿过该方块时的额外衰减。实现 mesh.Registry。
+//
+// 流体额外衰减 1、其余方块 0。本变更只负责把值送过 ABI 边界，真正的衰减行为由
+// Rust 光照 BFS 在后续任务中消费。
+func (r *Registry) LightAttenuation(id world.BlockID) uint8 {
+	if core.IsFluid(id) {
+		return 1
+	}
+	return 0
+}
+
 // MeshSnapshot 返回构造时冻结的网格 registry 快照。
 func (r *Registry) MeshSnapshot() mesh.RegistrySnapshot { return r.meshSnapshot }
 

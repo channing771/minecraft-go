@@ -239,10 +239,15 @@ func TestNativeOracleParityConcurrentIndependentScratch(t *testing.T) {
 
 // TestNativeOracleParityWaterSurface 覆盖流体纳入 mesh registry 快照之后的 Go/Rust 一致性。
 //
-// 两侧的信息来源刻意不同：Go oracle 每格现算 assets.Registry.FaceVisible，Rust 读的是
-// BuildRegistrySnapshot 事先烘焙进 Visibility 位图、再经 encodeNativeInput 送过去的那一份。
-// 只要两者对「水面是否出面」给出不同答案，assertNativeOracleParity 就以 quad 数或 quad
-// 字节不一致变红。
+// **assertNativeOracleParity 守的不是出面规则**。Go oracle 与 Rust 位图同源于
+// assets.Registry.FaceVisible：oracle 每格现算，Rust 读的是 BuildRegistrySnapshot 把同一
+// 函数烘焙进 Visibility 位图、再经 encodeNativeInput 送过去的那一份。规则本身被改坏时
+// 两侧会**一起**改坏、差值恒等，两条 parity 断言照样全绿（任务组 1 评审实测：把已删除的
+// `core.IsFluid` 补偿分支加回 FaceVisible 后 parity 全过，变红的是下面那条计数守卫）。
+//
+// parity 断言真正守的是端到端事实：35 条 registry 快照确实通过了 Rust 的条目校验、
+// 编码布局两侧一致、且贪心合并与位打包逐字节相同。**规则由末尾的计数守卫承重**——
+// 若把它删掉，本用例对任何规则类变异都不再敏感。
 //
 // 夹具里水面之上单独放了一块石头，用来覆盖「流体紧邻不透明方块的面不可见」与其反方向
 // 「不透明方块朝向流体的面可见」两条规则。

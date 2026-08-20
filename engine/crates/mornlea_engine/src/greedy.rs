@@ -185,6 +185,7 @@ mod tests {
     const HEIGHTS_PRESENT_OFFSET: usize = BLOCKS_OFFSET + BLOCKS_BYTES;
     const HEIGHTS_BYTES: usize = 9 + 9 * 256 * 2;
     const REGISTRY_OFFSET: usize = HEIGHTS_PRESENT_OFFSET + HEIGHTS_BYTES;
+    const ENTRY_BYTES: usize = crate::input::tests::ENTRY_BYTES;
     const STONE_ID: u16 = 1;
     const GLASS_ID: u16 = 40000;
 
@@ -408,7 +409,8 @@ mod tests {
         bytes[4..8].copy_from_slice(&0_i32.to_le_bytes());
         bytes[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].fill(0);
         bytes[HEIGHTS_PRESENT_OFFSET..REGISTRY_OFFSET].fill(0);
-        bytes[REGISTRY_OFFSET + 2 * 16 + 3] = 0;
+        bytes[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 3] = 0;
+        bytes[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 16] = 0;
         set_visibility(&mut bytes, 5, 1);
         bytes
     }
@@ -424,7 +426,7 @@ mod tests {
     }
 
     fn set_visibility(bytes: &mut [u8], stone: u64, glass: u64) {
-        let visibility = REGISTRY_OFFSET + 3 * 16;
+        let visibility = REGISTRY_OFFSET + 3 * ENTRY_BYTES;
         bytes[visibility..visibility + 8].copy_from_slice(&0_u64.to_le_bytes());
         bytes[visibility + 8..visibility + 16].copy_from_slice(&stone.to_le_bytes());
         bytes[visibility + 16..visibility + 24].copy_from_slice(&glass.to_le_bytes());

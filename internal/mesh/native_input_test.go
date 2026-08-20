@@ -31,6 +31,22 @@ func (*snapshotTestReader) Emission(id world.BlockID) uint8 {
 	return 0
 }
 
+// 借玻璃当「假流体」，给两个新字节各自一个与 Emission 不同的取值，
+// 这样任一字段被漏抄、错位或与 Emission 串位都会让 wantBlocks 对不上。
+func (*snapshotTestReader) FluidHeight(id world.BlockID) uint8 {
+	if id == core.GlassID {
+		return 9
+	}
+	return 0
+}
+
+func (*snapshotTestReader) LightAttenuation(id world.BlockID) uint8 {
+	if id == core.GlassID {
+		return 3
+	}
+	return 0
+}
+
 func TestBuildRegistrySnapshotSortsAndFreezesVisibility(t *testing.T) {
 	snapshot, err := BuildRegistrySnapshot(
 		[]world.BlockID{core.StoneID, core.AirID, core.GlassID},
@@ -69,7 +85,7 @@ func TestBuildRegistrySnapshotCopiesAndFreezesProperties(t *testing.T) {
 	wantBlocks := []BlockProperties{
 		{ID: core.AirID, Materials: [6]uint16{0, 1, 2, 3, 4, 5}},
 		{ID: core.StoneID, Opaque: true, Materials: [6]uint16{200, 201, 202, 203, 204, 205}},
-		{ID: core.GlassID, Emission: 7, Materials: [6]uint16{2000, 2001, 2002, 2003, 2004, 2005}},
+		{ID: core.GlassID, Emission: 7, FluidHeight: 9, LightAttenuation: 3, Materials: [6]uint16{2000, 2001, 2002, 2003, 2004, 2005}},
 	}
 	if !reflect.DeepEqual(snapshot.Blocks, wantBlocks) {
 		t.Fatalf("snapshot blocks=%+v，想要 %+v", snapshot.Blocks, wantBlocks)
@@ -110,7 +126,7 @@ func TestEncodeNativeInputUsesExactLittleEndianLayout(t *testing.T) {
 		Blocks: []BlockProperties{
 			{ID: core.AirID, Materials: [6]uint16{1, 2, 3, 4, 5, 6}},
 			{ID: core.BarrierID, Opaque: true, Materials: [6]uint16{10, 11, 12, 13, 14, 15}},
-			{ID: 40000, Emission: 7, Materials: [6]uint16{20, 21, 22, 23, 24, 25}},
+			{ID: 40000, Emission: 7, FluidHeight: 11, LightAttenuation: 1, Materials: [6]uint16{20, 21, 22, 23, 24, 25}},
 		},
 		Visibility: []uint64{2, 5, 1},
 	}
@@ -119,8 +135,10 @@ func TestEncodeNativeInputUsesExactLittleEndianLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if length != 225889 {
-		t.Fatalf("input length=%d，想要 225889", length)
+	// 225895 = 16 + 27*4096*2 + 9 + 9*256*2 + 3*18 + 3*8：条目从 16 字节扩到 18
+	// 字节后总长必然变化，这个数就是「两个新字节真的被写进去了」的算术证据。
+	if length != 225895 {
+		t.Fatalf("input length=%d，想要 225895", length)
 	}
 	if got := string(dst[0:4]); got != "MGM1" {
 		t.Fatalf("magic=%q，想要 MGM1", got)
@@ -161,16 +179,29 @@ func TestEncodeNativeInputUsesExactLittleEndianLayout(t *testing.T) {
 	}
 
 	const registryOffset = 225817
-	if got := binary.LittleEndian.Uint16(dst[registryOffset+32:]); got != 40000 {
+	// 第三条条目起点 = registryOffset + 2*18 = +36；条目内偏移 0/3/4/16/17
+	// 分别是 id/emission/material[0]/fluidHeight/lightAttenuation。
+	if got := binary.LittleEndian.Uint16(dst[registryOffset+36:]); got != 40000 {
 		t.Fatalf("third registry ID=%d，想要 40000", got)
 	}
-	if got := dst[registryOffset+35]; got != 7 {
+	if got := dst[registryOffset+39]; got != 7 {
 		t.Fatalf("third registry emission=%d，想要 7", got)
 	}
-	if got := binary.LittleEndian.Uint16(dst[registryOffset+36:]); got != 20 {
+	if got := binary.LittleEndian.Uint16(dst[registryOffset+40:]); got != 20 {
 		t.Fatalf("third registry material[0]=%d，想要 20", got)
 	}
-	if got := binary.LittleEndian.Uint64(dst[registryOffset+48+8:]); got != 5 {
+	if got := dst[registryOffset+36+16]; got != 11 {
+		t.Fatalf("third registry fluidHeight=%d，想要 11", got)
+	}
+	if got := dst[registryOffset+36+17]; got != 1 {
+		t.Fatalf("third registry lightAttenuation=%d，想要 1", got)
+	}
+	// 前两条条目的两个新字节必须仍是 0：证明写入没有跨条目串位。
+	if dst[registryOffset+16] != 0 || dst[registryOffset+17] != 0 ||
+		dst[registryOffset+18+16] != 0 || dst[registryOffset+18+17] != 0 {
+		t.Fatal("前两条 registry 条目的 fluidHeight/lightAttenuation 应为 0")
+	}
+	if got := binary.LittleEndian.Uint64(dst[registryOffset+3*18+8:]); got != 5 {
 		t.Fatalf("visibility row 1=%d，想要 5", got)
 	}
 }
@@ -237,6 +268,7 @@ func TestEncodeNativeInputRejectsInvalidInputs(t *testing.T) {
 		{"too many registry entries", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: tooMany, Visibility: make([]uint64, nativeMaxRegistryEntries+1)}},
 		{"bad visibility size", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: valid.Blocks, Visibility: []uint64{0}}},
 		{"overbright emission", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, Emission: 16}}, Visibility: []uint64{0, 0}}},
+		{"fluid height above 14", make([]byte, 300000), fullyLoadedAirNeighborhood(), RegistrySnapshot{Blocks: []BlockProperties{{ID: core.AirID}, {ID: core.BarrierID, FluidHeight: 15}}, Visibility: []uint64{0, 0}}},
 		{"short destination", make([]byte, 16), fullyLoadedAirNeighborhood(), valid},
 	}
 	for _, tt := range tests {

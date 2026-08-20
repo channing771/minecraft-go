@@ -18,6 +18,22 @@ func (testRegistry) FaceVisible(id, adjacent world.BlockID) bool {
 func (testRegistry) Material(id world.BlockID, _ mesh.Face) uint16 {
 	return uint16(id)
 }
+
+// FluidHeight/LightAttenuation 沿用生产规则，见 assets.Registry 的同名方法。
+func (testRegistry) FluidHeight(id world.BlockID) uint8 {
+	if !core.IsFluid(id) {
+		return 0
+	}
+	return 14 - core.FluidLevel(id)
+}
+
+func (testRegistry) LightAttenuation(id world.BlockID) uint8 {
+	if core.IsFluid(id) {
+		return 1
+	}
+	return 0
+}
+
 func (testRegistry) Emission(id world.BlockID) uint8 {
 	if id == core.LightBlockID {
 		return 15
