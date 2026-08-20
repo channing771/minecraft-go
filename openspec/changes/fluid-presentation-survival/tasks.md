@@ -33,11 +33,11 @@
 
 ## 5. 浸没标志与水中物理
 
-- [ ] 5.1 新增计算浸没标志的纯函数（`BodyInFluid` = AABB 与任意流体格相交；`EyeInFluid` = 眼睛所在格是流体），服务端与客户端预测**共用同一实现**。验证：`go test ./internal/physics -race -count=1`
-- [ ] 5.2 `physics.Input` 增加两个 bool，`StepInput` 编码头版本递增；**不扩 prism**（design D4）。验证：`go test ./internal/physics -race -count=1`
-- [ ] 5.3 Rust `step.rs` 在 `BodyInFluid` 时切换积分常量：重力衰减、垂直终端速度压低、`Jump` 改为持续上浮、水平速度乘阻力、入水重置摔落峰值。全部走新 tunable。engine ABI v4 → v5。验证：`make rust && go test ./internal/nativeabi ./internal/physics -race -count=1`
-- [ ] 5.4 覆盖 `fluid-survival` 的浸没判定三个 Scenario 与水中移动四个 Scenario（含「入水消除摔落伤害」）。验证：`go test ./internal/physics ./internal/sim -race -count=1`
-- [ ] 5.5 **权威与预测一致性**：同一方块镜像与位置下两侧算出的标志逐位相同。验证：`go test ./internal/sim ./internal/client -race -count=1`
+- [x] 5.1 新增计算浸没标志的纯函数（`BodyInFluid` = AABB 与任意流体格相交；`EyeInFluid` = 眼睛所在格是流体），服务端与客户端预测**共用同一实现**。验证：`go test ./internal/physics -race -count=1`
+- [x] 5.2 `physics.Input` 增加两个 bool，`StepInput` 编码头版本递增；**不扩 prism**（design D4）。验证：`go test ./internal/physics -race -count=1`
+- [x] 5.3 Rust `step.rs` 在 `BodyInFluid` 时切换积分常量：重力衰减、垂直终端速度压低、`Jump` 改为持续上浮、水平速度乘阻力。全部走新 tunable。**engine ABI 不再升版**——组 1 已升 v5，本项只是同一个 v5 内的 `StepInput` header v1 → v2 扩展（与任务 2.0 扩 registry 条目同理，Ruling 2 的额度内）。**摔落峰值重置落在 Go 侧 `internal/sim`**：峰值高度 `peakY` 是 sim 的瞬态字段，Rust step ABI 里没有它，也不应为此把伤害状态搬进 engine。验证：`make rust && go test ./internal/nativeabi ./internal/physics -race -count=1`
+- [x] 5.4 覆盖 `fluid-survival` 的浸没判定三个 Scenario 与水中移动四个 Scenario（含「入水消除摔落伤害」）。验证：`go test ./internal/physics ./internal/sim -race -count=1`
+- [x] 5.5 **权威与预测一致性**：同一方块镜像与位置下两侧算出的标志逐位相同。验证：`go test ./internal/sim ./internal/client -race -count=1`
 
 ## 6. 溺水、氧气与 HUD
 
