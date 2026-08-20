@@ -156,13 +156,21 @@ type fluidTickSample struct {
 	// queueBefore / queueAfter 是 Step 前后的 q.pending 项数。
 	queueBefore int
 	queueAfter  int
-	// scan 是「只遍历整张 q.pending」的成本：用 now=0 调 Advance，此时没有
-	// 任何项到期（delay>=1 保证 dueTick>=1），预算又是 0，于是函数只做了
-	// map 遍历这一步，既不写世界也不改队列。
-	scan time.Duration
-	// scanSort 是「遍历 + 收集到期项 + 全序排序」的成本：用当前 tick 调
-	// Advance 但预算给 0，到期项被完整收集并排序，随后一项都不处理。
-	// 两者相减即得排序自身的开销。
+	// scan / scanSort 是两个只读探针，都以 budget=0 调 Advance（既不写世界也
+	// 不改队列）。**它们量的是 fluid-presentation-survival 任务组 10b 之前的
+	// 那版实现**：那时 Advance 每 tick 无条件遍历整张 q.pending（scan，用
+	// now=0 调，delay>=1 保证一项都不到期），再收集全部到期项并按全序排序
+	// （scanSort，用当前 tick 调），两者相减即得排序自身的开销。
+	//
+	// 10b 把取批换成最小堆之后，budget=0 意味着取批循环**一次都不执行**，两个
+	// 探针双双退化成 O(1)，读数落在几十到几百纳秒。这不是探针失效，恰恰是 10b
+	// 要证的结论：「遍历整张 map」与「排序整批到期项」这两项工作已经不存在了。
+	// 因此在 10b 之后的报告里，承重的数字是 fluidTail 与 step，scan / scanSort
+	// 两列读作「≈0，该工作已被结构性消除」。
+	//
+	// 保留而不删除，是为了让「修复前 / 修复后」两次测量输出同一张表、可以逐列
+	// 对照；测量代码一行未改，改的只是这段说明。
+	scan     time.Duration
 	scanSort time.Duration
 	// fluidTail 是从 phaseFluidAdvance 进入到 Step 返回的墙钟时间，
 	// 即 advanceFluids + 容器移动 + 采掘推进 + finishChanges。无命令时后三者
@@ -180,8 +188,16 @@ func measureFluidTicks(t *testing.T, engine *Engine, ticks int) []fluidTickSampl
 	t.Helper()
 	queue := engine.fluidQueue(core.Overworld)
 	delay := uint64(engine.tunables.FluidFlowDelayTicks)
+	// 这条守卫最初的理由是「delay=0 会让 now=0 的只读探针变成真处理」。任务组 10b
+	// 之后该理由**已不成立**：两个探针都以 budget=0 调 Advance，取批循环一次都
+	// 不执行，delay 取什么值都不会让它们动到世界或队列。
+	//
+	// 守卫本身保留（Ruling 61：只改注释与失效前提的说明，不动测量代码），现在守的
+	// 是另一件仍然成立的事：delay=0 时待更新项入队即到期，流动没有合并窗口，
+	// 逐 tick 的队列规模与耗时构成都和默认 tunable 下的场景不是同一回事，测出来的
+	// 数字不能与其它次测量并排比较。它是**夹具前提**守卫，不是正确性守卫。
 	if delay == 0 {
-		t.Fatal("FluidFlowDelayTicks=0 会让 now=0 的只读探针变成真处理，测量前提被破坏")
+		t.Fatal("FluidFlowDelayTicks=0：入队即到期、没有合并窗口，本次测量与默认 tunable 下的场景不可比")
 	}
 	adapter := fluidPerfAdapter(engine)
 
@@ -288,6 +304,16 @@ func clampNonNegative(d time.Duration) time.Duration {
 	return d
 }
 
+// damMinBreachEnqueue / damMinPeakQueue 是大坝场景的夹具承重下界。
+//
+// 大坝够不到 20 万项的风险区间是实测事实，因此它用不了 requireRiskScale；但它做得到
+// 的那两个数必须被钉住，否则夹具退化时只有 t.Logf 的输出会变、用例照样全绿——那正是
+// 本变更反复抓到的空转形态。取值留足余量：实测破坝入队 10,608 项、队列峰值 140,122 项。
+const (
+	damMinBreachEnqueue = 10_000
+	damMinPeakQueue     = 100_000
+)
+
 // fluidRiskScale 是 F1（归档变更 authoritative-fluid）记录的残余风险规模：
 // 队列约 20 万项时 Queue.Advance 单独就能吃满 20 TPS 的 50 ms tick 预算。
 //
@@ -326,14 +352,26 @@ func TestFluidPerfDamBreak(t *testing.T) {
 			breaker.SetBlock(core.BlockPos{X: 0, Y: y, Z: z}, core.AirID)
 		}
 	}
-	t.Logf("破坝写入 %d 格，入队后队列 %d 项", int(span)*damWallTop, queue.Len())
+	breachQueued := queue.Len()
+	t.Logf("破坝写入 %d 格，入队后队列 %d 项", int(span)*damWallTop, breachQueued)
+	if breachQueued < damMinBreachEnqueue {
+		t.Fatalf("大坝: 破坝只入队 %d 项（实测基线 10,608），不足 %d，前沿展开的起点已退化，本次测量无效",
+			breachQueued, damMinBreachEnqueue)
+	}
 
 	// 与瀑布同样采样 12000 tick。实测本场景在窗口末尾仍未收敛：队列峰值
 	// 14.0 万项（风险区间的 70.1%），第 11275 tick 上仍有 13.0 万项在队。
 	// 这里刻意**不加** requireRiskScale 守卫——本场景够不到 20 万项是实测事实，
 	// 加一条它注定不满足的守卫只会让用例长期红，如实报出 70.1% 这个坐标才是
 	// 该有的记录方式。
-	reportFluidSamples(t, "大坝溃决", measureFluidTicks(t, engine, 12000))
+	//
+	// 但「不加做不到的守卫」不等于「不加守卫」：下面按本场景**做得到**的规模设
+	// 下界。没有它，将来某改动把大坝夹具退化到几百项时只有日志会变、用例照样绿。
+	peak := reportFluidSamples(t, "大坝溃决", measureFluidTicks(t, engine, 12000))
+	if peak.queueBefore < damMinPeakQueue {
+		t.Fatalf("大坝: 队列峰值只有 %d 项（实测基线 140,122），不足 %d，夹具已退化，本次测量无效",
+			peak.queueBefore, damMinPeakQueue)
+	}
 }
 
 // TestFluidPerfWaterfall 场景二：注水世界里的瀑布。
