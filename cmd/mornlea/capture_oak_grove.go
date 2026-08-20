@@ -15,8 +15,11 @@ const captureOakGroveSeed int64 = 42
 
 // prepareOakGrove 把固定 3×3 生成区块经既有网络快照和 mirror 路径装入。
 func prepareOakGrove(app *application) error {
-	// 视觉 capture golden 固定在关闭注水的基线世界上。
-	generator := worldgen.New(captureOakGroveSeed, false)
+	// 注水必须与抓帧进程自己的世界一致：抓帧路径把 FluidEnabled 钉成编译期
+	// 默认值（已开），而本夹具的种子与抓帧世界的默认种子同为 42，覆盖的又只是
+	// 区块 (-1..1)。若这里仍按关闭注水生成，这 9 个区块就会变成周围一片海里
+	// 干涸的方坑，在 golden 里留下一条纯属人为的区块边界断层。
+	generator := worldgen.New(captureOakGroveSeed, true)
 	for z := int32(-1); z <= 1; z++ {
 		for x := int32(-1); x <= 1; x++ {
 			chunk := generator.GenerateChunk(core.ChunkPos{X: x, Z: z})

@@ -331,6 +331,46 @@ var captureScenes = []captureScene{
 		Prepare:      prepareAICompanion,
 		Apply:        applyAICompanionCaptureState,
 	},
+	{
+		// 水景一：水面之上俯瞰。覆盖「水面斜坡」与「水面之下的地形」——
+		// 顶层水沿 −Z 由源方块递减到 7 级，角高度插值成连续斜面；
+		// 池底的沙丘、砾石带与露出水面的圆石堆透过水面可见。
+		Name:         "water-surface-slope",
+		WarmupFrames: 8,
+		Prepare:      prepareWaterBasin,
+		Apply: func(app *application) error {
+			if err := resetCapturePresentation(app); err != nil {
+				return err
+			}
+			app.worldTimeTicks = 6000
+			// 3/4 角俯视：斜水面的梯度沿 −Z，从侧后方看过去，水面高度差
+			// 在画面里是一条明显倾斜的水线，正视（yaw=0）反而只能看到它退远。
+			app.camera.Pos = mgl32.Vec3{7.5, 6.4, 4.5}
+			app.camera.Yaw = 0.6
+			app.camera.Pitch = -0.3
+			app.center = cameraChunk(app.camera.Pos)
+			return nil
+		},
+	},
+	{
+		// 水景二：水下视角。覆盖「水下视角」——相机与权威位置一起放进水体，
+		// 眼睛浸没标志因此为真，画面同时呈现水色叠加、被压低的可见半径、
+		// 天空光穿水衰减，以及未满的氧气条。
+		//
+		// Prepare 重新装一遍夹具而不是继承上一个场景：镜像的 ChunkSnapshot 会把
+		// 区块 revision 复位，因此重装是幂等的，本场景的画面不依赖场景表的顺序。
+		//
+		// **本场景 MUST 排在场景表最后**，由 TestWaterUnderwaterCaptureSceneIsLast
+		// 兜底。它注入的权威 PlayerState 带一个远大于真实值的 ServerTick，此后
+		// 一切真实 PlayerState 都会被预测器的单调校验静默忽略，浸没标志因此永久
+		// 停在"在水里"；排在它后面的任何场景都会带着水色叠加与被压低的可见半径
+		// 出图。这不是假设——把它插在 ai-companion 之前实测过一次，ai-companion
+		// 的画面 98.75% 的像素随之改变。
+		Name:         "water-underwater",
+		WarmupFrames: 8,
+		Prepare:      prepareWaterBasin,
+		Apply:        applyWaterUnderwaterCaptureState,
+	},
 }
 
 // capturePinnedServerTick 是 debug-panel 场景钉死的权威 tick 值。
