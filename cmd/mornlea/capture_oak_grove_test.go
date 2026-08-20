@@ -88,7 +88,7 @@ func TestCaptureOakGroveFindsSceneByName(t *testing.T) {
 			if !loaded {
 				t.Fatalf("oak-grove 射线命中未加载方块 %+v", position)
 			}
-			return block != core.AirID, nil
+			return core.InteractionTarget(block), nil
 		},
 	)
 	if err != nil || found {
