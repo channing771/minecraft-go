@@ -76,13 +76,7 @@ func (engine *Engine) openContainer(id SessionID, command Command) (RejectReason
 		origin,
 		direction,
 		engine.tunables.InteractionReach,
-		func(position core.BlockPos) (bool, error) {
-			block, ready := dimension.BlockAt(position)
-			if !ready {
-				return false, ErrChunkNotReady
-			}
-			return block != core.AirID, nil
-		},
+		blockRaycastSampler(dimension),
 	)
 	if err != nil {
 		if errors.Is(err, ErrChunkNotReady) {

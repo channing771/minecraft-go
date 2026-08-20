@@ -189,3 +189,18 @@ func raycastFloorToI32(value float32) int32 {
 	}
 	return int32(floored)
 }
+
+// InteractionTarget 报告 id 是否可以作为交互射线（瞄准高亮、采掘、放置、开启
+// 容器、伙伴视线遮挡）的命中目标，是这些调用点共用的**唯一一份** solid 谓词。
+//
+// 空气与流体都不是目标。流体这一条是变更 fluid-presentation-survival 补上的：
+// 流体既不提供碰撞体也不是不透明方块，玩家可以自由穿行并看穿它；若沿用
+// `id != AirID`，泡在水里的玩家射线会立刻命中眼前那格水，采掘、开箱、瞄准
+// 高亮全部失效，向水面放置也会贴着水放而不是穿过水贴到底下的地面。
+//
+// 谓词只回答「能不能作为命中目标」，不回答「命中之后允许做什么」：目标是不是
+// 可采掘、放置的落点是否被占用，仍由各调用点自己的规则判定（例如放置把流体格
+// 视作可覆盖的空位，见 internal/sim 的 executePlacement）。
+func InteractionTarget(id BlockID) bool {
+	return id != AirID && !IsFluid(id)
+}

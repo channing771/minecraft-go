@@ -61,13 +61,7 @@ func (engine *Engine) executePlacement(
 		origin,
 		direction,
 		engine.tunables.InteractionReach,
-		func(position core.BlockPos) (bool, error) {
-			block, ready := dimension.BlockAt(position)
-			if !ready {
-				return false, ErrChunkNotReady
-			}
-			return block != core.AirID, nil
-		},
+		blockRaycastSampler(dimension),
 	)
 	if err != nil {
 		if errors.Is(err, ErrChunkNotReady) {
@@ -90,7 +84,12 @@ func (engine *Engine) executePlacement(
 	if !ready {
 		return RejectChunkNotReady, true
 	}
-	occupied := block != core.AirID || placementOverlapsPlayer(
+	// 流体格不算被占用：射线现在会穿过水命中水下的固体，落点因此常常是一格水，
+	// 放置必须直接把它覆盖掉（与 Minecraft 系的「向水里放方块」同语义）。覆盖
+	// 走的是下面同一条 SetBlock → recordChange 路径，因此该格及其六个面邻格会被
+	// enqueueFluidUpdate 重新入队，被切断的下游流动水才会按规则变干，水面不会
+	// 留下一个不会被填回的洞。
+	occupied := (block != core.AirID && !core.IsFluid(block)) || placementOverlapsPlayer(
 		placement,
 		target,
 		player.state.Position,

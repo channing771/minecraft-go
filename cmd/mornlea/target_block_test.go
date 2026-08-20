@@ -25,6 +25,28 @@ func TestCurrentBlockTargetHitsRegisteredBlockWithinSixBlocks(t *testing.T) {
 	}
 }
 
+func TestCurrentBlockTargetLooksThroughFluid(t *testing.T) {
+	app := newTargetBlockApplication(t, true, core.ChunkPos{}, core.ChunkPos{Z: -1})
+	position := core.BlockPos{X: 0, Y: 3, Z: -3}
+	setTargetMirrorBlock(t, app.mirror, position, core.BrickID)
+	// 相机在 (0.5,3.5,2.5) 沿 -Z 看，水必须落在它与砖块之间的射线路径上，
+	// 否则「命中砖块」在没有水的世界里同样成立、断言恒绿。
+	fluid := core.BlockPos{X: 0, Y: 3, Z: 0}
+	setTargetMirrorBlock(t, app.mirror, fluid, core.WaterSourceID)
+
+	got, ok := app.currentBlockTarget()
+	want := blockTarget{Position: position, Name: "砖块"}
+	if !ok || got != want {
+		t.Fatalf("穿水瞄准 currentBlockTarget() = %+v, %v，想要 %+v, true", got, ok, want)
+	}
+
+	// 夹具承重守卫排在真实断言之后。
+	id, loaded := app.mirror.BlockAt(core.Overworld, fluid)
+	if !loaded || !core.IsFluid(id) {
+		t.Fatalf("夹具失效：射线路径上的 %+v=%d loaded=%v，不是流体", fluid, id, loaded)
+	}
+}
+
 func TestCurrentBlockTargetRejectsDesyncedStaleBlock(t *testing.T) {
 	app := newTargetBlockApplication(t, true, core.ChunkPos{})
 	position := core.BlockPos{X: 0, Y: 3, Z: -3}

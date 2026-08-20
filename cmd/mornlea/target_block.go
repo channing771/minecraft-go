@@ -33,7 +33,7 @@ func (a *application) currentBlockTarget() (blockTarget, bool) {
 				return false, errBlockTargetUnknown
 			}
 			targetID = id
-			return id != core.AirID, nil
+			return core.InteractionTarget(id), nil
 		},
 	)
 	if err != nil || !found {

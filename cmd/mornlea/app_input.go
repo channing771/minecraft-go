@@ -34,7 +34,7 @@ func (a *application) placeBlock() {
 		6,
 		func(position core.BlockPos) (bool, error) {
 			block, loaded := a.mirror.BlockAt(core.Overworld, position)
-			return loaded && block != core.AirID, nil
+			return loaded && core.InteractionTarget(block), nil
 		},
 	)
 	if err != nil {
