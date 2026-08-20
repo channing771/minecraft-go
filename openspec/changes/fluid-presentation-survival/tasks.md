@@ -61,7 +61,7 @@
 
 ## 9. 视觉门禁
 
-- [ ] 9.1 **先在 `fluidEnabled=false` 下确认全部 capture golden 逐字节不变**——这是「非流体路径无回归」的证明，必须在重生成之前做。验证：`go run ./cmd/mornlea --capture ...` 比对
+- [x] 9.1 **先在 `fluidEnabled=false` 下确认全部 capture golden 逐字节不变**——这是「非流体路径无回归」的证明，必须在重生成之前做。验证：`go run ./cmd/mornlea --capture ...` 比对
 - [ ] 9.2 翻开开关后重新生成全部 capture golden，并新增水景场景（含水面斜坡、水下视角、水面之下的地形）。验证：同上
 - [ ] 9.3 记录哪些 golden 因水入画而变化、哪些因水下变暗而变化，逐场景说明差异来源。
 
