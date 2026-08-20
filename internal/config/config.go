@@ -807,6 +807,8 @@ type Field struct {
 //   - sim.furnaceBurnTicks 上限取 core.FurnaceBurnTicks，理由同上。
 //   - sim.regenIntervalTicks 下限为 1：internal/sim/health_regen.go 用它做
 //     取模除数，0 会在权威 tick 内 panic。
+//   - sim.drownDamageIntervalTicks 下限为 1：internal/sim/oxygen.go 用它做
+//     「距上次溺水伤害多少 tick」的比较阈值，0 会退化成氧气一归零就每 tick 扣血。
 //   - sim.spawnRadius 区间为 1..64：internal/sim/spawn.go 用它按平方分配切片，
 //     不钳制会触发巨额分配。
 //   - sim.dropPickupDelayTicks 与 sim.playerDropPickupDelayTicks 上限为 255：
@@ -843,6 +845,7 @@ func Fields() []Field {
 		{Group: "sim", Name: "interactionReach", Min: 1, Max: 32, Step: 0.5},
 		{Group: "sim", Name: "regenDelayTicks", Min: 0, Max: 2000, Step: 1},
 		{Group: "sim", Name: "regenIntervalTicks", Min: 1, Max: 600, Step: 1},
+		{Group: "sim", Name: "drownDamageIntervalTicks", Min: 1, Max: 600, Step: 1},
 		{Group: "sim", Name: "dropPickupDelayTicks", Min: 0, Max: 255, Step: 1},
 		{Group: "sim", Name: "playerDropPickupDelayTicks", Min: 0, Max: 255, Step: 1},
 		{Group: "sim", Name: "dropLifetimeTicks", Min: 1, Max: 120000, Step: 100},

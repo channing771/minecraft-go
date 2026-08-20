@@ -31,6 +31,9 @@ type PlayerUpdate struct {
 	Mining            MiningUpdate
 	// Health 是本 tick 结束时的权威生命值，0..core.MaxHealth；只发布给玩家本人。
 	Health uint8
+	// Oxygen 是本 tick 结束时的权威氧气，0..core.MaxOxygenTicks；同 Health，
+	// 只发布给玩家本人，不进入任何远端玩家消息。
+	Oxygen uint16
 	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。
 	WorldTimeTicks uint64
 }
@@ -91,6 +94,13 @@ type playerState struct {
 	// ticksSinceDamage 是自最后一次受伤以来连续未受伤的 tick 数，瞬态字段，
 	// 不持久化、不进入快照/哈希；满血时不推进。见 health_regen.go。
 	ticksSinceDamage uint32
+	// oxygen 是服务端单写者拥有的权威氧气，0..core.MaxOxygenTicks。瞬态字段，
+	// 不持久化、不进入快照/哈希：玩家 schema 保持 v6，重连后由 RegisterPlayer
+	// 初始化为满值。见 oxygen.go。
+	oxygen uint16
+	// drownTicks 是氧气归零后距离下一次溺水伤害已经过的 tick 数，瞬态字段，
+	// 语义同 ticksSinceDamage。见 oxygen.go。
+	drownTicks uint32
 
 	restoreCandidates  []restoreCandidate
 	nextRestore        int
@@ -130,7 +140,11 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 			yaw: restore.Yaw, pitch: restore.Pitch,
 			inventory:      restore.Inventory,
 			inventoryDirty: true},
-		health:          health,
+		health: health,
+		// 氧气不在 PlayerRestore 里，也不会出现在存档中：登录一律满值。
+		// 这条初始化是「氧气不跨重启保留」唯一的来源，不能依赖第一个 tick 的
+		// 「出水立即回满」代劳——在水里重生的玩家不会走那条分支。
+		oxygen:          core.MaxOxygenTicks,
 		restoreWanted:   make(map[core.ChunkKey]struct{}),
 		candidates:      candidates,
 		candidateChunks: spawnCandidateChunks(candidates),
@@ -325,6 +339,7 @@ func (player *playerState) update(
 		Reset:             player.reset,
 		Mining:            player.mining.update(),
 		Health:            player.health,
+		Oxygen:            player.oxygen,
 	}
 }
 
@@ -399,6 +414,9 @@ func (engine *Engine) advanceActivePlayers() {
 		// 再随 Input 传进物理步——流体没有碰撞盒，prism 里区分不出水与空气。
 		input := player.input
 		input.BodyInFluid, input.EyeInFluid = physics.SubmersionFlags(player.state.Position, source)
+		// 氧气按「本 tick 开始时的眼睛浸没标志」结算，与传给物理步的是同一个值：
+		// 水下视觉、水中积分与溺水三处共用这一份判定，不存在第二套。
+		player.advanceOxygen(input.EyeInFluid, engine.tunables.DrownDamageIntervalTicks)
 		wasOnGround := player.state.OnGround
 		// 步首这次重置在「玩家自己游进水里」的路径上是冗余的：步末那次每 tick
 		// 无条件执行，而本 tick 的步首位置恒等于上 tick 的步末位置。它唯一还能
@@ -427,12 +445,22 @@ func (engine *Engine) advanceActivePlayers() {
 	}
 }
 
-// applyFallDamage 在"上一 tick 不在地面、这一 tick 在地面"的边沿按固定曲线结算
-// 一次摔落伤害：伤害 = floor(峰值Y − 落地Y) − 3，负值取 0。本组只负责扣血，生命值
-// 归零后的死亡/重生/掉落结算不在这里处理。
+// applyFallDamage 在"上一 tick 不在地面、这一 tick 在地面"的边沿按固定曲线算出
+// 一次摔落伤害：伤害 = floor(峰值Y − 落地Y) − 3，负值取 0。它只负责曲线，扣血本身
+// 交给 applyDamage。
 func (player *playerState) applyFallDamage() {
 	fallHeight := float64(player.peakY - player.state.Position.Y())
-	damage := int32(math.Floor(fallHeight)) - 3
+	player.applyDamage(int32(math.Floor(fallHeight)) - 3)
+}
+
+// applyDamage 是全部伤害来源共用的唯一结算入口：重置自动回复计时、扣血并把
+// 生命值钳到 0。非正伤害是 no-op（摔落曲线在安全高度会算出负值）。
+//
+// 每个新伤害来源都必须经这里，不要复制它的三行内容：只有走这条入口才能同时拿到
+// 「重置回血计时」（否则玩家一边挨打一边回血）、客户端的确认伤害红色边缘反馈，
+// 以及生命值归零后由本 tick 稍后的 settleDeaths 做的死亡/重生/掉落结算——绕开它
+// 的伤害会静默丢掉这三件事，而且没有任何报错。
+func (player *playerState) applyDamage(damage int32) {
 	if damage <= 0 {
 		return
 	}
@@ -544,6 +572,10 @@ func (player *playerState) beginReset() {
 		float32(player.anchor.Z)*core.SectionSize + 0.5,
 	}}
 	player.peakY = player.state.Position.Y()
+	// 重生/传送把玩家挪到锚点列的空中，氧气随之回满：否则刚被淹死的玩家会带着
+	// 空氧气重生，下一次入水立刻继续掉血。
+	player.oxygen = core.MaxOxygenTicks
+	player.drownTicks = 0
 	player.input = physics.Input{}
 	player.miningHeld = false
 	player.mining = miningState{}
