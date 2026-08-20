@@ -66,11 +66,7 @@ func (s *goLightScratch) buildSky(n *world.Neighborhood, reg mesh.Registry) {
 	for x := lightMin; x < lightMin+lightSide; x++ {
 		for y := lightMin; y < lightMin+lightSide; y++ {
 			for z := lightMin; z < lightMin+lightSide; z++ {
-				// 直射起点只认「零衰减」的透光格：流体虽然透光，但列顶判定已忽略
-				// 流体，水下每一格的 SkyLight 都是 15；若照旧当直射起点，整根水柱
-				// 会齐读 15，竖直向下穿水就是无损的。与 Rust build_sky 同规则。
-				id := n.At(x, y, z)
-				if n.SkyLight(x, y, z) != 15 || reg.Opaque(id) || reg.LightAttenuation(id) != 0 {
+				if n.SkyLight(x, y, z) != 15 || reg.Opaque(n.At(x, y, z)) {
 					continue
 				}
 				index := lightIndex(x, y, z)

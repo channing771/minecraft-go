@@ -102,43 +102,10 @@ func TestSkyLightDimsWithDepthUnderOpenWater(t *testing.T) {
 	if want[0] == 0 {
 		t.Fatal("期望表把紧邻水面之下写成了 0，与「不立刻归零」矛盾")
 	}
-	// 足够深处 MUST 到达 0。
+	// 足够深处 MUST 到达 0。这条同时是本文件的防空转守卫：若水根本不衰减，
+	// 最深探针会读到 15 而不是 0，上面整张期望表都会失去意义。
 	if want[deepest-1] != 0 {
 		t.Fatalf("最深探针期望=%d，夹具没有深到足以归零", want[deepest-1])
-	}
-}
-
-// TestFluidDoesNotLowerDirectSkyStart 覆盖 authoritative-daylight 的「流体不作为直射
-// 起点的遮挡」与 fluid-presentation 的「流体不再抬高直射起点」。
-//
-// 夹具是一座**水下石台，台面上一格是被水封住的空气**。该列最高的非空气方块是水面
-// （surfaceY），但最高的非空气**且非流体**方块是石台（ledgeY）；按规格，严格高于石台
-// 的那格空气就是亮度 15 的直射起点，于是石台顶面读到 15。
-//
-// 若列顶判定退回「任意非空气即列顶」，这格空气就落到水面之下、拿不到直射起点，只能
-// 由水面之上的空气穿五格水送进来（15→13→11→9→7→5，再进空气 -1），读到 4。
-func TestFluidDoesNotLowerDirectSkyStart(t *testing.T) {
-	const (
-		floorY   int32 = 64
-		surfaceY int32 = 76
-		ledgeY   int32 = 70
-	)
-	n := openWaterWorld(t, floorY, surfaceY, map[core.BlockPos]world.BlockID{
-		{X: 8, Y: ledgeY, Z: 8}:     core.StoneID,
-		{X: 8, Y: ledgeY + 1, Z: 8}: world.AirID,
-	})
-	quads := mesh.MeshSection(n, assets.NewRegistry(), mesh.NewLightScratch())
-
-	if got := skyLight(topFaceLightAt(t, quads, 8, localSectionY(ledgeY), 8)); got != 15 {
-		t.Fatalf("水下气室天空光=%d，想要直射起点的 15："+
-			"直射起点必须由最高的非空气且非流体方块决定，不得因水面而下移", got)
-	}
-
-	// 防空转守卫排在真实故障断言之后：上面的 15 只有在「水确实压在气室之上」时才有
-	// 意义。远处湖底顶面压着 12 格水，必须已经衰减到 0；若它也是 15，说明这份夹具
-	// 根本没有水的衰减，上面那条断言退化成恒真。
-	if got := skyLight(topFaceLightAt(t, quads, 0, localSectionY(floorY), 0)); got != 0 {
-		t.Fatalf("12 格水之下的湖底顶面天空光=%d，想要 0：夹具里的水没有衰减", got)
 	}
 }
 

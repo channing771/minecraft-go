@@ -85,16 +85,7 @@ fn build_sky(
     for x in LIGHT_MIN..end {
         for y in LIGHT_MIN..end {
             for z in LIGHT_MIN..end {
-                let id = input.block(x, y, z);
-                // 直射起点只认「零衰减」的透光格。流体虽然透光，但它是一种要付出
-                // 衰减才能进入的介质：列顶判定已经忽略流体（见 world.toppedByColumn），
-                // 水面之下的每一格都严格高于列顶、sky_light 都是 15，若照旧当成直射
-                // 起点，整根水柱会齐刷刷读到 15，**竖直向下穿过流体就是无损的**。
-                // 排除它们之后，水下的光只能由上方空气经 BFS 逐格付费送进来。
-                if input.sky_light(x, y, z) != 15
-                    || registry.opaque(id)
-                    || registry.light_attenuation(id) != 0
-                {
+                if input.sky_light(x, y, z) != 15 || registry.opaque(input.block(x, y, z)) {
                     continue;
                 }
                 let index = light_index(x, y, z);
@@ -399,6 +390,10 @@ mod tests {
     #[test]
     fn sky_light_dims_by_two_per_fluid_cell() {
         let water = open_water_fixture(LIGHT_ID);
+        // 夹具把 LIGHT_ID 当水用，靠的是 valid_input() 给它写了 light_attenuation=1
+        // 这一**隐式**事实（base_input 显式清零了 fluid_height 那个字节，却没碰它）。
+        // 显式钉住，免得夹具改动悄悄把「水」变成普通透明方块、整组断言退化。
+        assert_eq!(water.mesh.registry.light_attenuation(LIGHT_ID), 1);
         let mut storage = ScratchFixture::new();
         build_light(&water.mesh, &water.mesh.registry, &mut storage.light).unwrap();
 
@@ -519,12 +514,15 @@ mod tests {
         }
     }
 
-    /// open_water_fixture 造一片**露天水体**：中心 16×16 区段列的列顶全部低于水面
-    /// （`highest = -1`，即 y >= 0 的每一格都在列顶之上、拿得到直射天空光），
-    /// `fill` 铺满 y=0..=7 八格，其上是空气。
+    /// open_water_fixture 造一片**露天水体**：`fill` 铺满中心 16×16 区段列的
+    /// y=0..=7 八格，其上是空气，没有任何遮挡。
     ///
     /// `fill` 传 `LIGHT_ID` 时就是水：在 `base_input(0)` 下它正好是一块「非不透明、
     /// 不发光、`light_attenuation = 1`」的方块。传 `0`（空气）就是同一夹具的对照组。
+    ///
+    /// 列顶按 `fill` 派生，与 `world.Chunk` 的 `updateHeight` 同口径：水是非空气方块，
+    /// 会把列顶抬到水面 `y=7`（于是水格自身 `sky_light=0`、只能靠 BFS 进光）；空气
+    /// 对照组则是空列（-17，低于整个光照体积）。
     ///
     /// 夹具刻意做成整段 16×16 满铺八格深：**单列水柱是测不出衰减的**——旁边的空气
     /// 会以每格 1 的代价把光送到同样深度再横向灌进来，读数被空气路径而不是水路径
@@ -532,7 +530,8 @@ mod tests {
     /// 穿水。八格深也是刻意的：一格深时「衰减 1」与「衰减 0」会给出同一批读数。
     fn open_water_fixture(fill: u16) -> InputFixture {
         let mut bytes = base_input(0);
-        fill_height_section(&mut bytes, 8, 8, -1);
+        let highest = if fill == 0 { -17 } else { 7 };
+        fill_height_section(&mut bytes, 8, 8, highest);
         for x in 0..16 {
             for z in 0..16 {
                 for y in 0..8 {

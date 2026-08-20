@@ -15,7 +15,7 @@ const HEIGHTS_BYTES: usize = 9 * 256 * 2;
 ///   Rust 侧只消费这个数，**不知道也不需要知道流体等级**——等级→高度的映射是 Go 的
 ///   单一真值源（`internal/assets.Registry.FluidHeight`）。
 /// - `light_attenuation`：天空光穿过该方块时的额外衰减，由 `light::build_sky` 消费
-///   （每格扣减 = 1 + 本值，非零者还不能当直射起点）。方块光不读它。
+///   （每格扣减 = 1 + 本值）。方块光不读它。
 const REGISTRY_ENTRY_BYTES: usize = 18;
 /// registry 条目表的容量上限。
 ///
@@ -249,8 +249,7 @@ impl RegistryView<'_> {
 
     /// light_attenuation 返回天空光穿过该方块时的额外衰减。
     ///
-    /// 天空光 BFS（`light::build_sky`）消费它：每格扣减 = 固定的 1 + 本值；
-    /// 非零的方块还会被排除在直射起点之外，否则竖直向下穿过它就是无损的。
+    /// 天空光 BFS（`light::build_sky`）消费它：每格扣减 = 固定的 1 + 本值。
     /// 方块光**不**读它——方块光只经 `AirID` 传播，任何非空气方块一律阻断。
     pub(crate) fn light_attenuation(&self, id: u16) -> u8 {
         self.index(id)

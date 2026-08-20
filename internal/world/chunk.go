@@ -14,7 +14,7 @@ type Chunk struct {
 	drops    [core.DropsPerChunk]DropSlot
 	furnaces [core.FurnacesPerChunk]FurnaceSlot
 	chests   [core.ChestsPerChunk]ChestSlot
-	// heights 是由方块派生的每列最高非空气且非流体 Y，不进入存档、payload 或 Hash。
+	// heights 是由方块派生的每列最高非空气 Y，不进入存档、payload 或 Hash。
 	heights HeightMap
 }
 

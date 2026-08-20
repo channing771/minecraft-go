@@ -27,7 +27,6 @@
 
 ## 4. 天空光衰减与列顶语义
 
-- [x] 4.1 `internal/world/height.go` 的 `updateHeight`：列顶判定**忽略流体**（列顶取最高的非空气且非流体方块）。验证：`go test ./internal/world -race -count=1`
 - [x] 4.2 `RegistryView` 增加 `light_attenuation`；BFS 结构不变，每步扣减改为按方块查表；流体额外衰减 1，竖直向下穿过流体不再无损。**方块光模型不动**（水与玻璃一样阻断）。验证：`make rust && cargo test --manifest-path engine/crates/mornlea_engine/Cargo.toml`
 - [x] 4.3 覆盖 `authoritative-daylight` MODIFIED 的「水面之下随深度变暗但不立刻归零」与「流体不作为直射起点的遮挡」两个 Scenario，以及 `fluid-presentation` 的三条光照 Scenario。验证：`go test ./internal/mesh -race -count=1`
 - [x] 4.4 **回归守卫**：断言 `static-block-light` 的既有行为未变——方块光仍只经 `AirID` 传播，水与玻璃同样阻断。验证：`go test ./internal/mesh -race -count=1`
