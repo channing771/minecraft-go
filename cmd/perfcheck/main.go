@@ -13,7 +13,7 @@ func main() {
 	baselinePath := flag.String("baseline", "", "基线 JSON")
 	currentPath := flag.String("current", "", "当前 JSON")
 	maxRegression := flag.Float64("max-regression", 0.20, "允许的最大相对退化")
-	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 15:16 场景迁移")
+	allowScenarioUpgrade := flag.String("allow-scenario-upgrade", "", "只允许显式的 16:17 场景迁移")
 	flag.Parse()
 
 	if *baselinePath == "" || *currentPath == "" {

@@ -16,7 +16,13 @@ import (
 const (
 	benchmarkSeed            = 20260726
 	benchmarkMessageDrainMax = 4096
-	scenarioVersion          = 16
+	// scenarioVersion 是 benchmark producer 的场景身份。v16 → v17 的理由是
+	// fluid-presentation-survival 改变了被测进程本身，即便 benchmark 的世界内容
+	// 没变（它把 FluidEnabled 钉死为 false）：mesh registry 条目从 16 字节扩到
+	// 18、quad 位布局改写、光照 BFS 改为按方块查衰减表、渲染器多出一条 water
+	// pass 与一块 32 MiB 的固定水面实例缓冲、StepInput 头版本升到 v2。这些都
+	// 落在 RSS、管线数量与每帧工作量上，v16 与 v17 的数字因此不可直接比较。
+	scenarioVersion = 17
 )
 
 var (
