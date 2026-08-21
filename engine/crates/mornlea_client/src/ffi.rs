@@ -16,7 +16,11 @@ use crate::input::SNAPSHOT_BYTES;
 use crate::window::ClientWindow;
 
 /// 当前 client ABI 版本。
-pub const CLIENT_ABI_VERSION: u32 = 4;
+///
+/// v5:`mornlea_client_render_upload_section` 按 material 分成不透明与水面两条
+/// 流,渲染器新增半透明 water pass。必须与 `engine/include/mornlea_client.h`
+/// 的 `MORNLEA_CLIENT_ABI_VERSION` 逐版本一致。
+pub const CLIENT_ABI_VERSION: u32 = 5;
 
 /// 调用成功。
 pub const MORNLEA_CLIENT_STATUS_OK: u32 = 0;
@@ -266,8 +270,8 @@ mod tests {
     // 校验拒绝路径:ABI 版本、参数校验与无效句柄。
 
     #[test]
-    fn abi_version_is_four() {
-        assert_eq!(mornlea_client_abi_version(), 4);
+    fn abi_version_is_five() {
+        assert_eq!(mornlea_client_abi_version(), 5);
     }
 
     #[test]
@@ -488,7 +492,13 @@ pub unsafe extern "C" fn mornlea_client_render_upload_atlas(
     })
 }
 
-/// 上传/替换一个 section 的 packed face 字节(8 的倍数;空等价 drop)。
+/// 上传/替换一个 section 的两条 packed face 字节流(各自长度均为 8 的倍数;
+/// 两条都空等价 drop)。
+///
+/// client ABI v5 起按 material 分流:`quads` 是不透明与 cutout 面,`water_quads`
+/// 是水面。两条流的元素格式完全相同(8 字节 packed quad),分流只决定它们进
+/// 哪条绘制路径——前者接 GPU culling 的单次 indirect draw,后者接半透明
+/// water pass。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mornlea_client_render_upload_section(
     abi_version: u32,
@@ -498,11 +508,17 @@ pub unsafe extern "C" fn mornlea_client_render_upload_section(
     section_z: i32,
     quads: *const u8,
     quads_len: usize,
+    water_quads: *const u8,
+    water_quads_len: usize,
 ) -> u32 {
     if abi_version != CLIENT_ABI_VERSION {
         return MORNLEA_CLIENT_STATUS_ABI_VERSION;
     }
-    if !quads_len.is_multiple_of(8) || (quads.is_null() && quads_len != 0) {
+    if !quads_len.is_multiple_of(8)
+        || !water_quads_len.is_multiple_of(8)
+        || (quads.is_null() && quads_len != 0)
+        || (water_quads.is_null() && water_quads_len != 0)
+    {
         return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
     }
     catch(|| {
@@ -513,7 +529,13 @@ pub unsafe extern "C" fn mornlea_client_render_upload_section(
                 // SAFETY: quads 非空,调用方保证 quads_len 字节可读。
                 unsafe { std::slice::from_raw_parts(quads, quads_len) }
             };
-            if renderer.upload_section((section_x, section_y, section_z), data) {
+            let water = if water_quads_len == 0 {
+                &[][..]
+            } else {
+                // SAFETY: water_quads 非空,调用方保证 water_quads_len 字节可读。
+                unsafe { std::slice::from_raw_parts(water_quads, water_quads_len) }
+            };
+            if renderer.upload_section((section_x, section_y, section_z), data, water) {
                 MORNLEA_CLIENT_STATUS_OK
             } else {
                 MORNLEA_CLIENT_STATUS_CAPACITY
@@ -550,6 +572,8 @@ const FRAME_TAG_OVERLAY: u32 = 4;
 const FRAME_TAG_NAME_TAG: u32 = 5;
 const FRAME_TAG_HUD: u32 = 6;
 const FRAME_TAG_DEBUG: u32 = 7;
+/// 水下水色叠加段(4 个 f32:RGBA)。client ABI v5 内的追加 tag,不升 ABI 版本。
+const FRAME_TAG_WATER: u32 = 8;
 
 /// 解析 render_frame 输入;违约返回 None。
 ///
@@ -593,12 +617,13 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
     let mut drop_instances = Vec::new();
     let mut outline = Vec::new();
     let mut overlay_strength = 0.0f32;
+    let mut water_tint = [0.0f32; 4];
     let mut name_tag_vertices = Vec::new();
     let mut hud_vertices = Vec::new();
     let mut debug_vertices = Vec::new();
     if layout == 2 {
         let mut cursor = sections_end;
-        let mut seen = [false; 8];
+        let mut seen = [false; 9];
         while cursor < bytes.len() {
             if bytes.len() - cursor < 8 {
                 return None;
@@ -612,7 +637,7 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
             let payload = &bytes[cursor..cursor + length];
             cursor += length;
             let index = tag as usize;
-            if !(1..=7).contains(&index) || seen[index] {
+            if !(1..=8).contains(&index) || seen[index] {
                 return None;
             }
             seen[index] = true;
@@ -629,6 +654,16 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
                 FRAME_TAG_NAME_TAG => name_tag_vertices = payload.to_vec(),
                 FRAME_TAG_HUD => hud_vertices = payload.to_vec(),
                 FRAME_TAG_DEBUG => debug_vertices = payload.to_vec(),
+                FRAME_TAG_WATER => {
+                    if length != 16 {
+                        return None;
+                    }
+                    for (index, slot) in water_tint.iter_mut().enumerate() {
+                        *slot = f32::from_le_bytes(
+                            payload[index * 4..index * 4 + 4].try_into().unwrap(),
+                        );
+                    }
+                }
                 _ => return None,
             }
         }
@@ -648,6 +683,7 @@ fn parse_frame(bytes: &[u8]) -> Option<FrameInput> {
         drop_instances,
         outline,
         overlay_strength,
+        water_tint,
         name_tag_vertices,
         hud_vertices,
         debug_vertices,
@@ -729,8 +765,10 @@ mod render_ffi_tests {
         let zero = unsafe { mornlea_client_render_create(CLIENT_ABI_VERSION, 0, 64, &mut handle) };
         assert_eq!(zero, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
 
-        // quads 长度非 8 的倍数必须拒绝。
+        // 任一条流的长度非 8 的倍数都必须拒绝(两条流各校验一次:
+        // 只校验其中一条的实现会让另一条静默错位)。
         let quads = [0u8; 9];
+        let aligned = [0u8; 8];
         // SAFETY: 同上。
         let misaligned = unsafe {
             mornlea_client_render_upload_section(
@@ -741,9 +779,26 @@ mod render_ffi_tests {
                 0,
                 quads.as_ptr(),
                 quads.len(),
+                std::ptr::null(),
+                0,
             )
         };
         assert_eq!(misaligned, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+        // SAFETY: 同上。
+        let misaligned_water = unsafe {
+            mornlea_client_render_upload_section(
+                CLIENT_ABI_VERSION,
+                0xBEEF,
+                0,
+                0,
+                0,
+                aligned.as_ptr(),
+                aligned.len(),
+                quads.as_ptr(),
+                quads.len(),
+            )
+        };
+        assert_eq!(misaligned_water, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
 
         // 未知句柄一律 WINDOW。
         assert_eq!(

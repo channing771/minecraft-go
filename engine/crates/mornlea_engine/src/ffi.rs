@@ -14,7 +14,7 @@ use crate::worldgen::{
     parse_chunk_input, parse_probe_input, run_probe,
 };
 
-pub(crate) const ABI_VERSION: u32 = 4;
+pub(crate) const ABI_VERSION: u32 = 5;
 
 // 输入长度校验委托给 step::step_input_is_valid（内部使用 STEP_HEADER_BYTES），此常量保留供 ABI 文档对齐。
 #[allow(dead_code)]
@@ -820,9 +820,9 @@ mod mesh_tests {
     use super::*;
 
     #[test]
-    fn exported_version_is_four() {
-        // engine ABI v4:worldgen 材料表 13 → 14(末项 water)。
-        assert_eq!(mornlea_engine_abi_version(), 4);
+    fn exported_version_is_five() {
+        // engine ABI v5:mesh registry 条目上限 27 → 35(流体进入 registry 快照)。
+        assert_eq!(mornlea_engine_abi_version(), 5);
     }
 }
 #[cfg(test)]
@@ -1863,6 +1863,7 @@ mod tests {
         const BLOCKS_OFFSET: usize = 16;
         const BLOCKS_BYTES: usize = 27 * 4096 * 2;
         const REGISTRY_OFFSET: usize = BLOCKS_OFFSET + BLOCKS_BYTES + 9 + 9 * 256 * 2;
+        const ENTRY_BYTES: usize = crate::input::tests::ENTRY_BYTES;
         let mut base = valid_input();
         base[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].fill(0);
         base[BLOCKS_OFFSET..BLOCKS_OFFSET + 2].copy_from_slice(&40000_u16.to_le_bytes());
@@ -1870,7 +1871,7 @@ mod tests {
         let cases = [
             ("overbright", {
                 let mut input = base.clone();
-                input[REGISTRY_OFFSET + 2 * 16 + 3] = 16;
+                input[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 3] = 16;
                 input
             }),
             ("bad opacity", {
@@ -1880,7 +1881,7 @@ mod tests {
             }),
             ("duplicate id", {
                 let mut input = base.clone();
-                input[REGISTRY_OFFSET + 16..REGISTRY_OFFSET + 18]
+                input[REGISTRY_OFFSET + ENTRY_BYTES..REGISTRY_OFFSET + ENTRY_BYTES + 2]
                     .copy_from_slice(&0_u16.to_le_bytes());
                 input
             }),
@@ -1891,7 +1892,7 @@ mod tests {
             }),
             ("missing barrier", {
                 let mut input = base;
-                input[REGISTRY_OFFSET + 16..REGISTRY_OFFSET + 18]
+                input[REGISTRY_OFFSET + ENTRY_BYTES..REGISTRY_OFFSET + ENTRY_BYTES + 2]
                     .copy_from_slice(&2_u16.to_le_bytes());
                 input
             }),
@@ -1953,9 +1954,10 @@ mod tests {
     fn ffi_publishes_six_quads_only_after_complete_mesh() {
         const BLOCKS_OFFSET: usize = 16;
         const REGISTRY_OFFSET: usize = BLOCKS_OFFSET + 27 * 4096 * 2 + 9 + 9 * 256 * 2;
+        const ENTRY_BYTES: usize = crate::input::tests::ENTRY_BYTES;
         let mut input = valid_input();
         input[BLOCKS_OFFSET..BLOCKS_OFFSET + 27 * 4096 * 2].fill(0);
-        input[REGISTRY_OFFSET + 3 * 16..REGISTRY_OFFSET + 3 * 16 + 8]
+        input[REGISTRY_OFFSET + 3 * ENTRY_BYTES..REGISTRY_OFFSET + 3 * ENTRY_BYTES + 8]
             .copy_from_slice(&0_u64.to_le_bytes());
         let center = BLOCKS_OFFSET + (13 * 4096 + ((8 << 8) | (8 << 4) | 8)) * 2;
         input[center..center + 2].copy_from_slice(&1_u16.to_le_bytes());
@@ -2113,6 +2115,7 @@ mod tests {
     #[test]
     fn invalid_arguments_and_inputs_return_exact_atomic_statuses() {
         const REGISTRY_OFFSET: usize = 225817;
+        const ENTRY_BYTES: usize = crate::input::tests::ENTRY_BYTES;
         let input = valid_input();
         let mut scratch = vec![0_u32; (48 * 48 * 48 * 5) / 4];
         let mut output = vec![0_u64; 6 * 4096];
@@ -2136,7 +2139,7 @@ mod tests {
                 "malformed registry",
                 {
                     let mut malformed = input.clone();
-                    malformed[REGISTRY_OFFSET + 16..REGISTRY_OFFSET + 18]
+                    malformed[REGISTRY_OFFSET + ENTRY_BYTES..REGISTRY_OFFSET + ENTRY_BYTES + 2]
                         .copy_from_slice(&0_u16.to_le_bytes());
                     malformed
                 },
@@ -2146,7 +2149,7 @@ mod tests {
                 "overbright emission",
                 {
                     let mut overbright = input.clone();
-                    overbright[REGISTRY_OFFSET + 2 * 16 + 3] = 16;
+                    overbright[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 3] = 16;
                     overbright
                 },
                 MORNLEA_STATUS_EMISSION,

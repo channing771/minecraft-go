@@ -348,7 +348,7 @@ func (m *companionManager) issuerLookHit(player sim.PlayerUpdate) (core.BlockPos
 			if !ready {
 				return false, nil
 			}
-			return block != core.AirID, nil
+			return core.InteractionTarget(block), nil
 		},
 	)
 	if err != nil || !ok {

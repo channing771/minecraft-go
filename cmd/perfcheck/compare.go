@@ -29,11 +29,13 @@ func compareReportsWithScenarioUpgrade(
 	allowScenarioUpgrade string,
 ) ([]string, error) {
 	scenarioUpgrade := baseline.ScenarioVersion != current.ScenarioVersion
-	// 统一伙伴渲染改变固定上传布局，因此当前唯一迁移是 v15 到 v16。
-	allowedScenarioUpgrade := baseline.ScenarioVersion == 15 && current.ScenarioVersion == 16 &&
-		allowScenarioUpgrade == "15:16"
+	// 流体呈现改变了被测进程（registry 条目、quad 位布局、光照衰减查表、
+	// water pass 与其固定显存），因此当前唯一迁移是 v16 到 v17。
+	// 历史的 15:16 已退役——它只作为归档证据留在 docs/notes，不再是授权值。
+	allowedScenarioUpgrade := baseline.ScenarioVersion == 16 && current.ScenarioVersion == 17 &&
+		allowScenarioUpgrade == "16:17"
 	if allowScenarioUpgrade != "" && !allowedScenarioUpgrade {
-		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v15 到 v16 使用 15:16", allowScenarioUpgrade)
+		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v16 到 v17 使用 16:17", allowScenarioUpgrade)
 	}
 	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(

@@ -13,7 +13,7 @@ import (
 func (p *Predictor) Advance(
 	elapsed time.Duration,
 	control Control,
-	source physics.CollisionSource,
+	source physics.WorldSource,
 	nextSequence func() uint64,
 	send func(network.PlayerInput) error,
 ) error {
@@ -81,11 +81,7 @@ func (p *Predictor) Advance(
 			},
 		})
 		p.previous = p.current
-		p.current = physics.Step(
-			p.current,
-			p.history[len(p.history)-1].input,
-			source,
-		).State
+		p.current = p.stepWithSubmersion(p.current, p.history[len(p.history)-1].input, source)
 		p.accumulator -= physics.FixedDelta
 	}
 	if dropRemainder {
@@ -138,4 +134,24 @@ func validateControl(control Control) error {
 
 func finiteFloat32(value float32) bool {
 	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
+}
+
+// stepWithSubmersion 先按当前位置算好两个浸没标志，再推进一个固定步，
+// 并把眼睛浸没标志记回预测器供水下视觉读取。
+//
+// 标志刻意不写回 predictedInput：权威侧每个 tick 都按「本 tick 开始时的位置」
+// 重算，重放时若沿用记录当时的旧值，重放起点已经换成权威位置、标志却还是旧的，
+// 两侧就会在水面附近分叉。重算的输入是位置与方块镜像，与权威侧同源。
+//
+// p.eyeInFluid 存的是**这一个**标志，不是另算的一份：水下视觉与溺水判定因此
+// 共用同一次 physics.SubmersionFlags 调用的结果，规格要求的"不得存在第二套
+// 独立判定"在这里是结构上成立的，而不是靠两处代码碰巧写对。
+func (p *Predictor) stepWithSubmersion(
+	state physics.State,
+	input physics.Input,
+	source physics.WorldSource,
+) physics.State {
+	input.BodyInFluid, input.EyeInFluid = physics.SubmersionFlags(state.Position, source)
+	p.eyeInFluid = input.EyeInFluid
+	return physics.Step(state, input, source).State
 }

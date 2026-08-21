@@ -24,6 +24,13 @@ type Tunables struct {
 	RegenDelayTicks uint32 `json:"regenDelayTicks"`
 	// RegenIntervalTicks 是进入回复阶段后，每回复 1 点生命值需要经过的 tick 数。
 	RegenIntervalTicks uint32 `json:"regenIntervalTicks"`
+	// DrownDamageIntervalTicks 是氧气归零后两次溺水伤害之间的 tick 数
+	// （变更 fluid-presentation-survival，internal/sim/oxygen.go 的 advanceOxygen）。
+	//
+	// 它只决定「多久扣一次血」，不决定「多久开始扣血」——后者由
+	// core.MaxOxygenTicks 这个不可调的存档无关常量固定。取 0 会退化成每 tick
+	// 扣血，配置层已把下限钳到 1，advanceOxygen 另有一次 max(…, 1) 兜底。
+	DrownDamageIntervalTicks uint32 `json:"drownDamageIntervalTicks"`
 	// DropPickupDelayTicks 是采掘与方块破坏产生的掉落物可被拾取前的活动 tick 数。
 	DropPickupDelayTicks uint8 `json:"dropPickupDelayTicks"`
 	// PlayerDropPickupDelayTicks 是玩家主动丢弃或死亡掉落的物品可被拾取前的活动
@@ -127,6 +134,7 @@ func DefaultTunables() Tunables {
 		InteractionReach:           defaultInteractionReach,
 		RegenDelayTicks:            defaultRegenDelayTicks,
 		RegenIntervalTicks:         defaultRegenIntervalTicks,
+		DrownDamageIntervalTicks:   defaultDrownDamageIntervalTicks,
 		DropPickupDelayTicks:       defaultDropPickupDelayTicks,
 		PlayerDropPickupDelayTicks: defaultPlayerDropPickupDelayTicks,
 		DropLifetimeTicks:          defaultDropLifetimeTicks,

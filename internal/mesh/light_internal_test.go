@@ -53,6 +53,23 @@ func (internalTestRegistry) FaceVisible(id, adjacent world.BlockID) bool {
 func (internalTestRegistry) Material(world.BlockID, Face) uint16 {
 	return 0
 }
+
+// FluidHeight/LightAttenuation 沿用生产规则（h_raw = 14 - level、流体额外衰减 1），
+// 免得夹具悄悄把流体当成普通方块。
+func (internalTestRegistry) FluidHeight(id world.BlockID) uint8 {
+	if !core.IsFluid(id) {
+		return 0
+	}
+	return 14 - core.FluidLevel(id)
+}
+
+func (internalTestRegistry) LightAttenuation(id world.BlockID) uint8 {
+	if core.IsFluid(id) {
+		return 1
+	}
+	return 0
+}
+
 func (internalTestRegistry) Emission(id world.BlockID) uint8 {
 	if id == core.LightBlockID {
 		return 15
@@ -108,6 +125,9 @@ func (r *countingRegistry) Emission(world.BlockID) uint8 {
 	r.emissionQueries++
 	return 0
 }
+
+func (*countingRegistry) FluidHeight(world.BlockID) uint8      { return 0 }
+func (*countingRegistry) LightAttenuation(world.BlockID) uint8 { return 0 }
 
 func (*countingRegistry) MeshSnapshot() RegistrySnapshot {
 	panic("countingRegistry.MeshSnapshot 不应被调用")

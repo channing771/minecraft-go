@@ -1,13 +1,20 @@
-// 确认受伤反馈：固定红色屏幕边缘渐变。
+// 全屏叠加：一条管线同时服务「确认受伤的红色屏幕边缘」与「相机浸没时的水色叠加」。
+//
+// 两者只有 uniform 不同：edge = 1 走边缘渐变（伤害红边，与本文件历史行为逐位一致），
+// edge = 0 走全屏均匀覆盖（水下水色）。刻意不为水色另开一条管线——规格要求
+// 水下视觉不得引入新的绘制管线。
 
-struct DamageOverlay {
-    strength: f32,
+struct ScreenTint {
+    /// 叠加色 RGB 与最大不透明度 A。
+    color: vec4<f32>,
+    /// 1 = 边缘渐变，0 = 全屏均匀；中间值线性插值。
+    edge: f32,
     _pad0: f32,
     _pad1: f32,
     _pad2: f32,
 };
 
-@group(0) @binding(0) var<uniform> overlay: DamageOverlay;
+@group(0) @binding(0) var<uniform> overlay: ScreenTint;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -35,5 +42,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         min(in.uv.y, 1.0 - in.uv.y),
     );
     let edge_factor = 1.0 - smoothstep(0.0, 0.35, edge_distance);
-    return vec4<f32>(0.65, 0.0, 0.0, 0.30 * overlay.strength * edge_factor);
+    let factor = mix(1.0, edge_factor, overlay.edge);
+    return vec4<f32>(overlay.color.rgb, overlay.color.a * factor);
 }

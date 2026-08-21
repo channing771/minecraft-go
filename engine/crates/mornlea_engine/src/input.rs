@@ -1,8 +1,33 @@
 const BLOCKS_BYTES: usize = 27 * 4096 * 2;
 const HEIGHTS_PRESENT_BYTES: usize = 9;
 const HEIGHTS_BYTES: usize = 9 * 256 * 2;
-const REGISTRY_ENTRY_BYTES: usize = 16;
-const MAX_REGISTRY_ENTRIES: usize = 27;
+/// 单条 registry 条目的字节数。
+///
+/// 布局（小端）：`id: u16` | `opaque: u8` | `emission: u8` | `material: [u16; 6]`
+/// | `fluid_height: u8` | `light_attenuation: u8`，共 18 字节。
+///
+/// 后两个字节与 `emission` 同形状——每方块一个字节、由 Go 侧
+/// `internal/mesh.BlockProperties` 烘焙、`encodeNativeInput` 按同一顺序写出：
+///
+/// - `fluid_height`：该格**孤立时**的 4-bit 高度原值 `h_raw`（实际高度 `(h_raw+1)/16`）。
+///   `0` 是「非流体」哨兵：`h_raw = 14 - level` 且 `level <= 7`，所以真流体的 `h_raw`
+///   恒在 `7..=14`，`0` 永远不会是合法的流体高度，于是不必再额外花一个标志位。
+///   Rust 侧只消费这个数，**不知道也不需要知道流体等级**——等级→高度的映射是 Go 的
+///   单一真值源（`internal/assets.Registry.FluidHeight`）。
+/// - `light_attenuation`：天空光穿过该方块时的额外衰减，由 `light::build_sky` 消费
+///   （每格扣减 = 1 + 本值）。合法域只有 `0..=1`，上界来自 `build_sky` 的分桶证明
+///   而不是天空光值域，见 `RegistryView::validate`。方块光不读它。
+const REGISTRY_ENTRY_BYTES: usize = 18;
+/// registry 条目表的容量上限。
+///
+/// 35 = Go 侧 `core.AirID..=core.WaterLevel7ID` 的方块编号总数，也就是
+/// `internal/assets.NewRegistry()` 烘焙进 mesh snapshot 的条目数；Go 侧对应的
+/// `internal/mesh.nativeMaxRegistryEntries` 必须与本常量一起改，两侧各自独立
+/// 定义、没有共享常量或生成步骤，只能人手同步（一次跨语言 engine ABI 变更）。
+///
+/// **注意**：本文件开头 `BLOCKS_BYTES = 27 * 4096 * 2` 里的 27 是 3×3×3 邻域的
+/// 区段数，与本常量只是数字撞了，两者语义无关，改一个绝不能牵动另一个。
+const MAX_REGISTRY_ENTRIES: usize = 35;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InputError {
@@ -165,6 +190,26 @@ impl RegistryView<'_> {
             if reject_overbright && self.entries[offset + 3] > 15 {
                 return Err(InputError::Emission);
             }
+            // fluid_height 是 4-bit 高度原值加「0=非流体」哨兵，合法域只有 0..=14；
+            // 15 被保留给「上方也是流体」的满格情形，那是 mesher 现算的、不会出现在
+            // 条目里，因此这里一并拒绝，免得错误的条目悄悄产生满格水面。
+            if self.entries[offset + 16] > 14 {
+                return Err(InputError::Registry);
+            }
+            // light_attenuation 的合法域是 **0..=1**。
+            //
+            // 这个 1 **不是**天空光值域（那是 0..15，两个数字碰巧都在附近，别看混）：
+            // 它是 `light::build_sky` 分桶推进的**算法前提**。那里的证明依赖「每格扣减
+            // 只可能是 1 或 2」，于是一个桶只装一种亮度、相位 A 产出的 L-1 与相位 B
+            // 产出的 L-2 落进不同桶段。衰减一旦到 2，扣减就有 1/2/3 三种，`B(L+1)` 的
+            // L-2 会和 `A(L)` 的 L-1 落进同一个桶段、桶不再单亮度，「每格至多入队一次」
+            // 随之失效，队列（容量恰好 LIGHT_VOLUME）就会溢出成渲染热路径上的 panic。
+            //
+            // 所以这里必须挡在最前面：真要支持 >= 2 的衰减，是一次独立变更——去把分桶
+            // 泛化成每个 step 一个桶，而不是放宽这条校验。
+            if self.entries[offset + 17] > 1 {
+                return Err(InputError::Registry);
+            }
             has_air |= id == air_id;
             has_barrier |= id == barrier_id;
             previous = Some(id);
@@ -197,6 +242,27 @@ impl RegistryView<'_> {
     pub(crate) fn emission(&self, id: u16) -> u8 {
         self.index(id)
             .map_or(0, |index| self.entries[index * REGISTRY_ENTRY_BYTES + 3])
+    }
+
+    /// fluid_height 返回该方块**孤立时**的 4-bit 高度原值 `h_raw`，非流体返回 `None`。
+    ///
+    /// 见 `REGISTRY_ENTRY_BYTES` 的布局说明：`0` 是非流体哨兵，真流体恒在 `7..=14`。
+    /// 未登记的方块编号同样返回 `None`（与 `opaque`/`emission` 的缺省口径一致）。
+    pub(crate) fn fluid_height(&self, id: u16) -> Option<u8> {
+        let index = self.index(id)?;
+        match self.entries[index * REGISTRY_ENTRY_BYTES + 16] {
+            0 => None,
+            raw => Some(raw),
+        }
+    }
+
+    /// light_attenuation 返回天空光穿过该方块时的额外衰减。
+    ///
+    /// 天空光 BFS（`light::build_sky`）消费它：每格扣减 = 固定的 1 + 本值。
+    /// 方块光**不**读它——方块光只经 `AirID` 传播，任何非空气方块一律阻断。
+    pub(crate) fn light_attenuation(&self, id: u16) -> u8 {
+        self.index(id)
+            .map_or(0, |index| self.entries[index * REGISTRY_ENTRY_BYTES + 17])
     }
 
     pub(crate) fn material(&self, id: u16, face: usize) -> Option<u16> {
@@ -268,9 +334,11 @@ pub(crate) mod tests {
     const HEIGHTS_PRESENT_OFFSET: usize = BLOCKS_OFFSET + 27 * 4096 * 2;
     const HEIGHTS_OFFSET: usize = HEIGHTS_PRESENT_OFFSET + 9;
     const REGISTRY_OFFSET: usize = HEIGHTS_OFFSET + 9 * 256 * 2;
+    /// 测试夹具复用生产常量，避免条目布局再扩容时夹具默默错位。
+    pub(crate) const ENTRY_BYTES: usize = super::REGISTRY_ENTRY_BYTES;
 
     pub(crate) fn valid_input() -> Vec<u8> {
-        let mut input = vec![0; REGISTRY_OFFSET + 3 * 16 + 3 * 8];
+        let mut input = vec![0; REGISTRY_OFFSET + 3 * ENTRY_BYTES + 3 * 8];
         input[0..4].copy_from_slice(b"MGM1");
         input[4..8].copy_from_slice(&(-32_i32).to_le_bytes());
         input[8..10].copy_from_slice(&3_u16.to_le_bytes());
@@ -285,7 +353,7 @@ pub(crate) mod tests {
         input[height..height + 2].copy_from_slice(&(-33_i16).to_le_bytes());
 
         for (index, id) in [0_u16, 1, 40000].into_iter().enumerate() {
-            let entry = REGISTRY_OFFSET + index * 16;
+            let entry = REGISTRY_OFFSET + index * ENTRY_BYTES;
             input[entry..entry + 2].copy_from_slice(&id.to_le_bytes());
             input[entry + 2] = u8::from(id == 1);
             input[entry + 3] = if id == 40000 { 7 } else { 0 };
@@ -294,12 +362,47 @@ pub(crate) mod tests {
                 input[entry + 4 + face * 2..entry + 6 + face * 2]
                     .copy_from_slice(&material.to_le_bytes());
             }
+            // id=40000 冒充一格流体：h_raw=9、额外衰减 1，用来证明这两个新字节
+            // 真的跨过了 ABI 边界（0 是非流体哨兵，若编码丢失就会读回 None/0）。
+            input[entry + 16] = if id == 40000 { 9 } else { 0 };
+            input[entry + 17] = u8::from(id == 40000);
         }
         for (index, word) in [2_u64, 5, 1].into_iter().enumerate() {
-            let offset = REGISTRY_OFFSET + 3 * 16 + index * 8;
+            let offset = REGISTRY_OFFSET + 3 * ENTRY_BYTES + index * 8;
             input[offset..offset + 8].copy_from_slice(&word.to_le_bytes());
         }
         input
+    }
+
+    /// input_with_registry_entries 造一份除条目数外一切合法的输入,用来把
+    /// MAX_REGISTRY_ENTRIES 这个纯数字常量钉在可执行断言上——否则它被改动时
+    /// 没有任何测试会变红。
+    fn input_with_registry_entries(count: usize) -> Vec<u8> {
+        let words_per_row = count.div_ceil(64);
+        let mut input = vec![0; REGISTRY_OFFSET + count * ENTRY_BYTES + count * words_per_row * 8];
+        input[0..4].copy_from_slice(b"MGM1");
+        input[8..10].copy_from_slice(&(count as u16).to_le_bytes());
+        input[10..12].copy_from_slice(&(words_per_row as u16).to_le_bytes());
+        // air=0、barrier=1,条目 id 取 0..count 保证严格递增。
+        input[12..14].copy_from_slice(&0_u16.to_le_bytes());
+        input[14..16].copy_from_slice(&1_u16.to_le_bytes());
+        for index in 0..count {
+            let entry = REGISTRY_OFFSET + index * ENTRY_BYTES;
+            input[entry..entry + 2].copy_from_slice(&(index as u16).to_le_bytes());
+        }
+        input
+    }
+
+    /// registry 条目上限必须正好容下 Go 侧 `core.AirID..=core.WaterLevel7ID` 的
+    /// 35 个方块编号:少一条,流体就进不了 mesh snapshot、水永远不出面;多一条,
+    /// 两侧对输入长度与条目上限的期望就会分叉。
+    #[test]
+    fn accepts_exactly_thirty_five_registry_entries() {
+        assert!(MeshInput::parse(&input_with_registry_entries(35)).is_ok());
+        assert_eq!(
+            MeshInput::parse(&input_with_registry_entries(36)).unwrap_err(),
+            InputError::Registry
+        );
     }
 
     #[test]
@@ -322,6 +425,12 @@ pub(crate) mod tests {
         assert_eq!(parsed.registry.emission(30000), 0);
         assert_eq!(parsed.registry.material(40000, 5), Some(40005));
         assert_eq!(parsed.registry.material(40000, 6), None);
+        assert_eq!(parsed.registry.fluid_height(40000), Some(9));
+        assert_eq!(parsed.registry.fluid_height(1), None);
+        assert_eq!(parsed.registry.fluid_height(30000), None);
+        assert_eq!(parsed.registry.light_attenuation(40000), 1);
+        assert_eq!(parsed.registry.light_attenuation(1), 0);
+        assert_eq!(parsed.registry.light_attenuation(30000), 0);
         assert!(parsed.registry.face_visible(1, 40000));
         assert!(!parsed.registry.face_visible(30000, 0));
     }
@@ -351,7 +460,8 @@ pub(crate) mod tests {
         );
 
         let mut duplicate = valid_input();
-        duplicate[REGISTRY_OFFSET + 16..REGISTRY_OFFSET + 18].copy_from_slice(&0_u16.to_le_bytes());
+        duplicate[REGISTRY_OFFSET + ENTRY_BYTES..REGISTRY_OFFSET + ENTRY_BYTES + 2]
+            .copy_from_slice(&0_u16.to_le_bytes());
         assert_eq!(
             MeshInput::parse(&duplicate).unwrap_err(),
             InputError::Registry
@@ -365,11 +475,33 @@ pub(crate) mod tests {
         );
 
         let mut emission = valid_input();
-        emission[REGISTRY_OFFSET + 2 * 16 + 3] = 16;
+        emission[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 3] = 16;
         assert_eq!(
             MeshInput::parse(&emission).unwrap_err(),
             InputError::Emission
         );
+
+        // fluid_height 的合法域是 0..=14：15 被保留给「上方也是流体」的满格情形，
+        // 只能由 mesher 现算，出现在条目里就是编码方写错了。
+        let mut fluid_height = valid_input();
+        fluid_height[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 16] = 15;
+        assert_eq!(
+            MeshInput::parse(&fluid_height).unwrap_err(),
+            InputError::Registry
+        );
+
+        // light_attenuation 的合法域是 0..=1，2 就要被拒——这是 light::build_sky 分桶
+        // 证明的前提（桶宽 = 1），不是天空光值域。挡在校验层，越界条目根本进不了 BFS。
+        let mut attenuation = valid_input();
+        attenuation[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 17] = 2;
+        assert_eq!(
+            MeshInput::parse(&attenuation).unwrap_err(),
+            InputError::Registry
+        );
+        // 1 仍然合法：上面那条不是把整个字段一起否掉。
+        let mut attenuation_one = valid_input();
+        attenuation_one[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 17] = 1;
+        assert!(MeshInput::parse(&attenuation_one).is_ok());
 
         let mut same_air_and_barrier = valid_input();
         same_air_and_barrier[14..16].copy_from_slice(&0_u16.to_le_bytes());

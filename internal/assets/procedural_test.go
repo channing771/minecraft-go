@@ -508,3 +508,22 @@ func matchingPixels(px []byte, left, top, right, bottom int, matches func([3]byt
 	}
 	return count
 }
+
+// TestWaterTextureIsTranslucentBlue 锁定水材质层的两条呈现前提：
+//
+//   - **全层半透明**（alpha 严格落在 0 与 255 之间）。水面走 alpha blend，
+//     alpha=255 会让水底地形完全被遮住，alpha=0 则整片水消失；两端都不是水。
+//   - **蓝色主导**，让「水面呈现可辨识水色」这条 Scenario 有像素级依据。
+func TestWaterTextureIsTranslucentBlue(t *testing.T) {
+	px := assets.NewRegistry().LayerRGBA(int(assets.LayerWater))
+	for i := 0; i < len(px); i += 4 {
+		alpha := px[i+3]
+		if alpha == 0 || alpha == 255 {
+			t.Fatalf("水层像素 %d 的 alpha = %d，必须严格介于 0 与 255 之间", i/4, alpha)
+		}
+		if px[i+2] <= px[i] || px[i+2] <= px[i+1] {
+			t.Fatalf("水层像素 %d 的 RGB = (%d,%d,%d)，蓝色必须主导",
+				i/4, px[i], px[i+1], px[i+2])
+		}
+	}
+}

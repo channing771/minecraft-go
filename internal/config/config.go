@@ -67,11 +67,12 @@ type Config struct {
 	// authoritative-fluid）。它是独立顶层布尔开关，不进 Fields()/physics/sim
 	// 那套数值分组与钳制机制——那套机制只认 float64 可钳制的数值字段。
 	//
-	// 启用后世界生成会在海平面及其以下注水，但本变更（authoritative-fluid）
-	// 不交付流体的任何呈现：水在渲染上没有专属处理，且由于流体暂未纳入
-	// mesh registry 快照，水体周围的地形面不会生成几何——看上去是穿透到
-	// 虚空的洞，而不是"水不可见"。正确呈现由后续变更
-	// fluid-presentation-survival 交付。本开关面向开发者，默认关闭。
+	// 变更 fluid-presentation-survival 已补齐流体的呈现与生存：斜水面几何、
+	// 半透明 water pass、天空光穿水衰减、浸没物理与水中移动、溺水与氧气、
+	// 水下可瞄准与采掘放置。原先阻止默认开启的三条后果（水下全黑、水体周围
+	// 地形不出几何、水下无法交互）均已消除，故默认值改为开启。
+	//
+	// 显式写 false 仍然有效，用来生成不含水的世界（例如复现旧存档的地形）。
 	FluidEnabled bool `json:"fluidEnabled"`
 }
 
@@ -91,9 +92,9 @@ func Defaults() Config {
 			FovDegrees:       70,
 			MouseSensitivity: 1,
 		},
-		// 默认关闭：本变更未交付流体呈现，开启后地形会在水体周围出现洞，
-		// 面向普通玩家的默认体验必须是关闭状态，见字段 GoDoc。
-		FluidEnabled: false,
+		// 默认开启：fluid-presentation-survival 交付呈现与生存后，水已是
+		// 面向普通玩家的正常世界内容，见字段 GoDoc。
+		FluidEnabled: true,
 	}
 }
 
@@ -807,6 +808,8 @@ type Field struct {
 //   - sim.furnaceBurnTicks 上限取 core.FurnaceBurnTicks，理由同上。
 //   - sim.regenIntervalTicks 下限为 1：internal/sim/health_regen.go 用它做
 //     取模除数，0 会在权威 tick 内 panic。
+//   - sim.drownDamageIntervalTicks 下限为 1：internal/sim/oxygen.go 用它做
+//     「距上次溺水伤害多少 tick」的比较阈值，0 会退化成氧气一归零就每 tick 扣血。
 //   - sim.spawnRadius 区间为 1..64：internal/sim/spawn.go 用它按平方分配切片，
 //     不钳制会触发巨额分配。
 //   - sim.dropPickupDelayTicks 与 sim.playerDropPickupDelayTicks 上限为 255：
@@ -832,10 +835,18 @@ func Fields() []Field {
 		{Group: "physics", Name: "jumpSpeed", Min: 1, Max: 30, Step: 0.1},
 		{Group: "physics", Name: "gravity", Min: 1, Max: 100, Step: 1},
 		{Group: "physics", Name: "terminalFallSpeed", Min: 1, Max: 200, Step: 1},
+		// 以下四项只在身体浸没时生效。区间不是安全约束，只是合理操作区间：
+		// fluidHorizontalDrag 上界钳到 1，因为 >1 会把水中水平速度放大到超过
+		// 陆地行走速度，直接违反 fluid-survival 的「水中水平移动更慢」。
+		{Group: "physics", Name: "fluidGravity", Min: 0, Max: 100, Step: 0.1},
+		{Group: "physics", Name: "fluidSinkSpeed", Min: 0, Max: 200, Step: 0.1},
+		{Group: "physics", Name: "fluidAscendSpeed", Min: 0, Max: 30, Step: 0.1},
+		{Group: "physics", Name: "fluidHorizontalDrag", Min: 0, Max: 1, Step: 0.05},
 
 		{Group: "sim", Name: "interactionReach", Min: 1, Max: 32, Step: 0.5},
 		{Group: "sim", Name: "regenDelayTicks", Min: 0, Max: 2000, Step: 1},
 		{Group: "sim", Name: "regenIntervalTicks", Min: 1, Max: 600, Step: 1},
+		{Group: "sim", Name: "drownDamageIntervalTicks", Min: 1, Max: 600, Step: 1},
 		{Group: "sim", Name: "dropPickupDelayTicks", Min: 0, Max: 255, Step: 1},
 		{Group: "sim", Name: "playerDropPickupDelayTicks", Min: 0, Max: 255, Step: 1},
 		{Group: "sim", Name: "dropLifetimeTicks", Min: 1, Max: 120000, Step: 100},

@@ -268,32 +268,36 @@ func TestUnknownVersionFails(t *testing.T) {
 	}
 }
 
-// TestFluidEnabledDefaultsToFalse 钉住 fluidEnabled 的编译期默认值：本变更
-// （authoritative-fluid）不交付流体呈现，默认必须关闭，否则普通玩家会看到
-// 穿透到虚空的地形洞。
-func TestFluidEnabledDefaultsToFalse(t *testing.T) {
-	if config.Defaults().FluidEnabled {
-		t.Fatal("fluidEnabled 的编译期默认值必须是 false")
+// TestFluidEnabledDefaultsToTrue 钉住 fluidEnabled 的编译期默认值：变更
+// fluid-presentation-survival 交付呈现与生存后，水成为普通玩家的正常世界
+// 内容，默认必须开启。
+func TestFluidEnabledDefaultsToTrue(t *testing.T) {
+	if !config.Defaults().FluidEnabled {
+		t.Fatal("fluidEnabled 的编译期默认值必须是 true")
 	}
 }
 
 // TestFluidEnabledLoadsFromFile 证明字段缺席时保留默认值、出现时读取生效值，
 // 与包内其他顶层/分组字段的"缺席=默认、出现=覆盖"约定一致。
+//
+// 覆盖用例刻意写 false 而不是 true：默认值已经是 true，写 true 的用例在
+// "读取生效值"和"根本没读、直接留默认值"两种实现下同时通过，差值恒等、
+// 断言不承重。只有显式 false 能把这两者区分开。
 func TestFluidEnabledLoadsFromFile(t *testing.T) {
 	absent, err := config.Load(writeConfig(t, `{"version":1}`))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if absent.FluidEnabled {
-		t.Fatal("fluidEnabled 缺席时必须保持默认值 false")
+	if !absent.FluidEnabled {
+		t.Fatal("fluidEnabled 缺席时必须保持默认值 true")
 	}
 
-	present, err := config.Load(writeConfig(t, `{"version":1,"fluidEnabled":true}`))
+	present, err := config.Load(writeConfig(t, `{"version":1,"fluidEnabled":false}`))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !present.FluidEnabled {
-		t.Fatal("fluidEnabled 显式写 true 时必须生效")
+	if present.FluidEnabled {
+		t.Fatal("fluidEnabled 显式写 false 时必须生效")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
+	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/world"
@@ -15,8 +16,17 @@ const captureOakGroveSeed int64 = 42
 
 // prepareOakGrove 把固定 3×3 生成区块经既有网络快照和 mirror 路径装入。
 func prepareOakGrove(app *application) error {
-	// 视觉 capture golden 固定在关闭注水的基线世界上。
-	generator := worldgen.New(captureOakGroveSeed, false)
+	// 注水必须与抓帧进程自己的世界一致：抓帧路径把 FluidEnabled 钉成编译期
+	// 默认值（见 main.go 的 resolveConfig 与 options.Application.FluidEnabled），
+	// 而本夹具的种子与抓帧世界的默认种子同为 42，覆盖的又只是区块 (-1..1)。
+	// 若这里按另一个门控值生成，这 9 个区块就会与周围的海不接缝——注水关时是
+	// 一片海里的干涸方坑，注水开时是干世界里的一块水洼，都会在 golden 里留下
+	// 一条纯属人为的区块边界断层。
+	//
+	// 因此这里**读**默认值而不是写字面量：写死 true 只在"默认值恰好是 true"
+	// 时与抓帧路径一致，默认值一旦翻回去就静默错位，而 golden 只会显示成
+	// 一条难以归因的地形断层。
+	generator := worldgen.New(captureOakGroveSeed, config.Defaults().FluidEnabled)
 	for z := int32(-1); z <= 1; z++ {
 		for x := int32(-1); x <= 1; x++ {
 			chunk := generator.GenerateChunk(core.ChunkPos{X: x, Z: z})

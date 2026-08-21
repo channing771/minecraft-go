@@ -4,10 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* ABI v4:worldgen `MGW1` header 的材料表由 13 项扩到 14 项(末项 water,
- * 占用 v3 的 reserved 槽,header 总长仍为 564 字节)。engine 与 Go 侧是同一
- * 不可跨版本混装的 release unit。 */
-#define MORNLEA_ENGINE_ABI_VERSION 4u
+/* ABI v5:mesh `MGM1` 输入的 registry 条目上限由 27 扩到 35,流体的 8 个方块
+ * 编号随之进入 registry 快照(见 input.rs 的 MAX_REGISTRY_ENTRIES);同一版本内
+ * 单条 registry 条目由 16 字节扩到 18 字节,末尾追加 `fluid_height`(该格孤立时
+ * 的 4-bit 流体高度原值,0 为「非流体」哨兵)与 `light_attenuation`(天空光穿过
+ * 该方块的额外衰减)两个每方块字节。engine 与 Go 侧是同一不可跨版本混装的
+ * release unit。
+ * ABI v4:worldgen `MGW1` header 的材料表由 13 项扩到 14 项(末项 water,
+ * 占用 v3 的 reserved 槽,header 总长仍为 564 字节)。 */
+#define MORNLEA_ENGINE_ABI_VERSION 5u
 
 #define MORNLEA_STATUS_OK 0u
 #define MORNLEA_STATUS_ABI_VERSION 1u

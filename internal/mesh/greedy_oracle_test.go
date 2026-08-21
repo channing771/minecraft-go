@@ -9,10 +9,67 @@ import (
 
 // oracleMaskCell 必须可比较，贪心合并靠 == 判断两格能否合并。
 type oracleMaskCell struct {
-	used  bool
-	mat   uint16
-	ao    uint8
-	light uint8
+	used    bool
+	mat     uint16
+	ao      uint8
+	light   uint8
+	fluid   bool
+	corners [4]uint8
+}
+
+// oracleFullFluidHeight 是水柱内部（上方也是流体）的满格高度原值。
+const oracleFullFluidHeight uint8 = 15
+
+// oracleCellHeight 返回一格流体的 4-bit 高度原值，非流体返回 (0,false)。
+// 规则与 engine 的 greedy.rs cell_height 相同：上方也是流体则取满格 15。
+func oracleCellHeight(n *world.Neighborhood, reg mesh.Registry, x, y, z int) (uint8, bool) {
+	raw := reg.FluidHeight(n.At(x, y, z))
+	if raw == 0 {
+		return 0, false
+	}
+	if reg.FluidHeight(n.At(x, y+1, z)) != 0 {
+		return oracleFullFluidHeight, true
+	}
+	return raw, true
+}
+
+// oracleCornerHeight 是 engine greedy.rs corner_height 的 Go 对照实现：
+// 顶点被四列共享，取其中流体格 h_raw 的整数平均（向下取整），任一格上方也是
+// 流体则直接取 15。整除是唯一的算术，不引入浮点。
+func oracleCornerHeight(n *world.Neighborhood, reg mesh.Registry, vx, y, vz int) uint8 {
+	sum, count := 0, 0
+	for _, d := range [4][2]int{{-1, -1}, {0, -1}, {-1, 0}, {0, 0}} {
+		height, ok := oracleCellHeight(n, reg, vx+d[0], y, vz+d[1])
+		if !ok {
+			continue
+		}
+		if height == oracleFullFluidHeight {
+			return oracleFullFluidHeight
+		}
+		sum += int(height)
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return uint8(sum / count)
+}
+
+// oracleFluidCorners 是 engine greedy.rs fluid_corners 的 Go 对照实现。
+func oracleFluidCorners(n *world.Neighborhood, reg mesh.Registry, p [3]int, face mesh.Face, axis, u, v int) [4]uint8 {
+	var corners [4]uint8
+	for i, c := range [4][2]int{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}} {
+		vertex := p
+		if face.Positive() {
+			vertex[axis]++
+		}
+		vertex[u] += (c[0] + 1) / 2
+		vertex[v] += (c[1] + 1) / 2
+		if vertex[1] == p[1]+1 {
+			corners[i] = oracleCornerHeight(n, reg, vertex[0], p[1], vertex[2])
+		}
+	}
+	return corners
 }
 
 // meshSectionGoOracle 把一个区段转换成贪心合并后的四边形集合。
@@ -51,12 +108,18 @@ func meshSectionGoOracle(n *world.Neighborhood, reg mesh.Registry, light *goLigh
 					if !reg.FaceVisible(id, n.At(q[0], q[1], q[2])) {
 						continue
 					}
-					mask[vi][ui] = oracleMaskCell{
+					fluid := reg.FluidHeight(id) != 0
+					cell := oracleMaskCell{
 						used:  true,
 						mat:   reg.Material(id, face),
 						ao:    computeAOOracle(n, reg, p, axis, u, v, step),
 						light: light.at(q[0], q[1], q[2]),
+						fluid: fluid,
 					}
+					if fluid {
+						cell.corners = oracleFluidCorners(n, reg, p, face, axis, u, v)
+					}
+					mask[vi][ui] = cell
 					any = true
 				}
 			}
@@ -72,20 +135,21 @@ func meshSectionGoOracle(n *world.Neighborhood, reg mesh.Registry, light *goLigh
 						continue
 					}
 
-					w := 1
-					for ui+w < 16 && mask[vi][ui+w] == c {
-						w++
-					}
-
-					h := 1
-				grow:
-					for vi+h < 16 {
-						for k := 0; k < w; k++ {
-							if mask[vi+h][ui+k] != c {
-								break grow
-							}
+					// 水面按 1×1 出面，不贪心合并（见 engine greedy.rs 的同名说明）。
+					w, h := 1, 1
+					if !c.fluid {
+						for ui+w < 16 && mask[vi][ui+w] == c {
+							w++
 						}
-						h++
+					grow:
+						for vi+h < 16 {
+							for k := 0; k < w; k++ {
+								if mask[vi+h][ui+k] != c {
+									break grow
+								}
+							}
+							h++
+						}
 					}
 
 					for dv := 0; dv < h; dv++ {
@@ -100,6 +164,7 @@ func meshSectionGoOracle(n *world.Neighborhood, reg mesh.Registry, light *goLigh
 						X: uint8(p[0]), Y: uint8(p[1]), Z: uint8(p[2]),
 						W: uint8(w), H: uint8(h),
 						Face: face, Mat: c.mat, AO: c.ao, Light: c.light,
+						Corners: c.corners,
 					})
 					ui += w
 				}

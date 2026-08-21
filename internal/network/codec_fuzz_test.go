@@ -9,6 +9,13 @@ func FuzzSmallPacketCodec(f *testing.F) {
 	f.Add(uint8(StateLogin), uint32(0), []byte{0})
 	f.Add(uint8(StatePlay), uint32(0), []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 	f.Add(uint8(StatePlay), uint32(5), []byte{1, 0, 0, 0, 0, 0, 0, 0})
+	// PlayerState 的种子由编码器现算，尾部字段（v21 起含 Oxygen）一变就自动跟上，
+	// 不会像手写字节那样悄悄退化成"截断的旧版载荷"。
+	if id, payload, err := encodeServerControlPayload(StatePlay, PlayerState{
+		Dimension: 0, Health: 15, Oxygen: 0x0101, WorldTimeTicks: 24000,
+	}); err == nil {
+		f.Add(uint8(StatePlay), id, payload)
+	}
 	f.Fuzz(func(t *testing.T, rawState uint8, packetID uint32, payload []byte) {
 		state := State(rawState)
 		if packet, err := decodeClientPacketPayload(state, packetID, payload); err == nil {

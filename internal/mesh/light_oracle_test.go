@@ -76,9 +76,30 @@ func (s *goLightScratch) buildSky(n *world.Neighborhood, reg mesh.Registry) {
 		}
 	}
 
-	for s.head < s.tail {
-		index := int(s.queue[s.head])
-		s.head++
+	// 按亮度降序分桶、每桶先零衰减后有衰减，与 Rust build_sky 同结构。
+	// 这是「每格至多入队一次」的来源，容量恰好 lightVolume 才够用；推导见 light.rs。
+	start, end := 0, s.tail
+	for start < s.tail {
+		deferred := s.spreadSky(n, reg, start, end, false)
+		nextEnd := s.tail
+		if deferred {
+			s.spreadSky(n, reg, start, end, true)
+		}
+		start, end = end, nextEnd
+	}
+}
+
+// spreadSky 放松 queue[start:end) 这一个桶，返回是否推迟过有衰减的邻居。
+// attenuating 为 false 时只处理零衰减邻居（扣 1），为 true 时只处理有衰减邻居（扣 >= 2）。
+func (s *goLightScratch) spreadSky(
+	n *world.Neighborhood,
+	reg mesh.Registry,
+	start, end int,
+	attenuating bool,
+) bool {
+	deferred := false
+	for slot := start; slot < end; slot++ {
+		index := int(s.queue[slot])
 		z := index%lightSide + lightMin
 		index /= lightSide
 		y := index%lightSide + lightMin
@@ -87,7 +108,8 @@ func (s *goLightScratch) buildSky(n *world.Neighborhood, reg mesh.Registry) {
 		if current <= 1 {
 			continue
 		}
-		candidate := current - 1
+		// best 是本格能给出的最好结果（扣减恰好为 1），先拿它剪枝再查表。
+		best := current - 1
 		for _, direction := range lightDirections {
 			nx, ny, nz := x+direction.x, y+direction.y, z+direction.z
 			if nx < lightMin || nx >= lightMin+lightSide ||
@@ -96,13 +118,32 @@ func (s *goLightScratch) buildSky(n *world.Neighborhood, reg mesh.Registry) {
 				continue
 			}
 			next := lightIndex(nx, ny, nz)
-			if s.levels[next]>>4 >= candidate || reg.Opaque(n.At(nx, ny, nz)) {
+			if s.levels[next]>>4 >= best {
+				continue
+			}
+			id := n.At(nx, ny, nz)
+			if reg.Opaque(id) {
+				continue
+			}
+			attenuation := reg.LightAttenuation(id)
+			if (attenuation != 0) != attenuating {
+				deferred = deferred || !attenuating
+				continue
+			}
+			// 每格扣减 = 固定的 1 + 目标方块的额外衰减，六个方向同一公式。
+			step := 1 + attenuation
+			if current <= step {
+				continue
+			}
+			candidate := current - step
+			if s.levels[next]>>4 >= candidate {
 				continue
 			}
 			s.levels[next] = s.levels[next]&blockMask | candidate<<4
 			s.enqueue(next)
 		}
 	}
+	return deferred
 }
 
 func (s *goLightScratch) buildBlock(n *world.Neighborhood, reg mesh.Registry) {
@@ -168,6 +209,9 @@ func (r *oracleCountingRegistry) Emission(world.BlockID) uint8 {
 	r.emissionQueries++
 	return 0
 }
+func (*oracleCountingRegistry) FluidHeight(world.BlockID) uint8      { return 0 }
+func (*oracleCountingRegistry) LightAttenuation(world.BlockID) uint8 { return 0 }
+
 func (*oracleCountingRegistry) MeshSnapshot() mesh.RegistrySnapshot {
 	panic("oracleCountingRegistry.MeshSnapshot 不应被调用")
 }

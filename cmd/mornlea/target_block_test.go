@@ -25,6 +25,43 @@ func TestCurrentBlockTargetHitsRegisteredBlockWithinSixBlocks(t *testing.T) {
 	}
 }
 
+func TestCurrentBlockTargetLooksThroughFluid(t *testing.T) {
+	app := newTargetBlockApplication(t, true, core.ChunkPos{}, core.ChunkPos{Z: -1})
+	position := core.BlockPos{X: 0, Y: 3, Z: -3}
+	setTargetMirrorBlock(t, app.mirror, position, core.BrickID)
+	// 相机在 (0.5,3.5,2.5) 沿 -Z 看，水必须落在它与砖块之间的射线路径上，
+	// 否则「命中砖块」在没有水的世界里同样成立、断言恒绿。
+	fluid := core.BlockPos{X: 0, Y: 3, Z: 0}
+	setTargetMirrorBlock(t, app.mirror, fluid, core.WaterSourceID)
+
+	got, ok := app.currentBlockTarget()
+	want := blockTarget{Position: position, Name: "砖块"}
+	if !ok || got != want {
+		t.Fatalf("穿水瞄准 currentBlockTarget() = %+v, %v，想要 %+v, true", got, ok, want)
+	}
+
+	// 夹具承重守卫排在真实断言之后。守卫必须证明水**挡在相机与砖块之间**，
+	// 而不只是"世界里某处有水"：后者在把水随手挪出射线路径后依然成立，改坏
+	// 实现也照样全绿。用修复前的旧谓词（流体也算实心）重打同一条射线，命中
+	// 必须恰好是那格水。
+	hit, found, err := core.RaycastBlocks(
+		app.camera.Pos,
+		app.camera.Forward(),
+		6,
+		func(position core.BlockPos) (bool, error) {
+			id, loaded := app.mirror.BlockAt(core.Overworld, position)
+			return loaded && id != core.AirID, nil
+		},
+	)
+	if err != nil || !found || hit.Block != fluid {
+		t.Fatalf("夹具失效：水 %+v 不挡在相机与砖块之间（旧谓词命中 %+v found=%v err=%v）",
+			fluid, hit.Block, found, err)
+	}
+	if id, loaded := app.mirror.BlockAt(core.Overworld, fluid); !loaded || !core.IsFluid(id) {
+		t.Fatalf("夹具失效：%+v=%d loaded=%v，不是流体", fluid, id, loaded)
+	}
+}
+
 func TestCurrentBlockTargetRejectsDesyncedStaleBlock(t *testing.T) {
 	app := newTargetBlockApplication(t, true, core.ChunkPos{})
 	position := core.BlockPos{X: 0, Y: 3, Z: -3}

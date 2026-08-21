@@ -95,32 +95,114 @@ fn build_sky(
         }
     }
 
-    while scratch.head < scratch.tail {
-        let mut index = scratch.queue[scratch.head] as usize;
-        scratch.head += 1;
+    // 按亮度降序分桶推进，每个桶再分两相位。刚扫出的全部满亮格就是 15 号桶。
+    //
+    // **为什么不能再用朴素 FIFO**：每步扣减改成按方块查表的 1 或 2 之后，FIFO 里的值
+    // 不再单调不增，同一格可以先被 2 代价路径够到、再被 1 代价路径改进并重复入队。
+    // 而队列容量是恰好 LIGHT_VOLUME（见 ffi.rs），溢出会一路变成 Go 侧渲染热路径上的
+    // panic。固定扣减 1 的年代「每格至多入队一次」是显然的，这里必须把它挣回来。
+    //
+    // **前提（必读）**：本证明只在 `light_attenuation <= 1`、即**每格扣减只可能是 1 或 2**
+    // 时成立。衰减到 2 就有 1/2/3 三种扣减，`B(L+1)` 产出的 L-2 会和 `A(L)` 产出的 L-1
+    // 落进同一个桶段、桶不再单亮度，下面第 2 条随即失效、队列溢出。这个前提由
+    // `RegistryView::validate`（以及 Go 侧 mesh.BuildRegistrySnapshot / encodeNativeInput）
+    // 的 `> 1` 校验强制，越界条目根本到不了这里。真要支持 >= 2 的衰减，是一次独立变更：
+    // 把分桶泛化成每个 step 一个桶，而不是放宽那条校验。
+    //
+    // **为什么这样就够**：设正在处理亮度 L 的桶。相位 A 只放松零衰减邻居（一律产出
+    // L-1），相位 B 只放松有衰减邻居（在前提下一律产出恰好 L-2）。于是：
+    //
+    //   1. 相位 A 跑完时，所有本轮能拿到 L-1 的格子都已经定在 L-1；相位 B 递上来的
+    //      L-2 对它们不是改进，被 `>= candidate` 挡掉，不会造成第二次入队；
+    //   2. 只在相位 B 拿到 L-2 的格子，此后再无人能给它更高的值——L-1 只可能由 L 桶的
+    //      相位 A 产生，而那一相位已经结束，更低的桶只会产出 <= L-2。
+    //
+    // 两条合起来：每格恰好在它的**最终**亮度上入队一次，容量 LIGHT_VOLUME 因此够用，
+    // 也不存在需要跳过的陈旧队列项。守卫见 sky_queue_enqueues_each_cell_at_most_once_in_mixed_media。
+    //
+    // 桶在队列里天然连续：写入顺序是 A(L+1)→L、B(L+1)→L-1、A(L)→L-1、B(L)→L-2……
+    // 所以 L-1 号桶正好是 B(L+1) 段紧接 A(L) 段，用 start/end 两个下标就能划出来。
+    let mut start = 0;
+    let mut end = scratch.tail;
+    while start < scratch.tail {
+        let deferred = spread(input, registry, scratch, start..end, false)?;
+        let next_end = scratch.tail;
+        // 没有任何有衰减的邻居被推迟时整个相位 B 是空转，直接跳过：这让不含流体的
+        // 世界维持与固定扣减时代逐格相同的工作量。
+        if deferred {
+            spread(input, registry, scratch, start..end, true)?;
+        }
+        // 空桶会自愈：start 不动、end 前移到当前 tail，下一轮自然落到再下一个桶。
+        start = end;
+        end = next_end;
+    }
+    Ok(())
+}
+
+/// spread 把 `queue[slots]` 这一个桶里的格子向六邻放松一轮，返回是否**推迟**过邻居。
+///
+/// `attenuating` 选择本轮处理哪一类邻居：`false` 只处理 `light_attenuation == 0` 的
+/// 邻居（扣减恰好 1），`true` 只处理有衰减的邻居（扣减至少 2）。同一个桶跑两遍、
+/// 零衰减那遍在先，是「每格至多入队一次」的关键，推导见 `build_sky`。
+///
+/// 返回值只在 `attenuating == false` 时有意义：为真表示本轮至少跳过了一个有衰减的
+/// 邻居，调用方据此决定要不要真的跑相位 B。
+fn spread(
+    input: &MeshInput<'_>,
+    registry: &RegistryView<'_>,
+    scratch: &mut LightScratch<'_>,
+    slots: std::ops::Range<usize>,
+    attenuating: bool,
+) -> Result<bool, MeshError> {
+    let mut deferred = false;
+    for slot in slots {
+        let mut index = scratch.queue[slot] as usize;
         let z = (index % LIGHT_SIDE) as i32 + LIGHT_MIN;
         index /= LIGHT_SIDE;
         let y = (index % LIGHT_SIDE) as i32 + LIGHT_MIN;
         let x = (index / LIGHT_SIDE) as i32 + LIGHT_MIN;
         let current = scratch.at(x, y, z) >> 4;
+        // 最小可能扣减是 1，所以 current<=1 时任何邻居都拿不到正的光照。
         if current <= 1 {
             continue;
         }
-        let candidate = current - 1;
+        // best 是本格能给出的**最好**结果（扣减恰好为 1）。先拿它剪枝，已经不低于
+        // best 的邻居连查表都不必做——这既省掉热路径上的两次二分查找，也保住了
+        // 「稳定输入不再采样已定型邻居」这条既有性质。
+        let best = current - 1;
         for (dx, dy, dz) in DIRECTIONS {
             let (nx, ny, nz) = (x + dx, y + dy, z + dz);
             if !inside(nx, ny, nz) {
                 continue;
             }
             let next = light_index(nx, ny, nz);
-            if scratch.levels[next] >> 4 >= candidate || registry.opaque(input.block(nx, ny, nz)) {
+            if scratch.levels[next] >> 4 >= best {
+                continue;
+            }
+            let id = input.block(nx, ny, nz);
+            if registry.opaque(id) {
+                continue;
+            }
+            let attenuation = registry.light_attenuation(id);
+            if (attenuation != 0) != attenuating {
+                deferred |= !attenuating;
+                continue;
+            }
+            // 每格扣减 = 固定的 1 + 目标方块查表得到的额外衰减。六个方向共用同一个
+            // 公式，竖直向下没有任何特例：水的额外衰减是 1，于是每下沉一格扣 2。
+            let step = 1 + attenuation;
+            if current <= step {
+                continue;
+            }
+            let candidate = current - step;
+            if scratch.levels[next] >> 4 >= candidate {
                 continue;
             }
             scratch.levels[next] = (scratch.levels[next] & BLOCK_MASK) | (candidate << 4);
             scratch.enqueue(next)?;
         }
     }
-    Ok(())
+    Ok(deferred)
 }
 
 fn build_block(
@@ -196,6 +278,7 @@ mod tests {
     const HEIGHTS_PRESENT_OFFSET: usize = BLOCKS_OFFSET + BLOCKS_BYTES;
     const HEIGHTS_OFFSET: usize = HEIGHTS_PRESENT_OFFSET + 9;
     const REGISTRY_OFFSET: usize = HEIGHTS_OFFSET + 9 * 256 * 2;
+    const ENTRY_BYTES: usize = crate::input::tests::ENTRY_BYTES;
     const LIGHT_ID: u16 = 40000;
 
     struct InputFixture {
@@ -351,7 +434,7 @@ mod tests {
         for block in bytes[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].chunks_exact_mut(2) {
             block.copy_from_slice(&1_u16.to_le_bytes());
         }
-        bytes[REGISTRY_OFFSET + 16 + 2] = 0;
+        bytes[REGISTRY_OFFSET + ENTRY_BYTES + 2] = 0;
         set_block(&mut bytes, 8, 8, 8, LIGHT_ID);
         set_block(&mut bytes, 10, 8, 8, 0);
         let input = parse_fixture(bytes);
@@ -361,6 +444,137 @@ mod tests {
 
         assert_eq!(storage.light.at(9, 8, 8) & 0x0f, 0);
         assert_eq!(storage.light.at(10, 8, 8) & 0x0f, 0);
+    }
+
+    /// 天空光穿过流体时每格额外衰减：固定的 1 加上查表得到的 `light_attenuation`。
+    ///
+    /// 水的 `light_attenuation = 1`，所以每下沉一格扣 2：15 → 13 → 11 → … → 1 → 0。
+    /// **竖直向下不再无损**：流体格即使严格高于列顶也不再是直射起点，光只能从上方的
+    /// 空气逐格付费进入。
+    #[test]
+    fn sky_light_dims_by_two_per_fluid_cell() {
+        let water = open_water_fixture(LIGHT_ID);
+        // 夹具把 LIGHT_ID 当水用，靠的是 valid_input() 给它写了 light_attenuation=1
+        // 这一**隐式**事实（base_input 显式清零了 fluid_height 那个字节，却没碰它）。
+        // 显式钉住，免得夹具改动悄悄把「水」变成普通透明方块、整组断言退化。
+        assert_eq!(water.mesh.registry.light_attenuation(LIGHT_ID), 1);
+        let mut storage = ScratchFixture::new();
+        build_light(&water.mesh, &water.mesh.registry, &mut storage.light).unwrap();
+
+        // 水面之上的空气仍然是满亮直射起点。
+        assert_eq!(storage.light.at(8, 8, 8) >> 4, 15);
+        // 紧邻水面之下必须大于 0，且逐格严格变暗，足够深处到 0。
+        let want = [13, 11, 9, 7, 5, 3, 1, 0];
+        for (depth, expected) in want.into_iter().enumerate() {
+            let y = 7 - depth as i32;
+            assert_eq!(
+                storage.light.at(8, y, 8) >> 4,
+                expected,
+                "水下第 {} 格（y={y}）的天空光不符",
+                depth + 1,
+            );
+        }
+
+        // 防空转守卫排在真实断言之后：把水换成空气后同样八格必须全是 15。
+        // 若对照组也变暗，说明变暗来自夹具被封顶之类的原因，而不是流体衰减，
+        // 上面那串读数就不再证明任何事。
+        let air = open_water_fixture(0);
+        let mut control = ScratchFixture::new();
+        build_light(&air.mesh, &air.mesh.registry, &mut control.light).unwrap();
+        for y in 0..8 {
+            assert_eq!(
+                control.light.at(8, y, 8) >> 4,
+                15,
+                "空气对照组 y={y} 不是满亮，夹具本身就是暗的"
+            );
+        }
+    }
+
+    /// 流体透光：水下的光来自 BFS 逐格付费，而不是「被流体完全阻断」。
+    /// 与 `opaque_cell_blocks_sky_propagation` 成对——不透明格是 0，流体格不是。
+    #[test]
+    fn fluid_attenuates_instead_of_blocking() {
+        let water = open_water_fixture(LIGHT_ID);
+        let mut storage = ScratchFixture::new();
+        build_light(&water.mesh, &water.mesh.registry, &mut storage.light).unwrap();
+
+        assert!(storage.light.at(8, 7, 8) >> 4 > 0);
+        assert!(storage.light.at(8, 7, 8) >> 4 < 15);
+    }
+
+    /// mixed_media_fixture 造一份**队列压力最大**的天空光输入：
+    ///
+    /// - 8 个外围区段列的列顶压到 `-17`（低于整个光照体积），于是它们的每一格都是
+    ///   满亮直射种子；中心区段列加一层 `roof` 高的顶盖，那 16×16 区域全靠 BFS 侧向灌入；
+    /// - 方块按 4×4 的**水柱／空气柱棋盘**交替铺满全高。
+    ///
+    /// 这两件事合起来正是重复入队的温床：中心暗区的同一格会先被穿水的 2 代价路径够到、
+    /// 再被绕行的 1 代价路径改进一次。而整个 48³ 体积恰好全部有光，队列一格不剩，
+    /// **任何一次重复入队都立刻溢出**。
+    fn mixed_media_fixture() -> InputFixture {
+        let mut bytes = base_input(0);
+        for cx in [-16_i32, 0, 16] {
+            for cz in [-16_i32, 0, 16] {
+                let highest = if cx == 0 && cz == 0 { 31 } else { -17 };
+                fill_height_section(&mut bytes, cx, cz, highest);
+            }
+        }
+        for x in -16_i32..32 {
+            for z in -16_i32..32 {
+                if (x.div_euclid(4) + z.div_euclid(4)).rem_euclid(2) != 0 {
+                    continue;
+                }
+                for y in -16_i32..32 {
+                    set_block(&mut bytes, x, y, z, LIGHT_ID);
+                }
+            }
+        }
+        parse_fixture(bytes)
+    }
+
+    /// 天空光队列容量的承重守卫：**每格至多入队一次**，因此恰好 `LIGHT_VOLUME` 够用。
+    ///
+    /// 这条不变量在「每步扣减固定为 1」的年代是显然的（BFS 值严格单调不增，一格被改进
+    /// 之后不可能再被改进）。扣减改成按方块查表的 1 或 2 之后它**不再显然**：FIFO 里的值
+    /// 不再单调，同一格可以先被 2 代价路径够到、再被 1 代价路径改进并重复入队。
+    /// `build_sky` 因此改成按亮度降序分桶、每桶先放松零衰减邻居再放松有衰减邻居，
+    /// 重新把「至多一次」变成可证的（推导见 `build_sky` 的注释）。
+    ///
+    /// 队列容量是 `ffi.rs` 里写死的 `LIGHT_VOLUME`，溢出会一路变成 Go 侧
+    /// `internal/mesh/native.go` 在渲染热路径上的 panic，所以这条必须钉死。
+    /// 本夹具下整个体积恰好全部有光，队列一格不剩：不变量一破就是真溢出，不是余量问题。
+    #[test]
+    fn sky_queue_enqueues_each_cell_at_most_once_in_mixed_media() {
+        let input = mixed_media_fixture();
+        let levels = Box::leak(vec![0; LIGHT_VOLUME].into_boxed_slice());
+        let queue = Box::leak(vec![0; LIGHT_VOLUME].into_boxed_slice());
+        let mut light = LightScratch::new(levels, queue);
+
+        super::build_sky(&input.mesh, &input.mesh.registry, &mut light)
+            .expect("天空光队列溢出：每格至多入队一次的不变量已被破坏");
+
+        let mut lit = 0;
+        for x in -16..32 {
+            for y in -16..32 {
+                for z in -16..32 {
+                    if light.at(x, y, z) >> 4 > 0 {
+                        lit += 1;
+                    }
+                }
+            }
+        }
+        // 夹具前提守卫排在真实断言之后：整个体积必须真的全部有光，否则队列还有余量，
+        // 上面那句 expect 就不再是「一次重复入队即溢出」的严格判据。
+        assert_eq!(
+            light.tail(),
+            lit,
+            "入队 {} 次但只有 {lit} 格有光：存在重复入队",
+            light.tail(),
+        );
+        assert_eq!(
+            lit, LIGHT_VOLUME,
+            "夹具没有把整个光照体积点亮，队列仍有余量"
+        );
     }
 
     fn fixture_with_light_block(x: i32, y: i32, z: i32) -> InputFixture {
@@ -399,7 +613,8 @@ mod tests {
         bytes[BLOCKS_OFFSET..BLOCKS_OFFSET + BLOCKS_BYTES].fill(0);
         bytes[HEIGHTS_PRESENT_OFFSET..HEIGHTS_PRESENT_OFFSET + 9].fill(0);
         bytes[HEIGHTS_OFFSET..REGISTRY_OFFSET].fill(0);
-        bytes[REGISTRY_OFFSET + 2 * 16 + 3] = emission;
+        bytes[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 3] = emission;
+        bytes[REGISTRY_OFFSET + 2 * ENTRY_BYTES + 16] = 0;
         bytes
     }
 
@@ -423,14 +638,47 @@ mod tests {
     }
 
     fn darken_height_section(bytes: &mut [u8], x: i32, z: i32) {
+        fill_height_section(bytes, x, z, 31);
+    }
+
+    /// fill_height_section 把 (x,z) 所在整个 16×16 区段列的列顶统一设成 highest。
+    fn fill_height_section(bytes: &mut [u8], x: i32, z: i32, highest: i16) {
         let (cx, _) = neighbor_cell(x);
         let (cz, _) = neighbor_cell(z);
         let column = cx * 3 + cz;
         bytes[HEIGHTS_PRESENT_OFFSET + column] = 1;
         for cell in 0..256 {
             let offset = HEIGHTS_OFFSET + (column * 256 + cell) * 2;
-            bytes[offset..offset + 2].copy_from_slice(&31_i16.to_le_bytes());
+            bytes[offset..offset + 2].copy_from_slice(&highest.to_le_bytes());
         }
+    }
+
+    /// open_water_fixture 造一片**露天水体**：`fill` 铺满中心 16×16 区段列的
+    /// y=0..=7 八格，其上是空气，没有任何遮挡。
+    ///
+    /// `fill` 传 `LIGHT_ID` 时就是水：在 `base_input(0)` 下它正好是一块「非不透明、
+    /// 不发光、`light_attenuation = 1`」的方块。传 `0`（空气）就是同一夹具的对照组。
+    ///
+    /// 列顶按 `fill` 派生，与 `world.Chunk` 的 `updateHeight` 同口径：水是非空气方块，
+    /// 会把列顶抬到水面 `y=7`（于是水格自身 `sky_light=0`、只能靠 BFS 进光）；空气
+    /// 对照组则是空列（-17，低于整个光照体积）。
+    ///
+    /// 夹具刻意做成整段 16×16 满铺八格深：**单列水柱是测不出衰减的**——旁边的空气
+    /// 会以每格 1 的代价把光送到同样深度再横向灌进来，读数被空气路径而不是水路径
+    /// 决定。满铺之后中心列 (8,·,8) 的每个横向邻居都是同深度的水，唯一路径是竖直
+    /// 穿水。八格深也是刻意的：一格深时「衰减 1」与「衰减 0」会给出同一批读数。
+    fn open_water_fixture(fill: u16) -> InputFixture {
+        let mut bytes = base_input(0);
+        let highest = if fill == 0 { -17 } else { 7 };
+        fill_height_section(&mut bytes, 8, 8, highest);
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in 0..8 {
+                    set_block(&mut bytes, x, y, z, fill);
+                }
+            }
+        }
+        parse_fixture(bytes)
     }
 
     fn neighbor_cell(value: i32) -> (usize, usize) {

@@ -1,10 +1,12 @@
 # 性能基线
 
-## M5A scenario v16 当前状态（record-only，非新基线）
+## 当前 producer 与迁移规则
 
-当前 benchmark producer 为 scenario v16，工作负载变化只来自 Avatar、NameTag 与 Hotbar HUD 的固定上传布局；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `15:16`，v6..v15 历史报告仍可同版本读取。
+当前 benchmark producer 为 scenario v17：`fluid-presentation-survival` 改变了被测进程本身（mesh registry 条目由 16 字节扩到 18、quad 位布局改写、光照 BFS 改为按方块查衰减表、渲染器多出一条 water pass 与一块 32 MiB 的固定水面实例缓冲、`StepInput` 头版本升到 v2），即便 benchmark 世界内容未变——它把 `FluidEnabled` 钉死为 `false`；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `16:17`，v6..v16 历史报告仍可同版本读取。历史的 `15:16` 已退役，只作本文的归档证据，工具不再接受它。
 
-M5A 已在同一 Apple M5 / 24GiB、2560×1440 和同一提交上独立生成完整 Memory/TCP v16 报告，分别通过自比较，并通过一次显式跨 transport 比较；Linux GPU source-set 修复后的最新 Rust kernel 累计门禁已在 2026-08-15 从冻结 producer `931c57a7d4d017e37a94baf19eee833b042c68ce` 完整重跑，输出见 [Apple M5 性能记录](perf-baseline-m5.md)。这些报告只作可重复生成的 record-only 证据，不提升基线。当前已接受的 M2 Memory v15 与 M5 Memory v14 baseline JSON 路径、字节和 SHA-256 均保持不变；性能数值只记录，报告结构、身份、真实 overflow、数据丢失和 I/O 错误仍失败。
+## M5A scenario v16 记录（record-only，非新基线）
+
+M5A 段落记录的是 producer 还停在 scenario v16 时的证据。M5A 已在同一 Apple M5 / 24GiB、2560×1440 和同一提交上独立生成完整 Memory/TCP v16 报告，分别通过自比较，并通过一次显式跨 transport 比较；Linux GPU source-set 修复后的最新 Rust kernel 累计门禁已在 2026-08-15 从冻结 producer `931c57a7d4d017e37a94baf19eee833b042c68ce` 完整重跑，输出见 [Apple M5 性能记录](perf-baseline-m5.md)。这些报告只作可重复生成的 record-only 证据，不提升基线。当前已接受的 M2 Memory v15 与 M5 Memory v14 baseline JSON 路径、字节和 SHA-256 均保持不变；性能数值只记录，报告结构、身份、真实 overflow、数据丢失和 I/O 错误仍失败。
 
 ## 当前已接受的 M2 scenario v15 基线
 
@@ -16,7 +18,7 @@ M5A 已在同一 Apple M5 / 24GiB、2560×1440 和同一提交上独立生成完
 - 被替代的 M2 scenario v6：提交 `38c90a93cc1f03f0a1adb00b4bf97b0131e7d0ef`，SHA-256 `b2d04877004c0cfae5884416d1ef7dbe1d6d5daed95dbda1a392604520cb7f93`
 - 未改动的 M5 scenario v14：`docs/notes/perf-baseline-m5.json`，SHA-256 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`
 
-M2 v15 是独立基线，不使用 `6:15` 或跨硬件迁移。完整 Memory 报告先以自身作为 baseline/current 通过同场景完整性、硬件身份和数据门禁，再精确复制到 M2 基线路径；TCP 随后独立生成并自比较。两次自比较均只记录 flying p99 超过 `12ms`，返回“同场景性能记录完成”。没有自动执行 Memory↔TCP 比较。M5 基线仍停留 v14 且不提升；当前跨 workload 只允许同硬件、同 transport 的 `15:16`，不得用 M5 v14 直接迁移到 v16。
+M2 v15 是独立基线，不使用 `6:15` 或跨硬件迁移。完整 Memory 报告先以自身作为 baseline/current 通过同场景完整性、硬件身份和数据门禁，再精确复制到 M2 基线路径；TCP 随后独立生成并自比较。两次自比较均只记录 flying p99 超过 `12ms`，返回“同场景性能记录完成”。没有自动执行 Memory↔TCP 比较。M5 基线仍停留 v14 且不提升；跨 workload 始终只允许同硬件、同 transport 的相邻一跳（本节记录的当时是 `15:16`，当前规则见首节），不得用 M5 v14 直接迁移到更高场景。
 
 此前从含未提交 scenario v15 改动的 `86ae0cc160732e597ad1ace7497feed091d324e4` 工作树生成的两份报告只保存在 `/private/tmp/mcgo-m4n-v15-dirty-86ae0cc/` 作为不可提升的 dirty provenance 历史；它们不是当前正式基线。
 

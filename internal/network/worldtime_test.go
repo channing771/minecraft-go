@@ -7,14 +7,14 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-func TestProtocolVersionIsTwenty(t *testing.T) {
-	if ProtocolVersion != 20 {
-		t.Fatalf("协议版本=%d，想要 20", ProtocolVersion)
+func TestProtocolVersionIsTwentyOne(t *testing.T) {
+	if ProtocolVersion != 21 {
+		t.Fatalf("协议版本=%d，想要 21", ProtocolVersion)
 	}
 }
 
-func TestProtocolV20RejectsPriorVersionsBeforePlay(t *testing.T) {
-	// v19 是上一版本，必须和 v18 及更早版本一样在 Handshake 阶段稳定拒绝，
+func TestProtocolV21RejectsPriorVersionsBeforePlay(t *testing.T) {
+	// v20 是上一版本，必须和 v19 及更早版本一样在 Handshake 阶段稳定拒绝，
 	// 并给出版本不匹配原因。
 	for version := uint32(1); version < ProtocolVersion; version++ {
 		stream := &staticClientHelloStream{version: version}
@@ -147,11 +147,78 @@ func TestProtocolV14PlayerStateRejectsOutOfRangeHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	healthOffset := len(payload) - 8 - 1
+	// 尾部布局（v21 起）：… | Health u8 | Oxygen u16 | WorldTimeTicks u64。
+	// 这个偏移必须随尾部字段一起维护：v21 追加 Oxygen 时它一度还指向氧气的高字节，
+	// 用例照样绿——因为把高字节写成 21 让氧气变成 5376，越界拒绝碰巧仍然发生。
+	healthOffset := len(payload) - 8 - 2 - 1
 	corrupted := append([]byte(nil), payload...)
 	corrupted[healthOffset] = core.MaxHealth + 1
 	if packet, err := decodeServerControlPayload(StatePlay, id, corrupted); err == nil {
 		t.Fatalf("越界生命值 wire 载荷被解码接受: %#v", packet)
+	}
+	// 守卫排在真实断言之后：改写的必须确实是生命值字节，否则上面那条断言可能
+	// 是被别的字段越界顶掉的（v21 就真实发生过一次）。
+	//
+	// 判据是"未改写的原始载荷在该偏移处正好是这份夹具编码进去的生命值"。这条
+	// 断言的第一版写成了对比 corrupted 与 payload 的**相邻**字节、再解一次合法
+	// 载荷的生命值：前者恒为 false（改写的是 healthOffset 那一字节，相邻字节
+	// 当然没动），后者与偏移无关（只是重复了夹具编码了满血这件事）。两个子句
+	// 都不看 healthOffset 指向哪里，因而恒真——把偏移改回错值照样 PASS，实测过。
+	if payload[healthOffset] != core.MaxHealth {
+		t.Fatalf("夹具无效：healthOffset 处是 %d，不是生命值 %d",
+			payload[healthOffset], core.MaxHealth)
+	}
+}
+
+// TestProtocolV21PlayerStateCarriesOxygen 覆盖 v21 追加的权威氧气：
+// 它按 u16 小端落在 Health 之后、WorldTimeTicks 之前，且往返保值。
+func TestProtocolV21PlayerStateCarriesOxygen(t *testing.T) {
+	for _, oxygen := range []uint16{0, 1, 0x0101, core.MaxOxygenTicks} {
+		state := PlayerState{Dimension: core.Overworld, Oxygen: oxygen, WorldTimeTicks: 24000}
+		if err := state.Validate(); err != nil {
+			t.Fatalf("氧气 %d 被 Validate 拒绝：%v", oxygen, err)
+		}
+		id, payload, err := encodeServerControlPayload(StatePlay, state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		round, err := decodeServerControlPayload(StatePlay, id, payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if round.(PlayerState).Oxygen != oxygen {
+			t.Fatalf("往返氧气 = %d，想要 %d", round.(PlayerState).Oxygen, oxygen)
+		}
+	}
+}
+
+// TestProtocolV21PlayerStateRejectsOutOfRangeOxygen 与生命值那条同形：
+// 越界氧气必须在 Validate、编码与解码三处各自被拒。
+func TestProtocolV21PlayerStateRejectsOutOfRangeOxygen(t *testing.T) {
+	invalid := PlayerState{Dimension: core.Overworld, Oxygen: core.MaxOxygenTicks + 1}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("越界氧气通过了 Validate")
+	}
+	if _, _, err := encodeServerControlPayload(StatePlay, invalid); err == nil {
+		t.Fatal("越界氧气被编码接受")
+	}
+
+	valid := PlayerState{Dimension: core.Overworld, Oxygen: core.MaxOxygenTicks, WorldTimeTicks: 24000}
+	id, payload, err := encodeServerControlPayload(StatePlay, valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oxygenOffset := len(payload) - 8 - 2
+	corrupted := append([]byte(nil), payload...)
+	// 只动低字节即可越界：满值 300 = 0x012C，把低字节抬到 0xFF 得 0x01FF = 511。
+	corrupted[oxygenOffset] = 0xFF
+	if packet, err := decodeServerControlPayload(StatePlay, id, corrupted); err == nil {
+		t.Fatalf("越界氧气 wire 载荷被解码接受: %#v", packet)
+	}
+	// 守卫排在真实断言之后：偏移必须真的指向氧气低字节。
+	if payload[oxygenOffset] != byte(core.MaxOxygenTicks&0xFF) ||
+		payload[oxygenOffset+1] != byte(core.MaxOxygenTicks>>8) {
+		t.Fatal("夹具无效：oxygenOffset 没有指向氧气的两个字节")
 	}
 }
 

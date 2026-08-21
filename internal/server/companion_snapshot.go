@@ -127,9 +127,23 @@ func (v companionChunkView) revisionAt(chunkX, chunkZ int32) uint64 {
 //
 // 流体是刻意的例外：它在 oracle 下是零碰撞体（实体可自由穿行），却仍在本表里
 // 阻挡。原因是伙伴尚无浮力、屏息或溺水处理，把水面纳入路径会让它走进水里沉底
-// 卡死；宁可绕开水域。退出条件是后续变更交付浸没物理，届时应连同
-// TestCompanionManagerPathBlockTableMatchesCollisionOracle 里的豁免分支一并
-// 移除。
+// 卡死；宁可绕开水域。
+//
+// 退出条件（**两条都成立才可以放开流体**，缺一条就是制造故障）：
+//
+//  1. 伙伴走与玩家同一套水中积分——即 sim.advanceActiveCompanions 喂给
+//     physics.Step 的 physics.Input 里 BodyInFluid 由 physics.SubmersionFlags
+//     真实算出，而不是像现在这样恒为零值；
+//  2. 伙伴有自己的氧气与溺水结算——即 sim 的 advanceOxygen 对伙伴也成立。
+//
+// 两条**都还不成立**：spec fluid-survival 的主语全是"玩家"。原注释写的是
+// "后续变更交付浸没物理后移除"，而浸没物理本身（physics.SubmersionFlags、
+// 水中积分、玩家溺水）已由变更 fluid-presentation-survival 交付，那句话字面
+// 已经成立——照它放开流体，A* 会规划穿水路径而伙伴仍按空气 + 重力积分，正好
+// 落进本例外当初要防的故障。给伙伴接水中物理属 M5 系列范围。
+//
+// 本表与 TestCompanionManagerPathBlockTableMatchesCollisionOracle 里的豁免
+// 分支是同一条决定的两半，必须同进同出；那里写着同样的两条退出条件。
 func productionCompanionPassableBlocks() map[core.BlockID]bool {
 	return map[core.BlockID]bool{core.AirID: true}
 }

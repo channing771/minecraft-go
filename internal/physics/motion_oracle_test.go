@@ -33,15 +33,27 @@ func oracleStep(
 			horizontal = horizontal.Normalize().Mul(tunables.WalkSpeed)
 		}
 	}
+	// 水中分支是 Rust integrate 的逐字镜像（本变更任务 5.3 同批加入 oracle）。
+	if input.BodyInFluid {
+		horizontal = horizontal.Mul(tunables.FluidHorizontalDrag)
+	}
 	state.Velocity[0], state.Velocity[2] = horizontal.X(), horizontal.Z()
 
-	if state.OnGround && input.Jump {
+	switch {
+	case input.BodyInFluid && input.Jump:
+		state.Velocity[1] = tunables.FluidAscendSpeed
+		state.OnGround = false
+	case state.OnGround && input.Jump:
 		state.Velocity[1] = tunables.JumpSpeed
 		state.OnGround = false
-	} else {
+	default:
+		gravity, terminal := tunables.Gravity, tunables.TerminalFallSpeed
+		if input.BodyInFluid {
+			gravity, terminal = tunables.FluidGravity, tunables.FluidSinkSpeed
+		}
 		state.Velocity[1] = max(
-			state.Velocity.Y()-tunables.Gravity*physics.FixedDeltaSeconds,
-			-tunables.TerminalFallSpeed,
+			state.Velocity.Y()-gravity*physics.FixedDeltaSeconds,
+			-terminal,
 		)
 	}
 	displacement := state.Velocity.Mul(physics.FixedDeltaSeconds)

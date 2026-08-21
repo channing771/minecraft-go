@@ -121,16 +121,18 @@ func stepMiningProgress(actor *actorState, target core.BlockPos, block core.Bloc
 	}
 }
 
-// blockRaycastSampler 返回玩家采掘/放置共用的射线采样回调：区块未就绪返回
-// ErrChunkNotReady，实心判定为非空气。M5C 起伙伴采掘的交互距离与 Ready 校验
-// 复用同一采样器与同一 InteractionReach，保证没有第二套规则实现。
+// blockRaycastSampler 返回权威交互射线共用的采样回调：区块未就绪返回
+// ErrChunkNotReady，命中判定一律走 core.InteractionTarget（空气与流体都不是
+// 目标）。玩家采掘、玩家放置、伙伴采掘的视线遮挡与开启容器四条路径共用它，
+// 同一份交互距离（InteractionReach）加同一份 solid 谓词，保证没有第二套规则
+// 实现——流体豁免只在这一处写，任何调用点都不可能漏掉。
 func blockRaycastSampler(dimension *Dimension) func(core.BlockPos) (bool, error) {
 	return func(position core.BlockPos) (bool, error) {
 		block, ready := dimension.BlockAt(position)
 		if !ready {
 			return false, ErrChunkNotReady
 		}
-		return block != core.AirID, nil
+		return core.InteractionTarget(block), nil
 	}
 }
 

@@ -135,6 +135,95 @@ func TestRunWithDependenciesAlwaysEnablesDevForCapture(t *testing.T) {
 	}
 }
 
+// TestFluidGatePerRunPath 钉住注水门控在三条运行路径上的取值，是 F1 契约
+// 「benchmark 与 capture 路径显式解耦、不随配置漂移」在默认值翻转后的承重断言。
+//
+// 三个用例都显式写了一份 fluidEnabled=false 的用户配置文件，且编译期默认值
+// 已经是 true：
+//   - benchmark 想要 false —— 但**不能**是因为读到了配置里的 false（resolveConfig
+//     对 benchmark 直接返回 Defaults()，根本不看这份文件），只能是因为 main.go
+//     的 !Benchmark 钉死。所以本用例还配了一个 benchmark + 配置写 true 的孪生
+//     用例：那一条排除了"恰好读到 false"这种恒真解释。
+//   - capture 想要 true —— 证明抓帧既不读用户配置（文件里写的是 false），
+//     也没有被钉死成 false，而是跟随编译期默认值。
+//   - 普通本地游玩想要 false —— 证明普通路径确实读用户配置，配置写 false 生效。
+//     没有这一条，"门控恒为编译默认值"这种实现也会让前两条通过。
+func TestFluidGatePerRunPath(t *testing.T) {
+	writeFluidConfig := func(t *testing.T, enabled bool) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.json")
+		custom := config.Defaults()
+		custom.FluidEnabled = enabled
+		if err := custom.Save(path); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		return path
+	}
+	if !config.Defaults().FluidEnabled {
+		t.Fatal("本测试的前提是编译期默认值为 true；默认值一旦改回 false，" +
+			"capture 用例就会变成恒真，请连同断言一起重新设计")
+	}
+	t.Cleanup(func() { config.Defaults().Apply() })
+
+	for _, test := range []struct {
+		name        string
+		args        func(t *testing.T) []string
+		configFluid bool
+		wantFluid   bool
+	}{
+		{
+			name:        "benchmark 路径钉死关闭（配置写 false）",
+			configFluid: false,
+			wantFluid:   false,
+			args: func(t *testing.T) []string {
+				return []string{"--benchmark", "--perf-output", filepath.Join(t.TempDir(), "perf.json")}
+			},
+		},
+		{
+			name:        "benchmark 路径钉死关闭（配置写 true）",
+			configFluid: true,
+			wantFluid:   false,
+			args: func(t *testing.T) []string {
+				return []string{"--benchmark", "--perf-output", filepath.Join(t.TempDir(), "perf.json")}
+			},
+		},
+		{
+			name:        "抓帧路径跟随编译默认值",
+			configFluid: false,
+			wantFluid:   true,
+			args: func(t *testing.T) []string {
+				return []string{"--capture", t.TempDir()}
+			},
+		},
+		{
+			name:        "普通本地游玩读用户配置",
+			configFluid: false,
+			wantFluid:   false,
+			args:        func(t *testing.T) []string { return nil },
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append(test.args(t), "--config", writeFluidConfig(t, test.configFluid))
+			sawCall := false
+			var gotFluid bool
+			err := runWithDependencies(args, runDependencies{
+				loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+				newApplication: func(options applicationOptions) (*application, error) {
+					sawCall = true
+					gotFluid = options.FluidEnabled
+					return nil, errors.New("stop before window")
+				},
+			})
+			if gotFluid != test.wantFluid {
+				t.Fatalf("options.FluidEnabled = %v，want %v", gotFluid, test.wantFluid)
+			}
+			if err == nil || !sawCall {
+				t.Fatalf("run error=%v sawCall=%v，想要构造期错误且确实调用了 newApplication", err, sawCall)
+			}
+		})
+	}
+}
+
 func TestRunWithDependenciesPassesExplicitNameToProfile(t *testing.T) {
 	name := "Chen"
 	var got *string

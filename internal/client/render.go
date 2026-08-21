@@ -84,6 +84,10 @@ type RenderFrame struct {
 	OutlineInstances []byte
 	// OverlayStrength 是伤害红边强度(>0 才绘制)。
 	OverlayStrength float32
+	// WaterTint 是相机浸没时的全屏水色叠加(RGBA)。A <= 0 表示本帧不叠加,
+	// 帧字节与本变更之前逐位一致。它与 OverlayStrength 共用同一条全屏三角
+	// 管线,只是 uniform 不同——不新增任何绘制管线。
+	WaterTint [4]float32
 	// NameTagSegment/HUDSegment/DebugSegment 是各文本 pass 的
 	// [uniform][aCount][bCount][a][b] 段字节(EncodeQuadSegment 产物)。
 	NameTagSegment []byte
@@ -163,19 +167,28 @@ func (r *Renderer) UploadAtlas(layers int, pixels []byte) {
 	)))
 }
 
-// UploadSection 上传/替换一个 section 的 packed face 字节(空等价 drop)。
-func (r *Renderer) UploadSection(x, y, z int32, packed []byte) {
+// UploadSection 上传/替换一个 section 的两条 packed face 字节流(两条都空
+// 等价 drop)。
+//
+// client ABI v5 起按 material 分流:opaque 是不透明与 cutout 面,water 是水面。
+// 两条流的元素格式相同(8 字节 packed quad),分流只决定它们进哪条绘制路径。
+func (r *Renderer) UploadSection(x, y, z int32, opaque, water []byte) {
 	r.uploadCalls++
-	var ptr *C.uint8_t
-	if len(packed) > 0 {
-		ptr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(packed)))
+	var opaquePtr, waterPtr *C.uint8_t
+	if len(opaque) > 0 {
+		opaquePtr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(opaque)))
+	}
+	if len(water) > 0 {
+		waterPtr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(water)))
 	}
 	r.check("upload section", uint32(C.mornlea_client_render_upload_section(
 		C.MORNLEA_CLIENT_ABI_VERSION,
 		C.uint64_t(r.handle),
 		C.int32_t(x), C.int32_t(y), C.int32_t(z),
-		ptr,
-		C.size_t(len(packed)),
+		opaquePtr,
+		C.size_t(len(opaque)),
+		waterPtr,
+		C.size_t(len(water)),
 	)))
 }
 
@@ -197,12 +210,15 @@ const (
 	frameTagNameTag = 5
 	frameTagHUD     = 6
 	frameTagDebug   = 7
+	// frameTagWater 是水下水色叠加段(4 个 f32:RGBA),client ABI v5 内的追加
+	// TLV tag,不升 ABI 版本。
+	frameTagWater = 8
 )
 
 // hasPassSegments 报告本帧是否携带任一 pass 段(决定 layout 版本)。
 func (frame RenderFrame) hasPassSegments() bool {
 	return len(frame.AvatarInstances) > 0 || len(frame.DropInstances) > 0 ||
-		len(frame.OutlineInstances) > 0 || frame.OverlayStrength > 0 ||
+		len(frame.OutlineInstances) > 0 || frame.OverlayStrength > 0 || frame.WaterTint[3] > 0 ||
 		len(frame.NameTagSegment) > 0 || len(frame.HUDSegment) > 0 ||
 		len(frame.DebugSegment) > 0
 }
@@ -260,6 +276,13 @@ func EncodeRenderFrame(frame RenderFrame) []byte {
 	appendTLV(frameTagNameTag, frame.NameTagSegment)
 	appendTLV(frameTagHUD, frame.HUDSegment)
 	appendTLV(frameTagDebug, frame.DebugSegment)
+	if frame.WaterTint[3] > 0 {
+		var tint [16]byte
+		for index, value := range frame.WaterTint {
+			binary.LittleEndian.PutUint32(tint[index*4:], math.Float32bits(value))
+		}
+		appendTLV(frameTagWater, tint[:])
+	}
 	return out
 }
 

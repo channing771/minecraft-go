@@ -17,6 +17,8 @@ pub mod entity;
 pub mod pool;
 pub mod quads;
 pub mod shaders;
+#[cfg(test)]
+mod water_tests;
 
 use std::collections::HashMap;
 
@@ -31,6 +33,21 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 // 容量与 Go 渲染器默认值一致(pool 面数、origin 槽位)。
 const POOL_FACES: u32 = 4_500_000;
+/// 水面实例池容量(条)。水面不贪心合并、按 1×1 出面,主导项是海面的顶面:
+/// 视距 32 → 视半径 33 → (2×33+1)² = 4489 个区块,每区块 16×16 = 256 列,
+/// 全海世界的顶面上界 4489×256 ≈ 1.15M 条;岸线与水下地形边缘再贡献侧面。
+/// 取 2Mi 条 = 32 MiB 固定显存,约为该上界的 1.8 倍。
+///
+/// 这个值曾是 512Ki,依据是"一个区段的水面上界 6×256 = 1536 条"——那个算式
+/// 错了(区段有 16³ = 4096 格,不是 256 格),而且区段上界本来就推不出整视距的
+/// 总量。fluidEnabled 默认打开后,默认世界的实测峰值就在 50 万条上方、恰好
+/// 越过 512Ki,抓帧在加载阶段直接以 STATUS_CAPACITY 崩溃。
+///
+/// 池仍是**一次性**创建的固定容量——water pass MUST NOT 引入每帧动态资源
+/// (`voxel-visual-presentation` MODIFIED 写死的边界);上限本身是硬约束,
+/// 超出时 upload_section 返回 false 并由调用方以 STATUS_CAPACITY 报错,
+/// 不做静默截断。
+const WATER_POOL_INSTANCES: u32 = 2 * 1024 * 1024;
 const ORIGIN_SLOTS: u32 = 128 * 1024;
 /// 每个 pool face 8 字节(packed u64);cull 后每个可见实例 16 字节。
 const BYTES_PER_POOL_FACE: u64 = 8;
@@ -115,6 +132,11 @@ pub struct FrameInput {
     pub outline: Vec<u8>,
     /// 伤害红边强度(0 表示不绘制)。
     pub overlay_strength: f32,
+    /// 相机浸没时的全屏水色叠加 RGBA(A <= 0 表示不绘制)。
+    ///
+    /// 它与 `overlay_strength` 共用同一条全屏三角管线,只是 uniform 的 edge 位
+    /// 不同(水色全屏均匀,红边走边缘渐变),因此不新增任何绘制管线。
+    pub water_tint: [f32; 4],
     /// 名牌 billboard 顶点流;空表示本帧无名牌。
     pub name_tag_vertices: Vec<u8>,
     /// HUD 屏幕空间顶点流;空表示本帧无 HUD。
@@ -130,17 +152,56 @@ impl FrameInput {
             && self.drop_instances.is_empty()
             && self.outline.is_empty()
             && self.overlay_strength == 0.0
+            && self.water_tint[3] == 0.0
             && self.name_tag_vertices.is_empty()
             && self.hud_vertices.is_empty()
             && self.debug_vertices.is_empty()
     }
 }
 
-/// 一个已上传 section:池内分配、origin 槽位与面数。
+/// 一个已上传 section:两条流各自的池内分配、共用的 origin 槽位与条数。
+///
+/// 不透明面与水面分属两个池:前者接 GPU culling 走单次 indirect draw,后者
+/// 走独立的半透明 water pass。任一侧可以为空——只有水面的区段(地形在相邻
+/// 区段)完全正常,不得被当成空区段丢弃。
 struct SectionSlot {
-    alloc: Alloc,
+    /// 不透明面在 `faces` 池中的分配;只有水面的区段为 None。
+    alloc: Option<Alloc>,
     origin_idx: u32,
     face_count: u32,
+    /// 水面实例在 `water_instances` 池中的分配;无水面为 None。
+    water: Option<Alloc>,
+    water_count: u32,
+}
+
+/// reallocate 在一个池上为区段的新数据挑选分配,策略与既有 `upload_section`
+/// 逐步等价:
+///
+/// - `required == 0` → 归还旧块并返回 `Some(None)`(该侧本次没有数据);
+/// - 旧块够大 → 原地复用,不动池;
+/// - 旧块不够 → 先尝试在**不归还**旧块的情况下分配(避免碎片化时白白丢块),
+///   失败再归还旧块重试。
+///
+/// 返回 `None` 表示池容量确实不足,此时旧块已归还,调用方需回收 origin 槽位。
+fn reallocate(pool: &mut Pool, old: Option<Alloc>, required: u32) -> Option<Option<Alloc>> {
+    if required == 0 {
+        if let Some(old) = old {
+            pool.free(old);
+        }
+        return Some(None);
+    }
+    let Some(old) = old else {
+        return pool.alloc(required).map(Some);
+    };
+    if required <= old.size {
+        return Some(Some(old));
+    }
+    if let Some(fresh) = pool.alloc(required) {
+        pool.free(old);
+        return Some(Some(fresh));
+    }
+    pool.free(old);
+    pool.alloc(required).map(Some)
 }
 
 /// HiZ 金字塔,镜像 Go `hiz.go`。
@@ -359,6 +420,24 @@ impl HiZ {
     }
 }
 
+/// sort_water_draws 把本帧的水面绘制表排成**由远及近**。
+///
+/// 三个约束都在这一行里:
+///
+/// - **方向**:`b` 在前、`a` 在后,即距离平方**降序**。alpha blend 下最后画的那层
+///   主导,由远及近才能让近处的水覆在远处之上;反过来排会直接违反
+///   `fluid-presentation` 的「MUST 按由远及近的顺序绘制」。
+/// - **不分配**:必须是 `sort_unstable_by`。稳定排序(driftsort)在几百条以上会申请
+///   一次临时缓冲,而 `voxel-visual-presentation` MODIFIED 写死了「预热后 MUST 不
+///   产生每帧动态资源创建或堆分配」。守卫见 `water_draw_sort_does_not_allocate`。
+/// - **确定性**:不稳定排序不保证等价元素的相对次序,因此用池内 `offset` 兜底比较。
+///   等距区段的绘制次序于是仍然固定,capture golden 不会在两次运行之间抖动。
+///
+/// `total_cmp` 是 f32 上的全序,不会因 NaN 触发排序 panic。
+fn sort_water_draws(draws: &mut [(f32, Alloc, u32)]) {
+    draws.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.offset.cmp(&b.1.offset)));
+}
+
 /// 离屏世界渲染器。
 pub struct OffscreenRenderer {
     device: wgpu::Device,
@@ -370,6 +449,9 @@ pub struct OffscreenRenderer {
 
     faces: wgpu::Buffer,
     instances: wgpu::Buffer,
+    /// 水面实例缓冲(16 字节/条,布局与 cull 输出的 visible 实例一致:
+    /// `vec4u(lo, hi, origin_idx, 0)`),由 CPU 在上传时一次写入。
+    water_instances: wgpu::Buffer,
     origins: wgpu::Buffer,
     camera: wgpu::Buffer,
     sky_camera: wgpu::Buffer,
@@ -380,6 +462,11 @@ pub struct OffscreenRenderer {
     terrain_layout: wgpu::BindGroupLayout,
     terrain_pipeline: wgpu::RenderPipeline,
     terrain_bind: Option<wgpu::BindGroup>,
+    /// water pass 管线:alpha blend、深度测试开、深度写关。
+    water_pipeline: wgpu::RenderPipeline,
+    /// water pass 的 bind group(与 terrain 同 layout,实例缓冲换成
+    /// water_instances);None 表示 atlas 尚未上传。
+    water_bind: Option<wgpu::BindGroup>,
     sampler: wgpu::Sampler,
     sky_pipeline: wgpu::RenderPipeline,
     sky_bind: wgpu::BindGroup,
@@ -402,9 +489,11 @@ pub struct OffscreenRenderer {
     outline_pass: EntityPass,
     /// 伤害红边 uniform(16B,strength@0)。
     overlay_uniform: wgpu::Buffer,
+    water_tint_uniform: wgpu::Buffer,
     /// 伤害红边全屏管线(无深度附件,alpha blend)。
     overlay_pipeline: wgpu::RenderPipeline,
     overlay_bind: wgpu::BindGroup,
+    water_tint_bind: wgpu::BindGroup,
 
     /// 名牌 billboard pass(双流:背景 + 字形)。
     name_tag_pass: QuadPass,
@@ -421,6 +510,13 @@ pub struct OffscreenRenderer {
     hud_atlas: Option<wgpu::Texture>,
 
     pool: Pool,
+    /// 水面实例池;与 `pool` 同一分配器,单位是实例条数。
+    water_pool: Pool,
+    /// 水面实例编码 scratch,跨上传复用以避免逐次堆分配。
+    water_scratch: Vec<u8>,
+    /// 本帧参与 water pass 的区段(距离平方,水面分配,条数),按由远及近排序;
+    /// 跨帧复用,预热后不再分配。
+    water_draws: Vec<(f32, Alloc, u32)>,
     sections: HashMap<(i32, i32, i32), SectionSlot>,
     next_origin: u32,
     free_origins: Vec<u32>,
@@ -555,6 +651,11 @@ impl OffscreenRenderer {
             BU::STORAGE | BU::COPY_DST,
             "terrain visible instances",
         );
+        let water_instances = make_buffer(
+            u64::from(WATER_POOL_INSTANCES) * BYTES_PER_VISIBLE_FACE,
+            BU::STORAGE | BU::COPY_DST,
+            "water surface instances",
+        );
         let origins = make_buffer(
             u64::from(ORIGIN_SLOTS) * 16,
             BU::STORAGE | BU::COPY_DST,
@@ -617,8 +718,28 @@ impl OffscreenRenderer {
             label: Some("terrain"),
             source: wgpu::ShaderSource::Wgsl(shaders::TERRAIN.into()),
         });
-        let terrain_pipeline =
-            make_render_pipeline(&device, "terrain", &terrain_module, &terrain_layout, true);
+        let terrain_pipeline = make_render_pipeline(
+            &device,
+            "terrain",
+            &terrain_module,
+            &terrain_layout,
+            true,
+            wgpu::BlendState::REPLACE,
+        );
+        // water pass 复用 terrain 的 bind group layout(camera / 实例 / origin /
+        // atlas / sampler 五项完全相同),只换实例缓冲与管线状态。
+        let water_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("water"),
+            source: wgpu::ShaderSource::Wgsl(shaders::WATER.into()),
+        });
+        let water_pipeline = make_render_pipeline(
+            &device,
+            "water",
+            &water_module,
+            &terrain_layout,
+            false,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
         // 采样器参数与 Go `block-sampler` 一致。
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("block-sampler"),
@@ -644,7 +765,14 @@ impl OffscreenRenderer {
             label: Some("sky"),
             source: wgpu::ShaderSource::Wgsl(shaders::SKY.into()),
         });
-        let sky_pipeline = make_render_pipeline(&device, "sky", &sky_module, &sky_layout, false);
+        let sky_pipeline = make_render_pipeline(
+            &device,
+            "sky",
+            &sky_module,
+            &sky_layout,
+            false,
+            wgpu::BlendState::REPLACE,
+        );
         let sky_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sky resources"),
             layout: &sky_layout,
@@ -775,10 +903,15 @@ impl OffscreenRenderer {
             DEPTH_FORMAT,
         );
 
-        // 伤害红边:无深度附件的全屏三角管线,镜像 Go damage_overlay.go。
-        let overlay_uniform = make_buffer(16, BU::UNIFORM | BU::COPY_DST, "damage overlay uniform");
+        // 全屏叠加:无深度附件的全屏三角管线,镜像 Go damage_overlay.go。
+        // 伤害红边与水下水色共用这一条管线与这一份 layout,各自持有一块 32 字节
+        // uniform(vec4 颜色 + edge 位 + 三个 pad):同一帧里两者可能都要画,
+        // 而一次提交内对同一块 buffer 的两次 write_buffer 只有最后一次生效,
+        // 所以必须是两块 buffer,不是两条管线。
+        let overlay_uniform = make_buffer(32, BU::UNIFORM | BU::COPY_DST, "screen tint uniform");
+        let water_tint_uniform = make_buffer(32, BU::UNIFORM | BU::COPY_DST, "water tint uniform");
         let overlay_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("damage overlay layout"),
+            label: Some("screen tint layout"),
             entries: &[buffer_layout_entry(
                 0,
                 wgpu::ShaderStages::FRAGMENT,
@@ -831,6 +964,14 @@ impl OffscreenRenderer {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: overlay_uniform.as_entire_binding(),
+            }],
+        });
+        let water_tint_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("water tint resources"),
+            layout: &overlay_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: water_tint_uniform.as_entire_binding(),
             }],
         });
 
@@ -944,6 +1085,7 @@ impl OffscreenRenderer {
             depth_view,
             faces,
             instances,
+            water_instances,
             origins,
             camera,
             sky_camera,
@@ -953,6 +1095,8 @@ impl OffscreenRenderer {
             terrain_layout,
             terrain_pipeline,
             terrain_bind: None,
+            water_pipeline,
+            water_bind: None,
             sampler,
             sky_pipeline,
             sky_bind,
@@ -971,12 +1115,17 @@ impl OffscreenRenderer {
             hud_pass,
             debug_pass,
             overlay_uniform,
+            water_tint_uniform,
             overlay_pipeline,
             overlay_bind,
+            water_tint_bind,
             glyph_atlas,
             glyph_view,
             hud_atlas: None,
             pool: Pool::new(POOL_FACES),
+            water_pool: Pool::new(WATER_POOL_INSTANCES),
+            water_scratch: Vec::new(),
+            water_draws: Vec::new(),
             sections: HashMap::new(),
             next_origin: 0,
             free_origins: Vec::new(),
@@ -1073,60 +1222,106 @@ impl OffscreenRenderer {
                 },
             ],
         }));
+        // water bind 与 terrain 同 layout、同 atlas,只把 binding 1 的实例缓冲
+        // 换成 water_instances。两者在 atlas 上传时一次性建好,帧内不再创建
+        // 任何绑定资源。
+        self.water_bind = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("water resources"),
+            layout: &self.terrain_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.camera.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.water_instances.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.origins.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        }));
         true
     }
 
-    /// 上传/替换一个 section 的 packed face 字节(8 字节/面,已 Pack);
-    /// 空数据等价于 drop。返回 false 表示池或 origin 槽位不足。
-    /// 分配策略镜像 Go `uploadOne`。
-    pub fn upload_section(&mut self, pos: (i32, i32, i32), packed: &[u8]) -> bool {
-        debug_assert_eq!(packed.len() % 8, 0);
-        if packed.is_empty() {
+    /// 上传/替换一个 section 的两条 packed face 流(均为 8 字节/面,已 Pack):
+    /// `opaque` 走 GPU culling 与单次 indirect terrain draw,`water` 走独立的
+    /// 半透明 water pass。两条都为空等价于 drop。
+    ///
+    /// 返回 false 表示某个池或 origin 槽位不足;此时该区段已完全退回未上传态,
+    /// 不留半条流。
+    pub fn upload_section(&mut self, pos: (i32, i32, i32), opaque: &[u8], water: &[u8]) -> bool {
+        debug_assert_eq!(opaque.len() % 8, 0);
+        debug_assert_eq!(water.len() % 8, 0);
+        if opaque.is_empty() && water.is_empty() {
             self.drop_section(pos);
             return true;
         }
-        let required = (packed.len() / 8) as u32;
-        let old = self
-            .sections
-            .get(&pos)
-            .map(|slot| (slot.origin_idx, slot.alloc));
-        let (alloc, origin_idx) = match old {
-            Some((origin_idx, old_alloc)) if required <= old_alloc.size => (old_alloc, origin_idx),
-            Some((origin_idx, old_alloc)) => match self.pool.alloc(required) {
-                Some(alloc) => {
-                    self.pool.free(old_alloc);
-                    (alloc, origin_idx)
-                }
-                None => {
-                    self.pool.free(old_alloc);
-                    self.sections.remove(&pos);
-                    match self.pool.alloc(required) {
-                        Some(alloc) => (alloc, origin_idx),
-                        None => {
-                            self.free_origins.push(origin_idx);
-                            return false;
-                        }
-                    }
-                }
+        let need_opaque = (opaque.len() / 8) as u32;
+        let need_water = (water.len() / 8) as u32;
+        // 先摘出旧记录:两条流各自 realloc,任一失败都要把另一条也回滚。
+        let previous = self.sections.remove(&pos);
+        let origin_idx = match &previous {
+            Some(slot) => slot.origin_idx,
+            None => match self.take_origin() {
+                Some(idx) => idx,
+                None => return false,
             },
-            None => {
-                let Some(alloc) = self.pool.alloc(required) else {
-                    return false;
-                };
-                match self.take_origin() {
-                    Some(origin_idx) => (alloc, origin_idx),
-                    None => {
-                        self.pool.free(alloc);
-                        return false;
-                    }
-                }
-            }
         };
-        self.queue.write_buffer(
-            &self.faces,
-            u64::from(alloc.offset) * BYTES_PER_POOL_FACE,
-            packed,
-        );
+        let old_opaque = previous.as_ref().and_then(|slot| slot.alloc);
+        let old_water = previous.as_ref().and_then(|slot| slot.water);
+        let Some(alloc) = reallocate(&mut self.pool, old_opaque, need_opaque) else {
+            if let Some(old) = old_water {
+                self.water_pool.free(old);
+            }
+            self.free_origins.push(origin_idx);
+            return false;
+        };
+        let Some(water_alloc) = reallocate(&mut self.water_pool, old_water, need_water) else {
+            if let Some(new) = alloc {
+                self.pool.free(new);
+            }
+            self.free_origins.push(origin_idx);
+            return false;
+        };
+
+        if let Some(alloc) = alloc {
+            self.queue.write_buffer(
+                &self.faces,
+                u64::from(alloc.offset) * BYTES_PER_POOL_FACE,
+                opaque,
+            );
+        }
+        if let Some(alloc) = water_alloc {
+            // water pass 不接 culling,没有 cull compute 替它展开 origin,
+            // 因此这里就把 8 字节的 quad 补成与 cull 输出同布局的 16 字节实例:
+            // `vec4u(lo, hi, origin_idx, 0)`。水面几何只在区段重新网格化时变,
+            // 这份展开随之只做一次,帧内零工作。
+            self.water_scratch.clear();
+            self.water_scratch
+                .reserve(water.len() / 8 * BYTES_PER_VISIBLE_FACE as usize);
+            for quad in water.chunks_exact(8) {
+                self.water_scratch.extend_from_slice(quad);
+                self.water_scratch
+                    .extend_from_slice(&origin_idx.to_le_bytes());
+                self.water_scratch.extend_from_slice(&0u32.to_le_bytes());
+            }
+            self.queue.write_buffer(
+                &self.water_instances,
+                u64::from(alloc.offset) * BYTES_PER_VISIBLE_FACE,
+                &self.water_scratch,
+            );
+        }
         let origin = section_origin(pos);
         let mut origin_bytes = [0u8; 16];
         for (i, v) in origin.iter().enumerate() {
@@ -1139,7 +1334,9 @@ impl OffscreenRenderer {
             SectionSlot {
                 alloc,
                 origin_idx,
-                face_count: required,
+                face_count: need_opaque,
+                water: water_alloc,
+                water_count: need_water,
             },
         );
         true
@@ -1157,10 +1354,15 @@ impl OffscreenRenderer {
         Some(idx)
     }
 
-    /// 丢弃一个 section;不存在时为幂等空操作。
+    /// 丢弃一个 section;不存在时为幂等空操作。两条流的分配都要归还。
     pub fn drop_section(&mut self, pos: (i32, i32, i32)) {
         if let Some(slot) = self.sections.remove(&pos) {
-            self.pool.free(slot.alloc);
+            if let Some(alloc) = slot.alloc {
+                self.pool.free(alloc);
+            }
+            if let Some(alloc) = slot.water {
+                self.water_pool.free(alloc);
+            }
             self.free_origins.push(slot.origin_idx);
         }
     }
@@ -1265,6 +1467,7 @@ impl OffscreenRenderer {
             || !self.drop_pass.instances_valid(&input.drop_instances)
             || !self.outline_pass.instances_valid(&input.outline)
             || input.overlay_strength.is_nan()
+            || input.water_tint.iter().any(|value| value.is_nan())
         {
             return FrameResult::Invalid;
         }
@@ -1320,10 +1523,14 @@ impl OffscreenRenderer {
             let Some(slot) = self.sections.get(pos) else {
                 continue;
             };
+            // 只有水面的区段对不透明 draw 没有贡献,不进候选 record。
+            let Some(alloc) = slot.alloc else {
+                continue;
+            };
             for v in section_origin(*pos) {
                 records.extend_from_slice(&v.to_le_bytes());
             }
-            records.extend_from_slice(&slot.alloc.offset.to_le_bytes());
+            records.extend_from_slice(&alloc.offset.to_le_bytes());
             records.extend_from_slice(&slot.face_count.to_le_bytes());
             records.extend_from_slice(&slot.origin_idx.to_le_bytes());
             records.extend_from_slice(&0u32.to_le_bytes());
@@ -1431,6 +1638,30 @@ impl OffscreenRenderer {
             pass.set_bind_group(0, &self.cull_bind, &[]);
             pass.dispatch_workgroups(candidates, 1, 1);
         }
+        // 相机浸没时的背景替换:天空 pass 整个跳过,terrain pass 的 clear 色由
+        // 天空色换成水色。water_visible 同时决定后面那层全屏水色叠加是否绘制,
+        // 两处**必须**是同一个布尔:背景换成水色却不叠加(或反过来)都会让画面
+        // 出现前后不一致的色偏。
+        //
+        // 这是"压低远处可见度"能读成**浑浊**而不是**一堵墙**的关键。可见半径在
+        // 水下被压到几个区段,被裁掉的地方不画任何地形;而 clear 色原本是天空色、
+        // 其上还盖着一整块天空三角,于是水下抬头看到的是晴空、云、太阳和星星,
+        // 切边成为一条硬边。换成水色之后,裁掉的区域与远景水色连成一片,切边只
+        // 剩"地形与水色之间的残余对比",由随后那层全屏水色叠加继续压低。
+        //
+        // 代价:浸没时看不到水面之上的天空(浅水抬头也是一片水色)。这是刻意接受
+        // 的——水下能见度低本来就意味着看不见远处,而保留天空就必然保留那条硬边。
+        let water_visible = input.water_tint[3] > 0.0;
+        let clear_color = if water_visible {
+            [
+                input.water_tint[0],
+                input.water_tint[1],
+                input.water_tint[2],
+                1.0,
+            ]
+        } else {
+            input.sky_color
+        };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain pass"),
@@ -1440,10 +1671,10 @@ impl OffscreenRenderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: f64::from(input.sky_color[0]),
-                            g: f64::from(input.sky_color[1]),
-                            b: f64::from(input.sky_color[2]),
-                            a: f64::from(input.sky_color[3]),
+                            r: f64::from(clear_color[0]),
+                            g: f64::from(clear_color[1]),
+                            b: f64::from(clear_color[2]),
+                            a: f64::from(clear_color[3]),
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -1460,9 +1691,11 @@ impl OffscreenRenderer {
                 timestamp_writes: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.sky_pipeline);
-            pass.set_bind_group(0, &self.sky_bind, &[]);
-            pass.draw(0..3, 0..1);
+            if !water_visible {
+                pass.set_pipeline(&self.sky_pipeline);
+                pass.set_bind_group(0, &self.sky_bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
             if let Some(bind) = &self.terrain_bind {
                 pass.set_pipeline(&self.terrain_pipeline);
                 pass.set_bind_group(0, bind, &[]);
@@ -1470,6 +1703,71 @@ impl OffscreenRenderer {
                 pass.draw_indexed_indirect(&self.indirect, 0);
             }
         }
+        // water pass:排在 terrain pass 之后、HiZ build 之前(design D3)。
+        //
+        // 三条状态由管线固定:alpha blend、深度测试开、**深度写关**。深度写关是
+        // 为了让视线上前后两片水面都可见——互相 depth-cull 会留下明显空洞。
+        //
+        // 排序粒度**止于区段**:按区段中心到相机的距离平方由远及近,区段内部按
+        // 上传顺序绘制,MUST NOT 逐面排序(逐面排序是每帧的动态工作,与"预热后
+        // 零分配"冲突)。water 不接 GPU culling,走普通 draw_indexed。
+        //
+        // water_draws 跨帧复用(take/放回只是为了避开 self 的借用冲突),预热后
+        // 不再有堆分配。
+        let mut draws = std::mem::take(&mut self.water_draws);
+        draws.clear();
+        for pos in &input.visible {
+            let Some(slot) = self.sections.get(pos) else {
+                continue;
+            };
+            let (Some(alloc), true) = (slot.water, slot.water_count > 0) else {
+                continue;
+            };
+            let origin = section_origin(*pos);
+            let center = [
+                origin[0] as f32 + 8.0,
+                origin[1] as f32 + 8.0,
+                origin[2] as f32 + 8.0,
+            ];
+            let offset = sub3(center, input.pos);
+            let distance2 = offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2];
+            draws.push((distance2, alloc, slot.water_count));
+        }
+        if let (Some(bind), false) = (&self.water_bind, draws.is_empty()) {
+            sort_water_draws(&mut draws);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("water pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &frame_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.water_pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_index_buffer(self.index.slice(..), wgpu::IndexFormat::Uint32);
+            for &(_, alloc, count) in &draws {
+                // first_instance 直接就是实例在水面池中的起始下标:WebGPU 的
+                // `@builtin(instance_index)` 从 firstInstance 起算。
+                pass.draw_indexed(0..6, 0, alloc.offset..alloc.offset + count);
+            }
+        }
+        self.water_draws = draws;
         self.hiz.build(&self.device, &mut encoder, &self.depth_view);
         // 实体 pass:顺序镜像 app_frame(avatar → item drop),空段跳过。
         if !input.avatar_instances.is_empty() {
@@ -1523,15 +1821,41 @@ impl OffscreenRenderer {
                 glyphs,
             );
         }
-        // 伤害红边(Go 顺序:名牌之后、HUD 之前);strength 钳制到 1,
-        // 非正值跳过(镜像 Go)。
-        if input.overlay_strength > 0.0 {
-            let strength = input.overlay_strength.min(1.0);
-            let mut uniform = [0u8; 16];
-            uniform[0..4].copy_from_slice(&strength.to_le_bytes());
-            self.queue.write_buffer(&self.overlay_uniform, 0, &uniform);
+        // 全屏叠加(Go 顺序:名牌之后、HUD 之前):水下水色与伤害红边**共用一条
+        // render pass 与一条管线**,只是各自的 uniform 不同。
+        //
+        // 两者合并成一个 pass 是有意的:src/render 下的 render pass 起始调用点
+        // 总数是 water_tests 的一条硬门禁(voxel-visual-presentation 只放宽了恰好
+        // 一个额外的半透明阶段),水下视觉不该消费那份额度。
+        //
+        // 绘制次序是「先水色、后红边」:水色是环境效果,必须垫在受伤反馈下面,
+        // 否则红边会被水色冲淡。
+        let damage_visible = input.overlay_strength > 0.0;
+        if water_visible || damage_visible {
+            if water_visible {
+                let mut uniform = [0u8; 32];
+                for (index, value) in input.water_tint.iter().enumerate() {
+                    let clamped = value.clamp(0.0, 1.0);
+                    uniform[index * 4..index * 4 + 4].copy_from_slice(&clamped.to_le_bytes());
+                }
+                // edge = 0:全屏均匀覆盖,不走边缘渐变。
+                uniform[16..20].copy_from_slice(&0.0f32.to_le_bytes());
+                self.queue
+                    .write_buffer(&self.water_tint_uniform, 0, &uniform);
+            }
+            if damage_visible {
+                // 固定红色、0.30 上限与 edge = 1 的边缘渐变:与本文件历史行为逐位
+                // 一致,只是颜色与 edge 位从 shader 常量搬进了 uniform。
+                // strength 钳制到 1(镜像 Go)。
+                let strength = input.overlay_strength.min(1.0);
+                let mut uniform = [0u8; 32];
+                uniform[0..4].copy_from_slice(&0.65f32.to_le_bytes());
+                uniform[12..16].copy_from_slice(&(0.30f32 * strength).to_le_bytes());
+                uniform[16..20].copy_from_slice(&1.0f32.to_le_bytes());
+                self.queue.write_buffer(&self.overlay_uniform, 0, &uniform);
+            }
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("damage overlay pass"),
+                label: Some("screen tint pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &frame_view,
                     depth_slice: None,
@@ -1547,8 +1871,14 @@ impl OffscreenRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.overlay_pipeline);
-            pass.set_bind_group(0, &self.overlay_bind, &[]);
-            pass.draw(0..3, 0..1);
+            if water_visible {
+                pass.set_bind_group(0, &self.water_tint_bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            if damage_visible {
+                pass.set_bind_group(0, &self.overlay_bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
         }
         // HUD 与调试面板(Go 顺序:overlay 之后,面板最后)。
         if let Some((uniform, quads, glyphs)) = hud_segment {
@@ -1739,13 +2069,18 @@ fn buffer_layout_entry(
 }
 
 /// 渲染管线构造,状态镜像 Go `CreateRenderPipeline` 缺省语义:
-/// TriangleList、CCW、无背面剔除、BlendReplace、depth compare Less。
+/// TriangleList、CCW、无背面剔除、depth compare Less。
+///
+/// `blend` 是唯一按 pass 变化的颜色状态:terrain/sky 用 REPLACE,water pass 用
+/// ALPHA_BLENDING。water 另以 `depth_write = false` 关闭深度写——两片水面若互相
+/// depth-cull 会在画面上留下明显空洞(design D3)。
 fn make_render_pipeline(
     device: &wgpu::Device,
     label: &str,
     module: &wgpu::ShaderModule,
     layout: &wgpu::BindGroupLayout,
     depth_write: bool,
+    blend: wgpu::BlendState,
 ) -> wgpu::RenderPipeline {
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
@@ -1767,7 +2102,7 @@ fn make_render_pipeline(
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: COLOR_FORMAT,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -1913,6 +2248,33 @@ mod tests {
         }
     }
 
+    /// 水面实例池必须覆盖"最大视距下全海世界的顶面"这一主导上界。
+    ///
+    /// 这条断言承的重是**位置性**而非存在性:它不是在问"常量存在吗",而是把
+    /// 常量与一个独立算出的几何上界比大小。曾用的 512Ki 会让本测试变红——
+    /// fluidEnabled 默认打开后,默认世界的实测峰值就越过了它,抓帧在加载阶段
+    /// 以 STATUS_CAPACITY 崩溃。
+    #[test]
+    fn water_pool_covers_full_ocean_top_faces() {
+        // 视距 32(config.Render.ViewDistance 默认值)→ 视半径 33 区块。
+        const VIEW_RADIUS_CHUNKS: u32 = 33;
+        const CHUNK_COLUMNS: u32 = 16 * 16;
+        let chunks = (2 * VIEW_RADIUS_CHUNKS + 1).pow(2);
+        let top_faces = chunks * CHUNK_COLUMNS;
+        assert!(
+            WATER_POOL_INSTANCES >= top_faces,
+            "水面实例池 {} 条覆盖不了全海顶面上界 {} 条",
+            WATER_POOL_INSTANCES,
+            top_faces
+        );
+        // 同时钉住 wgpu 的 max_storage_buffer_binding_size(128 MiB)硬上限:
+        // 实测超出会在 create_bind_group 阶段直接 validation error。
+        assert!(
+            u64::from(WATER_POOL_INSTANCES) * BYTES_PER_VISIBLE_FACE <= 128 * 1024 * 1024,
+            "水面实例缓冲超出 128 MiB 绑定上限"
+        );
+    }
+
     #[test]
     fn offscreen_frame_and_readback_are_deterministic() {
         let Some(mut renderer) = renderer_or_skip(64, 32) else {
@@ -1933,14 +2295,14 @@ mod tests {
         let Some(mut renderer) = renderer_or_skip(16, 16) else {
             return;
         };
-        assert!(renderer.upload_section((0, 4, 0), &[0u8; 16]));
-        assert!(renderer.upload_section((0, 5, 0), &[0u8; 8]));
+        assert!(renderer.upload_section((0, 4, 0), &[0u8; 16], &[]));
+        assert!(renderer.upload_section((0, 5, 0), &[0u8; 8], &[]));
         assert_eq!(renderer.total_faces(), 3);
         // 覆盖上传复用旧槽。
-        assert!(renderer.upload_section((0, 4, 0), &[0u8; 8]));
+        assert!(renderer.upload_section((0, 4, 0), &[0u8; 8], &[]));
         assert_eq!(renderer.total_faces(), 2);
         // 空数据等价 drop;未知位置 drop 幂等。
-        assert!(renderer.upload_section((0, 5, 0), &[]));
+        assert!(renderer.upload_section((0, 5, 0), &[], &[]));
         renderer.drop_section((9, 9, 9));
         assert_eq!(renderer.total_faces(), 1);
     }
@@ -1975,7 +2337,7 @@ mod tests {
         assert!(renderer.upload_atlas(1, &vec![128u8; bytes_per_layer]));
         // 一个 section、若干 packed face(全零 face 也会经过 cull 与绘制
         // 路径,验证管线兼容性;图像正确性由 Go 侧双后端对照保证)。
-        assert!(renderer.upload_section((0, 5, 0), &[0u8; 64]));
+        assert!(renderer.upload_section((0, 5, 0), &[0u8; 64], &[]));
         let mut frame = empty_frame();
         frame.visible = vec![(0, 5, 0), (9, 9, 9)];
         renderer.render_frame(&frame);

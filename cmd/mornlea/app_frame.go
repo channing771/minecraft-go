@@ -17,6 +17,10 @@ import (
 	"github.com/channing771/mornlea/internal/render/hud"
 )
 
+// baseVisibleRadius 是相机不在流体时的可见 section 搜索半径（区段），
+// 与本变更之前硬编码在 VisibleSectionsInto 调用处的 32 是同一个值。
+const baseVisibleRadius = 32
+
 func (a *application) updateCenter() {
 	center := cameraChunk(a.camera.Pos)
 	if center == a.center {
@@ -136,15 +140,17 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	if chest, opened := a.chest.State(); opened {
 		chestOverlay = &hud.ChestOverlay{Items: chest.Items}
 	}
-	// 生命值和聊天都独立于背包确认状态；未确认时 renderer 只跳过物品布局。
+	// 生命值、氧气和聊天都独立于背包确认状态；未确认时 renderer 只跳过物品布局。
 	health, healthReady := a.predictor.Health()
+	oxygen, oxygenReady := a.predictor.Oxygen()
 	chatOverlay := a.chatOverlay()
 	hudVisible := inventoryConfirmed || (healthReady && !a.clientSessionClosed) ||
 		chatOverlay.Open || len(chatOverlay.Lines) != 0
 	if hudVisible {
 		if err := a.hotbarRenderer.Prepare(
 			inventory, inventoryConfirmed, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
-			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health}, chatOverlay,
+			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health},
+			hud.OxygenOverlay{Confirmed: oxygenReady, Value: oxygen}, chatOverlay,
 			uint32(width), uint32(height), a.scheduler.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)
@@ -167,10 +173,16 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	viewProj := a.camera.ViewProj()
 	viewProjInv := viewProj.Inv()
 
+	// 水下视觉:判定复用 Predictor 最近一次 physics.SubmersionFlags 算出的那一个
+	// 眼睛浸没标志——与服务端氧气结算同源,不另起一套(spec fluid-presentation
+	// 「视觉与溺水判定一致」)。
+	underwater := render.UnderwaterViewFor(a.predictor.EyeInFluid(), baseVisibleRadius)
+
 	// 可见列表:BFS 连通性 + frustum,与旧 Go 渲染器同一算法与顺序。
+	// 半径在水下被压低,是"压低远处可见度"的落点。
 	a.visibleSections = mesh.VisibleSectionsInto(
 		a.visibleSections[:0], &a.visibleScratch,
-		cameraSectionPos(a.camera.Pos), 32,
+		cameraSectionPos(a.camera.Pos), underwater.VisibleRadius,
 		core.FrustumFrom(viewProj), a.scheduler.Connectivity,
 	)
 	a.lastFrameStats = a.scheduler.FrameStats(a.visibleSections)
@@ -241,6 +253,7 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		DropInstances:    a.dropStream,
 		OutlineInstances: a.outlineStream,
 		OverlayStrength:  a.damageStrength,
+		WaterTint:        underwater.Tint,
 		NameTagSegment:   nameTagSegment,
 		HUDSegment:       hudSegment,
 		DebugSegment:     debugSegment,

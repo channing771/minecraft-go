@@ -48,14 +48,16 @@ type companionState struct {
 	// miningTarget 是 MineHold action 携带、伙伴专属的采掘意图目标：玩家的目标
 	// 由视线 raycast 逐 tick 派生，不需要持久化；伙伴的目标由 Task Runner 显式
 	// 指定，跨 tick 保持（Manager 每个采掘 tick 重新提交同一目标）。
-	miningTarget       core.BlockPos
-	restoreCandidates  []restoreCandidate
-	nextRestore        int
-	restoreWanted      map[core.ChunkKey]struct{}
-	spawnCandidates    []spawnColumn
-	spawnChunks        []core.ChunkPos
-	spawnWanted        map[core.ChunkPos]struct{}
-	spawnIndex         int
+	miningTarget      core.BlockPos
+	restoreCandidates []restoreCandidate
+	nextRestore       int
+	restoreWanted     map[core.ChunkKey]struct{}
+	spawnCandidates   []spawnColumn
+	spawnChunks       []core.ChunkPos
+	spawnWanted       map[core.ChunkPos]struct{}
+	spawnIndex        int
+	// spawnFallback 是本轮候选扫描中最优的降级出生点，语义同 playerState。
+	spawnFallback      spawnFallback
 	exhausted          bool
 	exhaustedRevisions []uint64
 }
@@ -168,6 +170,7 @@ func (engine *Engine) advancePendingCompanion(state *companionState) {
 		state.exhausted = false
 		state.exhaustedRevisions = nil
 		state.spawnIndex = 0
+		state.spawnFallback = spawnFallback{}
 	}
 
 	source := dimensionCollisionSource{dimension: dimension}
@@ -178,19 +181,29 @@ func (engine *Engine) advancePendingCompanion(state *companionState) {
 			state.spawnWanted[chunk] = struct{}{}
 			engine.subscriptionsDirty = true
 		}
-		position, valid, ready := findSpawnInColumn(candidate, dimension, source)
+		position, tier, ready := findSpawnInColumn(candidate, dimension, source)
 		if !ready {
 			if info, ok := dimension.Info(chunk); !ok || info.State == ChunkFailed {
 				engine.subscriptionsDirty = true
 			}
 			return
 		}
-		if valid {
+		if tier == spawnTierDry {
+			state.spawnFallback = spawnFallback{}
 			state.activate(PlayerLocation{Dimension: state.dimension, Position: position}, true)
 			engine.subscriptionsDirty = true
 			return
 		}
+		state.spawnFallback.consider(position, tier)
 		state.spawnIndex++
+	}
+
+	// 与玩家同一条降级阶梯（理由与伙伴侧的差异见 findSpawnInColumn 的注释）：
+	// 伙伴的替代结局是永远不出生，比站在水底更糟。
+	if position, ok := state.spawnFallback.take(); ok {
+		state.activate(PlayerLocation{Dimension: state.dimension, Position: position}, true)
+		engine.subscriptionsDirty = true
+		return
 	}
 
 	state.exhausted = true

@@ -49,6 +49,8 @@ func completeV9ComparableReport(transport string) client.PerfReport {
 // 包括该场景要求的 remote_gpu_complete 样本数与批次数量。
 func scenarioComparableReport(version int, transport string) client.PerfReport {
 	switch version {
+	case 17:
+		return completeV17ComparableReport(transport)
 	case 16:
 		return completeV16ComparableReport(transport)
 	case 15:
@@ -72,6 +74,12 @@ func scenarioComparableReport(version int, transport string) client.PerfReport {
 		report.ScenarioVersion = version
 		return report
 	}
+}
+
+func completeV17ComparableReport(transport string) client.PerfReport {
+	report := completeV16ComparableReport(transport)
+	report.ScenarioVersion = 17
+	return report
 }
 
 func completeV16ComparableReport(transport string) client.PerfReport {

@@ -146,11 +146,11 @@ func TestNativeOracleParityDeterministicRandomizedCorpus(t *testing.T) {
 		// WaterLevel7ID+1 是真正越界、未注册的编号：覆盖「registry 里完全不
 		// 存在」这条路径。
 		core.WaterLevel7ID + 1,
-		// WaterSourceID 是已注册流体，但没有被纳入 assets.NewRegistry() 构建
-		// mesh snapshot 时使用的 ids 范围（仍止于 MossyCobblestoneID），所以
-		// 从 snapshot 的角度看同样是「缺条目」：覆盖「已注册但不在 snapshot
-		// 里」这条独立路径，与上面的 WaterLevel7ID+1 分开断言。
+		// 流体已纳入 assets.NewRegistry() 的 snapshot ids 范围，会真的产生
+		// 几何。放两个不同等级，让「流体—流体」「流体—固体」「流体—空气」
+		// 三类相邻都出现在随机语料里。
 		core.WaterSourceID,
+		core.WaterLevel5ID,
 	}
 
 	for caseIndex := range 64 {
@@ -234,5 +234,75 @@ func TestNativeOracleParityConcurrentIndependentScratch(t *testing.T) {
 	close(failures)
 	for failure := range failures {
 		t.Error(failure)
+	}
+}
+
+// TestNativeOracleParityWaterSurface 覆盖流体纳入 mesh registry 快照之后的 Go/Rust 一致性。
+//
+// **assertNativeOracleParity 守的不是出面规则**。Go oracle 与 Rust 位图同源于
+// assets.Registry.FaceVisible：oracle 每格现算，Rust 读的是 BuildRegistrySnapshot 把同一
+// 函数烘焙进 Visibility 位图、再经 encodeNativeInput 送过去的那一份。规则本身被改坏时
+// 两侧会**一起**改坏、差值恒等，两条 parity 断言照样全绿（任务组 1 评审实测：把已删除的
+// `core.IsFluid` 补偿分支加回 FaceVisible 后 parity 全过，变红的是下面那条计数守卫）。
+//
+// parity 断言真正守的是端到端事实：35 条 registry 快照确实通过了 Rust 的条目校验、
+// 编码布局两侧一致、且贪心合并与位打包逐字节相同。**规则由末尾的计数守卫承重**——
+// 若把它删掉，本用例对任何规则类变异都不再敏感。
+//
+// 夹具里水面之上单独放了一块石头，用来覆盖「流体紧邻不透明方块的面不可见」与其反方向
+// 「不透明方块朝向流体的面可见」两条规则。
+func TestNativeOracleParityWaterSurface(t *testing.T) {
+	// build 造一个下半部为 fill、上方 (3,8,3) 放一块石头的中心区段，邻居全实心。
+	// fill 传 AirID 时就是同一夹具的「无水对照组」。
+	build := func(fill world.BlockID) *world.Neighborhood {
+		center := world.NewSection()
+		for y := range 8 {
+			for z := range core.SectionSize {
+				for x := range core.SectionSize {
+					id := fill
+					// 掺入不同等级的流动水，让「流体—流体」相邻也进入判定，
+					// 而不是只覆盖单一编号。
+					if core.IsFluid(fill) && x >= core.SectionSize/2 {
+						id = core.WaterLevel3ID
+					}
+					center.Blocks.Set(x, y, z, id)
+				}
+			}
+		}
+		center.Blocks.Set(3, 8, 3, core.StoneID)
+		return solidNeighbors(center)
+	}
+
+	registry := assets.NewRegistry()
+	water := assertNativeOracleParity(t, build(core.WaterSourceID), registry)
+	air := assertNativeOracleParity(t, build(core.AirID), registry)
+
+	// 防空转守卫排在真实故障断言之后：一致性断言在「两侧都不给水出面」时同样成立，
+	// 所以必须另外证明水**确实**贡献了几何。把水换成空气后 quad 只会更少（水面顶面
+	// 全部消失，只剩那块孤立石头），若水版不严格多于空气版，说明水仍然画不出来。
+	if len(water) <= len(air) {
+		t.Fatalf("水版 quad=%d，空气对照组 quad=%d：水没有贡献任何几何，"+
+			"上面的一致性断言已退化为「两侧都不出面」的恒真", len(water), len(air))
+	}
+
+	// 水面必须真的带上角高度且按 1×1 出面。角高度经 Rust 打包、Go 解包、
+	// 上传前再打包，任一环节丢位都会让这里读到零角高度。
+	tops := 0
+	for _, quad := range water {
+		if quad.Face != mesh.FacePosY || quad.Corners == ([4]uint8{}) {
+			continue
+		}
+		tops++
+		if quad.W != 1 || quad.H != 1 {
+			t.Fatalf("水面顶面 %+v 被贪心合并成 %dx%d", quad, quad.W, quad.H)
+		}
+		for i, corner := range quad.Corners {
+			if corner < 7 || corner > 15 {
+				t.Fatalf("水面顶面 %+v 的角 %d 高度=%d，合法域是 7..15", quad, i, corner)
+			}
+		}
+	}
+	if tops == 0 {
+		t.Fatal("没有任何带角高度的水面顶面：斜面几何整体缺失")
 	}
 }

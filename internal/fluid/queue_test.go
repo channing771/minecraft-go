@@ -74,13 +74,13 @@ func TestEnqueueDedupKeepsEarliestDueTick(t *testing.T) {
 	if got := q.Len(); got != 1 {
 		t.Fatalf("同一格重复入队应去重为 1 项，got %d", got)
 	}
-	if got := q.pending[pos]; got != 3 {
-		t.Fatalf("去重后应保留更早的 dueTick=3，got %d", got)
+	if got, ok := queuedDueTick(q, pos); !ok || got != 3 {
+		t.Fatalf("去重后应保留更早的 dueTick=3，got ok=%v got=%d", ok, got)
 	}
 
 	q.Enqueue(pos, 0, 100) // due=100，更晚，不应覆盖已保留的更早值
-	if got := q.pending[pos]; got != 3 {
-		t.Fatalf("更晚的重复入队不应推迟已排定的 dueTick，got %d", got)
+	if got, ok := queuedDueTick(q, pos); !ok || got != 3 {
+		t.Fatalf("更晚的重复入队不应推迟已排定的 dueTick，got ok=%v got=%d", ok, got)
 	}
 }
 

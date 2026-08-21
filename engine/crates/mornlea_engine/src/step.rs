@@ -1,9 +1,15 @@
 //! physics step ABI 的输入解析、校验、积分与输出编码。
 //!
 //! 输入布局与偏移以 `docs/superpowers/specs/2026-08-15-rust-engine-physics-step-design.md`
-//! 第 4 节为准：128 字节 header（magic MGP1 + layout v1）+ 每 cell 196 字节。
+//! 第 4 节为准：header（magic MGP1 + layout 版本）+ 每 cell 196 字节；header 现为 v2、160 字节。
 
-pub(crate) const STEP_HEADER_BYTES: usize = 128;
+/// StepInput header 长度。v1 的 128 字节已排满，v2 追加浸没标志与四个水中
+/// tunable，故扩到 160（仍是 32 的整数倍）。这是同一个 engine ABI v5 内的
+/// header 扩展，ABI 版本不变。
+pub(crate) const STEP_HEADER_BYTES: usize = 160;
+
+/// StepInput header 的布局版本。v1 → v2 的唯一差异见 STEP_HEADER_BYTES。
+const STEP_LAYOUT_VERSION: u32 = 2;
 pub(crate) const STEP_OUTPUT_BYTES: usize = 32;
 pub(crate) const STEP_MAX_CELLS: usize = 4096;
 
@@ -48,6 +54,17 @@ pub(crate) struct StepInput<'a> {
     pub(crate) jump_speed: f32,
     pub(crate) gravity: f32,
     pub(crate) terminal_fall_speed: f32,
+    /// 身体浸没标志。流体没有碰撞盒，prism 里区分不出水与空气，因此由 Go
+    /// 调用方从各自的方块镜像算好后随 header 传入（design D4）。
+    pub(crate) body_in_fluid: bool,
+    /// 水中重力，替换 gravity。
+    pub(crate) fluid_gravity: f32,
+    /// 水中垂直终端下沉速度，替换 terminal_fall_speed。
+    pub(crate) fluid_sink_speed: f32,
+    /// 水中持续上浮速度：Jump 在水中不是冲量，而是每 tick 直接赋值。
+    pub(crate) fluid_ascend_speed: f32,
+    /// 水中水平阻力系数，每 tick 乘在水平速度上。
+    pub(crate) fluid_horizontal_drag: f32,
     pub(crate) sweep_min: [f32; 3],
     pub(crate) sweep_max: [f32; 3],
     pub(crate) origin: [i32; 3],
@@ -95,6 +112,11 @@ impl<'a> StepInput<'a> {
             jump_speed: tunables[5],
             gravity: tunables[6],
             terminal_fall_speed: tunables[7],
+            body_in_fluid: bytes[128] == 1,
+            fluid_gravity: read_f32(bytes, 132),
+            fluid_sink_speed: read_f32(bytes, 136),
+            fluid_ascend_speed: read_f32(bytes, 140),
+            fluid_horizontal_drag: read_f32(bytes, 144),
             sweep_min,
             sweep_max,
             origin,
@@ -106,9 +128,14 @@ impl<'a> StepInput<'a> {
 pub(crate) fn step_input_is_valid(bytes: &[u8]) -> bool {
     if bytes.len() < STEP_HEADER_BYTES
         || &bytes[0..4] != b"MGP1"
-        || read_u32(bytes, 4) != 1
+        || read_u32(bytes, 4) != STEP_LAYOUT_VERSION
         || bytes[32] > 1
         || bytes[33] > 1
+        || bytes[128] > 1
+        // v2 的两段保留区必须逐字节为 0：将来在这里扩字段时，旧编码器写出的
+        // 非零垃圾或新编码器漏置零都会立刻被挡下，而不是被静默解读成参数。
+        || bytes[129..132].iter().any(|&byte| byte != 0)
+        || bytes[148..STEP_HEADER_BYTES].iter().any(|&byte| byte != 0)
         || !(-1..=1).contains(&(bytes[34] as i8))
         || !(-1..=1).contains(&(bytes[35] as i8))
     {
@@ -119,6 +146,7 @@ pub(crate) fn step_input_is_valid(bytes: &[u8]) -> bool {
         .step_by(4)
         .chain((36..=44).step_by(4))
         .chain((48..104).step_by(4))
+        .chain((132..148).step_by(4))
     {
         if !read_f32(bytes, offset).is_finite() {
             return false;
@@ -248,13 +276,35 @@ pub(crate) fn integrate(input: &StepInput<'_>) -> (Vector, Vector) {
             horizontal = vec3_scale(vec3_normalize(horizontal), input.walk_speed);
         }
     }
+    // 水中水平阻力乘在加速之后：每 tick 都把这一步的结果按系数缩一次，稳态因此
+    // 收敛到 accel*dt*k/(1−k)（或加速已够到 walk_speed 时的 walk_speed*k），
+    // 恒低于陆地行走速度。放在加速之前只会被同一步的 move_toward 拉回去，
+    // 水陆速度将无差别。
+    if input.body_in_fluid {
+        horizontal = vec3_scale(horizontal, input.fluid_horizontal_drag);
+    }
     velocity[0] = horizontal[0];
     velocity[2] = horizontal[2];
-    if input.on_ground && input.jump {
+    // 垂直分支的优先级：水中上浮 > 地面起跳 > 重力。
+    //
+    // 为什么水中的 Jump 是持续上浮而不是跳跃冲量：冲量语义是「离地瞬间给一次
+    // 初速度，之后交给重力」，它依赖 on_ground 这个只在触地那一 tick 成立的
+    // 边沿。玩家浮在水中时 on_ground 恒为假，冲量分支永远不会再触发，按住上升
+    // 键将毫无作用；即便强行去掉 on_ground 条件，冲量也会被随后的水中重力立刻
+    // 吃掉，表现为一次抖动而不是上升。直接每 tick 把垂直速度赋成 fluid_ascend_speed
+    // 才能给出「按住就一直升，松开就开始沉」的可控上浮，并保证一定能浮出水面。
+    if input.body_in_fluid && input.jump {
+        velocity[1] = input.fluid_ascend_speed;
+    } else if input.on_ground && input.jump {
         velocity[1] = input.jump_speed;
     } else {
+        let (gravity, terminal) = if input.body_in_fluid {
+            (input.fluid_gravity, input.fluid_sink_speed)
+        } else {
+            (input.gravity, input.terminal_fall_speed)
+        };
         // 与 Go 内建 max 逐位一致：f32::max 符号零语义为 +0 胜出。
-        velocity[1] = (velocity[1] - input.gravity * dt).max(-input.terminal_fall_speed);
+        velocity[1] = (velocity[1] - gravity * dt).max(-terminal);
     }
     let displacement = [velocity[0] * dt, velocity[1] * dt, velocity[2] * dt];
     (velocity, displacement)
@@ -322,8 +372,8 @@ pub(crate) fn physics_step(bytes: &[u8]) -> Result<[u8; STEP_OUTPUT_BYTES], Step
 #[cfg(test)]
 mod tests {
     use super::{
-        STEP_HEADER_BYTES, STEP_OUTPUT_BYTES, StepError, StepInput, integrate, physics_step,
-        read_f32, step_input_is_valid, vec3_len,
+        STEP_HEADER_BYTES, STEP_LAYOUT_VERSION, STEP_OUTPUT_BYTES, StepError, StepInput, integrate,
+        physics_step, read_f32, step_input_is_valid, vec3_len,
     };
 
     const CELL_BYTES: usize = 196;
@@ -335,7 +385,7 @@ mod tests {
     fn valid_step_bytes() -> Vec<u8> {
         let mut bytes = vec![0u8; STEP_HEADER_BYTES + CELL_BYTES];
         bytes[0..4].copy_from_slice(b"MGP1");
-        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&STEP_LAYOUT_VERSION.to_le_bytes());
         write_f32(&mut bytes, 8, 0.5); // position x
         write_f32(&mut bytes, 12, 1.0); // position y
         write_f32(&mut bytes, 16, 0.5); // position z
@@ -362,6 +412,10 @@ mod tests {
         for index in 0..3 {
             bytes[104 + index * 4..108 + index * 4].copy_from_slice(&0u32.to_le_bytes()); // origin
             bytes[116 + index * 4..120 + index * 4].copy_from_slice(&1u32.to_le_bytes()); // dimensions
+        }
+        // v2 新增区：默认给一组「水中」参数，浸没标志本身仍为 0（空气）。
+        for (index, value) in [6.4f32, 3.0, 4.0, 0.8].iter().enumerate() {
+            write_f32(&mut bytes, 132 + index * 4, *value);
         }
         bytes[STEP_HEADER_BYTES] = 1; // cell loaded
         bytes

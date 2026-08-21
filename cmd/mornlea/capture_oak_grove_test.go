@@ -30,7 +30,10 @@ func TestCaptureOakGroveFindsSceneByName(t *testing.T) {
 		t.Fatalf("准备 oak-grove: %v", err)
 	}
 
-	generator := worldgen.New(42, false)
+	// 与 prepareOakGrove 一样按开启注水生成。仅靠这一处相等还不够——两侧同时
+	// 写 false 也会相等，差值恒等；下面另断言夹具里确实有水源方块，那条才是
+	// 承重的位置性断言。
+	generator := worldgen.New(42, true)
 	counts := map[core.BlockID]int{}
 	for z := int32(-1); z <= 1; z++ {
 		for x := int32(-1); x <= 1; x++ {
@@ -56,7 +59,9 @@ func TestCaptureOakGroveFindsSceneByName(t *testing.T) {
 			}
 		}
 	}
-	for _, block := range []core.BlockID{core.GrassID, core.OakLogID, core.LeavesID} {
+	for _, block := range []core.BlockID{
+		core.GrassID, core.OakLogID, core.LeavesID, core.WaterSourceID,
+	} {
 		if counts[block] == 0 {
 			t.Fatalf("oak-grove 缺少方块 %d", block)
 		}
@@ -88,7 +93,7 @@ func TestCaptureOakGroveFindsSceneByName(t *testing.T) {
 			if !loaded {
 				t.Fatalf("oak-grove 射线命中未加载方块 %+v", position)
 			}
-			return block != core.AirID, nil
+			return core.InteractionTarget(block), nil
 		},
 	)
 	if err != nil || found {

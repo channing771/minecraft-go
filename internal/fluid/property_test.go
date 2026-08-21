@@ -108,17 +108,38 @@ func rescanEnqueue(w *memWorld, q *Queue, now, delay uint64) int {
 	return q.Len()
 }
 
-// dueCount 返回队列中 dueTick <= now 的项数，即本 tick 会进入 due 列表、且受
-// 预算截断的项数。只供测试判定「预算是否真的成为了约束」，避免用
-// len(changed) 做代理（变更数远小于处理数）。
+// dueCount 返回队列中 dueTick <= now 的项数，即本 tick 到期、且受预算截断的
+// 项数。只供测试判定「预算是否真的成为了约束」，避免用 len(changed) 做代理
+// （变更数远小于处理数）。
+//
+// 遍历 q.order 而不是从前的 q.pending：任务组 10b 修复轮 2 把队列内容的存放处
+// 从 map[BlockPos]uint64 换成了索引最小堆，order 就是队列内容本身（每个排队位置
+// 恰好一条记录），因此这个计数与从前逐字等价——问的仍是「有多少项到期」。
 func dueCount(q *Queue, now uint64) int {
 	n := 0
-	for _, dueTick := range q.pending {
-		if dueTick <= now {
+	for _, it := range q.order {
+		if it.dueTick <= now {
 			n++
 		}
 	}
 	return n
+}
+
+// requireNoExamineLimitHits 断言 q 从构造到现在，Advance 里那条探视上界守卫
+// （advanceExamineLimit）一次都没触发过。
+//
+// 索引堆下它**应当恒为 0**：每次弹出都消耗一格预算，探视数天然封在 budget+1
+// 以内。这条断言存在的意义不是「验证现在是 0」，而是给那条守卫一个**信号**——
+// 守卫本身在生产路径上只 break 不 panic（权威 tick 上硬失败比轻微吞吐下降糟得多），
+// 若没有人断言这个计数，它触发时现场只会表现为一声不响的吞吐损失。放在大场景
+// 测试里而不是只放在新写的小用例里，是为了让真实规模的推进路径也覆盖到。
+func requireNoExamineLimitHits(t *testing.T, q *Queue, name string) {
+	t.Helper()
+	if q.advanceExamineLimitHits != 0 {
+		t.Fatalf("%s：Advance 的探视上界守卫触发了 %d 次——它本应永不触发，"+
+			"说明 Queue 的双射不变量已被破坏（弹出的条目没有消耗预算）",
+			name, q.advanceExamineLimitHits)
+	}
 }
 
 // advanceToFixedPoint 反复推进直到不动点：某个 tick 既不产生任何变更、队列又
@@ -358,6 +379,8 @@ func TestRescanFixedPoint_EquilibriumProducesNoChanges(t *testing.T) {
 			if diffs := diffWorlds(before, snapshot(w)); len(diffs) != 0 {
 				t.Fatalf("重扫后世界状态发生变化：%s", reportDiff(diffs))
 			}
+
+			requireNoExamineLimitHits(t, q, "形状 "+fx.name+" 的重扫不动点推进")
 		})
 	}
 }
@@ -422,7 +445,10 @@ func TestRescanMidFlight_ConvergesToSameEquilibrium(t *testing.T) {
 					t.Fatalf("在第 %d tick 清空队列并重扫后到达的平衡态与基线不一致（丢弃前队列 %d 项）：%s",
 						cut, pendingBefore, reportDiff(diffs))
 				}
+
+				requireNoExamineLimitHits(t, q, fmt.Sprintf("形状 %s 切点 %d 的重扫推进", fx.name, cut))
 			}
+			requireNoExamineLimitHits(t, baseQ, "形状 "+fx.name+" 的基线推进")
 
 			// 要求至少 3 个非零切点落在未平衡处：1 个太容易被形状的细微调整
 			// 蒙混过去，3 个意味着该形状的瞬态确实横跨了多个切点。
@@ -491,17 +517,19 @@ func TestBudgetEquivalence_DamBreakSameFinalState(t *testing.T) {
 // 与「重复运行结果一致」：同一组待更新格以不同入队顺序推进相同 tick 数、相同
 // 预算，**每一个 tick** 产生的变更集合逐格一致，最终状态也逐格一致。
 //
-// 关于本测试的证据强度，必须说清楚：Queue.pending 是以位置为键的 map，入队
-// 顺序在进入 Advance 之前就已经被结构性抹除；Advance 每 tick 又用 sortItems
-// 按 (dueTick, lessPos) 重排一次。因此入队顺序**根本到不了合并步骤**，本测试
-// 几乎必然通过——它属于「设计正确所以平凡为真」，**不是**确定性的主要论据。
+// 关于本测试的证据强度，必须说清楚：Queue 以位置为键去重（现在是 Queue.index
+// 这张 map），入队顺序在进入 Advance 之前就已经被结构性抹除；Advance 每 tick 又
+// 从 Queue 内部那个按 lessItem 组织的最小堆里，按 (dueTick, lessPos) 全序取出
+// 下一批。因此入队顺序**根本到不了合并步骤**，本测试几乎必然通过——它属于
+// 「设计正确所以平凡为真」，**不是**确定性的主要论据。
 //
-// 它真正守住的回归面是：将来有人删掉或改坏 sortItems（改成直接遍历 pending
-// map）时立刻报警。为了让这个回归面真的被覆盖，测试刻意用**受限预算**推进：
-// 只有预算切断 due 列表时，"处理哪些项"才依赖排序结果，map 遍历顺序的随机性
-// 才会体现为可观测的差异。用不受限预算测这条性质是测不出 sortItems 的。
+// 它真正守住的回归面是：将来有人删掉或改坏「按全序取批」这件事（比如改成直接
+// 遍历那张以位置为键的 map）时立刻报警。为了让这个回归面真的被覆盖，测试刻意用
+// **受限预算**推进：只有预算截断本 tick 的到期项时，"处理哪些项"才依赖全序，
+// map 遍历顺序的随机性才会体现为可观测的差异。用不受限预算测这条性质，是测不出
+// 全序取批的。
 func TestOrderIndependence_PerTickChangesMatch(t *testing.T) {
-	// 受限预算：让 due 列表的截断点依赖排序结果。
+	// 受限预算：让本 tick 到期项的截断点依赖全序取批的结果。
 	const orderBudget = 37
 	const orderTicks = 400
 
@@ -571,12 +599,12 @@ func TestOrderIndependence_PerTickChangesMatch(t *testing.T) {
 				t.Fatalf("参考运行 %d tick 内没有任何变更，逐 tick 断言是空转", orderTicks)
 			}
 			// 非空转守卫二：必须真的有某个 tick 的到期项数超过预算——只有
-			// 那时 due 列表才会被截断，「处理哪些项」才取决于 sortItems 的结果，
-			// 本测试才真的盖住了「删掉 sortItems」这个回归面。注意不能用
+			// 那时取批才会被预算截断，「处理哪些项」才取决于全序，本测试才真的
+			// 盖住了「取批不按全序」这个回归面。注意不能用
 			// len(changed) 做代理：预算限制的是处理项数，而变更数只是其中
 			// 真改变了值的子集，两者差一个数量级。
 			if refMaxDue <= orderBudget {
-				t.Fatalf("参考运行单 tick 最大到期项数 %d 未超过预算 %d，sortItems 的截断路径未被覆盖",
+				t.Fatalf("参考运行单 tick 最大到期项数 %d 未超过预算 %d，全序取批的截断路径未被覆盖",
 					refMaxDue, orderBudget)
 			}
 			t.Logf("形状 %s：单 tick 最大到期项 %d（预算 %d）", fx.name, refMaxDue, orderBudget)
@@ -744,6 +772,8 @@ func TestConvergeRandomWaterBodiesReachFixedPoint(t *testing.T) {
 				if diffs := diffWorlds(before, snapshot(w)); len(diffs) != 0 {
 					t.Fatalf("seed=%d：重扫后世界状态发生变化：%s", seed, reportDiff(diffs))
 				}
+
+				requireNoExamineLimitHits(t, q, fmt.Sprintf("seed=%d budget=%d 的随机水体推进", seed, budget))
 			})
 		}
 	}

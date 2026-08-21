@@ -15,7 +15,7 @@ import (
 // ApplyPlayerState 应用更新的权威玩家状态并重放尚未确认的输入。
 func (p *Predictor) ApplyPlayerState(
 	message network.PlayerState,
-	source physics.CollisionSource,
+	source physics.WorldSource,
 ) (ReconcileResult, error) {
 	if message.ServerTick <= p.lastServerTick {
 		return ReconcileResult{}, nil
@@ -49,7 +49,11 @@ func (p *Predictor) ApplyPlayerState(
 	oldCorrectionRemaining := p.correctionRemaining
 	p.current = authority
 	p.previous = authority
+	// 权威位置到手后立刻按它重算一次浸没标志：历史为空（刚同步、或挂起后清空）
+	// 时下面的重放循环一步都不会跑，水下视觉不能因此停在上一次预测位置的旧标志上。
+	_, p.eyeInFluid = physics.SubmersionFlags(authority.Position, source)
 	p.health = message.Health
+	p.oxygen = message.Oxygen
 	if p.suspended {
 		p.history = p.history[:0]
 		p.accumulator = 0
@@ -60,7 +64,7 @@ func (p *Predictor) ApplyPlayerState(
 		p.dropAcknowledged(message.LastInputSequence)
 		for _, entry := range p.history {
 			p.previous = p.current
-			p.current = physics.Step(p.current, entry.input, source).State
+			p.current = p.stepWithSubmersion(p.current, entry.input, source)
 		}
 	}
 	p.lastServerTick = message.ServerTick
@@ -120,6 +124,9 @@ func validatePlayerState(message network.PlayerState, maxSentInput uint64) (phys
 	}
 	if !core.ValidHealth(message.Health) {
 		return physics.State{}, errors.New("client: player state has out-of-range health")
+	}
+	if !core.ValidOxygen(message.Oxygen) {
+		return physics.State{}, errors.New("client: player state has out-of-range oxygen")
 	}
 	const maxPitch = float32(math.Pi/2 - 0.01)
 	if message.Pitch < -maxPitch || message.Pitch > maxPitch {

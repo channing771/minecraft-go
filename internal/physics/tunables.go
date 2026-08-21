@@ -22,6 +22,13 @@ type Tunables struct {
 	JumpSpeed          float32 `json:"jumpSpeed"`
 	Gravity            float32 `json:"gravity"`
 	TerminalFallSpeed  float32 `json:"terminalFallSpeed"`
+
+	// 以下四项只在 Input.BodyInFluid 为真的那一步生效，逐项替换掉对应的
+	// 空气常量；取值理由见 types.go 的 defaultFluidXxx 注释。
+	FluidGravity        float32 `json:"fluidGravity"`
+	FluidSinkSpeed      float32 `json:"fluidSinkSpeed"`
+	FluidAscendSpeed    float32 `json:"fluidAscendSpeed"`
+	FluidHorizontalDrag float32 `json:"fluidHorizontalDrag"`
 }
 
 // DefaultTunables 返回编译期默认参数。它是配置文件缺省时的取值，
@@ -37,6 +44,11 @@ func DefaultTunables() Tunables {
 		JumpSpeed:          defaultJumpSpeed,
 		Gravity:            defaultGravity,
 		TerminalFallSpeed:  defaultTerminalFallSpeed,
+
+		FluidGravity:        defaultFluidGravity,
+		FluidSinkSpeed:      defaultFluidSinkSpeed,
+		FluidAscendSpeed:    defaultFluidAscendSpeed,
+		FluidHorizontalDrag: defaultFluidHorizontalDrag,
 	}
 }
 

@@ -163,9 +163,10 @@ func TestCollisionRawFailureAtomicity(t *testing.T) {
 }
 
 func testValidPhysicsStepInput() []byte {
-	input := make([]byte, 128+196)
+	// header v2：160 字节（v1 的 128 已排满，浸没标志与四个水中 tunable 追加在后）。
+	input := make([]byte, 160+196)
 	copy(input[:4], "MGP1")
-	binary.LittleEndian.PutUint32(input[4:8], 1)
+	binary.LittleEndian.PutUint32(input[4:8], 2)
 	for _, offset := range []int{8, 12, 16, 20, 24, 28, 36, 40, 44} {
 		binary.LittleEndian.PutUint32(input[offset:offset+4], math.Float32bits(0))
 	}
@@ -178,7 +179,10 @@ func testValidPhysicsStepInput() []byte {
 	for index := range 3 {
 		binary.LittleEndian.PutUint32(input[116+index*4:120+index*4], 1)
 	}
-	input[128] = 1 // cell loaded
+	for index, value := range [...]float32{6.4, 3, 4, 0.8} {
+		binary.LittleEndian.PutUint32(input[132+index*4:136+index*4], math.Float32bits(value))
+	}
+	input[160] = 1 // cell loaded
 	return input
 }
 
@@ -195,7 +199,7 @@ func TestPhysicsStepRawFailureAtomicity(t *testing.T) {
 	}{
 		{name: "ABI version", version: ABIVersion + 1, input: validInput, output: make([]byte, 32), want: StatusABIVersion},
 		{name: "nil input", version: ABIVersion, output: make([]byte, 32), want: StatusInvalidArgument},
-		{name: "short input", version: ABIVersion, input: validInput[:127], output: make([]byte, 32), want: StatusInput},
+		{name: "short input", version: ABIVersion, input: validInput[:159], output: make([]byte, 32), want: StatusInput},
 		{name: "long input", version: ABIVersion, input: append(slices.Clone(validInput), 0), output: make([]byte, 32), want: StatusInput},
 		{name: "jump flag", version: ABIVersion, input: malformed, output: make([]byte, 32), want: StatusInput},
 		{name: "short output", version: ABIVersion, input: validInput, output: make([]byte, 31), want: StatusOutputOverflow},
