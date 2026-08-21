@@ -54,6 +54,7 @@
 - [ ] 7.1 缺失玩家材料包加入起步种子。**不得向已有玩家补发**。验证:`go test ./internal/sim ./internal/server -race -count=1`
 - [ ] 7.2 端到端完整循环:翻地 → 种植 → 生长到成熟 → 收获 → 用收获的种子再种。断言循环**自持**(收获产出的种子数不少于种下的)。验证:`go test ./internal/server -race -count=1`
 - [ ] 7.3 变异验证:让材料包不含种子,确认「首次进入的玩家持有种子」变红;让成熟作物只掉 1 种子而不掉小麦,确认端到端断言变红。
+- [ ] 7.4 HUD 合成面板加 recipe 9/10 两行(Ruling 24 计划缺口:`hud.inventoryRecipeIDs` 写死 8 行,锄头在 UI 不可达)。若 `inventory-crafting` capture golden 因布局变化,重生成并逐场景说明差异来源;其余 golden 必须逐字节不变。验证:`go test ./internal/render/hud ./cmd/mornlea -race -count=1` 与 capture 比对
 
 ## 8. 收尾门禁与归档准备
 
