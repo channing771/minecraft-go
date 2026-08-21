@@ -70,7 +70,7 @@ authoritative-farming 占用,本变更排其后;若顺序对调先互换版本�
 
 ## 6. 收尾
 
-- [ ] 6.1 全量门禁:`make rust`、`go test ./... -race`、
+- [x] 6.1 全量门禁:`make rust`、`go test ./... -race`、
       `go vet ./...`、`gofmt -l .` 无输出、
       `go test ./internal/archcheck -count=1`、
       `openspec validate --all --strict --no-interactive`。
