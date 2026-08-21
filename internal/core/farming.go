@@ -19,3 +19,12 @@ func CropStage(id BlockID) uint8 {
 	}
 	return uint8(id - WheatStage0ID)
 }
+
+// IsFarmland 报告 id 是否是耕地方块（干耕地或湿耕地）。
+//
+// 与 IsCrop、IsFluid 同形的闭区间比较：两个耕地编号连续，且按方块演进纪律
+// 只能整体追加，因此新增湿度态时只需推进上界。**耕地不是作物**——它是可站立
+// 的实心方块（碰撞体只是顶面低 1/16），而作物零碰撞体，见 IsCrop 的说明。
+func IsFarmland(id BlockID) bool {
+	return id >= FarmlandDryID && id <= FarmlandWetID
+}

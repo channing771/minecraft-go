@@ -18,6 +18,19 @@ const (
 	CollisionEpsilon  = float32(1e-5)
 	GroundProbe       = float32(1e-4)
 
+	// farmlandCollisionHeight 是耕地碰撞体的高度 15/16 = 0.9375（其余五个面
+	// 与完整方块相同）。
+	//
+	// 为什么是 15/16：耕地被锄头翻过后表层被削掉一层，spec 要求站上耕地与站上
+	// 完整方块**可区分**，所以必须严格小于 1；而 1/16 是方块纹理的最小单元格，
+	// 也是这套体素世界里「一格之内可见但不影响通行」的最小刻度——凹陷再深一档
+	// （1/8）走过农田就会开始像台阶，再浅则与满方块无从分辨。
+	//
+	// 取 2 的负整数次幂还有一层数值上的理由：0.9375 = 1 − 2^-4 在 f32 里精确，
+	// 与完整方块顶面 1.0 的差值也精确等于 1/16，落地钳位不引入任何舍入，权威
+	// 与客户端预测两侧因此逐位一致。
+	farmlandCollisionHeight = float32(0.9375)
+
 	// 以下是可调参数的编译期默认值。唯一读取入口是 Tunables 快照，
 	// 不得再以导出常量暴露——见 internal/archcheck 的 TestTunableConstantsAreNotExported。
 	defaultEyeHeight          = float32(1.62)
@@ -116,21 +129,32 @@ func PlayerBounds(position mgl32.Vec3) core.AABB {
 }
 
 // BlockCollisionBoxes 返回当前方块的局部碰撞体。
-// 流体（core.IsFluid）与空气同形状——已加载但零碰撞体：spec Requirement
-// 「流体方块编码」要求流体 MUST NOT 提供碰撞体，实体必须能自由穿行。
+// 流体（core.IsFluid）、作物（core.IsCrop）与空气同形状——已加载但零碰撞体：
+// spec Requirement「流体方块编码」要求流体 MUST NOT 提供碰撞体，Requirement
+// 「作物不提供碰撞体，耕地略低于满方块」对作物提出同一要求，实体必须能自由穿行。
+// 耕地（core.IsFarmland）是全仓唯一的非满立方体碰撞：单盒，顶面压到
+// farmlandCollisionHeight。
+//
+// 三条分支的形状差异全部由 prism 的逐格 AABB 数组承载（每格 box count + 每 box
+// 24 字节），Rust 侧按 count 循环读任意包围盒，因此新增非满方块形状不触及 FFI
+// 编码，也不升 engine ABI。
 func BlockCollisionBoxes(id core.BlockID, loaded bool) CollisionBoxSet {
 	if !loaded {
 		return CollisionBoxSet{}
 	}
-	if id == core.AirID || core.IsFluid(id) {
+	if id == core.AirID || core.IsFluid(id) || core.IsCrop(id) {
 		return CollisionBoxSet{Loaded: true}
+	}
+	top := float32(1)
+	if core.IsFarmland(id) {
+		top = farmlandCollisionHeight
 	}
 	return CollisionBoxSet{
 		Loaded: true,
 		Count:  1,
 		Boxes: [8]core.AABB{{
 			Min: mgl32.Vec3{},
-			Max: mgl32.Vec3{1, 1, 1},
+			Max: mgl32.Vec3{1, top, 1},
 		}},
 	}
 }
