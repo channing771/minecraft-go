@@ -116,6 +116,8 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 | 16 | 手持锄头收获作物仍扣锄头耐久(MC 锄头只在翻地时掉耐久) | 既有通用规则 `consumeToolDurability` 对任何成功破坏的工具生效,与手持镐挖泥土同理;为作物开特例要在采掘完成路径加按方块×工具的豁免表 | 若要对齐 MC,在 `completeMining` 加「作物 × 锄头」豁免并配测试 |
 | 17 | `world.Chunk.HighestOpaque` 名不副实:返回最高**非空气**方块(F2 列顶语义),作物露天判定依赖的正是「非空气」 | 改名是跨包重构(world/mesh/sim 多处调用),不在本变更;语义缝由玻璃/水遮挡用例兜住 | 独立小型重构:改名为 `HighestNonAir` 或在 GoDoc 首句钉死语义 |
 | 18 | HUD 物品图集宽度随 `ItemIDMax` 增长,`hotbarTextureUV` 不做 texel 中心对齐,追加物品会让**既有**图标亚像素漂移(本变更 `hud-hotbar-health` 0.115%) | 改 UV 采样策略是渲染改动,不在农业范围;本次按「确认采样层正确 → 重生成」处理 | 独立变更:UV 按 texel 中心或整数像素计算,使图集扩列不影响既有列 |
+| 19 | `internal/server` 既有登录等待循环多数无界(`farming_integration_test.go:117`、`till_soil_integration_test.go:109` 等),挂起时表现为 5 分钟超时而非可读断言 | 本变更只给新增的端到端加了有界预算;改既有用例属测试基础设施整理 | 独立小变更:统一用有预算的等待助手 |
+| 20 | 合成面板 8→10 行使 `openHUDHeight` 670→774,高度 < 790 px 的窗口打开态 HUD 整体缩小(1280×720 下 scale 1 → 0.91) | 由既有「面板必须装进窗口」门禁强制;滚动或压行距是 HUD 布局改动,不在农业范围 | HUD 合成面板分页/滚动,或按窗口高度自适应行距 |
 
 ## 验证策略
 
