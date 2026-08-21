@@ -2,10 +2,10 @@
 
 ## 1. 编号、容量与哨兵
 
-- [ ] 1.1 `internal/core` 追加 10 个稳定方块编号(`FarmlandDryID` / `FarmlandWetID` / `WheatStage0..7ID`)与 4 个物品编号(`ItemStoneHoe` / `ItemIronHoe` 及其损坏形态、`ItemWheatSeeds`、`ItemWheat`),并补 `RegisteredBlock` / `RegisteredItem` / `ItemPlacement` / `BlockDrop` 对应项。验证:`go test ./internal/core -race -count=1`
-- [ ] 1.2 mesh registry 上限 `35 → 48`:Rust `MAX_REGISTRY_ENTRIES`、Go `nativeMaxRegistryEntries`、`maxNativeInputBytes` 三处同批。**`BLOCKS_BYTES` 里的 27 是 3×3×3 邻域区段数,不得一起改。** 验证:`make rust` 与 `go test ./internal/mesh -race -count=1`
-- [ ] 1.3 **扫全仓以 `WaterLevel7ID` 为界的哨兵与循环上界**并逐处修正。F1 同类哨兵曾在五个包里失效(其中一处是真实行为回归),F2 终审又发现 `TestCompanionManagerPathBlockTableMatchesCollisionOracle` 的循环上界写死。**必须同时覆盖常量定义与循环上界。** 验证:`go test ./... -race -count=1`
-- [ ] 1.4 变异验证:把 Rust 侧上限改回 35,确认有测试变红且诊断指向 registry 容量。
+- [x] 1.1 `internal/core` 追加 10 个稳定方块编号(`FarmlandDryID` / `FarmlandWetID` / `WheatStage0..7ID`)与 4 个物品编号(`ItemStoneHoe` / `ItemIronHoe` 及其损坏形态、`ItemWheatSeeds`、`ItemWheat`),并补 `RegisteredBlock` / `RegisteredItem` / `ItemPlacement` / `BlockDrop` 对应项。验证:`go test ./internal/core -race -count=1`
+- [x] 1.2 mesh registry 上限 `35 → 48`:Rust `MAX_REGISTRY_ENTRIES`、Go `nativeMaxRegistryEntries`、`maxNativeInputBytes` 三处同批。**`BLOCKS_BYTES` 里的 27 是 3×3×3 邻域区段数,不得一起改。** 验证:`make rust` 与 `go test ./internal/mesh -race -count=1`
+- [x] 1.3 **扫全仓以 `WaterLevel7ID` 为界的哨兵与循环上界**并逐处修正。F1 同类哨兵曾在五个包里失效(其中一处是真实行为回归),F2 终审又发现 `TestCompanionManagerPathBlockTableMatchesCollisionOracle` 的循环上界写死。**必须同时覆盖常量定义与循环上界。** 验证:`go test ./... -race -count=1`
+- [x] 1.4 变异验证:把 Rust 侧上限改回 35,确认有测试变红且诊断指向 registry 容量。
 
 ## 2. 材质与交叉面几何
 
