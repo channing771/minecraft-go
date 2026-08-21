@@ -252,8 +252,9 @@ func TestEncodeNativeInputUsesExactLittleEndianLayout(t *testing.T) {
 
 // TestEncodeNativeInputAcceptsRegistryAtCapacity 断言编码器接受正好装满
 // nativeMaxRegistryEntries 的快照，且末位 ID 允许远离连续区间（不假设 ID 连续）。
-// 上限本身与 Rust 的 MAX_REGISTRY_ENTRIES 是否一致，由跨语言的 native parity
-// 测试兜底：那里真的把 35 条 assets 快照喂进 Rust，两侧对不上会被直接拒绝。
+// 上限本身与 Rust 的 MAX_REGISTRY_ENTRIES 是否一致，由同包的
+// TestNativeAcceptsRegistryAtGoCapacity 兜底：那里把正好装满本上限的快照真的喂进
+// Rust，两侧对不上会被直接拒绝。
 func TestEncodeNativeInputAcceptsRegistryAtCapacity(t *testing.T) {
 	blocks := make([]BlockProperties, nativeMaxRegistryEntries)
 	for i := range nativeMaxRegistryEntries - 1 {

@@ -246,7 +246,8 @@ func TestNativeOracleParityConcurrentIndependentScratch(t *testing.T) {
 // 两侧会**一起**改坏、差值恒等，两条 parity 断言照样全绿（任务组 1 评审实测：把已删除的
 // `core.IsFluid` 补偿分支加回 FaceVisible 后 parity 全过，变红的是下面那条计数守卫）。
 //
-// parity 断言真正守的是端到端事实：35 条 registry 快照确实通过了 Rust 的条目校验、
+// parity 断言真正守的是端到端事实：整份 registry 快照（全部已注册方块）确实通过了
+// Rust 的条目校验、
 // 编码布局两侧一致、且贪心合并与位打包逐字节相同。**规则由末尾的计数守卫承重**——
 // 若把它删掉，本用例对任何规则类变异都不再敏感。
 //

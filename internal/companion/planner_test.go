@@ -980,12 +980,36 @@ func TestPlanDecodePlaceRegistryLock(t *testing.T) {
 		}
 		blocks[block] = name
 	}
+	// planPlaceExempt 是「玩家可放置、但伙伴注册表刻意不收」的物品。收进注册表
+	// 就等于顺手给伙伴开了对应的世界交互权限，因此每一条豁免都必须写明理由，
+	// 并由下面两条守卫钉住，不能靠"忘了加"而存在。
+	planPlaceExempt := map[core.ItemID]string{
+		core.ItemWheatSeeds: "伙伴种地属 M5 系列范围；变更 authoritative-farming " +
+			"的非目标明确不交付伙伴农业（design.md 遗留清单 11）",
+	}
+	for item, why := range planPlaceExempt {
+		// 守卫一（防豁免空转）：被豁免的物品必须**真的**是玩家可放置物品。
+		// 否则豁免条目在物品被改成不可放置之后会静默变成一句废话，而下面的
+		// 穷举也不会再报警。
+		if _, ok := core.ItemPlacement(item); !ok {
+			t.Fatalf("豁免物品 %d 已不可放置，豁免条目失效：%s", item, why)
+		}
+		// 守卫二（防豁免与注册表同时成立）：豁免物品不得又出现在注册表里。
+		for name, registered := range planPlaceItems {
+			if registered == item {
+				t.Fatalf("物品 %d 同时被豁免与登记为名字 %s：%s", item, name, why)
+			}
+		}
+	}
 	// 穷举界用 core.ItemIDMax 独占哨兵而不是「<= 枚举末项」：core 的枚举末项
 	// 守护断言保证追加新物品时断言变红，迫使开发者同步审视本穷举的覆盖认知，
 	// 而不是让本测试静默漏掉新物品。
 	for item := core.ItemID(0); item < core.ItemIDMax; item++ {
 		block, ok := core.ItemPlacement(item)
 		if !ok {
+			continue
+		}
+		if _, exempted := planPlaceExempt[item]; exempted {
 			continue
 		}
 		if _, covered := blocks[block]; !covered {
