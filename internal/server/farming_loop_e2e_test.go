@@ -43,8 +43,14 @@ const (
 	// farmingPickupTicks 是等掉落物过完拾取延迟（默认 10 tick）并入包的 tick 数。
 	farmingPickupTicks = 40
 	// farmingLoginBudget 是等登录就绪（Ready + 背包发布 + 九个区块进镜像）的
-	// tick 预算。给足余量，只用来把"卡住"变成一条读得懂的失败而不是 go test 超时。
-	farmingLoginBudget = 600
+	// tick 预算。这个预算的**唯一职责**是把挂起变成一条读得懂的失败而不是
+	// go test 超时，因此它不是性能断言，宁可宽到几乎不可能误伤。
+	//
+	// 实测卡点是异步区块生成：九个区块从入队到进镜像在空闲机器上约 202 tick，
+	// 在并发跑满包的机器上会涨到 300 tick 以上，且随负载继续漂。600 只有
+	// 2–3 倍余量，在 CI 上会变成假失败源；3000 给到一个数量级余量，而真正
+	// 的挂起（登录握手不返回、区块永不就绪）仍会在预算内被拦成可读断言。
+	farmingLoginBudget = 3000
 )
 
 // TestFarmingLoopEndToEndMemory 是组 1–6 的集成回归：一名**从未存在过**的玩家
