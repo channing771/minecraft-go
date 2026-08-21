@@ -81,3 +81,25 @@ func TestChestItemColorIsVisible(t *testing.T) {
 		t.Fatal("箱子颜色与泥土相同")
 	}
 }
+
+// 杀死变异：把 hotbarTextureUV 的列宽算错、或让图集扩列时既有列的 UV 漂移到
+// 相邻列，都会让某个物品的缩略图采到别的方块材质——而那在 capture golden 里
+// 只表现为「有像素变了」，看不出变得对不对。这里把「列 UV 必须落在本列的
+// 16 个纹素内」钉成机械断言：图集宽度随 ItemIDMax 增长，float32 的除法误差
+// 允许亚纹素漂移，但绝不允许越过列边界。
+func TestHotbarColumnUVStaysInsideItsOwnColumn(t *testing.T) {
+	const tolerance = 0.01 // 纹素；实测漂移量级为 1e-6
+	for column := range hotbarTextureColumns {
+		uv := hotbarTextureUV(column)
+		left := float64(uv[0]) * float64(hotbarTextureWidth)
+		right := float64(uv[2]) * float64(hotbarTextureWidth)
+		wantLeft := float64(column * hotbarTextureSize)
+		wantRight := float64((column + 1) * hotbarTextureSize)
+		if left < wantLeft-tolerance || left > wantLeft+tolerance {
+			t.Fatalf("列 %d 左界 texel=%v，想要 %v±%v", column, left, wantLeft, tolerance)
+		}
+		if right < wantRight-tolerance || right > wantRight+tolerance {
+			t.Fatalf("列 %d 右界 texel=%v，想要 %v±%v", column, right, wantRight, tolerance)
+		}
+	}
+}
