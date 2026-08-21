@@ -317,6 +317,28 @@ mod tests {
         assert_eq!(checked, 10 * 10 * 9 * 10);
     }
 
+    /// 植物 material 配轴向 face 必须当场炸，与 Go 侧 `quad.go` 的 Pack/UnpackQuad
+    /// 同口径。缺了这条反方向强制，一条贪心合并过的植物轴向面能干净流出 mesher，
+    /// 而着色器按 `face >= 6` 判别、会把它画成一整块普通石板。
+    #[test]
+    #[should_panic(expected = "植物 material 只允许出现在 face 6/7 上")]
+    fn plant_material_on_an_axial_face_is_rejected() {
+        Quad {
+            x: 1,
+            y: 2,
+            z: 3,
+            w: 5,
+            h: 4,
+            face: Face::PosY,
+            material: super::PLANT_MATERIAL_FIRST,
+            ao: 0,
+            light: 0,
+            corners: [0; 4],
+            back: false,
+        }
+        .pack();
+    }
+
     /// 普通 quad 的 w/h 与水面 quad 的角高度共用 bit 12..19，二者必须互不串味：
     /// 一条 16×16 的普通 quad 解包后仍是 16×16、角高度全 0。
     #[test]
