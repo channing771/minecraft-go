@@ -20,7 +20,27 @@ var tillTarget = core.BlockPos{X: 0, Y: 1, Z: 4}
 // 夹具用它而不是手写角度常量：EyeHeight 是 tunable，写死的角度在它变动后会
 // 静默瞄到别的格子上，而"瞄错了"和"实现错了"在读数上无法区分。
 func lookAtBlockCenter(eye mgl32.Vec3, target core.BlockPos) (yaw, pitch float32) {
-	delta := blockCenterVec3(target).Sub(eye)
+	return lookAtPoint(eye, blockCenterVec3(target))
+}
+
+// lookAtBlockTop 返回从 eye 看向方块**顶面中心**所需的 (yaw, pitch)。
+//
+// 种植夹具必须用它而不是 lookAtBlockCenter：从站立高度俯视地面方块时，指向
+// 几何中心的射线在到达该格之前就已经下穿 y 平面，命中的是更近一列方块的顶面。
+// 瞄准点落在顶面上时，射线恰好在该格的列内穿过 y 平面，命中格与瞄准格一致，
+// 命中面必然是 +Y——「玩家瞄准耕地顶面种下种子」这条主路径才被真正覆盖。
+func lookAtBlockTop(eye mgl32.Vec3, target core.BlockPos) (yaw, pitch float32) {
+	return lookAtPoint(eye, mgl32.Vec3{
+		float32(target.X) + 0.5,
+		float32(target.Y) + 1,
+		float32(target.Z) + 0.5,
+	})
+}
+
+// lookAtPoint 是 LookDirection 的逆运算：返回从 eye 看向世界坐标 point 所需的
+// (yaw, pitch)。
+func lookAtPoint(eye, point mgl32.Vec3) (yaw, pitch float32) {
+	delta := point.Sub(eye)
 	horizontal := math.Hypot(float64(delta.X()), float64(delta.Z()))
 	pitch = float32(math.Atan2(float64(delta.Y()), horizontal))
 	yaw = float32(math.Atan2(float64(-delta.X()), float64(-delta.Z())))
@@ -281,5 +301,173 @@ func TestTillRespectsInteractionReach(t *testing.T) {
 	}
 	if hoe.Durability != full {
 		t.Fatalf("超距翻地磨损了锄头: 耐久 = %d，想要保持 %d", hoe.Durability, full)
+	}
+}
+
+// plantBelow 是种植用例的落脚格（readyMovementPlayer 的 flat 世界里 y=0 全是
+// 草，用例按需把它替换成耕地或别的方块），plantTarget 是它正上方的空气格，
+// 也就是种子唯一应该落进去的位置。
+var (
+	plantBelow  = core.BlockPos{X: 0, Y: 0, Z: 3}
+	plantTarget = core.BlockPos{X: 0, Y: 1, Z: 3}
+)
+
+// plantSeedCount 是种植夹具持有的种子数量。它必须 ≥ 2 且断言取**精确值**：
+// 夹具若只放 0 或 1 颗种子，「拒绝时种子不变」在扣与不扣两种实现下都是同一个
+// 读数（0 恒为 0、1 扣完即空槽也可能被误读成"本来就没有"），差值恒等于零。
+const plantSeedCount = uint8(4)
+
+// readyPlantingPlayer 构造一个持有 plantSeedCount 颗种子、俯视 plantBelow
+// 顶面的玩家；below 写进 plantBelow，决定种子的落脚方块是不是耕地。
+func readyPlantingPlayer(
+	t *testing.T,
+	below core.BlockID,
+) (*Engine, SessionID, float32, float32) {
+	t.Helper()
+	engine, session := readyMovementPlayer(t)
+	engine.SetBlockForTest(plantBelow, below)
+	player := engine.sessions[session].player
+	player.inventory.Hotbar.Slots[0] = core.ItemStack{
+		Item: core.ItemWheatSeeds, Count: plantSeedCount,
+	}
+	player.inventory.Hotbar.Selected = 0
+	eye := player.state.Position.Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
+	yaw, pitch := lookAtBlockTop(eye, plantBelow)
+	return engine, session, yaw, pitch
+}
+
+// blockLabel 返回方块的中文显示名，用作子用例名——失败输出里"干耕地"比裸编号
+// 好读得多。
+func blockLabel(id core.BlockID) string {
+	name, _ := core.BlockDisplayName(id)
+	return name
+}
+
+// plantSeeds 发一条放置命令（选中第 0 格的种子）并推进一个权威 tick。
+func plantSeeds(engine *Engine, session SessionID, yaw, pitch float32) TickResult {
+	engine.Enqueue(Command{
+		Session: session, Sequence: 2, Kind: CommandPlaceBlock, Slot: 0,
+		Yaw: yaw, Pitch: pitch,
+	})
+	return engine.Step()
+}
+
+// TestPlantSeedsOnFarmland 覆盖 Scenario「在耕地上种下种子」：耕地正上方出现
+// 第一阶段作物，种子恰好减少 1。
+//
+// 两种瞄法都必须成立：俯视耕地顶面（命中面就是耕地）与瞄准旁边方块的侧面
+// （命中的是石头、目标格才落在耕地上方）。前置读的是**目标格正下方**，不是
+// 命中面，第二种瞄法是这条判据的位置性守卫——若实现改成"命中面必须是耕地"，
+// 只有它会红。
+func TestPlantSeedsOnFarmland(t *testing.T) {
+	for _, farmland := range []core.BlockID{core.FarmlandDryID, core.FarmlandWetID} {
+		for _, aim := range []struct {
+			name string
+			look func(*Engine, SessionID) (float32, float32)
+		}{
+			{
+				name: "俯视耕地顶面",
+				look: func(engine *Engine, session SessionID) (float32, float32) {
+					player := engine.sessions[session].player
+					eye := player.state.Position.
+						Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
+					return lookAtBlockTop(eye, plantBelow)
+				},
+			},
+			{
+				// 侧面瞄法：plantTarget 的 +Z 邻格放一块石头，射线命中它的 −Z
+				// 侧面，目标格因此正是 plantTarget。
+				name: "瞄准旁边方块的侧面",
+				look: func(engine *Engine, session SessionID) (float32, float32) {
+					side := plantTarget
+					side.Z++
+					engine.SetBlockForTest(side, core.StoneID)
+					player := engine.sessions[session].player
+					eye := player.state.Position.
+						Add(mgl32.Vec3{0, engine.physicsTunables.EyeHeight, 0})
+					return lookAtBlockCenter(eye, side)
+				},
+			},
+		} {
+			t.Run(blockLabel(farmland)+"/"+aim.name, func(t *testing.T) {
+				engine, session, _, _ := readyPlantingPlayer(t, farmland)
+				yaw, pitch := aim.look(engine, session)
+
+				result := plantSeeds(engine, session, yaw, pitch)
+
+				if len(result.Rejected) != 0 {
+					t.Fatalf("合法种植被拒绝: %+v", result.Rejected)
+				}
+				if got := tillBlockAt(t, engine, plantTarget); got != core.WheatStage0ID {
+					t.Fatalf("种植结果 = %d，想要第一阶段作物 %d", got, core.WheatStage0ID)
+				}
+				want := core.ItemStack{Item: core.ItemWheatSeeds, Count: plantSeedCount - 1}
+				player := engine.sessions[session].player
+				if got := player.inventory.Hotbar.Slots[0]; got != want {
+					t.Fatalf("种植后栏位 = %+v，想要恰好 −1 的 %+v", got, want)
+				}
+				// 方块变更必须经既有 recordChange 汇入本 tick 的批次；只改内存
+				// 不广播同样能让上面的断言全绿。
+				if len(result.Changes) != 1 || len(result.Changes[0].Changes) != 1 ||
+					result.Changes[0].Changes[0] != (BlockChange{
+						Position: plantTarget, Block: core.WheatStage0ID,
+					}) {
+					t.Fatalf("种植没有广播为区块变更: %+v", result.Changes)
+				}
+			})
+		}
+	}
+}
+
+// TestPlantSeedsRejectsNonFarmlandGround 覆盖 Scenario「非耕地上拒绝种植」：
+// 泥土、草与石头之上都不能种，且种子数量一颗不掉。
+func TestPlantSeedsRejectsNonFarmlandGround(t *testing.T) {
+	for _, below := range []core.BlockID{core.DirtID, core.GrassID, core.StoneID} {
+		t.Run(blockLabel(below), func(t *testing.T) {
+			engine, session, yaw, pitch := readyPlantingPlayer(t, below)
+
+			result := plantSeeds(engine, session, yaw, pitch)
+
+			if len(result.Rejected) != 1 || result.Rejected[0].Reason != RejectInvalidBlock {
+				t.Fatalf("Rejected = %+v，想要恰好一条 RejectInvalidBlock", result.Rejected)
+			}
+			if got := tillBlockAt(t, engine, plantTarget); got != core.AirID {
+				t.Fatalf("被拒绝的种植写了方块: %d", got)
+			}
+			want := core.ItemStack{Item: core.ItemWheatSeeds, Count: plantSeedCount}
+			player := engine.sessions[session].player
+			if got := player.inventory.Hotbar.Slots[0]; got != want {
+				t.Fatalf("被拒绝的种植扣了种子: %+v，想要一字不变的 %+v", got, want)
+			}
+			if len(result.Changes) != 0 {
+				t.Fatalf("被拒绝的种植广播了区块变更: %+v", result.Changes)
+			}
+		})
+	}
+}
+
+// TestPlaceNonSeedItemsIgnoreFarmlandPrecondition 是「非种子物品的放置行为
+// 一字不变」的守卫：同一个非耕地夹具下，石头必须照常放得下去。
+//
+// 没有它的话，一个把耕地前置错加到**全部**放置物上的实现会让上面两条种植用例
+// 全绿——「种子被正确拒绝」和「所有放置都被拒绝」在种子用例里读数完全相同。
+func TestPlaceNonSeedItemsIgnoreFarmlandPrecondition(t *testing.T) {
+	engine, session, yaw, pitch := readyPlantingPlayer(t, core.DirtID)
+	player := engine.sessions[session].player
+	player.inventory.Hotbar.Slots[1] = core.ItemStack{
+		Item: core.ItemStone, Count: core.MaxStackCount,
+	}
+	engine.Enqueue(Command{
+		Session: session, Sequence: 2, Kind: CommandPlaceBlock, Slot: 1,
+		Yaw: yaw, Pitch: pitch,
+	})
+
+	result := engine.Step()
+
+	if len(result.Rejected) != 0 {
+		t.Fatalf("泥土之上放置石头被拒绝: %+v", result.Rejected)
+	}
+	if got := tillBlockAt(t, engine, plantTarget); got != core.StoneID {
+		t.Fatalf("非种子放置结果 = %d，想要石头 %d", got, core.StoneID)
 	}
 }

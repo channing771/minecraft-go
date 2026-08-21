@@ -97,6 +97,26 @@ func (engine *Engine) executePlacement(
 	if occupied {
 		return RejectOccupied, true
 	}
+	// 作物是唯一有「落脚方块」前置的放置物：种子只能种在耕地正上方。这条前置
+	// **追加**在通用校验之后，因此非种子物品的放置行为一字不变。
+	//
+	// 判据读的是**目标格正下方的方块编号**，不是命中面：玩家通常俯视耕地顶面
+	// （目标格就在耕地之上），但也可以瞄准旁边方块的侧面把目标格落到耕地上方，
+	// 两种瞄法都应放行。要求"命中面必须是耕地"会把后一种合法瞄法误拒。
+	//
+	// 「手持物不适用于当前目标」与「选中物品不产生可放置方块」是同一类事实，
+	// 复用放置路径与翻地已在用的 RejectInvalidBlock，不新增 wire 值。
+	if core.IsCrop(placement) {
+		below := target
+		below.Y--
+		belowBlock, belowReady := dimension.BlockAt(below)
+		if !belowReady {
+			return RejectChunkNotReady, true
+		}
+		if !core.IsFarmland(belowBlock) {
+			return RejectInvalidBlock, true
+		}
+	}
 	// 放置熔炉或箱子必须先预留槽位；槽位耗尽时不改方块也不扣物品。
 	targetRecord, targetOK := dimension.records[target.Chunk()]
 	targetIndex, targetIndexed := world.ChunkBlockIndex(target)
