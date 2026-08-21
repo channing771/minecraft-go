@@ -188,15 +188,17 @@ var (
 	cropFixtureCover    = core.BlockPos{X: 8, Y: 3, Z: 8}
 )
 
-// cropFlatChunk 生成作物测试用的平坦区块：y=0 石头地基、y=1 草皮，其余空气。
+// cropFlatChunk 生成作物测试用的平坦区块：y=-1 与 y=0 两层石头地基、y=1 草皮，
+// 其余空气。
 //
-// 地基是必需的：水源要放在 y=1，下方必须实心，否则水会向 y=0 及以下流走，
-// 「范围内有水」这个前置在第一个 tick 就自己消失了。四周同层是草皮、上方是
-// 空气，水源因此是流体规则下的不动点，整段测试期间原地不动。
+// 地基是必需的：夹具里的水源可能放在耕地的下一层（y=0），下方必须实心，否则
+// 水会一路流到世界底部，「范围内有水」这个前置在第一个 tick 就自己消失。两层
+// 而不是一层，正是为了让 y=0 这一层也能放水。列顶仍是 y=1，露天判定不受影响。
 func cropFlatChunk(pos core.ChunkPos) *world.Chunk {
 	chunk := world.NewChunk(pos)
 	for x := range core.SectionSize {
 		for z := range core.SectionSize {
+			chunk.SetBlock(x, -1, z, core.StoneID)
 			chunk.SetBlock(x, 0, z, core.StoneID)
 			chunk.SetBlock(x, 1, z, core.GrassID)
 		}
@@ -205,16 +207,41 @@ func cropFlatChunk(pos core.ChunkPos) *world.Chunk {
 	return chunk
 }
 
+// placeContainedWater 放一格水源，并把它周围仍是空气的六个面邻格填成石头。
+//
+// 这样这一格水在流体规则下是不动点：源永不自然消失，六个邻格都不可被等级 1
+// 替换，evalCell 对它产出空写入集合。夹具里的水**必须原地不动**——它一旦流走，
+// 「范围内有水」这个前置就在第一个 tick 自己消失，用例会因为前置蒸发而绿。
+// 复用 internal/sim/fluid.go 的 fluidNeighbors，不另写一份邻格表。
+func placeContainedWater(t *testing.T, engine *Engine, position core.BlockPos) {
+	t.Helper()
+	for _, neighbor := range fluidNeighbors(position) {
+		if cropBlockAt(t, engine, neighbor) == core.AirID {
+			engine.SetBlockForTest(neighbor, core.StoneID)
+		}
+	}
+	engine.SetBlockForTest(position, core.WaterSourceID)
+}
+
 // cropFixture 描述一个作物夹具的四个可独立开关的条件。对照用例只改其中一个。
 type cropFixture struct {
 	// farmland 是 cropFixtureFarmland 处写入的耕地编号。
 	farmland core.BlockID
 	// crop 是 cropFixtureCrop 处写入的作物编号；AirID 表示不放作物。
 	crop core.BlockID
-	// waterDistance > 0 时在同层、该水平距离处放一个水源；0 表示不放水。
+	// waterDistance > 0 时在耕地的 waterDY 层、该水平距离处放一个水源；
+	// 0 表示不放水。
 	waterDistance int32
-	// covered 为真时在作物正上方放一块石头，制造遮挡。
-	covered bool
+	// waterDY 是水源相对耕地的层偏移：0 同层、+1 上一层、-1 下一层。规格写的
+	// 是「同层或上一层」，三个取值恰好覆盖窗口的内侧、上边界与下边界外侧。
+	waterDY int32
+	// cover 是作物正上方写入的方块编号；AirID 表示不遮挡。
+	//
+	// 类型是方块编号而不是 bool：规格说的是「之上不存在**任何非空气**方块」，
+	// 而实现读的是 world.Chunk.HighestOpaque——那个名字里的 Opaque 名不副实
+	// （它返回的是最高**非空气**方块）。只用石头遮挡的话，「不透明才算遮挡」
+	// 这种实现照样全绿，名字与规格之间的缝没人守。
+	cover core.BlockID
 }
 
 // readyCropWorld 构造一名 active 玩家与一个已 Ready 的平坦区块，并把
@@ -225,6 +252,15 @@ type cropFixture struct {
 // 24 个区段 × 64 条抽样，测试跑得起 600 个 tick。
 func readyCropWorld(t *testing.T) (*Engine, SessionID) {
 	t.Helper()
+	engine, sessions := readyCropWorldAt(t, core.ChunkPos{})
+	return engine, sessions[0]
+}
+
+// readyCropWorldAt 是 readyCropWorld 的多锚点版本：每个 anchor 注册一名玩家，
+// 因此**恰好**这些区块会就绪。跨区块用例靠它同时让两个区块进入 Ready，再靠
+// UnregisterSession 让其中一个离开。
+func readyCropWorldAt(t *testing.T, anchors ...core.ChunkPos) (*Engine, []SessionID) {
+	t.Helper()
 	t.Cleanup(func() { SetTunables(DefaultTunables()) })
 	tunables := DefaultTunables()
 	tunables.RandomTicksPerSection = 64
@@ -232,9 +268,13 @@ func readyCropWorld(t *testing.T) (*Engine, SessionID) {
 	SetTunables(tunables)
 
 	engine := NewEngine(0, 0, 0)
-	const session = SessionID(1)
-	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
-	for range 6 {
+	sessions := make([]SessionID, 0, len(anchors))
+	for index, anchor := range anchors {
+		session := SessionID(index + 1)
+		sessions = append(sessions, session)
+		engine.RegisterSession(session, core.Overworld, anchor)
+	}
+	for range 8 {
 		result := engine.Step()
 		for _, key := range result.Acquire {
 			engine.SubmitAcquired(AcquiredChunk{Key: key, Missing: true})
@@ -247,10 +287,20 @@ func readyCropWorld(t *testing.T) (*Engine, SessionID) {
 			})
 		}
 	}
-	if player, ok := engine.Player(session); !ok || !player.Ready {
-		t.Fatalf("玩家未 Ready: %+v", player)
+	for _, session := range sessions {
+		if player, ok := engine.Player(session); !ok || !player.Ready {
+			t.Fatalf("会话 %d 的玩家未 Ready: %+v", session, player)
+		}
 	}
-	return engine, session
+	return engine, sessions
+}
+
+// setCropGrowthChance 改写生效中的生长概率。readyCropWorldAt 已经登记了恢复
+// 默认值的 Cleanup，因此这里不必再登记一次。
+func setCropGrowthChance(percent uint8) {
+	tunables := ActiveTunables()
+	tunables.CropGrowthChancePercent = percent
+	SetTunables(tunables)
 }
 
 // applyCropFixture 把夹具写进已就绪的世界。
@@ -263,10 +313,19 @@ func applyCropFixture(t *testing.T, engine *Engine, fixture cropFixture) {
 	if fixture.waterDistance > 0 {
 		water := cropFixtureFarmland
 		water.X += fixture.waterDistance
-		engine.SetBlockForTest(water, core.WaterSourceID)
+		water.Y += fixture.waterDY
+		placeContainedWater(t, engine, water)
 	}
-	if fixture.covered {
-		engine.SetBlockForTest(cropFixtureCover, core.StoneID)
+	if fixture.cover != core.AirID {
+		if core.IsFluid(fixture.cover) {
+			// 流体遮挡物同样要封住，否则它会流走，「被遮挡」这个前置在第一个
+			// tick 就消失。placeContainedWater 会先把六个空气邻格填成石头，
+			// 其中「下方」那一格是作物本身（非空气、非流体，不可替换），因此
+			// 不会被填掉，也不会被水冲走。
+			placeContainedWater(t, engine, cropFixtureCover)
+		} else {
+			engine.SetBlockForTest(cropFixtureCover, fixture.cover)
+		}
 	}
 }
 
@@ -353,24 +412,32 @@ func TestExposedWetCropAdvancesStage(t *testing.T) {
 
 // TestCoveredCropDoesNotGrow 覆盖 Scenario「被遮挡的作物不生长」。
 //
-// 两条子用例共用同一个夹具构造，**只差 covered 一个字段**：对照必须长，
+// 四条子用例共用同一个夹具构造，**只差 cover 一个字段**：对照必须长，
 // 被遮挡的必须不长。没有对照的话，「不长」在「600 个 tick 里恰好没抽中这一格」
 // 时同样成立，断言与规则无关。
+//
+// 三种遮挡物缺一不可。规格写的是「之上不存在**任何非空气**方块」，而实现读的
+// 是 world.Chunk.HighestOpaque——那个名字里的 Opaque 名不副实（它返回的是最高
+// 非空气方块）。只用石头的话，「只有不透明方块才算遮挡」这种实现照样全绿：
+// 玻璃是非空气、非不透明的 cutout 类，水是非空气、非不透明的流体，两者正好
+// 卡在名字与规格之间的那道缝上。
 func TestCoveredCropDoesNotGrow(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		covered    bool
+		cover      core.BlockID
 		wantGrowth bool
 	}{
-		{"对照：无遮挡必须推进", false, true},
-		{"正上方有石头时不推进", true, false},
+		{"对照：无遮挡必须推进", core.AirID, true},
+		{"正上方是石头时不推进", core.StoneID, false},
+		{"正上方是玻璃时不推进", core.GlassID, false},
+		{"正上方是水时不推进", core.WaterSourceID, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := newCropWorld(t, cropFixture{
 				farmland:      core.FarmlandWetID,
 				crop:          core.WheatStage0ID,
 				waterDistance: 4,
-				covered:       tc.covered,
+				cover:         tc.cover,
 			})
 			stepCropTicks(engine)
 			assertCropGrowth(t, engine, core.WheatStage0ID, tc.wantGrowth)
@@ -382,6 +449,11 @@ func TestCoveredCropDoesNotGrow(t *testing.T) {
 //
 // 同样是「只改一个条件」的成对用例：对照在范围内放水（耕地保持湿），
 // 主用例不放水（耕地保持干），其余完全相同。
+//
+// **farmland 与 waterDistance 必须一起改，这不是"改了两个条件"。** 干湿是由
+// 邻近流体双向决定的：只改 farmland 不放水，湿耕地会被第一次随机 tick 改回干；
+// 只放水不改 farmland，干耕地会被改成湿。两个字段合起来才是「耕地的湿度」这
+// 一个条件，拆开任何一半都会被双向转换自动改回去。后人请勿"修正"成单字段。
 func TestCropOnDryFarmlandDoesNotGrow(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -470,22 +542,31 @@ func TestFarmlandTurnsDryAfterWaterRemoved(t *testing.T) {
 
 // TestFarmlandWetnessRangeBoundary 覆盖 Scenario「范围外的水不产生湿润」。
 //
-// 距离 4 与距离 5 必须**成对**出现：只测距离 5 的话，夹具在距离 4 处也没有水，
-// 「不湿」在任何半径实现下都成立（包括半径写成 0 的实现），测不出边界在哪。
+// 四条子用例把湿润窗口的**四个边界**各钉一颗钉子，每一对都只差一个字段：
+//
+//   - 水平方向：距离 4 湿、距离 5 不湿。只测距离 5 的话，夹具在距离 4 处也没有
+//     水，「不湿」在任何半径实现下都成立（包括半径写成 0 的实现）。
+//   - 垂直方向：上一层湿、只在下一层不湿。规格写的是「同层**或上一层**」，
+//     而所有正向夹具的水都放在同层——上界删掉（只看同层）与下界放宽（连下一层
+//     也算）这两种实现，在只有同层夹具时都照样全绿。
 func TestFarmlandWetnessRangeBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		distance int32
+		dy       int32
 		want     core.BlockID
 	}{
-		{"距离 4 的水使耕地变湿", 4, core.FarmlandWetID},
-		{"距离 5 的水不使耕地变湿", 5, core.FarmlandDryID},
+		{"同层距离 4 的水使耕地变湿", 4, 0, core.FarmlandWetID},
+		{"同层距离 5 的水不使耕地变湿", 5, 0, core.FarmlandDryID},
+		{"上一层距离 4 的水使耕地变湿", 4, +1, core.FarmlandWetID},
+		{"只在下一层的水不使耕地变湿", 4, -1, core.FarmlandDryID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := newCropWorld(t, cropFixture{
 				farmland:      core.FarmlandDryID,
 				crop:          core.AirID,
 				waterDistance: tc.distance,
+				waterDY:       tc.dy,
 			})
 			stepCropTicks(engine)
 			if got := cropBlockAt(t, engine, cropFixtureFarmland); got != tc.want {
@@ -583,5 +664,186 @@ func TestCropTickCostIsIndependentOfCropCount(t *testing.T) {
 	if barren.cropCellsExamined != want {
 		t.Fatalf("单 tick 考察量 %d，想要 %d（1 个已就绪区块 × %d 区段 × 64 抽样）",
 			barren.cropCellsExamined, want, core.SectionsPerChunk)
+	}
+}
+
+// —— 生长概率(CropGrowthChancePercent) ——
+
+// cropRollPositions 是概率判定测试用的一组位置：坐标含负值与零，避免"只在正
+// 坐标上正确"的实现蒙混过关。
+var cropRollPositions = []core.BlockPos{
+	{X: 0, Y: 0, Z: 0},
+	{X: 8, Y: 1, Z: 8},
+	{X: -3, Y: 70, Z: 21},
+	{X: 1024, Y: -60, Z: -1024},
+}
+
+// TestCropGrowthRollHonoursEndpoints 守住两个端点的规范语义：0 = 永不推进，
+// 100 = 抽中即推进。
+//
+// 「0 = 永不推进」在端到端层面很难与"恰好没抽中"区分，所以必须在纯函数层面
+// 钉死；「100 恒真」则是全部端到端夹具的前提，它自己不能只靠夹具来证明。
+func TestCropGrowthRollHonoursEndpoints(t *testing.T) {
+	for _, position := range cropRollPositions {
+		for tick := range uint64(64) {
+			if cropGrowthRoll(0x5eed, tick, core.Overworld, position, 0) {
+				t.Fatalf("概率 0 在 tick %d、%+v 上通过了判定", tick, position)
+			}
+			if !cropGrowthRoll(0x5eed, tick, core.Overworld, position, 100) {
+				t.Fatalf("概率 100 在 tick %d、%+v 上未通过判定", tick, position)
+			}
+		}
+	}
+}
+
+// cropRollStream 把 ticks 个 tick 的概率判定结果收成一个布尔序列，供下面几条
+// 「两条序列必须不同」的守卫比较。
+func cropRollStream(
+	seed int64, dimension core.DimensionID, position core.BlockPos, percent uint8, ticks int,
+) []bool {
+	stream := make([]bool, ticks)
+	for tick := range ticks {
+		stream[tick] = cropGrowthRoll(seed, uint64(tick), dimension, position, percent)
+	}
+	return stream
+}
+
+// equalBools 报告两个布尔序列是否逐元素相同。
+func equalBools(a, b []bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for index := range a {
+		if a[index] != b[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestCropGrowthRollAtFiftyIsDeterministicAndIndependent 覆盖**默认配置下唯一
+// 会执行的那段哈希**（默认 CropGrowthChancePercent = 50，两个端点都短路掉了，
+// 端到端夹具又一律把它设成 100 或 0，所以这段代码此前一次都没被测试跑过）。
+//
+// 四条断言，每条守一个独立性质：
+//
+//  1. 可复现——同输入两次逐元素相同，这是「相同输入重放一致」在概率侧的前提；
+//  2. 分布非退化——1000 次里通过 400..600 次。恒 true / 恒 false / 只在少数
+//     tick 上翻转的实现都会红，而只断言"有 true 也有 false"不会；
+//  3. **维度被折进哈希**——两个维度的判定序列必须不同。core.BlockPos 不带维度，
+//     不折的话两个世界里同坐标的作物每 tick 拿到逐位相同的判定；
+//  4. **与抽样不是同一条哈希流**——这是 cropGrowthRollSalt 存在的理由。它守的
+//     是"概率判定直接复用抽样哈希"这种同源实现，不是 salt 常量本身的取值。
+func TestCropGrowthRollAtFiftyIsDeterministicAndIndependent(t *testing.T) {
+	const (
+		seed  = int64(0x5eed)
+		ticks = 1000
+	)
+	position := core.BlockPos{X: 8, Y: 1, Z: 8}
+
+	stream := cropRollStream(seed, core.Overworld, position, 50, ticks)
+	if !equalBools(stream, cropRollStream(seed, core.Overworld, position, 50, ticks)) {
+		t.Fatal("同输入两次的概率判定序列不同，判定不是纯函数")
+	}
+
+	passed := 0
+	for _, pass := range stream {
+		if pass {
+			passed++
+		}
+	}
+	if passed < 400 || passed > 600 {
+		t.Fatalf("%d 次判定通过 %d 次，50%% 的分布退化了", ticks, passed)
+	}
+
+	if equalBools(stream, cropRollStream(seed, core.Overworld+1, position, 50, ticks)) {
+		t.Fatal("两个维度的概率判定序列逐位相同，维度没有被折进哈希")
+	}
+
+	// 抽样流按同一组 (seed, tick) 取出一个格下标，再折成同样 50% 的布尔序列。
+	// 两条流必须不是同一个函数。
+	var buffer []int
+	sampling := make([]bool, ticks)
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: position.Chunk()}
+	for tick := range ticks {
+		buffer = sampleCells(seed, uint64(tick), key, position.SectionIndex(), 1, buffer)
+		sampling[tick] = buffer[0]%100 < 50
+	}
+	if equalBools(stream, sampling) {
+		t.Fatal("概率判定与抽样是同一条哈希流，salt 没有起作用")
+	}
+}
+
+// TestZeroGrowthChanceNeverAdvancesCrop 覆盖「0 = 永不推进」的端到端语义。
+//
+// 夹具起手是**干**耕地加范围内的水：于是耕地必须在测试期间转成湿。这条附带
+// 断言是本用例的反空转手段——它证明随机 tick 一直在照常抽样，「作物没长」因此
+// 只可能是概率判定拒绝，不可能是抽样停摆。对照把概率改成 100，同夹具必须长。
+func TestZeroGrowthChanceNeverAdvancesCrop(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		percent    uint8
+		wantGrowth bool
+	}{
+		{"对照：概率 100 必须推进", 100, true},
+		{"概率 0 永不推进", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := newCropWorld(t, cropFixture{
+				farmland:      core.FarmlandDryID,
+				crop:          core.WheatStage0ID,
+				waterDistance: 4,
+			})
+			setCropGrowthChance(tc.percent)
+			stepCropTicks(engine)
+			if got := cropBlockAt(t, engine, cropFixtureFarmland); got != core.FarmlandWetID {
+				t.Fatalf("耕地是 %s，想要湿耕地——随机 tick 没在照常抽样，"+
+					"「作物没长」的断言失去意义", blockLabel(got))
+			}
+			assertCropGrowth(t, engine, core.WheatStage0ID, tc.wantGrowth)
+		})
+	}
+}
+
+// —— 跨区块湿润与「相邻区块未加载按无水」 ——
+
+// 跨区块夹具：耕地在世界 x=0（区块 (0,0) 的局部 x=0），它的 9×9 湿润窗口
+// x ∈ [-4, 4] 因此跨进区块 (-1,0)；水放在 x=-2，**只存在于邻块里**。
+var (
+	cropCrossFarmland = core.BlockPos{X: 0, Y: 1, Z: 8}
+	cropCrossWater    = core.BlockPos{X: -2, Y: 1, Z: 8}
+	cropCrossChunk    = core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1}}
+)
+
+// TestFarmlandWetnessCrossesChunkBoundary 覆盖湿润窗口跨区块的两半语义，
+// 两半互相咬合、缺一条都会让另一条失去意义：
+//
+//   - **邻块已加载**：窗口必须真的读进邻块。跳过跨区块邻格的实现在这一半红。
+//   - **邻块未加载**：按「无水」保守处理。夹具让邻块离开活动兴趣范围后转为
+//     非 Ready，**而水方块本身一格都没动**——这正是该约定唯一可观察的后果。
+//     把未加载读作"可能有水"的实现在这一半红。
+//
+// 只写第一半的话，「未加载按无水」没人守；只写第二半的话，一个从不跨区块读的
+// 实现（永远判干）照样全绿。
+func TestFarmlandWetnessCrossesChunkBoundary(t *testing.T) {
+	engine, sessions := readyCropWorldAt(t, core.ChunkPos{}, core.ChunkPos{X: -1})
+	engine.SetBlockForTest(cropCrossFarmland, core.FarmlandDryID)
+	placeContainedWater(t, engine, cropCrossWater)
+
+	if _, ok := stepUntilBlock(engine, cropCrossFarmland, core.FarmlandWetID); !ok {
+		t.Fatalf("邻块已加载时耕地仍是 %s：湿润窗口没有读进相邻区块",
+			blockLabel(cropBlockAt(t, engine, cropCrossFarmland)))
+	}
+
+	// 注销锚在 (-1,0) 的会话：该区块随即离开活动兴趣范围与订阅集合。
+	// **水方块没有被删除**，改变的只有"它所在的区块还在不在线上"。
+	engine.UnregisterSession(sessions[1])
+	engine.Step()
+	if info, ok := engine.ChunkInfo(cropCrossChunk); ok && info.State == ChunkReady {
+		t.Fatalf("邻块仍是 Ready（State=%d），本用例根本没造出「未加载」条件", info.State)
+	}
+	if _, ok := stepUntilBlock(engine, cropCrossFarmland, core.FarmlandDryID); !ok {
+		t.Fatalf("邻块卸载后耕地仍是 %s：未加载的邻块被当成了有水",
+			blockLabel(cropBlockAt(t, engine, cropCrossFarmland)))
 	}
 }

@@ -101,12 +101,22 @@ const cropGrowthRollSalt = 0xc0ffee5eedca11ed
 // cropGrowthRoll 报告 position 上的作物在 tick 上是否通过生长概率判定。
 //
 // 与抽样同源的设计：纯整数哈希、无全局 RNG、无浮点，结果只依赖
-// (worldSeed, tick, 方块坐标)，因此重放同一段 tick 必然得到同一串判定。
+// (worldSeed, tick, 维度, 方块坐标)，因此重放同一段 tick 必然得到同一串判定。
+//
+// **维度必须与坐标一起折进哈希**，理由与 cropSectionHash 折维度完全相同：
+// core.BlockPos 不携带维度，不折的话两个维度里坐标相同的作物每 tick 拿到逐位
+// 相同的概率判定，两个世界的生长会同步得一模一样，而任何单维度测试都照样全绿。
 //
 // `hash % 100` 有理论上的取模偏差（2^64 不是 100 的整数倍），最大偏差量级约
 // 1e-17，远小于任何可观察的游戏效果，不值得为它引入拒绝采样循环——而拒绝采样
 // 的循环次数不定，反而给权威 tick 引入一个无上界的分支。
-func cropGrowthRoll(seed int64, tick uint64, position core.BlockPos, chancePercent uint8) bool {
+func cropGrowthRoll(
+	seed int64,
+	tick uint64,
+	dimension core.DimensionID,
+	position core.BlockPos,
+	chancePercent uint8,
+) bool {
 	// 0% 与 100% 单独短路：它们是测试与调试面板最常用的两个端点值，短路让
 	// 「设成 100 必长」这条测试前提不依赖哈希分布。
 	if chancePercent == 0 {
@@ -117,6 +127,7 @@ func cropGrowthRoll(seed int64, tick uint64, position core.BlockPos, chancePerce
 	}
 	hash := splitmix64(uint64(seed) ^ cropGrowthRollSalt)
 	hash = splitmix64(hash ^ tick)
+	hash = splitmix64(hash ^ uint64(uint32(dimension)))
 	hash = splitmix64(hash ^ uint64(uint32(position.X)))
 	hash = splitmix64(hash ^ uint64(uint32(position.Y)))
 	hash = splitmix64(hash ^ uint64(uint32(position.Z)))
@@ -224,6 +235,13 @@ func farmlandIsWet(dimension *Dimension, position core.BlockPos) bool {
 // RandomTicksPerSection」，与世界里有多少株作物无关。这里刻意**不**跳过均匀
 // 空气区段——那类捷径会让考察量随地形（进而随作物分布）变化，正好破坏 spec
 // 「作物数量增加不改变单 tick 考察量」这条契约，而省下的只是几次哈希。
+//
+// **cropCellsExamined 的计量单位是「被抽中的格数」，不是「方块读取次数」。**
+// 这与 spec 的措辞（「被考察的格数」）逐字一致，但两者并不等价：抽中一格耕地
+// 会额外做 9×9×2 = 162 次方块读取去判湿润。当前实现下这条差异不影响成本契约
+// ——耕地格数同样有上界且与作物数无关——但**若将来作物分支也去重扫一遍 9×9**，
+// 真实成本就会随作物数量增长，而按格数计的那条测试不会红。届时必须把计量口径
+// 一并改成方块读取次数。
 func (engine *Engine) advanceCrops(pending map[core.ChunkKey]*pendingChunkChanges) {
 	engine.cropCellsExamined = 0
 	samples := int(engine.tunables.RandomTicksPerSection)
@@ -298,7 +316,8 @@ func (engine *Engine) advanceCropCell(
 			return
 		}
 		if !cropGrowthRoll(
-			engine.seed, tick, position, engine.tunables.CropGrowthChancePercent,
+			engine.seed, tick, dimensionID, position,
+			engine.tunables.CropGrowthChancePercent,
 		) {
 			return
 		}
