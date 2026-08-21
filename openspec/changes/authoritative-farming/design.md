@@ -70,7 +70,7 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 
 翻地走 `openContainer` 同形的路径:带目标格、触及距离校验、权威校验后改方块。`RejectReason` 的 wire value 已冻结,新增只能**追加不能重排**。
 
-**伙伴的种田能力必须显式拒绝**(任务组 1 修正):原稿以为「成熟小麦是多掉落 ⇒ 伙伴天然被拒」,但 `core.BlockDrop` 只支持单一产物,多掉落在编号层面表达不出——`companionMineableBlock(WheatStage7ID)` 会返回 true,巧合性安全不成立。因此:掉落分支放在 sim 的采掘完成路径按方块编号处理;伙伴对农业方块的采掘在 `internal/sim/mining.go` 与 `internal/companion/plan_types.go` 两处防御清单**显式拒绝**并加断言;放置方向已由组 1 的 `planPlaceExempt` 豁免钉住。
+**伙伴的种田能力必须显式拒绝**(任务组 1 修正):原稿以为「成熟小麦是多掉落 ⇒ 伙伴天然被拒」,但 `core.BlockDrop` 只支持单一产物,多掉落在编号层面表达不出——`companionMineableBlock(WheatStage7ID)` 会返回 true,巧合性安全不成立。因此:掉落分支放在 sim 的采掘完成路径按方块编号处理;伙伴对农业方块的采掘在 `internal/sim/mining.go` 与 `internal/companion/plan_types.go` 两处防御清单**显式拒绝**并加断言;放置方向除组 1 的 `planPlaceExempt` 豁免外,还须在 `internal/sim/companion_placement.go` 的 `BlockDrop→ItemPlacement` 往返二重校验里一并显式拒绝(Ruling 8:该往返对种子是成立的,`BlockDrop(WheatStage0ID)` = 种子、`ItemPlacement(种子)` = `WheatStage0ID`,二重校验本身挡不住伙伴种地)——**防御清单共三处**。
 
 ## D8 植物几何按 material 判别,不占 quad 位
 
@@ -106,7 +106,7 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 | 8 | ~~作物阻断天空光~~(**已删除——这条是计划错误而非简化**:玻璃/树叶本就是非不透明且透光的 cutout 类,阻断判据是 `opaque`;植物入同类后天空光自然穿过,与 MC 行为一致,无需动光照模型) | — | — |
 | 9 | 湿润更新有延迟 | 挂 `recordChange` 会让水源移除的扇出无上界 | 若要即时,需给扇出定预算,与流体队列同构 |
 | 10 | 掉落数量固定(MC 是随机 0–3 种子) | 随机掉落要新的确定性来源,收益只是数值手感 | 用 `hash(worldSeed, tick, pos)` 定数量,与生长抽样共用哈希 |
-| 11 | 伙伴不能种地/收获 | 靠「多掉落被拒」的既有限制天然挡住,属巧合 | 归 M5 系列;放宽多掉落限制前必须先决定伙伴农业语义 |
+| 11 | 伙伴不能种地/收获 | 伙伴农业语义(种什么、何时收、成熟度判断)未裁决;原稿以为靠「多掉落被拒」天然挡住,实为巧合且不成立(Ruling 5),故改为三处防御清单显式拒绝 | 归 M5 系列;放开任一处防御清单前必须先决定伙伴农业语义 |
 | 12 | 纹理为自绘程序化,非 MC 像素级一致 | 仓库禁止 Mojang 素材;引入贴图管线是独立变更 | 先做贴图资源管线(加载、图集打包、构建期许可校验),届时全部材质一次性换 |
 | 13 | 耕地渲染为满高立方体,碰撞为 15/16(站上去脚部视觉陷入 1/16) | 计划无任何一步改耕地 mesh 几何,补上会扩组 2/3 范围 | 按 material 固定下移顶面,或复用水面角高度位 |
 | 14 | 出生点选在耕地上时留 1/16 空隙,玩家首 tick 沉降 1/16 | `findSpawnInColumn` 对任何有碰撞体的方块返回 `y+1`,不读盒子顶面;改它要同步出生点与 support/safe 存档点三处口径。摔落伤害为 0、safe 点不被污染、worldgen 不产耕地 | `findSpawnInColumn` 改读落脚盒顶面,作为独立决定 |
