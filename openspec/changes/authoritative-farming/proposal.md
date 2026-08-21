@@ -29,13 +29,14 @@
 - `authoritative-mining`: 采掘时长与掉落等级表加入作物与耕地条目。
 - `tool-durability`: 现行条文把耐久消耗绑定在「目标方块被实际移除之后」,而翻地不移除方块;需覆盖「翻地成功同样扣减恰好一点耐久」,拒绝路径仍不扣。
 - `common-block-materials`: 缺失玩家材料包加入初始种子,使玩家在草丛存在之前也能开始耕种。
+- `bounded-benchmark-workload`: benchmark scenario v17 → **v18**(实现期实测判定,见下)。
 
 **不需要 delta 的既有能力**(与 F1 加入 8 个流体编号时同理):`common-block-materials` 的「稳定材料注册表」与「权威放置采掘与掉落」是 M4 材料批次的历史快照,追加新编号不改变其断言;「协议与存档语义版本」同样记录的是 v15/v6/v8 那次上线,本变更的协议 v22 由 `internal/archcheck` 的基线版本门禁覆盖;「cutout 方块语义」只约束玻璃与树叶,未声明排他。`voxel-visual-presentation` 的有界渲染成本条文植物全部满足(仍走既有 terrain pass、仍 8 字节),边界由新能力 `plant-visual-presentation` 自陈。
 
 ## Impact
 
 - **受影响包**:`internal/core`(方块与物品编号、掉落表、配方)、`internal/sim`(生长阶段推进、翻地命令、种植与收获校验)、`internal/mesh` 与 `internal/assets`(registry 扩容、植物 material 集合、程序化纹理层)、`internal/physics`(作物零碰撞体、耕地 15/16)、`internal/network`(协议 v22 与新命令 kind)、`internal/world`(`heights` 只读查询)、`internal/config`(生长与湿润 tunable)、`internal/archcheck`(基线版本与依赖登记)、`engine/crates/mornlea_engine`(交叉面几何)、`engine/crates/mornlea_client`(着色器顶点变形)、`cmd/mornlea`(手持锄头时「使用」键发翻地命令)。
-- **兼容性**:协议 v21 → v22。**区块 schema v9、玩家 schema v6、`companions.ai` v4、世界 metadata v2、engine/client ABI v5 全部不变**——农业状态完全落在方块编号里。benchmark scenario 是否需要升版由实现期实测决定。
+- **兼容性**:协议 v21 → v22。**区块 schema v9、玩家 schema v6、`companions.ai` v4、世界 metadata v2、engine/client ABI v5 全部不变**——农业状态完全落在方块编号里。benchmark scenario **v17 → v18**:实现期实测确认本变更改变了被测进程本身——mesh registry 条目上限 35 → 48(实际烘焙条目 35 → 45,每次 mesh 调用的 FFI 输入 910 → 1170 bytes)、合成面板 8 → 10 行使 Hotbar HUD 固定上传布局移动(quad 容量 238 → 247、glyph offset 11776 → 12288、总容量 45376 → 45888 bytes、空聊天帧每帧实际写入 11776 → 12288 bytes)、权威 tick 新增每 tick 枚举全部区段的 `advanceCrops` 阶段(满编 200 区块实测约 113 µs/tick)。其中「改变固定 GPU 上传布局、offset 与每帧写入字节数」正是主规格判定 v15 → v16 时用的同一条条文。benchmark 的固定输入与被测世界一格未动(仍七名远端玩家、零伙伴、不注水、不含农业方块),唯一显式迁移改为 `17:18`,`16:17` 退为归档证据。
 - **并发**:生长推进在单写者权威 tick 内串行,与流体、掉落物、熔炉同构,不引入新 goroutine 或锁。
 - **性能**:每 tick 触及 = `section 数 × 3`,由兴趣范围约束;湿润扫描是 `9×9 × 抽中的耕地数`,全部因子为常数或已有上界,**不随农田规模增长**。
 - **回退**:整支 revert 即可。农业方块编号一旦写入区块,回退后会被读成未知编号——与既有未知方块处理路径一致,不产生存档损坏。

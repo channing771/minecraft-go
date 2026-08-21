@@ -77,8 +77,9 @@ func TestCompanionActionAppliesInIDOrderAfterPlayers(t *testing.T) {
 	firstPhases, firstPlayers, firstCompanions := run()
 	if !reflect.DeepEqual(firstPhases, []stepPhase{
 		phasePlayerCommands, phaseCompanionActions, phasePhysicsAdvance, phaseFluidAdvance,
+		phaseCropAdvance,
 	}) {
-		t.Fatalf("阶段顺序=%v，想要 [玩家命令 伙伴action 统一物理 流体推进]", firstPhases)
+		t.Fatalf("阶段顺序=%v，想要 [玩家命令 伙伴action 统一物理 流体推进 作物推进]", firstPhases)
 	}
 	// 玩家命令必须在同 tick 生效：玩家 A 沿 +X、玩家 B 沿 +Z 移动。
 	if firstPlayers[0].State.Position.X() <= 0.5 {

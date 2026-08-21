@@ -12,8 +12,8 @@ import (
 )
 
 func TestComparisonSuccessMessageDescribesComparisonMode(t *testing.T) {
-	if got := comparisonSuccessMessage(16, 17); got !=
-		"场景迁移性能记录完成：报告完整、硬件一致，当前 v17" {
+	if got := comparisonSuccessMessage(17, 18); got !=
+		"场景迁移性能记录完成：报告完整、硬件一致，当前 v18" {
 		t.Fatalf("migration message=%q", got)
 	}
 	if got := comparisonSuccessMessage(6, 6); got !=

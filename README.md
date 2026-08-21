@@ -321,7 +321,7 @@ make visual-update             # 重新生成基线，写入 cmd/mornlea/testdat
 - 玩家存档保持 schema v6：读取 v5 后执行 identity migration，既有背包不会被补发材料；区块存档保持 schema v8，读取含静态发光块的 v7 后按原 payload 语义迁移。只认识旧 schema 的程序必须把 v6 玩家或 v8 区块作为 future schema 拒绝且不得覆盖。伙伴身体独立写入世界根目录的 `companions.ai` schema v1，active 与 inactive 合计最多 64 条；名称始终来自当前配置，文件不保存聊天、任务、FIFO、计划或摘要。AI 配置为空时不读取、不保存也不改写已有 `companions.ai`；
 - 列顶高度表、天空光和静态方块光仍只从权威方块镜像取得，不写入区块、玩家或伙伴存档，也不进入网络 payload；程序化天空仍只消费既有权威世界时间；
 - **备份与回退**：升级前必须正常关服，等待玩家、伙伴与世界存储刷写完成并备份完整世界目录，再启动 v16 程序。回退时必须先停服，再恢复升级前的完整备份；不承诺把 schema v8 区块、schema v6 玩家档、`companions.ai` 或新物品降级写回，不能让旧程序直接打开已升级目录后继续写入。异常退出时玩家、伙伴与区块文件各自原子，但它们之间没有跨文件事务；
-- benchmark producer 为 scenario v17，固定输入仍是七名远端玩家、零伙伴，且 benchmark 世界仍显式钉死不注水；版本变化记录的是被测进程本身的改变（mesh registry 条目扩宽、quad 位布局改写、光照衰减查表、water pass 与其固定显存、StepInput 头 v2）。当前唯一显式迁移是 `16:17`，v6..v16 历史报告仍可同版本读取。M5A v16 Memory/TCP 报告仅为 record-only 证据，M2 v15 与 M5 v14 baseline JSON 未提升；性能数值只记录，报告结构、身份、真实 overflow、数据丢失和 I/O 错误仍失败。跨 transport 比较只在显式请求时执行。
+- benchmark producer 为 scenario v18，固定输入仍是七名远端玩家、零伙伴，且 benchmark 世界仍显式钉死不注水、不含农业方块；版本变化记录的是被测进程本身的改变（mesh registry 条目上限 35→48 使每次 mesh 调用的 FFI 输入变长、合成面板 8→10 行使 Hotbar HUD 固定上传布局与 offset 移动、权威 tick 多出每 tick 枚举全部区段的作物阶段）。当前唯一显式迁移是 `17:18`，v6..v17 历史报告仍可同版本读取。M5A v16 Memory/TCP 报告仅为 record-only 证据，M2 v15 与 M5 v14 baseline JSON 未提升；性能数值只记录，报告结构、身份、真实 overflow、数据丢失和 I/O 错误仍失败。跨 transport 比较只在显式请求时执行。
 
 ## 使用 OpenSpec 开发
 

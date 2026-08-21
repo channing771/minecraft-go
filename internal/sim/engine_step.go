@@ -29,6 +29,15 @@ const (
 	// 唯一承重的约束是必须早于 finishChanges：流动写入要与其他方块变更共用同一批
 	// revision、广播与存盘（design.md D8）。
 	phaseFluidAdvance
+	// phaseCropAdvance 位于流体推进之后、容器移动之前。排在流体之后是承重的：
+	// 耕地干湿判定读的是流体方块，同 tick 内先流动后判湿才能看到本 tick 的水位
+	// （design.md D1/D6）。它同样必须早于 finishChanges——生长与干湿转换要与
+	// 其他方块变更共用同一批 revision、广播与存盘。
+	//
+	// 单独登记这个阶段而不是折进 phaseFluidAdvance，是为了让 benchmark 能把
+	// 作物阶段的墙钟耗时与流体分开计量：两者的成本模型完全不同（流体正比于
+	// 待更新队列长度，作物正比于 section 数），混在一起的读数无法归因。
+	phaseCropAdvance
 )
 
 // notifyStepPhase 把阶段进入事件上报给测试探针；生产环境探针恒为 nil。
@@ -361,6 +370,7 @@ func (engine *Engine) Step() TickResult {
 	engine.advanceFurnaces(pending)
 	engine.notifyStepPhase(phaseFluidAdvance)
 	engine.advanceFluids(pending)
+	engine.notifyStepPhase(phaseCropAdvance)
 	// 作物随机 tick 紧跟流体：耕地的干湿判定读的是流体方块，排在流动之后能在
 	// 同一 tick 内看到本 tick 的水位。它同样必须早于 finishChanges——生长与
 	// 干湿转换要与其他方块变更共用同一批 revision、广播与存盘（design.md D1）。

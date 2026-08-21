@@ -65,11 +65,11 @@
 
 采集时宿主为 Darwin 25.5.0 / `RELEASE_ARM64_T8142`、model `Mac17,2`、内存 25,769,803,776 bytes；uptime 为 3 天 5:53，load averages 为 3.43 / 4.33 / 3.57，Battery Power 90% 且正在放电，没有遗留 `mornlea`/`mornlea-server` 进程。宿主状态只作 provenance，没有阻止或改变 producer workload。
 
-Memory flying p99 `12.539ms` 与 TCP flying p99 `13.010ms` 均按当前契约只记录；两份报告结构、阶段、样本、身份、真实 overflow 与数据丢失校验均通过。本节记录时唯一显式场景迁移是 `15:16`；`15:16` 此后随 producer 升到 scenario v17 一并退役，当前唯一显式迁移是 `16:17`，`14:15` 与 `14:16` 同样不得恢复或新增。`docs/notes/perf-baseline.json` 的 M2 v15 SHA-256 仍为 `9691d9752f309795e77176c6f959c357c4c97f1f7daaa4a5a6fddff8bf164d78`，`docs/notes/perf-baseline-m5.json` 的 M5 v14 SHA-256 仍为 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`。
+Memory flying p99 `12.539ms` 与 TCP flying p99 `13.010ms` 均按当前契约只记录；两份报告结构、阶段、样本、身份、真实 overflow 与数据丢失校验均通过。本节记录时唯一显式场景迁移是 `15:16`；`15:16` 此后随 producer 升到 scenario v17 一并退役，`16:17` 又随 producer 升到 scenario v18 退役，当前唯一显式迁移是 `17:18`，`14:15` 与 `14:16` 同样不得恢复或新增。`docs/notes/perf-baseline.json` 的 M2 v15 SHA-256 仍为 `9691d9752f309795e77176c6f959c357c4c97f1f7daaa4a5a6fddff8bf164d78`，`docs/notes/perf-baseline-m5.json` 的 M5 v14 SHA-256 仍为 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`。
 
 ## 历史 M4N scenario v15 状态
 
-M4N 在 Apple M2 上独立建立 scenario v15 时，本文件对应的 M5 基线仍是下方 scenario v14；`docs/notes/perf-baseline-m5.json` 字节未改，SHA-256 仍为 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`。当时的显式 `14:15` 迁移规则只作为历史证据保留；当前规则见 `perf-baseline.md` 首节，不再授权 `14:15`、`14:16`、`15:16` 或跨硬件例外。
+M4N 在 Apple M2 上独立建立 scenario v15 时，本文件对应的 M5 基线仍是下方 scenario v14；`docs/notes/perf-baseline-m5.json` 字节未改，SHA-256 仍为 `5a34fe091cb1aacfee0172db90b5a7f66571202d230e7542660dd8e703132483`。当时的显式 `14:15` 迁移规则只作为历史证据保留；当前规则见 `perf-baseline.md` 首节，不再授权 `14:15`、`14:16`、`15:16`、`16:17` 或跨硬件例外。
 
 ## 当前 scenario v14 基线
 

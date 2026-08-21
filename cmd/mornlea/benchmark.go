@@ -16,13 +16,25 @@ import (
 const (
 	benchmarkSeed            = 20260726
 	benchmarkMessageDrainMax = 4096
-	// scenarioVersion 是 benchmark producer 的场景身份。v16 → v17 的理由是
-	// fluid-presentation-survival 改变了被测进程本身，即便 benchmark 的世界内容
-	// 没变（它把 FluidEnabled 钉死为 false）：mesh registry 条目从 16 字节扩到
-	// 18、quad 位布局改写、光照 BFS 改为按方块查衰减表、渲染器多出一条 water
-	// pass 与一块 32 MiB 的固定水面实例缓冲、StepInput 头版本升到 v2。这些都
-	// 落在 RSS、管线数量与每帧工作量上，v16 与 v17 的数字因此不可直接比较。
-	scenarioVersion = 17
+	// scenarioVersion 是 benchmark producer 的场景身份。v17 → v18 的理由与
+	// v16 → v17 同构：benchmark 的固定输入（七名远端玩家、零伙伴、不注入聊天）
+	// 与被测世界（不注水、同一 seed）一格未动，但 authoritative-farming 改变了
+	// **被测进程本身**：
+	//
+	//   - mesh registry 条目上限 35 → 48，且实际烘焙条目 35 → 45，于是每次
+	//     mesh 调用的 FFI 输入从 910 bytes 涨到 1170 bytes（每帧最多 64 次），
+	//     Rust 侧 RegistryView 的固定数组也随之变宽；
+	//   - 合成面板 8 → 10 行使 maxOverlayQuads 82 → 91，Hotbar HUD 的**固定
+	//     GPU 上传布局**随之移动：quad 容量 238 → 247、glyph offset
+	//     11776 → 12288、总容量 45376 → 45888 bytes，空聊天帧每帧实际写入
+	//     也从 11776 变成 12288 bytes。这与 v15 → v16 的升版理由是同一条
+	//     （「改变固定 GPU 上传布局、offset 与每帧写入字节数」）；
+	//   - 权威 tick 多出一个 advanceCrops 阶段，它每 tick 枚举活动兴趣范围内
+	//     的全部区段（满编 200 区块实测约 113 µs/tick），直接落在 tick 指标上。
+	//
+	// 这些都落在 RSS、每帧上传字节数与权威 tick 耗时上，v17 与 v18 的数字
+	// 因此不可直接比较。
+	scenarioVersion = 18
 )
 
 var (
