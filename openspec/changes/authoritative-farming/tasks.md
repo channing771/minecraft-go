@@ -42,12 +42,12 @@
 
 ## 6. 生长机制与环境判定
 
-- [ ] 6.1 `sampleCells` 纯函数:`hash(worldSeed, tick, chunkX, chunkZ, sectionY, i) mod 4096`,**不用全局 RNG、不用浮点**。验证:`go test ./internal/sim -race -count=1`
-- [ ] 6.2 `growCrop` 纯函数,**穷举测试** 8 阶段 × 湿/干 × 露天/遮蔽 = 32 种输入。验证:`go test ./internal/sim -race -count=1`
-- [ ] 6.3 接进 `sim.Engine.Step`:按 `(ChunkKey, sectionY)` **全序**枚举活动兴趣范围内的已加载 section,**绝不遍历 map**;每 section 抽 3 格;`RandomTicksPerSection`(默认 3)与生长概率 tunable 进 `physics/sim` tunable 体系并登记 `internal/config` 的 `Fields()` 钳制(Ruling 2:不登记等于新参数永久漏出配置钳制)。验证:`go test ./internal/sim -race -count=1`
-- [ ] 6.4 环境判定:露天读 `heights` 列顶图,湿润扫水平切比雪夫距离 ≤ 4、同层或上一层;耕地干湿双向转换。两者均为**纯查询**,不写 `internal/world` 与 `internal/fluid` 的状态。验证:`go test ./internal/sim ./internal/world -race -count=1`
-- [ ] 6.5 覆盖 `authoritative-farming` 的生长四条与确定性两条 Scenario。**端到端行为测试把生长概率 tunable 设成 100%**,否则用例会因「恰好没抽中」而绿。验证:`go test ./internal/sim -race -count=1`
-- [ ] 6.6 变异验证三条:让抽样依赖 map 遍历顺序,确认「相同输入重放一致」变红;去掉露天判定,确认「被遮挡的作物不生长」变红;让单 tick 考察量正比于作物数,确认「作物数量增加不改变单 tick 考察量」变红。
+- [x] 6.1 `sampleCells` 纯函数:`hash(worldSeed, tick, chunkX, chunkZ, sectionY, i) mod 4096`,**不用全局 RNG、不用浮点**。验证:`go test ./internal/sim -race -count=1`
+- [x] 6.2 `growCrop` 纯函数,**穷举测试** 8 阶段 × 湿/干 × 露天/遮蔽 = 32 种输入。验证:`go test ./internal/sim -race -count=1`
+- [x] 6.3 接进 `sim.Engine.Step`:按 `(ChunkKey, sectionY)` **全序**枚举活动兴趣范围内的已加载 section,**绝不遍历 map**;每 section 抽 3 格;`RandomTicksPerSection`(默认 3)与生长概率 tunable 进 `physics/sim` tunable 体系并登记 `internal/config` 的 `Fields()` 钳制(Ruling 2:不登记等于新参数永久漏出配置钳制)。验证:`go test ./internal/sim -race -count=1`
+- [x] 6.4 环境判定:露天读 `heights` 列顶图,湿润扫水平切比雪夫距离 ≤ 4、同层或上一层;耕地干湿双向转换。两者均为**纯查询**,不写 `internal/world` 与 `internal/fluid` 的状态。验证:`go test ./internal/sim ./internal/world -race -count=1`
+- [x] 6.5 覆盖 `authoritative-farming` 的生长四条与确定性两条 Scenario。**端到端行为测试把生长概率 tunable 设成 100%**,否则用例会因「恰好没抽中」而绿。验证:`go test ./internal/sim -race -count=1`
+- [x] 6.6 变异验证三条:让抽样依赖 map 遍历顺序,确认「相同输入重放一致」变红;去掉露天判定,确认「被遮挡的作物不生长」变红;让单 tick 考察量正比于作物数,确认「作物数量增加不改变单 tick 考察量」变红。
 
 ## 7. 初始材料包与端到端
 
