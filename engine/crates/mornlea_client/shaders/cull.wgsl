@@ -100,17 +100,46 @@ fn cs_main(
         let hi = faces[base + 1u];
 
         let face = (lo >> 20u) & 0x7u;
-        let axis = face >> 1u;
-        var normal = axis_vec(axis);
-        if ((face & 1u) == 0u) {
-            normal = -normal;
-        }
-
-        let local = vec3f(
+        let cell = vec3f(
             f32( lo         & 0xFu),
             f32((lo >>  4u) & 0xFu),
             f32((lo >>  8u) & 0xFu),
-        ) + normal * f32(face & 1u);
+        );
+
+        var normal: vec3f;
+        var local: vec3f;
+        if (face >= 6u) {
+            // 植物的交叉斜面（face 6/7）没有轴向法线，`face >> 1` 会得到 3、
+            // `axis_vec` 只会给出一个与几何无关的方向，背面剔除随即按错误的法线
+            // 把整片斜面剔掉——那正是"某个方向看不见植物"的成因。
+            //
+            // 两条对角线的法线（不必归一化，这里只用点积的**符号**）：
+            //
+            //   face 6：切向 (1,0,1) × (0,1,0) → (1,0,-1)
+            //   face 7：切向 (-1,0,1) × (0,1,0) → (1,0,1)
+            //
+            // bit 12 的正/背标志把法线取反。于是一格里的 4 条 quad，任何视角下
+            // 每条对角线恰好留下一条、共两条——这就是"出 4 条而不是 2 条 + 关
+            // 剔除"的全部理由：剔除照常生效，几何不因视角缺失，也不必为植物
+            // 新增管线或每帧状态切换。
+            var n = vec3f(1.0, 0.0, -1.0);
+            if (face == 7u) {
+                n = vec3f(1.0, 0.0, 1.0);
+            }
+            if (((lo >> 12u) & 1u) == 1u) {
+                n = -n;
+            }
+            normal = n;
+            // 判定点取格心：斜面过格心，点积对整片平面同号。
+            local = cell + vec3f(0.5, 0.5, 0.5);
+        } else {
+            let axis = face >> 1u;
+            normal = axis_vec(axis);
+            if ((face & 1u) == 0u) {
+                normal = -normal;
+            }
+            local = cell + normal * f32(face & 1u);
+        }
         let world = vec3f(sec.origin.xyz) + local;
 
         if (dot(normal, world - u.cam_pos.xyz) >= 0.0) {
