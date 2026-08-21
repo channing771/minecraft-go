@@ -64,7 +64,7 @@
 - [ ] 8.4 核对 `tasks.md` 全部勾选、实现与六个 delta spec 一致;偏离时**先修订 OpenSpec 产物**。
 - [ ] 8.5 **遗留与简化清单落纸**:核对 `design.md` 的清单已覆盖执行期间新出现的每一条简化。
 - [ ] 8.6 `docs/notes/progress.md` 追加里程碑条目;基线文档能力描述同步。
-- [ ] 8.7 若渲染或 tick 热路径读数变化,运行对应 benchmark 并记录;**性能数值只记录,报告完整性与真实 overflow 仍是门禁**。判定 benchmark scenario 是否需要升版。
+- [ ] 8.7 若渲染或 tick 热路径读数变化,运行对应 benchmark 并记录;**性能数值只记录,报告完整性与真实 overflow 仍是门禁**。判定 benchmark scenario 是否需要升版。**含(Ruling 37)**:为 `advanceCrops` 登记 `stepPhase` 探针,并补一条满编(活动兴趣范围内全部 section)的 `sim` benchmark,实测单 tick 作物阶段耗时与触及格数;数值只记录。
 
 ## 9.(可分离)注释标识符保真门禁
 
