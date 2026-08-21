@@ -24,13 +24,13 @@
 
 ## 4. 锄头、翻地命令与协议 v22
 
-- [ ] 4.1 石锄/铁锄物品与损坏形态接进 `tool-durability` 既有体系;新增 recipe ID `9`/`10`,**既有 ID 1..8 语义不得位移**。验证:`go test ./internal/core -race -count=1`
-- [ ] 4.2 协议 v21 → v22:新增翻地命令 kind,`RejectReason` **只追加不重排**(目标不可翻地、上方非空气、手持非锄头)。wire golden 与 fuzz 同步扩展。验证:`go test ./internal/network -race -count=1`
-- [ ] 4.3 `internal/sim` 实现翻地:走 `openContainer` 同形路径,触及距离校验,成功后改方块并扣一点耐久。验证:`go test ./internal/sim -race -count=1`
-- [ ] 4.4 **同组内同步 `AGENTS.md` 与 `CLAUDE.md` 的协议版本号**(契约版本改动必须与基线文档同批,否则 archcheck 会从本组一直红到最后)。**两份必须逐字节相同。** 验证:`go test ./internal/archcheck -count=1`
-- [ ] 4.5 覆盖 `authoritative-farming` 翻地四条 Scenario 与 `tool-durability` 的两条新 Scenario(翻地成功扣耐久且方块未被移除、翻地被拒不磨损)。验证:`go test ./internal/sim ./internal/network -race -count=1`
-- [ ] 4.6 变异验证:去掉翻地成功后的耐久扣减,确认变红;把拒绝路径改成也扣耐久,确认变红。
-- [ ] 4.7 `cmd/mornlea` 输入层(Ruling 23 计划缺口):手持锄头对泥土/草按「使用」键时发翻地命令而非放置;其余手持物行为不变。客户端只读镜像 + 发命令,不越权威边界。验证:`go test ./cmd/mornlea -race -count=1`
+- [x] 4.1 石锄/铁锄物品与损坏形态接进 `tool-durability` 既有体系;新增 recipe ID `9`/`10`,**既有 ID 1..8 语义不得位移**。验证:`go test ./internal/core -race -count=1`
+- [x] 4.2 协议 v21 → v22:新增翻地命令 kind,`RejectReason` **只追加不重排**(目标不可翻地、上方非空气、手持非锄头)。wire golden 与 fuzz 同步扩展。验证:`go test ./internal/network -race -count=1`
+- [x] 4.3 `internal/sim` 实现翻地:走 `openContainer` 同形路径,触及距离校验,成功后改方块并扣一点耐久。验证:`go test ./internal/sim -race -count=1`
+- [x] 4.4 **同组内同步 `AGENTS.md` 与 `CLAUDE.md` 的协议版本号**(契约版本改动必须与基线文档同批,否则 archcheck 会从本组一直红到最后)。**两份必须逐字节相同。** 验证:`go test ./internal/archcheck -count=1`
+- [x] 4.5 覆盖 `authoritative-farming` 翻地四条 Scenario 与 `tool-durability` 的两条新 Scenario(翻地成功扣耐久且方块未被移除、翻地被拒不磨损)。验证:`go test ./internal/sim ./internal/network -race -count=1`
+- [x] 4.6 变异验证:去掉翻地成功后的耐久扣减,确认变红;把拒绝路径改成也扣耐久,确认变红。
+- [x] 4.7 `cmd/mornlea` 输入层(Ruling 23 计划缺口):手持锄头对泥土/草按「使用」键时发翻地命令而非放置;其余手持物行为不变。客户端只读镜像 + 发命令,不越权威边界。验证:`go test ./cmd/mornlea -race -count=1`
 
 ## 5. 种植与收获
 
