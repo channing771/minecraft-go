@@ -34,7 +34,7 @@
 
 ## Impact
 
-- **受影响包**:`internal/core`(方块与物品编号、掉落表、配方)、`internal/sim`(生长阶段推进、翻地命令、种植与收获校验)、`internal/mesh` 与 `internal/assets`(registry 扩容、植物 material 集合、程序化纹理层)、`internal/physics`(作物零碰撞体、耕地 15/16)、`internal/network`(协议 v22 与新命令 kind)、`internal/world`(`heights` 只读查询)、`internal/config`(生长与湿润 tunable)、`internal/archcheck`(基线版本与依赖登记)、`engine/crates/mornlea_engine`(交叉面几何)、`engine/crates/mornlea_client`(着色器顶点变形)。
+- **受影响包**:`internal/core`(方块与物品编号、掉落表、配方)、`internal/sim`(生长阶段推进、翻地命令、种植与收获校验)、`internal/mesh` 与 `internal/assets`(registry 扩容、植物 material 集合、程序化纹理层)、`internal/physics`(作物零碰撞体、耕地 15/16)、`internal/network`(协议 v22 与新命令 kind)、`internal/world`(`heights` 只读查询)、`internal/config`(生长与湿润 tunable)、`internal/archcheck`(基线版本与依赖登记)、`engine/crates/mornlea_engine`(交叉面几何)、`engine/crates/mornlea_client`(着色器顶点变形)、`cmd/mornlea`(手持锄头时「使用」键发翻地命令)。
 - **兼容性**:协议 v21 → v22。**区块 schema v9、玩家 schema v6、`companions.ai` v4、世界 metadata v2、engine/client ABI v5 全部不变**——农业状态完全落在方块编号里。benchmark scenario 是否需要升版由实现期实测决定。
 - **并发**:生长推进在单写者权威 tick 内串行,与流体、掉落物、熔炉同构,不引入新 goroutine 或锁。
 - **性能**:每 tick 触及 = `section 数 × 3`,由兴趣范围约束;湿润扫描是 `9×9 × 抽中的耕地数`,全部因子为常数或已有上界,**不随农田规模增长**。
