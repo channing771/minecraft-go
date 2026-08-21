@@ -18,9 +18,9 @@
 
 ## 3. 碰撞与耕地形状
 
-- [ ] 3.1 `physics.BlockCollisionBoxes`:作物返回零碰撞体(复用流体分支形状),耕地返回高 `15/16` 的单盒。prism 每格本就携带任意 AABB 数组,**无需 FFI 编码变更**。验证:`go test ./internal/physics -race -count=1`
-- [ ] 3.2 覆盖两条 Scenario:玩家穿过作物、站上耕地低于站上完整方块。验证:`go test ./internal/physics ./internal/sim -race -count=1`
-- [ ] 3.3 复核出生点选取与伙伴寻路是否被新编号意外影响(作物零碰撞体会让它成为可站立空间的一部分),**结论写进报告**;伙伴对流体的既有豁免不得被本变更改动。验证:`go test ./internal/sim ./internal/server -race -count=1`
+- [x] 3.1 `physics.BlockCollisionBoxes`:作物返回零碰撞体(复用流体分支形状),耕地返回高 `15/16` 的单盒。prism 每格本就携带任意 AABB 数组,**无需 FFI 编码变更**。验证:`go test ./internal/physics -race -count=1`
+- [x] 3.2 覆盖两条 Scenario:玩家穿过作物、站上耕地低于站上完整方块。验证:`go test ./internal/physics ./internal/sim -race -count=1`
+- [x] 3.3 复核出生点选取与伙伴寻路是否被新编号意外影响(作物零碰撞体会让它成为可站立空间的一部分),**结论写进报告**;伙伴对流体的既有豁免不得被本变更改动。验证:`go test ./internal/sim ./internal/server -race -count=1`
 
 ## 4. 锄头、翻地命令与协议 v22
 
