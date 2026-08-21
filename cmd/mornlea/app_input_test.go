@@ -1126,3 +1126,71 @@ func TestInteractiveDropSendsOnlyWhenReadyAndAllowed(t *testing.T) {
 		t.Fatalf("客户端创建了本地掉落物：%d", got)
 	}
 }
+
+// TestUseKeySendsTillSoilOnlyForHoeAgainstSoil 覆盖任务 4.7：手持锄头对着
+// 泥土或草按「使用」键必须发翻地命令，其余手持物与目标组合的行为一字不变。
+//
+// 表里既有"必须发翻地"的行，也有四行"必须仍发放置"的对照（普通方块、镐、
+// 损坏锄头、锄头对着石头）。只测翻地那一行的话，一个把所有「使用」都改发
+// 翻地的实现也会全绿。
+func TestUseKeySendsTillSoilOnlyForHoeAgainstSoil(t *testing.T) {
+	stoneFull, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+	hoeFull, _ := core.ItemMaxDurability(core.ItemStoneHoe)
+	for _, tc := range []struct {
+		name   string
+		target core.BlockID
+		held   core.ItemStack
+		till   bool
+	}{
+		{"锄头对草发翻地", core.GrassID,
+			core.ItemStack{Item: core.ItemStoneHoe, Count: 1, Durability: hoeFull}, true},
+		{"锄头对泥土发翻地", core.DirtID,
+			core.ItemStack{Item: core.ItemIronHoe, Count: 1, Durability: 3}, true},
+		{"锄头对石头仍发放置", core.StoneID,
+			core.ItemStack{Item: core.ItemStoneHoe, Count: 1, Durability: hoeFull}, false},
+		{"损坏锄头对草仍发放置", core.GrassID,
+			core.ItemStack{Item: core.ItemBrokenStoneHoe, Count: 1}, false},
+		{"镐对草仍发放置", core.GrassID,
+			core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: stoneFull}, false},
+		{"普通方块对草仍发放置", core.GrassID,
+			core.ItemStack{Item: core.ItemDirt, Count: 1}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, serverEndpoint := newInteractiveTestApplication(t)
+			if err := app.predictor.Begin(network.PlayerState{
+				ServerTick: 1, Dimension: core.Overworld,
+				Position: mgl32.Vec3{0.5, 10, 3.5}, OnGround: true, Ready: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			app.camera = client.Camera{Pos: mgl32.Vec3{0.5, 10.5, 3.5}}
+			target := core.BlockPos{X: 0, Y: 10, Z: 0}
+			loadInteractiveBlock(t, app, target, tc.target)
+			var inventory core.Inventory
+			inventory.Hotbar.Selected = 4
+			inventory.Hotbar.Slots[4] = tc.held
+			if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+				t.Fatal(err)
+			}
+
+			app.placeBlock()
+			message := receiveInteractiveClientMessage(t, serverEndpoint)
+			if tc.till {
+				till, ok := message.(network.TillSoil)
+				if !ok || till != (network.TillSoil{Sequence: 1}) {
+					t.Fatalf("请求 = %#v，想要 sequence 1 的翻地命令", message)
+				}
+			} else if place, ok := message.(network.PlaceBlock); !ok ||
+				place != (network.PlaceBlock{Sequence: 1, Slot: 4}) {
+				t.Fatalf("请求 = %#v，想要放置已确认栏位 4", message)
+			}
+			// 客户端绝不预测式改方块：目标格必须仍是服务端发来的那个编号。
+			if got, loaded := app.mirror.BlockAt(core.Overworld, target); !loaded ||
+				got != tc.target {
+				t.Fatalf("本地镜像被预测式改写: %d, loaded=%v，想要保持 %d",
+					got, loaded, tc.target)
+			}
+			assertNoInteractiveClientMessage(t, serverEndpoint)
+		})
+	}
+}

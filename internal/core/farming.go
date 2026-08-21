@@ -28,3 +28,25 @@ func CropStage(id BlockID) uint8 {
 func IsFarmland(id BlockID) bool {
 	return id >= FarmlandDryID && id <= FarmlandWetID
 }
+
+// TillableBlock 报告方块能否被锄头翻成耕地：只有泥土与草。
+//
+// 耕地自身刻意不在此列——翻过的地不能再翻一次，否则同一格可以被反复翻地，
+// 把锄头耐久无限消耗在一个不产生任何新状态的动作上。
+//
+// 权威模拟与客户端输入层共用这一份判定：客户端只用它决定「使用」键该发哪种
+// 命令，真正的目标仍由服务端的权威射线重新判定，但两边的可翻集合必须是同一
+// 个，否则客户端会对着一个服务端根本不接受的目标发翻地命令。
+func TillableBlock(id BlockID) bool {
+	return id == DirtID || id == GrassID
+}
+
+// TillingTool 报告物品是否是**还有耐久的**锄头，即能否用于翻地。
+//
+// 损坏形态（ItemBrokenStoneHoe / ItemBrokenIronHoe）刻意不在此列：它们是独立
+// 物品编号，语义上等同空手——采掘规则对损坏的镐也是同一种对待。判定写成对两
+// 个完好编号的显式枚举而不是「编号落在锄头区间内」，正是为了让损坏形态不会
+// 因为编号相邻被顺带放行。
+func TillingTool(item ItemID) bool {
+	return item == ItemStoneHoe || item == ItemIronHoe
+}

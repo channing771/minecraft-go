@@ -8,24 +8,6 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// tillingTool 报告选中物品是否是**还有耐久的**锄头。
-//
-// 损坏形态（ItemBrokenStoneHoe / ItemBrokenIronHoe）刻意不在此列：它们是独立
-// 物品编号，语义上等同空手——miningRule 对损坏的镐也是同一种对待。判定写成
-// 对两个完好编号的显式枚举，而不是"编号落在锄头区间内"，正是为了让损坏形态
-// 不会因为编号相邻而被顺带放行。
-func tillingTool(item core.ItemID) bool {
-	return item == core.ItemStoneHoe || item == core.ItemIronHoe
-}
-
-// tillableBlock 报告方块能否被翻成耕地：只有泥土与草。
-//
-// 耕地自身不可再翻——否则同一格可以被反复翻地，把锄头耐久无限消耗在一个不
-// 产生任何新状态的动作上。
-func tillableBlock(block core.BlockID) bool {
-	return block == core.DirtID || block == core.GrassID
-}
-
 // executeTillSoil 处理一条翻地命令：把视线内的泥土或草变成干耕地，并从权威
 // 选中的锄头扣减恰好一点耐久。
 //
@@ -92,7 +74,7 @@ func (engine *Engine) executeTillSoil(
 	if !ready {
 		return RejectChunkNotReady, true
 	}
-	if !tillableBlock(block) {
+	if !core.TillableBlock(block) {
 		return RejectInvalidBlock, true
 	}
 	// 上方必须是**方块编号意义上的空气**，不是"没有碰撞体"：作物与流体都零
@@ -110,7 +92,7 @@ func (engine *Engine) executeTillSoil(
 	// 手持物按权威选中格解析，客户端不参与决定用哪一格。手持物不适用于本次
 	// 动作与"选中物品不产生可放置方块"是同一类事实，复用放置路径已在用的
 	// RejectInvalidBlock。
-	if !tillingTool(player.inventory.Hotbar.Slots[player.inventory.Hotbar.Selected].Item) {
+	if !core.TillingTool(player.inventory.Hotbar.Slots[player.inventory.Hotbar.Selected].Item) {
 		return RejectInvalidBlock, true
 	}
 
