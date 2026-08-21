@@ -388,8 +388,11 @@ func TestRecipeOakPlanksIsFixed(t *testing.T) {
 		recipe.Output != (core.ItemStack{Item: core.ItemOakPlanks, Count: 4}) {
 		t.Fatalf("橡木木板配方 = %+v, %v", recipe, ok)
 	}
-	if _, ok := core.Recipe(core.RecipeID(9)); ok {
-		t.Fatal("未知 recipe ID 9 被接受")
+	// 配方表末项的上界断言随表推进：锄头配方（9/10）落地后，第一个未知
+	// ID 是 11。写成 RecipeIronHoe+1 而不是字面量 11，下次追加配方时它会
+	// 自动跟着末项走，不会静默退化成「测一个早已合法的 ID」。
+	if _, ok := core.Recipe(core.RecipeIronHoe + 1); ok {
+		t.Fatal("未知 recipe ID 11 被接受")
 	}
 }
 
@@ -476,5 +479,92 @@ func TestRecipeLightBlockIsFixedAndAtomic(t *testing.T) {
 				t.Fatalf("失败合成=%+v,%v，想要原值和 false", next, ok)
 			}
 		})
+	}
+}
+
+// TestHoeRecipesAreFixedAndAtomic 锁定两条锄头配方：ID 9 = 2 石头 → 1 石锄，
+// ID 10 = 2 铁锭 → 1 铁锄，产物都是满耐久。位次断言与既有工具配方同形：
+// 配方 ID 是协议稳定值，重排会让客户端已经发出的合成请求指向别的配方。
+func TestHoeRecipesAreFixedAndAtomic(t *testing.T) {
+	if core.RecipeStoneHoe != 9 || core.RecipeIronHoe != 10 {
+		t.Fatalf("锄头配方 ID = stone %d / iron %d，想要 9 / 10",
+			core.RecipeStoneHoe, core.RecipeIronHoe)
+	}
+	if core.RecipeStoneHoe != core.RecipeLightBlock+1 {
+		t.Fatalf("RecipeStoneHoe = %d，必须紧随 RecipeLightBlock(%d)",
+			core.RecipeStoneHoe, core.RecipeLightBlock)
+	}
+	for _, tc := range []struct {
+		name   string
+		id     core.RecipeID
+		input  core.ItemID
+		output core.ItemID
+		full   uint16
+	}{
+		{"石锄", core.RecipeStoneHoe, core.ItemStone, core.ItemStoneHoe, 131},
+		{"铁锄", core.RecipeIronHoe, core.ItemIronIngot, core.ItemIronHoe, 250},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantOutput := core.ItemStack{Item: tc.output, Count: 1, Durability: tc.full}
+			recipe, ok := core.Recipe(tc.id)
+			if !ok || recipe.Input != (core.ItemStack{Item: tc.input, Count: 2}) ||
+				recipe.Output != wantOutput || !recipe.Output.Valid() {
+				t.Fatalf("配方 = %+v, %v，想要 2 个 %d 换满耐久 %+v",
+					recipe, ok, tc.input, wantOutput)
+			}
+
+			// 原料跨栏位扣除 + 产物入空位，与既有工具配方同一条原子路径。
+			var inventory core.Inventory
+			inventory.Hotbar.Slots[2] = core.ItemStack{Item: tc.input, Count: 1}
+			inventory.Backpack[0] = core.ItemStack{Item: tc.input, Count: 1}
+			next, ok := inventory.Craft(tc.id)
+			if !ok {
+				t.Fatal("跨栏位的两份原料应当可以合成")
+			}
+			if next.Hotbar.Slots[2] != (core.ItemStack{}) || next.Backpack[0] != (core.ItemStack{}) {
+				t.Fatalf("原料未被跨栏位扣除: %+v / %+v", next.Hotbar.Slots[2], next.Backpack[0])
+			}
+			if next.Hotbar.Slots[0] != wantOutput {
+				t.Fatalf("新产物 = %+v，想要满耐久锄头 %+v", next.Hotbar.Slots[0], wantOutput)
+			}
+
+			// 原料只有一份时必须整体失败且一字不改。
+			short := core.Inventory{}
+			short.Hotbar.Slots[0] = core.ItemStack{Item: tc.input, Count: 1}
+			if got, ok := short.Craft(tc.id); ok || got != short {
+				t.Fatalf("原料不足时合成必须原子失败: %+v, %v", got, ok)
+			}
+		})
+	}
+}
+
+// TestExistingRecipesDoNotShiftAfterHoes 覆盖 Scenario「既有配方编号不因新增而位移」：
+// 逐条比对 ID 1..8 的原料、数量与产物，任何一条被锄头配方挤位或改写都会变红。
+// 这不是「存在性」断言——每条都钉死了完整的输入输出值。
+func TestExistingRecipesDoNotShiftAfterHoes(t *testing.T) {
+	frozen := []struct {
+		id     core.RecipeID
+		input  core.ItemStack
+		output core.ItemStack
+	}{
+		{1, core.ItemStack{Item: core.ItemStone, Count: 4}, core.ItemStack{Item: core.ItemStoneBrick, Count: 4}},
+		{2, core.ItemStack{Item: core.ItemStone, Count: 8}, core.ItemStack{Item: core.ItemFurnace, Count: 1}},
+		{3, core.ItemStack{Item: core.ItemIronIngot, Count: 9}, core.ItemStack{Item: core.ItemIronBlock, Count: 1}},
+		{4, core.ItemStack{Item: core.ItemStone, Count: 3}, core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 131}},
+		{5, core.ItemStack{Item: core.ItemIronIngot, Count: 3}, core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 250}},
+		{6, core.ItemStack{Item: core.ItemStone, Count: 8}, core.ItemStack{Item: core.ItemChest, Count: 1}},
+		{7, core.ItemStack{Item: core.ItemOakLog, Count: 1}, core.ItemStack{Item: core.ItemOakPlanks, Count: 4}},
+		{8, core.ItemStack{Item: core.ItemGlass, Count: 4}, core.ItemStack{Item: core.ItemLightBlock, Count: 4}},
+	}
+	for _, tc := range frozen {
+		recipe, ok := core.Recipe(tc.id)
+		if !ok || recipe.Input != tc.input || recipe.Output != tc.output {
+			t.Fatalf("recipe %d = %+v, %v，想要 %+v → %+v", tc.id, recipe, ok, tc.input, tc.output)
+		}
+	}
+	// 配方表的新末项：11 之后必须仍然未知，否则说明有人在锄头之后又追加了
+	// 配方却没有同步这条上界断言。
+	if _, ok := core.Recipe(core.RecipeIronHoe + 1); ok {
+		t.Fatal("未知 recipe ID 11 被接受")
 	}
 }
