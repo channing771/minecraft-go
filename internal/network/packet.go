@@ -7,16 +7,19 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// ProtocolVersion 是当前唯一支持的协议版本；v21 在 PlayerState 末尾追加 2 字节
-// 权威氧气并拒绝 v20 及更早登录。
+// ProtocolVersion 是当前唯一支持的协议版本；v22 追加客户端翻地命令并拒绝
+// v21 及更早登录。
 //
-// v21 的唯一变化是 PlayerState 多出 Oxygen（u16，wire 上紧跟 Health 之后）：不新增消息
-// 类型，其余 packet 的 wire 形状、字段布局与全部长度上限都不变。氧气与生命值
-// 同属"只发给玩家本人"的权威值，不进入任何远端玩家消息。
+// v22 的唯一变化是 Play/C→S 多出 ID 13 的 TillSoil（u64 序号 + 两个 f32 朝向，
+// 与 OpenContainer 同形）：既有 packet 的 wire 形状、字段布局与全部长度上限都
+// 不变，服务端拒绝原因也没有新增 wire 值——翻地的四条拒绝路径全部复用既有
+// RejectReason（目标不可翻/手持非锄头 → invalid_block，上方非空气 → occupied，
+// 超出触及距离 → no_target）。
 //
-// 历史：v20 追加 8 个流体方块编号（只扩方块 ID 集合，wire 形状不变），流体变更
-// 走既有区块变更通道（design.md D8）。
-const ProtocolVersion uint32 = 21
+// 历史：v21 在 PlayerState 末尾追加 2 字节权威氧气（u16，紧跟 Health 之后）；
+// v20 追加 8 个流体方块编号（只扩方块 ID 集合，wire 形状不变），流体变更走既有
+// 区块变更通道（design.md D8）。
+const ProtocolVersion uint32 = 22
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -172,6 +175,8 @@ func ValidateClientPacket(state State, packet ClientPacket) error {
 		case DropSelectedItem:
 			return clientPacket.Validate()
 		case ChatCommand:
+			return clientPacket.Validate()
+		case TillSoil:
 			return clientPacket.Validate()
 		case RequestChunkResync:
 			return clientPacket.Validate()

@@ -105,3 +105,23 @@ func (DropSelectedItem) clientMessage() {}
 func (DropSelectedItem) clientPacket()  {}
 
 func (DropSelectedItem) Validate() error { return nil }
+
+// TillSoil 请求把视线内的泥土或草翻成耕地。
+//
+// 与 OpenContainer 同形：只带序号与朝向。客户端**不声明目标格、也不声明栏位**
+// ——目标由服务端的权威射线决定，作用的锄头一律取权威选中的快捷栏格，
+// 与 DropSelectedItem 的"位置与栏位都由服务端决定"是同一条边界。
+type TillSoil struct {
+	Sequence   uint64
+	Yaw, Pitch float32
+}
+
+func (TillSoil) clientMessage() {}
+func (TillSoil) clientPacket()  {}
+
+func (command TillSoil) Validate() error {
+	if !finite32(command.Yaw) || !finite32(command.Pitch) {
+		return errors.New("network: till soil has non-finite rotation")
+	}
+	return nil
+}

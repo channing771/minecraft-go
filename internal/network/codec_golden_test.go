@@ -19,7 +19,7 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"hello", StateHandshake, ClientHello{ProtocolVersion: 21}, 0, "15"},
+		{"hello", StateHandshake, ClientHello{ProtocolVersion: 22}, 0, "16"},
 		{"login start", StateLogin, LoginStart{PlayerID: id, DisplayName: "Chen"}, 0, "00112233445546778899aabbccddeeff044368656e"},
 		{"input", StatePlay, PlayerInput{Sequence: 1, MoveX: -1, MoveZ: 1, Jump: true, Yaw: 1.5, Pitch: -0.5, Mining: true}, 0, "0100000000000000ff01010000c03f000000bf01"},
 		{"place", StatePlay, PlaceBlock{Sequence: 3, Yaw: 2, Pitch: -1, Slot: 4}, 2, "030000000000000000000040000080bf04"},
@@ -31,6 +31,9 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		{"drop selected item", StatePlay, DropSelectedItem{
 			Sequence: 0x1122334455667788,
 		}, 11, "8877665544332211"},
+		// v22 新增：与 place 同样的 u64 序号 + 两个 f32 朝向，但没有栏位字节。
+		{"till soil", StatePlay, TillSoil{Sequence: 12, Yaw: 2, Pitch: -1}, 13,
+			"0c0000000000000000000040000080bf"},
 	}
 	for _, tc := range clients {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,8 +60,8 @@ func TestProtocolV1SmallPacketGolden(t *testing.T) {
 		wantID  uint32
 		wantHex string
 	}{
-		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 21}, 0, "15"},
-		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 21, Code: HandshakeVersionMismatch, Message: "no"}, 1, "1501026e6f"},
+		{"server hello", StateHandshake, ServerHello{ProtocolVersion: 22}, 0, "16"},
+		{"handshake reject", StateHandshake, HandshakeReject{ServerProtocolVersion: 22, Code: HandshakeVersionMismatch, Message: "no"}, 1, "1601026e6f"},
 		{"login success", StateLogin, LoginSuccess{PlayerID: id}, 0, "00112233445546778899aabbccddeeff"},
 		{"login reject", StateLogin, LoginReject{Code: LoginInvalidIdentity, Message: "no"}, 1, "02026e6f"},
 		{"block changes", StatePlay, BlockChanges{Dimension: core.Overworld, Chunk: core.ChunkPos{X: 1, Z: -1}, BaseRevision: 1, NewRevision: 2, Changes: []BlockChange{{Position: core.BlockPos{X: 16, Y: -64, Z: -1}, Block: core.StoneID}}}, 1, "0000000001000000ffffffff010000000000000002000000000000000110000000c0ffffffffffffff0200"},

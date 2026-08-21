@@ -25,6 +25,9 @@ const (
 	CommandCloseFurnace
 	CommandMoveFurnaceStack
 	CommandDropSelectedItem
+	// CommandTillSoil 请求把视线内的泥土或草翻成耕地。只带朝向：目标格由权威
+	// 射线决定，作用的锄头取权威选中的快捷栏格。CommandKind 只追加不重排。
+	CommandTillSoil
 )
 
 // LookDirection 把玩家 look 角转换为单位方向；yaw=0、pitch=0 朝向 -Z。

@@ -7,14 +7,14 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-func TestProtocolVersionIsTwentyOne(t *testing.T) {
-	if ProtocolVersion != 21 {
-		t.Fatalf("协议版本=%d，想要 21", ProtocolVersion)
+func TestProtocolVersionIsTwentyTwo(t *testing.T) {
+	if ProtocolVersion != 22 {
+		t.Fatalf("协议版本=%d，想要 22", ProtocolVersion)
 	}
 }
 
-func TestProtocolV21RejectsPriorVersionsBeforePlay(t *testing.T) {
-	// v20 是上一版本，必须和 v19 及更早版本一样在 Handshake 阶段稳定拒绝，
+func TestProtocolV22RejectsPriorVersionsBeforePlay(t *testing.T) {
+	// v21 是上一版本，必须和 v20 及更早版本一样在 Handshake 阶段稳定拒绝，
 	// 并给出版本不匹配原因。
 	for version := uint32(1); version < ProtocolVersion; version++ {
 		stream := &staticClientHelloStream{version: version}

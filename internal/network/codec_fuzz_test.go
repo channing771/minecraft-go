@@ -16,6 +16,13 @@ func FuzzSmallPacketCodec(f *testing.F) {
 	}); err == nil {
 		f.Add(uint8(StatePlay), id, payload)
 	}
+	// TillSoil 的种子同样由编码器现算：v22 的唯一 wire 变化必须进入语料，
+	// 且形状随字段变动自动跟上。
+	if id, payload, err := encodeClientPacketPayload(StatePlay, TillSoil{
+		Sequence: 0x0102030405060708, Yaw: 1.5, Pitch: -0.5,
+	}); err == nil {
+		f.Add(uint8(StatePlay), id, payload)
+	}
 	f.Fuzz(func(t *testing.T, rawState uint8, packetID uint32, payload []byte) {
 		state := State(rawState)
 		if packet, err := decodeClientPacketPayload(state, packetID, payload); err == nil {
