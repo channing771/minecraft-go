@@ -118,6 +118,9 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 | 18 | HUD 物品图集宽度随 `ItemIDMax` 增长,`hotbarTextureUV` 不做 texel 中心对齐,追加物品会让**既有**图标亚像素漂移(本变更 `hud-hotbar-health` 0.115%) | 改 UV 采样策略是渲染改动,不在农业范围;本次按「确认采样层正确 → 重生成」处理 | 独立变更:UV 按 texel 中心或整数像素计算,使图集扩列不影响既有列 |
 | 19 | `internal/server` 既有登录等待循环多数无界(`farming_integration_test.go:117`、`till_soil_integration_test.go:109` 等),挂起时表现为 5 分钟超时而非可读断言 | 本变更只给新增的端到端加了有界预算;改既有用例属测试基础设施整理 | 独立小变更:统一用有预算的等待助手 |
 | 20 | 合成面板 8→10 行使 `openHUDHeight` 670→774,高度 < 790 px 的窗口打开态 HUD 整体缩小(1280×720 下 scale 1 → 0.91) | 由既有「面板必须装进窗口」门禁强制;滚动或压行距是 HUD 布局改动,不在农业范围 | HUD 合成面板分页/滚动,或按窗口高度自适应行距 |
+| 21 | 作物阶段的**墙钟单价**随耕地密度上升：`cropCellsExamined` 按「被抽中的格数」计量并与作物数无关（三档实测 cells/op 完全相等），但抽中一格耕地要额外扫 9×9×2 = 162 格判湿润。实测满编 200 区块 0 株 113.9 µs/tick、51,200 株 159.2 µs/tick（+40%），单区块全耕地夹具给出单价上界 646 ns/样本，外推到 14400 个样本全落耕地约 9.3 ms/tick（20 TPS 预算的 19%） | 上界由**抽样数 × 162**决定而非作物数，因此仍是有界的；把它压下去要给湿润判定加缓存或改成事件驱动，而后者正是 D6 因扇出无上界而否决的方案 | 若将来成为问题：给耕地缓存一位「上次判定的湿度 + 判定 tick」，或把湿润扫描的半径做成 tunable；**若作物分支也开始扫 9×9**，必须同时把成本契约的计量口径从「格数」改成「方块读取次数」（`advanceCrops` 的注释已钉住这条） |
+| 22 | 既有缺陷：`cmd/perfcheck/migration_test.go` 的 `TestPerfcheckV15SameCommitExplicitCrossTransportComparison` 失败信息写的是「v16 同 commit 显式跨 transport 比较」，而它比的是两份 v15 报告 | 早于本变更存在（F2 升 v16→v17 时的批量替换波及），与农业无关；本变更只在同文件里做 v17→v18 的等价位移，不顺手改无关行 | 独立小型修复（一处字符串），建议按直接修改豁免处理 |
+| 23 | 本变更把 producer 升到 scenario v18，但**没有生成任何 v18 的 Memory/TCP record-only 报告** | 与 F2 升到 v17 时同样未生成 v17 报告一致：benchmark 需要 macOS 图形栈上约 3.5 分钟的独占满载运行，且数值只记录、不构成门禁；`docs/notes/perf-baseline.md` 当前记录的仍是 producer 还停在 v16 时的 M5A 证据 | 需要新的性能证据时按 `perf-baseline.md` 首节的规则重跑并追加一节 v18 记录；M2 v15 与 M5 v14 baseline JSON 不因此提升 |
 
 ## 验证策略
 

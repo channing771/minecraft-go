@@ -30,6 +30,11 @@ const plantingParitySeeds = uint8(4)
 // 脚本刻意同时走拒绝与成功两条路：先在**没翻过的草地**上种一次（必须被拒且
 // 一颗种子都不掉），再翻地、再种一次（必须成功且恰好扣一颗）。只跑成功那一半
 // 的话，一个把种子种到任何地面上的实现照样能让两种传输一致。
+//
+// 锄头**由脚本自己合成**而不是塞进初始背包：`authoritative-crafting` 主规格
+// 要求「新增配方 …… 相同初始状态与命令序列经 Memory 和 TCP MUST 得到相同
+// 结果」，而 recipe 9/10 此前只有 core 层的原子性单测，没有任何跨传输证据。
+// 让本脚本以 recipe 9 起手，这条限定词就随种植一起被两种传输各跑一遍。
 func TestPlantSeedsMemoryTCPParity(t *testing.T) {
 	memory := runPlantingParityScript(t, "memory")
 	tcp := runPlantingParityScript(t, "tcp")
@@ -49,7 +54,12 @@ func TestPlantSeedsMemoryTCPParity(t *testing.T) {
 		t.Fatalf("客户端镜像里的作物格 = %d，想要第一阶段作物 %d",
 			memory.Crop, core.WheatStage0ID)
 	}
-	want := network.CommandRejected{Sequence: 1, Reason: network.RejectInvalidBlock}
+	full, _ := core.ItemMaxDurability(core.ItemStoneHoe)
+	wantHoe := core.ItemStack{Item: core.ItemStoneHoe, Count: 1, Durability: full - 1}
+	if got := memory.Inventory.Hotbar.Slots[0]; got != wantHoe {
+		t.Fatalf("合成并翻地一次后的选中格 = %+v，想要耐久恰好 −1 的石锄 %+v", got, wantHoe)
+	}
+	want := network.CommandRejected{Sequence: 2, Reason: network.RejectInvalidBlock}
 	if memory.Rejection != want {
 		t.Fatalf("未翻地就种的拒绝 = %+v，想要 %+v", memory.Rejection, want)
 	}
@@ -61,11 +71,11 @@ func runPlantingParityScript(t *testing.T, transport string) plantingParityResul
 	store := storage.NewMemory(storage.Metadata{
 		FormatVersion: 2, Seed: 42, SpawnDimension: core.Overworld,
 	})
-	full, _ := core.ItemMaxDurability(core.ItemStoneHoe)
 	var initial core.Inventory
-	// 锄头放在**选中格**（翻地只认权威选中格），种子放在第 1 格（放置命令自带
-	// 栏位号，不需要选中）。
-	initial.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStoneHoe, Count: 1, Durability: full}
+	// 第 0 格放恰好两块石头：它既是 recipe 9 的全部原料，也是合成后唯一的空位，
+	// 于是产出的石锄正好落回**选中格**（翻地只认权威选中格）。种子放在第 1 格
+	// （放置命令自带栏位号，不需要选中）。
+	initial.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 2}
 	initial.Hotbar.Slots[1] = core.ItemStack{
 		Item: core.ItemWheatSeeds, Count: plantingParitySeeds,
 	}
@@ -126,18 +136,23 @@ func runPlantingParityScript(t *testing.T, transport string) plantingParityResul
 		}
 	}
 
+	// 合成石锄：两块石头换一把满耐久石锄，落回第 0 格。
+	send(network.CraftRecipe{Sequence: 1, Recipe: core.RecipeStoneHoe})
+	for range 3 {
+		step()
+	}
 	// 第一次种植：脚下还是草，必须被拒且一颗种子都不掉。
-	send(network.PlaceBlock{Sequence: 1, Pitch: tillSoilLookDown, Slot: 1})
+	send(network.PlaceBlock{Sequence: 2, Pitch: tillSoilLookDown, Slot: 1})
 	for range 3 {
 		step()
 	}
 	// 翻地：脚下那格草变成耕地。
-	send(network.TillSoil{Sequence: 2, Pitch: tillSoilLookDown})
+	send(network.TillSoil{Sequence: 3, Pitch: tillSoilLookDown})
 	for range 3 {
 		step()
 	}
 	// 第二次种植：同一条命令，这次必须成功。
-	send(network.PlaceBlock{Sequence: 3, Pitch: tillSoilLookDown, Slot: 1})
+	send(network.PlaceBlock{Sequence: 4, Pitch: tillSoilLookDown, Slot: 1})
 	for range 3 {
 		step()
 	}

@@ -13,8 +13,9 @@ import (
 )
 
 // TestCompanionActionAppliesInIDOrderAfterPlayers 锁定权威 tick 的固定阶段顺序：
-// 玩家命令 → 按 ID 字节序的伙伴 action → 统一物理推进。三个阶段写互不相交的
-// 状态，仅凭外部结果无法观察先后，因此用 stepPhaseObserver 探针直接断言 Step
+// 玩家命令 → 按 ID 字节序的伙伴 action → 统一物理推进 → 流体推进 → 作物推进。
+// 五个阶段写互不相交的状态，仅凭外部结果无法观察先后，因此用
+// stepPhaseObserver 探针直接断言 Step
 // 进入阶段的次序（这也是突变验证的锚点），同时用两名玩家与两个伙伴的位移验证
 // 同 tick 双方都被处理、action 按 CompanionID 正确寻址且两次相同输入的重放
 // 产生完全一致的可观察结果。

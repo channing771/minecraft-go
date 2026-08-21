@@ -58,14 +58,14 @@
 
 ## 8. 收尾门禁与归档准备
 
-- [ ] 8.1 `make rust` 与 `make rust-check` 后运行 `go test ./... -race -count=1`。**已知既有红灯不得修改、不得改阈值**:`TestChatCommandAddressesExactConfiguredCompanionAtTickBoundary`(单独 `-run` 时约 9/10 失败、全包跑时通过,测试隔离缺陷)、`TestDroppedItemSurvivesShutdownAndRestart` 与 `TestAuthoritativeMiningMemoryLifecycle`(90 秒超时,macOS 时序抖动)。出现这三条之外的失败必须上报。
-- [ ] 8.2 `go vet ./...` 与 `gofmt -l .`(后者应无输出)。
-- [ ] 8.3 `openspec validate --all --strict --no-interactive`。
-- [ ] 8.4 核对 `tasks.md` 全部勾选、实现与六个 delta spec 一致;偏离时**先修订 OpenSpec 产物**。
-- [ ] 8.5 **遗留与简化清单落纸**:核对 `design.md` 的清单已覆盖执行期间新出现的每一条简化。
-- [ ] 8.6 `docs/notes/progress.md` 追加里程碑条目;基线文档能力描述同步。
-- [ ] 8.7 若渲染或 tick 热路径读数变化,运行对应 benchmark 并记录;**性能数值只记录,报告完整性与真实 overflow 仍是门禁**。判定 benchmark scenario 是否需要升版。**含(Ruling 37)**:为 `advanceCrops` 登记 `stepPhase` 探针,并补一条满编(活动兴趣范围内全部 section)的 `sim` benchmark,实测单 tick 作物阶段耗时与触及格数;数值只记录。
-- [ ] 8.8 `hud-hotbar-health` golden(Ruling 42):组 1 追加物品编号使 `ItemIDMax` 30→36、HUD 图集变宽、石头/石砖缩略图 UV 亚像素漂移(0.115%,最大通道差 47)。**先**像素级确认新缩略图采样的仍是石头/石砖层(与 `registry.LayerRGBA` 直接比对),**再**重生成该 golden 并说明差异来源;若采样到了邻层,那是缺陷,停下上报。验证:capture 比对 EXIT=0
+- [x] 8.1 `make rust` 与 `make rust-check` 后运行 `go test ./... -race -count=1`。**已知既有红灯不得修改、不得改阈值**:`TestChatCommandAddressesExactConfiguredCompanionAtTickBoundary`(单独 `-run` 时约 9/10 失败、全包跑时通过,测试隔离缺陷)、`TestDroppedItemSurvivesShutdownAndRestart` 与 `TestAuthoritativeMiningMemoryLifecycle`(90 秒超时,macOS 时序抖动)。出现这三条之外的失败必须上报。 **前置**：`farmingLoginBudget` 600 → 3000（Ruling 44，实测卡点是异步区块生成，空闲机器约 202 tick、满载 300+；该预算唯一职责是把挂起变成可读失败）。
+- [x] 8.2 `go vet ./...` 与 `gofmt -l .`(后者应无输出)。
+- [x] 8.3 `openspec validate --all --strict --no-interactive`。
+- [x] 8.4 核对 `tasks.md` 全部勾选、实现与六个 delta spec 一致;偏离时**先修订 OpenSpec 产物**。 **结论**：查出两处偏离并按「先修订 OpenSpec 产物」处理——(a) `authoritative-crafting` 的 MODIFIED 整块替换掉了主规格 11 条 Scenario 中的 10 条（归档即静默删除），已原样带回并把「未知配方大于 `8`」更新为「大于 `10`」；(b) 主规格对**新增配方**的限定词「相同初始状态与命令序列经 Memory 和 TCP MUST 得到相同结果」对 recipe 9/10 零承重，已把既有 `TestPlantSeedsMemoryTCPParity` 的开局改成脚本自己合成 recipe 9（新增 8 行）并补上对应 Scenario。其余 Requirement 正文的限定词逐条核对均有承重测试。
+- [x] 8.5 **遗留与简化清单落纸**:核对 `design.md` 的清单已覆盖执行期间新出现的每一条简化。 本组新增残余 21（作物阶段的墙钟单价随耕地密度上升，上界由「抽样数 × 162」决定而非作物数）、22（既有缺陷：`TestPerfcheckV15SameCommitExplicitCrossTransportComparison` 的失败信息写成 v16）、23（升到 scenario v18 但未生成 v18 的 record-only 报告）。
+- [x] 8.6 `docs/notes/progress.md` 追加里程碑条目;基线文档能力描述同步。 条目以变更名开头、不用「当前」；`AGENTS.md`/`CLAUDE.md` 基线名改为「`fluid-presentation-survival` 之后的 `authoritative-farming`」、能力写成现存事实、benchmark scenario 与迁移改为 v18/`17:18`，两份逐字节相同；`README.md`/`README.en.md` 与 `docs/notes/perf-baseline*.md` 的活文档句同步（快照节不动）。
+- [x] 8.7 若渲染或 tick 热路径读数变化,运行对应 benchmark 并记录;**性能数值只记录,报告完整性与真实 overflow 仍是门禁**。判定 benchmark scenario 是否需要升版。**含(Ruling 37)**:为 `advanceCrops` 登记 `stepPhase` 探针,并补一条满编(活动兴趣范围内全部 section)的 `sim` benchmark,实测单 tick 作物阶段耗时与触及格数;数值只记录。 **结论**：`advanceCrops` 已登记 `phaseCropAdvance`（单独登记而非折进流体阶段，两者成本模型不同）。满编 200 区块（8 会话、兴趣范围互不重叠）在默认 tunable 下单 tick 约 113.9 µs、触及 14400 格、零分配；256 株与 51,200 株两档对照 cells/op 完全相等（Dense 慢 40% 是耕地单价差，见残余 21）。**benchmark scenario 判定为 v17 → v18（必须升）**：Hotbar HUD 固定上传布局移动（quad 238 → 247、glyph offset 11776 → 12288、总容量 45376 → 45888、空聊天帧写入 11776 → 12288），命中的正是主规格判定 v15 → v16 时用的同一条条文；另有 mesh registry 每次调用的 FFI 输入 910 → 1170 bytes 与新增的每 tick 枚举全部区段的作物阶段。唯一显式迁移改为 `17:18`、`16:17` 退为归档证据，新增 `bounded-benchmark-workload` delta spec，基线文档与 `perf-baseline*.md` 活文档句同步。
+- [x] 8.8 `hud-hotbar-health` golden(Ruling 42):组 1 追加物品编号使 `ItemIDMax` 30→36、HUD 图集变宽、石头/石砖缩略图 UV 亚像素漂移(0.115%,最大通道差 47)。**先**像素级确认新缩略图采样的仍是石头/石砖层(与 `registry.LayerRGBA` 直接比对),**再**重生成该 golden 并说明差异来源;若采样到了邻层,那是缺陷,停下上报。验证:capture 比对 EXIT=0 **结论**：像素级确认通过——石头/石砖缩略图与 `registry.LayerRGBA` 逐层比对后最接近的仍是层 0 与层 5（排名 1，MAE 8.582 / 3.232，次优层 12.725 / 14.562），纹素内部像素 219/256 与 253/256 逐字节相等（不等者全部是叠加在缩略图上的数量数字），列 UV 的 texel 边界与整数列边界相差约 4e-6 纹素，**不是邻层**。确认后只重生成这一张，capture 比对回到 EXIT=0、其余 12 张逐字节不变；并新增 `TestHotbarColumnUVStaysInsideItsOwnColumn` 把「列 UV 不越界」变成机械断言（已变异验证）。
 
 ## 9.(可分离)注释标识符保真门禁
 
