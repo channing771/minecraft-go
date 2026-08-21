@@ -45,9 +45,40 @@ func TestDownsampleCutoutPreservesCoverageAndRGBMean(t *testing.T) {
 	}
 }
 
+// TestWheatLayersTakeTheCutoutMipPath 是**位置性**断言：小麦层必须真的走
+// downsampleCutout 那条分支，而不是仅仅"存在一条 mip 链"。
+//
+// 只断言链长或最后一层非空是恒真的——两条分支都给得出。这里比的是同一层在两条
+// 分支下的产物：麦秆细到 1 像素，盒式降采样把 alpha 平均到 64 上下，一过
+// `c.a < 0.5` 的 discard 远处整片作物就消失了，而保覆盖率降采样给 255。
+func TestWheatLayersTakeTheCutoutMipPath(t *testing.T) {
+	r := NewRegistry()
+	for layer := LayerWheat0; layer <= LayerWheat7; layer++ {
+		chain := r.layerMipChain(int(layer))
+		if len(chain) != atlasMips {
+			t.Fatalf("小麦层 %d 的 mip 链长度 = %d，想要 %d", layer, len(chain), atlasMips)
+		}
+		src := r.LayerRGBA(int(layer))
+		wantCutout := downsampleCutout(src, texSize)
+		wantPlain := downsample(src, texSize)
+		if string(chain[1]) != string(wantCutout) {
+			t.Fatalf("小麦层 %d 的 mip 1 不是 downsampleCutout 的产物", layer)
+		}
+		// 夹具承重守卫排在真实断言之后：两条分支必须真的不同，否则上面那条
+		// 断言在"随便哪条分支"下都成立。
+		if string(wantCutout) == string(wantPlain) {
+			t.Fatalf("小麦层 %d 的两条降采样分支产物相同，位置性断言退化为恒真", layer)
+		}
+	}
+}
+
 func TestCutoutMipChainKeepsOpaqueCoverage(t *testing.T) {
 	r := NewRegistry()
-	for _, layer := range []uint16{LayerLeaves, LayerGlass} {
+	layers := []uint16{LayerLeaves, LayerGlass}
+	for layer := LayerWheat0; layer <= LayerWheat7; layer++ {
+		layers = append(layers, layer)
+	}
+	for _, layer := range layers {
 		px, size := r.LayerRGBA(int(layer)), texSize
 		for size > 1 {
 			px = downsampleCutout(px, size)
