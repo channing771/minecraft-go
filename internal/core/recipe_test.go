@@ -456,6 +456,15 @@ func TestRecipeLightBlockIsFixedAndAtomic(t *testing.T) {
 
 	var insufficient core.Inventory
 	insufficient.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemGlass, Count: 3}
+	// stocked 装满全部配方原料，专供「未知 ID」那一行：它因此只可能因为
+	// **ID 未知**被拒。原先那行共用 insufficient（3 个玻璃、无石头），
+	// 在 ID 9 被石锄配方占用后只是恰好缺料才继续绿，已经退化成「玻璃不足」
+	// 的复读——魔数被新编号占用是 F2「尾部偏移静默改指」的变体。
+	var stocked core.Inventory
+	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: core.MaxStackCount}
+	stocked.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronIngot, Count: core.MaxStackCount}
+	stocked.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemGlass, Count: core.MaxStackCount}
+	stocked.Hotbar.Slots[3] = core.ItemStack{Item: core.ItemOakLog, Count: core.MaxStackCount}
 	noRoom := core.Inventory{}
 	for slot := range noRoom.Hotbar.Slots {
 		noRoom.Hotbar.Slots[slot] = core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount}
@@ -471,7 +480,7 @@ func TestRecipeLightBlockIsFixedAndAtomic(t *testing.T) {
 	}{
 		{"玻璃不足", insufficient, core.RecipeLightBlock},
 		{"产物无容量", noRoom, core.RecipeLightBlock},
-		{"未知 ID 9", insufficient, core.RecipeID(9)},
+		{"未知 ID 11", stocked, core.RecipeIronHoe + 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			next, ok := test.inventory.Craft(test.recipe)
