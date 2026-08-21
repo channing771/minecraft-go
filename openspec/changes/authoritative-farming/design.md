@@ -121,6 +121,8 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 | 21 | 作物阶段的**墙钟单价**随耕地密度上升：`cropCellsExamined` 按「被抽中的格数」计量并与作物数无关（三档实测 cells/op 完全相等），但抽中一格耕地要额外扫 9×9×2 = 162 格判湿润。实测满编 200 区块 0 株 113.9 µs/tick、51,200 株 159.2 µs/tick（+40%），单区块全耕地夹具给出单价上界 646 ns/样本，外推到 14400 个样本全落耕地约 9.3 ms/tick（20 TPS 预算的 19%） | 上界由**抽样数 × 162**决定而非作物数，因此仍是有界的；把它压下去要给湿润判定加缓存或改成事件驱动，而后者正是 D6 因扇出无上界而否决的方案 | 若将来成为问题：给耕地缓存一位「上次判定的湿度 + 判定 tick」，或把湿润扫描的半径做成 tunable；**若作物分支也开始扫 9×9**，必须同时把成本契约的计量口径从「格数」改成「方块读取次数」（`advanceCrops` 的注释已钉住这条） |
 | 22 | 既有缺陷：`cmd/perfcheck/migration_test.go` 的 `TestPerfcheckV15SameCommitExplicitCrossTransportComparison` 失败信息写的是「v16 同 commit 显式跨 transport 比较」，而它比的是两份 v15 报告 | 早于本变更存在（F2 升 v16→v17 时的批量替换波及），与农业无关；本变更只在同文件里做 v17→v18 的等价位移，不顺手改无关行 | 独立小型修复（一处字符串），建议按直接修改豁免处理 |
 | 23 | 本变更把 producer 升到 scenario v18，但**没有生成任何 v18 的 Memory/TCP record-only 报告** | 与 F2 升到 v17 时同样未生成 v17 报告一致：benchmark 需要 macOS 图形栈上约 3.5 分钟的独占满载运行，且数值只记录、不构成门禁；`docs/notes/perf-baseline.md` 当前记录的仍是 producer 还停在 v16 时的 M5A 证据 | 需要新的性能证据时按 `perf-baseline.md` 首节的规则重跑并追加一节 v18 记录；M2 v15 与 M5 v14 baseline JSON 不因此提升 |
+| 24 | 植物几何未加入 capture 视觉门禁(13 个场景无麦田)——**有意**:`engine/crates/mornlea_client/src/render/plant_tests.rs` 是真 GPU 离屏渲染,四方向读数对称、X 形对轴向实心面做对照并带夹具承重守卫,比一张 golden 更强;capture golden 对交叉面的亚像素噪声也更敏感 | 加场景要 `water-underwater` 之外再排序约束且收益低于既有离屏测试 | 若后续植物种类增多(花草树苗),加一张「农田 + 花草」场景并记录差异来源 |
+| 25 | 可玩性后果:无水桶 + 干耕地不生长 ⇒ 农业只能在天然水体水平切比雪夫 4 格内进行(规格与实现均忠实) | 水桶是 F1/F2 的显式非目标;本变更不引入可搬运流体 | 下一个变更(饥饿)直接消费这条约束;水桶交付后自然解除 |
 
 ## 验证策略
 
