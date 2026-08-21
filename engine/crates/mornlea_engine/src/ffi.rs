@@ -821,7 +821,11 @@ mod mesh_tests {
 
     #[test]
     fn exported_version_is_five() {
-        // engine ABI v5:mesh registry 条目上限 27 → 35(流体进入 registry 快照)。
+        // mesh registry 条目上限不在 engine ABI 版本契约内：Go/Rust 两侧数值
+        // 是否一致由容量同步测试 TestNativeAcceptsRegistryAtGoCapacity 守护，
+        // 跨版本混装由 release unit 纪律兜底，上限变化不需要跟着升本版本号。
+        // 历史记录（仅记账，不代表升级触发条件）：v5 时 27 → 35（流体进入
+        // registry 快照），后续变更 35 → 48。
         assert_eq!(mornlea_engine_abi_version(), 5);
     }
 }

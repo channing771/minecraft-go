@@ -34,21 +34,20 @@ func TestFarmingBlockIDsAppendAfterFluids(t *testing.T) {
 
 // TestBlockIDMaxGuardsExhaustiveEnumeration 锁定 BlockIDMax 独占哨兵与枚举末项
 // 的关系（与 ItemIDMax 同形）：当前最后一个合法方块必须是 WheatStage7ID。
-// 方块演进纪律是只能在哨兵之前追加；将来追加新编号时第一个断言变红，迫使开发者
+// 方块演进纪律是只能在哨兵之前追加；将来追加新编号时这条位次断言变红，迫使开发者
 // 同步审视全部以「id < BlockIDMax」为穷举界的测试与哨兵，而不是让它们静默退化
 // 成子集——历史上以 MossyCobblestoneID、WaterLevel7ID 为界写死的循环上界正是这
 // 样在五个包里失效过。
+//
+// 本测试不覆盖「有人把新编号追加在哨兵之后」：RegisteredBlock 现在是纯算术
+// 判定 id < BlockIDMax，对哨兵之外的 id 恒为 false，扫描它没有意义。哨兵后
+// 追加且补注册显示名的情况，由 TestBlockDisplayNameCoversRegisteredBlocks 的
+// 计数比对抓住；追加但不登记显示名的方块完全惰性、一用就在别处炸开，不值得
+// 为这种自毁式误用另建守卫。
 func TestBlockIDMaxGuardsExhaustiveEnumeration(t *testing.T) {
 	if core.WheatStage7ID != core.BlockIDMax-1 {
 		t.Fatalf("BlockID 枚举末项不再是 WheatStage7ID（BlockIDMax-1 = %d）；"+
 			"新增方块必须同步审视全部以 BlockIDMax 为穷举界的测试与哨兵", core.BlockIDMax-1)
-	}
-	// 哨兵之外不得再出现已注册方块：若有人把新编号追加在哨兵之后，穷举界会
-	// 静默漏掉它，这里用有界前瞻扫描兜底报警。扫描宽度只作绊线不是完备证明。
-	for id := core.BlockIDMax; id < core.BlockIDMax+64; id++ {
-		if core.RegisteredBlock(id) {
-			t.Fatalf("方块 %d 注册在 BlockIDMax 哨兵之外，独占穷举界失效", id)
-		}
 	}
 }
 
