@@ -13,27 +13,32 @@ section mesh)完全不动,远环由客户端本地确定性生成纯地表壳 me
 
 ## What Changes
 
-- Rust engine:ABI 3→4,新增 `mornlea_lod_shell` 纯函数批量导出——输入
+- Rust engine:ABI 5→6(变基重编,原 3→4;main 的 fluid 系列占用 v4/v5),
+  新增 `mornlea_lod_shell` 纯函数批量导出——输入
   perm 播种字节(与 `mornlea_worldgen_chunk` 同格式)、tile 原点、列数与
   LOD 步长(2/4/8);内部复用 worldgen 高度与表层材质选择,步长内列高取
   max(保守遮挡),同材质等高顶面贪心合并,高度断差生成侧裙 quad(接缝在
   构造上不可能裂开),输出带世界坐标 terrain UV 与斜坡着色权重的壳 quad
   流;status/两段式 overflow 语义与既有导出一致,无状态纯函数。
-- Rust client:ABI 4→5,新增 `render_upload_lod_tile`/`render_drop_lod_tile`
+- Rust client:ABI 5→7(变基重编,原 4→5/6;v5 为 main 的 water pass),
+  新增 `render_upload_lod_tile`/`render_drop_lod_tile`
   与远环独立 pipeline(大尺寸世界坐标 quad);距离雾按相机距离向天空色
   衰减,外缘带全雾,雾色与昼夜 tint 同源;帧序为天空 → 远环 → 近环
   terrain → 实体/HUD,远环写深度。
-- 协议 v16→v18:`LoginSuccess` 增加 `WorldSeed uint64`(种子即真相的
-  前提是种子到达客户端);v17 已被进行中的 M5B(companion planning)占用,
-  本变更排在其后落地。
+- 协议 v21→v23:`LoginSuccess` 增加 `WorldSeed uint64`(种子即真相的
+  前提是种子到达客户端);v22 已被在飞的 authoritative-farming 占用,
+  本变更排在其后落地(变基重编:本段在旧基线上原编号 v16→v18,main 合并
+  fluid 系列至 v21 后顺延)。
 - Go:新建 `internal/lod`(tile 环形队列,语义镜像 SectionScheduler:
   pending 覆盖、由近到远、界外丢弃;独立帧预算,不与近环共享);
   `internal/nativeabi` 新增绑定;config 新增 `lodEnabled`、
   `lodFarMultiplier`(默认 3)、`lodStep`(默认 4)调参。
-- 视觉与门禁:既有 capture golden 因远景入画重新生成(变化仅限远景带,
-  近处内容不变),新增 `far-horizon` 场景;benchmark 远环默认禁用,
-  scenario 保持 v16;用 `mornlea_worldgen_probe` 高度差分 + 壳覆盖性质
-  结构测试替代第二套 Go 壳 oracle。
+- 视觉与门禁:既有 capture golden 因远景入画与注水地形重新生成(变化仅
+  限远景带与水景,近处内容不变),新增 `far-horizon` 场景(变基排序:
+  排在 `water-underwater` 之前、倒数第二);benchmark 远环默认禁用,
+  scenario 保持 v17;用 `mornlea_worldgen_probe` 高度差分 + 壳覆盖性质
+  结构测试替代第二套 Go 壳 oracle,海平面以下的窗口按 Ruling 22 钳到
+  水面并取水材质(水下不发裙边)。
 
 ## Capabilities
 
@@ -47,8 +52,8 @@ section mesh)完全不动,远环由客户端本地确定性生成纯地表壳 me
 
 无既有主规格的文本修改;`voxel-visual-presentation`、
 `visual-verification` 描述的近环行为 MUST 原样成立(golden 更新仅因
-新增远景带),协议相关主规格随 v18 在归档时由本 capability 的迁移说明
-覆盖。
+新增远景带与水景),协议相关主规格随 v23 在归档时由本 capability 的迁移
+说明覆盖。
 
 ## Impact
 
@@ -58,12 +63,16 @@ section mesh)完全不动,远环由客户端本地确定性生成纯地表壳 me
   `internal/client`(上传绑定)、`internal/network`(LoginSuccess +
   协议版本)、`internal/config`、`cmd/mornlea`、`internal/archcheck`、
   capture golden 资产。
-- 兼容性:engine ABI 3→4、client ABI 4→5、协议 v16→v18;区块 schema v8、
-  玩家 schema v6、世界 metadata v2、`companions.ai` schema v1 均不变;
-  benchmark scenario 保持 v16;M2 v15/M5 v14 基线原字节;Linux 专服
-  不链接 client 库、不下发种子、零影响。
-- 排序约束:v17 已被 M5B 分支占用,本变更 MUST 在 M5B 合并后落地;若顺序
-  对调,两变更需互换版本号并同步改 wire 测试。
+- 兼容性:engine ABI 5→6、client ABI 5→7(6=远环 tile 出口、7=雾 setter,
+  变基重编——main 的 water pass 占用 v5 后整体顺延)、协议 v21→v23;
+  区块 schema v9、玩家 schema v6、世界 metadata v2、`companions.ai`
+  schema v4 均不变;benchmark scenario 保持 v17;M2 v15/M5 v14 基线
+  原字节;Linux 专服不链接 client 库、不下发种子、零影响。
+- 排序约束:协议版本上 v22 已被在飞的 authoritative-farming 占用,本变更
+  重编为 v23 并 MUST 排在其后落地;若两变更的合并顺序对调,需互换版本号
+  并同步改握手拒绝矩阵与 golden wire 测试。远环壳的 engine ABI 段在旧
+  基线原编号 v4、client 段原编号 v5/v6,main 合并 fluid 系列(占用
+  engine v4/v5 与 client v5)后分别重编为 v6 与 v6/v7。
 - 性能:远环生成按 tile(4×4 chunk)分摊到帧预算;benchmark/perfcheck
   数值只记录。
 - 回退:远环独立于近环管线,`lodEnabled=false` 即行为级回退;整支 revert

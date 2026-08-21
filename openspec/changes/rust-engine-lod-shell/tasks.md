@@ -1,6 +1,7 @@
 # Tasks: rust-engine-lod-shell
 
-前置约束:协议 v18 依赖 M5B(v17)先行合并;若顺序对调先互换版本号再动工。
+前置约束:协议段重编为 v23——变基后基线为 main v21,v22 已被在飞的
+authoritative-farming 占用,本变更排其后;若顺序对调先互换版本号再动工。
 
 ## 1. engine 壳生成核心(Rust)
 
@@ -11,11 +12,12 @@
 - [x] 1.2 确定性 golden:固定 seed/tile/step 的输出字节回归测试;
       验证:`cargo test -p mornlea_engine`。
 
-## 2. engine ABI v4 与 Go 绑定
+## 2. engine ABI v6 与 Go 绑定(变基重编,原编号 v4)
 
 - [x] 2.1 `ffi.rs` 出口 `mornlea_lod_shell`(入口校验、两段式 overflow、
       panic catch),`engine/include/mornlea_engine.h` 同步并升
-      `MORNLEA_ENGINE_ABI_VERSION` 到 4;版本拒绝与容量探测单测;
+      `MORNLEA_ENGINE_ABI_VERSION` 到 6(变基重编:main 的 fluid 系列已占用
+      v4/v5);版本拒绝与容量探测单测;
       验证:`cargo test -p mornlea_engine && cargo clippy --all-targets
       -- -D warnings`。
 - [x] 2.2 `internal/nativeabi` 绑定与输入输出编码测试;probe 高度差分与
@@ -25,16 +27,16 @@
 - [x] 2.3 新建 `internal/lod` 包并登记 `internal/archcheck` 依赖;
       验证:`go test ./internal/archcheck -count=1`。
 
-## 3. 协议 v18 种子下发
+## 3. 协议 v23 种子下发(变基重编,原编号 v18)
 
 - [ ] 3.1 `internal/network`:`LoginSuccess.WorldSeed uint64`、协议版本
-      v17→v18(v17 已由 M5B 任务生命周期占用)、编解码与 golden wire
+      v21→v23(v22 已被在飞的 authoritative-farming 占用)、编解码与 golden wire
       更新、握手版本拒绝新旧组合测试(Memory 与 TCP 双传输);服务端
       在构造 LoginSuccess 时填入真实世界种子(internal/server,单机与
       专服同一路径);
       验证:`go test ./internal/network -race -count=1`。
 
-## 4. client 远环 pass(Rust;ABI v4→v5,终审修复波随雾 setter 升 v6)
+## 4. client 远环 pass(Rust;ABI v5→v6,终审修复波随雾 setter 升 v7)
 
 - [x] 4.1 `mornlea_client`:`render_upload_lod_tile`/`render_drop_lod_tile`
       (tile 整体替换语义)、远环 pipeline(世界坐标大 quad)、距离雾
@@ -62,7 +64,8 @@
       场景入库;既有场景近处像素不变的比对断言;
       验证:`go test ./cmd/mornlea -race -count=1 -run TestCapture`。
 - [ ] 5.4 benchmark producer 默认 `lodEnabled=false`,scenario 保持
-      v16,LOD 专项数值另存记录(只记录不门禁);
+      v17(变基后与 main 一致,不迁移),LOD 专项数值另存记录(只记录
+      不门禁);
       验证:`go test ./cmd/mornlea -race -count=1 -run Benchmark`。
 
 ## 6. 收尾
@@ -75,4 +78,5 @@
       雾过渡平滑、移动跨 tile 无闪烁、关闭路径干净退出;
       验证:截图与退出码。
 - [ ] 6.3 文档基线:`docs/notes/progress.md`、AGENTS.md/CLAUDE.md
-      (engine ABI v4、client ABI v5、协议 v18、远环语义)。
+      (engine ABI v6、client ABI v7、协议 v23、远环语义与海平面壳
+      钳制)。
