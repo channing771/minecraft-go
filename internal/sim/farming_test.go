@@ -471,3 +471,169 @@ func TestPlaceNonSeedItemsIgnoreFarmlandPrecondition(t *testing.T) {
 		t.Fatalf("非种子放置结果 = %d，想要石头 %d", got, core.StoneID)
 	}
 }
+
+// farmingCropIDs 是八个小麦阶段编号，收获用例按阶段穷举。
+var farmingCropIDs = [...]core.BlockID{
+	core.WheatStage0ID, core.WheatStage1ID, core.WheatStage2ID, core.WheatStage3ID,
+	core.WheatStage4ID, core.WheatStage5ID, core.WheatStage6ID, core.WheatStage7ID,
+}
+
+// TestFarmingMiningRules 覆盖 authoritative-mining 的农业条目：作物在任意手持
+// 下恰好 1 tick、耕地在任意手持下恰好 5 tick，两者都可收获。
+//
+// tick 数断言取**精确值**（与既有泥土用例同风格）：只断言"能挖"的话任意正数
+// 都绿，规则被改成 30 tick 也读不出来。1 tick 是最小权威量子——0 是 miningRule
+// 的"不可采掘"哨兵（基岩语义），作物用 0 会永远挖不动。
+func TestFarmingMiningRules(t *testing.T) {
+	held := [...]core.ItemID{
+		core.ItemNone, core.ItemStone, core.ItemIronPickaxe, core.ItemStoneHoe,
+		core.ItemBrokenIronHoe,
+	}
+	for _, block := range farmingCropIDs {
+		for _, item := range held {
+			ticks, harvestable := miningRule(block, item)
+			if ticks != 1 || !harvestable {
+				t.Fatalf("miningRule(作物 %d, %d) = (%d,%v)，想要 (1,true)",
+					block, item, ticks, harvestable)
+			}
+		}
+	}
+	for _, block := range []core.BlockID{core.FarmlandDryID, core.FarmlandWetID} {
+		for _, item := range held {
+			ticks, harvestable := miningRule(block, item)
+			if ticks != 5 || !harvestable {
+				t.Fatalf("miningRule(耕地 %d, %d) = (%d,%v)，想要 (5,true)",
+					block, item, ticks, harvestable)
+			}
+		}
+	}
+}
+
+// harvest 把 block 写进采掘目标格并按住采掘推进 ticks 个权威 tick，返回最后
+// 一个 tick 的结果、目标区块记录与目标格坐标。
+func harvest(
+	t *testing.T,
+	block core.BlockID,
+	ticks int,
+) (*Engine, TickResult, *ChunkRecord, core.BlockPos) {
+	t.Helper()
+	engine, _, targets := readyMiningPlayers(t, 1)
+	target := targets[0]
+	engine.SetBlockForTest(target, block)
+	var result TickResult
+	for range ticks {
+		result = advanceMiningOnce(engine)
+	}
+	return engine, result, miningTargetRecord(t, engine, target), target
+}
+
+func harvestBlockAt(t *testing.T, record *ChunkRecord, target core.BlockPos) core.BlockID {
+	t.Helper()
+	x, _, z := target.Local()
+	return record.Chunk.BlockAt(x, target.Y, z)
+}
+
+// TestHarvestMatureWheatDropsWheatAndSeeds 覆盖 Scenario「收获成熟作物」与
+// 「任意手持状态一个 tick 内收获成熟作物」：1 tick 破坏，掉落 1 小麦 + 2 种子。
+//
+// 断言列的是**物品种类与精确数量**（len(got) == 2 一起钉）：只断言"掉落物非空"
+// 的话，未成熟路径的那 1 颗种子也能让它绿，多产物分支根本没被覆盖。
+func TestHarvestMatureWheatDropsWheatAndSeeds(t *testing.T) {
+	_, result, record, target := harvest(t, core.WheatStage7ID, 1)
+
+	if len(result.Rejected) != 0 {
+		t.Fatalf("收获成熟小麦被拒绝: %+v", result.Rejected)
+	}
+	if got := harvestBlockAt(t, record, target); got != core.AirID {
+		t.Fatalf("一个 tick 后方块 = %d，想要空气", got)
+	}
+	got := miningDropTotals(record.Chunk)
+	if len(got) != 2 || got[core.ItemWheat] != 1 || got[core.ItemWheatSeeds] != 2 {
+		t.Fatalf("成熟小麦掉落 = %+v，想要恰好 1 小麦 + 2 种子", got)
+	}
+}
+
+// TestHarvestImmatureWheatStillDropsSeed 覆盖 Scenario「误挖未成熟作物不亏
+// 种子」：阶段 0..6 都在 1 tick 内破坏并恰好掉 1 颗种子，一颗小麦都不掉。
+func TestHarvestImmatureWheatStillDropsSeed(t *testing.T) {
+	for _, block := range farmingCropIDs[:len(farmingCropIDs)-1] {
+		t.Run(blockLabel(block), func(t *testing.T) {
+			_, result, record, target := harvest(t, block, 1)
+
+			if len(result.Rejected) != 0 {
+				t.Fatalf("收获未成熟作物被拒绝: %+v", result.Rejected)
+			}
+			if got := harvestBlockAt(t, record, target); got != core.AirID {
+				t.Fatalf("一个 tick 后方块 = %d，想要空气", got)
+			}
+			got := miningDropTotals(record.Chunk)
+			if len(got) != 1 || got[core.ItemWheatSeeds] != 1 {
+				t.Fatalf("未成熟作物掉落 = %+v，想要恰好 1 颗种子", got)
+			}
+		})
+	}
+}
+
+// TestHarvestFarmlandDropsDirtAfterFiveTicks 覆盖 Scenario「采掘耕地掉落
+// 泥土」：第 4 tick 时耕地必须还在，第 5 tick 才破坏并掉 1 泥土。
+//
+// 两个读数缺一不可：只看第 5 tick 的话，一个 1 tick 就挖穿耕地的实现照样全绿
+// （断言变成存在性的"最终挖掉了"）。
+func TestHarvestFarmlandDropsDirtAfterFiveTicks(t *testing.T) {
+	for _, farmland := range []core.BlockID{core.FarmlandDryID, core.FarmlandWetID} {
+		t.Run(blockLabel(farmland), func(t *testing.T) {
+			engine, _, record, target := harvest(t, farmland, 4)
+			if got := harvestBlockAt(t, record, target); got != farmland {
+				t.Fatalf("第 4 tick 的耕地 = %d，想要仍是 %d", got, farmland)
+			}
+			if got := miningDropTotals(record.Chunk); len(got) != 0 {
+				t.Fatalf("第 4 tick 就产生了掉落物: %+v", got)
+			}
+
+			result := advanceMiningOnce(engine)
+
+			if len(result.Rejected) != 0 {
+				t.Fatalf("第 5 tick 采掘耕地被拒绝: %+v", result.Rejected)
+			}
+			if got := harvestBlockAt(t, record, target); got != core.AirID {
+				t.Fatalf("第 5 tick 后方块 = %d，想要空气", got)
+			}
+			got := miningDropTotals(record.Chunk)
+			if len(got) != 1 || got[core.ItemDirt] != 1 {
+				t.Fatalf("耕地掉落 = %+v，想要恰好 1 泥土", got)
+			}
+		})
+	}
+}
+
+// TestHarvestMatureWheatCapacityFailureIsAtomic 钉死成熟小麦的多产物没有绕开
+// 既有掉落物容量门禁：掉落槽满时整体拒绝，方块不变、掉落槽逐字节不变——
+// 绝不允许"先掉了小麦、种子放不下"的半掉落。
+func TestHarvestMatureWheatCapacityFailureIsAtomic(t *testing.T) {
+	engine, sessions, targets := readyMiningPlayers(t, 1)
+	session, target := sessions[0], targets[0]
+	engine.SetBlockForTest(target, core.WheatStage7ID)
+	fillMiningDrops(engine, target)
+	record := miningTargetRecord(t, engine, target)
+	beforeHash := record.Chunk.Hash()
+	beforeDropsHash := record.Chunk.DropsHash()
+	beforeRevision := record.Revision
+
+	result := advanceMiningOnce(engine)
+
+	if len(result.Rejected) != 1 || result.Rejected[0] != (Rejection{
+		Session: session, Sequence: 10, Reason: RejectDropCapacity,
+	}) {
+		t.Fatalf("容量拒绝 = %+v，想要恰好一条 RejectDropCapacity", result.Rejected)
+	}
+	if got := harvestBlockAt(t, record, target); got != core.WheatStage7ID {
+		t.Fatalf("容量失败破坏了作物: %d", got)
+	}
+	if got := record.Chunk.Hash(); got != beforeHash || record.Revision != beforeRevision {
+		t.Fatalf("容量失败修改了区块或 revision: hash=%x/%x revision=%d/%d",
+			got, beforeHash, record.Revision, beforeRevision)
+	}
+	if got := record.Chunk.DropsHash(); got != beforeDropsHash {
+		t.Fatalf("容量失败修改了掉落槽: drops=%x/%x", got, beforeDropsHash)
+	}
+}
