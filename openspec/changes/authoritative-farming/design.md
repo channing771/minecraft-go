@@ -111,6 +111,7 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 | 13 | 耕地渲染为满高立方体,碰撞为 15/16(站上去脚部视觉陷入 1/16) | 计划无任何一步改耕地 mesh 几何,补上会扩组 2/3 范围 | 按 material 固定下移顶面,或复用水面角高度位 |
 | 14 | 出生点选在耕地上时留 1/16 空隙,玩家首 tick 沉降 1/16 | `findSpawnInColumn` 对任何有碰撞体的方块返回 `y+1`,不读盒子顶面;改它要同步出生点与 support/safe 存档点三处口径。摔落伤害为 0、safe 点不被污染、worldgen 不产耕地 | `findSpawnInColumn` 改读落脚盒顶面,作为独立决定 |
 | 15 | 既有缺陷:`client/mirror.go` 的拒绝原因白名单漏登记 `RejectContainerCapacity`,服务端发该原因时客户端报 unknown | 早于本变更存在、与农业无关;本变更只复用既有原因、零 wire 新增,不碰该白名单 | 独立小型修复(一行),建议本变更合并后按直接修改豁免处理 |
+| 16 | 手持锄头收获作物仍扣锄头耐久(MC 锄头只在翻地时掉耐久) | 既有通用规则 `consumeToolDurability` 对任何成功破坏的工具生效,与手持镐挖泥土同理;为作物开特例要在采掘完成路径加按方块×工具的豁免表 | 若要对齐 MC,在 `completeMining` 加「作物 × 锄头」豁免并配测试 |
 
 ## 验证策略
 
