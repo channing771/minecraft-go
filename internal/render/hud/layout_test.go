@@ -58,7 +58,7 @@ func TestHotbarLayoutDrawsItemSwatchesAndCounts(t *testing.T) {
 	inventory.Hotbar.Slots[8] = core.ItemStack{Item: core.ItemGrass, Count: 1}
 
 	var layout hotbarLayout
-	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, nil, MiningOverlay{}, 1280, 720)
+	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, nil, MiningOverlay{}, 1280, 800)
 	if len(got.quads) != 2+core.HotbarSlots+3*2 {
 		t.Fatalf("quads=%d，想要面板、选中框、9 个栏位和 3 个双层色块", len(got.quads))
 	}
@@ -117,7 +117,7 @@ func TestHotbarLayoutUsesPanelAndInsetItemTiles(t *testing.T) {
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemGrass, Count: 1}
 
 	var layout hotbarLayout
-	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, nil, MiningOverlay{}, 1280, 720)
+	got := layoutInventory(&layout, atlas, inventory, false, -1, nil, nil, MiningOverlay{}, 1280, 800)
 	if len(got.quads) != 13 {
 		t.Fatalf("快捷栏 quads=%d，想要面板、选中框、9 个栏位和双层物品色块共 13", len(got.quads))
 	}
@@ -140,31 +140,32 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
-	// 箱子视图（27 格）比配方行与熔炉视图都大，因此固定容量的见证必须用满箱子叠加值，
-	// 再叠加已确认的满血十段生命条才是真正的最坏布局。
+	// 十行固定配方（91 quad）已超过箱子视图（82 quad），因此 quad 上限的见证是
+	// 配方视图（overlay 与 chest 都为 nil），再叠加已确认的满血十段生命条、
+	// 未满氧气条与满屏聊天才是真正的最坏布局。glyph 上限仍在箱子视图上见证。
 	layoutInventory(
-		&layout, atlas, maxQuadTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720,
+		&layout, atlas, maxQuadTestInventory(), true, 5, nil, nil, MiningOverlay{}, 1280, 800,
 	)
-	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720)
+	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 800)
 	// 氧气条只在未满时出现，因此最坏布局取一个未满值；满氧反而是零 quad。
-	appendOxygenBar(&layout, OxygenOverlay{Confirmed: true, Value: 0}, 1280, 720)
+	appendOxygenBar(&layout, OxygenOverlay{Confirmed: true, Value: 0}, 1280, 800)
 	chatLine := strings.Repeat("中", maxChatRunes)
 	appendChatOverlay(&layout, atlas, ChatOverlay{
 		Open: true, Input: chatLine,
 		Lines: []string{chatLine, chatLine, chatLine, chatLine, chatLine, chatLine},
-	}, 1280, 720)
+	}, 1280, 800)
 	if len(layout.quads) != maxHotbarQuads {
 		t.Fatalf("quad 上限见证 quads=%d，想要 %d", len(layout.quads), maxHotbarQuads)
 	}
 	layoutInventory(
-		&layout, atlas, fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720,
+		&layout, atlas, fullTestInventory(), true, 5, nil, fullChestOverlay(), MiningOverlay{}, 1280, 800,
 	)
-	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 720)
-	appendOxygenBar(&layout, OxygenOverlay{Confirmed: true, Value: 0}, 1280, 720)
+	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 800)
+	appendOxygenBar(&layout, OxygenOverlay{Confirmed: true, Value: 0}, 1280, 800)
 	appendChatOverlay(&layout, atlas, ChatOverlay{
 		Open: true, Input: chatLine,
 		Lines: []string{chatLine, chatLine, chatLine, chatLine, chatLine, chatLine},
-	}, 1280, 720)
+	}, 1280, 800)
 	if len(layout.glyphs) != maxHotbarGlyphs {
 		t.Fatalf("glyph 上限见证=%d，想要 %d", len(layout.glyphs), maxHotbarGlyphs)
 	}
@@ -174,7 +175,7 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 	closed := layoutInventory(
 		&layout, atlas, fullTestInventory(), false, -1, nil, nil,
 		MiningOverlay{Active: true, ProgressTicks: 6, RequiredTicks: 15, Harvestable: true},
-		1280, 720,
+		1280, 800,
 	)
 	if len(closed.quads) != 2+core.HotbarSlots*3+2 || len(closed.quads) > maxHotbarQuads {
 		t.Fatalf("关闭界面加采掘条 quads=%d，固定上限=%d", len(closed.quads), maxHotbarQuads)
@@ -241,10 +242,10 @@ func TestDurabilityBarLayoutUsesOnlyHotbarGeometry(t *testing.T) {
 
 	var layout hotbarLayout
 	closedBase := len(layoutInventory(
-		&layout, atlas, base, false, -1, nil, nil, MiningOverlay{}, 1280, 720,
+		&layout, atlas, base, false, -1, nil, nil, MiningOverlay{}, 1280, 800,
 	).quads)
 	closed := layoutInventory(
-		&layout, atlas, hotbarWorn, false, -1, nil, nil, MiningOverlay{}, 1280, 720,
+		&layout, atlas, hotbarWorn, false, -1, nil, nil, MiningOverlay{}, 1280, 800,
 	)
 	if len(closed.quads) != closedBase+2 {
 		t.Fatalf("关闭背包的磨损工具 quads=%d，想要 %d", len(closed.quads), closedBase+2)
@@ -252,10 +253,10 @@ func TestDurabilityBarLayoutUsesOnlyHotbarGeometry(t *testing.T) {
 	closedBars := [2]hotbarInstance{closed.quads[len(closed.quads)-2], closed.quads[len(closed.quads)-1]}
 
 	openBase := len(layoutInventory(
-		&layout, atlas, base, true, -1, nil, nil, MiningOverlay{}, 1280, 720,
+		&layout, atlas, base, true, -1, nil, nil, MiningOverlay{}, 1280, 800,
 	).quads)
 	open := layoutInventory(
-		&layout, atlas, hotbarWorn, true, -1, nil, nil, MiningOverlay{}, 1280, 720,
+		&layout, atlas, hotbarWorn, true, -1, nil, nil, MiningOverlay{}, 1280, 800,
 	)
 	if len(open.quads) != openBase+2 {
 		t.Fatalf("打开背包的快捷栏磨损工具 quads=%d，想要 %d", len(open.quads), openBase+2)
@@ -266,7 +267,7 @@ func TestDurabilityBarLayoutUsesOnlyHotbarGeometry(t *testing.T) {
 		t.Fatalf("打开/关闭背包的耐久条几何不同: open=%+v closed=%+v", openBars, closedBars)
 	}
 	if got := len(layoutInventory(
-		&layout, atlas, backpackWorn, true, -1, nil, nil, MiningOverlay{}, 1280, 720,
+		&layout, atlas, backpackWorn, true, -1, nil, nil, MiningOverlay{}, 1280, 800,
 	).quads); got != openBase {
 		t.Fatalf("背包栏磨损工具 quads=%d，想要 %d", got, openBase)
 	}
@@ -277,14 +278,14 @@ func TestMiningOverlayUsesOnlyConfirmedFixedGeometry(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
 	var layout hotbarLayout
 	baseQuads := len(layoutInventory(
-		&layout, atlas, core.Inventory{}, false, -1, nil, nil, MiningOverlay{}, 1280, 720,
+		&layout, atlas, core.Inventory{}, false, -1, nil, nil, MiningOverlay{}, 1280, 800,
 	).quads)
 	if baseQuads != 2+core.HotbarSlots {
 		t.Fatalf("inactive quads=%d，想要仅面板、选中框和快捷栏", baseQuads)
 	}
 	requiredZero := layoutInventory(
 		&layout, atlas, core.Inventory{}, false, -1, nil, nil,
-		MiningOverlay{Active: true, ProgressTicks: 6}, 1280, 720,
+		MiningOverlay{Active: true, ProgressTicks: 6}, 1280, 800,
 	)
 	if len(requiredZero.quads) != baseQuads {
 		t.Fatalf("required=0 quads=%d，想要 %d", len(requiredZero.quads), baseQuads)
@@ -293,13 +294,13 @@ func TestMiningOverlayUsesOnlyConfirmedFixedGeometry(t *testing.T) {
 	green := layoutInventory(
 		&layout, atlas, core.Inventory{}, false, -1, nil, nil,
 		MiningOverlay{Active: true, ProgressTicks: 6, RequiredTicks: 15, Harvestable: true},
-		1280, 720,
+		1280, 800,
 	)
 	if len(green.quads) != baseQuads+2 {
 		t.Fatalf("active 6/15 quads=%d，想要背景加填充", len(green.quads))
 	}
 	background, fill := green.quads[len(green.quads)-2], green.quads[len(green.quads)-1]
-	if background.X != 520 || background.Y != 620 ||
+	if background.X != 520 || background.Y != 700 ||
 		background.Width != 240 || background.Height != 12 ||
 		background.Color != ([4]float32{0.05, 0.05, 0.06, 0.78}) {
 		t.Fatalf("采掘条背景=%+v", background)
@@ -312,19 +313,19 @@ func TestMiningOverlayUsesOnlyConfirmedFixedGeometry(t *testing.T) {
 
 	orange := layoutInventory(
 		&layout, atlas, core.Inventory{}, false, -1, nil, nil,
-		MiningOverlay{Active: true, ProgressTicks: 6, RequiredTicks: 15}, 1280, 720,
+		MiningOverlay{Active: true, ProgressTicks: 6, RequiredTicks: 15}, 1280, 800,
 	)
 	if got := orange.quads[len(orange.quads)-1].Color; got != ([4]float32{0.95, 0.55, 0.15, 0.95}) {
 		t.Fatalf("不可掉落颜色=%v", got)
 	}
 
 	openWithoutMining := len(layoutInventory(
-		&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 1280, 720,
+		&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 1280, 800,
 	).quads)
 	openWithMining := len(layoutInventory(
 		&layout, atlas, core.Inventory{}, true, -1, nil, nil,
 		MiningOverlay{Active: true, ProgressTicks: 6, RequiredTicks: 15, Harvestable: true},
-		1280, 720,
+		1280, 800,
 	).quads)
 	if openWithMining != openWithoutMining {
 		t.Fatalf("打开背包仍绘制采掘条: quads=%d，想要 %d", openWithMining, openWithoutMining)
@@ -354,7 +355,7 @@ func TestInventoryLayoutOpensThreeBackpackRows(t *testing.T) {
 	}
 	var layout hotbarLayout
 	var inventory core.Inventory
-	got := layoutInventory(&layout, atlas, inventory, true, 12, nil, nil, MiningOverlay{}, 1280, 720)
+	got := layoutInventory(&layout, atlas, inventory, true, 12, nil, nil, MiningOverlay{}, 1280, 800)
 
 	// 外框、背包区、快捷栏区与分隔线 + 选中框 + 来源高亮 + 36 格 + 固定配方行。
 	if len(got.quads) != openInventoryPanelQuads+2+core.InventorySlots+recipeQuads {
@@ -364,9 +365,9 @@ func TestInventoryLayoutOpensThreeBackpackRows(t *testing.T) {
 	if panels[1].Y >= panels[2].Y || panels[1].Color == panels[2].Color || panels[3].Height <= 0 {
 		t.Fatalf("背包分组面板不清晰: %+v", panels)
 	}
-	hotbarY := float32(720) - hotbarBottomMargin - hotbarSlotSize
+	hotbarY := float32(800) - hotbarBottomMargin - hotbarSlotSize
 	for slot := range core.InventorySlots {
-		x, y := inventorySlotOrigin(slot, true, 1280, 720)
+		x, y := inventorySlotOrigin(slot, true, 1280, 800)
 		if slot < core.HotbarSlots && y != hotbarY {
 			t.Fatalf("快捷栏格 %d 不在底行: y=%f", slot, y)
 		}
@@ -374,18 +375,18 @@ func TestInventoryLayoutOpensThreeBackpackRows(t *testing.T) {
 			t.Fatalf("背包格 %d 未排在快捷栏之上: y=%f", slot, y)
 		}
 		// 命中函数必须与绘制几何一致。
-		if got, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 1280, 720); !ok ||
+		if got, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 1280, 800); !ok ||
 			got != uint8(slot) {
 			t.Fatalf("InventorySlotAt 命中 %d, %v，想要 %d", got, ok, slot)
 		}
 	}
 }
 func TestInventorySlotAtRejectsOutsideHits(t *testing.T) {
-	if _, ok := InventorySlotAt(0, 0, 1280, 720); ok {
+	if _, ok := InventorySlotAt(0, 0, 1280, 800); ok {
 		t.Fatal("界外命中被接受")
 	}
-	x, y := inventorySlotOrigin(0, true, 1280, 720)
-	if _, ok := InventorySlotAt(float64(x)-1, float64(y)+1, 1280, 720); ok {
+	x, y := inventorySlotOrigin(0, true, 1280, 800)
+	if _, ok := InventorySlotAt(float64(x)-1, float64(y)+1, 1280, 800); ok {
 		t.Fatal("格子左侧 1 像素被判为命中")
 	}
 	if _, ok := InventorySlotAt(float64(x)+1, float64(y)+1, 0, 0); ok {

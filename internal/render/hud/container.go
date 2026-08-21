@@ -6,9 +6,11 @@ import (
 )
 
 const (
-	// 八条固定配方（含发光方块）：面板 + 每行两个栏位与双层物品色块、按钮和加号。
-	recipeQuads  = 1 + 8*9
-	recipeGlyphs = 20
+	// 固定配方：面板 + 每行两个栏位与双层物品色块、按钮和加号。
+	recipeQuads = 1 + len(inventoryRecipeIDs)*9
+	// 数量为 1 的栏位不画数字，其余每位数字画阴影与前景两个实例。
+	// 当前十条配方共 12 位数字：石砖 4/4、发光方块 4/4 各两位，其余各一位。
+	recipeGlyphs = 24
 	// 熔炉视图：面板、三个栏位、双层物品色块、两条进度条底与填充。
 	furnaceQuads = 1 + 3 + 3*2 + 4
 	// 三个熔炉格各最多两位数量。
@@ -29,7 +31,7 @@ const (
 	furnaceBarGap    = float32(6)
 )
 
-// ponytail: 当前只有八条固定配方；需要分页或分类时再引入共享目录。
+// ponytail: 当前只有十条固定配方；需要分页或分类时再引入共享目录。
 var inventoryRecipeIDs = [...]core.RecipeID{
 	core.RecipeStoneBricks,
 	core.RecipeFurnace,
@@ -39,6 +41,10 @@ var inventoryRecipeIDs = [...]core.RecipeID{
 	core.RecipeChest,
 	core.RecipeOakPlanks,
 	core.RecipeLightBlock,
+	// 两条锄头配方按 ID 顺序追加在末尾；没有它们玩家在 UI 里拿不到锄头，
+	// 也就翻不了地，整条农业闭环在客户端不可达。
+	core.RecipeStoneHoe,
+	core.RecipeIronHoe,
 }
 
 // containerSourceOrigin 返回来源高亮格的左上角像素坐标；索引落在当前打开的容器视图之外
@@ -233,7 +239,7 @@ func ChestSlotAt(cursorX, cursorY float64, width, height uint32) (uint8, bool) {
 	return 0, false
 }
 
-// appendRecipeRows 绘制八条固定配方及各自的一次合成按钮。
+// appendRecipeRows 绘制全部固定配方及各自的一次合成按钮。
 func appendRecipeRows(
 	dst *hotbarLayout,
 	atlas render.GlyphSource,
