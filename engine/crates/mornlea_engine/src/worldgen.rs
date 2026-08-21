@@ -27,7 +27,11 @@ const SEA_LEVEL: f64 = 64.0;
 /// 海平面的整数 Y 值,注水判定用。单独写成 i32 常量而不是由 `SEA_LEVEL`
 /// 转换,是为了避免在常量上下文里做浮点转换;`sea_level_constants_agree`
 /// 测试钉死两者一致。
-const SEA_LEVEL_Y: i32 = 64;
+///
+/// `pub(crate)`:engine ABI v6 起远环壳(lod 模块)的海平面钳制与注水判定
+/// 必须引用同一个常量——两处各写一份 64 会在任一侧调整海平面时静默分叉
+/// (fluid × 远环,变更 rust-engine-lod-shell 的 Ruling 22)。
+pub(crate) const SEA_LEVEL_Y: i32 = 64;
 const TERRAIN_AMP: f64 = 48.0;
 const TERRAIN_SCALE: f64 = 1.0 / 256.0;
 const OCTAVES: usize = 5;

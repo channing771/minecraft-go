@@ -164,6 +164,22 @@ func testSampleField(t *testing.T, header []byte, tile core.ChunkPos, step uint3
 			material: binary.LittleEndian.Uint16(record[4:6]),
 		}
 	}
+
+	// 海平面钳制镜像(Ruling 22,与 engine clamp_window_to_sea_level 同一
+	// 规则):有地表且固体顶面低于海平面的窗口,顶面钳到海平面、材质取
+	// header 材料表的 water(偏移 50);门控编码(water == air,偏移 24)
+	// 时整体跳过,与注水门控引入前的行为逐位一致。空窗口(哨兵未刷新)
+	// 不钳制。
+	const seaLevelY = 64
+	airMaterial := binary.LittleEndian.Uint16(header[24:26])
+	waterMaterial := binary.LittleEndian.Uint16(header[50:52])
+	if waterMaterial != airMaterial {
+		for cell, window := range cells {
+			if window.top != math.MinInt32 && window.top < seaLevelY {
+				cells[cell] = testWindow{top: seaLevelY, material: waterMaterial}
+			}
+		}
+	}
 	return &testField{step: s, baseX: baseX, baseZ: baseZ, n: n, cells: cells}
 }
 
@@ -196,14 +212,15 @@ var oracleTileCases = []struct {
 // TestShellMatchesEngineGoldenBytes 把 Go FFI 输出与 engine 侧确定性
 // golden fixture 逐字节比对:同输入跨平台逐位一致的直接证据。fixture
 // 与 engine lod.rs 的 golden_shell_bytes_are_stable 同源(seed 42、恒等
-// perm、恒等材料表、tile(−3,2)、step 4)。
+// perm、恒等材料表 0..=13、tile(−3,2)、step 4);v2 为 Ruling 22 海平面
+// 钳制后的定版(v1 是钳制前、layout 1 输入的快照)。
 func TestShellMatchesEngineGoldenBytes(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("无法定位 lod 测试文件")
 	}
 	goldenPath := filepath.Join(filepath.Dir(file), "..", "..",
-		"engine", "crates", "mornlea_engine", "testdata", "lod-shell-seed42-step4-v1.bin")
+		"engine", "crates", "mornlea_engine", "testdata", "lod-shell-seed42-step4-v2.bin")
 	golden, err := os.ReadFile(goldenPath)
 	if err != nil {
 		t.Fatalf("读取 engine golden fixture 失败: %v", err)
@@ -271,6 +288,105 @@ func TestShellTopsCoverColumnsAndMatchProbeOracle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSeaLevelClampAssertsWaterWindowSemantics 是 Ruling 22 的高度差分
+// 专项:以 worldgen probe 的原始列高(mode 0)为独立 oracle——不走
+// testSampleField 的钳制镜像——对每个内部窗口计算未钳制的固体 max:
+// max < 海平面的海盆窗在壳顶面里必须呈现为钳制后的 (海平面, 水材质),
+// max >= 海平面的陆地窗保持探针高度不被抬升。全部 tile 的海盆窗总数
+// 必须非零,防止夹具漂移让断言空转。
+func TestSeaLevelClampAssertsWaterWindowSemantics(t *testing.T) {
+	header := testHeader()
+	airMaterial := binary.LittleEndian.Uint16(header[24:26])
+	waterMaterial := binary.LittleEndian.Uint16(header[50:52])
+	if waterMaterial == airMaterial {
+		t.Fatal("夹具必须启用流体:water 材质与 air 相同(门控关闭态)")
+	}
+	const seaLevelY = 64
+	basinWindows := 0
+	for _, tc := range oracleTileCases {
+		t.Run(fmt.Sprintf("tile(%d,%d)/step%d", tc.tile.X, tc.tile.Z, tc.step), func(t *testing.T) {
+			s := int32(tc.step)
+			baseX, baseZ := tc.tile.X*TileColumns, tc.tile.Z*TileColumns
+			n := int(TileColumns / tc.step)
+
+			// 1) 原始列高探针:内部窗口覆盖的全部列(不含边界外一圈,
+			// 本测试只断言内部窗的顶面值)。
+			type columnRef struct {
+				x, z int32
+				cell int
+			}
+			columns := make([]columnRef, 0, n*n*int(s)*int(s))
+			for gj := 0; gj < n; gj++ {
+				for gi := 0; gi < n; gi++ {
+					for lz := int32(0); lz < s; lz++ {
+						for lx := int32(0); lx < s; lx++ {
+							columns = append(columns, columnRef{
+								x:    baseX + int32(gi)*s + lx,
+								z:    baseZ + int32(gj)*s + lz,
+								cell: gj*n + gi,
+							})
+						}
+					}
+				}
+			}
+			heightRecords := make([]probeRecord, len(columns))
+			for index, column := range columns {
+				heightRecords[index] = probeRecord{mode: 0, x: column.x, y: 0, z: column.z}
+			}
+			rawMax := make([]int32, n*n)
+			for index, record := range testProbe(t, header, heightRecords) {
+				height := int32(binary.LittleEndian.Uint32(record[0:4]))
+				if height >= core.MaxY {
+					height = core.MaxY - 1
+				}
+				cell := columns[index].cell
+				if height > rawMax[cell] {
+					rawMax[cell] = height
+				}
+			}
+
+			// 2) 壳顶面重建列 → 窗值映射(顶面贪心合并不重不漏,每列恰一次)。
+			windowTop := make([]int32, n*n)
+			windowMaterial := make([]uint16, n*n)
+			for _, quad := range testGenerateQuads(t, header, tc.tile, tc.step) {
+				if quad.Face != FaceTop {
+					continue
+				}
+				for dz := int32(0); dz < int32(quad.D); dz++ {
+					for dx := int32(0); dx < int32(quad.W); dx++ {
+						wx, wz := quad.X+dx, quad.Z+dz
+						cell := int((wz-baseZ)/s)*n + int((wx-baseX)/s)
+						windowTop[cell] = quad.Y
+						windowMaterial[cell] = quad.Material
+					}
+				}
+			}
+
+			// 3) 差分断言:海盆窗(原始 max < 海平面)→ (海平面, 水);陆地窗
+			// → 原始 max,且不得被替换成水材质(顶面恰在海平面的陆地窗除外:
+			// 其材质是地形表层,可能巧合等于水编号以外的任意地形值,断言只锁
+			// 高度与「非水」)。
+			for cell, want := range rawMax {
+				if want < seaLevelY {
+					basinWindows++
+					if windowTop[cell] != seaLevelY || windowMaterial[cell] != waterMaterial {
+						t.Fatalf("海盆窗 %d 原始 max=%d,壳窗值=(%d,%d),想要 (%d,%d)",
+							cell, want, windowTop[cell], windowMaterial[cell], seaLevelY, waterMaterial)
+					}
+				} else if windowTop[cell] != want {
+					t.Fatalf("陆地窗 %d 原始 max=%d,壳窗高=%d(钳制不得抬升陆地)",
+						cell, want, windowTop[cell])
+				} else if want == seaLevelY && windowMaterial[cell] == waterMaterial {
+					t.Fatalf("陆地窗 %d 顶面恰在海平面却被替换成水材质", cell)
+				}
+			}
+		})
+	}
+	if basinWindows == 0 {
+		t.Fatal("夹具失效:全部 tile 都没有海盆窗,钳制断言空转")
 	}
 }
 

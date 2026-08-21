@@ -32,8 +32,17 @@ func TestFarHorizonCaptureSceneIsRegistered(t *testing.T) {
 	if scene.WarmupFrames != 8 || scene.Apply == nil {
 		t.Fatalf("场景=%+v,想要 WarmupFrames=8 且 Apply 齐备", scene)
 	}
-	if captureScenes[len(captureScenes)-1].Name != "far-horizon" {
-		t.Fatal("far-horizon 必须追加在场景表末尾(状态继承链的既定顺序)")
+	// 变基排序协调(Ruling 21):fluid 规格钉死 water-underwater 必须排在
+	// 场景表最后(其注入的权威 PlayerState 会永久钉住浸没标志),far-horizon
+	// 插在它之前(倒数第二)。原断言「必须追加在表尾」是 fluid 合并前的
+	// 事实,变基后由本断言取代:倒数第二 = far-horizon,末位 = water-underwater。
+	// far-horizon 的 Apply 经 resetCapturePresentation 清空全部共享呈现
+	// 状态,对前序场景不构成顺序依赖。
+	if captureScenes[len(captureScenes)-2].Name != "far-horizon" {
+		t.Fatal("far-horizon 必须排在倒数第二(water-underwater 固定居末)")
+	}
+	if captureScenes[len(captureScenes)-1].Name != "water-underwater" {
+		t.Fatal("water-underwater 必须排在场景表最后(fluid 规格)")
 	}
 }
 

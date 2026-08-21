@@ -11,12 +11,24 @@
 //! 完全由 worldgen 纯函数推导(复用 [`WorldgenParams`],本模块不重写
 //! 噪声/高度公式);quad 流顺序由固定遍历序决定;编码只用整数小端字节。
 //!
+//! 海平面钳制(fluid × 远环,Ruling 22):worldgen 已在海平面
+//! (`worldgen::SEA_LEVEL_Y`,y=64)及以下注水,海盆的固体地形低于 64、
+//! 水面则与 64 齐平。若壳按固体地形高度出顶面,海盆会呈现为「干涸盆地」
+//! ——与近环所见(一片水面)矛盾。因此固体顶面低于海平面的窗口把顶面
+//! 高度钳到海平面、材质取水材质:钳制后所有水窗等高(恰好 64),构造上
+//! 永远不会成为断差的高侧,水下侧裙无从产生也不必产生(水下从上方
+//! 不可见);陆地与海交界处的裙边按钳制后高度生成——陆侧(> 64)正常
+//! 发裙,跨度从 65 砌到陆侧地表,与近环岸线视觉一致。门控编码下
+//! (water == air,即 Go 侧 `fluidEnabled` 关闭)钳制整体跳过,远环输出
+//! 与注水门控引入前逐位一致。
+//!
 //! 坐标约定(与近环 quad 同源):`y` 为方块坐标,渲染可见面平面 = y+1;
 //! 顶面 quad 覆盖方块列 [x, x+w) × [z, z+d);侧裙 `y` 为裙边最低方块行,
 //! 竖直跨度 `d` 恰好衔接两侧地表平面(方块行 低侧 top+1 ..= 高侧 top)。
 
 use crate::worldgen::{
-    WORLD_MAX_Y, WORLDGEN_HEADER_BYTES, WorldgenParams, parse_header, read_i32, read_u32,
+    SEA_LEVEL_Y, WORLD_MAX_Y, WORLDGEN_HEADER_BYTES, WorldgenParams, parse_header, read_i32,
+    read_u32,
 };
 
 /// tile 固定列数:4×4 chunk = 64×64 列,与 design 裁决一致。
@@ -160,7 +172,7 @@ pub(crate) fn parse_lod_input(bytes: &[u8]) -> Option<LodShellRequest> {
 }
 
 /// 采样单个 step×step 窗口:窗高取窗内列高 max(保守遮挡),材质取最高
-/// 列的 worldgen 表层材质。
+/// 列的 worldgen 表层材质;随后应用海平面钳制(见模块文档,Ruling 22)。
 ///
 /// 高度截断到 WORLD_MAX_Y−1,与 `generate_chunk` 的写入高度一致;并列
 /// 最高时取首个达到 max 的列(z 外层、x 内层扫描序,与 `generate_chunk`
@@ -189,7 +201,28 @@ fn sample_window(params: &WorldgenParams, base_x: i32, base_z: i32, step: i32) -
             }
         }
     }
-    best
+    clamp_window_to_sea_level(params, best)
+}
+
+/// 海平面钳制:有地表(top 哨兵已刷新)且固体顶面低于海平面的窗口,
+/// 顶面钳到海平面、材质取水材质。
+///
+/// 为什么不区分「海盆」与「低地」:worldgen 的注水判定同样是
+/// `y <= SEA_LEVEL_Y`,任何固体顶面低于海平面的窗口在该规则下必然被
+/// 水覆盖到 64——壳与近环按同一规则推导,不存在第二条判定。空窗口
+/// (哨兵未刷新)不钳制:把它变成水窗会让「无地表」语义(不出顶面、
+/// 不出裙边)失效。门控编码(water == air,`fluidEnabled` 关闭)下
+/// 钳制整体跳过——此时钳制只会把干涸盆地错误地变成 air 窗(远环出现
+/// 洞),而正确的行为是保持门控引入前的逐位一致。
+fn clamp_window_to_sea_level(params: &WorldgenParams, window: LodWindow) -> LodWindow {
+    let m = &params.materials;
+    if window.top != i32::MIN && window.top < SEA_LEVEL_Y && m.water != m.air {
+        return LodWindow {
+            top: SEA_LEVEL_Y,
+            material: m.water,
+        };
+    }
+    window
 }
 
 /// 采样 tile 的窗口场(含边界外一圈)。
@@ -390,13 +423,19 @@ pub(crate) fn encode_shell(quads: &[LodQuad], out: &mut Vec<u8>) {
 mod tests {
     use super::{
         LOD_SHELL_INPUT_BYTES, LOD_SHELL_QUAD_BYTES, LodFace, LodQuad, LodShellRequest, LodWindow,
-        WindowField, build_shell, encode_shell, lod_shell, parse_lod_input, sample_field,
-        sample_window,
+        WindowField, build_shell, clamp_window_to_sea_level, encode_shell, lod_shell,
+        parse_lod_input, sample_field, sample_window,
     };
-    use crate::worldgen::{Materials, WORLD_MAX_Y, WorldgenParams};
+    use crate::worldgen::{Materials, WORLD_MAX_Y, WorldgenParams, SEA_LEVEL_Y};
 
     /// 测试材料表:与 worldgen 测试同款,取值互异即可。
     fn materials() -> Materials {
+        materials_with_water(13)
+    }
+
+    /// 指定 water 编号的测试材料表:恒等表 0..=12 + water;传 0(= air)
+    /// 即 fluidEnabled 关闭的门控编码,用于断言钳制的门控跳过。
+    fn materials_with_water(water: u16) -> Materials {
         Materials {
             air: 0,
             stone: 1,
@@ -411,18 +450,25 @@ mod tests {
             coal_ore: 10,
             oak_log: 11,
             leaves: 12,
+            water,
         }
     }
 
     /// 恒等 perm 表 + 固定 seed 的 worldgen 参数(镜像 worldgen 测试)。
     fn params(seed: i64) -> WorldgenParams {
+        params_with_materials(seed, materials())
+    }
+
+    /// 指定材料表的 worldgen 参数:恒等 perm,材料表由调用方给定
+    /// (门控编码测试传 water == air 的表)。
+    fn params_with_materials(seed: i64, materials: Materials) -> WorldgenParams {
         let mut perm = [0u8; 512];
         for (i, entry) in perm.iter_mut().enumerate() {
             *entry = (i & 255) as u8;
         }
         WorldgenParams {
             seed,
-            materials: materials(),
+            materials,
             perm,
         }
     }
@@ -431,11 +477,12 @@ mod tests {
     fn lod_input(seed: i64, tile_x: i32, tile_z: i32, columns: u32, step: u32) -> Vec<u8> {
         let mut bytes = vec![0u8; LOD_SHELL_INPUT_BYTES];
         bytes[0..4].copy_from_slice(b"MGW1");
-        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        // layout 2:材料表 14 项(engine ABI v4 起末项 water 占用旧 reserved 槽)。
+        bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
         bytes[8..16].copy_from_slice(&seed.to_le_bytes());
         bytes[16..20].copy_from_slice(&(-64i32).to_le_bytes());
         bytes[20..24].copy_from_slice(&320i32.to_le_bytes());
-        for index in 0..13u16 {
+        for index in 0..14u16 {
             bytes[24 + 2 * index as usize..26 + 2 * index as usize]
                 .copy_from_slice(&index.to_le_bytes());
         }
@@ -702,6 +749,9 @@ mod tests {
                     }
                 }
             }
+            // 复用核验同样覆盖海平面钳制(Ruling 22):期望值在聚合后按同一
+            // 规则钳制,采样点里刻意包含海盆窗(见下方专项测试的选点说明)。
+            expected = clamp_window_to_sea_level(&p, expected);
             assert_eq!(
                 sample_window(&p, base_x, base_z, 8),
                 expected,
@@ -709,6 +759,154 @@ mod tests {
             );
             assert_eq!(field.window(gi, gj), expected, "({gi},{gj})");
         }
+    }
+
+    /// 找一个固体顶面低于海平面的 step×step 窗口原点(海盆窗),返回
+    /// (base_x, base_z, 窗内固体 max 高度)。seed 42 + 恒等 perm 的地形
+    /// 振幅 ±48 必然存在低于 64 的海盆;找不到即测试夹具失效。
+    fn find_basin_window(params: &WorldgenParams, step: i32) -> (i32, i32, i32) {
+        for gj in -40..40i32 {
+            for gi in -40..40i32 {
+                let (base_x, base_z) = (gi * step, gj * step);
+                let mut top = i32::MIN;
+                for lz in 0..step {
+                    for lx in 0..step {
+                        let mut height = params.height_at(base_x + lx, base_z + lz);
+                        if height >= WORLD_MAX_Y {
+                            height = WORLD_MAX_Y - 1;
+                        }
+                        top = top.max(height);
+                    }
+                }
+                if top < SEA_LEVEL_Y {
+                    return (base_x, base_z, top);
+                }
+            }
+        }
+        panic!("测试夹具失效:seed 42 + 恒等 perm 的地形中找不到海盆窗");
+    }
+
+    #[test]
+    fn sea_level_clamp_replaces_basin_with_water_surface() {
+        // Ruling 22 主断言:流体开启(water != air)时,固体顶面低于海平面
+        // 的窗口顶面钳到 SEA_LEVEL_Y、材质取水材质——远环呈现水面而非
+        // 干涸盆地。
+        let p = params(42);
+        assert_ne!(p.materials.water, p.materials.air, "夹具必须启用流体");
+        let (base_x, base_z, top) = find_basin_window(&p, 8);
+        assert!(top < SEA_LEVEL_Y);
+        assert_eq!(
+            sample_window(&p, base_x, base_z, 8),
+            LodWindow {
+                top: SEA_LEVEL_Y,
+                material: p.materials.water,
+            }
+        );
+    }
+
+    #[test]
+    fn sea_level_clamp_skipped_when_fluid_gated_off() {
+        // 门控编码(water == air):钳制必须整体跳过,窗口值与注水门控
+        // 引入前逐位一致(干涸盆地按固体地形呈现)。
+        let p = params_with_materials(42, materials_with_water(0));
+        assert_eq!(p.materials.water, p.materials.air);
+        let (base_x, base_z, _) = find_basin_window(&params(42), 8);
+        let window = sample_window(&p, base_x, base_z, 8);
+        assert!(
+            window.top < SEA_LEVEL_Y,
+            "门控关闭时海盆窗不得被钳制: {window:?}"
+        );
+        assert_ne!(window.material, p.materials.air);
+    }
+
+    #[test]
+    fn sea_level_clamp_keeps_empty_windows_empty() {
+        // 空窗口(top 哨兵未刷新)不得被钳制成水窗:「无地表」语义必须
+        // 保持(不出顶面、不出裙边)。哨兵直接构造,绕过采样。
+        let p = params(42);
+        let empty = LodWindow {
+            top: i32::MIN,
+            material: p.materials.air,
+        };
+        assert_eq!(clamp_window_to_sea_level(&p, empty), empty);
+    }
+
+    #[test]
+    fn sea_level_clamped_water_windows_emit_no_skirts_but_land_does() {
+        // 结构语义:钳制后水窗等高(64),相邻水窗之间无裙边(水下从上方
+        // 不可见);陆/海断差处裙边由陆侧(高侧,> 64)正常生成,裙边按
+        // 钳制后高度生成——竖直跨度 [64+1, 陆侧+1)。
+        // n=3/step=8:内部第 0、1 列水窗(64/材质 13),第 2 列陆地
+        // top=80;边界外一圈全部取草地(80),使西边界(外侧高侧)裙边归
+        // 西邻 tile、东西边界等高无裙边,隔离出唯一的内部陆/海断差。
+        let water = LodWindow {
+            top: SEA_LEVEL_Y,
+            material: 13,
+        };
+        let bounded = field(8, 3, 0, 0, |gi, _| {
+            if (0..2).contains(&gi) {
+                water
+            } else {
+                grass(80)
+            }
+        });
+        let quads = build_shell(&bounded, AIR);
+        // 顶面:水窗贪心合并为一条(等高等材质),陆地一条。
+        let tops: Vec<LodQuad> = quads
+            .iter()
+            .copied()
+            .filter(|quad| quad.face == LodFace::Top)
+            .collect();
+        assert_eq!(
+            tops,
+            vec![
+                LodQuad {
+                    x: 0,
+                    z: 0,
+                    y: SEA_LEVEL_Y,
+                    w: 16,
+                    d: 24,
+                    face: LodFace::Top,
+                    material: 13,
+                    shade: 255,
+                },
+                LodQuad {
+                    x: 16,
+                    z: 0,
+                    y: 80,
+                    w: 8,
+                    d: 24,
+                    face: LodFace::Top,
+                    material: GRASS,
+                    shade: 255,
+                },
+            ]
+        );
+        // 裙边:仅内部陆/海断差(g=1,水 64 → 陆 80)出裙,陆侧 NegX 面,
+        // 每行窗口(j=0,1,2)各一条;相邻水窗(g=0)等高零裙边;西边界
+        // (外侧 80 高于水 64)的裙边归西邻 tile,东边界等高无裙边。
+        let skirts: Vec<LodQuad> = quads
+            .iter()
+            .copied()
+            .filter(|quad| quad.face != LodFace::Top)
+            .collect();
+        let skirt = LodQuad {
+            x: 16,
+            z: 0,
+            y: SEA_LEVEL_Y + 1,
+            w: 8,
+            d: 16,
+            face: LodFace::NegX,
+            material: GRASS,
+            shade: 153,
+        };
+        assert_eq!(
+            skirts,
+            vec![skirt, LodQuad { z: 8, ..skirt }, LodQuad { z: 16, ..skirt }]
+        );
+        // 裙边竖直跨度精确衔接:[65, 81) = 钳制后低侧(64)+1 到陆侧(80)+1。
+        assert_eq!(skirts[0].y, 64 + 1);
+        assert_eq!(skirts[0].y + skirts[0].d as i32, 80 + 1);
     }
 
     #[test]
@@ -745,7 +943,12 @@ mod tests {
         assert_eq!(GOLDEN_SHELL_BYTES.len() % LOD_SHELL_QUAD_BYTES, 0);
     }
 
-    /// 固定 seed 42、恒等 perm、tile(−3,2)、step 4(默认档)的壳输出
-    /// 字节快照:548 个 quad,共 10960 字节。
-    const GOLDEN_SHELL_BYTES: &[u8] = include_bytes!("../testdata/lod-shell-seed42-step4-v1.bin");
+    /// 固定 seed 42、恒等 perm(layout 2 十四项恒等材料表,water=13)、
+    /// tile(−3,2)、step 4(默认档)的壳输出字节快照。v2:Ruling 22 海平面
+    /// 钳制与 worldgen layout 2 输入变更后的定版(v1 为钳制前、layout 1
+    /// 十三项输入的快照);重新生成方式:临时用 fs::write 把 encoded 落盘
+    /// 后替换该文件(输入三要素在本测试内逐字钉死)。
+    const GOLDEN_SHELL_BYTES: &[u8] = include_bytes!("../testdata/lod-shell-seed42-step4-v2.bin");
 }
+
+

@@ -10,17 +10,19 @@ import (
 )
 
 // testHeader 构造与 engine lod.rs 单测同源的 `MGW1` header:seed 42、
-// 恒等材料表 0..=12、恒等 perm(与 nativeabi 测试的 testLodShellHeader
-// 逐字节一致),保证 oracle 测试与 Rust golden fixture 输入严格同源。
+// 恒等材料表 0..=13(末项 water=13,layout 2——变基后与 main 的注水
+// worldgen 同一布局,水窗因此按 Ruling 22 钳制到海平面)、恒等 perm
+// (与 nativeabi 测试的 testLodShellHeader 逐字节一致),保证 oracle
+// 测试与 Rust golden fixture 输入严格同源。
 func testHeader() []byte {
 	header := make([]byte, 564)
 	copy(header[:4], "MGW1")
-	binary.LittleEndian.PutUint32(header[4:8], 1)
+	binary.LittleEndian.PutUint32(header[4:8], 2)
 	binary.LittleEndian.PutUint64(header[8:16], 42)
 	minY := int32(-64)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
 	binary.LittleEndian.PutUint32(header[20:24], 320)
-	for index := uint16(0); index < 13; index++ {
+	for index := uint16(0); index < 14; index++ {
 		binary.LittleEndian.PutUint16(header[24+2*int(index):26+2*int(index)], index)
 	}
 	for index := 0; index < 512; index++ {

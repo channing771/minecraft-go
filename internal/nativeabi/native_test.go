@@ -657,18 +657,19 @@ func TestWorldgenStatusPanicTextIsStable(t *testing.T) {
 }
 
 // testLodShellHeader 构造与 engine lod.rs 单测 lod_input 逐字节一致的
-// `MGW1` header:seed 42、恒等材料表 0..=12、恒等 perm。材料表取恒等
-// (而非 worldgen 测试的 1..=13)是为了与 engine golden fixture
-// `lod-shell-seed42-step4-v1.bin` 的输入严格同源。
+// `MGW1` header:seed 42、恒等材料表 0..=13(末项 water=13,layout 2——
+// 变基后与 main 的注水 worldgen 同一布局)、恒等 perm。材料表取恒等
+// (而非 worldgen 测试的 1..=14)是为了与 engine golden fixture
+// `lod-shell-seed42-step4-v2.bin` 的输入严格同源。
 func testLodShellHeader() []byte {
 	header := make([]byte, 564)
 	copy(header[:4], "MGW1")
-	binary.LittleEndian.PutUint32(header[4:8], 1)
+	binary.LittleEndian.PutUint32(header[4:8], 2)
 	binary.LittleEndian.PutUint64(header[8:16], 42)
 	minY := int32(-64)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(minY))
 	binary.LittleEndian.PutUint32(header[20:24], 320)
-	for index := uint16(0); index < 13; index++ {
+	for index := uint16(0); index < 14; index++ {
 		binary.LittleEndian.PutUint16(header[24+2*int(index):26+2*int(index)], index)
 	}
 	for index := 0; index < 512; index++ {
