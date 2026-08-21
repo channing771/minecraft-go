@@ -88,7 +88,7 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 
 ## D10 `BlockCollisionBoxes` 自本变更起可返回非满盒
 
-耕地是全仓第一个非满立方体碰撞体(高 15/16)。prism 每格本就携带任意 AABB 数组,Rust 侧按 `count` 循环读任意盒,现有 4 个 Go 消费者(`playerBoundsAreFree`、`playerSupport`、`placementOverlapsPlayer`、客户端 `collision.go`)均按 `boxes.Count` 逐盒读取。**新消费者不得假定「非空气即整格」**——这条假定无法被 grep 机械识别,只能靠这条注记与代码评审守。
+耕地是全仓第一个非满立方体碰撞体(高 15/16)。prism 每格本就携带任意 AABB 数组,Rust 侧按 `count` 循环读任意盒。`BlockCollisionBoxes` 的 Go 消费者共**六**处(任务组 3 评审普查):`playerBoundsAreFree`、`playerSupport`、`placementOverlapsPlayer`、客户端 `collision.go`、`physics/step.go` 的 prism 编码器——这五处均按 `boxes.Count` 逐盒读取盒顶;**第六处 `sim/spawn.go` 的 `findSpawnInColumn` 是唯一仍假定「有碰撞体即 `y+1`」的调用点**,它不读盒顶,后果是简化 14 的 1/16 空隙(已接受)。**新消费者不得假定「非空气即整格」**——这条假定无法被 grep 机械识别,只能靠这条注记与代码评审守。
 
 ## 遗留与简化清单
 
