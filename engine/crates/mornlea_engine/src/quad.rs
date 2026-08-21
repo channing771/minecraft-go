@@ -42,6 +42,26 @@ const SHIFT_PLANT_BACK: u32 = SHIFT_W;
 #[cfg(test)]
 const PLANT_RESERVED_MASK: u64 = (0xff << SHIFT_W) ^ (1 << SHIFT_PLANT_BACK);
 
+/// 植物材质层的闭区间：`material ∈ [FIRST, LAST]` 即判定该格是植物。
+///
+/// 「一格是不是植物」以 **material 为准**（design D8）：判别不占任何 quad 位，
+/// 而 quad 布局只剩 bit 63 一个空闲位且必须留空。registry 条目布局同样一字不改
+/// （engine ABI 仍是 v5），没有新增「是不是植物」的属性字节。
+///
+/// 数值的真值源在 Go 侧 `internal/assets` 的 `LayerWheat0..LayerWheat7`，并由
+/// `internal/mesh` 的 `PlantMaterialFirst/PlantMaterialLast` 复述一份。三处没有
+/// 共享常量也没有生成步骤，只能人手同步——Go 两处相等由
+/// `TestPlantMaterialLayersMatchMeshContract` 钉住，跨语言一致由真的把小麦喂进
+/// mesher 的 `TestNativeOracleParityWheatCrossPlanes` 兜底。在 Go 的层枚举里
+/// 往小麦**之前**插层会整体平移这段区间，那两条守卫就是唯一会报警的地方。
+pub(crate) const PLANT_MATERIAL_FIRST: u16 = 31;
+pub(crate) const PLANT_MATERIAL_LAST: u16 = 38;
+
+/// plant_material 报告某个材质层是否属于植物集合。
+pub(crate) fn plant_material(material: u16) -> bool {
+    (PLANT_MATERIAL_FIRST..=PLANT_MATERIAL_LAST).contains(&material)
+}
+
 /// 水柱内部（上方也是流体）使用的满格高度原值，实际高度 (15+1)/16 = 1。
 pub(crate) const FULL_FLUID_HEIGHT: u8 = 15;
 
@@ -113,6 +133,14 @@ impl Quad {
             assert!(self.corners == [0; 4], "植物 quad 不得带角高度");
             (u64::from(self.back) << SHIFT_PLANT_BACK, 0)
         } else if self.corners == [0; 4] {
+            // 反方向的强制：植物 material 只允许出现在 face 6/7 上。缺了它，一条
+            // 贪心合并过的植物轴向面能干净流出 mesher，而着色器按 `face >= 6`
+            // 判别、会把它画成一整块普通石板。与 Go 侧 `quad.go` 的 Pack/UnpackQuad
+            // 同口径，两侧都把这条双向等价当成格式的一部分。
+            assert!(
+                !plant_material(self.material),
+                "植物 material 只允许出现在 face 6/7 上"
+            );
             assert!(!self.back, "非植物 quad 不得设置 back");
             (
                 u64::from(self.w - 1) << SHIFT_W | u64::from(self.h - 1) << SHIFT_H,
@@ -120,6 +148,10 @@ impl Quad {
             )
         } else {
             assert!(self.w == 1 && self.h == 1);
+            assert!(
+                !plant_material(self.material),
+                "植物 material 只允许出现在 face 6/7 上"
+            );
             assert!(!self.back, "非植物 quad 不得设置 back");
             assert!(self.corners.iter().all(|&corner| corner <= 15));
             (

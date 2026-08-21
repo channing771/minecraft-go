@@ -17,6 +17,13 @@ func TestQuadPackRemainsEightBytes(t *testing.T) {
 func TestQuadPackRoundTrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	for i := 0; i < 100000; i++ {
+		mat := uint16(rng.Intn(65536))
+		// 植物 material 只允许出现在 face 6/7 上（quad.go 的双向约束），随机的
+		// 轴向面必须避开那 8 个值，否则 Pack 会按约定拒绝。植物 quad 自身的往返
+		// 由 TestPlantQuadsSurviveTheUploadRoundTrip 覆盖。
+		if mesh.PlantMaterial(mat) {
+			mat = mesh.PlantMaterialLast + 1
+		}
 		want := mesh.Quad{
 			X:     uint8(rng.Intn(16)),
 			Y:     uint8(rng.Intn(16)),
@@ -24,7 +31,7 @@ func TestQuadPackRoundTrip(t *testing.T) {
 			W:     uint8(rng.Intn(16) + 1),
 			H:     uint8(rng.Intn(16) + 1),
 			Face:  mesh.Face(rng.Intn(6)),
-			Mat:   uint16(rng.Intn(65536)),
+			Mat:   mat,
 			AO:    uint8(rng.Intn(256)),
 			Light: uint8(rng.Intn(256)),
 		}

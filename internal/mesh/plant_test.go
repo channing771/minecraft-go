@@ -265,6 +265,16 @@ func TestPlantQuadEncodingRejectsIllegalCombinations(t *testing.T) {
 			mesh.Quad{X: 1, Y: 1, Z: 1, W: 1, H: 1, Face: mesh.FacePlantDiagB, Mat: plantMat}.Pack() | 1<<13,
 		},
 		{
+			// 植物 material 落在轴向 face 上,而且还是一条贪心合并过的 5×4:
+			// 着色器按 `face >= 6` 判别,会把它当普通方块画成一整块石板。
+			// 这是 `face ∈ {6,7} ⟺ material ∈ 植物区间` 的**反方向**,只强制一半
+			// 等于着色器那条"按 face 判别与按 material 判别等价"的前提不成立。
+			"植物 material 配轴向 face",
+			// Pack 现在同样拒绝这个组合,所以只能先打包一条 Mat=0 的合法 quad,
+			// 再把植物 material 按位或进去。
+			mesh.Quad{X: 1, Y: 2, Z: 3, W: 5, H: 4, Face: mesh.FacePosY}.Pack() | uint64(plantMat)<<23,
+		},
+		{
 			// bit 63 必须永远空着。
 			"占用 bit 63",
 			mesh.Quad{X: 1, Y: 1, Z: 1, W: 1, H: 1, Face: mesh.FacePosY, Mat: 3}.Pack() | 1<<63,

@@ -56,7 +56,8 @@ func (f Face) Positive() bool { return f&1 == 1 }
 //     它据此决定哪些格跳过轴向面、改出 4 条交叉斜面；跨语言一致性由真的喂一次
 //     Rust mesher 的 TestNativeOracleParityWheatCrossPlanes 兜底；
 //   - 着色器：terrain.wgsl 与 cull.wgsl **不**复制这段数值，改按 `face >= 6`
-//     判别。二者等价——本文件的解包保证 `face ∈ {6,7} ⟺ material ∈ 植物区间`，
+//     判别。二者等价——本文件的 Pack 与 UnpackQuad **双向**强制
+//     `face ∈ {6,7} ⟺ material ∈ 植物区间`（两个方向各有一条 panic），
 //     而少一份跨语言常量就少一处会静默分叉的地方。
 const (
 	PlantMaterialFirst uint16 = 31
@@ -147,8 +148,18 @@ func (q Quad) Pack() uint64 {
 		}
 		low = uint64(q.Corners[0])<<shiftW | uint64(q.Corners[1])<<shiftH
 		high = uint64(q.Corners[2])<<shiftCorner2 | uint64(q.Corners[3])<<shiftCorner3
-	case q.Back:
-		panic("mesh: 非植物 quad 不得设置 Back")
+	default:
+		// 反方向的强制：植物 material 只允许出现在 face 6/7 上。缺了这一条，
+		// 一条贪心合并过的 5×4 小麦轴向石板能干净穿过信任边界，而着色器按
+		// `face >= 6` 判别、会把它当普通方块画成一整块石板——`face ∈ {6,7} ⟺
+		// material ∈ 植物区间` 这条双向等价正是着色器不必复制 material 区间的
+		// 前提，只强制一半等于没有前提。它同时把「植物 quad 被贪心合并」堵死。
+		if PlantMaterial(q.Mat) {
+			panic("mesh: 植物 material 只允许出现在 face 6/7 上")
+		}
+		if q.Back {
+			panic("mesh: 非植物 quad 不得设置 Back")
+		}
 	}
 	return uint64(q.X)<<shiftX |
 		uint64(q.Y)<<shiftY |
@@ -166,7 +177,8 @@ func (q Quad) Pack() uint64 {
 //
 // 三条判别互斥、按顺序生效：
 //
-//  1. face ∈ {6,7} → 植物交叉斜面，W/H 那 8 bit 是正背标志加保留位；
+//  1. face ∈ {6,7} → 植物交叉斜面，W/H 那 8 bit 是正背标志加保留位。判别是
+//     **双向**的：植物 material 配轴向 face 与轴向 material 配 face 6/7 一样被拒；
 //  2. 角 2（bit 55..58）非零 → 带角高度的水面。角 2 在任何面朝向下都是顶面顶点，
 //     而真流体高度恒 >= 7，普通 quad 的这 4 bit 则恒为 0，于是不必额外花标志位；
 //  3. 其余 → 普通 quad，W/H 照常解为 w-1 / h-1。
@@ -189,6 +201,9 @@ func UnpackQuad(v uint64) Quad {
 		Mat:   uint16(v >> shiftMat),
 		AO:    uint8(v >> shiftAO),
 		Light: uint8(v >> shiftLight),
+	}
+	if !q.Face.Plant() && PlantMaterial(q.Mat) {
+		panic("mesh: 植物 material 只允许出现在 face 6/7 上")
 	}
 	if q.Face.Plant() {
 		if !PlantMaterial(q.Mat) {

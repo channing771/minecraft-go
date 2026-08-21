@@ -1,6 +1,6 @@
 use crate::input::MeshInput;
 use crate::light::LightScratch;
-use crate::quad::{FULL_FLUID_HEIGHT, Face, Quad};
+use crate::quad::{FULL_FLUID_HEIGHT, Face, Quad, plant_material};
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum MeshError {
@@ -28,26 +28,16 @@ const FACES: [Face; 6] = [
     Face::PosZ,
 ];
 
-/// 植物材质层的闭区间：`material ∈ [FIRST, LAST]` 即判定该格是植物。
-///
-/// 「一格是不是植物」以 **material 为准**（design D8）：判别不占任何 quad 位，
-/// 而 quad 布局只剩 bit 63 一个空闲位且必须留空。registry 条目布局同样一字不改
-/// （engine ABI 仍是 v5），没有新增「是不是植物」的属性字节。
-///
-/// 数值的真值源在 Go 侧 `internal/assets` 的 `LayerWheat0..LayerWheat7`，并由
-/// `internal/mesh` 的 `PlantMaterialFirst/PlantMaterialLast` 复述一份。三处没有
-/// 共享常量也没有生成步骤，只能人手同步——Go 两处相等由
-/// `TestPlantMaterialLayersMatchMeshContract` 钉住，跨语言一致由真的把小麦喂进
-/// 本 mesher 的 `TestNativeOracleParityWheatCrossPlanes` 兜底。在 Go 的层枚举里
-/// 往小麦**之前**插层会整体平移这段区间，那两条守卫就是唯一会报警的地方。
-const PLANT_MATERIAL_FIRST: u16 = 31;
-const PLANT_MATERIAL_LAST: u16 = 38;
-
 /// 单个植物格产生的面实例数**固定上界**。
 ///
 /// 两条对角线 × 正反两面 = 4，`plant-visual-presentation` 把「每格面实例数 MUST
 /// 有固定上界」写成 MUST。4 小于普通方块的 6，所以整段的输出上界不变，Go 侧的
 /// `maxNativeQuads = 6 * BlocksPerSection` 依旧覆盖最坏情况。
+///
+/// **上界由 `a_section_full_of_plants_stays_within_the_fixed_bound` 守**：它把整段
+/// 塞满作物、断言总数恰好 `4 * 4096`，常量一旦被改大就变红。此前这里还有一条
+/// 就地的 `assert_eq!(count - before, PLANT_QUADS_PER_CELL)`，但 `PLANT_QUADS` 的
+/// 长度与本常量编译期绑定、循环每轮 `+1`，那条断言恒真、挡不住任何东西，已删。
 const PLANT_QUADS_PER_CELL: usize = 4;
 
 /// 植物格的四条 quad：对角线 A 正/背，对角线 B 正/背。次序固定，Go oracle 逐条对齐。
@@ -185,10 +175,7 @@ pub(crate) fn mesh_section(
 /// 取 face 0 的 material 即可：植物六个面共用同一层（交叉斜面没有"朝向"），
 /// Go 侧 `assets.Registry.Material` 对作物的全部 face 返回同一个 `LayerWheatN`。
 fn is_plant(input: &MeshInput<'_>, id: u16) -> bool {
-    matches!(
-        input.registry.material(id, 0),
-        Some(material) if (PLANT_MATERIAL_FIRST..=PLANT_MATERIAL_LAST).contains(&material)
-    )
+    matches!(input.registry.material(id, 0), Some(material) if plant_material(material))
 }
 
 /// mesh_plants 为区段里每个植物格补出交叉斜面，返回新的 quad 总数。
@@ -221,14 +208,14 @@ fn mesh_plants(
         for z in 0..16 {
             for x in 0..16 {
                 let id = input.block(x, y, z);
-                if !is_plant(input, id) {
+                // 空气早退：绝大多数格是空气，先挡掉能省下一次 registry 二分。
+                if id == input.air_id || !is_plant(input, id) {
                     continue;
                 }
                 let Some(material) = input.registry.material(id, 0) else {
                     continue;
                 };
                 let light_above = light.at(x, y + 1, z);
-                let before = count;
                 for (face, back) in PLANT_QUADS {
                     let Some(slot) = output.get_mut(count) else {
                         return Err(MeshError::OutputOverflow);
@@ -249,14 +236,6 @@ fn mesh_plants(
                     .pack();
                     count += 1;
                 }
-                // 固定上界是一条 MUST，就地钉死：任何"顺手多出一片"的改动都在
-                // 这里当场炸，而不是等到显存预算或 capture 门禁上才显形。
-                assert_eq!(
-                    count - before,
-                    PLANT_QUADS_PER_CELL,
-                    "植物格 ({x},{y},{z}) 产生了 {} 条面实例，固定上界是 {PLANT_QUADS_PER_CELL}",
-                    count - before
-                );
             }
         }
     }
@@ -381,13 +360,10 @@ fn compute_ao(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        MeshError, PLANT_MATERIAL_FIRST, PLANT_QUADS, PLANT_QUADS_PER_CELL, compute_ao,
-        mesh_section,
-    };
+    use super::{MeshError, PLANT_QUADS, PLANT_QUADS_PER_CELL, compute_ao, mesh_section};
     use crate::input::{MeshInput, tests::valid_input};
     use crate::light::{LIGHT_VOLUME, LightScratch};
-    use crate::quad::{Face, Quad};
+    use crate::quad::{Face, PLANT_MATERIAL_FIRST, Quad};
 
     const BLOCKS_OFFSET: usize = 16;
     const BLOCKS_BYTES: usize = 27 * 4096 * 2;
