@@ -327,3 +327,46 @@ func TestApplicationLodWiringDisabledZeroParticipation(t *testing.T) {
 		t.Fatalf("禁用路径 renderFrame: %v", err)
 	}
 }
+
+// TestApplicationLodWiringBenchmarkObserverZeroParticipation 在应用装配级
+// 锁住 5.4 的基准可比性裁决:benchmark 观察者路径即使带着编译默认的
+// lodEnabled=true 也不得构造远环 Scheduler——attachLodScheduler 在
+// lodWiringEnabled 判定后立即返回,种子不进 worldgen、无播种、无雾下发,
+// benchmark 的被测负载因此与远环引入前逐字节一致(scenario 保持 v17)。
+// 与 TestLodWiringEnabled 的差异:断言落在真实 benchmark 装配产物上
+// (内存 store、内存传输、离屏渲染器、trusted observer 中心请求全走真
+// 分支)而不是开关函数上,防止装配点停止传递 benchmark 标记的静默回归。
+func TestApplicationLodWiringBenchmarkObserverZeroParticipation(t *testing.T) {
+	dependencies := defaultApplicationDependencies()
+	// benchmark 装配要求 2560x1440 离屏渲染器;沿用全包惯例,无 GPU 适配器
+	// 时跳过(其余断言在 TestLodWiringEnabled 的开关级已覆盖)。
+	dependencies.newOffscreenRenderer = func(width, height int) (*client.Renderer, error) {
+		renderer, err := client.NewRenderer(width, height)
+		if errors.Is(err, client.ErrNoGPUAdapter) {
+			t.Skip("无 GPU 适配器")
+		}
+		return renderer, err
+	}
+	options := applicationOptions{
+		Seed:               benchmarkSeed,
+		Benchmark:          true,
+		BenchmarkTransport: "memory",
+		Render:             config.Defaults().Render,
+	}
+	app, err := newApplicationWithDependencies(options, dependencies)
+	if err != nil {
+		t.Fatalf("newApplication: %v", err)
+	}
+	defer func() {
+		if err := app.Close(); err != nil {
+			t.Fatalf("application Close: %v", err)
+		}
+	}()
+	if app.lodScheduler != nil {
+		t.Fatal("benchmark 观察者路径不得构造远环 Scheduler(基准可比性:scenario 保持 v17)")
+	}
+	// 帧循环照常:零参与是"不建调度器",不是"帧循环分叉出第二条路径"。
+	if _, err := app.renderFrame(steadyFrameMeshWorkMax); err != nil {
+		t.Fatalf("benchmark 零参与路径 renderFrame: %v", err)
+	}
+}
