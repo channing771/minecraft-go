@@ -637,3 +637,47 @@ func TestHarvestMatureWheatCapacityFailureIsAtomic(t *testing.T) {
 		t.Fatalf("容量失败修改了掉落槽: drops=%x/%x", got, beforeDropsHash)
 	}
 }
+
+// farmingBlockIDs 是全部十个农业方块编号（八个作物阶段 + 干湿耕地），伙伴
+// 防御清单用例按它穷举。
+var farmingBlockIDs = append(farmingCropIDs[:], core.FarmlandDryID, core.FarmlandWetID)
+
+// TestCompanionMineableBlockRejectsFarmingBlocks 锁定伙伴采掘防御清单对农业
+// 方块的**显式**拒绝（design.md D7 / Ruling 5）。
+//
+// 前置守卫是这条用例的承重墙：十个农业方块在 core.BlockDrop 里都有单一产物
+// 登记，"必须有单一 BlockDrop"这条通用判据会**放行**它们。因此本用例断言的是
+// "农业方块被显式拒绝"这个事实本身，不是"多掉落被拒"的副产品——把显式拒绝
+// 删掉，或者把成熟小麦的多掉落放宽进 core，本用例都必须红。
+func TestCompanionMineableBlockRejectsFarmingBlocks(t *testing.T) {
+	for _, block := range farmingBlockIDs {
+		if _, ok := core.BlockDrop(block); !ok {
+			t.Fatalf("农业方块 %d 已不在 core.BlockDrop 中，本用例的前提失效", block)
+		}
+		if companionMineableBlock(block) {
+			t.Fatalf("companionMineableBlock(%d) = true，伙伴必须被显式拒绝", block)
+		}
+	}
+}
+
+// TestCompanionPlaceableBlockRejectsFarmingBlocks 锁定伙伴放置防御清单对农业
+// 方块的**显式**拒绝（Ruling 8）。
+//
+// 前置守卫钉死"往返二重校验本身放行种植"：BlockDrop(阶段 0) = 种子、
+// ItemPlacement(种子) = 阶段 0，往返成立，因此 completeCompanionPlacement 的
+// 既有校验链挡不住伙伴种地。本用例断言的是显式拒绝本身。
+func TestCompanionPlaceableBlockRejectsFarmingBlocks(t *testing.T) {
+	item, ok := core.BlockDrop(core.WheatStage0ID)
+	if !ok || item != core.ItemWheatSeeds {
+		t.Fatalf("BlockDrop(阶段 0) = (%d,%v)，本用例的前提失效", item, ok)
+	}
+	if placement, ok := core.ItemPlacement(item); !ok || placement != core.WheatStage0ID {
+		t.Fatalf("ItemPlacement(种子) = (%d,%v)，往返已不成立，本用例的前提失效",
+			placement, ok)
+	}
+	for _, block := range farmingBlockIDs {
+		if _, ok := companionPlaceableBlock(block); ok {
+			t.Fatalf("companionPlaceableBlock(%d) 放行，伙伴必须被显式拒绝", block)
+		}
+	}
+}

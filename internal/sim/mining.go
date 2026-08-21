@@ -162,6 +162,15 @@ func companionMineableBlock(block core.BlockID) bool {
 	if block == core.ChestID || block == core.FurnaceID {
 		return false
 	}
+	// 农业方块（八个作物阶段 + 干湿耕地）必须**显式**拒绝，不能指望"单一
+	// BlockDrop"这条判据顺手挡住（design.md D7 / Ruling 5）：core.BlockDrop 对
+	// 十个编号都有单一产物登记，成熟小麦的第二份产物（2 种子）只存在于
+	// completeMining 的分支里，编号层面读不出来——巧合性安全不成立。
+	// 伙伴的农业语义（种什么、何时收、成熟度判断）尚未裁决（design.md 遗留 11），
+	// 在裁决之前十个编号一律不可作为伙伴采掘目标。
+	if core.IsCrop(block) || core.IsFarmland(block) {
+		return false
+	}
 	_, ok := core.BlockDrop(block)
 	return ok
 }
