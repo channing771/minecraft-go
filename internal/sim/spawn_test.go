@@ -42,7 +42,7 @@ func TestSpawnCandidatesOrderByDistanceThenXZ(t *testing.T) {
 }
 
 func TestSpawnWaitsForEarlierUnknownCandidate(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	requested := engine.Step()
 	for _, key := range requested.Acquire {
@@ -69,7 +69,7 @@ func TestSpawnWaitsForEarlierUnknownCandidate(t *testing.T) {
 }
 
 func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	const sessionID = SessionID(1)
 	anchor := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{}}
 	target := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -1}}
@@ -153,7 +153,7 @@ func TestPendingSpawnGenerateRetainActivateAndForget(t *testing.T) {
 }
 
 func TestExhaustedSpawnRetriesOnlyAfterRevisionChange(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	dimension := engine.dimensions[core.Overworld]
 	for x := int32(-1); x <= 1; x++ {
@@ -213,7 +213,7 @@ func spawnTestChunk(pos core.ChunkPos, support core.BlockPos) *world.Chunk {
 // 流体零碰撞体，因此 playerBoundsAreFree 对两列的读数完全相同——「改对改错
 // 读数相同」的空转在这里靠水的存在与否本身区分，不是靠碰撞体。
 func TestSpawnSkipsSubmergedColumn(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	dimension := engine.dimensions[core.Overworld]
 
@@ -287,7 +287,7 @@ func spawnLadderEngine(
 	overrides map[core.BlockPos]int32,
 ) (*Engine, PlayerUpdate) {
 	t.Helper()
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	dimension := engine.dimensions[core.Overworld]
 	chunks := make(map[core.ChunkPos]*world.Chunk)
@@ -415,7 +415,7 @@ func spawnLadderPillar(chunk *world.Chunk, column core.BlockPos, top int32) {
 // {-1,-1} 第一 tick 故意不给，扫描必然停在它之前。补齐该区块后，出生点必须是
 // **断点之前**记下的第 2 档 (0.5,4,0.5)；栈上语义会丢掉它而落到断点处的第 3 档。
 func TestSpawnFallbackSurvivesChunkReadinessGap(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	dimension := engine.dimensions[core.Overworld]
 	gap := core.ChunkPos{X: -1, Z: -1}

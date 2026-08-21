@@ -446,7 +446,7 @@ func TestOldestDueRetryPreventsFixedRegionStarvation(t *testing.T) {
 	config := DefaultConfig(42)
 	config.RetryBaseTicks = 1
 	config.RetryMaxTicks = 1
-	engine := sim.NewEngine(0, 0)
+	engine := sim.NewEngine(0, 0, 0)
 	running := &Server{
 		config:          config,
 		engine:          engine,

@@ -495,7 +495,7 @@ func readyFlatWorld(
 	inventory core.Inventory,
 ) (*sim.Engine, sim.SessionID) {
 	t.Helper()
-	engine := sim.NewEngine(viewRadius, 0)
+	engine := sim.NewEngine(viewRadius, 0, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterPlayer(session, sim.PlayerRestore{
 		SpawnDimension: core.Overworld,

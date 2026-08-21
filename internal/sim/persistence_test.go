@@ -145,7 +145,7 @@ func TestPersistenceStaleAckCannotClearNewerInFlightSnapshot(t *testing.T) {
 }
 
 func TestPersistenceSuccessClearsRewriteAndRejectsFutureRevision(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -3, Z: 5}}
 	dimension := engine.dimensions[key.Dimension]
 	if !dimension.BeginLoading(key.Pos) {
@@ -248,7 +248,7 @@ func TestPersistenceStatsKeepSelectionTimeInFlightBytesStable(t *testing.T) {
 
 func dirtyPersistenceEngine(t *testing.T, keys []core.ChunkKey) *Engine {
 	t.Helper()
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	for _, key := range keys {
 		dimension := engine.dimensions[key.Dimension]
 		if dimension == nil {

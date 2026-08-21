@@ -48,7 +48,14 @@ type pendingChunkChanges struct {
 }
 
 type Engine struct {
-	viewRadius         int
+	viewRadius int
+	// seed 是世界种子，构造后只读。它由 host 从 storage.Metadata.Seed 传入，
+	// 与 worldgen.New 拿到的是**同一个值**——作物生长抽样必须与地形生成同源，
+	// 否则同一个存档在两处会表现出两套"世界身份"。
+	//
+	// 权威模拟不 import storage（archcheck 的依赖白名单禁止），因此种子只能经
+	// 构造参数注入，不在 sim 内引入第二个种子来源。测试一律传 0。
+	seed               int64
 	dimensions         map[core.DimensionID]*Dimension
 	sessions           map[SessionID]*sessionState
 	companions         map[companion.ID]*companionState
@@ -69,6 +76,16 @@ type Engine struct {
 	fluidDimensionScratch []core.DimensionID
 	// fluidRescan 是跨 tick 的边界重扫待办，见 fluidRescanState。
 	fluidRescan fluidRescanState
+
+	// cropCellScratch 是作物随机 tick 抽样下标的复用缓冲；抽样每 tick 执行
+	// 「活动区块数 × 24 个区段」次，不复用就会在权威 tick 上产生同量级的分配。
+	cropCellScratch []int
+	// cropCellsExamined 是**最近一个 tick** 里被作物随机 tick 考察过的格数。
+	//
+	// 它是 spec「单个 tick 内被考察的格数 MUST NOT 随世界中作物的数量增长」
+	// 这条成本契约的可读计数：该断言无法从方块结果观察（两个世界的作物数不同，
+	// 方块结果本来就不同），只能靠一个显式计数。生产代码只写不读，包内测试读。
+	cropCellsExamined int
 
 	// 掉落物 tick 的复用 scratch，避免每 tick 分配固定上限集合。
 	dropKeySeen            map[core.ChunkKey]struct{}
@@ -96,13 +113,15 @@ type Engine struct {
 	physicsTunables physics.Tunables
 }
 
-// NewEngine 创建权威引擎。worldTime 是从 metadata 恢复的绝对世界时间。
-func NewEngine(viewRadius int, worldTime uint64) *Engine {
+// NewEngine 创建权威引擎。worldTime 是从 metadata 恢复的绝对世界时间，
+// seed 是世界种子（与 worldgen.New 同值，见 Engine.seed 的说明）。
+func NewEngine(viewRadius int, worldTime uint64, seed int64) *Engine {
 	if viewRadius < 0 {
 		panic("sim: negative view radius")
 	}
 	engine := &Engine{
 		viewRadius: viewRadius,
+		seed:       seed,
 		dimensions: map[core.DimensionID]*Dimension{
 			core.Overworld: NewDimension(core.Overworld),
 		},

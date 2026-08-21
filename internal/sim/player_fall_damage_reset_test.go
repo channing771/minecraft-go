@@ -12,7 +12,7 @@ import (
 // beginReset（例如摔出世界下界）时，此前遗留的摔落峰值必须被重置为 reset 后的
 // 新高度，不能带着旧峰值进入下一次重生。
 func TestBeginResetResetsFallPeak(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	id := SessionID(90)
 	engine.RegisterSession(id, core.Overworld, core.ChunkPos{})
 	player := engine.sessions[id].player
@@ -32,7 +32,7 @@ func TestBeginResetResetsFallPeak(t *testing.T) {
 // 激活（无论来自 restore 候选还是新出生点）时，必须把遗留的摔落峰值重置为
 // 激活后的落点高度，而不是沿用激活前的旧峰值。
 func TestActivateResetsFallPeak(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	id := SessionID(91)
 	engine.RegisterSession(id, core.Overworld, core.ChunkPos{})
 	session := engine.sessions[id]

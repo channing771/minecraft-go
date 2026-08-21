@@ -10,7 +10,7 @@ import (
 const testDayLengthTicks = 24000
 
 func TestEngineRestoresAbsoluteWorldTime(t *testing.T) {
-	engine := NewEngine(0, 12345)
+	engine := NewEngine(0, 12345, 0)
 	if got := engine.WorldTime(); got != 12345 {
 		t.Fatalf("构造后世界时间 = %d，想要 12345", got)
 	}
@@ -20,7 +20,7 @@ func TestEngineRestoresAbsoluteWorldTime(t *testing.T) {
 }
 
 func TestEngineAdvancesWorldTimeExactlyOncePerStep(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	for step := uint64(1); step <= 5; step++ {
 		result := engine.Step()
 		if result.WorldTimeTicks != step {
@@ -33,7 +33,7 @@ func TestEngineAdvancesWorldTimeExactlyOncePerStep(t *testing.T) {
 }
 
 func TestEngineWorldTimeCrossesDayBoundaryWithoutWrapping(t *testing.T) {
-	engine := NewEngine(0, testDayLengthTicks-1)
+	engine := NewEngine(0, testDayLengthTicks-1, 0)
 	result := engine.Step()
 	if result.WorldTimeTicks != testDayLengthTicks {
 		t.Fatalf("跨昼夜边界世界时间 = %d，想要 %d", result.WorldTimeTicks, testDayLengthTicks)
@@ -45,7 +45,7 @@ func TestEngineWorldTimeCrossesDayBoundaryWithoutWrapping(t *testing.T) {
 }
 
 func TestEnginePublishesSameWorldTimeToAllPlayers(t *testing.T) {
-	engine := NewEngine(0, 100)
+	engine := NewEngine(0, 100, 0)
 	for session := SessionID(1); session <= 8; session++ {
 		engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	}
@@ -63,7 +63,7 @@ func TestEnginePublishesSameWorldTimeToAllPlayers(t *testing.T) {
 
 func TestEngineWorldTimeAdvanceIsDeterministicAndAllocationFree(t *testing.T) {
 	replay := func() []uint64 {
-		engine := NewEngine(0, 7)
+		engine := NewEngine(0, 7, 0)
 		times := make([]uint64, 0, 32)
 		for range 32 {
 			times = append(times, engine.Step().WorldTimeTicks)
@@ -78,7 +78,7 @@ func TestEngineWorldTimeAdvanceIsDeterministicAndAllocationFree(t *testing.T) {
 	}
 
 	// 稳定推进的世界时间本身不得引入堆分配。
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.Step()
 	before := engine.WorldTime()
 	allocations := testing.AllocsPerRun(64, func() { engine.advanceWorldTime() })

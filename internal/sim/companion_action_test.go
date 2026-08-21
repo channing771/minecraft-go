@@ -20,7 +20,7 @@ import (
 // 产生完全一致的可观察结果。
 func TestCompanionActionAppliesInIDOrderAfterPlayers(t *testing.T) {
 	run := func() (phases []stepPhase, players [2]PlayerUpdate, companions [2]CompanionUpdate) {
-		engine := NewEngine(0, 0)
+		engine := NewEngine(0, 0, 0)
 		sessionA, sessionB := SessionID(1), SessionID(2)
 		engine.RegisterSession(sessionA, core.Overworld, core.ChunkPos{})
 		engine.RegisterSession(sessionB, core.Overworld, core.ChunkPos{})
@@ -153,7 +153,7 @@ func TestCompanionActionInboxBoundedAndSessionless(t *testing.T) {
 	})
 
 	t.Run("inbox 有界且满员即丢弃", func(t *testing.T) {
-		engine := NewEngine(0, 0)
+		engine := NewEngine(0, 0, 0)
 		for suffix := byte(1); suffix <= companion.MaxActive; suffix++ {
 			if !engine.EnqueueCompanionAction(CompanionAction{ID: companionTestID(suffix)}) {
 				t.Fatalf("第 %d 个 action 未入队", suffix)
@@ -169,7 +169,7 @@ func TestCompanionActionInboxBoundedAndSessionless(t *testing.T) {
 	})
 
 	t.Run("未知 ID 丢弃且无会话副作用", func(t *testing.T) {
-		engine := NewEngine(0, 0)
+		engine := NewEngine(0, 0, 0)
 		loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
 		id := companionTestID(1)
 		activateCompanionAt(t, engine, id, mgl32.Vec3{8.5, 1, 8.5})
@@ -189,7 +189,7 @@ func TestCompanionActionInboxBoundedAndSessionless(t *testing.T) {
 	})
 
 	t.Run("未激活伙伴的 action 丢弃不跨 tick 滞留", func(t *testing.T) {
-		engine := NewEngine(0, 0)
+		engine := NewEngine(0, 0, 0)
 		id := companionTestID(1)
 		position := mgl32.Vec3{8.5, 1, 8.5}
 		engine.RegisterCompanion(CompanionRestore{
@@ -221,7 +221,7 @@ func TestCompanionActionInboxBoundedAndSessionless(t *testing.T) {
 	})
 
 	t.Run("同 tick 重复 action 只应用最早入队的一个", func(t *testing.T) {
-		engine := NewEngine(0, 0)
+		engine := NewEngine(0, 0, 0)
 		loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
 		id := companionTestID(1)
 		activateCompanionAt(t, engine, id, mgl32.Vec3{0.5, 1, 0.5})
@@ -243,7 +243,7 @@ func TestCompanionActionInboxBoundedAndSessionless(t *testing.T) {
 // acquire/generate 流程就绪，离开的旧区块按既有规则释放，且任一时刻单伙伴兴趣
 // 区块数不超过 9。
 func TestCompanionInterestSlidesWithBody(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	id := companionTestID(1)
 	engine.RegisterCompanion(CompanionRestore{
 		ID: id,

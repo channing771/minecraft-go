@@ -824,6 +824,11 @@ type Field struct {
 //   - sim.fluidRescanCellsPerTick 下限同样为 1：重扫预算在区段边界检查，
 //     取 1 也保证每 tick 至少推进一个区段，但取 0 会让待重扫队列永远排不空，
 //     刚进入推进范围的区块里的水永远不会被唤醒。
+//   - sim.randomTicksPerSection 区间为 0..64：取 0 是合法的调试取值（作物停止
+//     生长、耕地不再转换干湿），不是错误；上限 64 只是操作区间，抽样对更大的
+//     取值同样正确，但那已是默认值的 20 倍，再大只会线性烧掉权威 tick 预算。
+//   - sim.cropGrowthChancePercent 区间为 0..100：它是一个百分比，两端都有明确
+//     语义（0 = 永不推进，100 = 抽中即推进），越界值没有任何解释。
 func Fields() []Field {
 	return []Field{
 		{Group: "physics", Name: "eyeHeight", Min: 1, Max: 2.2, Step: 0.01},
@@ -857,6 +862,8 @@ func Fields() []Field {
 		{Group: "sim", Name: "fluidFlowDelayTicks", Min: 0, Max: 2000, Step: 1},
 		{Group: "sim", Name: "fluidUpdatesPerTick", Min: 1, Max: 65536, Step: 1},
 		{Group: "sim", Name: "fluidRescanCellsPerTick", Min: 1, Max: 1048576, Step: 1024},
+		{Group: "sim", Name: "randomTicksPerSection", Min: 0, Max: 64, Step: 1},
+		{Group: "sim", Name: "cropGrowthChancePercent", Min: 0, Max: 100, Step: 1},
 
 		{Group: "render", Name: "viewDistance", Min: 2, Max: 64, Step: 1, ReadOnly: true},
 		{Group: "render", Name: "fovDegrees", Min: 30, Max: 110, Step: 1},

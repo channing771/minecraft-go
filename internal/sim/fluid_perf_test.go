@@ -109,7 +109,7 @@ func waterfallChunk(pos core.ChunkPos) *world.Chunk {
 // 个区块。
 func fluidPerfEngine(t *testing.T, gen func(core.ChunkPos) *world.Chunk) *Engine {
 	t.Helper()
-	engine := NewEngine(DropInterestRadius, 0)
+	engine := NewEngine(DropInterestRadius, 0, 0)
 	engine.RegisterSession(1, core.Overworld, core.ChunkPos{})
 	for range 12 {
 		result := engine.Step()

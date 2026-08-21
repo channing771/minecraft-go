@@ -136,7 +136,7 @@ func TestPlayerIntentDoesNotModifyReadyChunkWhenRayEntersUnknownChunk(t *testing
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			engine := sim.NewEngine(0, 0)
+			engine := sim.NewEngine(0, 0, 0)
 			const session = sim.SessionID(1)
 			anchor := core.ChunkPos{X: 1}
 			engine.RegisterPlayer(session, sim.PlayerRestore{

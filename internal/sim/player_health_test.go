@@ -11,7 +11,7 @@ import (
 // TestRegisterPlayerDefaultsMissingHealthToFull 覆盖"新玩家以满血开始"场景：
 // 缺失（零值）生命值必须被当作"缺失"处理，落地为满血。
 func TestRegisterPlayerDefaultsMissingHealthToFull(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	id := SessionID(70)
 	engine.RegisterSession(id, core.Overworld, core.ChunkPos{})
 	if got := engine.sessions[id].player.health; got != core.MaxHealth {
@@ -22,7 +22,7 @@ func TestRegisterPlayerDefaultsMissingHealthToFull(t *testing.T) {
 // TestPlayerRestoreCarriesExplicitHealthThroughSnapshot 覆盖生命值跨重启保真：
 // 存档携带的非满血生命值必须原样出现在权威快照中。
 func TestPlayerRestoreCarriesExplicitHealthThroughSnapshot(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	id := SessionID(71)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
@@ -53,7 +53,7 @@ func TestPlayerRestoreCarriesExplicitHealthThroughSnapshot(t *testing.T) {
 // TestPlayerRestoreMissingHealthDefaultsToFullThroughSnapshot 覆盖缺失值兜底：
 // restore 未携带生命值时，快照必须回落到满血而不是零血。
 func TestPlayerRestoreMissingHealthDefaultsToFullThroughSnapshot(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	id := SessionID(72)
 	current := PlayerLocation{
 		Dimension: core.Overworld,

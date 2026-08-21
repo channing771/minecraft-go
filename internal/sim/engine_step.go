@@ -361,6 +361,10 @@ func (engine *Engine) Step() TickResult {
 	engine.advanceFurnaces(pending)
 	engine.notifyStepPhase(phaseFluidAdvance)
 	engine.advanceFluids(pending)
+	// 作物随机 tick 紧跟流体：耕地的干湿判定读的是流体方块，排在流动之后能在
+	// 同一 tick 内看到本 tick 的水位。它同样必须早于 finishChanges——生长与
+	// 干湿转换要与其他方块变更共用同一批 revision、广播与存盘（design.md D1）。
+	engine.advanceCrops(pending)
 	for _, command := range containerMoves {
 		if reason, rejected := engine.applyContainerMove(command.Session, command, pending); rejected {
 			result.Rejected = append(result.Rejected, Rejection{

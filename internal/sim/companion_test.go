@@ -13,7 +13,7 @@ import (
 )
 
 func TestCompanionsAreSeparateSortedIdleActors(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
 	ids := []companion.ID{companionTestID(3), companionTestID(1), companionTestID(2)}
 	positions := map[companion.ID]mgl32.Vec3{}
@@ -66,7 +66,7 @@ func TestCompanionsAreSeparateSortedIdleActors(t *testing.T) {
 }
 
 func TestCompanionRestoreWaitsForAllCollisionChunksBeforeFallback(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	loadCompanionFlatChunk(t, engine, core.ChunkPos{})
 	loadCompanionFlatChunk(t, engine, core.ChunkPos{X: 2})
 	position := mgl32.Vec3{15.9, 1, 0.5}
@@ -94,7 +94,7 @@ func TestCompanionRestoreWaitsForAllCollisionChunksBeforeFallback(t *testing.T) 
 }
 
 func TestCompanionRestoreChunkInitiallyMissingThenRestores(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	id := companionTestID(1)
 	position := mgl32.Vec3{0.5, 1, 0.5}
 	key := core.ChunkKey{Dimension: core.Overworld}
@@ -167,7 +167,7 @@ func TestCompanionRestoreRetriesRetainedChunkFailures(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			engine := NewEngine(0, 0)
+			engine := NewEngine(0, 0, 0)
 			id := companionTestID(1)
 			key := core.ChunkKey{Dimension: core.Overworld}
 			engine.RegisterCompanion(CompanionRestore{
@@ -212,7 +212,7 @@ func advanceCompanionRestoreToGenerating(t *testing.T, engine *Engine, key core.
 }
 
 func TestCompanionSpawnRetriesAfterFailedChunkRevisionChanges(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	loadCompanionAirChunks(t, engine, core.ChunkPos{}, 1)
 	id := companionTestID(1)
 	engine.RegisterCompanion(CompanionRestore{
@@ -235,7 +235,7 @@ func TestCompanionSpawnRetriesAfterFailedChunkRevisionChanges(t *testing.T) {
 }
 
 func TestCompanionSpawnSearchRetainsOnlyThreeByThreeCandidateChunks(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	anchor := core.ChunkPos{X: 4, Z: -3}
 	loadCompanionAirChunks(t, engine, anchor, 1)
 	id := companionTestID(1)
@@ -270,7 +270,7 @@ func TestCompanionSpawnSearchRetainsOnlyThreeByThreeCandidateChunks(t *testing.T
 }
 
 func TestCompanionInterestIsThreeByThreeAndDoesNotConsumeSessions(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	loadCompanionFlatChunk(t, engine, core.ChunkPos{})
 	id := companionTestID(1)
 	position := mgl32.Vec3{8.5, 1, 8.5}
@@ -308,7 +308,7 @@ func TestCompanionInterestIsThreeByThreeAndDoesNotConsumeSessions(t *testing.T) 
 }
 
 func TestEightPlayersAndFourCompanionsRemainIndependentInEngine(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
 	for session := SessionID(1); session <= 8; session++ {
 		engine.RegisterSession(session, core.Overworld, core.ChunkPos{})

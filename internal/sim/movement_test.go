@@ -372,7 +372,7 @@ func TestPlayerHashGoldenLittleEndianLayout(t *testing.T) {
 	}
 
 	const sessionID = SessionID(73)
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.sessions[sessionID] = &sessionState{
 		dimension: core.DimensionID(0x0c0d0e0f),
 		player: &playerState{
@@ -475,7 +475,7 @@ func readyMovementPlayer(t *testing.T) (*Engine, SessionID) {
 // readyMovementPlayerForBench 与 readyMovementPlayer 相同，但接受 testing.TB 以供 benchmark 使用。
 func readyMovementPlayerForBench(t testing.TB) (*Engine, SessionID) {
 	t.Helper()
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	session := SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	requested := engine.Step()

@@ -40,7 +40,7 @@ func TestPlaceBlockRejectsCompletePlayerAABBOverlap(t *testing.T) {
 }
 
 func TestPlayerInteractionRejectsPendingSpawn(t *testing.T) {
-	engine := sim.NewEngine(0, 0)
+	engine := sim.NewEngine(0, 0, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	engine.Enqueue(sim.Command{
@@ -259,7 +259,7 @@ func readyFlatPlayerInventory(
 	inventory core.Inventory,
 ) (*sim.Engine, sim.SessionID) {
 	t.Helper()
-	engine := sim.NewEngine(0, 0)
+	engine := sim.NewEngine(0, 0, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterPlayer(session, sim.PlayerRestore{
 		SpawnDimension: core.Overworld,

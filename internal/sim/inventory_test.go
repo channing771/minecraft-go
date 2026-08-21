@@ -93,7 +93,7 @@ func TestMoveStackRejectsInvalidRequests(t *testing.T) {
 }
 
 func TestMoveStackRejectsPendingSpawn(t *testing.T) {
-	engine := sim.NewEngine(0, 0)
+	engine := sim.NewEngine(0, 0, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	engine.Enqueue(moveCommand(session, 1, 0, 1))
@@ -203,7 +203,7 @@ func TestCraftIgnoresStaleSequence(t *testing.T) {
 }
 
 func TestCraftRejectsPendingSpawn(t *testing.T) {
-	engine := sim.NewEngine(0, 0)
+	engine := sim.NewEngine(0, 0, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	engine.Enqueue(craftCommand(session, 1, core.RecipeStoneBricks))

@@ -89,7 +89,7 @@ func TestSetTunablesRoundTripsFluidFields(t *testing.T) {
 func TestEngineRefreshesSnapshotAtTickStart(t *testing.T) {
 	t.Cleanup(func() { SetTunables(DefaultTunables()) })
 
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 
 	changed := DefaultTunables()
 	changed.InteractionReach = 3

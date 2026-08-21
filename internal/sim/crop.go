@@ -2,6 +2,7 @@ package sim
 
 import (
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // 本文件实现作物的**随机 tick 推进**：抽样、生长规则与两个环境判定。
@@ -146,4 +147,178 @@ func growCrop(block core.BlockID, wet, skyExposed bool) (next core.BlockID, chan
 		return block, false
 	}
 	return block + 1, true
+}
+
+// 湿润判定的两个几何常量（spec「耕地的干湿由邻近流体决定并双向转换」）。
+const (
+	// farmlandWetRadius 是判定湿润时向四周扫的水平切比雪夫距离，4 对应 9×9 的
+	// 水平窗口。
+	farmlandWetRadius = 4
+	// farmlandWetLayersAbove 是除耕地自身所在层外，向上还要扫的层数。取 1 表示
+	// 「同层与上一层」两层：水面通常正好铺在耕地那一层或高一格，再往上的水与
+	// 耕地之间必然隔着方块或空气，不再算作灌溉。
+	farmlandWetLayersAbove = 1
+)
+
+// cropSkyExposed 报告 position 上的作物是否露天（design.md D5）。
+//
+// 判据是 `cropY >= 列顶`，其中列顶取既有的派生高度图 world.Chunk.HighestOpaque
+// ——它是"该列最高的非空气方块 Y"，完全由权威方块派生，不进存档、不进 payload。
+// **本函数只读高度图，绝不写**。
+//
+// 作物自己是非空气方块、会抬高自己所在列的列顶，判定依然成立：
+//   - 作物就是该列最高的非空气方块时，列顶 == cropY，`>=` 为真；
+//   - 作物上方有任何非空气方块（含水）时，列顶 > cropY，为假。
+//
+// 而作物换阶段不改变"空气 / 非空气"这个属性，所以高度图在整个生长过程中稳定，
+// 不会因为长高一阶段就把自己判成被遮挡。
+//
+// chunk 必须是 position 所属的区块：调用方（advanceCrops）本来就按区块枚举，
+// 传进来省掉一次 map 查找。
+func cropSkyExposed(chunk *world.Chunk, position core.BlockPos) bool {
+	localX, _, localZ := position.Local()
+	return position.Y >= chunk.HighestOpaque(localX, localZ)
+}
+
+// farmlandIsWet 报告 position 上的耕地是否处于湿润状态：以该格为中心，水平
+// 切比雪夫距离 ≤ farmlandWetRadius（9×9）、同层与上一层两层内存在任意流体方块。
+//
+// **纯查询**：只读 Dimension 的方块，不写任何世界状态，也不碰流体队列。
+//
+// 相邻区块未加载时按「无水」处理。这是一条刻意的保守约定，方向与流体把范围外
+// 的格读作 core.BarrierID（"不可替换"）一致——两者都选择"少发生一点变化"这一侧。
+// 后果只是区块边界上的耕地在邻块加载之前可能被判干；邻块加载后它会在下一次被
+// 随机 tick 抽中时自动转回湿（干湿是双向的，见 advanceCropCell）。反过来若把
+// 未加载读作"可能有水"，就会出现一块永远湿着、谁也说不清水在哪里的耕地。
+func farmlandIsWet(dimension *Dimension, position core.BlockPos) bool {
+	for dy := int32(0); dy <= farmlandWetLayersAbove; dy++ {
+		for dz := int32(-farmlandWetRadius); dz <= farmlandWetRadius; dz++ {
+			for dx := int32(-farmlandWetRadius); dx <= farmlandWetRadius; dx++ {
+				block, ready := dimension.BlockAt(core.BlockPos{
+					X: position.X + dx,
+					Y: position.Y + dy,
+					Z: position.Z + dz,
+				})
+				if ready && core.IsFluid(block) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// advanceCrops 在单写者权威 tick 中推进活动兴趣范围内的作物与耕地湿度。
+//
+// 形状与 advanceFluids / advanceFurnaces 一致：只遍历 activeInterestKeys() 里
+// State == ChunkReady 且 Chunk != nil 的区块，变更经 recordChange 汇入调用方
+// 传入的同一批 pendingChunkChanges（design.md D1：阶段存在方块编号里，因此
+// 既有的方块变更广播与存盘天然覆盖，不新增任何协议消息）。tunable 取自
+// engine.tunables（本 tick 入口的快照），本函数绝不调用 ActiveTunables()。
+//
+// **枚举顺序全序、绝不遍历 map**：区块来自 activeInterestKeys()（已按
+// chunkKeyLess 排好），区段按索引升序，区段内的 n 条抽样按 i 升序。
+// dimension.records[...] 是 map **查找**不是 map 遍历，不引入顺序不确定性。
+//
+// 成本契约：本 tick 触及的格数恒等于「已就绪的活动区块数 × 24 个区段 ×
+// RandomTicksPerSection」，与世界里有多少株作物无关。这里刻意**不**跳过均匀
+// 空气区段——那类捷径会让考察量随地形（进而随作物分布）变化，正好破坏 spec
+// 「作物数量增加不改变单 tick 考察量」这条契约，而省下的只是几次哈希。
+func (engine *Engine) advanceCrops(pending map[core.ChunkKey]*pendingChunkChanges) {
+	engine.cropCellsExamined = 0
+	samples := int(engine.tunables.RandomTicksPerSection)
+	if samples <= 0 {
+		return
+	}
+	tick := engine.tick.Load()
+	for _, key := range engine.activeInterestKeys() {
+		dimension := engine.dimensions[key.Dimension]
+		if dimension == nil {
+			continue
+		}
+		record := dimension.records[key.Pos]
+		if record == nil || record.State != ChunkReady || record.Chunk == nil {
+			continue
+		}
+		baseX := key.Pos.X << core.SectionShift
+		baseZ := key.Pos.Z << core.SectionShift
+		for sectionY := range core.SectionsPerChunk {
+			baseY := int32(sectionY<<core.SectionShift) + core.MinY
+			engine.cropCellScratch = sampleCells(
+				engine.seed, tick, key, sectionY, samples, engine.cropCellScratch,
+			)
+			for _, cell := range engine.cropCellScratch {
+				// 紧凑下标 y*256 + z*16 + x 还原成区段内局部坐标，与
+				// world.ChunkBlockIndex 的区段内编号规则一致。
+				localX := cell & core.SectionMask
+				localZ := (cell >> core.SectionShift) & core.SectionMask
+				localY := cell >> (core.SectionShift * 2)
+				engine.cropCellsExamined++
+				engine.advanceCropCell(dimension, key.Dimension, record.Chunk, core.BlockPos{
+					X: baseX + int32(localX),
+					Y: baseY + int32(localY),
+					Z: baseZ + int32(localZ),
+				}, tick, pending)
+			}
+		}
+	}
+}
+
+// advanceCropCell 处理一个被随机 tick 抽中的格。
+//
+// 只有两类方块会被处理，其余一律跳过（绝大多数抽样落在空气或石头上，这是随机
+// tick 机制的固有开销，也正是它与作物数量无关的原因）：
+//
+//   - 作物：算湿润与露天两个环境条件，交给 growCrop 判定是否推进，再由
+//     cropGrowthRoll 决定本次是否真的推进。湿润读的是**作物正下方**那一格是否
+//     为湿耕地，而不是重扫一遍 9×9——耕地自己的湿度已经由下面那条分支维护好，
+//     作物只需要读结果。
+//   - 耕地：重判干湿并在需要时双向转换（design.md D6：湿润更新挂在随机 tick，
+//     而不是挂 recordChange——挂后者的话，一处水源被移除要立刻更新半径内所有
+//     耕地，那个扇出没有上界；挂随机 tick 则天然受同一个抽样预算约束）。
+func (engine *Engine) advanceCropCell(
+	dimension *Dimension,
+	dimensionID core.DimensionID,
+	chunk *world.Chunk,
+	position core.BlockPos,
+	tick uint64,
+	pending map[core.ChunkKey]*pendingChunkChanges,
+) {
+	localX, _, localZ := position.Local()
+	block := chunk.BlockAt(localX, position.Y, localZ)
+	var next core.BlockID
+	switch {
+	case core.IsCrop(block):
+		below := position
+		below.Y--
+		belowBlock, ready := dimension.BlockAt(below)
+		wet := ready && belowBlock == core.FarmlandWetID
+		grown, changed := growCrop(block, wet, cropSkyExposed(chunk, position))
+		if !changed {
+			return
+		}
+		if !cropGrowthRoll(
+			engine.seed, tick, position, engine.tunables.CropGrowthChancePercent,
+		) {
+			return
+		}
+		next = grown
+	case core.IsFarmland(block):
+		next = core.FarmlandDryID
+		if farmlandIsWet(dimension, position) {
+			next = core.FarmlandWetID
+		}
+		if next == block {
+			return
+		}
+	default:
+		return
+	}
+	if _, changed, err := dimension.SetBlock(position, next); err != nil || !changed {
+		// 位置来自本区块自身的抽样、区块已就绪，两条失败路径都走不到；真走到
+		// 了说明枚举范围与写入范围发生了分歧，此时丢弃这次写入比继续广播一条
+		// 没有落地的方块变更安全。
+		return
+	}
+	engine.recordChange(dimensionID, position, next, pending)
 }

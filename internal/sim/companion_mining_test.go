@@ -72,7 +72,7 @@ func newCompanionMiningScene(
 	tool core.ItemID,
 ) companionMiningFixture {
 	t.Helper()
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
 	id := companionTestID(1)
 	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})

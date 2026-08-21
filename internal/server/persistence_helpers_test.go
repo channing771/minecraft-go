@@ -162,7 +162,7 @@ func newPersistenceServerWithoutCleanup(t *testing.T, store storage.Store) *Serv
 
 func dirtyReadyEngine(t *testing.T, keys []core.ChunkKey) *sim.Engine {
 	t.Helper()
-	engine := sim.NewEngine(0, 0)
+	engine := sim.NewEngine(0, 0, 0)
 	for index, key := range keys {
 		session := sim.SessionID(index + 1)
 		engine.RegisterObserverSession(session)
@@ -210,7 +210,7 @@ func dirtyUnloadingEngine(t *testing.T, key core.ChunkKey) *sim.Engine {
 
 func dirtyPlayerEngine(t *testing.T, key core.ChunkKey) *sim.Engine {
 	t.Helper()
-	engine := sim.NewEngine(0, 0)
+	engine := sim.NewEngine(0, 0, 0)
 	engine.RegisterSession(testSessionID, key.Dimension, key.Pos)
 	requested := engine.Step()
 	if !reflect.DeepEqual(requested.Acquire, []core.ChunkKey{key}) {
