@@ -86,6 +86,10 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 
 成熟掉 1 小麦 + 2 种子,未成熟掉 1 种子,耕地掉 1 泥土。随机掉落数在权威侧要额外的确定性来源,而收益只是数值手感。固定值同时保证**误挖不亏种子**,循环不会死。
 
+## D10 `BlockCollisionBoxes` 自本变更起可返回非满盒
+
+耕地是全仓第一个非满立方体碰撞体(高 15/16)。prism 每格本就携带任意 AABB 数组,Rust 侧按 `count` 循环读任意盒,现有 4 个 Go 消费者(`playerBoundsAreFree`、`playerSupport`、`placementOverlapsPlayer`、客户端 `collision.go`)均按 `boxes.Count` 逐盒读取。**新消费者不得假定「非空气即整格」**——这条假定无法被 grep 机械识别,只能靠这条注记与代码评审守。
+
 ## 遗留与简化清单
 
 本变更刻意简化或延期的每一项都记在这里,写清**是什么 / 为什么这次不做 / 后续如何承接**。执行期间新出现的简化一律追加进本节,不得只活在对话或 commit message 里。
@@ -105,6 +109,7 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 | 11 | 伙伴不能种地/收获 | 靠「多掉落被拒」的既有限制天然挡住,属巧合 | 归 M5 系列;放宽多掉落限制前必须先决定伙伴农业语义 |
 | 12 | 纹理为自绘程序化,非 MC 像素级一致 | 仓库禁止 Mojang 素材;引入贴图管线是独立变更 | 先做贴图资源管线(加载、图集打包、构建期许可校验),届时全部材质一次性换 |
 | 13 | 耕地渲染为满高立方体,碰撞为 15/16(站上去脚部视觉陷入 1/16) | 计划无任何一步改耕地 mesh 几何,补上会扩组 2/3 范围 | 按 material 固定下移顶面,或复用水面角高度位 |
+| 14 | 出生点选在耕地上时留 1/16 空隙,玩家首 tick 沉降 1/16 | `findSpawnInColumn` 对任何有碰撞体的方块返回 `y+1`,不读盒子顶面;改它要同步出生点与 support/safe 存档点三处口径。摔落伤害为 0、safe 点不被污染、worldgen 不产耕地 | `findSpawnInColumn` 改读落脚盒顶面,作为独立决定 |
 
 ## 验证策略
 
