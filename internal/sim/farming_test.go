@@ -7,6 +7,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/world"
 )
 
 // tillTarget 是全部翻地用例共用的目标格：一个悬空的可翻方块，正上方按用例
@@ -632,6 +633,25 @@ func TestHarvestFarmlandDropsDirtAfterFiveTicks(t *testing.T) {
 	}
 }
 
+// fillMiningDropsLeavingOneSlot 把目标区块的掉落槽填到只剩一个空位，而不是
+// 像 fillMiningDrops 那样填满全部 core.DropsPerChunk 个槽。
+//
+// 判别点必须是"恰好剩一个空位"：填满全部槽时，连第一个产物（小麦）都放不
+// 下，"整体原子拒绝"与"半完成（小麦掉了、种子因槽满丢失、方块已清空）"两种
+// 实现都会返回 RejectDropCapacity，测试分辨不出来——评审曾把种子的容量检查
+// 去掉后该测试依旧全绿。只留一个空位时，第一个产物（小麦）放得下、第二个产
+// 物（种子）放不下，只有真正原子的实现才会连已经放得下的小麦一起回滚拒绝。
+func fillMiningDropsLeavingOneSlot(engine *Engine, target core.BlockPos) {
+	key := core.ChunkKey{Dimension: core.Overworld, Pos: target.Chunk()}
+	for slot := range core.DropsPerChunk - 1 {
+		engine.SetChunkDropForTest(key, slot, world.DropSlot{
+			Generation: 1,
+			Active:     true,
+			Stack:      core.ItemStack{Item: core.ItemDirt, Count: core.MaxStackCount},
+		})
+	}
+}
+
 // TestHarvestMatureWheatCapacityFailureIsAtomic 钉死成熟小麦的多产物没有绕开
 // 既有掉落物容量门禁：掉落槽满时整体拒绝，方块不变、掉落槽逐字节不变——
 // 绝不允许"先掉了小麦、种子放不下"的半掉落。
@@ -639,7 +659,7 @@ func TestHarvestMatureWheatCapacityFailureIsAtomic(t *testing.T) {
 	engine, sessions, targets := readyMiningPlayers(t, 1)
 	session, target := sessions[0], targets[0]
 	engine.SetBlockForTest(target, core.WheatStage7ID)
-	fillMiningDrops(engine, target)
+	fillMiningDropsLeavingOneSlot(engine, target)
 	record := miningTargetRecord(t, engine, target)
 	beforeHash := record.Chunk.Hash()
 	beforeDropsHash := record.Chunk.DropsHash()
