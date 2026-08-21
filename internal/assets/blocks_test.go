@@ -346,3 +346,109 @@ func TestFluidBlocksUseDedicatedWaterMaterialLayer(t *testing.T) {
 		}
 	}
 }
+
+// TestPlantMaterialLayersMatchMeshContract 是植物 material 区间在 Go 侧的
+// **唯一**机械守卫。
+//
+// 区间的数值真值源是本包的层枚举，但常量必须住在 internal/mesh（assets 依赖
+// mesh，反向不成立），Rust 的 greedy.rs 还硬编码了第三份。三份没有共享定义也
+// 没有生成步骤：在 LayerWheat0 之前插一层会整体平移这段区间，而那件事**不会**
+// 让任何材质或渲染断言变红——Rust 会把别的方块当成植物、把小麦当成普通方块。
+// 本条钉住 Go 两处相等，跨语言那一侧由 internal/mesh 的
+// TestNativeOracleParityWheatCrossPlanes 真的喂一次 Rust mesher 兜底。
+func TestPlantMaterialLayersMatchMeshContract(t *testing.T) {
+	if assets.LayerWheat0 != mesh.PlantMaterialFirst {
+		t.Fatalf("LayerWheat0=%d，mesh.PlantMaterialFirst=%d", assets.LayerWheat0, mesh.PlantMaterialFirst)
+	}
+	if assets.LayerWheat7 != mesh.PlantMaterialLast {
+		t.Fatalf("LayerWheat7=%d，mesh.PlantMaterialLast=%d", assets.LayerWheat7, mesh.PlantMaterialLast)
+	}
+	// 区间必须恰好覆盖八个小麦层，一个不多一个不少：区间放宽会把相邻的耕地层
+	// 也当成植物，那两层会被渲染成交叉斜面。
+	if got := int(mesh.PlantMaterialLast - mesh.PlantMaterialFirst + 1); got != 8 {
+		t.Fatalf("植物 material 区间覆盖 %d 层，想要 8", got)
+	}
+	for _, layer := range []uint16{assets.LayerFarmlandDry, assets.LayerFarmlandWet, assets.LayerWater, assets.LayerLeaves} {
+		if mesh.PlantMaterial(layer) {
+			t.Fatalf("非植物层 %d 落进了植物 material 区间", layer)
+		}
+	}
+}
+
+// TestCropsAreCutoutAndEmitNoAxialFaces 锁定 Ruling 6：作物与玻璃、树叶同类。
+//
+// 每一条都是**位置性**的：耕地作为同批新增的农业方块留在对照组里，它必须仍然
+// 不透明、仍然照常出面。若把作物的规则误写成"整批农业方块"，耕地那半边立刻红。
+func TestCropsAreCutoutAndEmitNoAxialFaces(t *testing.T) {
+	r := assets.NewRegistry()
+	for id := core.WheatStage0ID; id <= core.WheatStage7ID; id++ {
+		if r.Opaque(id) {
+			t.Fatalf("作物 %d 是不透明的：它必须与玻璃、树叶同类，否则会挡死下方耕地的天空光", id)
+		}
+		if r.LightAttenuation(id) != 0 {
+			t.Fatalf("作物 %d 的天空光额外衰减=%d，想要 0", id, r.LightAttenuation(id))
+		}
+		if r.FluidHeight(id) != 0 {
+			t.Fatalf("作物 %d 的 FluidHeight=%d，想要非流体哨兵 0", id, r.FluidHeight(id))
+		}
+		if r.Emission(id) != 0 {
+			t.Fatalf("作物 %d 会发光", id)
+		}
+		// 作物自己一个轴向面都不出：几何全部来自 Rust 补的交叉斜面。
+		for _, adjacent := range []world.BlockID{core.AirID, core.GlassID, core.WaterSourceID, core.WheatStage0ID, core.FarmlandDryID} {
+			if r.FaceVisible(id, adjacent) {
+				t.Fatalf("作物 %d 对相邻 %d 出了轴向面", id, adjacent)
+			}
+		}
+		// 反方向不受影响：相邻方块朝向作物的面仍然可见。
+		if !r.FaceVisible(core.StoneID, id) {
+			t.Fatalf("石头朝向作物 %d 的面消失了：作物非不透明，不该遮挡邻居出面", id)
+		}
+	}
+
+	// 对照组：耕地是视觉上的满立方体，仍然不透明、仍然出面。
+	for _, id := range []world.BlockID{core.FarmlandDryID, core.FarmlandWetID} {
+		if !r.Opaque(id) {
+			t.Fatalf("耕地 %d 不再是不透明方块", id)
+		}
+		if !r.FaceVisible(id, core.AirID) {
+			t.Fatalf("耕地 %d 朝向空气的面消失了", id)
+		}
+	}
+}
+
+// TestCropsUseDedicatedWheatMaterialLayers 钉住八个阶段各占一层、六面同层。
+//
+// 六面同层不是可有可无的细节：Rust 的 is_plant 只读 face 0 的 material，某个面
+// 被写成别的层就会让那一面在别处被当成普通方块。
+func TestCropsUseDedicatedWheatMaterialLayers(t *testing.T) {
+	r := assets.NewRegistry()
+	seen := map[uint16]world.BlockID{}
+	for id := core.WheatStage0ID; id <= core.WheatStage7ID; id++ {
+		want := r.Material(id, mesh.FaceNegX)
+		if !mesh.PlantMaterial(want) {
+			t.Fatalf("作物 %d 的 material=%d 不在植物区间内", id, want)
+		}
+		for face := mesh.Face(0); face < 6; face++ {
+			if got := r.Material(id, face); got != want {
+				t.Fatalf("作物 %d 的面 %d material=%d，想要与其余面一致的 %d", id, face, got, want)
+			}
+		}
+		if other, ok := seen[want]; ok {
+			t.Fatalf("作物 %d 与 %d 共用材质层 %d：八个阶段必须各占一层", id, other, want)
+		}
+		seen[want] = id
+	}
+	if len(seen) != 8 {
+		t.Fatalf("八个阶段只用了 %d 个材质层", len(seen))
+	}
+	// 耕地干湿必须各占一层，且都不是小麦层。
+	dry := r.Material(core.FarmlandDryID, mesh.FacePosY)
+	wet := r.Material(core.FarmlandWetID, mesh.FacePosY)
+	if dry == wet {
+		t.Fatal("耕地干湿共用同一材质层")
+	}
+	if mesh.PlantMaterial(dry) || mesh.PlantMaterial(wet) {
+		t.Fatalf("耕地材质层 %d/%d 落进了植物区间", dry, wet)
+	}
+}

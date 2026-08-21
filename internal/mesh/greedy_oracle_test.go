@@ -171,7 +171,60 @@ func meshSectionGoOracle(n *world.Neighborhood, reg mesh.Registry, light *goLigh
 			}
 		}
 	}
+
+	// 植物交叉斜面：轴向面在上面的循环里已被 FaceVisible 挡掉（assets 对作物一律
+	// 返回 false），这里独立实现一遍 engine greedy.rs 的 mesh_plants。
+	//
+	// 与被测实现只共享**规则**、不共享代码：Rust 在 engine 里，本函数在 Go 测试里，
+	// 两边各写一遍枚举次序、四条 quad 的 (face, back) 组合、上方格采光与满 AO。
+	snapshot := reg.MeshSnapshot()
+	for y := 0; y < 16; y++ {
+		for z := 0; z < 16; z++ {
+			for x := 0; x < 16; x++ {
+				id := n.Center.Blocks.Get(x, y, z)
+				material, ok := oraclePlantMaterial(snapshot, id)
+				if !ok {
+					continue
+				}
+				above := light.at(x, y+1, z)
+				for _, spec := range [4]struct {
+					face mesh.Face
+					back bool
+				}{
+					{mesh.FacePlantDiagA, false},
+					{mesh.FacePlantDiagA, true},
+					{mesh.FacePlantDiagB, false},
+					{mesh.FacePlantDiagB, true},
+				} {
+					out = append(out, mesh.Quad{
+						X: uint8(x), Y: uint8(y), Z: uint8(z),
+						W: 1, H: 1,
+						Face: spec.face, Mat: material, AO: 0xFF, Light: above,
+						Back: spec.back,
+					})
+				}
+			}
+		}
+	}
 	return out
+}
+
+// oraclePlantMaterial 返回一格的植物材质层，非植物返回 ok=false。
+//
+// 判据必须与 engine 的 `is_plant` 逐字对应：读的是**快照里烘焙好的** face 0
+// material（未登记的编号在 Rust 侧查表落空、一律不是植物），再看它是否落在
+// mesh.PlantMaterialFirst..PlantMaterialLast 这段闭区间里。
+func oraclePlantMaterial(snapshot mesh.RegistrySnapshot, id world.BlockID) (uint16, bool) {
+	for _, block := range snapshot.Blocks {
+		if block.ID != id {
+			continue
+		}
+		if !mesh.PlantMaterial(block.Materials[0]) {
+			return 0, false
+		}
+		return block.Materials[0], true
+	}
+	return 0, false
 }
 
 // computeAOOracle 计算一个面 4 个角的环境光遮蔽，每角 2 位。

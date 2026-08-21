@@ -152,6 +152,11 @@ func TestNativeOracleParityDeterministicRandomizedCorpus(t *testing.T) {
 		// 三类相邻都出现在随机语料里。
 		core.WaterSourceID,
 		core.WaterLevel5ID,
+		// 农业方块同样已在 snapshot 范围内：耕地是普通不透明方块，作物走交叉斜面
+		// 那条独立的出面路径。放进随机语料后，「作物—作物」「作物—固体」
+		// 「作物—空气」「作物—流体」四类相邻都会出现。
+		core.FarmlandDryID,
+		core.WheatStage3ID,
 	}
 
 	for caseIndex := range 64 {

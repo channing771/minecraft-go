@@ -23,6 +23,24 @@ const SHIFT_LIGHT: u32 = 47;
 /// **quad 实例仍是 `u64` / 8 字节**——`voxel-visual-presentation` 把这条写成 MUST。
 const SHIFT_CORNER2: u32 = 55;
 const SHIFT_CORNER3: u32 = 59;
+/// 植物 quad 的正/背面标志位。
+///
+/// 植物同样不贪心合并（每格独立出面），`w`/`h` 恒为 1，于是与水面借的是同一段
+/// bit 12..19。这里只用最低一位放正/背，**bit 13..19 是保留位、MUST 为 0**：
+/// 留给后续植物形态（例如高作物的上下半格），现在任何非零值都是编码错误，
+/// `pack`/`unpack` 与 Go 侧 `internal/mesh/quad.go` 同口径当场拒绝。
+///
+/// | 位 | 植物 quad 的内容 |
+/// |---|---|
+/// | 12 | 0 = 正面、1 = 背面 |
+/// | 13..19 | 保留，必须为 0 |
+/// | 20..22 | face：6 = 对角线 A、7 = 对角线 B |
+///
+/// **quad 实例仍是 `u64` / 8 字节，bit 63 仍然留空。**
+const SHIFT_PLANT_BACK: u32 = SHIFT_W;
+/// 覆盖 bit 13..19 的保留位掩码。只有解包侧需要它——打包侧根本构造不出保留位。
+#[cfg(test)]
+const PLANT_RESERVED_MASK: u64 = (0xff << SHIFT_W) ^ (1 << SHIFT_PLANT_BACK);
 
 /// 水柱内部（上方也是流体）使用的满格高度原值，实际高度 (15+1)/16 = 1。
 pub(crate) const FULL_FLUID_HEIGHT: u8 = 15;
@@ -36,6 +54,22 @@ pub(crate) enum Face {
     PosY = 3,
     NegZ = 4,
     PosZ = 5,
+    /// 植物交叉斜面的第一条对角线：水平自格内 `(x, z)` 走向 `(x+1, z+1)`。
+    ///
+    /// 6 与 7 是 3 位 `face` 字段里此前空闲的两个取值。quad 布局只剩 bit 63
+    /// 一个空闲位且必须留空（水面角高度已占 55..62），所以交叉斜面**只能**
+    /// 挤进 `face`——位布局因此零变更。它们没有轴向语义，`face >> 1` 与
+    /// `face & 1` 对它们无意义。
+    PlantDiagA = 6,
+    /// 植物交叉斜面的第二条对角线：水平自格内 `(x+1, z)` 走向 `(x, z+1)`。
+    PlantDiagB = 7,
+}
+
+impl Face {
+    /// plant 报告该 face 是否是植物交叉斜面。
+    pub(crate) fn plant(self) -> bool {
+        matches!(self, Face::PlantDiagA | Face::PlantDiagB)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -60,20 +94,33 @@ pub(crate) struct Quad {
     /// 都落在上沿），而真流体高度恒 `>= 7`，所以 **bit 55..58 非零 ⟺ 这是一条带
     /// 角高度的水面 quad**——判别不花额外标志位，解包据此还原 `w`/`h`。
     pub corners: [u8; 4],
+    /// back 只对植物 quad 有意义：同一条对角面的正面记 `false`、背面记 `true`。
+    ///
+    /// 两者几何完全相同（terrain 管线的 `cull_mode` 是 `None`，正背都画），
+    /// 差别只在 `cull.wgsl` 做背面剔除时用的法线方向相反，于是任何水平视角下
+    /// 每条对角面恰好留下一条、两条对角线共两条。
+    pub back: bool,
 }
 
 impl Quad {
     pub(crate) fn pack(self) -> u64 {
         assert!((1..=16).contains(&self.w));
         assert!((1..=16).contains(&self.h));
-        // 带角高度的 quad 借走 w/h 的 8 bit，因此必须是 1×1；水面本就不合并。
-        let (low, high) = if self.corners == [0; 4] {
+        // 带角高度的 quad 与植物 quad 都借走 w/h 的 8 bit，因此都必须是 1×1；
+        // 两者本就都不参与贪心合并。
+        let (low, high) = if self.face.plant() {
+            assert!(self.w == 1 && self.h == 1);
+            assert!(self.corners == [0; 4], "植物 quad 不得带角高度");
+            (u64::from(self.back) << SHIFT_PLANT_BACK, 0)
+        } else if self.corners == [0; 4] {
+            assert!(!self.back, "非植物 quad 不得设置 back");
             (
                 u64::from(self.w - 1) << SHIFT_W | u64::from(self.h - 1) << SHIFT_H,
                 0,
             )
         } else {
             assert!(self.w == 1 && self.h == 1);
+            assert!(!self.back, "非植物 quad 不得设置 back");
             assert!(self.corners.iter().all(|&corner| corner <= 15));
             (
                 u64::from(self.corners[0]) << SHIFT_W | u64::from(self.corners[1]) << SHIFT_H,
@@ -94,9 +141,42 @@ impl Quad {
 
     /// unpack 是 pack 的逆运算，仅供测试与调试使用。
     ///
-    /// 判别靠 bit 55..58（角 2）非零，见 `corners` 的说明。
+    /// 三条判别互斥、按顺序生效：`face ∈ {6,7}` 是植物（w/h 那 8 bit 装正背标志
+    /// 与保留位）；否则 bit 55..58（角 2）非零是带角高度的水面，见 `corners`；
+    /// 其余是普通 quad。
     #[cfg(test)]
     pub(crate) fn unpack(packed: u64) -> Self {
+        assert_eq!(packed >> 63, 0, "quad 占用了必须留空的 bit 63");
+        let face = match (packed >> SHIFT_FACE) & 7 {
+            0 => Face::NegX,
+            1 => Face::PosX,
+            2 => Face::NegY,
+            3 => Face::PosY,
+            4 => Face::NegZ,
+            5 => Face::PosZ,
+            6 => Face::PlantDiagA,
+            _ => Face::PlantDiagB,
+        };
+        if face.plant() {
+            assert_eq!(
+                packed & PLANT_RESERVED_MASK,
+                0,
+                "植物 quad 的保留位 13..19 必须为 0"
+            );
+            return Self {
+                x: (packed & 0xf) as u8,
+                y: ((packed >> SHIFT_Y) & 0xf) as u8,
+                z: ((packed >> SHIFT_Z) & 0xf) as u8,
+                w: 1,
+                h: 1,
+                face,
+                material: ((packed >> SHIFT_MATERIAL) & 0xffff) as u16,
+                ao: ((packed >> SHIFT_AO) & 0xff) as u8,
+                light: ((packed >> SHIFT_LIGHT) & 0xff) as u8,
+                corners: [0; 4],
+                back: (packed >> SHIFT_PLANT_BACK) & 1 == 1,
+            };
+        }
         let corner2 = ((packed >> SHIFT_CORNER2) & 0xf) as u8;
         let (w, h, corners) = if corner2 == 0 {
             (
@@ -122,18 +202,12 @@ impl Quad {
             z: ((packed >> SHIFT_Z) & 0xf) as u8,
             w,
             h,
-            face: match (packed >> SHIFT_FACE) & 7 {
-                0 => Face::NegX,
-                1 => Face::PosX,
-                2 => Face::NegY,
-                3 => Face::PosY,
-                4 => Face::NegZ,
-                _ => Face::PosZ,
-            },
+            face,
             material: ((packed >> SHIFT_MATERIAL) & 0xffff) as u16,
             ao: ((packed >> SHIFT_AO) & 0xff) as u8,
             light: ((packed >> SHIFT_LIGHT) & 0xff) as u8,
             corners,
+            back: false,
         }
     }
 }
@@ -155,6 +229,7 @@ mod tests {
             ao: 0xa5,
             light: 0xbc,
             corners: [0; 4],
+            back: false,
         };
         let want = 3u64
             | 4u64 << 4
@@ -196,6 +271,7 @@ mod tests {
                             ao: 0x5a,
                             light: 0xa5,
                             corners: [c0, c1, c2, c3],
+                            back: false,
                         };
                         let packed = quad.pack();
                         assert_eq!(Quad::unpack(packed), quad, "corners={:?}", quad.corners);
@@ -224,6 +300,7 @@ mod tests {
             ao: 0,
             light: 0,
             corners: [0; 4],
+            back: false,
         };
         assert_eq!(Quad::unpack(quad.pack()), quad);
     }
