@@ -174,18 +174,20 @@ type fluidTickSample struct {
 	// 对照；测量代码一行未改，改的只是这段说明。
 	scan     time.Duration
 	scanSort time.Duration
-	// fluidTail 是从 phaseFluidAdvance 进入到 Step 返回的墙钟时间，即
-	// advanceFluids + advanceCrops + 容器移动 + 采掘推进 + finishChanges。
+	// fluidTail 是从 `phaseFluidAdvance` 进入到 `Step` 返回的墙钟时间，即
+	// `advanceFluids` + `advanceCrops` + 容器移动 + 采掘推进 + `finishChanges`。
 	//
-	// 无命令时容器移动、采掘推进与 finishChanges 近乎为零，但 advanceCrops
-	// **不是**：作物阶段每 tick 枚举全部活动区段，成本正比于 section 数而与
-	// 有没有作物几乎无关，满编默认配置约 114 µs/tick（见
-	// BenchmarkCropAdvanceFullInterestBarren 一组读数）。因此这一列**含**作物
-	// 阶段，只能读作 advanceFluids 的**更保守**上界，不能读作流体的净耗时。
+	// 无命令时容器移动、采掘推进与 `finishChanges` 近乎为零，但 `advanceCrops`
+	// **不是**：作物阶段每 tick 枚举全部活动区段，成本正比于区段数而与有没有
+	// 作物几乎无关，因此它非零、且随活动兴趣范围内的区段数增长（量级读数见
+	// `BenchmarkCropAdvanceFullInterestBarren` 一组 benchmark；这里不复制具体
+	// 数值，那种数字会随机器与配置漂移，且没有任何门禁守着它）。
+	// 所以这一列**含**作物阶段，只能读作 `advanceFluids` 的**更保守**上界，
+	// 不能读作流体的净耗时。
 	//
-	// 要把两者分开，用 stepPhaseObserver 同时记录 phaseFluidAdvance 与
-	// phaseCropAdvance 的进入时刻：前者到后者是流体净耗时，后者到 Step 返回是
-	// 作物及其余。本文件只需要一个保守上界，故没有引入第二个时刻。
+	// 要把两者分开，用 `stepPhaseObserver` 同时记录 `phaseFluidAdvance` 与
+	// `phaseCropAdvance` 的进入时刻：前者到后者是流体净耗时，后者到 `Step` 返回
+	// 是作物及其余。本文件只需要一个保守上界，故没有引入第二个时刻。
 	fluidTail time.Duration
 	// step 是整个权威 tick 的墙钟时间，与 20 TPS 的 50 ms 预算直接可比。
 	step time.Duration

@@ -102,8 +102,8 @@ type Engine struct {
 	// worldTime 是权威绝对世界时间，只由 simulation owner 在 Step 中推进。
 	worldTime atomic.Uint64
 
-	// stepPhaseObserver 仅供包内测试观测 Step 的阶段进入顺序。阶段顺序是规格
-	// 契约（完整清单见 stepPhase 的常量定义），但各阶段写互不相交的状态、无法
+	// stepPhaseObserver 仅供包内测试观测 `Step` 的阶段进入顺序。阶段顺序是规格
+	// 契约（完整清单见 `stepPhase` 的常量定义），但各阶段写互不相交的状态、无法
 	// 从外部结果观察先后，只能用显式探针锁定；生产代码恒为 nil，nil 判断零开销。
 	stepPhaseObserver func(stepPhase)
 

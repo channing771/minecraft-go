@@ -43,11 +43,21 @@ import (
 //
 //   - **计数漂移**：枚举式注释写「三个阶段」而常量已有五个，句子里根本没有标识
 //     符，本检查抓不到。任务 9.0 修的三处正是这一类，只能靠评审。
-//   - **裸词失真**：如上，不扫描。若要扩大覆盖，正确方向是先把「注释提到标识符
-//     必须加反引号」立成书写约定，而不是放宽提取规则。
+//   - **裸词失真**：如上，不扫描。覆盖率因此完全取决于书写约定「注释提及 Go
+//     标识符必须用反引号包裹」（见基线文档的实现约定一节）被遵守到什么程度；
+//     放宽提取规则不是提升覆盖的正确方向。
+//   - **同名掩盖**：点路径只查**末段**，而末段是在全仓 9,000 多个名字的**扁平**
+//     集合里查的，不做类型解析。于是短小通用名会被任何无关的同名声明掩盖——
+//     注释写 `Queue.pending` 时，只要全仓任何地方还有一个叫 pending 的字段
+//     （实际就有：`VisibilityScratch` 的 pending，与流体队列毫无关系），这条
+//     提及就永远解析得到。input、due 一类通用名同理。要真正收紧需要跨包类型
+//     解析，成本远超这条门禁的价值，故**有意**保留；
+//     TestShadowedLastSegmentIsAKnownBlindSpot 把该行为钉成了已知且有意的。
 //   - **语义失真**：标识符存在但说明的行为是错的，本检查无能为力。
 //   - **Rust/WGSL 注释**：不在本次范围，是后续扩展点（engine/ 下的 .rs 与 .wgsl
-//     可以套用同一套「反引号 + 声明名集合」的做法）。
+//     可以套用同一套「反引号 + 声明名集合」的做法）。这也是 nonGoNameExemptions
+//     那几条逐条豁免**没有**自失效守卫的原因：它们指向 Rust 侧的名字，而 Rust
+//     源码不在扫描范围内，无从判定这些名字是否还存在。
 
 // identifierPattern 判定反引号内容是否形如 Go 标识符或点路径。
 // 含空格、斜杠、冒号（版本区间那种写法）、以数字开头的内容都不匹配，因此这些
@@ -60,12 +70,13 @@ var backtickPattern = regexp.MustCompile("`([^`\n]*)`")
 
 // fileExtensionExemptions 是「点路径末段其实是文件扩展名」的豁免。
 // 反引号里写文件名是本仓的常见写法（基线文档、Rust 源文件、oracle 测试文件），
-// 它们不是 Go 标识符。清单按实际出现驱动，出现新扩展名时门禁会红并要求登记。
+// 它们不是 Go 标识符。清单按实际出现驱动（与 nonGoNameExemptions 同一条纪律：
+// 零命中的扩展名不预先登记，否则清单会变成许愿池），出现新扩展名时门禁会红并
+// 要求登记。
 var fileExtensionExemptions = map[string]string{
-	"md":   "Markdown 文档名，例如基线文档与 OpenSpec 产物",
-	"go":   "Go 源文件名，例如指向 oracle 实现所在的文件",
-	"rs":   "Rust 源文件名，engine crate 里的模块",
-	"wgsl": "WGSL 着色器文件名",
+	"md": "Markdown 文档名，例如基线文档与 OpenSpec 产物",
+	"go": "Go 源文件名，例如指向 oracle 实现所在的文件",
+	"rs": "Rust 源文件名，engine crate 里的模块",
 }
 
 // nonGoNameExemptions 是逐条登记的非 Go 名字，每条附理由。
@@ -292,12 +303,34 @@ const (
 		"// sampleDrain 清空队列；见 `sampleQueue.due` 与 `sampleWorker`。\n" +
 		"func sampleDrain() {}\n"
 
-	// selfCheckRenamedFieldSource 复刻 F2 那次真实的坏样本：字段改了名，
+	// selfCheckRenamedFieldSource 复刻 F2 那次坏样本的**形状**：字段改了名，
 	// 同一段注释还在提旧名。这正是人工专项检查放过去的那一类。
+	//
+	// 注意「形状」二字：这条样本能红，前提是旧名在扫描输入里**唯一**。真实仓库
+	// 里 pending 并不唯一（见盲区一节的同名掩盖），因此 F2 那次即便加了反引号，
+	// 本门禁也抓不到——两件事分开看，别把这条样本的绿灯当成对 F2 的覆盖证明。
 	selfCheckRenamedFieldSource = "package sample\n" +
 		"\n" +
 		"// sampleAdvance 取出到期项；它不遍历 `pending`，只看堆顶。\n" +
 		"func sampleAdvance(queue *sampleQueue) int { return len(queue.due) }\n"
+
+	// selfCheckShadowedRenamedSource 是「字段改了名，注释仍提旧名」——与
+	// selfCheckRenamedFieldSource 完全同形，唯一区别是旧名 hidden 在另一个文件里
+	// 还有一个**无关的**同名声明。
+	selfCheckShadowedRenamedSource = "package sample\n" +
+		"\n" +
+		"// sampleShadowed 的字段原名 hidden，已改名为 renamed；本行仍写 `sampleShadowed.hidden`。\n" +
+		"type sampleShadowed struct {\n" +
+		"\trenamed []int\n" +
+		"}\n"
+
+	// selfCheckShadowingSource 提供那个无关的同名字段。
+	selfCheckShadowingSource = "package sample\n" +
+		"\n" +
+		"// sampleUnrelated 与 sampleShadowed 毫无关系，只是恰好也有一个 hidden 字段。\n" +
+		"type sampleUnrelated struct {\n" +
+		"\thidden int\n" +
+		"}\n"
 
 	// selfCheckExemptSource 覆盖三类豁免，必须一条都不报。
 	selfCheckExemptSource = "package sample\n" +
@@ -307,15 +340,17 @@ const (
 		"func sampleNotes() {}\n"
 )
 
-// selfCheckFindings 用内嵌样本跑一遍扫描器内核。
-func selfCheckFindings(t *testing.T, name, source string) []string {
+// selfCheckFindings 用内嵌样本跑一遍扫描器内核。extra 是样本文件名到源码的
+// 映射，与固定的 declarations.go 一起构成这次扫描的全部输入。
+func selfCheckFindings(t *testing.T, extra map[string]string) []string {
 	t.Helper()
-	findings, _, err := scanCommentBacktickIdentifiers(map[string][]byte{
-		"declarations.go": []byte(selfCheckDeclarationsSource),
-		name:              []byte(source),
-	})
+	sources := map[string][]byte{"declarations.go": []byte(selfCheckDeclarationsSource)}
+	for name, source := range extra {
+		sources[name] = []byte(source)
+	}
+	findings, _, err := scanCommentBacktickIdentifiers(sources)
 	if err != nil {
-		t.Fatalf("扫描内嵌样本 %s: %v", name, err)
+		t.Fatalf("扫描内嵌样本: %v", err)
 	}
 	return findings
 }
@@ -328,7 +363,7 @@ func selfCheckFindings(t *testing.T, name, source string) []string {
 // 测试而不是一次性验证，是因为规则今后还会被人改。
 func TestCommentIdentifierScannerCatchesKnownBadSamples(t *testing.T) {
 	t.Run("不存在的名字必须报错", func(t *testing.T) {
-		findings := selfCheckFindings(t, "bad.go", selfCheckBadSource)
+		findings := selfCheckFindings(t, map[string]string{"bad.go": selfCheckBadSource})
 		if len(findings) != 1 {
 			t.Fatalf("想要恰好 1 条失真，得到 %d 条: %v", len(findings), findings)
 		}
@@ -342,13 +377,13 @@ func TestCommentIdentifierScannerCatchesKnownBadSamples(t *testing.T) {
 	})
 
 	t.Run("存在的名字不得报错", func(t *testing.T) {
-		if findings := selfCheckFindings(t, "good.go", selfCheckGoodSource); len(findings) != 0 {
+		if findings := selfCheckFindings(t, map[string]string{"good.go": selfCheckGoodSource}); len(findings) != 0 {
 			t.Errorf("对存在的名字误报: %v", findings)
 		}
 	})
 
 	t.Run("字段改名而注释未改必须报错", func(t *testing.T) {
-		findings := selfCheckFindings(t, "renamed.go", selfCheckRenamedFieldSource)
+		findings := selfCheckFindings(t, map[string]string{"renamed.go": selfCheckRenamedFieldSource})
 		if len(findings) != 1 {
 			t.Fatalf("想要恰好 1 条失真，得到 %d 条: %v", len(findings), findings)
 		}
@@ -358,8 +393,28 @@ func TestCommentIdentifierScannerCatchesKnownBadSamples(t *testing.T) {
 	})
 
 	t.Run("豁免清单内的名字不得报错", func(t *testing.T) {
-		if findings := selfCheckFindings(t, "exempt.go", selfCheckExemptSource); len(findings) != 0 {
+		if findings := selfCheckFindings(t, map[string]string{"exempt.go": selfCheckExemptSource}); len(findings) != 0 {
 			t.Errorf("对已豁免的名字误报: %v", findings)
 		}
 	})
+}
+
+// TestShadowedLastSegmentIsAKnownBlindSpot 把「同名掩盖」这个盲区钉成**已知且
+// 有意**的行为（Ruling 54）。
+//
+// 样本与 selfCheckRenamedFieldSource 完全同形——字段改名、注释仍提旧名——唯一
+// 区别是旧名在另一个文件里还有一个无关的同名声明。因为点路径只查末段、且在扁平
+// 的全仓名字集合里查，这条真失真**查不出来**，门禁按设计保持绿。
+//
+// 断言「必须绿」看起来别扭，它守的不是正确性而是**文档与实现的一致性**：谁要是
+// 哪天把判定收紧成查全路径或做了类型解析，这条会红，提醒他同步更新盲区一节。
+// 没有它，盲区就只是一段可能已经过时的散文。
+func TestShadowedLastSegmentIsAKnownBlindSpot(t *testing.T) {
+	findings := selfCheckFindings(t, map[string]string{
+		"shadowed.go":  selfCheckShadowedRenamedSource,
+		"shadowing.go": selfCheckShadowingSource,
+	})
+	if len(findings) != 0 {
+		t.Errorf("同名掩盖这个盲区不再存在（判定被收紧了？）；请同步更新本文件顶部的盲区一节。实测失真: %v", findings)
+	}
 }

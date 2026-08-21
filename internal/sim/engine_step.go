@@ -7,10 +7,10 @@ import (
 	"github.com/channing771/mornlea/internal/physics"
 )
 
-// stepPhase 标识 Step 内部的固定处理阶段。权威 tick 的阶段顺序是规格契约：
+// stepPhase 标识 `Step` 内部的固定处理阶段。权威 tick 的阶段顺序是规格契约：
 // 玩家命令 → 伙伴 action → 统一物理与世界变更 → 流体推进 → 作物推进；各阶段
-// 写互不相交的状态，无法从外部结果观察先后，因此用 stepPhaseObserver 探针显式
-// 锁定。下面的常量是这份顺序的唯一权威，本段说明必须与之逐项对齐。
+// 写互不相交的状态，无法从外部结果观察先后，因此用 `stepPhaseObserver` 探针
+// 显式锁定。下面的常量是这份顺序的唯一权威，本段说明必须与之逐项对齐。
 type stepPhase uint8
 
 const (
