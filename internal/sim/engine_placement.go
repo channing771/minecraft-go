@@ -107,6 +107,14 @@ func (engine *Engine) executePlacement(
 	// 「手持物不适用于当前目标」与「选中物品不产生可放置方块」是同一类事实，
 	// 复用放置路径与翻地已在用的 RejectInvalidBlock，不新增 wire 值。
 	if core.IsCrop(placement) {
+		// 种子不复用上面「流体可覆盖」的通用放置语义：规格字面写死种子 MUST
+		// NOT 被放置在非空气格，流体也不例外——往水里种麦子没有玩法意义，
+		// 且与组 4 翻地已经把流体判为占用的判据保持一致（Ruling 31）。
+		// 因此这里额外判目标格必须是 AirID；通用 occupied 判据已经挡掉了
+		// 非空气非流体的固体，这条只需要补上流体这一种漏网情况。
+		if block != core.AirID {
+			return RejectInvalidBlock, true
+		}
 		below := target
 		below.Y--
 		belowBlock, belowReady := dimension.BlockAt(below)

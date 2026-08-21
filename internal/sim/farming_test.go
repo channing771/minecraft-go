@@ -446,6 +446,32 @@ func TestPlantSeedsRejectsNonFarmlandGround(t *testing.T) {
 	}
 }
 
+// TestPlantSeedsRejectsFluidTarget 覆盖 Scenario「耕地上方是水时种植被拒」：
+// 落脚格是合法耕地，但种子真正要落进去的目标格（正上方）已经是一格水——
+// 规格要求种子 MUST NOT 被放置在非空气格，流体也不例外（与组 4 翻地把流体
+// 判为占用一致），种子数必须一颗不掉。
+func TestPlantSeedsRejectsFluidTarget(t *testing.T) {
+	engine, session, yaw, pitch := readyPlantingPlayer(t, core.FarmlandDryID)
+	engine.SetBlockForTest(plantTarget, core.WaterSourceID)
+
+	result := plantSeeds(engine, session, yaw, pitch)
+
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != RejectInvalidBlock {
+		t.Fatalf("Rejected = %+v，想要恰好一条 RejectInvalidBlock", result.Rejected)
+	}
+	if got := tillBlockAt(t, engine, plantTarget); got != core.WaterSourceID {
+		t.Fatalf("被拒绝的种植改了目标格: %d，想要保留原来的水 %d", got, core.WaterSourceID)
+	}
+	want := core.ItemStack{Item: core.ItemWheatSeeds, Count: plantSeedCount}
+	player := engine.sessions[session].player
+	if got := player.inventory.Hotbar.Slots[0]; got != want {
+		t.Fatalf("被拒绝的种植扣了种子: %+v，想要一字不变的 %+v", got, want)
+	}
+	if len(result.Changes) != 0 {
+		t.Fatalf("被拒绝的种植广播了区块变更: %+v", result.Changes)
+	}
+}
+
 // TestPlaceNonSeedItemsIgnoreFarmlandPrecondition 是「非种子物品的放置行为
 // 一字不变」的守卫：同一个非耕地夹具下，石头必须照常放得下去。
 //
