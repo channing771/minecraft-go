@@ -20,14 +20,21 @@ const HEIGHTS_BYTES: usize = 9 * 256 * 2;
 const REGISTRY_ENTRY_BYTES: usize = 18;
 /// registry 条目表的容量上限。
 ///
-/// 35 = Go 侧 `core.AirID..=core.WaterLevel7ID` 的方块编号总数，也就是
-/// `internal/assets.NewRegistry()` 烘焙进 mesh snapshot 的条目数；Go 侧对应的
-/// `internal/mesh.nativeMaxRegistryEntries` 必须与本常量一起改，两侧各自独立
-/// 定义、没有共享常量或生成步骤，只能人手同步（一次跨语言 engine ABI 变更）。
+/// 48 是**上限**而不是当前条目数：Go 侧 `internal/assets.NewRegistry()` 把
+/// `core.AirID..core.BlockIDMax-1` 的全部已注册方块烘焙进 mesh snapshot，今天
+/// 是 45 条（27 个 M4 材料 + 8 个流体 + 10 个农业编号）。留出余量是为了避免
+/// 每次追加方块编号都要做一次跨语言的常量同步。
+///
+/// 本常量此前是 35，即"恰好等于当时的条目数"；那种写法会在 Go 侧追加编号时
+/// 静默分叉，因为 Go 侧的对应常量当时是从末位方块编号推导出来的、会自己长大。
+/// Go 侧对应的 `internal/mesh.nativeMaxRegistryEntries` 必须与本常量一起改，
+/// 两侧各自独立定义、没有共享常量或生成步骤，只能人手同步（一次跨语言
+/// engine ABI 变更）。Go 侧的 `TestNativeAcceptsRegistryAtGoCapacity` 会真的
+/// 喂满一次调用，两侧不同步即变红。
 ///
 /// **注意**：本文件开头 `BLOCKS_BYTES = 27 * 4096 * 2` 里的 27 是 3×3×3 邻域的
 /// 区段数，与本常量只是数字撞了，两者语义无关，改一个绝不能牵动另一个。
-const MAX_REGISTRY_ENTRIES: usize = 35;
+const MAX_REGISTRY_ENTRIES: usize = 48;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InputError {
@@ -328,7 +335,7 @@ fn read_u64(bytes: &[u8], offset: usize) -> u64 {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{InputError, MeshInput};
+    use super::{InputError, MAX_REGISTRY_ENTRIES, MeshInput};
 
     const BLOCKS_OFFSET: usize = 16;
     const HEIGHTS_PRESENT_OFFSET: usize = BLOCKS_OFFSET + 27 * 4096 * 2;
@@ -393,14 +400,18 @@ pub(crate) mod tests {
         input
     }
 
-    /// registry 条目上限必须正好容下 Go 侧 `core.AirID..=core.WaterLevel7ID` 的
-    /// 35 个方块编号:少一条,流体就进不了 mesh snapshot、水永远不出面;多一条,
-    /// 两侧对输入长度与条目上限的期望就会分叉。
+    /// registry 条目上限必须正好是 MAX_REGISTRY_ENTRIES:恰好装满要被接受,多
+    /// 一条要被拒绝。上限少于 Go 侧烘焙的条目数,整批 mesh 调用会被拒绝(水与
+    /// 作物直接画不出来);多于 Go 侧上限,两侧对输入长度的期望就会分叉。
+    ///
+    /// 断言直接引用常量而不是把 48 抄成字面量:抄字面量的话,常量被改动时本用例
+    /// 会跟着一起"正确",变成恒真的空转。真正把数字钉住的是 Go 侧
+    /// TestNativeAcceptsRegistryAtGoCapacity——它拿 Go 的上限喂进本解析器。
     #[test]
-    fn accepts_exactly_thirty_five_registry_entries() {
-        assert!(MeshInput::parse(&input_with_registry_entries(35)).is_ok());
+    fn accepts_exactly_max_registry_entries() {
+        assert!(MeshInput::parse(&input_with_registry_entries(MAX_REGISTRY_ENTRIES)).is_ok());
         assert_eq!(
-            MeshInput::parse(&input_with_registry_entries(36)).unwrap_err(),
+            MeshInput::parse(&input_with_registry_entries(MAX_REGISTRY_ENTRIES + 1)).unwrap_err(),
             InputError::Registry
         );
     }

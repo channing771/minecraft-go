@@ -18,17 +18,24 @@ const (
 	nativeRegistryEntryBytes = 2 + 1 + 1 + 6*2 + 1 + 1
 	// nativeMaxRegistryEntries 必须与 Rust 端硬编码的
 	// engine/crates/mornlea_engine/src/input.rs 的 MAX_REGISTRY_ENTRIES
-	// (=35) 保持一致——两侧各自独立定义，没有共享常量或生成步骤，全靠人
+	// (=48) 保持一致——两侧各自独立定义，没有共享常量或生成步骤，全靠人
 	// 手动同步，改动两侧即构成一次 engine ABI 变更（当前为 v5）。
-	// 用 `int(core.WaterLevel7ID)+1` 推导：WaterLevel7ID 是最后一个已注册
-	// 方块编号，也是 internal/assets.NewRegistry() 烘焙 mesh snapshot 时
-	// ids 范围的上界（见 internal/assets/blocks.go），因此 snapshot 条目数
-	// 恒等于 35。两侧一旦不同步，Go 端喂进的条目数会被 Rust 侧
+	//
+	// 这里是**上限**而不是当前条目数：internal/assets.NewRegistry() 把
+	// core.AirID..core.BlockIDMax-1 的全部已注册方块烘焙进 mesh snapshot
+	// （见 internal/assets/blocks.go），今天是 45 条。本常量此前写成
+	// `int(core.WaterLevel7ID)+1`，即"恰好等于当前条目数"，于是追加方块编号
+	// 时 Go 侧会自己长大而 Rust 侧不会，两侧静默分叉。改成显式上限后，
+	// 「条目数不得超过上限」由 TestRegistryCapacityCoversEveryRegisteredBlock
+	// 的位置性断言守住，「Rust 上限不小于本上限」由
+	// TestNativeAcceptsRegistryAtGoCapacity 真的喂满一次跨语言调用守住。
+	// 留到 48 而不是 45，是给后续花草树苗预留，避免连续变更都动同一处上限。
+	// 两侧一旦不同步，Go 端喂进的条目数会被 Rust 侧
 	// registry_count > MAX_REGISTRY_ENTRIES 校验直接拒绝整次 mesh 调用。
 	// 顺带一提：input.rs 的 BLOCKS_BYTES = 27*4096*2 里也有一个 27，但那
 	// 是 3×3×3 邻域区段数，跟这里的 registry 条目数上限只是数字撞了，两者
 	// 无关，改一个不需要牵动另一个。
-	nativeMaxRegistryEntries = int(core.WaterLevel7ID) + 1
+	nativeMaxRegistryEntries = 48
 	nativeMaxRegistryWords   = (nativeMaxRegistryEntries + 63) / 64
 	nativeLightVolume        = 48 * 48 * 48
 	nativeScratchPadding     = (4 - nativeLightVolume%4) % 4

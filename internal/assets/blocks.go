@@ -81,13 +81,15 @@ func NewRegistry() *Registry {
 	r.layers[LayerSnowSide] = snowSideTexture()
 	r.layers[LayerMossyCobblestone] = mossyCobblestoneTexture()
 	r.layers[LayerWater] = waterTexture()
-	// ids 覆盖 core 的全部已注册方块编号（含 8 个流体编号，上界即
-	// WaterLevel7ID）。流体必须在快照里，Rust 侧的 RegistryView::face_visible
-	// 只做位图查表、缺条目一律判不可见，漏掉流体就等于水永远不出面。
-	// 条目数（35）必须与 internal/mesh.nativeMaxRegistryEntries 及 Rust 的
-	// MAX_REGISTRY_ENTRIES 一致。
-	ids := make([]world.BlockID, 0, int(core.WaterLevel7ID)+1)
-	for id := core.AirID; id <= core.WaterLevel7ID; id++ {
+	// ids 覆盖 core 的全部已注册方块编号，上界一律用独占哨兵 core.BlockIDMax
+	// 表达——写死某个具体末位编号（历史上写过 WaterLevel7ID）会在追加新编号时
+	// 静默退化成子集，新方块就永远进不了快照。Rust 侧的
+	// RegistryView::face_visible 只做位图查表、缺条目一律判不可见，漏掉谁就等于
+	// 谁永远不出面（流体当年正是这样差点画不出水）。
+	// 条目数必须不超过 internal/mesh.nativeMaxRegistryEntries 与 Rust 的
+	// MAX_REGISTRY_ENTRIES（今天是 45 <= 48）。
+	ids := make([]world.BlockID, 0, int(core.BlockIDMax))
+	for id := core.AirID; id < core.BlockIDMax; id++ {
 		ids = append(ids, id)
 	}
 	snapshot, err := mesh.BuildRegistrySnapshot(ids, r)

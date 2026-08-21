@@ -17,11 +17,12 @@ func TestRegistryFaceVisible(t *testing.T) {
 		want         bool
 	}{
 		{"空气不出面", core.AirID, core.AirID, false},
-		// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体），真正越界的
-		// 未知方块编号改为 WaterLevel7ID+1。
-		{"未知当前方块不出面", core.WaterLevel7ID + 1, core.AirID, false},
+		// 未注册编号一律用独占哨兵 core.BlockIDMax 表达：写死具体编号（历史上
+		// 写过 MossyCobblestoneID+1、WaterLevel7ID+1）会在追加新方块时静默
+		// 变成已注册。
+		{"未知当前方块不出面", core.BlockIDMax, core.AirID, false},
 		{"石头面向空气", core.StoneID, core.AirID, true},
-		{"石头面向未知方块关闭", core.StoneID, core.WaterLevel7ID + 1, false},
+		{"石头面向未知方块关闭", core.StoneID, core.BlockIDMax, false},
 		// 流体已纳入 mesh snapshot 的 ids 范围：水面对空气出面，水下地形
 		// 也要透过水出面。id 侧和 adjacent 侧都要覆盖到。
 		{"流体面向空气出面", core.WaterSourceID, core.AirID, true},
@@ -77,7 +78,12 @@ func TestFluidHeightMapsLevelToRawHeightExhaustively(t *testing.T) {
 	if got, want := registry.FluidHeight(core.WaterLevel7ID), uint8(7); got != want {
 		t.Fatalf("最弱流体 FluidHeight=%d，想要 %d", got, want)
 	}
-	for id := core.AirID; id < core.WaterSourceID; id++ {
+	// 上界必须是「全部已注册非流体方块」，不能只扫到流体编号之前：流体之后
+	// 追加的编号（农业方块）同样是非流体，写死 WaterSourceID 会让它们漏测。
+	for id := core.AirID; id < core.BlockIDMax; id++ {
+		if core.IsFluid(id) {
+			continue
+		}
 		if got := registry.FluidHeight(id); got != 0 {
 			t.Fatalf("非流体 %d 的 FluidHeight=%d，想要哨兵 0", id, got)
 		}
@@ -90,10 +96,12 @@ func TestFluidHeightMapsLevelToRawHeightExhaustively(t *testing.T) {
 func TestRegistryMeshSnapshotMatchesRegistry(t *testing.T) {
 	registry := assets.NewRegistry()
 	snapshot := registry.MeshSnapshot()
-	if got, want := len(snapshot.Blocks), int(core.WaterLevel7ID)+1; got != want {
+	// 快照必须逐条覆盖全部已注册方块：条目数与上界都用独占哨兵 core.BlockIDMax
+	// 表达，写死具体末位编号会让新追加的方块静默漏出本用例。
+	if got, want := len(snapshot.Blocks), int(core.BlockIDMax); got != want {
 		t.Fatalf("snapshot block 数=%d，想要 %d", got, want)
 	}
-	for id := core.AirID; id <= core.WaterLevel7ID; id++ {
+	for id := core.AirID; id < core.BlockIDMax; id++ {
 		block := snapshot.Blocks[int(id)]
 		if block.FluidHeight != registry.FluidHeight(id) || block.LightAttenuation != registry.LightAttenuation(id) {
 			t.Fatalf("block %d snapshot 的流体/衰减字段=%+v", id, block)
@@ -106,7 +114,7 @@ func TestRegistryMeshSnapshotMatchesRegistry(t *testing.T) {
 				t.Fatalf("block %d face %d material=%d，想要 %d", id, face, got, want)
 			}
 		}
-		for adjacent := core.AirID; adjacent <= core.WaterLevel7ID; adjacent++ {
+		for adjacent := core.AirID; adjacent < core.BlockIDMax; adjacent++ {
 			if got, want := snapshot.FaceVisible(id, adjacent), registry.FaceVisible(id, adjacent); got != want {
 				t.Fatalf("FaceVisible(%d, %d)=%v，想要 %v", id, adjacent, got, want)
 			}
@@ -266,7 +274,8 @@ func TestFluidFaceVisibilityRules(t *testing.T) {
 	// 计数用于最后的防空转守卫：三类结论各自都必须真的被走到过。
 	var fluidToFluid, fluidToAir, fluidToOpaque, opaqueToFluid int
 	for id := core.WaterSourceID; id <= core.WaterLevel7ID; id++ {
-		for adjacent := core.AirID; adjacent <= core.WaterLevel7ID; adjacent++ {
+		// adjacent 侧要穷举「全部已注册方块」，上界用 core.BlockIDMax。
+		for adjacent := core.AirID; adjacent < core.BlockIDMax; adjacent++ {
 			got := registry.FaceVisible(id, adjacent)
 			switch {
 			case core.IsFluid(adjacent):
@@ -324,7 +333,9 @@ func TestFluidBlocksUseDedicatedWaterMaterialLayer(t *testing.T) {
 	}
 	// 反向守卫：任何非流体的已注册方块都不得落到水层，否则「按 material
 	// 分流」会把不透明几何一起拖进半透明 pass。
-	for id := core.AirID; id <= core.MossyCobblestoneID; id++ {
+	// 上界必须是「全部已注册方块」：写死 MossyCobblestoneID 时它恰好是流体之前
+	// 的末项，看起来等价于全域，流体之后再追加编号就静默漏测了。
+	for id := core.AirID; id < core.BlockIDMax; id++ {
 		if core.IsFluid(id) {
 			continue
 		}

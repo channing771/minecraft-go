@@ -86,9 +86,10 @@ func TestNativeOracleParityFixedCorpus(t *testing.T) {
 		}},
 		{"unknown-id", func(*testing.T) (*world.Neighborhood, mesh.Registry) {
 			center := world.NewSection()
-			// MossyCobblestoneID+1 现在是已注册的流体 WaterSourceID，不再是
-			// 未知方块；真正越界、未注册的编号是 WaterLevel7ID+1。
-			center.Blocks.Set(8, 8, 8, core.WaterLevel7ID+1)
+			// 未注册编号一律用独占哨兵 core.BlockIDMax 表达：写死具体编号
+			// （历史上写过 MossyCobblestoneID+1、WaterLevel7ID+1）会在追加
+			// 新方块时静默变成已注册，本用例就不再覆盖未知方块那条路径。
+			center.Blocks.Set(8, 8, 8, core.BlockIDMax)
 			return solidNeighbors(center), assetRegistry
 		}},
 		{"sky-edge", func(t *testing.T) (*world.Neighborhood, mesh.Registry) {
@@ -143,9 +144,9 @@ func TestNativeOracleParityDeterministicRandomizedCorpus(t *testing.T) {
 		core.GlassID,
 		core.LeavesID,
 		core.LightBlockID,
-		// WaterLevel7ID+1 是真正越界、未注册的编号：覆盖「registry 里完全不
-		// 存在」这条路径。
-		core.WaterLevel7ID + 1,
+		// core.BlockIDMax 是未注册编号的独占哨兵：覆盖「registry 里完全不
+		// 存在」这条路径，且不会随新方块追加而失效。
+		core.BlockIDMax,
 		// 流体已纳入 assets.NewRegistry() 的 snapshot ids 范围，会真的产生
 		// 几何。放两个不同等级，让「流体—流体」「流体—固体」「流体—空气」
 		// 三类相邻都出现在随机语料里。

@@ -135,9 +135,10 @@ func TestMeshEmptySectionProducesNothing(t *testing.T) {
 
 func TestMeshUnknownBlockDoesNotSelectMaterial(t *testing.T) {
 	center := world.NewSection()
-	// MossyCobblestoneID+1 现在是已注册的流体 WaterSourceID，不再是未知方块；
-	// 真正越界、未注册的编号是 WaterLevel7ID+1。
-	center.Blocks.Set(8, 8, 8, core.WaterLevel7ID+1)
+	// 未注册编号一律用独占哨兵 core.BlockIDMax 表达：写死具体编号（历史上写过
+	// MossyCobblestoneID+1、WaterLevel7ID+1）会在追加新方块时静默变成已注册，
+	// 让本用例失去它要覆盖的那条路径。
+	center.Blocks.Set(8, 8, 8, core.BlockIDMax)
 	registry := &materialCallRegistry{Registry: assets.NewRegistry()}
 	if quads := mesh.MeshSection(solidNeighbors(center), registry, mesh.NewLightScratch()); len(quads) != 0 {
 		t.Fatalf("未知方块产生了 %d 个面，想要 0", len(quads))
