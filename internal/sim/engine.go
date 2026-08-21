@@ -138,6 +138,12 @@ func NewEngine(viewRadius int, worldTime uint64, seed int64) *Engine {
 	return engine
 }
 
+// SeedForTest 读出构造时传入的世界种子，仅供测试断言 host 接线是否把
+// storage.Metadata.Seed 原样传给了 NewEngine（见 Engine.seed 的说明）。
+func (engine *Engine) SeedForTest() int64 {
+	return engine.seed
+}
+
 // WorldTime 返回最近一个完成 tick 的绝对世界时间。
 func (engine *Engine) WorldTime() uint64 { return engine.worldTime.Load() }
 
