@@ -190,6 +190,27 @@ func (engine *Engine) Step() TickResult {
 			}
 			player.inventory = next
 			player.inventoryDirty = true
+		case CommandTillSoil:
+			// 与放置同形的两段式：命令阶段只做玩家与朝向的廉价校验，真正的
+			// 射线、目标判定与写方块推迟到 interactions 循环——阶段顺序契约
+			// 要求一切区块写者位于 reconcileSubscriptions 之后。
+			if session.player == nil || session.player.lifecycle != PlayerActive {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectPlayerNotReady,
+				})
+				continue
+			}
+			if !validPlayerLook(command.Yaw, command.Pitch) {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   RejectInvalidInput,
+				})
+				continue
+			}
+			interactions = append(interactions, command)
 		case CommandOpenFurnace:
 			if reason, rejected := engine.openContainer(command.Session, command); rejected {
 				result.Rejected = append(result.Rejected, Rejection{
@@ -306,6 +327,14 @@ func (engine *Engine) Step() TickResult {
 		switch command.Kind {
 		case CommandPlaceBlock:
 			if reason, rejected := engine.executePlacement(command, pending); rejected {
+				result.Rejected = append(result.Rejected, Rejection{
+					Session:  command.Session,
+					Sequence: command.Sequence,
+					Reason:   reason,
+				})
+			}
+		case CommandTillSoil:
+			if reason, rejected := engine.executeTillSoil(command, pending); rejected {
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
 					Sequence: command.Sequence,
