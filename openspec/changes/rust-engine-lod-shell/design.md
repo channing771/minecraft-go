@@ -75,9 +75,11 @@ section 网格编码;帧序 天空 → 远环 → 近环 → 实体/HUD,远环�
 近环自然覆盖。距离雾在远环 WGSL 内按相机距离向天空色 mix,外缘带
 (最外 25%)全雾;近环 v1 不雾化。雾色与昼夜 tint 同源(复用 day/night
 uniform,不新增状态)。剔除:v1 仅 tile 级视锥剔除(每帧 ≤ 数十 tile),
-不进 HiZ/GPU culling。终审修复波(Ruling 13/14)定版:`MAX_LOD_TILES`
-按切比雪夫方环定容(multiplier=8 全方环 (2×64+1)²=16641,取 32768 留
-2 倍余量);FOG_START/FOG_FULL 参数化为渲染器可设状态,新增
+不进 HiZ/GPU culling。终审修复波(Ruling 13/14/18)定版:`MAX_LOD_TILES`
+按切比雪夫方环定容(最大合法配置 viewDistance=64×multiplier=8 →
+(2×128+1)²=66049,取 131072 留 2 倍余量;裁决演进审计:Ruling 13 的
+32768 因漏看 viewDistance 合法上限 64 被 Ruling 18 推翻);FOG_START/
+FOG_FULL 参数化为渲染器可设状态,新增
 `render_set_lod_fog(abi, start, full)` 出口(默认 768/1152 保持
 multiplier=3 行为),client ABI 随之 v6→v7(新增出口必 bump,同
 engine ABI v5→v6 先例;变基重编:tile 出口原 v5、雾 setter 原 v6,main

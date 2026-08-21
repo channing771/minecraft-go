@@ -6,7 +6,7 @@
 //! origin 槽位、32 字节 section record、cull compute 写 visible instances
 //! 与 indirect args、单次 indexed indirect draw、sky 全屏三角与 HiZ
 //! 金字塔遮挡。uniform 布局、clear 值与 pass 顺序保持一致,保证同输入
-//! 同图像。远环 LOD 壳 pass(v5)绘制在天空与近环 terrain 之间:世界
+//! 同图像。远环 LOD 壳 pass(v6)绘制在天空与近环 terrain 之间:世界
 //! 坐标大 quad + 距离雾 + tile 级 CPU 视锥剔除,不进 HiZ/GPU culling。
 //!
 //! 约束:
@@ -476,7 +476,7 @@ pub struct OffscreenRenderer {
     sky_pipeline: wgpu::RenderPipeline,
     sky_bind: wgpu::BindGroup,
 
-    /// 远环 LOD pass(client ABI v5):世界坐标壳 quad + 距离雾,
+    /// 远环 LOD pass(client ABI v6):世界坐标壳 quad + 距离雾,
     /// 帧序位于天空之后、近环 terrain 之前。
     lod_pass: LodPass,
 

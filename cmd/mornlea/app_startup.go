@@ -256,7 +256,7 @@ func newApplicationWithDependencies(
 		app.panel = newPanelStateFromActive(options.Render)
 	}
 	app.mesher = client.NewMesher(reg, max(1, runtime.NumCPU()-2))
-	// 远环 LOD 接线:登录种子→Scheduler 播种全环→雾距离按配置推导下发。
+	// 远环 LOD 接线:登录种子→Scheduler 播种远环带→雾距离按配置推导下发。
 	// 禁用(lodEnabled=false)与 benchmark 观察者路径在此零参与。
 	if err := app.attachLodScheduler(worldSeed, options.FluidEnabled, options.Benchmark); err != nil {
 		return nil, errors.Join(fmt.Errorf("接线远环 LOD: %w", err), app.Close())

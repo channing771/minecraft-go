@@ -1,4 +1,4 @@
-//! 远环 LOD 壳 pass(client ABI v5)。
+//! 远环 LOD 壳 pass(client ABI v6)。
 //!
 //! 远环由 engine `mornlea_lod_shell` 生产的确定性纯地表壳构成:每 tile
 //! (4×4 chunk = 64×64 列)一条 20 字节/quad 的世界坐标 quad 流。本模块

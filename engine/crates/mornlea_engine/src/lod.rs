@@ -950,5 +950,3 @@ mod tests {
     /// 后替换该文件(输入三要素在本测试内逐字钉死)。
     const GOLDEN_SHELL_BYTES: &[u8] = include_bytes!("../testdata/lod-shell-seed42-step4-v2.bin");
 }
-
-

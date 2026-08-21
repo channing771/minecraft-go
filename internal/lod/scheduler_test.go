@@ -144,7 +144,7 @@ func TestNewSchedulerValidatesArguments(t *testing.T) {
 	scheduler.Close()
 }
 
-func TestQueueRingEnqueuesDiskIncrementally(t *testing.T) {
+func TestQueueRingEnqueuesRingIncrementally(t *testing.T) {
 	s, _ := newTestScheduler(t, 4<<20, fakeGenerate)
 	s.QueueRing(TilePos{X: 0, Z: 0}, 0, 1)
 	if got := s.PendingUploads(); got != 9 {

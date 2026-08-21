@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// TestProtocolV18LoginSuccessCarriesWorldSeed 验证种子字段恰好追加在
+// TestProtocolV23LoginSuccessCarriesWorldSeed 验证种子字段恰好追加在
 // PlayerID 之后：固定 16 字节 UUID + little-endian uint64，全值域可往返，
 // 任何截断或尾随字节都必须被拒绝，不产生部分包。
-func TestProtocolV18LoginSuccessCarriesWorldSeed(t *testing.T) {
+func TestProtocolV23LoginSuccessCarriesWorldSeed(t *testing.T) {
 	id := mustCodecPlayerID(t)
 	packet := LoginSuccess{PlayerID: id, WorldSeed: 0x1122334455667788}
 	gotID, payload, err := encodeServerControlPayload(StateLogin, packet)
@@ -42,10 +42,10 @@ func TestProtocolV18LoginSuccessCarriesWorldSeed(t *testing.T) {
 	}
 }
 
-// TestProtocolV18LoginSuccessWorldSeedAcceptsFullRange 验证 uint64 全值域
+// TestProtocolV23LoginSuccessWorldSeedAcceptsFullRange 验证 uint64 全值域
 // （含 0 与最大值）都不携带任何隐式校验：种子的语义解释属于客户端远环
 // 播种（任务 5.2），wire 层只负责无损搬运。
-func TestProtocolV18LoginSuccessWorldSeedAcceptsFullRange(t *testing.T) {
+func TestProtocolV23LoginSuccessWorldSeedAcceptsFullRange(t *testing.T) {
 	id := mustCodecPlayerID(t)
 	for _, seed := range []uint64{0, 1, 0x7fff_ffff_ffff_ffff, ^uint64(0)} {
 		packet := LoginSuccess{PlayerID: id, WorldSeed: seed}
@@ -142,11 +142,11 @@ func TestLoginClientWithSeedSurfacesWorldSeed(t *testing.T) {
 	}
 }
 
-// TestV18ClientRejectsV17ServerAcrossTransports 模拟一个只会说 v17 的
+// TestV23ClientRejectsPriorServerAcrossTransports 模拟一个只会说 v17 的
 // 服务端（生产服务端已升 v23，只能以对端身份模拟；类型化 Send 会拒绝
 // 非 v23 的 ServerHello，因此按传输写原始字节），验证 v23 客户端在
 // Memory 与 TCP 上都拒绝它，不进入登录阶段，也不产生半兼容会话。
-func TestV18ClientRejectsV17ServerAcrossTransports(t *testing.T) {
+func TestV23ClientRejectsPriorServerAcrossTransports(t *testing.T) {
 	const legacy = uint32(17)
 	for _, open := range transportOpeners {
 		t.Run(open.name, func(t *testing.T) {
