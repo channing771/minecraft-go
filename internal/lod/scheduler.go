@@ -13,8 +13,9 @@ import (
 
 // TileSink 是远环 tile 的上传与释放出口,形状镜像近环 render.SectionSink
 // 的 UploadSection/DropSection(本包不得 import internal/render,只复刻
-// 形状);由 cmd/mornlea 的接线层(任务 5.2)适配到 client ABI v5 的
-// render_upload_lod_tile / render_drop_lod_tile。quads 为 20 字节 LE
+// 形状);由 cmd/mornlea 的接线层(任务 5.2)适配到 client ABI v6 的
+// render_upload_lod_tile / render_drop_lod_tile(变基重编:tile 出口原编号
+// v5,main 的 water pass 占用 v5 后顺延为 v6)。quads 为 20 字节 LE
 // quad 字节流,接收方只读、发送后不可变。
 type TileSink interface {
 	// UploadLodTile 整体上传一个 tile 的壳 quad 流;重复上传同 tile 即
