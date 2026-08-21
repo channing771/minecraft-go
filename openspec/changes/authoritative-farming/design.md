@@ -114,6 +114,7 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 | 14 | 出生点选在耕地上时留 1/16 空隙,玩家首 tick 沉降 1/16 | `findSpawnInColumn` 对任何有碰撞体的方块返回 `y+1`,不读盒子顶面;改它要同步出生点与 support/safe 存档点三处口径。摔落伤害为 0、safe 点不被污染、worldgen 不产耕地 | `findSpawnInColumn` 改读落脚盒顶面,作为独立决定 |
 | 15 | 既有缺陷:`client/mirror.go` 的拒绝原因白名单漏登记 `RejectContainerCapacity`,服务端发该原因时客户端报 unknown | 早于本变更存在、与农业无关;本变更只复用既有原因、零 wire 新增,不碰该白名单 | 独立小型修复(一行),建议本变更合并后按直接修改豁免处理 |
 | 16 | 手持锄头收获作物仍扣锄头耐久(MC 锄头只在翻地时掉耐久) | 既有通用规则 `consumeToolDurability` 对任何成功破坏的工具生效,与手持镐挖泥土同理;为作物开特例要在采掘完成路径加按方块×工具的豁免表 | 若要对齐 MC,在 `completeMining` 加「作物 × 锄头」豁免并配测试 |
+| 17 | `world.Chunk.HighestOpaque` 名不副实:返回最高**非空气**方块(F2 列顶语义),作物露天判定依赖的正是「非空气」 | 改名是跨包重构(world/mesh/sim 多处调用),不在本变更;语义缝由玻璃/水遮挡用例兜住 | 独立小型重构:改名为 `HighestNonAir` 或在 GoDoc 首句钉死语义 |
 
 ## 验证策略
 
