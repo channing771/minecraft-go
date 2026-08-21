@@ -42,6 +42,9 @@ const (
 	farmingSettleTicks = 3
 	// farmingPickupTicks 是等掉落物过完拾取延迟（默认 10 tick）并入包的 tick 数。
 	farmingPickupTicks = 40
+	// farmingLoginBudget 是等登录就绪（Ready + 背包发布 + 九个区块进镜像）的
+	// tick 预算。给足余量，只用来把"卡住"变成一条读得懂的失败而不是 go test 超时。
+	farmingLoginBudget = 600
 )
 
 // TestFarmingLoopEndToEndMemory 是组 1–6 的集成回归：一名**从未存在过**的玩家
@@ -138,16 +141,23 @@ func TestFarmingLoopEndToEndMemory(t *testing.T) {
 	}
 
 	// —— 第 1 步：登录即持有 64 颗种子，且全身上下没有锄头 ——
+	//
+	// 等待条件刻意只看「发布过一份非空背包」，**不**看种子：条件里写种子的话，
+	// 材料包被改成不发种子时这个循环会一直空转到 go test 超时，而超时是一种
+	// 读不出原因的红。等待有 tick 预算，断言留给下面的显式比较。
 	ready, inventoryReady := false, false
-	for !ready || !inventoryReady || !parityViewLoaded(mirror) {
+	for ticks := 0; !ready || !inventoryReady || !parityViewLoaded(mirror); ticks++ {
+		if ticks > farmingLoginBudget {
+			t.Fatalf("登录 %d 个 tick 后仍未就绪: ready=%v 背包已发布=%v 视野已加载=%v",
+				ticks, ready, inventoryReady, parityViewLoaded(mirror))
+		}
 		_, messages := parityStep(t, host, endpoint, mirror)
 		for _, message := range messages {
 			switch message := message.(type) {
 			case network.PlayerState:
 				ready = ready || message.Ready
 			case network.InventoryState:
-				inventoryReady = inventoryReady ||
-					message.Inventory.Backpack[starterSeedSlot].Item == core.ItemWheatSeeds
+				inventoryReady = inventoryReady || message.Inventory != core.Inventory{}
 			}
 		}
 	}
