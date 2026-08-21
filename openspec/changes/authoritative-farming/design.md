@@ -115,6 +115,7 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 | 15 | 既有缺陷:`client/mirror.go` 的拒绝原因白名单漏登记 `RejectContainerCapacity`,服务端发该原因时客户端报 unknown | 早于本变更存在、与农业无关;本变更只复用既有原因、零 wire 新增,不碰该白名单 | 独立小型修复(一行),建议本变更合并后按直接修改豁免处理 |
 | 16 | 手持锄头收获作物仍扣锄头耐久(MC 锄头只在翻地时掉耐久) | 既有通用规则 `consumeToolDurability` 对任何成功破坏的工具生效,与手持镐挖泥土同理;为作物开特例要在采掘完成路径加按方块×工具的豁免表 | 若要对齐 MC,在 `completeMining` 加「作物 × 锄头」豁免并配测试 |
 | 17 | `world.Chunk.HighestOpaque` 名不副实:返回最高**非空气**方块(F2 列顶语义),作物露天判定依赖的正是「非空气」 | 改名是跨包重构(world/mesh/sim 多处调用),不在本变更;语义缝由玻璃/水遮挡用例兜住 | 独立小型重构:改名为 `HighestNonAir` 或在 GoDoc 首句钉死语义 |
+| 18 | HUD 物品图集宽度随 `ItemIDMax` 增长,`hotbarTextureUV` 不做 texel 中心对齐,追加物品会让**既有**图标亚像素漂移(本变更 `hud-hotbar-health` 0.115%) | 改 UV 采样策略是渲染改动,不在农业范围;本次按「确认采样层正确 → 重生成」处理 | 独立变更:UV 按 texel 中心或整数像素计算,使图集扩列不影响既有列 |
 
 ## 验证策略
 
@@ -125,3 +126,4 @@ growCrop(block, wet, skyExposed) (nextBlock, changed bool)
 - **生长测试把概率 tunable 设成 100%**,否则用例会因「恰好没抽中」而绿。
 - **多断言/多场景门禁要用正交变异取并集**证明无死角——F2 的 golden 比对是两次不同变异才覆盖全部 11 个场景。
 - 门禁一律**按退出码**判定,过滤只用于阅读;**变异实验前先提交**(未提交的改动对 `git stash` 和 `git checkout` 一样脆弱)。
+- **凡改 `ItemIDMax` / `LayerCount` / HUD 布局的任务组,capture 比对是该组门禁**(任务组 7 才发现组 1 的 `hud-hotbar-health` 漂移——HUD 图集尺寸随这两个上界变化,改动面不明显但必然触达 golden)。
