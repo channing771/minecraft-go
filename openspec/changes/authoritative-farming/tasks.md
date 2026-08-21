@@ -12,7 +12,7 @@
 - [x] 2.1 `internal/assets` 新增程序化纹理层:耕地干(深褐)/湿(近黑)、小麦 8 阶段(嫩芽绿→成熟金黄)。视觉按 MC 约定看齐,**不引入任何二进制美术资源**。验证:`go test ./internal/assets -race -count=1`
 - [x] 2.2 定义植物 material 集合,`Opaque` 排除植物,`FaceVisible` 让植物不出轴向面。验证:`go test ./internal/assets ./internal/mesh -race -count=1`
 - [x] 2.3 Rust mesh:植物格出 4 片 quad(两条对角线 × 正反两面),**不贪心合并**,`w`/`h` 强制为 1。**quad 位布局零变更**。验证:`make rust` 与 `cargo test -p mornlea_engine`
-- [x] 2.4 着色器按 `material ∈ 植物集合` 把顶点摆到对角面;光照取上方相邻格。走既有 terrain pass 的 alpha cutout,**零新 pass**。验证:`make rust` 与离屏对照测试
+- [x] 2.4 着色器按 `face ∈ {6,7}` 分支把顶点摆到对角面(Ruling 13:`face∈{6,7} ⟺ material ∈ 植物区间` 在 Go 解包与 Rust 发射端双向强制,shader 只信已校验的流;`cull.wgsl` 同步按植物法线判可见,Ruling 14);光照取上方相邻格。走既有 terrain pass 的 alpha cutout,**零新 pass**。验证:`make rust` 与离屏对照测试
 - [x] 2.5 覆盖 `plant-visual-presentation` 的 Scenario:四个水平方向都可见、相邻植物不合并、不新增绘制阶段、面实例仍 8 字节且每格有固定上界、预热后零每帧分配、光照取上方格。验证:`go test ./internal/mesh ./internal/render -race -count=1`
 - [x] 2.6 变异验证两条:去掉「按 material 判别」让植物退回轴向面,确认可见性 Scenario 变红;把每格面数上界断言的夹具改到应当拒绝的规模,确认守卫会红。
 
