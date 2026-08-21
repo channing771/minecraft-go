@@ -36,7 +36,7 @@
 - [ ] 5.1 种植复用放置路径:放置校验加「种子只能放在耕地正上方的空气格」。验证:`go test ./internal/sim -race -count=1`
 - [ ] 5.2 收获复用采掘路径:采掘表加作物(任意手持 `0` tick)与耕地(`5` tick)条目,掉落按方块编号分支。验证:`go test ./internal/sim -race -count=1`
 - [ ] 5.3 覆盖 `authoritative-mining` 三条新 Scenario 与 `authoritative-farming` 的种植/收获 Scenario。验证:`go test ./internal/sim -race -count=1`
-- [ ] 5.4 **显式拒绝伙伴种地与收获**(Ruling 5:多掉落在 core 表达不出,巧合性安全不成立):`internal/sim/mining.go` 与 `internal/companion/plan_types.go` 两处防御清单同改并加断言;放置方向由组 1 的 `planPlaceExempt` 已钉。验证:`go test ./internal/server ./internal/companion -race -count=1`
+- [ ] 5.4 **显式拒绝伙伴种地与收获**(Ruling 5:多掉落在 core 表达不出,巧合性安全不成立):`internal/sim/mining.go`、`internal/companion/plan_types.go` 与 `internal/sim/companion_placement.go`(Ruling 8:BlockDrop→ItemPlacement 往返二重校验已放行种子,须一并显式拒绝)三处防御清单同改并加断言;planner 白名单方向由组 1 的 `planPlaceExempt` 已钉。验证:`go test ./internal/server ./internal/companion -race -count=1`
 - [ ] 5.5 变异验证:去掉「种子只能种在耕地上」的校验,确认变红;让未成熟作物不掉种子,确认「误挖不亏种子」变红。
 
 ## 6. 生长机制与环境判定
