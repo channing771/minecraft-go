@@ -94,6 +94,7 @@ MC 持久化三层;不持久化疲劳会让「重登即清疲劳」成为无成�
 | 8 | 饥饿值 < 18 时回血计时仍累积 | 与 MC 同;改为冻结计时要动既有回血状态机 | 若要冻结,`advanceHealthRegen` 入口改为不推进计时 |
 | 9 | 既有:`playerPersistence.Flush` 的 `attempted` 去重键含 revision、重派递增 revision,「快照与存档永不相等」时只能靠 ctx 终止(关服 Flush 可能自旋) | 先于本变更存在;本组三字段在 `save`/`matchesSave`/`playerSnapshotsEqual` 三处对称,未引入恒脏态 | 独立修复:去重键去掉 revision 或给 Flush 加「连续 N 次重派无进展即放弃」 |
 | 10 | 打开容器界面(箱子/熔炉)或视野尚未就绪(`hasView` 为假)时仍可继续进食 | spec 的中断清单只列松手/切格/受伤/死亡;采掘有 `viewContainer`/`hasView` 中断是因为采掘要瞄准,进食不需要;MC 打开 GUI 取消进食属呈现层惯例 | 若要对齐 MC,`advanceEating` 的中断条件加 `session.viewContainer`(与 `hasView`),并补「开箱中断不扣料」Scenario |
+| 11 | 既有:手持小麦按「使用」键仍发送 `PlaceBlock`(服务端拒绝),食物分支只接管食物 | 改动前就存在;正确的统一修法是收敛 `core.ItemPlacement` 判据而非在客户端食物分支上再叠一层条件,那是与饥饿无关的独立小修(执行期 Ruling 28) | 独立小修:让客户端「使用」键按 `core.ItemPlacement` 决定是否发 `PlaceBlock`,不可放置物一律不发;现状由 `cmd/mornlea/app_input_test.go:TestUseKeyRisingEdgeSkipsPlaceWhileHoldingFood` 钉住 |
 
 ## 验证策略
 
