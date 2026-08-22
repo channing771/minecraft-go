@@ -420,7 +420,20 @@ func (engine *Engine) advanceActivePlayers() {
 		// 计时冻结；重生本身回满生命值，冻结与否都观察不到差别。计时放在
 		// reset 短路之前同样是有意的：reset 只是位置跳变的当 tick 标记，
 		// 玩家仍在世界里，回复不应因此停摆。
-		player.advanceHealthRegen(engine.tunables.RegenDelayTicks, engine.tunables.RegenIntervalTicks)
+		if player.advanceHealthRegen(
+			engine.tunables.RegenDelayTicks,
+			engine.tunables.RegenIntervalTicks,
+			engine.tunables.RegenHungerThreshold,
+		) {
+			// 疲劳表：自然回血每回 1 点生命值累积固定疲劳（见 hunger.go）。
+			// 它是全表最大的一项，一次调用会跨过多个阈值。
+			player.applyExhaustion(
+				exhaustionRegenPerHealthMilli, engine.tunables.ExhaustionThresholdMilli,
+			)
+		}
+		// 饥饿伤害与回血计时同处：它同样只在 Active 期间推进，也同样放在 reset
+		// 短路之前——reset 只是位置跳变的当 tick 标记，玩家仍在世界里挨饿。
+		player.advanceStarvation(engine.tunables.StarvationDamageIntervalTicks)
 		if player.reset {
 			continue
 		}

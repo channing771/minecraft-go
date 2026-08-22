@@ -149,3 +149,135 @@ func TestNewPlayerStartsFedAndUnexhausted(t *testing.T) {
 			player.exhaustionMilli, player.starvationTicks)
 	}
 }
+
+// TestStarvationDamagesOncePerInterval 覆盖 Scenario「饥饿归零周期扣血」：
+// 饥饿为 0 时每 StarvationDamageIntervalTicks 扣 1 点，且这一扣必须经既有伤害
+// 入口——回血计时被清零就是"走了同一个入口"的可观察证据。
+//
+// 第 79 tick 的断言不可省：只在第 80 tick 检查末值，间隔被改小 1 的变异会
+// 悄悄漏网。
+func TestStarvationDamagesOncePerInterval(t *testing.T) {
+	const id = SessionID(46)
+	engine := readyRegenPlayer(t, id, 10)
+	player := engine.sessions[id].player
+	player.hunger = 0
+	player.saturationMilli = 0
+
+	stepRegen(t, engine, id, 79)
+	if player.health != 10 {
+		t.Fatalf("第 79 tick health=%d，想要保持 10（扣血不应提前）", player.health)
+	}
+	if player.starvationTicks != 79 {
+		t.Fatalf("第 79 tick starvationTicks=%d，想要 79", player.starvationTicks)
+	}
+	stepRegen(t, engine, id, 1)
+	if player.health != 9 {
+		t.Fatalf("第 80 tick health=%d，想要 9", player.health)
+	}
+	if player.starvationTicks != 0 {
+		t.Fatalf("扣血后 starvationTicks=%d，想要 0", player.starvationTicks)
+	}
+	// 走 applyDamage 的直接后果：回血计时被清零。
+	if player.ticksSinceDamage != 0 {
+		t.Fatalf("饥饿伤害未重置回血计时: ticksSinceDamage=%d", player.ticksSinceDamage)
+	}
+	// 第二个间隔照常扣。
+	stepRegen(t, engine, id, 80)
+	if player.health != 8 {
+		t.Fatalf("第二个间隔后 health=%d，想要 8", player.health)
+	}
+}
+
+// TestStarvationStopsAtOneHealth 覆盖 Scenario「饥饿伤害止于一点生命」与
+// authoritative-health 的 MODIFIED Scenario「饥饿伤害经同一入口且止于 1」。
+//
+// 夹具从 health=2 起推进**两个**间隔：第一个把生命打到 1，第二个必须完全不动。
+// 只推进一个间隔的用例测不出"止于"——那种夹具在"没有地板"的实现下读数相同。
+func TestStarvationStopsAtOneHealth(t *testing.T) {
+	const id = SessionID(47)
+	engine := readyRegenPlayer(t, id, 2)
+	player := engine.sessions[id].player
+	player.hunger = 0
+	player.saturationMilli = 0
+
+	stepRegen(t, engine, id, 80)
+	if player.health != 1 {
+		t.Fatalf("第一个间隔后 health=%d，想要 1", player.health)
+	}
+	stepRegen(t, engine, id, 80)
+	if player.health != 1 {
+		t.Fatalf("第二个间隔后 health=%d，想要保持 1（饥饿伤害不致死）", player.health)
+	}
+	// 生命值触底后计时冻结，不是照推：否则一吃饱回血就会立刻结算一次积压伤害。
+	if player.starvationTicks != 0 {
+		t.Fatalf("触底后 starvationTicks=%d，想要冻结在 0", player.starvationTicks)
+	}
+	// 玩家必须仍然活着（没有被 settleDeaths 送进待重生）。
+	if player.lifecycle != PlayerActive {
+		t.Fatalf("饥饿伤害把玩家打死了: lifecycle=%d", player.lifecycle)
+	}
+	stepRegen(t, engine, id, 240)
+	if player.health != 1 || player.lifecycle != PlayerActive {
+		t.Fatalf("长时间饥饿后 (health,lifecycle)=(%d,%d)，想要 (1,Active)",
+			player.health, player.lifecycle)
+	}
+}
+
+// TestStarvationTimerResetsWhenFed 覆盖「饥饿值大于零时计时清零」：熬到间隔
+// 前一刻吃回一点，已经积累的计时必须作废，不能在下一次饿到 0 时立刻结算。
+func TestStarvationTimerResetsWhenFed(t *testing.T) {
+	const id = SessionID(48)
+	engine := readyRegenPlayer(t, id, 10)
+	player := engine.sessions[id].player
+	player.hunger = 0
+	player.saturationMilli = 0
+
+	stepRegen(t, engine, id, 79)
+	if player.starvationTicks != 79 {
+		t.Fatalf("starvationTicks=%d，想要 79", player.starvationTicks)
+	}
+	player.hunger = 1
+	stepRegen(t, engine, id, 1)
+	if player.starvationTicks != 0 || player.health != 10 {
+		t.Fatalf("吃回一点后 (starvationTicks,health)=(%d,%d)，想要 (0,10)",
+			player.starvationTicks, player.health)
+	}
+	player.hunger = 0
+	stepRegen(t, engine, id, 79)
+	if player.health != 10 {
+		t.Fatalf("重新计时的第 79 tick health=%d，想要保持 10", player.health)
+	}
+	stepRegen(t, engine, id, 1)
+	if player.health != 9 {
+		t.Fatalf("重新计时的第 80 tick health=%d，想要 9", player.health)
+	}
+}
+
+// TestRespawnRestoresHungerToInitialValues 覆盖 Scenario「重生后饥饿回满」。
+// 死亡由既有伤害入口触发（不是直接写 health），因此这条同时证明死亡结算
+// 复用了 resetHunger 这一个初值来源。
+func TestRespawnRestoresHungerToInitialValues(t *testing.T) {
+	const id = SessionID(49)
+	engine := readyRegenPlayer(t, id, 10)
+	player := engine.sessions[id].player
+	player.hunger = 3
+	player.saturationMilli = 0
+	player.exhaustionMilli = 3000
+	player.starvationTicks = 0
+	player.applyDamage(int32(player.health))
+	if player.health != 0 {
+		t.Fatalf("致命伤后 health=%d，想要 0", player.health)
+	}
+
+	engine.Step()
+	if player.hunger != core.MaxHunger {
+		t.Fatalf("重生后饥饿=%d，想要 %d", player.hunger, core.MaxHunger)
+	}
+	if player.saturationMilli != initialSaturationMilli {
+		t.Fatalf("重生后饱和=%d，想要 %d", player.saturationMilli, initialSaturationMilli)
+	}
+	if player.exhaustionMilli != 0 || player.starvationTicks != 0 {
+		t.Fatalf("重生后 (疲劳,饥饿计时)=(%d,%d)，想要 (0,0)",
+			player.exhaustionMilli, player.starvationTicks)
+	}
+}
