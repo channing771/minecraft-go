@@ -29,7 +29,7 @@
 
 - [x] 4.1 `playerState.eating{slot, item, progress}`;开始/推进/结算/中断四类规则按 design D5;结算单 tick 原子(扣 1、饥饿 +5 ≤20、饱和 +6000 ≤ 饥饿×1000)。`EatingTicks`(默认 32)进 tunable。验证:`go test ./internal/sim -race -count=1`
 - [x] 4.2 覆盖「进食」Requirement 五条 + 「食物表」两条 Scenario;**中断用例在 progress ∈ (0,32) 触发,断言面包数精确不变**;受伤与死亡中断各一条。验证:`go test ./internal/sim -race -count=1`
-- [x] 4.3 Memory/TCP parity 脚本:登录 → 跳跃到饥饿下降 → 合成面包 → 长按进食 → 回升,两传输逐字段比。验证:`go test ./internal/server -race -count=1`
+- [x] 4.3 Memory/TCP parity 脚本:登录(夹具播种饥饿 12、满血——非满血的自然回血每 HP 累积 6000 疲劳会在 32 tick 内污染读数;跳跃 +50/次要 80 次才扣 1 饱和,脚本不现实)→ 夹具直给 3 小麦(材料包只有种子)→ 合成面包 → 选中 → 长按 32 tick → 从 wire 上的 `PlayerState.Hunger` 读回升,两传输 transcript 逐字段比。验证:`go test ./internal/server -race -count=1`
 - [x] 4.4 伙伴不接:`companionState` 无三层状态、疲劳表判定点不在伙伴路径,各一条断言(能在有人接线时变红)。验证:`go test ./internal/server ./internal/sim -race -count=1`
 - [x] 4.5 变异验证(三条):去掉 `(slot,item)` 核对 → 「切换栏位不扣料」红;结算放到 progress==31 → 「到时结算」红(断言精确 tick);饱和不钳 → 「饱和度不超过饥饿值」红。
 
