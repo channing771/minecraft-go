@@ -56,6 +56,12 @@ Avatar、NameTag 与 Hotbar HUD 为容纳最多七名远端玩家、四个伙伴
 - **THEN** 该次运行的注水门控 MUST 为关闭
 - **AND** benchmark 的被测世界 MUST 与注水默认开启之前逐格一致
 
+#### Scenario: v19 同场景比较只记录性能
+
+- **GIVEN** baseline 与 current 都是完整有效且身份兼容的 scenario v19 报告
+- **WHEN** 比较器执行同场景比较
+- **THEN** 比较器 MUST 输出既有绝对指标和相对回归记录，且任何性能数值变差都 MUST 返回成功
+
 #### Scenario: v18 同场景比较只记录性能
 
 - **GIVEN** baseline 与 current 都是完整有效且身份兼容的 scenario v18 报告

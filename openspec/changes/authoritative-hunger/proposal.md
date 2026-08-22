@@ -30,7 +30,7 @@
 
 ## Impact
 
-- **受影响包**:`internal/core`(食物表、配方 11)、`internal/sim`(三层状态、疲劳表、回血门控、饥饿伤害、进食状态机)、`internal/physics`(起跳检测供疲劳表,若尚无现成信号)、`internal/network`(协议 v23)、`internal/storage`(玩家 schema v7 与 v6 迁移)、`internal/config`(tunable `Fields()`)、`internal/render/hud`(饥饿条)、`cmd/mornlea`(使用键食物分支)、`internal/archcheck`(基线版本)。
+- **受影响包**:`internal/core`(食物表、配方 11)、`internal/sim`(三层状态、疲劳表、回血门控、饥饿伤害、进食状态机)、`internal/physics`(起跳检测供疲劳表,若尚无现成信号)、`internal/network`(协议 v24)、`internal/storage`(玩家 schema v7 与 v6 迁移)、`internal/config`(tunable `Fields()`)、`internal/render/hud`(饥饿条)、`cmd/mornlea`(使用键食物分支)、`internal/archcheck`(基线版本)。
 - **兼容性**:协议 v23 → v24;玩家 schema v6 → v7(v6 只读兼容迁移,v7 以上按 `ErrFutureVersion` 拒);区块 schema v9、`companions.ai` v4、世界 metadata v2、engine ABI v6、client ABI v7、benchmark scenario v18 → v19(实现期实测:饥饿条的 20 个 quad 使 HUD 固定上传布局移动——quad 容量 247 → 267、glyph offset 12288 → 13312、总容量 45888 → 46912 bytes、空聊天帧每帧实际写入 12288 → 13312 bytes,按 `bounded-benchmark-workload` 条文升版,唯一显式迁移改为 `18:19`、`17:18` 退为归档证据)。
 - **并发**:饥饿推进与进食在单写者权威 tick 内串行,不引入 goroutine 或锁。
 - **性能**:每玩家每 tick O(1);无全局扫描。

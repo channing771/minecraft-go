@@ -461,18 +461,21 @@ func TestApplicationRendersHealthBeforeInventoryConfirmation(t *testing.T) {
 	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	if err := app.predictor.Begin(network.PlayerState{
 		ServerTick: 1, Dimension: core.Overworld,
-		// 氧气给满值：本用例只关心生命条的爱心实例数，未满氧气会额外画出氧气条。
+		// 氧气给满值：氧气条只在未满时出现，满值让它不占用 quad 流。饥饿条与之
+		// 相反、满值也常驻，所以饥饿给的是显式满值而不是靠零值蒙混——本用例数的
+		// 是「生命条 + 饥饿条」这个确定的总数。
 		Position: mgl32.Vec3{0.5, 10, 0.5}, Ready: true, Health: 12,
-		Oxygen: core.MaxOxygenTicks,
+		Oxygen: core.MaxOxygenTicks, Hunger: core.MaxHunger,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if rendered, err := app.renderFrame(1); err != nil || !rendered {
 		t.Fatalf("renderFrame=(%v,%v)", rendered, err)
 	}
-	// 未确认背包时 HUD 只画生命值爱心(quad 流恰为爱心实例数)。
-	if _, quads, _ := app.hotbarRenderer.FrameStreams(); len(quads)/48 != int(healthQuadInstancesForHUDTest) {
-		t.Fatalf("unconfirmed inventory health quads=%d want=%d", len(quads)/48, healthQuadInstancesForHUDTest)
+	// 未确认背包时 HUD 只画生命条与饥饿条(quad 流恰为两条 bar 的实例数之和)。
+	want := healthQuadInstancesForHUDTest + hungerQuadInstancesForHUDTest
+	if _, quads, _ := app.hotbarRenderer.FrameStreams(); len(quads)/48 != want {
+		t.Fatalf("unconfirmed inventory health+hunger quads=%d want=%d", len(quads)/48, want)
 	}
 }
 

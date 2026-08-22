@@ -74,7 +74,11 @@ func (a *application) placeBlock() {
 	// 手持食物时「使用」键的语义是进食而不是放置。食物不可放置，服务端必然拒绝
 	// 这条命令，客户端不发只是为了不刷无谓的拒绝；进食本身由 `client.Control`
 	// 的进食位逐 tick 上行（见 `applyInteractiveInput`），与这条上升沿无关。
-	if a.holdingFood() {
+	//
+	// 直接判上面那份 `hotbar` 而不是调 `holdingFood`：后者会再取一次快捷栏，
+	// 两次取值之间镜像可能被网络 goroutine 换掉，于是「拿来判食物的栏位」与
+	// 「写进 PlaceBlock.Slot 的栏位」来自不同的快照。
+	if _, _, isFood := core.FoodValue(hotbar.Slots[hotbar.Selected].Item); isFood {
 		return
 	}
 	if err := a.send(network.PlaceBlock{
