@@ -987,7 +987,7 @@ type Field struct {
 //     50 点饱和度」，那不是调参而是坏配置。
 //   - sim.regenHungerThreshold 区间为 0..core.MaxHunger：两端都是合法调试取值
 //     （0 = 取消门控，20 = 只有吃饱才回血），越界值没有语义。
-//   - sim.eatingTicks 下限为 1：internal/sim/eating.go 的 advanceEating 以它为
+//   - sim.eatingTicks 下限为 1：internal/sim/eating.go 的 `advanceEating` 以它为
 //     结算阈值，而进度从 1 起，0 会让进食永远结算不了。上限 200（10 秒）只是
 //     操作区间，再长的进食在受伤中断规则下等于吃不完。
 func Fields() []Field {

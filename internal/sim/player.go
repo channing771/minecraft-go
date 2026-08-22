@@ -481,11 +481,11 @@ func (engine *Engine) advanceActivePlayers() {
 		// 饥饿伤害与回血计时同处：它同样只在 Active 期间推进，也同样放在 reset
 		// 短路之前——reset 只是位置跳变的当 tick 标记，玩家仍在世界里挨饿。
 		player.advanceStarvation(engine.tunables.StarvationDamageIntervalTicks)
-		// 进食推进排在饥饿伤害之后：饥饿伤害走 applyDamage，而 applyDamage 会
+		// 进食推进排在饥饿伤害之后：饥饿伤害走 `applyDamage`，而 `applyDamage` 会
 		// 中断进食。反过来排的话，"饿到零的玩家在挨这一拳的同一 tick 吃完面包"
 		// 会先结算进食、再被同一 tick 的伤害打断一个已经不存在的进度——读起来
-		// 像是伤害没能打断进食。它同样放在 reset 短路之前：reset 只是位置跳变
-		// 的当 tick 标记，而"位置跳变中断进食"由 advanceEating 自己的 reset
+		// 像是伤害没能打断进食。它同样放在 `reset` 短路之前：`reset` 只是位置跳变
+		// 的当 tick 标记，而"位置跳变中断进食"由 `advanceEating` 自己的 `reset`
 		// 判据表达，不靠这里的短路代劳。
 		player.advanceEating(engine.tunables.EatingTicks)
 		if player.reset {

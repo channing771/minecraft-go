@@ -3,8 +3,8 @@ package sim
 import "github.com/channing771/mornlea/internal/core"
 
 // defaultEatingTicks 是吃完一件食物需要连续保持进食输入的 tick 数。
-// 唯一读取入口是 Tunables 快照，不得再以导出常量暴露——见 internal/archcheck
-// 的 TestTunableConstantsAreNotExported。
+// 唯一读取入口是 `Tunables` 快照，不得再以导出常量暴露——见 internal/archcheck
+// 的 `TestTunableConstantsAreNotExported`。
 //
 // 取 32 与参考实现同值：权威 tick 是 20 TPS，32 tick 是 1.6 秒。它必须足够长，
 // 让"受伤打断进食"成为一件真会发生的事（否则中断规则形同虚设），又必须短到
@@ -75,7 +75,7 @@ func (player *playerState) advanceEating(eatingTicks uint16) {
 		return
 	}
 	next, consumed := player.inventory.Hotbar.Consume(selected)
-	// Consume 只在栏位越界或为空时失败，而这两种情况上面的食物判定已经排除；
+	// `Consume` 只在栏位越界或为空时失败，而这两种情况上面的食物判定已经排除；
 	// 这里仍然检查而不是丢弃返回值：漏检会在将来某次改动后变成"没扣料却回饱"。
 	if !consumed {
 		player.eating = eatingState{}

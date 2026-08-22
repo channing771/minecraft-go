@@ -28,10 +28,10 @@ const (
 	// 不是农业本身——农业闭环由 farming_loop_e2e_test.go 覆盖。
 	//
 	// 也不能指望缺失玩家的一次性材料包：它给的是 core.ItemWheatSeeds
-	// （见 starterMaterialInventory），不是小麦，更不是面包。
+	// （见 `starterMaterialInventory`），不是小麦，更不是面包。
 	eatingParityWheat uint8 = 3
 	// eatingParityEatTicks 是脚本按住进食输入推进的 tick 数，必须等于权威
-	// 默认的 EatingTicks。sim 的默认值不导出（archcheck 的禁导出清单），
+	// 默认的 `EatingTicks`。sim 的默认值不导出（archcheck 的禁导出清单），
 	// 这里写字面量并由第 31 tick「饥饿精确不变」+ 第 32 tick「精确 +5」
 	// 两条断言共同钉死：默认值一旦改动，这两条会同时变红。
 	eatingParityEatTicks = 32
@@ -67,8 +67,8 @@ func TestMemoryTCPEatingConvergence(t *testing.T) {
 
 // runEatingParityScript 在一种传输上跑完整段进食脚本并返回可比结果。
 //
-// 脚本形状照 runMiningParityScript：先把登录、视野与背包确认跑完，再逐 tick
-// 发命令并把每一条业务消息经 parityBusinessMessage 转写成文本。
+// 脚本形状照 `runMiningParityScript`：先把登录、视野与背包确认跑完，再逐 tick
+// 发命令并把每一条业务消息经 `parityBusinessMessage` 转写成文本。
 func runEatingParityScript(t *testing.T, transport string) eatingParityResult {
 	t.Helper()
 	identity := integrationIdentity(0x74, "EatingParity")
@@ -154,8 +154,8 @@ func runEatingParityScript(t *testing.T, transport string) eatingParityResult {
 		t.Fatalf("%s 选中后 wire 饥饿值=%d，想要 %d", transport, state.Hunger, eatingParityHunger)
 	}
 
-	// 第二段：按住进食输入整整 EatingTicks 个 tick。输入只发一次——权威侧的
-	// 进食意图在下一条 PlayerInput 到达之前保持不变，与采掘同形。
+	// 第二段：按住进食输入整整 `EatingTicks` 个 tick。输入只发一次——权威侧的
+	// 进食意图在下一条 `PlayerInput` 到达之前保持不变，与采掘同形。
 	for tick := 1; tick <= eatingParityEatTicks; tick++ {
 		var command network.ClientMessage
 		if tick == 1 {

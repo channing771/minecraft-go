@@ -6,6 +6,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/physics"
 )
 
 // eatingTestSession 是本文件全部夹具共用的会话号。每条用例各建一个引擎，
@@ -117,7 +118,7 @@ func TestEatingReleaseKeepsFoodAndRestartsFromZero(t *testing.T) {
 	for range releasedAt {
 		engine.Step()
 	}
-	// 夹具自证：中断必须发生在 (0, EatingTicks) 的开区间内，否则测的是
+	// 夹具自证：中断必须发生在 (0, `EatingTicks`) 的开区间内，否则测的是
 	// "没开始"或"已结算"，不是中断。
 	if player.eating.progressTicks != releasedAt {
 		t.Fatalf("松手前进度=%d，想要 %d", player.eating.progressTicks, releasedAt)
@@ -200,6 +201,90 @@ func TestEatingSlotSwitchRestartsAndConsumesNeitherSlot(t *testing.T) {
 		t.Fatalf("切格后进食状态=%+v，想要 %+v（新栏位必须从 0 重新计时）",
 			player.eating, want)
 	}
+}
+
+// TestEatingSameSlotItemSwapRestartsAndConsumesNeither 覆盖 Scenario「栏位物品
+// 变化即中断」的另一半：**不切格**，只把选中格里的东西换掉。
+//
+// 与 `TestEatingSlotSwitchRestartsAndConsumesNeitherSlot` 成对：那条动的是
+// `Selected`，这条动的是 `Slots[selected].Item`。两条合起来才是
+// `eatingState` 里 `(slot, item)` 这个二元组的完整覆盖——只测切格的话，
+// 「按住不放时手里的东西被换掉」这条路一个 tick 都没跑过。
+//
+// 第二条子用例直接调用 `advanceEating` 而不经引擎，因为**今天的食物表只有
+// 面包**（`core.FoodValue` 只对 `core.ItemBread` 返回 true）：经引擎换物品必然
+// 换成非食物，会先被 `!edible` 那条中断吃掉，`item` 这一项在引擎路径上根本
+// 到不了。它是为「食物表加第二项」准备的前置防御（那一天「吃 A 扣 B」会真的
+// 可达），所以必须由构造出来的状态承重，否则这一项零覆盖、删掉全绿。
+func TestEatingSameSlotItemSwapRestartsAndConsumesNeither(t *testing.T) {
+	const swappedAt = 17
+
+	t.Run("同格换成非食物再换回来必须从 0 重新计时", func(t *testing.T) {
+		engine, player := readyEatingPlayer(t, 12, 0)
+		setEatingSlot(player, 0, core.ItemStack{Item: core.ItemBread, Count: 2})
+		player.eatingHeld = true
+		for range swappedAt {
+			engine.Step()
+		}
+		if player.eating.progressTicks != swappedAt {
+			t.Fatalf("换物品前进度=%d，想要 %d", player.eating.progressTicks, swappedAt)
+		}
+
+		// 只换内容，不动 `Selected`：面包整摞离开这一格，换成 3 小麦。
+		wheat := core.ItemStack{Item: core.ItemWheat, Count: 3}
+		player.inventory.Hotbar.Slots[0] = wheat
+		for range defaultEatingTicks - swappedAt {
+			engine.Step()
+		}
+		if got := player.inventory.Hotbar.Slots[0]; got != wheat {
+			t.Fatalf("换物品后 0 号格=%+v，想要精确保持 %+v", got, wheat)
+		}
+		if player.eating != (eatingState{}) {
+			t.Fatalf("换物品后进食状态=%+v，想要清空", player.eating)
+		}
+		if player.hunger != 12 || player.saturationMilli != 0 {
+			t.Fatalf("换物品后 (饥饿,饱和)=(%d,%d)，想要精确保持 (12,0)",
+				player.hunger, player.saturationMilli)
+		}
+
+		// 换回面包并继续按住：面包数就是"原来那两块一件没少"的记账口——它已经
+		// 离开过这一格，只能这样断言。重新计时必须从 0 起，因此第
+		// `EatingTicks - 1` tick 仍不许结算。
+		player.inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemBread, Count: 2}
+		for range defaultEatingTicks - 1 {
+			engine.Step()
+		}
+		if got := hotbarCount(player, 0); got != 2 {
+			t.Fatalf("换回面包第 %d tick 面包数=%d，想要精确保持 2（换物品必须从 0 重新计时）",
+				defaultEatingTicks-1, got)
+		}
+		if player.hunger != 12 || player.saturationMilli != 0 {
+			t.Fatalf("换回面包第 %d tick (饥饿,饱和)=(%d,%d)，想要精确保持 (12,0)",
+				defaultEatingTicks-1, player.hunger, player.saturationMilli)
+		}
+	})
+
+	t.Run("记录物品与当前物品不一致时重新计时而不结算", func(t *testing.T) {
+		player := &playerState{hunger: 12, eatingHeld: true}
+		player.inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemBread, Count: 2}
+		// 记录的是另一物品、进度差一 tick 就结算：核对 `item` 的实现从 1 重数，
+		// 只核对 `slot` 的实现会在这一 tick 直接吃掉面包。
+		player.eating = eatingState{
+			slot: 0, item: core.ItemWheat, progressTicks: defaultEatingTicks - 1,
+		}
+
+		player.advanceEating(defaultEatingTicks)
+		want := eatingState{slot: 0, item: core.ItemBread, progressTicks: 1}
+		if player.eating != want {
+			t.Fatalf("进食状态=%+v，想要 %+v", player.eating, want)
+		}
+		if got := player.inventory.Hotbar.Slots[0].Count; got != 2 {
+			t.Fatalf("面包数=%d，想要精确保持 2（记录物品不一致不得结算）", got)
+		}
+		if player.hunger != 12 {
+			t.Fatalf("饥饿=%d，想要精确保持 12", player.hunger)
+		}
+	})
 }
 
 // TestEatingDoesNotStartWhenHungerIsFull 覆盖 Scenario「饥饿已满不推进」：
@@ -398,7 +483,7 @@ func TestEatingTicksComesFromTunableSnapshot(t *testing.T) {
 // 完全可以复用 `playerState` 之外的另一份进度）。这里断言的是位置性事实——
 // 伙伴的动作**没有任何途径**吃掉手里的食物。
 //
-// 它与源码守卫 TestExhaustionTableIsNotWiredIntoCompanionCode（其禁用清单
+// 它与源码守卫 `TestExhaustionTableIsNotWiredIntoCompanionCode`（其禁用清单
 // 已含进食标识符）是互补的两条，**不得只保留其中一条**：源码守卫是名字驱动
 // 的，看不见"换个名字重写一遍"；本用例是夹具驱动的，只覆盖被驱动到的路径。
 func TestCompanionsNeverEat(t *testing.T) {
@@ -413,15 +498,39 @@ func TestCompanionsNeverEat(t *testing.T) {
 		t.Fatal("面包不是食物，夹具选错了物品")
 	}
 
-	// 伙伴采掘 + 移动：走完整条权威 tick 出口，tick 数远超一次进食（32）。
+	// 伙伴采掘：原地走完整条权威采掘出口，tick 数远超一次进食（32）。采掘意图
+	// 是按住语义、跨 tick 保持，直接装配即可。
 	companionTarget := core.BlockPos{X: 4, Y: 1, Z: 5}
 	engine.SetBlockForTest(companionTarget, core.CoalOreID)
 	entry.miningTarget = companionTarget
 	entry.miningHeld = true
-	entry.input.Jump = true
-	entry.input.MoveZ = -1
 	for range 64 {
 		engine.Step()
+	}
+
+	// 伙伴移动：另起 64 tick，同样远超一次进食。移动必须逐 tick 经
+	// `CompanionActionMove` 意图管线提交——`applyCompanionActions` 对没有 action
+	// 的伙伴每 tick 用 `physics.Input{Yaw: entry.yaw}` 覆盖 `entry.input`，直接写
+	// `entry.input` 的夹具会被这一步抹掉，伙伴一步不动，这半边就是空转的。
+	//
+	// 移动前松开采掘：伙伴会走出触及距离，继续按住只会让采掘每 tick 被距离校验
+	// 拒绝，把上面那段已经跑通的采掘路径换成一条拒绝路径。位移跨区块，因此逐
+	// tick 按既有 `feedCompanionActionRequests` 惯例供给新订阅的区块。
+	entry.miningHeld = false
+	start := entry.state.Position
+	for tick := range 64 {
+		if !engine.EnqueueCompanionAction(CompanionAction{
+			ID: id, Kind: CompanionActionMove,
+			Input: physics.Input{MoveX: 1, Jump: true},
+		}) {
+			t.Fatalf("tick %d 移动 action 未入队", tick)
+		}
+		feedCompanionActionRequests(t, engine, engine.Step())
+	}
+	// 夹具自证：伙伴确实位移了。移动这半边一旦被输入覆盖打回原地，本条断言先红，
+	// 而不是让"伙伴不进食"在一个根本没动过的伙伴身上空绿。
+	if entry.state.Position == start {
+		t.Fatalf("伙伴位置=%+v，与起点相同（移动夹具空转）", entry.state.Position)
 	}
 
 	if got := companionItemCount(entry, core.ItemBread); got != 2 {
