@@ -10,3 +10,9 @@
 | 6 | `/root/texture_task6_docs_ci` | `/root/texture_task6_review`: PASS/CLEAN（round 1） | `/root/texture_task6_review`: PASS/CLEAN（round 1） | 1 | `CARGO ?= rustup run 1.97.1 cargo` 修复精简 PATH 下的固定工具链入口并保留显式覆盖；客户端 build 只复制三份 byte-identical notice，39 名文档与运行时映射一致，Linux 专服依赖/发布单元保持 asset-free。 |
 | 7 | `/root/texture_task7_visual` | `/root/texture_task7_review`: 实现 PASS/CLEAN（round 2）；整体 BLOCKED | `/root/texture_task7_review`: 实现 PASS/CLEAN（round 2）；整体 BLOCKED | 2 | 关闭 1×P3：把 `nearBandGuard` 的旧 golden/new frame 注释与命名改为同 registry 的 LOD-off/LOD-on current control 语义，不改几何、行带、RGB 比较或阈值。三 application preflight 已通过独立评审；沙箱无 GPU adapter，14 张 golden 零变化，真实 visual-update/check 与逐图验收仍未完成，7.1–7.7 保持未勾。 |
 | 8 | `/root/texture_task8_baseline` | `/root/texture_task8_review`: 非视觉 PASS/CLEAN（round 2）；整体 BLOCKED | `/root/texture_task8_review`: 非视觉 PASS/CLEAN（round 2）；整体 BLOCKED | 2 | 关闭 1×P2：Task 1–8 review 列补全对应 reviewer 身份且保留历史 verdict/round。identity/archcheck、Rust、可运行 Go race、vet、build、notices、专服隔离与 OpenSpec 均通过；Task 7 仍缺真实 GPU visual-update、14 张 golden 逐图验收和 final visual-check，故 7/8 保持未勾且不可归档。 |
+
+## 2026-08-22 暂停点
+
+- 分支 `codex/mornlea-texture-pack` 当前 HEAD 为 `f5742ed`，工作树 clean；Task 1–6 已完成双评审，Task 7 三 application preflight 与 Task 8 非视觉整分支终审均为 PASS/CLEAN。
+- 唯一产品验收阻塞是当前沙箱没有 GPU adapter：14 张 tracked golden 尚未更新，7.1–7.7 与 8.1–8.7 保持未勾，change 不可归档。listener/httptest 的 exact full race 也须在允许本机 bind 的正常环境复跑。
+- 恢复顺序固定为：在可用 Metal 环境运行 `make visual-update VISUAL_OUT=build/visual-texture-pack-update`，逐图验收 14 场景，再运行 final `visual-check` 与 exact full race，完成 Task 7/8 复审、勾选与归档前批准；不得删除旧 golden、放宽阈值或绕过 near-band control。
