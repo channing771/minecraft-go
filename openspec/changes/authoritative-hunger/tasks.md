@@ -47,9 +47,9 @@
 
 ## 7. 收尾门禁、golden 与归档准备
 
-- [ ] 7.0 **`git fetch && git rebase origin/main`**;若 `mornlea-texture-pack` 已合并,记录其 golden 基线;解 `AGENTS.md`/`CLAUDE.md` 与 `config.Fields()` 冲突(两份文档逐字节相同)。
-- [ ] 7.1 capture golden:先比对列出变化场景(应只有含 HUD 的场景),逐场景说明差异来源(饥饿条入画),再重生成;其余逐字节不变。验证:`make build && ./bin/mornlea --capture <tmp>` EXIT=0
-- [ ] 7.2 `make rust && make rust-check`;`go test ./... -race -count=1`(已知既有红灯:`TestChatCommand...AtTickBoundary` 单跑隔离缺陷、两条 90s 超时、dialogue 双负载抖动、`cmd/mornlea` 并发 GPU 包级超时——不修不改阈值,如实记录);`go vet ./...`;`gofmt -l .`;`openspec validate --all --strict --no-interactive`。
-- [ ] 7.3 核对 tasks 与三个 delta spec 逐条一致,**Requirement 正文限定词逐个核承重**(农业 Ruling 39);偏离先改产物。按 Ruling 46 机械核对两份 MODIFIED 的 Scenario 集合为主规格超集。
-- [ ] 7.4 遗留清单落纸(design.md 1–8 + 执行期新增);`docs/notes/progress.md` 里程碑条目(不以「当前」开头);基线文档能力描述同步(只陈述现存事实)。
-- [ ] 7.5 若 HUD 布局或 tick 热路径读数变化,运行 benchmark/perfcheck 并记录;scenario 版本按 5.2 的判定。
+- [x] 7.0 **`git fetch && git rebase origin/main`**;若 `mornlea-texture-pack` 已合并,记录其 golden 基线;解 `AGENTS.md`/`CLAUDE.md` 与 `config.Fields()` 冲突(两份文档逐字节相同)。
+- [x] 7.1 capture golden:先比对列出变化场景(应只有含 HUD 的场景),逐场景说明差异来源(饥饿条入画),再重生成;其余逐字节不变。验证:`make build && ./bin/mornlea --capture <tmp>` EXIT=0
+- [x] 7.2 `make rust && make rust-check`;`go test ./... -race -count=1`(已知既有红灯:`TestChatCommand...AtTickBoundary` 单跑隔离缺陷、两条 90s 超时、dialogue 双负载抖动、`cmd/mornlea` 并发 GPU 包级超时——不修不改阈值,如实记录);`go vet ./...`;`gofmt -l .`;`openspec validate --all --strict --no-interactive`。
+- [x] 7.3 核对 tasks 与三个 delta spec 逐条一致,**Requirement 正文限定词逐个核承重**(农业 Ruling 39);偏离先改产物。按 Ruling 46 机械核对两份 MODIFIED 的 Scenario 集合为主规格超集。
+- [x] 7.4 遗留清单落纸(design.md 1–8 + 执行期新增);`docs/notes/progress.md` 里程碑条目(不以「当前」开头);基线文档能力描述同步(只陈述现存事实)。
+- [x] 7.5 若 HUD 布局或 tick 热路径读数变化,运行 benchmark/perfcheck 并记录;scenario 版本按 5.2 的判定。
