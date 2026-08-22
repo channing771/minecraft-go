@@ -26,7 +26,7 @@
 - `authoritative-health`: 「未受伤时生命值自动回复」从无条件改为受饥饿门控(≥18)且每 HP 消耗疲劳;新增饥饿伤害经既有入口且止于 1 HP。
 - `authoritative-crafting`: 固定配方集合由十条扩为十一条,加入面包。
 
-**不需要 delta 的既有能力**:`common-block-materials` 的「协议与存档语义版本」是 v15/v6/v8 那次上线的历史快照,本变更的协议 v23 / 玩家 schema v7 由 `internal/archcheck` 基线版本门禁覆盖;`voxel-visual-presentation` 的有界渲染成本条文饥饿条全部满足(复用 HUD pass 与图集,与 F2 氧气条同构),边界由新能力自陈;`authoritative-farming` 不变(面包只消费其产物)。
+**不需要 delta 的既有能力**:`common-block-materials` 的「协议与存档语义版本」是 v15/v6/v8 那次上线的历史快照,本变更的协议 v24 / 玩家 schema v7 由 `internal/archcheck` 基线版本门禁覆盖;`voxel-visual-presentation` 的有界渲染成本条文饥饿条全部满足(复用 HUD pass 与图集,与 F2 氧气条同构),边界由新能力自陈;`authoritative-farming` 不变(面包只消费其产物)。
 
 ## Impact
 
