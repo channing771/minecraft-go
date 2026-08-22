@@ -117,7 +117,7 @@ type playerState struct {
 	// 不持久化、不进入快照/哈希；满血时不推进。见 health_regen.go。
 	ticksSinceDamage uint32
 	// oxygen 是服务端单写者拥有的权威氧气，0..core.MaxOxygenTicks。瞬态字段，
-	// 不持久化、不进入快照/哈希：玩家 schema 保持 v6，重连后由 RegisterPlayer
+	// 不持久化、不进入快照/哈希：氧气不占存档字段（玩家 schema v7 只追加了饥饿三层），重连后由 `RegisterPlayer`
 	// 初始化为满值。见 oxygen.go。
 	oxygen uint16
 	// drownTicks 是氧气归零后距离下一次溺水伤害已经过的 tick 数，瞬态字段，
