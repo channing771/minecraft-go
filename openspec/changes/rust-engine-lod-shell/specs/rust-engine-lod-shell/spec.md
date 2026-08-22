@@ -53,8 +53,8 @@ MUST 为壳 quad 流(世界坐标顶面 + 高度断差侧裙),步长窗内列高
 ### Requirement: 世界种子经登录成功下发
 
 服务端 MUST 在登录成功应答中携带 `WorldSeed`;单机内置服务端与 TCP 专用
-服务端 MUST 走同一编码;协议版本 MUST 升到 v23(v22 已被在飞的
-authoritative-farming 占用;变基重编,原编号 v18),
+服务端 MUST 走同一编码;协议版本 MUST 升到 v23(v22 已由 main 合并的
+authoritative-farming 交付;变基重编,原编号 v18),
 版本不匹配的握手 MUST 被既有拒绝机制拒绝,不产生半兼容会话。
 
 #### Scenario: v23 登录携带种子
@@ -126,7 +126,7 @@ MUST 使用独立帧预算,预算耗尽即停,且 MUST NOT 减少近环 section 
 
 `lodEnabled`、`lodFarMultiplier`(默认 3,范围 2..8)与 `lodStep`
 (默认 4)MUST 作为配置调参暴露;benchmark producer MUST 默认禁用远环,
-benchmark scenario MUST 保持 v17(变基后与 main 一致)且输出结构不变;
+benchmark scenario MUST 保持 v18(farming 的迁移段,本变更不迁移)且输出结构不变;
 既有 capture 场景的 golden 更新 MUST 仅包含新增远景带与 main 注水地形引入
 的变化(近处不变双侧守卫),并 MUST 新增 `far-horizon` 视觉场景
 作为长期门禁;`water-underwater` MUST 保持在场景表最后,`far-horizon`
@@ -136,7 +136,7 @@ MUST 排在其之前(倒数第二)。
 
 - GIVEN benchmark producer 运行
 - WHEN 产出基准报告
-- THEN 远环未参与,scenario 为 v17,报告结构与既有基准可比
+- THEN 远环未参与,scenario 为 v18(farming 的迁移段),报告结构与既有基准可比
 
 #### Scenario: golden 更新仅限远景带
 

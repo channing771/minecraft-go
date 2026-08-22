@@ -2,7 +2,7 @@
 
 > **声明:本文件数值只记录,不作为任何门禁。** 按 `rust-engine-lod-shell`
 > 变更的「配置与基准可比性」裁决:benchmark producer 默认 `lodEnabled=false`
-> 且 scenario 保持 v17,远环不进入基准;本文件单独记录远环 LOD 的专项数值,
+> 且 scenario 保持 v18(farming 的迁移段,本变更不迁移),远环不进入基准;本文件单独记录远环 LOD 的专项数值,
 > 供后续调参与回归对比参考。性能数值永不改变测试退出状态;报告完整性、
 > 真实 overflow 与数据丢失门禁不受本文件影响。
 

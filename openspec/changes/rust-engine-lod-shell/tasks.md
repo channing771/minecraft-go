@@ -1,7 +1,7 @@
 # Tasks: rust-engine-lod-shell
 
-前置约束:协议段重编为 v23——变基后基线为 main v21,v22 已被在飞的
-authoritative-farming 占用,本变更排其后;若顺序对调先互换版本号再动工。
+前置约束:协议段重编为 v23——变基后基线为 main(farming 合并后 v22),
+v22 已由 authoritative-farming 交付,本变更排其后;若顺序对调先互换版本号再动工。
 
 ## 1. engine 壳生成核心(Rust)
 
@@ -30,7 +30,7 @@ authoritative-farming 占用,本变更排其后;若顺序对调先互换版本�
 ## 3. 协议 v23 种子下发(变基重编,原编号 v18)
 
 - [x] 3.1 `internal/network`:`LoginSuccess.WorldSeed uint64`、协议版本
-      v21→v23(v22 已被在飞的 authoritative-farming 占用)、编解码与 golden wire
+      v21→v23(v22 已由 authoritative-farming 交付)、编解码与 golden wire
       更新、握手版本拒绝新旧组合测试(Memory 与 TCP 双传输);服务端
       在构造 LoginSuccess 时填入真实世界种子(internal/server,单机与
       专服同一路径);

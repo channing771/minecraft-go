@@ -26,9 +26,9 @@ section mesh)完全不动,远环由客户端本地确定性生成纯地表壳 me
   衰减,外缘带全雾,雾色与昼夜 tint 同源;帧序为天空 → 远环 → 近环
   terrain → 实体/HUD,远环写深度。
 - 协议 v21→v23:`LoginSuccess` 增加 `WorldSeed uint64`(种子即真相的
-  前提是种子到达客户端);v22 已被在飞的 authoritative-farming 占用,
-  本变更排在其后落地(变基重编:本段在旧基线上原编号 v16→v18,main 合并
-  fluid 系列至 v21 后顺延)。
+  前提是种子到达客户端);v22 已由 main 合并的 authoritative-farming
+  交付(翻地命令段),本变更排在其后落地(变基重编:本段在旧基线上
+  原编号 v16→v18,main 合并 fluid 系列至 v21、farming 至 v22 后顺延)。
 - Go:新建 `internal/lod`(tile 环形队列,语义镜像 SectionScheduler:
   pending 覆盖、由近到远、界外丢弃;独立帧预算,不与近环共享);
   `internal/nativeabi` 新增绑定;config 新增 `lodEnabled`、
@@ -36,7 +36,7 @@ section mesh)完全不动,远环由客户端本地确定性生成纯地表壳 me
 - 视觉与门禁:既有 capture golden 因远景入画与注水地形重新生成(变化仅
   限远景带与水景,近处内容不变),新增 `far-horizon` 场景(变基排序:
   排在 `water-underwater` 之前、倒数第二);benchmark 远环默认禁用,
-  scenario 保持 v17;用 `mornlea_worldgen_probe` 高度差分 + 壳覆盖性质
+  scenario 保持 v18(farming 的迁移段,本变更不触碰);用 `mornlea_worldgen_probe` 高度差分 + 壳覆盖性质
   结构测试替代第二套 Go 壳 oracle,海平面以下的窗口按 Ruling 22 钳到
   水面并取水材质(水下不发裙边)。
 
@@ -66,13 +66,14 @@ section mesh)完全不动,远环由客户端本地确定性生成纯地表壳 me
 - 兼容性:engine ABI 5→6、client ABI 5→7(6=远环 tile 出口、7=雾 setter,
   变基重编——main 的 water pass 占用 v5 后整体顺延)、协议 v21→v23;
   区块 schema v9、玩家 schema v6、世界 metadata v2、`companions.ai`
-  schema v4 均不变;benchmark scenario 保持 v17;M2 v15/M5 v14 基线
+  schema v4 均不变;benchmark scenario 保持 v18;M2 v15/M5 v14 基线
   原字节;Linux 专服不链接 client 库、不下发种子、零影响。
-- 排序约束:协议版本上 v22 已被在飞的 authoritative-farming 占用,本变更
-  重编为 v23 并 MUST 排在其后落地;若两变更的合并顺序对调,需互换版本号
-  并同步改握手拒绝矩阵与 golden wire 测试。远环壳的 engine ABI 段在旧
-  基线原编号 v4、client 段原编号 v5/v6,main 合并 fluid 系列(占用
-  engine v4/v5 与 client v5)后分别重编为 v6 与 v6/v7。
+- 排序约束:协议版本上 v22 已由 main 合并的 authoritative-farming 交付,
+  本变更重编为 v23 并 MUST 排在其后落地(合并顺序已按此落定:先 farming
+  后本变更);若当初顺序对调,需互换版本号并同步改握手拒绝矩阵与 golden
+  wire 测试。远环壳的 engine ABI 段在旧基线原编号 v4、client 段原编号
+  v5/v6,main 合并 fluid 系列(占用 engine v4/v5 与 client v5)后分别
+  重编为 v6 与 v6/v7。
 - 性能:远环生成按 tile(4×4 chunk)分摊到帧预算;benchmark/perfcheck
   数值只记录。
 - 回退:远环独立于近环管线,`lodEnabled=false` 即行为级回退;整支 revert
