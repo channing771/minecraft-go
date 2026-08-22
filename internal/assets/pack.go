@@ -61,10 +61,14 @@ func applyPack(registry *Registry, root fs.FS) error {
 	var replacements [layerCount][]byte
 	for _, binding := range textureBindings {
 		path := "textures/" + binding.name + ".png"
-		data, err := readPackFile(root, path, packTextureLimit)
+		file, err := root.Open(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
+		if err != nil {
+			return fmt.Errorf("材质包 %q 的材质 %q: 打开 %s: %w", manifest.Name, binding.name, path, err)
+		}
+		data, err := readOpenedPackFile(file, path, packTextureLimit)
 		if err != nil {
 			return fmt.Errorf("材质包 %q 的材质 %q: %w", manifest.Name, binding.name, err)
 		}
@@ -99,6 +103,10 @@ func readPackFile(root fs.FS, path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("打开 %s: %w", path, err)
 	}
+	return readOpenedPackFile(file, path, limit)
+}
+
+func readOpenedPackFile(file fs.File, path string, limit int64) ([]byte, error) {
 	defer file.Close()
 
 	info, err := file.Stat()

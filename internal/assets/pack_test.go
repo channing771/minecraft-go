@@ -230,6 +230,35 @@ func TestApplyPack(t *testing.T) {
 		}
 		assertLayersEqual(t, registry, before)
 	})
+
+	t.Run("已打开材质的 NotExist 错误仍会原子失败", func(t *testing.T) {
+		_, stone := solidPNG(t, 16, 16, color.NRGBA{R: 12, G: 34, B: 56, A: 255})
+		for _, stage := range []fileErrorStage{fileErrorStat, fileErrorRead} {
+			t.Run(string(stage), func(t *testing.T) {
+				registry := NewRegistry()
+				before := snapshotLayers(registry)
+				root := &stageErrorFS{
+					FS: fstest.MapFS{
+						"pack.json":          {Data: manifest(t, "阶段错误测试包")},
+						"textures/stone.png": {Data: stone},
+					},
+					target: "textures/stone.png",
+					stage:  stage,
+				}
+
+				err := applyPack(registry, root)
+				if err == nil {
+					t.Fatal("applyPack() error = nil")
+				}
+				for _, want := range []string{"阶段错误测试包", "stone"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("error = %q，缺少上下文 %q", err, want)
+					}
+				}
+				assertLayersEqual(t, registry, before)
+			})
+		}
+	})
 }
 
 func TestTextureBindingsCoverEveryLayerExactlyOnce(t *testing.T) {
@@ -269,6 +298,46 @@ type recordingFS struct {
 func (f *recordingFS) Open(name string) (fs.File, error) {
 	f.opened = append(f.opened, name)
 	return f.FS.Open(name)
+}
+
+type fileErrorStage string
+
+const (
+	fileErrorStat fileErrorStage = "Stat"
+	fileErrorRead fileErrorStage = "Read"
+)
+
+type stageErrorFS struct {
+	fs.FS
+	target string
+	stage  fileErrorStage
+}
+
+func (f *stageErrorFS) Open(name string) (fs.File, error) {
+	file, err := f.FS.Open(name)
+	if err != nil || name != f.target {
+		return file, err
+	}
+	return &stageErrorFile{File: file, stage: f.stage}, nil
+}
+
+type stageErrorFile struct {
+	fs.File
+	stage fileErrorStage
+}
+
+func (f *stageErrorFile) Stat() (fs.FileInfo, error) {
+	if f.stage == fileErrorStat {
+		return nil, fs.ErrNotExist
+	}
+	return f.File.Stat()
+}
+
+func (f *stageErrorFile) Read(p []byte) (int, error) {
+	if f.stage == fileErrorRead {
+		return 0, fs.ErrNotExist
+	}
+	return f.File.Read(p)
 }
 
 func manifest(t *testing.T, name string) []byte {
