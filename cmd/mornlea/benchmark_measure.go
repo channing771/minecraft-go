@@ -104,8 +104,7 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 	deadline := time.Now().Add(timeout)
 	started := time.Now()
 	var snapshotDuration time.Duration
-	viewDistance := app.render.ViewDistance
-	wantedChunks := (2*(viewDistance+1) + 1) * (2*(viewDistance+1) + 1)
+	wantedChunks := loadedChunkTarget(app)
 	lastLog := time.Time{}
 	for {
 		if time.Now().After(deadline) {
@@ -126,23 +125,85 @@ func waitUntilLoaded(app *application, timeout time.Duration) (time.Duration, er
 		if !rendered {
 			continue
 		}
-		stats := app.mesher.Stats()
 		if snapshotDuration == 0 && len(app.loadedChunks) == wantedChunks {
 			snapshotDuration = time.Since(started)
 		}
-		if len(app.loadedChunks) == wantedChunks &&
-			stats.QueuedJobs == 0 &&
-			stats.InFlightJobs == 0 &&
-			stats.ReadyResults == 0 &&
-			stats.DirtySections == 0 &&
-			app.scheduler.PendingUploads() == 0 {
+		if applicationLoadComplete(app, wantedChunks) {
 			return snapshotDuration, nil
 		}
 		if time.Since(lastLog) >= 5*time.Second {
+			stats := app.mesher.Stats()
 			fmt.Printf("加载中：chunks=%d/%d queued=%d active=%d ready=%d pending=%d\n",
 				len(app.loadedChunks), wantedChunks, stats.QueuedJobs, stats.InFlightJobs,
 				stats.ReadyResults, app.scheduler.PendingUploads())
 			lastLog = time.Now()
+		}
+	}
+}
+
+// loadedChunkTarget 返回当前视距完整初始快照应包含的列数。服务端额外发送
+// 一圈边界列，故半径是 `ViewDistance + 1`，这个定义与 `waitUntilLoaded`
+// 的历史收敛判据保持完全一致。
+func loadedChunkTarget(app *application) int {
+	viewDistance := app.render.ViewDistance
+	return (2*(viewDistance+1) + 1) * (2*(viewDistance+1) + 1)
+}
+
+// applicationLoadComplete 判断初始快照与近环网格上传是否全部收敛。远环
+// LOD 的单独收敛仍由 `captureSceneImage` 负责；这里刻意保持 benchmark 的
+// 原判据，避免 control 的预加载与正式抓帧有不同的近环就绪定义。
+func applicationLoadComplete(app *application, wantedChunks int) bool {
+	stats := app.mesher.Stats()
+	return len(app.loadedChunks) == wantedChunks &&
+		stats.QueuedJobs == 0 &&
+		stats.InFlightJobs == 0 &&
+		stats.ReadyResults == 0 &&
+		stats.DirtySections == 0 &&
+		app.scheduler.PendingUploads() == 0
+}
+
+// waitUntilLoadedPair 在同一 goroutine 交错推进 LOD on/off control，直到
+// 两者的既有加载判据都成立。即便一侧先完成，也继续推进它直到另一侧完成，
+// 因为其内嵌 Host 仍会持续发送消息，停止 drain 会让 `client.Receiver`
+// 的有界 inbox 溢出。这里不并发调用 renderer，控制次序固定为 on 后 off。
+func waitUntilLoadedPair(lodOn, lodOff *application, timeout time.Duration) error {
+	return waitUntilLoadedPairWithStep(
+		lodOn, lodOff, timeout,
+		func(app *application) (bool, error) {
+			rendered, err := app.frame(
+				benchmarkMessageDrainMax, benchmarkMessageDrainMax, physics.FixedDelta,
+			)
+			if err != nil || !rendered {
+				return false, err
+			}
+			return applicationLoadComplete(app, loadedChunkTarget(app)), nil
+		},
+	)
+}
+
+// waitUntilLoadedPairWithStep 是 paired control 的最小调度内核。`step` 保留
+// 仅用于无 GPU 单元测试的 seam；生产路径始终由 `waitUntilLoadedPair` 注入
+// 真实 `application.frame`，从而完整应用服务端消息和网格上传。
+func waitUntilLoadedPairWithStep(
+	lodOn, lodOff *application,
+	timeout time.Duration,
+	step func(*application) (bool, error),
+) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("LOD on/off control 在 %s 内未完成加载", timeout)
+		}
+		lodOnReady, err := step(lodOn)
+		if err != nil {
+			return fmt.Errorf("LOD-on control: %w", err)
+		}
+		lodOffReady, err := step(lodOff)
+		if err != nil {
+			return fmt.Errorf("LOD-off control: %w", err)
+		}
+		if lodOnReady && lodOffReady {
+			return nil
 		}
 	}
 }

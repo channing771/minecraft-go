@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/config"
@@ -30,6 +31,36 @@ func goldenControlTestApplication() *application {
 		camera:       nearBandTestCamera(60),
 		lodScheduler: &lod.Scheduler{},
 		render:       config.Defaults().Render,
+	}
+}
+
+// TestWaitUntilLoadedPairContinuesDrainingControlThatFinishedFirst 锁住两个
+// disposable control 的背压边界：一个已完成初始加载后，另一个尚未完成时，
+// 前者仍必须继续推进并 drain receiver。若退回为先完整加载一个再加载另一个，
+// `firstCalls` 会停在 1，闲置一侧的有界 inbox 会在真实 4,489 个快照期间溢出。
+func TestWaitUntilLoadedPairContinuesDrainingControlThatFinishedFirst(t *testing.T) {
+	first, second := &application{}, &application{}
+	firstCalls, secondCalls := 0, 0
+	err := waitUntilLoadedPairWithStep(first, second, time.Second,
+		func(app *application) (bool, error) {
+			switch app {
+			case first:
+				firstCalls++
+				return true, nil
+			case second:
+				secondCalls++
+				return secondCalls == 3, nil
+			default:
+				t.Fatalf("推进了未知 control %p", app)
+				return false, nil
+			}
+		},
+	)
+	if err != nil {
+		t.Fatalf("waitUntilLoadedPairWithStep: %v", err)
+	}
+	if firstCalls != 3 || secondCalls != 3 {
+		t.Fatalf("control 推进次数 = (%d,%d)，want (3,3)", firstCalls, secondCalls)
 	}
 }
 

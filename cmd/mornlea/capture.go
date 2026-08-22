@@ -420,6 +420,20 @@ func runCapture(app *application, dir string, updateGolden bool) error {
 }
 
 func prepareCaptureApplication(app *application) error {
+	if err := validateCaptureApplication(app); err != nil {
+		return err
+	}
+	// 复用 benchmark 的加载等待：同样的视距、同样的收敛判据。
+	// 抓帧不另设视距，否则图里所见与真实客户端所见就会分歧，golden 随之失去意义。
+	if _, err := waitUntilLoaded(app, 5*time.Minute); err != nil {
+		return fmt.Errorf("固定场景加载: %w", err)
+	}
+	return nil
+}
+
+// validateCaptureApplication 检查无头 capture 的固定 framebuffer 契约。单
+// application 与 LOD on/off control 都必须在开始消费服务端快照前通过它。
+func validateCaptureApplication(app *application) error {
 	if width, height := app.framebufferSize(); width != captureWidth || height != captureHeight {
 		return fmt.Errorf("capture framebuffer=%dx%d，要求精确 %dx%d",
 			width, height, captureWidth, captureHeight)
@@ -427,9 +441,26 @@ func prepareCaptureApplication(app *application) error {
 	if app.window != nil {
 		return fmt.Errorf("capture 需要无头 offscreen 渲染器,当前为窗口模式")
 	}
-	// 复用 benchmark 的加载等待：同样的视距、同样的收敛判据。
-	// 抓帧不另设视距，否则图里所见与真实客户端所见就会分歧，golden 随之失去意义。
-	if _, err := waitUntilLoaded(app, 5*time.Minute); err != nil {
+	return nil
+}
+
+// prepareGoldenUpdateControls 在同一 goroutine 中交错推进两个 control 的
+// 初始加载。二者在构造后 Host 已开始发送完整快照，故不能先完整加载其中
+// 一个；否则另一侧的 bounded receiver 会在闲置时溢出。交错仅调用现有帧
+// 路径，不并发使用任何 renderer。
+func prepareGoldenUpdateControls(lodOn, lodOff *application) error {
+	for _, control := range []struct {
+		name string
+		app  *application
+	}{
+		{name: "LOD-on", app: lodOn},
+		{name: "LOD-off", app: lodOff},
+	} {
+		if err := validateCaptureApplication(control.app); err != nil {
+			return fmt.Errorf("%s control: %w", control.name, err)
+		}
+	}
+	if err := waitUntilLoadedPair(lodOn, lodOff, 5*time.Minute); err != nil {
 		return fmt.Errorf("固定场景加载: %w", err)
 	}
 	return nil
@@ -518,12 +549,12 @@ func captureSceneImage(app *application, scene captureScene) (*image.NRGBA, erro
 // `runGoldenUpdateControl` 在两个 disposable application 上只抓取 far-horizon，
 // 并在调用方可能写入任一 golden 前完成当前 LOD on/off 帧的近环比较。
 func runGoldenUpdateControl(lodOn, lodOff *application, dir string) error {
+	if err := prepareGoldenUpdateControls(lodOn, lodOff); err != nil {
+		return err
+	}
 	return runGoldenUpdateControlWithCapture(
 		lodOn, lodOff, dir,
 		func(app *application, scene captureScene) (*image.NRGBA, error) {
-			if err := prepareCaptureApplication(app); err != nil {
-				return nil, err
-			}
 			return captureSceneImage(app, scene)
 		},
 	)
