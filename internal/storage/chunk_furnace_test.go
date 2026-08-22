@@ -266,9 +266,9 @@ func TestChunkCodecRejectsFutureSchema(t *testing.T) {
 	_ = key
 }
 
-func TestPlayerSchemaV6KeepsM4EItems(t *testing.T) {
-	if currentPlayerSchema != 6 {
-		t.Fatalf("玩家 schema = %d，想要 6", currentPlayerSchema)
+func TestPlayerSchemaV7KeepsM4EItems(t *testing.T) {
+	if currentPlayerSchema != 7 {
+		t.Fatalf("玩家 schema = %d，想要 7", currentPlayerSchema)
 	}
 	var inventory core.Inventory
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemCoal, Count: 12}

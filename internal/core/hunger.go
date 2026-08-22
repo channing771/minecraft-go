@@ -15,6 +15,16 @@ const MaxHunger uint8 = 20
 // 仍有三倍余量。
 const SaturationMilliPerPoint uint16 = 1000
 
+// InitialSaturationMilli 是新玩家、重生玩家与旧版玩家存档迁移共用的固定饱和度
+// 初值（千分位）。
+//
+// 它放在 core 而不是 sim，是因为它同时是**存档契约**的一部分：不含饥饿字段的
+// 旧版玩家存档要按它迁移，而 internal/storage 不依赖 internal/sim。两处各写一份
+// 字面量会让同一份存档在"迁移路径"与"新玩家路径"上得到不同的饱和度。
+//
+// 它也不是 tunable：初值随配置漂移会让同一份旧存档在不同机器上迁出不同的状态。
+const InitialSaturationMilli uint16 = 5 * SaturationMilliPerPoint
+
 // ValidHunger 判断饥饿值是否落在 0..MaxHunger 的合法区间内。
 func ValidHunger(hunger uint8) bool {
 	return hunger <= MaxHunger
