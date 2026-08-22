@@ -21,11 +21,11 @@
 
 ## 5. 接入全部图形客户端启动模式
 
-- [ ] 5.1 在 `cmd/mornlea` 的 `runWithDependencies` seam 添加失败测试，证明本地与远程模式使用解析后的本地路径，benchmark/capture 即使用户配置非空也得到空路径。
-- [ ] 5.2 只把解析后的材质路径加入客户端 `applicationOptions`，复用既有 benchmark/capture 默认配置隔离，不修改专用服务端。
-- [ ] 5.3 添加启动副作用顺序失败测试：材质构造返回 sentinel error 时，dial、store、host、window 与 offscreen renderer 均不得被调用；同时覆盖空路径默认包与非空目录覆盖。
-- [ ] 5.4 把 registry 构造移到客户端启动最前端，失败时返回带路径上下文的错误，并复用同一 registry 完成 atlas、HUD 和 mesh；不得加入第二套加载路径。
-- [ ] 5.5 运行 `gofmt -w cmd/mornlea/app.go cmd/mornlea/app_dependencies.go cmd/mornlea/app_startup.go cmd/mornlea/app_startup_test.go cmd/mornlea/main.go cmd/mornlea/run_test.go`、`go test ./cmd/mornlea -race -count=1`、`go test ./internal/archcheck -count=1` 与 `git diff --check`，通过规格与质量评审后提交启动接线。
+- [x] 5.1 在 `cmd/mornlea` 的 `runWithDependencies` seam 添加失败测试，证明本地与远程模式使用解析后的本地路径，benchmark/capture 即使用户配置非空也得到空路径。
+- [x] 5.2 只把解析后的材质路径加入客户端 `applicationOptions`，复用既有 benchmark/capture 默认配置隔离，不修改专用服务端。
+- [x] 5.3 添加启动副作用顺序失败测试：材质构造返回 sentinel error 时，dial、store、host、window 与 offscreen renderer 均不得被调用；同时覆盖空路径默认包与非空目录覆盖。
+- [x] 5.4 把 registry 构造移到客户端启动最前端，失败时返回带路径上下文的错误，并复用同一 registry 完成 atlas、HUD 和 mesh；不得加入第二套加载路径。
+- [x] 5.5 运行 `gofmt -w cmd/mornlea/app.go cmd/mornlea/app_dependencies.go cmd/mornlea/app_startup.go cmd/mornlea/app_startup_test.go cmd/mornlea/main.go cmd/mornlea/run_test.go`、`go test ./cmd/mornlea -race -count=1`、`go test ./internal/archcheck -count=1` 与 `git diff --check`，通过规格与质量评审后提交启动接线。
 
 ## 6. 文档化格式并打包第三方 notices
 
