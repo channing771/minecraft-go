@@ -55,7 +55,8 @@ type dialogueOutcome struct {
 // m.cancel 的调用契约：只在关服序列（beginShutdown/close）被调用，tick 路径
 // 绝不调用——dialogueInFlight 的清除只能来自 tick 边界的结果应用
 // （applyDialogueOutcome）或进程退出，关服 cancel 令在途 worker 经 ctx.Done
-// 放弃结果并释放共享槽（D5 评审 Minor-5 的显式化）。
+// 放弃结果（共享槽已在模型调用返回后、结果发送前释放，见 `dialogueWorker`）
+// （D5 评审 Minor-5 的显式化）。
 func (m *companionManager) requestDialogue(id companion.ID, node companion.DialogueNode) {
 	slot := m.slots[id]
 	if slot == nil {
