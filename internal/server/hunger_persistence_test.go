@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -22,6 +23,22 @@ const (
 	savedSaturationMilli uint16 = 2500
 	savedExhaustionMilli uint16 = 1750
 )
+
+// hungerFlushDeadline 给落盘等待一个上界。Flush 在"缓存快照与写出的存档永远
+// 不相等"时会一直重派保存（matchesSave 恒假 ⇒ 恒脏），而保存路径漏写任何一个
+// 饥饿字段就正是这种状态：没有上界的话用例不是变红而是挂死，要等包级 timeout
+// 才收场。一次临时目录写盘是毫秒量级，10 秒是三个数量级的余量。
+const hungerFlushDeadline = 10 * time.Second
+
+// flushHungerPersistence 在有界上下文里把脏玩家写盘。
+func flushHungerPersistence(t *testing.T, persistence *playerPersistence) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), hungerFlushDeadline)
+	defer cancel()
+	if err := persistence.Flush(ctx); err != nil {
+		t.Fatalf("落盘: %v", err)
+	}
+}
 
 // hungerTestSnapshot 在 testPlayerSnapshot 之上带上三层饥饿状态与一个非零生命值。
 // 位置、朝向、安全点沿用既有夹具，"其余字段不变"因此有具体内容可比。
@@ -83,7 +100,7 @@ func assertRestoreHunger(
 ) {
 	t.Helper()
 	if !restore.HasHunger {
-		t.Fatalf("%s 的 PlayerRestore.HasHunger = false，存档里的饥饿状态不会生效", what)
+		t.Fatalf("%s：PlayerRestore.HasHunger = false，存档里的饥饿状态不会生效", what)
 	}
 	if restore.Hunger != hunger || restore.SaturationMilli != saturation ||
 		restore.ExhaustionMilli != exhaustion {
@@ -117,9 +134,7 @@ func TestHungerSurvivesDiskRestart(t *testing.T) {
 	if err := persistence.Observe(id, name, want, 0, false); err != nil {
 		t.Fatalf("观察权威快照: %v", err)
 	}
-	if err := persistence.Flush(ctx); err != nil {
-		t.Fatalf("落盘: %v", err)
-	}
+	flushHungerPersistence(t, persistence)
 	persistence.CloseWorker()
 	if err := store.Close(); err != nil {
 		t.Fatalf("关闭世界: %v", err)
@@ -280,9 +295,7 @@ func TestRespawnHungerResetIsPersisted(t *testing.T) {
 	if err := persistence.Observe(id, name, respawned, 0, false); err != nil {
 		t.Fatalf("观察重生后的权威快照: %v", err)
 	}
-	if err := persistence.Flush(ctx); err != nil {
-		t.Fatalf("落盘: %v", err)
-	}
+	flushHungerPersistence(t, persistence)
 	persistence.CloseWorker()
 	if err := store.Close(); err != nil {
 		t.Fatalf("关闭世界: %v", err)
