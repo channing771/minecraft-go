@@ -12,7 +12,7 @@
 
 | 动作 | 千分位 | 判定点 |
 |---|---|---|
-| 跳跃 | 50 | sim 侧判定 `input.Jump && wasOnGround && !input.BodyInFluid && 步末 !OnGround`(任务组 1,Ruling 3):`physics.Step` 对水中 `Jump` 走持续上浮而非起跳冲量,故排除浸没以免与游泳重复计费;撞低天花板的跳不计费是「步末离地」判据的代价,否则按住跳跃可逐 tick 刷疲劳 |
+| 跳跃 | 50 | sim 侧判定 `input.Jump && wasOnGround && !input.BodyInFluid && 步末 !OnGround`(任务组 1,Ruling 3):`physics.Step` 对水中 `Jump` 走持续上浮而非起跳冲量,故排除浸没以免与游泳重复计费;「步末离地」把起跳钉成「冲量真的抬离地面」;当前整格碰撞几何下低天花板仍会离地一瞬并照常计费(最小头顶间隙 0.2 ≫ `GroundProbe`),该分项只在单步位移落进探针容差时生效(终审 F2 用例以极小 `JumpSpeed` 构造) |
 | 游泳 | 10 / 格 | `BodyInFluid` 且水平位移 > 0,按位移累加 |
 | 采掘完成 | 5 | `completeMining` 成功路径 |
 | 翻地完成 | 5 | `executeTillSoil` 成功路径 |
