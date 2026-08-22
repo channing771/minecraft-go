@@ -721,13 +721,24 @@ Expected: every current scene passes with unchanged thresholds.
 
 **Files:**
 
+- Modify: `.gitignore`
 - Modify: `AGENTS.md`
 - Modify: `CLAUDE.md`
 - Modify: `docs/notes/progress.md`
 - Modify: `openspec/changes/mornlea-texture-pack/tasks.md`
 - Modify: `openspec/changes/mornlea-texture-pack/ledger.md`
 
-- [ ] **Step 1: Update long-lived project documentation**
+- [ ] **Step 1: Repair the stale identity gate failure**
+
+Reproduce the focused failure first:
+
+```bash
+go test ./internal/archcheck -run '^TestMornleaCurrentIdentity$' -count=1
+```
+
+Trace the rejected `/mcgo` literal to `.gitignore`. The obsolete executable was removed after the Mornlea rename; the current `/mornlea` build output already has its own ignore entry. Delete only the redundant `/mcgo` line, do not add an allowance or weaken `TestMornleaCurrentIdentity`, then require both the focused test and full archcheck to pass.
+
+- [ ] **Step 2: Update long-lived project documentation**
 
 Add one current-capability paragraph stating:
 
@@ -739,11 +750,11 @@ Add one current-capability paragraph stating:
 
 Apply the same edit to `AGENTS.md` and `CLAUDE.md`, then require byte identity. Add the milestone and attribution link to `docs/notes/progress.md`. Do not copy change-specific non-goals into the baseline docs.
 
-- [ ] **Step 2: Mark completed OpenSpec tasks and reconcile the ledger**
+- [ ] **Step 3: Mark completed OpenSpec tasks and reconcile the ledger**
 
 Check each `tasks.md` item only when its implementation and both reviews are complete. The ledger must name every implementer/reviewer, review iteration, resolved finding and controller ruling. Do not archive the change in this task.
 
-- [ ] **Step 3: Run formatting and focused verification**
+- [ ] **Step 4: Run formatting and focused verification**
 
 ```bash
 gofmt -l .
@@ -755,7 +766,7 @@ git diff --check
 
 Expected: `gofmt -l .` and `git diff --check` print nothing; all tests and `cmp` succeed.
 
-- [ ] **Step 4: Run Rust, full Go, build and visual verification**
+- [ ] **Step 5: Run Rust, full Go, build and visual verification**
 
 ```bash
 make rust
@@ -769,7 +780,7 @@ openspec validate --all --strict --no-interactive
 
 Expected: every command succeeds. Performance numbers may be recorded but no threshold, overflow, completeness or data-loss gate may be relaxed.
 
-- [ ] **Step 5: Ask an independent final reviewer to inspect the whole branch**
+- [ ] **Step 6: Ask an independent final reviewer to inspect the whole branch**
 
 The final review must compare the complete branch diff with the approved design and active OpenSpec change, explicitly checking:
 
@@ -783,10 +794,10 @@ The final review must compare the complete branch diff with the approved design 
 
 Resolve findings through the ledger and rerun the affected commands plus the full verification above.
 
-- [ ] **Step 6: Commit the reconciled baseline and stop for archive approval**
+- [ ] **Step 7: Commit the reconciled baseline and stop for archive approval**
 
 ```bash
-git add AGENTS.md CLAUDE.md docs/notes/progress.md openspec/changes/mornlea-texture-pack
+git add .gitignore AGENTS.md CLAUDE.md docs/notes/progress.md openspec/changes/mornlea-texture-pack
 git commit -m "docs: record texture pack integration"
 git status --short
 ```

@@ -46,9 +46,10 @@
 
 ## 8. 更新长期基线并完成全量验证
 
-- [ ] 8.1 逐字节同步更新 `AGENTS.md` 与 `CLAUDE.md` 当前能力，更新 `docs/notes/progress.md` 里程碑与 attribution；记录协议 v23、engine ABI v6、client ABI v7、benchmark scenario v18 均未由本变更推进。
-- [ ] 8.2 仅在每项实现及规格/质量双评审完成后勾选 `tasks.md`，并在 `ledger.md` 记录 implementer、reviewer、轮次、发现、修复与 controller ruling。
-- [ ] 8.3 运行 `gofmt -l .`、`go test ./internal/assets ./internal/config ./cmd/mornlea -race -count=1`、`go test ./internal/archcheck -count=1`、`cmp -s AGENTS.md CLAUDE.md` 与 `git diff --check`。
-- [ ] 8.4 运行 `make rust`、`make rust-check`、`go test ./... -race`、`go vet ./...`、`make build`、`make visual-check VISUAL_OUT=build/visual-texture-pack-final-review` 与 `openspec validate --all --strict --no-interactive`，不得放宽性能、overflow、完整性或数据丢失门禁。
-- [ ] 8.5 由独立终审者对完整分支核验加载/回退/错误和副作用顺序、有界原子应用、39 名映射、来源许可、自动化与服务端隔离、LOD 后视觉结果及无版本迁移；修复后重跑受影响与全量门禁。
-- [ ] 8.6 提交已对账的长期文档与 OpenSpec 状态，确认工作区只剩已知无关改动，并在得到明确批准前不归档 change。
+- [ ] 8.1 先复现 `TestMornleaCurrentIdentity` 因 `.gitignore` 中废弃 `/mcgo` 忽略项失败，核对当前构建产物 `/mornlea` 已另行忽略且旧路径不再产生；只删除冗余旧身份项，不加 allowlist、不放宽扫描器，并要求 focused identity 与完整 archcheck 转绿。
+- [ ] 8.2 逐字节同步更新 `AGENTS.md` 与 `CLAUDE.md` 当前能力，更新 `docs/notes/progress.md` 里程碑与 attribution；记录协议 v23、engine ABI v6、client ABI v7、benchmark scenario v18 均未由本变更推进。
+- [ ] 8.3 仅在每项实现及规格/质量双评审完成后勾选 `tasks.md`，并在 `ledger.md` 记录 implementer、reviewer、轮次、发现、修复与 controller ruling。
+- [ ] 8.4 运行 `gofmt -l .`、`go test ./internal/assets ./internal/config ./cmd/mornlea -race -count=1`、`go test ./internal/archcheck -count=1`、`cmp -s AGENTS.md CLAUDE.md` 与 `git diff --check`。
+- [ ] 8.5 运行 `make rust`、`make rust-check`、`go test ./... -race`、`go vet ./...`、`make build`、`make visual-check VISUAL_OUT=build/visual-texture-pack-final-review` 与 `openspec validate --all --strict --no-interactive`，不得放宽性能、overflow、完整性或数据丢失门禁。
+- [ ] 8.6 由独立终审者对完整分支核验加载/回退/错误和副作用顺序、有界原子应用、39 名映射、来源许可、自动化与服务端隔离、LOD 后视觉结果及无版本迁移；修复后重跑受影响与全量门禁。
+- [ ] 8.7 提交已对账的长期文档与 OpenSpec 状态，确认工作区只剩已知无关改动，并在得到明确批准前不归档 change。
