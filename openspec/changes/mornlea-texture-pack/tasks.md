@@ -38,9 +38,11 @@
 
 - [ ] 7.1 读取并测试当前 capture 场景结构，确认不重建或改名 `far-horizon`，其保持倒数第二且 `water-underwater` 保持末尾；运行 `go test ./cmd/mornlea -run 'TestCapture.*Scene|Test.*WaterUnderwater|Test.*Far.*Horizon' -count=1`。
 - [ ] 7.2 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-before-update`，确认只因默认材质像素变化而失败；崩溃、缺场景、mesh、alpha、超时或门禁变化须先修复。
-- [ ] 7.3 备份 tracked golden 后以空用户覆盖运行 `make visual-update VISUAL_OUT=build/visual-texture-pack-update` 重建整套基线；更新失败立即恢复备份，不修改阈值或 LOD 近环 guard。
-- [ ] 7.4 人工逐图检查至少 `materials-showcase`、HUD/inventory、农业、`water-surface-slope`、末尾 `water-underwater` 与倒数第二 `far-horizon`，把接受范围和裁决写入 ledger。
-- [ ] 7.5 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-final` 与 `git diff --check`，通过规格与质量评审后提交 golden。
+- [ ] 7.3 先在 `cmd/mornlea/run_test.go` 与 `cmd/mornlea/capture_near_band_test.go` 添加失败测试：`--update-golden` 必须构造同 registry/同配置且仅 `LodEnabled` 相反的两个 application；受保护行差异必须在任何 golden 写入前失败并保留全部旧文件，只有远景带差异才允许继续；运行 `go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden)' -count=1` 确认先失败。
+- [ ] 7.4 在 `cmd/mornlea/main.go`、`cmd/mornlea/capture.go` 与最小必要依赖 seam 中实现更新 preflight：用当前内嵌默认 registry 成对渲染 LOD on/off `far-horizon`，把现有 `nearBandGuard.assertUnchanged` 前移到任何 golden 写盘之前；control 不读取旧 golden，失败时输出诊断图但不得改 baseline。不得删除 guard、移动旧 golden 或放宽阈值；运行步骤 7.3 的测试及 `go test ./cmd/mornlea -run 'TestNearBandGuard' -count=1`。
+- [ ] 7.5 以空用户覆盖直接运行 `make visual-update VISUAL_OUT=build/visual-texture-pack-update`；确认日志显示 LOD on/off 近环 control 实际执行并通过，且无需移动或删除任何 tracked golden。
+- [ ] 7.6 人工逐图检查至少 `materials-showcase`、HUD/inventory、农业、`water-surface-slope`、末尾 `water-underwater` 与倒数第二 `far-horizon`，把接受范围和裁决写入 ledger。
+- [ ] 7.7 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-final`、`go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden|NearBandGuard)' -count=1` 与 `git diff --check`，通过规格与质量评审后提交 capture control 与 golden。
 
 ## 8. 更新长期基线并完成全量验证
 

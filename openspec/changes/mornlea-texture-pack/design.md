@@ -111,13 +111,24 @@ manifest 只描述格式与人类可读名称；它不提供材质映射。未�
 
 ### 6. 呈现与视觉门禁不迁移
 
-只替换像素，不改变世界坐标 UV、cutout 分类、水与植物几何、atlas/mip 形状、material ID 或 Rust 上传 ABI。`far-horizon` 保持场景表倒数第二，`water-underwater` 保持唯一末场景；更新默认材质 golden 时保留所有现有双阈值和 LOD 近环 golden guard。benchmark 报告结构与 scenario v18 不变。
+只替换像素，不改变世界坐标 UV、cutout 分类、水与植物几何、atlas/mip 形状、material ID 或 Rust 上传 ABI。`far-horizon` 保持场景表倒数第二，`water-underwater` 保持唯一末场景；更新默认材质 golden 时保留所有现有双阈值。benchmark 报告结构与 scenario v18 不变。
+
+现有 `nearBandGuard` 在 update 模式下把新帧的受保护行与旧 golden 逐字节比较，且旧图不存在时跳过。新默认材质会有意改变近环颜色，因此旧图比较无法区分“像素来源改变”与“LOD 误伤近环”；移动 golden 目录又会令 guard 根本不执行。材质更新改用同一当前 registry 的 LOD on/off 成对 control：
+
+1. `--update-golden` 路径创建两个无窗口 application，二者使用相同内嵌默认 registry、世界种子、固定场景与 render 配置，control 仅把 `LodEnabled` 设为 false；
+2. 在写任何 golden 前，两端只渲染同一个 `far-horizon` 场景，并保留两张诊断图；
+3. 用 LOD-on application 的相机与壳半径构造现有 `nearBandGuard`，调用同一个 `assertUnchanged` 比较 LOD-off 与 LOD-on 当前帧的顶部/底部受保护行；
+4. control 失败时整次更新返回错误且不覆盖任何 golden；通过后才按内嵌默认 registry 生成整套新 baseline。
+
+该比较直接验证 LOD 开关不改变同一材质下的近环，且不依赖历史像素或旧文件存在性。实现只把 `assertUnchanged` 的调用从逐场景写盘分支前移到整次更新的 preflight，不删除或放宽几何行带、fail-closed 规则与逐像素比较。第二个 application 只在显式 baseline update 中存在，不增加普通 capture 或游戏运行成本。
+
+被否决的替代方案：移走全部或单张旧 golden 会触发现有 `os.IsNotExist` 跳过分支；只靠人工看图不可自动阻止近环回归；继续比较旧 RGB 会永久阻止任何有意的默认材质变化。
 
 ## Risks / Trade-offs
 
 - [第三方上游内容或许可记录不完整] → 入库前核验固定 commit、完整许可证、逐文件哈希和无额外 PNG 的测试，发布时字节复制 notices。
 - [损坏用户包导致客户端不可启动] → 这是显式配置的可诊断策略；清空 `texturePackPath` 即可恢复内嵌默认。
-- [新默认像素暴露 cutout、水、HUD 或远环回归] → 先保留五层程序化回退，再更新全部受影响 golden，并人工检查材料、HUD、农业、水下和远环场景。
+- [新默认像素暴露 cutout、水、HUD 或远环回归] → 先保留五层程序化回退，golden 写盘前运行同 registry 的 LOD on/off 近环 control，再更新并人工检查材料、HUD、农业、水下和远环场景。
 - [配置路径带来运行时 I/O] → 只在启动时有界读取，帧循环不保留文件系统访问或并发状态。
 
 ## Migration Plan
@@ -125,7 +136,7 @@ manifest 只描述格式与人类可读名称；它不提供材质映射。未�
 1. 在合并后的 LOD 基线上先实现并验证有界 loader 与配置字段。
 2. 从固定上游 commit 直接复制批准子集，加入许可证、署名与 provenance，再内嵌为产品默认。
 3. 在所有客户端启动模式接线，并验证无效配置早于外部副作用失败、专用服务端依赖闭包不含资产。
-4. 更新文档、客户端发布 notices 与受影响 golden；保持 `far-horizon`/`water-underwater` 顺序、阈值和近环保护。
+4. 更新文档与客户端发布 notices；先以同一内嵌默认 registry 的 LOD on/off `far-horizon` control 通过近环保护，再更新受影响 golden，并保持 `far-horizon`/`water-underwater` 顺序与阈值。
 5. 运行 Rust、全量 Go、构建、视觉及 OpenSpec 门禁后再申请归档。
 
 回退时整支 revert 即恢复程序化产品默认；用户也可清空 `texturePackPath` 回到内嵌默认，或删除单个用户 PNG 让该 layer 回退。本变更不需要协议、存档、配置 schema、ABI 或 benchmark 数据迁移。

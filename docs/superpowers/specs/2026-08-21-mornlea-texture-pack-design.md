@@ -189,6 +189,15 @@ cutout、水透明和 HUD 物品图标。最终运行 `make rust`、受影响 Go
 `go test ./... -race`、`go vet ./...`、`gofmt -l .`、archcheck 与
 `openspec validate --all --strict --no-interactive`。
 
+默认材质会有意改变近环 RGB，不能再把新图与旧程序化 golden 的受保护行直接
+比较，也不能通过移走旧 golden 触发缺失分支跳过门禁。材质 baseline 更新必须在
+写入任何 golden 前，用同一生效 registry、种子、相机与场景分别抓取 LOD on/off
+的 `far-horizon`；两次运行只允许 `lodEnabled` 不同，并复用既有几何行带和
+`nearBandGuard.assertUnchanged` 对两张当前帧执行逐像素近环比较。受保护行不同则
+整次更新失败且旧 golden 全部不变；只有 control 通过后才写入并人工复核新默认图。
+自动测试必须覆盖成对 application 的唯一配置差异、guard 在旧 golden 缺失时仍
+执行、近环差异先于任何写盘失败，以及纯远景带差异允许继续。
+
 ## OpenSpec 与执行顺序
 
 这是跨 `internal/assets`、`internal/config`、客户端启动、第三方资产和视觉 golden 的

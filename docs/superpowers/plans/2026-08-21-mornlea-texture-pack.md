@@ -619,8 +619,11 @@ git commit -m "docs: describe and attribute texture packs"
 
 **Files:**
 
+- Modify: `cmd/mornlea/main.go`
+- Modify: `cmd/mornlea/capture.go`
+- Modify: `cmd/mornlea/run_test.go`
+- Modify: `cmd/mornlea/capture_near_band_test.go`
 - Modify: existing files under `cmd/mornlea/testdata/golden/` selected by the post-LOD `captureScenes` table
-- Reference: `cmd/mornlea/capture.go`
 - Reference: post-merge LOD capture scene and tests
 
 - [ ] **Step 1: Confirm scene ownership after the LOD merge**
@@ -641,25 +644,45 @@ make visual-check VISUAL_OUT=build/visual-texture-pack-before-update
 
 Expected: image comparison fails because mapped material pixels changed. Any crash, missing scene, mesh error, timeout, alpha regression or threshold/config mutation is a real defect; fix it before updating goldens.
 
-- [ ] **Step 3: Regenerate with the embedded default only**
+- [ ] **Step 3: Write failing material-independent near-band control tests**
+
+Add focused tests to `run_test.go` and `capture_near_band_test.go` proving:
+
+1. `--update-golden` creates two capture applications with the same effective embedded-default registry, seed and render config, with `LodEnabled` the only difference;
+2. before any golden write, the update renders `far-horizon` in both applications and invokes the existing geometrically derived `nearBandGuard.assertUnchanged` on the two current frames;
+3. a protected top/bottom row difference fails the whole update and leaves every existing golden byte-identical, even when an old golden is absent;
+4. a difference confined to the derived far band allows the update to continue.
 
 ```bash
-golden_backup="$(mktemp -d)"
-mv cmd/mornlea/testdata/golden "$golden_backup/golden"
-if make visual-update VISUAL_OUT=build/visual-texture-pack-update; then
-	printf '旧 golden 备份：%s\n' "$golden_backup/golden"
-else
-	mv cmd/mornlea/testdata/golden "$golden_backup/failed-update"
-	mv "$golden_backup/golden" cmd/mornlea/testdata/golden
-	exit 1
-fi
+go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden)' -count=1
 ```
 
-LOD 的近景不变门禁会按设计拒绝覆盖已有 near-band 像素；把已精确定位的 tracked golden 目录移动到临时备份，是 LOD 代码注释给出的显式“重立整套视觉基线”路径，同时保留可恢复的旧图，不增加绕过开关也不放宽门禁。若更新失败，命令立即恢复旧目录。
+Expected: FAIL because update mode currently creates one application and compares against the old golden only when it exists.
+
+- [ ] **Step 4: Move the existing guard into a pre-write LOD on/off control**
+
+In `runWithDependencies`, create an additional update-only capture application from the same resolved default options with only `Render.LodEnabled = false`. Before `runCapture` writes any baseline, render `far-horizon` once on the normal LOD-on application and once on the LOD-off control application. Keep both diagnostic images in `VISUAL_OUT`, construct the guard from the LOD-on camera and shell radii, and call the existing `nearBandGuard.assertUnchanged` on those two current frames.
+
+Move the call site out of `captureOne`'s old-golden branch; do not delete or weaken `nearBandGuard`, its fail-closed geometry, or per-pixel protected-row comparison. A control failure must return before the first golden write. The second application exists only for explicit update mode; ordinary capture and gameplay still construct one application.
+
+```bash
+gofmt -w cmd/mornlea/main.go cmd/mornlea/capture.go cmd/mornlea/run_test.go cmd/mornlea/capture_near_band_test.go
+go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden|NearBandGuard)' -count=1
+```
+
+Expected: PASS. The control no longer depends on historical material pixels or on any old golden being present.
+
+- [ ] **Step 5: Regenerate with the embedded default only**
+
+```bash
+make visual-update VISUAL_OUT=build/visual-texture-pack-update
+```
+
+Expected: the command reports that the LOD on/off near-band control executed and passed before writing the first baseline. Do not move, delete or rename any tracked golden before this command.
 
 The capture path must ignore any local `texturePackPath`; verify the run-path test from Task 5 before accepting these files. Do not set or temporarily rename the user's config.
 
-- [ ] **Step 4: Inspect the rendered outputs**
+- [ ] **Step 6: Inspect the rendered outputs**
 
 Visually inspect at minimum:
 
@@ -669,14 +692,16 @@ Visually inspect at minimum:
 - the post-LOD far-horizon scene: near/default textures and distant LOD presentation have no seam or missing layer;
 - wheat/farming scene coverage if present: all eight crop stages retain alpha cutout and crossed-plane geometry.
 
-Compare the new images with the printed temporary backup path, then record accepted images and any ruling in the ledger. Keep the backup until the final visual gate passes. Do not adjust capture thresholds or modify the LOD near-band guard.
+Compare the new images with the previous revision, then record accepted images and any ruling in the ledger. Do not adjust capture thresholds or modify the LOD near-band guard.
 
-- [ ] **Step 5: Re-run the visual gate and commit**
+- [ ] **Step 7: Re-run the visual gate and commit**
 
 ```bash
 make visual-check VISUAL_OUT=build/visual-texture-pack-final
+go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden|NearBandGuard)' -count=1
 git diff --check
-git add cmd/mornlea/testdata/golden
+git add cmd/mornlea/main.go cmd/mornlea/capture.go cmd/mornlea/run_test.go \
+	cmd/mornlea/capture_near_band_test.go cmd/mornlea/testdata/golden
 git commit -m "test: update visual baselines for default textures"
 ```
 

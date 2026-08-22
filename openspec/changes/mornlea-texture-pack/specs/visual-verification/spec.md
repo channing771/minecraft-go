@@ -20,7 +20,7 @@
 
 ### Requirement: 远环与水下场景顺序及近环保护保持不变
 
-抓帧场景清单 MUST 保留 `far-horizon` 为倒数第二个场景，并 MUST 保留 `water-underwater` 为唯一末场景。重建材质视觉基线时，LOD 近环 golden 保护 MUST 保持启用，不得以修改保护逻辑或比较阈值的方式接受新图。
+抓帧场景清单 MUST 保留 `far-horizon` 为倒数第二个场景，并 MUST 保留 `water-underwater` 为唯一末场景。重建材质视觉基线时，系统 MUST 在写入任何 golden 前，以相同生效 registry、世界种子、场景状态、相机和渲染配置分别抓取启用与禁用 LOD 的 `far-horizon`；两次抓帧除 `lodEnabled` 外 MUST 等价。系统 MUST 复用既有几何推导的顶部与底部受保护行，对两张当前帧执行逐像素近环比较；任一受保护行不同 MUST 拒绝整次更新且不得覆盖任何 golden。该 control MUST NOT 依赖旧 golden 是否存在，既有视觉比较阈值 MUST 保持不变。
 
 #### Scenario: 远环紧邻末尾水下场景
 
@@ -29,9 +29,17 @@
 - **THEN** `far-horizon` MUST 位于 `water-underwater` 之前
 - **AND** `far-horizon` MUST 是倒数第二个场景，`water-underwater` MUST 是唯一末场景
 
-#### Scenario: 重立默认材质基线保留近环保护
+#### Scenario: 重立默认材质基线先执行材质无关近环 control
 
 - **GIVEN** 调用方显式请求为新的内嵌默认材质更新整套 golden
-- **WHEN** 视觉更新和后续比对运行
-- **THEN** LOD 近环 golden 保护 MUST 继续执行
-- **AND** 任何近环、场景顺序或透明语义回归 MUST 阻止接受更新
+- **WHEN** 系统准备覆盖第一张 golden
+- **THEN** 系统 MUST 先用同一生效 registry 完成 LOD on/off `far-horizon` 成对抓帧并执行受保护行比较
+- **AND** 该 control MUST 在旧 golden 缺失时仍执行
+- **AND** 任一近环差异 MUST 使整次更新失败且所有既有 golden 保持不变
+
+#### Scenario: 真正的远景带差异不阻止材质基线更新
+
+- **GIVEN** LOD on/off 成对抓帧只在几何推导的远景带存在差异，受保护的顶部与底部行逐像素一致
+- **WHEN** 系统执行材质 golden 更新
+- **THEN** 近环 control MUST 通过
+- **AND** 系统 MAY 在继续使用既有双阈值的前提下写入经复核的内嵌默认材质 golden
