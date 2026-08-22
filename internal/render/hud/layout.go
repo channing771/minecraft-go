@@ -34,8 +34,16 @@ const (
 	inventoryRowGap = float32(12)
 
 	hudEdgeMargin = float32(8)
-	// 固定合成最上沿到快捷栏下沿（含面板边距）的设计高度。
-	openHUDHeight = float32(670)
+	// openHUDHeight 是打开背包时从合成面板上沿到 framebuffer 下沿的设计高度，
+	// hudScale 用它把整个界面缩进窗口。自下而上依次是：快捷栏下边距与一格、
+	// 背包三行与行间隔、合成行间隔与最下一条合成行、其余合成行、面板上边距。
+	// 写成随 len(inventoryRecipeIDs) 增长的表达式而不是字面量，否则每追加一条
+	// 配方最上面的行都会被挤出窗口上沿。
+	openHUDHeight = hotbarBottomMargin + hotbarSlotSize +
+		inventoryRowGap + 3*hotbarSlotSize + 2*hotbarSlotGap +
+		recipeRowGap + hotbarSlotSize +
+		float32(len(inventoryRecipeIDs)-1)*(hotbarSlotSize+hotbarSlotGap) +
+		hotbarPanelPadding
 )
 
 // hotbarDigits 是 HUD 需要的全部字形，登录后不再增长。

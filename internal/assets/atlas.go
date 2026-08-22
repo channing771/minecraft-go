@@ -13,7 +13,9 @@ func (r *Registry) layerMipChain(layer int) [][]byte {
 	size := texSize
 	chain = append(chain, px)
 	for mip := 1; mip < atlasMips; mip++ {
-		if layer == int(LayerLeaves) || layer == int(LayerGlass) {
+		// 小麦与树叶、玻璃同属 cutout 类：普通盒式降采样会把细麦秆的 alpha
+		// 平均到 0.5 以下，远处整片作物被 `c.a < 0.5` 的 discard 抹掉。
+		if isCutoutLayer(layer) {
 			px = downsampleCutout(px, size)
 		} else {
 			px = downsample(px, size)

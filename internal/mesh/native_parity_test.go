@@ -86,9 +86,10 @@ func TestNativeOracleParityFixedCorpus(t *testing.T) {
 		}},
 		{"unknown-id", func(*testing.T) (*world.Neighborhood, mesh.Registry) {
 			center := world.NewSection()
-			// MossyCobblestoneID+1 现在是已注册的流体 WaterSourceID，不再是
-			// 未知方块；真正越界、未注册的编号是 WaterLevel7ID+1。
-			center.Blocks.Set(8, 8, 8, core.WaterLevel7ID+1)
+			// 未注册编号一律用独占哨兵 core.BlockIDMax 表达：写死具体编号
+			// （历史上写过 MossyCobblestoneID+1、WaterLevel7ID+1）会在追加
+			// 新方块时静默变成已注册，本用例就不再覆盖未知方块那条路径。
+			center.Blocks.Set(8, 8, 8, core.BlockIDMax)
 			return solidNeighbors(center), assetRegistry
 		}},
 		{"sky-edge", func(t *testing.T) (*world.Neighborhood, mesh.Registry) {
@@ -143,14 +144,19 @@ func TestNativeOracleParityDeterministicRandomizedCorpus(t *testing.T) {
 		core.GlassID,
 		core.LeavesID,
 		core.LightBlockID,
-		// WaterLevel7ID+1 是真正越界、未注册的编号：覆盖「registry 里完全不
-		// 存在」这条路径。
-		core.WaterLevel7ID + 1,
+		// core.BlockIDMax 是未注册编号的独占哨兵：覆盖「registry 里完全不
+		// 存在」这条路径，且不会随新方块追加而失效。
+		core.BlockIDMax,
 		// 流体已纳入 assets.NewRegistry() 的 snapshot ids 范围，会真的产生
 		// 几何。放两个不同等级，让「流体—流体」「流体—固体」「流体—空气」
 		// 三类相邻都出现在随机语料里。
 		core.WaterSourceID,
 		core.WaterLevel5ID,
+		// 农业方块同样已在 snapshot 范围内：耕地是普通不透明方块，作物走交叉斜面
+		// 那条独立的出面路径。放进随机语料后，「作物—作物」「作物—固体」
+		// 「作物—空气」「作物—流体」四类相邻都会出现。
+		core.FarmlandDryID,
+		core.WheatStage3ID,
 	}
 
 	for caseIndex := range 64 {
@@ -245,7 +251,8 @@ func TestNativeOracleParityConcurrentIndependentScratch(t *testing.T) {
 // 两侧会**一起**改坏、差值恒等，两条 parity 断言照样全绿（任务组 1 评审实测：把已删除的
 // `core.IsFluid` 补偿分支加回 FaceVisible 后 parity 全过，变红的是下面那条计数守卫）。
 //
-// parity 断言真正守的是端到端事实：35 条 registry 快照确实通过了 Rust 的条目校验、
+// parity 断言真正守的是端到端事实：整份 registry 快照（全部已注册方块）确实通过了
+// Rust 的条目校验、
 // 编码布局两侧一致、且贪心合并与位打包逐字节相同。**规则由末尾的计数守卫承重**——
 // 若把它删掉，本用例对任何规则类变异都不再敏感。
 //

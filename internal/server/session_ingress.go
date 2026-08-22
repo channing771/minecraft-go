@@ -160,6 +160,16 @@ func translateClientMessage(
 			Slot:     message.From,
 			ToSlot:   message.To,
 		}, true
+	case network.TillSoil:
+		// 与 OpenContainer 同形：只搬运序号与朝向，目标与栏位都由 sim 从权威
+		// 状态取得，server 不做第二次校验。
+		return sim.Command{
+			Session:  id,
+			Sequence: message.Sequence,
+			Kind:     sim.CommandTillSoil,
+			Yaw:      message.Yaw,
+			Pitch:    message.Pitch,
+		}, true
 	case network.CloseContainer:
 		return sim.Command{
 			Session:  id,

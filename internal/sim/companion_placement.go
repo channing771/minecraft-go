@@ -44,6 +44,29 @@ func consumeFirstInventoryItem(
 	return inventory, false
 }
 
+// companionPlaceableBlock 是伙伴放置目标的防御清单：返回放置该方块所需消耗的
+// 物品。可放置注册表是物品→方块方向（core.ItemPlacement）的像；action 携带的
+// 已是方块形态，经 core.BlockDrop 反查物品后必须能由 ItemPlacement 还原成同一
+// 方块。矿石等已注册但没有物品能放置成的方块在这里被拒绝。
+//
+// 农业方块必须在往返校验之外**显式**拒绝（Ruling 8）：BlockDrop(WheatStage0ID)
+// = 种子、ItemPlacement(种子) = WheatStage0ID，往返对种子是成立的，二重校验
+// 本身挡不住伙伴种地。伙伴的农业语义尚未裁决（design.md 遗留 11），与采掘侧的
+// companionMineableBlock 取同一立场：十个农业编号一律拒绝。
+func companionPlaceableBlock(blockID core.BlockID) (core.ItemID, bool) {
+	if core.IsCrop(blockID) || core.IsFarmland(blockID) {
+		return core.ItemNone, false
+	}
+	item, ok := core.BlockDrop(blockID)
+	if !ok {
+		return core.ItemNone, false
+	}
+	if placement, ok := core.ItemPlacement(item); !ok || placement != blockID {
+		return core.ItemNone, false
+	}
+	return item, true
+}
+
 // settleCompanionPlacements 结算本 tick 收集的放置意图。它必须位于 Step 的
 // reconcileSubscriptions 之后（阶段顺序契约：所有区块写者都在订阅收敛之后——
 // 订阅收缩会立即删除干净区块，先写方块会让 finishChanges 取到 nil record 而
@@ -83,17 +106,13 @@ func (engine *Engine) completeCompanionPlacement(
 	blockID core.BlockID,
 	pending map[core.ChunkKey]*pendingChunkChanges,
 ) bool {
-	// 可放置注册表是物品→方块方向（core.ItemPlacement）的像；action 携带的已是
-	// 方块形态，经 core.BlockDrop 反查物品后必须能由 ItemPlacement 还原成同一
-	// 方块。矿石等已注册但没有物品能放置成的方块在这里被拒绝。
-	item, ok := core.BlockDrop(blockID)
+	item, ok := companionPlaceableBlock(blockID)
 	if !ok {
 		return false
 	}
-	placement, ok := core.ItemPlacement(item)
-	if !ok || placement != blockID {
-		return false
-	}
+	// 往返校验通过意味着 ItemPlacement(item) 恰好还原成 blockID，因此下面沿用
+	// 的 placement 与 blockID 是同一个值，只是保留放置方向的命名。
+	placement := blockID
 	dimension := engine.dimensions[entry.dimension]
 	if dimension == nil {
 		return false

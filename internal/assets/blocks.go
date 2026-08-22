@@ -40,6 +40,28 @@ const (
 	// （见 internal/render.SectionScheduler），共用石头层等于水面被画进
 	// 不透明 terrain pass。
 	LayerWater
+	// LayerFarmlandDry / LayerFarmlandWet 是耕地的干湿两态。耕地在视觉上仍是
+	// 满立方体、仍然不透明，因此它们是普通固体层，不进植物集合。
+	LayerFarmlandDry
+	LayerFarmlandWet
+	// LayerWheat0..LayerWheat7 是小麦八个生长阶段的材质层，**必须连续且是本枚举
+	// 的最后 8 层**：Rust 侧 `greedy.rs` 用一段硬编码的闭区间
+	// [PLANT_MATERIAL_FIRST, PLANT_MATERIAL_LAST] 判断一格是不是植物，从而决定
+	// 出交叉斜面而非轴向面。两侧没有共享常量也没有生成步骤，只能人手同步——
+	// 数值一侧由 internal/mesh 的 PlantMaterialFirst/PlantMaterialLast 与
+	// TestPlantMaterialLayersMatchMeshContract 钉住，跨语言一侧由真的喂一次
+	// Rust mesher 的 TestNativeOracleParityWheatCrossPlanes 兜底。
+	//
+	// 在这 8 层**之前**插入任何新层都会整体平移它们，于是 Rust 会把别的方块当成
+	// 植物、把植物当成普通方块——新层一律追加在 LayerWheat7 之后。
+	LayerWheat0
+	LayerWheat1
+	LayerWheat2
+	LayerWheat3
+	LayerWheat4
+	LayerWheat5
+	LayerWheat6
+	LayerWheat7
 	layerCount
 )
 
@@ -81,13 +103,20 @@ func NewRegistry() *Registry {
 	r.layers[LayerSnowSide] = snowSideTexture()
 	r.layers[LayerMossyCobblestone] = mossyCobblestoneTexture()
 	r.layers[LayerWater] = waterTexture()
-	// ids 覆盖 core 的全部已注册方块编号（含 8 个流体编号，上界即
-	// WaterLevel7ID）。流体必须在快照里，Rust 侧的 RegistryView::face_visible
-	// 只做位图查表、缺条目一律判不可见，漏掉流体就等于水永远不出面。
-	// 条目数（35）必须与 internal/mesh.nativeMaxRegistryEntries 及 Rust 的
-	// MAX_REGISTRY_ENTRIES 一致。
-	ids := make([]world.BlockID, 0, int(core.WaterLevel7ID)+1)
-	for id := core.AirID; id <= core.WaterLevel7ID; id++ {
+	r.layers[LayerFarmlandDry] = farmlandDryTexture()
+	r.layers[LayerFarmlandWet] = farmlandWetTexture()
+	for stage := 0; stage < wheatStageCount; stage++ {
+		r.layers[LayerWheat0+uint16(stage)] = wheatTexture(stage)
+	}
+	// ids 覆盖 core 的全部已注册方块编号，上界一律用独占哨兵 core.BlockIDMax
+	// 表达——写死某个具体末位编号（历史上写过 WaterLevel7ID）会在追加新编号时
+	// 静默退化成子集，新方块就永远进不了快照。Rust 侧的
+	// RegistryView::face_visible 只做位图查表、缺条目一律判不可见，漏掉谁就等于
+	// 谁永远不出面（流体当年正是这样差点画不出水）。
+	// 条目数必须不超过 internal/mesh.nativeMaxRegistryEntries 与 Rust 的
+	// MAX_REGISTRY_ENTRIES（今天是 45 <= 48）。
+	ids := make([]world.BlockID, 0, int(core.BlockIDMax))
+	for id := core.AirID; id < core.BlockIDMax; id++ {
 		ids = append(ids, id)
 	}
 	snapshot, err := mesh.BuildRegistrySnapshot(ids, r)
@@ -107,9 +136,13 @@ func NewRegistry() *Registry {
 // 这处排除，整片水会被当成实心遮挡体，区段面连通性塌成全不可达，进而错误
 // 剔除水体后方的整批区段。守卫见 internal/mesh 的
 // TestConnectivityTreatsFluidAsTransparentOnLiveSectionData。
+// 作物（core.IsCrop）同样在排除之列：它与玻璃、树叶同属 cutout 类，几何是方块
+// 内部的两片交叉斜面，既不填满格子也不该挡光。这一条直接决定了「作物下方的耕地
+// 仍被照亮」——Rust 天空光 BFS 的阻断判据就是本函数（light.rs 的 build_sky 只看
+// opaque），作物一旦不透明，它下方那格的派生天空光会归零、耕地顶面变全黑。
 func (r *Registry) Opaque(id world.BlockID) bool {
 	return core.RegisteredBlock(id) && id != core.AirID && id != core.GlassID &&
-		id != core.LeavesID && !core.IsFluid(id)
+		id != core.LeavesID && !core.IsFluid(id) && !core.IsCrop(id)
 }
 
 // FaceVisible 返回当前方块朝向相邻方块的面是否可绘制。实现 mesh.Registry。
@@ -132,9 +165,17 @@ func (r *Registry) Opaque(id world.BlockID) bool {
 // 成永久不可见、水彻底画不出来，而这件事**不会**让任何既有断言变红——守卫是
 // internal/assets 的 TestFluidFaceVisibilityRules 与 internal/mesh 的
 // TestNativeOracleParityWaterSurface。
+// 作物是本函数唯一「自己一个轴向面都不出」的方块类：它的几何是 Rust mesher 另行
+// 补出的两片交叉斜面（每格 4 条 quad），六个轴向面一条都不要。规则写在这里而不是
+// Rust 里，是因为 Rust 的 face_visible 只对本函数烘焙出的位图查表、自己不含规则。
+// 反方向不受影响——相邻方块**朝向**作物的面仍然可见，因为作物非不透明，判定落到
+// 末尾的 `return r.Opaque(id)`。
 func (r *Registry) FaceVisible(id, adjacent world.BlockID) bool {
 	if !core.RegisteredBlock(id) || id == core.AirID ||
 		!core.RegisteredBlock(adjacent) || r.Opaque(adjacent) {
+		return false
+	}
+	if core.IsCrop(id) {
 		return false
 	}
 	if adjacent == core.AirID {
@@ -200,6 +241,10 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 		return LayerSnowSide
 	case core.MossyCobblestoneID:
 		return LayerMossyCobblestone
+	case core.FarmlandDryID:
+		return LayerFarmlandDry
+	case core.FarmlandWetID:
+		return LayerFarmlandWet
 	case core.GrassID:
 		switch f {
 		case mesh.FacePosY:
@@ -214,6 +259,11 @@ func (r *Registry) Material(id world.BlockID, f mesh.Face) uint16 {
 		// 6 个 material，塞不下等级；等级信息走独立的 FluidHeight 字段。
 		if core.IsFluid(id) {
 			return LayerWater
+		}
+		// 8 个作物阶段各占一层，六个面共用同一层：交叉斜面没有"朝向"可言，
+		// 而 Rust mesher 正是靠「六个面的 material 都落在植物区间」认出植物格的。
+		if core.IsCrop(id) {
+			return LayerWheat0 + uint16(core.CropStage(id))
 		}
 		return LayerStone
 	}
@@ -261,6 +311,15 @@ func (r *Registry) LightAttenuation(id world.BlockID) uint8 {
 
 // MeshSnapshot 返回构造时冻结的网格 registry 快照。
 func (r *Registry) MeshSnapshot() mesh.RegistrySnapshot { return r.meshSnapshot }
+
+// isCutoutLayer 报告某个材质层是否走 alpha cutout（二值 alpha + 保覆盖率降采样）。
+//
+// 判据必须与 terrain.wgsl 里 `c.a < 0.5` 那条 discard 覆盖的层集合一致：这些层的
+// mip 链要用 downsampleCutout 保住覆盖率，否则远处的细结构会整片消失。
+func isCutoutLayer(layer int) bool {
+	return layer == int(LayerLeaves) || layer == int(LayerGlass) ||
+		(layer >= int(LayerWheat0) && layer <= int(LayerWheat7))
+}
 
 func (r *Registry) LayerCount() int { return int(layerCount) }
 

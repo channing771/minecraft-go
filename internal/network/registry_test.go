@@ -41,6 +41,29 @@ func TestProtocolV1PacketIDsAreFrozen(t *testing.T) {
 	}
 }
 
+// TestProtocolV22TillSoilPacketIDIsFrozen 钉死 v22 唯一的 wire 变化：翻地命令
+// 占 Play/C→S 的 ID 13，且 14 仍未分配。上界断言写成 13+1 而不是裸字面量，
+// 下次追加客户端 packet 时它会跟着末项走，不会静默退化成「测一个已合法的 ID」。
+func TestProtocolV22TillSoilPacketIDIsFrozen(t *testing.T) {
+	id, ok := clientPacketID(StatePlay, TillSoil{})
+	if !ok || id != 13 {
+		t.Fatalf("TillSoil ID = %d, ok=%v，想要 13, true", id, ok)
+	}
+	packet, ok := clientPacketForID(StatePlay, 13)
+	if !ok {
+		t.Fatal("Play client packet ID 13 未注册")
+	}
+	if _, isTill := packet.(TillSoil); !isTill {
+		t.Fatalf("Play client packet ID 13 = %T，想要 TillSoil", packet)
+	}
+	if _, ok := clientPacketForID(StatePlay, 13+1); ok {
+		t.Fatal("Play client packet ID 14 必须保持未分配")
+	}
+	if ProtocolVersion != 22 {
+		t.Fatalf("协议版本 = %d，想要 22——翻地命令随 v22 交付", ProtocolVersion)
+	}
+}
+
 func TestProtocolV2RemotePlayerPacketIDsAreFrozen(t *testing.T) {
 	for _, test := range []struct {
 		packet ServerPacket

@@ -136,7 +136,7 @@ func TestRecoveredOnlyLoadedChunkRequiresRewriteOnUnload(t *testing.T) {
 }
 
 func TestEngineAcquiredHitPropagatesExactPersistenceState(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	key := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: -6, Z: 3}}
 	engine.RegisterObserverSession(71)
 	engine.Enqueue(Command{
@@ -168,7 +168,7 @@ func TestEngineAcquiredHitPropagatesExactPersistenceState(t *testing.T) {
 }
 
 func TestEngineForgottenCleanAcquiredHitIsDeleted(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	oldKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 3}}
 	newKey := core.ChunkKey{Dimension: core.Overworld, Pos: core.ChunkPos{X: 40}}
 	engine.RegisterObserverSession(72)
@@ -285,7 +285,7 @@ func TestPersistenceLifecycleBlockChangeAdvancesDirtyRevision(t *testing.T) {
 }
 
 func TestPersistenceLifecycleRetainsLateGeneratedChunkForSaving(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	const session = SessionID(41)
 	engine.RegisterObserverSession(session)
 	first := core.ChunkPos{X: 2, Z: -4}

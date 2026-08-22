@@ -40,8 +40,7 @@
 - **THEN** 方块 MUST 被移除但 MUST NOT 产生材料掉落
 
 ### Requirement: 缺失玩家材料包
-
-系统 SHALL 只在玩家存档明确不存在时构造一次初始材料包：固定 27 格背包的前 14 格 MUST 依稳定材料清单顺序各包含 `64` 个对应物品，九格快捷栏 MUST 保持为空。材料包 MUST 通过现有背包合法性规则，并仍由服务端权威确认与持久化。
+系统 SHALL 只在玩家存档明确不存在时构造一次初始材料包：固定 27 格背包的前 14 格 MUST 依稳定材料清单顺序各包含 `64` 个对应物品，紧随其后的一格 MUST 包含可用于耕种的种子，九格快捷栏 MUST 保持为空。在草丛等自然种子来源存在之前，该格是玩家取得第一颗种子的唯一途径；自然来源上线后本条 MUST 重新评估。材料包 MUST 通过现有背包合法性规则，并仍由服务端权威确认与持久化。
 
 #### Scenario: 缺失玩家获得固定材料包
 - **GIVEN** `LoadPlayer` 返回 `ErrPlayerNotFound`
@@ -58,6 +57,10 @@
 - **WHEN** 该玩家再次登录
 - **THEN** 系统 MUST 恢复已保存背包，且 MUST NOT 再次填充或累加材料
 
+#### Scenario: 材料包含有起步种子
+- **GIVEN** `LoadPlayer` 返回 `ErrPlayerNotFound`
+- **WHEN** 准备玩家快照
+- **THEN** 背包 MUST 包含至少一格可用于耕种的种子，使该玩家无需任何自然来源即可开始耕种
 ### Requirement: 协议与存档语义版本
 
 新增稳定编号集合上线时，线上协议语义版本 SHALL 升至 v15，玩家存档 schema SHALL 升至 v6，区块存档 schema SHALL 升至 v8；三者字节布局 MUST 保持不变。玩家 v5→v6 与区块 v7→v8 MUST 执行 identity migration，保留既有背包、耐久、位置、生命值、静态发光块、palette、掉落物、熔炉、箱子和 revision，且不得向已有玩家注入材料包。

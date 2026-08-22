@@ -81,16 +81,27 @@ func newMissingCachedPlayer(
 	}
 }
 
+// starterMaterialItems 是一次性材料包的稳定材料清单，顺序即背包格位顺序。
+var starterMaterialItems = [...]core.ItemID{
+	core.ItemCobblestone, core.ItemSmoothStone, core.ItemSand, core.ItemGravel,
+	core.ItemOakLog, core.ItemOakPlanks, core.ItemLeaves, core.ItemGlass,
+	core.ItemBrick, core.ItemWhiteWool, core.ItemRoofTile, core.ItemClay,
+	core.ItemSnowBlock, core.ItemMossyCobblestone,
+}
+
+// starterSeedSlot 是起步种子所在的背包格位：紧随材料清单最后一格。
+// 写成 len(starterMaterialItems) 而不是字面量 14，材料清单增删时种子自动跟随。
+const starterSeedSlot = len(starterMaterialItems)
+
 func starterMaterialInventory() core.Inventory {
-	items := [...]core.ItemID{
-		core.ItemCobblestone, core.ItemSmoothStone, core.ItemSand, core.ItemGravel,
-		core.ItemOakLog, core.ItemOakPlanks, core.ItemLeaves, core.ItemGlass,
-		core.ItemBrick, core.ItemWhiteWool, core.ItemRoofTile, core.ItemClay,
-		core.ItemSnowBlock, core.ItemMossyCobblestone,
-	}
 	var inventory core.Inventory
-	for slot, item := range items {
+	for slot, item := range starterMaterialItems {
 		inventory.Backpack[slot] = core.ItemStack{Item: item, Count: core.MaxStackCount}
+	}
+	// 草丛等自然种子来源尚不存在，这一格是玩家取得第一颗种子的唯一途径。
+	// 它和材料一样只在 ErrPlayerNotFound 路径构造，既有玩家不会被补发。
+	inventory.Backpack[starterSeedSlot] = core.ItemStack{
+		Item: core.ItemWheatSeeds, Count: core.MaxStackCount,
 	}
 	if !inventory.Valid() {
 		panic("server: invalid starter material inventory")

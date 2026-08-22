@@ -41,7 +41,9 @@ func TestLightBlockIDsMappingsStayStable(t *testing.T) {
 	if _, ok := core.Recipe(core.RecipeLightBlock); !ok {
 		t.Fatal("发光方块配方未注册")
 	}
-	if _, ok := core.Recipe(core.RecipeLightBlock + 1); ok {
-		t.Fatal("未知配方不得被接受")
+	// RecipeLightBlock+1 自本变更起是石锄配方；本用例只负责发光方块，
+	// 「表末之后未知」的上界断言归 TestExistingRecipesDoNotShiftAfterHoes。
+	if _, ok := core.Recipe(core.RecipeStoneHoe); !ok {
+		t.Fatal("石锄配方必须紧随发光方块配方注册")
 	}
 }

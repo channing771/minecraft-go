@@ -151,6 +151,9 @@ func sameClientPacket(got, want ClientPacket) bool {
 	case ChatCommand:
 		other, ok := want.(ChatCommand)
 		return ok && got == other
+	case TillSoil:
+		other, ok := want.(TillSoil)
+		return ok && got == other
 	default:
 		return false
 	}

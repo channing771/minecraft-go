@@ -12,7 +12,7 @@ import (
 // 用于精确钉住自动回复的 tick 边界。
 func readyRegenPlayer(t *testing.T, id SessionID, health uint8) *Engine {
 	t.Helper()
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	current := PlayerLocation{
 		Dimension: core.Overworld,
 		Position:  mgl32.Vec3{2.5, 1, 0.5},

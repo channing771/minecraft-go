@@ -23,7 +23,7 @@ type companionPlacementFixture struct {
 // readyCompanionPlacement 构造一个站在标准位置、面向空气目标的伙伴放置场景。
 func readyCompanionPlacement(t *testing.T) companionPlacementFixture {
 	t.Helper()
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	loadCompanionFlatChunks(t, engine, core.ChunkPos{}, 1)
 	id := companionTestID(1)
 	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})

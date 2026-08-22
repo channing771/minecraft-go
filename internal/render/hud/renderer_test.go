@@ -47,3 +47,31 @@ func TestHotbarPrepareReusesLayoutAndUploadStorage(t *testing.T) {
 		t.Fatalf("warmed hotbar Prepare allocations=%v want=0", allocations)
 	}
 }
+
+// TestHotbarFixedUploadLayoutMatchesScenarioVersion 把 Hotbar HUD 的**固定上传
+// 布局**钉成数值断言。
+//
+// 这三个数不是内部细节：bounded-benchmark-workload 主规格用「固定 GPU 上传
+// 布局、offset 与每帧写入字节数是否移动」来判定 benchmark scenario 要不要升版
+// （v15→v16 与 v17→v18 都是因它而升）。没有这条断言，改动 HUD 布局时无人会
+// 注意到 scenario 身份已经该动了——而那正是 v16 加氧气条那次发生过的事
+// （quad 236→238 恰好没跨过 256 字节对齐边界，offset 与总容量才没变）。
+//
+// 数值随 HUD 结构增长是正常的；改动本测试的期望值时必须同时判定 scenario
+// 版本要不要升，并把结论写进变更产物。
+func TestHotbarFixedUploadLayoutMatchesScenarioVersion(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		got, want int
+	}{
+		{"quad 容量", maxHotbarQuads, 247},
+		{"glyph 容量", maxHotbarGlyphs, 700},
+		{"glyph offset", hotbarGlyphOffset, 12288},
+		{"总容量", hotbarUploadBytes, 45888},
+	} {
+		if test.got != test.want {
+			t.Errorf("%s=%d，想要 %d（改这个数就要重新判定 benchmark scenario 版本）",
+				test.name, test.got, test.want)
+		}
+	}
+}

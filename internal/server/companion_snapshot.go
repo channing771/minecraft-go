@@ -120,10 +120,16 @@ func (v companionChunkView) revisionAt(chunkX, chunkZ int32) uint64 {
 	return v.revisions[(chunkZ-v.origin.Z)*3+(chunkX-v.origin.X)]
 }
 
-// productionCompanionPassableBlocks 返回寻路阻挡表的生产映射：只有空气可
+// productionCompanionPassableBlocks 返回寻路阻挡表的生产映射：空气与作物可
 // 通过，其余一切注册方块阻挡。除流体外，该判定与 collision oracle（physics.
-// BlockCollisionBoxes）逐一对齐——每个已加载的非空气固体方块都是整格碰撞体，
-// 玻璃与树叶也不例外；未注册编号由 NewPathBlockTable 缺省视为阻挡。
+// BlockCollisionBoxes）逐一对齐——作物是零碰撞体故可通过，其余非空气方块都有
+// 碰撞体故阻挡（玻璃、树叶与顶面低 1/16 的耕地都不例外，耕地有碰撞体正意味着
+// 伙伴可以站在农田上）；未注册编号由 NewPathBlockTable 缺省视为阻挡。
+//
+// 作物**不是**例外，是照章办事：它在 oracle 下零碰撞体，这里就如实放行。为
+// 什么不像流体那样豁免——流体的豁免防的是「走进去沉底且自己走不出来」，而穿过
+// 一株小麦对伙伴没有任何后续状态（不下沉、不扣氧气、不受伤），把作物当墙只会
+// 让伙伴绕开自家农田，或者在农田中央被自己种的小麦困住。
 //
 // 流体是刻意的例外：它在 oracle 下是零碰撞体（实体可自由穿行），却仍在本表里
 // 阻挡。原因是伙伴尚无浮力、屏息或溺水处理，把水面纳入路径会让它走进水里沉底
@@ -145,7 +151,11 @@ func (v companionChunkView) revisionAt(chunkX, chunkZ int32) uint64 {
 // 本表与 TestCompanionManagerPathBlockTableMatchesCollisionOracle 里的豁免
 // 分支是同一条决定的两半，必须同进同出；那里写着同样的两条退出条件。
 func productionCompanionPassableBlocks() map[core.BlockID]bool {
-	return map[core.BlockID]bool{core.AirID: true}
+	passable := map[core.BlockID]bool{core.AirID: true}
+	for id := core.WheatStage0ID; id <= core.WheatStage7ID; id++ {
+		passable[id] = true
+	}
+	return passable
 }
 
 // scanEnvObservation 扫描伙伴周围水平 ±16、垂直 ±4 窗口内的环境观察：每列

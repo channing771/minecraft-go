@@ -2,7 +2,7 @@
 
 ## 当前 producer 与迁移规则
 
-当前 benchmark producer 为 scenario v17：`fluid-presentation-survival` 改变了被测进程本身（mesh registry 条目由 16 字节扩到 18、quad 位布局改写、光照 BFS 改为按方块查衰减表、渲染器多出一条 water pass 与一块 32 MiB 的固定水面实例缓冲、`StepInput` 头版本升到 v2），即便 benchmark 世界内容未变——它把 `FluidEnabled` 钉死为 `false`；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `16:17`，v6..v16 历史报告仍可同版本读取。历史的 `15:16` 已退役，只作本文的归档证据，工具不再接受它。
+当前 benchmark producer 为 scenario v18：`authoritative-farming` 再次改变了被测进程本身（mesh registry 条目上限 35 → 48、实际烘焙条目 35 → 45，每次 mesh 调用的 FFI 输入从 910 bytes 涨到 1170 bytes；合成面板 8 → 10 行使 Hotbar HUD 固定上传布局移动——quad 容量 238 → 247、glyph offset 11776 → 12288、总容量 45376 → 45888 bytes、空聊天帧每帧实际写入 11776 → 12288 bytes；权威 tick 多出一个每 tick 枚举全部区段的 `advanceCrops` 阶段），即便 benchmark 世界内容未变——它仍把 `FluidEnabled` 钉死为 `false`，也不含任何农业方块；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `17:18`，v6..v17 历史报告仍可同版本读取。历史的 `16:17` 与更早的 `15:16` 已退役，只作本文的归档证据，工具不再接受它们。
 
 ## M5A scenario v16 记录（record-only，非新基线）
 

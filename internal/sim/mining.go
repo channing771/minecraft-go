@@ -44,7 +44,26 @@ func (state miningState) update() MiningUpdate {
 	}
 }
 
+// wheatSeedDropCount 是收获一株成熟小麦额外产出的种子数（design.md D9：掉落
+// 数量固定，不随机）。固定值同时保证「误挖不亏种子」——耕种循环不会死。
+const wheatSeedDropCount = uint8(2)
+
 func miningRule(block core.BlockID, held core.ItemID) (uint16, bool) {
+	// 农业方块与手持无关（锄头不是采掘工具，作物与耕地徒手即可收）：作物 1
+	// tick、耕地 5 tick（与泥土同价，翻地这一步撤销得和挖泥土一样费力）。
+	//
+	// 作物是 1 tick 而不是 0：`0` 是本函数「不可采掘」的哨兵（基岩语义），
+	// stepMiningProgress 与两条完成判定都以 requiredTicks == 0 直接跳过，用 0
+	// 会让作物永远挖不动。1 是最小权威量子，玩家感知上仍是"一碰就掉"。
+	//
+	// 两条判据写成 core.IsCrop / core.IsFarmland 而不是穷举十个编号：阶段编号
+	// 连续且只会整体追加，穷举漏一个阶段就是一格永远挖不动的作物。
+	if core.IsCrop(block) {
+		return 1, true
+	}
+	if core.IsFarmland(block) {
+		return 5, true
+	}
 	switch block {
 	case core.DirtID, core.GrassID, core.SandID, core.GravelID, core.LeavesID,
 		core.GlassID, core.WhiteWoolID, core.ClayID, core.SnowBlockID:
@@ -141,6 +160,15 @@ func blockRaycastSampler(dimension *Dimension) func(core.BlockPos) (bool, error)
 // 直入背包"的结算形状。Planner 契约之外，权威模拟在这里完成第二重拒绝。
 func companionMineableBlock(block core.BlockID) bool {
 	if block == core.ChestID || block == core.FurnaceID {
+		return false
+	}
+	// 农业方块（八个作物阶段 + 干湿耕地）必须**显式**拒绝，不能指望"单一
+	// BlockDrop"这条判据顺手挡住（design.md D7 / Ruling 5）：core.BlockDrop 对
+	// 十个编号都有单一产物登记，成熟小麦的第二份产物（2 种子）只存在于
+	// completeMining 的分支里，编号层面读不出来——巧合性安全不成立。
+	// 伙伴的农业语义（种什么、何时收、成熟度判断）尚未裁决（design.md 遗留 11），
+	// 在裁决之前十个编号一律不可作为伙伴采掘目标。
+	if core.IsCrop(block) || core.IsFarmland(block) {
 		return false
 	}
 	_, ok := core.BlockDrop(block)
@@ -436,6 +464,37 @@ func (engine *Engine) completeMining(
 		}
 		engine.recordChange(dimensionID, target, core.AirID, pending)
 		record.Chunk.DeactivateChest(chestSlot)
+		record.Chunk.CommitDropBatch(next)
+		return 0, false
+	}
+
+	// 成熟小麦是全仓唯一的多产物方块：1 小麦 + 2 种子。多产物**刻意不进
+	// core.BlockDrop**——那张表的返回形状是单一产物，改成多产物会波及它的全部
+	// 消费者（伙伴采掘与放置的防御清单、planner 的 place 注册表交叉校验、
+	// 客户端镜像），而收益只是这一个方块（Ruling 5）。因此 core 只登记主产物
+	// 小麦，额外的种子在这里按方块编号补发，多产物的知识只存在于权威结算路径。
+	//
+	// 批量预演复用破坏熔炉/箱子的 PrepareDropBatch：任一堆放不下就整体返回
+	// false，方块与掉落槽逐字节不变，绝不出现"小麦掉了、种子没掉"的半掉落。
+	if block == core.WheatStage7ID && harvestable {
+		stacks := [2]core.ItemStack{
+			{Item: item, Count: 1},
+			{Item: core.ItemWheatSeeds, Count: wheatSeedDropCount},
+		}
+		next, capacityOK := record.Chunk.PrepareDropBatch(
+			stacks[:], blockIndex, engine.tunables.DropPickupDelayTicks,
+		)
+		if !capacityOK {
+			return RejectDropCapacity, true
+		}
+		_, changed, err := dimension.SetBlock(target, core.AirID)
+		if err != nil {
+			return mapSetBlockError(err), true
+		}
+		if !changed {
+			return RejectNoTarget, true
+		}
+		engine.recordChange(dimensionID, target, core.AirID, pending)
 		record.Chunk.CommitDropBatch(next)
 		return 0, false
 	}

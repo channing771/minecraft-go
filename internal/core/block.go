@@ -65,11 +65,41 @@ const (
 	WaterLevel5ID
 	WaterLevel6ID
 	WaterLevel7ID
+	// 以下 10 个是农业方块编号，只能追加在 WaterLevel7ID 之后：方块 ID 是协议
+	// 稳定值，重排会破坏既有存档与线上字节。
+	//
+	// FarmlandDryID / FarmlandWetID 是锄头翻地得到的耕地，只有干湿两态：湿润
+	// 由附近流体决定（见变更 authoritative-farming 的湿润判定），两态共用同一
+	// 掉落（1 泥土），干湿差别只影响作物生长速度与外观。
+	FarmlandDryID
+	FarmlandWetID
+	// WheatStage0ID..WheatStage7ID 是小麦的八个生长阶段，每阶段一个稳定编号
+	// （沿用流体「每等级一个编号」的模式）。阶段 0 是刚种下的种子，阶段 7 是
+	// 成熟可收获态；编号连续递增即生长方向，因此推进一阶段就是 +1。
+	// 把阶段放进方块编号而不是附加状态字节，是为了让区块 schema、采掘表、碰撞
+	// 表与 mesh registry 快照天然覆盖农业，不新开任何存储或传输通道。
+	WheatStage0ID
+	WheatStage1ID
+	WheatStage2ID
+	WheatStage3ID
+	WheatStage4ID
+	WheatStage5ID
+	WheatStage6ID
+	WheatStage7ID
+	// BlockIDMax 是合法方块编号的独占上界（最后一个合法 BlockID + 1），本身不是
+	// 方块枚举成员，与物品侧的 ItemIDMax 同形。它供哨兵与穷举测试以
+	// 「id < BlockIDMax」表达「全部已注册方块」，替代「某个具体编号恰为枚举末项」
+	// 的脆弱写法：后者在追加新编号时会静默退化成子集——历史上以
+	// MossyCobblestoneID 为界的哨兵就曾在五个包里失效（其中一处是真实行为回归），
+	// 以 WaterLevel7ID 为界的循环上界也让新编号全程漏出门禁。新方块只能追加在
+	// 本哨兵之前（哨兵始终紧随末项），farming_test.go 的枚举末项守护断言负责在
+	// 追加时报警。
+	BlockIDMax
 )
 
 // RegisteredBlock 报告 id 是否是已注册的稳定方块编号。
 func RegisteredBlock(id BlockID) bool {
-	return id <= WaterLevel7ID
+	return id < BlockIDMax
 }
 
 const (

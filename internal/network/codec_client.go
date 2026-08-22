@@ -71,6 +71,10 @@ func encodeClientPacketPayload(state State, packet ClientPacket) (packetID uint3
 			e.u64(message.Token)
 		case ChatCommand:
 			e.string(message.Text, 1024)
+		case TillSoil:
+			e.u64(message.Sequence)
+			e.f32(message.Yaw)
+			e.f32(message.Pitch)
 		default:
 			return 0, nil, codecError("encode client", state, packetID, invalidClientPacket(state, packet))
 		}
@@ -237,6 +241,16 @@ func decodeClientPacketPayload(state State, packetID uint32, payload []byte) (Cl
 			var command ChatCommand
 			command.Text, err = d.string(1024, 1024)
 			packet = command
+		case 13:
+			var till TillSoil
+			till.Sequence, err = d.u64()
+			if err == nil {
+				till.Yaw, err = d.f32()
+			}
+			if err == nil {
+				till.Pitch, err = d.f32()
+			}
+			packet = till
 		default:
 			return nil, codecError("decode client", state, packetID, errUnknownPacketID)
 		}

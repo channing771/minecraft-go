@@ -265,7 +265,7 @@ func TestFurnaceChunkRevisionRisesOnce(t *testing.T) {
 func fullFurnaceLoadEngine(tb testing.TB) *sim.Engine {
 	tb.Helper()
 	// 视野半径 2 让 8 名玩家共享的 25 个兴趣区块全部驻留。
-	engine := sim.NewEngine(core.DropInterestRadius, 0)
+	engine := sim.NewEngine(core.DropInterestRadius, 0, 0)
 	for index := range 8 {
 		engine.RegisterPlayer(sim.SessionID(index+1), sim.PlayerRestore{
 			SpawnDimension: core.Overworld,
@@ -380,7 +380,7 @@ func TestOpenFurnaceRejectsNonFurnaceTarget(t *testing.T) {
 }
 
 func TestOpenFurnaceRejectsPendingSpawn(t *testing.T) {
-	engine := sim.NewEngine(0, 0)
+	engine := sim.NewEngine(0, 0, 0)
 	const session = sim.SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	engine.Enqueue(openFurnaceCommand(session, 1))

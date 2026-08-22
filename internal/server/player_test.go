@@ -299,6 +299,24 @@ func TestTranslatePlayerMessage(t *testing.T) {
 				Kind:     sim.CommandCloseFurnace,
 			},
 		},
+		{
+			// Yaw 同样必须非零，理由与 open container 那一行完全一致：
+			// sim.executeTillSoil 也用 LookDirection(Yaw, Pitch) 做权威射线，
+			// 只给 Pitch 的夹具漏不掉 Yaw 字段的翻译缺失。
+			name: "till soil carries yaw and pitch",
+			message: network.TillSoil{
+				Sequence: 23,
+				Yaw:      -1.75,
+				Pitch:    0.3,
+			},
+			want: sim.Command{
+				Session:  testSessionID,
+				Sequence: 23,
+				Kind:     sim.CommandTillSoil,
+				Yaw:      -1.75,
+				Pitch:    0.3,
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

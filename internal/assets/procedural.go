@@ -463,3 +463,83 @@ func clamp8(v int32) uint8 {
 	}
 	return uint8(v)
 }
+
+// farmlandDryTexture 生成干耕地的顶面材质：比泥土更深的褐色，加三道犁沟。
+//
+// 干湿两种耕地**只靠明暗区分**（与 Minecraft 的约定一致），因此这里的基色必须
+// 明显亮于 farmlandWetTexture，守卫见 TestFarmlandWetIsDarkerThanDry。
+func farmlandDryTexture() []byte {
+	px := noisyTexture(rgb{R: 108, G: 74, B: 46}, 9, 0x7A31)
+	furrow := rgb{R: 78, G: 52, B: 32}
+	for _, y := range [...]int{2, 7, 12} {
+		for x := 0; x < texSize; x++ {
+			paint(px, x, y, furrow)
+		}
+	}
+	return px
+}
+
+// farmlandWetTexture 生成湿耕地的顶面材质：近黑的深褐，犁沟同样更深。
+func farmlandWetTexture() []byte {
+	px := noisyTexture(rgb{R: 56, G: 36, B: 22}, 7, 0x7A32)
+	furrow := rgb{R: 34, G: 22, B: 14}
+	for _, y := range [...]int{2, 7, 12} {
+		for x := 0; x < texSize; x++ {
+			paint(px, x, y, furrow)
+		}
+	}
+	return px
+}
+
+// wheatStageCount 是小麦的生长阶段数，与 core.WheatStage0ID..WheatStage7ID 一一对应。
+const wheatStageCount = 8
+
+// lerp8 在 [from, to] 上按 step/span 线性插值，全整数运算、不引入浮点。
+func lerp8(from, to uint8, step, span int) uint8 {
+	return uint8(int32(from) + (int32(to)-int32(from))*int32(step)/int32(span))
+}
+
+// wheatTexture 生成小麦第 stage（0..7）阶段的 cutout 材质。
+//
+// 结构：5 根等距麦秆自图像**第 0 行**向上生长。第 0 行在世界坐标 UV 下对应方块
+// 底面（terrain.wgsl 的植物分支取 uv = (world.x, world.y)，v = 0 即格子底面），
+// 于是「阶段越高长得越高」在画面上就是从地面往上长。秆高 h = 2 + 2*stage，
+// 阶段 7 恰好长满 16 行；颜色自嫩芽绿线性插值到成熟金黄，阶段 >= 5 起在顶端
+// 三行左右各加宽一列作为麦穗。
+//
+// 其余像素 alpha 为 0，走 terrain pass 既有的 alpha cutout（`c.a < 0.5` 即
+// discard），因此**不得**出现中间 alpha——守卫见 TestCutoutLayersUseBinaryAlpha。
+func wheatTexture(stage int) []byte {
+	px := make([]byte, texSize*texSize*4)
+	young := rgb{R: 74, G: 142, B: 56}
+	ripe := rgb{R: 206, G: 174, B: 74}
+	base := rgb{
+		R: lerp8(young.R, ripe.R, stage, wheatStageCount-1),
+		G: lerp8(young.G, ripe.G, stage, wheatStageCount-1),
+		B: lerp8(young.B, ripe.B, stage, wheatStageCount-1),
+	}
+	height := 2 + 2*stage
+	salt := 0x3D57 + uint32(stage)
+	speck := func(x, y int) {
+		n := int32(hash2(uint32(x), uint32(y), salt)%25) - 12
+		paint(px, x, y, rgb{
+			R: clamp8(int32(base.R) + n),
+			G: clamp8(int32(base.G) + n),
+			B: clamp8(int32(base.B) + n),
+		})
+	}
+	for _, x := range [...]int{1, 4, 7, 10, 13} {
+		for y := 0; y < height; y++ {
+			speck(x, y)
+		}
+		if stage < 5 {
+			continue
+		}
+		// 麦穗：成熟阶段在顶端三行向两侧各加宽一列，读起来才像结了穗而不是草。
+		for y := height - 3; y < height; y++ {
+			speck(x-1, y)
+			speck(x+1, y)
+		}
+	}
+	return px
+}

@@ -22,6 +22,8 @@ func wantStarterMaterialInventory() core.Inventory {
 	for slot, item := range items {
 		inventory.Backpack[slot] = core.ItemStack{Item: item, Count: core.MaxStackCount}
 	}
+	// 起步种子紧随 14 格材料；这里独立写死格位与数量，实现改动必须同步过来。
+	inventory.Backpack[14] = core.ItemStack{Item: core.ItemWheatSeeds, Count: core.MaxStackCount}
 	return inventory
 }
 
@@ -559,4 +561,33 @@ func TestPlayerPersistenceObserveCopiesCallerSnapshot(t *testing.T) {
 	}
 	store.complete(nil)
 	pollPlayerPersistenceUntilIdle(t, p, 6001)
+}
+
+// 捕获：一次性材料包不再含起步种子。草丛等自然来源尚不存在，这一格是玩家取得
+// 第一颗种子的唯一途径；断言精确到格位、物品与数量，去掉种子或改数量都会红。
+func TestPlayerPersistencePrepareMissingProvidesStarterWheatSeeds(t *testing.T) {
+	store := newControllablePlayerStore()
+	p := newPlayerPersistence(store, playerPersistenceTestConfig())
+	t.Cleanup(p.CloseWorker)
+
+	restored, err := p.Prepare(context.Background(), playerID(39), "Farmer", testMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeds := restored.Inventory.Backpack[starterSeedSlot]
+	if seeds != (core.ItemStack{Item: core.ItemWheatSeeds, Count: core.MaxStackCount}) {
+		t.Fatalf("材料包第 %d 格=%+v，想要 %d 颗小麦种子",
+			starterSeedSlot+1, seeds, core.MaxStackCount)
+	}
+	// 种子必须紧随 14 格材料之后，且不得占用快捷栏。
+	if restored.Inventory.Hotbar != (core.Hotbar{}) {
+		t.Fatalf("材料包快捷栏=%+v，想要空", restored.Inventory.Hotbar)
+	}
+	if restored.Inventory.Backpack[starterSeedSlot-1].Item != core.ItemMossyCobblestone {
+		t.Fatalf("种子格之前=%+v，想要紧随最后一种材料",
+			restored.Inventory.Backpack[starterSeedSlot-1])
+	}
+	if restored.Inventory.Backpack[starterSeedSlot+1] != (core.ItemStack{}) {
+		t.Fatalf("种子格之后=%+v，想要空", restored.Inventory.Backpack[starterSeedSlot+1])
+	}
 }

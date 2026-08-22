@@ -221,7 +221,7 @@ func TestOxygenRefillsImmediatelyOnLeavingFluid(t *testing.T) {
 // 加载路径就算一个字都不初始化，用例照样绿。
 func TestOxygenIsFullOnRegistrationBeforeAnyTick(t *testing.T) {
 	const id = SessionID(25)
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.RegisterPlayer(id, PlayerRestore{SpawnDimension: core.Overworld})
 	if oxygen := engine.sessions[id].player.oxygen; oxygen != core.MaxOxygenTicks {
 		t.Fatalf("注册后（未跑任何 tick）oxygen=%d，想要 %d", oxygen, core.MaxOxygenTicks)

@@ -29,13 +29,15 @@ func compareReportsWithScenarioUpgrade(
 	allowScenarioUpgrade string,
 ) ([]string, error) {
 	scenarioUpgrade := baseline.ScenarioVersion != current.ScenarioVersion
-	// 流体呈现改变了被测进程（registry 条目、quad 位布局、光照衰减查表、
-	// water pass 与其固定显存），因此当前唯一迁移是 v16 到 v17。
-	// 历史的 15:16 已退役——它只作为归档证据留在 docs/notes，不再是授权值。
-	allowedScenarioUpgrade := baseline.ScenarioVersion == 16 && current.ScenarioVersion == 17 &&
-		allowScenarioUpgrade == "16:17"
+	// 农业改变了被测进程（mesh registry 条目上限 35→48 使每次 mesh 调用的
+	// FFI 输入变长、合成面板 8→10 行使 HUD 固定上传布局与 offset 移动、
+	// 权威 tick 多出一个每 tick 枚举全部区段的作物阶段），因此当前唯一迁移
+	// 是 v17 到 v18。历史的 16:17 已退役——它只作为归档证据留在 docs/notes，
+	// 不再是授权值。
+	allowedScenarioUpgrade := baseline.ScenarioVersion == 17 && current.ScenarioVersion == 18 &&
+		allowScenarioUpgrade == "17:18"
 	if allowScenarioUpgrade != "" && !allowedScenarioUpgrade {
-		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v16 到 v17 使用 16:17", allowScenarioUpgrade)
+		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v17 到 v18 使用 17:18", allowScenarioUpgrade)
 	}
 	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(

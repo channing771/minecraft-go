@@ -6,12 +6,12 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// TestIsFluidAndFluidLevelExhaustive 对 BlockID 全域 0..WaterLevel7ID 穷举断言
+// TestIsFluidAndFluidLevelExhaustive 对 BlockID 全域 0..BlockIDMax-1 穷举断言
 // 分类正确：只有 WaterSourceID 与 WaterLevel1ID..WaterLevel7ID 这 8 个编号是
 // 流体，源方块等级为 0，第 N 个流动方块等级为 N，其余编号一律不是流体。
 func TestIsFluidAndFluidLevelExhaustive(t *testing.T) {
-	for id := core.AirID; id <= core.WaterLevel7ID; id++ {
-		wantFluid := id >= core.WaterSourceID
+	for id := core.AirID; id < core.BlockIDMax; id++ {
+		wantFluid := id >= core.WaterSourceID && id <= core.WaterLevel7ID
 		if got := core.IsFluid(id); got != wantFluid {
 			t.Fatalf("IsFluid(%d) = %v，想要 %v", id, got, wantFluid)
 		}
@@ -29,7 +29,8 @@ func TestIsFluidAndFluidLevelExhaustive(t *testing.T) {
 // FluidLevel 的口径：不 panic，返回 0，且调用方 MUST 先用 IsFluid 判定。
 func TestFluidLevelRejectsNonFluidBlocks(t *testing.T) {
 	for _, id := range []core.BlockID{
-		core.AirID, core.StoneID, core.MossyCobblestoneID, core.WaterLevel7ID + 1, core.BlockID(65535),
+		core.AirID, core.StoneID, core.MossyCobblestoneID,
+		core.FarmlandDryID, core.WheatStage7ID, core.BlockIDMax, core.BlockID(65535),
 	} {
 		if core.IsFluid(id) {
 			t.Fatalf("IsFluid(%d) 不应为 true", id)
@@ -58,7 +59,9 @@ func TestFluidBlockIDsAreRegisteredAndOrdered(t *testing.T) {
 			t.Fatalf("流体编号 %d 未注册", id)
 		}
 	}
-	if core.RegisteredBlock(core.WaterLevel7ID + 1) {
-		t.Fatal("WaterLevel7ID 之后的编号不应被注册")
+	// 注意：WaterLevel7ID+1 现在是 FarmlandDryID（已注册农业方块），不再是
+	// 未注册编号；未注册的独占上界只能用 BlockIDMax 表达。
+	if core.RegisteredBlock(core.BlockIDMax) {
+		t.Fatal("BlockIDMax 及其之后的编号不应被注册")
 	}
 }

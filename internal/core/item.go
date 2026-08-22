@@ -38,6 +38,20 @@ const (
 	ItemClay
 	ItemSnowBlock
 	ItemMossyCobblestone
+	// 以下 6 个是农业物品，只能追加在既有序列末尾（ItemIDMax 哨兵之前）：
+	// 插入会平移后续物品 ID，破坏既有存档与线上字节。
+	//
+	// ItemStoneHoe / ItemIronHoe 是翻地工具，沿用镐的耐久与损坏形态模式；
+	// 两个损坏形态紧随两把锄头，与 ItemBrokenStonePickaxe/ItemBrokenIronPickaxe
+	// 的排布同形。
+	ItemStoneHoe
+	ItemIronHoe
+	ItemBrokenStoneHoe
+	ItemBrokenIronHoe
+	// ItemWheatSeeds 是唯一能写出农业方块的物品（放置成 WheatStage0ID）；
+	// ItemWheat 是成熟小麦的收获产物，本身不可放置。
+	ItemWheatSeeds
+	ItemWheat
 	// ItemIDMax 是合法物品编号的独占上界（最后一个合法 ItemID + 1），本身不是
 	// 物品枚举成员。它供测试以「item < ItemIDMax」穷举全部物品，替代依赖
 	//「某个具体物品恰为枚举末项」的脆弱写法；放在 core 是因为物品注册表归属
@@ -193,6 +207,19 @@ func BlockDrop(block BlockID) (ItemID, bool) {
 		return ItemSnowBlock, true
 	case MossyCobblestoneID:
 		return ItemMossyCobblestone, true
+	// 耕地两态都还原成 1 泥土：耕地不是可携带的方块物品，挖掉它只是把翻地
+	// 这一步撤销。
+	case FarmlandDryID, FarmlandWetID:
+		return ItemDirt, true
+	// 未成熟小麦掉 1 种子：误挖不亏种子，耕种循环因此不会死。
+	case WheatStage0ID, WheatStage1ID, WheatStage2ID, WheatStage3ID,
+		WheatStage4ID, WheatStage5ID, WheatStage6ID:
+		return ItemWheatSeeds, true
+	// 成熟小麦的完整产出是 1 小麦 + 2 种子，但本函数的返回形状只能表达单一
+	// 产物，因此这里只给出主产物小麦；额外的种子由收获路径按方块编号分支补发
+	// （变更 authoritative-farming 的任务组 5）。不在这里发明新的多产物形状。
+	case WheatStage7ID:
+		return ItemWheat, true
 	default:
 		return ItemNone, false
 	}
@@ -205,10 +232,13 @@ func ItemStackLimit(item ItemID) (uint8, bool) {
 		ItemRawIron, ItemIronIngot, ItemFurnace, ItemIronBlock, ItemChest, ItemLightBlock,
 		ItemCobblestone, ItemSmoothStone, ItemSand, ItemGravel, ItemOakLog,
 		ItemOakPlanks, ItemLeaves, ItemGlass, ItemBrick, ItemWhiteWool,
-		ItemRoofTile, ItemClay, ItemSnowBlock, ItemMossyCobblestone:
+		ItemRoofTile, ItemClay, ItemSnowBlock, ItemMossyCobblestone,
+		ItemWheatSeeds, ItemWheat:
 		return MaxStackCount, true
 	case ItemStonePickaxe, ItemIronPickaxe,
-		ItemBrokenStonePickaxe, ItemBrokenIronPickaxe:
+		ItemBrokenStonePickaxe, ItemBrokenIronPickaxe,
+		ItemStoneHoe, ItemIronHoe,
+		ItemBrokenStoneHoe, ItemBrokenIronHoe:
 		return 1, true
 	default:
 		return 0, false
@@ -222,6 +252,14 @@ func ItemMaxDurability(item ItemID) (uint16, bool) {
 		return 131, true
 	case ItemIronPickaxe:
 		return 250, true
+	// 锄头取与同材质镐相同的耐久：两者都是「每次成功动作恰好扣 1 点」的工具
+	// （采掘破坏方块扣 1、翻地成功扣 1），同一材质给两种工具不同数值只会制造
+	// 第二套没有来源的数字，也会让「石器换代到铁器」的手感在采掘与耕种两条线
+	// 上不一致。
+	case ItemStoneHoe:
+		return 131, true
+	case ItemIronHoe:
+		return 250, true
 	default:
 		return 0, false
 	}
@@ -234,6 +272,10 @@ func ItemBrokenForm(item ItemID) (ItemID, bool) {
 		return ItemBrokenStonePickaxe, true
 	case ItemIronPickaxe:
 		return ItemBrokenIronPickaxe, true
+	case ItemStoneHoe:
+		return ItemBrokenStoneHoe, true
+	case ItemIronHoe:
+		return ItemBrokenIronHoe, true
 	default:
 		return ItemNone, false
 	}
@@ -293,6 +335,10 @@ func ItemPlacement(item ItemID) (BlockID, bool) {
 		return SnowBlockID, true
 	case ItemMossyCobblestone:
 		return MossyCobblestoneID, true
+	// 种子放置成刚种下的阶段 0。耕地与作物方块本身没有对应的方块物品，
+	// 因此不出现在本表里：耕地只能由锄头翻出，作物只能由种子长成。
+	case ItemWheatSeeds:
+		return WheatStage0ID, true
 	default:
 		return AirID, false
 	}

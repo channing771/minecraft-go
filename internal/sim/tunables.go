@@ -106,6 +106,29 @@ type Tunables struct {
 	// 在它进入范围的那一 tick。区块在重扫完成前离开范围会被整条丢弃并在重新
 	// 进入时从头重扫，因此也不会留下"只扫了一半"的区块。
 	FluidRescanCellsPerTick uint32 `json:"fluidRescanCellsPerTick"`
+	// RandomTicksPerSection 是单个权威 tick 内每个已加载区段被抽样考察的格数
+	// （变更 authoritative-farming，internal/sim/crop.go 的 advanceCrops）。
+	//
+	// 它是「生长推进的成本与作物数量无关」这条 spec 契约的唯一成本旋钮：本 tick
+	// 触及的格数恒等于「活动兴趣范围内的区段数 × 本字段」，与世界里有多少株
+	// 作物无关（design.md D3）。调大它让作物长得快、耕地干湿跟得紧，代价是每
+	// tick 线性增加的哈希与方块读取；取 0 则完全停止生长与干湿转换，这是一个
+	// 合法的调试取值，不是错误。
+	//
+	// 上限 64 由配置层钳制，不是安全约束而是操作区间：抽样本身对任何取值都
+	// 正确，但 64 已经是默认值的 20 倍，再大只会白烧 tick 预算。
+	RandomTicksPerSection uint8 `json:"randomTicksPerSection"`
+	// CropGrowthChancePercent 是被抽中的未成熟作物在环境满足时推进一个阶段的
+	// 百分比概率（变更 authoritative-farming，internal/sim/crop.go 的
+	// cropGrowthRoll）。
+	//
+	// 判定用纯整数哈希 `hash(worldSeed, tick, 方块坐标) % 100 < 本字段`，不是
+	// 全局 RNG，因此重放同一段 tick 必然得到同一串结果。
+	//
+	// 取 100 表示「抽中即推进」，是端到端测试的标准设置——概率不置满时，
+	// 「作物没长」的断言在「本来就没抽中」的情况下也会绿，用例会静默失去意义。
+	// 取 0 表示作物永不推进（耕地干湿转换不受影响）。
+	CropGrowthChancePercent uint8 `json:"cropGrowthChancePercent"`
 }
 
 // 以下是流体三个 tunable 的编译期默认值。它们的消费方都在
@@ -127,6 +150,26 @@ const (
 	defaultFluidRescanCellsPerTick = 65536
 )
 
+// 以下是作物随机 tick 两个 tunable 的编译期默认值。它们唯一的消费方是
+// internal/sim/crop.go 的 advanceCrops，与流体三项同理集中定义在这里。
+const (
+	// defaultRandomTicksPerSection 取 3，与 MC 的 randomTickSpeed 默认值一致：
+	// 每个 16³ 区段每 tick 抽 3 格，单格被抽中的概率是 3/4096。
+	defaultRandomTicksPerSection = 3
+	// defaultCropGrowthChancePercent 取 50。
+	//
+	// 推导：单格每 tick 被抽中的概率约 3/4096 ≈ 7.32e-4，乘 50% 得每 tick 推进
+	// 一个阶段的概率约 3.66e-4，即平均约 2732 tick（20 TPS 下约 137 秒）推进
+	// 一阶段；小麦从阶段 0 到阶段 7 共 7 次推进，期望约 16 分钟成熟。这个量级
+	// 与 MC 在理想条件下的小麦（每次随机 tick 约 1/2 的推进概率）一致，也落在
+	// 「一局游戏里等得到、但值得先去做点别的」这个手感区间内。
+	//
+	// 之所以不取 100：留出向下调整生长速度的余量是次要的，主要理由是 100 会让
+	// 「概率判定」这条路径在默认配置下永远不被执行，任何关于它的确定性回归都
+	// 只能在非默认配置下被发现。
+	defaultCropGrowthChancePercent = 50
+)
+
 // DefaultTunables 返回编译期默认参数。它是配置文件缺省时的取值，
 // 也是调试面板“重置”的目标值。
 func DefaultTunables() Tunables {
@@ -145,6 +188,8 @@ func DefaultTunables() Tunables {
 		FluidFlowDelayTicks:        defaultFluidFlowDelayTicks,
 		FluidUpdatesPerTick:        defaultFluidUpdatesPerTick,
 		FluidRescanCellsPerTick:    defaultFluidRescanCellsPerTick,
+		RandomTicksPerSection:      defaultRandomTicksPerSection,
+		CropGrowthChancePercent:    defaultCropGrowthChancePercent,
 	}
 }
 

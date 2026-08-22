@@ -1221,16 +1221,16 @@ func TestCompanionManagerStopSameTickOrdering(t *testing.T) {
 // 编号对齐到 collision oracle（physics.BlockCollisionBoxes）：零碰撞体的编号
 // 必须可通过，有碰撞体的编号必须阻挡。
 //
-// 循环上界必须始终是「当前最后一个已注册编号」。历史上这里写的是
-// MossyCobblestoneID——它当时恰好是末位，因此看起来等价于全域；流体编号追加
-// 到它之后以后，这个上界就静默退化成了子集，新编号全程不受门禁覆盖。新增方块
-// 编号时必须同步推进这个上界。
+// 循环上界必须覆盖「全部已注册编号」，因此只能写成独占哨兵 core.BlockIDMax。
+// 历史上这里写死过具体末项：先是 MossyCobblestoneID，流体追加后退化成子集；
+// 改成 WaterLevel7ID 后，农业编号追加又会再退化一次。用哨兵表达之后，新增
+// 方块编号自动纳入本门禁，不再需要人手推进上界。
 func TestCompanionManagerPathBlockTableMatchesCollisionOracle(t *testing.T) {
 	table := companion.NewPathBlockTable(productionCompanionPassableBlocks())
 	if !table.PassableForTest(core.AirID) {
 		t.Fatal("空气必须可通过")
 	}
-	for id := core.BlockID(1); id <= core.WaterLevel7ID; id++ {
+	for id := core.BlockID(1); id < core.BlockIDMax; id++ {
 		if core.IsFluid(id) {
 			// 流体的显式豁免：流体在 oracle 下是零碰撞体（实体可自由穿行），
 			// 按上面的对齐规则本应可通过；但伙伴寻路刻意继续把它当阻挡。

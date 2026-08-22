@@ -30,6 +30,7 @@ func TestTunableConstantsAreNotExported(t *testing.T) {
 			"RegenDelayTicks", "RegenIntervalTicks", "DropPickupDelayTicks",
 			"PlayerDropPickupDelayTicks", "DropLifetimeTicks",
 			"InteractionReach", "DropPickupRange", "SpawnRadius",
+			"RandomTicksPerSection", "CropGrowthChancePercent",
 		},
 	}
 	root := moduleRoot(t)

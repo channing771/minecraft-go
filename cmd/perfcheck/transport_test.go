@@ -17,9 +17,9 @@ func TestCrossTransportComparisonRequiresMatchingCommit(t *testing.T) {
 }
 
 func TestCrossTransportComparisonRequiresMatchingScenario(t *testing.T) {
-	baseline := completeV16ComparableReport("memory")
-	current := completeV17ComparableReport("tcp")
-	if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "16:17"); err == nil ||
+	baseline := completeV17ComparableReport("memory")
+	current := completeV18ComparableReport("tcp")
+	if _, err := compareReportsWithScenarioUpgrade(baseline, current, 0.20, "17:18"); err == nil ||
 		!strings.Contains(err.Error(), "scenario_version") {
 		t.Fatalf("跨 transport scenario 不一致 error=%v", err)
 	}

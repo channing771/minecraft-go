@@ -13,21 +13,22 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		atlas.glyphs[char] = fakeNameTagGlyph(7)
 	}
 	var layout hotbarLayout
-	if recipeQuads != 73 || recipeGlyphs != 20 {
-		t.Fatalf("八行配方容量 quads/glyphs=%d/%d，想要 73/20", recipeQuads, recipeGlyphs)
+	if len(inventoryRecipeIDs) != 10 || recipeQuads != 91 || recipeGlyphs != 24 {
+		t.Fatalf("十行配方容量 rows/quads/glyphs=%d/%d/%d，想要 10/91/24",
+			len(inventoryRecipeIDs), recipeQuads, recipeGlyphs)
 	}
-	if got := inventoryRecipeIDs[len(inventoryRecipeIDs)-1]; got != core.RecipeLightBlock {
-		t.Fatalf("固定配方末项=%d，想要发光方块配方 %d", got, core.RecipeLightBlock)
+	if got := inventoryRecipeIDs[len(inventoryRecipeIDs)-1]; got != core.RecipeIronHoe {
+		t.Fatalf("固定配方末项=%d，想要铁锄配方 %d", got, core.RecipeIronHoe)
 	}
 
-	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
+	open := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, nil, MiningOverlay{}, 1280, 800)
 	// source=-1：四层背包分组面板加选中框，没有来源高亮；空背包没有物品色块。
 	if len(open.quads) != openInventoryPanelQuads+1+core.InventorySlots+recipeQuads {
 		t.Fatalf("空背包 quads=%d，想要分组面板、选中框、36 格和 %d 个配方实例共 %d",
 			len(open.quads), recipeQuads, openInventoryPanelQuads+1+core.InventorySlots+recipeQuads)
 	}
-	if len(open.glyphs) != 20 {
-		t.Fatalf("八条配方数字=%d，想要隐藏数量 1 并为其余数字绘制阴影共 20", len(open.glyphs))
+	if len(open.glyphs) != 24 {
+		t.Fatalf("十条配方数字=%d，想要隐藏数量 1 并为其余数字绘制阴影共 24", len(open.glyphs))
 	}
 	overlay := open.quads[len(open.quads)-recipeQuads:]
 	wantItems := [][2]core.ItemID{
@@ -39,8 +40,11 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 		{core.ItemStone, core.ItemChest},
 		{core.ItemOakLog, core.ItemOakPlanks},
 		{core.ItemGlass, core.ItemLightBlock},
+		{core.ItemStone, core.ItemStoneHoe},
+		{core.ItemIronIngot, core.ItemIronHoe},
 	}
-	for row, y := range []float32{420, 368, 316, 264, 212, 160, 108, 56} {
+	// 1280x800 下 openHUDHeight 仍放得下十行，hudScale 保持 1，行距是整数 52。
+	for row, y := range []float32{500, 448, 396, 344, 292, 240, 188, 136, 84, 32} {
 		start := 1 + row*9
 		input, output := overlay[start], overlay[start+3]
 		inputFace, outputFace := overlay[start+2], overlay[start+5]
@@ -57,7 +61,7 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 
 	var stone core.Inventory
 	stone.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
-	stoneButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, stone, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
+	stoneButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, stone, true, -1, nil, nil, MiningOverlay{}, 1280, 800))
 	if disabled[0].Color == stoneButtons[0].Color {
 		t.Fatal("石砖可合成时按钮颜色未改变")
 	}
@@ -66,34 +70,45 @@ func TestInventoryLayoutDrawsAllFixedRecipeRows(t *testing.T) {
 	}
 
 	stone.Hotbar.Slots[0].Count = 8
-	furnaceButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, stone, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
+	furnaceButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, stone, true, -1, nil, nil, MiningOverlay{}, 1280, 800))
 	if disabled[1].Color == furnaceButtons[1].Color || disabled[2].Color != furnaceButtons[2].Color {
 		t.Fatal("熔炉配方可用颜色不独立")
 	}
 	stone.Hotbar.Slots[0].Count = 3
-	stonePickaxeButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, stone, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
+	stonePickaxeButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, stone, true, -1, nil, nil, MiningOverlay{}, 1280, 800))
 	if disabled[3].Color == stonePickaxeButtons[3].Color || disabled[4].Color != stonePickaxeButtons[4].Color {
 		t.Fatal("石镐配方可用颜色不独立")
 	}
 
 	var iron core.Inventory
 	iron.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemIronIngot, Count: 9}
-	ironButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, iron, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
+	ironButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, iron, true, -1, nil, nil, MiningOverlay{}, 1280, 800))
 	if disabled[2].Color == ironButtons[2].Color || disabled[0].Color != ironButtons[0].Color ||
 		disabled[1].Color != ironButtons[1].Color {
 		t.Fatal("铁块配方可用颜色不独立")
 	}
 	iron.Hotbar.Slots[0].Count = 3
-	ironPickaxeButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, iron, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
+	ironPickaxeButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, iron, true, -1, nil, nil, MiningOverlay{}, 1280, 800))
 	if disabled[4].Color == ironPickaxeButtons[4].Color || disabled[3].Color != ironPickaxeButtons[3].Color {
 		t.Fatal("铁镐配方可用颜色不独立")
 	}
 
 	var glass core.Inventory
 	glass.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemGlass, Count: 4}
-	glassButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, glass, true, -1, nil, nil, MiningOverlay{}, 1280, 720))
+	glassButtons := hotbarRecipeButtonQuads(layoutInventory(&layout, atlas, glass, true, -1, nil, nil, MiningOverlay{}, 1280, 800))
+	// 发光方块不再是末行（后面还有两条锄头），因此按 ID 查它所在的行，
+	// 不再用 len-1 顶替：否则追加配方会把断言悄悄挪到别的行上。
+	lightRow := -1
+	for index, recipeID := range inventoryRecipeIDs {
+		if recipeID == core.RecipeLightBlock {
+			lightRow = index
+		}
+	}
+	if lightRow < 0 {
+		t.Fatal("固定配方表缺少发光方块")
+	}
 	for index := range glassButtons {
-		if index == len(glassButtons)-1 {
+		if index == lightRow {
 			if disabled[index].Color == glassButtons[index].Color {
 				t.Fatal("四个玻璃未启用发光方块配方")
 			}
@@ -110,27 +125,29 @@ func TestRecipeButtonHitTestMatchesDrawnGeometry(t *testing.T) {
 		y      float64
 		recipe core.RecipeID
 	}{
-		{"石砖", 421, core.RecipeStoneBricks},
-		{"熔炉", 369, core.RecipeFurnace},
-		{"铁块", 317, core.RecipeIronBlock},
-		{"石镐", 265, core.RecipeStonePickaxe},
-		{"铁镐", 213, core.RecipeIronPickaxe},
-		{"箱子", 161, core.RecipeChest},
-		{"橡木木板", 109, core.RecipeOakPlanks},
-		{"发光方块", 57, core.RecipeLightBlock},
+		{"石砖", 501, core.RecipeStoneBricks},
+		{"熔炉", 449, core.RecipeFurnace},
+		{"铁块", 397, core.RecipeIronBlock},
+		{"石镐", 345, core.RecipeStonePickaxe},
+		{"铁镐", 293, core.RecipeIronPickaxe},
+		{"箱子", 241, core.RecipeChest},
+		{"橡木木板", 189, core.RecipeOakPlanks},
+		{"发光方块", 137, core.RecipeLightBlock},
+		{"石锄", 85, core.RecipeStoneHoe},
+		{"铁锄", 33, core.RecipeIronHoe},
 	} {
-		got, ok := RecipeButtonAt(513, test.y, 1280, 720)
+		got, ok := RecipeButtonAt(513, test.y, 1280, 800)
 		if !ok || got != test.recipe {
 			t.Fatalf("%s按钮命中 = %d, %v，想要 %d", test.name, got, ok, test.recipe)
 		}
-		if _, ok := InventorySlotAt(513, test.y, 1280, 720); ok {
+		if _, ok := InventorySlotAt(513, test.y, 1280, 800); ok {
 			t.Fatalf("%s按钮与背包格重叠", test.name)
 		}
 	}
-	if _, ok := RecipeButtonAt(511, 421, 1280, 720); ok {
+	if _, ok := RecipeButtonAt(511, 501, 1280, 800); ok {
 		t.Fatal("按钮左侧 1 像素被判为命中")
 	}
-	if _, ok := RecipeButtonAt(513, 421, 0, 0); ok {
+	if _, ok := RecipeButtonAt(513, 501, 0, 0); ok {
 		t.Fatal("零尺寸 framebuffer 被判为命中")
 	}
 }
@@ -143,7 +160,7 @@ func TestFurnaceOverlayDrawsThreeSlotsAndTwoBars(t *testing.T) {
 	}
 	var layout hotbarLayout
 
-	empty := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, &FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 720)
+	empty := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, &FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 800)
 	// 空熔炉：面板、3 个栏位背景与 2 条进度条底，没有物品色块或填充。
 	emptyQuads := len(empty.quads)
 	if len(empty.glyphs) != 0 {
@@ -151,7 +168,7 @@ func TestFurnaceOverlayDrawsThreeSlotsAndTwoBars(t *testing.T) {
 	}
 
 	full := layoutInventory(
-		&layout, atlas, core.Inventory{}, true, -1, fullFurnaceOverlay(), nil, MiningOverlay{}, 1280, 720,
+		&layout, atlas, core.Inventory{}, true, -1, fullFurnaceOverlay(), nil, MiningOverlay{}, 1280, 800,
 	)
 	if len(full.quads) != emptyQuads+3*2+2 {
 		t.Fatalf("满熔炉 quads = %d，想要比空熔炉多 3 个双层色块和 2 条填充", len(full.quads))
@@ -163,7 +180,7 @@ func TestFurnaceOverlayDrawsThreeSlotsAndTwoBars(t *testing.T) {
 	// 进度条宽度必须随权威计时按比例变化。
 	half := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, &FurnaceOverlay{
 		BurnTicks: core.FurnaceBurnTicks / 2,
-	}, nil, MiningOverlay{}, 1280, 720)
+	}, nil, MiningOverlay{}, 1280, 800)
 	// 满布局末尾是 [燃烧底, 燃烧填充, 熔炼底, 熔炼填充]；
 	// 半满布局的熔炼进度为 0 所以没有填充，末尾是 [燃烧底, 燃烧填充, 熔炼底]。
 	fullBar := full.quads[len(full.quads)-3]
@@ -181,16 +198,16 @@ func TestFurnaceOverlayReplacesRecipeRow(t *testing.T) {
 	var stocked core.Inventory
 	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
 
-	recipe := layoutInventory(&layout, atlas, stocked, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
+	recipe := layoutInventory(&layout, atlas, stocked, true, -1, nil, nil, MiningOverlay{}, 1280, 800)
 	recipeButtons := len(hotbarRecipeButtonQuads(recipe))
-	furnace := layoutInventory(&layout, atlas, stocked, true, -1, &FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 720)
+	furnace := layoutInventory(&layout, atlas, stocked, true, -1, &FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 800)
 	if recipeButtons != len(inventoryRecipeIDs) || len(hotbarRecipeButtonQuads(furnace)) != 0 {
 		t.Fatalf("配方视图按钮=%d，熔炉视图按钮=%d，想要 %d 和 0",
 			recipeButtons, len(hotbarRecipeButtonQuads(furnace)), len(inventoryRecipeIDs))
 	}
 }
 func TestFurnaceSlotAtCoversUnifiedIndices(t *testing.T) {
-	width, height := uint32(1280), uint32(720)
+	width, height := uint32(1280), uint32(800)
 	// 0..35 与背包命中一致。
 	for _, slot := range []int{0, 8, 9, 35} {
 		x, y := inventorySlotOrigin(slot, true, float32(width), float32(height))
@@ -225,13 +242,13 @@ func TestFurnaceSourceHighlightCoversFurnaceSlots(t *testing.T) {
 	for source := range core.FurnaceViewSlots {
 		got := layoutInventory(
 			&layout, atlas, core.Inventory{}, true, source,
-			&FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 720,
+			&FurnaceOverlay{}, nil, MiningOverlay{}, 1280, 800,
 		)
 		// 面板和当前选中框之后是来源高亮。
 		highlight := got.quads[openInventoryPanelQuads+1]
-		wantX, wantY := inventorySlotOrigin(source, true, 1280, 720)
+		wantX, wantY := inventorySlotOrigin(source, true, 1280, 800)
 		if source >= core.InventorySlots {
-			wantX, wantY = recipeSlotOrigin(source-core.InventorySlots, 1280, 720)
+			wantX, wantY = recipeSlotOrigin(source-core.InventorySlots, 1280, 800)
 		}
 		if highlight.X != wantX-hotbarSelectBorder || highlight.Y != wantY-hotbarSelectBorder {
 			t.Fatalf("来源 %d 高亮 = %+v，想要包住 (%f,%f)",
@@ -248,7 +265,7 @@ func TestChestOverlayDraws27SlotsWithItemsAndCounts(t *testing.T) {
 	}
 	var layout hotbarLayout
 
-	empty := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, &ChestOverlay{}, MiningOverlay{}, 1280, 720)
+	empty := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, &ChestOverlay{}, MiningOverlay{}, 1280, 800)
 	// 空箱子：27 个栏位背景，没有色块也没有数字。
 	if len(empty.glyphs) != 0 {
 		t.Fatalf("空箱子数字 = %d，想要 0", len(empty.glyphs))
@@ -259,7 +276,7 @@ func TestChestOverlayDraws27SlotsWithItemsAndCounts(t *testing.T) {
 	sparse.Items[0] = core.ItemStack{Item: core.ItemStone, Count: 64}
 	sparse.Items[13] = core.ItemStack{Item: core.ItemCoal, Count: 5}
 	sparse.Items[26] = core.ItemStack{Item: core.ItemIronIngot, Count: 1}
-	got := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, &sparse, MiningOverlay{}, 1280, 720)
+	got := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, &sparse, MiningOverlay{}, 1280, 800)
 	if len(got.quads) != emptyQuads+3*2 {
 		t.Fatalf("三格占用 quads=%d，想要比空箱子多 3 个双层色块", len(got.quads))
 	}
@@ -273,7 +290,7 @@ func TestChestOverlayDraws27SlotsWithItemsAndCounts(t *testing.T) {
 		assertHotbarItemFace(t, face, item)
 	}
 
-	full := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, fullChestOverlay(), MiningOverlay{}, 1280, 720)
+	full := layoutInventory(&layout, atlas, core.Inventory{}, true, -1, nil, fullChestOverlay(), MiningOverlay{}, 1280, 800)
 	if len(full.quads) != emptyQuads+core.ChestSlots*2 {
 		t.Fatalf("满箱子 quads = %d，想要比空箱子多 %d 个双层色块", len(full.quads), core.ChestSlots)
 	}
@@ -290,9 +307,9 @@ func TestChestOverlayReplacesRecipeRow(t *testing.T) {
 	var stocked core.Inventory
 	stocked.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
 
-	recipe := layoutInventory(&layout, atlas, stocked, true, -1, nil, nil, MiningOverlay{}, 1280, 720)
+	recipe := layoutInventory(&layout, atlas, stocked, true, -1, nil, nil, MiningOverlay{}, 1280, 800)
 	recipeButtons := len(hotbarRecipeButtonQuads(recipe))
-	chest := layoutInventory(&layout, atlas, stocked, true, -1, nil, &ChestOverlay{}, MiningOverlay{}, 1280, 720)
+	chest := layoutInventory(&layout, atlas, stocked, true, -1, nil, &ChestOverlay{}, MiningOverlay{}, 1280, 800)
 	if recipeButtons != len(inventoryRecipeIDs) || len(hotbarRecipeButtonQuads(chest)) != 0 {
 		t.Fatalf("配方视图按钮=%d，箱子视图按钮=%d，想要 %d 和 0",
 			recipeButtons, len(hotbarRecipeButtonQuads(chest)), len(inventoryRecipeIDs))
@@ -304,17 +321,17 @@ func TestChestOverlayTakesPriorityOverFurnaceOverlay(t *testing.T) {
 	atlas := newFakeNameTagAtlas()
 	var layout hotbarLayout
 	both := layoutInventory(
-		&layout, atlas, core.Inventory{}, true, -1, &FurnaceOverlay{}, &ChestOverlay{}, MiningOverlay{}, 1280, 720,
+		&layout, atlas, core.Inventory{}, true, -1, &FurnaceOverlay{}, &ChestOverlay{}, MiningOverlay{}, 1280, 800,
 	)
 	chestOnly := layoutInventory(
-		&layout, atlas, core.Inventory{}, true, -1, nil, &ChestOverlay{}, MiningOverlay{}, 1280, 720,
+		&layout, atlas, core.Inventory{}, true, -1, nil, &ChestOverlay{}, MiningOverlay{}, 1280, 800,
 	)
 	if len(both.quads) != len(chestOnly.quads) {
 		t.Fatalf("两者都非 nil 时 quads=%d，想要与仅箱子相同 %d", len(both.quads), len(chestOnly.quads))
 	}
 }
 func TestChestSlotAtCoversUnifiedIndices(t *testing.T) {
-	width, height := uint32(1280), uint32(720)
+	width, height := uint32(1280), uint32(800)
 	// 0..35 与背包命中一致。
 	for _, slot := range []int{0, 8, 9, 35} {
 		x, y := inventorySlotOrigin(slot, true, float32(width), float32(height))
@@ -349,13 +366,13 @@ func TestChestSourceHighlightCoversChestSlots(t *testing.T) {
 	for source := range core.ChestViewSlots {
 		got := layoutInventory(
 			&layout, atlas, core.Inventory{}, true, source,
-			nil, &ChestOverlay{}, MiningOverlay{}, 1280, 720,
+			nil, &ChestOverlay{}, MiningOverlay{}, 1280, 800,
 		)
 		// 面板和当前选中框之后是来源高亮。
 		highlight := got.quads[openInventoryPanelQuads+1]
-		wantX, wantY := inventorySlotOrigin(source, true, 1280, 720)
+		wantX, wantY := inventorySlotOrigin(source, true, 1280, 800)
 		if source >= core.InventorySlots {
-			wantX, wantY = chestSlotOrigin(source-core.InventorySlots, 1280, 720)
+			wantX, wantY = chestSlotOrigin(source-core.InventorySlots, 1280, 800)
 		}
 		if highlight.X != wantX-hotbarSelectBorder || highlight.Y != wantY-hotbarSelectBorder {
 			t.Fatalf("来源 %d 高亮 = %+v，想要包住 (%f,%f)",

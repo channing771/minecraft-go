@@ -50,7 +50,7 @@ func readyFluidPlayer(
 	withhold func(core.ChunkPos) bool,
 ) (*Engine, SessionID, []core.ChunkKey) {
 	t.Helper()
-	engine := NewEngine(DropInterestRadius, 0)
+	engine := NewEngine(DropInterestRadius, 0, 0)
 	const session = SessionID(1)
 	engine.RegisterSession(session, core.Overworld, core.ChunkPos{})
 	withheld := make([]core.ChunkKey, 0)
@@ -103,7 +103,7 @@ func overworldFluidQueue(t *testing.T, engine *Engine) *fluid.Queue {
 // 维度；两个维度共用一个 Queue 会让不同维度的同坐标格比较为相等，全序退化成
 // 偏序，确定性静默失效。
 func TestFluidQueuesArePerDimension(t *testing.T) {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	overworld := engine.fluidQueue(core.Overworld)
 	if again := engine.fluidQueue(core.Overworld); again != overworld {
 		t.Fatal("同一维度两次取到了不同的队列实例")
@@ -289,7 +289,7 @@ func TestFluidOutsideInterestRangeHoldsAndResumes(t *testing.T) {
 		outside: core.WaterLevel1ID,
 	}
 
-	engine := NewEngine(DropInterestRadius, 0)
+	engine := NewEngine(DropInterestRadius, 0, 0)
 	const session = SessionID(1)
 	dimension := engine.dimensions[core.Overworld]
 	if !dimension.BeginGeneration(outsidePos) {
@@ -630,7 +630,7 @@ func enqueueEveryFluidCell(queue *fluid.Queue, dimension *Dimension, now, delay 
 // 避免测试在不收敛时挂死。
 func settleFluids(t *testing.T, queue *fluid.Queue, dimension *Dimension, positions []core.ChunkPos) {
 	t.Helper()
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	// recordChange 会经 engine.dimensions 定位区块 revision，这里把被测维度挂上去。
 	engine.dimensions[core.Overworld] = dimension
 	scope := make(map[core.ChunkKey]struct{}, len(positions))
@@ -678,7 +678,7 @@ func dimensionHashes(dimension *Dimension, positions []core.ChunkPos) map[core.C
 func TestFluidRescanFixedPointSkipMatchesFullRescan(t *testing.T) {
 	fastDimension, positions := fluidBasinDimension()
 	fastQueue := fluid.NewQueue()
-	fastEngine := NewEngine(0, 0)
+	fastEngine := NewEngine(0, 0, 0)
 	for _, pos := range positions {
 		fastEngine.rescanChunkFluids(fastQueue, fastDimension, pos, 0, 1, 1<<30)
 	}
@@ -716,7 +716,7 @@ func TestFluidRescanFixedPointSkipMatchesFullRescan(t *testing.T) {
 // fluidRescanEngine 构造一个只用于重扫状态机测试的引擎：挂上被测维度、把全部
 // 区块放进推进范围，并把重扫预算设成 budget。
 func fluidRescanEngine(dimension *Dimension, positions []core.ChunkPos, budget uint32) *Engine {
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.tunables = DefaultTunables()
 	engine.tunables.FluidRescanCellsPerTick = budget
 	engine.dimensions[core.Overworld] = dimension
@@ -736,7 +736,7 @@ func fluidRescanEngine(dimension *Dimension, positions []core.ChunkPos, budget u
 func TestFluidRescanSpreadsAcrossTicksAndStaysComplete(t *testing.T) {
 	referenceDimension, positions := fluidBasinDimension()
 	referenceQueue := fluid.NewQueue()
-	referenceEngine := NewEngine(0, 0)
+	referenceEngine := NewEngine(0, 0, 0)
 	for _, pos := range positions {
 		referenceEngine.rescanChunkFluids(referenceQueue, referenceDimension, pos, 0, 1, 1<<30)
 	}
@@ -819,7 +819,7 @@ func TestFluidRescanDropsChunkThatLeavesScope(t *testing.T) {
 	}
 
 	reference := fluid.NewQueue()
-	referenceEngine := NewEngine(0, 0)
+	referenceEngine := NewEngine(0, 0, 0)
 	referenceEngine.rescanChunkFluids(reference, dimension, positions[0], 0, 1, 1<<30)
 	if got := engine.fluidQueue(core.Overworld).Len(); got != reference.Len() {
 		t.Fatalf("重新进入后入队 %d 项，完整重扫应为 %d 项", got, reference.Len())
@@ -837,7 +837,7 @@ func TestFluidRescanUsesQueueOfItsOwnDimension(t *testing.T) {
 	const other = core.Overworld + 1
 	dimension, positions := fluidBasinDimension()
 	dimension.id = other
-	engine := NewEngine(0, 0)
+	engine := NewEngine(0, 0, 0)
 	engine.tunables = DefaultTunables()
 	engine.tunables.FluidRescanCellsPerTick = 1 << 20
 	engine.dimensions[other] = dimension

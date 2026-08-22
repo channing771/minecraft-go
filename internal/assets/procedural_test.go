@@ -81,7 +81,13 @@ func TestTexturesAreNotFlat(t *testing.T) {
 
 func TestCutoutLayersUseBinaryAlpha(t *testing.T) {
 	r := assets.NewRegistry()
-	for _, layer := range []uint16{assets.LayerLeaves, assets.LayerGlass} {
+	layers := []uint16{assets.LayerLeaves, assets.LayerGlass}
+	// 小麦八个阶段同属 cutout：中间 alpha 会让 `c.a < 0.5` 的 discard 把麦秆
+	// 边缘啃出锯齿或整根抹掉。
+	for layer := assets.LayerWheat0; layer <= assets.LayerWheat7; layer++ {
+		layers = append(layers, layer)
+	}
+	for _, layer := range layers {
 		px := r.LayerRGBA(int(layer))
 		opaque, transparent := 0, 0
 		for i := 3; i < len(px); i += 4 {
@@ -525,5 +531,108 @@ func TestWaterTextureIsTranslucentBlue(t *testing.T) {
 			t.Fatalf("水层像素 %d 的 RGB = (%d,%d,%d)，蓝色必须主导",
 				i/4, px[i], px[i+1], px[i+2])
 		}
+	}
+}
+
+// layerLuma 返回一层材质**不透明像素**的平均亮度，用于比较明暗。
+//
+// 透明像素必须排除：cutout 层的透明像素 RGB 是 0，混进平均值等于在比"覆盖率"
+// 而不是"颜色"。
+func layerLuma(px []byte) int {
+	sum, count := 0, 0
+	for i := 0; i < len(px); i += 4 {
+		if px[i+3] == 0 {
+			continue
+		}
+		sum += int(px[i]) + int(px[i+1]) + int(px[i+2])
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return sum / (3 * count)
+}
+
+// TestFarmlandWetIsDarkerThanDry 钉住耕地干湿两态**唯一**的可辨识差异。
+//
+// 干湿共用同一个形状（都是满立方体、都有犁沟），玩家只能靠明暗区分，与 Minecraft
+// 的约定一致。若两层被写成同一份像素，或亮度差小到看不出来，这条会红。
+// 同时要求两者都明显暗于泥土——耕地是"被翻过的土"，不该和普通泥土撞色。
+func TestFarmlandWetIsDarkerThanDry(t *testing.T) {
+	r := assets.NewRegistry()
+	dry := layerLuma(r.LayerRGBA(int(assets.LayerFarmlandDry)))
+	wet := layerLuma(r.LayerRGBA(int(assets.LayerFarmlandWet)))
+	dirt := layerLuma(r.LayerRGBA(int(assets.LayerDirt)))
+
+	if wet >= dry {
+		t.Fatalf("湿耕地平均亮度 %d 不低于干耕地 %d：干湿只能靠明暗区分", wet, dry)
+	}
+	if dry-wet < 20 {
+		t.Fatalf("干湿亮度差只有 %d，肉眼无法区分", dry-wet)
+	}
+	if dry >= dirt {
+		t.Fatalf("干耕地平均亮度 %d 不低于泥土 %d：耕地会与泥土撞色", dry, dirt)
+	}
+}
+
+// TestWheatStagesGrowTallerAndRipen 钉住八个阶段在**画面上真的不同**。
+//
+// 两条正交的性质各自都可能被写成恒真，因此必须一起断言：
+//
+//  1. 高度：不透明像素覆盖的最高行号逐阶段严格递增，阶段 7 长满整格；
+//  2. 颜色：不透明像素的平均色由绿（G 明显高于 R）走向金黄（R 追平并超过 G）。
+//
+// 只测其一时，"八层复制同一张图再改个色"或"八层同色只改高度"都能通过。
+func TestWheatStagesGrowTallerAndRipen(t *testing.T) {
+	r := assets.NewRegistry()
+	previousTop, previousWarmth := -1, -1000
+	for stage := 0; stage < 8; stage++ {
+		px := r.LayerRGBA(int(assets.LayerWheat0) + stage)
+		top, sumR, sumG, count := -1, 0, 0, 0
+		for row := 0; row < 16; row++ {
+			for x := 0; x < 16; x++ {
+				i := (row*16 + x) * 4
+				if px[i+3] == 0 {
+					continue
+				}
+				if row > top {
+					top = row
+				}
+				sumR += int(px[i])
+				sumG += int(px[i+1])
+				count++
+			}
+		}
+		if count == 0 {
+			t.Fatalf("阶段 %d 一个不透明像素都没有", stage)
+		}
+		if top <= previousTop {
+			t.Fatalf("阶段 %d 的最高行 %d 未高于阶段 %d 的 %d：作物没有长高",
+				stage, top, stage-1, previousTop)
+		}
+		warmth := (sumR - sumG) / count
+		if warmth <= previousWarmth {
+			t.Fatalf("阶段 %d 的暖色度 %d 未高于阶段 %d 的 %d：颜色没有从嫩绿走向金黄",
+				stage, warmth, stage-1, previousWarmth)
+		}
+		previousTop, previousWarmth = top, warmth
+	}
+	if previousTop != 15 {
+		t.Fatalf("成熟阶段最高行 = %d，想要 15（长满整格）", previousTop)
+	}
+	// 端点守卫：阶段 0 必须真的偏绿（R 低于 G），否则"暖色度递增"可能整段
+	// 都落在金黄区间里，读起来八个阶段是同一种颜色。
+	first := r.LayerRGBA(int(assets.LayerWheat0))
+	sumR, sumG, count := 0, 0, 0
+	for i := 0; i < len(first); i += 4 {
+		if first[i+3] == 0 {
+			continue
+		}
+		sumR += int(first[i])
+		sumG += int(first[i+1])
+		count++
+	}
+	if sumR/count >= sumG/count {
+		t.Fatalf("阶段 0 的平均 R=%d 不低于 G=%d：嫩芽不是绿色", sumR/count, sumG/count)
 	}
 }

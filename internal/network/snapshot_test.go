@@ -115,9 +115,9 @@ func TestChunkSnapshotRejectsMalformedSections(t *testing.T) {
 }
 
 func TestSectionDataRejectsUnknownBlockEveryStorage(t *testing.T) {
-	// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体），真正越界的
-	// 未知方块编号改为 WaterLevel7ID+1。
-	unknown := core.WaterLevel7ID + 1
+	// 未注册编号一律用独占哨兵 core.BlockIDMax 表达：写死具体编号（历史上写过
+	// MossyCobblestoneID+1、WaterLevel7ID+1）会在追加新方块时静默变成已注册。
+	unknown := core.BlockIDMax
 	tests := []struct {
 		name    string
 		section network.SectionData
@@ -209,8 +209,8 @@ func TestBlockChangesValidateRevisionPositionAndOrder(t *testing.T) {
 		{
 			name: "unregistered block ID",
 			mutate: func(changes *network.BlockChanges) {
-				// MossyCobblestoneID+1 现在是 WaterSourceID（已注册流体）。
-				changes.Changes[0].Block = core.WaterLevel7ID + 1
+				// 未注册编号的独占哨兵，见上。
+				changes.Changes[0].Block = core.BlockIDMax
 			},
 		},
 		{

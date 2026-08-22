@@ -14,6 +14,8 @@
 //! - 每帧一次 [`OffscreenRenderer::render_frame`],帧内无逐 pass FFI。
 
 pub mod entity;
+#[cfg(test)]
+mod plant_tests;
 pub mod pool;
 pub mod quads;
 pub mod shaders;

@@ -25,6 +25,7 @@ func TestValidateClientPacket(t *testing.T) {
 		{"craft recipe", StatePlay, CraftRecipe{Recipe: core.RecipeStoneBricks}},
 		{"resync", StatePlay, RequestChunkResync{}},
 		{"keep alive reply", StatePlay, KeepAliveReply{Token: 1}},
+		{"till soil", StatePlay, TillSoil{Yaw: 90, Pitch: -15}},
 	}
 	for _, tc := range valid {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,6 +48,8 @@ func TestValidateClientPacket(t *testing.T) {
 		{"zero keep alive token", StatePlay, KeepAliveReply{}},
 		{"input NaN", StatePlay, PlayerInput{Yaw: float32(math.NaN())}},
 		{"place NaN", StatePlay, PlaceBlock{Yaw: float32(math.NaN())}},
+		{"till soil NaN", StatePlay, TillSoil{Yaw: float32(math.NaN())}},
+		{"till soil Inf pitch", StatePlay, TillSoil{Pitch: float32(math.Inf(1))}},
 		{"place slot out of range", StatePlay, PlaceBlock{Slot: core.HotbarSlots}},
 		{"select hotbar slot out of range", StatePlay, SelectHotbar{Slot: core.HotbarSlots}},
 		{"inventory move out of range", StatePlay, MoveInventoryStack{To: core.InventorySlots}},
@@ -80,8 +83,8 @@ func TestProtocolV1StateAndErrorCodesAreFrozen(t *testing.T) {
 			t.Fatalf("%s state = %d, want %d", tc.name, tc.got, tc.want)
 		}
 	}
-	if ProtocolVersion != 21 {
-		t.Fatalf("protocol version = %d, want 21", ProtocolVersion)
+	if ProtocolVersion != 22 {
+		t.Fatalf("protocol version = %d, want 22", ProtocolVersion)
 	}
 
 	codes := []struct {

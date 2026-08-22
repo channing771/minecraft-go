@@ -51,6 +51,20 @@ func (a *application) placeBlock() {
 			}
 			return
 		}
+		// 手持锄头对着泥土或草时，「使用」键发翻地命令而不是放置。判定只读
+		// 本地只读镜像与已确认的快捷栏，且与权威侧共用 core 里的同一对谓词；
+		// 服务端仍会用权威射线重新判定目标，客户端**不做任何预测式改方块**，
+		// 耕地要等权威广播回来才出现。其余手持物与目标组合行为完全不变。
+		if hotbar, confirmed := a.inventory.Hotbar(); loaded && confirmed &&
+			core.TillableBlock(block) &&
+			core.TillingTool(hotbar.Slots[hotbar.Selected].Item) {
+			if err := a.send(network.TillSoil{
+				Sequence: a.nextSequence(), Yaw: a.camera.Yaw, Pitch: a.camera.Pitch,
+			}); err != nil {
+				slog.Warn("发送翻地命令失败", "error", err)
+			}
+			return
+		}
 	}
 	// 放置引用最后一个已确认的选中栏位；尚未确认时不发送。
 	hotbar, confirmed := a.inventory.Hotbar()

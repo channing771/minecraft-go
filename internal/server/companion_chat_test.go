@@ -954,7 +954,7 @@ func newCompanionChatRoutingServer(
 	config.Companions = append([]companion.Definition(nil), definitions...)
 	running := &Server{
 		config:           config,
-		engine:           sim.NewEngine(0, 0),
+		engine:           sim.NewEngine(0, 0, 0),
 		sessions:         make(map[sim.SessionID]*session, len(capacities)),
 		playerSessions:   make(map[core.PlayerID]sim.SessionID, len(capacities)),
 		ctx:              ctx,

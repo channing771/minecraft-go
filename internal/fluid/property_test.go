@@ -161,18 +161,43 @@ func advanceToFixedPoint(t *testing.T, q *Queue, w FluidWorld, start uint64, bud
 	return now, maxTicks
 }
 
-// assertAllRegistered 断言世界中不存在未注册方块编号。
+// assertNoLevelOverflow 断言世界中不存在「流体等级越界」写出的方块编号。
 //
 // evalCell 用 core.WaterSourceID+nextLevel 算出水平传播的目标编号，若「水平
-// 传播上界」的 nextLevel > 7 守卫失效，就会写出 WaterLevel7ID+1 这个未注册
+// 传播上界」的 nextLevel > 7 守卫失效，就会写出 WaterSourceID+8 及其之后的
 // 编号——这条廉价不变量把那种越界写入变成显式失败，而不是悄悄污染世界。
-func assertAllRegistered(t *testing.T, w *memWorld, label string) {
+//
+// 判据两次被削弱过，两次都必须记住：
+//
+//  1. 遍历范围原先是 fluidPositions(w)，而它按 core.IsFluid 过滤——越界写出的
+//     编号恰恰不是流体，于是压根不会进入遍历，断言**恒真**。现在改为遍历世界
+//     里的全部格。
+//  2. 判据原先是 !core.RegisteredBlock(id)。农业编号追加之后
+//     WaterSourceID+8 == FarmlandDryID **已经是已注册方块**，越界写入不再会被
+//     RegisteredBlock 拒绝。现在改为白名单：本包的夹具只放空气、石头与流体，
+//     出现其它任何编号都只可能来自流体规则的越界写入。
+func assertNoLevelOverflow(t *testing.T, w *memWorld, label string) {
 	t.Helper()
-	for _, pos := range fluidPositions(w) {
-		if id := w.BlockAt(pos); !core.RegisteredBlock(id) {
-			t.Fatalf("%s：位置 %+v 出现未注册方块编号 %d（流体等级越界）", label, pos, id)
+	for _, pos := range allPositions(w) {
+		id := w.BlockAt(pos)
+		if id == core.AirID || id == core.StoneID || core.IsFluid(id) {
+			continue
 		}
+		t.Fatalf("%s：位置 %+v 出现非法方块编号 %d（夹具只放空气/石头/流体，"+
+			"其余只可能来自流体等级越界写入）", label, pos, id)
 	}
+}
+
+// allPositions 返回世界中全部**已记录**的格（含非流体），按 lessPos 全序排序。
+// 与 fluidPositions 的差别正是 assertNoLevelOverflow 需要的：越界写出的编号不
+// 是流体，只有遍历全部格才能看见它。
+func allPositions(w *memWorld) []core.BlockPos {
+	out := make([]core.BlockPos, 0, len(w.blocks))
+	for pos := range w.blocks {
+		out = append(out, pos)
+	}
+	sort.Slice(out, func(i, j int) bool { return lessPos(out[i], out[j]) })
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +360,7 @@ func TestRescanFixedPoint_EquilibriumProducesNoChanges(t *testing.T) {
 			}
 
 			now, ticks := advanceToFixedPoint(t, q, w, 1, unboundedBudget, testDelay, testMaxTicks)
-			assertAllRegistered(t, w, "平衡态")
+			assertNoLevelOverflow(t, w, "平衡态")
 			before := snapshot(w)
 			fluidCount := len(fluidPositions(w))
 			// 双向核对形状声明：只有显式声明会流干的形状才允许平衡态无水
@@ -439,7 +464,7 @@ func TestRescanMidFlight_ConvergesToSameEquilibrium(t *testing.T) {
 				rescanEnqueue(w, q, now, 0)
 
 				advanceToFixedPoint(t, q, w, now, unboundedBudget, testDelay, testMaxTicks)
-				assertAllRegistered(t, w, fmt.Sprintf("切点 %d 的重扫平衡态", cut))
+				assertNoLevelOverflow(t, w, fmt.Sprintf("切点 %d 的重扫平衡态", cut))
 
 				if diffs := diffWorlds(want, snapshot(w)); len(diffs) != 0 {
 					t.Fatalf("在第 %d tick 清空队列并重扫后到达的平衡态与基线不一致（丢弃前队列 %d 项）：%s",
@@ -485,7 +510,7 @@ func TestBudgetEquivalence_DamBreakSameFinalState(t *testing.T) {
 	seedFromFluid(ref, refQ, 0, 0)
 	_, refTicks := advanceToFixedPoint(t, refQ, ref, 1, unboundedBudget, testDelay, testMaxTicks)
 	want := snapshot(ref)
-	assertAllRegistered(t, ref, "不受限预算平衡态")
+	assertNoLevelOverflow(t, ref, "不受限预算平衡态")
 	t.Logf("不受限预算：%d tick 到达平衡态，流体格 %d 个", refTicks, len(fluidPositions(ref)))
 
 	for _, budget := range []int{testBudget, 64} {
@@ -494,7 +519,7 @@ func TestBudgetEquivalence_DamBreakSameFinalState(t *testing.T) {
 			q := NewQueue()
 			seedFromFluid(w, q, 0, 0)
 			_, ticks := advanceToFixedPoint(t, q, w, 1, budget, testDelay, testMaxTicks)
-			assertAllRegistered(t, w, fmt.Sprintf("budget=%d 平衡态", budget))
+			assertNoLevelOverflow(t, w, fmt.Sprintf("budget=%d 平衡态", budget))
 			t.Logf("budget=%d：%d tick 到达平衡态", budget, ticks)
 
 			if ticks <= refTicks {
@@ -754,7 +779,7 @@ func TestConvergeRandomWaterBodiesReachFixedPoint(t *testing.T) {
 				initialFluid := q.Len()
 
 				now, ticks := advanceToFixedPoint(t, q, w, 1, budget, testDelay, convergeMaxTicks)
-				assertAllRegistered(t, w, fmt.Sprintf("seed=%d 平衡态", seed))
+				assertNoLevelOverflow(t, w, fmt.Sprintf("seed=%d 平衡态", seed))
 				t.Logf("seed=%d budget=%d：初始流体 %d 格，%d tick 到达不动点，平衡态流体 %d 格",
 					seed, budget, initialFluid, ticks, len(fluidPositions(w)))
 

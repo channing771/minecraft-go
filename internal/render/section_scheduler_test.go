@@ -54,6 +54,20 @@ func stoneQuad(x, y, z uint8) mesh.Quad {
 	}
 }
 
+// plantQuad 构造一条植物交叉斜面 quad(材质层落在植物区间)。
+//
+// 正/背标志与 face 6/7 共用 W/H 那 8 bit,是上传路径上最容易被旧解码吃掉的地方。
+func plantQuad(x, y, z uint8, back bool) mesh.Quad {
+	return mesh.Quad{
+		X: x, Y: y, Z: z, W: 1, H: 1,
+		Face:  mesh.FacePlantDiagA,
+		Mat:   assets.LayerWheat3,
+		AO:    0xFF,
+		Light: 0xF0,
+		Back:  back,
+	}
+}
+
 // unpackStream 把上传字节流还原成 quad 序列,顺带校验每条实例恰好 8 字节。
 func unpackStream(t *testing.T, name string, stream []byte) []mesh.Quad {
 	t.Helper()
@@ -192,14 +206,20 @@ func (s *countingSink) DropSection(int32, int32, int32)                   {}
 func TestFlushUploadsDoesNotAllocatePerFrame(t *testing.T) {
 	const count = 64
 	quads := make([]mesh.Quad, 0, count)
-	waters := 0
+	waters, plants := 0, 0
 	for i := 0; i < count; i++ {
-		if i%2 == 0 {
+		switch i % 3 {
+		case 0:
 			quads = append(quads, waterQuad(uint8(i%16), 5, 0))
 			waters++
-			continue
+		case 1:
+			// 含植物的场景同样受「预热后零每帧分配」约束:植物走既有的不透明流,
+			// 不得因为多了一类 quad 就在冲刷路径上冒出新的分配。
+			quads = append(quads, plantQuad(uint8(i%16), 6, 0, i%2 == 0))
+			plants++
+		default:
+			quads = append(quads, stoneQuad(uint8(i%16), 0, 0))
 		}
-		quads = append(quads, stoneQuad(uint8(i%16), 0, 0))
 	}
 	sink := &countingSink{}
 	scheduler := render.NewSectionScheduler(sink, 1<<20)
@@ -224,6 +244,9 @@ func TestFlushUploadsDoesNotAllocatePerFrame(t *testing.T) {
 	// 两条夹具前提守卫排在真实断言之后:真实失效不应先被误报成夹具问题。
 	if waters == 0 {
 		t.Fatal("夹具里没有水面 quad,这条断言与水面阶段无关")
+	}
+	if plants == 0 {
+		t.Fatal("夹具里没有植物 quad,这条断言与含植物场景无关")
 	}
 	// 「都没分配」也可能是因为冲刷根本没做事(预算早退、去重跳过之类),
 	// 那时两侧同为 1.0、断言会静默转绿。
@@ -282,5 +305,55 @@ func TestSectionSinkExposesExactlyOneExtraStream(t *testing.T) {
 	}
 	if streams != 2 {
 		t.Fatalf("UploadSection 有 %d 条字节流,想要 2(不透明 + 唯一的水面阶段)", streams)
+	}
+}
+
+// TestFlushUploadsKeepsPlantQuadsInTheTerrainStream 锁定「植物不新增绘制阶段」在
+// 上传契约上的投影:植物 quad 必须留在不透明流里,与石头同批走既有的 terrain
+// pass,而不是被分流到唯一那个额外的半透明阶段。
+//
+// 承重点是**位置性**的:只断言"两条流合计条数不变"在任何分流规则下都成立。
+// 这里逐条钉住每条 quad 落在**哪一条**流上,并同时放一条水面 quad 作对照——
+// 若把判据写成"非石头即透明",水面那条仍然正确、植物那条会当场红。
+func TestFlushUploadsKeepsPlantQuadsInTheTerrainStream(t *testing.T) {
+	sink := &recordingSink{}
+	scheduler := render.NewSectionScheduler(sink, 1<<20)
+	quads := []mesh.Quad{
+		stoneQuad(0, 0, 0),
+		plantQuad(1, 6, 2, false),
+		waterQuad(3, 5, 4),
+		plantQuad(1, 6, 2, true),
+	}
+	scheduler.QueueSection(core.SectionPos{}, quads)
+	scheduler.BeginFrame()
+	scheduler.FlushUploads(core.ChunkPos{})
+
+	if len(sink.uploads) != 1 {
+		t.Fatalf("上传次数 = %d,想要 1", len(sink.uploads))
+	}
+	opaque := unpackStream(t, "opaque", sink.uploads[0].opaque)
+	water := unpackStream(t, "water", sink.uploads[0].water)
+
+	wantOpaque := []mesh.Quad{stoneQuad(0, 0, 0), plantQuad(1, 6, 2, false), plantQuad(1, 6, 2, true)}
+	if len(opaque) != len(wantOpaque) {
+		t.Fatalf("opaque 流 %d 条,想要 %d:植物被分流到了别的阶段", len(opaque), len(wantOpaque))
+	}
+	for i, want := range wantOpaque {
+		if opaque[i] != want {
+			t.Fatalf("opaque 流第 %d 条 = %+v,想要 %+v", i, opaque[i], want)
+		}
+	}
+	// 对照:同一批里的水面仍然必须离开不透明流,否则"植物留在不透明流"这条
+	// 可能只是"分流整体失效"。
+	if len(water) != 1 || water[0] != waterQuad(3, 5, 4) {
+		t.Fatalf("water 流 = %+v,想要恰好那条水面 quad", water)
+	}
+	// 面实例仍是 8 字节,且正/背标志与 face 6/7 逐条无损往返(unpackStream 已经
+	// 校验过长度是 8 的倍数,这里补上"条数 × 8 == 字节数"这条严格等式)。
+	if got := len(sink.uploads[0].opaque); got != len(wantOpaque)*8 {
+		t.Fatalf("opaque 流 %d 字节,想要 %d(每条实例 8 字节)", got, len(wantOpaque)*8)
+	}
+	if opaque[1].Back == opaque[2].Back {
+		t.Fatal("正/背标志在上传往返中丢失:两条本应一正一背")
 	}
 }

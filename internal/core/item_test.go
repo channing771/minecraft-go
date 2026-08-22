@@ -21,13 +21,13 @@ func TestCanonicalItemIDsStayStable(t *testing.T) {
 }
 
 // TestItemIDMaxGuardsExhaustiveEnumeration 锁定 ItemIDMax 独占哨兵与枚举末项的
-// 关系：当前最后一个合法物品必须是 ItemMossyCobblestone。物品演进纪律是只能在
+// 关系：当前最后一个合法物品必须是 ItemWheat。物品演进纪律是只能在
 // 哨兵之前追加；将来追加新物品时第一个断言变红，迫使开发者同步审视全部以
 // 「item < ItemIDMax」为穷举界的测试（例如 companion 的 place 注册表覆盖测试），
 // 而不是让穷举测试静默失去对新物品的覆盖。
 func TestItemIDMaxGuardsExhaustiveEnumeration(t *testing.T) {
-	if core.ItemMossyCobblestone != core.ItemIDMax-1 {
-		t.Fatalf("ItemID 枚举末项不再是 ItemMossyCobblestone（ItemIDMax-1 = %d）；"+
+	if core.ItemWheat != core.ItemIDMax-1 {
+		t.Fatalf("ItemID 枚举末项不再是 ItemWheat（ItemIDMax-1 = %d）；"+
 			"新增物品必须同步审视全部以 ItemIDMax 为穷举界的测试", core.ItemIDMax-1)
 	}
 	// 哨兵之外不得再出现已注册物品：若有人把新物品追加在哨兵之后，穷举界会
@@ -76,9 +76,9 @@ func TestCommonBlockMaterialsAreFixedAndRoundTrip(t *testing.T) {
 			t.Fatalf("ItemStackLimit(%d)=(%d,%v)，想要 (64,true)", tc.item, limit, ok)
 		}
 	}
-	// MossyCobblestoneID+1 现在是 WaterSourceID（流体方块编号紧随其后追加），
-	// 已注册；真正越界的未知方块编号是 WaterLevel7ID+1。
-	if core.RegisteredBlock(core.WaterLevel7ID + 1) {
+	// MossyCobblestoneID+1 是 WaterSourceID、WaterLevel7ID+1 是 FarmlandDryID，
+	// 两者都已注册；未注册编号的独占上界只能用 BlockIDMax 表达。
+	if core.RegisteredBlock(core.BlockIDMax) {
 		t.Fatal("未知方块被注册")
 	}
 }
@@ -325,13 +325,14 @@ func TestHotbarConsumeRejectsEmptyOrInvalidSlot(t *testing.T) {
 }
 
 // TestFluidBlocksDoNotProduceItems 锁定「流体不进物品表」：全部 8 个流体编号
-// 采掘不产出任何物品，且合法物品编号上界 ItemIDMax 不因流体的引入而变化——
-// 流体只追加在 BlockID 枚举，不新增任何 ItemID。
+// 采掘不产出任何物品——流体只追加在 BlockID 枚举，自己不带任何 ItemID。
+//
+// 本用例原先还断言 `ItemIDMax == ItemMossyCobblestone+1`，用来表达"流体没有
+// 新增物品"。那条断言把流体的性质写成了对物品表末项的锁定，任何**别的**变更
+// 追加物品都会让它变红（农业追加 6 个物品即触发），因此已改由
+// TestItemIDMaxGuardsExhaustiveEnumeration 统一守护物品表末项，这里只保留
+// 与流体真正相关的部分。
 func TestFluidBlocksDoNotProduceItems(t *testing.T) {
-	if core.ItemIDMax != core.ItemMossyCobblestone+1 {
-		t.Fatalf("ItemIDMax = %d，想要保持 ItemMossyCobblestone+1 (%d) 不变",
-			core.ItemIDMax, core.ItemMossyCobblestone+1)
-	}
 	for _, block := range []core.BlockID{
 		core.WaterSourceID, core.WaterLevel1ID, core.WaterLevel2ID, core.WaterLevel3ID,
 		core.WaterLevel4ID, core.WaterLevel5ID, core.WaterLevel6ID, core.WaterLevel7ID,

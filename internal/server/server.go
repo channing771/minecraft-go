@@ -109,7 +109,7 @@ func newWorld(
 		config:          config,
 		generator:       generator,
 		store:           store,
-		engine:          sim.NewEngine(config.ViewRadius, metadata.WorldTimeTicks),
+		engine:          sim.NewEngine(config.ViewRadius, metadata.WorldTimeTicks, metadata.Seed),
 		sessions:        make(map[sim.SessionID]*session),
 		playerSessions:  make(map[core.PlayerID]sim.SessionID),
 		ctx:             ctx,

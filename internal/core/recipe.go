@@ -20,6 +20,12 @@ const (
 	RecipeOakPlanks
 	// RecipeLightBlock 用 4 个玻璃合成 4 个发光方块。
 	RecipeLightBlock
+	// RecipeStoneHoe 用 2 个石头合成 1 把石锄。
+	// 锄头比同材质的镐少用一份原料：锄头只作用于翻地这一件事，产出也不是
+	// 资源而是地块状态，与镐同价会让第一块耕地的门槛高得没有道理。
+	RecipeStoneHoe
+	// RecipeIronHoe 用 2 个铁锭合成 1 把铁锄。
+	RecipeIronHoe
 )
 
 // CraftingRecipe 是一条固定的单输入、单输出配方。
@@ -70,6 +76,18 @@ func Recipe(id RecipeID) (CraftingRecipe, bool) {
 		return CraftingRecipe{
 			Input:  ItemStack{Item: ItemGlass, Count: 4},
 			Output: ItemStack{Item: ItemLightBlock, Count: 4},
+		}, true
+	// 两条锄头配方的产物耐久直接写死为 ItemMaxDurability 的同一组数值，与
+	// 既有镐配方保持同一种表达方式（配方表是产物的字面量来源，不反查函数）。
+	case RecipeStoneHoe:
+		return CraftingRecipe{
+			Input:  ItemStack{Item: ItemStone, Count: 2},
+			Output: ItemStack{Item: ItemStoneHoe, Count: 1, Durability: 131},
+		}, true
+	case RecipeIronHoe:
+		return CraftingRecipe{
+			Input:  ItemStack{Item: ItemIronIngot, Count: 2},
+			Output: ItemStack{Item: ItemIronHoe, Count: 1, Durability: 250},
 		}, true
 	default:
 		return CraftingRecipe{}, false
