@@ -107,9 +107,9 @@ func TestJumpAccumulatesExhaustionExactlyOncePerTakeoff(t *testing.T) {
 //
 // 真正能让「起跳冲量已施加，但步末位移小到仍判定在地面上」成立的构造，是把
 // `physics.Tunables.JumpSpeed` 调到远小于 `GroundProbe/FixedDeltaSeconds` 的量级：
-// 单 tick 位移本身就落进地面探测容差，`clip_axis` 的下探测（-GroundProbe）仍然
+// 单 tick 位移本身就落进地面探测容差，clip_axis 的下探测（-GroundProbe）仍然
 // 能摸到原来那块地板，`OnGround` 因此持续读 true，同时 `input.Jump` 与
-// `wasOnGround` 每 tick 都成立——这是当前代码路径里，「已经离地」与「未离地」
+// wasOnGround 每 tick 都成立——这是当前代码路径里，「已经离地」与「未离地」
 // 两种可能结果都真实可达的唯一夹具，因此是能让判据变异变红的构造。
 //
 // 20 tick 里累计位移 = 20 × 0.00003 × `physics.FixedDeltaSeconds`(0.05) = 0.00003，
