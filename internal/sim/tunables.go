@@ -147,8 +147,9 @@ type Tunables struct {
 	// RegenHungerThreshold 是允许自然回血的最低饥饿值
 	// （变更 authoritative-hunger，internal/sim/health_regen.go 的入口门控）。
 	//
-	// 取 0 等于取消门控（任何饥饿值都能回血），取值大于 core.MaxHunger 等于
-	// 永久禁止自然回血；两端都是合法的调试取值，不是错误。它只门控**是否
+	// 区间 0..core.MaxHunger（由配置层钳制）两端都是合法的调试取值，不是错误：
+	// 0 等于取消门控（任何饥饿值都能回血），core.MaxHunger 等于只有吃饱才回血。
+	// 它只门控**是否
 	// 回复**，不改变回血计时本身——饥饿值低于阈值时计时照常累积，饥饿回到阈值
 	// 那一刻若计时已满就立即回血。
 	RegenHungerThreshold uint8 `json:"regenHungerThreshold"`

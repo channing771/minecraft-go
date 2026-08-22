@@ -115,12 +115,20 @@ func TestWalkingOnFlatGroundAccumulatesNoExhaustion(t *testing.T) {
 	}
 }
 
-// TestSwimmingAccumulatesExhaustionAndStandingStillDoesNot 覆盖疲劳表的游泳项。
+// TestSwimmingAccumulatesExhaustionAndStandingStillDoesNot 覆盖疲劳表的游泳项，
+// 以及起跳判据里 `!input.BodyInFluid` 这一项的承重。
 //
-// 三条分支共用同一个泡在水里的夹具，只差输入与是否有水：
+// 四条分支共用同一个泡在水里的夹具，只差输入与是否有水：
 //   - 水中移动：疲劳必须严格增长；
 //   - 水中不动：疲劳必须**精确**保持 0（这一条杀死「只要浸没就加疲劳」的实现）；
+//   - 水中按跳：疲劳必须**精确**保持 0（见下）；
 //   - 陆上移动：疲劳必须精确保持 0（这一条杀死「移动就加疲劳」的实现）。
+//
+// 「水中按跳」是起跳判据第二项的唯一守卫：physics.Step 的垂直分支里
+// `BodyInFluid && Jump`（持续上浮）排在 `OnGround && Jump`（起跳冲量）之前，
+// 水里按跳走的是上浮、根本没有起跳冲量。判据若少了 `!input.BodyInFluid`，
+// 站在水底按跳会同时满足「按下 Jump」「步首在地面」「步末已离地」三条，
+// 凭空计一次 50 跳跃疲劳，外加游泳疲劳，双重计费且没有任何信号。
 //
 // 移动分支断言的是「大于 0」而不是字面值：精确值取决于物理步的实际位移，
 // 写死它只会变成 physics.Step 的第二份实现。位移到疲劳的换算规则由
@@ -130,11 +138,13 @@ func TestSwimmingAccumulatesExhaustionAndStandingStillDoesNot(t *testing.T) {
 		name      string
 		submerged bool
 		moveZ     int8
+		jump      bool
 		wantMoved bool
 	}{
-		{"水中移动累积", true, -1, true},
-		{"水中静止不累积", true, 0, false},
-		{"陆上移动不累积", false, -1, false},
+		{"水中移动累积", true, -1, false, true},
+		{"水中静止不累积", true, 0, false, false},
+		{"水中按跳不算起跳", true, 0, true, false},
+		{"陆上移动不累积", false, -1, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const id = SessionID(53)
@@ -151,6 +161,7 @@ func TestSwimmingAccumulatesExhaustionAndStandingStillDoesNot(t *testing.T) {
 			}
 			player.exhaustionMilli = 0
 			player.input.MoveZ = tc.moveZ
+			player.input.Jump = tc.jump
 			for range 20 {
 				engine.Step()
 			}
@@ -304,6 +315,10 @@ func TestTillCompletionAccumulatesExhaustionOnlyOnSuccess(t *testing.T) {
 // 为什么不断言「companionState 没有三层字段」：那是存在性断言，编译期就恒真，
 // 在「有人把疲劳表接进伙伴路径」的世界里同样成立（伙伴完全可以去改别人的
 // playerState）。这里断言的是位置性事实——伙伴的动作**没有任何途径**改到饥饿状态。
+//
+// 它与源码守卫 TestExhaustionTableIsNotWiredIntoCompanionCode 是互补的两条，
+// **不得只保留其中一条**：源码守卫是名字驱动的，看不见「伙伴间接改到某个
+// playerState」这条路；本用例是夹具驱动的，只覆盖被驱动到的那几条伙伴路径。
 func TestCompanionPathsNeverTouchHungerState(t *testing.T) {
 	engine, sessions, _ := readyMiningPlayers(t, 1)
 	player := engine.sessions[sessions[0]].player
@@ -350,6 +365,8 @@ func TestCompanionPathsNeverTouchHungerState(t *testing.T) {
 //
 // 运行时守卫只能覆盖被夹具驱动到的那几条伙伴路径；这条守卫覆盖的是「有人把
 // applyExhaustion 写进任意一条伙伴路径」这件事本身，包括还没有测试驱动到的路径。
+// 反过来，本守卫是名字驱动的，看不见「伙伴间接改到某个 playerState」这条路，
+// 那一半由 TestCompanionPathsNeverTouchHungerState 承重。**两条不得只留一条。**
 func TestExhaustionTableIsNotWiredIntoCompanionCode(t *testing.T) {
 	banned := map[string]bool{
 		"applyExhaustion":               true,

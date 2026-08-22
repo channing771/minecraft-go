@@ -204,17 +204,19 @@ func TestStarvationStopsAtOneHealth(t *testing.T) {
 	if player.health != 1 {
 		t.Fatalf("第一个间隔后 health=%d，想要 1", player.health)
 	}
-	stepRegen(t, engine, id, 80)
-	if player.health != 1 {
-		t.Fatalf("第二个间隔后 health=%d，想要保持 1（饥饿伤害不致死）", player.health)
+	// 第二个间隔刻意**不**走 stepRegen：那个 helper 在玩家失去 Ready 时自己就
+	// t.Fatalf 了，「饿死」这个违规会红在 helper 里，诊断信息指向「失去 Ready」
+	// 而不是「止于 1」。这里直接推进，把红点留给下面两条显式断言。
+	for range 80 {
+		engine.Step()
+	}
+	if player.health != 1 || player.lifecycle != PlayerActive {
+		t.Fatalf("第二个间隔后 (health,lifecycle)=(%d,%d)，想要 (1,Active)："+
+			"饥饿伤害必须止于 1 点生命且不致死", player.health, player.lifecycle)
 	}
 	// 生命值触底后计时冻结，不是照推：否则一吃饱回血就会立刻结算一次积压伤害。
 	if player.starvationTicks != 0 {
 		t.Fatalf("触底后 starvationTicks=%d，想要冻结在 0", player.starvationTicks)
-	}
-	// 玩家必须仍然活着（没有被 settleDeaths 送进待重生）。
-	if player.lifecycle != PlayerActive {
-		t.Fatalf("饥饿伤害把玩家打死了: lifecycle=%d", player.lifecycle)
 	}
 	stepRegen(t, engine, id, 240)
 	if player.health != 1 || player.lifecycle != PlayerActive {
