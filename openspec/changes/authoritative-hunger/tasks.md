@@ -13,10 +13,10 @@
 
 ## 2. 玩家存档 v6 → v7
 
-- [ ] 2.1 `storage.PlayerSave` 加三字段;`currentPlayerSchema` 6 → 7;v6 读入迁移 `Hunger=20, Saturation=5000, Exhaustion=0`;v5→v6→v7 链仍可读;v8+ `ErrFutureVersion`。wire golden 与 fuzz 同步。验证:`go test ./internal/storage -race -count=1`
-- [ ] 2.2 sim ↔ storage 接线:登录读入三层、保存写出三层;重生回初值。覆盖「跨重启保留」「旧存档按初值迁移」「重生后饥饿回满」。验证:`go test ./internal/server ./internal/sim -race -count=1`
-- [ ] 2.3 **同组同步 `AGENTS.md`/`CLAUDE.md` 的玩家 schema 版本号**(两份逐字节相同)。验证:`go test ./internal/archcheck -count=1`
-- [ ] 2.4 变异验证:v6 迁移把 `Hunger` 初值改 0 → 「旧存档按初值迁移」红;保存路径漏写 `Saturation` → 「跨重启保留」红(夹具饱和非零)。
+- [x] 2.1 `storage.PlayerSave` 加三字段;`currentPlayerSchema` 6 → 7;v6 读入迁移 `Hunger=20, Saturation=5000, Exhaustion=0`;v5→v6→v7 链仍可读;v8+ `ErrFutureVersion`。wire golden 与 fuzz 同步。验证:`go test ./internal/storage -race -count=1`
+- [x] 2.2 sim ↔ storage 接线:登录读入三层、保存写出三层;重生回初值。覆盖「跨重启保留」「旧存档按初值迁移」「重生后饥饿回满」。验证:`go test ./internal/server ./internal/sim -race -count=1`
+- [x] 2.3 **同组同步 `AGENTS.md`/`CLAUDE.md` 的玩家 schema 版本号**(两份逐字节相同)。验证:`go test ./internal/archcheck -count=1`
+- [x] 2.4 变异验证:v6 迁移把 `Hunger` 初值改 0 → 「旧存档按初值迁移」红;保存路径漏写 `Saturation` → 「跨重启保留」红(夹具饱和非零)。
 
 ## 3. 协议 v23 → v24
 
