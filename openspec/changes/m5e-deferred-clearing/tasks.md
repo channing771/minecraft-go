@@ -43,5 +43,5 @@
 
 - [x] 4.1 `git fetch && git rebase origin/main`；整支终审四件套 + `openspec validate
   m5e-deferred-clearing --strict --no-interactive`。
-- [ ] 4.2 独立终审代理复核 D6 语义论证与三组提交；PR → 合并 → 归档
+- [x] 4.2 独立终审代理复核 D6 语义论证与三组提交；PR → 合并 → 归档
   （progress.md 小段 + 执行期欠账誊入「延期与放弃」）。
