@@ -2,7 +2,7 @@
 
 | task | implementer | spec review | quality review | iteration | ruling |
 |---|---|---|---|---:|---|
-| 1 | `/root/texture_task1_openspec` | rounds 1–2 findings closed；round 3 changes requested（1×P1），修复待复审 | rounds 1–2 findings closed；round 3 changes requested（visual-verification 主规格冲突），修复待复审 | 4 | 保留前两轮 override 与三 application 裁决；以完整 MODIFIED 重写主规格两项视觉 Requirement，默认材质改为内嵌默认+程序化回退，末尾统一 far-horizon/water-underwater，并允许既有 golden 因当前默认材质变化在完整复核后更新。 |
+| 1 | `/root/texture_task1_openspec` | PASS/CLEAN（round 4） | PASS/CLEAN（round 4） | 4 | 五项 P1 均关闭：用完整 MODIFIED 对账 voxel/HUD 与 visual-verification 主规格；用户 RGBA 与默认资产义务分域；golden 更新用两个 disposable control 加一个 fresh 正式 application，写盘前实际执行 near-band guard。 |
 | 2 | pending | pending | pending | 0 | pending |
 | 3 | pending | pending | pending | 0 | pending |
 | 4 | pending | pending | pending | 0 | pending |
