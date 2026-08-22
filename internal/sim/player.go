@@ -34,8 +34,8 @@ type PlayerUpdate struct {
 	// Oxygen 是本 tick 结束时的权威氧气，0..core.MaxOxygenTicks；同 Health，
 	// 只发布给玩家本人，不进入任何远端玩家消息。
 	Oxygen uint16
-	// Hunger 是本 tick 结束时的权威饥饿值，0..core.MaxHunger；同 Health 与
-	// Oxygen，只发布给玩家本人。三层饥饿状态里只有它随协议上线：饱和度与
+	// Hunger 是本 tick 结束时的权威饥饿值，0..`core.MaxHunger`；同 `Health` 与
+	// `Oxygen`，只发布给玩家本人。三层饥饿状态里只有它随协议上线：饱和度与
 	// 疲劳值是纯服务端推进量，界面不呈现。
 	Hunger uint8
 	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。

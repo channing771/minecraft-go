@@ -100,7 +100,7 @@ func TestDefaultOptions(t *testing.T) {
 	}
 }
 
-func TestServerProtocolV23IsCurrent(t *testing.T) {
+func TestServerProtocolV24IsCurrent(t *testing.T) {
 	if network.ProtocolVersion != 24 {
 		t.Fatalf("专用服务端协议版本 = %d，想要 24", network.ProtocolVersion)
 	}

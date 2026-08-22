@@ -7,24 +7,24 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// ProtocolVersion 是当前唯一支持的协议版本；v24 上线权威饥饿（PlayerInput
-// 多出 Eating 输入位、PlayerState 多出 Hunger 权威值），并拒绝 v23 及更早登录。
+// ProtocolVersion 是当前唯一支持的协议版本；v24 上线权威饥饿（`PlayerInput`
+// 多出 Eating 输入位、`PlayerState` 多出 Hunger 权威值），并拒绝 v23 及更早登录。
 //
 // v24 的两处变化都是既有 packet 的尾部追加，不新增消息类型、不新增
-// RejectReason，其余 packet 的 wire 形状与全部长度上限都不变：
+// `RejectReason`，其余 packet 的 wire 形状与全部长度上限都不变：
 //
-//   - PlayerInput（Play/C→S ID 0）末尾追加 1 字节 Eating，紧跟 Mining 之后。
+//   - `PlayerInput`（Play/C→S ID 0）末尾追加 1 字节 `Eating`，紧跟 `Mining` 之后。
 //     两者同形：客户端只声明按键意图，权威结算全在服务端。
-//   - PlayerState（Play/S→C ID 3）追加 1 字节 Hunger，落在 Oxygen 之后、
-//     WorldTimeTicks 之前。三层饥饿状态里只有饥饿值上线，饱和度与疲劳值
+//   - `PlayerState`（Play/S→C ID 3）追加 1 字节 `Hunger`，落在 `Oxygen` 之后、
+//     `WorldTimeTicks` 之前。三层饥饿状态里只有饥饿值上线，饱和度与疲劳值
 //     是纯服务端量、不占 wire 字段（design.md D6）。
 //
-// 历史：v23 在 LoginSuccess 追加 WorldSeed（u64，wire 上紧跟 PlayerID 之后），
+// 历史：v23 在 `LoginSuccess` 追加 `WorldSeed`（u64，wire 上紧跟 `PlayerID` 之后），
 // 供客户端确定性生成远环壳——该段在旧基线上原编号 v18，main 合并 fluid 系列
 // 已占用至 v21、authoritative-farming 合并后占用 v22，故整体重编为 v23；
-// v22 追加客户端翻地命令（Play/C→S 多出 ID 13 的 TillSoil，u64 序号 +
-// 两个 f32 朝向，与 OpenContainer 同形，拒绝路径全部复用既有 RejectReason）；
-// v21 在 PlayerState 末尾追加 2 字节权威氧气（只发给玩家本人的权威
+// v22 追加客户端翻地命令（Play/C→S 多出 ID 13 的 `TillSoil`，u64 序号 +
+// 两个 f32 朝向，与 `OpenContainer` 同形，拒绝路径全部复用既有 `RejectReason`）；
+// v21 在 `PlayerState` 末尾追加 2 字节权威氧气（只发给玩家本人的权威
 // 值）；v20 追加 8 个流体方块编号（只扩方块 ID 集合，wire 形状不变），流体
 // 变更走既有区块变更通道（design.md D8）。
 const ProtocolVersion uint32 = 24
