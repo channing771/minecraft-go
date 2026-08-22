@@ -91,6 +91,10 @@ type Config struct {
 	Sim     sim.Tunables     `json:"sim"`
 	Render  Render           `json:"render"`
 	AI      *AI              `json:"ai,omitempty"`
+	// TexturePackPath 是配置文件原文，供保存时无损往返。
+	TexturePackPath string `json:"texturePackPath,omitempty"`
+	// ResolvedTexturePackPath 是相对配置文件目录解析后的客户端启动路径。
+	ResolvedTexturePackPath string `json:"-"`
 
 	// FluidEnabled 控制世界生成是否在海平面及其以下注水（权威流体，变更
 	// authoritative-fluid）。它是独立顶层布尔开关，不进 Fields()/physics/sim
@@ -209,6 +213,27 @@ func decodeConfig(path string, contents []byte) (Config, error) {
 	if raw, ok := lookupCaseInsensitive(top, "ai"); ok {
 		if err := applyAI(&cfg, raw, path); err != nil {
 			return Config{}, fmt.Errorf("config: 解析 ai 字段: %w", err)
+		}
+	}
+	if raw, ok := lookupCaseInsensitive(top, "texturePackPath"); ok {
+		var texturePackPath *string
+		if err := json.Unmarshal(raw, &texturePackPath); err != nil {
+			return Config{}, fmt.Errorf("config: 解析 texturePackPath 字段: %w", err)
+		}
+		if texturePackPath == nil {
+			return Config{}, errors.New("config: 解析 texturePackPath 字段: 必须是字符串")
+		}
+		cfg.TexturePackPath = *texturePackPath
+		if cfg.TexturePackPath != "" {
+			if filepath.IsAbs(cfg.TexturePackPath) {
+				cfg.ResolvedTexturePackPath = filepath.Clean(cfg.TexturePackPath)
+			} else {
+				resolved, err := filepath.Abs(filepath.Join(filepath.Dir(path), cfg.TexturePackPath))
+				if err != nil {
+					return Config{}, fmt.Errorf("config: 解析 texturePackPath 字段: %w", err)
+				}
+				cfg.ResolvedTexturePackPath = resolved
+			}
 		}
 	}
 	// fluidEnabled 是独立顶层布尔字段，不经 applyGroups 的数值钳制路径：
@@ -815,7 +840,7 @@ func applyRenderLOD(render *Render, fields map[string]json.RawMessage) error {
 
 // warnUnknownTopLevel 对不认识的顶层分组名 slog.Warn。
 func warnUnknownTopLevel(top map[string]json.RawMessage) {
-	known := map[string]bool{"version": true, "logging": true, "physics": true, "sim": true, "render": true, "ai": true, "fluidenabled": true}
+	known := map[string]bool{"version": true, "logging": true, "physics": true, "sim": true, "render": true, "ai": true, "texturepackpath": true, "fluidenabled": true}
 	for key := range top {
 		if !known[strings.ToLower(key)] {
 			slog.Warn("配置项未知字段已忽略", "field", key)

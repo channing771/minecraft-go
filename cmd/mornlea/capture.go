@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"time"
@@ -400,20 +401,11 @@ const capturePinnedServerTick = 400
 // runCapture 依次跑完全部视觉场景。updateGolden 为真时把抓到的图写进 golden 基线；
 // 为假时与已有基线比对，超阈值的场景把实拍图与差异图写进 dir 并返回错误。
 func runCapture(app *application, dir string, updateGolden bool) error {
-	if width, height := app.framebufferSize(); width != captureWidth || height != captureHeight {
-		return fmt.Errorf("capture framebuffer=%dx%d，要求精确 %dx%d",
-			width, height, captureWidth, captureHeight)
-	}
-	if app.window != nil {
-		return fmt.Errorf("capture 需要无头 offscreen 渲染器,当前为窗口模式")
+	if err := prepareCaptureApplication(app); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("创建抓帧输出目录 %s: %w", dir, err)
-	}
-	// 复用 benchmark 的加载等待：同样的视距、同样的收敛判据。
-	// 抓帧不另设视距，否则图里所见与真实客户端所见就会分歧，golden 随之失去意义。
-	if _, err := waitUntilLoaded(app, 5*time.Minute); err != nil {
-		return fmt.Errorf("固定场景加载: %w", err)
 	}
 	// 用 errors.Join 累积每个场景的错误并跑完全部场景，而不是遇错即停：
 	// 着色器或格式类改动通常会让多个场景同时变红，只看到第一个红的场景
@@ -427,10 +419,86 @@ func runCapture(app *application, dir string, updateGolden bool) error {
 	return errors.Join(errs...)
 }
 
+func prepareCaptureApplication(app *application) error {
+	if err := validateCaptureApplication(app); err != nil {
+		return err
+	}
+	// 复用 benchmark 的加载等待：同样的视距、同样的收敛判据。
+	// 抓帧不另设视距，否则图里所见与真实客户端所见就会分歧，golden 随之失去意义。
+	if _, err := waitUntilLoaded(app, 5*time.Minute); err != nil {
+		return fmt.Errorf("固定场景加载: %w", err)
+	}
+	return nil
+}
+
+// validateCaptureApplication 检查无头 capture 的固定 framebuffer 契约。单
+// application 与 LOD on/off control 都必须在开始消费服务端快照前通过它。
+func validateCaptureApplication(app *application) error {
+	if width, height := app.framebufferSize(); width != captureWidth || height != captureHeight {
+		return fmt.Errorf("capture framebuffer=%dx%d，要求精确 %dx%d",
+			width, height, captureWidth, captureHeight)
+	}
+	if app.window != nil {
+		return fmt.Errorf("capture 需要无头 offscreen 渲染器,当前为窗口模式")
+	}
+	return nil
+}
+
+// prepareGoldenUpdateControls 在同一 goroutine 中交错推进两个 control 的
+// 初始加载。二者在构造后 Host 已开始发送完整快照，故不能先完整加载其中
+// 一个；否则另一侧的 bounded receiver 会在闲置时溢出。交错仅调用现有帧
+// 路径，不并发使用任何 renderer。
+func prepareGoldenUpdateControls(lodOn, lodOff *application) error {
+	for _, control := range []struct {
+		name string
+		app  *application
+	}{
+		{name: "LOD-on", app: lodOn},
+		{name: "LOD-off", app: lodOff},
+	} {
+		if err := validateCaptureApplication(control.app); err != nil {
+			return fmt.Errorf("%s control: %w", control.name, err)
+		}
+	}
+	if err := waitUntilLoadedPair(lodOn, lodOff, 5*time.Minute); err != nil {
+		return fmt.Errorf("固定场景加载: %w", err)
+	}
+	return nil
+}
+
 func captureOne(app *application, dir string, scene captureScene, updateGolden bool) error {
+	img, err := captureSceneImage(app, scene)
+	if err != nil {
+		return err
+	}
+	// 无条件把场景图写进 dir——不管比对通不通过、要不要更新基线。
+	// spec 要求 dir 里必须为每个场景产出一份与场景名同名的图像文件；
+	// 之前只在比对失败或更新基线时才写，比对通过的正常路径反而拿不到图看。
+	if err := writePNG(filepath.Join(dir, scene.Name+".png"), img); err != nil {
+		return fmt.Errorf("写出场景图 %s: %w", scene.Name, err)
+	}
+	if updateGolden {
+		goldenPath := filepath.Join(captureGoldenDir, scene.Name+".png")
+		if err := os.MkdirAll(captureGoldenDir, 0o755); err != nil {
+			return fmt.Errorf("创建 golden 基线目录 %s: %w", captureGoldenDir, err)
+		}
+		if err := writePNG(goldenPath, img); err != nil {
+			return err
+		}
+		fmt.Printf("已抓取场景 %s(写入基线)\n", scene.Name)
+		return nil
+	}
+	diff, err := compareAgainstGolden(captureGoldenDir, dir, scene.Name, img, captureThresholds)
+	fmt.Printf("已抓取场景 %s: %s\n", scene.Name, diff)
+	return err
+}
+
+// `captureSceneImage` 只完成既有场景的预热、状态装入、收敛和回读，不写文件。
+// update control 与正式 `captureOne` 共用它，保证两条路径没有第二套场景渲染逻辑。
+func captureSceneImage(app *application, scene captureScene) (*image.NRGBA, error) {
 	for i := 0; i < scene.WarmupFrames; i++ {
 		if _, err := app.frame(captureDrainMax, captureDrainMax, physics.FixedDelta); err != nil {
-			return fmt.Errorf("预热第 %d 帧: %w", i, err)
+			return nil, fmt.Errorf("预热第 %d 帧: %w", i, err)
 		}
 	}
 	// 最后一帧手工拆开 frame()：先收消息，再装入夹具并覆盖呈现状态，最后渲染。
@@ -438,16 +506,16 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 	app.drainServerMessages(captureDrainMax)
 	if scene.Prepare != nil {
 		if err := scene.Prepare(app); err != nil {
-			return fmt.Errorf("准备场景夹具: %w", err)
+			return nil, fmt.Errorf("准备场景夹具: %w", err)
 		}
 	}
 	if err := scene.Apply(app); err != nil {
-		return fmt.Errorf("应用场景状态: %w", err)
+		return nil, fmt.Errorf("应用场景状态: %w", err)
 	}
 	settleDeadline := time.Now().Add(captureSettleTimeout)
 	for i := 0; ; i++ {
 		if _, err := app.renderFrame(captureDrainMax); err != nil {
-			return fmt.Errorf("场景收敛第 %d 帧: %w", i, err)
+			return nil, fmt.Errorf("场景收敛第 %d 帧: %w", i, err)
 		}
 		stats, pending := app.mesher.Stats(), app.scheduler.PendingUploads()
 		// 远环收敛判据与近环同源：pending==0 且 worker 空闲（Busy 归零）。
@@ -460,7 +528,7 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 			break
 		}
 		if time.Now().After(settleDeadline) {
-			return fmt.Errorf("场景 %s 在 %s 内未收敛：mesher=%+v pending=%d lodBusy=%d",
+			return nil, fmt.Errorf("场景 %s 在 %s 内未收敛：mesher=%+v pending=%d lodBusy=%d",
 				scene.Name, captureSettleTimeout, stats, pending, lodBusy)
 		}
 	}
@@ -468,50 +536,73 @@ func captureOne(app *application, dir string, scene captureScene, updateGolden b
 	// 速度变化的量（帧间隔、权威 tick），在 Apply 里钉死会被它们重新覆盖。
 	if scene.PinVolatile != nil {
 		if err := scene.PinVolatile(app); err != nil {
-			return fmt.Errorf("钉住易变读数: %w", err)
+			return nil, fmt.Errorf("钉住易变读数: %w", err)
 		}
 	}
 	if _, err := app.renderFrame(captureDrainMax); err != nil {
-		return fmt.Errorf("渲染抓帧: %w", err)
+		return nil, fmt.Errorf("渲染抓帧: %w", err)
 	}
 	pixels := app.renderer.Readback()
-	img := bgraToNRGBA(pixels, captureWidth, captureHeight)
-	// 无条件把场景图写进 dir——不管比对通不通过、要不要更新基线。
-	// spec 要求 dir 里必须为每个场景产出一份与场景名同名的图像文件；
-	// 之前只在比对失败或更新基线时才写，比对通过的正常路径反而拿不到图看。
-	if err := writePNG(filepath.Join(dir, scene.Name+".png"), img); err != nil {
-		return fmt.Errorf("写出场景图 %s: %w", scene.Name, err)
+	return bgraToNRGBA(pixels, captureWidth, captureHeight), nil
+}
+
+// `runGoldenUpdateControl` 在两个 disposable application 上只抓取 far-horizon，
+// 并在调用方可能写入任一 golden 前完成当前 LOD on/off 帧的近环比较。
+func runGoldenUpdateControl(lodOn, lodOff *application, dir string) error {
+	if err := prepareGoldenUpdateControls(lodOn, lodOff); err != nil {
+		return err
 	}
-	if updateGolden {
-		// 近处不变断言(spec delta「golden 更新仅限远景带」的长期门禁):
-		// 覆盖旧基线之前,先与新帧在受保护行上做逐字节比对。LOD 只允许
-		// 改变远景带;近处内容若与旧基线不一致,说明本次改动误伤了近环
-		// 渲染,必须拒绝写盘而不是把回退固化成新基线。确属有意的近处
-		// 内容变更时,删除旧基线后重跑(显式动作),或同步修订本断言。
-		goldenPath := filepath.Join(captureGoldenDir, scene.Name+".png")
-		if old, err := readPNG(goldenPath); err == nil {
-			guard := newNearBandGuard(
-				app.camera, app.lodTileCenter,
-				lodNearTileRadius(app.render.ViewDistance),
-				lodFarTileRadius(app.render.ViewDistance, app.render.LodFarMultiplier),
-				app.lodScheduler != nil,
-			)
-			if guardErr := guard.assertUnchanged(scene.Name, old, img); guardErr != nil {
-				return fmt.Errorf("拒绝更新基线 %s: %w", goldenPath, guardErr)
-			}
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("读取旧基线 %s: %w", goldenPath, err)
-		}
-		if err := os.MkdirAll(captureGoldenDir, 0o755); err != nil {
-			return fmt.Errorf("创建 golden 基线目录 %s: %w", captureGoldenDir, err)
-		}
-		if err := writePNG(goldenPath, img); err != nil {
-			return err
-		}
-		fmt.Printf("已抓取场景 %s(写入基线,近处不变断言通过)\n", scene.Name)
-		return nil
+	return runGoldenUpdateControlWithCapture(
+		lodOn, lodOff, dir,
+		func(app *application, scene captureScene) (*image.NRGBA, error) {
+			return captureSceneImage(app, scene)
+		},
+	)
+}
+
+// `runGoldenUpdateControlWithCapture` 保留最小的抓帧 seam，让测试用合成当前帧
+// 覆盖 fail-closed guard；生产调用仍由 `runGoldenUpdateControl` 走真实完整链路。
+func runGoldenUpdateControlWithCapture(
+	lodOn, lodOff *application,
+	dir string,
+	capture func(*application, captureScene) (*image.NRGBA, error),
+) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("创建抓帧输出目录 %s: %w", dir, err)
 	}
-	diff, err := compareAgainstGolden(captureGoldenDir, dir, scene.Name, img, captureThresholds)
-	fmt.Printf("已抓取场景 %s: %s\n", scene.Name, diff)
-	return err
+	var farHorizon *captureScene
+	for index := range captureScenes {
+		if captureScenes[index].Name == "far-horizon" {
+			farHorizon = &captureScenes[index]
+			break
+		}
+	}
+	if farHorizon == nil {
+		return errors.New("视觉基线近环 control 缺少 far-horizon 场景")
+	}
+	lodOnFrame, err := capture(lodOn, *farHorizon)
+	if err != nil {
+		return fmt.Errorf("抓取 LOD-on control: %w", err)
+	}
+	if err := writePNG(filepath.Join(dir, "far-horizon-lod-on-control.png"), lodOnFrame); err != nil {
+		return fmt.Errorf("写出 LOD-on control: %w", err)
+	}
+	lodOffFrame, err := capture(lodOff, *farHorizon)
+	if err != nil {
+		return fmt.Errorf("抓取 LOD-off control: %w", err)
+	}
+	if err := writePNG(filepath.Join(dir, "far-horizon-lod-off-control.png"), lodOffFrame); err != nil {
+		return fmt.Errorf("写出 LOD-off control: %w", err)
+	}
+	guard := newNearBandGuard(
+		lodOn.camera, lodOn.lodTileCenter,
+		lodNearTileRadius(lodOn.render.ViewDistance),
+		lodFarTileRadius(lodOn.render.ViewDistance, lodOn.render.LodFarMultiplier),
+		lodOn.lodScheduler != nil,
+	)
+	if err := guard.assertUnchanged(farHorizon.Name, lodOffFrame, lodOnFrame); err != nil {
+		return err
+	}
+	fmt.Println("LOD on/off 近环 control 已执行并通过")
+	return nil
 }

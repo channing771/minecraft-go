@@ -47,6 +47,8 @@ type applicationOptions struct {
 	Render config.Render
 	// ConfigPath 是调试面板 F5 保存时的目标路径；只在 Dev 为真时使用。
 	ConfigPath string
+	// TexturePackPath 是客户端启动时读取的本地覆盖目录；空值只用内嵌默认材质。
+	TexturePackPath string
 	// FluidEnabled 是配置 fluidEnabled 的生效值，下传给本地权威世界的
 	// worldgen.New 门控海平面注水。远程连接模式下不使用它——世界内容由
 	// 服务端权威决定。

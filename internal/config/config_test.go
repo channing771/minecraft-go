@@ -3,6 +3,7 @@ package config_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -308,6 +309,137 @@ func TestFluidEnabledRejectsNonBoolValue(t *testing.T) {
 	path := writeConfig(t, `{"version":1,"fluidEnabled":"yes"}`)
 	if _, err := config.Load(path); err == nil {
 		t.Fatal("fluidEnabled 非布尔值必须报错")
+	}
+}
+
+func TestTexturePackDefaultsAreDisabled(t *testing.T) {
+	defaults := config.Defaults()
+	if defaults.TexturePackPath != "" || defaults.ResolvedTexturePackPath != "" {
+		t.Fatalf("默认材质包路径 = raw %q, resolved %q，want 均为空",
+			defaults.TexturePackPath, defaults.ResolvedTexturePackPath)
+	}
+}
+
+func TestTexturePackPathLoadsRelativeToConfigFile(t *testing.T) {
+	path := writeConfig(t, `{"version":1,"texturePackPath":"packs/local"}`)
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	wantResolved, err := filepath.Abs(filepath.Join(filepath.Dir(path), "packs/local"))
+	if err != nil {
+		t.Fatalf("filepath.Abs: %v", err)
+	}
+	if loaded.TexturePackPath != "packs/local" {
+		t.Fatalf("TexturePackPath = %q，want %q", loaded.TexturePackPath, "packs/local")
+	}
+	if loaded.ResolvedTexturePackPath != wantResolved {
+		t.Fatalf("ResolvedTexturePackPath = %q，want %q", loaded.ResolvedTexturePackPath, wantResolved)
+	}
+}
+
+func TestTexturePackAbsoluteAndEmptyPaths(t *testing.T) {
+	t.Run("绝对路径清理后使用", func(t *testing.T) {
+		raw := filepath.Join(t.TempDir(), "packs") + string(filepath.Separator) + ".." +
+			string(filepath.Separator) + "local"
+		path := writeConfig(t, fmt.Sprintf(`{"version":1,"texturePackPath":%q}`, raw))
+		loaded, err := config.Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if loaded.TexturePackPath != raw {
+			t.Fatalf("TexturePackPath = %q，want 原文 %q", loaded.TexturePackPath, raw)
+		}
+		if loaded.ResolvedTexturePackPath != filepath.Clean(raw) {
+			t.Fatalf("ResolvedTexturePackPath = %q，want %q",
+				loaded.ResolvedTexturePackPath, filepath.Clean(raw))
+		}
+	})
+
+	t.Run("空值禁用覆盖", func(t *testing.T) {
+		loaded, err := config.Load(writeConfig(t, `{"version":1,"texturePackPath":""}`))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if loaded.TexturePackPath != "" || loaded.ResolvedTexturePackPath != "" {
+			t.Fatalf("空值解析为 raw %q, resolved %q，want 均为空",
+				loaded.TexturePackPath, loaded.ResolvedTexturePackPath)
+		}
+	})
+}
+
+func TestTexturePackPathRejectsNonString(t *testing.T) {
+	for _, value := range []string{"7", "null"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := config.Load(writeConfig(t, `{"version":1,"texturePackPath":`+value+`}`))
+			if err == nil || !strings.Contains(err.Error(), "解析 texturePackPath 字段") {
+				t.Fatalf("Load error = %v，want texturePackPath 字段上下文", err)
+			}
+		})
+	}
+}
+
+func TestTexturePackSaveWritesOnlyRawPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := config.Defaults()
+	cfg.TexturePackPath = "packs/local"
+	cfg.ResolvedTexturePackPath = filepath.Join(t.TempDir(), "resolved-must-not-be-saved")
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var written map[string]json.RawMessage
+	if err := json.Unmarshal(body, &written); err != nil {
+		t.Fatalf("保存产物不是合法 JSON: %v", err)
+	}
+	if got := string(written["texturePackPath"]); got != `"packs/local"` {
+		t.Fatalf("保存的 texturePackPath = %s，want %q", got, "packs/local")
+	}
+	if _, exists := written["resolvedTexturePackPath"]; exists || bytes.Contains(body, []byte(cfg.ResolvedTexturePackPath)) {
+		t.Fatalf("保存产物泄漏解析后路径: %s", body)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.TexturePackPath != "packs/local" {
+		t.Fatalf("往返后的 TexturePackPath = %q，want %q", loaded.TexturePackPath, "packs/local")
+	}
+	wantResolved, err := filepath.Abs(filepath.Join(filepath.Dir(path), "packs/local"))
+	if err != nil {
+		t.Fatalf("filepath.Abs: %v", err)
+	}
+	if loaded.ResolvedTexturePackPath != wantResolved {
+		t.Fatalf("往返后的 ResolvedTexturePackPath = %q，want %q",
+			loaded.ResolvedTexturePackPath, wantResolved)
+	}
+}
+
+func TestTexturePackPathIsKnownButNotNumeric(t *testing.T) {
+	previous := slog.Default()
+	var records bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&records, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	if _, err := config.Load(writeConfig(t, `{"version":1,"texturePackPath":"packs/local"}`)); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if strings.Contains(records.String(), `"field":"texturePackPath"`) {
+		t.Fatalf("已识别 texturePackPath 不得触发未知字段告警: %s", records.String())
+	}
+	for _, field := range config.Fields() {
+		if strings.EqualFold(field.Name, "texturePackPath") {
+			t.Fatalf("texturePackPath 不得进入数值 Fields: %+v", field)
+		}
+	}
+}
+
+func TestTexturePackPathKeepsConfigVersionOne(t *testing.T) {
+	if config.CurrentVersion != 1 {
+		t.Fatalf("CurrentVersion = %d，want 1", config.CurrentVersion)
 	}
 }
 

@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 
-	"github.com/channing771/mornlea/internal/assets"
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
@@ -73,6 +72,13 @@ func newApplicationWithDependencies(
 	}
 	if dependencies.newOffscreenRenderer == nil {
 		dependencies.newOffscreenRenderer = client.NewRenderer
+	}
+	if dependencies.newRegistry == nil {
+		dependencies.newRegistry = defaultApplicationDependencies().newRegistry
+	}
+	reg, registryErr := dependencies.newRegistry(options.TexturePackPath)
+	if registryErr != nil {
+		return nil, fmt.Errorf("加载材质包 %q: %w", options.TexturePackPath, registryErr)
 	}
 	ctx := context.Background()
 	var store storage.WorldStore
@@ -192,7 +198,6 @@ func newApplicationWithDependencies(
 		return nil, errors.Join(err, connectionErr)
 	}
 
-	reg := assets.NewRegistry()
 	camera := client.Camera{
 		Pos:    mgl32.Vec3{0, 110, 0},
 		Pitch:  -0.25,

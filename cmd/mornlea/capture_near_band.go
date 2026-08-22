@@ -65,9 +65,9 @@ func lodMaxShellDistance(outer int) float64 {
 	return math.Sqrt2 * float64(int64(outer)+1) * lodTileBlocks
 }
 
-// nearBandGuard 是「近处像素不变」断言(spec delta「golden 更新仅限
-// 远景带」)的可执行形态:golden 重生成时,新帧与旧基线在受保护行上
-// 必须逐字节一致,差异只允许出现在远景带。
+// `nearBandGuard` 是「近处像素不变」断言(spec delta「golden 更新仅限
+// 远景带」)的可执行形态:golden 重生成前,同一当前 registry 的 LOD-off
+// 与 LOD-on control 帧在受保护行上必须逐字节一致,差异只允许出现在远景带。
 //
 // 双侧保护都是纯几何推导、对任意种子成立。壳内容只出现在远环带
 // (水平距离 ∈ [`lodMinShellDistance`, `lodMaxShellDistance`]),高度 ∈
@@ -77,13 +77,13 @@ func lodMaxShellDistance(outer int) float64 {
 //   - 上行截止 topCut:相机低于壳上界时 = atan((shellTop − camY)/minDist)
 //     (最近距离上的最高壳);相机不低于壳上界时壳恒在地平线之下、随
 //     距离无限趋近地平线,上确界为 0。仰角严格大于 topCut 的像素不可能
-//     包含壳(天空、云或高处的近环内容),必须与旧基线逐字节一致。
+//     包含壳(天空、云或高处的近环内容),LOD-off/on control 必须逐字节一致。
 //   - 下行截止 bottomCut:相机高于壳下界时 = atan((shellBottom − camY)/
 //     minDist)——负高度差在最近距离处仰角最低(注意:这里必须用
 //     minDist 而不是 maxDist,最近处的最低壳片比远处的更低);相机
 //     不高于壳下界时 = atan((shellBottom − camY)/maxDist)(正高度差
 //     在最远处仰角最低)。仰角严格低于 bottomCut 的像素(下半屏的
-//     近场地表)同样不可能包含壳,必须逐字节一致——这正是修复循环
+//     近场地表)同样不可能包含壳,两张 control 帧必须逐字节一致——这正是修复循环
 //     第 1 轮补上的半边:只保护顶部行时,内盘壳 poke 出地表遮挡近处
 //     mesh 那类回归(差异遍布下半屏)会被静默固化进 golden。
 //
@@ -178,18 +178,18 @@ func (g nearBandGuard) protectedRowSpans(height int) (topRows, bottomRows int) {
 	return topRows, bottomRows
 }
 
-// assertUnchanged 断言 fresh 与 old 在受保护行(顶部仰角高于上行截止、
-// 底部仰角低于下行截止)上 RGB 逐字节一致(alpha 在抓帧时恒为 255,无
-// 信息量)。违反时返回带场景名、受保护区间与首个差异像素的错误;尺寸
-// 不匹配同样视为违反(基线形态变了必须显式重立);壳距离推导退化时
-// fail-closed 直接拒绝。
-func (g nearBandGuard) assertUnchanged(scene string, old, fresh *image.NRGBA) error {
-	if old.Bounds() != fresh.Bounds() {
-		return fmt.Errorf("近处不变断言(%s): 图像尺寸不匹配 old=%v fresh=%v",
-			scene, old.Bounds(), fresh.Bounds())
+// `assertUnchanged` 断言当前同 registry 的 lodOff 与 lodOn control 帧在
+// 受保护行(顶部仰角高于上行截止、底部仰角低于下行截止)上 RGB 逐字节一致
+// (alpha 在抓帧时恒为 255,无信息量)。违反时返回带场景名、受保护区间与首个差异像素的错误;尺寸
+// 不匹配同样视为违反(control 形态不等价);壳距离推导退化时 fail-closed
+// 直接拒绝。
+func (g nearBandGuard) assertUnchanged(scene string, lodOff, lodOn *image.NRGBA) error {
+	if lodOff.Bounds() != lodOn.Bounds() {
+		return fmt.Errorf("近处不变断言(%s): 图像尺寸不匹配 lodOff=%v lodOn=%v",
+			scene, lodOff.Bounds(), lodOn.Bounds())
 	}
 	if !g.shellWired {
-		diffPixels, firstX, firstY := compareNRGBARows(old, fresh, 0, fresh.Bounds().Dy())
+		diffPixels, firstX, firstY := compareNRGBARows(lodOff, lodOn, 0, lodOn.Bounds().Dy())
 		if diffPixels > 0 {
 			return fmt.Errorf(
 				"近处不变断言(%s): 未接线 LOD 要求全图一致,差异像素 %d,首个在 (%d,%d)",
@@ -202,11 +202,11 @@ func (g nearBandGuard) assertUnchanged(scene string, old, fresh *image.NRGBA) er
 			"近处不变断言(%s): 壳最近距离推导退化(shellDist=%v),无法证明任何行无壳,拒绝更新基线",
 			scene, g.shellDist)
 	}
-	height := fresh.Bounds().Dy()
+	height := lodOn.Bounds().Dy()
 	topRows, bottomRows := g.protectedRowSpans(height)
-	diffPixels, firstX, firstY := compareNRGBARows(old, fresh, 0, topRows)
+	diffPixels, firstX, firstY := compareNRGBARows(lodOff, lodOn, 0, topRows)
 	if diffPixels == 0 && bottomRows > 0 {
-		diffPixels, firstX, firstY = compareNRGBARows(old, fresh, height-bottomRows, height)
+		diffPixels, firstX, firstY = compareNRGBARows(lodOff, lodOn, height-bottomRows, height)
 	}
 	if diffPixels > 0 {
 		return fmt.Errorf(
@@ -216,16 +216,16 @@ func (g nearBandGuard) assertUnchanged(scene string, old, fresh *image.NRGBA) er
 	return nil
 }
 
-// compareNRGBARows 在行区间 [y0, y1) 内逐像素比较 RGB,返回差异像素数
+// `compareNRGBARows` 在行区间 [y0, y1) 内逐像素比较 RGB,返回差异像素数
 // 与首个差异位置(无差异时 firstX < 0)。
-func compareNRGBARows(old, fresh *image.NRGBA, y0, y1 int) (diffPixels, firstX, firstY int) {
+func compareNRGBARows(lodOff, lodOn *image.NRGBA, y0, y1 int) (diffPixels, firstX, firstY int) {
 	firstX, firstY = -1, -1
 	for y := y0; y < y1; y++ {
-		for x := 0; x < fresh.Bounds().Dx(); x++ {
-			oi, fi := old.PixOffset(x, y), fresh.PixOffset(x, y)
-			if old.Pix[oi] != fresh.Pix[fi] ||
-				old.Pix[oi+1] != fresh.Pix[fi+1] ||
-				old.Pix[oi+2] != fresh.Pix[fi+2] {
+		for x := 0; x < lodOn.Bounds().Dx(); x++ {
+			offIndex, onIndex := lodOff.PixOffset(x, y), lodOn.PixOffset(x, y)
+			if lodOff.Pix[offIndex] != lodOn.Pix[onIndex] ||
+				lodOff.Pix[offIndex+1] != lodOn.Pix[onIndex+1] ||
+				lodOff.Pix[offIndex+2] != lodOn.Pix[onIndex+2] {
 				diffPixels++
 				if firstX < 0 {
 					firstX, firstY = x, y

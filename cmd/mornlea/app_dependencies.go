@@ -5,7 +5,9 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 
+	"github.com/channing771/mornlea/internal/assets"
 	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
@@ -14,8 +16,9 @@ import (
 )
 
 type applicationDependencies struct {
-	openStore func(context.Context, applicationOptions) (storage.WorldStore, error)
-	dialTCP   func(context.Context, string) (network.ClientPacketStream, error)
+	newRegistry func(string) (*assets.Registry, error)
+	openStore   func(context.Context, applicationOptions) (storage.WorldStore, error)
+	dialTCP     func(context.Context, string) (network.ClientPacketStream, error)
 	// loginClient 执行客户端登录并额外返回 LoginSuccess.WorldSeed——远环
 	// LOD 的播种种子经它在装配点流入(单机与 TCP 远程共用同一登录路径)。
 	loginClient          func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, uint64, error)
@@ -29,6 +32,12 @@ type applicationDependencies struct {
 
 func defaultApplicationDependencies() applicationDependencies {
 	return applicationDependencies{
+		newRegistry: func(path string) (*assets.Registry, error) {
+			if path == "" {
+				return assets.NewDefaultRegistry(), nil
+			}
+			return assets.NewRegistryWithOverride(os.DirFS(path))
+		},
 		openStore:   openApplicationStore,
 		dialTCP:     network.DialTCP,
 		loginClient: network.LoginClientWithSeed,

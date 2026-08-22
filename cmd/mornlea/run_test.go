@@ -7,8 +7,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
+	"github.com/channing771/mornlea/internal/client"
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
@@ -17,6 +19,166 @@ import (
 	"github.com/channing771/mornlea/internal/server"
 	"github.com/channing771/mornlea/internal/storage"
 )
+
+func newRunTestApplication(events *[]string, name string) *application {
+	return &application{
+		itemDrops: client.NewItemDrops(),
+		releaseResources: func() {
+			*events = append(*events, "close "+name)
+		},
+	}
+}
+
+func TestTextureGoldenUpdateUsesDisposableControlsBeforeFreshCapture(t *testing.T) {
+	var events []string
+	var applications []*application
+	var gotOptions []applicationOptions
+	dependencies := runDependencies{
+		loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+		newApplication: func(options applicationOptions) (*application, error) {
+			name := string(rune('0' + len(applications)))
+			events = append(events, "new "+name)
+			app := newRunTestApplication(&events, name)
+			applications = append(applications, app)
+			gotOptions = append(gotOptions, options)
+			return app, nil
+		},
+		runGoldenUpdateControl: func(lodOn, lodOff *application, _ string) error {
+			events = append(events, "control")
+			if len(applications) != 2 || lodOn != applications[0] || lodOff != applications[1] {
+				t.Fatalf("control applications = (%p, %p)，want 前两次构造结果", lodOn, lodOff)
+			}
+			return nil
+		},
+		runCapture: func(app *application, _ string, update bool) error {
+			events = append(events, "formal")
+			if !update || len(applications) != 3 || app != applications[2] {
+				t.Fatalf("formal capture app=%p update=%v，want fresh 第三次构造结果", app, update)
+			}
+			return nil
+		},
+	}
+
+	err := runWithDependencies(
+		append([]string{"--capture", t.TempDir(), "--update-golden"}, absentConfigArgs(t)...),
+		dependencies,
+	)
+	if err != nil {
+		t.Fatalf("runWithDependencies: %v", err)
+	}
+	if len(gotOptions) != 3 {
+		t.Fatalf("application 构造次数 = %d，want 3", len(gotOptions))
+	}
+	if !gotOptions[0].Render.LodEnabled || gotOptions[1].Render.LodEnabled || !gotOptions[2].Render.LodEnabled {
+		t.Fatalf("LodEnabled 序列 = [%v %v %v]，want [true false true]",
+			gotOptions[0].Render.LodEnabled, gotOptions[1].Render.LodEnabled, gotOptions[2].Render.LodEnabled)
+	}
+	normalized := gotOptions[1]
+	normalized.Render.LodEnabled = true
+	if !reflect.DeepEqual(gotOptions[0], normalized) || !reflect.DeepEqual(gotOptions[0], gotOptions[2]) {
+		t.Fatalf("三个 application options 除 control-off 的 LodEnabled 外不等价:\non=%+v\noff=%+v\nformal=%+v",
+			gotOptions[0], gotOptions[1], gotOptions[2])
+	}
+	if gotOptions[0].TexturePackPath != "" || gotOptions[0].Seed != 42 {
+		t.Fatalf("control 未使用内嵌默认/固定 seed: path=%q seed=%d",
+			gotOptions[0].TexturePackPath, gotOptions[0].Seed)
+	}
+	wantEvents := []string{
+		"new 0", "new 1", "control", "close 1", "close 0", "new 2", "formal", "close 2",
+	}
+	if !reflect.DeepEqual(events, wantEvents) {
+		t.Fatalf("事件顺序 = %v，want %v", events, wantEvents)
+	}
+}
+
+func TestTextureGoldenUpdateClosesConstructedApplicationsOnEveryFailure(t *testing.T) {
+	constructionErr := errors.New("construction failed")
+	controlErr := errors.New("control failed")
+	captureErr := errors.New("capture failed")
+	for _, test := range []struct {
+		name              string
+		failConstruction  int
+		controlErr        error
+		captureErr        error
+		wantConstructed   int
+		wantClosed        int
+		wantFormalCapture bool
+		wantErr           error
+	}{
+		{name: "第二个 control 构造失败", failConstruction: 2, wantConstructed: 1, wantClosed: 1, wantErr: constructionErr},
+		{name: "guard 失败", controlErr: controlErr, wantConstructed: 2, wantClosed: 2, wantErr: controlErr},
+		{name: "fresh 正式 application 构造失败", failConstruction: 3, wantConstructed: 2, wantClosed: 2, wantErr: constructionErr},
+		{name: "正式 capture 失败", captureErr: captureErr, wantConstructed: 3, wantClosed: 3, wantFormalCapture: true, wantErr: captureErr},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			constructed, closed, formalCapture := 0, 0, false
+			err := runWithDependencies(
+				append([]string{"--capture", t.TempDir(), "--update-golden"}, absentConfigArgs(t)...),
+				runDependencies{
+					loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+					newApplication: func(applicationOptions) (*application, error) {
+						if constructed+1 == test.failConstruction {
+							return nil, constructionErr
+						}
+						constructed++
+						return &application{
+							itemDrops:        client.NewItemDrops(),
+							releaseResources: func() { closed++ },
+						}, nil
+					},
+					runGoldenUpdateControl: func(*application, *application, string) error {
+						return test.controlErr
+					},
+					runCapture: func(*application, string, bool) error {
+						formalCapture = true
+						return test.captureErr
+					},
+				},
+			)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("error = %v，want %v", err, test.wantErr)
+			}
+			if constructed != test.wantConstructed || closed != test.wantClosed {
+				t.Fatalf("constructed=%d closed=%d，want %d/%d",
+					constructed, closed, test.wantConstructed, test.wantClosed)
+			}
+			if formalCapture != test.wantFormalCapture {
+				t.Fatalf("formal capture=%v，want %v", formalCapture, test.wantFormalCapture)
+			}
+		})
+	}
+}
+
+func TestRunOrdinaryCaptureUsesOneApplicationWithoutGoldenControl(t *testing.T) {
+	constructed, closed, captured := 0, 0, 0
+	err := runWithDependencies(
+		append([]string{"--capture", t.TempDir()}, absentConfigArgs(t)...),
+		runDependencies{
+			loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+			newApplication: func(applicationOptions) (*application, error) {
+				constructed++
+				return &application{
+					itemDrops:        client.NewItemDrops(),
+					releaseResources: func() { closed++ },
+				}, nil
+			},
+			runGoldenUpdateControl: func(*application, *application, string) error {
+				t.Fatal("ordinary capture 不得运行 golden update control")
+				return nil
+			},
+			runCapture: func(*application, string, bool) error {
+				captured++
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("runWithDependencies: %v", err)
+	}
+	if constructed != 1 || captured != 1 || closed != 1 {
+		t.Fatalf("constructed=%d captured=%d closed=%d，want 1/1/1", constructed, captured, closed)
+	}
+}
 
 // absentConfigArgs 返回指向本次测试临时目录下一个不存在文件的 --config 参数。
 // 它让普通运行测试走显式 config.Load 的 Defaults 回落，避免读写开发者的默认目录。
@@ -130,6 +292,79 @@ func TestRunWithDependenciesAlwaysEnablesDevForCapture(t *testing.T) {
 			}
 			if !gotDev {
 				t.Fatal("--capture 必须构造面板渲染器：options.Dev = false，debug-panel 场景会拍到空画面")
+			}
+		})
+	}
+}
+
+func TestRunPassesResolvedTexturePackPathToLocalAndRemoteClients(t *testing.T) {
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "config.json")
+	cfg := config.Defaults()
+	cfg.TexturePackPath = "packs/local"
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	wantPath := filepath.Join(configDir, "packs/local")
+
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "本地", args: []string{"--config", configPath}},
+		{name: "远程", args: []string{"--config", configPath, "--connect", "127.0.0.1:25565"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var gotPath string
+			err := runWithDependencies(test.args, runDependencies{
+				loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+				newApplication: func(options applicationOptions) (*application, error) {
+					gotPath = options.TexturePackPath
+					return nil, errors.New("stop before window")
+				},
+			})
+			if err == nil {
+				t.Fatal("runWithDependencies succeeded, want construction error")
+			}
+			if gotPath != wantPath {
+				t.Fatalf("TexturePackPath = %q，want %q", gotPath, wantPath)
+			}
+		})
+	}
+}
+
+func TestRunAutomationTexturePackIsolation(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := config.Defaults()
+	cfg.TexturePackPath = "packs/local"
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "benchmark",
+			args: []string{"--config", configPath, "--benchmark", "--perf-output", filepath.Join(t.TempDir(), "perf.json")},
+		},
+		{name: "capture", args: []string{"--config", configPath, "--capture", t.TempDir()}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var gotPath string
+			err := runWithDependencies(test.args, runDependencies{
+				loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+				newApplication: func(options applicationOptions) (*application, error) {
+					gotPath = options.TexturePackPath
+					return nil, errors.New("stop before window")
+				},
+			})
+			if err == nil {
+				t.Fatal("runWithDependencies succeeded, want construction error")
+			}
+			if gotPath != "" {
+				t.Fatalf("TexturePackPath = %q，want empty", gotPath)
 			}
 		})
 	}

@@ -65,6 +65,53 @@ const (
 	layerCount
 )
 
+type textureBinding struct {
+	name  string
+	layer uint16
+}
+
+var textureBindings = [...]textureBinding{
+	{name: "stone", layer: LayerStone},
+	{name: "dirt", layer: LayerDirt},
+	{name: "grass_top", layer: LayerGrassTop},
+	{name: "grass_side", layer: LayerGrassSide},
+	{name: "bedrock", layer: LayerBedrock},
+	{name: "stone_brick", layer: LayerStoneBrick},
+	{name: "coal_ore", layer: LayerCoalOre},
+	{name: "iron_ore", layer: LayerIronOre},
+	{name: "furnace", layer: LayerFurnace},
+	{name: "iron_block", layer: LayerIronBlock},
+	{name: "chest", layer: LayerChest},
+	{name: "light_block", layer: LayerLightBlock},
+	{name: "leaves", layer: LayerLeaves},
+	{name: "glass", layer: LayerGlass},
+	{name: "cobblestone", layer: LayerCobblestone},
+	{name: "smooth_stone", layer: LayerSmoothStone},
+	{name: "sand", layer: LayerSand},
+	{name: "gravel", layer: LayerGravel},
+	{name: "oak_log_side", layer: LayerOakLogSide},
+	{name: "oak_log_top", layer: LayerOakLogTop},
+	{name: "oak_planks", layer: LayerOakPlanks},
+	{name: "brick", layer: LayerBrick},
+	{name: "white_wool", layer: LayerWhiteWool},
+	{name: "roof_tile", layer: LayerRoofTile},
+	{name: "clay", layer: LayerClay},
+	{name: "snow_top", layer: LayerSnowTop},
+	{name: "snow_side", layer: LayerSnowSide},
+	{name: "mossy_cobblestone", layer: LayerMossyCobblestone},
+	{name: "water", layer: LayerWater},
+	{name: "farmland_dry", layer: LayerFarmlandDry},
+	{name: "farmland_wet", layer: LayerFarmlandWet},
+	{name: "wheat_0", layer: LayerWheat0},
+	{name: "wheat_1", layer: LayerWheat1},
+	{name: "wheat_2", layer: LayerWheat2},
+	{name: "wheat_3", layer: LayerWheat3},
+	{name: "wheat_4", layer: LayerWheat4},
+	{name: "wheat_5", layer: LayerWheat5},
+	{name: "wheat_6", layer: LayerWheat6},
+	{name: "wheat_7", layer: LayerWheat7},
+}
+
 // Registry 是方块属性与材质的注册表。
 type Registry struct {
 	layers       [layerCount][]byte
