@@ -6,7 +6,9 @@
 //     step() 的 advanceCompanionTasks、drainIncomingChats 的入队、Shutdown
 //     的冻结段；
 //   - worker goroutine 只持有不可变值（PlanSnapshot、PathGrid），经有界
-//     channel 回送结果；channel 与 semaphore 是它们触碰的全部共享状态；
+//     channel 回送结果；channel 与 semaphore 是它们触碰的全部共享状态，
+//     模型槽名额在模型调用返回后、结果发送前显式释放（`plannerWorker` 与
+//     `dialogueWorker` 的函数内注释有时序论证）；
 //   - 结果只在 tick 边界非阻塞接收，世代或状态不符即丢弃。
 //
 // channel 容量论证：plannerResults 与 pathResults 容量 4——在途上限由
@@ -897,15 +899,22 @@ func (m *companionManager) dispatchPlanning() {
 }
 
 // plannerWorker 在 worker goroutine 上调用模型：只读不可变快照，结果经有界
-// channel 回 tick 边界；ctx 取消（关服）时放弃结果并释放并发名额。
+// channel 回 tick 边界；ctx 取消（关服）时放弃结果；并发名额在模型调用返回
+// 后、结果发送前释放（时序论证见函数内注释）。
 func (m *companionManager) plannerWorker(
 	id companion.ID,
 	generation uint64,
 	snapshot companion.PlanSnapshot,
 ) {
 	defer m.waitGroup.Done()
-	defer func() { <-m.semaphore }()
 	plan, err := m.planner.Plan(m.ctx, snapshot)
+	// 释放先于发送：`m.semaphore` 约束的是在途模型调用数，`Plan` 返回即调用
+	// 结束、名额自此可复用，结果投递只是队列簿记。若先发送再经 defer 释放，
+	// 两者之间没有屏障，tick 线程 try-acquire 的成败便依赖 goroutine 调度
+	// （ns 级残余窗口，M5E 递延 8 记录的成因）；前移后「任何观察者看到结果
+	// 之前名额已归还」成为严格事实，ctx 取消路径行为不变（取消时同样先
+	// 释放、发送走 `<-m.ctx.Done()` 分支放弃结果）。
+	<-m.semaphore
 	outcome := plannerOutcome{id: id, generation: generation, plan: plan, err: err}
 	select {
 	case m.plannerResults <- outcome:

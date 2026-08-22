@@ -55,7 +55,8 @@ type dialogueOutcome struct {
 // m.cancel 的调用契约：只在关服序列（beginShutdown/close）被调用，tick 路径
 // 绝不调用——dialogueInFlight 的清除只能来自 tick 边界的结果应用
 // （applyDialogueOutcome）或进程退出，关服 cancel 令在途 worker 经 ctx.Done
-// 放弃结果并释放共享槽（D5 评审 Minor-5 的显式化）。
+// 放弃结果（共享槽已在模型调用返回后、结果发送前释放，见 `dialogueWorker`）
+// （D5 评审 Minor-5 的显式化）。
 func (m *companionManager) requestDialogue(id companion.ID, node companion.DialogueNode) {
 	slot := m.slots[id]
 	if slot == nil {
@@ -106,9 +107,10 @@ func (m *companionManager) requestDialogue(id companion.ID, node companion.Dialo
 }
 
 // dialogueWorker 在 worker goroutine 上调用模型：只读不可变请求值，结果经
-// 有界 channel 回 tick 边界。ctx 取消（仅关服序列调用 m.cancel）时放弃结果
-// 并释放共享槽——HTTP 调用直接使用 m.ctx，beginShutdown 的 cancel 同时取消
-// 在途模型请求；tick 路径没有任何取消路径（见 requestDialogue 的契约注释）。
+// 有界 channel 回 tick 边界。ctx 取消（仅关服序列调用 m.cancel）时放弃结果；
+// 共享槽在模型调用返回后、结果发送前释放（时序论证见函数内注释）——HTTP
+// 调用直接使用 m.ctx，beginShutdown 的 cancel 同时取消在途模型请求；tick
+// 路径没有任何取消路径（见 requestDialogue 的契约注释）。
 func (m *companionManager) dialogueWorker(
 	id companion.ID,
 	generation uint64,
@@ -117,9 +119,15 @@ func (m *companionManager) dialogueWorker(
 	request companion.DialogueRequest,
 ) {
 	defer m.waitGroup.Done()
-	defer func() { <-m.semaphore }()
 	terminal := node.Kind == companion.DialogueNodeTerminal
 	line, summary, err := m.dialogue.Do(m.ctx, request, terminal)
+	// 释放先于发送：`m.semaphore` 约束的是在途模型调用数，`m.dialogue.Do` 返回
+	// 即调用结束、名额自此可复用，结果投递只是队列簿记。若先发送再经 defer
+	// 释放，两者之间没有屏障，tick 线程 try-acquire 的成败便依赖 goroutine
+	// 调度（ns 级残余窗口，M5E 递延 8 记录的成因）；前移后「任何观察者看到
+	// 结果之前名额已归还」成为严格事实，ctx 取消路径行为不变（取消时同样
+	// 先释放、发送走 `<-m.ctx.Done()` 分支放弃结果）。
+	<-m.semaphore
 	outcome := dialogueOutcome{
 		id: id, generation: generation, node: node, issuer: issuer,
 		line: line, summary: summary, err: err,

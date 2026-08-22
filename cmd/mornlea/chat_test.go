@@ -436,6 +436,27 @@ func TestChatEventFormattingIsStableForAcceptedInvalidAndUnknown(t *testing.T) {
 	}
 }
 
+// TestFormatChatEventUnknownKindFallsBackToNeutralLine 直接构造 wire 校验不可
+// 达的未知 kind 与未知拒绝理由，锁定 `formatChatEvent` 的防御兜底「未知事件」
+// （M5E 递延 3 的清偿）：kind switch 无 default 子句，未知 kind 落入二级
+// reason switch 的 default；未来新增 kind/reason 漏加 case 时本测试守住
+// 「宁可中性占位行也不静默复用其他行格式」的 E9/C2 契约。
+func TestFormatChatEventUnknownKindFallsBackToNeutralLine(t *testing.T) {
+	unknownKind := network.ChatEvent{
+		Kind: network.ChatEventKind(200), CompanionName: "阿木", Command: "挖石头",
+	}
+	if got, want := formatChatEvent(unknownKind), "未知事件"; got != want {
+		t.Fatalf("formatChatEvent(未知 kind) = %q, want %q", got, want)
+	}
+	unknownReason := network.ChatEvent{
+		Kind: network.ChatEventRejected, RejectReason: network.ChatRejectReason(200),
+		CompanionName: "阿木", Command: "挖石头",
+	}
+	if got, want := formatChatEvent(unknownReason), "未知事件"; got != want {
+		t.Fatalf("formatChatEvent(未知拒绝理由) = %q, want %q", got, want)
+	}
+}
+
 func TestApplicationRendersHealthBeforeInventoryConfirmation(t *testing.T) {
 	app := newRemoteRenderApplication(t, &integrationGlyphSource{})
 	if err := app.predictor.Begin(network.PlayerState{
