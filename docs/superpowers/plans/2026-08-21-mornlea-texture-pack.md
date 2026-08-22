@@ -279,16 +279,9 @@ git commit -m "feat: load bounded texture pack directories"
 
 - [ ] **Step 1: Pin and verify the upstream source before copying anything**
 
-Use a temporary clone outside the repository and record the full commit returned by Git; never use a moving branch name in provenance.
+The immutable upstream pin is `7935d064fc6f993d1b5038ed5ec17a615600cf0a`. Shell DNS blocks `git clone` in this workspace, so fetch every approved file through the official GitHub connector with that full ref and record the returned Git blob SHA; never omit the ref or use a moving branch name in provenance.
 
-```bash
-source_dir="$(mktemp -d)"
-git clone --filter=blob:none https://github.com/minetest-texture-packs/Pixel-Perfection.git "$source_dir/Pixel-Perfection"
-git -C "$source_dir/Pixel-Perfection" rev-parse HEAD
-git -C "$source_dir/Pixel-Perfection" show HEAD:LICENSE.txt | sed -n '1,20p'
-```
-
-Expected: a 40-hex commit and a CC BY-SA 4.0 license. If cloning is unavailable, stop and ask for a verified local upstream checkout; do not substitute files from search results, release ZIPs or Minecraft distributions.
+Expected: the official repository metadata and commit URL identify the same 40-hex commit, and the exact-ref README states CC BY-SA 4.0. Do not substitute files from search results, release ZIPs, third-party mirrors or Minecraft distributions.
 
 Before copying, assert every source path below exists at the pinned commit. If any path differs, update the OpenSpec design and obtain controller approval before changing the mapping.
 
@@ -318,7 +311,6 @@ Copy/rename these upstream PNGs without resizing, recoloring, compositing or ext
 | `leaves` | `default/default_leaves.png` |
 | `glass` | `default/default_glass.png` |
 | `cobblestone` | `default/default_cobble.png` |
-| `smooth_stone` | `default/default_stone_block.png` |
 | `sand` | `default/default_sand.png` |
 | `gravel` | `default/default_gravel.png` |
 | `oak_log_side` | `default/default_tree.png` |
@@ -334,7 +326,7 @@ Copy/rename these upstream PNGs without resizing, recoloring, compositing or ext
 | `farmland_wet` | `farming/farming_soil_wet.png` |
 | `wheat_0` … `wheat_7` | `farming/farming_wheat_1.png` … `farming/farming_wheat_8.png` |
 
-Keep these five layers procedural because a direct equivalent would require composition, animation extraction or a non-equivalent substitute: `coal_ore`, `iron_ore`, `light_block`, `roof_tile`, `water`.
+Keep these six layers procedural: `coal_ore`, `iron_ore`, `light_block`, `roof_tile`, `water`, `smooth_stone`. The first five would require composition, animation extraction or a non-equivalent substitute; the fixed commit does not contain the planned `default/default_stone_block.png` or another direct smooth-stone equivalent.
 
 - [ ] **Step 3: Add complete legal and provenance metadata**
 
@@ -359,7 +351,7 @@ Expected: PASS.
 
 `default_pack_test.go` must additionally assert:
 
-1. every mapped layer equals the normalized bytes of its embedded PNG, while the five fallback layers remain identical to `NewRegistry()`, and the programmatic/embedded leaves and glass keep binary alpha;
+1. every mapped layer equals the normalized bytes of its embedded PNG, while the six fallback layers remain identical to `NewRegistry()`, and the programmatic/embedded leaves and glass keep binary alpha;
 2. default and procedural registries have the same atlas layer count/byte length, and two calls to `NewDefaultRegistry()` produce byte-identical atlas output;
 3. the embedded FS contains `pack.json`, `ATTRIBUTION.md`, `LICENSE.txt` and `PROVENANCE.json`;
 4. a user override replaces an embedded layer while an absent user file retains the embedded bytes, and a valid intermediate-alpha override is accepted without changing classification or mapping;
@@ -688,7 +680,7 @@ The capture path must ignore any local `texturePackPath`; verify the run-path te
 
 Visually inspect at minimum:
 
-- `materials-showcase`: all mapped solids, cutout leaves/glass and the five procedural fallbacks;
+- `materials-showcase`: all mapped solids, cutout leaves/glass and the six procedural fallbacks;
 - inventory/HUD scenes: item icons use the same default atlas without bleeding;
 - `water-surface-slope` and `water-underwater`: procedural water, transparency ordering and tint are unchanged;
 - the post-LOD far-horizon scene: near/default textures and distant LOD presentation have no seam or missing layer;

@@ -7,10 +7,10 @@
 
 ## 3. 固定来源并内嵌 Pixel Perfection 子集
 
-- [ ] 3.1 在仓库外临时 clone Pixel Perfection，核验 CC BY-SA 4.0，并把上游 `master` 解析为完整 commit SHA；逐项确认 `design.md` 批准的源路径存在，路径不符时先更新设计并取得裁决。
+- [ ] 3.1 以 GitHub 官方 connector 在完整 ref `7935d064fc6f993d1b5038ed5ec17a615600cf0a` 读取 Pixel Perfection，核验 CC BY-SA 4.0 并记录每个批准源文件的 Git blob SHA；逐项确认 `design.md` 批准的源路径存在，路径不符时先更新设计并取得裁决。
 - [ ] 3.2 先在 `internal/assets/default_pack_test.go` 写 provenance 失败测试，要求完整映射、16×16 PNG、SHA-256、无额外 PNG 及四个元数据文件；运行 `go test ./internal/assets -run TestEmbeddedDefaultPackProvenance -count=1` 确认因资产缺失而失败。
-- [ ] 3.3 直接复制并重命名批准子集到 `internal/assets/packs/pixel_perfection/`，添加固定 commit 的 `pack.json`、`ATTRIBUTION.md`、完整 `LICENSE.txt` 与逐文件 `PROVENANCE.json`；五个无直接对应 layer 保持程序化，重跑 provenance 测试通过。
-- [ ] 3.4 为默认注册表、五层回退、确定性 atlas、内嵌树叶/玻璃 binary alpha、用户逐层覆盖与无效用户包失败添加测试，再在 `internal/assets/default_pack.go` 内嵌默认包并实现最小产品构造路径；稳定结构、授权与来源门禁只约束程序化/内嵌默认，不扩张到本地用户像素。
+- [ ] 3.3 直接复制并重命名批准子集到 `internal/assets/packs/pixel_perfection/`，添加固定 commit 的 `pack.json`、`ATTRIBUTION.md`、完整 `LICENSE.txt` 与逐文件 `PROVENANCE.json`；`smooth_stone` 因固定 commit 缺少直接等价文件而与其他五个 layer 一并保持程序化，重跑 provenance 测试通过。
+- [ ] 3.4 为默认注册表、六层回退、确定性 atlas、内嵌树叶/玻璃 binary alpha、用户逐层覆盖与无效用户包失败添加测试，再在 `internal/assets/default_pack.go` 内嵌默认包并实现最小产品构造路径；稳定结构、授权与来源门禁只约束程序化/内嵌默认，不扩张到本地用户像素。
 - [ ] 3.5 运行 `gofmt -w internal/assets/default_pack.go internal/assets/default_pack_test.go`、`go test ./internal/assets -race -count=1` 与 `git diff --check`，通过规格与质量评审后提交内嵌资产。
 
 ## 4. 在配置 v1 增加启动时路径

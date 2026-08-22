@@ -149,9 +149,10 @@ benchmark 与 capture 已经强制使用 `config.Defaults()`，不得读取本�
 ## 默认资产与许可证
 
 内置子集放在 `internal/assets/packs/pixel_perfection/` 并由 `go:embed` 编入客户端。
-导入前必须把上游 `master` 解析为不可变的完整 commit SHA；provenance 对每个入库 PNG
-记录上游路径、commit、原文件 SHA-256、Mornlea 逻辑名与像素修改说明。运行时和构建
-均不访问网络，也不跟随浮动分支。
+上游不可变 source pin 固定为 `7935d064fc6f993d1b5038ed5ec17a615600cf0a`；shell DNS
+无法 clone 时由 GitHub 官方 connector 以完整 ref 逐文件读取并记录 Git blob SHA。
+provenance 对每个入库 PNG 记录上游路径、commit、原文件 SHA-256、Mornlea 逻辑名与
+像素修改说明。运行时和构建均不访问网络，也不跟随浮动分支。
 
 资产目录同时提交：
 

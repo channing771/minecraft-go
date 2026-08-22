@@ -65,7 +65,7 @@ manifest 只描述格式与人类可读名称；它不提供材质映射。未�
 
 ### 4. Pixel Perfection 只做不可变来源的直接复制映射
 
-入库前必须把上游 `https://github.com/minetest-texture-packs/Pixel-Perfection` 的 `master` 解析为一个 40 位完整 commit SHA，之后所有读取、哈希与 provenance 都引用该不可变 commit，不引用浮动分支、搜索结果、发布 ZIP 或 Minecraft 发行内容。实际 SHA 在 Task 3 获取并写入资产元数据后成为发布 source pin。
+上游 `https://github.com/minetest-texture-packs/Pixel-Perfection` 的发布 source pin 固定为 `7935d064fc6f993d1b5038ed5ec17a615600cf0a`。shell DNS 无法 clone 时，允许 GitHub 官方 connector 以该完整 ref 逐文件读取并记录 Git blob SHA；所有读取、哈希与 provenance 都必须引用该不可变 commit，不得省略 ref 或改用浮动分支、搜索结果、发布 ZIP、第三方镜像或 Minecraft 发行内容。
 
 允许的直接复制/重命名映射如下，不做缩放、重色、合成或动画帧抽取：
 
@@ -83,7 +83,6 @@ manifest 只描述格式与人类可读名称；它不提供材质映射。未�
 | `leaves` | `default/default_leaves.png` |
 | `glass` | `default/default_glass.png` |
 | `cobblestone` | `default/default_cobble.png` |
-| `smooth_stone` | `default/default_stone_block.png` |
 | `sand` | `default/default_sand.png` |
 | `gravel` | `default/default_gravel.png` |
 | `oak_log_side` | `default/default_tree.png` |
@@ -99,7 +98,7 @@ manifest 只描述格式与人类可读名称；它不提供材质映射。未�
 | `farmland_wet` | `farming/farming_soil_wet.png` |
 | `wheat_0` … `wheat_7` | `farming/farming_wheat_1.png` … `farming/farming_wheat_8.png` |
 
-`coal_ore`、`iron_ore`、`light_block`、`roof_tile` 与 `water` 保持程序化，因为直接对应需要合成、动画抽帧或非等价替代。任何上游路径变化都必须先更新设计并重新批准，不能临时改用近似素材。
+`coal_ore`、`iron_ore`、`light_block`、`roof_tile`、`water` 与 `smooth_stone` 保持程序化：前五项的直接对应需要合成、动画抽帧或非等价替代；固定 commit 中不存在原计划的 `default/default_stone_block.png`，且没有其他直接等价的 smooth stone 素材。任何上游路径变化都必须先更新设计并重新批准，不能临时改用近似素材。
 
 资产目录必须包含 `pack.json`、完整 `LICENSE.txt`、`ATTRIBUTION.md` 与逐文件 `PROVENANCE.json`。provenance 为每个目标 PNG 记录上游路径、固定 commit、vendored bytes 的 SHA-256 与“只选择并重命名、无像素变换”的修改说明；`snow_top` 与 `snow_side` 分别记录。署名包含 Hugh “XSSheep” Rutland、上游列出的贡献者、仓库链接、commit、CC BY-SA 4.0 链接和 Mornlea 修改说明。源码内资产及客户端发布物携带相同许可证、署名和 provenance；第三方资产许可证不扩张为 Mornlea 代码许可证。专用服务端发布单元不携带这些客户端资产。
 
@@ -131,7 +130,7 @@ manifest 只描述格式与人类可读名称；它不提供材质映射。未�
 
 - [第三方上游内容或许可记录不完整] → 入库前核验固定 commit、完整许可证、逐文件哈希和无额外 PNG 的测试，发布时字节复制 notices。
 - [损坏用户包导致客户端不可启动] → 这是显式配置的可诊断策略；清空 `texturePackPath` 即可恢复内嵌默认。
-- [新默认像素暴露 cutout、水、HUD 或远环回归] → 先保留五层程序化回退，golden 写盘前运行同 registry 的 LOD on/off 近环 control，再更新并人工检查材料、HUD、农业、水下和远环场景。
+- [新默认像素暴露 cutout、水、HUD 或远环回归] → 先保留六层程序化回退，golden 写盘前运行同 registry 的 LOD on/off 近环 control，再更新并人工检查材料、HUD、农业、水下和远环场景。
 - [配置路径带来运行时 I/O] → 只在启动时有界读取，帧循环不保留文件系统访问或并发状态。
 
 ## Migration Plan
