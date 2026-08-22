@@ -89,6 +89,76 @@ func TestJumpAccumulatesExhaustionExactlyOncePerTakeoff(t *testing.T) {
 	}
 }
 
+// TestJumpDisplacementWithinGroundProbeToleranceDoesNotAccumulateExhaustion 覆盖
+// `internal/sim/player.go` 起跳疲劳判据里 `&& !player.state.OnGround`（步末已经
+// 离地）这一分项——变更前该分项零测试覆盖：删掉它 `go test ./internal/sim` 全绿。
+//
+// 判据注释论证的场景是「贴着低天花板按住 Jump，冲量每 tick 都被碰撞解算吃掉，
+// 玩家步末仍在地面上」。但这个具体场景在当前引擎里**无法用天花板复现**：
+//   - 玩家高 `physics.PlayerHeight`=1.8，地板顶面与天花板底面都钉死在整数网格上
+//     （耕地 `farmlandCollisionHeight`=15/16 是唯一的非整数例外，且只影响地板顶面，
+//     天花板底面恒为整数）；能站立且不重叠的最小净空只能是「下一个整数层高 − 1.8」，
+//     取最小的 2 层楼（地板顶=n，天花板底=n+2）算出 0.2，其余可达净空只会更大。
+//   - 0.2 远大于地面探测容差 `physics.GroundProbe`（1e-4）：无论天花板多低，起跳
+//     冲量撞上去之后玩家仍会真的离地 0.2（哪怕只维持 1～2 tick），`!player.state.
+//     OnGround` 与「未加这一项」在天花板夹具下逐 tick 完全同值——本文件曾用
+//     2 层楼天花板夹具实测验证过这一点：加与不加这一项，20 tick 后疲劳都是 350，
+//     变异不变色，说明天花板夹具测不出这一项的必要性。
+//
+// 真正能让「起跳冲量已施加，但步末位移小到仍判定在地面上」成立的构造，是把
+// `physics.Tunables.JumpSpeed` 调到远小于 `GroundProbe/FixedDeltaSeconds` 的量级：
+// 单 tick 位移本身就落进地面探测容差，`clip_axis` 的下探测（-GroundProbe）仍然
+// 能摸到原来那块地板，`OnGround` 因此持续读 true，同时 `input.Jump` 与
+// `wasOnGround` 每 tick 都成立——这是当前代码路径里，「已经离地」与「未离地」
+// 两种可能结果都真实可达的唯一夹具，因此是能让判据变异变红的构造。
+//
+// 20 tick 里累计位移 = 20 × 0.00003 × `physics.FixedDeltaSeconds`(0.05) = 0.00003，
+// 严格小于 `physics.GroundProbe`(1e-4)，留有 3 倍余量，不依赖 float32 精度边界。
+func TestJumpDisplacementWithinGroundProbeToleranceDoesNotAccumulateExhaustion(t *testing.T) {
+	t.Run("跳跃位移小于地面容差不重复计费", func(t *testing.T) {
+		t.Cleanup(func() { physics.SetTunables(physics.DefaultTunables()) })
+		tuned := physics.DefaultTunables()
+		tuned.JumpSpeed = 0.00003
+		physics.SetTunables(tuned)
+
+		const id = SessionID(54)
+		engine := readyRegenPlayer(t, id, core.MaxHealth)
+		player := engine.sessions[id].player
+
+		player.input.Jump = true
+		for tick := range 20 {
+			engine.Step()
+			if !player.state.OnGround {
+				t.Fatalf("tick %d: 玩家离地，夹具没能把跳跃位移压进地面探测容差内: %+v",
+					tick, player.state)
+			}
+		}
+		if player.exhaustionMilli != 0 {
+			t.Fatalf("跳跃位移小于地面容差时持续按跳 20 tick 后疲劳=%d，想要精确 0",
+				player.exhaustionMilli)
+		}
+	})
+
+	// 对照组：不改 JumpSpeed，用默认参数持续按住 Jump 20 tick。玩家会在约
+	// 11 tick 后落地，此时 wasOnGround 为 false（前一 tick 仍在空中），不计费；
+	// 落地后下一 tick（wasOnGround 变回 true）立刻再次起跳，计费第二次——20 tick
+	// 内恰好完整走完两次「起跳」，实测疲劳精确 100（用真实推进结果核实，不臆测）。
+	t.Run("默认参数持续按跳20tick对照", func(t *testing.T) {
+		const id = SessionID(55)
+		engine := readyRegenPlayer(t, id, core.MaxHealth)
+		player := engine.sessions[id].player
+
+		player.input.Jump = true
+		for range 20 {
+			engine.Step()
+		}
+		if player.exhaustionMilli != 2*exhaustionJumpMilli {
+			t.Fatalf("默认参数下持续按跳 20 tick 后疲劳=%d，想要 %d（20 tick 内落地并重新起跳恰好两次）",
+				player.exhaustionMilli, 2*exhaustionJumpMilli)
+		}
+	})
+}
+
 // TestWalkingOnFlatGroundAccumulatesNoExhaustion 覆盖 Scenario「平地行走不累积
 // 疲劳」：持续行走 60 tick，三层状态必须**逐字段**保持初值。
 //
