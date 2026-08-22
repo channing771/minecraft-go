@@ -1,8 +1,8 @@
 package lod
 
-// 本文件是任务 5.1 Scheduler 的行为测试:环形入队、pending 覆盖、距离
-// 升序冲刷、独立帧预算耗尽即停、DropOutside 释放与 sink drop、worker
-// 交接切片不可变(-race)与关闭安全。生成路径经 newScheduler 注入确定性
+// 本文件是任务 5.1 `Scheduler` 的行为测试:环形入队、pending 覆盖、距离
+// 升序冲刷、独立帧预算耗尽即停、`DropOutside` 释放与 sink drop、worker
+// 交接切片不可变(-race)与关闭安全。生成路径经 `newScheduler` 注入确定性
 // 替身,不依赖 cdylib 时序;native 真路径另有一条确定性比对测试。
 
 import (
@@ -54,7 +54,7 @@ func patternShell(tile TilePos) []byte {
 func fakeGenerate(tile TilePos) []byte { return patternShell(tile) }
 
 // newTestScheduler 以注入 generate 构造调度器(步长固定 4,与预算计费的
-// 静态上界 16000 字节对应);Close 挂到 t.Cleanup。
+// 静态上界 16000 字节对应);`Close` 挂到 t.Cleanup。
 func newTestScheduler(t *testing.T, bytesPerFrame uint32, generate func(TilePos) []byte) (*Scheduler, *recordingSink) {
 	t.Helper()
 	sink := &recordingSink{}
@@ -66,7 +66,7 @@ func newTestScheduler(t *testing.T, bytesPerFrame uint32, generate func(TilePos)
 	return scheduler, sink
 }
 
-// flushUntilIdle 反复 BeginFrame+FlushUploads 直到 Busy 归零(带超时),
+// flushUntilIdle 反复 `BeginFrame`+`FlushUploads` 直到 `Busy` 归零(带超时),
 // 供"全部上传完成"类断言收敛。
 func flushUntilIdle(t *testing.T, s *Scheduler, center TilePos) {
 	t.Helper()
@@ -178,7 +178,7 @@ func TestQueueRingEnqueuesRingIncrementally(t *testing.T) {
 // TestQueueRingBandSkipsInnerDisk 锁住 Ruling 19 的带状入队语义:近环
 // 之内的 tile(inner 半径内盘)不得入队——壳窗高取 max,系统性高于精细
 // 地表,若在近环内渲染会 poke 出地表遮挡近处 mesh(capture 近处像素
-// 不变门禁的构造性前提)。以默认几何 viewDistance=32 推导的 inner=9、
+// 不变门禁的构造性前提)。以默认几何 `viewDistance`=32 推导的 inner=9、
 // outer=24 为代表:入队域恰为 (2×24+1)²−(2×8+1)²,且入队 tile 的最小
 // 覆盖块 9×64=576 ≥ 近 mesh 覆盖半径 32×16=512,与近 mesh 零重叠。
 func TestQueueRingBandSkipsInnerDisk(t *testing.T) {
@@ -207,7 +207,7 @@ func TestQueueRingBandSkipsInnerDisk(t *testing.T) {
 	}
 
 	// 非法区间(inner<0、outer<inner)一律不入队;inner=0 退化为全盘
-	// (旧语义,QueueTile 直入的调用方仍可靠)。
+	// (旧语义,`QueueTile` 直入的调用方仍可靠)。
 	s2, _ := newTestScheduler(t, 4<<20, fakeGenerate)
 	s2.QueueRing(TilePos{}, -1, 2)
 	s2.QueueRing(TilePos{}, 3, 2)
@@ -481,7 +481,7 @@ func TestWorkerHandoffCopiesExactLengthSheddingBoundCapacity(t *testing.T) {
 	if !ok {
 		t.Fatal("step 4 无静态上界")
 	}
-	// 模拟 nativeabi.LodShell 的返回形态:cap=步长静态上界,len=实际写入。
+	// 模拟 `nativeabi.LodShell` 的返回形态:cap=步长静态上界,len=实际写入。
 	generate := func(tile TilePos) []byte {
 		shell := make([]byte, bound)
 		content := patternShell(tile)

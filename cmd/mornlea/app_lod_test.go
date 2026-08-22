@@ -19,7 +19,7 @@ import (
 )
 
 // TestLodFogDistancesAnchors 锁住雾距离推导的 0.5/0.75 半径锚点(design
-// 「Go 编排」裁决):farRadiusBlocks = lodFarMultiplier × viewDistance × 16,
+// 「Go 编排」裁决):farRadiusBlocks = lodFarMultiplier × `viewDistance` × 16,
 // start = 0.5×far、full = 0.75×far。默认几何 (32,3) 必须精确落在 Rust
 // 渲染器的编译期默认 768/1152 上;非默认倍率下外缘全雾仍成立(full 恒在
 // far 内侧 25% 起雾)。
@@ -58,7 +58,7 @@ func TestLodFogDistancesAnchors(t *testing.T) {
 }
 
 // TestLodFarTileRadius 锁住远环 tile 半径推导:tile 半径 = ceil(
-// multiplier × viewDistance / 4)(tile = 4×4 chunk,向上取整保证全雾距离
+// multiplier × `viewDistance` / 4)(tile = 4×4 chunk,向上取整保证全雾距离
 // 之外不露天空缝),并在极端输入下饱和钳制到 int32 范围而不是溢出回绕
 // (控制器裁决 1,顺带消化任务 E 的评审②)。
 func TestLodFarTileRadius(t *testing.T) {
@@ -94,8 +94,8 @@ func TestLodFarTileRadius(t *testing.T) {
 }
 
 // TestLodNearTileRadius 锁住 Ruling 19 的内半径推导:inner =
-// floor(viewDistance/4)+1,使壳的最小覆盖块 inner×64 ≥ 近 mesh 覆盖
-// 半径 viewDistance×16(带与近 mesh 零重叠、无缝衔接的代数保证)。
+// floor(`viewDistance`/4)+1,使壳的最小覆盖块 inner×64 ≥ 近 mesh 覆盖
+// 半径 `viewDistance`×16(带与近 mesh 零重叠、无缝衔接的代数保证)。
 func TestLodNearTileRadius(t *testing.T) {
 	cases := []struct {
 		viewDistance int
@@ -149,11 +149,11 @@ func TestLodTileFromChunkFloorSemantics(t *testing.T) {
 // TestLodRingDomainWithinCapacityAtMaxLegalConfig 是 5.2 的显式验收
 // (Ruling 18 第三点):按 config 最大合法值推导环形入队域规模,断言不触
 // client 渲染器的 MAX_LOD_TILES 容量。容量数值在 Go 侧是镜像常量
-// lodMaxTiles,用 Rust 源文件字面量同步断言锚定,防止双源漂移。
+// `lodMaxTiles`,用 Rust 源文件字面量同步断言锚定,防止双源漂移。
 func TestLodRingDomainWithinCapacityAtMaxLegalConfig(t *testing.T) {
-	// viewDistance 的合法上限从 config.Fields() 读取(单一权威),
+	// `viewDistance` 的合法上限从 `config.Fields`() 读取(单一权威),
 	// lodFarMultiplier 的上限 8 与 config 的钳制区间锚定(见
-	// internal/config 的 LodFarMultiplierMax)。
+	// internal/config 的 `LodFarMultiplierMax`)。
 	viewDistanceMax := 0
 	for _, field := range config.Fields() {
 		if field.Group == "render" && field.Name == "viewDistance" {
@@ -178,7 +178,7 @@ func TestLodRingDomainWithinCapacityAtMaxLegalConfig(t *testing.T) {
 }
 
 // TestLodMaxTilesMirrorsRustConstant 是镜像常量的同步断言:Go 侧
-// lodMaxTiles 必须与 Rust client 渲染器的 MAX_LOD_TILES 源字面量一致,
+// `lodMaxTiles` 必须与 Rust client 渲染器的 MAX_LOD_TILES 源字面量一致,
 // 否则容量论证出现双源漂移(一侧改动另一侧不知情)。
 func TestLodMaxTilesMirrorsRustConstant(t *testing.T) {
 	source, err := os.ReadFile("../../engine/crates/mornlea_client/src/render/lod.rs")
@@ -200,8 +200,8 @@ func TestLodMaxTilesMirrorsRustConstant(t *testing.T) {
 }
 
 // TestLodWiringEnabled 锁住接线开关:lodEnabled=false 或 benchmark 观察者
-// 路径都不建 Scheduler(设计「Go 编排」:禁用时零参与;benchmark 的
-// viewDistance 路径无远环需求,5.4 再显式关闭)。
+// 路径都不建 `Scheduler`(设计「Go 编排」:禁用时零参与;benchmark 的
+// `viewDistance` 路径无远环需求,5.4 再显式关闭)。
 func TestLodWiringEnabled(t *testing.T) {
 	defaults := config.Defaults().Render
 	if !lodWiringEnabled(defaults, false) {
@@ -219,7 +219,7 @@ func TestLodWiringEnabled(t *testing.T) {
 
 // newLodConnectionTestApplication 构造一个远端连接形态的完整 application:
 // fake 登录返回固定世界种子,真实离屏渲染器(无 GPU 时跳过)。远端路径与
-// 单机共用同一登录状态机,种子经 LoginSuccess 流入装配点。
+// 单机共用同一登录状态机,种子经 `LoginSuccess` 流入装配点。
 func newLodConnectionTestApplication(
 	t *testing.T,
 	render config.Render,
@@ -260,10 +260,10 @@ func newLodConnectionTestApplication(
 }
 
 // TestApplicationLodWiringEnabledSeedsBandFromLoginSeed 验证启用路径的
-// 登录种子→Scheduler 播种链路:登录成功取得 WorldSeed 后,装配点立即以
+// 登录种子→`Scheduler` 播种链路:登录成功取得 `WorldSeed` 后,装配点立即以
 // 初始 tile 中心播种远环带(Ruling 19:默认几何 32×3 → 带 [9,24] →
 // (2×24+1)²−(2×8+1)² = 2112 个 pending,近环内盘不入队),且推导后的
-// 雾参数已下发给渲染器(非法推导会让 SetLodFog panic,构造即失败)。
+// 雾参数已下发给渲染器(非法推导会让 `SetLodFog` panic,构造即失败)。
 func TestApplicationLodWiringEnabledSeedsBandFromLoginSeed(t *testing.T) {
 	const loginSeed = uint64(0xC0FFEE)
 	app := newLodConnectionTestApplication(t, config.Defaults().Render, loginSeed)
@@ -290,7 +290,7 @@ func TestApplicationLodWiringEnabledSeedsBandFromLoginSeed(t *testing.T) {
 
 // TestApplicationLodWiringNonDefaultGeometry 验证非默认倍率(32×8 的雾
 // 推导 + 带 [9,64])也能构造成功——雾锚点 4096/6144 违约会让
-// SetLodFog 在装配点 panic。
+// `SetLodFog` 在装配点 panic。
 func TestApplicationLodWiringNonDefaultGeometry(t *testing.T) {
 	render := config.Defaults().Render
 	render.LodFarMultiplier = config.LodFarMultiplierMax
@@ -310,7 +310,7 @@ func TestApplicationLodWiringNonDefaultGeometry(t *testing.T) {
 }
 
 // TestApplicationLodWiringDisabledZeroParticipation 验证禁用路径的零参与:
-// 不建 Scheduler(种子不消费、渲染器远环 pass 空转即零成本),帧循环照常。
+// 不建 `Scheduler`(种子不消费、渲染器远环 pass 空转即零成本),帧循环照常。
 func TestApplicationLodWiringDisabledZeroParticipation(t *testing.T) {
 	render := config.Defaults().Render
 	render.LodEnabled = false
@@ -330,16 +330,16 @@ func TestApplicationLodWiringDisabledZeroParticipation(t *testing.T) {
 
 // TestApplicationLodWiringBenchmarkObserverZeroParticipation 在应用装配级
 // 锁住 5.4 的基准可比性裁决:benchmark 观察者路径即使带着编译默认的
-// lodEnabled=true 也不得构造远环 Scheduler——attachLodScheduler 在
-// lodWiringEnabled 判定后立即返回,种子不进 worldgen、无播种、无雾下发,
+// lodEnabled=true 也不得构造远环 `Scheduler`——`attachLodScheduler` 在
+// `lodWiringEnabled` 判定后立即返回,种子不进 worldgen、无播种、无雾下发,
 // benchmark 的被测负载因此与远环引入前逐字节一致(scenario 保持 v17)。
-// 与 TestLodWiringEnabled 的差异:断言落在真实 benchmark 装配产物上
+// 与 `TestLodWiringEnabled` 的差异:断言落在真实 benchmark 装配产物上
 // (内存 store、内存传输、离屏渲染器、trusted observer 中心请求全走真
 // 分支)而不是开关函数上,防止装配点停止传递 benchmark 标记的静默回归。
 func TestApplicationLodWiringBenchmarkObserverZeroParticipation(t *testing.T) {
 	dependencies := defaultApplicationDependencies()
 	// benchmark 装配要求 2560x1440 离屏渲染器;沿用全包惯例,无 GPU 适配器
-	// 时跳过(其余断言在 TestLodWiringEnabled 的开关级已覆盖)。
+	// 时跳过(其余断言在 `TestLodWiringEnabled` 的开关级已覆盖)。
 	dependencies.newOffscreenRenderer = func(width, height int) (*client.Renderer, error) {
 		renderer, err := client.NewRenderer(width, height)
 		if errors.Is(err, client.ErrNoGPUAdapter) {

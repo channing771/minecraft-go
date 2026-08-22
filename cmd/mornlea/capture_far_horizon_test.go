@@ -33,10 +33,10 @@ func TestFarHorizonCaptureSceneIsRegistered(t *testing.T) {
 		t.Fatalf("场景=%+v,想要 WarmupFrames=8 且 Apply 齐备", scene)
 	}
 	// 变基排序协调(Ruling 21):fluid 规格钉死 water-underwater 必须排在
-	// 场景表最后(其注入的权威 PlayerState 会永久钉住浸没标志),far-horizon
+	// 场景表最后(其注入的权威 `PlayerState` 会永久钉住浸没标志),far-horizon
 	// 插在它之前(倒数第二)。原断言「必须追加在表尾」是 fluid 合并前的
 	// 事实,变基后由本断言取代:倒数第二 = far-horizon,末位 = water-underwater。
-	// far-horizon 的 Apply 经 resetCapturePresentation 清空全部共享呈现
+	// far-horizon 的 `Apply` 经 `resetCapturePresentation` 清空全部共享呈现
 	// 状态,对前序场景不构成顺序依赖。
 	if captureScenes[len(captureScenes)-2].Name != "far-horizon" {
 		t.Fatal("far-horizon 必须排在倒数第二(water-underwater 固定居末)")
@@ -48,7 +48,7 @@ func TestFarHorizonCaptureSceneIsRegistered(t *testing.T) {
 
 // TestFarHorizonApplyPinsCameraAndResetsSharedState 杀死这些变异:相机
 // 未钉死(位置/朝向/ FOV 随登录或前一场景漂移)、远环装配事实被改动
-// (a.center/ lodTileCenter,会触发近环释放与远环增量入队)、或继承
+// (a.center/ `lodTileCenter`,会触发近环释放与远环增量入队)、或继承
 // ai-companion 留下的物品栏/聊天/伙伴/界面状态。
 func TestFarHorizonApplyPinsCameraAndResetsSharedState(t *testing.T) {
 	var scene captureScene
@@ -109,7 +109,7 @@ func TestFarHorizonApplyPinsCameraAndResetsSharedState(t *testing.T) {
 		t.Fatalf("yaw/pitch = %v/%v, want 0/-0.25(朝 -z 地平线)", app.camera.Yaw, app.camera.Pitch)
 	}
 	// 远环与近环的装配事实必须原样保留:场景不得移动视距中心,否则
-	// 触发近环 DropOutside 与远环增量入队,收敛域随场景执行漂移。
+	// 触发近环 `DropOutside` 与远环增量入队,收敛域随场景执行漂移。
 	if app.center != (core.ChunkPos{X: 0, Z: 0}) {
 		t.Fatalf("center = %v, want (0,0)(场景不得移动视距中心)", app.center)
 	}

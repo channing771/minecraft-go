@@ -12,7 +12,7 @@ import (
 // testHeader 构造与 engine lod.rs 单测同源的 `MGW1` header:seed 42、
 // 恒等材料表 0..=13(末项 water=13,layout 2——变基后与 main 的注水
 // worldgen 同一布局,水窗因此按 Ruling 22 钳制到海平面)、恒等 perm
-// (与 nativeabi 测试的 testLodShellHeader 逐字节一致),保证 oracle
+// (与 nativeabi 测试的 `testLodShellHeader` 逐字节一致),保证 oracle
 // 测试与 Rust golden fixture 输入严格同源。
 func testHeader() []byte {
 	header := make([]byte, 564)

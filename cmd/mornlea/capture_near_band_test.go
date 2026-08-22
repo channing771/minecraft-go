@@ -8,8 +8,8 @@ import (
 	"github.com/channing771/mornlea/internal/lod"
 )
 
-// graySolid 复用既有 solidNRGBA 生成一张全部像素同灰度的图,供近处不变
-// 断言的合成图测试(solidNRGBA 定义在 visual_compare_test.go)。
+// graySolid 复用既有 `solidNRGBA` 生成一张全部像素同灰度的图,供近处不变
+// 断言的合成图测试(`solidNRGBA` 定义在 visual_compare_test.go)。
 func graySolid(width, height int, value uint8) *image.NRGBA {
 	return solidNRGBA(width, height, value, value, value)
 }
@@ -192,7 +192,7 @@ func TestNearBandGuardRequiresFullEqualityWithoutShell(t *testing.T) {
 // 无法证明任何行无壳——必须拒绝更新基线,而不是静默放宽保护。
 func TestNearBandGuardFailsClosedOnDegenerateShellDistance(t *testing.T) {
 	camera := nearBandTestCamera(64)
-	camera.Pos[0], camera.Pos[2] = 2000, 0 // 内盘外 → shellDist = 0
+	camera.Pos[0], camera.Pos[2] = 2000, 0 // 内盘外 → `shellDist` = 0
 	guard := newNearBandGuard(camera, lod.TilePos{}, 9, 24, true)
 	old, fresh := graySolid(64, 64, 40), graySolid(64, 64, 40)
 	err := guard.assertUnchanged("scene", old, fresh)

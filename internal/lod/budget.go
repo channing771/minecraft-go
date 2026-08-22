@@ -1,13 +1,13 @@
 package lod
 
 // frameBudget 是远环 LOD 的自包含帧预算计数器,语义与近环
-// internal/render.UploadBudget 对齐(每帧重置、tryConsume 首个超预算请求
+// internal/render 包的 `UploadBudget` 对齐(每帧重置、`tryConsume` 首个超预算请求
 // 放行一次以防永久饥饿);因依赖方向铁律(internal/lod 不得 import
-// internal/render)在本包独立实现,绝不与近环 SectionScheduler 共享实例。
+// internal/render)在本包独立实现,绝不与近环 `SectionScheduler` 共享实例。
 // 生成派发与上传冲刷共用同一预算:每次派发按步长静态上界字节计费,
 // 该上界同时覆盖本次生成的 CPU 分配与结果上传的字节足迹。
 //
-// 并发约束:仅帧线程(渲染循环)触碰,beginFrame/tryConsume 均不加锁。
+// 并发约束:仅帧线程(渲染循环)触碰,`beginFrame`/`tryConsume` 均不加锁。
 type frameBudget struct {
 	perFrame  uint32
 	spent     uint32

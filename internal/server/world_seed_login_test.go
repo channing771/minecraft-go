@@ -8,10 +8,10 @@ import (
 	"github.com/channing771/mornlea/internal/network"
 )
 
-// TestHostLoginSuccessCarriesStoreSeedAcrossTransports 验证 Host 在构造
-// LoginSuccess 时填入存档 metadata 的真实世界种子（与 worldgen 播种同源），
-// 且单机内存路径（AcceptStream）与 TCP 专用服务端路径（acceptLoop）走同一
-// 编码：两个传输上的 LoginSuccess.WorldSeed 逐位一致。
+// TestHostLoginSuccessCarriesStoreSeedAcrossTransports 验证 `Host` 在构造
+// `LoginSuccess` 时填入存档 metadata 的真实世界种子（与 worldgen 播种同源），
+// 且单机内存路径（`AcceptStream`）与 TCP 专用服务端路径（`acceptLoop`）走同一
+// 编码：两个传输上的 `LoginSuccess.WorldSeed` 逐位一致。
 func TestHostLoginSuccessCarriesStoreSeedAcrossTransports(t *testing.T) {
 	store := newHostTestStore()
 	const wantSeed = uint64(42)
@@ -48,10 +48,10 @@ func TestHostLoginSuccessCarriesStoreSeedAcrossTransports(t *testing.T) {
 	}
 }
 
-// loginSeedOverMemory 复刻单机内置服务端的装配：Host.Run 驱动权威 tick，
-// AcceptStream 接收内存流（与 cmd/mornlea 的 assembleLocalApplicationConnection
-// 同构）。手工驱动客户端握手并在 Login 状态读取 LoginSuccess，因为
-// network.LoginClient 有意不消费种子字段（客户端播种属于 5.2）。
+// loginSeedOverMemory 复刻单机内置服务端的装配：`Host.Run` 驱动权威 tick，
+// `AcceptStream` 接收内存流（与 cmd/mornlea 的 `assembleLocalApplicationConnection`
+// 同构）。手工驱动客户端握手并在 Login 状态读取 `LoginSuccess`，因为
+// `network.LoginClient` 有意不消费种子字段（客户端播种属于 5.2）。
 func loginSeedOverMemory(t *testing.T, host *Host) network.LoginSuccess {
 	t.Helper()
 	runCtx, cancelRun := context.WithCancel(context.Background())
@@ -74,7 +74,7 @@ func loginSeedOverMemory(t *testing.T, host *Host) network.LoginSuccess {
 	go func() { done <- host.AcceptStream(context.Background(), serverStream) }()
 	success := driveManualLogin(t, clientStream)
 	// 读到应答后立即断开客户端：tick 中的世界按真实掉线语义收敛会话，
-	// AcceptStream 随之返回，不必等心跳超时。
+	// `AcceptStream` 随之返回，不必等心跳超时。
 	if err := clientStream.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func loginSeedOverMemory(t *testing.T, host *Host) network.LoginSuccess {
 	return success
 }
 
-// loginSeedOverTCP 走专用服务端同款路径：Host.Run 的 TCP acceptLoop。
+// loginSeedOverTCP 走专用服务端同款路径：`Host.Run` 的 TCP `acceptLoop`。
 func loginSeedOverTCP(t *testing.T, host *Host) network.LoginSuccess {
 	t.Helper()
 	listener, err := network.ListenTCP("127.0.0.1:0")
@@ -115,7 +115,7 @@ func loginSeedOverTCP(t *testing.T, host *Host) network.LoginSuccess {
 }
 
 // driveManualLogin 以当前协议版本手工完成握手与登录，返回服务端下发的
-// LoginSuccess 原文。
+// `LoginSuccess` 原文。
 func driveManualLogin(t *testing.T, client network.ClientPacketStream) network.LoginSuccess {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)

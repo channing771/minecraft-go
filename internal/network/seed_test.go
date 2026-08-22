@@ -8,7 +8,7 @@ import (
 )
 
 // TestProtocolV23LoginSuccessCarriesWorldSeed 验证种子字段恰好追加在
-// PlayerID 之后：固定 16 字节 UUID + little-endian uint64，全值域可往返，
+// `PlayerID` 之后：固定 16 字节 UUID + little-endian uint64，全值域可往返，
 // 任何截断或尾随字节都必须被拒绝，不产生部分包。
 func TestProtocolV23LoginSuccessCarriesWorldSeed(t *testing.T) {
 	id := mustCodecPlayerID(t)
@@ -64,8 +64,8 @@ func TestProtocolV23LoginSuccessWorldSeedAcceptsFullRange(t *testing.T) {
 }
 
 // TestBeginServerLoginSendsConfiguredWorldSeed 验证服务端登录驱动把
-// BeginServerLogin 收到的种子原样填进 LoginSuccess；LoginClient 仍只校验
-// PlayerID（种子消费属于 5.2），因此手工在 Login 状态读取应答断言字段。
+// `BeginServerLogin` 收到的种子原样填进 `LoginSuccess`；`LoginClient` 仍只校验
+// `PlayerID`（种子消费属于 5.2），因此手工在 Login 状态读取应答断言字段。
 func TestBeginServerLoginSendsConfiguredWorldSeed(t *testing.T) {
 	const worldSeed = uint64(0x5eed_cafe_beef_0000)
 	client, server := NewMemoryStreamPair(8)
@@ -105,8 +105,8 @@ func TestBeginServerLoginSendsConfiguredWorldSeed(t *testing.T) {
 }
 
 // TestLoginClientWithSeedSurfacesWorldSeed 验证 5.2 的种子消费入口:
-// LoginClientWithSeed 走与 LoginClient 完全相同的登录状态机,并额外把
-// LoginSuccess.WorldSeed 返回给调用方(cmd/mornlea 装配点用它播种远环
+// `LoginClientWithSeed` 走与 `LoginClient` 完全相同的登录状态机,并额外把
+// `LoginSuccess.WorldSeed` 返回给调用方(cmd/mornlea 装配点用它播种远环
 // 壳)。uint64 全值域(含 0 与 two's complement 负种子)都必须无损返回;
 // 登录失败时不返回端点。
 func TestLoginClientWithSeedSurfacesWorldSeed(t *testing.T) {
@@ -143,8 +143,8 @@ func TestLoginClientWithSeedSurfacesWorldSeed(t *testing.T) {
 }
 
 // TestV23ClientRejectsPriorServerAcrossTransports 模拟一个只会说 v17 的
-// 服务端（生产服务端已升 v23，只能以对端身份模拟；类型化 Send 会拒绝
-// 非 v23 的 ServerHello，因此按传输写原始字节），验证 v23 客户端在
+// 服务端（生产服务端已升 v23，只能以对端身份模拟；类型化 `Send` 会拒绝
+// 非 v23 的 `ServerHello`，因此按传输写原始字节），验证 v23 客户端在
 // Memory 与 TCP 上都拒绝它，不进入登录阶段，也不产生半兼容会话。
 func TestV23ClientRejectsPriorServerAcrossTransports(t *testing.T) {
 	const legacy = uint32(17)
@@ -163,7 +163,7 @@ func TestV23ClientRejectsPriorServerAcrossTransports(t *testing.T) {
 
 			_, err := LoginClient(context.Background(), client, testIdentity(23))
 			// 两个传输都在接收侧校验版本并按 protocol violation 关闭连接；
-			// LoginClient 自身的版本分支是纵深防御，两者都算正确拒绝。
+			// `LoginClient` 自身的版本分支是纵深防御，两者都算正确拒绝。
 			if err == nil || !strings.Contains(err.Error(), "protocol violation") ||
 				!(strings.Contains(err.Error(), "server protocol version 17") ||
 					strings.Contains(err.Error(), "server handshake version mismatch")) {
@@ -180,9 +180,9 @@ func TestV23ClientRejectsPriorServerAcrossTransports(t *testing.T) {
 	}
 }
 
-// sendRawServerHello 绕过类型化校验，把一条任意版本的 ServerHello 原样
+// sendRawServerHello 绕过类型化校验，把一条任意版本的 `ServerHello` 原样
 // 送进对端：Memory 直写 channel，TCP 直写 wire 帧，镜像
-// sendProtocolVersionHello 的客户端版本。
+// `sendProtocolVersionHello` 的客户端版本。
 func sendRawServerHello(server ServerPacketStream, version uint32) error {
 	switch server := server.(type) {
 	case *memoryServerStream:

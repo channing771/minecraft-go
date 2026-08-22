@@ -67,7 +67,7 @@ func TestRenderLODMissingFieldsFallBackToDefaults(t *testing.T) {
 }
 
 // TestRenderLODFarMultiplierClamped 验证 lodFarMultiplier 越界被钳制到
-// [2,8] 而不是报错——与 viewDistance 等连续数值字段同一纪律。
+// [2,8] 而不是报错——与 `viewDistance` 等连续数值字段同一纪律。
 func TestRenderLODFarMultiplierClamped(t *testing.T) {
 	cases := []struct {
 		body string
@@ -124,7 +124,7 @@ func TestRenderLODStepDiscreteSet(t *testing.T) {
 }
 
 // TestRenderLODEnabledRejectsNonBool 验证 lodEnabled 收到非布尔值时告警并
-// 保留默认 true,而不是让 Load 失败。
+// 保留默认 true,而不是让 `Load` 失败。
 func TestRenderLODEnabledRejectsNonBool(t *testing.T) {
 	previous := slog.Default()
 	var records bytes.Buffer
@@ -145,7 +145,7 @@ func TestRenderLODEnabledRejectsNonBool(t *testing.T) {
 }
 
 // TestRenderLODKeysAreKnownFields 验证三个 LOD 键被识别为 render 分组的
-// 已知字段——不写进 Fields()(离散集/布尔不进连续数值面板)之后,最大的
+// 已知字段——不写进 `Fields`()(离散集/布尔不进连续数值面板)之后,最大的
 // 风险就是它们被当成未知字段告警忽略,配置文件写了却不生效。
 func TestRenderLODKeysAreKnownFields(t *testing.T) {
 	previous := slog.Default()
@@ -169,8 +169,8 @@ func TestRenderLODKeysAreKnownFields(t *testing.T) {
 	}
 }
 
-// TestRenderLODRoundTrip 验证 Save/Load 往返保留 LOD 三字段——调试面板 F5
-// 的保存路径按整组 Render 落盘,读回必须不丢。
+// TestRenderLODRoundTrip 验证 `Save`/`Load` 往返保留 LOD 三字段——调试面板 F5
+// 的保存路径按整组 `Render` 落盘,读回必须不丢。
 func TestRenderLODRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	original := config.Defaults()

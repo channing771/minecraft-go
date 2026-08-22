@@ -80,7 +80,7 @@ func (f *testField) window(gi, gj int) testWindow {
 }
 
 // testSampleField 以 worldgen probe 采样窗口场,复刻 engine sample_window
-// 的 oracle 定义:窗高 = 窗内截断列高 max(逐列截断到 MaxY−1,与
+// 的 oracle 定义:窗高 = 窗内截断列高 max(逐列截断到 `MaxY`−1,与
 // generate_chunk 的写入高度一致),材质 = 首个达到 max 的列(z 外层、
 // x 内层扫描序)的 worldgen 表层材质。并列最高取首个达到 max 的列是
 // 确定性契约的一部分,不是对实现细节的偶然复制。
@@ -183,7 +183,7 @@ func testSampleField(t *testing.T, header []byte, tile core.ChunkPos, step uint3
 	return &testField{step: s, baseX: baseX, baseZ: baseZ, n: n, cells: cells}
 }
 
-// testGenerateQuads 生成 tile 壳并解码为 Quad 流(差分/结构测试的公共入口)。
+// testGenerateQuads 生成 tile 壳并解码为 `Quad` 流(差分/结构测试的公共入口)。
 func testGenerateQuads(t *testing.T, header []byte, tile core.ChunkPos, step uint32) []Quad {
 	t.Helper()
 	shell, err := GenerateShell(header, tile, step)

@@ -82,10 +82,14 @@ var fileExtensionExemptions = map[string]string{
 // nonGoNameExemptions 是逐条登记的非 Go 名字，每条附理由。
 // 只登记**实际出现过**的；没出现的不预先登记，免得清单变成许愿池。
 var nonGoNameExemptions = map[string]string{
-	"MGW1":           "worldgen native ABI 的 wire magic，4 字节字面量，定义在 Rust 侧",
-	"mornlea_engine": "Rust cdylib crate 名（mesh/light、物理、raycast、worldgen 的生产实现）",
-	"mornlea_client": "Rust cdylib crate 名（窗口、事件循环与全部 GPU 渲染）",
-	"is_plant":       "Rust engine greedy 模块的函数名，snake_case，Go 侧没有同名声明",
+	"MGW1":                   "worldgen native ABI 的 wire magic，4 字节字面量，定义在 Rust 侧",
+	"mornlea_engine":         "Rust cdylib crate 名（mesh/light、物理、raycast、worldgen 的生产实现）",
+	"mornlea_client":         "Rust cdylib crate 名（窗口、事件循环与全部 GPU 渲染）",
+	"is_plant":               "Rust engine greedy 模块的函数名，snake_case，Go 侧没有同名声明",
+	"mornlea_lod_shell":      "Rust engine lod 模块的 FFI 出口函数名，snake_case，Go 侧没有同名声明",
+	"mornlea_worldgen_chunk": "Rust engine worldgen 的 FFI 出口函数名，snake_case，Go 侧没有同名声明",
+	"mornlea_worldgen_probe": "Rust engine worldgen probe 的 FFI 出口函数名，snake_case，Go 侧没有同名声明",
+	"LodQuad":                "Rust engine lod 模块的壳 quad 结构体类型名，定义在 Rust 侧，Go 侧没有同名声明",
 }
 
 // isShoutingName 判断名字是否形如「全大写 + 下划线」的常量命名。

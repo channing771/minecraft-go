@@ -5,7 +5,7 @@
 // 壳请求编码(复用 worldgen `MGW1` header + tile 尾部)、20 字节 LE quad
 // 流解码与生成入口,不实现第二套 Go 壳算法。差分与结构 oracle 测试在
 // 本包测试内以 `mornlea_worldgen_probe` 为对照(oracle 保留方案)。
-// 远环 tile 的排队、预算化生成与上传调度由本包 Scheduler 与其 worker
+// 远环 tile 的排队、预算化生成与上传调度由本包 `Scheduler` 与其 worker
 // goroutine 承担(scheduler.go/worker.go/budget.go)。
 package lod
 
@@ -85,9 +85,9 @@ type Quad struct {
 	D uint16
 	// Face 面朝向。
 	Face Face
-	// Material 材质 ID(最高列 worldgen 表层材质)。
+	// `Material` 材质 ID(最高列 worldgen 表层材质)。
 	Material uint16
-	// Shade 着色权重(ShadeTop/ShadeSideX/ShadeSideZ 之一)。
+	// `Shade` 着色权重(`ShadeTop`/`ShadeSideX`/`ShadeSideZ` 之一)。
 	Shade uint8
 }
 
@@ -112,7 +112,7 @@ func AppendShellInput(dst []byte, header []byte, tile core.ChunkPos, step uint32
 }
 
 // GenerateShell 生成一个远环 tile 的壳 quad 字节流(未解码,可直接供
-// 渲染上传消费)。header 与 AppendShellInput 同源;返回切片调用方只读。
+// 渲染上传消费)。header 与 `AppendShellInput` 同源;返回切片调用方只读。
 // 请求编码失败返回错误;engine 侧失败(版本、tile 越界等编程错误)由
 // nativeabi 绑定以稳定中文文案 panic,镜像 worldgen 生产路径。
 func GenerateShell(header []byte, tile core.ChunkPos, step uint32) ([]byte, error) {
@@ -123,9 +123,9 @@ func GenerateShell(header []byte, tile core.ChunkPos, step uint32) ([]byte, erro
 	return nativeabi.LodShell(input), nil
 }
 
-// DecodeQuads 把 `mornlea_lod_shell` 输出的 quad 字节流解码为 Quad 切片,
+// DecodeQuads 把 `mornlea_lod_shell` 输出的 quad 字节流解码为 `Quad` 切片,
 // 供校验与 oracle 测试消费(渲染上传直接使用原始字节流,不经解码)。
-// 长度不是 QuadBytes 的倍数或 face 越界时返回带上下文的错误。
+// 长度不是 `QuadBytes` 的倍数或 face 越界时返回带上下文的错误。
 func DecodeQuads(shell []byte) ([]Quad, error) {
 	if len(shell)%QuadBytes != 0 {
 		return nil, fmt.Errorf("lod: 壳流长度 %d 不是 %d 的倍数", len(shell), QuadBytes)

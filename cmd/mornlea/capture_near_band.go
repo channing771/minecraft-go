@@ -13,7 +13,7 @@ import (
 
 // captureShellTopY 是远环壳内容在世界 Y 轴上的解析上界,用作近处不变
 // 断言的截止推导输入:worldgen 地表高度 = 海平面 64 + fbm×振幅 48
-// (见 internal/worldgen oracle 的 oracleSeaLevel/oracleTerrainAmp),
+// (见 internal/worldgen oracle 的 `oracleSeaLevel`/`oracleTerrainAmp`),
 // |fbm| ≤ 1 故高度 ≤ 112;壳的断差裙边只向下延伸、不抬高上界。取解析
 // 界而非实测最值,让断言对任意种子都成立——若未来 worldgen 振幅改变,
 // 本常量必须同步。
@@ -21,12 +21,12 @@ const captureShellTopY = 64 + 48
 
 // captureShellBottomY 是远环壳内容在世界 Y 轴上的解析下界(与上界
 // 对称:海平面 64 − 振幅 48 = 16),供双侧保护的下行截止推导:仰角
-// 低于 atan2(captureShellBottomY − camY, 距离) 的像素同样不可能包含
+// 低于 atan2(`captureShellBottomY` − camY, 距离) 的像素同样不可能包含
 // 壳,近场地表(下半屏)由此受保护。
 const captureShellBottomY = 64 - 48
 
 // lodTileBlocks 是远环 tile 的世界边长(block),与 app_lod.go 的
-// lodTileChunks×16 同值(4 chunk × 16)。client 渲染器的同名常量
+// `lodTileChunks`×16 同值(4 chunk × 16)。client 渲染器的同名常量
 // LOD_TILE_WORLD_BLOCKS 也是 64;这里只做距离推导,不镜像容量类契约,
 // 数值耦合由 5.2 的半径推导测试锚定。
 const lodTileBlocks = 64
@@ -70,8 +70,8 @@ func lodMaxShellDistance(outer int) float64 {
 // 必须逐字节一致,差异只允许出现在远景带。
 //
 // 双侧保护都是纯几何推导、对任意种子成立。壳内容只出现在远环带
-// (水平距离 ∈ [lodMinShellDistance, lodMaxShellDistance]),高度 ∈
-// [captureShellBottomY, captureShellTopY],因此壳可能出现的仰角区间为
+// (水平距离 ∈ [`lodMinShellDistance`, `lodMaxShellDistance`]),高度 ∈
+// [`captureShellBottomY`, `captureShellTopY`],因此壳可能出现的仰角区间为
 // (bottomCut, topCut]:
 //
 //   - 上行截止 topCut:相机低于壳上界时 = atan((shellTop − camY)/minDist)
@@ -96,17 +96,17 @@ func lodMaxShellDistance(outer int) float64 {
 // 任何行无壳,按 fail-closed 拒绝更新基线。
 type nearBandGuard struct {
 	camera client.Camera
-	// shellDist 是相机到壳的最近水平距离;>0 才参与截止推导。
+	// `shellDist` 是相机到壳的最近水平距离;>0 才参与截止推导。
 	shellDist float32
-	// maxShellDist 是相机到壳的最远欧氏距离,供下行截止使用。
+	// `maxShellDist` 是相机到壳的最远欧氏距离,供下行截止使用。
 	maxShellDist float64
-	// shellWired 标记本次运行是否接线了远环(未接线时全图保护)。
+	// `shellWired` 标记本次运行是否接线了远环(未接线时全图保护)。
 	shellWired bool
 }
 
 // newNearBandGuard 按抓帧时的相机位姿与远环装配事实构造断言。center
-// 是远环带中心 tile(a.lodTileCenter),inner 是 lodNearTileRadius 推导的
-// 内半径,outer 是 lodFarTileRadius 推导的远环外半径;shellWired 为假
+// 是远环带中心 tile(方法 `lodTileCenter`),inner 是 `lodNearTileRadius` 推导的
+// 内半径,outer 是 `lodFarTileRadius` 推导的远环外半径;`shellWired` 为假
 // (禁用/benchmark 路径)时其余参数不参与。
 func newNearBandGuard(
 	camera client.Camera, center lod.TilePos, inner, outer int, shellWired bool,
@@ -123,8 +123,8 @@ func newNearBandGuard(
 }
 
 // shellCutElevation 返回壳内容可能出现的最大仰角(弧度,水平线之上
-// 为正)。推导见类型注释;调用方(assertUnchanged)已先行排除
-// shellDist ≤ 0 的退化形态。
+// 为正)。推导见类型注释;调用方(`assertUnchanged`)已先行排除
+// `shellDist` ≤ 0 的退化形态。
 func (g nearBandGuard) shellCutElevation() float64 {
 	rise := float64(captureShellTopY) - float64(g.camera.Pos.Y())
 	if rise <= 0 {
@@ -148,7 +148,7 @@ func (g nearBandGuard) shellBottomElevation() float64 {
 // [height−bottomRows, height)。相机无横滚,每行是等仰角线且仰角随
 // 行号单调递减,因此两侧受保护行各自连续,从顶部/底部首个越界行即
 // 停;每个方向每行只做一次矩阵乘法(64×360 图共 720 次,可忽略)。
-// 未接线形态由 assertUnchanged 走全图比较,不经过本函数。
+// 未接线形态由 `assertUnchanged` 走全图比较,不经过本函数。
 func (g nearBandGuard) protectedRowSpans(height int) (topRows, bottomRows int) {
 	if height <= 0 {
 		return 0, 0
