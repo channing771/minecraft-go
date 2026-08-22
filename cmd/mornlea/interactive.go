@@ -9,6 +9,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/core"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/physics"
@@ -30,7 +31,11 @@ func runInteractive(app *application) error {
 	panelSaveWasDown := false
 	panelResetAllWasDown := false
 	var input client.InputState
-	var textInputBuffer [1024]rune
+	// textInputBuffer 与 `chatInput.runes` 同以 `companion.MaxPlanCommandBytes`
+	// 为界（M5E 递延 2 的清偿，E7 同源化收口）：rune 编码后每字符至少 1 字节，
+	// 满上限指令即使单帧全部到达也不会在 drain 层截断，截断恒由 `chatInput`
+	// 的字节上限统一执行——两处界一旦分叉，较大一侧会在另一侧之前静默截断。
+	var textInputBuffer [companion.MaxPlanCommandBytes]rune
 
 	for !app.window.ShouldClose() {
 		app.window.Poll()
