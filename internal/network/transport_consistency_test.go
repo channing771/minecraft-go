@@ -187,10 +187,14 @@ func TestCommonBlockMaterialPlayTranscriptMatchesMemoryAndTCP(t *testing.T) {
 }
 
 func TestProtocolOutdatedHandshakeRejectMatchesMemoryAndTCP(t *testing.T) {
-	// v15、v16 与 v17 都是过时版本：Memory 与 TCP 必须产生相同的 v23 版本
-	// 不匹配拒绝(变基重编:WorldSeed 段由 v18 重编为 v23,v22 为
-	// authoritative-farming 已交付的翻地命令段,对本客户端同样是被拒的过时版本)。
-	for _, version := range []uint32{15, 16, 17} {
+	// v15、v16 与 v17 都是过时版本：Memory 与 TCP 必须产生相同的版本不匹配
+	// 拒绝(变基重编:WorldSeed 段由 v18 重编为 v23,v22 为 authoritative-farming
+	// 已交付的翻地命令段,对本客户端同样是被拒的过时版本)。
+	//
+	// `ProtocolVersion - 1` 是**刚退役的那一版**，写成表达式而不是字面量：
+	// 只列远古版本的话，升版当次退役的版本在两种传输上的拒绝行为无人覆盖
+	// （v24 退役 v23 时正是这个缺口）。
+	for _, version := range []uint32{15, 16, 17, ProtocolVersion - 1} {
 		for _, open := range transportOpeners {
 			t.Run(fmt.Sprintf("v%d/%s", version, open.name), func(t *testing.T) {
 				client, server := open.open(t)

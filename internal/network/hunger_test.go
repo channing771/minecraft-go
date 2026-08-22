@@ -82,14 +82,29 @@ func TestProtocolV24PlayerInputCarriesEating(t *testing.T) {
 			t.Fatalf("往返 (Mining,Eating) = (%v,%v)，想要 (%v,%v)",
 				got.Mining, got.Eating, tc.mining, tc.eating)
 		}
-		// 进食位是载荷最末一字节，采掘位紧邻其前：位置性断言，防止两者互换。
-		if payload[len(payload)-1] != boolWireByte(tc.eating) ||
-			payload[len(payload)-2] != boolWireByte(tc.mining) {
+		// 位置性断言（Ruling 27）：先钉死载荷总长，再按具名常量索引尾部两个
+		// 布尔字节。裸写 `len(payload)-1` 的话，日后再往尾部追加一个字段时
+		// 索引会静默改指到新字段——PlayerState 的 healthOffset 就这么错过一次。
+		if len(payload) != playerInputPayloadBytes {
+			t.Fatalf("PlayerInput 载荷 %d 字节，想要 %d——尾部布局变了，"+
+				"下面的偏移必须一起重算", len(payload), playerInputPayloadBytes)
+		}
+		if payload[playerInputEatingOffset] != boolWireByte(tc.eating) ||
+			payload[playerInputMiningOffset] != boolWireByte(tc.mining) {
 			t.Fatalf("载荷尾部 = %x，想要 Mining=%v 后跟 Eating=%v",
-				payload[len(payload)-2:], tc.mining, tc.eating)
+				payload[playerInputMiningOffset:], tc.mining, tc.eating)
 		}
 	}
 }
+
+// PlayerInput 的 wire 布局（v24 起，固定长度）：
+//
+//	Sequence u64 | MoveX i8 | MoveZ i8 | Jump u8 | Yaw f32 | Pitch f32 | Mining u8 | Eating u8
+const (
+	playerInputPayloadBytes = 8 + 1 + 1 + 1 + 4 + 4 + 1 + 1
+	playerInputEatingOffset = playerInputPayloadBytes - 1
+	playerInputMiningOffset = playerInputEatingOffset - 1
+)
 
 func boolWireByte(value bool) byte {
 	if value {
