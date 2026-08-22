@@ -10,6 +10,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/sim"
 	"github.com/channing771/mornlea/internal/storage"
 )
@@ -352,6 +353,39 @@ func TestPlayerPersistenceDirtyDetectionIncludesHunger(t *testing.T) {
 				t.Fatalf("存档比较忽略了%s", testCase.name)
 			}
 		})
+	}
+}
+
+// TestHungerPublishedOverWireOnLogin 覆盖 `Server.publishLocalResult` 里
+// `Hunger: playerUpdate.Hunger` 这一行：权威饥饿值必须真的经 wire 下发给
+// 玩家本人，不是只停留在服务端内部快照里。仿照
+// TestOxygenIsNotPersistedAcrossDiskRestart 的先例：断言读的是从
+// `network.PlayerState` 收到的值，不是窥探服务端内部状态。
+//
+// 玩家带非零非满的饥饿值（`savedHunger` = 12）登录，落脚在既有 changedGenerator
+// 平地上（而不是 hungerTestSnapshot 默认的 y=70 半空位置）：真实模拟在跑，
+// 高空落地会摔死并触发重生，重生会把饥饿值重置回满值，届时断言的就不再是
+// 落盘值而是重生初值，用例会在不覆盖目标行的情况下也保持绿色。
+func TestHungerPublishedOverWireOnLogin(t *testing.T) {
+	root := t.TempDir()
+	id := playerID(0x73)
+	const name = "Wired"
+	loc := sim.PlayerLocation{Dimension: core.Overworld, Position: mgl32.Vec3{0.5, 1.001, 0.5}}
+	seedHungerPlayer(t, root, id, name, sim.PlayerSnapshot{
+		Current: loc, Health: core.MaxHealth,
+		Hunger: savedHunger, SaturationMilli: savedSaturationMilli, ExhaustionMilli: savedExhaustionMilli,
+	})
+
+	host := startDiskHost(t, root, "127.0.0.1:0", changedGenerator{})
+	identity := network.Identity{PlayerID: id, DisplayName: name}
+	connected := dialIntegrationClient(t, host.Addr, identity)
+	waitClientReadyFor(t, host, connected, id)
+
+	state, _ := waitHealth(t, connected, func(state network.PlayerState) bool {
+		return state.Ready
+	})
+	if state.Hunger != savedHunger {
+		t.Fatalf("wire 上的饥饿值 = %d，想要 %d", state.Hunger, savedHunger)
 	}
 }
 
