@@ -544,14 +544,28 @@ git commit -m "feat: apply texture packs during client startup"
 
 - [ ] **Step 1: Add a focused packaging check before changing the Makefile**
 
-Run the existing macOS build, then prove the notice directory is currently absent:
+First prove the existing Makefile fails in the hook/CI-style environment because it hard-codes an unqualified cargo executable, then make the one-line tool selection fix and prove the ordinary target succeeds:
 
 ```bash
+make rust
+# Expected before the fix: cargo: command not found
+```
+
+Change only the existing assignment to:
+
+```make
+CARGO ?= rustup run 1.97.1 cargo
+```
+
+This keeps the repository-pinned toolchain as the default and still lets build environments override `CARGO`; do not add an installer, fallback downloader or PATH mutation. Then run the existing macOS build and prove the notice directory is currently absent:
+
+```bash
+make rust
 make build
 test ! -e bin/third-party/pixel-perfection/ATTRIBUTION.md
 ```
 
-Expected: the final command succeeds before the packaging change. Preserve any existing Rust toolchain fix or unrelated Makefile edit; do not overwrite the file wholesale.
+Expected: both build commands and the final absence check succeed before the packaging change. Preserve unrelated Makefile edits; do not overwrite the file wholesale.
 
 - [ ] **Step 2: Write the user-facing format documentation**
 
@@ -588,6 +602,7 @@ Do not add these assets or notices to `build-linux-server`: the dedicated server
 - [ ] **Step 4: Verify documentation and release output**
 
 ```bash
+make rust
 make build
 cmp internal/assets/packs/pixel_perfection/ATTRIBUTION.md bin/third-party/pixel-perfection/ATTRIBUTION.md
 cmp internal/assets/packs/pixel_perfection/LICENSE.txt bin/third-party/pixel-perfection/LICENSE.txt

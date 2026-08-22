@@ -9,6 +9,7 @@ Mornlea 当前只有程序化 16×16 材质，玩家无法在不改源码的情�
 - 配置 v1 新增可选顶层字段 `texturePackPath`，相对路径按配置文件所在目录解析；benchmark 与 capture 忽略本地用户值。
 - 显式配置的材质包无效时，客户端在创建窗口、打开存储或建立网络连接之前启动失败。
 - 发布物携带 Pixel Perfection 的不可变来源 pin、逐文件 provenance、署名、修改说明与 CC BY-SA 4.0 许可证。
+- `Makefile` 默认经 rustup 调用固定 Rust 1.97.1 工具链，同时保留 `CARGO` 覆盖入口，避免 hook/CI 的精简 `PATH` 找不到 cargo。
 - 专用服务端不加载或分发材质；协议 v23、存档 schema、engine ABI v6、client ABI v7 与 benchmark scenario v18 均不变化。
 
 ## Capabilities

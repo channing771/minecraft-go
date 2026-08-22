@@ -29,10 +29,10 @@
 
 ## 6. 文档化格式并打包第三方 notices
 
-- [ ] 6.1 先运行 `make build` 并确认 `bin/third-party/pixel-perfection/ATTRIBUTION.md` 尚不存在，保留现有 Makefile 变更。
+- [ ] 6.1 先运行 `make rust`，确认当前 `CARGO := cargo` 在 hook/CI 的精简 `PATH` 下因找不到 cargo 失败；再把默认值最小改为可覆盖的 `CARGO ?= rustup run 1.97.1 cargo`，证明不额外传参的 `make rust` 使用固定工具链通过。随后运行 `make build` 并确认 `bin/third-party/pixel-perfection/ATTRIBUTION.md` 尚不存在；保留现有其他 Makefile 变更。
 - [ ] 6.2 新建 `docs/texture-packs.md`，记录 v1 目录、完整逻辑名、16×16 PNG、逐层回退、错误语义、路径解析、启动时/目录限制、不兼容格式及 notices 位置；README 只增加短链接。
 - [ ] 6.3 在 macOS 客户端 `build` 产物中逐字节复制 `ATTRIBUTION.md`、`LICENSE.txt` 与 `PROVENANCE.json`，不得加入 Linux 专用服务端 release unit。
-- [ ] 6.4 运行 `make build`、三个 `cmp`、`test -z "$(go list -deps ./cmd/mornlea-server | rg 'internal/assets')"` 与 `git diff --check`，通过规格与质量评审后提交文档和打包变更。
+- [ ] 6.4 运行 `make rust`、`make build`、三个 `cmp`、`test -z "$(go list -deps ./cmd/mornlea-server | rg 'internal/assets')"` 与 `git diff --check`，通过规格与质量评审后提交文档和打包变更。
 
 ## 7. 在 LOD 基线上重建并检查视觉 golden
 
