@@ -1,9 +1,9 @@
 ## 2. 实现有界目录材质包 loader
 
-- [ ] 2.1 在 `internal/assets/pack_test.go` 用 `testing/fstest.MapFS` 添加失败测试，覆盖有效单层覆盖（含树叶/玻璃的中间 alpha RGBA 被接受）、缺失回退、manifest/PNG/尺寸/上限/普通文件校验、未知 manifest 字段告警、固定映射顺序、未知文件不读取以及失败时注册表不变；运行 `go test ./internal/assets -run 'TestApplyPack' -count=1` 确认先失败。
-- [ ] 2.2 在 `internal/assets/blocks.go` 添加固定 39 项逻辑名到既有 layer 的内部映射及完整性测试，不暴露新 mutation API。
-- [ ] 2.3 在 `internal/assets/pack.go` 仅用标准库实现 v1 manifest 与 PNG 的有界读取、任意合法 16×16 RGBA 规范化、逐层缺失回退和临时集合验证后的原子应用；不得按逻辑 layer 拒绝中间 alpha、检查像素结构或验证本地用户文件许可证。
-- [ ] 2.4 运行 `gofmt -w internal/assets/pack.go internal/assets/pack_test.go internal/assets/blocks.go`、`go test ./internal/assets -race -count=1` 与 `git diff --check`，通过规格与质量评审后提交 loader。
+- [x] 2.1 在 `internal/assets/pack_test.go` 用 `testing/fstest.MapFS` 添加失败测试，覆盖有效单层覆盖（含树叶/玻璃的中间 alpha RGBA 被接受）、缺失回退、manifest/PNG/尺寸/上限/普通文件校验、未知 manifest 字段告警、固定映射顺序、未知文件不读取以及失败时注册表不变；运行 `go test ./internal/assets -run 'TestApplyPack' -count=1` 确认先失败。
+- [x] 2.2 在 `internal/assets/blocks.go` 添加固定 39 项逻辑名到既有 layer 的内部映射及完整性测试，不暴露新 mutation API。
+- [x] 2.3 在 `internal/assets/pack.go` 仅用标准库实现 v1 manifest 与 PNG 的有界读取、任意合法 16×16 RGBA 规范化、逐层缺失回退和临时集合验证后的原子应用；不得按逻辑 layer 拒绝中间 alpha、检查像素结构或验证本地用户文件许可证。
+- [x] 2.4 运行 `gofmt -w internal/assets/pack.go internal/assets/pack_test.go internal/assets/blocks.go`、`go test ./internal/assets -race -count=1` 与 `git diff --check`，通过规格与质量评审后提交 loader。
 
 ## 3. 固定来源并内嵌 Pixel Perfection 子集
 
