@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 
 GO := go
-CARGO := cargo
+CARGO ?= rustup run 1.97.1 cargo
 RUST_DIR := engine
 RUST_DYLIB := $(RUST_DIR)/target/release/libmornlea_engine.dylib
 RUST_SO := $(RUST_DIR)/target/release/libmornlea_engine.so
@@ -11,6 +11,8 @@ SERVER := ./cmd/mornlea-server
 SERVER_BINARY := bin/mornlea-server
 MORNLEA_DYLIB := bin/libmornlea_engine.dylib
 MORNLEA_SO := bin/libmornlea_engine.so
+PIXEL_PERFECTION_NOTICE_DIR := internal/assets/packs/pixel_perfection
+PIXEL_PERFECTION_NOTICE_DEST := bin/third-party/pixel-perfection
 ARGS ?=
 
 .PHONY: help run build build-linux-server test test-race test-multiplayer bench-multiplayer archcheck fmt clean visual-check visual-update rust rust-check
@@ -54,6 +56,10 @@ build:
 	$(GO) build -ldflags='-extldflags=-Wl,-rpath,@loader_path' -o $(BINARY) $(APP)
 	$(GO) build -ldflags='-extldflags=-Wl,-rpath,@loader_path' -o $(SERVER_BINARY) $(SERVER)
 	cp $(RUST_DYLIB) $(MORNLEA_DYLIB)
+	@mkdir -p $(PIXEL_PERFECTION_NOTICE_DEST)
+	cp $(PIXEL_PERFECTION_NOTICE_DIR)/ATTRIBUTION.md $(PIXEL_PERFECTION_NOTICE_DEST)/ATTRIBUTION.md
+	cp $(PIXEL_PERFECTION_NOTICE_DIR)/LICENSE.txt $(PIXEL_PERFECTION_NOTICE_DEST)/LICENSE.txt
+	cp $(PIXEL_PERFECTION_NOTICE_DIR)/PROVENANCE.json $(PIXEL_PERFECTION_NOTICE_DEST)/PROVENANCE.json
 
 build-linux-server: rust
 	@mkdir -p $(dir $(SERVER_BINARY))

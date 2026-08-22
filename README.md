@@ -195,6 +195,8 @@ go run ./cmd/mornlea --connect 127.0.0.1:25565 --name 玩家甲
 
 `mornlea`/`mornlea-server` 启动时读取同一份 JSON 配置文件，默认路径 `os.UserConfigDir()/mornlea/config.json`（与 `profile.json` 同目录），可用 `--config <path>` 覆盖。文件不存在时全部使用编译默认值，**不会自动创建文件**；字段缺失取默认值，越界值被钳制并 `slog.Warn`，未知字段被忽略，JSON 语法错误或不认识的 `version` 会导致启动失败。旧默认目录的迁移规则见[改名迁移说明](docs/notes/mornlea-migration.md)。
 
+本地材质覆盖的配置与 v1 目录格式见[材质包说明](docs/texture-packs.md)。
+
 配置包含四组运行参数和一个可选 AI 组：
 
 | 分组 | 内容 |
