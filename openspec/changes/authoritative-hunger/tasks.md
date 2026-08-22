@@ -35,10 +35,10 @@
 
 ## 5. 客户端输入与 HUD
 
-- [ ] 5.1 `cmd/mornlea` 使用键:手持食物时置 `Eating`(按住 true / 松开 false),其余手持物行为不变;无本地预测。覆盖「手持面包置位 / 手持小麦不置位 / 手持锄头仍翻地」。验证:`go test ./cmd/mornlea -race -count=1`
-- [ ] 5.2 `internal/render/hud`:`paintHotbarDrumstick`(空/满两列,与 `paintHotbarHeart` 同法)+ `appendHungerBar`(右下镜像生命条,10 格半格粒度,满时仍显示)。复用同一图集与 pass,零新 pipeline;**若 `maxHotbarQuads` 因此移动,按 `bounded-benchmark-workload` 升 scenario 并在报告写明**。验证:`go test ./internal/render/hud -race -count=1`
-- [ ] 5.3 覆盖「界面显示权威饥饿值」;HUD 单元测试断言至少两个不同饥饿值给出**不同**的填充(不只「非空」)。**本组跑 capture 比对并记录哪些场景变、不重生成**(重生成归组 7)。验证:`go test ./internal/render/hud ./cmd/mornlea -race -count=1`
-- [ ] 5.4 变异验证:鸡腿填充比例写死 → HUD 用例红;客户端食物分支去掉 → 「手持面包置位」红。
+- [x] 5.1 `cmd/mornlea` 使用键:手持食物时置 `Eating`(按住 true / 松开 false),其余手持物行为不变;无本地预测。覆盖「手持面包置位 / 手持小麦不置位 / 手持锄头仍翻地」。验证:`go test ./cmd/mornlea -race -count=1`
+- [x] 5.2 `internal/render/hud`:`paintHotbarDrumstick`(空/满两列,与 `paintHotbarHeart` 同法)+ `appendHungerBar`(右下镜像生命条,10 格半格粒度,满时仍显示)。复用同一图集与 pass,零新 pipeline;**若 `maxHotbarQuads` 因此移动,按 `bounded-benchmark-workload` 升 scenario 并在报告写明**。验证:`go test ./internal/render/hud -race -count=1`
+- [x] 5.3 覆盖「界面显示权威饥饿值」;HUD 单元测试断言至少两个不同饥饿值给出**不同**的填充(不只「非空」)。**本组跑 capture 比对并记录哪些场景变、不重生成**(重生成归组 7)。验证:`go test ./internal/render/hud ./cmd/mornlea -race -count=1`
+- [x] 5.4 变异验证:鸡腿填充比例写死 → HUD 用例红;客户端食物分支去掉 → 「手持面包置位」红。
 
 ## 6. 端到端
 

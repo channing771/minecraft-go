@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/render"
 )
 
 // 杀死变异：忽略 Confirmed 标记或画出预测值，会让 HUD 在收到权威状态前显示猜测值。
@@ -151,5 +152,48 @@ func TestHungerBarMirrorsHealthBarOnTheRight(t *testing.T) {
 	appendHungerBar(&open, HungerOverlay{Confirmed: true, Value: core.MaxHunger}, width, height)
 	if !reflect.DeepEqual(open.quads[start:], hunger.quads) {
 		t.Fatal("打开背包移动或缩放了饥饿条")
+	}
+}
+
+// TestHotbarPrepareDrawsHungerBar 钉死 `Prepare` 确实调用了 `appendHungerBar`。
+//
+// 没有这条断言，把那一行从 `Prepare` 里删掉不会让任何测试变红：quad 容量、
+// offset 与总容量都是编译期常量，`appendHungerBar` 自己的用例又直接调它。
+// 界面上饥饿条整条消失，门禁却全绿——这正是「链路接线无人断言」的经典形态。
+func TestHotbarPrepareDrawsHungerBar(t *testing.T) {
+	renderer := &HotbarRenderer{
+		atlas: &allocationGlyphSource{},
+		layout: hotbarLayout{
+			quads:  make([]hotbarInstance, 0, maxHotbarQuads),
+			glyphs: make([]hotbarInstance, 0, maxHotbarGlyphs),
+		},
+		upload: make([]byte, hotbarUploadBytes),
+	}
+	budget := render.NewUploadBudget(1024)
+	countDrumsticks := func(hunger HungerOverlay) (empty, full int) {
+		t.Helper()
+		if err := renderer.Prepare(
+			core.Inventory{}, false, false, -1, nil, nil, MiningOverlay{},
+			HealthOverlay{}, OxygenOverlay{}, hunger, ChatOverlay{}, 1280, 720, budget,
+		); err != nil {
+			t.Fatal(err)
+		}
+		emptyUV := hotbarTextureUV(hotbarEmptyDrumstickColumn)
+		fullUV := hotbarTextureUV(hotbarFullDrumstickColumn)
+		for _, quad := range renderer.layout.quads {
+			switch {
+			case quad.U0 == emptyUV[0] && quad.U1 == emptyUV[2]:
+				empty++
+			case quad.U1 == fullUV[2] && quad.U0 >= fullUV[0] && quad.U0 < fullUV[2]:
+				full++
+			}
+		}
+		return empty, full
+	}
+	if empty, full := countDrumsticks(HungerOverlay{Confirmed: true, Value: 13}); empty != 10 || full != 7 {
+		t.Fatalf("Prepare 后空/填充鸡腿=%d/%d，想要 10/7", empty, full)
+	}
+	if empty, full := countDrumsticks(HungerOverlay{Confirmed: false, Value: 13}); empty != 0 || full != 0 {
+		t.Fatalf("未确认饥饿值仍画出 %d/%d 个鸡腿", empty, full)
 	}
 }
