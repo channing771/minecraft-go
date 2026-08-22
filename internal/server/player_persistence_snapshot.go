@@ -90,9 +90,12 @@ func newMissingCachedPlayer(
 		}, Inventory: starterMaterialInventory(),
 			// 缺失玩家的首份快照可能先于 sim 的第一次 Observe 落盘（Confirm 会
 			// 直接标脏），因此这里就要写初值而不是零值：零饥饿是合法取值，
-			// 落盘后重登的新玩家会直接进入挨饿状态。
+			// 落盘后重登的新玩家会直接进入挨饿状态。ExhaustionMilli 显式写 0
+			// （与初值恰好相同）：留空虽然效果一致，但对"漏写疲劳初值"这类变异
+			// 免疫，不显式写就没有源码位置能被删掉从而让断言变红。
 			Hunger:          core.MaxHunger,
 			SaturationMilli: core.InitialSaturationMilli,
+			ExhaustionMilli: 0,
 		},
 		hasSnapshot: true,
 		missing:     true,

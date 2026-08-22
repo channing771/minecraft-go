@@ -459,8 +459,8 @@ func TestPlayerCodecRejectsCorruptEnvelope(t *testing.T) {
 		{"invalid health", func() []byte {
 			p := bytes.Clone(encoded)
 			// 生命值不再是末字节：v7 在它之后追加了三层饥饿状态。写成
-			// len(p)-playerHungerBytes-1 而不是 len(p)-1，否则这条断言会静默
-			// 改指疲劳值高字节，"生命值越界被拒"就不再被任何用例覆盖。
+			// len(p)-playerHungerBytes-playerHealthBytes 而不是 len(p)-1，否则
+			// 这条断言会静默改指疲劳值高字节，"生命值越界被拒"就不再被任何用例覆盖。
 			p[len(p)-playerHungerBytes-playerHealthBytes] = core.MaxHealth + 1
 			repairPlayerCRC(p)
 			return p

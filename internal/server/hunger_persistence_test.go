@@ -134,6 +134,15 @@ func TestHungerSurvivesDiskRestart(t *testing.T) {
 	if err := persistence.Observe(id, name, want, 0, false); err != nil {
 		t.Fatalf("观察权威快照: %v", err)
 	}
+	// 落盘前先自匹配：漏写任何一个饥饿字段会让 matchesSave 恒假，Flush 因此永远
+	// 重派保存直到包级 10 s 超时才收场——这里先把该类变异钉在值断言上。
+	persistence.mu.Lock()
+	cached := persistence.cache[id]
+	selfMatches := cached.matchesSave(cached.save(1))
+	persistence.mu.Unlock()
+	if !selfMatches {
+		t.Fatal("落盘前缓存快照与自身存档不匹配")
+	}
 	flushHungerPersistence(t, persistence)
 	persistence.CloseWorker()
 	if err := store.Close(); err != nil {
@@ -343,5 +352,20 @@ func TestPlayerPersistenceDirtyDetectionIncludesHunger(t *testing.T) {
 				t.Fatalf("存档比较忽略了%s", testCase.name)
 			}
 		})
+	}
+}
+
+// TestNewMissingCachedPlayerHasFedHungerInitialValues 覆盖
+// newMissingCachedPlayer 里三层饥饿状态的承重初值：缺失玩家的首份快照可能先于
+// sim 的第一次 Observe 落盘（Confirm 会直接标脏），若初值漏写成零值，新玩家
+// 落盘后重登会直接进入挨饿掉血状态。删掉初值赋值两行必须让这条断言变红。
+func TestNewMissingCachedPlayerHasFedHungerInitialValues(t *testing.T) {
+	player := newMissingCachedPlayer(playerID(0x90), "Newcomer", testMetadata())
+	save := player.save(1)
+	if save.Hunger != core.MaxHunger || save.SaturationMilli != core.InitialSaturationMilli ||
+		save.ExhaustionMilli != 0 {
+		t.Fatalf("缺失玩家的初值饥饿状态 = (%d, %d, %d)，想要 (%d, %d, 0)",
+			save.Hunger, save.SaturationMilli, save.ExhaustionMilli,
+			core.MaxHunger, core.InitialSaturationMilli)
 	}
 }
