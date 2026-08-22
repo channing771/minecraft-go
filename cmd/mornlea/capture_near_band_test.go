@@ -2,9 +2,12 @@ package main
 
 import (
 	"image"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/channing771/mornlea/internal/client"
+	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/lod"
 )
 
@@ -19,6 +22,83 @@ func repaintRow(img *image.NRGBA, y int, value uint8) {
 	for x := 0; x < img.Bounds().Dx(); x++ {
 		i := img.PixOffset(x, y)
 		img.Pix[i], img.Pix[i+1], img.Pix[i+2] = value, value, value
+	}
+}
+
+func goldenControlTestApplication() *application {
+	return &application{
+		camera:       nearBandTestCamera(60),
+		lodScheduler: &lod.Scheduler{},
+		render:       config.Defaults().Render,
+	}
+}
+
+func TestTextureGoldenUpdateControlRejectsProtectedRowsBeforeGoldenWrite(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	goldenDir := filepath.Join("cmd", "mornlea", "testdata", "golden")
+	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existingPath := filepath.Join(goldenDir, "existing.png")
+	oldBytes := []byte("existing golden bytes")
+	if err := os.WriteFile(existingPath, oldBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lodOn, lodOff := goldenControlTestApplication(), goldenControlTestApplication()
+	offFrame, onFrame := graySolid(64, 64, 40), graySolid(64, 64, 40)
+	repaintRow(onFrame, 0, 200)
+	outDir := filepath.Join(root, "out")
+	err := runGoldenUpdateControlWithCapture(
+		lodOn, lodOff, outDir,
+		func(app *application, scene captureScene) (*image.NRGBA, error) {
+			if scene.Name != "far-horizon" {
+				t.Fatalf("control scene = %q，want far-horizon", scene.Name)
+			}
+			if app == lodOn {
+				return onFrame, nil
+			}
+			return offFrame, nil
+		},
+	)
+	if err == nil || !containsSubstr(err.Error(), "受保护区间") {
+		t.Fatalf("protected-row control error = %v，want near-band rejection", err)
+	}
+	gotBytes, readErr := os.ReadFile(existingPath)
+	if readErr != nil || string(gotBytes) != string(oldBytes) {
+		t.Fatalf("existing golden changed: bytes=%q err=%v", gotBytes, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(goldenDir, "far-horizon.png")); !os.IsNotExist(statErr) {
+		t.Fatalf("缺失的旧 far-horizon golden 被创建: %v", statErr)
+	}
+	for _, name := range []string{"far-horizon-lod-on-control.png", "far-horizon-lod-off-control.png"} {
+		if _, statErr := os.Stat(filepath.Join(outDir, name)); statErr != nil {
+			t.Fatalf("诊断图 %s: %v", name, statErr)
+		}
+	}
+}
+
+func TestTextureGoldenUpdateControlAllowsOnlyFarBandDifference(t *testing.T) {
+	lodOn, lodOff := goldenControlTestApplication(), goldenControlTestApplication()
+	offFrame, onFrame := graySolid(64, 64, 40), graySolid(64, 64, 40)
+	repaintRow(onFrame, 32, 200)
+	var captured []string
+	err := runGoldenUpdateControlWithCapture(
+		lodOn, lodOff, t.TempDir(),
+		func(app *application, scene captureScene) (*image.NRGBA, error) {
+			captured = append(captured, scene.Name)
+			if app == lodOn {
+				return onFrame, nil
+			}
+			return offFrame, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("far-band-only control: %v", err)
+	}
+	if len(captured) != 2 || captured[0] != "far-horizon" || captured[1] != "far-horizon" {
+		t.Fatalf("captured scenes = %v，want [far-horizon far-horizon]", captured)
 	}
 }
 

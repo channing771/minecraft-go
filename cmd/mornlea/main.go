@@ -30,15 +30,18 @@ type runDependencies struct {
 	runInteractive func(*application) error
 	runBenchmark   func(*application, string) error
 	runCapture     func(*application, string, bool) error
+	// `runGoldenUpdateControl` 只服务显式 baseline update；普通 capture 与游戏不调用。
+	runGoldenUpdateControl func(*application, *application, string) error
 }
 
 func run(args []string) error {
 	return runWithDependencies(args, runDependencies{
-		newApplication: newApplication,
-		loadIdentity:   loadApplicationIdentity,
-		runInteractive: runInteractive,
-		runBenchmark:   runBenchmark,
-		runCapture:     runCapture,
+		newApplication:         newApplication,
+		loadIdentity:           loadApplicationIdentity,
+		runInteractive:         runInteractive,
+		runBenchmark:           runBenchmark,
+		runCapture:             runCapture,
+		runGoldenUpdateControl: runGoldenUpdateControl,
 	})
 }
 
@@ -109,6 +112,42 @@ func runWithDependencies(args []string, dependencies runDependencies) error {
 			return fmt.Errorf("解析配置文件路径: %w", err)
 		}
 		options.Application.ConfigPath = configPath
+	}
+
+	if options.CaptureDir != "" && options.UpdateGolden {
+		// update 必须先用两个 disposable application 比较同一当前材质下的
+		// LOD on/off 帧。两者关闭后才创建 fresh application，避免 control
+		// 场景留下的相机和镜像状态污染正式场景顺序。
+		lodOnOptions := options.Application
+		lodOnOptions.Render.LodEnabled = true
+		lodOn, err := dependencies.newApplication(lodOnOptions)
+		if err != nil {
+			return fmt.Errorf("启动 LOD-on 视觉基线 control: %w", err)
+		}
+		lodOffOptions := lodOnOptions
+		lodOffOptions.Render.LodEnabled = false
+		lodOff, err := dependencies.newApplication(lodOffOptions)
+		if err != nil {
+			return errors.Join(
+				fmt.Errorf("启动 LOD-off 视觉基线 control: %w", err),
+				lodOn.Close(),
+			)
+		}
+		controlErr := dependencies.runGoldenUpdateControl(lodOn, lodOff, options.CaptureDir)
+		controlErr = errors.Join(controlErr, lodOff.Close(), lodOn.Close())
+		if controlErr != nil {
+			return fmt.Errorf("视觉基线近环 control: %w", controlErr)
+		}
+		fmt.Println("LOD on/off control applications 已关闭，开始写入视觉基线")
+
+		app, err := dependencies.newApplication(lodOnOptions)
+		if err != nil {
+			return fmt.Errorf("启动正式视觉基线抓帧: %w", err)
+		}
+		return errors.Join(
+			dependencies.runCapture(app, options.CaptureDir, true),
+			app.Close(),
+		)
 	}
 
 	app, err := dependencies.newApplication(options.Application)
