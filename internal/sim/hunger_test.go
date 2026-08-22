@@ -281,3 +281,68 @@ func TestRespawnRestoresHungerToInitialValues(t *testing.T) {
 			player.exhaustionMilli, player.starvationTicks)
 	}
 }
+
+// hungerReplayFingerprint 在一个全新引擎上跑完固定的输入脚本，返回三层饥饿
+// 状态与生命值的指纹。脚本刻意把疲劳表的每一类来源都走一遍，其中游泳那一段
+// 是唯一经过浮点换算的路径，也就是重放不一致最可能出现的地方。
+func hungerReplayFingerprint(t *testing.T, id SessionID) [4]uint32 {
+	t.Helper()
+	engine := readyRegenPlayer(t, id, core.MaxHealth)
+	player := engine.sessions[id].player
+
+	// 第一段：平地起跳并落地。
+	player.input.Jump = true
+	engine.Step()
+	player.input.Jump = false
+	for range 20 {
+		engine.Step()
+	}
+
+	// 第二段：泡进水里持续游动，走浮点位移换算。
+	floodAroundPlayer(t, engine, player.state.Position)
+	player.input.MoveX = 1
+	player.input.MoveZ = -1
+	for range 60 {
+		engine.Step()
+	}
+	player.input.MoveX = 0
+	player.input.MoveZ = 0
+
+	// 第三段：饿到零并挨过若干饥饿伤害间隔（生命值先掉到中段，避免被回血门控
+	// 与满血短路一起抹平差异）。
+	player.hunger = 0
+	player.saturationMilli = 0
+	player.health = 10
+	for range 200 {
+		engine.Step()
+	}
+
+	return [4]uint32{
+		uint32(player.hunger),
+		uint32(player.saturationMilli),
+		uint32(player.exhaustionMilli),
+		uint32(player.health),
+	}
+}
+
+// TestHungerReplayIsBitIdenticalAcrossEngines 覆盖 Scenario「相同输入重放逐位
+// 一致」的 sim 层部分：两个**互相独立**的 Engine 吃同一串输入，三层饥饿状态与
+// 生命值必须逐字段相同。两传输（Memory/TCP）的 parity 归后续任务组。
+//
+// 这条用例真正守的是「权威推进不用浮点」：状态本身全是整数，唯一的浮点是游泳
+// 位移换算，且那一步立刻截断回整数。任何把浮点引进状态的改动都会让这里在某个
+// 平台上开始抖动。
+func TestHungerReplayIsBitIdenticalAcrossEngines(t *testing.T) {
+	first := hungerReplayFingerprint(t, SessionID(61))
+	second := hungerReplayFingerprint(t, SessionID(61))
+	if first != second {
+		t.Fatalf("两次重放的 (饥饿,饱和,疲劳,生命) 不一致: %v vs %v", first, second)
+	}
+	// 夹具自证：脚本必须真的把状态推离初值，否则「两次都等于初值」也会通过。
+	initial := [4]uint32{
+		uint32(core.MaxHunger), uint32(initialSaturationMilli), 0, uint32(core.MaxHealth),
+	}
+	if first == initial {
+		t.Fatalf("重放脚本没有改变任何状态: %v", first)
+	}
+}
