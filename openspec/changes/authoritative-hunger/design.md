@@ -74,6 +74,7 @@ MC 持久化三层;不持久化疲劳会让「重登即清疲劳」成为无成�
 | capture golden(HUD 场景) | PNG 无法三方合并。本变更 golden 放**最后一组**,组前 `rebase origin/main`;材质包若已合并,在其基线上重生成并逐场景说明;若未合并,材质包那边在其收尾重生成 |
 | `AGENTS.md` / `CLAUDE.md` 基线段 | 后合者解冲突,两份保持逐字节相同(archcheck 兜底) |
 | `internal/config` `Fields()` | 不同行,文本合并即可 |
+| Codex 规划中的 `bedrock-survival-hud`(main 上只有设计与计划:生命移到快捷栏左上、氧气改右上气泡、明写「不新增饥饿」) | 布局级而非代码级冲突:本变更按**现有**布局把饥饿条放右下镜像生命条;后合者负责把饥饿条纳入新布局(建议本变更先合,survival HUD 执行时把鸡腿与爱心一起重排)。`mornlea-texture-pack` 已于 2026-08-22 合并(PR #61),golden 基线已是 Pixel Perfection 材质,7.1 在其上重生成 |
 
 本变更**不碰** `internal/assets`、不改任何 layer、不改 mesh/shader。
 
