@@ -16,8 +16,8 @@ import (
 )
 
 func TestBenchmarkScenarioVersionIncludesStaticBlockLightWorkload(t *testing.T) {
-	if scenarioVersion != 18 {
-		t.Fatalf("scenarioVersion=%d，想要农业之后的 v18", scenarioVersion)
+	if scenarioVersion != 19 {
+		t.Fatalf("scenarioVersion=%d，想要饥饿之后的 v19", scenarioVersion)
 	}
 }
 

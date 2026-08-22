@@ -2,7 +2,9 @@
 
 ## 当前 producer 与迁移规则
 
-当前 benchmark producer 为 scenario v18：`authoritative-farming` 再次改变了被测进程本身（mesh registry 条目上限 35 → 48、实际烘焙条目 35 → 45，每次 mesh 调用的 FFI 输入从 910 bytes 涨到 1170 bytes；合成面板 8 → 10 行使 Hotbar HUD 固定上传布局移动——quad 容量 238 → 247、glyph offset 11776 → 12288、总容量 45376 → 45888 bytes、空聊天帧每帧实际写入 11776 → 12288 bytes；权威 tick 多出一个每 tick 枚举全部区段的 `advanceCrops` 阶段），即便 benchmark 世界内容未变——它仍把 `FluidEnabled` 钉死为 `false`，也不含任何农业方块；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `17:18`，v6..v17 历史报告仍可同版本读取。历史的 `16:17` 与更早的 `15:16` 已退役，只作本文的归档证据，工具不再接受它们。
+当前 benchmark producer 为 scenario v19：`authoritative-hunger` 又一次改变了被测进程本身（Hotbar HUD 新增右下角饥饿条，`maxHotbarQuads` 247 → 267 使固定上传布局移动——glyph offset 12288 → 13312、总容量 45888 → 46912 bytes、空聊天帧每帧实际写入 12288 → 13312 bytes；HUD 图集在爱心之后新增空/满两列程序化鸡腿；权威 tick 多出饥饿三层状态的推进与结算），即便 benchmark 世界内容未变——它仍把 `FluidEnabled` 钉死为 `false`，也不含任何农业方块；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `18:19`，v6..v18 历史报告仍可同版本读取。历史的 `17:18`、`16:17` 与更早的 `15:16` 已退役，只作本文的归档证据，工具不再接受它们。
+
+上一代（scenario v18）的判定理由：`authoritative-farming` 改变了被测进程本身（mesh registry 条目上限 35 → 48、实际烘焙条目 35 → 45，每次 mesh 调用的 FFI 输入从 910 bytes 涨到 1170 bytes；合成面板 8 → 10 行使 Hotbar HUD 固定上传布局移动——quad 容量 238 → 247、glyph offset 11776 → 12288、总容量 45376 → 45888 bytes、空聊天帧每帧实际写入 11776 → 12288 bytes；权威 tick 多出一个每 tick 枚举全部区段的 `advanceCrops` 阶段）。
 
 ## M5A scenario v16 记录（record-only，非新基线）
 
