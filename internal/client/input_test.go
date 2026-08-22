@@ -115,3 +115,29 @@ func TestInputStateDropsOnlyOnValidQRisingEdge(t *testing.T) {
 		t.Fatalf("重新按下 Q = %+v，想要触发丢弃", got)
 	}
 }
+
+// TestInputStateReportsUseKeyHeldAlongsideRisingEdgePlace 覆盖进食链的第一段：
+// 「使用」键必须同时给出**上升沿**（放置/翻地/开容器用）和**按住态**（进食用）。
+// 进食是逐 tick 上行的持续输入，只有上升沿的 `Place` 无法表达「一直按着」；
+// 反过来若把 `Place` 也改成按住态，长按会连发放置命令。两位必须并存且语义不同。
+func TestInputStateReportsUseKeyHeldAlongsideRisingEdgePlace(t *testing.T) {
+	var state client.InputState
+
+	first := state.Update(false, true, 0, false, false, false)
+	if !first.Use || !first.Place {
+		t.Fatalf("首次按下使用键 = %+v，想要 Use 与 Place 同时为 true", first)
+	}
+	held := state.Update(false, true, 0, false, false, false)
+	if !held.Use || held.Place {
+		t.Fatalf("持续按住使用键 = %+v，想要 Use=true 而 Place=false", held)
+	}
+	released := state.Update(false, false, 0, false, false, false)
+	if released.Use || released.Place {
+		t.Fatalf("松开使用键 = %+v，想要 Use 与 Place 都为 false", released)
+	}
+	// 背包界面打开时使用键与挖掘一样被抑制：界面里的右键不该被当成进食。
+	suppressed := state.Update(false, true, 0, false, false, true)
+	if suppressed.Use || suppressed.Mining {
+		t.Fatalf("界面打开时 = %+v，想要 Use 与 Mining 都被抑制", suppressed)
+	}
+}

@@ -39,6 +39,11 @@ type Actions struct {
 	Click bool
 	// Drop 是 Q 的有效上升沿：请求丢弃权威选中栏位中的一个物品。
 	Drop bool
+	// Use 是「使用」键的当前按住状态，与只给上升沿的 Place 是同一个物理键的
+	// 两种形态。放置、翻地和开容器都是一次性命令，只能吃上升沿，否则长按会连发；
+	// 进食却是**持续输入驱动**的权威动作，服务端要逐 tick 看见「还按着」才推进
+	// 进度，松开的那一 tick 立刻清零。两种语义无法共用一位，因此各占一位。
+	Use bool
 }
 
 type InputState struct {
@@ -69,6 +74,7 @@ func (state *InputState) Update(
 	} else {
 		actions.Mining = primary
 		actions.Place = secondary && !state.secondaryDown
+		actions.Use = secondary
 		if number >= 1 && number <= core.HotbarSlots && number != state.numberDown {
 			actions.Select = true
 			actions.SelectSlot = uint8(number - 1)

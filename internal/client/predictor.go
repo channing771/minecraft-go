@@ -24,6 +24,10 @@ type Control struct {
 	Yaw    float32
 	Pitch  float32
 	Mining bool
+	// Eating 是本帧是否请求进食。它由 app 按「手持食物 + 使用键按住」置位，
+	// 逐固定步原样上行给服务端；客户端**不做任何本地预测**——既不扣食物也不
+	// 改饥饿值，界面显示的永远是服务端确认回来的那个数。
+	Eating bool
 }
 
 // ReconcileResult 描述权威状态和解对视角的影响。
