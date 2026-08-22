@@ -346,12 +346,27 @@ func TestCompanionPathsNeverTouchHungerState(t *testing.T) {
 		t.Fatalf("伙伴没有完成采掘，夹具空转: coal=%d", got)
 	}
 
-	// 伙伴移动：走完整条权威积分出口（含跳跃输入与水平位移）。
+	// 伙伴移动：走完整条权威积分出口（含跳跃输入与水平位移）。移动必须逐 tick
+	// 经 `CompanionActionMove` 意图管线提交——`applyCompanionActions` 对没有
+	// action 的伙伴每 tick 用 `physics.Input{Yaw: entry.yaw}` 覆盖 `entry.input`，
+	// 直接写 `entry.input` 的夹具会被这一步抹掉，伙伴一步不动，这半边就是空转的。
+	// 位移跨区块，因此逐 tick 按既有 `feedCompanionActionRequests` 惯例供给新
+	// 订阅的区块。
 	entry.miningHeld = false
-	entry.input.Jump = true
-	entry.input.MoveZ = -1
-	for range 40 {
-		engine.Step()
+	start := entry.state.Position
+	for tick := range 40 {
+		if !engine.EnqueueCompanionAction(CompanionAction{
+			ID: id, Kind: CompanionActionMove,
+			Input: physics.Input{MoveX: 1, Jump: true},
+		}) {
+			t.Fatalf("tick %d 移动 action 未入队", tick)
+		}
+		feedCompanionActionRequests(t, engine, engine.Step())
+	}
+	// 夹具自证：伙伴确实位移了。移动这半边一旦被中性输入打回原地，本条断言先红，
+	// 而不是让"伙伴不改玩家三层状态"在一个根本没动过的伙伴身上空绿。
+	if entry.state.Position == start {
+		t.Fatalf("伙伴位置=%+v，与起点相同（移动夹具空转）", entry.state.Position)
 	}
 
 	if got := exhaustionOf(player); got != before {
