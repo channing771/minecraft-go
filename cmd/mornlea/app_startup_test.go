@@ -23,50 +23,92 @@ import (
 
 func TestNewApplicationReturnsRegistryErrorBeforeClientSideEffects(t *testing.T) {
 	want := errors.New("registry failure")
-	unexpected := func(name string) {
-		t.Helper()
-		t.Fatalf("材质加载失败后调用了 %s", name)
-	}
-	dependencies := defaultApplicationDependencies()
-	dependencies.newRegistry = func(path string) (*assets.Registry, error) {
-		if path != "/missing/texture-pack" {
-			t.Fatalf("registry path = %q", path)
-		}
-		return nil, want
-	}
-	dependencies.openStore = func(context.Context, applicationOptions) (storage.WorldStore, error) {
-		unexpected("openStore")
-		return nil, nil
-	}
-	dependencies.dialTCP = func(context.Context, string) (network.ClientPacketStream, error) {
-		unexpected("dialTCP")
-		return nil, nil
-	}
-	dependencies.newHost = func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
-		unexpected("newHost")
-		return nil, nil
-	}
-	dependencies.newWindow = func(int, int, string) (applicationWindow, error) {
-		unexpected("newWindow")
-		return nil, nil
-	}
-	dependencies.newWindowedRenderer = func(applicationWindow) (*client.Renderer, error) {
-		unexpected("newWindowedRenderer")
-		return nil, nil
-	}
-	dependencies.newOffscreenRenderer = func(int, int) (*client.Renderer, error) {
-		unexpected("newOffscreenRenderer")
-		return nil, nil
-	}
+	sideEffectErr := errors.New("unexpected client side effect")
+	local := localConnectionOptions()
+	remote := remoteConnectionOptions()
+	headless := localConnectionOptions()
+	headless.Benchmark = true
+	for _, test := range []struct {
+		name      string
+		options   applicationOptions
+		configure func(*applicationDependencies, func(string))
+	}{
+		{name: "本地交互", options: local},
+		{name: "远程连接", options: remote},
+		{
+			name:    "benchmark 无头",
+			options: headless,
+			configure: func(dependencies *applicationDependencies, called func(string)) {
+				dependencies.openStore = func(context.Context, applicationOptions) (storage.WorldStore, error) {
+					called("openStore")
+					return storage.NewMemory(storage.Metadata{FormatVersion: 2, Seed: 42}), nil
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := make(map[string]int)
+			called := func(name string) { calls[name]++ }
+			dependencies := defaultApplicationDependencies()
+			dependencies.newRegistry = func(path string) (*assets.Registry, error) {
+				if path != "/missing/texture-pack" {
+					t.Fatalf("registry path = %q", path)
+				}
+				return nil, want
+			}
+			dependencies.openStore = func(context.Context, applicationOptions) (storage.WorldStore, error) {
+				called("openStore")
+				return nil, sideEffectErr
+			}
+			dependencies.dialTCP = func(context.Context, string) (network.ClientPacketStream, error) {
+				called("dialTCP")
+				return nil, sideEffectErr
+			}
+			dependencies.loginClient = func(context.Context, network.ClientPacketStream, network.Identity) (network.ClientEndpoint, uint64, error) {
+				called("loginClient")
+				return nil, 0, sideEffectErr
+			}
+			dependencies.newHost = func(context.Context, server.Config, server.Generator, storage.WorldStore) (applicationHost, error) {
+				called("newHost")
+				return nil, sideEffectErr
+			}
+			dependencies.newMemoryStreamPair = func(int) (network.ClientPacketStream, network.ServerPacketStream, error) {
+				called("newMemoryStreamPair")
+				return nil, nil, sideEffectErr
+			}
+			dependencies.newWindow = func(int, int, string) (applicationWindow, error) {
+				called("newWindow")
+				return nil, sideEffectErr
+			}
+			dependencies.newWindowedRenderer = func(applicationWindow) (*client.Renderer, error) {
+				called("newWindowedRenderer")
+				return nil, sideEffectErr
+			}
+			dependencies.newOffscreenRenderer = func(int, int) (*client.Renderer, error) {
+				called("newOffscreenRenderer")
+				return nil, sideEffectErr
+			}
+			if test.configure != nil {
+				test.configure(&dependencies, called)
+			}
 
-	options := localConnectionOptions()
-	options.TexturePackPath = "/missing/texture-pack"
-	_, err := newApplicationWithDependencies(options, dependencies)
-	if !errors.Is(err, want) {
-		t.Fatalf("newApplication error = %v，want %v", err, want)
-	}
-	if !strings.Contains(err.Error(), `加载材质包 "/missing/texture-pack"`) {
-		t.Fatalf("newApplication error = %q，want path context", err)
+			test.options.TexturePackPath = "/missing/texture-pack"
+			_, err := newApplicationWithDependencies(test.options, dependencies)
+			for _, name := range []string{
+				"openStore", "dialTCP", "loginClient", "newHost", "newMemoryStreamPair",
+				"newWindow", "newWindowedRenderer", "newOffscreenRenderer",
+			} {
+				if calls[name] != 0 {
+					t.Errorf("材质加载失败后 %s calls = %d，want 0", name, calls[name])
+				}
+			}
+			if !errors.Is(err, want) {
+				t.Errorf("newApplication error = %v，want %v", err, want)
+			}
+			if err == nil || !strings.Contains(err.Error(), `加载材质包 "/missing/texture-pack"`) {
+				t.Errorf("newApplication error = %q，want path context", err)
+			}
+		})
 	}
 }
 
