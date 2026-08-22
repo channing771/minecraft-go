@@ -29,4 +29,8 @@ Ruling: 模型选择——本 harness 的 Agent 工具无 model 参数，无法�
 
 ## 任务记录
 
-（派发时追加）
+Task 1: dispatched (BASE 693db2e, implementer agent_fec61641, 45 tool uses)
+Task 1: Ruling: Step 4 变异形式——brief 字面变异（必填出现判定 `has(...)` 改指针判 nil）实测不红（null 仍经「缺少」分支拒绝、用例只断言错误类别），实现者改证完整回归形态（指针判定 + 删 nil 屏障 → 两用例各自 nil panic 红，栈迹可交叉印证），与新用例注释的「nil 解引用防 panic 屏障」语义严格一致，采纳 — 若误纳，代价是「出现判定单独退化为指针判定且不删屏障」这一退化不被消息级断言捕获（记录于下条 minor）。
+Task 1: minor (deferred): planner_test.go 宿主测试只断言错误类别，「显式 null 记为字段出现」契约在错误消息层未锁；消息级区分需后续调整宿主断言（brief 断言形态固有，非实现缺陷，评审已确认披露完整）
+Task 1: complete (commits 693db2e..21ce9e2, review clean — Spec ✅ / Approved, 0 Critical, 0 Important)
+
