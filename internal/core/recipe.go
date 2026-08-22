@@ -26,6 +26,11 @@ const (
 	RecipeStoneHoe
 	// RecipeIronHoe 用 2 个铁锭合成 1 把铁锄。
 	RecipeIronHoe
+	// RecipeBread 用 3 个小麦合成 1 个面包。
+	//
+	// 它是农业闭环的出口：小麦除了合成面包没有任何用途，这条配方是「种地」
+	// 与「吃饭」之间唯一的通路。3 换 1 与参考实现同值。
+	RecipeBread
 )
 
 // CraftingRecipe 是一条固定的单输入、单输出配方。
@@ -88,6 +93,11 @@ func Recipe(id RecipeID) (CraftingRecipe, bool) {
 		return CraftingRecipe{
 			Input:  ItemStack{Item: ItemIronIngot, Count: 2},
 			Output: ItemStack{Item: ItemIronHoe, Count: 1, Durability: 250},
+		}, true
+	case RecipeBread:
+		return CraftingRecipe{
+			Input:  ItemStack{Item: ItemWheat, Count: 3},
+			Output: ItemStack{Item: ItemBread, Count: 1},
 		}, true
 	default:
 		return CraftingRecipe{}, false

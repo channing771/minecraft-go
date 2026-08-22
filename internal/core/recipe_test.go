@@ -388,11 +388,11 @@ func TestRecipeOakPlanksIsFixed(t *testing.T) {
 		recipe.Output != (core.ItemStack{Item: core.ItemOakPlanks, Count: 4}) {
 		t.Fatalf("橡木木板配方 = %+v, %v", recipe, ok)
 	}
-	// 配方表末项的上界断言随表推进：锄头配方（9/10）落地后，第一个未知
-	// ID 是 11。写成 RecipeIronHoe+1 而不是字面量 11，下次追加配方时它会
-	// 自动跟着末项走，不会静默退化成「测一个早已合法的 ID」。
-	if _, ok := core.Recipe(core.RecipeIronHoe + 1); ok {
-		t.Fatal("未知 recipe ID 11 被接受")
+	// 配方表末项的上界断言随表推进：面包配方（11）落地后，第一个未知 ID 是
+	// 12。写成 RecipeBread+1 而不是字面量，下次追加配方时它会自动跟着末项
+	// 走，不会静默退化成「测一个早已合法的 ID」。
+	if _, ok := core.Recipe(core.RecipeBread + 1); ok {
+		t.Fatalf("未知 recipe ID %d 被接受", core.RecipeBread+1)
 	}
 }
 
@@ -480,7 +480,7 @@ func TestRecipeLightBlockIsFixedAndAtomic(t *testing.T) {
 	}{
 		{"玻璃不足", insufficient, core.RecipeLightBlock},
 		{"产物无容量", noRoom, core.RecipeLightBlock},
-		{"未知 ID 11", stocked, core.RecipeIronHoe + 1},
+		{"未知 ID 12", stocked, core.RecipeBread + 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			next, ok := test.inventory.Craft(test.recipe)
@@ -571,9 +571,80 @@ func TestExistingRecipesDoNotShiftAfterHoes(t *testing.T) {
 			t.Fatalf("recipe %d = %+v, %v，想要 %+v → %+v", tc.id, recipe, ok, tc.input, tc.output)
 		}
 	}
-	// 配方表的新末项：11 之后必须仍然未知，否则说明有人在锄头之后又追加了
+	// 配方表的新末项：面包配方（11）之后必须仍然未知，否则说明有人又追加了
 	// 配方却没有同步这条上界断言。
-	if _, ok := core.Recipe(core.RecipeIronHoe + 1); ok {
-		t.Fatal("未知 recipe ID 11 被接受")
+	if _, ok := core.Recipe(core.RecipeBread + 1); ok {
+		t.Fatalf("未知 recipe ID %d 被接受", core.RecipeBread+1)
+	}
+}
+
+// TestBreadRecipeIsFixedAndAtomic 锁定面包配方：ID 11 = 3 小麦 → 1 面包。
+//
+// 位次断言与既有工具配方同形：配方 ID 是协议稳定值，重排会让客户端已经发出的
+// 合成请求指向别的配方。面包是农业闭环的出口——小麦本身除了合成没有任何用途，
+// 这条配方是「种地」与「吃饭」之间唯一的通路。
+func TestBreadRecipeIsFixedAndAtomic(t *testing.T) {
+	if core.RecipeBread != 11 {
+		t.Fatalf("RecipeBread = %d，想要稳定为 11", core.RecipeBread)
+	}
+	if core.RecipeBread != core.RecipeIronHoe+1 {
+		t.Fatalf("RecipeBread = %d，必须紧随 RecipeIronHoe(%d)",
+			core.RecipeBread, core.RecipeIronHoe)
+	}
+	wantInput := core.ItemStack{Item: core.ItemWheat, Count: 3}
+	wantOutput := core.ItemStack{Item: core.ItemBread, Count: 1}
+	recipe, ok := core.Recipe(core.RecipeBread)
+	if !ok || recipe.Input != wantInput || recipe.Output != wantOutput || !recipe.Output.Valid() {
+		t.Fatalf("面包配方 = %+v, %v，想要 %+v → %+v", recipe, ok, wantInput, wantOutput)
+	}
+
+	// 原料跨栏位扣除 + 产物入空位，与既有配方同一条原子路径。
+	var inventory core.Inventory
+	inventory.Hotbar.Slots[3] = core.ItemStack{Item: core.ItemWheat, Count: 2}
+	inventory.Backpack[5] = core.ItemStack{Item: core.ItemWheat, Count: 1}
+	next, ok := inventory.Craft(core.RecipeBread)
+	if !ok {
+		t.Fatal("跨栏位的三份小麦应当可以合成面包")
+	}
+	if next.Hotbar.Slots[3] != (core.ItemStack{}) || next.Backpack[5] != (core.ItemStack{}) {
+		t.Fatalf("小麦未被跨栏位扣除: %+v / %+v", next.Hotbar.Slots[3], next.Backpack[5])
+	}
+	if next.Hotbar.Slots[0] != wantOutput {
+		t.Fatalf("新产物 = %+v，想要 %+v", next.Hotbar.Slots[0], wantOutput)
+	}
+
+	// 只有两份小麦时必须整体失败且一字不改。
+	short := core.Inventory{}
+	short.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemWheat, Count: 2}
+	if got, ok := short.Craft(core.RecipeBread); ok || got != short {
+		t.Fatalf("小麦不足时合成必须原子失败: %+v, %v", got, ok)
+	}
+}
+
+// TestExistingRecipesDoNotShiftAfterBread 覆盖 Scenario「既有配方编号不因新增
+// 而位移」：逐条比对 ID 1..10 的原料、数量与产物。上一次（锄头）只冻结到 8，
+// 这里把锄头的两条也一并冻结，任何一条被面包配方挤位或改写都会变红。
+func TestExistingRecipesDoNotShiftAfterBread(t *testing.T) {
+	frozen := []struct {
+		id     core.RecipeID
+		input  core.ItemStack
+		output core.ItemStack
+	}{
+		{1, core.ItemStack{Item: core.ItemStone, Count: 4}, core.ItemStack{Item: core.ItemStoneBrick, Count: 4}},
+		{2, core.ItemStack{Item: core.ItemStone, Count: 8}, core.ItemStack{Item: core.ItemFurnace, Count: 1}},
+		{3, core.ItemStack{Item: core.ItemIronIngot, Count: 9}, core.ItemStack{Item: core.ItemIronBlock, Count: 1}},
+		{4, core.ItemStack{Item: core.ItemStone, Count: 3}, core.ItemStack{Item: core.ItemStonePickaxe, Count: 1, Durability: 131}},
+		{5, core.ItemStack{Item: core.ItemIronIngot, Count: 3}, core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: 250}},
+		{6, core.ItemStack{Item: core.ItemStone, Count: 8}, core.ItemStack{Item: core.ItemChest, Count: 1}},
+		{7, core.ItemStack{Item: core.ItemOakLog, Count: 1}, core.ItemStack{Item: core.ItemOakPlanks, Count: 4}},
+		{8, core.ItemStack{Item: core.ItemGlass, Count: 4}, core.ItemStack{Item: core.ItemLightBlock, Count: 4}},
+		{9, core.ItemStack{Item: core.ItemStone, Count: 2}, core.ItemStack{Item: core.ItemStoneHoe, Count: 1, Durability: 131}},
+		{10, core.ItemStack{Item: core.ItemIronIngot, Count: 2}, core.ItemStack{Item: core.ItemIronHoe, Count: 1, Durability: 250}},
+	}
+	for _, tc := range frozen {
+		recipe, ok := core.Recipe(tc.id)
+		if !ok || recipe.Input != tc.input || recipe.Output != tc.output {
+			t.Fatalf("recipe %d = %+v, %v，想要 %+v → %+v", tc.id, recipe, ok, tc.input, tc.output)
+		}
 	}
 }
