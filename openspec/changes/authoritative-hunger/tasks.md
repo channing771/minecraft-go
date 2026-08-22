@@ -18,9 +18,9 @@
 - [ ] 2.3 **同组同步 `AGENTS.md`/`CLAUDE.md` 的玩家 schema 版本号**(两份逐字节相同)。验证:`go test ./internal/archcheck -count=1`
 - [ ] 2.4 变异验证:v6 迁移把 `Hunger` 初值改 0 → 「旧存档按初值迁移」红;保存路径漏写 `Saturation` → 「跨重启保留」红(夹具饱和非零)。
 
-## 3. 协议 v22 → v23
+## 3. 协议 v23 → v24
 
-- [ ] 3.1 `PlayerInput.Eating bool`、`PlayerState.Hunger uint8`(`Validate` 拒 >20);`ProtocolVersion` 23;wire golden 与 fuzz 同步;v22 握手被拒。**Ruling 27 普查**尾部偏移与魔数(`21`/`22`/`13`/`14` 等字面值 + 末项名)。验证:`go test ./internal/network -race -count=1`
+- [ ] 3.1 `PlayerInput.Eating bool`、`PlayerState.Hunger uint8`(`Validate` 拒 >20);`ProtocolVersion` 24(main 已是 v23);wire golden 与 fuzz 同步;v23 握手被拒。**Ruling 27 普查**尾部偏移与魔数(`22`/`23`/`14`/`15` 等字面值 + 末项名)。验证:`go test ./internal/network -race -count=1`
 - [ ] 3.2 sim 填 `PlayerState.Hunger`、读 `PlayerInput.Eating`;客户端镜像接收。验证:`go test ./internal/sim ./internal/client -race -count=1`
 - [ ] 3.3 **同组同步基线文档协议版本号**。验证:`go test ./internal/archcheck -count=1`
 - [ ] 3.4 变异验证:`Validate` 去掉 >20 拒绝 → 对应 golden/invalid 用例红;`PlayerState` 编码漏写 `Hunger` → 往返用例红。

@@ -10,7 +10,7 @@
 - **饥饿归零**:每 80 tick 经**既有伤害入口**扣 1 血,**HP ≤ 1 时停止**(MC 普通难度,不死)。
 - **进食(MC 式长按 32 tick)**:`PlayerInput` 加 `Eating` 持续输入位,权威状态机与采掘同构——记录开始时的 `(slot, item)`,每 tick 核对,松手/切格/物品变化/受伤/死亡即中断不扣料;第 32 tick 单 tick 原子结算(扣 1、饥饿 +5 ≤20、饱和 +6.000 ≤ 饥饿)。饥饿已满不推进。
 - **食物**:只有 `ItemBread`(饥饿 +5 / 饱和 +6.0);固定配方 **11**:3 小麦 → 1 面包。
-- **协议 v22 → v23**:`PlayerInput.Eating`、`PlayerState.Hunger`;饱和与疲劳**不上线**。
+- **协议 v23 → v24**(main 合入 `rust-engine-lod-shell` 后已是 v23):`PlayerInput.Eating`、`PlayerState.Hunger`;饱和与疲劳**不上线**。
 - **玩家存档 schema v6 → v7**:三字段持久化;v6 读入按 `Hunger=20 / Saturation=5.000 / Exhaustion=0` 迁移;重生饥饿回满。
 - **HUD 饥饿条**:右下、快捷栏上方,10 个程序化鸡腿(画在 `hud/atlas.go`,与爱心同处,**不进 `internal/assets` 的 layer**),复用同一 HUD 图集与 pass,饥饿满时仍显示。
 - 客户端「使用」键手持食物时置 `Eating`,不做任何本地预测。
@@ -31,7 +31,7 @@
 ## Impact
 
 - **受影响包**:`internal/core`(食物表、配方 11)、`internal/sim`(三层状态、疲劳表、回血门控、饥饿伤害、进食状态机)、`internal/physics`(起跳检测供疲劳表,若尚无现成信号)、`internal/network`(协议 v23)、`internal/storage`(玩家 schema v7 与 v6 迁移)、`internal/config`(tunable `Fields()`)、`internal/render/hud`(饥饿条)、`cmd/mornlea`(使用键食物分支)、`internal/archcheck`(基线版本)。
-- **兼容性**:协议 v22 → v23;玩家 schema v6 → v7(v6 只读兼容迁移,v7 以上按 `ErrFutureVersion` 拒);区块 schema v9、`companions.ai` v4、世界 metadata v2、engine/client ABI v5、benchmark scenario v18 **不变**(本变更不动 HUD 固定上传布局的 quad 容量——饥饿条复用爱心的列与尺寸;若实现期实测布局移动,按 `bounded-benchmark-workload` 条文升版)。
+- **兼容性**:协议 v23 → v24;玩家 schema v6 → v7(v6 只读兼容迁移,v7 以上按 `ErrFutureVersion` 拒);区块 schema v9、`companions.ai` v4、世界 metadata v2、engine ABI v6、client ABI v7、benchmark scenario v18 **不变**(本变更不动 HUD 固定上传布局的 quad 容量——饥饿条复用爱心的列与尺寸;若实现期实测布局移动,按 `bounded-benchmark-workload` 条文升版)。
 - **并发**:饥饿推进与进食在单写者权威 tick 内串行,不引入 goroutine 或锁。
 - **性能**:每玩家每 tick O(1);无全局扫描。
 - **与并行变更 `mornlea-texture-pack` 的关系**:本变更**不碰** `internal/assets`、不改 layer;饥饿条图标程序化画在 HUD 图集。两者都会改 capture golden(HUD 场景)与基线文档——**后合并者在对方基线上重生成 golden 并解文档冲突**,本变更的 golden 工作放在最后一组且组前 rebase 到 main。
