@@ -2,14 +2,14 @@
 
 ## 1. 核心状态、疲劳表与回血门控
 
-- [ ] 1.1 `internal/core` 新增 `ItemBread`(末项前追加,`ItemIDMax` 随之;`RegisteredItem`/堆叠 64/不可放置)、食物表 `FoodValue(item) (hunger uint8, saturationMilli uint16, ok bool)`(只有面包 5/6000)、recipe ID `11`(3 小麦 → 1 面包,既有 1..10 不位移)。**按 Ruling 27 普查**以 `ItemWheat`/`RecipeIronHoe` 为末项的断言与「末项+1」字面值。验证:`go test ./internal/core -race -count=1`
-- [ ] 1.2 `internal/sim` 三层状态进 `playerState`(`hunger uint8`、`saturationMilli uint16`、`exhaustionMilli uint16`),`applyExhaustion(milli)` 纯函数:累积 ≥4000 归零并扣饱和(饱和 0 则扣饥饿,饥饿 0 不动)。**穷举式单测**覆盖三层边界。验证:`go test ./internal/sim -race -count=1`
-- [ ] 1.3 疲劳来源表接进五个判定点(起跳 / 游泳按位移 / 采掘完成 / 翻地完成 / 回血每 HP),**只在玩家路径**,每个判定点一条用例(成功累积 + 拒绝/中断不累积)。起跳信号若物理侧没有现成导出,以「`Jump` 输入且上 tick `OnGround`」在 sim 判定,写明。验证:`go test ./internal/sim ./internal/physics -race -count=1`
-- [ ] 1.4 回血门控:`advanceHealthRegen` 入口加 `hunger >= 18`;每回 1 HP 累积 6000。既有四条回血用例在饥饿 ≥18 夹具下原样通过。验证:`go test ./internal/sim -race -count=1`
-- [ ] 1.5 饥饿伤害:饥饿 0 时每 `StarvationDamageIntervalTicks`(默认 80)经 `applyDamage` 扣 1,`health <= 1` 停。验证:`go test ./internal/sim -race -count=1`
-- [ ] 1.6 tunable:`StarvationDamageIntervalTicks`、`ExhaustionThresholdMilli`、`RegenHungerThreshold` 进 `sim.Tunables` + `internal/config` `Fields()` 钳制 + archcheck 禁导出清单。验证:`go test ./internal/config ./internal/archcheck -race -count=1`
-- [ ] 1.7 覆盖 `authoritative-hunger` 前四条 Requirement 的 Scenario(三层 4 条、疲劳表 3 条、回血门控 3 条、饥饿伤害 2 条)与 `authoritative-health` MODIFIED 的两条新 Scenario。**饥饿 17 与 18 成对夹具;每条「消耗」用例跨过阈值并断言精确值。**
-- [ ] 1.8 变异验证(三条):疲劳阈值改为 8000 → 「疲劳先消耗饱和度」红;去掉回血门控 → 「饥饿值 17 不回血」红;饥饿伤害去掉 `health <= 1` 停止 → 「止于一点生命」红。
+- [x] 1.1 `internal/core` 新增 `ItemBread`(末项前追加,`ItemIDMax` 随之;`RegisteredItem`/堆叠 64/不可放置)、食物表 `FoodValue(item) (hunger uint8, saturationMilli uint16, ok bool)`(只有面包 5/6000)、recipe ID `11`(3 小麦 → 1 面包,既有 1..10 不位移)。**按 Ruling 27 普查**以 `ItemWheat`/`RecipeIronHoe` 为末项的断言与「末项+1」字面值。验证:`go test ./internal/core -race -count=1`
+- [x] 1.2 `internal/sim` 三层状态进 `playerState`(`hunger uint8`、`saturationMilli uint16`、`exhaustionMilli uint16`),`applyExhaustion(milli)` 纯函数:累积 ≥4000 归零并扣饱和(饱和 0 则扣饥饿,饥饿 0 不动)。**穷举式单测**覆盖三层边界。验证:`go test ./internal/sim -race -count=1`
+- [x] 1.3 疲劳来源表接进五个判定点(起跳 / 游泳按位移 / 采掘完成 / 翻地完成 / 回血每 HP),**只在玩家路径**,每个判定点一条用例(成功累积 + 拒绝/中断不累积)。起跳信号若物理侧没有现成导出,以「`Jump` 输入且上 tick `OnGround`」在 sim 判定,写明。验证:`go test ./internal/sim ./internal/physics -race -count=1`
+- [x] 1.4 回血门控:`advanceHealthRegen` 入口加 `hunger >= 18`;每回 1 HP 累积 6000。既有四条回血用例在饥饿 ≥18 夹具下原样通过。验证:`go test ./internal/sim -race -count=1`
+- [x] 1.5 饥饿伤害:饥饿 0 时每 `StarvationDamageIntervalTicks`(默认 80)经 `applyDamage` 扣 1,`health <= 1` 停。验证:`go test ./internal/sim -race -count=1`
+- [x] 1.6 tunable:`StarvationDamageIntervalTicks`、`ExhaustionThresholdMilli`、`RegenHungerThreshold` 进 `sim.Tunables` + `internal/config` `Fields()` 钳制 + archcheck 禁导出清单。验证:`go test ./internal/config ./internal/archcheck -race -count=1`
+- [x] 1.7 覆盖 `authoritative-hunger` 前四条 Requirement 的 Scenario(三层 4 条、疲劳表 3 条、回血门控 3 条、饥饿伤害 2 条)与 `authoritative-health` MODIFIED 的两条新 Scenario。**饥饿 17 与 18 成对夹具;每条「消耗」用例跨过阈值并断言精确值。**
+- [x] 1.8 变异验证(三条):疲劳阈值改为 8000 → 「疲劳先消耗饱和度」红;去掉回血门控 → 「饥饿值 17 不回血」红;饥饿伤害去掉 `health <= 1` 停止 → 「止于一点生命」红。
 
 ## 2. 玩家存档 v6 → v7
 
