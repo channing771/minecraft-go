@@ -140,9 +140,11 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 	if chest, opened := a.chest.State(); opened {
 		chestOverlay = &hud.ChestOverlay{Items: chest.Items}
 	}
-	// 生命值、氧气和聊天都独立于背包确认状态；未确认时 renderer 只跳过物品布局。
+	// 生命值、氧气、饥饿值和聊天都独立于背包确认状态；未确认时 renderer 只跳过物品布局。
 	health, healthReady := a.predictor.Health()
 	oxygen, oxygenReady := a.predictor.Oxygen()
+	// 饥饿值同生命值与氧气：只取权威确认镜像，客户端不推算也不预测。
+	hunger, hungerReady := a.predictor.Hunger()
 	chatOverlay := a.chatOverlay()
 	hudVisible := inventoryConfirmed || (healthReady && !a.clientSessionClosed) ||
 		chatOverlay.Open || len(chatOverlay.Lines) != 0
@@ -150,7 +152,8 @@ func (a *application) renderFrame(workMax int) (bool, error) {
 		if err := a.hotbarRenderer.Prepare(
 			inventory, inventoryConfirmed, a.inventoryOpen, a.inventorySource, overlay, chestOverlay,
 			a.miningOverlay, hud.HealthOverlay{Confirmed: healthReady, Value: health},
-			hud.OxygenOverlay{Confirmed: oxygenReady, Value: oxygen}, chatOverlay,
+			hud.OxygenOverlay{Confirmed: oxygenReady, Value: oxygen},
+			hud.HungerOverlay{Confirmed: hungerReady, Value: hunger}, chatOverlay,
 			uint32(width), uint32(height), a.scheduler.UploadBudget(),
 		); err != nil {
 			return false, fmt.Errorf("准备快捷栏 HUD: %w", err)

@@ -7,9 +7,10 @@ import (
 
 const (
 	// 固定容量按最坏布局：背包分组面板、两种高亮、36 个栏位、双层物品内容、
-	// 九格快捷栏耐久条，再加最大的容器叠加层、十段生命条与两段氧气条。
+	// 九格快捷栏耐久条，再加最大的容器叠加层、十段生命条、两段氧气条与十段饥饿条。
 	maxHotbarQuads = openInventoryPanelQuads + 2 + core.InventorySlots + core.InventorySlots*2 +
-		core.HotbarSlots*2 + maxOverlayQuads + healthQuads + oxygenQuads + maxChatQuads
+		core.HotbarSlots*2 + maxOverlayQuads + healthQuads + oxygenQuads + hungerQuads +
+		maxChatQuads
 	// 数量最多两位数（2..64），每个数字包含阴影与前景两个实例。
 	maxHotbarGlyphs = core.InventorySlots*4 + maxOverlayGlyphs + maxChatGlyphs
 
