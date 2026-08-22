@@ -64,7 +64,7 @@ v22 已由 authoritative-farming 交付,本变更排其后;若顺序对调先互
       场景入库;既有场景近处像素不变的比对断言;
       验证:`go test ./cmd/mornlea -race -count=1 -run TestCapture`。
 - [x] 5.4 benchmark producer 默认 `lodEnabled=false`,scenario 保持
-      v17(变基后与 main 一致,不迁移),LOD 专项数值另存记录(只记录
+      v18(farming 的迁移段,本变更不迁移,与 main 一致),LOD 专项数值另存记录(只记录
       不门禁);
       验证:`go test ./cmd/mornlea -race -count=1 -run Benchmark`。
 

@@ -151,7 +151,7 @@ func TestLodTileFromChunkFloorSemantics(t *testing.T) {
 // client 渲染器的 MAX_LOD_TILES 容量。容量数值在 Go 侧是镜像常量
 // `lodMaxTiles`,用 Rust 源文件字面量同步断言锚定,防止双源漂移。
 func TestLodRingDomainWithinCapacityAtMaxLegalConfig(t *testing.T) {
-	// `viewDistance` 的合法上限从 `config.Fields`() 读取(单一权威),
+	// `viewDistance` 的合法上限从 `config.Fields` 读取(单一权威),
 	// lodFarMultiplier 的上限 8 与 config 的钳制区间锚定(见
 	// internal/config 的 `LodFarMultiplierMax`)。
 	viewDistanceMax := 0
@@ -332,7 +332,7 @@ func TestApplicationLodWiringDisabledZeroParticipation(t *testing.T) {
 // 锁住 5.4 的基准可比性裁决:benchmark 观察者路径即使带着编译默认的
 // lodEnabled=true 也不得构造远环 `Scheduler`——`attachLodScheduler` 在
 // `lodWiringEnabled` 判定后立即返回,种子不进 worldgen、无播种、无雾下发,
-// benchmark 的被测负载因此与远环引入前逐字节一致(scenario 保持 v17)。
+// benchmark 的被测负载因此与远环引入前逐字节一致(scenario 保持 v18)。
 // 与 `TestLodWiringEnabled` 的差异:断言落在真实 benchmark 装配产物上
 // (内存 store、内存传输、离屏渲染器、trusted observer 中心请求全走真
 // 分支)而不是开关函数上,防止装配点停止传递 benchmark 标记的静默回归。
@@ -363,7 +363,7 @@ func TestApplicationLodWiringBenchmarkObserverZeroParticipation(t *testing.T) {
 		}
 	}()
 	if app.lodScheduler != nil {
-		t.Fatal("benchmark 观察者路径不得构造远环 Scheduler(基准可比性:scenario 保持 v17)")
+		t.Fatal("benchmark 观察者路径不得构造远环 Scheduler(基准可比性:scenario 保持 v18)")
 	}
 	// 帧循环照常:零参与是"不建调度器",不是"帧循环分叉出第二条路径"。
 	if _, err := app.renderFrame(steadyFrameMeshWorkMax); err != nil {
