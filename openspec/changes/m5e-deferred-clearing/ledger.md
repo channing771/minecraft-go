@@ -41,5 +41,17 @@ Task 2: complete (commits 597f044..4ee2be7, review clean — Spec ✅ / Approved
 Task 3: dispatched (BASE c762813, implementer agent_b7aae507, 37 tool uses)
 Task 3: Ruling: 两处计划文本偏离按计划自身回退指示处理——(a) brief 注释模板 `` `Dialogue` `` 标识符全仓不存在（真实方法为 `Do`），archcheck 门禁拒收，实现者按根因修复改为 `` `m.dialogue.Do` ``，语义不变；(b) Step 2 `-run 'TestCompanionStageAcceptance'` 无匹配宿主（计划已预置「以实际宿主名为准」），实际宿主为 `TestM5StageAcceptancePersonaDialogueEndToEnd` — 两处若误裁，代价仅为注释措辞/测试过滤名与计划文本不一致，无行为影响。
 Task 3: minor (deferred): 释放改为裸语句后，`Plan`/`Do` 内部未恢复 panic 将跳过令牌释放（旧 defer 会释放）——worker goroutine panic 即杀进程，泄漏令牌不可观察，且该结构为计划显式指定；记录权衡供分支评审知悉（评审 Minor-1）
-Task 3: complete (commits c762813..5f9f2a7, review clean — Spec ✅ / Approved, 0 Critical, 0 Important；评审另核实信号量全部触点单次释放核算成立、ctx 路径不变、per-companion in-flight 旗标独立兜住并发上界）
+Task 3: complete (commits c762813..5f9f2a7, review clean — Spec ✅ / Approved, 0 Critical, 0 Important；评审另核实信号量全部触点单次释放核算成立、ctx 路径不变、per-companion in-flight 旗标独立兜住并发上界)
+
+## 终审与修复波
+
+终审门禁（四件套，08932d9 未移动、无需 rebase）：`make rust` EXIT=0（缓存命中）；`go test ./... -race -count=1` EXIT=0、24 包全 ok（hunger 7.2 记录的已知红灯本次未现）；`go vet ./...` EXIT=0；`gofmt -l .` 空；`openspec validate --all --strict` 56/56。
+
+终审（独立代理）：**Merge-ready after fixes**——D1–D6 全数交付且无多余；D6 四项语义断言逐项 verified（全部 `m.semaphore` 触点单次释放配对、无代码依赖「令牌持有至结果投递」、ctx 路径不变、双 channel 缓冲 + per-companion in-flight 旗标给出比设计更强的界）；提示词字节同一性双路验证（从 08932d9 提取旧 const 与新锁测试字面 cmp 逐位相等 1065 bytes + 运行时锁测试）。递延 minor 三角裁：Task 1 defer（错误身份契约已锁，消息级分类不成比例）、Task 2 fix-now（事实反向注释恰在 D3 要文档化的不变量上，且无领地流兜底）、Task 3 defer（panic 即杀进程，不可观察）。
+
+修复波（单次派发，112eb71）：两项注释修正——interactive.go 截断方向勘正（较小有效界先拦、两层经 `textOverflow`/`overflow` 均非静默、提交整体拒发）；companion_dialogue.go 取消契约释放时序同步。偏离：`textOverflow` 为 `:=` 局部变量、不在 archcheck 反引号门禁的声明索引内（门禁自文档「不含函数参数与局部变量」），故不加反引号——门禁实证。
+复审（scoped）：**PASS**——两项 ADDRESSED（逐行对代码核verified：chat.go:41-42/:62-63、dialogueWorker 实际释放序）、修复 diff 零新破坏（纯注释行）、偏离维持。
+
+终局：Ready to merge。
+
 
