@@ -2,7 +2,7 @@
 
 ## 1. 核心状态、疲劳表与回血门控
 
-- [x] 1.1 `internal/core` 新增 `ItemBread`(末项前追加,`ItemIDMax` 随之;`RegisteredItem`/堆叠 64/不可放置)、食物表 `FoodValue(item) (hunger uint8, saturationMilli uint16, ok bool)`(只有面包 5/6000)、recipe ID `11`(3 小麦 → 1 面包,既有 1..10 不位移)。**按 Ruling 27 普查**以 `ItemWheat`/`RecipeIronHoe` 为末项的断言与「末项+1」字面值。验证:`go test ./internal/core -race -count=1`
+- [x] 1.1 `internal/core` 新增 `ItemBread`(末项前追加,`ItemIDMax` 随之;`RegisteredItem`/堆叠 64/不可放置)、食物表 `FoodValue(item) (hunger uint8, saturationMilli uint16, ok bool)`(只有面包 5/6000)、recipe ID `11`(3 小麦 → 1 面包,既有 1..10 不位移)。**按农业 Ruling 27 普查**以 `ItemWheat`/`RecipeIronHoe` 为末项的断言与「末项+1」字面值。验证:`go test ./internal/core -race -count=1`
 - [x] 1.2 `internal/sim` 三层状态进 `playerState`(`hunger uint8`、`saturationMilli uint16`、`exhaustionMilli uint16`),`applyExhaustion(milli)` 纯函数:累积 ≥4000 归零并扣饱和(饱和 0 则扣饥饿,饥饿 0 不动)。**穷举式单测**覆盖三层边界。验证:`go test ./internal/sim -race -count=1`
 - [x] 1.3 疲劳来源表接进五个判定点(起跳 / 游泳按位移 / 采掘完成 / 翻地完成 / 回血每 HP),**只在玩家路径**,每个判定点一条用例(成功累积 + 拒绝/中断不累积)。起跳信号若物理侧没有现成导出,以「`Jump` 输入且上 tick `OnGround`」在 sim 判定,写明。验证:`go test ./internal/sim ./internal/physics -race -count=1`
 - [x] 1.4 回血门控:`advanceHealthRegen` 入口加 `hunger >= 18`;每回 1 HP 累积 6000。既有四条回血用例在饥饿 ≥18 夹具下原样通过。验证:`go test ./internal/sim -race -count=1`
@@ -20,7 +20,7 @@
 
 ## 3. 协议 v23 → v24
 
-- [x] 3.1 `PlayerInput.Eating bool`、`PlayerState.Hunger uint8`(`Validate` 拒 >20);`ProtocolVersion` 24(main 已是 v23);wire golden 与 fuzz 同步;v23 握手被拒。**Ruling 27 普查**尾部偏移与魔数(`22`/`23`/`14`/`15` 等字面值 + 末项名)。验证:`go test ./internal/network -race -count=1`
+- [x] 3.1 `PlayerInput.Eating bool`、`PlayerState.Hunger uint8`(`Validate` 拒 >20);`ProtocolVersion` 24(main 已是 v23);wire golden 与 fuzz 同步;v23 握手被拒。**农业 Ruling 27 普查**尾部偏移与魔数(`22`/`23`/`14`/`15` 等字面值 + 末项名)。验证:`go test ./internal/network -race -count=1`
 - [x] 3.2 sim 填 `PlayerState.Hunger`、读 `PlayerInput.Eating`;客户端镜像接收。验证:`go test ./internal/sim ./internal/client -race -count=1`
 - [x] 3.3 **同组同步基线文档协议版本号**。验证:`go test ./internal/archcheck -count=1`
 - [x] 3.4 变异验证:`Validate` 去掉 >20 拒绝 → 对应 golden/invalid 用例红;`PlayerState` 编码漏写 `Hunger` → 往返用例红。
