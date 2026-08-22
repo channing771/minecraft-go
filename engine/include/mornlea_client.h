@@ -4,7 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MORNLEA_CLIENT_ABI_VERSION 5u
+/* v7:终审修复波新增雾参数化 render_set_lod_fog 出口(新增导出面即
+ * bump,同版本 = 同表面的不可混装契约);v6:新增远环 LOD tile 出口
+ * (render_upload_lod_tile/drop_lod_tile)。变基重编:远环两项出口在旧基线
+ * 上原编号 v5/v6,main 的 water pass(按 material 分流 + 半透明 water
+ * pass)占用 v5 后整体顺延一格;v5 归 main 的 water pass。 */
+#define MORNLEA_CLIENT_ABI_VERSION 7u
 
 #define MORNLEA_CLIENT_STATUS_OK 0u
 #define MORNLEA_CLIENT_STATUS_ABI_VERSION 1u
@@ -93,6 +98,38 @@ uint32_t mornlea_client_render_drop_section(
     int32_t section_x,
     int32_t section_y,
     int32_t section_z);
+
+/* 远环 LOD tile(client ABI v6):上传/替换一个 tile 的壳 quad 字节流。
+ * 每 quad 20 字节 LE:x/z/y i32、w/d u16、face u8(顶面 + 四向侧裙共
+ * 5 值)、material u16、shade u8,布局与 engine mornlea_lod_shell 输出
+ * 逐字一致。整 tile 替换语义:重复上传同 tile 即整体替换;quads_len
+ * 为 0 等价 drop。流非法返回 INVALID_ARGUMENT,tile 表容量耗尽返回
+ * CAPACITY。tile 坐标为 chunk 坐标,每 tile 覆盖 4x4 chunk。 */
+uint32_t mornlea_client_render_upload_lod_tile(
+    uint32_t abi_version,
+    uint64_t handle,
+    int32_t tile_x,
+    int32_t tile_z,
+    const uint8_t *quads,
+    size_t quads_len);
+
+/* 丢弃一个远环 tile;不存在时为幂等空操作。 */
+uint32_t mornlea_client_render_drop_lod_tile(
+    uint32_t abi_version,
+    uint64_t handle,
+    int32_t tile_x,
+    int32_t tile_z);
+
+/* 设置远环距离雾参数(client ABI v7,Ruling 14 参数化):start 起雾
+ * 距离、full 全雾距离(block)。入口校验 start > 0 且 full > start
+ * (NaN 拒绝),违约返回 INVALID_ARGUMENT 且先于句柄查找;渲染器默认
+ * 768/1152 锚定 lodFarMultiplier=3 的默认几何,非默认倍率由上层按
+ * 配置推导后调用。 */
+uint32_t mornlea_client_render_set_lod_fog(
+    uint32_t abi_version,
+    uint64_t handle,
+    float start,
+    float full);
 
 uint32_t mornlea_client_render_frame(
     uint32_t abi_version,

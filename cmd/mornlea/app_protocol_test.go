@@ -30,9 +30,9 @@ func TestPerformanceRecordersOnlyEnableSaveSamplingForBenchmark(t *testing.T) {
 	}
 }
 
-func TestProtocolV21ClientIsCurrent(t *testing.T) {
-	if network.ProtocolVersion != 22 {
-		t.Fatalf("客户端协议版本 = %d，想要 22", network.ProtocolVersion)
+func TestProtocolV23ClientIsCurrent(t *testing.T) {
+	if network.ProtocolVersion != 23 {
+		t.Fatalf("客户端协议版本 = %d，想要 23", network.ProtocolVersion)
 	}
 }
 

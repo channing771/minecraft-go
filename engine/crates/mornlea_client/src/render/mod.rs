@@ -6,7 +6,8 @@
 //! origin 槽位、32 字节 section record、cull compute 写 visible instances
 //! 与 indirect args、单次 indexed indirect draw、sky 全屏三角与 HiZ
 //! 金字塔遮挡。uniform 布局、clear 值与 pass 顺序保持一致,保证同输入
-//! 同图像。
+//! 同图像。远环 LOD 壳 pass(v6)绘制在天空与近环 terrain 之间:世界
+//! 坐标大 quad + 距离雾 + tile 级 CPU 视锥剔除,不进 HiZ/GPU culling。
 //!
 //! 约束:
 //! - color `Bgra8UnormSrgb`(Go capture 同格式),depth `Depth32Float`;
@@ -14,6 +15,7 @@
 //! - 每帧一次 [`OffscreenRenderer::render_frame`],帧内无逐 pass FFI。
 
 pub mod entity;
+pub mod lod;
 #[cfg(test)]
 mod plant_tests;
 pub mod pool;
@@ -25,6 +27,7 @@ mod water_tests;
 use std::collections::HashMap;
 
 use entity::{EntityPass, EntityPipelineKind};
+use lod::{Frustum, LodPass};
 use pool::{Alloc, Pool};
 use quads::{QuadPass, QuadPassConfig};
 
@@ -103,7 +106,7 @@ pub enum RenderCreateError {
 
 /// 一帧渲染输入:相机、昼夜与 Go 侧算好的可见 section 列表。
 /// 字段语义与 Go `render.Camera` 一致。
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct FrameInput {
     /// 视图投影矩阵(列主序,与 mgl32 内存布局一致)。
     pub view_proj: [f32; 16],
@@ -473,6 +476,10 @@ pub struct OffscreenRenderer {
     sky_pipeline: wgpu::RenderPipeline,
     sky_bind: wgpu::BindGroup,
 
+    /// 远环 LOD pass(client ABI v6):世界坐标壳 quad + 距离雾,
+    /// 帧序位于天空之后、近环 terrain 之前。
+    lod_pass: LodPass,
+
     cull_pipeline: wgpu::ComputePipeline,
     cull_layout: wgpu::BindGroupLayout,
     cull_uniforms: wgpu::Buffer,
@@ -783,6 +790,9 @@ impl OffscreenRenderer {
                 resource: sky_camera.as_entire_binding(),
             }],
         });
+
+        // 远环 pass:世界坐标壳 quad 管线;bind group 随材质 atlas 建立。
+        let lod_pass = LodPass::new(&device, COLOR_FORMAT);
 
         // cull compute,镜像 Go `terrain cull layout`。
         let cull_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1102,6 +1112,7 @@ impl OffscreenRenderer {
             sampler,
             sky_pipeline,
             sky_bind,
+            lod_pass,
             cull_pipeline,
             cull_layout,
             cull_uniforms,
@@ -1198,6 +1209,9 @@ impl OffscreenRenderer {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
+        // 远环与近环共用同一图集与采样器:世界坐标 UV 才能跨远/近环连续。
+        self.lod_pass
+            .rebuild_bind(&self.device, &atlas_view, &self.sampler);
         self.terrain_bind = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain resources"),
             layout: &self.terrain_layout,
@@ -1367,6 +1381,36 @@ impl OffscreenRenderer {
             }
             self.free_origins.push(slot.origin_idx);
         }
+    }
+
+    /// 上传/替换一个远环 tile 的壳 quad 字节流(20 字节/quad;空等价
+    /// drop)。整 tile 替换语义:重复上传同 tile 即整体替换。失败时
+    /// 不触碰任何既有 tile;失败原因见 [`lod::LodUploadError`]。
+    pub fn upload_lod_tile(
+        &mut self,
+        tile: (i32, i32),
+        quads: &[u8],
+    ) -> Result<(), lod::LodUploadError> {
+        self.lod_pass
+            .upload_tile(&self.device, &self.queue, tile, quads)
+    }
+
+    /// 丢弃一个远环 tile;不存在时为幂等空操作。
+    pub fn drop_lod_tile(&mut self, tile: (i32, i32)) {
+        self.lod_pass.drop_tile(tile);
+    }
+
+    /// 设置远环距离雾参数(start 起雾距离、full 全雾距离,block);校验
+    /// 契约与 FFI setter 出口一致(start > 0 且 full > start,NaN 拒绝),
+    /// 非法参数返回 false 且不改变状态。默认 768/1152 锚定
+    /// lodFarMultiplier=3 的默认几何;5.2 接线按配置推导后调用。
+    pub fn set_lod_fog(&mut self, start: f32, full: f32) -> bool {
+        self.lod_pass.set_fog(start, full)
+    }
+
+    /// 已上传远环 tile 数,供测试断言替换/丢弃语义。
+    pub fn lod_tile_count(&self) -> usize {
+        self.lod_pass.tile_count()
     }
 
     /// 上传字形图集的一块 R8 矩形;越界或长度不符返回 false。
@@ -1625,6 +1669,22 @@ impl OffscreenRenderer {
             self.cull_uses_hiz = use_hiz;
         }
 
+        // 远环:无 tile 时完全跳过(uniform 与视锥都不产生),禁用远环的
+        // 帧路径与既有行为一致;有 tile 时写相机 uniform 并提取视锥供
+        // pass 内的 tile 级 CPU 剔除。
+        let lod_frustum = if self.lod_pass.is_empty() {
+            None
+        } else {
+            self.lod_pass.write_camera(
+                &self.queue,
+                &input.view_proj,
+                &input.pos,
+                input.daylight,
+                &input.sky_color,
+            );
+            Some(Frustum::from_view_proj(&input.view_proj))
+        };
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1697,6 +1757,14 @@ impl OffscreenRenderer {
                 pass.set_pipeline(&self.sky_pipeline);
                 pass.set_bind_group(0, &self.sky_bind, &[]);
                 pass.draw(0..3, 0..1);
+                // 帧序裁决:天空 → 远环 → 近环 terrain。远环写深度,近环以
+                // 更近的深度自然覆盖;远环深度只会让下一帧 HiZ 的遮挡判定
+                // 更保守(更少剔除),不会误剔除近环 section。
+                // 水下(water tint 激活)时天空被全屏水色替换,远环远景同样
+                // 不可见,与天空一并跳过——远环壳不得从水色里透出。
+                if let Some(frustum) = &lod_frustum {
+                    self.lod_pass.record(&mut pass, frustum);
+                }
             }
             if let Some(bind) = &self.terrain_bind {
                 pass.set_pipeline(&self.terrain_pipeline);

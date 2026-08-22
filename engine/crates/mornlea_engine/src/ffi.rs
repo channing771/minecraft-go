@@ -4,6 +4,7 @@ use crate::collision::{COLLISION_STEP_HEIGHT_OFFSET, resolve_collision};
 use crate::greedy::{MeshError as GreedyError, center_is_air, mesh_section};
 use crate::input::{InputError, MeshInput};
 use crate::light::{LIGHT_VOLUME, LightScratch, MeshError as LightError, build_light};
+use crate::lod::{LodQuad, LodShellRequest, encode_shell, lod_shell, parse_lod_input};
 use crate::raycast::{
     RAYCAST_CURSOR_BYTES, RAYCAST_INPUT_BYTES, RAYCAST_OUTPUT_BYTES, RaycastBatch, raycast_batch,
     raycast_cursor_overflow_is_valid,
@@ -14,7 +15,11 @@ use crate::worldgen::{
     parse_chunk_input, parse_probe_input, run_probe,
 };
 
-pub(crate) const ABI_VERSION: u32 = 5;
+/// engine ABI v6:v5(mesh registry 扩容,fluid 系列)之上新增
+/// `mornlea_lod_shell` 远环壳出口;既有入口签名与语义不变。变基重编:该
+/// 出口在旧基线上原编号 v4,main 的 fluid 系列已占用 v4/v5,故顺延为 v6,
+/// Go 侧版本断言由 rust-engine-lod-shell 2.2 同步。
+pub(crate) const ABI_VERSION: u32 = 6;
 
 // 输入长度校验委托给 step::step_input_is_valid（内部使用 STEP_HEADER_BYTES），此常量保留供 ABI 文档对齐。
 #[allow(dead_code)]
@@ -593,6 +598,126 @@ unsafe fn worldgen_probe_with(
     }
 }
 
+/// 远环 LOD 壳生成生产入口(两段式容量探测)。
+///
+/// 输入为与 `mornlea_worldgen_chunk` 完全一致的 `MGW1` header(564 字节),
+/// 追加 tile_x i32、tile_z i32、columns u32(必须等于 64)与 lod_step u32
+/// (合法值 2/4/8),共 580 字节;输出为壳 quad 字节流(单 quad 20 字节
+/// LE,位布局见 `lod::encode_shell` 与 `engine/include/mornlea_engine.h`
+/// 的同步注释)。
+///
+/// 容量语义(两段式探测):生成先在本地缓冲完成,`output_capacity` 不足
+/// 时返回 `MORNLEA_STATUS_OUTPUT_OVERFLOW` 并把所需字节数写入
+/// `*output_len`(不触碰输出缓冲),调用方扩容后重试即成功;成功时
+/// `*output_len` 为实际写入字节数。其余任何失败路径 `*output_len` 恒为
+/// 0 且输出缓冲原样;Rust panic 一律收敛为 status 9。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_lod_shell(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_capacity: usize,
+    output_len: *mut usize,
+) -> u32 {
+    // SAFETY: C 调用方提供原始缓冲区；helper 会在解引用前验证指针、范围、长度与重叠。
+    unsafe {
+        lod_shell_with(
+            abi_version,
+            input,
+            input_len,
+            output,
+            output_capacity,
+            output_len,
+            lod_shell,
+        )
+    }
+}
+
+/// `mornlea_lod_shell` 的校验与发布核心;generator 参数只为注入 panic 测试
+/// (同 collision/raycast 的 *_with 先例),生产路径恒传 [`lod_shell`]。
+///
+/// 校验顺序镜像 `mornlea_mesh_section`:先验证 `output_len` metadata 指针并
+/// 清零(此后任何提前返回调用方都能读到确定值),再依次检查 ABI 版本、
+/// 空指针、输入/输出范围与两两重叠;生成与编码全部在本地缓冲完成后才
+/// 一次性拷贝发布,失败路径不触碰调用方输出。
+unsafe fn lod_shell_with(
+    abi_version: u32,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_capacity: usize,
+    output_len: *mut usize,
+    generator: impl FnOnce(&LodShellRequest) -> Vec<LodQuad>,
+) -> u32 {
+    if output_len.is_null()
+        || !(output_len as usize).is_multiple_of(align_of::<usize>())
+        || output_len.addr().checked_add(size_of::<usize>()).is_none()
+    {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    // SAFETY: 指针已检查非空且满足 usize 对齐，调用期间独占写入一个值。
+    unsafe { output_len.write(0) };
+    if abi_version != ABI_VERSION {
+        return MORNLEA_STATUS_ABI_VERSION;
+    }
+    if input.is_null() || output.is_null() {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if !input_range_is_valid(input, input_len) {
+        return MORNLEA_STATUS_INPUT;
+    }
+    if !byte_range_is_valid(output, output_capacity) {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+    if ranges_overlap(input.addr(), input_len, output.addr(), output_capacity)
+        || ranges_overlap(
+            input.addr(),
+            input_len,
+            output_len.addr(),
+            size_of::<usize>(),
+        )
+        || ranges_overlap(
+            output.addr(),
+            output_capacity,
+            output_len.addr(),
+            size_of::<usize>(),
+        )
+    {
+        return MORNLEA_STATUS_INVALID_ARGUMENT;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: input 非空，范围不超过 isize::MAX 且地址加法不回绕；已验证与 output/output_len 不重叠。
+        let bytes = unsafe { std::slice::from_raw_parts(input, input_len) };
+        let request = parse_lod_input(bytes).ok_or(MORNLEA_STATUS_INPUT)?;
+        // 先在本地缓冲生成并编码,成功后一次拷贝,保证失败路径不触碰调用方输出。
+        let mut encoded = Vec::new();
+        encode_shell(&generator(&request), &mut encoded);
+        Ok::<Vec<u8>, u32>(encoded)
+    }));
+    match result {
+        Ok(Ok(encoded)) => {
+            let needed = encoded.len();
+            if output_capacity < needed {
+                // 两段式探测第一段:所需容量只有生成完成后才可知,这里向调用方
+                // 报告精确字节数(输出缓冲保持原样);扩容重试即进入第二段。
+                // SAFETY: output_len 已验证非空、对齐且地址不回绕。
+                unsafe { output_len.write(needed) };
+                return MORNLEA_STATUS_OUTPUT_OVERFLOW;
+            }
+            // SAFETY: output 非空、范围有效且与 input/output_len 不重叠；只在完整成功后一次发布。
+            unsafe {
+                std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, needed);
+                output_len.write(needed);
+            }
+            MORNLEA_STATUS_OK
+        }
+        Ok(Err(status)) => status,
+        Err(_) => MORNLEA_STATUS_PANIC,
+    }
+}
+
 fn raycast_input_is_valid(bytes: &[u8]) -> bool {
     if bytes.len() != RAYCAST_INPUT_BYTES
         || &bytes[0..4] != b"MGR1"
@@ -820,13 +945,14 @@ mod mesh_tests {
     use super::*;
 
     #[test]
-    fn exported_version_is_five() {
-        // mesh registry 条目上限不在 engine ABI 版本契约内：Go/Rust 两侧数值
-        // 是否一致由容量同步测试 TestNativeAcceptsRegistryAtGoCapacity 守护，
-        // 跨版本混装由 release unit 纪律兜底，上限变化不需要跟着升本版本号。
-        // 历史记录（仅记账，不代表升级触发条件）：v5 时 27 → 35（流体进入
-        // registry 快照），后续变更 35 → 48。
-        assert_eq!(mornlea_engine_abi_version(), 5);
+    fn exported_version_is_six() {
+        // engine ABI v6:v5(mesh registry 扩容,fluid 系列)之上新增 mornlea_lod_shell
+        // 远环壳出口;变基重编详见 ABI_VERSION 的 doc comment。mesh registry 条目
+        // 上限不在 engine ABI 版本契约内:Go/Rust 两侧数值是否一致由容量同步测试
+        // TestNativeAcceptsRegistryAtGoCapacity 守护,跨版本混装由 release unit 纪律
+        // 兜底,上限变化不需要跟着升本版本号。历史记录(仅记账,不代表升级触发条件):
+        // v5 时 27 → 35(流体进入 registry 快照),后续变更 35 → 48。
+        assert_eq!(mornlea_engine_abi_version(), 6);
     }
 }
 #[cfg(test)]
@@ -2746,5 +2872,419 @@ mod tests {
         };
         assert_eq!(status_short, MORNLEA_STATUS_OUTPUT_OVERFLOW);
         assert_eq!(out_one, canary_one);
+    }
+
+    use super::{lod_shell_with, mornlea_lod_shell};
+    use crate::lod::{LOD_SHELL_QUAD_BYTES, encode_shell, lod_shell, parse_lod_input};
+
+    /// 构造 LOD 壳入口输入:复用 worldgen header(564)+ tile 原点/列数/步长(16)。
+    fn lod_shell_input(tile_x: i32, tile_z: i32, columns: u32, step: u32) -> Vec<u8> {
+        let mut bytes = worldgen_header();
+        bytes.extend_from_slice(&tile_x.to_le_bytes());
+        bytes.extend_from_slice(&tile_z.to_le_bytes());
+        bytes.extend_from_slice(&columns.to_le_bytes());
+        bytes.extend_from_slice(&step.to_le_bytes());
+        bytes
+    }
+
+    /// 用 lod 模块级 API 计算期望输出(FFI 出口必须与其逐字节一致)。
+    fn expected_shell(input: &[u8]) -> Vec<u8> {
+        let request = parse_lod_input(input).expect("valid lod input");
+        let mut encoded = Vec::new();
+        encode_shell(&lod_shell(&request), &mut encoded);
+        encoded
+    }
+
+    /// 统一透传参数调用 `mornlea_lod_shell` 的测试助手,返回 status。
+    unsafe fn call_lod_shell(
+        abi_version: u32,
+        input: &[u8],
+        output: *mut u8,
+        output_capacity: usize,
+        output_len: *mut usize,
+    ) -> u32 {
+        // SAFETY: 指针来自有效分配,容量不超出实际分配范围。
+        unsafe {
+            mornlea_lod_shell(
+                abi_version,
+                input.as_ptr(),
+                input.len(),
+                output,
+                output_capacity,
+                output_len,
+            )
+        }
+    }
+
+    #[test]
+    fn lod_shell_wrong_abi_is_rejected_atomically() {
+        let input = lod_shell_input(0, 0, 64, 4);
+        let mut output = vec![0xA5_u8; 64];
+        let canary = output.clone();
+        let mut output_len = usize::MAX;
+        // SAFETY: 指针来自有效 Vec;仅 abi_version 不匹配。
+        let status = unsafe {
+            call_lod_shell(
+                ABI_VERSION + 1,
+                &input,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_ABI_VERSION);
+        assert_eq!(output_len, 0);
+        assert_eq!(output, canary);
+    }
+
+    #[test]
+    fn lod_shell_invalid_input_matrix_is_atomic() {
+        let valid = lod_shell_input(-3, 2, 64, 4);
+        let mut bad_magic = valid.clone();
+        bad_magic[0] = b'X';
+        let mut wrong_columns = valid.clone();
+        wrong_columns[WORLDGEN_HEADER_BYTES + 8..WORLDGEN_HEADER_BYTES + 12]
+            .copy_from_slice(&63_u32.to_le_bytes());
+        let mut wrong_step = valid.clone();
+        wrong_step[WORLDGEN_HEADER_BYTES + 12..WORLDGEN_HEADER_BYTES + 16]
+            .copy_from_slice(&3_u32.to_le_bytes());
+        let mut overflow_tile_x = valid.clone();
+        overflow_tile_x[WORLDGEN_HEADER_BYTES..WORLDGEN_HEADER_BYTES + 4]
+            .copy_from_slice(&i32::MAX.to_le_bytes());
+        let mut overflow_tile_z = valid.clone();
+        overflow_tile_z[WORLDGEN_HEADER_BYTES + 4..WORLDGEN_HEADER_BYTES + 8]
+            .copy_from_slice(&i32::MIN.to_le_bytes());
+        // 极值 tile 邻域:33554431(2²⁵−1)通过 ×64 但边界环 base+64 溢出;
+        // −33554432 的 base = i32::MIN,边界环 −step 下溢。两者都必须按
+        // INPUT 拒绝,而不是 panic 收敛(status 9)或 release 静默回绕。
+        let mut extreme_tile_x = valid.clone();
+        extreme_tile_x[WORLDGEN_HEADER_BYTES..WORLDGEN_HEADER_BYTES + 4]
+            .copy_from_slice(&33554431_i32.to_le_bytes());
+        let mut extreme_tile_z = valid.clone();
+        extreme_tile_z[WORLDGEN_HEADER_BYTES + 4..WORLDGEN_HEADER_BYTES + 8]
+            .copy_from_slice(&(-33554432_i32).to_le_bytes());
+        let mut cases: Vec<(&str, Vec<u8>)> = vec![
+            ("short input", valid[..valid.len() - 1].to_vec()),
+            ("long input", {
+                let mut long = valid.clone();
+                long.push(0);
+                long
+            }),
+            ("bad magic", bad_magic),
+            ("wrong columns", wrong_columns),
+            ("wrong step", wrong_step),
+            ("overflow tile_x", overflow_tile_x),
+            ("overflow tile_z", overflow_tile_z),
+            ("extreme tile_x base+64 overflows", extreme_tile_x),
+            ("extreme tile_z base-step underflows", extreme_tile_z),
+        ];
+        for (name, input) in cases.drain(..) {
+            let mut output = vec![0xA5_u8; 64];
+            let canary = output.clone();
+            let mut output_len = usize::MAX;
+            // SAFETY: 指针来自有效 Vec,长度与缓冲容量一致。
+            let status = unsafe {
+                call_lod_shell(
+                    ABI_VERSION,
+                    &input,
+                    output.as_mut_ptr(),
+                    64,
+                    &mut output_len,
+                )
+            };
+            assert_eq!(status, MORNLEA_STATUS_INPUT, "{name}");
+            assert_eq!(output_len, 0, "{name}");
+            assert_eq!(output, canary, "{name}");
+        }
+    }
+
+    #[test]
+    fn lod_shell_null_and_bad_pointer_arguments_are_atomic() {
+        let input = lod_shell_input(0, 0, 64, 4);
+        let mut output = vec![0xA5_u8; 64];
+        let canary = output.clone();
+        let mut output_len = usize::MAX;
+
+        // 空输入指针。
+        let mut status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                std::ptr::null(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(output_len, 0);
+
+        // 空输出指针。
+        status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                input.as_ptr(),
+                input.len(),
+                std::ptr::null_mut(),
+                0,
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(output_len, 0);
+
+        // 地址回绕的输入指针。
+        status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                std::ptr::without_provenance(usize::MAX),
+                1,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_INPUT);
+        assert_eq!(output_len, 0);
+
+        // 空输出长度指针:必须在任何写入前拒绝。
+        status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                input.as_ptr(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(output, canary);
+
+        // 未对齐的输出长度指针:同样必须在写入前拒绝。
+        let mut metadata = [usize::MAX; 2];
+        status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                input.as_ptr(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                metadata.as_mut_ptr().cast::<u8>().add(1).cast(),
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(metadata, [usize::MAX; 2]);
+        assert_eq!(output, canary);
+
+        // 对齐但地址回绕的输出长度指针。
+        let aligned_max = usize::MAX & !(align_of::<usize>() - 1);
+        status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                input.as_ptr(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                std::ptr::without_provenance_mut(aligned_max),
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(output, canary);
+    }
+
+    #[test]
+    fn lod_shell_two_phase_capacity_probe_then_retry_succeeds() {
+        let input = lod_shell_input(-3, 2, 64, 4);
+        let expected = expected_shell(&input);
+        assert!(!expected.is_empty());
+        assert_eq!(expected.len() % LOD_SHELL_QUAD_BYTES, 0);
+        let needed = expected.len();
+
+        // 第一段:容量 0 的探测调用只报告所需容量,不写输出缓冲。
+        let mut probe = vec![0xA5_u8; 8];
+        let probe_canary = probe.clone();
+        let mut output_len = usize::MAX;
+        let mut status =
+            unsafe { call_lod_shell(ABI_VERSION, &input, probe.as_mut_ptr(), 0, &mut output_len) };
+        assert_eq!(status, MORNLEA_STATUS_OUTPUT_OVERFLOW);
+        assert_eq!(output_len, needed);
+        assert_eq!(probe, probe_canary);
+
+        // 容量差一字节仍然 overflow,所需容量不变(确定性纯函数)。
+        let mut short = vec![0xA5_u8; needed - 1];
+        let short_canary = short.clone();
+        output_len = usize::MAX;
+        status = unsafe {
+            call_lod_shell(
+                ABI_VERSION,
+                &input,
+                short.as_mut_ptr(),
+                short.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_OUTPUT_OVERFLOW);
+        assert_eq!(output_len, needed);
+        assert_eq!(short, short_canary);
+
+        // 第二段:按报告容量扩容后重试必须成功,输出与模块编码逐字节一致。
+        let mut exact = vec![0_u8; needed];
+        output_len = usize::MAX;
+        status = unsafe {
+            call_lod_shell(
+                ABI_VERSION,
+                &input,
+                exact.as_mut_ptr(),
+                exact.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_OK);
+        assert_eq!(output_len, needed);
+        assert_eq!(exact, expected);
+
+        // 富余容量同样成功:报告写入字节数,多余尾部不被触碰。
+        let mut pooled = vec![0xA5_u8; needed + 64];
+        let pooled_canary = pooled.clone();
+        output_len = usize::MAX;
+        status = unsafe {
+            call_lod_shell(
+                ABI_VERSION,
+                &input,
+                pooled.as_mut_ptr(),
+                pooled.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_OK);
+        assert_eq!(output_len, needed);
+        assert_eq!(&pooled[..needed], &expected[..]);
+        assert_eq!(&pooled[needed..], &pooled_canary[needed..]);
+    }
+
+    #[test]
+    fn lod_shell_matches_module_encoding_for_all_steps() {
+        for step in [2_u32, 4, 8] {
+            let input = lod_shell_input(-3, 2, 64, step);
+            let expected = expected_shell(&input);
+            assert!(!expected.is_empty(), "step={step}");
+            let mut output = vec![0_u8; expected.len()];
+            let mut output_len = usize::MAX;
+            let status = unsafe {
+                call_lod_shell(
+                    ABI_VERSION,
+                    &input,
+                    output.as_mut_ptr(),
+                    output.len(),
+                    &mut output_len,
+                )
+            };
+            assert_eq!(status, MORNLEA_STATUS_OK, "step={step}");
+            assert_eq!(output_len, expected.len(), "step={step}");
+            assert_eq!(output, expected, "step={step}");
+
+            // 同输入两次调用逐字节一致(确定性契约)。
+            let mut second = vec![0_u8; expected.len()];
+            let mut second_len = usize::MAX;
+            let second_status = unsafe {
+                call_lod_shell(
+                    ABI_VERSION,
+                    &input,
+                    second.as_mut_ptr(),
+                    second.len(),
+                    &mut second_len,
+                )
+            };
+            assert_eq!(second_status, MORNLEA_STATUS_OK, "step={step}");
+            assert_eq!(second, output, "step={step}");
+        }
+    }
+
+    #[test]
+    fn lod_shell_panic_is_contained_without_output() {
+        let input = lod_shell_input(0, 0, 64, 4);
+        let mut output = vec![0xA5_u8; 64];
+        let canary = output.clone();
+        let mut output_len = usize::MAX;
+        // SAFETY: 指针来自有效 Vec;generator 注入 panic 验证收敛为 status 9。
+        let status = unsafe {
+            lod_shell_with(
+                ABI_VERSION,
+                input.as_ptr(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+                |_| panic!("测试 panic"),
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_PANIC);
+        assert_eq!(output_len, 0);
+        assert_eq!(output, canary);
+    }
+
+    #[test]
+    fn lod_shell_overlapping_buffers_are_rejected_atomically() {
+        // input/output 别名。
+        let input = lod_shell_input(0, 0, 64, 4);
+        let mut shared = input.clone();
+        let mut output_len = usize::MAX;
+        // SAFETY: 指针来自有效 Vec,刻意把输出指向输入缓冲以验证别名拒绝。
+        let status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                shared.as_ptr(),
+                shared.len(),
+                shared.as_mut_ptr(),
+                shared.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(output_len, 0);
+        assert_eq!(shared, input);
+
+        // output_len 与 input 别名:入口先清零 metadata 再拒绝(与 mesh 出口一致)。
+        let mut shared_input = vec![0_usize; input.len().div_ceil(size_of::<usize>())];
+        // SAFETY: shared_input 容量覆盖完整 encoded input,先写入合法输入。
+        unsafe {
+            std::slice::from_raw_parts_mut(shared_input.as_mut_ptr().cast::<u8>(), input.len())
+                .copy_from_slice(&input);
+        }
+        let mut output = vec![0xA5_u8; 64];
+        let output_canary = output.clone();
+        // SAFETY: output_len 刻意指向 input 缓冲,验证别名拒绝。
+        let input_status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                shared_input.as_ptr().cast(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                shared_input.as_mut_ptr(),
+            )
+        };
+        assert_eq!(input_status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(shared_input[0], 0);
+        assert_eq!(output, output_canary);
+
+        // output_len 与 output 别名:同样先清零再拒绝。
+        let mut shared_output = vec![0xA5_usize; 16];
+        let before = shared_output.clone();
+        // SAFETY: output 与 output_len 刻意指向同一缓冲,验证别名拒绝。
+        let output_status = unsafe {
+            mornlea_lod_shell(
+                ABI_VERSION,
+                input.as_ptr(),
+                input.len(),
+                shared_output.as_mut_ptr().cast(),
+                shared_output.len() * size_of::<usize>(),
+                shared_output.as_mut_ptr(),
+            )
+        };
+        assert_eq!(output_status, MORNLEA_STATUS_INVALID_ARGUMENT);
+        assert_eq!(shared_output[0], 0);
+        assert_eq!(shared_output[1..], before[1..]);
     }
 }

@@ -87,7 +87,7 @@ func openRawTCPLogin(t *testing.T) (streamConn, <-chan error) {
 	raw := client.(*tcpClientStream).stream.conn
 	serverDone := make(chan error, 1)
 	go func() {
-		_, loginErr := BeginServerLogin(context.Background(), server)
+		_, loginErr := BeginServerLogin(context.Background(), server, 0)
 		serverDone <- loginErr
 	}()
 	return raw, serverDone

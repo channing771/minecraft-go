@@ -15,7 +15,8 @@ readOnly)同时是同步半径、保留半径与可见半径。worldgen 全量�
 ## Goals / Non-Goals
 
 - Goals:可视距离扩展到 `lodFarMultiplier`×;远环确定性纯地表壳;种子经
-  v18 登录下发;近环行为逐位不变;benchmark 可比性保持。
+  v23 登录下发(变基重编,原编号 v18);近环行为逐位不变;benchmark 可比性
+  保持。
 - Non-Goals:见 proposal「非目标」;另不重开 go-rust-division.md 的归属
   裁决(壳生成天然落在 engine 侧)。
 
@@ -35,30 +36,37 @@ readOnly)同时是同步半径、保留半径与可见半径。worldgen 全量�
 世界坐标 terrain UV(与近环同源同图集);着色 = 天空光满档 × 法线朝向
 权重(斜坡变暗),昼夜 tint 由渲染侧统一计算,不做第二套昼夜。
 
-### engine ABI 3→4:`mornlea_lod_shell`
+### engine ABI 5→6:`mornlea_lod_shell`(变基重编,原 3→4)
 
 签名与既有批量导出同风格(caller-owned 输入/输出 + status);输入 =
 perm 播种字节(格式与 `mornlea_worldgen_chunk` 完全一致)+ tile 原点
 (chunk 坐标,int32×2)+ 列数(固定 64)+ `lodStep`(合法值 2/4/8);
 输出 = 壳 quad 流,每 quad 字段:世界 X/Z(block,int32)、Y(int32)、
-宽/深(block,uint16)、面朝向(top/side)、材质 ID、着色权重(uint8),
-位布局在实现时定稿并写入头文件注释。status 复用 0..9:`ABI_VERSION`
+宽/深(block,uint16)、面朝向(顶面 top + 四向侧裙 side,四向承载断差
+方向与方向性着色)、材质 ID、着色权重(uint8)。位布局已由 `lod.rs` 的
+`encode_shell` 定稿(20 字节 LE,着色权重:顶面 255、±Z 204、±X 153),
+任务 2.1 的头文件注释 MUST 逐字沿用;顶面的世界坐标 terrain UV 不进入
+quad 字段,由渲染侧按世界坐标推导(与近环同源),在 client 远环任务中
+落实。status 复用 0..9:`ABI_VERSION`
 拒绝旧版本、`INVALID_ARGUMENT`/`INPUT` 拒绝非法步长与越界 tile、
-`SCRATCH`/`OUTPUT_OVERFLOW` 两段式探测(先报所需容量,扩容重试成功)、
+`OUTPUT_OVERFLOW` 两段式探测(出口无 caller-scratch 参数,随
+`mornlea_worldgen_chunk` 先例用内部缓冲——壳输出对固定 64×64 列 tile
+有界;先经 `*output_len` 报所需容量,扩容重试成功;`SCRATCH` 等其余
+status 对本出口结构性不可达,保留在 0..9 语义空间)、
 panic catch → 9。确定性契约:同 perm + 同 tile + 同步长 → 全平台逐位
 一致输出,与 worldgen 差分门禁同一标准。
 
 ### 种子下发与协议版本(而非服务端下发远环几何)
 
 `LoginSuccess` 增加 `WorldSeed uint64`。单机(内置权威服务端)与 TCP
-远程共用同一登录协议,两条路径自动一致。协议 v16→v18:v17 已被 M5B
-分支占用,本变更排在其后;若落地顺序对调,两分支互换版本号并同步
-golden wire 测试。版本不匹配沿用既有握手拒绝,不产生半兼容会话。
+远程共用同一登录协议,两条路径自动一致。协议 v21→v23:v22 已由 main
+合并的 authoritative-farming 交付(翻地命令段),本变更排在其后;若当初
+落地顺序对调,两变更互换版本号并同步 golden wire 测试(变基重编:本段在旧基线上为 v16→v18)。版本不匹配沿用既有握手拒绝,不产生半兼容会话。
 种子暴露不构成新风险:TCP 面向可信局域网且无加密,抓包本可读全部区块。
 **被否决的替代**:服务端按需下发远环几何/高度摘要——把"每客户端一次
 8 字节"变成持续带宽与协议面,且与确定性本地生成的成本优势相反。
 
-### client ABI 4→5 与远环 pass
+### client ABI 5→6→7 与远环 pass(变基重编,原 4→5→6)
 
 `render_upload_lod_tile(abi, x, z, quads, len)` / `render_drop_lod_tile`
 (整 tile 生命周期替换,复用近环 section 的覆盖语义:重复上传同 tile 即
@@ -67,7 +75,17 @@ section 网格编码;帧序 天空 → 远环 → 近环 → 实体/HUD,远环�
 近环自然覆盖。距离雾在远环 WGSL 内按相机距离向天空色 mix,外缘带
 (最外 25%)全雾;近环 v1 不雾化。雾色与昼夜 tint 同源(复用 day/night
 uniform,不新增状态)。剔除:v1 仅 tile 级视锥剔除(每帧 ≤ 数十 tile),
-不进 HiZ/GPU culling。
+不进 HiZ/GPU culling。终审修复波(Ruling 13/14/18)定版:`MAX_LOD_TILES`
+按切比雪夫方环定容(最大合法配置 viewDistance=64×multiplier=8 →
+(2×128+1)²=66049,取 131072 留 2 倍余量;裁决演进审计:Ruling 13 的
+32768 因漏看 viewDistance 合法上限 64 被 Ruling 18 推翻);FOG_START/
+FOG_FULL 参数化为渲染器可设状态,新增
+`render_set_lod_fog(abi, start, full)` 出口(默认 768/1152 保持
+multiplier=3 行为),client ABI 随之 v6→v7(新增出口必 bump,同
+engine ABI v5→v6 先例;变基重编:tile 出口原 v5、雾 setter 原 v6,main
+的 water pass 占用 v5 后顺延为 v6/v7);5.2 接线按 `lodFarMultiplier`
+推导雾距离并调用
+该出口(tasks.md 已列显式验收)。
 
 ### Go 编排:`internal/lod` 与独立预算
 
@@ -75,8 +93,11 @@ uniform,不新增状态)。剔除:v1 仅 tile 级视锥剔除(每帧 ≤ 数十 
 最新、按与中心 chunk 距离升序冲刷、`DropOutside` 丢弃远环半径外的
 pending 与已上传 tile(触发 `render_drop_lod_tile`);生成调用与上传
 共享一个**独立帧预算**(默认与近环同量级,数值只记录),绝不与近环
-`SectionScheduler` 共享预算。入队时机:登录成功取得种子后播种全环;
-玩家跨 tile 边界时增量入队新进入范围的 tile。`internal/nativeabi` 新增
+`SectionScheduler` 共享预算。入队时机:登录成功取得种子后播种**远环带**
+(Ruling 19:只入队 d ≥ floor(viewDistance/4)+1 的 tile——壳覆盖块
+d×64 ≥ VD×16,与近 mesh 半径无缝零重叠;近处壳的 max 高度会在眼平线
+遮挡精细 mesh,全盘入队被几何证据否决);玩家跨 tile 边界时增量入队新
+进入带内的 tile。`internal/nativeabi` 新增
 `LodShell` 绑定;archcheck 登记 `internal/lod`(依赖 core/nativeabi,
 不得依赖 render/sim/network)。配置:`lodEnabled`(默认 true;benchmark
 与 capture 既有场景按需关闭)、`lodFarMultiplier`(默认 3,范围 2..8)、
@@ -101,16 +122,18 @@ pending 与已上传 tile(触发 `render_drop_lod_tile`);生成调用与上传
 
 ## 兼容与回退
 
-- engine ABI 3→4、client ABI 4→5:新增出口,既有入口签名不变;两库
+- engine ABI 5→6、client ABI 5→7(变基重编,原 3→4 与 4→5/6):新增
+  出口,既有入口签名不变;两库
   仍互不耦合,Linux 专服 release unit(engine so)照旧,client 库版本
   与 darwin 客户端一起演进。
-- 协议 v18:M2 v15/M5 v14 基线原字节;握手版本拒绝覆盖新旧客户端组合;
-  golden wire 测试更新到 v18 字节。
-- benchmark scenario v16 不迁移,producer 默认 `lodEnabled=false`,
-  基准输出结构不变;LOD 专项数值另存记录。
+- 协议 v23:M2 v15/M5 v14 基线原字节;握手版本拒绝覆盖新旧客户端组合;
+  golden wire 测试更新到 v23 字节。
+- benchmark scenario v18 不迁移(farming 已把 main 升到 v18,本变更
+  不触碰固定工作负载,与 main 一致),producer
+  默认 `lodEnabled=false`,基准输出结构不变;LOD 专项数值另存记录。
 - 回退:`lodEnabled=false` 是行为级回退开关;远环资产(tile 表、pass)
-  随禁用不参与帧循环;整支 revert 无存档/协议残留(v18 字段不再下发即
-  回 v16 语义——但 v18 已合并则保持版本号,由后续 change 裁决)。
+  随禁用不参与帧循环;整支 revert 无存档/协议残留(v23 字段不再下发即
+  回 v21 语义——但 v23 已合并则保持版本号,由后续 change 裁决)。
 
 ## 验证方法
 
@@ -118,8 +141,9 @@ pending 与已上传 tile(触发 `render_drop_lod_tile`);生成调用与上传
   `cargo clippy --all-targets -- -D warnings`、`make rust`;壳确定性
   golden、入口校验拒绝、两段式 overflow 单测;远环 pass 无头入口单测。
 - Go:`internal/lod` 调度行为测试;probe 高度差分与壳覆盖结构测试;
-  `internal/network` v18 编解码与握手拒绝测试;capture golden 重新生成
-  (变化仅远景带)并新增 `far-horizon` 场景;受影响包 `-race`、全量
+  `internal/network` v23 编解码与握手拒绝测试;capture golden 重新生成
+  (变化含远景带与注水地形;`far-horizon` 排在 `water-underwater` 之前)
+  并新增 `far-horizon` 场景;受影响包 `-race`、全量
   `go test ./... -race`、archcheck、vet、gofmt、openspec strict。
 - 真窗:CGEvent 注入验收(复用 R1/R2c 工具)——远景入画、雾过渡平滑、
   移动跨 tile 无闪烁、关闭路径干净。

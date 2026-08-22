@@ -385,8 +385,8 @@ func TestApplicationConstructionCreatesDebugPanelRendererWhenDevOn(t *testing.T)
 	}
 	dependencies.loginClient = func(
 		context.Context, network.ClientPacketStream, network.Identity,
-	) (network.ClientEndpoint, error) {
-		return endpoint, nil
+	) (network.ClientEndpoint, uint64, error) {
+		return endpoint, 0, nil
 	}
 	dependencies.newWindow = func(int, int, string) (applicationWindow, error) { return window, nil }
 	dependencies.newWindowedRenderer = func(applicationWindow) (*client.Renderer, error) {

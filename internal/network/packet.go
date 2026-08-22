@@ -7,19 +7,22 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-// ProtocolVersion 是当前唯一支持的协议版本；v22 追加客户端翻地命令并拒绝
-// v21 及更早登录。
+// ProtocolVersion 是当前唯一支持的协议版本；v23 在 LoginSuccess 追加
+// WorldSeed（服务端下发世界种子供客户端确定性生成远环壳），并拒绝
+// v22 及更早登录。变基重编:本变更的 WorldSeed 段在旧基线上原编号 v18,
+// main 合并 fluid 系列已占用至 v21、authoritative-farming 合并后占用 v22,
+// 故整体重编为 v23。
 //
-// v22 的唯一变化是 Play/C→S 多出 ID 13 的 TillSoil（u64 序号 + 两个 f32 朝向，
-// 与 OpenContainer 同形）：既有 packet 的 wire 形状、字段布局与全部长度上限都
-// 不变，服务端拒绝原因也没有新增 wire 值——翻地的四条拒绝路径全部复用既有
-// RejectReason（目标不可翻/手持非锄头 → invalid_block，上方非空气 → occupied，
-// 超出触及距离 → no_target）。
+// v23 的唯一变化是 LoginSuccess 多出 WorldSeed（u64，wire 上紧跟 PlayerID
+// 之后）：不新增消息类型，其余 packet 的 wire 形状、字段布局与全部长度上限
+// 都不变。
 //
-// 历史：v21 在 PlayerState 末尾追加 2 字节权威氧气（u16，紧跟 Health 之后）；
-// v20 追加 8 个流体方块编号（只扩方块 ID 集合，wire 形状不变），流体变更走既有
-// 区块变更通道（design.md D8）。
-const ProtocolVersion uint32 = 22
+// 历史：v22 追加客户端翻地命令（Play/C→S 多出 ID 13 的 TillSoil，u64 序号 +
+// 两个 f32 朝向，与 OpenContainer 同形，拒绝路径全部复用既有 RejectReason）；
+// v21 在 PlayerState 末尾追加 2 字节权威氧气（只发给玩家本人的权威
+// 值）；v20 追加 8 个流体方块编号（只扩方块 ID 集合，wire 形状不变），流体
+// 变更走既有区块变更通道（design.md D8）。
+const ProtocolVersion uint32 = 23
 
 // State 标识连接当前允许交换的 packet 集合。
 type State uint8
@@ -73,8 +76,13 @@ type LoginStart struct {
 
 func (LoginStart) clientPacket() {}
 
+// LoginSuccess 是服务端对成功登录的应答。WorldSeed 是权威世界种子的
+// 无损位视图（int64 按 two's complement 转 uint64 下发），编码为
+// PlayerID 之后的 little-endian uint64；客户端用它本地生成同步半径外的
+// 确定性远环壳。wire 层不对该值做任何隐式校验：0 是合法种子。
 type LoginSuccess struct {
-	PlayerID core.PlayerID
+	PlayerID  core.PlayerID
+	WorldSeed uint64
 }
 
 func (LoginSuccess) serverPacket() {}

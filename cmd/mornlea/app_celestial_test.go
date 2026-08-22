@@ -122,7 +122,7 @@ func celestialTestEndpoints(t *testing.T, transport string) (network.ClientEndpo
 		err      error
 	}, 1)
 	go func() {
-		pending, err := network.BeginServerLogin(context.Background(), serverStream)
+		pending, err := network.BeginServerLogin(context.Background(), serverStream, 0)
 		if err != nil {
 			accepted <- struct {
 				endpoint network.ServerEndpoint

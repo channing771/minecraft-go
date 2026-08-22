@@ -2,8 +2,10 @@
 
 package client
 
-// 本文件是 `mornlea_client` render ABI(client ABI v2)的 Go 绑定:R2a 的
-// 离屏 Rust 渲染器只被双后端对照测试与后续期使用,生产渲染仍是 Go 路径。
+// 本文件是 `mornlea_client` render ABI 族的 Go 绑定(v2 引入,v6 增补
+// 远环 tile 上传/丢弃入口,v7 增补雾参数化 SetLodFog——变基重编后
+// v5 归 main 的 water pass,远环两项出口顺延为 v6/v7):R2a 的离屏
+// Rust 渲染器只被双后端对照测试与后续期使用,生产渲染仍是 Go 路径。
 // 链接与 include 标志在 window.go 的 cgo 序言中声明,此处只补 render
 // 入口的逃逸与回调指令。
 
@@ -18,6 +20,12 @@ package client
 #cgo nocallback mornlea_client_render_upload_section
 #cgo noescape mornlea_client_render_drop_section
 #cgo nocallback mornlea_client_render_drop_section
+#cgo noescape mornlea_client_render_upload_lod_tile
+#cgo nocallback mornlea_client_render_upload_lod_tile
+#cgo noescape mornlea_client_render_drop_lod_tile
+#cgo nocallback mornlea_client_render_drop_lod_tile
+#cgo noescape mornlea_client_render_set_lod_fog
+#cgo nocallback mornlea_client_render_set_lod_fog
 #cgo noescape mornlea_client_render_frame
 #cgo nocallback mornlea_client_render_frame
 #cgo noescape mornlea_client_render_readback
@@ -198,6 +206,48 @@ func (r *Renderer) DropSection(x, y, z int32) {
 		C.MORNLEA_CLIENT_ABI_VERSION,
 		C.uint64_t(r.handle),
 		C.int32_t(x), C.int32_t(y), C.int32_t(z),
+	)))
+}
+
+// UploadLodTile 上传/替换一个远环 tile 的壳 quad 字节流(每 quad 20 字节
+// LE,布局与 engine mornlea_lod_shell 输出逐字一致;空等价 drop)。整 tile
+// 替换语义:重复上传同 tile 即整体替换。tile 坐标为 chunk 坐标,每 tile
+// 覆盖 4×4 chunk;流非法或 tile 表容量耗尽时 panic(编程错误)。
+func (r *Renderer) UploadLodTile(x, z int32, quads []byte) {
+	var ptr *C.uint8_t
+	if len(quads) > 0 {
+		ptr = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(quads)))
+	}
+	r.check("upload lod tile", uint32(C.mornlea_client_render_upload_lod_tile(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(r.handle),
+		C.int32_t(x), C.int32_t(z),
+		ptr,
+		C.size_t(len(quads)),
+	)))
+}
+
+// DropLodTile 丢弃一个远环 tile(幂等)。
+func (r *Renderer) DropLodTile(x, z int32) {
+	r.check("drop lod tile", uint32(C.mornlea_client_render_drop_lod_tile(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(r.handle),
+		C.int32_t(x), C.int32_t(z),
+	)))
+}
+
+// SetLodFog 设置远环距离雾参数:start 起雾距离、full 全雾距离(block)。
+// Rust 入口校验 start>0 且 full>start(NaN 拒绝),非法参数返回
+// INVALID_ARGUMENT 并在本方法表现为 panic(编程错误);校验先于句柄
+// 查找,不触碰渲染器状态。渲染器默认 768/1152 锚定 lodFarMultiplier=3
+// 的默认几何(0.5/0.75 × 1536),非默认倍率的推导接线由 5.2 按配置
+// 计算后调用本方法。
+func (r *Renderer) SetLodFog(start, full float32) {
+	r.check("set lod fog", uint32(C.mornlea_client_render_set_lod_fog(
+		C.MORNLEA_CLIENT_ABI_VERSION,
+		C.uint64_t(r.handle),
+		C.float(start),
+		C.float(full),
 	)))
 }
 

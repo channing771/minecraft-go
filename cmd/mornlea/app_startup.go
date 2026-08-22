@@ -82,6 +82,10 @@ func newApplicationWithDependencies(
 	var serverCancel context.CancelFunc
 	var serverDone chan error
 	var err error
+	// worldSeed 是登录成功应答携带的权威世界种子(uint64 全值域,0 合法):
+	// 单机与 TCP 远程都在登录装配点取得,benchmark 观察者不消费(不建远环
+	// Scheduler)。它是运行时事实而非配置,只在装配链路内传递。
+	var worldSeed uint64
 	ticks, saves := newPerformanceRecorders(options.Benchmark)
 	config := server.DefaultConfig(options.Seed)
 	config.Companions = slices.Clone(options.Companions)
@@ -103,7 +107,7 @@ func newApplicationWithDependencies(
 		if err != nil {
 			return nil, fmt.Errorf("连接远程服务器: %w", err)
 		}
-		clientEndpoint, err = dependencies.loginClient(ctx, stream, *options.Identity)
+		clientEndpoint, worldSeed, err = dependencies.loginClient(ctx, stream, *options.Identity)
 		if err != nil {
 			return nil, errors.Join(fmt.Errorf("远程登录: %w", err), stream.Close())
 		}
@@ -116,7 +120,7 @@ func newApplicationWithDependencies(
 	if options.Benchmark {
 		running = server.NewWorld(config, worldgen.New(store.Metadata().Seed, options.FluidEnabled), store)
 		clientEndpoint, err = assembleBenchmarkObserverConnection(
-			ctx, running, options.BenchmarkTransport,
+			ctx, running, options.BenchmarkTransport, uint64(store.Metadata().Seed),
 			func(address string) (network.Listener, error) {
 				return network.ListenTCP(address)
 			},
@@ -135,7 +139,8 @@ func newApplicationWithDependencies(
 			_ = store.Close()
 			return nil, errors.New("本地世界缺少本机身份")
 		}
-		clientEndpoint, host, serverCancel, serverDone, err = assembleLocalApplicationConnection(
+		var localSeed uint64
+		clientEndpoint, host, serverCancel, serverDone, localSeed, err = assembleLocalApplicationConnection(
 			ctx,
 			config,
 			worldgen.New(store.Metadata().Seed, options.FluidEnabled),
@@ -146,6 +151,10 @@ func newApplicationWithDependencies(
 		if err != nil {
 			return nil, fmt.Errorf("连接本地 Host: %w", err)
 		}
+		// 单机登录走与远程相同的 LoginSuccess 状态机,种子由服务端从存档
+		// metadata 填入;远环播种只认登录应答,不直接读 store,保证单机与
+		// TCP 远程同一条种子链路。
+		worldSeed = localSeed
 	}
 	receiver := client.NewReceiver(clientEndpoint, 256)
 
@@ -247,6 +256,11 @@ func newApplicationWithDependencies(
 		app.panel = newPanelStateFromActive(options.Render)
 	}
 	app.mesher = client.NewMesher(reg, max(1, runtime.NumCPU()-2))
+	// 远环 LOD 接线:登录种子→Scheduler 播种远环带→雾距离按配置推导下发。
+	// 禁用(lodEnabled=false)与 benchmark 观察者路径在此零参与。
+	if err := app.attachLodScheduler(worldSeed, options.FluidEnabled, options.Benchmark); err != nil {
+		return nil, errors.Join(fmt.Errorf("接线远环 LOD: %w", err), app.Close())
+	}
 	if options.Benchmark {
 		if err := app.requestTrustedObserverCenter(app.center); err != nil {
 			cleanupErr := app.Close()
@@ -270,10 +284,14 @@ func (sink rendererGlyphSink) WriteGlyphRect(x, y, width, height uint32, pixels 
 	sink.renderer.UploadGlyphRect(int(x), int(y), int(width), int(height), pixels)
 }
 
+// assembleBenchmarkObserverConnection 为 benchmark 观察者建立连接。内存
+// 传输走 AttachTrustedObserver 旁路；TCP 传输复用与真实客户端相同的登录
+// 状态机，worldSeed 与被观测世界同源，保证 LoginSuccess 与生产路径一致。
 func assembleBenchmarkObserverConnection(
 	ctx context.Context,
 	running *server.Server,
 	transport string,
+	worldSeed uint64,
 	listenTCP func(string) (network.Listener, error),
 	dialTCP func(context.Context, string) (network.ClientPacketStream, error),
 ) (network.ClientEndpoint, error) {
@@ -302,7 +320,7 @@ func assembleBenchmarkObserverConnection(
 			serverDone <- acceptErr
 			return
 		}
-		pending, loginErr := network.BeginServerLogin(acceptContext, stream)
+		pending, loginErr := network.BeginServerLogin(acceptContext, stream, worldSeed)
 		if loginErr == nil {
 			loginErr = pending.Accept(acceptContext, running.AttachTrustedObserver)
 		}
@@ -328,10 +346,14 @@ func assembleBenchmarkObserverConnection(
 }
 
 type applicationLoginResult struct {
-	endpoint network.ClientEndpoint
-	err      error
+	endpoint  network.ClientEndpoint
+	worldSeed uint64
+	err       error
 }
 
+// assembleLocalApplicationConnection 建立单机模式的全套连接:内嵌 Host、
+// 内存流对与登录状态机。返回值含登录成功应答的 WorldSeed(远环 LOD 的
+// 播种输入),与 TCP 远程路径同一来源。
 func assembleLocalApplicationConnection(
 	ctx context.Context,
 	config server.Config,
@@ -344,11 +366,12 @@ func assembleLocalApplicationConnection(
 	applicationHost,
 	context.CancelFunc,
 	chan error,
+	uint64,
 	error,
 ) {
 	host, err := dependencies.newHost(ctx, config, generator, store)
 	if err != nil {
-		return nil, nil, nil, nil, errors.Join(err, store.Close())
+		return nil, nil, nil, nil, 0, errors.Join(err, store.Close())
 	}
 	hostContext, cancel := context.WithCancel(ctx)
 	hostDone := make(chan error, 1)
@@ -359,20 +382,20 @@ func assembleLocalApplicationConnection(
 		cleanupErr := cleanupLocalApplicationStartup(
 			host, cancel, hostDone, nil, nil, nil, config.ShutdownTimeout,
 		)
-		return nil, nil, nil, nil, errors.Join(err, cleanupErr)
+		return nil, nil, nil, nil, 0, errors.Join(err, cleanupErr)
 	}
 	acceptDone := make(chan error, 1)
 	go func() { acceptDone <- host.AcceptStream(hostContext, serverStream) }()
 	loginDone := make(chan applicationLoginResult, 1)
 	go func() {
-		endpoint, loginErr := dependencies.loginClient(hostContext, clientStream, identity)
-		loginDone <- applicationLoginResult{endpoint: endpoint, err: loginErr}
+		endpoint, worldSeed, loginErr := dependencies.loginClient(hostContext, clientStream, identity)
+		loginDone <- applicationLoginResult{endpoint: endpoint, worldSeed: worldSeed, err: loginErr}
 	}()
 
 	select {
 	case result := <-loginDone:
 		if result.err == nil {
-			return result.endpoint, host, cancel, hostDone, nil
+			return result.endpoint, host, cancel, hostDone, result.worldSeed, nil
 		}
 		cleanupErr := cleanupLocalApplicationStartup(
 			host,
@@ -383,7 +406,7 @@ func assembleLocalApplicationConnection(
 			serverStream,
 			config.ShutdownTimeout,
 		)
-		return nil, nil, nil, nil, errors.Join(result.err, cleanupErr)
+		return nil, nil, nil, nil, 0, errors.Join(result.err, cleanupErr)
 	case hostErr := <-hostDone:
 		_ = clientStream.Close()
 		_ = serverStream.Close()
@@ -391,7 +414,7 @@ func assembleLocalApplicationConnection(
 		result := <-loginDone
 		acceptErr := <-acceptDone
 		shutdownErr := shutdownApplicationHost(host, config.ShutdownTimeout)
-		return nil, nil, nil, nil, errors.Join(
+		return nil, nil, nil, nil, 0, errors.Join(
 			hostErr,
 			result.err,
 			ignoreApplicationStartupCloseError(acceptErr),
@@ -404,7 +427,7 @@ func assembleLocalApplicationConnection(
 		result := <-loginDone
 		hostErr := <-hostDone
 		shutdownErr := shutdownApplicationHost(host, config.ShutdownTimeout)
-		return nil, nil, nil, nil, errors.Join(
+		return nil, nil, nil, nil, 0, errors.Join(
 			acceptErr,
 			result.err,
 			ignoreApplicationStartupCloseError(hostErr),

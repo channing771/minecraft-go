@@ -17,7 +17,7 @@ func TestMemoryLoginTransitionsToPlay(t *testing.T) {
 	id := core.PlayerID{0, 1, 2, 3, 4, 5, 0x46, 7, 0x88, 9, 10, 11, 12, 13, 14, 15}
 	serverDone := make(chan error, 1)
 	go func() {
-		pending, err := BeginServerLogin(context.Background(), serverStream)
+		pending, err := BeginServerLogin(context.Background(), serverStream, 0)
 		if err != nil {
 			serverDone <- err
 			return
@@ -90,7 +90,7 @@ func TestLoginClientReportsHandshakeVersionMismatch(t *testing.T) {
 func TestBeginServerLoginRejectsOutdatedClientHelloWithProtocolV8(t *testing.T) {
 	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7} {
 		stream := &staticClientHelloStream{version: version}
-		if _, err := BeginServerLogin(context.Background(), stream); err == nil {
+		if _, err := BeginServerLogin(context.Background(), stream, 0); err == nil {
 			t.Fatalf("v%d ClientHello accepted", version)
 		}
 		reject, ok := stream.sent.(HandshakeReject)
@@ -112,7 +112,7 @@ func TestBeginServerLoginFutureClientHelloReturnsV2MismatchOverTCP(t *testing.T)
 	defer cancel()
 	serverDone := make(chan error, 1)
 	go func() {
-		_, err := BeginServerLogin(ctx, server)
+		_, err := BeginServerLogin(ctx, server, 0)
 		serverDone <- err
 	}()
 
@@ -536,7 +536,7 @@ func TestLoginClientKeepsPlayControlPacketsOutOfMirror(t *testing.T) {
 	clientStream, serverStream := NewMemoryStreamPair(8)
 	serverDone := make(chan error, 1)
 	go func() {
-		pending, err := BeginServerLogin(context.Background(), serverStream)
+		pending, err := BeginServerLogin(context.Background(), serverStream, 0)
 		if err != nil {
 			serverDone <- err
 			return
@@ -598,7 +598,7 @@ func beginMemoryLoginWithContext(t *testing.T, ctx context.Context, client Clien
 		err     error
 	}, 1)
 	go func() {
-		pending, err := BeginServerLogin(ctx, server)
+		pending, err := BeginServerLogin(ctx, server, 0)
 		pendingDone <- struct {
 			pending *PendingLogin
 			err     error

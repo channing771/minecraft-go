@@ -7,6 +7,12 @@ func FuzzSmallPacketCodec(f *testing.F) {
 	f.Add(uint8(StateHandshake), uint32(0), []byte{1})
 	f.Add(uint8(StateHandshake), uint32(0), []byte{3})
 	f.Add(uint8(StateLogin), uint32(0), []byte{0})
+	// v23 LoginSuccess：16 字节 UUIDv4 + little-endian uint64 世界种子。
+	f.Add(uint8(StateLogin), uint32(0), []byte{
+		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x46, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+		0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
+	})
 	f.Add(uint8(StatePlay), uint32(0), []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 	f.Add(uint8(StatePlay), uint32(5), []byte{1, 0, 0, 0, 0, 0, 0, 0})
 	// PlayerState 的种子由编码器现算，尾部字段（v21 起含 Oxygen）一变就自动跟上，

@@ -2,6 +2,7 @@ mod collision;
 mod ffi;
 mod greedy;
 mod light;
+mod lod;
 mod quad;
 mod raycast;
 mod step;

@@ -5,6 +5,8 @@
 pub const TERRAIN: &str = include_str!("../../shaders/terrain.wgsl");
 /// 水面 pass(半透明,与 terrain 共享 atlas 与世界坐标 UV)。
 pub const WATER: &str = include_str!("../../shaders/water.wgsl");
+/// 远环 LOD 壳 pass(世界坐标大 quad + 距离雾)。
+pub const LOD: &str = include_str!("../../shaders/lod.wgsl");
 /// 天空与程序化方块云 pass。
 pub const SKY: &str = include_str!("../../shaders/sky.wgsl");
 /// GPU culling compute。
@@ -34,6 +36,7 @@ mod tests {
         for (name, source) in [
             ("terrain", TERRAIN),
             ("water", WATER),
+            ("lod", LOD),
             ("sky", SKY),
             ("cull", CULL),
             ("hiz_build", HIZ_BUILD),

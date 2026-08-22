@@ -1,8 +1,9 @@
 //! mornlea_client 的 C ABI 出口。
 //!
 //! 契约:
-//! - ABI version 1;所有入口第一个参数是调用方期望的 ABI 版本,不匹配立即
-//!   返回 `MORNLEA_CLIENT_STATUS_ABI_VERSION`。
+//! - 所有入口第一个参数是调用方期望的 ABI 版本,不匹配立即返回
+//!   `MORNLEA_CLIENT_STATUS_ABI_VERSION`;当前版本见 [`CLIENT_ABI_VERSION`]
+//!   (v6 起远环 tile 出口加入,v7 起雾 setter 出口加入)。
 //! - 窗口句柄存放在 thread-local 表中:句柄只在创建线程有效,跨线程调用
 //!   查不到句柄而返回 `MORNLEA_CLIENT_STATUS_WINDOW`——这同时兜住了 winit
 //!   macOS 的主线程约束(Go 侧已 `LockOSThread`)。
@@ -17,10 +18,16 @@ use crate::window::ClientWindow;
 
 /// 当前 client ABI 版本。
 ///
-/// v5:`mornlea_client_render_upload_section` 按 material 分成不透明与水面两条
-/// 流,渲染器新增半透明 water pass。必须与 `engine/include/mornlea_client.h`
-/// 的 `MORNLEA_CLIENT_ABI_VERSION` 逐版本一致。
-pub const CLIENT_ABI_VERSION: u32 = 5;
+/// v7:终审修复波(Ruling 14/16)新增雾参数化 `render_set_lod_fog` 出口——
+/// 新增导出面即 bump,ABI 版本是"同版本 = 同表面"的不可混装契约(与
+/// engine v3→v4、client v4→5 同一先例);既有入口签名不变。
+/// v6:新增远环 `render_upload_lod_tile`/`render_drop_lod_tile` 出口。
+/// 变基重编说明:远环两项出口在旧基线上原编号 v5/v6,main 合并 fluid 系列
+/// 后 v5 已被 water pass(`mornlea_client_render_upload_section` 按 material
+/// 分成不透明与水面两条流,新增半透明 water pass)占用,故整体顺延一格。
+/// 必须与 `engine/include/mornlea_client.h` 的 `MORNLEA_CLIENT_ABI_VERSION`
+/// 逐版本一致。
+pub const CLIENT_ABI_VERSION: u32 = 7;
 
 /// 调用成功。
 pub const MORNLEA_CLIENT_STATUS_OK: u32 = 0;
@@ -270,8 +277,9 @@ mod tests {
     // 校验拒绝路径:ABI 版本、参数校验与无效句柄。
 
     #[test]
-    fn abi_version_is_five() {
-        assert_eq!(mornlea_client_abi_version(), 5);
+    fn abi_version_is_seven() {
+        // 变基重编:main 的 water pass 占用 v5,远环 tile 顺延 v6,雾 setter v7。
+        assert_eq!(mornlea_client_abi_version(), 7);
     }
 
     #[test]
@@ -1152,6 +1160,201 @@ mod atlas_ffi_tests {
         assert_eq!(
             mornlea_client_render_destroy(CLIENT_ABI_VERSION, handle),
             MORNLEA_CLIENT_STATUS_OK
+        );
+    }
+}
+
+/// 上传/替换一个远环 tile 的壳 quad 字节流(20 字节/quad 的 LE 编码,
+/// 布局与 engine `mornlea_lod_shell` 输出逐字一致;空等价 drop)。
+/// 整 tile 替换语义:重复上传同 tile 即整体替换。流非法返回
+/// INVALID_ARGUMENT,tile 表容量耗尽返回 CAPACITY。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mornlea_client_render_upload_lod_tile(
+    abi_version: u32,
+    handle: u64,
+    tile_x: i32,
+    tile_z: i32,
+    quads: *const u8,
+    quads_len: usize,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if !quads_len.is_multiple_of(crate::render::lod::LOD_QUAD_BYTES)
+        || (quads.is_null() && quads_len != 0)
+    {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            let data = if quads_len == 0 {
+                &[][..]
+            } else {
+                // SAFETY: quads 非空,调用方保证 quads_len 字节可读。
+                unsafe { std::slice::from_raw_parts(quads, quads_len) }
+            };
+            match renderer.upload_lod_tile((tile_x, tile_z), data) {
+                Ok(()) => MORNLEA_CLIENT_STATUS_OK,
+                Err(crate::render::lod::LodUploadError::Invalid) => {
+                    MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT
+                }
+                Err(crate::render::lod::LodUploadError::Capacity) => MORNLEA_CLIENT_STATUS_CAPACITY,
+            }
+        })
+    })
+}
+
+/// 丢弃一个远环 tile;不存在时为幂等空操作。
+#[unsafe(no_mangle)]
+pub extern "C" fn mornlea_client_render_drop_lod_tile(
+    abi_version: u32,
+    handle: u64,
+    tile_x: i32,
+    tile_z: i32,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            renderer.drop_lod_tile((tile_x, tile_z));
+            MORNLEA_CLIENT_STATUS_OK
+        })
+    })
+}
+
+/// 设置远环距离雾参数(Ruling 14 参数化):`start` 起雾距离、`full`
+/// 全雾距离(block)。入口校验 start > 0 且 full > start(NaN 天然被拒),
+/// 违约返回 INVALID_ARGUMENT 且校验先于句柄查找(不触碰任何渲染器
+/// 状态);渲染器内的默认值 768/1152 锚定 lodFarMultiplier=3 的默认
+/// 几何,非默认倍率的推导接线由上层(5.2)按配置计算后调用本出口。
+#[unsafe(no_mangle)]
+pub extern "C" fn mornlea_client_render_set_lod_fog(
+    abi_version: u32,
+    handle: u64,
+    start: f32,
+    full: f32,
+) -> u32 {
+    if abi_version != CLIENT_ABI_VERSION {
+        return MORNLEA_CLIENT_STATUS_ABI_VERSION;
+    }
+    if !(start > 0.0 && full > start) {
+        return MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT;
+    }
+    catch(|| {
+        with_renderer(handle, |renderer| {
+            // 入口校验已通过;渲染器层同契约再校验一次(防御直连调用方),
+            // 理论上恒为 true。
+            renderer.set_lod_fog(start, full);
+            MORNLEA_CLIENT_STATUS_OK
+        })
+    })
+}
+
+#[cfg(test)]
+mod lod_ffi_tests {
+    use super::*;
+
+    // 远环入口的无头校验:错误 ABI、非法 quad 流长度、空指针与未知句柄。
+    // tile 替换语义与图像路径在 render 模块的 GPU-or-skip 测试中覆盖。
+
+    #[test]
+    fn lod_entries_reject_bad_abi_and_arguments() {
+        let quads = [0u8; 20];
+        // SAFETY: 指针来自有效局部变量。
+        let wrong_abi = unsafe {
+            mornlea_client_render_upload_lod_tile(
+                CLIENT_ABI_VERSION + 1,
+                0xBEEF,
+                0,
+                0,
+                quads.as_ptr(),
+                quads.len(),
+            )
+        };
+        assert_eq!(wrong_abi, MORNLEA_CLIENT_STATUS_ABI_VERSION);
+        assert_eq!(
+            mornlea_client_render_drop_lod_tile(CLIENT_ABI_VERSION + 1, 0xBEEF, 0, 0),
+            MORNLEA_CLIENT_STATUS_ABI_VERSION
+        );
+
+        // 长度非 20 的倍数必须在校验层拒绝。
+        let odd = [0u8; 21];
+        // SAFETY: 同上。
+        let misaligned = unsafe {
+            mornlea_client_render_upload_lod_tile(
+                CLIENT_ABI_VERSION,
+                0xBEEF,
+                0,
+                0,
+                odd.as_ptr(),
+                odd.len(),
+            )
+        };
+        assert_eq!(misaligned, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+
+        // 空指针 + 非零长度拒绝;空指针 + 零长度是合法的 drop 语义,
+        // 只会因句柄未知停在 WINDOW。
+        // SAFETY: 刻意的空指针,长度非零必须先于解引用被拒绝。
+        let null = unsafe {
+            mornlea_client_render_upload_lod_tile(
+                CLIENT_ABI_VERSION,
+                0xBEEF,
+                0,
+                0,
+                std::ptr::null(),
+                4,
+            )
+        };
+        assert_eq!(null, MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT);
+
+        // 参数本身合法时,未知句柄一律 WINDOW。
+        // SAFETY: 同上。
+        let unknown = unsafe {
+            mornlea_client_render_upload_lod_tile(
+                CLIENT_ABI_VERSION,
+                0xF00D,
+                0,
+                0,
+                quads.as_ptr(),
+                quads.len(),
+            )
+        };
+        assert_eq!(unknown, MORNLEA_CLIENT_STATUS_WINDOW);
+        assert_eq!(
+            mornlea_client_render_drop_lod_tile(CLIENT_ABI_VERSION, 0xF00D, 0, 0),
+            MORNLEA_CLIENT_STATUS_WINDOW
+        );
+    }
+
+    /// 雾参数化 setter(Ruling 14)的无头校验矩阵:入口校验(start > 0、
+    /// full > start,NaN 与任一违约都拒绝)必须先于句柄查找——非法参数
+    /// 配未知句柄仍报 INVALID_ARGUMENT;参数合法才因句柄未知停在 WINDOW。
+    #[test]
+    fn set_lod_fog_validates_arguments_before_handle_lookup() {
+        // 错误 ABI 优先于一切参数校验。
+        assert_eq!(
+            mornlea_client_render_set_lod_fog(CLIENT_ABI_VERSION + 1, 0xF00D, 768.0, 1152.0),
+            MORNLEA_CLIENT_STATUS_ABI_VERSION
+        );
+        for (name, start, full) in [
+            ("start 为零", 0.0, 100.0),
+            ("start 为负", -1.0, 100.0),
+            ("start 为 NaN", f32::NAN, 100.0),
+            ("full 等于 start", 100.0, 100.0),
+            ("full 小于 start", 200.0, 100.0),
+            ("full 为 NaN", 100.0, f32::NAN),
+        ] {
+            assert_eq!(
+                mornlea_client_render_set_lod_fog(CLIENT_ABI_VERSION, 0xF00D, start, full),
+                MORNLEA_CLIENT_STATUS_INVALID_ARGUMENT,
+                "{name}"
+            );
+        }
+        // 参数合法 + 未知句柄 → WINDOW,证明校验通过后到达句柄查找。
+        assert_eq!(
+            mornlea_client_render_set_lod_fog(CLIENT_ABI_VERSION, 0xF00D, 768.0, 1152.0),
+            MORNLEA_CLIENT_STATUS_WINDOW
         );
     }
 }

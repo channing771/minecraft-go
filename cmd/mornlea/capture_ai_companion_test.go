@@ -53,15 +53,16 @@ func TestWaterUnderwaterCaptureSceneIsLast(t *testing.T) {
 // ai-companion 夹具的确定性。
 //
 // 原名是 ...AICompanionIsLast...，但 ai-companion 已不再是最后一个：水景两个
-// 场景追加在它之后（新增场景一律追加在表末尾，见 captureScenes 的说明），
-// 而 water-underwater 另有必须排最后的硬理由，见
-// TestWaterUnderwaterCaptureSceneIsLast。
+// 场景与远环 far-horizon 追加在它之后，而 water-underwater 另有必须排最后的
+// 硬理由，见 TestWaterUnderwaterCaptureSceneIsLast。变基排序协调:far-horizon
+// 插在 water-underwater 之前(倒数第二);其 Apply 显式清空 ai-companion 留下的
+// 全部呈现状态,与前一场景互相独立。
 func TestCaptureSceneOrderAndAICompanionDeterminism(t *testing.T) {
 	wantNames := []string{
 		"terrain-noon", "hud-hotbar-health", "avatar-nametag", "inventory-crafting",
 		"debug-panel", "skylight-tunnel", "block-light-room", "materials-showcase",
 		"target-block-feedback", "oak-grove", "ai-companion",
-		"water-surface-slope", "water-underwater",
+		"water-surface-slope", "far-horizon", "water-underwater",
 	}
 	gotNames := make([]string, len(captureScenes))
 	for index, scene := range captureScenes {

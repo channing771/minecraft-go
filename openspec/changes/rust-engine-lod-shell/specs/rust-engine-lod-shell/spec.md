@@ -2,7 +2,8 @@
 
 ## Purpose
 
-新增确定性远环 LOD:客户端经 v18 登录取得世界种子后,本地生成同步半径外的
+新增确定性远环 LOD:客户端经 v23 登录取得世界种子后(变基重编,原 v18),
+本地生成同步半径外的
 纯地表壳 mesh,以距离雾掩盖精度接缝,把可视距离扩展到配置倍数;近环权威
 语义逐位不变,远环不反映同步半径外的人工修改(种子即真相)。
 
@@ -13,7 +14,11 @@
 `mornlea_engine` MUST 以无状态纯函数导出 `mornlea_lod_shell`:同 perm
 播种 + 同 tile + 同 LOD 步长的调用 MUST 在全平台产生逐位一致的输出;输出
 MUST 为壳 quad 流(世界坐标顶面 + 高度断差侧裙),步长窗内列高 MUST 取
-窗内最高列(保守遮挡),材质 MUST 取该最高列的 worldgen 表层材质;status
+窗内最高列(保守遮挡),材质 MUST 取该最高列的 worldgen 表层材质;流体
+开启(材料表 water != air)时,固体顶面低于海平面(64)的窗口 MUST 把
+顶面钳到海平面并取水材质——水窗等高故水下 MUST NOT 产生裙边,陆海断差
+由陆侧按钳制后高度发裙;流体关闭(water == air)时钳制 MUST 整体跳过,
+输出与注水门控引入前逐位一致;status
 与两段式容量探测语义 MUST 与既有 engine 导出一致。
 
 #### Scenario: 同输入跨平台逐位一致
@@ -41,24 +46,26 @@ MUST 为壳 quad 流(世界坐标顶面 + 高度断差侧裙),步长窗内列高
 
 - GIVEN 任意 tile 与步长
 - WHEN 以 `mornlea_worldgen_probe` 逐列采样并与壳窗高比对
-- THEN 每个窗高 == 窗内 max(worldgen 列高),每个顶面窗恰好覆盖一次,
+- THEN 每个窗高 == 窗内 max(worldgen 列高) 经海平面钳制(低于 64 的窗
+  取 64 与水材质),每个顶面窗恰好覆盖一次,
   断差边界裙边闭合(边界遍历无洞)
 
 ### Requirement: 世界种子经登录成功下发
 
 服务端 MUST 在登录成功应答中携带 `WorldSeed`;单机内置服务端与 TCP 专用
-服务端 MUST 走同一编码;协议版本 MUST 升到 v18(v17 已由 M5B 占用),
+服务端 MUST 走同一编码;协议版本 MUST 升到 v23(v22 已由 main 合并的
+authoritative-farming 交付;变基重编,原编号 v18),
 版本不匹配的握手 MUST 被既有拒绝机制拒绝,不产生半兼容会话。
 
-#### Scenario: v18 登录携带种子
+#### Scenario: v23 登录携带种子
 
-- GIVEN 客户端以 v18 协议完成登录
+- GIVEN 客户端以 v23 协议完成登录
 - WHEN 解码登录成功应答
 - THEN 取得 `WorldSeed` 并完成远环播种,无需任何额外往返
 
 #### Scenario: 旧版本握手被拒绝
 
-- GIVEN v18 服务端与非 v18 客户端(或反向组合)
+- GIVEN v23 服务端与非 v23 客户端(或反向组合)
 - WHEN 执行登录握手
 - THEN 握手被版本校验拒绝,连接不进入游戏会话
 
@@ -119,15 +126,17 @@ MUST 使用独立帧预算,预算耗尽即停,且 MUST NOT 减少近环 section 
 
 `lodEnabled`、`lodFarMultiplier`(默认 3,范围 2..8)与 `lodStep`
 (默认 4)MUST 作为配置调参暴露;benchmark producer MUST 默认禁用远环,
-benchmark scenario MUST 保持 v16 且输出结构不变;既有 capture 场景的
-golden 更新 MUST 仅包含新增远景带,并 MUST 新增 `far-horizon` 视觉场景
-作为长期门禁。
+benchmark scenario MUST 保持 v18(farming 的迁移段,本变更不迁移)且输出结构不变;
+既有 capture 场景的 golden 更新 MUST 仅包含新增远景带与 main 注水地形引入
+的变化(近处不变双侧守卫),并 MUST 新增 `far-horizon` 视觉场景
+作为长期门禁;`water-underwater` MUST 保持在场景表最后,`far-horizon`
+MUST 排在其之前(倒数第二)。
 
 #### Scenario: benchmark 保持可比
 
 - GIVEN benchmark producer 运行
 - WHEN 产出基准报告
-- THEN 远环未参与,scenario 为 v16,报告结构与既有基准可比
+- THEN 远环未参与,scenario 为 v18(farming 的迁移段),报告结构与既有基准可比
 
 #### Scenario: golden 更新仅限远景带
 

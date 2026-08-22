@@ -11,6 +11,7 @@ import (
 	"github.com/channing771/mornlea/internal/companion"
 	"github.com/channing771/mornlea/internal/config"
 	"github.com/channing771/mornlea/internal/core"
+	"github.com/channing771/mornlea/internal/lod"
 	"github.com/channing771/mornlea/internal/mesh"
 	"github.com/channing771/mornlea/internal/network"
 	"github.com/channing771/mornlea/internal/render"
@@ -60,6 +61,14 @@ type application struct {
 	scheduler   *render.SectionScheduler
 	frameWidth  int
 	frameHeight int
+	// lodScheduler 是远环 LOD 壳的生成/上传调度器;lodEnabled=false 或
+	// benchmark 观察者路径下保持 nil(零参与:不建、不消费种子、帧循环只做
+	// nil 检查)。生命周期随 application,Close 时先于渲染器释放。
+	lodScheduler *lod.Scheduler
+	// lodTileCenter 是最近一次已播种/增量入队的 tile 中心,用于跨 tile 边界
+	// 检测;初始值在 attachLodScheduler 的远环带播种(Ruling 19:近环内盘
+	// 不入队)时写入。
+	lodTileCenter lod.TilePos
 	// visibleScratch/visibleSections 是每帧可见性计算的复用缓冲。
 	visibleScratch  mesh.VisibilityScratch
 	visibleSections []core.SectionPos

@@ -59,8 +59,8 @@ func TestProtocolV22TillSoilPacketIDIsFrozen(t *testing.T) {
 	if _, ok := clientPacketForID(StatePlay, 13+1); ok {
 		t.Fatal("Play client packet ID 14 必须保持未分配")
 	}
-	if ProtocolVersion != 22 {
-		t.Fatalf("协议版本 = %d，想要 22——翻地命令随 v22 交付", ProtocolVersion)
+	if ProtocolVersion != 23 {
+		t.Fatalf("协议版本 = %d，想要 23——翻地命令随 v22 交付，当前版本为 v23", ProtocolVersion)
 	}
 }
 
