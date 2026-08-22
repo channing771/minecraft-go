@@ -149,6 +149,12 @@ type playerState struct {
 	// 它留在 playerState 而不是上移到 actorState：伙伴不进食，把它放进共有
 	// 结构体会给伙伴凭空多出一个永远为假的字段。
 	eatingHeld bool
+	// eating 是权威进食进度状态机（见 eating.go）。它与 `mining` 一样是瞬态
+	// 字段，不持久化、不进入快照/哈希，也不上线协议：进度只在服务端存在，
+	// 客户端按自己的按键预测呈现。
+	//
+	// 它同样留在 playerState 而不是上移 actorState：伙伴不进食。
+	eating eatingState
 
 	restoreCandidates []restoreCandidate
 	nextRestore       int
@@ -475,6 +481,13 @@ func (engine *Engine) advanceActivePlayers() {
 		// 饥饿伤害与回血计时同处：它同样只在 Active 期间推进，也同样放在 reset
 		// 短路之前——reset 只是位置跳变的当 tick 标记，玩家仍在世界里挨饿。
 		player.advanceStarvation(engine.tunables.StarvationDamageIntervalTicks)
+		// 进食推进排在饥饿伤害之后：饥饿伤害走 applyDamage，而 applyDamage 会
+		// 中断进食。反过来排的话，"饿到零的玩家在挨这一拳的同一 tick 吃完面包"
+		// 会先结算进食、再被同一 tick 的伤害打断一个已经不存在的进度——读起来
+		// 像是伤害没能打断进食。它同样放在 reset 短路之前：reset 只是位置跳变
+		// 的当 tick 标记，而"位置跳变中断进食"由 advanceEating 自己的 reset
+		// 判据表达，不靠这里的短路代劳。
+		player.advanceEating(engine.tunables.EatingTicks)
 		if player.reset {
 			continue
 		}
@@ -566,6 +579,11 @@ func (player *playerState) applyDamage(damage int32) {
 		return
 	}
 	player.resetRegenTimer()
+	// 受伤中断进食（spec「受伤或死亡 MUST 清零进度且 MUST NOT 扣除食物」），
+	// 与上一行"重置回血计时"同处同理：两者都是"真正挨了一下"才发生的副作用，
+	// 因此都必须排在非正伤害的短路**之后**——摔落曲线在安全高度每次落地都会
+	// 算出负值，写在函数第一行会让"跳一下"打断进食。清空只丢进度，不碰背包。
+	player.eating = eatingState{}
 	if damage >= int32(player.health) {
 		player.health = 0
 		return
@@ -681,6 +699,9 @@ func (player *playerState) beginReset() {
 	player.miningHeld = false
 	player.eatingHeld = false
 	player.mining = miningState{}
+	// 死亡与位置跳变都经这里，进食进度随之作废：重生后站在出生点继续吃完
+	// 死前那半块面包没有任何语义，与 `mining` 上一行同理。
+	player.eating = eatingState{}
 	player.reset = false
 	player.inventoryDirty = true
 	player.nextCandidate = 0

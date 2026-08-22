@@ -32,7 +32,7 @@ func TestTunableConstantsAreNotExported(t *testing.T) {
 			"InteractionReach", "DropPickupRange", "SpawnRadius",
 			"RandomTicksPerSection", "CropGrowthChancePercent",
 			"StarvationDamageIntervalTicks", "ExhaustionThresholdMilli",
-			"RegenHungerThreshold",
+			"RegenHungerThreshold", "EatingTicks",
 		},
 	}
 	root := moduleRoot(t)

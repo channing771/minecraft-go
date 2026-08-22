@@ -153,6 +153,13 @@ type Tunables struct {
 	// 回复**，不改变回血计时本身——饥饿值低于阈值时计时照常累积，饥饿回到阈值
 	// 那一刻若计时已满就立即回血。
 	RegenHungerThreshold uint8 `json:"regenHungerThreshold"`
+	// EatingTicks 是吃完一件食物需要连续保持进食输入的 tick 数
+	// （变更 authoritative-hunger，internal/sim/eating.go 的 advanceEating）。
+	//
+	// 它同时是"中断窗口"的长度：调大让进食更容易被打断，调小到 1 等于按一下
+	// 就吃完（合法的调试取值，不是错误）。取 0 会让进度永远够不到结算——进度
+	// 从 1 起——配置层把下限钳到 1，advanceEating 另有一次 max(…, 1) 兜底。
+	EatingTicks uint16 `json:"eatingTicks"`
 }
 
 // 以下是流体三个 tunable 的编译期默认值。它们的消费方都在
@@ -218,6 +225,7 @@ func DefaultTunables() Tunables {
 		StarvationDamageIntervalTicks: defaultStarvationDamageIntervalTicks,
 		ExhaustionThresholdMilli:      defaultExhaustionThresholdMilli,
 		RegenHungerThreshold:          defaultRegenHungerThreshold,
+		EatingTicks:                   defaultEatingTicks,
 	}
 }
 
