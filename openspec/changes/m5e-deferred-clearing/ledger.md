@@ -38,3 +38,8 @@ Task 2: dispatched (BASE 597f044, implementer agent_aea7520e, 23 tool uses)
 Task 2: minor (deferred, plan-mandated): `interactive.go` 新注释末句「两处界一旦分叉，较大一侧会在另一侧之前静默截断」方向写反——静默截断发生在**较小**的有效界一侧（若上限增大而缓冲不变，drain 层先截断），且 `chatInput` 的字节上限是置 overflow 拒收而非静默截断；注释为计划原文逐字强制，实现者无自由度（评审 Minor-1，终审裁决是否入修复波）
 Task 2: complete (commits 597f044..4ee2be7, review clean — Spec ✅ / Approved, 0 Critical, 0 Important)
 
+Task 3: dispatched (BASE c762813, implementer agent_b7aae507, 37 tool uses)
+Task 3: Ruling: 两处计划文本偏离按计划自身回退指示处理——(a) brief 注释模板 `` `Dialogue` `` 标识符全仓不存在（真实方法为 `Do`），archcheck 门禁拒收，实现者按根因修复改为 `` `m.dialogue.Do` ``，语义不变；(b) Step 2 `-run 'TestCompanionStageAcceptance'` 无匹配宿主（计划已预置「以实际宿主名为准」），实际宿主为 `TestM5StageAcceptancePersonaDialogueEndToEnd` — 两处若误裁，代价仅为注释措辞/测试过滤名与计划文本不一致，无行为影响。
+Task 3: minor (deferred): 释放改为裸语句后，`Plan`/`Do` 内部未恢复 panic 将跳过令牌释放（旧 defer 会释放）——worker goroutine panic 即杀进程，泄漏令牌不可观察，且该结构为计划显式指定；记录权衡供分支评审知悉（评审 Minor-1）
+Task 3: complete (commits c762813..5f9f2a7, review clean — Spec ✅ / Approved, 0 Critical, 0 Important；评审另核实信号量全部触点单次释放核算成立、ctx 路径不变、per-companion in-flight 旗标独立兜住并发上界）
+
