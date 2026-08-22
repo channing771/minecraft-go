@@ -15,9 +15,9 @@
 
 ## 4. 在配置 v1 增加启动时路径
 
-- [ ] 4.1 在 `internal/config/config_test.go` 添加失败测试，覆盖空默认值、相对/绝对路径解析、非字符串错误、原文 Save 往返、已知顶层字段、数值面板隔离和 `CurrentVersion == 1`；运行 `go test ./internal/config -run 'Test.*TexturePack' -count=1` 确认先失败。
-- [ ] 4.2 在 `internal/config/config.go` 添加原文 `texturePackPath` 与不序列化的解析后路径，按配置文件目录解析相对值，不加入 `Fields()`、调试分组或权威参数。
-- [ ] 4.3 运行 `gofmt -w internal/config/config.go internal/config/config_test.go`、`go test ./internal/config -race -count=1` 与 `git diff --check`，通过规格与质量评审后提交配置变更。
+- [x] 4.1 在 `internal/config/config_test.go` 添加失败测试，覆盖空默认值、相对/绝对路径解析、非字符串错误、原文 Save 往返、已知顶层字段、数值面板隔离和 `CurrentVersion == 1`；运行 `go test ./internal/config -run 'Test.*TexturePack' -count=1` 确认先失败。
+- [x] 4.2 在 `internal/config/config.go` 添加原文 `texturePackPath` 与不序列化的解析后路径，按配置文件目录解析相对值，不加入 `Fields()`、调试分组或权威参数。
+- [x] 4.3 运行 `gofmt -w internal/config/config.go internal/config/config_test.go`、`go test ./internal/config -race -count=1` 与 `git diff --check`，通过规格与质量评审后提交配置变更。
 
 ## 5. 接入全部图形客户端启动模式
 
