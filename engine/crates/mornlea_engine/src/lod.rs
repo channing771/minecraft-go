@@ -426,7 +426,7 @@ mod tests {
         WindowField, build_shell, clamp_window_to_sea_level, encode_shell, lod_shell,
         parse_lod_input, sample_field, sample_window,
     };
-    use crate::worldgen::{Materials, WORLD_MAX_Y, WorldgenParams, SEA_LEVEL_Y};
+    use crate::worldgen::{Materials, SEA_LEVEL_Y, WORLD_MAX_Y, WorldgenParams};
 
     /// 测试材料表:与 worldgen 测试同款,取值互异即可。
     fn materials() -> Materials {
