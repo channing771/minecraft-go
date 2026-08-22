@@ -41,6 +41,8 @@ loader 接受标准库文件系统抽象，不新增自有接口。正常帧循�
 
 每张 PNG 最大 `64 KiB`，必须恰好 `16×16` 像素。加载先在有界读取内检查 PNG 尺寸，再完整解码并规范化为 `16×16×4` 的 8-bit RGBA。文件名大小写敏感。loader 不遍历目录，只按固定逻辑名表尝试文件，因此未知文件不会被打开。
 
+loader 只校验 manifest、读取上限、PNG 可解码性与尺寸，不按逻辑 layer 检查像素结构、alpha 值或许可证。程序化 registry 与内嵌默认包由仓库测试保证稳定结构；其中树叶/玻璃基础层保持 binary alpha，内嵌资产另受来源与许可证门禁约束。用户 override 可以提供任意合法 16×16 RGBA（包括中间 alpha），但只能替换像素，不能改变 render classification、几何、layer ID、逻辑名映射或面映射。
+
 固定逻辑名为：
 
 ```text
@@ -115,14 +117,15 @@ manifest 只描述格式与人类可读名称；它不提供材质映射。未�
 
 现有 `nearBandGuard` 在 update 模式下把新帧的受保护行与旧 golden 逐字节比较，且旧图不存在时跳过。新默认材质会有意改变近环颜色，因此旧图比较无法区分“像素来源改变”与“LOD 误伤近环”；移动 golden 目录又会令 guard 根本不执行。材质更新改用同一当前 registry 的 LOD on/off 成对 control：
 
-1. `--update-golden` 路径创建两个无窗口 application，二者使用相同内嵌默认 registry、世界种子、固定场景与 render 配置，control 仅把 `LodEnabled` 设为 false；
-2. 在写任何 golden 前，两端只渲染同一个 `far-horizon` 场景，并保留两张诊断图；
-3. 用 LOD-on application 的相机与壳半径构造现有 `nearBandGuard`，调用同一个 `assertUnchanged` 比较 LOD-off 与 LOD-on 当前帧的顶部/底部受保护行；
-4. control 失败时整次更新返回错误且不覆盖任何 golden；通过后才按内嵌默认 registry 生成整套新 baseline。
+1. `--update-golden` 路径创建 disposable LOD-on control application，再以相同内嵌默认 registry、世界种子、固定场景与 render 配置创建 disposable LOD-off control application；两者只有 `LodEnabled` 不同；
+2. 在写任何 golden 前，两端只渲染同一个 `far-horizon` scene，并保留两张诊断图；
+3. 用 disposable LOD-on control 的相机与壳半径构造现有 `nearBandGuard`，调用同一个 `assertUnchanged` 比较 LOD-off 与 LOD-on 当前帧的顶部/底部受保护行；
+4. 无论 control 成功、第二个 application 构造失败还是 guard 失败，都关闭每个已经构造的 control application；失败时整次更新返回错误且不覆盖任何 golden；
+5. 只有 guard 通过且两个 control application 均关闭后，才构造第三个 fresh LOD-on application，并只把该 application 交给正式 `runCapture` 按普通完整场景顺序生成 baseline；正式 application 未执行过 control scene，并在成功、构造后的 capture 失败或正常完成路径关闭。
 
-该比较直接验证 LOD 开关不改变同一材质下的近环，且不依赖历史像素或旧文件存在性。实现只把 `assertUnchanged` 的调用从逐场景写盘分支前移到整次更新的 preflight，不删除或放宽几何行带、fail-closed 规则与逐像素比较。第二个 application 只在显式 baseline update 中存在，不增加普通 capture 或游戏运行成本。
+该比较直接验证 LOD 开关不改变同一材质下的近环，且不依赖历史像素或旧文件存在性。实现只把 `assertUnchanged` 的调用从逐场景写盘分支前移到整次更新的 preflight，不删除或放宽几何行带、fail-closed 规则与逐像素比较。三个 application 只在显式 baseline update 中按上述受控生命周期存在；普通 capture 与游戏仍只构造一个 application。
 
-被否决的替代方案：移走全部或单张旧 golden 会触发现有 `os.IsNotExist` 跳过分支；只靠人工看图不可自动阻止近环回归；继续比较旧 RGB 会永久阻止任何有意的默认材质变化。
+被否决的替代方案：移走全部或单张旧 golden 会触发现有 `os.IsNotExist` 跳过分支；复用已跑过 `far-horizon` control 的 LOD-on application 会污染依赖 fresh 初态的正式场景顺序；先把整套场景缓存到内存再统一写盘会增加无必要的图像缓存与写盘事务；只靠人工看图不可自动阻止近环回归；继续比较旧 RGB 会永久阻止任何有意的默认材质变化。
 
 ## Risks / Trade-offs
 

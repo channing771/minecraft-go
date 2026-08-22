@@ -140,7 +140,7 @@ git commit -m "docs: propose texture pack loading"
 
 Use `testing/fstest.MapFS` and test the production entry point directly. Cover:
 
-1. a valid `pack.json` plus one 16×16 PNG replaces only its named layer;
+1. a valid `pack.json` plus one 16×16 PNG replaces only its named layer, including an RGBA leaves/glass PNG with intermediate alpha;
 2. an absent known texture leaves the previous layer bytes unchanged;
 3. missing manifest, malformed JSON, unsupported format, invalid UTF-8, empty/over-128-byte name, malformed PNG, non-16×16 image, over-limit manifest and over-limit texture return contextual errors;
 4. entries whose `fs.File.Stat` result is non-regular are rejected;
@@ -242,6 +242,7 @@ Required behavior:
 - Treat `fs.ErrNotExist` for a known texture as fallback. All other open/read/decode errors are fatal and include the validated pack name plus logical name.
 - Use `png.DecodeConfig` to reject dimensions before full decode, then `png.Decode`, `image.NewNRGBA` and `draw.Draw` to normalize any supported PNG color model to exactly `16*16*4` RGBA bytes.
 - Decode all replacements into a temporary fixed array first and mutate `Registry` only after every present texture validates, so one bad file cannot leave a partially applied pack.
+- Accept arbitrary valid per-layer RGBA pixels, including intermediate alpha. Do not add logical-layer-specific alpha, pixel-structure or local-license validation; render classification, geometry, layer IDs and mapping remain owned by the registry rather than the pack.
 
 Do not add a runtime importer, manifest texture mapping, image scaling, format sniffing, cache, interface, or goroutine.
 
@@ -358,10 +359,10 @@ Expected: PASS.
 
 `default_pack_test.go` must additionally assert:
 
-1. every mapped layer equals the normalized bytes of its embedded PNG, while the five fallback layers remain identical to `NewRegistry()`;
+1. every mapped layer equals the normalized bytes of its embedded PNG, while the five fallback layers remain identical to `NewRegistry()`, and the programmatic/embedded leaves and glass keep binary alpha;
 2. default and procedural registries have the same atlas layer count/byte length, and two calls to `NewDefaultRegistry()` produce byte-identical atlas output;
 3. the embedded FS contains `pack.json`, `ATTRIBUTION.md`, `LICENSE.txt` and `PROVENANCE.json`;
-4. a user override replaces an embedded layer while an absent user file retains the embedded bytes;
+4. a user override replaces an embedded layer while an absent user file retains the embedded bytes, and a valid intermediate-alpha override is accepted without changing classification or mapping;
 5. an invalid user pack returns `nil, error`, never a partially applied registry.
 
 Run:
@@ -648,10 +649,11 @@ Expected: image comparison fails because mapped material pixels changed. Any cra
 
 Add focused tests to `run_test.go` and `capture_near_band_test.go` proving:
 
-1. `--update-golden` creates two capture applications with the same effective embedded-default registry, seed and render config, with `LodEnabled` the only difference;
-2. before any golden write, the update renders `far-horizon` in both applications and invokes the existing geometrically derived `nearBandGuard.assertUnchanged` on the two current frames;
+1. `--update-golden` first creates two disposable control applications with the same effective embedded-default registry, seed and render config, with `LodEnabled` the only difference;
+2. before any golden write, the update renders `far-horizon` in both control applications and invokes the existing geometrically derived `nearBandGuard.assertUnchanged` on the two current frames;
 3. a protected top/bottom row difference fails the whole update and leaves every existing golden byte-identical, even when an old golden is absent;
-4. a difference confined to the derived far band allows the update to continue.
+4. a difference confined to the derived far band closes both controls and only then creates a fresh LOD-on application for formal `runCapture`; that application has not executed the control scene and runs the normal full scene order;
+5. every successfully created application closes on success, second-control construction failure, guard failure, fresh-application construction failure and formal-capture failure.
 
 ```bash
 go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden)' -count=1
@@ -661,9 +663,9 @@ Expected: FAIL because update mode currently creates one application and compare
 
 - [ ] **Step 4: Move the existing guard into a pre-write LOD on/off control**
 
-In `runWithDependencies`, create an additional update-only capture application from the same resolved default options with only `Render.LodEnabled = false`. Before `runCapture` writes any baseline, render `far-horizon` once on the normal LOD-on application and once on the LOD-off control application. Keep both diagnostic images in `VISUAL_OUT`, construct the guard from the LOD-on camera and shell radii, and call the existing `nearBandGuard.assertUnchanged` on those two current frames.
+In `runWithDependencies`, create a disposable LOD-on control application and a disposable LOD-off control application from the same resolved default options, with only `Render.LodEnabled` different. Before any baseline write, render `far-horizon` once on each control. Keep both diagnostic images in `VISUAL_OUT`, construct the guard from the LOD-on control camera and shell radii, and call the existing `nearBandGuard.assertUnchanged` on those two current frames.
 
-Move the call site out of `captureOne`'s old-golden branch; do not delete or weaken `nearBandGuard`, its fail-closed geometry, or per-pixel protected-row comparison. A control failure must return before the first golden write. The second application exists only for explicit update mode; ordinary capture and gameplay still construct one application.
+Move the call site out of `captureOne`'s old-golden branch; do not delete or weaken `nearBandGuard`, its fail-closed geometry, or per-pixel protected-row comparison. Close both disposable controls before returning any construction/guard error. Only after the guard passes and both controls close, construct a fresh LOD-on application and pass only that untouched application to formal `runCapture`; close it on success or failure. Do not reuse the LOD-on control for formal capture and do not cache every scene image in memory. The three-application sequence exists only for explicit update mode; ordinary capture and gameplay still construct one application.
 
 ```bash
 gofmt -w cmd/mornlea/main.go cmd/mornlea/capture.go cmd/mornlea/run_test.go cmd/mornlea/capture_near_band_test.go

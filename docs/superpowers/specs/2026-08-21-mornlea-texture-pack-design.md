@@ -126,8 +126,10 @@ loader 不遍历目录，只尝试已知文件名。因此未知文件天然忽�
 抵御本机恶意 symlink 的安全沙箱。
 
 材质 alpha 不改变渲染分类：水仍走 water pass，树叶/玻璃/小麦仍走既有 cutout
-规则，其他层仍走 terrain pass。默认适配资产必须通过水透明、cutout 可见性与 HUD
-可辨识度测试；用户包可以自行选择像素 alpha 效果。
+规则，其他层仍走 terrain pass。程序化 registry 与内嵌默认包必须通过稳定结构、
+树叶/玻璃 binary alpha、水透明、cutout 可见性、HUD 可辨识度及仓库授权/来源测试；
+用户包可以使用任意合法 16×16 RGBA（包括中间 alpha），不要求仓库验证其像素结构
+或许可证，但它只能替换像素，不能改变 render classification、几何、layer ID 或映射。
 
 ## 配置与启动
 
@@ -191,12 +193,15 @@ cutout、水透明和 HUD 物品图标。最终运行 `make rust`、受影响 Go
 
 默认材质会有意改变近环 RGB，不能再把新图与旧程序化 golden 的受保护行直接
 比较，也不能通过移走旧 golden 触发缺失分支跳过门禁。材质 baseline 更新必须在
-写入任何 golden 前，用同一生效 registry、种子、相机与场景分别抓取 LOD on/off
-的 `far-horizon`；两次运行只允许 `lodEnabled` 不同，并复用既有几何行带和
-`nearBandGuard.assertUnchanged` 对两张当前帧执行逐像素近环比较。受保护行不同则
-整次更新失败且旧 golden 全部不变；只有 control 通过后才写入并人工复核新默认图。
-自动测试必须覆盖成对 application 的唯一配置差异、guard 在旧 golden 缺失时仍
-执行、近环差异先于任何写盘失败，以及纯远景带差异允许继续。
+写入任何 golden 前，用两个 disposable application 和同一生效 registry、种子、
+相机与场景分别抓取 LOD on/off 的 `far-horizon`；两次运行只允许 `lodEnabled`
+不同，并复用既有几何行带和 `nearBandGuard.assertUnchanged` 对两张当前帧执行逐像素
+近环比较。受保护行不同则整次更新失败且旧 golden 全部不变；无论成功、构造失败或
+guard 失败，两个 control app 都必须关闭。只有 control 通过且两者关闭后，才构造
+fresh LOD-on application 并按普通完整顺序执行正式 capture；正式 app 不得执行过
+control scene。自动测试必须覆盖三次构造与正式 app fresh 状态、guard 在旧 golden
+缺失时仍执行、近环差异先于写盘失败、纯远景带差异允许继续，以及成功/第二或第三次
+构造失败/guard 失败/正式 capture 失败的全部关闭路径。
 
 ## OpenSpec 与执行顺序
 

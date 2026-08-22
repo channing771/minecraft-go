@@ -1,8 +1,8 @@
 ## 2. 实现有界目录材质包 loader
 
-- [ ] 2.1 在 `internal/assets/pack_test.go` 用 `testing/fstest.MapFS` 添加失败测试，覆盖有效单层覆盖、缺失回退、manifest/PNG/尺寸/上限/普通文件校验、未知 manifest 字段告警、固定映射顺序、未知文件不读取以及失败时注册表不变；运行 `go test ./internal/assets -run 'TestApplyPack' -count=1` 确认先失败。
+- [ ] 2.1 在 `internal/assets/pack_test.go` 用 `testing/fstest.MapFS` 添加失败测试，覆盖有效单层覆盖（含树叶/玻璃的中间 alpha RGBA 被接受）、缺失回退、manifest/PNG/尺寸/上限/普通文件校验、未知 manifest 字段告警、固定映射顺序、未知文件不读取以及失败时注册表不变；运行 `go test ./internal/assets -run 'TestApplyPack' -count=1` 确认先失败。
 - [ ] 2.2 在 `internal/assets/blocks.go` 添加固定 39 项逻辑名到既有 layer 的内部映射及完整性测试，不暴露新 mutation API。
-- [ ] 2.3 在 `internal/assets/pack.go` 仅用标准库实现 v1 manifest 与 PNG 的有界读取、16×16 RGBA 规范化、逐层缺失回退和临时集合验证后的原子应用。
+- [ ] 2.3 在 `internal/assets/pack.go` 仅用标准库实现 v1 manifest 与 PNG 的有界读取、任意合法 16×16 RGBA 规范化、逐层缺失回退和临时集合验证后的原子应用；不得按逻辑 layer 拒绝中间 alpha、检查像素结构或验证本地用户文件许可证。
 - [ ] 2.4 运行 `gofmt -w internal/assets/pack.go internal/assets/pack_test.go internal/assets/blocks.go`、`go test ./internal/assets -race -count=1` 与 `git diff --check`，通过规格与质量评审后提交 loader。
 
 ## 3. 固定来源并内嵌 Pixel Perfection 子集
@@ -10,7 +10,7 @@
 - [ ] 3.1 在仓库外临时 clone Pixel Perfection，核验 CC BY-SA 4.0，并把上游 `master` 解析为完整 commit SHA；逐项确认 `design.md` 批准的源路径存在，路径不符时先更新设计并取得裁决。
 - [ ] 3.2 先在 `internal/assets/default_pack_test.go` 写 provenance 失败测试，要求完整映射、16×16 PNG、SHA-256、无额外 PNG 及四个元数据文件；运行 `go test ./internal/assets -run TestEmbeddedDefaultPackProvenance -count=1` 确认因资产缺失而失败。
 - [ ] 3.3 直接复制并重命名批准子集到 `internal/assets/packs/pixel_perfection/`，添加固定 commit 的 `pack.json`、`ATTRIBUTION.md`、完整 `LICENSE.txt` 与逐文件 `PROVENANCE.json`；五个无直接对应 layer 保持程序化，重跑 provenance 测试通过。
-- [ ] 3.4 为默认注册表、五层回退、确定性 atlas、用户逐层覆盖与无效用户包失败添加测试，再在 `internal/assets/default_pack.go` 内嵌默认包并实现最小产品构造路径。
+- [ ] 3.4 为默认注册表、五层回退、确定性 atlas、内嵌树叶/玻璃 binary alpha、用户逐层覆盖与无效用户包失败添加测试，再在 `internal/assets/default_pack.go` 内嵌默认包并实现最小产品构造路径；稳定结构、授权与来源门禁只约束程序化/内嵌默认，不扩张到本地用户像素。
 - [ ] 3.5 运行 `gofmt -w internal/assets/default_pack.go internal/assets/default_pack_test.go`、`go test ./internal/assets -race -count=1` 与 `git diff --check`，通过规格与质量评审后提交内嵌资产。
 
 ## 4. 在配置 v1 增加启动时路径
@@ -38,8 +38,8 @@
 
 - [ ] 7.1 读取并测试当前 capture 场景结构，确认不重建或改名 `far-horizon`，其保持倒数第二且 `water-underwater` 保持末尾；运行 `go test ./cmd/mornlea -run 'TestCapture.*Scene|Test.*WaterUnderwater|Test.*Far.*Horizon' -count=1`。
 - [ ] 7.2 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-before-update`，确认只因默认材质像素变化而失败；崩溃、缺场景、mesh、alpha、超时或门禁变化须先修复。
-- [ ] 7.3 先在 `cmd/mornlea/run_test.go` 与 `cmd/mornlea/capture_near_band_test.go` 添加失败测试：`--update-golden` 必须构造同 registry/同配置且仅 `LodEnabled` 相反的两个 application；受保护行差异必须在任何 golden 写入前失败并保留全部旧文件，只有远景带差异才允许继续；运行 `go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden)' -count=1` 确认先失败。
-- [ ] 7.4 在 `cmd/mornlea/main.go`、`cmd/mornlea/capture.go` 与最小必要依赖 seam 中实现更新 preflight：用当前内嵌默认 registry 成对渲染 LOD on/off `far-horizon`，把现有 `nearBandGuard.assertUnchanged` 前移到任何 golden 写盘之前；control 不读取旧 golden，失败时输出诊断图但不得改 baseline。不得删除 guard、移动旧 golden 或放宽阈值；运行步骤 7.3 的测试及 `go test ./cmd/mornlea -run 'TestNearBandGuard' -count=1`。
+- [ ] 7.3 先在 `cmd/mornlea/run_test.go` 与 `cmd/mornlea/capture_near_band_test.go` 添加失败测试：`--update-golden` 必须先构造同 registry/同配置且仅 `LodEnabled` 相反的两个 disposable control application，guard 通过并关闭两者后再构造 fresh LOD-on 正式 application；正式 `runCapture` 收到的 app 不得执行过 control scene；受保护行差异必须在任何 golden 写入前失败并保留全部旧文件，只有远景带差异才允许继续；所有已构造 application 在成功、第二/第三次构造失败、guard 失败与正式 capture 失败路径都必须关闭。运行 `go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden)' -count=1` 确认先失败。
+- [ ] 7.4 在 `cmd/mornlea/main.go`、`cmd/mornlea/capture.go` 与最小必要依赖 seam 中实现更新 preflight：用两个 disposable application 和当前内嵌默认 registry 成对渲染 LOD on/off `far-horizon`，把现有 `nearBandGuard.assertUnchanged` 前移到任何 golden 写盘之前；关闭两者后才创建 fresh LOD-on app 执行普通完整 capture 顺序。control 不读取旧 golden，失败时输出诊断图但不得改 baseline。不得复用 control app、缓存整套场景到内存、删除 guard、移动旧 golden 或放宽阈值；运行步骤 7.3 的测试及 `go test ./cmd/mornlea -run 'TestNearBandGuard' -count=1`。
 - [ ] 7.5 以空用户覆盖直接运行 `make visual-update VISUAL_OUT=build/visual-texture-pack-update`；确认日志显示 LOD on/off 近环 control 实际执行并通过，且无需移动或删除任何 tracked golden。
 - [ ] 7.6 人工逐图检查至少 `materials-showcase`、HUD/inventory、农业、`water-surface-slope`、末尾 `water-underwater` 与倒数第二 `far-horizon`，把接受范围和裁决写入 ledger。
 - [ ] 7.7 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-final`、`go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden|NearBandGuard)' -count=1` 与 `git diff --check`，通过规格与质量评审后提交 capture control 与 golden。
