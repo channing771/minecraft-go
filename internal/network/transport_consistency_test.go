@@ -37,7 +37,11 @@ func TestProtocolTranscriptSuccessMatchesMemoryAndTCP(t *testing.T) {
 					return nil
 				})
 				if err == nil {
-					err = endpoint.Send(context.Background(), PlayerState{Ready: true})
+					// 饥饿值取非零非满的 12：这条 transcript 用整结构相等比较
+					// （下面的 `packet != (...)`），带一个中间值才能真正锁住
+					// v24 新增字段在两种传输上逐字段一致——满值或 0 与
+					// "字段根本没搬运" 不可分辨。
+					err = endpoint.Send(context.Background(), PlayerState{Ready: true, Hunger: 12})
 				}
 				serverDone <- err
 			}()
@@ -47,7 +51,7 @@ func TestProtocolTranscriptSuccessMatchesMemoryAndTCP(t *testing.T) {
 				t.Fatal(err)
 			}
 			packet, err := endpoint.Recv(context.Background())
-			if err != nil || packet != (PlayerState{Ready: true}) {
+			if err != nil || packet != (PlayerState{Ready: true, Hunger: 12}) {
 				t.Fatalf("play transcript = (%+v, %v)", packet, err)
 			}
 			if err := <-serverDone; err != nil {

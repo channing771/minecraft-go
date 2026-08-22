@@ -137,8 +137,8 @@ func TestItemDropMessagesValidateBoundedBatches(t *testing.T) {
 }
 
 func TestProtocolV16ToolDropUsesFiveByteStackWire(t *testing.T) {
-	if ProtocolVersion != 23 {
-		t.Fatalf("协议版本 = %d，想要 23", ProtocolVersion)
+	if ProtocolVersion != 24 {
+		t.Fatalf("协议版本 = %d，想要 24", ProtocolVersion)
 	}
 	full, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
 	packet := ItemDropUpserts{ServerTick: 5, Drops: []ItemDrop{{

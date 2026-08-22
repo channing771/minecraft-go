@@ -87,6 +87,7 @@ func encodeServerControlPayload(state State, packet ServerPacket) (packetID uint
 			e.bool(message.MiningHarvestable)
 			e.u8(message.Health)
 			e.u16(message.Oxygen)
+			e.u8(message.Hunger)
 			e.u64(message.WorldTimeTicks)
 		case CommandRejected:
 			reason, _ := commandRejectReasonID(message.Reason)
@@ -321,6 +322,9 @@ func decodeServerControlPayload(state State, packetID uint32, payload []byte) (S
 			}
 			if err == nil {
 				statePacket.Oxygen, err = d.u16()
+			}
+			if err == nil {
+				statePacket.Hunger, err = d.u8()
 			}
 			if err == nil {
 				statePacket.WorldTimeTicks, err = d.u64()

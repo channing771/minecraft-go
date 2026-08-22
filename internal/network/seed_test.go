@@ -142,11 +142,11 @@ func TestLoginClientWithSeedSurfacesWorldSeed(t *testing.T) {
 	}
 }
 
-// TestV23ClientRejectsPriorServerAcrossTransports 模拟一个只会说 v17 的
-// 服务端（生产服务端已升 v23，只能以对端身份模拟；类型化 `Send` 会拒绝
-// 非 v23 的 `ServerHello`，因此按传输写原始字节），验证 v23 客户端在
+// TestV24ClientRejectsPriorServerAcrossTransports 模拟一个只会说 v17 的
+// 服务端（生产服务端已升 v24，只能以对端身份模拟；类型化 `Send` 会拒绝
+// 非当前版本的 `ServerHello`，因此按传输写原始字节），验证当前客户端在
 // Memory 与 TCP 上都拒绝它，不进入登录阶段，也不产生半兼容会话。
-func TestV23ClientRejectsPriorServerAcrossTransports(t *testing.T) {
+func TestV24ClientRejectsPriorServerAcrossTransports(t *testing.T) {
 	const legacy = uint32(17)
 	for _, open := range transportOpeners {
 		t.Run(open.name, func(t *testing.T) {
