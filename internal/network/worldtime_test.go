@@ -29,9 +29,10 @@ func TestProtocolV23RejectsPriorVersionsBeforePlay(t *testing.T) {
 	}
 }
 
-func TestProtocolV20HandshakeAcceptsCurrentVersion(t *testing.T) {
-	// 当前版本 v20 的 ClientHello 必须通过握手：服务端读取后以同版本 ServerHello
-	// 回应，而不是版本不匹配拒绝。
+func TestHandshakeAcceptsCurrentVersion(t *testing.T) {
+	// 当前版本的 ClientHello 必须通过握手：服务端读取后以同版本 ServerHello
+	// 回应，而不是版本不匹配拒绝。（版本无关命名：测试始终跟随
+	// `ProtocolVersion` 常量，协议升版时无需改名。）
 	client, server := NewMemoryStreamPair(4)
 	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
 	if err := client.Send(t.Context(), StateHandshake, ClientHello{ProtocolVersion: ProtocolVersion}); err != nil {
@@ -39,14 +40,14 @@ func TestProtocolV20HandshakeAcceptsCurrentVersion(t *testing.T) {
 	}
 	hello, err := server.Recv(t.Context(), StateHandshake)
 	if err != nil || hello != (ClientHello{ProtocolVersion: ProtocolVersion}) {
-		t.Fatalf("v20 ClientHello = (%#v,%v)", hello, err)
+		t.Fatalf("当前版本 ClientHello = (%#v,%v)", hello, err)
 	}
 	if err := server.Send(t.Context(), StateHandshake, ServerHello{ProtocolVersion: ProtocolVersion}); err != nil {
 		t.Fatal(err)
 	}
 	greeting, err := client.Recv(t.Context(), StateHandshake)
 	if err != nil || greeting != (ServerHello{ProtocolVersion: ProtocolVersion}) {
-		t.Fatalf("v20 ServerHello = (%#v,%v)", greeting, err)
+		t.Fatalf("当前版本 ServerHello = (%#v,%v)", greeting, err)
 	}
 }
 
