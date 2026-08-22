@@ -34,3 +34,7 @@ Task 1: Ruling: Step 4 变异形式——brief 字面变异（必填出现判定
 Task 1: minor (deferred): planner_test.go 宿主测试只断言错误类别，「显式 null 记为字段出现」契约在错误消息层未锁；消息级区分需后续调整宿主断言（brief 断言形态固有，非实现缺陷，评审已确认披露完整）
 Task 1: complete (commits 693db2e..21ce9e2, review clean — Spec ✅ / Approved, 0 Critical, 0 Important)
 
+Task 2: dispatched (BASE 597f044, implementer agent_aea7520e, 23 tool uses)
+Task 2: minor (deferred, plan-mandated): `interactive.go` 新注释末句「两处界一旦分叉，较大一侧会在另一侧之前静默截断」方向写反——静默截断发生在**较小**的有效界一侧（若上限增大而缓冲不变，drain 层先截断），且 `chatInput` 的字节上限是置 overflow 拒收而非静默截断；注释为计划原文逐字强制，实现者无自由度（评审 Minor-1，终审裁决是否入修复波）
+Task 2: complete (commits 597f044..4ee2be7, review clean — Spec ✅ / Approved, 0 Critical, 0 Important)
+
