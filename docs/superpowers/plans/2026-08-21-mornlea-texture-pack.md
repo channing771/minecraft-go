@@ -307,7 +307,6 @@ Copy/rename these upstream PNGs without resizing, recoloring, compositing or ext
 | `stone_brick` | `default/default_stone_brick.png` |
 | `furnace` | `default/default_furnace_front.png` |
 | `iron_block` | `default/default_steel_block.png` |
-| `chest` | `default/default_chest_front.png` |
 | `leaves` | `default/default_leaves.png` |
 | `glass` | `default/default_glass.png` |
 | `cobblestone` | `default/default_cobble.png` |
@@ -326,7 +325,7 @@ Copy/rename these upstream PNGs without resizing, recoloring, compositing or ext
 | `farmland_wet` | `farming/farming_soil_wet.png` |
 | `wheat_0` … `wheat_7` | `farming/farming_wheat_1.png` … `farming/farming_wheat_8.png` |
 
-Keep these six layers procedural: `coal_ore`, `iron_ore`, `light_block`, `roof_tile`, `water`, `smooth_stone`. The first five would require composition, animation extraction or a non-equivalent substitute; the fixed commit does not contain the planned `default/default_stone_block.png` or another direct smooth-stone equivalent.
+Keep these seven layers procedural: `coal_ore`, `iron_ore`, `light_block`, `roof_tile`, `water`, `smooth_stone`, `chest`. The first five would require composition, animation extraction or a non-equivalent substitute; the fixed commit does not contain the planned `default/default_stone_block.png` or another direct smooth-stone equivalent; `default/default_chest_front.png` is 14×14 and cannot satisfy the no-transform 16×16 contract.
 
 - [ ] **Step 3: Add complete legal and provenance metadata**
 
@@ -351,7 +350,7 @@ Expected: PASS.
 
 `default_pack_test.go` must additionally assert:
 
-1. every mapped layer equals the normalized bytes of its embedded PNG, while the six fallback layers remain identical to `NewRegistry()`, and the programmatic/embedded leaves and glass keep binary alpha;
+1. every mapped layer equals the normalized bytes of its embedded PNG, while the seven fallback layers remain identical to `NewRegistry()`, and the programmatic/embedded leaves and glass keep binary alpha;
 2. default and procedural registries have the same atlas layer count/byte length, and two calls to `NewDefaultRegistry()` produce byte-identical atlas output;
 3. the embedded FS contains `pack.json`, `ATTRIBUTION.md`, `LICENSE.txt` and `PROVENANCE.json`;
 4. a user override replaces an embedded layer while an absent user file retains the embedded bytes, and a valid intermediate-alpha override is accepted without changing classification or mapping;
@@ -680,7 +679,7 @@ The capture path must ignore any local `texturePackPath`; verify the run-path te
 
 Visually inspect at minimum:
 
-- `materials-showcase`: all mapped solids, cutout leaves/glass and the six procedural fallbacks;
+- `materials-showcase`: all mapped solids, cutout leaves/glass and the seven procedural fallbacks;
 - inventory/HUD scenes: item icons use the same default atlas without bleeding;
 - `water-surface-slope` and `water-underwater`: procedural water, transparency ordering and tint are unchanged;
 - the post-LOD far-horizon scene: near/default textures and distant LOD presentation have no seam or missing layer;
