@@ -12,7 +12,7 @@
 
 | 动作 | 千分位 | 判定点 |
 |---|---|---|
-| 跳跃 | 50 | 权威积分检测到起跳(`Jump` 输入在 `OnGround` 时生效的那一 tick) |
+| 跳跃 | 50 | sim 侧判定 `input.Jump && wasOnGround && !input.BodyInFluid && 步末 !OnGround`(任务组 1,Ruling 3):`physics.Step` 对水中 `Jump` 走持续上浮而非起跳冲量,故排除浸没以免与游泳重复计费;撞低天花板的跳不计费是「步末离地」判据的代价,否则按住跳跃可逐 tick 刷疲劳 |
 | 游泳 | 10 / 格 | `BodyInFluid` 且水平位移 > 0,按位移累加 |
 | 采掘完成 | 5 | `completeMining` 成功路径 |
 | 翻地完成 | 5 | `executeTillSoil` 成功路径 |
@@ -33,6 +33,8 @@
 每 80 tick(`StarvationDamageIntervalTicks`,tunable)经 `applyDamage` 扣 1;`Health <= 1` 时不扣。走既有入口意味着自动触发「确认伤害红色边缘」与回血计时重置——与 F2 溺水伤害同构(Ruling:溺水走既有入口的变异曾证实这是承重的)。
 
 **不致死**是 MC 普通难度;困难难度(致死)记遗留。
+
+**重生回初值的「重生」= 死亡后重生**(`settleDeath`)。`beginReset`(掉出世界/卡住重置)不经死亡结算、不掉背包,若在此回满饥饿即成免费进食途径,故**不回满**(任务组 1,Ruling 5)。`starvationTicks` 在 `health <= 1` 时冻结而非照推。
 
 ## D5 进食是采掘同构的持续输入状态机
 
