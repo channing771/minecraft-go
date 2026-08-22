@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"math"
 	"testing"
 
 	"github.com/channing771/mornlea/internal/core"
@@ -346,5 +347,66 @@ func TestHungerReplayIsBitIdenticalAcrossEngines(t *testing.T) {
 	}
 	if first == initial {
 		t.Fatalf("重放脚本没有改变任何状态: %v", first)
+	}
+}
+
+// TestPlayerUpdatePublishesAuthoritativeHunger 覆盖协议 v24 的 sim 半边：
+// `PlayerUpdate.Hunger` 必须逐 tick 跟随权威 `playerState.hunger`。
+//
+// 两次采样取两个不同的非零非满值：只采一次的话，「发布端写死初值 20」
+// 与「发布端确实读了权威字段」在满血满食的夹具上读数完全相同。
+func TestPlayerUpdatePublishesAuthoritativeHunger(t *testing.T) {
+	const id = SessionID(61)
+	engine := readyRegenPlayer(t, id, core.MaxHealth)
+	player := engine.sessions[id].player
+	for _, want := range []uint8{12, 3} {
+		player.hunger = want
+		update := onlyPlayerUpdate(t, engine.Step(), id)
+		if update.Hunger != want {
+			t.Fatalf("PlayerUpdate.Hunger=%d，想要 %d", update.Hunger, want)
+		}
+	}
+}
+
+// TestPlayerInputEatingIsRecordedAndCleared 覆盖协议 v24 的进食输入位在 sim
+// 侧的读入：它与 `Mining` 完全同形——有效输入保存意图、中性输入清空、
+// 非法输入清空。本变更只读入不消费（进食状态机属于后续任务组），因此断言
+// 落在 `playerState.eatingHeld` 上。
+//
+// 每条断言都同时看 `eatingHeld` 与 `miningHeld`：两个布尔挨在一起，只看其中
+// 一个的话，把 `command.Eating` 错写成 `command.Mining` 的实现照样绿。
+func TestPlayerInputEatingIsRecordedAndCleared(t *testing.T) {
+	engine, session := readyMovementPlayer(t)
+	player := engine.sessions[session].player
+
+	engine.Enqueue(Command{
+		Session: session, Sequence: 2, Kind: CommandPlayerInput, Eating: true,
+	})
+	onlyMovementPlayer(t, engine.Step())
+	if !player.eatingHeld || player.miningHeld {
+		t.Fatalf("有效进食输入后 (eatingHeld,miningHeld)=(%v,%v)，想要 (true,false)",
+			player.eatingHeld, player.miningHeld)
+	}
+
+	engine.Enqueue(Command{
+		Session: session, Sequence: 3, Kind: CommandPlayerInput, Mining: true,
+	})
+	onlyMovementPlayer(t, engine.Step())
+	if player.eatingHeld || !player.miningHeld {
+		t.Fatalf("只按采掘后 (eatingHeld,miningHeld)=(%v,%v)，想要 (false,true)",
+			player.eatingHeld, player.miningHeld)
+	}
+
+	engine.Enqueue(Command{
+		Session: session, Sequence: 4, Kind: CommandPlayerInput,
+		Eating: true, Yaw: float32(math.NaN()),
+	})
+	result := engine.Step()
+	if len(result.Rejected) != 1 ||
+		result.Rejected[0] != (Rejection{Session: session, Sequence: 4, Reason: RejectInvalidInput}) {
+		t.Fatalf("非法输入未被拒绝: %+v", result.Rejected)
+	}
+	if player.eatingHeld {
+		t.Fatal("非法最新输入未清空持续进食意图")
 	}
 }

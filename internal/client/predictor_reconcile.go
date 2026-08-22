@@ -54,6 +54,7 @@ func (p *Predictor) ApplyPlayerState(
 	_, p.eyeInFluid = physics.SubmersionFlags(authority.Position, source)
 	p.health = message.Health
 	p.oxygen = message.Oxygen
+	p.hunger = message.Hunger
 	if p.suspended {
 		p.history = p.history[:0]
 		p.accumulator = 0
@@ -107,6 +108,9 @@ func (p *Predictor) clearForNotReady(message network.PlayerState) {
 	p.displayOffset = mgl32.Vec3{}
 	p.correctionRemaining = 0
 	p.health = 0
+	// 与生命值同法清零：Ready 之间的会话不共享镜像值，留着旧饥饿值会让下一次
+	// 就绪前的一帧显示上一条会话的读数。
+	p.hunger = 0
 }
 
 func validatePlayerState(message network.PlayerState, maxSentInput uint64) (physics.State, error) {
@@ -127,6 +131,9 @@ func validatePlayerState(message network.PlayerState, maxSentInput uint64) (phys
 	}
 	if !core.ValidOxygen(message.Oxygen) {
 		return physics.State{}, errors.New("client: player state has out-of-range oxygen")
+	}
+	if !core.ValidHunger(message.Hunger) {
+		return physics.State{}, errors.New("client: player state has out-of-range hunger")
 	}
 	const maxPitch = float32(math.Pi/2 - 0.01)
 	if message.Pitch < -maxPitch || message.Pitch > maxPitch {

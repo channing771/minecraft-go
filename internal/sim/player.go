@@ -34,6 +34,10 @@ type PlayerUpdate struct {
 	// Oxygen 是本 tick 结束时的权威氧气，0..core.MaxOxygenTicks；同 Health，
 	// 只发布给玩家本人，不进入任何远端玩家消息。
 	Oxygen uint16
+	// Hunger 是本 tick 结束时的权威饥饿值，0..core.MaxHunger；同 Health 与
+	// Oxygen，只发布给玩家本人。三层饥饿状态里只有它随协议上线：饱和度与
+	// 疲劳值是纯服务端推进量，界面不呈现。
+	Hunger uint8
 	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。
 	WorldTimeTicks uint64
 }
@@ -138,6 +142,13 @@ type playerState struct {
 	// starvationTicks 是饥饿值归零后距离下一次饥饿伤害已经过的 tick 数，
 	// 瞬态字段，语义同 drownTicks。见 hunger.go 的 advanceStarvation。
 	starvationTicks uint32
+	// eatingHeld 是玩家本 tick 的持续进食意图，来自 `Command.Eating`
+	// （协议 v24 的 `PlayerInput.Eating`），语义与 `miningHeld` 完全对称：
+	// 有效输入写入、中性输入与非法输入清零、重生清零。
+	//
+	// 它留在 playerState 而不是上移到 actorState：伙伴不进食，把它放进共有
+	// 结构体会给伙伴凭空多出一个永远为假的字段。
+	eatingHeld bool
 
 	restoreCandidates []restoreCandidate
 	nextRestore       int
@@ -394,6 +405,7 @@ func (player *playerState) update(
 		Mining:            player.mining.update(),
 		Health:            player.health,
 		Oxygen:            player.oxygen,
+		Hunger:            player.hunger,
 	}
 }
 
@@ -667,6 +679,7 @@ func (player *playerState) beginReset() {
 	player.drownTicks = 0
 	player.input = physics.Input{}
 	player.miningHeld = false
+	player.eatingHeld = false
 	player.mining = miningState{}
 	player.reset = false
 	player.inventoryDirty = true

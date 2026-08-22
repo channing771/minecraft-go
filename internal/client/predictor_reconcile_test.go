@@ -169,6 +169,9 @@ func TestInvalidPlayerStateIsRejectedAtomically(t *testing.T) {
 		{name: "health above max", mutate: func(state *network.PlayerState, _ *Predictor) {
 			state.Health = core.MaxHealth + 1
 		}},
+		{name: "hunger above max", mutate: func(state *network.PlayerState, _ *Predictor) {
+			state.Hunger = core.MaxHunger + 1
+		}},
 	}
 
 	for _, test := range invalid {
@@ -283,4 +286,53 @@ func TestApplyPlayerStateResetAndDimensionChangeSnapAndResetView(t *testing.T) {
 		state.Pitch = -0.2
 		assertResetState(t, p, state)
 	})
+}
+
+// TestApplyPlayerStateUpdatesHungerWithoutPrediction 覆盖协议 v24 的客户端
+// 半边：饥饿值是纯镜像值——只由权威 `network.PlayerState` 写入，客户端不做
+// 任何预测或插值。
+//
+// 与生命值那条同形，两次和解取两个不同的非零非满值：只看一次的话，「镜像
+// 端写死初值」与「镜像端确实透传了权威字段」读数相同。
+func TestApplyPlayerStateUpdatesHungerWithoutPrediction(t *testing.T) {
+	p := readyPredictor(t)
+	if hunger, ready := p.Hunger(); !ready || hunger != 0 {
+		t.Fatalf("readyPredictor 初始 hunger=(%d,%v)，想要 (0,true)", hunger, ready)
+	}
+
+	for _, want := range []uint8{12, 3} {
+		advanceSteps(t, p, 2, Control{MoveX: 1})
+		state := nextAuthority(p)
+		state.Hunger = want
+		if _, err := p.ApplyPlayerState(state, flatClientWorld{}); err != nil {
+			t.Fatalf("ApplyPlayerState(hunger=%d): %v", want, err)
+		}
+		if hunger, ready := p.Hunger(); !ready || hunger != want {
+			t.Fatalf("和解后 hunger=(%d,%v)，想要 (%d,true)，饥饿值不得被预测/插值",
+				hunger, ready, want)
+		}
+	}
+}
+
+// TestBeginAdoptsAuthoritativeHunger 覆盖首帧路径：`Begin` 与和解走的是两条
+// 不同的赋值语句，只测和解的话，`Begin` 漏抄饥饿值的实现会绿到第一次和解为止。
+func TestBeginAdoptsAuthoritativeHunger(t *testing.T) {
+	p := NewPredictor()
+	message := network.PlayerState{
+		Dimension: core.Overworld,
+		Ready:     true,
+		Hunger:    12,
+	}
+	if err := p.Begin(message); err != nil {
+		t.Fatal(err)
+	}
+	if hunger, ready := p.Hunger(); !ready || hunger != 12 {
+		t.Fatalf("Begin 后 hunger=(%d,%v)，想要 (12,true)", hunger, ready)
+	}
+
+	// 越界饥饿值必须在 Begin 处就被拒绝，与生命值、氧气同形。
+	message.Hunger = core.MaxHunger + 1
+	if err := NewPredictor().Begin(message); err == nil {
+		t.Fatal("Begin 接受了越界饥饿值")
+	}
 }

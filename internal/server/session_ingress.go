@@ -126,6 +126,7 @@ func translateClientMessage(
 			Yaw:      message.Yaw,
 			Pitch:    message.Pitch,
 			Mining:   message.Mining,
+			Eating:   message.Eating,
 		}, true
 	case network.PlaceBlock:
 		return sim.Command{

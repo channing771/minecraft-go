@@ -54,6 +54,7 @@ type Predictor struct {
 	correctionRemaining time.Duration
 	health              uint8
 	oxygen              uint16
+	hunger              uint8
 	// eyeInFluid 是最近一次浸没判定给出的眼睛浸没标志。它由 stepWithSubmersion
 	// 与权威状态和解共同写入，是水下视觉唯一的判定来源。见 EyeInFluid。
 	eyeInFluid bool
@@ -86,6 +87,9 @@ func (p *Predictor) Begin(message network.PlayerState) error {
 	if !core.ValidOxygen(message.Oxygen) {
 		return errors.New("client: cannot begin prediction from invalid oxygen")
 	}
+	if !core.ValidHunger(message.Hunger) {
+		return errors.New("client: cannot begin prediction from invalid hunger")
+	}
 
 	p.ready = true
 	p.dimension = message.Dimension
@@ -102,6 +106,7 @@ func (p *Predictor) Begin(message network.PlayerState) error {
 	p.correctionRemaining = 0
 	p.health = message.Health
 	p.oxygen = message.Oxygen
+	p.hunger = message.Hunger
 	// Begin 只有权威位置、没有方块视图，浸没标志留待第一次固定步或和解算出。
 	p.eyeInFluid = false
 	return nil
@@ -123,6 +128,13 @@ func (p *Predictor) Health() (uint8, bool) {
 // 也绝不据此自行增减氧气，否则界面会显示一个服务端并不认可的数值。
 func (p *Predictor) Oxygen() (uint16, bool) {
 	return p.oxygen, p.ready
+}
+
+// Hunger 返回只读镜像持有的权威饥饿值以及预测器是否已就绪。
+// 同生命值与氧气：饥饿值只接受服务端确认值，客户端**不做任何预测**——
+// 本地既不推进疲劳也不结算进食，界面显示的永远是服务端认可的那个数。
+func (p *Predictor) Hunger() (uint8, bool) {
+	return p.hunger, p.ready
 }
 
 // EyeInFluid 报告最近一次浸没判定认为相机所在格是不是流体。
