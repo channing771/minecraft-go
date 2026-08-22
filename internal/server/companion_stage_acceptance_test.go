@@ -41,8 +41,12 @@ const stageAcceptanceSummary = "最近完成了任务"
 // stageAcceptanceSeedInventory 构造阶段验收伙伴的种子背包：快捷栏 0 手握
 // 完好石镐（mine 步骤的采掘计时与耐久规则）、快捷栏 1 两块泥土（place 步骤
 // 的扣料来源），与交互测试同一构造纪律。
-func stageAcceptanceSeedInventory() core.Inventory {
-	durability, _ := core.ItemMaxDurability(core.ItemStonePickaxe)
+func stageAcceptanceSeedInventory(t *testing.T) core.Inventory {
+	t.Helper()
+	durability, ok := core.ItemMaxDurability(core.ItemStonePickaxe)
+	if !ok {
+		t.Fatalf("石镐必须注册在耐久表中，否则 mine 步骤夹具失真")
+	}
 	var inventory core.Inventory
 	inventory.Hotbar.Slots[0] = core.ItemStack{
 		Item: core.ItemStonePickaxe, Count: 1, Durability: durability,
@@ -56,13 +60,17 @@ func stageAcceptanceSeedInventory() core.Inventory {
 // TestCompanionDialogueFollowExactlyThreeNodes 承担）。目标几何刻意拉开间距
 // （走向 2 格外 → 回头 6 格挖矿 → 再走 7 格回填），保证相邻台词节点之间有
 // 多个权威 tick 的走步窗口，台词往返不被每伙伴单在途约束挤掉。
-func stageAcceptancePlanJSON(walkTo, mineTarget, placeTarget core.BlockPos) string {
+func stageAcceptancePlanJSON(t *testing.T, walkTo, mineTarget, placeTarget core.BlockPos) string {
+	t.Helper()
 	steps := []map[string]any{
 		{"kind": "go_to", "x": walkTo.X, "y": walkTo.Y, "z": walkTo.Z},
 		{"kind": "mine", "x": mineTarget.X, "y": mineTarget.Y, "z": mineTarget.Z},
 		{"kind": "place", "x": placeTarget.X, "y": placeTarget.Y, "z": placeTarget.Z, "block": "dirt"},
 	}
-	encoded, _ := json.Marshal(map[string]any{"summary": "挖矿之后回填", "steps": steps})
+	encoded, err := json.Marshal(map[string]any{"summary": "挖矿之后回填", "steps": steps})
+	if err != nil {
+		t.Fatalf("构造假计划脚本: %v", err)
+	}
 	return string(encoded)
 }
 
@@ -171,7 +179,7 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 			ID:        id,
 			Dimension: core.Overworld,
 			Position:  interactionCompanionPosition,
-			Inventory: stageAcceptanceSeedInventory(),
+			Inventory: stageAcceptanceSeedInventory(t),
 		}
 		if err := seedStore.SaveCompanions(context.Background(), storage.CompanionSave{
 			Revision: 1, Records: []companion.Body{seed},
@@ -219,7 +227,7 @@ func TestM5StageAcceptancePersonaDialogueEndToEnd(t *testing.T) {
 		// 假规划模型不传 go_to 目标（变参为空）：混合计划正文随后经
 		// setPlanScript 整体注入，占位目标只服务两步 go_to 的第二段任务。
 		planner := newFakeCompanionModel(t)
-		planner.setPlanScript(stageAcceptancePlanJSON(
+		planner.setPlanScript(stageAcceptancePlanJSON(t,
 			core.BlockPos{X: 2, Y: 1, Z: 4},
 			core.BlockPos{X: 8, Y: 1, Z: 4},
 			core.BlockPos{X: 15, Y: 1, Z: 4},
