@@ -178,7 +178,7 @@ func (g nearBandGuard) protectedRowSpans(height int) (topRows, bottomRows int) {
 	return topRows, bottomRows
 }
 
-// `assertUnchanged` 断言当前同 registry 的 `lodOff` 与 `lodOn` control 帧在
+// `assertUnchanged` 断言当前同 registry 的 lodOff 与 lodOn control 帧在
 // 受保护行(顶部仰角高于上行截止、底部仰角低于下行截止)上 RGB 逐字节一致
 // (alpha 在抓帧时恒为 255,无信息量)。违反时返回带场景名、受保护区间与首个差异像素的错误;尺寸
 // 不匹配同样视为违反(control 形态不等价);壳距离推导退化时 fail-closed
