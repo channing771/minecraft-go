@@ -135,6 +135,79 @@ func TestRunWithDependenciesAlwaysEnablesDevForCapture(t *testing.T) {
 	}
 }
 
+func TestRunPassesResolvedTexturePackPathToLocalAndRemoteClients(t *testing.T) {
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "config.json")
+	cfg := config.Defaults()
+	cfg.TexturePackPath = "packs/local"
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	wantPath := filepath.Join(configDir, "packs/local")
+
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "本地", args: []string{"--config", configPath}},
+		{name: "远程", args: []string{"--config", configPath, "--connect", "127.0.0.1:25565"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var gotPath string
+			err := runWithDependencies(test.args, runDependencies{
+				loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+				newApplication: func(options applicationOptions) (*application, error) {
+					gotPath = options.TexturePackPath
+					return nil, errors.New("stop before window")
+				},
+			})
+			if err == nil {
+				t.Fatal("runWithDependencies succeeded, want construction error")
+			}
+			if gotPath != wantPath {
+				t.Fatalf("TexturePackPath = %q，want %q", gotPath, wantPath)
+			}
+		})
+	}
+}
+
+func TestRunAutomationTexturePackIsolation(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := config.Defaults()
+	cfg.TexturePackPath = "packs/local"
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "benchmark",
+			args: []string{"--config", configPath, "--benchmark", "--perf-output", filepath.Join(t.TempDir(), "perf.json")},
+		},
+		{name: "capture", args: []string{"--config", configPath, "--capture", t.TempDir()}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var gotPath string
+			err := runWithDependencies(test.args, runDependencies{
+				loadIdentity: func(*string) (network.Identity, error) { return network.Identity{}, nil },
+				newApplication: func(options applicationOptions) (*application, error) {
+					gotPath = options.TexturePackPath
+					return nil, errors.New("stop before window")
+				},
+			})
+			if err == nil {
+				t.Fatal("runWithDependencies succeeded, want construction error")
+			}
+			if gotPath != "" {
+				t.Fatalf("TexturePackPath = %q，want empty", gotPath)
+			}
+		})
+	}
+}
+
 // TestFluidGatePerRunPath 钉住注水门控在三条运行路径上的取值，是 F1 契约
 // 「benchmark 与 capture 路径显式解耦、不随配置漂移」在默认值翻转后的承重断言。
 //
