@@ -307,7 +307,7 @@ Copy/rename these upstream PNGs without resizing, recoloring, compositing or ext
 | `stone_brick` | `default/default_stone_brick.png` |
 | `furnace` | `default/default_furnace_front.png` |
 | `iron_block` | `default/default_steel_block.png` |
-| `leaves` | `default/default_leaves.png` |
+| `leaves` | `default/default_leaves_simple.png` |
 | `glass` | `default/default_glass.png` |
 | `cobblestone` | `default/default_cobble.png` |
 | `sand` | `default/default_sand.png` |
