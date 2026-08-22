@@ -464,8 +464,30 @@ func (engine *Engine) advanceActivePlayers() {
 		if wasOnGround || input.BodyInFluid {
 			player.peakY = player.state.Position.Y()
 		}
+		positionBeforeStep := player.state.Position
 		step := physics.Step(player.state, input, source)
 		player.state = step.State
+		// —— 疲劳表的两个运动判定点（见 hunger.go 的固定表）——
+		//
+		// 起跳：物理积分只在「不在流体里、步首在地面、按下 Jump」这一组条件下
+		// 施加起跳冲量（见 physics.Step 的垂直分支次序：BodyInFluid && Jump 的
+		// 持续上浮分支排在 OnGround && Jump 之前，因此水里按跳是上浮不是起跳）。
+		// 这里逐条复刻那组条件，另外再要求**步末已经离地**：撞低天花板时冲量
+		// 被碰撞解算吃掉、玩家一直贴在地面上，那种情况下按住跳跃会逐 tick 反复
+		// 施加冲量，按「施加即计费」记账等于把疲劳变成可以刷的读数。
+		// physics.Step 的输出里没有现成的「本步起跳了」标志位，所以判据只能在
+		// 这里由 sim 可见的量复刻；将来若 physics 输出该标志，这里应改为直接复用。
+		if input.Jump && wasOnGround && !input.BodyInFluid && !player.state.OnGround {
+			player.applyExhaustion(exhaustionJumpMilli, engine.tunables.ExhaustionThresholdMilli)
+		}
+		// 游泳：身体浸没时按本步的水平位移计费。位移为零（原地泡着）自然得到
+		// 零疲劳，不需要额外分支。
+		if input.BodyInFluid {
+			player.applyExhaustion(
+				swimExhaustionMilli(positionBeforeStep, player.state.Position),
+				engine.tunables.ExhaustionThresholdMilli,
+			)
+		}
 		// 落点也要判一次：水浅、下落又快时，本步开始时玩家还在水面之上、结束
 		// 时已经踩到水底，只看步首标志会让这一跤照旧结算摔落伤害。
 		if landedInFluid, _ := physics.SubmersionFlags(player.state.Position, source); landedInFluid {

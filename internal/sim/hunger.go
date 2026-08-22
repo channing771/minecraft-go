@@ -1,6 +1,12 @@
 package sim
 
-import "github.com/channing771/mornlea/internal/core"
+import (
+	"math"
+
+	"github.com/go-gl/mathgl/mgl32"
+
+	"github.com/channing771/mornlea/internal/core"
+)
 
 // defaultStarvationDamageIntervalTicks 是饥饿值归零后两次饥饿伤害之间的 tick 数。
 // 唯一读取入口是 Tunables 快照，不得再以导出常量暴露——见 internal/archcheck
@@ -59,6 +65,37 @@ const (
 	// 必须循环处理，只减一次阈值会让回血的代价凭空少掉三分之一。
 	exhaustionRegenPerHealthMilli uint16 = 6000
 )
+
+// swimExhaustionMilli 把一次物理步的水平位移换算成游泳疲劳（千分位）。
+//
+// 这里是本变更**唯一**出现浮点的地方：物理体的位置本来就是 float32，而三层
+// 饥饿状态全是整数，两者之间必须有一次取整。取整只做这一次，结果立刻回到整数
+// 域，浮点绝不进入状态本身。
+//
+// 取整规则是「先放大到千分位再整除，余数丢弃」：
+//
+//	milli = floor(距离 × 1000 × exhaustionSwimMilliPerBlock) / 1000
+//
+// 也就是向下取整到 1 千分位疲劳。**绝不四舍五入**：物理步每 tick 都会有极小的
+// 位置抖动，四舍五入会让原地泡在水里的玩家凭空积累疲劳。
+//
+// 只算水平分量：垂直方向的沉浮不是「游」，否则站在水里被水流托着上下也要付
+// 代价。极端位移（传送、异常状态）被钳到 uint16 上界而不是回绕。
+func swimExhaustionMilli(before, after mgl32.Vec3) uint16 {
+	dx := float64(after.X()) - float64(before.X())
+	dz := float64(after.Z()) - float64(before.Z())
+	distance := math.Sqrt(dx*dx + dz*dz)
+	// 非正与 NaN 一并挡在这里：NaN 的任何比较都为假，因此 !(distance > 0) 才是
+	// 正确的写法，写成 distance <= 0 会让 NaN 漏进下面的换算。
+	if !(distance > 0) {
+		return 0
+	}
+	scaled := distance * 1000 * exhaustionSwimMilliPerBlock
+	if scaled >= float64(math.MaxUint16)*1000 {
+		return math.MaxUint16
+	}
+	return uint16(int64(scaled) / 1000)
+}
 
 // applyExhaustion 累积疲劳并按固定规则结算跨阈值的消耗。
 //

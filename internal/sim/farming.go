@@ -107,6 +107,9 @@ func (engine *Engine) executeTillSoil(
 		return RejectNoTarget, true
 	}
 	engine.recordChange(session.dimension, hit.Block, core.FarmlandDryID, pending)
+	// 疲劳表（见 hunger.go）：翻地完成累积固定疲劳。它和扣耐久一样只出现在
+	// 这个唯一的写入区里，因此拒绝路径在结构上就不可能累积疲劳。
+	player.applyExhaustion(exhaustionTillMilli, engine.tunables.ExhaustionThresholdMilli)
 	if consumeToolDurability(&player.actorState) {
 		player.inventoryDirty = true
 	}
