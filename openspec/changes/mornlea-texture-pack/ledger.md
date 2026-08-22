@@ -4,7 +4,7 @@
 |---|---|---|---|---:|---|
 | 1 | `/root/texture_task1_openspec` | PASS/CLEAN（round 4） | PASS/CLEAN（round 4） | 4 | 五项 P1 均关闭：用完整 MODIFIED 对账 voxel/HUD 与 visual-verification 主规格；用户 RGBA 与默认资产义务分域；golden 更新用两个 disposable control 加一个 fresh 正式 application，写盘前实际执行 near-band guard。 |
 | 2 | `/root/texture_task2_loader` | PASS/CLEAN（round 2） | PASS/CLEAN（round 2） | 2 | 关闭 1×P1：只有 `root.Open` 阶段的 NotExist 可按缺失 layer 回退；成功打开后的 Stat/Read 错误一律带 pack/layer 上下文原子失败。 |
-| 3 | `/root/texture_task3_embed` | pending | pending | 0 | 官方 connector 固定 source pin `7935d064fc6f993d1b5038ed5ec17a615600cf0a`；`smooth_stone` 因缺少直接等价素材、`chest` 因批准原图为 14×14，分别改为第六、七个程序化回退；原 leaves 含 alpha=5，改用同 commit 内 16×16、alpha `{0,255}` 的直接等价 `default_leaves_simple.png`，全程禁止像素变换。 |
+| 3 | `/root/texture_task3_embed` | PASS/CLEAN（round 1） | PASS/CLEAN（round 1） | 1 | 独立复核固定 commit、31 个唯一源 Blob 与 32 个目的 PNG 逐字节一致，许可证、署名、provenance、二值 alpha 与构造器语义全部通过；`smooth_stone`、`chest` 保持程序回退，`leaves` 使用已裁决的 `default_leaves_simple.png`。 |
 | 4 | `/root/texture_task4_config` | PASS/CLEAN（round 2） | PASS/CLEAN（round 2） | 2 | 关闭 1×P1：`texturePackPath` 经 nullable string 解码，JSON null 与其他非字符串均带字段上下文拒绝；真实空字符串继续禁用覆盖。 |
 | 5 | pending | pending | pending | 0 | pending |
 | 6 | pending | pending | pending | 0 | pending |
