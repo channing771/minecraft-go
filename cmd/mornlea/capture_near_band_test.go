@@ -37,7 +37,7 @@ func goldenControlTestApplication() *application {
 // TestWaitUntilLoadedPairContinuesDrainingControlThatFinishedFirst 锁住两个
 // disposable control 的背压边界：一个已完成初始加载后，另一个尚未完成时，
 // 前者仍必须继续推进并 drain receiver。若退回为先完整加载一个再加载另一个，
-// `firstCalls` 会停在 1，闲置一侧的有界 inbox 会在真实 4,489 个快照期间溢出。
+// firstCalls 会停在 1，闲置一侧的有界 inbox 会在真实 4,489 个快照期间溢出。
 func TestWaitUntilLoadedPairContinuesDrainingControlThatFinishedFirst(t *testing.T) {
 	first, second := &application{}, &application{}
 	firstCalls, secondCalls := 0, 0

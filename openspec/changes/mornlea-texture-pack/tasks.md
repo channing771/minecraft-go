@@ -36,20 +36,20 @@
 
 ## 7. 在 LOD 基线上重建并检查视觉 golden
 
-- [ ] 7.1 读取并测试当前 capture 场景结构，确认不重建或改名 `far-horizon`，其保持倒数第二且 `water-underwater` 保持末尾；运行 `go test ./cmd/mornlea -run 'TestCapture.*Scene|Test.*WaterUnderwater|Test.*Far.*Horizon' -count=1`。
-- [ ] 7.2 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-before-update`，确认只因默认材质像素变化而失败；崩溃、缺场景、mesh、alpha、超时或门禁变化须先修复。
-- [ ] 7.3 先在 `cmd/mornlea/run_test.go` 与 `cmd/mornlea/capture_near_band_test.go` 添加失败测试：`--update-golden` 必须先构造同 registry/同配置且仅 `LodEnabled` 相反的两个 disposable control application，guard 通过并关闭两者后再构造 fresh LOD-on 正式 application；正式 `runCapture` 收到的 app 不得执行过 control scene；受保护行差异必须在任何 golden 写入前失败并保留全部旧文件，只有远景带差异才允许继续；所有已构造 application 在成功、第二/第三次构造失败、guard 失败与正式 capture 失败路径都必须关闭。运行 `go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden)' -count=1` 确认先失败。
-- [ ] 7.4 在 `cmd/mornlea/main.go`、`cmd/mornlea/capture.go` 与最小必要依赖 seam 中实现更新 preflight：用两个 disposable application 和当前内嵌默认 registry 成对渲染 LOD on/off `far-horizon`，把现有 `nearBandGuard.assertUnchanged` 前移到任何 golden 写盘之前；关闭两者后才创建 fresh LOD-on app 执行普通完整 capture 顺序。control 不读取旧 golden，失败时输出诊断图但不得改 baseline。不得复用 control app、缓存整套场景到内存、删除 guard、移动旧 golden 或放宽阈值；运行步骤 7.3 的测试及 `go test ./cmd/mornlea -run 'TestNearBandGuard' -count=1`。
-- [ ] 7.5 以空用户覆盖直接运行 `make visual-update VISUAL_OUT=build/visual-texture-pack-update`；确认日志显示 LOD on/off 近环 control 实际执行并通过，且无需移动或删除任何 tracked golden。
-- [ ] 7.6 人工逐图检查至少 `materials-showcase`、HUD/inventory、农业、`water-surface-slope`、末尾 `water-underwater` 与倒数第二 `far-horizon`，把接受范围和裁决写入 ledger。
-- [ ] 7.7 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-final`、`go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden|NearBandGuard)' -count=1` 与 `git diff --check`，通过规格与质量评审后提交 capture control 与 golden。
+- [x] 7.1 读取并测试当前 capture 场景结构，确认不重建或改名 `far-horizon`，其保持倒数第二且 `water-underwater` 保持末尾；运行 `go test ./cmd/mornlea -run 'TestCapture.*Scene|Test.*WaterUnderwater|Test.*Far.*Horizon' -count=1`。
+- [x] 7.2 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-before-update`，确认只因默认材质像素变化而失败；崩溃、缺场景、mesh、alpha、超时或门禁变化须先修复。
+- [x] 7.3 先在 `cmd/mornlea/run_test.go` 与 `cmd/mornlea/capture_near_band_test.go` 添加失败测试：`--update-golden` 必须先构造同 registry/同配置且仅 `LodEnabled` 相反的两个 disposable control application，guard 通过并关闭两者后再构造 fresh LOD-on 正式 application；正式 `runCapture` 收到的 app 不得执行过 control scene；受保护行差异必须在任何 golden 写入前失败并保留全部旧文件，只有远景带差异才允许继续；所有已构造 application 在成功、第二/第三次构造失败、guard 失败与正式 capture 失败路径都必须关闭。运行 `go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden)' -count=1` 确认先失败。
+- [x] 7.4 在 `cmd/mornlea/main.go`、`cmd/mornlea/capture.go` 与最小必要依赖 seam 中实现更新 preflight：用两个 disposable application 和当前内嵌默认 registry 成对渲染 LOD on/off `far-horizon`，把现有 `nearBandGuard.assertUnchanged` 前移到任何 golden 写盘之前；关闭两者后才创建 fresh LOD-on app 执行普通完整 capture 顺序。control 不读取旧 golden，失败时输出诊断图但不得改 baseline。不得复用 control app、缓存整套场景到内存、删除 guard、移动旧 golden 或放宽阈值；运行步骤 7.3 的测试及 `go test ./cmd/mornlea -run 'TestNearBandGuard' -count=1`。
+- [x] 7.5 以空用户覆盖直接运行 `make visual-update VISUAL_OUT=build/visual-texture-pack-update`；确认日志显示 LOD on/off 近环 control 实际执行并通过，且无需移动或删除任何 tracked golden。
+- [x] 7.6 人工逐图检查至少 `materials-showcase`、HUD/inventory、农业、`water-surface-slope`、末尾 `water-underwater` 与倒数第二 `far-horizon`，把接受范围和裁决写入 ledger。
+- [x] 7.7 运行 `make visual-check VISUAL_OUT=build/visual-texture-pack-final`、`go test ./cmd/mornlea -run 'Test(TextureGoldenUpdate|Run.*Golden|NearBandGuard)' -count=1` 与 `git diff --check`，通过规格与质量评审后提交 capture control 与 golden。
 
 ## 8. 更新长期基线并完成全量验证
 
-- [ ] 8.1 先复现 `TestMornleaCurrentIdentity` 因 `.gitignore` 中废弃 `/mcgo` 忽略项失败，核对当前构建产物 `/mornlea` 已另行忽略且旧路径不再产生；只删除冗余旧身份项，不加 allowlist、不放宽扫描器，并要求 focused identity 与完整 archcheck 转绿。
-- [ ] 8.2 逐字节同步更新 `AGENTS.md` 与 `CLAUDE.md` 当前能力，更新 `docs/notes/progress.md` 里程碑与 attribution；记录协议 v23、engine ABI v6、client ABI v7、benchmark scenario v18 均未由本变更推进。
-- [ ] 8.3 仅在每项实现及规格/质量双评审完成后勾选 `tasks.md`，并在 `ledger.md` 记录 implementer、reviewer、轮次、发现、修复与 controller ruling。
-- [ ] 8.4 运行 `gofmt -l .`、`go test ./internal/assets ./internal/config ./cmd/mornlea -race -count=1`、`go test ./internal/archcheck -count=1`、`cmp -s AGENTS.md CLAUDE.md` 与 `git diff --check`。
-- [ ] 8.5 运行 `make rust`、`make rust-check`、`go test ./... -race`、`go vet ./...`、`make build`、`make visual-check VISUAL_OUT=build/visual-texture-pack-final-review` 与 `openspec validate --all --strict --no-interactive`，不得放宽性能、overflow、完整性或数据丢失门禁。
-- [ ] 8.6 由独立终审者对完整分支核验加载/回退/错误和副作用顺序、有界原子应用、39 名映射、来源许可、自动化与服务端隔离、LOD 后视觉结果及无版本迁移；修复后重跑受影响与全量门禁。
-- [ ] 8.7 提交已对账的长期文档与 OpenSpec 状态，确认工作区只剩已知无关改动，并在得到明确批准前不归档 change。
+- [x] 8.1 先复现 `TestMornleaCurrentIdentity` 因 `.gitignore` 中废弃 `/mcgo` 忽略项失败，核对当前构建产物 `/mornlea` 已另行忽略且旧路径不再产生；只删除冗余旧身份项，不加 allowlist、不放宽扫描器，并要求 focused identity 与完整 archcheck 转绿。
+- [x] 8.2 逐字节同步更新 `AGENTS.md` 与 `CLAUDE.md` 当前能力，更新 `docs/notes/progress.md` 里程碑与 attribution；记录协议 v23、engine ABI v6、client ABI v7、benchmark scenario v18 均未由本变更推进。
+- [x] 8.3 仅在每项实现及规格/质量双评审完成后勾选 `tasks.md`，并在 `ledger.md` 记录 implementer、reviewer、轮次、发现、修复与 controller ruling。
+- [x] 8.4 运行 `gofmt -l .`、`go test ./internal/assets ./internal/config ./cmd/mornlea -race -count=1`、`go test ./internal/archcheck -count=1`、`cmp -s AGENTS.md CLAUDE.md` 与 `git diff --check`。
+- [x] 8.5 运行 `make rust`、`make rust-check`、`go test ./... -race`、`go vet ./...`、`make build`、`make visual-check VISUAL_OUT=build/visual-texture-pack-final-review` 与 `openspec validate --all --strict --no-interactive`，不得放宽性能、overflow、完整性或数据丢失门禁。
+- [x] 8.6 由独立终审者对完整分支核验加载/回退/错误和副作用顺序、有界原子应用、39 名映射、来源许可、自动化与服务端隔离、LOD 后视觉结果及无版本迁移；修复后重跑受影响与全量门禁。
+- [x] 8.7 提交已对账的长期文档与 OpenSpec 状态，确认工作区只剩已知无关改动，并在得到明确批准前不归档 change。
