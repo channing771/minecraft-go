@@ -361,7 +361,8 @@ func TestCompanionPathsNeverTouchHungerState(t *testing.T) {
 
 // TestExhaustionTableIsNotWiredIntoCompanionCode 是「伙伴不接饥饿」的**源码**
 // 守卫，与上一条运行时守卫互补：任何以 *companionState 为接收者、或者函数名
-// 里带 Companion 的 internal/sim 生产函数，都不得提到疲劳表的任何一个标识符。
+// 里带 Companion 的 internal/sim 生产函数，都不得提到疲劳表或进食状态机的
+// 任何一个标识符。
 //
 // 运行时守卫只能覆盖被夹具驱动到的那几条伙伴路径；这条守卫覆盖的是「有人把
 // applyExhaustion 写进任意一条伙伴路径」这件事本身，包括还没有测试驱动到的路径。
@@ -382,6 +383,16 @@ func TestExhaustionTableIsNotWiredIntoCompanionCode(t *testing.T) {
 		"saturationMilli":               true,
 		"exhaustionMilli":               true,
 		"starvationTicks":               true,
+		// 进食状态机（任务组 4）与疲劳表同属"伙伴没有的能力"：伙伴不吃饭，
+		// 也没有任何食物来源。`FoodValue` 也在列——它是食物表的唯一查询入口，
+		// 伙伴路径一旦提到它，就说明有人在给伙伴接进食准入判定。
+		"advanceEating":      true,
+		"eatingState":        true,
+		"eating":             true,
+		"eatingHeld":         true,
+		"defaultEatingTicks": true,
+		"EatingTicks":        true,
+		"FoodValue":          true,
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {

@@ -3,6 +3,8 @@ package sim
 import (
 	"testing"
 
+	"github.com/go-gl/mathgl/mgl32"
+
 	"github.com/channing771/mornlea/internal/core"
 )
 
@@ -384,5 +386,45 @@ func TestEatingTicksComesFromTunableSnapshot(t *testing.T) {
 			t.Fatalf("EatingTicks=%d 时第 %d tick (面包,饥饿)=(%d,%d)，想要 (1,17)",
 				ticks, ticks, player.inventory.Hotbar.Slots[0].Count, player.hunger)
 		}
+	}
+}
+
+// TestCompanionsNeverEat 是「伙伴不接进食」的**运行时**守卫：一名伙伴手持
+// 面包并被驱动完整条移动与采掘路径，远超一次进食所需的 tick 数之后，那两块
+// 面包必须一件不少。
+//
+// 为什么不断言「`companionState` 没有进食字段」：那是存在性断言，编译期就
+// 恒真，在「有人把 `advanceEating` 接进伙伴 tick」的世界里也可能成立（伙伴
+// 完全可以复用 `playerState` 之外的另一份进度）。这里断言的是位置性事实——
+// 伙伴的动作**没有任何途径**吃掉手里的食物。
+//
+// 它与源码守卫 TestExhaustionTableIsNotWiredIntoCompanionCode（其禁用清单
+// 已含进食标识符）是互补的两条，**不得只保留其中一条**：源码守卫是名字驱动
+// 的，看不见"换个名字重写一遍"；本用例是夹具驱动的，只覆盖被驱动到的路径。
+func TestCompanionsNeverEat(t *testing.T) {
+	engine, _, _ := readyMiningPlayers(t, 1)
+	id := companionTestID(2)
+	activateCompanionAt(t, engine, id, mgl32.Vec3{4.5, 1, 8.5})
+	entry := engine.companions[id]
+	entry.inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemBread, Count: 2}
+	entry.inventory.Hotbar.Selected = 0
+	// 夹具自证：面包确实是食物，否则本用例在"伙伴其实会吃"的世界里也会绿。
+	if _, _, edible := core.FoodValue(core.ItemBread); !edible {
+		t.Fatal("面包不是食物，夹具选错了物品")
+	}
+
+	// 伙伴采掘 + 移动：走完整条权威 tick 出口，tick 数远超一次进食（32）。
+	companionTarget := core.BlockPos{X: 4, Y: 1, Z: 5}
+	engine.SetBlockForTest(companionTarget, core.CoalOreID)
+	entry.miningTarget = companionTarget
+	entry.miningHeld = true
+	entry.input.Jump = true
+	entry.input.MoveZ = -1
+	for range 64 {
+		engine.Step()
+	}
+
+	if got := companionItemCount(entry, core.ItemBread); got != 2 {
+		t.Fatalf("伙伴的面包数=%d，想要精确保持 2（伙伴不进食）", got)
 	}
 }
