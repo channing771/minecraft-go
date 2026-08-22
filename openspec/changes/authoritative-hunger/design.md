@@ -92,7 +92,7 @@ MC 持久化三层;不持久化疲劳会让「重登即清疲劳」成为无成�
 | 7 | 饥饿条图标程序化,与材质包风格不对齐 | 材质包不覆盖 HUD 图集;HUD 贴图管线是独立议题 | 材质包 v2 若覆盖 HUD 图集,鸡腿与爱心一起换 |
 | 8 | 饥饿值 < 18 时回血计时仍累积 | 与 MC 同;改为冻结计时要动既有回血状态机 | 若要冻结,`advanceHealthRegen` 入口改为不推进计时 |
 | 9 | 既有:`playerPersistence.Flush` 的 `attempted` 去重键含 revision、重派递增 revision,「快照与存档永不相等」时只能靠 ctx 终止(关服 Flush 可能自旋) | 先于本变更存在;本组三字段在 `save`/`matchesSave`/`playerSnapshotsEqual` 三处对称,未引入恒脏态 | 独立修复:去重键去掉 revision 或给 Flush 加「连续 N 次重派无进展即放弃」 |
-| 10 | 打开容器界面(箱子/熔炉)时仍可继续进食 | spec 的中断清单只列松手/切格/受伤/死亡;采掘有 `viewContainer` 中断是因为采掘要瞄准,进食不需要;MC 打开 GUI 取消进食属呈现层惯例 | 若要对齐 MC,`advanceEating` 的中断条件加 `session.viewContainer`,并补「开箱中断不扣料」Scenario |
+| 10 | 打开容器界面(箱子/熔炉)或视野尚未就绪(`hasView` 为假)时仍可继续进食 | spec 的中断清单只列松手/切格/受伤/死亡;采掘有 `viewContainer`/`hasView` 中断是因为采掘要瞄准,进食不需要;MC 打开 GUI 取消进食属呈现层惯例 | 若要对齐 MC,`advanceEating` 的中断条件加 `session.viewContainer`(与 `hasView`),并补「开箱中断不扣料」Scenario |
 
 ## 验证策略
 
