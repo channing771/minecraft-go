@@ -75,10 +75,10 @@ func runEightPlayersSurviveDiskRestart(t *testing.T) {
 	for index := range identities {
 		identities[index] = multiplayerIdentity(byte(0xa0+index), multiplayerNames[index])
 		location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{8.5, 1.001, 8.5}}
-		if _, err := seedStore.SavePlayer(context.Background(), storage.PlayerSave{
+		if _, err := seedStore.SavePlayer(context.Background(), wellFedPlayerSave(storage.PlayerSave{
 			PlayerID: identities[index].PlayerID, Revision: 1, DisplayName: identities[index].DisplayName,
 			Current: location, Safe: &location,
-		}); err != nil {
+		})); err != nil {
 			_ = seedStore.Close()
 			t.Fatalf("seed player %d: %v", index, err)
 		}

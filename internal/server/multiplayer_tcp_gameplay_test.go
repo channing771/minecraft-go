@@ -154,10 +154,10 @@ func TestDropSelectedItemOverTCPConvergesAndCapacityFailureIsIsolated(t *testing
 		{identity: firstIdentity, inventory: firstInventory},
 		{identity: secondIdentity},
 	} {
-		if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{
+		if _, err := store.SavePlayer(context.Background(), wellFedPlayerSave(storage.PlayerSave{
 			PlayerID: seeded.identity.PlayerID, Revision: 1, DisplayName: seeded.identity.DisplayName,
 			Current: location, Safe: &location, Inventory: seeded.inventory,
-		}); err != nil {
+		})); err != nil {
 			t.Fatalf("预置 TCP 玩家 %s: %v", seeded.identity.DisplayName, err)
 		}
 	}

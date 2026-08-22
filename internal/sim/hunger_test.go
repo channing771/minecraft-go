@@ -141,8 +141,8 @@ func TestNewPlayerStartsFedAndUnexhausted(t *testing.T) {
 	if player.hunger != core.MaxHunger {
 		t.Fatalf("新玩家饥饿=%d，想要 %d", player.hunger, core.MaxHunger)
 	}
-	if player.saturationMilli != initialSaturationMilli {
-		t.Fatalf("新玩家饱和=%d，想要 %d", player.saturationMilli, initialSaturationMilli)
+	if player.saturationMilli != core.InitialSaturationMilli {
+		t.Fatalf("新玩家饱和=%d，想要 %d", player.saturationMilli, core.InitialSaturationMilli)
 	}
 	if player.exhaustionMilli != 0 || player.starvationTicks != 0 {
 		t.Fatalf("新玩家 (疲劳,饥饿计时)=(%d,%d)，想要 (0,0)",
@@ -275,8 +275,8 @@ func TestRespawnRestoresHungerToInitialValues(t *testing.T) {
 	if player.hunger != core.MaxHunger {
 		t.Fatalf("重生后饥饿=%d，想要 %d", player.hunger, core.MaxHunger)
 	}
-	if player.saturationMilli != initialSaturationMilli {
-		t.Fatalf("重生后饱和=%d，想要 %d", player.saturationMilli, initialSaturationMilli)
+	if player.saturationMilli != core.InitialSaturationMilli {
+		t.Fatalf("重生后饱和=%d，想要 %d", player.saturationMilli, core.InitialSaturationMilli)
 	}
 	if player.exhaustionMilli != 0 || player.starvationTicks != 0 {
 		t.Fatalf("重生后 (疲劳,饥饿计时)=(%d,%d)，想要 (0,0)",
@@ -342,7 +342,7 @@ func TestHungerReplayIsBitIdenticalAcrossEngines(t *testing.T) {
 	}
 	// 夹具自证：脚本必须真的把状态推离初值，否则「两次都等于初值」也会通过。
 	initial := [4]uint32{
-		uint32(core.MaxHunger), uint32(initialSaturationMilli), 0, uint32(core.MaxHealth),
+		uint32(core.MaxHunger), uint32(core.InitialSaturationMilli), 0, uint32(core.MaxHealth),
 	}
 	if first == initial {
 		t.Fatalf("重放脚本没有改变任何状态: %v", first)

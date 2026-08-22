@@ -217,9 +217,9 @@ func TestHealthRegenAtHungerThresholdHealsAndCostsExhaustion(t *testing.T) {
 	if player.exhaustionMilli != 2000 {
 		t.Fatalf("回血后疲劳=%d，想要 2000（6000 减去一次 4000 阈值）", player.exhaustionMilli)
 	}
-	if player.saturationMilli != initialSaturationMilli-1000 {
+	if player.saturationMilli != core.InitialSaturationMilli-1000 {
 		t.Fatalf("回血后饱和=%d，想要 %d（跨阈值扣 1 点）",
-			player.saturationMilli, initialSaturationMilli-1000)
+			player.saturationMilli, core.InitialSaturationMilli-1000)
 	}
 	if player.hunger != 18 {
 		t.Fatalf("回血后饥饿=%d，想要保持 18（饱和度尚未耗尽）", player.hunger)
@@ -240,7 +240,7 @@ func TestHealthRegenBelowHungerThresholdDoesNotHeal(t *testing.T) {
 	if player.health != 10 {
 		t.Fatalf("饥饿 17 时第 140 tick health=%d，想要保持 10", player.health)
 	}
-	if player.exhaustionMilli != 0 || player.saturationMilli != initialSaturationMilli {
+	if player.exhaustionMilli != 0 || player.saturationMilli != core.InitialSaturationMilli {
 		t.Fatalf("未回血却累积了疲劳: (疲劳,饱和)=(%d,%d)",
 			player.exhaustionMilli, player.saturationMilli)
 	}

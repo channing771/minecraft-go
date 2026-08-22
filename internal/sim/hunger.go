@@ -31,12 +31,6 @@ const defaultExhaustionThresholdMilli = 4000
 // 把饥饿值推回 18 以下。这个反馈环就是本变更要交付的「回血有代价」。
 const defaultRegenHungerThreshold = 18
 
-// initialSaturationMilli 是新玩家与重生玩家的固定饱和度初值（千分位）。
-//
-// 它不是 tunable：初值属于存档契约的一部分（旧版玩家存档迁移时也用它），
-// 让它随配置漂移会让同一份存档在不同机器上迁出不同的状态。
-const initialSaturationMilli uint16 = 5 * uint16(core.SaturationMilliPerPoint)
-
 // 疲劳来源固定表（单位：千分位）。
 //
 // 这五个数值**刻意不做 tunable**：它们之间的比例关系就是玩法本身（跳一次抵
@@ -172,7 +166,7 @@ func (player *playerState) advanceStarvation(intervalTicks uint32) {
 // 的是 beginReset，把它也当成"重生"会让"跳进虚空"变成一次免费的饱餐。
 func (player *playerState) resetHunger() {
 	player.hunger = core.MaxHunger
-	player.saturationMilli = initialSaturationMilli
+	player.saturationMilli = core.InitialSaturationMilli
 	player.exhaustionMilli = 0
 	player.starvationTicks = 0
 }

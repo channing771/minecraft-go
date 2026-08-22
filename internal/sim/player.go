@@ -52,6 +52,18 @@ type PlayerRestore struct {
 	Inventory      core.Inventory
 	// Health 是存档中的权威生命值；零值代表"缺失"，注册时会回落到 core.MaxHealth。
 	Health uint8
+	// Hunger、SaturationMilli、ExhaustionMilli 是存档中的三层权威饥饿状态，
+	// 只有 HasHunger 为真时才生效。
+	Hunger          uint8
+	SaturationMilli uint16
+	ExhaustionMilli uint16
+	// HasHunger 报告上面三个字段是否来自一份真实存档。
+	//
+	// 它不能像 Health 那样用"零值代表缺失"：三层状态**全部**可以合法地为零
+	// （饿到零、烧空饱和、疲劳刚跨过阈值），把 0 当缺失会让饿着下线的玩家一
+	// 重登就回到 20/5000/0——重登因此成为免费进食途径，与 design.md D4
+	// "beginReset 不回满"要挡的正是同一个漏洞。
+	HasHunger bool
 }
 
 type PlayerSnapshot struct {
@@ -60,6 +72,12 @@ type PlayerSnapshot struct {
 	Safe       *PlayerLocation
 	Inventory  core.Inventory
 	Health     uint8
+	// Hunger、SaturationMilli、ExhaustionMilli 是本次快照的三层权威饥饿状态，
+	// 由持久化路径原样落盘（玩家 schema v7）。这里没有"缺失"语义：快照总是
+	// 由权威 playerState 现取，三者恒为有效值。
+	Hunger          uint8
+	SaturationMilli uint16
+	ExhaustionMilli uint16
 }
 
 // InventoryUpdate 是一名玩家在本 tick 的最终权威物品状态，只发送给所属会话。
@@ -172,9 +190,15 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		candidateChunks: spawnCandidateChunks(candidates),
 		spawnWanted:     make(map[core.ChunkPos]struct{}),
 	}
-	// 三层饥饿状态本组还不在 PlayerRestore 里，也还不进存档：登录一律回到固定
-	// 初值。初值只由 resetHunger 一处给出，注册与死亡结算共用。
+	// 先落到固定初值（初值只由 resetHunger 一处给出，注册、死亡结算与旧存档
+	// 迁移共用同一组常量），再让带饥饿状态的存档覆盖它。没有存档可恢复的路径
+	// ——新玩家、缺失玩家、只给维度与锚点的 RegisterSession——因此一律得到初值。
 	player.resetHunger()
+	if restore.HasHunger {
+		player.hunger = restore.Hunger
+		player.saturationMilli = restore.SaturationMilli
+		player.exhaustionMilli = restore.ExhaustionMilli
+	}
 	if restore.Current != nil {
 		player.restoreCandidates = append(player.restoreCandidates, restoreCandidate{
 			location: *restore.Current,
@@ -276,6 +300,11 @@ func (player *playerState) snapshot(
 		Pitch:     player.pitch,
 		Inventory: player.inventory,
 		Health:    player.health,
+		// 三层饥饿状态原样进快照：持久化路径（internal/server 的 save/restore）
+		// 是它跨重启保留的唯一通道，任何一个字段漏进快照都会在重登时静默落回初值。
+		Hunger:          player.hunger,
+		SaturationMilli: player.saturationMilli,
+		ExhaustionMilli: player.exhaustionMilli,
 	}
 	if player.safe != nil {
 		safe := *player.safe

@@ -27,6 +27,13 @@ func (player *cachedPlayer) restore(metadata storage.Metadata) sim.PlayerRestore
 	restore.Pitch = player.snapshot.Pitch
 	restore.Inventory = player.snapshot.Inventory
 	restore.Health = player.snapshot.Health
+	// 三层饥饿状态只有走到这里才来自真实存档：上面那条提前返回是"缺失玩家 /
+	// 尚未观察到权威快照"，那两种情况没有可恢复的饥饿状态，HasHunger 保持假，
+	// 由 sim 的 RegisterPlayer 落到与新玩家相同的固定初值。
+	restore.Hunger = player.snapshot.Hunger
+	restore.SaturationMilli = player.snapshot.SaturationMilli
+	restore.ExhaustionMilli = player.snapshot.ExhaustionMilli
+	restore.HasHunger = true
 	return restore
 }
 
@@ -40,6 +47,11 @@ func cachedPlayerFromStored(stored storage.StoredPlayer, pendingName string) *ca
 		Pitch:     stored.Pitch,
 		Inventory: stored.Inventory,
 		Health:    stored.Health,
+		// 更旧的 schema 没有饥饿字段，storage 的迁移链已经在这一步之前把它们
+		// 补成固定初值，这里因此无条件照抄。
+		Hunger:          stored.Hunger,
+		SaturationMilli: stored.SaturationMilli,
+		ExhaustionMilli: stored.ExhaustionMilli,
 	}
 	if stored.Safe != nil {
 		snapshot.Safe = &sim.PlayerLocation{
@@ -75,7 +87,13 @@ func newMissingCachedPlayer(
 				core.MaxY + 1,
 				float32(anchor.Z)*core.SectionSize + 0.5,
 			},
-		}, Inventory: starterMaterialInventory()},
+		}, Inventory: starterMaterialInventory(),
+			// 缺失玩家的首份快照可能先于 sim 的第一次 Observe 落盘（Confirm 会
+			// 直接标脏），因此这里就要写初值而不是零值：零饥饿是合法取值，
+			// 落盘后重登的新玩家会直接进入挨饿状态。
+			Hunger:          core.MaxHunger,
+			SaturationMilli: core.InitialSaturationMilli,
+		},
 		hasSnapshot: true,
 		missing:     true,
 	}
@@ -122,6 +140,10 @@ func (player *cachedPlayer) save(revision uint64) storage.PlayerSave {
 		Pitch:     player.snapshot.Pitch,
 		Inventory: player.snapshot.Inventory,
 		Health:    player.snapshot.Health,
+		// 三层全部落盘：不写疲劳会让"重登清疲劳"变成无成本操作（design.md D7）。
+		Hunger:          player.snapshot.Hunger,
+		SaturationMilli: player.snapshot.SaturationMilli,
+		ExhaustionMilli: player.snapshot.ExhaustionMilli,
 	}
 	if player.snapshot.Safe != nil {
 		save.Safe = &storage.PlayerLocation{
@@ -138,7 +160,10 @@ func (player *cachedPlayer) matchesSave(save storage.PlayerSave) bool {
 		[3]float32(player.snapshot.Current.Position) != save.Current.Position ||
 		player.snapshot.Yaw != save.Yaw || player.snapshot.Pitch != save.Pitch ||
 		player.snapshot.Inventory != save.Inventory ||
-		player.snapshot.Health != save.Health {
+		player.snapshot.Health != save.Health ||
+		player.snapshot.Hunger != save.Hunger ||
+		player.snapshot.SaturationMilli != save.SaturationMilli ||
+		player.snapshot.ExhaustionMilli != save.ExhaustionMilli {
 		return false
 	}
 	if player.snapshot.Safe == nil || save.Safe == nil {
@@ -167,9 +192,13 @@ func clonePlayerSnapshot(snapshot sim.PlayerSnapshot) sim.PlayerSnapshot {
 }
 
 func playerSnapshotsEqual(left, right sim.PlayerSnapshot) bool {
+	// 三层饥饿状态参与变更检测：饥饿是唯一会在玩家原地不动时独自变化的状态，
+	// 漏掉任何一个字段都会让"只有饥饿变了"的 tick 被判为无变化而永不落盘。
 	if left.Current != right.Current || left.Yaw != right.Yaw ||
 		left.Pitch != right.Pitch || left.Inventory != right.Inventory ||
-		left.Health != right.Health {
+		left.Health != right.Health || left.Hunger != right.Hunger ||
+		left.SaturationMilli != right.SaturationMilli ||
+		left.ExhaustionMilli != right.ExhaustionMilli {
 		return false
 	}
 	if left.Safe == nil || right.Safe == nil {
