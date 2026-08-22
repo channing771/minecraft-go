@@ -101,6 +101,25 @@ type playerState struct {
 	// drownTicks 是氧气归零后距离下一次溺水伤害已经过的 tick 数，瞬态字段，
 	// 语义同 ticksSinceDamage。见 oxygen.go。
 	drownTicks uint32
+	// 以下四个字段是服务端单写者拥有的权威饥饿状态。三层状态**全为整数**：
+	// 权威推进不用浮点，否则 Memory/TCP 两传输的重放一致与跨平台逐位相同这
+	// 两条契约不可证。写者只有权威 tick 内的串行路径，没有 goroutine 也没有锁。
+	// 见 hunger.go。
+	//
+	// hunger 是饥饿值，单位「点」，合法区间 0..core.MaxHunger（20）。
+	hunger uint8
+	// saturationMilli 是饱和度，单位千分位，上界是 hunger×
+	// core.SaturationMilliPerPoint（因此绝对上界 20000，远在 uint16 之内）。
+	// 它是饥饿值之上的缓冲：疲劳先烧它，烧空了才动饥饿值。
+	saturationMilli uint16
+	// exhaustionMilli 是疲劳值，单位千分位。每累积满
+	// Tunables.ExhaustionThresholdMilli 就结算一次消耗并减去一个阈值，因此
+	// 稳态下它恒小于阈值（uint16 的上界只在中间值上被短暂触及，见
+	// applyExhaustion 在 uint32 上做累加的理由）。
+	exhaustionMilli uint16
+	// starvationTicks 是饥饿值归零后距离下一次饥饿伤害已经过的 tick 数，
+	// 瞬态字段，语义同 drownTicks。见 hunger.go 的 advanceStarvation。
+	starvationTicks uint32
 
 	restoreCandidates []restoreCandidate
 	nextRestore       int
@@ -153,6 +172,9 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		candidateChunks: spawnCandidateChunks(candidates),
 		spawnWanted:     make(map[core.ChunkPos]struct{}),
 	}
+	// 三层饥饿状态本组还不在 PlayerRestore 里，也还不进存档：登录一律回到固定
+	// 初值。初值只由 resetHunger 一处给出，注册与死亡结算共用。
+	player.resetHunger()
 	if restore.Current != nil {
 		player.restoreCandidates = append(player.restoreCandidates, restoreCandidate{
 			location: *restore.Current,

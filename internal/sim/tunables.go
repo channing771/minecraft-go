@@ -129,6 +129,29 @@ type Tunables struct {
 	// 「作物没长」的断言在「本来就没抽中」的情况下也会绿，用例会静默失去意义。
 	// 取 0 表示作物永不推进（耕地干湿转换不受影响）。
 	CropGrowthChancePercent uint8 `json:"cropGrowthChancePercent"`
+	// StarvationDamageIntervalTicks 是饥饿值归零后两次饥饿伤害之间的 tick 数
+	// （变更 authoritative-hunger，internal/sim/hunger.go 的 advanceStarvation）。
+	//
+	// 它只决定「多久扣一次血」，不决定「扣到哪里为止」——后者是硬地板 1 点生命，
+	// 不可调：饥饿伤害不致死是玩法裁决，不是参数。取 0 会退化成每 tick 扣血，
+	// 配置层已把下限钳到 1，advanceStarvation 另有一次 max(…, 1) 兜底。
+	StarvationDamageIntervalTicks uint32 `json:"starvationDamageIntervalTicks"`
+	// ExhaustionThresholdMilli 是疲劳值累积到多少（千分位）结算一次消耗
+	// （变更 authoritative-hunger，internal/sim/hunger.go 的 applyExhaustion）。
+	//
+	// 调小它让饥饿掉得快，调大让整条饥饿曲线变慢；疲劳来源表的五个数值本身
+	// 固定，因此这是「饥饿速度」的唯一旋钮。取 0 会让 applyExhaustion 的循环
+	// 在权威 tick 内永不退出，配置层把下限钳到 1000，applyExhaustion 另有一次
+	// max(…, 1) 兜底。
+	ExhaustionThresholdMilli uint16 `json:"exhaustionThresholdMilli"`
+	// RegenHungerThreshold 是允许自然回血的最低饥饿值
+	// （变更 authoritative-hunger，internal/sim/health_regen.go 的入口门控）。
+	//
+	// 取 0 等于取消门控（任何饥饿值都能回血），取值大于 core.MaxHunger 等于
+	// 永久禁止自然回血；两端都是合法的调试取值，不是错误。它只门控**是否
+	// 回复**，不改变回血计时本身——饥饿值低于阈值时计时照常累积，饥饿回到阈值
+	// 那一刻若计时已满就立即回血。
+	RegenHungerThreshold uint8 `json:"regenHungerThreshold"`
 }
 
 // 以下是流体三个 tunable 的编译期默认值。它们的消费方都在
@@ -190,6 +213,10 @@ func DefaultTunables() Tunables {
 		FluidRescanCellsPerTick:    defaultFluidRescanCellsPerTick,
 		RandomTicksPerSection:      defaultRandomTicksPerSection,
 		CropGrowthChancePercent:    defaultCropGrowthChancePercent,
+
+		StarvationDamageIntervalTicks: defaultStarvationDamageIntervalTicks,
+		ExhaustionThresholdMilli:      defaultExhaustionThresholdMilli,
+		RegenHungerThreshold:          defaultRegenHungerThreshold,
 	}
 }
 

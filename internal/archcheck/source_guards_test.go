@@ -31,6 +31,8 @@ func TestTunableConstantsAreNotExported(t *testing.T) {
 			"PlayerDropPickupDelayTicks", "DropLifetimeTicks",
 			"InteractionReach", "DropPickupRange", "SpawnRadius",
 			"RandomTicksPerSection", "CropGrowthChancePercent",
+			"StarvationDamageIntervalTicks", "ExhaustionThresholdMilli",
+			"RegenHungerThreshold",
 		},
 	}
 	root := moduleRoot(t)
