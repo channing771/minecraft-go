@@ -13,6 +13,20 @@
 - skip_specs 探针验证：`schema: spec-driven` + `skip_specs: true` 通过
   `openspec validate --strict`（探针目录已清理，`--all` 55 项全绿）。
 
+预检扫描（任务对/自洽性，逐行核对）：
+
+| 对象 | 核对结果 |
+|---|---|
+| T1↔T2 | T2 消费的 `companion.MaxPlanCommandBytes` 是既有常量，非 T1 产物；零耦合 |
+| T1↔T3 | 不同包；T1 提示词字节锁不变，server 侧无感知 |
+| T2↔T3 | 文件集不相交 |
+| T1 自洽 | Sprintf 引用的 `planEnvRadiusBlocks`/`planEnvVerticalBlocks` 存在于 plan_types.go:36/:40；头段拆分保持逐位拼接 |
+| T2 自洽 | `ChatEvent` 字段 Kind/CompanionName/Command/RejectReason 经 chat.go 实际用法核对存在；两枚举均 uint8、200 未占用 |
+| T3 自洽 | 两个 helper 调用点均在 `t` 作用域；worker 重排对照实际代码行核实；两结果 channel 均 MaxActive 缓冲 |
+| 计划 vs 评审观感 | D1/D4 为「锁现状」用例（先绿后变异验证），与 red-first TDD 不同属计划本意，非测试无效 |
+
+Ruling: 模型选择——本 harness 的 Agent 工具无 model 参数，无法按 SKILL.md 指定分级模型；全部以 general-purpose 派发并在评审侧用最仔细的输入约束补偿 — 若评审质量不足将体现为修复轮增加，成本是更多轮次而非质量下降。
+
 ## 任务记录
 
 （派发时追加）
