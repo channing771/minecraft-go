@@ -369,9 +369,13 @@ func TestTexturePackAbsoluteAndEmptyPaths(t *testing.T) {
 }
 
 func TestTexturePackPathRejectsNonString(t *testing.T) {
-	_, err := config.Load(writeConfig(t, `{"version":1,"texturePackPath":7}`))
-	if err == nil || !strings.Contains(err.Error(), "解析 texturePackPath 字段") {
-		t.Fatalf("Load error = %v，want texturePackPath 字段上下文", err)
+	for _, value := range []string{"7", "null"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := config.Load(writeConfig(t, `{"version":1,"texturePackPath":`+value+`}`))
+			if err == nil || !strings.Contains(err.Error(), "解析 texturePackPath 字段") {
+				t.Fatalf("Load error = %v，want texturePackPath 字段上下文", err)
+			}
+		})
 	}
 }
 

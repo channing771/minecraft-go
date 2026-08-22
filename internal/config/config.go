@@ -216,9 +216,14 @@ func decodeConfig(path string, contents []byte) (Config, error) {
 		}
 	}
 	if raw, ok := lookupCaseInsensitive(top, "texturePackPath"); ok {
-		if err := json.Unmarshal(raw, &cfg.TexturePackPath); err != nil {
+		var texturePackPath *string
+		if err := json.Unmarshal(raw, &texturePackPath); err != nil {
 			return Config{}, fmt.Errorf("config: 解析 texturePackPath 字段: %w", err)
 		}
+		if texturePackPath == nil {
+			return Config{}, errors.New("config: 解析 texturePackPath 字段: 必须是字符串")
+		}
+		cfg.TexturePackPath = *texturePackPath
 		if cfg.TexturePackPath != "" {
 			if filepath.IsAbs(cfg.TexturePackPath) {
 				cfg.ResolvedTexturePackPath = filepath.Clean(cfg.TexturePackPath)
