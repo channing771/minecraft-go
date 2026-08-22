@@ -18,6 +18,12 @@ type playerDTO struct {
 	Inventory   core.Inventory
 	// Health 是权威生命值，0..core.MaxHealth。
 	Health uint8
+	// Hunger 是权威饥饿值，0..core.MaxHunger。
+	Hunger uint8
+	// SaturationMilli 是权威饱和度（千分位），上界是 Hunger×core.SaturationMilliPerPoint。
+	SaturationMilli uint16
+	// ExhaustionMilli 是权威疲劳值（千分位）。
+	ExhaustionMilli uint16
 }
 
 type playerMigration func(playerDTO) (playerDTO, error)
@@ -50,6 +56,15 @@ var playerMigrations = map[uint32]playerMigration{
 	},
 	// v6 与 v5 的 payload 布局相同，只扩展合法物品注册表。
 	5: func(dto playerDTO) (playerDTO, error) { return dto, nil },
+	// v6 没有三层饥饿状态，历史存档一律迁移为新玩家初值。初值与 sim 侧的
+	// resetHunger 同源（core.MaxHunger / core.InitialSaturationMilli / 0），
+	// 因此"旧存档登录"与"新玩家登录"得到的饥饿状态逐字段相同。
+	6: func(dto playerDTO) (playerDTO, error) {
+		dto.Hunger = core.MaxHunger
+		dto.SaturationMilli = core.InitialSaturationMilli
+		dto.ExhaustionMilli = 0
+		return dto, nil
+	},
 }
 
 func migratePlayer(from uint32, dto playerDTO) (playerDTO, bool, error) {

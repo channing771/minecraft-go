@@ -572,3 +572,47 @@ func TestSuspendedPredictorDoesNotResumeBeforeNeutralSendSucceeds(t *testing.T) 
 			p.Suspended(), p.suspendInputSent, p.suspendSequence, p.HistoryLen(), before, got)
 	}
 }
+
+// TestPredictorForwardsEatingOnEveryFixedStep 覆盖进食链的第三段：
+// `Control.Eating` 必须逐固定步原样落进 `network.PlayerInput.Eating`。
+//
+// 杀死变异：Advance 漏填该字段时 wire 上的进食位恒为 false，
+// 服务端的进食状态机永远收不到开始信号——而客户端本地一切照旧，没有任何症状。
+// 松开那一步的 false 同样是断言的一部分：只在 true 时置位、松手后仍留 true
+// 的实现会让服务端把「已经松手」当成「还在按住」，进度不清零。
+func TestPredictorForwardsEatingOnEveryFixedStep(t *testing.T) {
+	p := readyPredictor(t)
+	var sent []network.PlayerInput
+	var sequence uint64
+	advance := func(eating bool) {
+		t.Helper()
+		if err := p.Advance(2*physics.FixedDelta, Control{Eating: eating}, loadedAirSource{},
+			func() uint64 { sequence++; return sequence },
+			func(input network.PlayerInput) error { sent = append(sent, input); return nil },
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	advance(true)
+	if len(sent) != 2 {
+		t.Fatalf("按住两个固定步发送 %d 条，想要 2", len(sent))
+	}
+	for index, input := range sent {
+		if !input.Eating {
+			t.Fatalf("固定步 %d 丢失进食状态: %+v", index, input)
+		}
+	}
+	advance(false)
+	if len(sent) != 4 {
+		t.Fatalf("松手后共发送 %d 条，想要 4", len(sent))
+	}
+	for index, input := range sent[2:] {
+		if input.Eating {
+			t.Fatalf("松手后固定步 %d 仍置进食位: %+v", index, input)
+		}
+	}
+	// 进食纯粹是上行意图：本地预测状态与历史输入都不得因它改变。
+	if p.history[0].input != (physics.Input{}) {
+		t.Fatalf("进食污染了本地预测输入: %+v", p.history[0].input)
+	}
+}

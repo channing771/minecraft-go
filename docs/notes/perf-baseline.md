@@ -2,7 +2,34 @@
 
 ## 当前 producer 与迁移规则
 
-当前 benchmark producer 为 scenario v18：`authoritative-farming` 再次改变了被测进程本身（mesh registry 条目上限 35 → 48、实际烘焙条目 35 → 45，每次 mesh 调用的 FFI 输入从 910 bytes 涨到 1170 bytes；合成面板 8 → 10 行使 Hotbar HUD 固定上传布局移动——quad 容量 238 → 247、glyph offset 11776 → 12288、总容量 45376 → 45888 bytes、空聊天帧每帧实际写入 11776 → 12288 bytes；权威 tick 多出一个每 tick 枚举全部区段的 `advanceCrops` 阶段），即便 benchmark 世界内容未变——它仍把 `FluidEnabled` 钉死为 `false`，也不含任何农业方块；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `17:18`，v6..v17 历史报告仍可同版本读取。历史的 `16:17` 与更早的 `15:16` 已退役，只作本文的归档证据，工具不再接受它们。
+当前 benchmark producer 为 scenario v19：`authoritative-hunger` 又一次改变了被测进程本身（Hotbar HUD 新增右下角饥饿条，`maxHotbarQuads` 247 → 267 使固定上传布局移动——glyph offset 12288 → 13312、总容量 45888 → 46912 bytes、空聊天帧每帧实际写入 12288 → 13312 bytes；HUD 图集在爱心之后新增空/满两列程序化鸡腿；权威 tick 多出饥饿三层状态的推进与结算），即便 benchmark 世界内容未变——它仍把 `FluidEnabled` 钉死为 `false`，也不含任何农业方块；固定 benchmark 输入仍为七名远端玩家、零伙伴。当前唯一显式跨 workload 迁移为 `18:19`，v6..v18 历史报告仍可同版本读取。历史的 `17:18`、`16:17` 与更早的 `15:16` 已退役，只作本文的归档证据，工具不再接受它们。
+
+上一代（scenario v18）的判定理由：`authoritative-farming` 改变了被测进程本身（mesh registry 条目上限 35 → 48、实际烘焙条目 35 → 45，每次 mesh 调用的 FFI 输入从 910 bytes 涨到 1170 bytes；合成面板 8 → 10 行使 Hotbar HUD 固定上传布局移动——quad 容量 238 → 247、glyph offset 11776 → 12288、总容量 45376 → 45888 bytes、空聊天帧每帧实际写入 11776 → 12288 bytes；权威 tick 多出一个每 tick 枚举全部区段的 `advanceCrops` 阶段）。
+
+## authoritative-hunger scenario v19 记录（record-only，非新基线）
+
+2026-08-22 在 `claude/authoritative-hunger` 分支提交 `5c76ebb5bfcfe23ee6ed551342c08965edc26a97` 上，用无窗口离屏入口跑了一次 scenario v19 Memory producer：
+
+```bash
+./bin/mornlea --benchmark --benchmark-transport memory --perf-output <tmp>/memory-v19.json
+```
+
+进程退出码 0，报告完整写出（`scenario_version=19`、`transport=memory`、`Apple M5 / 24GiB`、`macOS 26.5.1`、`go1.26.0 darwin/arm64`、`2560x1440`、`load_seconds=25.50`、`snapshot_seconds=16.90`、`cooldown_seconds=30`），SHA-256 `89e4543b95c1903caec057e984a2e41e0173d08e09026b5eadf129d21b821610`。这是**记录性测量**：不覆盖 `docs/notes/perf-baseline.json` 与 `docs/notes/perf-baseline-m5.json`，不提升任何基线，也不与 v18 报告作相对比较（跨 workload 需显式 `18:19` 迁移）。
+
+| 指标 | 数值 |
+|---|---|
+| still | fps 259.28、p50 3.824 ms、p95 4.028 ms、p99 4.322 ms、max 12.733 ms、peak RSS 1512.1 MiB、15,555 帧 |
+| flying | fps 452.99、p50 1.902 ms、p95 4.210 ms、p99 12.303 ms、max 25.480 ms、peak RSS 1871.9 MiB、54,338 帧 |
+| 权威 tick | p50 0.397 ms、p95 0.482 ms、p99 0.501 ms、max 0.514 ms（200 帧） |
+| `remote_gpu_complete` | p50 2.993 ms、p95 3.028 ms、p99 3.034 ms（128 样本，每样本摊薄 256 次绘制） |
+| 区块持久化 | p50 5.505 ms、p95 12.036 ms、p99 13.949 ms、max 28.148 ms（5,259 次快照） |
+| 玩家持久化 | p50 0.0015 ms、p95 0.0040 ms、p99 0.0118 ms、max 2.851 ms（256 次快照） |
+| 协议 | encode p99 0.001 ms、decode p99 0.000125 ms、43,008 bytes |
+| 八会话服务端 | outbound 617,214 bytes、outbox 高水位 1、player jobs 高水位 6、player done 高水位 2、peak RSS 2,160,754,688 bytes |
+
+producer 打印了两条以「性能记录:」开头的绝对阈值记录——`multiplayer peak RSS 2160754688 >= 2GiB` 与 `flying p99 12.303 ms >= 12 ms`。按 `bounded-benchmark-workload` 条文，p99、FPS、RSS、GPU、tick、队列高水位与绝对阈值结果**只记录和报告**，不改变退出状态；报告结构、字段、样本完整性、身份、真实 overflow、数据丢失与 I/O 错误仍会失败，本次全部通过（退出码 0）。
+
+provenance 说明：生成时工作区有用户在 `AGENTS.md`/`CLAUDE.md`「验证」节的 16 行未提交改动，两者都是文档、不进入二进制，其余被跟踪文件与 `5c76ebb` 一致。
 
 ## M5A scenario v16 记录（record-only，非新基线）
 

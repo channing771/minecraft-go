@@ -149,6 +149,8 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 800)
 	// 氧气条只在未满时出现，因此最坏布局取一个未满值；满氧反而是零 quad。
 	appendOxygenBar(&layout, OxygenOverlay{Confirmed: true, Value: 0}, 1280, 800)
+	// 饥饿条与氧气条相反：满值才是最坏布局（十空底 + 十满格），它常驻显示。
+	appendHungerBar(&layout, HungerOverlay{Confirmed: true, Value: core.MaxHunger}, 1280, 800)
 	chatLine := strings.Repeat("中", maxChatRunes)
 	appendChatOverlay(&layout, atlas, ChatOverlay{
 		Open: true, Input: chatLine,
@@ -162,6 +164,7 @@ func TestHotbarLayoutStaysWithinFixedCapacity(t *testing.T) {
 	)
 	appendHealthBar(&layout, atlas, HealthOverlay{Confirmed: true, Value: core.MaxHealth}, 1280, 800)
 	appendOxygenBar(&layout, OxygenOverlay{Confirmed: true, Value: 0}, 1280, 800)
+	appendHungerBar(&layout, HungerOverlay{Confirmed: true, Value: core.MaxHunger}, 1280, 800)
 	appendChatOverlay(&layout, atlas, ChatOverlay{
 		Open: true, Input: chatLine,
 		Lines: []string{chatLine, chatLine, chatLine, chatLine, chatLine, chatLine},

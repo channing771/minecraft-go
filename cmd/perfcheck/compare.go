@@ -29,15 +29,14 @@ func compareReportsWithScenarioUpgrade(
 	allowScenarioUpgrade string,
 ) ([]string, error) {
 	scenarioUpgrade := baseline.ScenarioVersion != current.ScenarioVersion
-	// 农业改变了被测进程（mesh registry 条目上限 35→48 使每次 mesh 调用的
-	// FFI 输入变长、合成面板 8→10 行使 HUD 固定上传布局与 offset 移动、
-	// 权威 tick 多出一个每 tick 枚举全部区段的作物阶段），因此当前唯一迁移
-	// 是 v17 到 v18。历史的 16:17 已退役——它只作为归档证据留在 docs/notes，
-	// 不再是授权值。
-	allowedScenarioUpgrade := baseline.ScenarioVersion == 17 && current.ScenarioVersion == 18 &&
-		allowScenarioUpgrade == "17:18"
+	// 饥饿又一次改变了被测进程（HUD 新增饥饿条，quad 容量 247→267 使固定 GPU
+	// 上传布局、glyph offset 与每帧写入字节数移动；HUD 图集多出两列鸡腿；
+	// 权威 tick 多出饥饿三层状态的推进），因此当前唯一迁移是 v18 到 v19。
+	// 历史的 17:18 已退役——它只作为归档证据留在 docs/notes，不再是授权值。
+	allowedScenarioUpgrade := baseline.ScenarioVersion == 18 && current.ScenarioVersion == 19 &&
+		allowScenarioUpgrade == "18:19"
 	if allowScenarioUpgrade != "" && !allowedScenarioUpgrade {
-		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v17 到 v18 使用 17:18", allowScenarioUpgrade)
+		return nil, fmt.Errorf("场景迁移授权 %q 无效：只允许 v18 到 v19 使用 18:19", allowScenarioUpgrade)
 	}
 	if scenarioUpgrade && !allowedScenarioUpgrade {
 		return nil, fmt.Errorf(

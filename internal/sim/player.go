@@ -34,6 +34,10 @@ type PlayerUpdate struct {
 	// Oxygen 是本 tick 结束时的权威氧气，0..core.MaxOxygenTicks；同 Health，
 	// 只发布给玩家本人，不进入任何远端玩家消息。
 	Oxygen uint16
+	// Hunger 是本 tick 结束时的权威饥饿值，0..`core.MaxHunger`；同 `Health` 与
+	// `Oxygen`，只发布给玩家本人。三层饥饿状态里只有它随协议上线：饱和度与
+	// 疲劳值是纯服务端推进量，界面不呈现。
+	Hunger uint8
 	// WorldTimeTicks 是本 tick 结束时的权威绝对世界时间。
 	WorldTimeTicks uint64
 }
@@ -52,6 +56,18 @@ type PlayerRestore struct {
 	Inventory      core.Inventory
 	// Health 是存档中的权威生命值；零值代表"缺失"，注册时会回落到 core.MaxHealth。
 	Health uint8
+	// Hunger、SaturationMilli、ExhaustionMilli 是存档中的三层权威饥饿状态，
+	// 只有 HasHunger 为真时才生效。
+	Hunger          uint8
+	SaturationMilli uint16
+	ExhaustionMilli uint16
+	// HasHunger 报告上面三个字段是否来自一份真实存档。
+	//
+	// 它不能像 Health 那样用"零值代表缺失"：三层状态**全部**可以合法地为零
+	// （饿到零、烧空饱和、疲劳刚跨过阈值），把 0 当缺失会让饿着下线的玩家一
+	// 重登就回到 20/5000/0——重登因此成为免费进食途径，与 design.md D4
+	// "beginReset 不回满"要挡的正是同一个漏洞。
+	HasHunger bool
 }
 
 type PlayerSnapshot struct {
@@ -60,6 +76,12 @@ type PlayerSnapshot struct {
 	Safe       *PlayerLocation
 	Inventory  core.Inventory
 	Health     uint8
+	// Hunger、SaturationMilli、ExhaustionMilli 是本次快照的三层权威饥饿状态，
+	// 由持久化路径原样落盘（玩家 schema v7）。这里没有"缺失"语义：快照总是
+	// 由权威 playerState 现取，三者恒为有效值。
+	Hunger          uint8
+	SaturationMilli uint16
+	ExhaustionMilli uint16
 }
 
 // InventoryUpdate 是一名玩家在本 tick 的最终权威物品状态，只发送给所属会话。
@@ -95,12 +117,44 @@ type playerState struct {
 	// 不持久化、不进入快照/哈希；满血时不推进。见 health_regen.go。
 	ticksSinceDamage uint32
 	// oxygen 是服务端单写者拥有的权威氧气，0..core.MaxOxygenTicks。瞬态字段，
-	// 不持久化、不进入快照/哈希：玩家 schema 保持 v6，重连后由 RegisterPlayer
+	// 不持久化、不进入快照/哈希：氧气不占存档字段（玩家 schema v7 只追加了饥饿三层），重连后由 `RegisterPlayer`
 	// 初始化为满值。见 oxygen.go。
 	oxygen uint16
 	// drownTicks 是氧气归零后距离下一次溺水伤害已经过的 tick 数，瞬态字段，
 	// 语义同 ticksSinceDamage。见 oxygen.go。
 	drownTicks uint32
+	// 以下四个字段是服务端单写者拥有的权威饥饿状态。三层状态**全为整数**：
+	// 权威推进不用浮点，否则 Memory/TCP 两传输的重放一致与跨平台逐位相同这
+	// 两条契约不可证。写者只有权威 tick 内的串行路径，没有 goroutine 也没有锁。
+	// 见 hunger.go。
+	//
+	// hunger 是饥饿值，单位「点」，合法区间 0..core.MaxHunger（20）。
+	hunger uint8
+	// saturationMilli 是饱和度，单位千分位，上界是 hunger×
+	// core.SaturationMilliPerPoint（因此绝对上界 20000，远在 uint16 之内）。
+	// 它是饥饿值之上的缓冲：疲劳先烧它，烧空了才动饥饿值。
+	saturationMilli uint16
+	// exhaustionMilli 是疲劳值，单位千分位。每累积满
+	// Tunables.ExhaustionThresholdMilli 就结算一次消耗并减去一个阈值，因此
+	// 稳态下它恒小于阈值（uint16 的上界只在中间值上被短暂触及，见
+	// applyExhaustion 在 uint32 上做累加的理由）。
+	exhaustionMilli uint16
+	// starvationTicks 是饥饿值归零后距离下一次饥饿伤害已经过的 tick 数，
+	// 瞬态字段，语义同 drownTicks。见 hunger.go 的 advanceStarvation。
+	starvationTicks uint32
+	// eatingHeld 是玩家本 tick 的持续进食意图，来自 `Command.Eating`
+	// （协议 v24 的 `PlayerInput.Eating`），语义与 `miningHeld` 完全对称：
+	// 有效输入写入、中性输入与非法输入清零、重生清零。
+	//
+	// 它留在 playerState 而不是上移到 actorState：伙伴不进食，把它放进共有
+	// 结构体会给伙伴凭空多出一个永远为假的字段。
+	eatingHeld bool
+	// eating 是权威进食进度状态机（见 eating.go）。它与 `mining` 一样是瞬态
+	// 字段，不持久化、不进入快照/哈希，也不上线协议：进度只在服务端存在，
+	// 客户端按自己的按键预测呈现。
+	//
+	// 它同样留在 playerState 而不是上移 actorState：伙伴不进食。
+	eating eatingState
 
 	restoreCandidates []restoreCandidate
 	nextRestore       int
@@ -152,6 +206,15 @@ func (engine *Engine) RegisterPlayer(id SessionID, restore PlayerRestore) {
 		candidates:      candidates,
 		candidateChunks: spawnCandidateChunks(candidates),
 		spawnWanted:     make(map[core.ChunkPos]struct{}),
+	}
+	// 先落到固定初值（初值只由 resetHunger 一处给出，注册、死亡结算与旧存档
+	// 迁移共用同一组常量），再让带饥饿状态的存档覆盖它。没有存档可恢复的路径
+	// ——新玩家、缺失玩家、只给维度与锚点的 RegisterSession——因此一律得到初值。
+	player.resetHunger()
+	if restore.HasHunger {
+		player.hunger = restore.Hunger
+		player.saturationMilli = restore.SaturationMilli
+		player.exhaustionMilli = restore.ExhaustionMilli
 	}
 	if restore.Current != nil {
 		player.restoreCandidates = append(player.restoreCandidates, restoreCandidate{
@@ -254,6 +317,11 @@ func (player *playerState) snapshot(
 		Pitch:     player.pitch,
 		Inventory: player.inventory,
 		Health:    player.health,
+		// 三层饥饿状态原样进快照：持久化路径（internal/server 的 save/restore）
+		// 是它跨重启保留的唯一通道，任何一个字段漏进快照都会在重登时静默落回初值。
+		Hunger:          player.hunger,
+		SaturationMilli: player.saturationMilli,
+		ExhaustionMilli: player.exhaustionMilli,
 	}
 	if player.safe != nil {
 		safe := *player.safe
@@ -343,6 +411,7 @@ func (player *playerState) update(
 		Mining:            player.mining.update(),
 		Health:            player.health,
 		Oxygen:            player.oxygen,
+		Hunger:            player.hunger,
 	}
 }
 
@@ -398,7 +467,27 @@ func (engine *Engine) advanceActivePlayers() {
 		// 计时冻结；重生本身回满生命值，冻结与否都观察不到差别。计时放在
 		// reset 短路之前同样是有意的：reset 只是位置跳变的当 tick 标记，
 		// 玩家仍在世界里，回复不应因此停摆。
-		player.advanceHealthRegen(engine.tunables.RegenDelayTicks, engine.tunables.RegenIntervalTicks)
+		if player.advanceHealthRegen(
+			engine.tunables.RegenDelayTicks,
+			engine.tunables.RegenIntervalTicks,
+			engine.tunables.RegenHungerThreshold,
+		) {
+			// 疲劳表：自然回血每回 1 点生命值累积固定疲劳（见 hunger.go）。
+			// 它是全表最大的一项，一次调用会跨过多个阈值。
+			player.applyExhaustion(
+				exhaustionRegenPerHealthMilli, engine.tunables.ExhaustionThresholdMilli,
+			)
+		}
+		// 饥饿伤害与回血计时同处：它同样只在 Active 期间推进，也同样放在 reset
+		// 短路之前——reset 只是位置跳变的当 tick 标记，玩家仍在世界里挨饿。
+		player.advanceStarvation(engine.tunables.StarvationDamageIntervalTicks)
+		// 进食推进排在饥饿伤害之后：饥饿伤害走 `applyDamage`，而 `applyDamage` 会
+		// 中断进食。反过来排的话，"饿到零的玩家在挨这一拳的同一 tick 吃完面包"
+		// 会先结算进食、再被同一 tick 的伤害打断一个已经不存在的进度——读起来
+		// 像是伤害没能打断进食。它同样放在 `reset` 短路之前：`reset` 只是位置跳变
+		// 的当 tick 标记，而"位置跳变中断进食"由 `advanceEating` 自己的 `reset`
+		// 判据表达，不靠这里的短路代劳。
+		player.advanceEating(engine.tunables.EatingTicks)
 		if player.reset {
 			continue
 		}
@@ -429,8 +518,34 @@ func (engine *Engine) advanceActivePlayers() {
 		if wasOnGround || input.BodyInFluid {
 			player.peakY = player.state.Position.Y()
 		}
+		positionBeforeStep := player.state.Position
 		step := physics.Step(player.state, input, source)
 		player.state = step.State
+		// —— 疲劳表的两个运动判定点（见 hunger.go 的固定表）——
+		//
+		// 起跳：物理积分只在「不在流体里、步首在地面、按下 Jump」这一组条件下
+		// 施加起跳冲量（见 physics.Step 的垂直分支次序：BodyInFluid && Jump 的
+		// 持续上浮分支排在 OnGround && Jump 之前，因此水里按跳是上浮不是起跳）。
+		// 这里逐条复刻那组条件，另外再要求**步末已经离地**：它把「起跳」钉成
+		// 「冲量真的把玩家抬离了地面」而不是「冲量被施加了」——否则某种让冲量
+		// 当步就被吃掉的几何下，按住跳跃会逐 tick 反复施加冲量，疲劳变成可刷读数。
+		// 注意：在当前整格碰撞几何下**低天花板触发不了这一分项**——头顶最小间隙
+		// 0.2（`physics.PlayerHeight` 1.8 对 2 格洞）远大于 `physics.GroundProbe`，
+		// 贴顶跳也会真实离地一瞬并照常计费；该分项只在单步位移落进探针容差内时
+		// 生效（例如 `JumpSpeed` tunable 被调到极小），覆盖它的用例正是这样构造的。
+		// physics.Step 的输出里没有现成的「本步起跳了」标志位，所以判据只能在
+		// 这里由 sim 可见的量复刻；将来若 physics 输出该标志，这里应改为直接复用。
+		if input.Jump && wasOnGround && !input.BodyInFluid && !player.state.OnGround {
+			player.applyExhaustion(exhaustionJumpMilli, engine.tunables.ExhaustionThresholdMilli)
+		}
+		// 游泳：身体浸没时按本步的水平位移计费。位移为零（原地泡着）自然得到
+		// 零疲劳，不需要额外分支。
+		if input.BodyInFluid {
+			player.applyExhaustion(
+				swimExhaustionMilli(positionBeforeStep, player.state.Position),
+				engine.tunables.ExhaustionThresholdMilli,
+			)
+		}
 		// 落点也要判一次：水浅、下落又快时，本步开始时玩家还在水面之上、结束
 		// 时已经踩到水底，只看步首标志会让这一跤照旧结算摔落伤害。
 		if landedInFluid, _ := physics.SubmersionFlags(player.state.Position, source); landedInFluid {
@@ -468,6 +583,11 @@ func (player *playerState) applyDamage(damage int32) {
 		return
 	}
 	player.resetRegenTimer()
+	// 受伤中断进食（spec「受伤或死亡 MUST 清零进度且 MUST NOT 扣除食物」），
+	// 与上一行"重置回血计时"同处同理：两者都是"真正挨了一下"才发生的副作用，
+	// 因此都必须排在非正伤害的短路**之后**——摔落曲线在安全高度每次落地都会
+	// 算出负值，写在函数第一行会让"跳一下"打断进食。清空只丢进度，不碰背包。
+	player.eating = eatingState{}
 	if damage >= int32(player.health) {
 		player.health = 0
 		return
@@ -581,7 +701,11 @@ func (player *playerState) beginReset() {
 	player.drownTicks = 0
 	player.input = physics.Input{}
 	player.miningHeld = false
+	player.eatingHeld = false
 	player.mining = miningState{}
+	// 死亡与位置跳变都经这里，进食进度随之作废：重生后站在出生点继续吃完
+	// 死前那半块面包没有任何语义，与 `mining` 上一行同理。
+	player.eating = eatingState{}
 	player.reset = false
 	player.inventoryDirty = true
 	player.nextCandidate = 0

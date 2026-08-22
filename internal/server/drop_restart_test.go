@@ -32,10 +32,10 @@ func TestTCPDropSelectedItemSurvivesRestart(t *testing.T) {
 	var inventory core.Inventory
 	inventory.Hotbar.Selected = 0
 	inventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemCoal, Count: 5}
-	if _, err := seedStore.SavePlayer(context.Background(), storage.PlayerSave{
+	if _, err := seedStore.SavePlayer(context.Background(), wellFedPlayerSave(storage.PlayerSave{
 		PlayerID: identity.PlayerID, Revision: 1, DisplayName: identity.DisplayName,
 		Current: location, Safe: &location, Inventory: inventory,
-	}); err != nil {
+	})); err != nil {
 		_ = seedStore.Close()
 		t.Fatalf("预置玩家存档: %v", err)
 	}
@@ -139,10 +139,10 @@ func TestTCPToolDurabilitySurvivesRestart(t *testing.T) {
 	location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{8.5, 1.001, 8.5}}
 	var inventory core.Inventory
 	inventory.Hotbar.Slots[0] = want
-	if _, err := seedStore.SavePlayer(context.Background(), storage.PlayerSave{
+	if _, err := seedStore.SavePlayer(context.Background(), wellFedPlayerSave(storage.PlayerSave{
 		PlayerID: identity.PlayerID, Revision: 1, DisplayName: identity.DisplayName,
 		Current: location, Safe: &location, Inventory: inventory,
-	}); err != nil {
+	})); err != nil {
 		_ = seedStore.Close()
 		t.Fatalf("预置玩家存档: %v", err)
 	}

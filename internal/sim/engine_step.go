@@ -121,6 +121,7 @@ func (engine *Engine) Step() TickResult {
 			if session.player == nil || session.player.lifecycle != PlayerActive {
 				if session.player != nil {
 					session.player.miningHeld = false
+					session.player.eatingHeld = false
 					session.player.mining = miningState{}
 				}
 				result.Rejected = append(result.Rejected, Rejection{
@@ -135,6 +136,7 @@ func (engine *Engine) Step() TickResult {
 			if !validPlayerInput(command) {
 				player.input = physics.Input{Yaw: player.yaw}
 				player.miningHeld = false
+				player.eatingHeld = false
 				player.mining = miningState{}
 				result.Rejected = append(result.Rejected, Rejection{
 					Session:  command.Session,
@@ -151,6 +153,7 @@ func (engine *Engine) Step() TickResult {
 				Yaw:   yaw,
 			}
 			player.miningHeld = command.Mining
+			player.eatingHeld = command.Eating
 			player.yaw = yaw
 			player.pitch = command.Pitch
 		case CommandSelectHotbar:

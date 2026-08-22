@@ -319,6 +319,7 @@ func seedIntegrationPlayer(
 		},
 		Yaw: snapshot.Yaw, Pitch: snapshot.Pitch, Inventory: snapshot.Inventory,
 	}
+	save = wellFedPlayerSave(save)
 	if snapshot.Safe != nil {
 		save.Safe = &storage.PlayerLocation{
 			Dimension: snapshot.Safe.Dimension,
@@ -332,6 +333,18 @@ func seedIntegrationPlayer(
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// wellFedPlayerSave 给一份播种用的玩家存档补上"吃饱的普通老玩家"的三层饥饿状态。
+//
+// 三层状态的零值是**合法的挨饿态**，没有 Health 那种"零值代表缺失就回落满值"
+// 的语义：饥饿 0 的玩家登录后每 80 tick 就要挨一次饥饿伤害。用零值播种会让所有
+// 纵向脚本随机沾上掉血，因此磁盘播种统一经过这里；需要特定饥饿状态的用例自行
+// 改写这三个字段。
+func wellFedPlayerSave(save storage.PlayerSave) storage.PlayerSave {
+	save.Hunger = core.MaxHunger
+	save.SaturationMilli = core.InitialSaturationMilli
+	return save
 }
 
 func integrationPlayerSnapshotAt(x, y, z float32, safe *sim.PlayerLocation) sim.PlayerSnapshot {

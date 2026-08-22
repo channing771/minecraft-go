@@ -7,11 +7,15 @@ import (
 )
 
 const (
-	// HUD 图集前两格是代码生成的空心/实心爱心，后续格按 ItemID 放置真实方块顶面。
-	hotbarTextureSize       = 16
-	hotbarEmptyHeartColumn  = 0
-	hotbarFullHeartColumn   = 1
-	hotbarBlockColumnOffset = 2
+	// HUD 图集前四格是代码生成的空心/实心爱心与空/满鸡腿，后续格按 ItemID
+	// 放置真实方块顶面。鸡腿与爱心同处同法（程序化、不进 internal/assets），
+	// 是因为 HUD 图集本就不在材质包覆盖范围内。
+	hotbarTextureSize          = 16
+	hotbarEmptyHeartColumn     = 0
+	hotbarFullHeartColumn      = 1
+	hotbarEmptyDrumstickColumn = 2
+	hotbarFullDrumstickColumn  = 3
+	hotbarBlockColumnOffset    = 4
 	// 列数按合法物品编号的独占上界 ItemIDMax 预留：追加新物品时图集自动扩出
 	// 空白列，与 core 枚举末项守护（item_test.go）保持同一穷举界，不再依赖
 	// 「某个具体物品恰为枚举末项」的脆弱假设。
@@ -23,6 +27,8 @@ func buildHotbarTextureAtlas(registry *assets.Registry) []byte {
 	pixels := make([]byte, hotbarTextureWidth*hotbarTextureSize*4)
 	paintHotbarHeart(pixels, hotbarEmptyHeartColumn, false)
 	paintHotbarHeart(pixels, hotbarFullHeartColumn, true)
+	paintHotbarDrumstick(pixels, hotbarEmptyDrumstickColumn, false)
+	paintHotbarDrumstick(pixels, hotbarFullDrumstickColumn, true)
 	// 物品列按 ItemID 穷举到独占上界 ItemIDMax（与列数预留同一穷举界），
 	// 不可放置的物品没有对应列内容，保持空白。
 	for item := core.ItemStone; item < core.ItemIDMax; item++ {

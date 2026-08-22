@@ -979,6 +979,17 @@ type Field struct {
 //     取值同样正确，但那已是默认值的 20 倍，再大只会线性烧掉权威 tick 预算。
 //   - sim.cropGrowthChancePercent 区间为 0..100：它是一个百分比，两端都有明确
 //     语义（0 = 永不推进，100 = 抽中即推进），越界值没有任何解释。
+//   - sim.starvationDamageIntervalTicks 下限为 1：internal/sim/hunger.go 用它做
+//     「距上次饥饿伤害多少 tick」的比较阈值，0 会退化成饥饿一归零就每 tick 扣血。
+//   - sim.exhaustionThresholdMilli 下限为 1000：internal/sim/hunger.go 的
+//     applyExhaustion 以它为循环条件，0 会让循环在权威 tick 内永不退出。下限取
+//     1000（一点饱和度的千分位）而不是 1，是因为再小的阈值意味着「一次跳跃烧掉
+//     50 点饱和度」，那不是调参而是坏配置。
+//   - sim.regenHungerThreshold 区间为 0..core.MaxHunger：两端都是合法调试取值
+//     （0 = 取消门控，20 = 只有吃饱才回血），越界值没有语义。
+//   - sim.eatingTicks 下限为 1：internal/sim/eating.go 的 `advanceEating` 以它为
+//     结算阈值，而进度从 1 起，0 会让进食永远结算不了。上限 200（10 秒）只是
+//     操作区间，再长的进食在受伤中断规则下等于吃不完。
 func Fields() []Field {
 	return []Field{
 		{Group: "physics", Name: "eyeHeight", Min: 1, Max: 2.2, Step: 0.01},
@@ -1014,6 +1025,10 @@ func Fields() []Field {
 		{Group: "sim", Name: "fluidRescanCellsPerTick", Min: 1, Max: 1048576, Step: 1024},
 		{Group: "sim", Name: "randomTicksPerSection", Min: 0, Max: 64, Step: 1},
 		{Group: "sim", Name: "cropGrowthChancePercent", Min: 0, Max: 100, Step: 1},
+		{Group: "sim", Name: "starvationDamageIntervalTicks", Min: 1, Max: 2000, Step: 1},
+		{Group: "sim", Name: "exhaustionThresholdMilli", Min: 1000, Max: 20000, Step: 100},
+		{Group: "sim", Name: "regenHungerThreshold", Min: 0, Max: float64(core.MaxHunger), Step: 1},
+		{Group: "sim", Name: "eatingTicks", Min: 1, Max: 200, Step: 1},
 
 		{Group: "render", Name: "viewDistance", Min: 2, Max: 64, Step: 1, ReadOnly: true},
 		{Group: "render", Name: "fovDegrees", Min: 30, Max: 110, Step: 1},

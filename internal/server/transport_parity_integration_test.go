@@ -209,10 +209,10 @@ func runMiningParityScript(t *testing.T, transport string) miningParityResult {
 	inventory.Hotbar.Slots[1] = core.ItemStack{Item: core.ItemIronPickaxe, Count: 1, Durability: ironFull}
 	inventory.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemDirt, Count: 1}
 	location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{0.5, 1.001, 0.5}}
-	if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{
+	if _, err := store.SavePlayer(context.Background(), wellFedPlayerSave(storage.PlayerSave{
 		PlayerID: identity.PlayerID, Revision: 1, DisplayName: identity.DisplayName,
 		Current: location, Safe: &location, Inventory: inventory,
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	config := hostTestConfig()
@@ -463,10 +463,10 @@ func runParityTranscript(t *testing.T, transport string) parityResult {
 	var initialInventory core.Inventory
 	initialInventory.Hotbar.Slots[0] = core.ItemStack{Item: core.ItemStone, Count: 4}
 	location := storage.PlayerLocation{Dimension: core.Overworld, Position: [3]float32{0.5, 1.001, 0.5}}
-	if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{
+	if _, err := store.SavePlayer(context.Background(), wellFedPlayerSave(storage.PlayerSave{
 		PlayerID: identity.PlayerID, Revision: 1, DisplayName: identity.DisplayName,
 		Current: location, Safe: &location, Inventory: initialInventory,
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	config := hostTestConfig()

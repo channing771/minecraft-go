@@ -19,13 +19,19 @@ func TestPlayerV5MigrationPreservesState(t *testing.T) {
 	if err != nil || !migrated {
 		t.Fatalf("v5 identity migration migrated=%v err=%v", migrated, err)
 	}
+	// v5→v6 是恒等迁移，v6→v7 只填三层饥饿初值：其余字段必须逐字节不变。
+	want.Hunger = core.MaxHunger
+	want.SaturationMilli = core.InitialSaturationMilli
+	want.ExhaustionMilli = 0
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("v5 identity migration\n got=%+v\nwant=%+v", got, want)
 	}
 }
 
 func TestPlayerFutureSchemaIsRejected(t *testing.T) {
-	if _, migrated, err := migratePlayer(7, playerDTO{}); !errors.Is(err, ErrFutureVersion) || migrated {
+	// 用 currentPlayerSchema+1 而不是字面量：升 schema 时这条断言必须自动跟随，
+	// 否则它会退化成"迁移一个已经支持的版本"，永远绿。
+	if _, migrated, err := migratePlayer(currentPlayerSchema+1, playerDTO{}); !errors.Is(err, ErrFutureVersion) || migrated {
 		t.Fatalf("未来玩家 schema migrated=%v err=%v，想要 ErrFutureVersion", migrated, err)
 	}
 }
@@ -69,6 +75,21 @@ func TestPlayerV3MigrationFillsFullToolDurability(t *testing.T) {
 	}
 	if got := migrated.Inventory.Hotbar.Slots[2].Durability; got != 7 {
 		t.Fatalf("已有耐久迁移后 = %d，想要 7", got)
+	}
+}
+
+func TestPlayerV6MigrationFillsInitialHunger(t *testing.T) {
+	dto := playerDTO{Hunger: 0, SaturationMilli: 0, ExhaustionMilli: 7}
+	migrated, changed, err := migratePlayer(6, dto)
+	if err != nil || !changed {
+		t.Fatalf("migratePlayer(6) changed=%v err=%v", changed, err)
+	}
+	if migrated.Hunger != core.MaxHunger ||
+		migrated.SaturationMilli != core.InitialSaturationMilli ||
+		migrated.ExhaustionMilli != 0 {
+		t.Fatalf("v6 迁移三层饥饿状态 = (%d, %d, %d)，想要初值 (%d, %d, 0)",
+			migrated.Hunger, migrated.SaturationMilli, migrated.ExhaustionMilli,
+			core.MaxHunger, core.InitialSaturationMilli)
 	}
 }
 

@@ -258,6 +258,11 @@ func (engine *Engine) advanceMining(
 			})
 			continue
 		}
+		// 疲劳表（见 hunger.go）：采掘完成累积固定疲劳。它压在拒绝分支**之后**、
+		// 与扣耐久同处，理由也相同——被拒绝或中断的采掘不改变任何玩家资源。
+		// 这里只在玩家分叉上：伙伴的完成分叉是 completeCompanionMining，没有
+		// 也不得有这一行。
+		player.applyExhaustion(exhaustionMiningMilli, engine.tunables.ExhaustionThresholdMilli)
 		if consumeToolDurability(&player.actorState) {
 			player.inventoryDirty = true
 		}

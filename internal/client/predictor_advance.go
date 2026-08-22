@@ -66,6 +66,7 @@ func (p *Predictor) Advance(
 			Yaw:      control.Yaw,
 			Pitch:    control.Pitch,
 			Mining:   control.Mining,
+			Eating:   control.Eating,
 		}
 		if err := send(message); err != nil {
 			return err

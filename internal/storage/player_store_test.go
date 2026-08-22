@@ -666,7 +666,11 @@ func assertStoredPlayerMatchesSave(t *testing.T, got StoredPlayer, want PlayerSa
 	if got.PlayerID != want.PlayerID || got.Revision != want.Revision ||
 		got.DisplayName != want.DisplayName || got.Current != want.Current ||
 		got.Yaw != want.Yaw || got.Pitch != want.Pitch ||
-		!reflect.DeepEqual(got.Safe, want.Safe) || got.Health != want.Health {
+		!reflect.DeepEqual(got.Safe, want.Safe) || got.Health != want.Health ||
+		// 三层饥饿状态是 v7 的末项：这条整记录断言原本停在 Health，
+		// DiskStore 往返因此不覆盖新字段（Ruling 27 的尾部普查所指）。
+		got.Hunger != want.Hunger || got.SaturationMilli != want.SaturationMilli ||
+		got.ExhaustionMilli != want.ExhaustionMilli {
 		t.Fatalf("stored player = %+v, want save %+v", got, want)
 	}
 	if got.NeedsRewrite {

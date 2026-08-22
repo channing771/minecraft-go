@@ -15,6 +15,11 @@ type PlayerInput struct {
 	Yaw      float32
 	Pitch    float32
 	Mining   bool
+	// Eating 是持续进食输入位，协议 v24 起随玩家输入上行（wire 上紧跟
+	// `Mining` 之后）。它与 `Mining` 完全同形：客户端只声明「我按着进食键」，
+	// 吃的是哪个栏位、哪件物品、进度到哪一 tick 全由服务端权威决定，
+	// 因而这里既不带栏位也不带物品编号。
+	Eating bool
 }
 
 func (PlayerInput) clientMessage() {}

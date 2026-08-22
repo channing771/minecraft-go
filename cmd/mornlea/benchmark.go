@@ -16,25 +16,20 @@ import (
 const (
 	benchmarkSeed            = 20260726
 	benchmarkMessageDrainMax = 4096
-	// scenarioVersion 是 benchmark producer 的场景身份。v17 → v18 的理由与
-	// v16 → v17 同构：benchmark 的固定输入（七名远端玩家、零伙伴、不注入聊天）
-	// 与被测世界（不注水、同一 seed）一格未动，但 authoritative-farming 改变了
-	// **被测进程本身**：
+	// scenarioVersion 是 benchmark producer 的场景身份。v18 → v19 的判定与
+	// v17 → v18、v15 → v16 同源：benchmark 的固定输入（七名远端玩家、零伙伴、
+	// 不注入聊天）与被测世界（不注水、同一 seed、不含农业方块）一格未动，但
+	// authoritative-hunger 又一次改变了**被测进程本身**——HUD 新增右下角饥饿条，
+	// `maxHotbarQuads` 从 247 涨到 267（十格常驻空鸡腿加最多十格填充），
+	// **固定 GPU 上传布局**随之移动：glyph offset 12288 → 13312、总容量
+	// 45888 → 46912 bytes、空聊天帧每帧实际写入也从 12288 变成 13312 bytes。
+	// HUD 图集同时从 2 列非物品格扩到 4 列（多出空/满两列鸡腿），每帧上传的
+	// 图集宽度随之变化。
 	//
-	//   - mesh registry 条目上限 35 → 48，且实际烘焙条目 35 → 45，于是每次
-	//     mesh 调用的 FFI 输入从 910 bytes 涨到 1170 bytes（每帧最多 64 次），
-	//     Rust 侧 RegistryView 的固定数组也随之变宽；
-	//   - 合成面板 8 → 10 行使 maxOverlayQuads 82 → 91，Hotbar HUD 的**固定
-	//     GPU 上传布局**随之移动：quad 容量 238 → 247、glyph offset
-	//     11776 → 12288、总容量 45376 → 45888 bytes，空聊天帧每帧实际写入
-	//     也从 11776 变成 12288 bytes。这与 v15 → v16 的升版理由是同一条
-	//     （「改变固定 GPU 上传布局、offset 与每帧写入字节数」）；
-	//   - 权威 tick 多出一个 advanceCrops 阶段，它每 tick 枚举活动兴趣范围内
-	//     的全部区段（满编 200 区块实测约 113 µs/tick），直接落在 tick 指标上。
-	//
-	// 这些都落在 RSS、每帧上传字节数与权威 tick 耗时上，v17 与 v18 的数字
-	// 因此不可直接比较。
-	scenarioVersion = 18
+	// 这条正是主规格判定 v15 → v16 与 v17 → v18 时用的同一条条文（「改变固定
+	// GPU 上传布局、offset 与每帧写入字节数」），独立成立即可升版。权威侧的
+	// 饥饿推进落在服务端 tick 上，benchmark 的 tick 指标同样不可与 v18 直接比较。
+	scenarioVersion = 19
 )
 
 var (

@@ -100,9 +100,9 @@ func TestDefaultOptions(t *testing.T) {
 	}
 }
 
-func TestServerProtocolV23IsCurrent(t *testing.T) {
-	if network.ProtocolVersion != 23 {
-		t.Fatalf("专用服务端协议版本 = %d，想要 23", network.ProtocolVersion)
+func TestServerProtocolV24IsCurrent(t *testing.T) {
+	if network.ProtocolVersion != 24 {
+		t.Fatalf("专用服务端协议版本 = %d，想要 24", network.ProtocolVersion)
 	}
 }
 
@@ -331,7 +331,7 @@ func TestRunMigrateMaterialsCompletesAndRerunsWithSameArguments(t *testing.T) {
 	if got := reopened.Metadata().FormatVersion; got != 2 {
 		t.Fatalf("迁移后 metadata 版本 = %d，期望 2", got)
 	}
-	if network.ProtocolVersion != 23 {
+	if network.ProtocolVersion != 24 {
 		t.Fatalf("迁移命令改变了协议版本: %d", network.ProtocolVersion)
 	}
 }

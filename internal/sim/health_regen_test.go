@@ -188,3 +188,111 @@ func TestApplyFallDamageResetsRegenTimer(t *testing.T) {
 		t.Fatalf("applyFallDamage 未清零回复计时: ticksSinceDamage=%d", player.ticksSinceDamage)
 	}
 }
+
+// hungryRegenPlayer 在 readyRegenPlayer 的基础上把饥饿值改成 hunger，其余一切
+// 保持逐字相同。饥饿 17 与 18 两条用例**共用这一个夹具、只差一个入参**：
+// 门控用例最常见的假绿是两条用例各自搭一套夹具，然后差异其实来自别处。
+func hungryRegenPlayer(t *testing.T, id SessionID, health, hunger uint8) *Engine {
+	t.Helper()
+	engine := readyRegenPlayer(t, id, health)
+	engine.sessions[id].player.hunger = hunger
+	return engine
+}
+
+// TestHealthRegenAtHungerThresholdHealsAndCostsExhaustion 覆盖 Scenario
+// 「饥饿值 18 以上可回血」：饥饿恰好等于阈值时回血照常发生，并且**精确**累积
+// 一次回血疲劳。
+//
+// 疲劳读数写死为跨过一次阈值之后的末值（6000 加进来、扣掉 4000 换 1 点饱和度、
+// 余 2000），而不是「疲劳 > 0」：后者在「加了 6000 却一次阈值都没结算」的错误
+// 实现下同样成立。
+func TestHealthRegenAtHungerThresholdHealsAndCostsExhaustion(t *testing.T) {
+	const id = SessionID(42)
+	engine := hungryRegenPlayer(t, id, 10, 18)
+	stepRegen(t, engine, id, 140)
+	player := engine.sessions[id].player
+	if player.health != 11 {
+		t.Fatalf("饥饿 18 时第 140 tick health=%d，想要 11", player.health)
+	}
+	if player.exhaustionMilli != 2000 {
+		t.Fatalf("回血后疲劳=%d，想要 2000（6000 减去一次 4000 阈值）", player.exhaustionMilli)
+	}
+	if player.saturationMilli != core.InitialSaturationMilli-1000 {
+		t.Fatalf("回血后饱和=%d，想要 %d（跨阈值扣 1 点）",
+			player.saturationMilli, core.InitialSaturationMilli-1000)
+	}
+	if player.hunger != 18 {
+		t.Fatalf("回血后饥饿=%d，想要保持 18（饱和度尚未耗尽）", player.hunger)
+	}
+}
+
+// TestHealthRegenBelowHungerThresholdDoesNotHeal 覆盖 Scenario「饥饿值 17
+// 不回血」与 authoritative-health 的 MODIFIED Scenario「饥饿值不足时不回复」：
+// 与上一条同夹具、只把饥饿从 18 改成 17。
+//
+// 夹具生命值刻意取 10 而不是满值：满血玩家门控开不开都不回血，那样的用例
+// 在两种实现下读数相同，测不出门控。
+func TestHealthRegenBelowHungerThresholdDoesNotHeal(t *testing.T) {
+	const id = SessionID(43)
+	engine := hungryRegenPlayer(t, id, 10, 17)
+	stepRegen(t, engine, id, 140)
+	player := engine.sessions[id].player
+	if player.health != 10 {
+		t.Fatalf("饥饿 17 时第 140 tick health=%d，想要保持 10", player.health)
+	}
+	if player.exhaustionMilli != 0 || player.saturationMilli != core.InitialSaturationMilli {
+		t.Fatalf("未回血却累积了疲劳: (疲劳,饱和)=(%d,%d)",
+			player.exhaustionMilli, player.saturationMilli)
+	}
+	// 计时照常累积（design.md D3）：饥饿一旦回到阈值，已满的计时立即生效。
+	if player.ticksSinceDamage != 140 {
+		t.Fatalf("门控期间 ticksSinceDamage=%d，想要 140（计时不应被门控冻结）",
+			player.ticksSinceDamage)
+	}
+}
+
+// TestHealthRegenTimerSurvivesGateAndHealsOnceFed 钉住 D3 的另一半：门控只挡
+// 「是否回复」，不挡计时。玩家在饥饿不足的状态下熬掉 139 tick，第 140 tick 前
+// 一刻吃回阈值——回血必须**就在第 140 tick 发生**，而不是从头再等 100+40。
+//
+// 这条断言正是「计时被冻结」这个变异的杀手：计时若在门控期间停摆，第 140 tick
+// 的计时读数只会是 1，离回复边界还差得远。
+func TestHealthRegenTimerSurvivesGateAndHealsOnceFed(t *testing.T) {
+	const id = SessionID(44)
+	engine := hungryRegenPlayer(t, id, 10, 17)
+	stepRegen(t, engine, id, 139)
+	player := engine.sessions[id].player
+	if player.health != 10 {
+		t.Fatalf("门控期间 health=%d，想要保持 10", player.health)
+	}
+	if player.ticksSinceDamage != 139 {
+		t.Fatalf("门控期间 ticksSinceDamage=%d，想要 139（计时不应被冻结）",
+			player.ticksSinceDamage)
+	}
+	player.hunger = 18
+	stepRegen(t, engine, id, 1)
+	if player.health != 11 {
+		t.Fatalf("饥饿回到阈值后第 140 tick health=%d，想要 11（已满的计时立即生效）",
+			player.health)
+	}
+}
+
+// TestHealthRegenExhaustionEventuallyDropsHunger 覆盖 Scenario「回血消耗最终
+// 体现为饥饿下降」：饱和度为 0 时，第一次回血的疲劳直接扣在饥饿值上。
+func TestHealthRegenExhaustionEventuallyDropsHunger(t *testing.T) {
+	const id = SessionID(45)
+	engine := hungryRegenPlayer(t, id, 10, core.MaxHunger)
+	player := engine.sessions[id].player
+	player.saturationMilli = 0
+	stepRegen(t, engine, id, 140)
+	if player.health != 11 {
+		t.Fatalf("health=%d，想要 11", player.health)
+	}
+	if player.hunger != core.MaxHunger-1 {
+		t.Fatalf("回血后饥饿=%d，想要 %d（饱和度为 0，疲劳直接扣饥饿）",
+			player.hunger, core.MaxHunger-1)
+	}
+	if player.exhaustionMilli != 2000 {
+		t.Fatalf("回血后疲劳=%d，想要 2000", player.exhaustionMilli)
+	}
+}

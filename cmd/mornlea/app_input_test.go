@@ -1194,3 +1194,120 @@ func TestUseKeySendsTillSoilOnlyForHoeAgainstSoil(t *testing.T) {
 		})
 	}
 }
+
+// TestUseKeyHeldEatsOnlyWhileHoldingFood 覆盖任务 5.1：手持食物时「使用」键
+// **按住**必须把 `PlayerInput.Eating` 置位，其余手持物的既有行为一字不变。
+//
+// 表里既有「面包按住置位」，也有「小麦/锄头/方块都不置位」的对照，且锄头那行
+// 同时断言仍然发出 `TillSoil`、方块那行断言仍然发出 `PlaceBlock`——只断言
+// 「没置进食位」的话，一个把食物分支条件写死为 false 的实现也会全绿。
+func TestUseKeyHeldEatsOnlyWhileHoldingFood(t *testing.T) {
+	hoeFull, _ := core.ItemMaxDurability(core.ItemStoneHoe)
+	for _, tc := range []struct {
+		name       string
+		held       core.ItemStack
+		wantEating bool
+		// wantUse 是「使用」键上升沿必须发出的命令类型；nil 表示什么都不发。
+		wantUse any
+	}{
+		{"手持面包按住即进食", core.ItemStack{Item: core.ItemBread, Count: 2}, true, nil},
+		{"手持小麦不进食", core.ItemStack{Item: core.ItemWheat, Count: 3}, false,
+			network.PlaceBlock{Sequence: 1, Slot: 4}},
+		{"手持锄头仍翻地", core.ItemStack{Item: core.ItemStoneHoe, Count: 1, Durability: hoeFull},
+			false, network.TillSoil{Sequence: 1}},
+		{"手持方块仍放置", core.ItemStack{Item: core.ItemDirt, Count: 9}, false,
+			network.PlaceBlock{Sequence: 1, Slot: 4}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, serverEndpoint := newInteractiveTestApplication(t)
+			if err := app.predictor.Begin(network.PlayerState{
+				ServerTick: 1, Dimension: core.Overworld,
+				Position: mgl32.Vec3{0.5, 10, 3.5}, OnGround: true, Ready: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			app.camera = client.Camera{Pos: mgl32.Vec3{0.5, 10.5, 3.5}}
+			loadInteractiveBlock(t, app, core.BlockPos{X: 0, Y: 10, Z: 0}, core.GrassID)
+			var inventory core.Inventory
+			inventory.Hotbar.Selected = 4
+			inventory.Hotbar.Slots[4] = tc.held
+			if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+				t.Fatal(err)
+			}
+			beforeInventory, _ := app.inventory.State()
+
+			// 第一帧：使用键刚按下，同时给出上升沿与按住态。
+			app.applyInteractiveInput(physics.FixedDelta, client.Movement{},
+				client.Actions{Place: true, Use: true}, true)
+			if tc.wantUse != nil {
+				if got := receiveInteractiveClientMessage(t, serverEndpoint); got != tc.wantUse {
+					t.Fatalf("使用键上升沿 = %#v，想要 %#v", got, tc.wantUse)
+				}
+			}
+			input, ok := receiveInteractiveClientMessage(t, serverEndpoint).(network.PlayerInput)
+			if !ok {
+				t.Fatal("按住使用键没有上行玩家输入")
+			}
+			if input.Eating != tc.wantEating {
+				t.Fatalf("按住首帧 Eating=%v，想要 %v", input.Eating, tc.wantEating)
+			}
+
+			// 第二帧：仍然按住（无上升沿），进食位必须保持。
+			app.applyInteractiveInput(physics.FixedDelta, client.Movement{},
+				client.Actions{Use: true}, true)
+			held, ok := receiveInteractiveClientMessage(t, serverEndpoint).(network.PlayerInput)
+			if !ok || held.Eating != tc.wantEating {
+				t.Fatalf("持续按住 = %#v，想要 Eating=%v", held, tc.wantEating)
+			}
+
+			// 第三帧：松开使用键，进食位必须落回 false。
+			app.applyInteractiveInput(physics.FixedDelta, client.Movement{},
+				client.Actions{}, true)
+			released, ok := receiveInteractiveClientMessage(t, serverEndpoint).(network.PlayerInput)
+			if !ok || released.Eating {
+				t.Fatalf("松开使用键 = %#v，想要 Eating=false", released)
+			}
+
+			// 客户端不做任何本地预测：手持食物长按也不得扣减本地背包镜像。
+			if got, _ := app.inventory.State(); got != beforeInventory {
+				t.Fatalf("客户端预测了进食扣料: %+v", got)
+			}
+			assertNoInteractiveClientMessage(t, serverEndpoint)
+		})
+	}
+}
+
+// TestUseKeyRisingEdgeSkipsPlaceWhileHoldingFood 单独钉死「手持食物时使用键的
+// 上升沿不再发放置命令」：食物不可放置，服务端本来就会拒，客户端不发只是为了
+// 不刷无谓的拒绝。用未确认快捷栏做对照——分支只读**已确认**的权威快捷栏。
+func TestUseKeyRisingEdgeSkipsPlaceWhileHoldingFood(t *testing.T) {
+	app, serverEndpoint := newInteractiveTestApplication(t)
+	if err := app.predictor.Begin(network.PlayerState{
+		ServerTick: 1, Dimension: core.Overworld,
+		Position: mgl32.Vec3{0.5, 10, 3.5}, OnGround: true, Ready: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app.camera = client.Camera{Pos: mgl32.Vec3{0.5, 10.5, 3.5}}
+
+	// 快捷栏尚未确认：既不发放置也不置进食位。
+	app.applyInteractiveInput(physics.FixedDelta, client.Movement{},
+		client.Actions{Place: true, Use: true}, true)
+	unconfirmed, ok := receiveInteractiveClientMessage(t, serverEndpoint).(network.PlayerInput)
+	if !ok || unconfirmed.Eating {
+		t.Fatalf("未确认快捷栏 = %#v，想要 Eating=false", unconfirmed)
+	}
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+
+	var inventory core.Inventory
+	inventory.Hotbar.Selected = 2
+	inventory.Hotbar.Slots[2] = core.ItemStack{Item: core.ItemBread, Count: 1}
+	if err := app.inventory.Apply(network.InventoryState{Inventory: inventory}); err != nil {
+		t.Fatal(err)
+	}
+	app.placeBlock()
+	assertNoInteractiveClientMessage(t, serverEndpoint)
+	if app.sequence != 1 {
+		t.Fatalf("手持食物的使用键上升沿分配了序号：sequence=%d", app.sequence)
+	}
+}

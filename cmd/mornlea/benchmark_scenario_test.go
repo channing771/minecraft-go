@@ -21,9 +21,9 @@ import (
 	"github.com/channing771/mornlea/internal/worldgen"
 )
 
-func TestScenarioV18ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
-	if scenarioVersion != 18 {
-		t.Fatalf("scenarioVersion=%d, want 18", scenarioVersion)
+func TestScenarioV19ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
+	if scenarioVersion != 19 {
+		t.Fatalf("scenarioVersion=%d, want 19", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if !scenario.LocalPlayerID.Valid() {
@@ -61,9 +61,9 @@ func TestScenarioV18ContainsSevenSortedUnicodeRemotePlayers(t *testing.T) {
 	}
 }
 
-func TestBenchmarkScenarioV18AccountsForCompanionRendererUploadLayout(t *testing.T) {
-	if scenarioVersion != 18 {
-		t.Fatalf("scenarioVersion=%d，想要 18", scenarioVersion)
+func TestBenchmarkScenarioV19AccountsForCompanionRendererUploadLayout(t *testing.T) {
+	if scenarioVersion != 19 {
+		t.Fatalf("scenarioVersion=%d，想要 19", scenarioVersion)
 	}
 	scenario := newMultiplayerBenchmarkScenario()
 	if len(scenario.Spawns) != 7 || len(scenario.Tags) != 7 {

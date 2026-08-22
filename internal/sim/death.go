@@ -39,6 +39,10 @@ func (engine *Engine) settleDeath(
 	engine.dropInventoryOnDeath(session, pending)
 	player.health = core.MaxHealth
 	player.resetRegenTimer()
+	// 重生回到固定的饥饿初值（spec「玩家重生时饥饿状态 MUST 回到固定初值」）。
+	// 它刻意放在这里而不是 beginReset：beginReset 同时服务「掉出世界」等纯位置
+	// 跳变，在那里回满饥饿等于给玩家一条免费的进食途径。
+	player.resetHunger()
 	// beginReset 是既有的重生/传送路径：它把玩家置为待重生、位置移回出生锚点所在列、
 	// 速度与输入归零，并把摔落峰值重置到新高度，因此死亡不需要另写一套位置赋值。
 	player.beginReset()

@@ -142,41 +142,47 @@ func TestLoginClientWithSeedSurfacesWorldSeed(t *testing.T) {
 	}
 }
 
-// TestV23ClientRejectsPriorServerAcrossTransports 模拟一个只会说 v17 的
-// 服务端（生产服务端已升 v23，只能以对端身份模拟；类型化 `Send` 会拒绝
-// 非 v23 的 `ServerHello`，因此按传输写原始字节），验证 v23 客户端在
+// TestV24ClientRejectsPriorServerAcrossTransports 模拟一个只会说 v17 的
+// 服务端（生产服务端已升 v24，只能以对端身份模拟；类型化 `Send` 会拒绝
+// 非当前版本的 `ServerHello`，因此按传输写原始字节），验证当前客户端在
 // Memory 与 TCP 上都拒绝它，不进入登录阶段，也不产生半兼容会话。
-func TestV23ClientRejectsPriorServerAcrossTransports(t *testing.T) {
-	const legacy = uint32(17)
-	for _, open := range transportOpeners {
-		t.Run(open.name, func(t *testing.T) {
-			client, server := open.open(t)
-			t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
-			serverDone := make(chan error, 1)
-			go func() {
-				if _, err := server.Recv(context.Background(), StateHandshake); err != nil {
-					serverDone <- err
-					return
-				}
-				serverDone <- sendRawServerHello(server, legacy)
-			}()
+func TestV24ClientRejectsPriorServerAcrossTransports(t *testing.T) {
+	// 17 是一个任意选取的远古版本样本；`ProtocolVersion` - 1（v23）是刚退役、
+	// 离当前最近的版本——同一条镜像用例必须两档都覆盖，不能只留着早已作古的
+	// 17 而让刚退役的版本失去回归覆盖。
+	legacyVersions := []uint32{17, ProtocolVersion - 1}
+	for _, legacy := range legacyVersions {
+		for _, open := range transportOpeners {
+			t.Run(fmt.Sprintf("v%d/%s", legacy, open.name), func(t *testing.T) {
+				client, server := open.open(t)
+				t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+				serverDone := make(chan error, 1)
+				go func() {
+					if _, err := server.Recv(context.Background(), StateHandshake); err != nil {
+						serverDone <- err
+						return
+					}
+					serverDone <- sendRawServerHello(server, legacy)
+				}()
 
-			_, err := LoginClient(context.Background(), client, testIdentity(23))
-			// 两个传输都在接收侧校验版本并按 protocol violation 关闭连接；
-			// `LoginClient` 自身的版本分支是纵深防御，两者都算正确拒绝。
-			if err == nil || !strings.Contains(err.Error(), "protocol violation") ||
-				!(strings.Contains(err.Error(), "server protocol version 17") ||
-					strings.Contains(err.Error(), "server handshake version mismatch")) {
-				t.Fatalf("v17 服务端登录结果 = %v，想要握手版本不匹配拒绝", err)
-			}
-			if err := <-serverDone; err != nil {
-				t.Fatal(err)
-			}
-			// 客户端在握手失败后必须关闭连接，不允许退化进入 Play。
-			if err := client.Send(context.Background(), StatePlay, PlayerInput{}); err == nil {
-				t.Fatal("握手版本不匹配后客户端仍能发送 Play 包")
-			}
-		})
+				_, err := LoginClient(context.Background(), client, testIdentity(23))
+				// 两个传输都在接收侧校验版本并按 protocol violation 关闭连接；
+				// `LoginClient` 自身的版本分支是纵深防御，两者都算正确拒绝。
+				wantVersion := fmt.Sprintf("server protocol version %d", legacy)
+				if err == nil || !strings.Contains(err.Error(), "protocol violation") ||
+					!(strings.Contains(err.Error(), wantVersion) ||
+						strings.Contains(err.Error(), "server handshake version mismatch")) {
+					t.Fatalf("v%d 服务端登录结果 = %v，想要握手版本不匹配拒绝", legacy, err)
+				}
+				if err := <-serverDone; err != nil {
+					t.Fatal(err)
+				}
+				// 客户端在握手失败后必须关闭连接，不允许退化进入 Play。
+				if err := client.Send(context.Background(), StatePlay, PlayerInput{}); err == nil {
+					t.Fatal("握手版本不匹配后客户端仍能发送 Play 包")
+				}
+			})
+		}
 	}
 }
 

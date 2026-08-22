@@ -7,15 +7,17 @@ import (
 	"github.com/channing771/mornlea/internal/core"
 )
 
-func TestProtocolVersionIsTwentyThree(t *testing.T) {
-	if ProtocolVersion != 23 {
-		t.Fatalf("协议版本=%d，想要 23", ProtocolVersion)
+func TestProtocolVersionIsTwentyFour(t *testing.T) {
+	if ProtocolVersion != 24 {
+		t.Fatalf("协议版本=%d，想要 24", ProtocolVersion)
 	}
 }
 
-func TestProtocolV23RejectsPriorVersionsBeforePlay(t *testing.T) {
-	// v22 是上一版本（authoritative-farming 交付的翻地命令段），必须和 v21
+func TestProtocolV24RejectsPriorVersionsBeforePlay(t *testing.T) {
+	// v23 是上一版本（rust-engine-lod-shell 交付的登录种子段），必须和 v22
 	// 及更早版本一样在 Handshake 阶段稳定拒绝，并给出版本不匹配原因。
+	// 循环上界是 `ProtocolVersion` 而不是某个字面量：升版时刚退役的那一版
+	// 必须自动进入覆盖，否则这条用例只测得到远古版本。
 	for version := uint32(1); version < ProtocolVersion; version++ {
 		stream := &staticClientHelloStream{version: version}
 		if _, err := BeginServerLogin(t.Context(), stream, 0); err == nil {
@@ -148,10 +150,7 @@ func TestProtocolV14PlayerStateRejectsOutOfRangeHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 尾部布局（v21 起）：… | Health u8 | Oxygen u16 | WorldTimeTicks u64。
-	// 这个偏移必须随尾部字段一起维护：v21 追加 Oxygen 时它一度还指向氧气的高字节，
-	// 用例照样绿——因为把高字节写成 21 让氧气变成 5376，越界拒绝碰巧仍然发生。
-	healthOffset := len(payload) - 8 - 2 - 1
+	healthOffset := playerStateHealthOffset(len(payload))
 	corrupted := append([]byte(nil), payload...)
 	corrupted[healthOffset] = core.MaxHealth + 1
 	if packet, err := decodeServerControlPayload(StatePlay, id, corrupted); err == nil {
@@ -172,7 +171,8 @@ func TestProtocolV14PlayerStateRejectsOutOfRangeHealth(t *testing.T) {
 }
 
 // TestProtocolV21PlayerStateCarriesOxygen 覆盖 v21 追加的权威氧气：
-// 它按 u16 小端落在 Health 之后、WorldTimeTicks 之前，且往返保值。
+// 它按 u16 小端紧跟在 Health 之后（v24 起其后还有 Hunger，再往后才是
+// WorldTimeTicks），且往返保值。
 func TestProtocolV21PlayerStateCarriesOxygen(t *testing.T) {
 	for _, oxygen := range []uint16{0, 1, 0x0101, core.MaxOxygenTicks} {
 		state := PlayerState{Dimension: core.Overworld, Oxygen: oxygen, WorldTimeTicks: 24000}
@@ -209,7 +209,7 @@ func TestProtocolV21PlayerStateRejectsOutOfRangeOxygen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oxygenOffset := len(payload) - 8 - 2
+	oxygenOffset := playerStateOxygenOffset(len(payload))
 	corrupted := append([]byte(nil), payload...)
 	// 只动低字节即可越界：满值 300 = 0x012C，把低字节抬到 0xFF 得 0x01FF = 511。
 	corrupted[oxygenOffset] = 0xFF
@@ -245,4 +245,35 @@ func TestProtocolV10DropSelectedItemRegistryIsFrozen(t *testing.T) {
 			t.Fatalf("状态 %d 接受了 DropSelectedItem", state)
 		}
 	}
+}
+
+// PlayerState wire 载荷尾部各字段的字节宽度（v24 起）：
+//
+//	… | Health u8 | Oxygen u16 | Hunger u8 | WorldTimeTicks u64
+//
+// 下面三个 helper 由末尾向前**链式**求偏移，而不是各写一串 `len(payload)-8-2-1`
+// 这样的裸算式。理由是血的教训：v21 追加 `Oxygen` 时，`playerStateHealthOffset`
+// 的前身（一句写死的 len(payload)-8-2-1）静默改指到了氧气高字节，用例照样绿（把高字节写成 21 让氧气变成 5376，越界拒绝碰巧
+// 仍然发生）；v24 追加 `Hunger` 时同一个坑会再来一次。链式表达让「尾部又多了
+// 一个字段」只需要改最外层一处，其余偏移自动跟上。
+const (
+	playerStateWorldTimeBytes = 8
+	playerStateHungerBytes    = 1
+	playerStateOxygenBytes    = 2
+	playerStateHealthBytes    = 1
+)
+
+// playerStateHungerOffset 返回饥饿值字节在 `PlayerState` 载荷中的下标。
+func playerStateHungerOffset(payloadLen int) int {
+	return payloadLen - playerStateWorldTimeBytes - playerStateHungerBytes
+}
+
+// playerStateOxygenOffset 返回氧气低字节在 `PlayerState` 载荷中的下标。
+func playerStateOxygenOffset(payloadLen int) int {
+	return playerStateHungerOffset(payloadLen) - playerStateOxygenBytes
+}
+
+// playerStateHealthOffset 返回生命值字节在 `PlayerState` 载荷中的下标。
+func playerStateHealthOffset(payloadLen int) int {
+	return playerStateOxygenOffset(payloadLen) - playerStateHealthBytes
 }

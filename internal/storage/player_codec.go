@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	currentPlayerSchema   uint32 = 6
+	currentPlayerSchema   uint32 = 7
 	playerEnvelopeVersion uint32 = 1
 	playerEnvelopeLength         = 44
 	maxPlayerPayload      uint32 = 1 << 20
@@ -22,6 +22,15 @@ const (
 	playerHotbarBytes = 1 + core.HotbarSlots*5
 	// playerBackpackBytes 是 schema v4 的固定背包负载长度。
 	playerBackpackBytes = core.BackpackSlots * 5
+	// playerHealthBytes 是 schema v5 起追加在负载末尾的生命值长度。
+	playerHealthBytes = 1
+	// playerHungerBytes 是 schema v7 起追加在生命值之后的三层饥饿状态长度：
+	// 饥饿值 1 字节 + 饱和度 2 字节 + 疲劳值 2 字节（后两者小端 uint16）。
+	//
+	// 三字段追加在 Health **之后**而不是插进负载中段，是既有的追加纪律：解码按
+	// "从末尾切走固定长度"逐层剥离（decodePlayerV7 → V5 → V4 → V1），只有末尾
+	// 追加才能让 v5/v6 那几层的切分点保持不变，冻结的旧 fixture 因此仍可解码。
+	playerHungerBytes = 1 + 2 + 2
 )
 
 var (
@@ -34,7 +43,7 @@ func encodePlayer(save PlayerSave) ([]byte, error) {
 	if err := validatePlayerSave(save); err != nil {
 		return nil, err
 	}
-	payload, err := encodePlayerV5(save)
+	payload, err := encodePlayerV7(save)
 	if err != nil {
 		return nil, err
 	}
@@ -140,14 +149,31 @@ func decodePlayer(wantID core.PlayerID, data []byte) (StoredPlayer, error) {
 	stored := StoredPlayer{
 		PlayerID: dto.PlayerID, Revision: dto.Revision, DisplayName: dto.DisplayName,
 		Current: dto.Current, Yaw: dto.Yaw, Pitch: dto.Pitch, Inventory: dto.Inventory,
-		Health:       dto.Health,
-		NeedsRewrite: migrated,
+		Health:          dto.Health,
+		Hunger:          dto.Hunger,
+		SaturationMilli: dto.SaturationMilli,
+		ExhaustionMilli: dto.ExhaustionMilli,
+		NeedsRewrite:    migrated,
 	}
 	if dto.Safe != nil {
 		safe := *dto.Safe
 		stored.Safe = &safe
 	}
 	return stored, nil
+}
+
+// encodePlayerV7 在 v5 负载末尾追加三层饥饿状态（饥饿值、饱和度、疲劳值）。
+//
+// 没有 encodePlayerV6：v6 与 v5 的负载布局逐字节相同，v6 只扩展了合法物品
+// 注册表，因此 v7 直接叠在 v5 之上。
+func encodePlayerV7(save PlayerSave) ([]byte, error) {
+	payload, err := encodePlayerV5(save)
+	if err != nil {
+		return nil, err
+	}
+	payload = append(payload, save.Hunger)
+	payload = binary.LittleEndian.AppendUint16(payload, save.SaturationMilli)
+	return binary.LittleEndian.AppendUint16(payload, save.ExhaustionMilli), nil
 }
 
 // encodePlayerV5 在 v4 负载末尾追加 1 字节生命值。
@@ -241,18 +267,40 @@ func decodePlayerPayload(
 	case 4:
 		return decodePlayerV4(playerID, revision, data)
 	case 5, 6:
+		// v6 与 v5 的负载布局相同（v6 只扩展了合法物品注册表），共用一个解码器；
+		// 两者都没有饥饿字段，缺口由 migratePlayer 的 v6 迁移补初值。
 		return decodePlayerV5(playerID, revision, data)
+	case 7:
+		return decodePlayerV7(playerID, revision, data)
 	default:
 		return playerDTO{}, fmt.Errorf("%w: unsupported player schema %d", ErrCorrupt, schema)
 	}
 }
 
+// decodePlayerV7 在 v5 解析结果之上追加三层饥饿状态。
+func decodePlayerV7(playerID core.PlayerID, revision uint64, data []byte) (playerDTO, error) {
+	if len(data) < playerHungerBytes {
+		return playerDTO{}, fmt.Errorf("%w: player payload is shorter than the hunger state", ErrCorrupt)
+	}
+	split := len(data) - playerHungerBytes
+	dto, err := decodePlayerV5(playerID, revision, data[:split])
+	if err != nil {
+		return playerDTO{}, err
+	}
+	// 长度已在上面校验，这里直接按固定偏移读；越界不可能发生。
+	tail := data[split:]
+	dto.Hunger = tail[0]
+	dto.SaturationMilli = binary.LittleEndian.Uint16(tail[1:])
+	dto.ExhaustionMilli = binary.LittleEndian.Uint16(tail[3:])
+	return dto, nil
+}
+
 // decodePlayerV5 在 v4 解析结果之上追加 1 字节生命值。
 func decodePlayerV5(playerID core.PlayerID, revision uint64, data []byte) (playerDTO, error) {
-	if len(data) < 1 {
+	if len(data) < playerHealthBytes {
 		return playerDTO{}, fmt.Errorf("%w: player payload is shorter than health", ErrCorrupt)
 	}
-	split := len(data) - 1
+	split := len(data) - playerHealthBytes
 	dto, err := decodePlayerV4(playerID, revision, data[:split])
 	if err != nil {
 		return playerDTO{}, err
@@ -427,6 +475,8 @@ func validatePlayerSave(save PlayerSave) error {
 		PlayerID: save.PlayerID, Revision: save.Revision, DisplayName: save.DisplayName,
 		Current: save.Current, Yaw: save.Yaw, Pitch: save.Pitch, Safe: save.Safe,
 		Inventory: save.Inventory, Health: save.Health,
+		Hunger: save.Hunger, SaturationMilli: save.SaturationMilli,
+		ExhaustionMilli: save.ExhaustionMilli,
 	})
 }
 
@@ -460,6 +510,15 @@ func validatePlayerDTO(dto playerDTO) error {
 	}
 	if !core.ValidHealth(dto.Health) {
 		return fmt.Errorf("%w: invalid player health", ErrCorrupt)
+	}
+	if !core.ValidHunger(dto.Hunger) {
+		return fmt.Errorf("%w: invalid player hunger", ErrCorrupt)
+	}
+	// 饱和度是饥饿值之上的缓冲，上界就是饥饿值本身（千分位）。乘积至多
+	// 20×1000，远在 uint16 之内，不会溢出。疲劳值没有静态上界：阈值是 tunable，
+	// uint16 的全域都是合法取值。
+	if dto.SaturationMilli > uint16(dto.Hunger)*core.SaturationMilliPerPoint {
+		return fmt.Errorf("%w: player saturation exceeds hunger", ErrCorrupt)
 	}
 	return nil
 }

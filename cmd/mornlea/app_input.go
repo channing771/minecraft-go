@@ -71,6 +71,16 @@ func (a *application) placeBlock() {
 	if !confirmed {
 		return
 	}
+	// 手持食物时「使用」键的语义是进食而不是放置。食物不可放置，服务端必然拒绝
+	// 这条命令，客户端不发只是为了不刷无谓的拒绝；进食本身由 `client.Control`
+	// 的进食位逐 tick 上行（见 `applyInteractiveInput`），与这条上升沿无关。
+	//
+	// 直接判上面那份 `hotbar` 而不是调 `holdingFood`：后者会再取一次快捷栏，
+	// 两次取值之间镜像可能被网络 goroutine 换掉，于是「拿来判食物的栏位」与
+	// 「写进 PlaceBlock.Slot 的栏位」来自不同的快照。
+	if _, _, isFood := core.FoodValue(hotbar.Slots[hotbar.Selected].Item); isFood {
+		return
+	}
 	if err := a.send(network.PlaceBlock{
 		Sequence: a.nextSequence(),
 		Yaw:      a.camera.Yaw,
@@ -79,6 +89,19 @@ func (a *application) placeBlock() {
 	}); err != nil {
 		slog.Warn("发送放置命令失败", "error", err)
 	}
+}
+
+// holdingFood 报告已确认的选中快捷栏位里是不是食物。
+//
+// 与翻地分支同形：只读**已确认**的权威快捷栏，并与权威侧共用 `core.FoodValue`
+// 这同一份食物表。尚未确认时一律返回 false——客户端绝不据猜测的手持物上行意图。
+func (a *application) holdingFood() bool {
+	hotbar, confirmed := a.inventory.Hotbar()
+	if !confirmed {
+		return false
+	}
+	_, _, ok := core.FoodValue(hotbar.Slots[hotbar.Selected].Item)
+	return ok
 }
 
 // containerOpen 报告是否有已确认的容器镜像（熔炉或箱子）正在驱动当前界面。

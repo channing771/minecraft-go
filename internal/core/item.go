@@ -52,6 +52,10 @@ const (
 	// ItemWheat 是成熟小麦的收获产物，本身不可放置。
 	ItemWheatSeeds
 	ItemWheat
+	// ItemBread 是唯一的食物，只能由小麦合成（RecipeBread），本身不可放置、
+	// 不是任何方块的掉落物。恢复值见 FoodValue。同样只能追加在 ItemIDMax
+	// 哨兵之前。
+	ItemBread
 	// ItemIDMax 是合法物品编号的独占上界（最后一个合法 ItemID + 1），本身不是
 	// 物品枚举成员。它供测试以「item < ItemIDMax」穷举全部物品，替代依赖
 	//「某个具体物品恰为枚举末项」的脆弱写法；放在 core 是因为物品注册表归属
@@ -233,7 +237,7 @@ func ItemStackLimit(item ItemID) (uint8, bool) {
 		ItemCobblestone, ItemSmoothStone, ItemSand, ItemGravel, ItemOakLog,
 		ItemOakPlanks, ItemLeaves, ItemGlass, ItemBrick, ItemWhiteWool,
 		ItemRoofTile, ItemClay, ItemSnowBlock, ItemMossyCobblestone,
-		ItemWheatSeeds, ItemWheat:
+		ItemWheatSeeds, ItemWheat, ItemBread:
 		return MaxStackCount, true
 	case ItemStonePickaxe, ItemIronPickaxe,
 		ItemBrokenStonePickaxe, ItemBrokenIronPickaxe,

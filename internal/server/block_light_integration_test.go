@@ -61,10 +61,10 @@ func runStaticBlockLightScript(t *testing.T, transport string) staticBlockLightR
 		Dimension: core.Overworld,
 		Position:  [3]float32{0.5, 1.001, 0.5},
 	}
-	if _, err := store.SavePlayer(context.Background(), storage.PlayerSave{
+	if _, err := store.SavePlayer(context.Background(), wellFedPlayerSave(storage.PlayerSave{
 		PlayerID: identity.PlayerID, Revision: 1, DisplayName: identity.DisplayName,
 		Current: location, Safe: &location, Inventory: inventory,
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 
